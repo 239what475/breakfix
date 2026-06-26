@@ -2,138 +2,109 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/ca"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/server"
+	"github.com/elazarl/goproxy"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
-	"github.com/elazarl/goproxy"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
 
 func main() {
-	kubeconfigPath := flag.String("kubeconfig", "", "Path to kubeconfig")
-	dbPath := flag.String("db", "breakfix.db", "SQLite database path")
-	challengesDir := flag.String("challenges", "./challenges", "Challenges directory")
-	port := flag.Int("port", 9090, "gRPC port")
-
+	configPath := flag.String("config", "breakfix.yaml", "Config file path")
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	klog.InfoS("Breakfix API Server starting", "version", build.Version)
-
-	// K8s client
-	k8sClient, err := k8s.New(*kubeconfigPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
-		klog.Fatalf("Failed to create K8s client: %v", err)
+		klog.Fatalf("Failed to load config: %v", err)
 	}
+	_ = os.MkdirAll(cfg.DataDir, 0700)
 
-	// Database
-	database, err := db.New(*dbPath)
+	klog.InfoS("Breakfix API Server starting", "version", build.Version, "data_dir", cfg.DataDir)
+
+	database, err := db.New(filepath.Join(cfg.DataDir, "breakfix.db"))
 	if err != nil {
 		klog.Fatalf("Failed to open database: %v", err)
 	}
 	defer func() { _ = database.Close() }()
 
-	// Sync challenges
-	if err := challenge.SyncChallenges(database, *challengesDir); err != nil {
+	challengesDir := filepath.Join(cfg.DataDir, "challenges")
+	os.MkdirAll(challengesDir, 0755)
+	if err := challenge.SyncChallenges(database, challengesDir); err != nil {
 		klog.Fatalf("Failed to sync challenges: %v", err)
 	}
-	klog.InfoS("challenges synced", "dir", *challengesDir)
 
-	// CA (auto-generates on first run)
-	ca, err := ca.New()
+	ca, err := ca.LoadOrCreate(cfg.CertFile(), cfg.KeyFile())
 	if err != nil {
-		klog.Fatalf("Failed to create CA: %v", err)
+		klog.Fatalf("Failed to load CA: %v", err)
 	}
 
-	// Server cert
 	serverCert, serverKey, err := ca.ServerCert()
 	if err != nil {
 		klog.Fatalf("Failed to generate server cert: %v", err)
 	}
-
-	// mTLS config
 	tlsConfig, err := ca.TLSConfig(serverCert, serverKey)
 	if err != nil {
 		klog.Fatalf("Failed to create TLS config: %v", err)
 	}
 
-	// Cooldown manager
+	k8sClient, err := k8s.New(cfg.Kubeconfig)
+	if err != nil {
+		klog.Fatalf("Failed to create K8s client: %v", err)
+	}
+
 	cooldown := server.NewCooldownManager(database, k8sClient)
+	srv := server.New(database, k8sClient, cooldown, cfg, ca)
 
-	srv := server.New(database, k8sClient, cooldown, *challengesDir, ca)
-
-	// Public port: plain gRPC, only register/login
 	publicServer := grpc.NewServer(grpc.UnaryInterceptor(authPublicOnly))
 	pb.RegisterBreakfixServer(publicServer, srv)
 
-	// mTLS port: requires client certificate
 	secureServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.UnaryInterceptor(authRequireCert),
 	)
 	pb.RegisterBreakfixServer(secureServer, srv)
 
-	// Start public listener
-	publicLis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
-	if err != nil {
-		klog.Fatalf("Failed to listen public: %v", err)
-	}
+	go func() {
+		klog.InfoS("proxy listening", "port", cfg.ProxyPort)
+		http.ListenAndServe(fmt.Sprintf(":%d", cfg.ProxyPort), goproxy.NewProxyHttpServer())
+	}()
 
-	// Start mTLS listener
-	mtlsPort := *port + 443
-	secureLis, err := net.Listen("tcp", fmt.Sprintf(":%d", mtlsPort))
-	if err != nil {
-		klog.Fatalf("Failed to listen mTLS: %v", err)
-	}
+	publicLis, _ := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	secureLis, _ := net.Listen("tcp", fmt.Sprintf(":%d", cfg.MTLSPort))
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		klog.InfoS("shutting down")
-		cooldown.Stop()
-		publicServer.GracefulStop()
-		secureServer.GracefulStop()
+		cooldown.Stop(); publicServer.GracefulStop(); secureServer.GracefulStop()
 	}()
 
-	go func() {
-		t := time.NewTicker(30 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			cooldown.CheckDraining()
-		}
-	}()
+	klog.InfoS("listening", "public", cfg.Port, "mtls", cfg.MTLSPort, "proxy", cfg.ProxyPort)
 
-	startProxy()
-	klog.InfoS("listening", "public", *port, "mtls", mtlsPort)
-
-	go func() {
-		if err := publicServer.Serve(publicLis); err != nil {
-			klog.Fatalf("Public server failed: %v", err)
-		}
-	}()
-	if err := secureServer.Serve(secureLis); err != nil {
-		klog.Fatalf("mTLS server failed: %v", err)
-	}
+	go func() { publicServer.Serve(publicLis) }()
+	secureServer.Serve(secureLis)
 }
 
 var publicMethods = map[string]bool{
@@ -141,15 +112,13 @@ var publicMethods = map[string]bool{
 	"/breakfix.Breakfix/Login":    true,
 }
 
-// authPublicOnly allows only register/login on the public port.
 func authPublicOnly(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	if !publicMethods[info.FullMethod] {
-		return nil, status.Error(codes.PermissionDenied, "only register/login allowed on this port, use mTLS port")
+		return nil, status.Error(codes.PermissionDenied, "only register/login allowed on this port")
 	}
 	return handler(ctx, req)
 }
 
-// authRequireCert requires a valid client certificate for all methods.
 func authRequireCert(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
@@ -160,13 +129,4 @@ func authRequireCert(ctx context.Context, req interface{}, info *grpc.UnaryServe
 		return nil, status.Error(codes.Unauthenticated, "client certificate required")
 	}
 	return handler(ctx, req)
-}
-
-func startProxy() {
-	go func() {
-		klog.InfoS("proxy listening", "port", 3128)
-		if err := http.ListenAndServe(":3128", goproxy.NewProxyHttpServer()); err != nil {
-			klog.Fatalf("Proxy failed: %v", err)
-		}
-	}()
 }
