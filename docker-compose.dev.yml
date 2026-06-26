@@ -1,6 +1,6 @@
 services:
   teleport:
-    image: public.ecr.aws/gravitational/teleport-distroless-debug:17
+    image: public.ecr.aws/gravitational/teleport-distroless-debug:18
     container_name: breakfix-teleport
     hostname: breakfix-dev
     ports:
