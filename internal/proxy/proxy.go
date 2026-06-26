@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const bytesPerSec = 5 * 1024 * 1024 // 5 MB/s per connection
+const bytesPerSec = 1 * 1024 * 1024 // 1 MB/s per connection
 
 // Start runs an HTTP forward proxy with logging and per-connection bandwidth limits.
 func Start(port int) {
