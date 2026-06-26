@@ -5,7 +5,6 @@
 - 阿里云账号，已完成实名认证和学生认证（科研包 2000 元抵扣金）
 - 一台 ECS（2C2G，已有域名备案，作为网关）
 - 域名 `breakfix.your-domain.com` 解析到网关 ECS
-- GitHub OAuth App（用于 Teleport 用户登录）：在 GitHub Settings → Developer settings → OAuth Apps 创建
 
 ---
 
@@ -55,8 +54,6 @@ auth_service:
   cluster_name: breakfix.your-domain.com
   listen_addr: 0.0.0.0:3025
   proxy_listener_mode: multiplex
-  authentication:
-    type: github
 
 ssh_service:
   enabled: yes
@@ -76,31 +73,19 @@ proxy_service:
 sudo systemctl enable --now teleport
 ```
 
-#### 1.2.1 配置 GitHub OAuth
+#### 1.2.1 创建用户（本地账号）
 
-创建 `/etc/teleport/github-connector.yaml`：
-
-```yaml
-kind: github
-version: v3
-metadata:
-  name: github
-spec:
-  client_id: <your-github-oauth-app-client-id>
-  client_secret: <your-github-oauth-app-client-secret>
-  redirect_url: https://teleport.your-domain.com/v1/webapi/github/callback
-  teams_to_roles:
-    - organization: <your-github-org>
-      team: <your-team>
-      roles:
-        - access
-```
-
-应用：
+初期使用 Teleport 本地用户，无需外部 OAuth：
 
 ```bash
-sudo tctl create -f /etc/teleport/github-connector.yaml
+# 为每个用户创建本地账号
+sudo tctl users add <username> --roles=access
+
+# 命令会输出一个邀请链接，用户打开后在 Web UI 设置密码
+# https://teleport.your-domain.com:3080/web/invite/<token>
 ```
+
+> 后续可接入 OIDC（如 Authing、阿里云 IDaaS）实现自助注册。
 
 ### 1.3 配置 Tinyproxy
 
@@ -355,7 +340,7 @@ docker push registry.cn-hangzhou.aliyuncs.com/breakfix/cleanup-logs:v1
 ## 快速检查清单
 
 - [ ] 网关 ECS：nginx + tinyproxy + teleport + breakfix-api 全部 active
-- [ ] Teleport：GitHub OAuth 登录正常
+- [ ] Teleport：用户可登录（`tsh login --proxy=teleport.your-domain.com:443 --user=<username>`）
 - [ ] Teleport K8s：`tsh kube login breakfix-ack` 成功
 - [ ] ACK：节点池 Running，Pod 可创建
 - [ ] ACR：镜像可 pull（`docker pull registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest`）
