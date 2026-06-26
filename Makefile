@@ -1,6 +1,6 @@
 .PHONY: dev-up dev-down dev-server dev-cli dev prod lint kind-up kind-down run clean proto certs
 
-LDFLAGS = -ldflags "\
+LDFLAGS = -ldflags "-s -w" "\
   -X 'github.com/breakfix/breakfix/internal/build.Version=0.1.0' \
   -X 'github.com/breakfix/breakfix/internal/build.BuildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' \
   -X 'github.com/breakfix/breakfix/internal/build.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)'"
