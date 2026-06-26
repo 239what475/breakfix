@@ -12,7 +12,6 @@ services:
       - ./dev/teleport.yaml:/etc/teleport/teleport.yaml:ro
       - teleport-data:/var/lib/teleport
       - ./dev/certs:/certs:rw      # 导出 CA 和服务端证书
-    command: teleport start --roles=all
     restart: unless-stopped
 
 volumes:

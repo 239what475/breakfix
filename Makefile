@@ -13,23 +13,34 @@ dev-up:
 	@echo "Run 'make dev-setup' to configure users and certs"
 
 dev-setup:
-	@# Create dev user
-	docker compose -f docker-compose.dev.yml exec -T teleport tctl users add dev-user --roles=access || true
-	@# Generate API Server cert
+	@# Create dev user (invitation token)
+	docker compose -f docker-compose.dev.yml exec -T teleport tctl users add dev-user --roles=access 2>&1 | tee /dev/stderr | grep 'https://' || true
+	@# Export Teleport TLS user CA (for client cert verification)
+	docker compose -f docker-compose.dev.yml exec -T teleport tctl auth export --type=tls-user > dev/certs/teleport-ca.pem
+	@# Generate dev CA for server cert
+	openssl req -x509 -newkey rsa:2048 -nodes \
+		-keyout dev/certs/server-ca-key.pem \
+		-out dev/certs/server-ca.pem \
+		-subj "/CN=breakfix-dev-ca" -days 365 2>/dev/null
+	@# Generate server cert signed by dev CA
 	openssl req -new -newkey rsa:2048 -nodes \
 		-keyout dev/certs/server-key.pem \
 		-out dev/certs/server.csr \
 		-subj "/CN=breakfix-api" 2>/dev/null
-	@# Sign with Teleport CA
-	docker compose -f docker-compose.dev.yml exec -T teleport tctl auth sign \
-		--csr=/certs/server.csr --out=/certs/server-cert.pem --ttl=8760h
-	@# Copy CA pub
-	docker compose -f docker-compose.dev.yml exec -T teleport cat /var/lib/teleport/ca.pub > dev/certs/ca.pub
+	openssl x509 -req -in dev/certs/server.csr \
+		-CA dev/certs/server-ca.pem -CAkey dev/certs/server-ca-key.pem \
+		-CAcreateserial -out dev/certs/server-cert.pem -days 365 2>/dev/null
+	@rm -f dev/certs/server.csr dev/certs/server-ca-key.pem dev/certs/server-ca.srl
+	@echo ""
+	@echo "=== Setup complete ==="
 	@echo "Certs ready in dev/certs/"
-	@echo "User 'dev-user' created. Set password:"
-	@echo "  docker compose -f docker-compose.dev.yml exec teleport tctl users reset dev-user"
-	@echo "Then login via browser: https://localhost:3080"
-	@echo "Or via CLI: tsh login --proxy=localhost:3080 --user=dev-user"
+	@echo "  teleport-ca.pem  → verify client (from Teleport)"
+	@echo "  server-ca.pem    → verify server (dev CA for CLI)"
+	@echo "  server-cert.pem  → API Server TLS cert"
+	@echo "  server-key.pem   → API Server TLS key"
+	@echo ""
+	@echo "Open the URL above in browser → create password → scan TOTP QR code"
+	@echo "Then: tsh login --proxy=localhost:3080 --user=dev-user"
 
 dev-down:
 	docker compose -f docker-compose.dev.yml down
@@ -80,14 +91,14 @@ run-server:
 		--challenges=./challenges \
 		--cert=dev/certs/server-cert.pem \
 		--key=dev/certs/server-key.pem \
-		--ca=dev/certs/ca.pub
+		--ca=dev/certs/teleport-ca.pem
 
 run-cli:
 	./bin/breakfix-cli \
 		--server=localhost:9090 \
 		--cert=$$(ls ~/.tsh/keys/localhost/dev-user | head -1) \
 		--key=$$(ls ~/.tsh/keys/localhost/dev-user | head -1) \
-		--ca=dev/certs/ca.pub
+		--ca=dev/certs/server-ca.pem
 
 # ── Clean ──
 

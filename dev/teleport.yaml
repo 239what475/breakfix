@@ -5,7 +5,7 @@ teleport:
   data_dir: /var/lib/teleport
   log:
     output: stderr
-    severity: DEBUG
+    severity: INFO
 
 auth_service:
   enabled: yes
@@ -14,7 +14,7 @@ auth_service:
   proxy_listener_mode: multiplex
   authentication:
     type: local
-    second_factor: off           # 开发环境关闭二次认证
+    second_factor: otp
 
 ssh_service:
   enabled: yes

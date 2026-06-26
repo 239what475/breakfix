@@ -27,3 +27,8 @@ coverage.txt
 
 # Kind kubeconfig
 .kube/
+dev/certs/*.pem
+dev/certs/*.pub
+dev/certs/*.csr
+dev/certs/*.srl
+dev/certs/server-ca-key.pem
