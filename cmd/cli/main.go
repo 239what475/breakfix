@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/breakfix/breakfix/internal/build"
+	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -122,26 +122,17 @@ func sshCmd() *cobra.Command {
 			instanceID := args[0]
 
 			// Revive if draining
-			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: instanceID}) //nolint:errcheck
+			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: instanceID}) //nolint:errcheck,gosec
 
 			if build.IsDev() {
-				// Find pod by instance ID label
-				nsBytes, _ := exec.Command("kubectl", "get", "pod", "-A",
-					"-l", fmt.Sprintf("instance-id=%s", instanceID),
-					"-o", "jsonpath={.items[0].metadata.namespace}").Output()
-				podBytes, _ := exec.Command("kubectl", "get", "pod", "-A",
-					"-l", fmt.Sprintf("instance-id=%s", instanceID),
-					"-o", "jsonpath={.items[0].metadata.name}").Output()
-				ns, pod := string(nsBytes), string(podBytes)
-				if pod == "" {
-					return fmt.Errorf("pod not found for instance %s", instanceID)
+				// Find pod by instance ID
+				k8sClient := k8s.EnsureK8sClient()
+				ns, pod, err := k8sClient.ListPodsByInstance(instanceID)
+				if err != nil {
+					return fmt.Errorf("pod not found: %w", err)
 				}
 
-				sshCmd := exec.Command("kubectl", "exec", "-ti", "-n", ns, pod, "--", "/bin/bash")
-				sshCmd.Stdin = os.Stdin
-				sshCmd.Stdout = os.Stdout
-				sshCmd.Stderr = os.Stderr
-				return sshCmd.Run()
+				return k8s.ExecSSH(ns, pod)
 			}
 			return fmt.Errorf("prod SSH: use tsh kubectl exec")
 		},
@@ -193,15 +184,16 @@ func statusCmd() *cobra.Command {
 		Short: "Check instance status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}) //nolint:errcheck
+			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}) //nolint:errcheck,gosec
 			resp, err := client.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
 			if err != nil {
 				return err
 			}
 			s := "running"
-			if resp.Status == pb.InstanceStatus_DRAINING {
+			switch resp.Status {
+			case pb.InstanceStatus_DRAINING:
 				s = "draining"
-			} else if resp.Status == pb.InstanceStatus_DESTROYED {
+			case pb.InstanceStatus_DESTROYED:
 				s = "destroyed"
 			}
 			fmt.Printf("Instance:  %s\nChallenge: %s\nStatus:    %s\n", resp.InstanceId, resp.ChallengeId, s)

@@ -20,7 +20,6 @@ linters:
         - G204   # Subprocess launching: kubectl calls are expected
         - G301   # Directory permissions 0755: standard
         - G304   # File inclusion: reading challenge YAML files
-        - G104   # Unhandled errors: intentional best-effort calls
         - G115   # Integer conversion: exit codes are small
 
 formatters:

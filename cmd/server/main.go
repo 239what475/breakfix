@@ -39,7 +39,10 @@ func main() {
 		// In prod, read from config
 		kubeconfig = filepath.Join(filepath.Dir(*configPath), "kubeconfig")
 	}
-	k8sClient := k8s.New(kubeconfig)
+	k8sClient, err := k8s.New(kubeconfig)
+	if err != nil {
+		log.Fatalf("Failed to create K8s client: %v", err)
+	}
 
 	// Database
 	database, err := db.New(*dbPath)
