@@ -1,9 +1,5 @@
 # Binaries
 bin/
-*.exe
-*.dll
-*.so
-*.dylib
 
 # IDE
 .idea/
@@ -15,20 +11,15 @@ bin/
 .DS_Store
 Thumbs.db
 
-# Go
-*.test
-*.out
-coverage.txt
-
-# Local database
+# Project data (SQLite + CA certs + challenges)
+data/
 *.db
 *.db-journal
 *.db-wal
+*.pem
+
+# CLI user data
+.breakfix/
 
 # Kind kubeconfig
 .kube/
-dev/certs/*.pem
-dev/certs/*.pub
-dev/certs/*.csr
-dev/certs/*.srl
-dev/certs/server-ca-key.pem
