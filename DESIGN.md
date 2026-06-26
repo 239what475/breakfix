@@ -15,10 +15,13 @@
 ┌────────────────────────────────────────────────────────┐
 │  网关 ECS (2C2G，已备案+域名，唯一公网入口)               │
 │                                                        │
-│  API Server (gRPC+mTLS)── 业务逻辑、调度，嵌入 SQLite      │
-│  Teleport (Auth+Proxy)  ── CA 证书签发、SSH 入口、会话录制    │
-│  Tinyproxy            ── 出网 HTTP 代理（题目需要时）      │
-│  Nginx                ── CLI 二进制分发                  │
+│  API Server             ── 全部功能（单一进程）              │
+│    ├── gRPC (9090/9533)  ── 明文 + mTLS 双端口             │
+│    ├── CA (crypto/x509)  ── 内置证书签发                    │
+│    ├── TOTP (pquerna/otp)── Google Authenticator 2FA       │
+│    ├── SQLite            ── 嵌入式数据库                    │
+│    ├── goproxy (:3128)   ── HTTP 出网代理                  │
+│    └── client-go         ── K8s 交互                       │
 │                                                        │
 └──────────┬─────────────────────────────────────────────┘
            │ 内网 VPC
@@ -83,7 +86,7 @@
 | 用户管理 | Teleport | 初期本地用户，后续接 OIDC |
 | API 认证 | **mTLS + Teleport CA** | Teleport 给 CLI 签的短期证书直接用于 gRPC |
 | 会话录制 | Teleport 自带 | 自动录制操作，后续评判用 |
-| 出网代理 | **Tinyproxy** | 轻量 HTTP 正向代理，题目需要外网时走它 |
+| 出网代理 | **goproxy** | Go HTTP 正向代理，嵌入 API Server |
 | API Server | Go | gRPC + mTLS，信任 Teleport CA |
 | CLI | Go (Cobra) | 单一二进制，内嵌 tsh，GitHub Actions 发 release |
 | 数据库 | **SQLite** | 嵌入 API Server 进程，零额外内存和部署 |
