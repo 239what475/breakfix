@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 type Server struct {
@@ -145,8 +146,9 @@ func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
 
 	klog.InfoS("pty session started", "instance", instanceID, "user", subject)
 
-	rw := &pty.ReadWriter{Stream: stream}
-	return s.k8s.ExecPTY(rw, rw, rw, inst.Namespace, inst.PodName)
+	resizeCh := make(chan remotecommand.TerminalSize, 4)
+	rw := &pty.ReadWriter{Stream: stream, Resize: resizeCh}
+	return s.k8s.ExecPTY(rw, rw, rw, resizeCh, inst.Namespace, inst.PodName)
 }
 
 // ── User ──

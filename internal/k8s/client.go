@@ -213,8 +213,8 @@ func VerifyScriptPath(challengeDir string) string {
 }
 
 
-// ExecPTY opens a PTY session in a pod via client-go remotecommand.
-func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, namespace, podName string) error {
+// ExecPTY opens a PTY session via client-go remotecommand.
+func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName string) error {
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Name(podName).Namespace(namespace).
 		SubResource("exec").
@@ -232,9 +232,22 @@ func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, namespace, p
 	}
 
 	return exec.Stream(remotecommand.StreamOptions{
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		Tty:    true,
+		Stdin:             stdin,
+		Stdout:            stdout,
+		Stderr:            stderr,
+		Tty:               true,
+		TerminalSizeQueue: &sizeQueue{ch: resize},
 	})
+}
+
+type sizeQueue struct {
+	ch <-chan remotecommand.TerminalSize
+}
+
+func (q *sizeQueue) Next() *remotecommand.TerminalSize {
+	s, ok := <-q.ch
+	if !ok {
+		return nil
+	}
+	return &s
 }
