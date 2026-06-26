@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/klog/v2"
 )
 
 type Server struct {
@@ -32,12 +32,10 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, challen
 	}
 }
 
-// getSubject extracts user identity from context metadata (dev) or TLS cert (prod)
 func (s *Server) getSubject(ctx context.Context) (string, error) {
 	if build.IsDev() {
 		return "dev-user", nil
 	}
-	// TODO: extract from mTLS cert in prod mode
 	return "", status.Error(codes.Unimplemented, "mTLS auth not implemented")
 }
 
@@ -137,7 +135,11 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	log.Printf("Instance %s started for user %s, challenge %s", instanceID, user.ID, challenge.ID)
+	klog.InfoS("instance started",
+		"instance", instanceID,
+		"user", user.ID,
+		"challenge", challenge.ID,
+	)
 
 	return &pb.StartChallengeResponse{
 		InstanceId:     instanceID,
@@ -182,7 +184,7 @@ func (s *Server) PingInstance(ctx context.Context, req *pb.PingInstanceRequest) 
 
 	if inst.Status == "draining" {
 		_ = s.db.UpdateInstanceStatus(req.InstanceId, "running")
-		log.Printf("Instance %s revived via ping", req.InstanceId)
+		klog.V(2).InfoS("instance revived via ping", "instance", req.InstanceId)
 	}
 
 	return &pb.PingInstanceResponse{
@@ -225,13 +227,11 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Copy verify.sh to pod
 	verifyPath := k8s.VerifyScriptPath(challenge.DirPath)
 	if err := s.k8s.CopyToPod(inst.Namespace, inst.PodName, verifyPath, "/tmp/verify.sh"); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("copy verify script: %v", err))
 	}
 
-	// Execute verify.sh
 	exitCode, output, err := s.k8s.ExecInPod(inst.Namespace, inst.PodName, "/bin/bash", "/tmp/verify.sh")
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("verify failed: %v", err))
@@ -248,7 +248,7 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		Output:      truncate(output, 2000),
 	}
 	if err := s.db.CreateSubmission(sub); err != nil {
-		log.Printf("Failed to save submission: %v", err)
+		klog.ErrorS(err, "failed to save submission", "instance", inst.ID)
 	}
 
 	s.cooldown.Cancel(req.InstanceId)
@@ -258,7 +258,11 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 	if passed {
 		result = "PASSED"
 	}
-	log.Printf("Submit %s: %s (exit=%d)", req.InstanceId, result, exitCode)
+	klog.InfoS("submit result",
+		"instance", req.InstanceId,
+		"result", result,
+		"exit", exitCode,
+	)
 
 	return &pb.SubmitChallengeResponse{
 		Passed:   passed,
@@ -273,13 +277,15 @@ func (s *Server) cleanupInstance(inst *db.Instance) {
 	_ = s.db.DestroyInstance(inst.ID)
 }
 
+// ── Tag parsing ──
+
 func parseTags(raw string) []string {
 	if raw == "" || raw == "[]" {
 		return nil
 	}
 	var tags []string
 	for _, t := range splitRaw(raw) {
-		t = trim(t)
+		t = trim(t, ' ', '"')
 		if t != "" {
 			tags = append(tags, t)
 		}
@@ -288,7 +294,6 @@ func parseTags(raw string) []string {
 }
 
 func splitRaw(s string) []string {
-	s = trim(s, '[', ']', '"', ' ')
 	result := []string{}
 	current := ""
 	for _, c := range s {
@@ -305,12 +310,12 @@ func splitRaw(s string) []string {
 	return result
 }
 
-func trim(s string, cut ...rune) string {
+func trim(s string, cut ...byte) string {
 	for _, r := range cut {
-		for len(s) > 0 && rune(s[0]) == r {
+		for len(s) > 0 && s[0] == r {
 			s = s[1:]
 		}
-		for len(s) > 0 && rune(s[len(s)-1]) == r {
+		for len(s) > 0 && s[len(s)-1] == r {
 			s = s[:len(s)-1]
 		}
 	}
@@ -324,12 +329,13 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// CooldownManager handles the 5-minute draining timer
+// ── CooldownManager ──
+
 type CooldownManager struct {
 	db     *db.DB
 	k8s    *k8s.Client
 	mu     sync.Mutex
-	timers map[string]*time.Timer // instanceID -> timer
+	timers map[string]*time.Timer
 }
 
 func NewCooldownManager(database *db.DB, client *k8s.Client) *CooldownManager {
@@ -349,7 +355,7 @@ func (m *CooldownManager) StartDraining(instanceID string) {
 	}
 
 	_ = m.db.UpdateInstanceStatus(instanceID, "draining")
-	log.Printf("Instance %s draining (5min cooldown)", instanceID)
+	klog.V(1).InfoS("instance draining", "instance", instanceID, "cooldown", "5min")
 
 	m.timers[instanceID] = time.AfterFunc(5*time.Minute, func() {
 		m.destroy(instanceID)
@@ -366,16 +372,13 @@ func (m *CooldownManager) Cancel(instanceID string) {
 }
 
 func (m *CooldownManager) Remaining(instanceID string) time.Duration {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// Only relevant for draining instances
 	return 0
 }
 
 func (m *CooldownManager) CheckDraining() {
 	insts, err := m.db.ListDrainingInstances()
 	if err != nil {
-		log.Printf("Cooldown check error: %v", err)
+		klog.ErrorS(err, "cooldown check failed")
 		return
 	}
 	for _, inst := range insts {
@@ -397,7 +400,7 @@ func (m *CooldownManager) destroy(instanceID string) {
 	if err != nil {
 		return
 	}
-	log.Printf("Cooldown expired, destroying instance %s", instanceID)
+	klog.InfoS("cooldown expired, destroying instance", "instance", instanceID)
 	_ = m.k8s.DeletePod(inst.Namespace, inst.PodName)
 	_ = m.k8s.DeleteNamespace(inst.Namespace)
 	_ = m.db.DestroyInstance(instanceID)

@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -15,8 +14,10 @@ import (
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	bl "github.com/breakfix/breakfix/internal/log"
 	"github.com/breakfix/breakfix/internal/server"
 	"google.golang.org/grpc"
+	"k8s.io/klog/v2"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
@@ -26,36 +27,36 @@ func main() {
 	dbPath := flag.String("db", "breakfix.db", "SQLite database path")
 	challengesDir := flag.String("challenges", "./challenges", "Challenges directory")
 	port := flag.Int("port", 9090, "gRPC port")
+
+	bl.Init()
 	flag.Parse()
 
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	if build.IsDev() {
-		log.SetFlags(log.LstdFlags | log.Lshortfile)
-		log.Println("===== BREAKFIX DEV MODE =====")
-	}
+	klog.InfoS("Breakfix API Server starting",
+		"version", build.Version,
+		"mode", build.Mode,
+	)
 
 	var kubeconfig string
 	if !build.IsDev() {
-		// In prod, read from config
 		kubeconfig = filepath.Join(filepath.Dir(*configPath), "kubeconfig")
 	}
 	k8sClient, err := k8s.New(kubeconfig)
 	if err != nil {
-		log.Fatalf("Failed to create K8s client: %v", err)
+		klog.Fatalf("Failed to create K8s client: %v", err)
 	}
 
 	// Database
 	database, err := db.New(*dbPath)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		klog.Fatalf("Failed to open database: %v", err)
 	}
 	defer func() { _ = database.Close() }()
 
 	// Sync challenges
 	if err := challenge.SyncChallenges(database, *challengesDir); err != nil {
-		log.Fatalf("Failed to sync challenges: %v", err)
+		klog.Fatalf("Failed to sync challenges: %v", err)
 	}
-	log.Printf("Challenges synced from %s", *challengesDir)
+	klog.V(2).InfoS("challenges synced", "dir", *challengesDir)
 
 	// Cooldown manager
 	cooldown := server.NewCooldownManager(database, k8sClient)
@@ -67,7 +68,7 @@ func main() {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		klog.Fatalf("Failed to listen: %v", err)
 	}
 
 	// Graceful shutdown
@@ -75,11 +76,12 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
-		log.Println("Shutting down...")
+		klog.InfoS("shutting down")
 		cooldown.Stop()
 		grpcServer.GracefulStop()
 	}()
 
+	// Periodic cooldown check
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
@@ -88,8 +90,8 @@ func main() {
 		}
 	}()
 
-	log.Printf("Breakfix API Server %s starting on :%d (mode=%s)", build.Version, *port, build.Mode)
+	klog.InfoS("listening", "port", *port)
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+		klog.Fatalf("Failed to serve: %v", err)
 	}
 }

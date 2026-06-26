@@ -7,10 +7,12 @@ import (
 
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/k8s"
+	bl "github.com/breakfix/breakfix/internal/log"
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -35,14 +37,13 @@ func main() {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "localhost:9090", "API Server address")
+
+	bl.Init()
 	rootCmd.AddCommand(
 		loginCmd(), listCmd(), startCmd(), sshCmd(),
 		submitCmd(), stopCmd(), statusCmd(),
 	)
 
-	if build.IsDev() {
-		fmt.Fprintf(os.Stderr, "[DEV MODE] Breakfix CLI %s\n", build.Version)
-	}
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -121,17 +122,17 @@ func sshCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			instanceID := args[0]
 
-			// Revive if draining
-			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: instanceID}) //nolint:errcheck,gosec
+			// Revive if draining (best-effort)
+			if _, err := client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: instanceID}); err != nil {
+				klog.V(1).InfoS("ping failed, continuing anyway", "instance", instanceID, "err", err)
+			}
 
 			if build.IsDev() {
-				// Find pod by instance ID
 				k8sClient := k8s.EnsureK8sClient()
 				ns, pod, err := k8sClient.ListPodsByInstance(instanceID)
 				if err != nil {
 					return fmt.Errorf("pod not found: %w", err)
 				}
-
 				return k8s.ExecSSH(ns, pod)
 			}
 			return fmt.Errorf("prod SSH: use tsh kubectl exec")
@@ -184,7 +185,9 @@ func statusCmd() *cobra.Command {
 		Short: "Check instance status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}) //nolint:errcheck,gosec
+			if _, err := client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}); err != nil {
+				klog.V(1).InfoS("ping failed, showing cached status", "instance", args[0], "err", err)
+			}
 			resp, err := client.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
 			if err != nil {
 				return err
