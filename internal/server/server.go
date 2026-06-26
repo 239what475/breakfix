@@ -55,9 +55,8 @@ func (s *Server) WhoAmI(ctx context.Context, req *pb.WhoAmIRequest) (*pb.WhoAmIR
 	}
 
 	return &pb.WhoAmIResponse{
-		UserId: user.ID,
-		Name:   user.Name,
-		IsNew:  isNew,
+		Name:  user.Name,
+		IsNew: isNew,
 	}, nil
 }
 

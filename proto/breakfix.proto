@@ -28,9 +28,8 @@ message WhoAmIRequest {
 }
 
 message WhoAmIResponse {
-    string user_id = 1;
-    string name = 2;
-    bool is_new = 3;
+    string name = 1;
+    bool is_new = 2;
 }
 
 // ── Challenges ──
