@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"golang.org/x/term"
 	"fmt"
 	"os"
@@ -140,7 +141,7 @@ func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Arg
 		// stream → stdout
 		for {
 			data, err := stream.Recv()
-			if err != nil { return nil }
+			if err != nil { if err != io.EOF { fmt.Fprintf(os.Stderr, "\nssh: %v\n", err) }; return nil }
 			os.Stdout.Write(data.Data)
 		}
 	}}}
