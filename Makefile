@@ -26,11 +26,12 @@ dev-setup:
 	openssl req -new -newkey rsa:2048 -nodes \
 		-keyout dev/certs/server-key.pem \
 		-out dev/certs/server.csr \
-		-subj "/CN=breakfix-api" 2>/dev/null
+		-subj "/CN=localhost" 2>/dev/null
+		@echo "subjectAltName=DNS:localhost,IP:127.0.0.1" > dev/certs/ext.cnf
 	openssl x509 -req -in dev/certs/server.csr \
 		-CA dev/certs/server-ca.pem -CAkey dev/certs/server-ca-key.pem \
-		-CAcreateserial -out dev/certs/server-cert.pem -days 365 2>/dev/null
-	@rm -f dev/certs/server.csr dev/certs/server-ca-key.pem dev/certs/server-ca.srl
+		-CAcreateserial -extfile dev/certs/ext.cnf -out dev/certs/server-cert.pem -days 365 2>/dev/null
+	@rm -f dev/certs/server.csr dev/certs/server-ca-key.pem dev/certs/server-ca.srl dev/certs/ext.cnf
 	@echo ""
 	@echo "=== Setup complete ==="
 	@echo "Certs ready in dev/certs/"
