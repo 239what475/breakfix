@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,7 +22,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "server.yaml", "Config file path")
+	kubeconfigPath := flag.String("kubeconfig", "", "Path to kubeconfig file (empty = default)")
 	dbPath := flag.String("db", "breakfix.db", "SQLite database path")
 	challengesDir := flag.String("challenges", "./challenges", "Challenges directory")
 	port := flag.Int("port", 9090, "gRPC port")
@@ -36,9 +35,9 @@ func main() {
 		"mode", build.Mode,
 	)
 
-	var kubeconfig string
-	if !build.IsDev() {
-		kubeconfig = filepath.Join(filepath.Dir(*configPath), "kubeconfig")
+	kubeconfig := *kubeconfigPath
+	if kubeconfig == "" && build.IsProd() {
+		kubeconfig = "/etc/breakfix/kubeconfig"
 	}
 	k8sClient, err := k8s.New(kubeconfig)
 	if err != nil {

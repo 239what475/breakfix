@@ -5,6 +5,7 @@
 - 阿里云账号，已完成实名认证和学生认证（科研包 2000 元抵扣金）
 - 一台 ECS（2C2G，已有域名备案，作为网关）
 - 域名 `breakfix.your-domain.com` 解析到网关 ECS
+- GitHub OAuth App（用于 Teleport 用户登录）：在 GitHub Settings → Developer settings → OAuth Apps 创建
 
 ---
 
@@ -15,37 +16,33 @@ SSH 到网关 ECS，执行以下步骤。
 ### 1.1 安装基础软件
 
 ```bash
-# 更新系统 & 安装基础工具
 sudo apt update && sudo apt install -y nginx tinyproxy git curl
-
-# 启动 nginx（后面配 CLI 分发）
 sudo systemctl enable --now nginx
-
-# 启动 tinyproxy（先默认跑，后面配）
 sudo systemctl enable --now tinyproxy
 ```
 
 ### 1.2 安装 Teleport
 
 ```bash
-# 添加 Teleport 仓库
-curl https://goteleport.com/static/teleport.repo | sudo tee /etc/yum.repos.d/teleport.repo
-
-# 或 Ubuntu/Debian
-curl https://deb.releases.teleport.dev/teleport-pubkey.asc | sudo apt-key add -
-echo "deb https://deb.releases.teleport.dev stable main" | sudo tee /etc/apt/sources.list.d/teleport.list
+# 添加 Teleport 仓库（现代 Debian/Ubuntu 方式）
+curl -fsSL https://deb.releases.teleport.dev/teleport-pubkey.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/teleport.gpg
+echo "deb [signed-by=/etc/apt/keyrings/teleport.gpg] https://deb.releases.teleport.dev stable main" \
+  | sudo tee /etc/apt/sources.list.d/teleport.list
 sudo apt update
 
 # 安装
 sudo apt install -y teleport
 
-# 配置 Teleport（单机模式，Auth + Proxy 合并）
+# 生成配置模板
 sudo teleport configure --output-file=/etc/teleport/teleport.yaml
 ```
 
 编辑 `/etc/teleport/teleport.yaml`：
 
 ```yaml
+version: v3
+
 teleport:
   nodename: breakfix-gateway
   data_dir: /var/lib/teleport
@@ -55,19 +52,14 @@ teleport:
 
 auth_service:
   enabled: yes
-  cluster_name: breakfix
-  tokens:
-    - "proxy,node,app:breakfix-token"
+  cluster_name: breakfix.your-domain.com
+  listen_addr: 0.0.0.0:3025
+  proxy_listener_mode: multiplex
   authentication:
     type: github
-    github:
-      client_id: <your-github-oauth-app-client-id>
-      client_secret: <your-github-oauth-app-client-secret>
-      display: GitHub
-      teams_to_roles:
-        - organization: <your-github-org>
-          roles:
-            - access
+
+ssh_service:
+  enabled: yes
 
 proxy_service:
   enabled: yes
@@ -78,10 +70,36 @@ proxy_service:
   kube_public_addr: teleport.your-domain.com:3026
 ```
 
-启动：
+启动 Teleport：
 
 ```bash
 sudo systemctl enable --now teleport
+```
+
+#### 1.2.1 配置 GitHub OAuth
+
+创建 `/etc/teleport/github-connector.yaml`：
+
+```yaml
+kind: github
+version: v3
+metadata:
+  name: github
+spec:
+  client_id: <your-github-oauth-app-client-id>
+  client_secret: <your-github-oauth-app-client-secret>
+  redirect_url: https://teleport.your-domain.com/v1/webapi/github/callback
+  teams_to_roles:
+    - organization: <your-github-org>
+      team: <your-team>
+      roles:
+        - access
+```
+
+应用：
+
+```bash
+sudo tctl create -f /etc/teleport/github-connector.yaml
 ```
 
 ### 1.3 配置 Tinyproxy
@@ -92,26 +110,31 @@ sudo systemctl enable --now teleport
 Port 3128
 Listen 0.0.0.0
 
-# 只允许 ACK Pod 网段（后面填实际的 Pod CIDR）
+# 只允许 ACK Pod 网段（填实际的 Pod CIDR）
 Allow 127.0.0.1
 Allow 10.244.0.0/16
 
 # 并发限制
 MaxClients 20
-MaxConnectionsPerHost 5
 
-# 基础认证
-BasicAuth breakfix-proxy <生成随机密码>
+# 基础认证（用户名和密码空格分隔）
+BasicAuth breakfix-proxy <随机密码>
 
 # 不暴露自己是代理
 DisableViaHeader Yes
 ```
 
-生成随机密码：
+生成随机密码并写入配置：
 
 ```bash
-echo "breakfix-proxy:$(openssl rand -hex 16)" | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+# 生成密码
+PASSWORD=$(openssl rand -hex 16)
+
+# 修改配置中的密码行
+sudo sed -i "s/BasicAuth breakfix-proxy .*/BasicAuth breakfix-proxy $PASSWORD/" /etc/tinyproxy/tinyproxy.conf
 ```
+
+记录密码供后面 Pod 环境变量使用。
 
 重启：
 
@@ -127,43 +150,11 @@ sudo mkdir -p /etc/breakfix /var/lib/breakfix/challenges
 sudo chown -R breakfix:breakfix /etc/breakfix /var/lib/breakfix
 ```
 
-### 1.5 配置 API Server
+### 1.5 API Server 配置
 
-编辑 `/etc/breakfix/server.yaml`：
-
-```yaml
-grpc:
-  port: 443
-  server_cert: /etc/breakfix/server-cert.pem
-  server_key:  /etc/breakfix/server-key.pem
-  client_ca:   /etc/teleport/ca.pub
-
-db:
-  path: /var/lib/breakfix/breakfix.db
-
-k8s:
-  kubeconfig: /etc/breakfix/kubeconfig
-
-challenges:
-  git_path: /var/lib/breakfix/challenges
-
-registry:
-  url: registry.cn-hangzhou.aliyuncs.com/breakfix
-
-teleport:
-  proxy_addr: teleport.your-domain.com:443
-```
-
-API Server 服务端证书：让 Teleport CA 签发，或后面用 `tctl` 签。
-
-### 1.6 安装 API Server
+API Server 使用命令行 flag，不需要 YAML 配置文件。直接配 systemd unit：
 
 ```bash
-# 从 GitHub Releases 下载
-curl -Lo /usr/local/bin/breakfix-api https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
-chmod +x /usr/local/bin/breakfix-api
-
-# 创建 systemd service
 sudo tee /etc/systemd/system/breakfix-api.service <<'EOF'
 [Unit]
 Description=Breakfix API Server
@@ -172,13 +163,26 @@ After=network.target
 [Service]
 Type=simple
 User=breakfix
-ExecStart=/usr/local/bin/breakfix-api --config /etc/breakfix/server.yaml
+ExecStart=/usr/local/bin/breakfix-api \
+  --port=9090 \
+  --db=/var/lib/breakfix/breakfix.db \
+  --challenges=/var/lib/breakfix/challenges
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+```
+
+> 注意：API Server 目前使用命令行 flag，不是 YAML 配置。`-X main.Mode=prod` 在编译时通过 ldflags 设置。
+
+### 1.6 安装 API Server
+
+```bash
+# 从 GitHub Releases 下载
+curl -Lo /usr/local/bin/breakfix-api https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
+chmod +x /usr/local/bin/breakfix-api
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now breakfix-api
@@ -205,7 +209,7 @@ server {
 }
 EOF
 
-sudo ln -s /etc/nginx/sites-available/breakfix /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/breakfix /etc/nginx/sites-enabled/
 sudo mkdir -p /var/www/breakfix/releases
 sudo systemctl reload nginx
 ```
@@ -228,13 +232,12 @@ sudo systemctl reload nginx
 1. 集群 → 节点池 → 创建节点池
 2. 扩缩容模式：**自动**
 3. 最小节点数：1，最大按需
-4. 实例规格：按量付费，`ecs.u1-c1m4.large`（4C16G）
+4. 实例规格：按量付费，`ecs.u1-c1m4.xlarge`（4C16G）
 5. 操作系统：Alibaba Cloud Linux 3
-6. 节点自定义数据：
+6. 节点自定义数据（用于配置镜像加速）：
 
 ```bash
 #!/bin/bash
-# 镜像站加速
 mkdir -p /etc/containerd
 cat >> /etc/containerd/config.toml <<'CONF'
 [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
@@ -246,13 +249,14 @@ systemctl restart containerd
 
 ### 2.3 获取 kubeconfig
 
-集群 → 连接信息 → 复制内网 endpoint → 生成 kubeconfig：
+1. 集群 → 连接信息 → 复制内网接入地址
+2. 在阿里云控制台下载 kubeconfig 文件
+
+在网关 ECS 上：
 
 ```bash
-# 在网关 ECS 上
 sudo mkdir -p /etc/breakfix
-# 从阿里云控制台下载 kubeconfig 并传到网关 ECS
-sudo mv kubeconfig /etc/breakfix/kubeconfig
+# 将下载的 kubeconfig 拷贝到网关 ECS 的 /etc/breakfix/kubeconfig
 sudo chmod 600 /etc/breakfix/kubeconfig
 sudo chown breakfix:breakfix /etc/breakfix/kubeconfig
 ```
@@ -263,7 +267,9 @@ sudo chown breakfix:breakfix /etc/breakfix/kubeconfig
 
 ### 3.1 创建个人版仓库
 
-容器镜像服务 → 创建命名空间 `breakfix` → 记录仓库地址 `registry.cn-hangzhou.aliyuncs.com/breakfix`
+容器镜像服务 ACR → 创建命名空间 `breakfix` → 记录仓库地址 `registry.cn-hangzhou.aliyuncs.com/breakfix`
+
+> ACR 个人版免费，VPC 内网可直接访问。
 
 ### 3.2 推送基础镜像
 
@@ -279,26 +285,35 @@ docker push registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest
 
 ## 4. Teleport 对接 ACK
 
-### 4.1 安装 Teleport K8s Service
+### 4.1 安装 Teleport K8s Agent
 
 ```bash
-# 生成加入 token
-tctl nodes add --roles=kube --ttl=8760h
+# 添加 Teleport Helm 仓库
+helm repo add teleport https://charts.releases.teleport.dev
+helm repo update
 
-# Helm 安装
-helm install teleport-k8s teleport/teleport-kube-agent \
+# 生成 K8s join token
+sudo tctl tokens add --type=kube --ttl=8760h
+
+# 安装
+helm install teleport-kube-agent teleport/teleport-kube-agent \
+  --namespace teleport-agent \
+  --create-namespace \
+  --set roles=kube \
   --set proxyAddr=teleport.your-domain.com:443 \
   --set authToken=<上面生成的 token> \
-  --set kubeClusterName=breakfix-ack \
-  --create-namespace -n teleport
+  --set kubeClusterName=breakfix-ack
 ```
 
 ### 4.2 验证
 
 ```bash
-# 确认可以 exec 到 Pod
+# 管理员本地登录 Teleport 并注册 K8s 集群
+tsh login --proxy=teleport.your-domain.com:443
 tsh kube login breakfix-ack
-tsh kubectl exec -ti <pod> -n <ns> -- /bin/sh
+
+# 验证可以访问 Pod
+kubectl exec -ti <pod-name> -n <namespace> -- /bin/sh
 ```
 
 ---
@@ -308,22 +323,25 @@ tsh kubectl exec -ti <pod> -n <ns> -- /bin/sh
 ### 5.1 检查组件
 
 ```bash
-systemctl status breakfix-api teleport nginx tinyproxy
-# 全部 active (running)
+systemctl status teleport nginx tinyproxy breakfix-api
+# 全部应为 active (running)
 ```
 
-### 5.2 检查 gRPC
+### 5.2 检查 API Server gRPC
 
 ```bash
-grpcurl -cacert /etc/teleport/ca.pub \
-  -cert ~/.tsh/keys/teleport.your-domain.com/user-cert.pub \
-  -key ~/.tsh/keys/teleport.your-domain.com/user \
-  gateway-ip:443 breakfix.Breakfix/WhoAmI
+curl -s http://localhost:9090/grpc.health.v1.Health/Check
+# 或使用 grpcurl（如果安装）
 ```
 
 ### 5.3 完整流程测试
 
 ```bash
+# 1. 用户下载 CLI
+curl -o /usr/local/bin/breakfix https://breakfix.your-domain.com/cli/breakfix-linux-amd64
+chmod +x /usr/local/bin/breakfix
+
+# 2. 测试全链路
 breakfix login
 breakfix list
 breakfix start cleanup-logs
@@ -349,8 +367,9 @@ docker push registry.cn-hangzhou.aliyuncs.com/breakfix/cleanup-logs:v1
 ## 快速检查清单
 
 - [ ] 网关 ECS：nginx + tinyproxy + teleport + breakfix-api 全部 active
-- [ ] Teleport：OAuth 登录正常，`tsh kube login` 成功
+- [ ] Teleport：GitHub OAuth 登录正常
+- [ ] Teleport K8s：`tsh kube login breakfix-ack` 成功
 - [ ] ACK：节点池 Running，Pod 可创建
-- [ ] ACR：镜像可 pull
-- [ ] API Server：gRPC 可用，mTLS 验证通过
+- [ ] ACR：镜像可 pull（`docker pull registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest`）
+- [ ] API Server：gRPC health check 正常
 - [ ] CLI：`breakfix login` → `start` → `ssh` → `submit` 全链路通
