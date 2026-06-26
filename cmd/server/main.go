@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,8 +16,8 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"github.com/breakfix/breakfix/internal/proxy"
 	"github.com/breakfix/breakfix/internal/server"
-	"github.com/elazarl/goproxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -88,7 +87,6 @@ func main() {
 
 	go func() {
 		klog.InfoS("proxy listening", "port", cfg.ProxyPort)
-		http.ListenAndServe(fmt.Sprintf(":%d", cfg.ProxyPort), goproxy.NewProxyHttpServer())
 	}()
 
 	publicLis, _ := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
@@ -102,6 +100,7 @@ func main() {
 		cooldown.Stop(); publicServer.GracefulStop(); secureServer.GracefulStop()
 	}()
 
+	go proxy.Start(cfg.ProxyPort)
 	klog.InfoS("listening", "public", cfg.Port, "mtls", cfg.MTLSPort, "proxy", cfg.ProxyPort)
 
 	go func() { publicServer.Serve(publicLis) }()
