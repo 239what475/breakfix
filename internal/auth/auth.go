@@ -3,10 +3,11 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"strings"
 
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
+	"rsc.io/qr"
 )
 
 const issuer = "Breakfix"
@@ -22,7 +23,7 @@ func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-// GenerateTOTPSecret creates a new TOTP secret and ASCII QR code.
+// GenerateTOTPSecret creates a new TOTP secret and terminal-scannable QR code.
 func GenerateTOTPSecret(username string) (secret string, qrASCII string, err error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      issuer,
@@ -33,20 +34,27 @@ func GenerateTOTPSecret(username string) (secret string, qrASCII string, err err
 	}
 
 	secret = key.Secret()
-	// Generate a text-based QR code approximation for terminal display.
-	// The real QR code URL is: otpauth://totp/Breakfix:user?secret=XXX&issuer=Breakfix
-	qrURL := key.URL()
-	qrASCII = fmt.Sprintf(`
-┌──────────────────────────────┐
-│  Scan with Google Auth App   │
-│                              │
-│  URL: %s
-│                              │
-│  Secret: %s                  │
-└──────────────────────────────┘
-`, qrURL, secret)
+	code, err := qr.Encode(key.URL(), qr.L)
+	if err != nil {
+		return "", "", err
+	}
 
-	return secret, qrASCII, nil
+	var sb strings.Builder
+	sb.WriteString("\nScan this QR code with Google Authenticator:\n\n")
+	for y := 0; y < code.Size; y++ {
+		sb.WriteString("  ")
+		for x := 0; x < code.Size; x++ {
+			if code.Black(x, y) {
+				sb.WriteString("██")
+			} else {
+				sb.WriteString("  ")
+			}
+		}
+		sb.WriteByte('\n')
+	}
+	sb.WriteString("\nSecret (manual entry): " + secret + "\n")
+
+	return secret, sb.String(), nil
 }
 
 // ValidateTOTP validates a TOTP code.
