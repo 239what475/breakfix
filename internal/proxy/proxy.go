@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const bytesPerSec = 1 * 1024 * 1024 // 1 MB/s per connection
+const bytesPerSec = 131072 // 1 Mb/s per connection (128 KB/s)
 
 // Start runs an HTTP forward proxy with logging and per-connection bandwidth limits.
 func Start(port int) {
@@ -29,7 +29,7 @@ func Start(port int) {
 
 type klogWriter struct{}
 
-func (w klogWriter) Printf(format string, args ...interface{}) {
+func (w klogWriter) Printf(format string, args ...any) {
 	klog.V(2).Infof(format, args...)
 }
 
