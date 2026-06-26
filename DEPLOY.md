@@ -234,18 +234,6 @@ sudo systemctl reload nginx
 3. 最小节点数：1，最大按需
 4. 实例规格：按量付费，`ecs.u1-c1m4.xlarge`（4C16G）
 5. 操作系统：Alibaba Cloud Linux 3
-6. 节点自定义数据（用于配置镜像加速）：
-
-```bash
-#!/bin/bash
-mkdir -p /etc/containerd
-cat >> /etc/containerd/config.toml <<'CONF'
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-    endpoint = ["https://registry.cn-hangzhou.aliyuncs.com/breakfix-mirror"]
-CONF
-systemctl restart containerd
-```
 
 ### 2.3 获取 kubeconfig
 
