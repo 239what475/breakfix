@@ -6,9 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/auth"
+	"github.com/breakfix/breakfix/internal/ca"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
+	"github.com/breakfix/breakfix/internal/pty"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
@@ -22,16 +25,130 @@ type Server struct {
 	k8s           *k8s.Client
 	cooldown      *CooldownManager
 	challengesDir string
+	ca            *ca.CA
 }
 
-func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, challengesDir string) *Server {
+func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, challengesDir string, ca *ca.CA) *Server {
 	return &Server{
 		db:            database,
 		k8s:           client,
 		cooldown:      cooldown,
 		challengesDir: challengesDir,
+		ca:            ca,
 	}
 }
+
+// ── Auth ──
+
+func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
+	username := req.Username
+	if username == "" || len(username) < 2 {
+		return nil, status.Error(codes.InvalidArgument, "username too short")
+	}
+	if len(req.Password) < 6 {
+		return nil, status.Error(codes.InvalidArgument, "password too short (min 6)")
+	}
+
+	// Check if user exists
+	if _, err := s.db.GetUserBySubject(username); err == nil {
+		return nil, status.Error(codes.AlreadyExists, "user already exists")
+	}
+
+	// Hash password
+	passwordHash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to hash password")
+	}
+
+	// Generate TOTP secret
+	secret, qr, err := auth.GenerateTOTPSecret(username)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to generate TOTP")
+	}
+
+	// Create user
+	id := fmt.Sprintf("u-%d", time.Now().UnixNano())
+	_, err = s.db.CreateUserWithAuth(id, username, passwordHash, secret)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to create user")
+	}
+
+	klog.InfoS("user registered", "user", username)
+
+	return &pb.RegisterResponse{
+		TotpSecret: secret,
+		TotpQr:     qr,
+	}, nil
+}
+
+func (s *Server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+	// Verify user
+	user, err := s.db.GetUserBySubject(req.Username)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	}
+
+	// Verify password
+	if !auth.CheckPassword(user.PasswordHash, req.Password) {
+		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	}
+
+	// Verify TOTP
+	if !auth.ValidateTOTP(user.TOTPSecret, req.TotpCode) {
+		return nil, status.Error(codes.Unauthenticated, "invalid TOTP code")
+	}
+
+	// Issue client certificate
+	certPEM, keyPEM, err := s.ca.IssueClientCert(req.Username)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to issue certificate")
+	}
+
+	klog.InfoS("user logged in", "user", req.Username)
+
+	return &pb.LoginResponse{
+		UserId:     user.ID,
+		Name:       user.Name,
+		ClientCert: string(certPEM),
+		ClientKey:  string(keyPEM),
+	}, nil
+}
+
+// ── Terminal ──
+
+func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
+	// Auth: first message contains instance ID (sent as data, extract via header)
+	// For now, get identity from context
+	subject, err := s.getSubject(stream.Context())
+	if err != nil {
+		return err
+	}
+
+	// Get instance from first message
+	data, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("receive instance id: %w", err)
+	}
+	instanceID := string(data.Data)
+
+	inst, err := s.db.GetInstance(instanceID)
+	if err != nil {
+		return status.Error(codes.NotFound, "instance not found")
+	}
+
+	user, err := s.db.GetUserBySubject(subject)
+	if err != nil {
+		return status.Error(codes.PermissionDenied, "not your instance")
+	}
+	if inst.UserID != user.ID {
+		return status.Error(codes.PermissionDenied, "not your instance")
+	}
+
+	klog.InfoS("pty session started", "instance", instanceID, "user", subject)
+	return pty.Proxy(stream, inst.Namespace, inst.PodName)
+}
+
+// ── User ──
 
 func (s *Server) getSubject(ctx context.Context) (string, error) {
 	p, ok := peer.FromContext(ctx)
@@ -58,35 +175,33 @@ func (s *Server) WhoAmI(ctx context.Context, req *pb.WhoAmIRequest) (*pb.WhoAmIR
 		}
 	}
 
-	user, isNew, err := s.db.GetOrCreateUser(subject, subject)
+	user, err := s.db.GetUserBySubject(subject)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Error(codes.NotFound, "user not found")
 	}
 
 	return &pb.WhoAmIResponse{
 		Name:  user.Name,
-		IsNew: isNew,
+		IsNew: false,
 	}, nil
 }
 
-func (s *Server) ListChallenges(ctx context.Context, req *pb.ListChallengesRequest) (*pb.ListChallengesResponse, error) {
-	subject, err := s.getSubject(ctx)
-	if err != nil {
-		return nil, err
-	}
-	user, _, err := s.db.GetOrCreateUser(subject, subject)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
+// ── Challenges ──
 
+func (s *Server) ListChallenges(ctx context.Context, req *pb.ListChallengesRequest) (*pb.ListChallengesResponse, error) {
 	challenges, err := s.db.ListChallenges()
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	subject, _ := s.getSubject(ctx)
+	user, _ := s.db.GetUserBySubject(subject)
 
 	var summaries []*pb.ChallengeSummary
 	for _, c := range challenges {
-		solved, _ := s.db.IsChallengeSolved(user.ID, c.ID)
+		solved := false
+		if user != nil {
+			solved, _ = s.db.IsChallengeSolved(user.ID, c.ID)
+		}
 		summaries = append(summaries, &pb.ChallengeSummary{
 			Id:         c.ID,
 			Title:      c.Title,
@@ -96,18 +211,19 @@ func (s *Server) ListChallenges(ctx context.Context, req *pb.ListChallengesReque
 			Solved:     solved,
 		})
 	}
-
 	return &pb.ListChallengesResponse{Challenges: summaries}, nil
 }
+
+// ── Instances ──
 
 func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeRequest) (*pb.StartChallengeResponse, error) {
 	subject, err := s.getSubject(ctx)
 	if err != nil {
 		return nil, err
 	}
-	user, _, err := s.db.GetOrCreateUser(subject, subject)
+	user, err := s.db.GetUserBySubject(subject)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Error(codes.Unauthenticated, "login required")
 	}
 
 	challenge, err := s.db.GetChallenge(req.ChallengeId)
@@ -122,11 +238,9 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 	if err := s.k8s.EnsureNamespace(ns); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("create namespace: %v", err))
 	}
-
 	if err := s.k8s.CreatePod(ns, podName, challenge.Image, challenge.ID, instanceID); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("create pod: %v", err))
 	}
-
 	if err := s.k8s.WaitForPod(ns, podName); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("pod not ready: %v", err))
 	}
@@ -143,11 +257,7 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	klog.InfoS("instance started",
-		"instance", instanceID,
-		"user", user.ID,
-		"challenge", challenge.ID,
-	)
+	klog.InfoS("instance started", "instance", instanceID, "user", user.ID, "challenge", challenge.ID)
 
 	return &pb.StartChallengeResponse{
 		InstanceId:     instanceID,
@@ -161,7 +271,6 @@ func (s *Server) GetInstance(ctx context.Context, req *pb.GetInstanceRequest) (*
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "instance not found")
 	}
-
 	var status_ pb.InstanceStatus
 	switch inst.Status {
 	case "running":
@@ -171,14 +280,11 @@ func (s *Server) GetInstance(ctx context.Context, req *pb.GetInstanceRequest) (*
 	default:
 		status_ = pb.InstanceStatus_DESTROYED
 	}
-
-	remaining := s.cooldown.Remaining(req.InstanceId)
-
 	return &pb.GetInstanceResponse{
 		InstanceId:   inst.ID,
 		ChallengeId:  inst.ChallengeID,
 		Status:       status_,
-		RemainingSec: int64(remaining.Seconds()),
+		RemainingSec: int64(s.cooldown.Remaining(req.InstanceId).Seconds()),
 	}, nil
 }
 
@@ -187,19 +293,14 @@ func (s *Server) PingInstance(ctx context.Context, req *pb.PingInstanceRequest) 
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "instance not found")
 	}
-
 	s.cooldown.Cancel(req.InstanceId)
-
 	if inst.Status == "draining" {
 		if err := s.db.UpdateInstanceStatus(req.InstanceId, "running"); err != nil {
 			klog.ErrorS(err, "failed to update instance status", "instance", req.InstanceId, "status", "running")
 		}
 		klog.V(2).InfoS("instance revived via ping", "instance", req.InstanceId)
 	}
-
-	return &pb.PingInstanceResponse{
-		Status: pb.InstanceStatus_RUNNING,
-	}, nil
+	return &pb.PingInstanceResponse{Status: pb.InstanceStatus_RUNNING}, nil
 }
 
 func (s *Server) StopChallenge(ctx context.Context, req *pb.StopChallengeRequest) (*pb.StopChallengeResponse, error) {
@@ -207,7 +308,6 @@ func (s *Server) StopChallenge(ctx context.Context, req *pb.StopChallengeRequest
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "instance not found")
 	}
-
 	s.cooldown.Cancel(req.InstanceId)
 	s.cleanupInstance(inst)
 	return &pb.StopChallengeResponse{}, nil
@@ -218,20 +318,17 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 	if err != nil {
 		return nil, err
 	}
-	user, _, err := s.db.GetOrCreateUser(subject, subject)
+	user, err := s.db.GetUserBySubject(subject)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, status.Error(codes.Unauthenticated, "login required")
 	}
-
 	inst, err := s.db.GetInstance(req.InstanceId)
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "instance not found")
 	}
-
 	if inst.UserID != user.ID {
 		return nil, status.Error(codes.PermissionDenied, "not your instance")
 	}
-
 	challenge, err := s.db.GetChallenge(inst.ChallengeID)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -241,14 +338,12 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 	if err := s.k8s.CopyToPod(inst.Namespace, inst.PodName, verifyPath, "/tmp/verify.sh"); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("copy verify script: %v", err))
 	}
-
 	exitCode, output, err := s.k8s.ExecInPod(inst.Namespace, inst.PodName, "/bin/bash", "/tmp/verify.sh")
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("verify failed: %v", err))
 	}
 
 	passed := exitCode == 0
-
 	sub := db.Submission{
 		InstanceID:  inst.ID,
 		UserID:      user.ID,
@@ -268,11 +363,7 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 	if passed {
 		result = "PASSED"
 	}
-	klog.InfoS("submit result",
-		"instance", req.InstanceId,
-		"result", result,
-		"exit", exitCode,
-	)
+	klog.InfoS("submit result", "instance", req.InstanceId, "result", result, "exit", exitCode)
 
 	return &pb.SubmitChallengeResponse{
 		Passed:   passed,
@@ -280,6 +371,8 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		Output:   output,
 	}, nil
 }
+
+// ── Cleanup ──
 
 func (s *Server) cleanupInstance(inst *db.Instance) {
 	if err := s.k8s.DeletePod(inst.Namespace, inst.PodName); err != nil {
@@ -348,9 +441,9 @@ func truncate(s string, maxLen int) string {
 // ── CooldownManager ──
 
 type CooldownManager struct {
-	db     *db.DB
-	k8s    *k8s.Client
-	mu     sync.Mutex
+	db    *db.DB
+	k8s   *k8s.Client
+	mu    sync.Mutex
 	timers map[string]*time.Timer
 }
 
@@ -365,16 +458,13 @@ func NewCooldownManager(database *db.DB, client *k8s.Client) *CooldownManager {
 func (m *CooldownManager) StartDraining(instanceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if t, ok := m.timers[instanceID]; ok {
 		t.Stop()
 	}
-
 	if err := m.db.UpdateInstanceStatus(instanceID, "draining"); err != nil {
 		klog.ErrorS(err, "failed to update instance status", "instance", instanceID, "status", "draining")
 	}
 	klog.V(1).InfoS("instance draining", "instance", instanceID, "cooldown", "5min")
-
 	m.timers[instanceID] = time.AfterFunc(5*time.Minute, func() {
 		m.destroy(instanceID)
 	})

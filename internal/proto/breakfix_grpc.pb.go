@@ -31,6 +31,11 @@ type BreakfixClient interface {
 	GetInstance(ctx context.Context, in *GetInstanceRequest, opts ...grpc.CallOption) (*GetInstanceResponse, error)
 	PingInstance(ctx context.Context, in *PingInstanceRequest, opts ...grpc.CallOption) (*PingInstanceResponse, error)
 	StopChallenge(ctx context.Context, in *StopChallengeRequest, opts ...grpc.CallOption) (*StopChallengeResponse, error)
+	// Auth
+	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	// Terminal
+	ExecInstance(ctx context.Context, opts ...grpc.CallOption) (Breakfix_ExecInstanceClient, error)
 	// Submission
 	SubmitChallenge(ctx context.Context, in *SubmitChallengeRequest, opts ...grpc.CallOption) (*SubmitChallengeResponse, error)
 }
@@ -97,6 +102,55 @@ func (c *breakfixClient) StopChallenge(ctx context.Context, in *StopChallengeReq
 	return out, nil
 }
 
+func (c *breakfixClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error) {
+	out := new(RegisterResponse)
+	err := c.cc.Invoke(ctx, "/breakfix.Breakfix/Register", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *breakfixClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+	out := new(LoginResponse)
+	err := c.cc.Invoke(ctx, "/breakfix.Breakfix/Login", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *breakfixClient) ExecInstance(ctx context.Context, opts ...grpc.CallOption) (Breakfix_ExecInstanceClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Breakfix_ServiceDesc.Streams[0], "/breakfix.Breakfix/ExecInstance", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &breakfixExecInstanceClient{stream}
+	return x, nil
+}
+
+type Breakfix_ExecInstanceClient interface {
+	Send(*PTYData) error
+	Recv() (*PTYData, error)
+	grpc.ClientStream
+}
+
+type breakfixExecInstanceClient struct {
+	grpc.ClientStream
+}
+
+func (x *breakfixExecInstanceClient) Send(m *PTYData) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *breakfixExecInstanceClient) Recv() (*PTYData, error) {
+	m := new(PTYData)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *breakfixClient) SubmitChallenge(ctx context.Context, in *SubmitChallengeRequest, opts ...grpc.CallOption) (*SubmitChallengeResponse, error) {
 	out := new(SubmitChallengeResponse)
 	err := c.cc.Invoke(ctx, "/breakfix.Breakfix/SubmitChallenge", in, out, opts...)
@@ -119,6 +173,11 @@ type BreakfixServer interface {
 	GetInstance(context.Context, *GetInstanceRequest) (*GetInstanceResponse, error)
 	PingInstance(context.Context, *PingInstanceRequest) (*PingInstanceResponse, error)
 	StopChallenge(context.Context, *StopChallengeRequest) (*StopChallengeResponse, error)
+	// Auth
+	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
+	Login(context.Context, *LoginRequest) (*LoginResponse, error)
+	// Terminal
+	ExecInstance(Breakfix_ExecInstanceServer) error
 	// Submission
 	SubmitChallenge(context.Context, *SubmitChallengeRequest) (*SubmitChallengeResponse, error)
 	mustEmbedUnimplementedBreakfixServer()
@@ -145,6 +204,15 @@ func (UnimplementedBreakfixServer) PingInstance(context.Context, *PingInstanceRe
 }
 func (UnimplementedBreakfixServer) StopChallenge(context.Context, *StopChallengeRequest) (*StopChallengeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StopChallenge not implemented")
+}
+func (UnimplementedBreakfixServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedBreakfixServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedBreakfixServer) ExecInstance(Breakfix_ExecInstanceServer) error {
+	return status.Errorf(codes.Unimplemented, "method ExecInstance not implemented")
 }
 func (UnimplementedBreakfixServer) SubmitChallenge(context.Context, *SubmitChallengeRequest) (*SubmitChallengeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitChallenge not implemented")
@@ -270,6 +338,68 @@ func _Breakfix_StopChallenge_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Breakfix_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BreakfixServer).Register(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/breakfix.Breakfix/Register",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BreakfixServer).Register(ctx, req.(*RegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Breakfix_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BreakfixServer).Login(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/breakfix.Breakfix/Login",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BreakfixServer).Login(ctx, req.(*LoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Breakfix_ExecInstance_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(BreakfixServer).ExecInstance(&breakfixExecInstanceServer{stream})
+}
+
+type Breakfix_ExecInstanceServer interface {
+	Send(*PTYData) error
+	Recv() (*PTYData, error)
+	grpc.ServerStream
+}
+
+type breakfixExecInstanceServer struct {
+	grpc.ServerStream
+}
+
+func (x *breakfixExecInstanceServer) Send(m *PTYData) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *breakfixExecInstanceServer) Recv() (*PTYData, error) {
+	m := new(PTYData)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func _Breakfix_SubmitChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SubmitChallengeRequest)
 	if err := dec(in); err != nil {
@@ -320,10 +450,25 @@ var Breakfix_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Breakfix_StopChallenge_Handler,
 		},
 		{
+			MethodName: "Register",
+			Handler:    _Breakfix_Register_Handler,
+		},
+		{
+			MethodName: "Login",
+			Handler:    _Breakfix_Login_Handler,
+		},
+		{
 			MethodName: "SubmitChallenge",
 			Handler:    _Breakfix_SubmitChallenge_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ExecInstance",
+			Handler:       _Breakfix_ExecInstance_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "breakfix.proto",
 }
