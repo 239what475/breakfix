@@ -1,0 +1,20 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck      # 检查未处理的错误返回
+    - govet         # Go 官方静态分析
+    - staticcheck   # 更深入的静态分析
+    - unused        # 未使用的变量/函数
+    - gosec         # 安全检查
+    - misspell      # 拼写错误
+    - nilerr        # 返回 nil error 的错误模式
+    - unconvert     # 不必要的类型转换
+
+formatters:
+  enable:
+    - gofmt         # 标准格式
+    - goimports     # import 排序 + 自动补全
