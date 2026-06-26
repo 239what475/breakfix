@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/breakfix/breakfix/internal/build"
-	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -96,13 +95,26 @@ func startC() *cobra.Command { return &cobra.Command{Use: "start", Short: "Start
 }}}
 
 func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
-	c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]})
-	k8sClient := k8s.EnsureK8sClient()
-	ns, pod, err := k8sClient.ListPodsByInstance(args[0])
-	if err != nil { return fmt.Errorf("pod not found: %w", err) }
-	return k8s.ExecSSH(ns, pod)
-}}}
+		c, err := grpcMTLS(); if err != nil { return err }
+		c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]})
+		stream, err := c.ExecInstance(context.Background())
+		if err != nil { return fmt.Errorf("exec: %w", err) }
+		stream.Send(&pb.PTYData{Data: []byte(args[0])})
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				n, err := os.Stdin.Read(buf)
+				if n > 0 { stream.Send(&pb.PTYData{Data: buf[:n]}) }
+				if err != nil { stream.CloseSend(); return }
+			}
+		}()
+		for {
+			data, err := stream.Recv()
+			if err != nil { return nil }
+			os.Stdout.Write(data.Data)
+		}
+	}}}
+
 
 func subC() *cobra.Command { return &cobra.Command{Use: "submit", Short: "Submit", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	c, err := grpcMTLS(); if err != nil { return err }
