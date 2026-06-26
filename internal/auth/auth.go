@@ -38,7 +38,7 @@ func GenerateTOTPSecret(username string) (secret string, qrStr string, err error
 	}
 
 	const (
-		bgBlack = "\033[40m \033[0m"  // black module
+		bgBlack = "\033[40m  \033[0m"  // black module
 		bgWhite = "\033[47m  \033[0m"  // white module
 		qz      = "\033[47m  \033[0m"  // quiet zone (white)
 	)
