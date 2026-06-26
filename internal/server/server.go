@@ -183,7 +183,9 @@ func (s *Server) PingInstance(ctx context.Context, req *pb.PingInstanceRequest) 
 	s.cooldown.Cancel(req.InstanceId)
 
 	if inst.Status == "draining" {
-		_ = s.db.UpdateInstanceStatus(req.InstanceId, "running")
+		if err := s.db.UpdateInstanceStatus(req.InstanceId, "running"); err != nil {
+			klog.ErrorS(err, "failed to update instance status", "instance", req.InstanceId, "status", "running")
+		}
 		klog.V(2).InfoS("instance revived via ping", "instance", req.InstanceId)
 	}
 
@@ -272,9 +274,15 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 }
 
 func (s *Server) cleanupInstance(inst *db.Instance) {
-	_ = s.k8s.DeletePod(inst.Namespace, inst.PodName)
-	_ = s.k8s.DeleteNamespace(inst.Namespace)
-	_ = s.db.DestroyInstance(inst.ID)
+	if err := s.k8s.DeletePod(inst.Namespace, inst.PodName); err != nil {
+		klog.ErrorS(err, "failed to delete pod", "namespace", inst.Namespace, "pod", inst.PodName)
+	}
+	if err := s.k8s.DeleteNamespace(inst.Namespace); err != nil {
+		klog.ErrorS(err, "failed to delete namespace", "namespace", inst.Namespace)
+	}
+	if err := s.db.DestroyInstance(inst.ID); err != nil {
+		klog.ErrorS(err, "failed to destroy instance record", "instance", inst.ID)
+	}
 }
 
 // ── Tag parsing ──
@@ -354,7 +362,9 @@ func (m *CooldownManager) StartDraining(instanceID string) {
 		t.Stop()
 	}
 
-	_ = m.db.UpdateInstanceStatus(instanceID, "draining")
+	if err := m.db.UpdateInstanceStatus(instanceID, "draining"); err != nil {
+		klog.ErrorS(err, "failed to update instance status", "instance", instanceID, "status", "draining")
+	}
 	klog.V(1).InfoS("instance draining", "instance", instanceID, "cooldown", "5min")
 
 	m.timers[instanceID] = time.AfterFunc(5*time.Minute, func() {
@@ -401,9 +411,15 @@ func (m *CooldownManager) destroy(instanceID string) {
 		return
 	}
 	klog.InfoS("cooldown expired, destroying instance", "instance", instanceID)
-	_ = m.k8s.DeletePod(inst.Namespace, inst.PodName)
-	_ = m.k8s.DeleteNamespace(inst.Namespace)
-	_ = m.db.DestroyInstance(instanceID)
+	if err := m.k8s.DeletePod(inst.Namespace, inst.PodName); err != nil {
+		klog.ErrorS(err, "failed to delete pod on cooldown expiry", "namespace", inst.Namespace, "pod", inst.PodName)
+	}
+	if err := m.k8s.DeleteNamespace(inst.Namespace); err != nil {
+		klog.ErrorS(err, "failed to delete namespace on cooldown expiry", "namespace", inst.Namespace)
+	}
+	if err := m.db.DestroyInstance(instanceID); err != nil {
+		klog.ErrorS(err, "failed to destroy instance record on cooldown expiry", "instance", instanceID)
+	}
 }
 
 func (m *CooldownManager) Stop() {
