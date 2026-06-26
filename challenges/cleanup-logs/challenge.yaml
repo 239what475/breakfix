@@ -1,0 +1,21 @@
+id: cleanup-logs
+type: script
+title: "批量压缩旧日志"
+difficulty: easy
+tags:
+  - linux
+  - find
+  - tar
+  - shell
+timeout: 600
+image: breakfix-cleanup-logs:dev
+
+description: |
+  服务器磁盘空间不足，/var/log 下有大量历史日志文件。
+
+  你的任务：编写 /usr/local/bin/cleanup.sh，实现：
+  1. 找出 /var/log 下 7 天前（mtime > 6 天）、大于 100MB 的 .log 文件
+  2. 批量压缩到 /backup 目录（用 tar.gz 格式）
+  3. 原文件可以不保留
+
+  完成后运行脚本即可，submit 时会自动验证。

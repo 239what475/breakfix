@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package breakfix;
+
+option go_package = "github.com/breakfix/breakfix/internal/proto";
+
+service Breakfix {
+    // User
+    rpc WhoAmI (WhoAmIRequest) returns (WhoAmIResponse);
+
+    // Challenges
+    rpc ListChallenges (ListChallengesRequest) returns (ListChallengesResponse);
+
+    // Instances
+    rpc StartChallenge (StartChallengeRequest) returns (StartChallengeResponse);
+    rpc GetInstance (GetInstanceRequest) returns (GetInstanceResponse);
+    rpc PingInstance (PingInstanceRequest) returns (PingInstanceResponse);
+    rpc StopChallenge (StopChallengeRequest) returns (StopChallengeResponse);
+
+    // Submission
+    rpc SubmitChallenge (SubmitChallengeRequest) returns (SubmitChallengeResponse);
+}
+
+// ── User ──
+
+message WhoAmIRequest {
+    string subject = 1;
+}
+
+message WhoAmIResponse {
+    string user_id = 1;
+    string name = 2;
+    bool is_new = 3;
+}
+
+// ── Challenges ──
+
+message ListChallengesRequest {}
+
+message ChallengeSummary {
+    string id = 1;
+    string title = 2;
+    string type = 3;
+    string difficulty = 4;
+    repeated string tags = 5;
+    bool solved = 6;
+}
+
+message ListChallengesResponse {
+    repeated ChallengeSummary challenges = 1;
+}
+
+// ── Instances ──
+
+message StartChallengeRequest {
+    string challenge_id = 1;
+}
+
+message StartChallengeResponse {
+    string instance_id = 1;
+    string challenge_title = 2;
+    int64 timeout_sec = 3;
+}
+
+message GetInstanceRequest {
+    string instance_id = 1;
+}
+
+enum InstanceStatus {
+    RUNNING = 0;
+    DRAINING = 1;
+    DESTROYED = 2;
+}
+
+message GetInstanceResponse {
+    string instance_id = 1;
+    string challenge_id = 2;
+    InstanceStatus status = 3;
+    int64 remaining_sec = 4;
+}
+
+message PingInstanceRequest {
+    string instance_id = 1;
+}
+
+message PingInstanceResponse {
+    InstanceStatus status = 1;
+}
+
+message StopChallengeRequest {
+    string instance_id = 1;
+}
+
+message StopChallengeResponse {}
+
+// ── Submission ──
+
+message SubmitChallengeRequest {
+    string instance_id = 1;
+}
+
+message SubmitChallengeResponse {
+    bool passed = 1;
+    int32 exit_code = 2;
+    string output = 3;
+}
