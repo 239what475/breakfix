@@ -106,26 +106,26 @@ func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Arg
 		if err != nil { return fmt.Errorf("exec: %w", err) }
 		stream.Send(&pb.PTYData{Data: []byte(args[0])})
 
-		// Enter raw mode
-		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-		if err != nil { return err }
-		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		// Terminal setup (only if stdin is a terminal)
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+			if err != nil { return err }
+			defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-		// Listen for terminal resize and send to server
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGWINCH)
-		defer signal.Stop(sigCh)
-		go func() {
-			for range sigCh {
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGWINCH)
+			defer signal.Stop(sigCh)
+			go func() {
 				if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
 					stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)})
 				}
-			}
-			// Send initial size
-			if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-				stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)})
-			}
-		}()
+				for range sigCh {
+					if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+						stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)})
+					}
+				}
+			}()
+		}
 
 		// stdin → stream
 		go func() {
