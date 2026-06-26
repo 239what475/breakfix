@@ -82,14 +82,16 @@ func logCmd() *cobra.Command {
 
 func listC() *cobra.Command { return &cobra.Command{Use: "list", Short: "List", RunE: func(cmd *cobra.Command, args []string) error {
 	c, err := grpcMTLS(); if err != nil { return err }
-	r, _ := c.ListChallenges(context.Background(), &pb.ListChallengesRequest{})
+	r, err := c.ListChallenges(context.Background(), &pb.ListChallengesRequest{})
+		if err != nil { return err }
 	for _, ch := range r.Challenges { fmt.Printf("%-25s %-10s %s\n", ch.Id, ch.Type, ch.Title) }
 	return nil
 }}}
 
 func startC() *cobra.Command { return &cobra.Command{Use: "start", Short: "Start", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	c, err := grpcMTLS(); if err != nil { return err }
-	r, _ := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: args[0]})
+	r, err := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: args[0]})
+		if err != nil { return err }
 	fmt.Printf("Challenge: %s\nInstance:  %s\n\nRun: breakfix ssh %s\n", r.ChallengeTitle, r.InstanceId, r.InstanceId)
 	return nil
 }}}
@@ -118,7 +120,8 @@ func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Arg
 
 func subC() *cobra.Command { return &cobra.Command{Use: "submit", Short: "Submit", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	c, err := grpcMTLS(); if err != nil { return err }
-	r, _ := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{InstanceId: args[0]})
+	r, err := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{InstanceId: args[0]})
+		if err != nil { return err }
 	if r.Passed { fmt.Println("✓ PASSED!") } else { fmt.Printf("✗ FAILED (exit=%d)\n", r.ExitCode) }
 	return nil
 }}}
@@ -132,7 +135,8 @@ func stopC() *cobra.Command { return &cobra.Command{Use: "stop", Short: "Stop", 
 
 func statC() *cobra.Command { return &cobra.Command{Use: "status", Short: "Status", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	c, err := grpcMTLS(); if err != nil { return err }
-	r, _ := c.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
+	r, err := c.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
+		if err != nil { return err }
 	fmt.Printf("Instance: %s Status: %d\n", r.InstanceId, r.Status)
 	return nil
 }}}

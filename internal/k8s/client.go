@@ -7,7 +7,6 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,7 +14,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"os/exec"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes/scheme"
+	k8sexec "k8s.io/client-go/util/exec"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
@@ -66,11 +68,9 @@ func (c *Client) EnsureNamespace(name string) error {
 func (c *Client) DeleteNamespace(name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	err := c.clientset.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil {
-		// Already gone is fine
-		return nil //nolint:nilerr
+	if err != nil && !k8sErrors.IsNotFound(err) {
+		return err
 	}
 	return nil
 }
@@ -139,10 +139,9 @@ func (c *Client) WaitForPod(namespace, podName string) error {
 func (c *Client) DeletePod(namespace, podName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	err := c.clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-	if err != nil {
-		return nil //nolint:nilerr // already gone is fine
+	if err != nil && !k8sErrors.IsNotFound(err) {
+		return err
 	}
 	return nil
 }
@@ -151,29 +150,33 @@ func (c *Client) DeletePod(namespace, podName string) error {
 // ── Exec (non-interactive) ──
 
 func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command("kubectl", append(
-		[]string{"exec", "-n", namespace, podName, "--"},
-		command...,
-	)...) //nolint:gosec
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	req := c.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").Name(podName).Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Command: command,
+			Stdout:  true,
+			Stderr:  true,
+		}, scheme.ParameterCodec)
 
-	err := cmd.Run()
+	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
+	if err != nil {
+		return -1, "", fmt.Errorf("exec: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
+		if exitErr, ok := err.(k8sexec.CodeExitError); ok {
+			exitCode = exitErr.Code
 		} else {
 			return -1, "", fmt.Errorf("exec: %w", err)
 		}
 	}
-
 	output := stdout.String()
 	if stderr.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
+		if output != "" { output += "\n" }
 		output += stderr.String()
 	}
 	return exitCode, strings.TrimSpace(output), nil
