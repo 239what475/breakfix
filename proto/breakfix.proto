@@ -6,7 +6,6 @@ option go_package = "github.com/breakfix/breakfix/internal/proto";
 
 service Breakfix {
     // User
-    rpc WhoAmI (WhoAmIRequest) returns (WhoAmIResponse);
 
     // Challenges
     rpc ListChallenges (ListChallengesRequest) returns (ListChallengesResponse);
@@ -51,27 +50,17 @@ message LoginResponse {
     string name = 2;
     string client_cert = 3;     // 客户端证书 PEM
     string client_key = 4;      // 客户端私钥 PEM
-    string ca_cert = 5;         // CA 证书 PEM（验证 API Server）
 }
 
 // ── Terminal ──
 
 message PTYData {
     bytes data = 1;             // stdin/stdout 字节流
-    uint32 cols = 2;            // 终端列数（resize 时设置）
-    uint32 rows = 3;            // 终端行数（resize 时设置）
 }
 
 // ── User ──
 
-message WhoAmIRequest {
-    string subject = 1;
-}
 
-message WhoAmIResponse {
-    string name = 1;
-    bool is_new = 2;
-}
 
 // ── Challenges ──
 

@@ -22,8 +22,6 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type BreakfixClient interface {
-	// User
-	WhoAmI(ctx context.Context, in *WhoAmIRequest, opts ...grpc.CallOption) (*WhoAmIResponse, error)
 	// Challenges
 	ListChallenges(ctx context.Context, in *ListChallengesRequest, opts ...grpc.CallOption) (*ListChallengesResponse, error)
 	// Instances
@@ -46,15 +44,6 @@ type breakfixClient struct {
 
 func NewBreakfixClient(cc grpc.ClientConnInterface) BreakfixClient {
 	return &breakfixClient{cc}
-}
-
-func (c *breakfixClient) WhoAmI(ctx context.Context, in *WhoAmIRequest, opts ...grpc.CallOption) (*WhoAmIResponse, error) {
-	out := new(WhoAmIResponse)
-	err := c.cc.Invoke(ctx, "/breakfix.Breakfix/WhoAmI", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *breakfixClient) ListChallenges(ctx context.Context, in *ListChallengesRequest, opts ...grpc.CallOption) (*ListChallengesResponse, error) {
@@ -164,8 +153,6 @@ func (c *breakfixClient) SubmitChallenge(ctx context.Context, in *SubmitChalleng
 // All implementations must embed UnimplementedBreakfixServer
 // for forward compatibility
 type BreakfixServer interface {
-	// User
-	WhoAmI(context.Context, *WhoAmIRequest) (*WhoAmIResponse, error)
 	// Challenges
 	ListChallenges(context.Context, *ListChallengesRequest) (*ListChallengesResponse, error)
 	// Instances
@@ -187,9 +174,6 @@ type BreakfixServer interface {
 type UnimplementedBreakfixServer struct {
 }
 
-func (UnimplementedBreakfixServer) WhoAmI(context.Context, *WhoAmIRequest) (*WhoAmIResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method WhoAmI not implemented")
-}
 func (UnimplementedBreakfixServer) ListChallenges(context.Context, *ListChallengesRequest) (*ListChallengesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListChallenges not implemented")
 }
@@ -228,24 +212,6 @@ type UnsafeBreakfixServer interface {
 
 func RegisterBreakfixServer(s grpc.ServiceRegistrar, srv BreakfixServer) {
 	s.RegisterService(&Breakfix_ServiceDesc, srv)
-}
-
-func _Breakfix_WhoAmI_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WhoAmIRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BreakfixServer).WhoAmI(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/breakfix.Breakfix/WhoAmI",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BreakfixServer).WhoAmI(ctx, req.(*WhoAmIRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Breakfix_ListChallenges_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -425,10 +391,6 @@ var Breakfix_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "breakfix.Breakfix",
 	HandlerType: (*BreakfixServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "WhoAmI",
-			Handler:    _Breakfix_WhoAmI_Handler,
-		},
 		{
 			MethodName: "ListChallenges",
 			Handler:    _Breakfix_ListChallenges_Handler,

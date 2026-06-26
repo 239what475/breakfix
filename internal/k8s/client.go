@@ -147,21 +147,6 @@ func (c *Client) DeletePod(namespace, podName string) error {
 	return nil
 }
 
-func (c *Client) ListPodsByInstance(instanceID string) (namespace, podName string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("instance-id=%s", instanceID),
-	})
-	if err != nil {
-		return "", "", err
-	}
-	if len(pods.Items) == 0 {
-		return "", "", fmt.Errorf("no pod found for instance %s", instanceID)
-	}
-	return pods.Items[0].Namespace, pods.Items[0].Name, nil
-}
 
 // ── Exec (non-interactive) ──
 
@@ -223,14 +208,6 @@ func VerifyScriptPath(challengeDir string) string {
 	return filepath.Join(challengeDir, "verify.sh")
 }
 
-// EnsureK8sClient creates a K8s client using default kubeconfig resolution.
-func EnsureK8sClient() *Client {
-	c, err := New("")
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create K8s client: %v", err))
-	}
-	return c
-}
 
 // ExecPTY opens a PTY session in a pod via client-go remotecommand.
 func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, namespace, podName string) error {

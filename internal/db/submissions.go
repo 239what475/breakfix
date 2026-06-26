@@ -27,26 +27,3 @@ func (d *DB) CreateSubmission(s Submission) error {
 	return err
 }
 
-func (d *DB) ListSubmissions(userID string, limit int) ([]Submission, error) {
-	rows, err := d.conn.Query(
-		`SELECT id, instance_id, user_id, challenge_id, passed, exit_code, output, created_at
-		 FROM submissions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
-		userID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []Submission
-	for rows.Next() {
-		var s Submission
-		var passed int
-		if err := rows.Scan(&s.ID, &s.InstanceID, &s.UserID, &s.ChallengeID, &passed, &s.ExitCode, &s.Output, &s.CreatedAt); err != nil {
-			return nil, err
-		}
-		s.Passed = passed == 1
-		subs = append(subs, s)
-	}
-	return subs, rows.Err()
-}

@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"strings"
 
 	"github.com/pquerna/otp/totp"
@@ -62,9 +60,3 @@ func ValidateTOTP(secret, code string) bool {
 	return totp.Validate(code, secret)
 }
 
-// RandomToken generates a random hex token.
-func RandomToken() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}

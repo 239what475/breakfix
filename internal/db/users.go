@@ -1,8 +1,6 @@
 package db
 
 import (
-	"fmt"
-	"time"
 )
 
 type User struct {
@@ -14,21 +12,6 @@ type User struct {
 	CreatedAt    string
 }
 
-func (d *DB) GetOrCreateUser(subject, name string) (*User, bool, error) {
-	u, err := d.GetUserBySubject(subject)
-	if err == nil {
-		return u, false, nil
-	}
-	id := fmt.Sprintf("u-%d", time.Now().UnixNano())
-	_, err = d.conn.Exec(
-		"INSERT INTO users (id, subject, name) VALUES (?, ?, ?)",
-		id, subject, name,
-	)
-	if err != nil {
-		return nil, false, err
-	}
-	return &User{ID: id, Subject: subject, Name: name}, true, nil
-}
 
 func (d *DB) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (string, error) {
 	_, err := d.conn.Exec(

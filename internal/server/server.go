@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/auth"
 	"github.com/breakfix/breakfix/internal/ca"
+	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
@@ -28,12 +30,12 @@ type Server struct {
 	ca            *ca.CA
 }
 
-func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, challengesDir string, ca *ca.CA) *Server {
+func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, cfg config.Config, ca *ca.CA) *Server {
 	return &Server{
 		db:            database,
 		k8s:           client,
 		cooldown:      cooldown,
-		challengesDir: challengesDir,
+		challengesDir: cfg.ChallengesDir(),
 		ca:            ca,
 	}
 }
@@ -164,26 +166,6 @@ func (s *Server) getSubject(ctx context.Context) (string, error) {
 	return tlsInfo.State.PeerCertificates[0].Subject.CommonName, nil
 }
 
-func (s *Server) WhoAmI(ctx context.Context, req *pb.WhoAmIRequest) (*pb.WhoAmIResponse, error) {
-	subject := req.Subject
-	if subject == "" {
-		var err error
-		subject, err = s.getSubject(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	user, err := s.db.GetUserBySubject(subject)
-	if err != nil {
-		return nil, status.Error(codes.NotFound, "user not found")
-	}
-
-	return &pb.WhoAmIResponse{
-		Name:  user.Name,
-		IsNew: false,
-	}, nil
-}
 
 // ── Challenges ──
 
@@ -206,7 +188,7 @@ func (s *Server) ListChallenges(ctx context.Context, req *pb.ListChallengesReque
 			Title:      c.Title,
 			Type:       c.Type,
 			Difficulty: c.Difficulty,
-			Tags:       parseTags(c.Tags),
+			Tags:       jsonParseTags(c.Tags),
 			Solved:     solved,
 		})
 	}
@@ -283,7 +265,7 @@ func (s *Server) GetInstance(ctx context.Context, req *pb.GetInstanceRequest) (*
 		InstanceId:   inst.ID,
 		ChallengeId:  inst.ChallengeID,
 		Status:       status_,
-		RemainingSec: int64(s.cooldown.Remaining(req.InstanceId).Seconds()),
+		RemainingSec: 0,
 	}, nil
 }
 
@@ -349,7 +331,7 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		ChallengeID: inst.ChallengeID,
 		Passed:      passed,
 		ExitCode:    exitCode,
-		Output:      truncate(output, 2000),
+		Output:      func(s string) string { if len(s)>2000 { return s[:2000]+"..." }; return s }(output),
 	}
 	if err := s.db.CreateSubmission(sub); err != nil {
 		klog.ErrorS(err, "failed to save submission", "instance", inst.ID)
@@ -387,55 +369,9 @@ func (s *Server) cleanupInstance(inst *db.Instance) {
 
 // ── Tag parsing ──
 
-func parseTags(raw string) []string {
-	if raw == "" || raw == "[]" {
-		return nil
-	}
-	var tags []string
-	for _, t := range splitRaw(raw) {
-		t = trim(t, ' ', '"')
-		if t != "" {
-			tags = append(tags, t)
-		}
-	}
-	return tags
-}
 
-func splitRaw(s string) []string {
-	result := []string{}
-	current := ""
-	for _, c := range s {
-		if c == ',' {
-			result = append(result, current)
-			current = ""
-		} else {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
 
-func trim(s string, cut ...byte) string {
-	for _, r := range cut {
-		for len(s) > 0 && s[0] == r {
-			s = s[1:]
-		}
-		for len(s) > 0 && s[len(s)-1] == r {
-			s = s[:len(s)-1]
-		}
-	}
-	return s
-}
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
 
 // ── CooldownManager ──
 
@@ -478,25 +414,7 @@ func (m *CooldownManager) Cancel(instanceID string) {
 	}
 }
 
-func (m *CooldownManager) Remaining(instanceID string) time.Duration {
-	return 0
-}
 
-func (m *CooldownManager) CheckDraining() {
-	insts, err := m.db.ListDrainingInstances()
-	if err != nil {
-		klog.ErrorS(err, "cooldown check failed")
-		return
-	}
-	for _, inst := range insts {
-		m.mu.Lock()
-		_, active := m.timers[inst.ID]
-		m.mu.Unlock()
-		if !active {
-			m.StartDraining(inst.ID)
-		}
-	}
-}
 
 func (m *CooldownManager) destroy(instanceID string) {
 	m.mu.Lock()
@@ -526,4 +444,17 @@ func (m *CooldownManager) Stop() {
 		t.Stop()
 		delete(m.timers, id)
 	}
+}
+
+func jsonParseTags(raw string) []string {
+	var tags []string
+	json.Unmarshal([]byte(raw), &tags)
+	return tags
+}
+
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "..."
+	}
+	return s
 }

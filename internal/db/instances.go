@@ -35,26 +35,6 @@ func (d *DB) GetInstance(id string) (*Instance, error) {
 	return i, nil
 }
 
-func (d *DB) ListActiveInstances(userID string) ([]Instance, error) {
-	rows, err := d.conn.Query(
-		"SELECT id, user_id, challenge_id, status, namespace, pod_name, created_at FROM instances WHERE user_id = ? AND status IN ('running','draining') ORDER BY created_at DESC",
-		userID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var insts []Instance
-	for rows.Next() {
-		var i Instance
-		if err := rows.Scan(&i.ID, &i.UserID, &i.ChallengeID, &i.Status, &i.Namespace, &i.PodName, &i.CreatedAt); err != nil {
-			return nil, err
-		}
-		insts = append(insts, i)
-	}
-	return insts, rows.Err()
-}
 
 func (d *DB) UpdateInstanceStatus(id, status string) error {
 	_, err := d.conn.Exec(
