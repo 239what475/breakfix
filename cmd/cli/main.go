@@ -58,7 +58,7 @@ func regCmd() *cobra.Command {
 		fmt.Println(r.TotpQr)
 		os.MkdirAll(configDir, 0700)
 		os.WriteFile(filepath.Join(configDir, "totp-secret"), []byte(r.TotpSecret), 0600)
-		fmt.Println("Run: breakfix login")
+		fmt.Printf("Run: breakfix login -u %s -p <password>\n", u)
 		return nil
 	}}
 	c.Flags().StringVarP(&u, "user", "u", "", "Username")

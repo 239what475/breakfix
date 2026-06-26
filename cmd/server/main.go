@@ -85,12 +85,12 @@ func main() {
 	)
 	pb.RegisterBreakfixServer(secureServer, srv)
 
-	go func() {
-		klog.InfoS("proxy listening", "port", cfg.ProxyPort)
-	}()
+	publicLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	if err != nil { klog.Fatalf("port %d: %v", cfg.Port, err) }
+	secureLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.MTLSPort))
+	if err != nil { klog.Fatalf("port %d: %v", cfg.MTLSPort, err) }
 
-	publicLis, _ := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
-	secureLis, _ := net.Listen("tcp", fmt.Sprintf(":%d", cfg.MTLSPort))
+	go proxy.Start(cfg.ProxyPort)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
@@ -100,7 +100,6 @@ func main() {
 		cooldown.Stop(); publicServer.GracefulStop(); secureServer.GracefulStop()
 	}()
 
-	go proxy.Start(cfg.ProxyPort)
 	klog.InfoS("listening", "public", cfg.Port, "mtls", cfg.MTLSPort, "proxy", cfg.ProxyPort)
 
 	go func() { publicServer.Serve(publicLis) }()

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pquerna/otp/totp"
@@ -10,19 +11,16 @@ import (
 
 const issuer = "Breakfix"
 
-// HashPassword returns a bcrypt hash.
 func HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(hash), err
 }
 
-// CheckPassword verifies a bcrypt hash.
 func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-// GenerateTOTPSecret creates a new TOTP secret and terminal-scannable QR code.
-func GenerateTOTPSecret(username string) (secret string, qrASCII string, err error) {
+func GenerateTOTPSecret(username string) (secret string, qrStr string, err error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      issuer,
 		AccountName: username,
@@ -32,31 +30,40 @@ func GenerateTOTPSecret(username string) (secret string, qrASCII string, err err
 	}
 
 	secret = key.Secret()
-	code, err := qr.Encode(key.URL(), qr.L)
+	// Minimal URL (drop default params) = smaller QR code
+	url := fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s", issuer, username, secret, issuer)
+	code, err := qr.Encode(url, qr.L)
 	if err != nil {
 		return "", "", err
 	}
 
-	var sb strings.Builder
-	sb.WriteString("\nScan this QR code with Google Authenticator:\n\n")
-	for y := 0; y < code.Size; y++ {
-		sb.WriteString("  ")
-		for x := 0; x < code.Size; x++ {
-			if code.Black(x, y) {
-				sb.WriteString("██")
-			} else {
-				sb.WriteString("  ")
-			}
-		}
-		sb.WriteByte('\n')
-	}
-	sb.WriteString("\nSecret (manual entry): " + secret + "\n")
+	const (
+		bgBlack = "\033[40m \033[0m"  // black module
+		bgWhite = "\033[47m  \033[0m"  // white module
+		qz      = "\033[47m  \033[0m"  // quiet zone (white)
+	)
 
+	scale := code.Size
+	var sb strings.Builder
+	sb.WriteByte('\n')
+
+	qzCol := strings.Repeat(qz, 2)
+	qzRow := strings.Repeat(qz, scale+4)
+
+	for i := 0; i < 2; i++ { sb.WriteString(qzRow); sb.WriteByte('\n') }
+	for y := 0; y < scale; y++ {
+		sb.WriteString(qzCol)
+		for x := 0; x < scale; x++ {
+			if code.Black(x, y) { sb.WriteString(bgBlack) } else { sb.WriteString(bgWhite) }
+		}
+		sb.WriteString(qzCol); sb.WriteByte('\n')
+	}
+	for i := 0; i < 2; i++ { sb.WriteString(qzRow); sb.WriteByte('\n') }
+
+	sb.WriteString(fmt.Sprintf("\nSecret: %s\n", secret))
 	return secret, sb.String(), nil
 }
 
-// ValidateTOTP validates a TOTP code.
 func ValidateTOTP(secret, code string) bool {
 	return totp.Validate(code, secret)
 }
-
