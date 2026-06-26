@@ -117,14 +117,11 @@ func (s *Server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResp
 // ── Terminal ──
 
 func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
-	// Auth: first message contains instance ID (sent as data, extract via header)
-	// For now, get identity from context
 	subject, err := s.getSubject(stream.Context())
 	if err != nil {
 		return err
 	}
 
-	// Get instance from first message
 	data, err := stream.Recv()
 	if err != nil {
 		return fmt.Errorf("receive instance id: %w", err)
@@ -145,7 +142,9 @@ func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
 	}
 
 	klog.InfoS("pty session started", "instance", instanceID, "user", subject)
-	return pty.Proxy(stream, inst.Namespace, inst.PodName)
+
+	rw := &pty.ReadWriter{Stream: stream}
+	return s.k8s.ExecPTY(rw, rw, rw, inst.Namespace, inst.PodName)
 }
 
 // ── User ──

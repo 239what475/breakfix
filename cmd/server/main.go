@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"flag"
 	"fmt"
 	"net"
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+	"github.com/elazarl/goproxy"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
@@ -121,6 +123,7 @@ func main() {
 		}
 	}()
 
+	startProxy()
 	klog.InfoS("listening", "public", *port, "mtls", mtlsPort)
 
 	go func() {
@@ -157,4 +160,13 @@ func authRequireCert(ctx context.Context, req interface{}, info *grpc.UnaryServe
 		return nil, status.Error(codes.Unauthenticated, "client certificate required")
 	}
 	return handler(ctx, req)
+}
+
+func startProxy() {
+	go func() {
+		klog.InfoS("proxy listening", "port", 3128)
+		if err := http.ListenAndServe(":3128", goproxy.NewProxyHttpServer()); err != nil {
+			klog.Fatalf("Proxy failed: %v", err)
+		}
+	}()
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -14,11 +15,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 type Client struct {
-	clientset *kubernetes.Clientset
+	clientset  *kubernetes.Clientset
+	restConfig *rest.Config
 }
 
 func New(kubeconfig string) (*Client, error) {
@@ -37,7 +42,7 @@ func New(kubeconfig string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create clientset: %w", err)
 	}
-	return &Client{clientset: clientset}, nil
+	return &Client{clientset: clientset, restConfig: config}, nil
 }
 
 // ── Namespace ──
@@ -198,13 +203,6 @@ func (c *Client) CopyToPod(namespace, podName, localPath, remotePath string) err
 
 // ── Interactive SSH ──
 
-func ExecSSH(namespace, podName string) error {
-	cmd := exec.Command("kubectl", "exec", "-ti", "-n", namespace, podName, "--", "/bin/bash") //nolint:gosec
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
 
 // ── Helpers ──
 
@@ -232,4 +230,30 @@ func EnsureK8sClient() *Client {
 		panic(fmt.Sprintf("Failed to create K8s client: %v", err))
 	}
 	return c
+}
+
+// ExecPTY opens a PTY session in a pod via client-go remotecommand.
+func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, namespace, podName string) error {
+	req := c.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").Name(podName).Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Command: []string{"/bin/bash"},
+			Stdin:   true,
+			Stdout:  true,
+			Stderr:  true,
+			TTY:     true,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("exec: %w", err)
+	}
+
+	return exec.Stream(remotecommand.StreamOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		Tty:    true,
+	})
 }
