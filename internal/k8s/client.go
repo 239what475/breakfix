@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/build"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -226,14 +225,9 @@ func VerifyScriptPath(challengeDir string) string {
 	return filepath.Join(challengeDir, "verify.sh")
 }
 
-// EnsureK8sClient is a helper that creates a client in dev mode (empty kubeconfig)
+// EnsureK8sClient creates a K8s client using default kubeconfig resolution.
 func EnsureK8sClient() *Client {
-	// For dev mode, use empty kubeconfig (uses default config)
-	kubeconfig := ""
-	if !build.IsDev() {
-		kubeconfig = "/etc/breakfix/kubeconfig"
-	}
-	c, err := New(kubeconfig)
+	c, err := New("")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create K8s client: %v", err))
 	}

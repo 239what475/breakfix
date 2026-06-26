@@ -6,11 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 )
@@ -33,10 +34,18 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, challen
 }
 
 func (s *Server) getSubject(ctx context.Context) (string, error) {
-	if build.IsDev() {
-		return "dev-user", nil
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "no peer info")
 	}
-	return "", status.Error(codes.Unimplemented, "mTLS auth not implemented")
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "no TLS info")
+	}
+	if len(tlsInfo.State.PeerCertificates) == 0 {
+		return "", status.Error(codes.Unauthenticated, "no client certificate")
+	}
+	return tlsInfo.State.PeerCertificates[0].Subject.CommonName, nil
 }
 
 func (s *Server) WhoAmI(ctx context.Context, req *pb.WhoAmIRequest) (*pb.WhoAmIResponse, error) {

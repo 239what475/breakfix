@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  teleport:
+    image: public.ecr.aws/gravitational/teleport:19
+    container_name: breakfix-teleport
+    hostname: breakfix-dev
+    ports:
+      - "3023:3023"   # SSH
+      - "3025:3025"   # Auth
+      - "3026:3026"   # Kube
+      - "3080:3080"   # Web UI
+    volumes:
+      - ./dev/teleport.yaml:/etc/teleport/teleport.yaml:ro
+      - teleport-data:/var/lib/teleport
+      - ./dev/certs:/certs:rw      # 导出 CA 和服务端证书
+    command: teleport start --roles=all
+    restart: unless-stopped
+
+volumes:
+  teleport-data:

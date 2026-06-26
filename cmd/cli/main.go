@@ -2,22 +2,26 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/k8s"
-	bl "github.com/breakfix/breakfix/internal/log"
 	pb "github.com/breakfix/breakfix/internal/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"k8s.io/klog/v2"
 )
 
 var (
 	serverAddr string
 	client     pb.BreakfixClient
+	certFile   string
+	keyFile    string
+	caFile     string
 )
 
 func main() {
@@ -25,8 +29,12 @@ func main() {
 		Use:   "breakfix",
 		Short: "Breakfix - SRE/DevOps interview practice platform",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			tlsConfig, err := loadClientTLS(certFile, keyFile, caFile)
+			if err != nil {
+				return fmt.Errorf("TLS config: %w", err)
+			}
 			conn, err := grpc.NewClient(serverAddr,
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 			)
 			if err != nil {
 				return fmt.Errorf("connect to server: %w", err)
@@ -36,9 +44,12 @@ func main() {
 		},
 	}
 
+	klog.InitFlags(nil)
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "localhost:9090", "API Server address")
+	rootCmd.PersistentFlags().StringVar(&certFile, "cert", "", "Client certificate file (PEM)")
+	rootCmd.PersistentFlags().StringVar(&keyFile, "key", "", "Client key file (PEM)")
+	rootCmd.PersistentFlags().StringVar(&caFile, "ca", "", "CA certificate file (PEM)")
 
-	bl.Init()
 	rootCmd.AddCommand(
 		loginCmd(), listCmd(), startCmd(), sshCmd(),
 		submitCmd(), stopCmd(), statusCmd(),
@@ -49,21 +60,40 @@ func main() {
 	}
 }
 
+func loadClientTLS(certFile, keyFile, caFile string) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load client cert: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA file: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("failed to parse CA certificate")
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caPool,
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
 func loginCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login",
 		Short: "Login to Breakfix",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !build.IsDev() {
-				return fmt.Errorf("run 'tsh login' first, then breakfix login")
-			}
-			resp, err := client.WhoAmI(context.Background(), &pb.WhoAmIRequest{Subject: "dev-user"})
+			resp, err := client.WhoAmI(context.Background(), &pb.WhoAmIRequest{})
 			if err != nil {
 				return fmt.Errorf("login failed: %w", err)
 			}
-			fmt.Printf("✓ Logged in as %s (dev mode)\n", resp.Name)
+			fmt.Printf("✓ Logged in as %s (v%s)\n", resp.Name, build.Version)
 			if resp.IsNew {
-				fmt.Println("  New account created!")
+				fmt.Println("  Welcome to Breakfix!")
 			}
 			return nil
 		},
@@ -122,20 +152,16 @@ func sshCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			instanceID := args[0]
 
-			// Revive if draining (best-effort)
 			if _, err := client.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: instanceID}); err != nil {
 				klog.V(1).InfoS("ping failed, continuing anyway", "instance", instanceID, "err", err)
 			}
 
-			if build.IsDev() {
-				k8sClient := k8s.EnsureK8sClient()
-				ns, pod, err := k8sClient.ListPodsByInstance(instanceID)
-				if err != nil {
-					return fmt.Errorf("pod not found: %w", err)
-				}
-				return k8s.ExecSSH(ns, pod)
+			k8sClient := k8s.EnsureK8sClient()
+			ns, pod, err := k8sClient.ListPodsByInstance(instanceID)
+			if err != nil {
+				return fmt.Errorf("pod not found: %w", err)
 			}
-			return fmt.Errorf("prod SSH: use tsh kubectl exec")
+			return k8s.ExecSSH(ns, pod)
 		},
 	}
 }
