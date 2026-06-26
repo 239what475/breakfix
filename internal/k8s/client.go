@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
+	crand "crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,8 +197,9 @@ func (c *Client) CopyToPod(namespace, podName, localPath, remotePath string) err
 func RandomID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 6)
+	crand.Read(b)
 	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))] //nolint:gosec
+		b[i] = chars[int(b[i])%len(chars)]
 	}
 	return string(b)
 }

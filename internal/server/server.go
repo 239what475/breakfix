@@ -376,21 +376,30 @@ func (s *Server) cleanupInstance(inst *db.Instance) {
 // ── CooldownManager ──
 
 type CooldownManager struct {
-	db    *db.DB
-	k8s   *k8s.Client
-	mu    sync.Mutex
-	timers map[string]*time.Timer
+	db        *db.DB
+	k8s       *k8s.Client
+	mu        sync.Mutex
+	timers    map[string]*time.Timer
+	cleanupFn func(string) // called on cooldown expiry
 }
 
-func NewCooldownManager(database *db.DB, client *k8s.Client) *CooldownManager {
+func NewCooldownManager(database *db.DB, client *k8s.Client, cleanupFn func(string)) *CooldownManager {
 	return &CooldownManager{
-		db:     database,
-		k8s:    client,
-		timers: make(map[string]*time.Timer),
+		db:        database,
+		k8s:       client,
+		timers:    make(map[string]*time.Timer),
+		cleanupFn: cleanupFn,
 	}
 }
 
+func (m *CooldownManager) SetCleanup(fn func(string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleanupFn = fn
+}
+
 func (m *CooldownManager) StartDraining(instanceID string) {
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if t, ok := m.timers[instanceID]; ok {
@@ -421,20 +430,8 @@ func (m *CooldownManager) destroy(instanceID string) {
 	delete(m.timers, instanceID)
 	m.mu.Unlock()
 
-	inst, err := m.db.GetInstance(instanceID)
-	if err != nil {
-		return
-	}
 	klog.InfoS("cooldown expired, destroying instance", "instance", instanceID)
-	if err := m.k8s.DeletePod(inst.Namespace, inst.PodName); err != nil {
-		klog.ErrorS(err, "failed to delete pod on cooldown expiry", "namespace", inst.Namespace, "pod", inst.PodName)
-	}
-	if err := m.k8s.DeleteNamespace(inst.Namespace); err != nil {
-		klog.ErrorS(err, "failed to delete namespace on cooldown expiry", "namespace", inst.Namespace)
-	}
-	if err := m.db.DestroyInstance(instanceID); err != nil {
-		klog.ErrorS(err, "failed to destroy instance record on cooldown expiry", "instance", instanceID)
-	}
+	m.cleanupFn(instanceID)
 }
 
 func (m *CooldownManager) Stop() {
@@ -457,4 +454,9 @@ func truncate(s string, n int) string {
 		return s[:n] + "..."
 	}
 	return s
+}
+func (s *Server) CleanupInstance(instanceID string) {
+	inst, err := s.db.GetInstance(instanceID)
+	if err != nil { return }
+	s.cleanupInstance(inst)
 }

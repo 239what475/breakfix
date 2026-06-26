@@ -73,8 +73,9 @@ func main() {
 		klog.Fatalf("Failed to create K8s client: %v", err)
 	}
 
-	cooldown := server.NewCooldownManager(database, k8sClient)
-	srv := server.New(database, k8sClient, cooldown, cfg, ca)
+		cooldown := server.NewCooldownManager(database, k8sClient, nil)
+		srv := server.New(database, k8sClient, cooldown, cfg, ca)
+		cooldown.SetCleanup(srv.CleanupInstance)
 
 	publicServer := grpc.NewServer(grpc.UnaryInterceptor(authPublicOnly))
 	pb.RegisterBreakfixServer(publicServer, srv)
