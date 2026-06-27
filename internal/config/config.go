@@ -16,7 +16,7 @@ type Config struct {
 	DataDir    string `yaml:"data_dir"`
 	Kubeconfig string `yaml:"kubeconfig"`
 	Registry        string `yaml:"registry"`
-	NamespacePrefix string `yaml:"namespace_prefix"`
+	ACRNamespace  string `yaml:"acr_namespace"`
 }
 
 func defaults() Config {
@@ -25,7 +25,7 @@ func defaults() Config {
 		MTLSPort:        9533,
 		ProxyPort:       3128,
 		DataDir:         "/var/lib/breakfix",
-		NamespacePrefix: "breakfix",
+		ACRNamespace:  "breakfix",
 	}
 }
 
