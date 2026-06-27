@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	ProxyPort  int    `yaml:"proxy_port"`
 	DataDir    string `yaml:"data_dir"`
 	Kubeconfig string `yaml:"kubeconfig"`
+	Registry   string `yaml:"registry"`
 }
 
 func defaults() Config {
@@ -23,6 +25,14 @@ func defaults() Config {
 		ProxyPort: 3128,
 		DataDir:   "/var/lib/breakfix",
 	}
+}
+
+// ImageURL prepends registry to image name if not already a full URL.
+func (c Config) ImageURL(image string) string {
+	if c.Registry == "" || strings.Contains(image, ".") {
+		return image
+	}
+	return c.Registry + "/" + image
 }
 
 func Load(path string) (Config, error) {

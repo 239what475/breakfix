@@ -18,6 +18,7 @@ sudo mkdir -p /var/lib/breakfix/challenges
 sudo tee /var/lib/breakfix/breakfix.yaml <<EOF > /dev/null
 data_dir: /var/lib/breakfix
 kubeconfig: /var/lib/breakfix/kubeconfig
+registry: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
 port: 9090
 mtls_port: 9533
 proxy_port: 3128
@@ -140,13 +141,29 @@ sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
 
 ## 3. ACR 镜像仓库
 
-创建命名空间 `breakfix`。
+### 3.1 创建命名空间
+
+ACR 控制台 → 个人版实例 → 创建命名空间 `breakfix`。
+
+记录实例的 **VPC 内网地址**（实例概览页），填入 `breakfix.yaml` 的 `registry` 字段。格式：
+
+```
+crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+### 3.2 推送镜像
 
 ```bash
-docker login registry.cn-hangzhou.aliyuncs.com
-docker tag breakfix-base:latest registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest
-docker push registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest
+# 登录（公网）
+docker login crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com
+
+# 构建 + 推送
+docker build -t breakfix-cleanup-logs:v1 ./challenges/cleanup-logs
+docker tag breakfix-cleanup-logs:v1 crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com/breakfix/cleanup-logs:v1
+docker push crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com/breakfix/cleanup-logs:v1
 ```
+
+> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `breakfix/cleanup-logs:v1`，Server 会自动拼上配置中的 `registry` 前缀。
 
 ---
 

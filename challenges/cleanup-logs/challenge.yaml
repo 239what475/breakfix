@@ -8,7 +8,7 @@ tags:
   - tar
   - shell
 timeout: 600
-image: breakfix-cleanup-logs:dev
+image: breakfix/cleanup-logs:v1
 
 description: |
   服务器磁盘空间不足，/var/log 下有大量历史日志文件。

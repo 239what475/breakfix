@@ -28,6 +28,7 @@ type Server struct {
 	k8s           *k8s.Client
 	cooldown      *CooldownManager
 	challengesDir string
+	registry     string
 	ca            *ca.CA
 }
 
@@ -37,6 +38,7 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, cfg con
 		k8s:           client,
 		cooldown:      cooldown,
 		challengesDir: cfg.ChallengesDir(),
+		registry:     cfg.Registry,
 		ca:            ca,
 	}
 }
@@ -221,7 +223,7 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 	if err := s.k8s.EnsureNamespace(ns); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("create namespace: %v", err))
 	}
-	if err := s.k8s.CreatePod(ns, podName, challenge.Image, challenge.ID, instanceID); err != nil {
+	if err := s.k8s.CreatePod(ns, podName, imageURL(challenge.Image, s.registry), challenge.ID, instanceID); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("create pod: %v", err))
 	}
 	if err := s.k8s.WaitForPod(ns, podName); err != nil {
@@ -461,4 +463,9 @@ func (s *Server) CleanupInstance(instanceID string) {
 	inst, err := s.db.GetInstance(instanceID)
 	if err != nil { return }
 	s.cleanupInstance(inst)
+}
+
+func imageURL(image, registry string) string {
+	if registry == "" { return image }
+	return registry + "/" + image
 }
