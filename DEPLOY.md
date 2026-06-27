@@ -10,23 +10,14 @@
 
 ## 1. 网关 ECS
 
-### 1.1 安装 API Server
-
-```bash
-sudo curl -Lo /usr/local/bin/breakfix-api \
-  https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
-sudo chmod +x /usr/local/bin/breakfix-api
-sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
-```
-
-### 1.3 创建用户和数据目录
+### 1.1 创建用户和数据目录
 
 ```bash
 sudo useradd -r -s /bin/false breakfix
 sudo mkdir -p /var/lib/breakfix/challenges
 sudo tee /var/lib/breakfix/breakfix.yaml <<EOF > /dev/null
 data_dir: /var/lib/breakfix
-	kubeconfig: /var/lib/breakfix/kubeconfig
+kubeconfig: /var/lib/breakfix/kubeconfig
 port: 9090
 mtls_port: 9533
 proxy_port: 3128
@@ -34,7 +25,32 @@ EOF
 sudo chown -R breakfix:breakfix /var/lib/breakfix
 ```
 
-将 ACK kubeconfig 放到 `/var/lib/breakfix/kubeconfig`。
+### 1.2 安装 kubeconfig
+
+集群 → 连接信息 → 复制 kubeconfig（内网接入）→ 上传到网关：
+
+```bash
+# 本地
+scp kubeconfig <服务器名>:/tmp/kubeconfig
+
+# 网关 ECS
+sudo mv /tmp/kubeconfig /var/lib/breakfix/kubeconfig
+sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
+```
+
+### 1.3 安装 API Server
+
+```bash
+# 方式一：从 GitHub Releases 下载
+sudo curl -Lo /usr/local/bin/breakfix-api \
+  https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
+sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+
+# 方式二：本地构建上传
+# scp dist/breakfix-api-linux-amd64 <服务器名>:~/
+# sudo mv ~/breakfix-api-linux-amd64 /usr/local/bin/breakfix-api
+# sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+```
 
 ### 1.4 systemd
 
@@ -64,7 +80,6 @@ sudo systemctl enable --now breakfix-api
 ```bash
 sudo git clone https://github.com/your-org/breakfix-challenges.git /var/lib/breakfix/challenges
 sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
-# 或手动解压题目 tar 包
 ```
 
 ---
@@ -89,7 +104,6 @@ sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
 | 容器镜像加速 | 不开 | 镜像全在 ACR VPC 内网 |
 | Prometheus | 基础版 | 免费，可学习 |
 | GOATScaler | 不开 | 单节点用不上 |
-| 可观测监控 | 开基础版 | 免费指标 |
 
 ### 2.2 创建节点池
 
@@ -105,23 +119,6 @@ sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
 | 节点 Pod 数量 | 64 | 默认够用 |
 | 登录方式 | 创建后设置 | 不需要 SSH 到节点 |
 | 自定义数据 | 留空 | 不需要 |
-
-> 自动扩缩容模式下无需设置期望节点数，直接配最小 1 最大 2 即可。
-
-### 2.3 获取 kubeconfig
-
-集群 → 连接信息 → 复制 kubeconfig（内网接入）→ 拷贝到网关 ECS：
-
-```bash
-# 本地
-scp ~/.kube/config <服务器名>:~/.kube/config
-
-# 或放到指定路径
-sudo mkdir -p /var/lib/breakfix
-scp kubeconfig <服务器名>:/tmp/kubeconfig
-sudo mv /tmp/kubeconfig /var/lib/breakfix/kubeconfig
-sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
-```
 
 ---
 
@@ -142,7 +139,6 @@ docker push registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest
 GitHub Releases 发布编译好的二进制：
 
 ```bash
-# 用户下载
 curl -Lo /usr/local/bin/breakfix https://github.com/your-org/breakfix/releases/latest/download/breakfix-cli-linux-amd64
 chmod +x /usr/local/bin/breakfix
 ```
@@ -153,7 +149,7 @@ chmod +x /usr/local/bin/breakfix
 
 ```bash
 sudo systemctl status breakfix-api            # active
-breakfix register -u test -p test123     # QR 码出现
+breakfix register -u test -p test123          # QR 码出现
 breakfix login -u test -p test123 -t <totp>
 breakfix list
 breakfix start cleanup-logs
