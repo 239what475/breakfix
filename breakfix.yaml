@@ -1,4 +1,0 @@
-data_dir: ./data
-port: 9090
-mtls_port: 9533
-proxy_port: 3128

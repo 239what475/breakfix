@@ -21,6 +21,14 @@ data/
 # CLI user data
 .breakfix/
 
+# Config (instance-specific, copy from breakfix.example.yaml)
+breakfix.yaml
+breakfix-local.yaml
+.breakfix-server
+
+# Build output
+dist/
+bin/
+
 # Kind kubeconfig
 .kube/
-dist/

@@ -8,6 +8,42 @@
 
 ---
 
+## 0. 本地开发
+
+### 0.1 一次性初始化
+
+```bash
+cp breakfix.example.yaml breakfix.yaml        # 编辑填入生产配置
+```
+
+前置依赖：Docker、Kind（集群名 `breakfix-dev`）。
+
+### 0.2 日常命令
+
+```bash
+make dev            # 启动完整环境（registry + 镜像 + 编译 + server）
+make dev-server     # 改代码后重编译+重启（不动 DB，不用重登录）
+make dev-down       # 停 server + 停 registry
+make dev-reset      # 停所有 + 清 DB（需要重新 register → login）
+
+make docker-challenge NAME=xxx  # 重建单个题目镜像
+```
+
+### 0.3 首次使用
+
+```bash
+make dev
+./bin/breakfix-cli register -u test -p pass123   # 扫 QR 码
+./bin/breakfix-cli login    -u test -p pass123 -t <totp>
+./bin/breakfix-cli list
+./bin/breakfix-cli start cleanup-logs
+./bin/breakfix-cli submit <instance-id>
+```
+
+> `make dev` 保留 DB 和 CA，之后 `make dev-server` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
+
+---
+
 ## 1. 网关 ECS
 
 ### 1.1 创建用户和数据目录
@@ -42,6 +78,11 @@ sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
 
 ### 1.3 安装 API Server
 
+**前置**：在本地仓库创建 `.breakfix-server` 文件，一行写服务器 SSH 主机名：
+```bash
+echo myserver2 > .breakfix-server
+```
+
 **方式一：GitHub Releases（推荐）**
 
 ```bash
@@ -50,19 +91,13 @@ sudo curl -Lo /usr/local/bin/breakfix-api \
 sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
 ```
 
-**方式二：本地构建上传**
+**方式二：make deploy-server（本地构建 + 自动部署）**
 
 ```bash
-# 本地
-go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=v0.1.0" \
-  -o dist/breakfix-api-linux-amd64 ./cmd/server
-
-scp dist/breakfix-api-linux-amd64 <服务器名>:~/
-
-# 网关 ECS
-sudo mv ~/breakfix-api-linux-amd64 /usr/local/bin/breakfix-api
-sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+make deploy-server     # 编译 → scp → systemctl restart，一条命令
 ```
+
+> 之后每次改代码，只需 `make deploy-server` 即可更新远程服务端。
 
 ### 1.4 systemd
 
@@ -155,36 +190,66 @@ crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
 ### 3.2 推送镜像
 
 ```bash
-# 登录（公网）
+# 首次需要 docker login（使用公网地址，去掉 -vpc）:
 docker login crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com
 
-# 构建 + 推送
-docker build -t breakfix-cleanup-logs:v1 ./challenges/cleanup-logs
-docker tag breakfix-cleanup-logs:v1 crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com/breakfix/cleanup-logs:v1
-docker push crpi-xxxx.cn-hangzhou.personal.cr.aliyuncs.com/breakfix/cleanup-logs:v1
+# 之后用 make 自动构建 + 推送:
+make deploy-image NAME=cleanup-logs      # 推送单个镜像
+make deploy-images                       # 推送全部镜像
 ```
 
-> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `breakfix/cleanup-logs:v1`，Server 会自动拼上配置中的 `registry` 前缀。
+`deploy-image` 自动读取 `breakfix.yaml` 中的 VPC 地址，去掉 `-vpc` 得到公网推送地址。
+
+> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `cleanup-logs:v1`，Server 会自动拼上 `{registry}/{acr_namespace}/` 前缀。
 
 ---
 
-## 4. CLI 分发
+## 4. 日常远程部署
+
+```bash
+make deploy               # 全量部署（镜像 → ACR + 二进制 → ECS）
+make deploy-server        # 只推二进制
+make deploy-image NAME=xxx  # 只推单个镜像
+make deploy-images        # 只推全部镜像
+make deploy-cleanup       # 清理 ACK 中残留的 break* 命名空间
+make deploy-reset         # 清理 K8s + 清远程 DB + 重启（彻底重置）
+
+make status               # 查看远程服务状态
+make logs                 # 查看远程实时日志
+```
+
+---
+
+## 5. CLI 分发（给面试者）
+
+CLI 是面试者在自己电脑上用的，用于注册、登录、连接题目环境。**不要装到服务器上**。
 
 **方式一：GitHub Releases**
 
+面试者在自己的机器上执行：
 ```bash
 curl -Lo /usr/local/bin/breakfix https://github.com/your-org/breakfix/releases/latest/download/breakfix-cli-linux-amd64
 chmod +x /usr/local/bin/breakfix
 ```
 
-**方式二：本地构建上传**
+**方式二：本地构建**
 
 ```bash
-# 本地
 go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=v0.1.0" \
   -o dist/breakfix-cli-linux-amd64 ./cmd/cli
+```
 
-scp dist/breakfix-cli-linux-amd64 <服务器名>:/usr/local/bin/breakfix
+> 跨平台构建由 GitHub Actions 的 release workflow 处理，本地不需要手动设 GOOS/GOARCH。
+
+### 连接远程服务器
+
+CLI 通过 `--server` 指定网关 ECS 地址，端口自动推导（9090 明文 / 9533 mTLS）：
+
+```bash
+breakfix --server <ecs-公网IP> register -u user -p pass
+breakfix --server <ecs-公网IP> login -u user -p pass -t <totp>
+breakfix --server <ecs-公网IP> list
+breakfix --server <ecs-公网IP> start cleanup-logs
 ```
 
 ---
@@ -192,11 +257,11 @@ scp dist/breakfix-cli-linux-amd64 <服务器名>:/usr/local/bin/breakfix
 ## 验证
 
 ```bash
-sudo systemctl status breakfix-api            # active
-breakfix register -u test -p test123          # QR 码出现
-breakfix login -u test -p test123 -t <totp>
-breakfix list
-breakfix start cleanup-logs
-breakfix ssh <id>
-breakfix submit <id>
+make status                                  # active
+breakfix --server <ecs-ip> register -u test -p test123
+breakfix --server <ecs-ip> login -u test -p test123 -t <totp>
+breakfix --server <ecs-ip> list
+breakfix --server <ecs-ip> start cleanup-logs
+breakfix --server <ecs-ip> ssh <id>
+breakfix --server <ecs-ip> submit <id>
 ```

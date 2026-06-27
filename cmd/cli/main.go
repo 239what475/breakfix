@@ -26,14 +26,14 @@ func main() {
 	home, _ := os.UserHomeDir()
 	configDir = filepath.Join(home, ".breakfix")
 	root := &cobra.Command{Use: "breakfix", Short: "Breakfix - SRE/DevOps interview practice platform"}
-	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost:9090", "API Server address")
+	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (ports 9090/9533 auto-derived)")
 	klog.InitFlags(nil)
 	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC())
 	root.Execute()
 }
 
 func grpcPlain() pb.BreakfixClient {
-	conn, _ := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, _ := grpc.NewClient(serverAddr+":9090", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	return pb.NewBreakfixClient(conn)
 }
 
@@ -44,7 +44,7 @@ func grpcMTLS() (pb.BreakfixClient, error) {
 	}
 	keyPEM, _ := os.ReadFile(filepath.Join(configDir, "key.pem"))
 	cert, _ := tls.X509KeyPair(certPEM, keyPEM)
-	conn, _ := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+	conn, _ := grpc.NewClient(serverAddr+":9533", grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true,
 	})))
 	return pb.NewBreakfixClient(conn), nil

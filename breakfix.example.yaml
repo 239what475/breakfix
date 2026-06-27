@@ -1,0 +1,32 @@
+# Breakfix server configuration.
+# Copy to breakfix.yaml and adjust for your environment.
+
+# gRPC ports
+port: 9090
+mtls_port: 9533
+
+# HTTP forward proxy for Pod egress
+proxy_port: 3128
+
+# Data directory (SQLite DB, CA certs, challenges)
+#   Local:  ./data
+#   Server: /var/lib/breakfix
+data_dir: ./data
+
+# Kubeconfig path
+#   Local (Kind):  ~/.kube/config
+#   Server (ACK):  /var/lib/breakfix/kubeconfig
+kubeconfig: ~/.kube/config
+
+# Container registry (VPC internal address — ACK pulls from this)
+#   Local:  localhost:5000
+#   Server: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
+#   Public push address is derived by removing "-vpc" from this value.
+registry: localhost:5000
+
+# ACR / registry namespace
+acr_namespace: breakfix
+
+# ── Deployment target (SSH host, must exist in ~/.ssh/config) ──
+# Create .breakfix-server with one line: your-server-name
+#   echo myserver2 > .breakfix-server

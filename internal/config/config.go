@@ -34,7 +34,7 @@ func (c Config) ImageURL(image string) string {
 	if c.Registry == "" || strings.Contains(image, ".") {
 		return image
 	}
-	return c.Registry + "/" + image
+	return c.Registry + "/" + c.ACRNamespace + "/" + image
 }
 
 func Load(path string) (Config, error) {
