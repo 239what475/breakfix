@@ -19,6 +19,7 @@ sudo tee /var/lib/breakfix/breakfix.yaml <<EOF > /dev/null
 data_dir: /var/lib/breakfix
 kubeconfig: /var/lib/breakfix/kubeconfig
 registry: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
+	namespace_prefix: breakfix
 port: 9090
 mtls_port: 9533
 proxy_port: 3128

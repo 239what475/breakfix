@@ -23,6 +23,7 @@ import (
 )
 
 type Server struct {
+	nsPrefix     string
 	pb.UnimplementedBreakfixServer
 	db            *db.DB
 	k8s           *k8s.Client
@@ -39,6 +40,7 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, cfg con
 		cooldown:      cooldown,
 		challengesDir: cfg.ChallengesDir(),
 		registry:     cfg.Registry,
+		nsPrefix:     cfg.NamespacePrefix,
 		ca:            ca,
 	}
 }
@@ -217,7 +219,7 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 	}
 
 	instanceID := k8s.RandomID()
-	ns := k8s.UserNamespace(user.ID)
+	ns := k8s.UserNamespace(s.nsPrefix, user.ID)
 	podName := fmt.Sprintf("challenge-%s", instanceID)
 
 	if err := s.k8s.EnsureNamespace(ns); err != nil {

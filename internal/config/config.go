@@ -15,15 +15,17 @@ type Config struct {
 	ProxyPort  int    `yaml:"proxy_port"`
 	DataDir    string `yaml:"data_dir"`
 	Kubeconfig string `yaml:"kubeconfig"`
-	Registry   string `yaml:"registry"`
+	Registry        string `yaml:"registry"`
+	NamespacePrefix string `yaml:"namespace_prefix"`
 }
 
 func defaults() Config {
 	return Config{
-		Port:      9090,
-		MTLSPort:  9533,
-		ProxyPort: 3128,
-		DataDir:   "/var/lib/breakfix",
+		Port:            9090,
+		MTLSPort:        9533,
+		ProxyPort:       3128,
+		DataDir:         "/var/lib/breakfix",
+		NamespacePrefix: "breakfix",
 	}
 }
 

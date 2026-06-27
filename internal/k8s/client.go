@@ -204,8 +204,8 @@ func RandomID() string {
 	return string(b)
 }
 
-func UserNamespace(userID string) string {
-	return "breakfix-" + strings.ReplaceAll(userID, "_", "-")
+func UserNamespace(prefix, userID string) string {
+	return prefix + "-" + strings.ReplaceAll(userID, "_", "-")
 }
 
 func VerifyScriptPath(challengeDir string) string {
