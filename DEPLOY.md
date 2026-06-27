@@ -40,16 +40,26 @@ sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
 
 ### 1.3 安装 API Server
 
+**方式一：GitHub Releases（推荐）**
+
 ```bash
-# 方式一：从 GitHub Releases 下载
 sudo curl -Lo /usr/local/bin/breakfix-api \
   https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
 sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+```
 
-# 方式二：本地构建上传
-# scp dist/breakfix-api-linux-amd64 <服务器名>:~/
-# sudo mv ~/breakfix-api-linux-amd64 /usr/local/bin/breakfix-api
-# sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+**方式二：本地构建上传**
+
+```bash
+# 本地
+go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=v0.1.0" \
+  -o dist/breakfix-api-linux-amd64 ./cmd/server
+
+scp dist/breakfix-api-linux-amd64 <服务器名>:~/
+
+# 网关 ECS
+sudo mv ~/breakfix-api-linux-amd64 /usr/local/bin/breakfix-api
+sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
 ```
 
 ### 1.4 systemd
@@ -78,8 +88,14 @@ sudo systemctl enable --now breakfix-api
 ### 1.5 同步题目
 
 ```bash
+# 方式一：Git 克隆
 sudo git clone https://github.com/your-org/breakfix-challenges.git /var/lib/breakfix/challenges
 sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
+
+# 方式二：本地 scp 上传
+# scp -r ./challenges <服务器名>:/tmp/
+# ssh <服务器名> sudo mv /tmp/challenges/* /var/lib/breakfix/challenges/
+# ssh <服务器名> sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
 ```
 
 ---
@@ -136,11 +152,21 @@ docker push registry.cn-hangzhou.aliyuncs.com/breakfix/base:latest
 
 ## 4. CLI 分发
 
-GitHub Releases 发布编译好的二进制：
+**方式一：GitHub Releases**
 
 ```bash
 curl -Lo /usr/local/bin/breakfix https://github.com/your-org/breakfix/releases/latest/download/breakfix-cli-linux-amd64
 chmod +x /usr/local/bin/breakfix
+```
+
+**方式二：本地构建上传**
+
+```bash
+# 本地
+go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=v0.1.0" \
+  -o dist/breakfix-cli-linux-amd64 ./cmd/cli
+
+scp dist/breakfix-cli-linux-amd64 <服务器名>:/usr/local/bin/breakfix
 ```
 
 ---
