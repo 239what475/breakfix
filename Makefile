@@ -1,5 +1,5 @@
 .PHONY: build build-server build-cli \
-        deploy deploy-server deploy-image deploy-images deploy-cleanup deploy-reset \
+        deploy deploy-server deploy-config deploy-image deploy-images deploy-cleanup deploy-reset \
         dev dev-build dev-server dev-cli dev-down dev-reset \
         lint proto clean status logs \
         docker-challenge docker-push
@@ -57,6 +57,11 @@ deploy-server: build-server _guard-server
 	scp dist/breakfix-api-linux-amd64 $(SERVER):/tmp/breakfix-api
 	ssh $(SERVER) 'sudo mv /tmp/breakfix-api $(SERVER_BIN) && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Server deployed to $(SERVER) and restarted"
+
+deploy-config: _guard-server
+	scp breakfix.yaml $(SERVER):/tmp/breakfix.yaml
+	ssh $(SERVER) 'sudo mv /tmp/breakfix.yaml $(SERVER_CONF) && sudo chown breakfix:breakfix $(SERVER_CONF) && sudo systemctl restart $(SERVICE)'
+	@echo "✓ Config deployed to $(SERVER) and server restarted"
 
 deploy-images: _guard-server
 	@for d in challenges/*/; do \
@@ -143,7 +148,7 @@ dev-start:
 	@grep -q "listening" /tmp/breakfix-api.log || { \
 		echo "  ✗ Server failed to start"; tail -5 /tmp/breakfix-api.log; exit 1; \
 	}
-	@echo "  ✓ Server listening on :9090 :9533"
+	@echo "  ✓ Server listening on :9090"
 
 dev-status:
 	@echo "  ✓ Proxy    :3128"

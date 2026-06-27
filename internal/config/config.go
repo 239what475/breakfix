@@ -10,22 +10,20 @@ import (
 )
 
 type Config struct {
-	Port       int    `yaml:"port"`
-	MTLSPort   int    `yaml:"mtls_port"`
-	ProxyPort  int    `yaml:"proxy_port"`
-	DataDir    string `yaml:"data_dir"`
-	Kubeconfig string `yaml:"kubeconfig"`
-	Registry        string `yaml:"registry"`
-	ACRNamespace  string `yaml:"acr_namespace"`
+	Port         int    `yaml:"port"`
+	ProxyPort    int    `yaml:"proxy_port"`
+	DataDir      string `yaml:"data_dir"`
+	Kubeconfig   string `yaml:"kubeconfig"`
+	Registry     string `yaml:"registry"`
+	ACRNamespace string `yaml:"acr_namespace"`
 }
 
 func defaults() Config {
 	return Config{
-		Port:            9090,
-		MTLSPort:        9533,
-		ProxyPort:       3128,
-		DataDir:         "/var/lib/breakfix",
-		ACRNamespace:  "breakfix",
+		Port:         9090,
+		ProxyPort:    3128,
+		DataDir:      "/var/lib/breakfix",
+		ACRNamespace: "breakfix",
 	}
 }
 

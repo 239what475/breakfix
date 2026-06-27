@@ -85,6 +85,7 @@ func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.Reg
 	return &pb.RegisterResponse{
 		TotpSecret: secret,
 		TotpQr:     qr,
+		CaCert:     string(s.ca.CertPEM()),
 	}, nil
 }
 
@@ -118,6 +119,7 @@ func (s *Server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResp
 		Name:       user.Name,
 		ClientCert: string(certPEM),
 		ClientKey:  string(keyPEM),
+		CaCert:     string(s.ca.CertPEM()),
 	}, nil
 }
 

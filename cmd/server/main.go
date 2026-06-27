@@ -28,6 +28,12 @@ import (
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
 
+// Methods that don't require a client certificate.
+var allowAnon = map[string]bool{
+	"/breakfix.Breakfix/Register": true,
+	"/breakfix.Breakfix/Login":    true,
+}
+
 func main() {
 	configPath := flag.String("config", "breakfix.yaml", "Config file path")
 	klog.InitFlags(nil)
@@ -53,16 +59,16 @@ func main() {
 		klog.Fatalf("Failed to sync challenges: %v", err)
 	}
 
-	ca, err := ca.LoadOrCreate(cfg.CertFile(), cfg.KeyFile())
+	caCert, err := ca.LoadOrCreate(cfg.CertFile(), cfg.KeyFile())
 	if err != nil {
 		klog.Fatalf("Failed to load CA: %v", err)
 	}
 
-	serverCert, serverKey, err := ca.ServerCert()
+	serverCert, serverKey, err := caCert.ServerCert()
 	if err != nil {
 		klog.Fatalf("Failed to generate server cert: %v", err)
 	}
-	tlsConfig, err := ca.TLSConfig(serverCert, serverKey)
+	tlsConfig, err := caCert.TLSConfig(serverCert, serverKey)
 	if err != nil {
 		klog.Fatalf("Failed to create TLS config: %v", err)
 	}
@@ -72,23 +78,20 @@ func main() {
 		klog.Fatalf("Failed to create K8s client: %v", err)
 	}
 
-		cooldown := server.NewCooldownManager(database, k8sClient, nil)
-		srv := server.New(database, k8sClient, cooldown, cfg, ca)
-		cooldown.SetCleanup(srv.CleanupInstance)
+	cooldown := server.NewCooldownManager(database, k8sClient, nil)
+	srv := server.New(database, k8sClient, cooldown, cfg, caCert)
+	cooldown.SetCleanup(srv.CleanupInstance)
 
-	publicServer := grpc.NewServer(grpc.UnaryInterceptor(authPublicOnly))
-	pb.RegisterBreakfixServer(publicServer, srv)
-
-	secureServer := grpc.NewServer(
+	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.UnaryInterceptor(authRequireCert),
+		grpc.UnaryInterceptor(authInterceptor),
 	)
-	pb.RegisterBreakfixServer(secureServer, srv)
+	pb.RegisterBreakfixServer(grpcServer, srv)
 
-	publicLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
-	if err != nil { klog.Fatalf("port %d: %v", cfg.Port, err) }
-	secureLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.MTLSPort))
-	if err != nil { klog.Fatalf("port %d: %v", cfg.MTLSPort, err) }
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	if err != nil {
+		klog.Fatalf("port %d: %v", cfg.Port, err)
+	}
 
 	go proxy.Start(cfg.ProxyPort)
 
@@ -97,28 +100,20 @@ func main() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		klog.InfoS("shutting down")
-		cooldown.Stop(); publicServer.GracefulStop(); secureServer.GracefulStop()
+		cooldown.Stop()
+		grpcServer.GracefulStop()
 	}()
 
-	klog.InfoS("listening", "public", cfg.Port, "mtls", cfg.MTLSPort, "proxy", cfg.ProxyPort)
-
-	go func() { publicServer.Serve(publicLis) }()
-	secureServer.Serve(secureLis)
+	klog.InfoS("listening", "port", cfg.Port, "proxy", cfg.ProxyPort)
+	grpcServer.Serve(lis)
 }
 
-var publicMethods = map[string]bool{
-	"/breakfix.Breakfix/Register": true,
-	"/breakfix.Breakfix/Login":    true,
-}
-
-func authPublicOnly(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if !publicMethods[info.FullMethod] {
-		return nil, status.Error(codes.PermissionDenied, "only register/login allowed on this port")
+// authInterceptor checks client certificate for non-auth methods.
+func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if allowAnon[info.FullMethod] {
+		return handler(ctx, req)
 	}
-	return handler(ctx, req)
-}
 
-func authRequireCert(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "no peer")

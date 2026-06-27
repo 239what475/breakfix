@@ -37,6 +37,7 @@ message RegisterRequest {
 message RegisterResponse {
     string totp_secret = 1;     // 给用户扫的密钥
     string totp_qr = 2;         // ASCII QR 码
+    string ca_cert = 3;         // CA 公钥 PEM（用于 TLS 服务端认证）
 }
 
 message LoginRequest {
@@ -50,6 +51,7 @@ message LoginResponse {
     string name = 2;
     string client_cert = 3;     // 客户端证书 PEM
     string client_key = 4;      // 客户端私钥 PEM
+    string ca_cert = 5;         // CA 公钥 PEM（用于 TLS 服务端认证）
 }
 
 // ── Terminal ──

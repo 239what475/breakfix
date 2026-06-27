@@ -1,9 +1,8 @@
 # Breakfix server configuration.
 # Copy to breakfix.yaml and adjust for your environment.
 
-# gRPC ports
+# gRPC port
 port: 9090
-mtls_port: 9533
 
 # HTTP forward proxy for Pod egress
 proxy_port: 3128

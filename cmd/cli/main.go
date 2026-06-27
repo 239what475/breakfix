@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"golang.org/x/term"
 	"fmt"
@@ -16,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
 )
 
@@ -26,39 +26,64 @@ func main() {
 	home, _ := os.UserHomeDir()
 	configDir = filepath.Join(home, ".breakfix")
 	root := &cobra.Command{Use: "breakfix", Short: "Breakfix - SRE/DevOps interview practice platform"}
-	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (ports 9090/9533 auto-derived)")
+	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (:9090 auto-derived)")
 	klog.InitFlags(nil)
 	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC())
 	root.Execute()
 }
 
-func grpcPlain() pb.BreakfixClient {
-	conn, _ := grpc.NewClient(serverAddr+":9090", grpc.WithTransportCredentials(insecure.NewCredentials()))
-	return pb.NewBreakfixClient(conn)
+// grpcDial returns a gRPC client connection using TLS.
+// On first use (no saved CA cert), InsecureSkipVerify is set.
+// After register, the CA cert is saved and used for verification.
+// After login, client certificates are also presented (mTLS).
+func grpcDial() (pb.BreakfixClient, *grpc.ClientConn, error) {
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+
+	// Try to load CA cert for server verification
+	caPEM, _ := os.ReadFile(filepath.Join(configDir, "ca-cert.pem"))
+	if len(caPEM) > 0 {
+		cp := x509.NewCertPool()
+		cp.AppendCertsFromPEM(caPEM)
+		tlsCfg.RootCAs = cp
+	} else {
+		tlsCfg.InsecureSkipVerify = true // first-time: skip, but save CA after register
+	}
+
+	// Try to load client cert for mTLS
+	certPEM, _ := os.ReadFile(filepath.Join(configDir, "cert.pem"))
+	keyPEM, _ := os.ReadFile(filepath.Join(configDir, "key.pem"))
+	if len(certPEM) > 0 && len(keyPEM) > 0 {
+		cert, _ := tls.X509KeyPair(certPEM, keyPEM)
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	conn, err := grpc.NewClient(serverAddr+":9090", grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		return nil, nil, err
+	}
+	return pb.NewBreakfixClient(conn), conn, nil
 }
 
-func grpcMTLS() (pb.BreakfixClient, error) {
-	certPEM, err := os.ReadFile(filepath.Join(configDir, "cert.pem"))
-	if err != nil {
-		return nil, fmt.Errorf("not logged in. Run 'breakfix login' first")
-	}
-	keyPEM, _ := os.ReadFile(filepath.Join(configDir, "key.pem"))
-	cert, _ := tls.X509KeyPair(certPEM, keyPEM)
-	conn, _ := grpc.NewClient(serverAddr+":9533", grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-		Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true,
-	})))
-	return pb.NewBreakfixClient(conn), nil
+func saveCA(caCert string) {
+	os.MkdirAll(configDir, 0700)
+	os.WriteFile(filepath.Join(configDir, "ca-cert.pem"), []byte(caCert), 0644)
 }
 
 func regCmd() *cobra.Command {
 	var u, p string
 	c := &cobra.Command{Use: "register", Short: "Register", RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := grpcPlain().Register(context.Background(), &pb.RegisterRequest{Username: u, Password: p})
+		c, conn, err := grpcDial()
+		if err != nil { return err }
+		defer conn.Close()
+
+		r, err := c.Register(context.Background(), &pb.RegisterRequest{Username: u, Password: p})
 		if err != nil { return err }
 		fmt.Println(r.TotpQr)
+
 		os.MkdirAll(configDir, 0700)
 		os.WriteFile(filepath.Join(configDir, "totp-secret"), []byte(r.TotpSecret), 0600)
-		fmt.Printf("Run: breakfix login -u %s -p <password>\n", u)
+		saveCA(r.CaCert)
+		fmt.Printf("\nRun: breakfix login -u %s -p <password>\n", u)
 		return nil
 	}}
 	c.Flags().StringVarP(&u, "user", "u", "", "Username")
@@ -70,11 +95,17 @@ func logCmd() *cobra.Command {
 	var u, p, t string
 	c := &cobra.Command{Use: "login", Short: "Login", RunE: func(cmd *cobra.Command, args []string) error {
 		if t == "" { fmt.Print("Enter TOTP code: "); fmt.Scanln(&t) }
-		r, err := grpcPlain().Login(context.Background(), &pb.LoginRequest{Username: u, Password: p, TotpCode: t})
+
+		c, conn, err := grpcDial()
+		if err != nil { return err }
+		defer conn.Close()
+
+		r, err := c.Login(context.Background(), &pb.LoginRequest{Username: u, Password: p, TotpCode: t})
 		if err != nil { return err }
 		os.MkdirAll(configDir, 0700)
 		os.WriteFile(filepath.Join(configDir, "cert.pem"), []byte(r.ClientCert), 0600)
 		os.WriteFile(filepath.Join(configDir, "key.pem"), []byte(r.ClientKey), 0600)
+		saveCA(r.CaCert)
 		fmt.Printf("✓ Logged in as %s (v%s)\n", r.Name, build.Version)
 		return nil
 	}}
@@ -85,7 +116,7 @@ func logCmd() *cobra.Command {
 }
 
 func listC() *cobra.Command { return &cobra.Command{Use: "list", Short: "List", RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
+	c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 	r, err := c.ListChallenges(context.Background(), &pb.ListChallengesRequest{})
 		if err != nil { return err }
 	for _, ch := range r.Challenges { fmt.Printf("%-25s %-10s %s\n", ch.Id, ch.Type, ch.Title) }
@@ -93,7 +124,7 @@ func listC() *cobra.Command { return &cobra.Command{Use: "list", Short: "List", 
 }}}
 
 func startC() *cobra.Command { return &cobra.Command{Use: "start", Short: "Start", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
+	c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 	r, err := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: args[0]})
 		if err != nil { return err }
 	fmt.Printf("Challenge: %s\nInstance:  %s\n\nRun: breakfix ssh %s\n", r.ChallengeTitle, r.InstanceId, r.InstanceId)
@@ -101,7 +132,7 @@ func startC() *cobra.Command { return &cobra.Command{Use: "start", Short: "Start
 }}}
 
 func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := grpcMTLS(); if err != nil { return err }
+		c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 		c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]})
 		stream, err := c.ExecInstance(context.Background())
 		if err != nil { return fmt.Errorf("exec: %w", err) }
@@ -148,7 +179,7 @@ func sshC() *cobra.Command { return &cobra.Command{Use: "ssh", Short: "SSH", Arg
 
 
 func subC() *cobra.Command { return &cobra.Command{Use: "submit", Short: "Submit", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
+	c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 	r, err := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{InstanceId: args[0]})
 		if err != nil { return err }
 	if r.Passed { fmt.Println("✓ PASSED!") } else { fmt.Printf("✗ FAILED (exit=%d)\n", r.ExitCode) }
@@ -156,14 +187,14 @@ func subC() *cobra.Command { return &cobra.Command{Use: "submit", Short: "Submit
 }}}
 
 func stopC() *cobra.Command { return &cobra.Command{Use: "stop", Short: "Stop", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
+	c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 	c.StopChallenge(context.Background(), &pb.StopChallengeRequest{InstanceId: args[0]})
 	fmt.Printf("Instance %s destroyed.\n", args[0])
 	return nil
 }}}
 
 func statC() *cobra.Command { return &cobra.Command{Use: "status", Short: "Status", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	c, err := grpcMTLS(); if err != nil { return err }
+	c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
 	r, err := c.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
 		if err != nil { return err }
 	fmt.Printf("Instance: %s Status: %d\n", r.InstanceId, r.Status)

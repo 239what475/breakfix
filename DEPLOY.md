@@ -55,9 +55,8 @@ sudo tee /var/lib/breakfix/breakfix.yaml <<EOF > /dev/null
 data_dir: /var/lib/breakfix
 kubeconfig: /var/lib/breakfix/kubeconfig
 registry: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
-	acr_namespace: breakfix
+acr_namespace: breakfix
 port: 9090
-mtls_port: 9533
 proxy_port: 3128
 EOF
 sudo chown -R breakfix:breakfix /var/lib/breakfix
@@ -243,7 +242,7 @@ go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=
 
 ### 连接远程服务器
 
-CLI 通过 `--server` 指定网关 ECS 地址，端口自动推导（9090 明文 / 9533 mTLS）：
+CLI 通过 `--server` 指定网关 ECS 地址，默认连接端口 9090（TLS 加密，单端口）：
 
 ```bash
 breakfix --server <ecs-公网IP> register -u user -p pass
