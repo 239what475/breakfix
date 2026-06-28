@@ -181,7 +181,7 @@ func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, s
 	}
 
 	var stdout, stderr bytes.Buffer
-	err = exec.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
+	err = exec.StreamWithContext(context.Background(), remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(k8sexec.CodeExitError); ok {
@@ -214,6 +214,7 @@ func (c *Client) CopyToPod(namespace, podName, localPath, remotePath string) err
 func RandomID() string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 6)
+	//nolint:gosec // randomness error is astronomically unlikely
 	crand.Read(b)
 	for i := range b {
 		b[i] = chars[int(b[i])%len(chars)]
@@ -247,7 +248,7 @@ func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-cha
 		return fmt.Errorf("exec: %w", err)
 	}
 
-	return exec.Stream(remotecommand.StreamOptions{
+	return exec.StreamWithContext(context.Background(), remotecommand.StreamOptions{
 		Stdin:             stdin,
 		Stdout:            stdout,
 		Stderr:            stderr,

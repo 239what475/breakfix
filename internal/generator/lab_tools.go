@@ -53,7 +53,9 @@ func (t *labCreateTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	oldPods, _ := t.lc.K8s.ListPods(ns)
 	for _, p := range oldPods {
 		if strings.HasPrefix(p, "lab-") {
-			t.lc.K8s.DeletePod(ns, p)
+			if err := t.lc.K8s.DeletePod(ns, p); err != nil {
+				fmt.Fprintf(os.Stderr, "cleanup old lab pod %s: %v\n", p, err)
+			}
 		}
 	}
 	if len(oldPods) > 0 {
@@ -188,6 +190,8 @@ func (t *labDestroyTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := t.lc.K8s.DeletePod(t.lc.Namespace, a.Pod); err != nil {
 		return "", err
 	}
-	t.lc.K8s.DeleteNamespace(t.lc.Namespace)
+	if err := t.lc.K8s.DeleteNamespace(t.lc.Namespace); err != nil {
+		fmt.Fprintf(os.Stderr, "delete lab namespace %s: %v\n", t.lc.Namespace, err)
+	}
 	return "destroyed", nil
 }

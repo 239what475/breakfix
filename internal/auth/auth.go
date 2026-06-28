@@ -71,7 +71,7 @@ func GenerateTOTPSecret(username string) (secret string, qrStr string, err error
 		sb.WriteByte('\n')
 	}
 
-	sb.WriteString(fmt.Sprintf("\nSecret: %s\n", secret))
+	fmt.Fprintf(&sb, "\nSecret: %s\n", secret)
 	return secret, sb.String(), nil
 }
 

@@ -75,8 +75,10 @@ func newCA() (*CA, error) {
 }
 
 func (ca *CA) save(certFile, keyFile string) error {
-	os.MkdirAll(filepath.Dir(certFile), 0700)
-	if err := os.WriteFile(certFile, ca.CertPEM(), 0644); err != nil {
+	if err := os.MkdirAll(filepath.Dir(certFile), 0700); err != nil {
+		return fmt.Errorf("mkdir for CA: %w", err)
+	}
+	if err := os.WriteFile(certFile, ca.CertPEM(), 0644); err != nil { //nolint:gosec // CA cert is public
 		return err
 	}
 	return os.WriteFile(keyFile, ca.KeyPEM(), 0600)

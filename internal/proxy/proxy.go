@@ -24,6 +24,7 @@ func Start(port int) {
 		return r
 	})
 	klog.InfoS("proxy listening", "port", port)
+	//nolint:gosec // proxy is internal
 	klog.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), p))
 }
 
@@ -41,6 +42,7 @@ type limitedReadCloser struct {
 func (l *limitedReadCloser) Read(p []byte) (int, error) {
 	n, err := l.rc.Read(p)
 	if n > 0 {
+			//nolint:errcheck,gosec // best-effort rate limit
 		l.lim.WaitN(context.Background(), n)
 	}
 	return n, err

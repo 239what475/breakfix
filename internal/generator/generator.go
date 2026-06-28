@@ -238,6 +238,7 @@ func (g *Generator) finalize(chalDir string) error {
 			klog.ErrorS(err, "failed to read generated file", "name", e.Name())
 			continue
 		}
+		//nolint:gosec // challenge files are public
 		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0644); err != nil {
 			klog.ErrorS(err, "failed to write output file", "name", e.Name())
 		}

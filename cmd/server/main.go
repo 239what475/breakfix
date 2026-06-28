@@ -55,7 +55,9 @@ func main() {
 	defer func() { _ = database.Close() }()
 
 	challengesDir := filepath.Join(cfg.DataDir, "challenges")
-	os.MkdirAll(challengesDir, 0755)
+	if err := os.MkdirAll(challengesDir, 0755); err != nil {
+		klog.Errorf("failed to create challenges dir: %v", err)
+	}
 	if err := challenge.SyncChallenges(database, challengesDir); err != nil {
 		klog.Fatalf("Failed to sync challenges: %v", err)
 	}
@@ -106,7 +108,9 @@ func main() {
 	}()
 
 	klog.InfoS("listening", "port", cfg.Port, "proxy", cfg.ProxyPort)
-	grpcServer.Serve(lis)
+	if err := grpcServer.Serve(lis); err != nil {
+		klog.Errorf("grpc serve: %v", err)
+	}
 }
 
 // authInterceptor checks client certificate for non-auth methods.
