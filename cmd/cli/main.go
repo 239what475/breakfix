@@ -5,12 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"golang.org/x/term"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"golang.org/x/term"
 
 	"github.com/breakfix/breakfix/internal/build"
 	pb "github.com/breakfix/breakfix/internal/proto"
@@ -64,9 +65,20 @@ func grpcDial() (pb.BreakfixClient, *grpc.ClientConn, error) {
 	return pb.NewBreakfixClient(conn), conn, nil
 }
 
-func saveCA(caCert string) { //nolint:errcheck
-	os.MkdirAll(configDir, 0700)
-	os.WriteFile(filepath.Join(configDir, "ca-cert.pem"), []byte(caCert), 0644)
+func saveCA(caCert string) {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		klog.ErrorS(err, "mkdir config dir")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "ca-cert.pem"), []byte(caCert), 0644); err != nil {
+		klog.ErrorS(err, "write ca cert")
+	}
+}
+
+func closeConn(conn *grpc.ClientConn) {
+	if err := conn.Close(); err != nil {
+		klog.V(3).InfoS("close conn", "err", err)
+	}
 }
 
 func regCmd() *cobra.Command {
@@ -76,7 +88,7 @@ func regCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 
 		r, err := c.Register(context.Background(), &pb.RegisterRequest{Username: u, Password: p})
 		if err != nil {
@@ -84,8 +96,12 @@ func regCmd() *cobra.Command {
 		}
 		fmt.Println(r.TotpQr)
 
-		os.MkdirAll(configDir, 0700)
-		os.WriteFile(filepath.Join(configDir, "totp-secret"), []byte(r.TotpSecret), 0600)
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			return fmt.Errorf("mkdir config: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "totp-secret"), []byte(r.TotpSecret), 0600); err != nil {
+			return fmt.Errorf("write totp: %w", err)
+		}
 		saveCA(r.CaCert)
 		fmt.Printf("\nRun: breakfix login -u %s -p <password>\n", u)
 		return nil
@@ -100,22 +116,28 @@ func logCmd() *cobra.Command {
 	c := &cobra.Command{Use: "login", Short: "Login", RunE: func(cmd *cobra.Command, args []string) error {
 		if t == "" {
 			fmt.Print("Enter TOTP code: ")
-			fmt.Scanln(&t)
+			fmt.Scanln(&t) //nolint:errcheck
 		}
 
 		c, conn, err := grpcDial()
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 
 		r, err := c.Login(context.Background(), &pb.LoginRequest{Username: u, Password: p, TotpCode: t})
 		if err != nil {
 			return err
 		}
-		os.MkdirAll(configDir, 0700)
-		os.WriteFile(filepath.Join(configDir, "cert.pem"), []byte(r.ClientCert), 0600)
-		os.WriteFile(filepath.Join(configDir, "key.pem"), []byte(r.ClientKey), 0600)
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			return fmt.Errorf("mkdir config: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "cert.pem"), []byte(r.ClientCert), 0600); err != nil {
+			return fmt.Errorf("write cert: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "key.pem"), []byte(r.ClientKey), 0600); err != nil {
+			return fmt.Errorf("write key: %w", err)
+		}
 		saveCA(r.CaCert)
 		fmt.Printf("✓ Logged in as %s (v%s)\n", r.Name, build.Version)
 		return nil
@@ -132,7 +154,7 @@ func listC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 		r, err := c.ListChallenges(context.Background(), &pb.ListChallengesRequest{})
 		if err != nil {
 			return err
@@ -150,7 +172,7 @@ func startC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 		r, err := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: args[0]})
 		if err != nil {
 			return err
@@ -166,13 +188,13 @@ func sshC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
-		c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]})
+		defer closeConn(conn)
+		c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}) //nolint:errcheck
 		stream, err := c.ExecInstance(context.Background())
 		if err != nil {
 			return fmt.Errorf("exec: %w", err)
 		}
-		stream.Send(&pb.PTYData{Data: []byte(args[0])})
+		stream.Send(&pb.PTYData{Data: []byte(args[0])}) //nolint:errcheck
 
 		// Terminal setup (only if stdin is a terminal)
 		if term.IsTerminal(int(os.Stdin.Fd())) {
@@ -180,18 +202,18 @@ func sshC() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer term.Restore(int(os.Stdin.Fd()), oldState)
+			defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
 
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGWINCH)
 			defer signal.Stop(sigCh)
 			go func() {
 				if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-					stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)})
+					stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
 				}
 				for range sigCh {
 					if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-						stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)})
+						stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
 					}
 				}
 			}()
@@ -203,10 +225,10 @@ func sshC() *cobra.Command {
 			for {
 				n, err := os.Stdin.Read(buf)
 				if n > 0 {
-					stream.Send(&pb.PTYData{Data: buf[:n]})
+					stream.Send(&pb.PTYData{Data: buf[:n]}) //nolint:errcheck
 				}
 				if err != nil {
-					stream.CloseSend()
+					stream.CloseSend() //nolint:errcheck
 					return
 				}
 			}
@@ -221,7 +243,9 @@ func sshC() *cobra.Command {
 				}
 				return nil
 			}
-			os.Stdout.Write(data.Data)
+			if _, err := os.Stdout.Write(data.Data); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
 		}
 	}}
 }
@@ -232,7 +256,7 @@ func subC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 		r, err := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{InstanceId: args[0]})
 		if err != nil {
 			return err
@@ -252,8 +276,8 @@ func stopC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
-		c.StopChallenge(context.Background(), &pb.StopChallengeRequest{InstanceId: args[0]})
+		defer closeConn(conn)
+		c.StopChallenge(context.Background(), &pb.StopChallengeRequest{InstanceId: args[0]}) //nolint:errcheck
 		fmt.Printf("Instance %s destroyed.\n", args[0])
 		return nil
 	}}
@@ -265,7 +289,7 @@ func statC() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 		r, err := c.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
 		if err != nil {
 			return err
@@ -282,7 +306,7 @@ func genCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer closeConn(conn)
 		fmt.Printf("Generating challenge for: %s\n", topic)
 		r, err := c.GenerateChallenge(context.Background(), &pb.GenerateChallengeRequest{Topic: topic})
 		if err != nil {

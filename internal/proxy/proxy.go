@@ -43,7 +43,7 @@ func (l *limitedReadCloser) Read(p []byte) (int, error) {
 	n, err := l.rc.Read(p)
 	if n > 0 {
 			//nolint:errcheck,gosec // best-effort rate limit
-		l.lim.WaitN(context.Background(), n)
+		l.lim.WaitN(context.Background(), n)  //nolint:errcheck
 	}
 	return n, err
 }
