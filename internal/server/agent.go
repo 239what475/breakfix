@@ -35,7 +35,7 @@ func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChalleng
 	env := map[string]string{
 		"TOPIC":                          topic,
 		"REGISTRY":                       s.registry,
-		"ACR_NAMESPACE":                  s.acrNS,
+		"ACR_NAMESPACE":                  s.namespace,
 		"ANTHROPIC_BASE_URL":             s.llm.BaseURL,
 		"ANTHROPIC_AUTH_TOKEN":           s.llm.APIKey,
 		"ANTHROPIC_MODEL":                s.llm.Model,

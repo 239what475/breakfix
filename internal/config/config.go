@@ -15,7 +15,7 @@ type Config struct {
 	DataDir      string    `yaml:"data_dir"`
 	Kubeconfig   string    `yaml:"kubeconfig"`
 	Registry     string    `yaml:"registry"`
-	ACRNamespace string    `yaml:"acr_namespace"`
+	Namespace string `yaml:"acr_namespace"`
 	LLM          LLMConfig `yaml:"llm"`
 }
 
@@ -32,7 +32,7 @@ func defaults() Config {
 		Port:         9090,
 		ProxyPort:    3128,
 		DataDir:      "/var/lib/breakfix",
-		ACRNamespace: "breakfix",
+		Namespace: "breakfix",
 		LLM: LLMConfig{
 			BaseURL:    "https://api.deepseek.com/anthropic",
 			Model:      "deepseek-v4-pro",
@@ -47,7 +47,7 @@ func (c Config) ImageURL(image string) string {
 	if c.Registry == "" || strings.Contains(image, ".") {
 		return image
 	}
-	return c.Registry + "/" + c.ACRNamespace + "/" + image
+	return c.Registry + "/" + c.Namespace + "/" + image
 }
 
 func Load(path string) (Config, error) {

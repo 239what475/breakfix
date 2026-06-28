@@ -67,10 +67,10 @@ func (t *labCreateTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if err := t.lc.K8s.EnsureNamespace(ns); err != nil {
 		return "", fmt.Errorf("ensure namespace: %w", err)
 	}
-	if err := t.lc.K8s.CreatePod(ns, podName, "breakfix-base:latest", "", ""); err != nil {
+	if err := t.lc.K8s.CreatePod(ns, podName, k8s.CreatePodOpts{Image: "breakfix-base:latest"}); err != nil {
 		return "", fmt.Errorf("create pod: %w", err)
 	}
-	if err := t.lc.K8s.WaitForPod(ns, podName); err != nil {
+	if err := t.lc.K8s.WaitForPod(ns, podName, "challenge"); err != nil {
 		return "", fmt.Errorf("wait pod: %w", err)
 	}
 	return podName, nil

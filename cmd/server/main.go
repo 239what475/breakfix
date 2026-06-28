@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -20,10 +19,7 @@ import (
 	"github.com/breakfix/breakfix/internal/proxy"
 	"github.com/breakfix/breakfix/internal/server"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
@@ -94,7 +90,7 @@ func main() {
 
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.UnaryInterceptor(authInterceptor),
+		grpc.UnaryInterceptor(server.AuthInterceptor(allowAnon)),
 	)
 	pb.RegisterBreakfixServer(grpcServer, srv)
 
@@ -121,18 +117,3 @@ func main() {
 	}
 }
 
-func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if allowAnon[info.FullMethod] {
-		return handler(ctx, req)
-	}
-
-	p, ok := peer.FromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "no peer")
-	}
-	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-	if !ok || len(tlsInfo.State.PeerCertificates) == 0 {
-		return nil, status.Error(codes.Unauthenticated, "client certificate required")
-	}
-	return handler(ctx, req)
-}

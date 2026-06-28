@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/auth"
@@ -13,7 +12,6 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	pb "github.com/breakfix/breakfix/internal/proto"
-	"github.com/breakfix/breakfix/internal/pty"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
@@ -23,7 +21,7 @@ import (
 )
 
 type Server struct {
-	acrNS string
+	namespace string
 	pb.UnimplementedBreakfixServer
 	db            *db.DB
 	k8s           *k8s.Client
@@ -41,7 +39,7 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, cfg con
 		cooldown:      cooldown,
 		challengesDir: cfg.ChallengesDir(),
 		registry:      cfg.Registry,
-		acrNS:         cfg.ACRNamespace,
+		namespace:     cfg.Namespace,
 		llm:           cfg.LLM,
 		ca:            ca,
 	}
@@ -155,7 +153,7 @@ func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
 	slog.Info("pty session started", "instance", instanceID, "user", subject)
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
-	rw := &pty.ReadWriter{Stream: stream, Resize: resizeCh}
+	rw := &ReadWriter{Stream: stream, Resize: resizeCh}
 	return s.k8s.ExecPTY(rw, rw, rw, resizeCh, inst.Namespace, inst.PodName)
 }
 
@@ -222,16 +220,20 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 	}
 
 	instanceID := k8s.RandomID()
-	ns := k8s.UserNamespace(s.acrNS, user.ID)
+	ns := k8s.UserNamespace(s.namespace, user.ID)
 	podName := fmt.Sprintf("challenge-%s", instanceID)
 
 	if err := s.k8s.EnsureNamespace(ns); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("create namespace: %v", err))
 	}
-	if err := s.k8s.CreatePod(ns, podName, imageURL(challenge.Image, s.registry, s.acrNS), challenge.ID, instanceID); err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("create pod: %v", err))
+	if err := s.k8s.CreatePod(ns, podName, k8s.CreatePodOpts{
+		Image:      s.imageURL(challenge.Image),
+		ChallengeID: challenge.ID,
+		InstanceID:  instanceID,
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "create pod: %v", err)
 	}
-	if err := s.k8s.WaitForPod(ns, podName); err != nil {
+	if err := s.k8s.WaitForPod(ns, podName, "challenge"); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("pod not ready: %v", err))
 	}
 
@@ -381,75 +383,6 @@ func (s *Server) cleanupInstance(inst *db.Instance) {
 	}
 }
 
-// ── Tag parsing ──
-
-// ── CooldownManager ──
-
-type CooldownManager struct {
-	db        *db.DB
-	k8s       *k8s.Client
-	mu        sync.Mutex
-	timers    map[string]*time.Timer
-	cleanupFn func(string) // called on cooldown expiry
-}
-
-func NewCooldownManager(database *db.DB, client *k8s.Client, cleanupFn func(string)) *CooldownManager {
-	return &CooldownManager{
-		db:        database,
-		k8s:       client,
-		timers:    make(map[string]*time.Timer),
-		cleanupFn: cleanupFn,
-	}
-}
-
-func (m *CooldownManager) SetCleanup(fn func(string)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupFn = fn
-}
-
-func (m *CooldownManager) StartDraining(instanceID string) {
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if t, ok := m.timers[instanceID]; ok {
-		t.Stop()
-	}
-	if err := m.db.UpdateInstanceStatus(instanceID, "draining"); err != nil {
-		slog.Error("failed to update instance status", "err", err, "instance", instanceID, "status", "draining")
-	}
-	slog.Debug("instance draining", "instance", instanceID, "cooldown", "5min")
-	m.timers[instanceID] = time.AfterFunc(5*time.Minute, func() {
-		m.destroy(instanceID)
-	})
-}
-
-func (m *CooldownManager) Cancel(instanceID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if t, ok := m.timers[instanceID]; ok {
-		t.Stop()
-		delete(m.timers, instanceID)
-	}
-}
-
-func (m *CooldownManager) destroy(instanceID string) {
-	m.mu.Lock()
-	delete(m.timers, instanceID)
-	m.mu.Unlock()
-
-	slog.Info("cooldown expired, destroying instance", "instance", instanceID)
-	m.cleanupFn(instanceID)
-}
-
-func (m *CooldownManager) Stop() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, t := range m.timers {
-		t.Stop()
-		delete(m.timers, id)
-	}
-}
 
 func jsonParseTags(raw string) []string {
 	var tags []string
@@ -467,9 +400,10 @@ func (s *Server) CleanupInstance(instanceID string) {
 	s.cleanupInstance(inst)
 }
 
-func imageURL(image, registry, acrNS string) string {
-	if registry == "" {
+// imageURL builds the full registry path for a challenge image.
+func (s *Server) imageURL(image string) string {
+	if s.registry == "" {
 		return image
 	}
-	return registry + "/" + acrNS + "/" + image
+	return s.registry + "/" + s.namespace + "/" + image
 }

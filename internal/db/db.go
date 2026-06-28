@@ -22,8 +22,6 @@ func New(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-
-	// Connection pool config (SQLite serializes writes)
 	conn.SetMaxOpenConns(1)
 	conn.SetMaxIdleConns(1)
 
@@ -36,8 +34,10 @@ func New(path string) (*DB, error) {
 
 func (d *DB) Close() error { return d.conn.Close() }
 
-func (d *DB) migrate() error {
-	schema := `
+// migrations is the ordered list of schema migrations.
+var migrations = []string{
+	// v1: initial schema
+	`
 	CREATE TABLE IF NOT EXISTS users (
 		id          TEXT PRIMARY KEY,
 		subject     TEXT NOT NULL UNIQUE,
@@ -83,7 +83,24 @@ func (d *DB) migrate() error {
 		created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 	);
 	CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id, created_at);
-	`
-	_, err := d.conn.Exec(schema)
-	return err
+	`,
+}
+
+func (d *DB) migrate() error {
+	// Read current schema version.
+	var version int
+	if err := d.conn.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+
+	for i := version; i < len(migrations); i++ {
+		if _, err := d.conn.Exec(migrations[i]); err != nil {
+			return fmt.Errorf("migration v%d: %w", i+1, err)
+		}
+		version = i + 1
+		if _, err := d.conn.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+			return fmt.Errorf("set schema version: %w", err)
+		}
+	}
+	return nil
 }

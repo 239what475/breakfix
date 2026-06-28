@@ -173,14 +173,14 @@ func (g *Generator) phaseVerify(ctx context.Context, chalDir string) bool {
 	//nolint:errcheck // best-effort pre-create namespace
 	k8sClient.EnsureNamespace(ns)
 
-	if err := k8sClient.CreatePod(ns, podName, imageName, "", ""); err != nil {
+	if err := k8sClient.CreatePod(ns, podName, k8s.CreatePodOpts{Image: imageName}); err != nil {
 		slog.Error("create verify pod", "err", err)
 		return false
 	}
 	//nolint:errcheck // defer cleanup
 	defer k8sClient.DeletePod(ns, podName)
 
-	if err := k8sClient.WaitForPod(ns, podName); err != nil {
+	if err := k8sClient.WaitForPod(ns, podName, "challenge"); err != nil {
 		slog.Error("wait verify pod", "err", err)
 		return false
 	}
