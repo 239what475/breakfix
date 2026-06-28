@@ -200,6 +200,39 @@ docker-push:
 	@echo "  ✓ $(NAME) → $(REGISTRY)"
 
 # ═══════════════════════════════════════════════════════════════
+# Generator (agent workflow)
+# ═══════════════════════════════════════════════════════════════
+
+generator-dev:
+	@[ -f breakfix-local.yaml ] || { echo "ERROR: breakfix-local.yaml not found. Run: make dev-build"; exit 1; }
+	go build -o bin/generator ./cmd/generator
+	@mkdir -p data/challenges
+	@REGISTRY=$$(grep '^registry:' breakfix-local.yaml | awk '{print $$2}'); \
+	ACR_NS=$$(grep '^acr_namespace:' breakfix-local.yaml | awk '{print $$2}'); \
+	BASE_URL=$$(grep 'base_url:' breakfix-local.yaml | awk '{print $$2}'); \
+	MODEL=$$(grep '  model:' breakfix-local.yaml | awk '{print $$2}'); \
+	HAIKU=$$(grep 'haiku_model:' breakfix-local.yaml | awk '{print $$2}'); \
+	EFFORT=$$(grep 'effort:' breakfix-local.yaml | awk '{print $$2}'); \
+	API_KEY=$$(grep 'api_key:' breakfix-local.yaml | awk '{print $$2}'); \
+	KUBECONFIG=$${HOME}/.kube/config \
+	ANTHROPIC_BASE_URL=$$BASE_URL \
+	ANTHROPIC_AUTH_TOKEN=$$API_KEY \
+	ANTHROPIC_MODEL=$$MODEL \
+	ANTHROPIC_DEFAULT_OPUS_MODEL=$$MODEL \
+	ANTHROPIC_DEFAULT_SONNET_MODEL=$$MODEL \
+	ANTHROPIC_DEFAULT_HAIKU_MODEL=$$HAIKU \
+	CLAUDE_CODE_SUBAGENT_MODEL=$$HAIKU \
+	CLAUDE_CODE_EFFORT_LEVEL=$$EFFORT \
+	REGISTRY=$$REGISTRY \
+	ACR_NAMESPACE=$$ACR_NS \
+	./bin/generator --topic "$(TOPIC)"
+	@echo "  ✓ Challenge generated in data/challenges/"
+
+generator-image:
+	docker build -t breakfix-generator:latest ./cmd/generator
+	@echo "  ✓ Generator image built"
+
+# ═══════════════════════════════════════════════════════════════
 # Lint / Proto / Ops
 # ═══════════════════════════════════════════════════════════════
 

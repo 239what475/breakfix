@@ -8,7 +8,7 @@
 
 ```
 例：压缩日志
-  breakfix ssh → vim cleanup.sh → 跑一下 → submit
+  breakfix ssh → cat question.md → vim cleanup.sh → 跑一下 → submit
 ```
 
 ### Break-Fix（修故障）
@@ -17,74 +17,82 @@
 
 ```
 例：nginx 配置错误导致 502
-  breakfix ssh → 排查 → 修配置 → reload → submit
+  breakfix ssh → cat question.md → 排查 → 修配置 → reload → submit
 ```
 
 ---
 
-## 题目 Spec
+## 题目文件结构
+
+```
+challenges/<id>/
+├── challenge.yaml     # 元数据
+├── Dockerfile         # FROM base + COPY question.md + RUN generate.sh
+├── generate.sh        # 注入故障 (docker build 时执行)
+├── question.md        # 用户看到的任务说明书
+├── verify.sh          # 验收脚本 (server 持有, 不进镜像)
+└── answer.sh          # 标准答案 (agent 自验证用, 不进镜像)
+```
+
+### challenge.yaml
 
 ```yaml
-# challenge.yaml
 id: cleanup-logs
 type: script
 title: "批量压缩旧日志"
 difficulty: easy
 tags: [linux, find, tar, shell]
 timeout: 600
-image: registry.cn-hangzhou.aliyuncs.com/breakfix/cleanup-logs:v1
-
+image: cleanup-logs:v1
 description: |
-  服务器磁盘空间不足，/var/log 下有大量历史日志。
-  请编写 /usr/local/bin/cleanup.sh，实现：
-  1. 找出 /var/log 下 7 天前、大于 100MB 的 log 文件
-  2. 批量压缩到 /backup 目录
-
-verify:
-  script: |
-    #!/bin/bash
-    [ -x /usr/local/bin/cleanup.sh ] || exit 1
-    bash /usr/local/bin/cleanup.sh
-    find /var/log -type f -mtime +6 -size +100M | while IFS= read -r f; do
-      name=$(basename "$f")
-      ls /backup/${name%.log}*.tar.gz >/dev/null 2>&1 || exit 1
-    done
-    exit 0
+  服务器磁盘空间不足，/var/log 下有大量历史日志文件。
+  你的任务：编写 /usr/local/bin/cleanup.sh，实现：
+  1. 找出 /var/log 下 7 天前（mtime > 6 天）、大于 100MB 的 .log 文件
+  2. 批量压缩到 /backup 目录（用 tar.gz 格式）
+  3. 原文件可以不保留
 ```
+
+> image 只需写短名称，Server 自动拼 `{registry}/{acr_namespace}/` 前缀。
+
+### Dockerfile
+
+```dockerfile
+FROM breakfix-base:latest
+COPY question.md /home/user/question.md
+COPY generate.sh /tmp/generate.sh
+RUN bash /tmp/generate.sh && rm /tmp/generate.sh
+```
+
+### generate.sh
+
+制造故障或准备测试数据，docker build 时执行。
+
+### question.md
+
+用户登录 Pod 后看到的任务说明书。
+
+### verify.sh
+
+submit 时由 server 拷贝到 Pod 内执行。exit 0 = 通过。
+
+### answer.sh
+
+Agent 自验证用的标准答案。不进镜像、不外泄。
 
 ---
 
-## 目录结构
+## 用户流程
 
 ```
-challenges/
-├── cleanup-logs/
-│   ├── challenge.yaml
-│   ├── Dockerfile
-│   └── verify.sh
-├── nginx-502/
-│   ├── challenge.yaml
-│   ├── Dockerfile
-│   └── verify.sh
-└── ...
+breakfix start <id>
+  → Pod 启动（破损环境，question.md 在 ~/）
+  → breakfix ssh → 看 question.md → 排查/写脚本
+  → breakfix submit
+     → server kubectl cp verify.sh pod:/tmp/
+     → server kubectl exec -- bash /tmp/verify.sh
+     → exit 0 = PASS / 非 0 = FAIL
 ```
 
----
+## Agent 自动生成
 
-## 题目构建
-
-```bash
-cd challenges/cleanup-logs
-docker build -t registry.cn-hangzhou.aliyuncs.com/breakfix/cleanup-logs:v1 .
-docker push registry.cn-hangzhou.aliyuncs.com/breakfix/cleanup-logs:v1
-```
-
----
-
-## 提交验证
-
-`breakfix submit` 时：
-1. API Server 通过 `kubectl cp` 将 `verify.sh` 注入 Pod
-2. `kubectl exec` 运行 `verify.sh`
-3. 退出码 0 = 通过，非 0 = 失败
-4. 销毁 Pod + Namespace
+见 AGENT_WORKFLOW.md。

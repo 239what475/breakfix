@@ -10,12 +10,21 @@ import (
 )
 
 type Config struct {
-	Port         int    `yaml:"port"`
-	ProxyPort    int    `yaml:"proxy_port"`
-	DataDir      string `yaml:"data_dir"`
-	Kubeconfig   string `yaml:"kubeconfig"`
-	Registry     string `yaml:"registry"`
-	ACRNamespace string `yaml:"acr_namespace"`
+	Port         int      `yaml:"port"`
+	ProxyPort    int      `yaml:"proxy_port"`
+	DataDir      string   `yaml:"data_dir"`
+	Kubeconfig   string   `yaml:"kubeconfig"`
+	Registry     string   `yaml:"registry"`
+	ACRNamespace string   `yaml:"acr_namespace"`
+	LLM          LLMConfig `yaml:"llm"`
+}
+
+type LLMConfig struct {
+	BaseURL     string `yaml:"base_url"`
+	Model       string `yaml:"model"`
+	HaikuModel  string `yaml:"haiku_model"`
+	Effort      string `yaml:"effort"`
+	APIKey      string `yaml:"api_key"`
 }
 
 func defaults() Config {
@@ -24,6 +33,12 @@ func defaults() Config {
 		ProxyPort:    3128,
 		DataDir:      "/var/lib/breakfix",
 		ACRNamespace: "breakfix",
+		LLM: LLMConfig{
+			BaseURL:    "https://api.deepseek.com/anthropic",
+			Model:      "deepseek-v4-pro",
+			HaikuModel: "deepseek-v4-flash",
+			Effort:     "max",
+		},
 	}
 }
 

@@ -2,12 +2,12 @@
 
 ## 认证
 
-两个 gRPC 端口：
+单端口 gRPC，TLS + 可选 mTLS：
 
-| 端口 | TLS | 用途 |
+| 方法 | TLS | 客户端证书 |
 |------|------|------|
-| 9090 | 明文 | Register / Login |
-| 9533 | mTLS | 所有其他 RPC |
+| Register / Login | ✓ 服务端认证 | 不需要 |
+| 其他所有 RPC | ✓ 服务端认证 | 需要（mTLS） |
 
 ### 注册
 
@@ -16,7 +16,7 @@ CLI → Register(username, password) → Server
   → bcrypt 哈希密码
   → 生成 TOTP secret + QR 码
   → 存入 SQLite
-  → 返回 secret + QR
+  → 返回 secret + QR + CA 公钥
 ```
 
 ### 登录
@@ -26,18 +26,24 @@ CLI → Login(username, password, totp) → Server
   → 验证 bcrypt 密码
   → 验证 TOTP (pquerna/otp)
   → CA 签发 12h 客户端证书 (crypto/x509)
-  → 返回证书 + 私钥
+  → 返回证书 + 私钥 + CA 公钥
 ```
 
-### mTLS 验证
+### mTLS + 方法级拦截器
 
 ```go
-func authRequireCert(ctx, req, info, handler) {
-    peer := peer.FromContext(ctx)
-    tlsInfo := peer.AuthInfo.(credentials.TLSInfo)
+tlsConfig.ClientAuth = tls.RequestClientCert  // 请求但不强制
+
+func authInterceptor(ctx, req, info, handler) {
+    if info.FullMethod is Register or Login {
+        return handler(ctx, req)  // 放行
+    }
+    // 其他方法: 必须有客户端证书
+    p := peer.FromContext(ctx)
+    tlsInfo := p.AuthInfo.(credentials.TLSInfo)
     cert := tlsInfo.State.PeerCertificates[0]
-    subject := cert.Subject.CommonName  // "username"
-    // 查数据库确认用户存在
+    subject := cert.Subject.CommonName  // username
+    // 验证证书来源有效
     return handler(ctx, req)
 }
 ```
@@ -96,7 +102,7 @@ CREATE TABLE submissions (
 
 ```protobuf
 service Breakfix {
-    // Auth (plain port)
+    // Auth
     rpc Register (RegisterRequest) returns (RegisterResponse);
     rpc Login (LoginRequest) returns (LoginResponse);
 
@@ -114,6 +120,34 @@ service Breakfix {
 
     // Submission
     rpc SubmitChallenge (SubmitChallengeRequest) returns (SubmitChallengeResponse);
+
+    // Agent (future)
+    // rpc GenerateChallenge (GenerateChallengeRequest) returns (GenerateChallengeResponse);
+}
+
+message RegisterRequest {
+    string username = 1;
+    string password = 2;
+}
+
+message RegisterResponse {
+    string totp_secret = 1;
+    string totp_qr = 2;
+    string ca_cert = 3;          // CA 公钥 PEM
+}
+
+message LoginRequest {
+    string username = 1;
+    string password = 2;
+    string totp_code = 3;
+}
+
+message LoginResponse {
+    string user_id = 1;
+    string name = 2;
+    string client_cert = 3;
+    string client_key = 4;
+    string ca_cert = 5;          // CA 公钥 PEM
 }
 ```
 
