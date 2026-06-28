@@ -1,7 +1,6 @@
 package db
 
-import (
-)
+import ()
 
 type User struct {
 	ID           string
@@ -11,7 +10,6 @@ type User struct {
 	TOTPSecret   string
 	CreatedAt    string
 }
-
 
 func (d *DB) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (string, error) {
 	_, err := d.conn.Exec(

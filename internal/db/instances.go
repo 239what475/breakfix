@@ -35,7 +35,6 @@ func (d *DB) GetInstance(id string) (*Instance, error) {
 	return i, nil
 }
 
-
 func (d *DB) UpdateInstanceStatus(id, status string) error {
 	_, err := d.conn.Exec(
 		"UPDATE instances SET status = ? WHERE id = ?", status, id,

@@ -29,7 +29,7 @@ func main() {
 	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (:9090 auto-derived)")
 	klog.InitFlags(nil)
 	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC(), genCmd())
-	root.Execute()
+	root.Execute() //nolint:errcheck
 }
 
 // grpcDial returns a gRPC client connection using TLS.
@@ -64,7 +64,7 @@ func grpcDial() (pb.BreakfixClient, *grpc.ClientConn, error) {
 	return pb.NewBreakfixClient(conn), conn, nil
 }
 
-func saveCA(caCert string) {
+func saveCA(caCert string) { //nolint:errcheck
 	os.MkdirAll(configDir, 0700)
 	os.WriteFile(filepath.Join(configDir, "ca-cert.pem"), []byte(caCert), 0644)
 }

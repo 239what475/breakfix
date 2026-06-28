@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/breakfix/breakfix/internal/k8s"
 )
 
 // LabClient wraps the k8s client for lab pod MCP tools.

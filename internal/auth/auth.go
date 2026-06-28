@@ -38,9 +38,9 @@ func GenerateTOTPSecret(username string) (secret string, qrStr string, err error
 	}
 
 	const (
-		bgBlack = "\033[40m  \033[0m"  // black module
-		bgWhite = "\033[47m  \033[0m"  // white module
-		qz      = "\033[47m  \033[0m"  // quiet zone (white)
+		bgBlack = "\033[40m  \033[0m" // black module
+		bgWhite = "\033[47m  \033[0m" // white module
+		qz      = "\033[47m  \033[0m" // quiet zone (white)
 	)
 
 	scale := code.Size
@@ -50,15 +50,26 @@ func GenerateTOTPSecret(username string) (secret string, qrStr string, err error
 	qzCol := strings.Repeat(qz, 2)
 	qzRow := strings.Repeat(qz, scale+4)
 
-	for i := 0; i < 2; i++ { sb.WriteString(qzRow); sb.WriteByte('\n') }
+	for i := 0; i < 2; i++ {
+		sb.WriteString(qzRow)
+		sb.WriteByte('\n')
+	}
 	for y := 0; y < scale; y++ {
 		sb.WriteString(qzCol)
 		for x := 0; x < scale; x++ {
-			if code.Black(x, y) { sb.WriteString(bgBlack) } else { sb.WriteString(bgWhite) }
+			if code.Black(x, y) {
+				sb.WriteString(bgBlack)
+			} else {
+				sb.WriteString(bgWhite)
+			}
 		}
-		sb.WriteString(qzCol); sb.WriteByte('\n')
+		sb.WriteString(qzCol)
+		sb.WriteByte('\n')
 	}
-	for i := 0; i < 2; i++ { sb.WriteString(qzRow); sb.WriteByte('\n') }
+	for i := 0; i < 2; i++ {
+		sb.WriteString(qzRow)
+		sb.WriteByte('\n')
+	}
 
 	sb.WriteString(fmt.Sprintf("\nSecret: %s\n", secret))
 	return secret, sb.String(), nil

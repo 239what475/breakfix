@@ -26,4 +26,3 @@ func (d *DB) CreateSubmission(s Submission) error {
 	)
 	return err
 }
-

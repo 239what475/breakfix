@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -18,12 +18,12 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	"k8s.io/klog/v2"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/klog/v2"
 )
 
 type Server struct {
-	acrNS     string
+	acrNS string
 	pb.UnimplementedBreakfixServer
 	db            *db.DB
 	k8s           *k8s.Client
@@ -175,7 +175,6 @@ func (s *Server) getSubject(ctx context.Context) (string, error) {
 	}
 	return tlsInfo.State.PeerCertificates[0].Subject.CommonName, nil
 }
-
 
 // ── Challenges ──
 
@@ -341,7 +340,12 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		ChallengeID: inst.ChallengeID,
 		Passed:      passed,
 		ExitCode:    exitCode,
-		Output:      func(s string) string { if len(s)>2000 { return s[:2000]+"..." }; return s }(output),
+		Output: func(s string) string {
+			if len(s) > 2000 {
+				return s[:2000] + "..."
+			}
+			return s
+		}(output),
 	}
 	if err := s.db.CreateSubmission(sub); err != nil {
 		klog.ErrorS(err, "failed to save submission", "instance", inst.ID)
@@ -378,10 +382,6 @@ func (s *Server) cleanupInstance(inst *db.Instance) {
 }
 
 // ── Tag parsing ──
-
-
-
-
 
 // ── CooldownManager ──
 
@@ -433,8 +433,6 @@ func (m *CooldownManager) Cancel(instanceID string) {
 	}
 }
 
-
-
 func (m *CooldownManager) destroy(instanceID string) {
 	m.mu.Lock()
 	delete(m.timers, instanceID)
@@ -455,23 +453,23 @@ func (m *CooldownManager) Stop() {
 
 func jsonParseTags(raw string) []string {
 	var tags []string
-	json.Unmarshal([]byte(raw), &tags)
+	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+		klog.ErrorS(err, "failed to parse tags", "raw", raw)
+	}
 	return tags
 }
 
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "..."
-	}
-	return s
-}
 func (s *Server) CleanupInstance(instanceID string) {
 	inst, err := s.db.GetInstance(instanceID)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	s.cleanupInstance(inst)
 }
 
 func imageURL(image, registry, acrNS string) string {
-	if registry == "" { return image }
+	if registry == "" {
+		return image
+	}
 	return registry + "/" + acrNS + "/" + image
 }

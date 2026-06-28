@@ -33,17 +33,17 @@ func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChalleng
 	jobName := "gen-" + k8s.RandomID()
 
 	env := map[string]string{
-		"TOPIC":                           topic,
-		"REGISTRY":                        s.registry,
-		"ACR_NAMESPACE":                   s.acrNS,
-		"ANTHROPIC_BASE_URL":              s.llm.BaseURL,
-		"ANTHROPIC_AUTH_TOKEN":            s.llm.APIKey,
-		"ANTHROPIC_MODEL":                 s.llm.Model,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":    s.llm.Model,
-		"ANTHROPIC_DEFAULT_SONNET_MODEL":  s.llm.Model,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":   s.llm.HaikuModel,
-		"CLAUDE_CODE_SUBAGENT_MODEL":      s.llm.HaikuModel,
-		"CLAUDE_CODE_EFFORT_LEVEL":        s.llm.Effort,
+		"TOPIC":                          topic,
+		"REGISTRY":                       s.registry,
+		"ACR_NAMESPACE":                  s.acrNS,
+		"ANTHROPIC_BASE_URL":             s.llm.BaseURL,
+		"ANTHROPIC_AUTH_TOKEN":           s.llm.APIKey,
+		"ANTHROPIC_MODEL":                s.llm.Model,
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   s.llm.Model,
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": s.llm.Model,
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  s.llm.HaikuModel,
+		"CLAUDE_CODE_SUBAGENT_MODEL":     s.llm.HaikuModel,
+		"CLAUDE_CODE_EFFORT_LEVEL":       s.llm.Effort,
 	}
 
 	klog.InfoS("creating generator job", "job", jobName, "topic", topic)

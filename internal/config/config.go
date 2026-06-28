@@ -10,21 +10,21 @@ import (
 )
 
 type Config struct {
-	Port         int      `yaml:"port"`
-	ProxyPort    int      `yaml:"proxy_port"`
-	DataDir      string   `yaml:"data_dir"`
-	Kubeconfig   string   `yaml:"kubeconfig"`
-	Registry     string   `yaml:"registry"`
-	ACRNamespace string   `yaml:"acr_namespace"`
+	Port         int       `yaml:"port"`
+	ProxyPort    int       `yaml:"proxy_port"`
+	DataDir      string    `yaml:"data_dir"`
+	Kubeconfig   string    `yaml:"kubeconfig"`
+	Registry     string    `yaml:"registry"`
+	ACRNamespace string    `yaml:"acr_namespace"`
 	LLM          LLMConfig `yaml:"llm"`
 }
 
 type LLMConfig struct {
-	BaseURL     string `yaml:"base_url"`
-	Model       string `yaml:"model"`
-	HaikuModel  string `yaml:"haiku_model"`
-	Effort      string `yaml:"effort"`
-	APIKey      string `yaml:"api_key"`
+	BaseURL    string `yaml:"base_url"`
+	Model      string `yaml:"model"`
+	HaikuModel string `yaml:"haiku_model"`
+	Effort     string `yaml:"effort"`
+	APIKey     string `yaml:"api_key"`
 }
 
 func defaults() Config {
@@ -65,6 +65,6 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-func (c Config) CertFile() string        { return filepath.Join(c.DataDir, "ca-cert.pem") }
-func (c Config) KeyFile() string         { return filepath.Join(c.DataDir, "ca-key.pem") }
-func (c Config) ChallengesDir() string   { return filepath.Join(c.DataDir, "challenges") }
+func (c Config) CertFile() string      { return filepath.Join(c.DataDir, "ca-cert.pem") }
+func (c Config) KeyFile() string       { return filepath.Join(c.DataDir, "ca-key.pem") }
+func (c Config) ChallengesDir() string { return filepath.Join(c.DataDir, "challenges") }

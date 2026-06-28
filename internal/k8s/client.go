@@ -3,25 +3,26 @@ package k8s
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"fmt"
 	"io"
-	crand "crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"os/exec"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"os/exec"
-	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes/scheme"
-	k8sexec "k8s.io/client-go/util/exec"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
+	k8sexec "k8s.io/client-go/util/exec"
 )
 
 type Client struct {
@@ -162,7 +163,6 @@ func (c *Client) DeletePod(namespace, podName string) error {
 	return nil
 }
 
-
 // ── Exec (non-interactive) ──
 
 func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, string, error) {
@@ -192,7 +192,9 @@ func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, s
 	}
 	output := stdout.String()
 	if stderr.Len() > 0 {
-		if output != "" { output += "\n" }
+		if output != "" {
+			output += "\n"
+		}
 		output += stderr.String()
 	}
 	return exitCode, strings.TrimSpace(output), nil
@@ -206,7 +208,6 @@ func (c *Client) CopyToPod(namespace, podName, localPath, remotePath string) err
 }
 
 // ── Interactive SSH ──
-
 
 // ── Helpers ──
 
@@ -227,7 +228,6 @@ func UserNamespace(acrNS, userID string) string {
 func VerifyScriptPath(challengeDir string) string {
 	return filepath.Join(challengeDir, "verify.sh")
 }
-
 
 // ExecPTY opens a PTY session via client-go remotecommand.
 func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName string) error {
@@ -289,8 +289,8 @@ func (c *Client) CreateJob(namespace, jobName, image string, env map[string]stri
 					Containers: []corev1.Container{{
 						Name:            "generator",
 						Image:           image,
-						ImagePullPolicy:     corev1.PullIfNotPresent,
-						Env:                 envVars,
+						ImagePullPolicy: corev1.PullIfNotPresent,
+						Env:             envVars,
 					}},
 					ServiceAccountName: "breakfix-generator",
 					RestartPolicy:      corev1.RestartPolicyNever,
