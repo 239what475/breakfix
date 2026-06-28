@@ -25,6 +25,9 @@ service Breakfix {
 
     // Submission
     rpc SubmitChallenge (SubmitChallengeRequest) returns (SubmitChallengeResponse);
+
+    // Agent
+    rpc GenerateChallenge (GenerateChallengeRequest) returns (GenerateChallengeResponse);
 }
 
 // ── Auth ──
@@ -136,4 +139,16 @@ message SubmitChallengeResponse {
     bool passed = 1;
     int32 exit_code = 2;
     string output = 3;
+}
+
+// ── Agent ──
+
+message GenerateChallengeRequest {
+    string topic = 1;
+}
+
+message GenerateChallengeResponse {
+    string challenge_id = 1;
+    string status = 2;          // "success" | "failed"
+    string detail = 3;          // log output
 }

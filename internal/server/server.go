@@ -29,7 +29,8 @@ type Server struct {
 	k8s           *k8s.Client
 	cooldown      *CooldownManager
 	challengesDir string
-	registry     string
+	registry      string
+	llm           config.LLMConfig
 	ca            *ca.CA
 }
 
@@ -39,8 +40,9 @@ func New(database *db.DB, client *k8s.Client, cooldown *CooldownManager, cfg con
 		k8s:           client,
 		cooldown:      cooldown,
 		challengesDir: cfg.ChallengesDir(),
-		registry:     cfg.Registry,
-		acrNS:     cfg.ACRNamespace,
+		registry:      cfg.Registry,
+		acrNS:         cfg.ACRNamespace,
+		llm:           cfg.LLM,
 		ca:            ca,
 	}
 }

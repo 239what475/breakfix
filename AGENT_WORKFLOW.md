@@ -273,3 +273,4 @@ cmd/generator/
 - 弱模型降成本（deepseek-v4-flash 替换 pro）
 - 题目模板库（减少 Worker 生成自由度，提高成功率）
 - BuildKit 缓存层（registry type export-cache 加速重复构建）
+- K8s-native CRD 化：将题目、实例、用户建模为 K8s 自定义资源，通过 Controller 调和状态。`kubectl get challenges` 查看题库，`kubectl apply -f challenge.yaml` 创建题目，GitOps 友好，和 ACK 生态深度整合。

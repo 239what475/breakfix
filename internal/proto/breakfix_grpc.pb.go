@@ -36,6 +36,8 @@ type BreakfixClient interface {
 	ExecInstance(ctx context.Context, opts ...grpc.CallOption) (Breakfix_ExecInstanceClient, error)
 	// Submission
 	SubmitChallenge(ctx context.Context, in *SubmitChallengeRequest, opts ...grpc.CallOption) (*SubmitChallengeResponse, error)
+	// Agent
+	GenerateChallenge(ctx context.Context, in *GenerateChallengeRequest, opts ...grpc.CallOption) (*GenerateChallengeResponse, error)
 }
 
 type breakfixClient struct {
@@ -149,6 +151,15 @@ func (c *breakfixClient) SubmitChallenge(ctx context.Context, in *SubmitChalleng
 	return out, nil
 }
 
+func (c *breakfixClient) GenerateChallenge(ctx context.Context, in *GenerateChallengeRequest, opts ...grpc.CallOption) (*GenerateChallengeResponse, error) {
+	out := new(GenerateChallengeResponse)
+	err := c.cc.Invoke(ctx, "/breakfix.Breakfix/GenerateChallenge", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BreakfixServer is the server API for Breakfix service.
 // All implementations must embed UnimplementedBreakfixServer
 // for forward compatibility
@@ -167,6 +178,8 @@ type BreakfixServer interface {
 	ExecInstance(Breakfix_ExecInstanceServer) error
 	// Submission
 	SubmitChallenge(context.Context, *SubmitChallengeRequest) (*SubmitChallengeResponse, error)
+	// Agent
+	GenerateChallenge(context.Context, *GenerateChallengeRequest) (*GenerateChallengeResponse, error)
 	mustEmbedUnimplementedBreakfixServer()
 }
 
@@ -200,6 +213,9 @@ func (UnimplementedBreakfixServer) ExecInstance(Breakfix_ExecInstanceServer) err
 }
 func (UnimplementedBreakfixServer) SubmitChallenge(context.Context, *SubmitChallengeRequest) (*SubmitChallengeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitChallenge not implemented")
+}
+func (UnimplementedBreakfixServer) GenerateChallenge(context.Context, *GenerateChallengeRequest) (*GenerateChallengeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GenerateChallenge not implemented")
 }
 func (UnimplementedBreakfixServer) mustEmbedUnimplementedBreakfixServer() {}
 
@@ -384,6 +400,24 @@ func _Breakfix_SubmitChallenge_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Breakfix_GenerateChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GenerateChallengeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BreakfixServer).GenerateChallenge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/breakfix.Breakfix/GenerateChallenge",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BreakfixServer).GenerateChallenge(ctx, req.(*GenerateChallengeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Breakfix_ServiceDesc is the grpc.ServiceDesc for Breakfix service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -422,6 +456,10 @@ var Breakfix_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitChallenge",
 			Handler:    _Breakfix_SubmitChallenge_Handler,
+		},
+		{
+			MethodName: "GenerateChallenge",
+			Handler:    _Breakfix_GenerateChallenge_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -28,7 +28,7 @@ func main() {
 	root := &cobra.Command{Use: "breakfix", Short: "Breakfix - SRE/DevOps interview practice platform"}
 	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (:9090 auto-derived)")
 	klog.InitFlags(nil)
-	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC())
+	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC(), genCmd())
 	root.Execute()
 }
 
@@ -200,3 +200,18 @@ func statC() *cobra.Command { return &cobra.Command{Use: "status", Short: "Statu
 	fmt.Printf("Instance: %s Status: %d\n", r.InstanceId, r.Status)
 	return nil
 }}}
+
+func genCmd() *cobra.Command {
+	var topic string
+	c := &cobra.Command{Use: "generate", Short: "Generate a challenge via agent", RunE: func(cmd *cobra.Command, args []string) error {
+		c, conn, err := grpcDial(); if err != nil { return err }; defer conn.Close()
+		fmt.Printf("Generating challenge for: %s\n", topic)
+		r, err := c.GenerateChallenge(context.Background(), &pb.GenerateChallengeRequest{Topic: topic})
+		if err != nil { return err }
+		fmt.Printf("Status: %s\n", r.Status)
+		if r.Detail != "" { fmt.Println(r.Detail) }
+		return nil
+	}}
+	c.Flags().StringVar(&topic, "topic", "", "Challenge topic description")
+	return c
+}

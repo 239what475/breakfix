@@ -98,7 +98,7 @@ deploy-reset: deploy-cleanup _guard-server
 # Local dev
 # ═══════════════════════════════════════════════════════════════
 
-dev: dev-registry dev-data dev-images dev-build dev-start dev-status
+dev: dev-registry dev-data dev-rbac dev-images dev-build dev-start dev-status
 	@echo ""
 	@echo "══════════════════════════════════════"
 	@echo "  Breakfix dev environment ready"
@@ -116,6 +116,19 @@ dev-data:
 	@mkdir -p data
 	@[ -L data/challenges ] || ln -s ../challenges data/challenges
 	@echo "  ✓ Data dir ready"
+
+dev-rbac:
+	@kubectl create ns breakfix-gen --dry-run=client -o yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 || true
+	@kubectl create sa breakfix-generator -n breakfix-gen --dry-run=client -o yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 || true
+	@kubectl create role breakfix-generator -n breakfix-gen \
+		--verb=create,get,list,delete \
+		--resource=pods,pods/exec,pods/log,namespaces \
+		--dry-run=client -o yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 || true
+	@kubectl create rolebinding breakfix-generator -n breakfix-gen \
+		--role=breakfix-generator \
+		--serviceaccount=breakfix-gen:breakfix-generator \
+		--dry-run=client -o yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1 || true
+	@echo "  ✓ Generator RBAC ready"
 
 dev-images:
 	@for d in challenges/*/; do \
@@ -203,33 +216,26 @@ docker-push:
 # Generator (agent workflow)
 # ═══════════════════════════════════════════════════════════════
 
-generator-dev:
+generator-dev: dev-rbac
 	@[ -f breakfix-local.yaml ] || { echo "ERROR: breakfix-local.yaml not found. Run: make dev-build"; exit 1; }
-	go build -o bin/generator ./cmd/generator
-	@mkdir -p data/challenges
-	@REGISTRY=$$(grep '^registry:' breakfix-local.yaml | awk '{print $$2}'); \
-	ACR_NS=$$(grep '^acr_namespace:' breakfix-local.yaml | awk '{print $$2}'); \
-	BASE_URL=$$(grep 'base_url:' breakfix-local.yaml | awk '{print $$2}'); \
-	MODEL=$$(grep '  model:' breakfix-local.yaml | awk '{print $$2}'); \
-	HAIKU=$$(grep 'haiku_model:' breakfix-local.yaml | awk '{print $$2}'); \
-	EFFORT=$$(grep 'effort:' breakfix-local.yaml | awk '{print $$2}'); \
-	API_KEY=$$(grep 'api_key:' breakfix-local.yaml | awk '{print $$2}'); \
-	KUBECONFIG=$${HOME}/.kube/config \
-	ANTHROPIC_BASE_URL=$$BASE_URL \
-	ANTHROPIC_AUTH_TOKEN=$$API_KEY \
-	ANTHROPIC_MODEL=$$MODEL \
-	ANTHROPIC_DEFAULT_OPUS_MODEL=$$MODEL \
-	ANTHROPIC_DEFAULT_SONNET_MODEL=$$MODEL \
-	ANTHROPIC_DEFAULT_HAIKU_MODEL=$$HAIKU \
-	CLAUDE_CODE_SUBAGENT_MODEL=$$HAIKU \
-	CLAUDE_CODE_EFFORT_LEVEL=$$EFFORT \
-	REGISTRY=$$REGISTRY \
-	ACR_NAMESPACE=$$ACR_NS \
-	./bin/generator --topic "$(TOPIC)"
-	@echo "  ✓ Challenge generated in data/challenges/"
+	CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/generator ./cmd/generator
+	docker build -t breakfix-generator:latest -f Dockerfile.generator .
+	kind load docker-image breakfix-generator:latest --name $(KIND_CLUSTER)
+	go build -o bin/breakfix-api ./cmd/server
+	@pkill breakfix-api 2>/dev/null || true
+	@sleep 0.5
+	@./bin/breakfix-api -config breakfix-local.yaml >/tmp/breakfix-api.log 2>&1 &
+	@sleep 2
+	@grep -q "listening" /tmp/breakfix-api.log || { echo "  ✗ Server failed"; tail -5 /tmp/breakfix-api.log; exit 1; }
+	@kubectl delete jobs -n breakfix-gen --all 2>/dev/null || true
+	@kubectl delete pods -n breakfix-gen --all 2>/dev/null || true
+	@echo "  ✓ Generator + server ready"
+
+generator-run:
+	./bin/breakfix-cli generate --topic "$(TOPIC)"
 
 generator-image:
-	docker build -t breakfix-generator:latest ./cmd/generator
+	docker build -t breakfix-generator:latest -f Dockerfile.generator .
 	@echo "  ✓ Generator image built"
 
 # ═══════════════════════════════════════════════════════════════

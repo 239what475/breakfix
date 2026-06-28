@@ -30,8 +30,9 @@ import (
 
 // Methods that don't require a client certificate.
 var allowAnon = map[string]bool{
-	"/breakfix.Breakfix/Register": true,
-	"/breakfix.Breakfix/Login":    true,
+	"/breakfix.Breakfix/Register":          true,
+	"/breakfix.Breakfix/Login":             true,
+	"/breakfix.Breakfix/GenerateChallenge": true,
 }
 
 func main() {
