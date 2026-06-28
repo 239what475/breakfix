@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"k8s.io/klog/v2"
+	"log/slog"
 
 	"github.com/breakfix/breakfix/internal/k8s"
 )
@@ -32,7 +32,7 @@ type Generator struct {
 func (g *Generator) Run(ctx context.Context) error {
 	g.workDir = filepath.Join(g.OutputDir, ".gen-"+sanitizeID(g.Topic))
 	if err := os.RemoveAll(g.workDir); err != nil {
-		klog.ErrorS(err, "failed to clean workdir", "dir", g.workDir)
+		slog.Error("failed to clean workdir", "err", err, "dir", g.workDir)
 	}
 	g.challengeID = sanitizeID(g.Topic)
 	chalDir := filepath.Join(g.workDir, g.challengeID)
@@ -40,7 +40,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		return fmt.Errorf("create challenge dir: %w", err)
 	}
 
-	klog.InfoS("generator started", "topic", g.Topic, "challengeID", g.challengeID)
+	slog.Info("generator started", "topic", g.Topic, "challengeID", g.challengeID)
 
 	k8sClient, err := k8s.New(g.Kubeconfig)
 	if err != nil {
@@ -50,23 +50,23 @@ func (g *Generator) Run(ctx context.Context) error {
 	labTools := labClient.Tools()
 
 	for round := 0; round < 5; round++ {
-		klog.InfoS("round", "n", round+1)
+		slog.Info("round", "n", round+1)
 
 		if err := g.phaseGenerate(ctx, chalDir, labTools); err != nil {
-			klog.ErrorS(err, "phase1 failed", "round", round+1)
+			slog.Error("phase1 failed", "err", err, "round", round+1)
 			continue
 		}
 
 		if !g.phaseJudge(ctx, chalDir) {
-			klog.InfoS("phase2: FAIL, retrying", "round", round+1)
+			slog.Info("phase2: FAIL, retrying", "round", round+1)
 			continue
 		}
-		klog.InfoS("phase2: PASS")
+		slog.Info("phase2: PASS")
 
 		if g.phaseVerify(ctx, chalDir) {
 			return g.finalize(chalDir)
 		}
-		klog.InfoS("phase3: FAIL, retrying", "round", round+1)
+		slog.Info("phase3: FAIL, retrying", "round", round+1)
 	}
 
 	return fmt.Errorf("exceeded max rounds for topic: %s", g.Topic)
@@ -127,7 +127,7 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) bool {
 		claudecode.WithPermissionMode("bypassPermissions"),
 	)
 	if err != nil {
-		klog.ErrorS(err, "create judge agent")
+		slog.Error("create judge agent", "err", err)
 		return false
 	}
 
@@ -164,7 +164,7 @@ func (g *Generator) phaseVerify(ctx context.Context, chalDir string) bool {
 
 	k8sClient, err := k8s.New(g.Kubeconfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "k8s client: %v\n", err)
+		slog.Error("k8s client", "err", err)
 		return false
 	}
 	ns := "breakfix-verify"
@@ -174,55 +174,55 @@ func (g *Generator) phaseVerify(ctx context.Context, chalDir string) bool {
 	k8sClient.EnsureNamespace(ns)
 
 	if err := k8sClient.CreatePod(ns, podName, imageName, "", ""); err != nil {
-		fmt.Fprintf(os.Stderr, "create pod: %v\n", err)
+		slog.Error("create verify pod", "err", err)
 		return false
 	}
 	//nolint:errcheck // defer cleanup
 	defer k8sClient.DeletePod(ns, podName)
 
 	if err := k8sClient.WaitForPod(ns, podName); err != nil {
-		fmt.Fprintf(os.Stderr, "wait pod: %v\n", err)
+		slog.Error("wait verify pod", "err", err)
 		return false
 	}
 
 	answerPath := filepath.Join(chalDir, "answer.sh")
 	if err := k8sClient.CopyToPod(ns, podName, answerPath, "/tmp/answer.sh"); err != nil {
-		fmt.Fprintf(os.Stderr, "copy answer.sh: %v\n", err)
+		slog.Error("copy answer.sh", "err", err)
 		return false
 	}
 	ansExit, ansOut, err := k8sClient.ExecInPod(ns, podName, "bash", "/tmp/answer.sh")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "answer.sh exec: %v\n", err)
+		slog.Error("exec answer.sh", "err", err)
 		return false
 	}
 	if ansExit != 0 {
-		fmt.Fprintf(os.Stderr, "answer.sh failed (exit=%d): %s\n", ansExit, ansOut)
+		slog.Error("answer.sh failed", "exit", ansExit, "output", ansOut)
 		return false
 	}
 
 	verifyPath := filepath.Join(chalDir, "verify.sh")
 	if err := k8sClient.CopyToPod(ns, podName, verifyPath, "/tmp/verify.sh"); err != nil {
-		fmt.Fprintf(os.Stderr, "copy verify.sh: %v\n", err)
+		slog.Error("copy verify.sh", "err", err)
 		return false
 	}
 	exitCode, output, err := k8sClient.ExecInPod(ns, podName, "bash", "/tmp/verify.sh")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "verify exec: %v\n", err)
+		slog.Error("exec verify.sh", "err", err)
 		return false
 	}
 
 	if exitCode == 0 {
-		fmt.Printf("  ✓ Verification PASSED\n")
+		slog.Info("verification PASSED")
 		return true
 	}
-	fmt.Fprintf(os.Stderr, "  ✗ Verification FAILED (exit=%d): %s\n", exitCode, output)
+	slog.Error("verification FAILED", "exit", exitCode, "output", output)
 	return false
 }
 
 func (g *Generator) finalize(chalDir string) error {
 	dst := filepath.Join(g.OutputDir, g.challengeID)
 	if err := os.RemoveAll(dst); err != nil {
-		klog.ErrorS(err, "failed to clean output", "dir", dst)
+		slog.Error("failed to clean output", "err", err, "dir", dst)
 	}
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
@@ -235,17 +235,17 @@ func (g *Generator) finalize(chalDir string) error {
 		}
 		data, err := os.ReadFile(filepath.Join(chalDir, e.Name()))
 		if err != nil {
-			klog.ErrorS(err, "failed to read generated file", "name", e.Name())
+			slog.Error("failed to read generated file", "err", err, "name", e.Name())
 			continue
 		}
 		//nolint:gosec // challenge files are public
 		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0644); err != nil {
-			klog.ErrorS(err, "failed to write output file", "name", e.Name())
+			slog.Error("failed to write output file", "err", err, "name", e.Name())
 		}
 	}
 
 	fmt.Println(g.challengeID)
-	klog.InfoS("challenge finalized", "id", g.challengeID, "dir", dst)
+	slog.Info("challenge finalized", "id", g.challengeID, "dir", dst)
 	return nil
 }
 

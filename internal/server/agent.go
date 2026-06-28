@@ -7,7 +7,7 @@ import (
 	"time"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
-	"k8s.io/klog/v2"
+	"log/slog"
 
 	"github.com/breakfix/breakfix/internal/k8s"
 )
@@ -46,7 +46,7 @@ func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChalleng
 		"CLAUDE_CODE_EFFORT_LEVEL":       s.llm.Effort,
 	}
 
-	klog.InfoS("creating generator job", "job", jobName, "topic", topic)
+	slog.Info("creating generator job", "job", jobName, "topic", topic)
 
 	if err := s.k8s.CreateJob(generatorNS, jobName, generatorImage, env); err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
@@ -61,20 +61,20 @@ func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChalleng
 	if podName != "" {
 		go func() {
 			if err := s.k8s.DeletePod(generatorNS, podName); err != nil {
-				klog.ErrorS(err, "failed to cleanup generator pod")
+				slog.Error("failed to cleanup generator pod", "err", err)
 			}
 		}()
 	}
 
 	if err != nil {
-		klog.ErrorS(err, "job failed", "job", jobName, "logs", logs)
+		slog.Error("job failed", "err", err, "job", jobName, "logs", logs)
 		return &pb.GenerateChallengeResponse{Status: "failed", Detail: err.Error() + "\n" + logs}, nil
 	}
 	if !ok {
 		return &pb.GenerateChallengeResponse{Status: "failed", Detail: "job did not succeed\n" + logs}, nil
 	}
 
-	klog.InfoS("job completed", "job", jobName, "pod", podName)
+	slog.Info("job completed", "job", jobName, "pod", podName)
 	return &pb.GenerateChallengeResponse{
 		Status: "success",
 		Detail: fmt.Sprintf("job %s completed\n%s", jobName, logs),

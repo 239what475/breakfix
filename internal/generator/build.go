@@ -2,7 +2,7 @@ package generator
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +16,7 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string) bool {
 	buildCmd.Env = os.Environ()
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "docker build failed: %v\n%s\n", err, string(output))
+		slog.Error("docker build failed", "err", err, "output", string(output))
 		return false
 	}
 
@@ -24,7 +24,7 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string) bool {
 	pushCmd.Env = os.Environ()
 	pushOutput, pushErr := pushCmd.CombinedOutput()
 	if pushErr != nil {
-		fmt.Fprintf(os.Stderr, "docker push failed: %v\n%s\n", pushErr, string(pushOutput))
+		slog.Error("docker push failed", "err", pushErr, "output", string(pushOutput))
 		return false
 	}
 
@@ -37,10 +37,10 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string) bool {
 	loadCmd.Env = os.Environ()
 	loadOutput, loadErr := loadCmd.CombinedOutput()
 	if loadErr != nil {
-		fmt.Fprintf(os.Stderr, "kind load failed: %v\n%s\n", loadErr, string(loadOutput))
+		slog.Error("kind load failed", "err", loadErr, "output", string(loadOutput))
 		return false
 	}
 
-	fmt.Printf("  ✓ Image built, pushed, and loaded into Kind: %s\n", imageName)
+	slog.Info("image built, pushed, and loaded into Kind", "image", imageName)
 	return true
 }

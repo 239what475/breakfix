@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"k8s.io/klog/v2"
+	"log/slog"
 )
 
 var serverAddr, configDir string
@@ -28,7 +28,6 @@ func main() {
 	configDir = filepath.Join(home, ".breakfix")
 	root := &cobra.Command{Use: "breakfix", Short: "Breakfix - SRE/DevOps interview practice platform"}
 	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (:9090 auto-derived)")
-	klog.InitFlags(nil)
 	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC(), genCmd())
 	root.Execute() //nolint:errcheck
 }
@@ -67,17 +66,17 @@ func grpcDial() (pb.BreakfixClient, *grpc.ClientConn, error) {
 
 func saveCA(caCert string) {
 	if err := os.MkdirAll(configDir, 0700); err != nil {
-		klog.ErrorS(err, "mkdir config dir")
+		slog.Error("mkdir config dir", "err", err)
 		return
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "ca-cert.pem"), []byte(caCert), 0644); err != nil {
-		klog.ErrorS(err, "write ca cert")
+		slog.Error("write ca cert", "err", err)
 	}
 }
 
 func closeConn(conn *grpc.ClientConn) {
 	if err := conn.Close(); err != nil {
-		klog.V(3).InfoS("close conn", "err", err)
+		slog.Debug("close conn", "err", err)
 	}
 }
 

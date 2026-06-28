@@ -1,28 +1,27 @@
-// Command generator produces breakfix challenges from a topic.
-// It runs the 3-phase agent workflow: Generate → Judge → Verify.
 package main
 
 import (
 	"context"
 	"flag"
+	"log/slog"
 	"os"
-
-	"k8s.io/klog/v2"
 
 	"github.com/breakfix/breakfix/internal/generator"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
 	topic := flag.String("topic", "", "Challenge topic")
 	outputDir := flag.String("output", "data/challenges", "Output directory")
-	klog.InitFlags(nil)
 	flag.Parse()
 
 	if *topic == "" {
 		*topic = os.Getenv("TOPIC")
 	}
 	if *topic == "" {
-		klog.Fatal("--topic is required")
+		slog.Error("--topic is required")
+		os.Exit(1)
 	}
 
 	g := &generator.Generator{
@@ -34,7 +33,8 @@ func main() {
 	}
 
 	if err := g.Run(context.Background()); err != nil {
-		klog.Fatal(err)
+		slog.Error("generator failed", "err", err)
+		os.Exit(1)
 	}
 }
 

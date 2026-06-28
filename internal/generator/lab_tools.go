@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ func (t *labCreateTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	for _, p := range oldPods {
 		if strings.HasPrefix(p, "lab-") {
 			if err := t.lc.K8s.DeletePod(ns, p); err != nil {
-				fmt.Fprintf(os.Stderr, "cleanup old lab pod %s: %v\n", p, err)
+				slog.Error("cleanup old lab pod", "pod", p, "err", err)
 			}
 		}
 	}
@@ -191,7 +192,7 @@ func (t *labDestroyTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		return "", err
 	}
 	if err := t.lc.K8s.DeleteNamespace(t.lc.Namespace); err != nil {
-		fmt.Fprintf(os.Stderr, "delete lab namespace %s: %v\n", t.lc.Namespace, err)
+		slog.Error("delete lab namespace", "ns", t.lc.Namespace, "err", err)
 	}
 	return "destroyed", nil
 }

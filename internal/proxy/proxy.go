@@ -8,7 +8,7 @@ import (
 
 	"github.com/elazarl/goproxy"
 	"golang.org/x/time/rate"
-	"k8s.io/klog/v2"
+	"log/slog"
 )
 
 const bytesPerSec = 131072 // 1 Mb/s per connection (128 KB/s)
@@ -16,22 +16,24 @@ const bytesPerSec = 131072 // 1 Mb/s per connection (128 KB/s)
 // Start runs an HTTP forward proxy with logging and per-connection bandwidth limits.
 func Start(port int) {
 	p := goproxy.NewProxyHttpServer()
-	p.Logger = klogWriter{}
+	p.Logger = slogWriter{}
 	p.OnResponse().DoFunc(func(r *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		if r.Body != nil {
 			r.Body = &limitedReadCloser{r.Body, rate.NewLimiter(rate.Limit(bytesPerSec), bytesPerSec)}
 		}
 		return r
 	})
-	klog.InfoS("proxy listening", "port", port)
+	slog.Info("proxy listening", "port", port)
 	//nolint:gosec // proxy is internal
-	klog.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), p))
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), p); err != nil {
+		slog.Error("proxy serve error", "err", err)
+	}
 }
 
-type klogWriter struct{}
+type slogWriter struct{}
 
-func (w klogWriter) Printf(format string, args ...any) {
-	klog.V(2).Infof(format, args...)
+func (w slogWriter) Printf(format string, args ...any) {
+	slog.Debug(fmt.Sprintf(format, args...))
 }
 
 type limitedReadCloser struct {

@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/klog/v2"
+	"log/slog"
 )
 
 type Server struct {
@@ -82,7 +82,7 @@ func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.Reg
 		return nil, status.Error(codes.Internal, "failed to create user")
 	}
 
-	klog.InfoS("user registered", "user", username)
+	slog.Info("user registered", "user", username)
 
 	return &pb.RegisterResponse{
 		TotpSecret: secret,
@@ -114,7 +114,7 @@ func (s *Server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResp
 		return nil, status.Error(codes.Internal, "failed to issue certificate")
 	}
 
-	klog.InfoS("user logged in", "user", req.Username)
+	slog.Info("user logged in", "user", req.Username)
 
 	return &pb.LoginResponse{
 		UserId:     user.ID,
@@ -152,7 +152,7 @@ func (s *Server) ExecInstance(stream pb.Breakfix_ExecInstanceServer) error {
 		return status.Error(codes.PermissionDenied, "not your instance")
 	}
 
-	klog.InfoS("pty session started", "instance", instanceID, "user", subject)
+	slog.Info("pty session started", "instance", instanceID, "user", subject)
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
 	rw := &pty.ReadWriter{Stream: stream, Resize: resizeCh}
@@ -247,7 +247,7 @@ func (s *Server) StartChallenge(ctx context.Context, req *pb.StartChallengeReque
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	klog.InfoS("instance started", "instance", instanceID, "user", user.ID, "challenge", challenge.ID)
+	slog.Info("instance started", "instance", instanceID, "user", user.ID, "challenge", challenge.ID)
 
 	return &pb.StartChallengeResponse{
 		InstanceId:     instanceID,
@@ -286,9 +286,9 @@ func (s *Server) PingInstance(ctx context.Context, req *pb.PingInstanceRequest) 
 	s.cooldown.Cancel(req.InstanceId)
 	if inst.Status == "draining" {
 		if err := s.db.UpdateInstanceStatus(req.InstanceId, "running"); err != nil {
-			klog.ErrorS(err, "failed to update instance status", "instance", req.InstanceId, "status", "running")
+			slog.Error("failed to update instance status", "err", err, "instance", req.InstanceId, "status", "running")
 		}
-		klog.V(2).InfoS("instance revived via ping", "instance", req.InstanceId)
+		slog.Debug("instance revived via ping", "instance", req.InstanceId)
 	}
 	return &pb.PingInstanceResponse{Status: pb.InstanceStatus_RUNNING}, nil
 }
@@ -348,7 +348,7 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 		}(output),
 	}
 	if err := s.db.CreateSubmission(sub); err != nil {
-		klog.ErrorS(err, "failed to save submission", "instance", inst.ID)
+		slog.Error("failed to save submission", "err", err, "instance", inst.ID)
 	}
 
 	s.cooldown.Cancel(req.InstanceId)
@@ -358,7 +358,7 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 	if passed {
 		result = "PASSED"
 	}
-	klog.InfoS("submit result", "instance", req.InstanceId, "result", result, "exit", exitCode)
+	slog.Info("submit result", "instance", req.InstanceId, "result", result, "exit", exitCode)
 
 	return &pb.SubmitChallengeResponse{
 		Passed:   passed,
@@ -371,13 +371,13 @@ func (s *Server) SubmitChallenge(ctx context.Context, req *pb.SubmitChallengeReq
 
 func (s *Server) cleanupInstance(inst *db.Instance) {
 	if err := s.k8s.DeletePod(inst.Namespace, inst.PodName); err != nil {
-		klog.ErrorS(err, "failed to delete pod", "namespace", inst.Namespace, "pod", inst.PodName)
+		slog.Error("failed to delete pod", "err", err, "namespace", inst.Namespace, "pod", inst.PodName)
 	}
 	if err := s.k8s.DeleteNamespace(inst.Namespace); err != nil {
-		klog.ErrorS(err, "failed to delete namespace", "namespace", inst.Namespace)
+		slog.Error("failed to delete namespace", "err", err, "namespace", inst.Namespace)
 	}
 	if err := s.db.DestroyInstance(inst.ID); err != nil {
-		klog.ErrorS(err, "failed to destroy instance record", "instance", inst.ID)
+		slog.Error("failed to destroy instance record", "err", err, "instance", inst.ID)
 	}
 }
 
@@ -416,9 +416,9 @@ func (m *CooldownManager) StartDraining(instanceID string) {
 		t.Stop()
 	}
 	if err := m.db.UpdateInstanceStatus(instanceID, "draining"); err != nil {
-		klog.ErrorS(err, "failed to update instance status", "instance", instanceID, "status", "draining")
+		slog.Error("failed to update instance status", "err", err, "instance", instanceID, "status", "draining")
 	}
-	klog.V(1).InfoS("instance draining", "instance", instanceID, "cooldown", "5min")
+	slog.Debug("instance draining", "instance", instanceID, "cooldown", "5min")
 	m.timers[instanceID] = time.AfterFunc(5*time.Minute, func() {
 		m.destroy(instanceID)
 	})
@@ -438,7 +438,7 @@ func (m *CooldownManager) destroy(instanceID string) {
 	delete(m.timers, instanceID)
 	m.mu.Unlock()
 
-	klog.InfoS("cooldown expired, destroying instance", "instance", instanceID)
+	slog.Info("cooldown expired, destroying instance", "instance", instanceID)
 	m.cleanupFn(instanceID)
 }
 
@@ -454,7 +454,7 @@ func (m *CooldownManager) Stop() {
 func jsonParseTags(raw string) []string {
 	var tags []string
 	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
-		klog.ErrorS(err, "failed to parse tags", "raw", raw)
+		slog.Error("failed to parse tags", "err", err, "raw", raw)
 	}
 	return tags
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -23,12 +24,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	"k8s.io/klog/v2"
 
 	pb "github.com/breakfix/breakfix/internal/proto"
 )
 
-// Methods that don't require a client certificate.
 var allowAnon = map[string]bool{
 	"/breakfix.Breakfix/Register":          true,
 	"/breakfix.Breakfix/Login":             true,
@@ -36,49 +35,57 @@ var allowAnon = map[string]bool{
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	configPath := flag.String("config", "breakfix.yaml", "Config file path")
-	klog.InitFlags(nil)
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		klog.Fatalf("Failed to load config: %v", err)
+		slog.Error("failed to load config", "err", err)
+		os.Exit(1)
 	}
 	_ = os.MkdirAll(cfg.DataDir, 0700)
 
-	klog.InfoS("Breakfix API Server starting", "version", build.Version, "data_dir", cfg.DataDir)
+	slog.Info("Breakfix API Server starting", "version", build.Version, "data_dir", cfg.DataDir)
 
 	database, err := db.New(filepath.Join(cfg.DataDir, "breakfix.db"))
 	if err != nil {
-		klog.Fatalf("Failed to open database: %v", err)
+		slog.Error("failed to open database", "err", err)
+		os.Exit(1)
 	}
 	defer func() { _ = database.Close() }()
 
 	challengesDir := filepath.Join(cfg.DataDir, "challenges")
 	if err := os.MkdirAll(challengesDir, 0755); err != nil {
-		klog.Errorf("failed to create challenges dir: %v", err)
+		slog.Error("failed to create challenges dir", "err", err)
 	}
 	if err := challenge.SyncChallenges(database, challengesDir); err != nil {
-		klog.Fatalf("Failed to sync challenges: %v", err)
+		slog.Error("failed to sync challenges", "err", err)
+		os.Exit(1)
 	}
 
 	caCert, err := ca.LoadOrCreate(cfg.CertFile(), cfg.KeyFile())
 	if err != nil {
-		klog.Fatalf("Failed to load CA: %v", err)
+		slog.Error("failed to load CA", "err", err)
+		os.Exit(1)
 	}
 
 	serverCert, serverKey, err := caCert.ServerCert()
 	if err != nil {
-		klog.Fatalf("Failed to generate server cert: %v", err)
+		slog.Error("failed to generate server cert", "err", err)
+		os.Exit(1)
 	}
 	tlsConfig, err := caCert.TLSConfig(serverCert, serverKey)
 	if err != nil {
-		klog.Fatalf("Failed to create TLS config: %v", err)
+		slog.Error("failed to create TLS config", "err", err)
+		os.Exit(1)
 	}
 
 	k8sClient, err := k8s.New(cfg.Kubeconfig)
 	if err != nil {
-		klog.Fatalf("Failed to create K8s client: %v", err)
+		slog.Error("failed to create K8s client", "err", err)
+		os.Exit(1)
 	}
 
 	cooldown := server.NewCooldownManager(database, k8sClient, nil)
@@ -93,7 +100,8 @@ func main() {
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 	if err != nil {
-		klog.Fatalf("port %d: %v", cfg.Port, err)
+		slog.Error("failed to listen", "port", cfg.Port, "err", err)
+		os.Exit(1)
 	}
 
 	go proxy.Start(cfg.ProxyPort)
@@ -102,18 +110,17 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
-		klog.InfoS("shutting down")
+		slog.Info("shutting down")
 		cooldown.Stop()
 		grpcServer.GracefulStop()
 	}()
 
-	klog.InfoS("listening", "port", cfg.Port, "proxy", cfg.ProxyPort)
+	slog.Info("listening", "port", cfg.Port, "proxy", cfg.ProxyPort)
 	if err := grpcServer.Serve(lis); err != nil {
-		klog.Errorf("grpc serve: %v", err)
+		slog.Error("grpc serve error", "err", err)
 	}
 }
 
-// authInterceptor checks client certificate for non-auth methods.
 func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	if allowAnon[info.FullMethod] {
 		return handler(ctx, req)
