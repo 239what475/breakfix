@@ -15,7 +15,8 @@ type Config struct {
 	DataDir      string    `yaml:"data_dir"`
 	Kubeconfig   string    `yaml:"kubeconfig"`
 	Registry     string    `yaml:"registry"`
-	Namespace string `yaml:"acr_namespace"`
+	ServerHost string `yaml:"server_host"`
+	Namespace  string `yaml:"acr_namespace"`
 	LLM          LLMConfig `yaml:"llm"`
 }
 

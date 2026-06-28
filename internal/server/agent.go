@@ -13,10 +13,16 @@ import (
 )
 
 const (
-	generatorImage = "breakfix-generator:latest"
-	generatorNS    = "breakfix-gen"
-	jobTimeout     = 15 * time.Minute
+	generatorNS = "breakfix-gen"
+	jobTimeout  = 15 * time.Minute
 )
+
+func (s *Server) generatorImage() string {
+	if s.registry == "" {
+		return "breakfix-generator:latest"
+	}
+	return s.registry + "/" + s.namespace + "/breakfix-generator:latest"
+}
 
 // GenerateChallenge creates a K8s Job to run the agent workflow.
 func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChallengeRequest) (*pb.GenerateChallengeResponse, error) {
@@ -48,7 +54,7 @@ func (s *Server) GenerateChallenge(ctx context.Context, req *pb.GenerateChalleng
 
 	slog.Info("creating generator job", "job", jobName, "topic", topic)
 
-	if err := s.k8s.CreateJob(generatorNS, jobName, generatorImage, env); err != nil {
+	if err := s.k8s.CreateJob(generatorNS, jobName, s.generatorImage(), env); err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
 	}
 

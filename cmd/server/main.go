@@ -67,7 +67,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	serverCert, serverKey, err := caCert.ServerCert()
+	host := cfg.ServerHost
+	if host == "" {
+		host = os.Getenv("SERVER_HOST")
+	}
+	serverCert, serverKey, err := caCert.ServerCert(host)
 	if err != nil {
 		slog.Error("failed to generate server cert", "err", err)
 		os.Exit(1)

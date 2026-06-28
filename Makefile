@@ -1,5 +1,5 @@
 .PHONY: build build-server build-cli \
-        deploy deploy-server deploy-config deploy-image deploy-images deploy-cleanup deploy-reset \
+        deploy deploy-server deploy-config deploy-image deploy-images deploy-generator deploy-cleanup deploy-reset \
         dev dev-build dev-server dev-cli dev-down dev-reset \
         lint proto clean status logs \
         docker-challenge docker-push
@@ -51,7 +51,7 @@ _guard-server:
 		exit 1; \
 	fi
 
-deploy: deploy-images deploy-server
+deploy: deploy-generator deploy-images deploy-server
 
 deploy-server: build-server _guard-server
 	scp dist/breakfix-api-linux-amd64 $(SERVER):/tmp/breakfix-api
@@ -235,8 +235,20 @@ generator-run:
 	./bin/breakfix-cli generate --topic "$(TOPIC)"
 
 generator-image:
+	CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/generator ./cmd/generator
 	docker build -t breakfix-generator:latest -f Dockerfile.generator .
 	@echo "  ✓ Generator image built"
+
+deploy-generator: _guard-server generator-image
+	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000" ]; then \
+		echo "  ✗ Registry not configured. Skipping."; exit 1; \
+	fi; \
+	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
+	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
+	docker tag breakfix-generator:latest $$pub/$$acr_ns/breakfix-generator:latest; \
+	docker push $$pub/$$acr_ns/breakfix-generator:latest
+	@echo "  ✓ Generator image pushed to ACR"
 
 # ═══════════════════════════════════════════════════════════════
 # Lint / Proto / Ops

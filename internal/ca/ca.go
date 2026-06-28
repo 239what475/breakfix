@@ -126,11 +126,23 @@ func (ca *CA) TLSConfig(serverCert, serverKey []byte) (*tls.Config, error) {
 	}, nil
 }
 
-func (ca *CA) ServerCert() (certPEM, keyPEM []byte, err error) {
+func (ca *CA) ServerCert(hosts ...string) (certPEM, keyPEM []byte, err error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	dnsNames := []string{"localhost"}
+	ips := []net.IP{net.ParseIP("127.0.0.1")}
+
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dnsNames = append(dnsNames, h)
+		}
+	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: "localhost"},
@@ -138,8 +150,8 @@ func (ca *CA) ServerCert() (certPEM, keyPEM []byte, err error) {
 		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     dnsNames,
+		IPAddresses:  ips,
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
 	if err != nil {
