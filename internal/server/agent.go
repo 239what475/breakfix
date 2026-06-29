@@ -14,7 +14,7 @@ import (
 
 const (
 	generatorNS = "breakfix-gen"
-	jobTimeout  = 15 * time.Minute
+	jobTimeout  = 1 * time.Hour
 )
 
 func (s *Server) generatorImage() string {
