@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
+import QRCode from 'qrcode'
 import { api, setToken } from '../composables/useApi'
 import { useToast } from '../composables/toast'
 
@@ -21,6 +22,14 @@ const totp = ref('')
 const loading = ref(false)
 const totpSecret = ref('')
 const totpUrl = ref('')
+const qrCanvas = ref<HTMLCanvasElement>()
+
+watch(totpUrl, async (url) => {
+  await nextTick()
+  if (qrCanvas.value && url) {
+    await QRCode.toCanvas(qrCanvas.value, url, { width: 160 })
+  }
+})
 
 watch(() => props.show, (v) => {
   if (!v) { username.value = ''; password.value = ''; totp.value = ''; totpSecret.value = ''; totpUrl.value = ''; loading.value = false }
@@ -101,8 +110,7 @@ function switchToLogin() {
                 <p class="text-white font-mono text-xs break-all">{{ totpSecret }}</p>
               </div>
               <div class="flex justify-center">
-                <img :src="`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(totpUrl)}`"
-                  width="160" height="160" alt="TOTP QR" class="bg-white p-1.5 rounded" />
+                <canvas ref="qrCanvas" width="160" height="160" class="bg-white p-1.5 rounded"></canvas>
               </div>
               <button @click="switchToLogin"
                 class="w-full py-2 bg-white text-black font-medium rounded-lg hover:bg-zinc-200 text-sm transition-colors">

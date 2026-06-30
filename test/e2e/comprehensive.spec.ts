@@ -163,7 +163,8 @@ test.describe('Register Modal', () => {
 
     await expect(page.locator('text=TOTP Secret')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=Scan QR Code')).toBeVisible();
-    await expect(page.locator('img[alt="TOTP QR"]')).toBeVisible();
+    // QR is now rendered on a canvas element instead of an external img
+    await expect(page.locator('canvas')).toBeVisible();
     // Should show "Continue to Sign In" button
     await expect(page.locator('text=Continue to Sign In')).toBeVisible();
   });

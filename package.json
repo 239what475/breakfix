@@ -15,5 +15,8 @@
   "type": "commonjs",
   "devDependencies": {
     "@playwright/test": "^1.61.1"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }
