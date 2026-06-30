@@ -372,11 +372,11 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 // ── Auth helpers ──
 
 func (h *Handler) getUser(c *gin.Context) *db.User {
-	subject, exists := c.Get("user_id")
+	uid, exists := c.Get("user_id")
 	if !exists {
 		return nil
 	}
-	user, err := h.db.GetUserBySubject(subject.(string))
+	user, err := h.db.GetUserByID(uid.(string))
 	if err != nil {
 		return nil
 	}

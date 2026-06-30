@@ -30,3 +30,15 @@ func (d *DB) GetUserBySubject(subject string) (*User, error) {
 	}
 	return u, nil
 }
+
+func (d *DB) GetUserByID(id string) (*User, error) {
+	u := &User{}
+	err := d.conn.QueryRow(
+		"SELECT id, subject, name, password_hash, totp_secret, created_at FROM users WHERE id = ?",
+		id,
+	).Scan(&u.ID, &u.Subject, &u.Name, &u.PasswordHash, &u.TOTPSecret, &u.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}

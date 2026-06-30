@@ -31,18 +31,14 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 		c.Data(http.StatusOK, "application/json", spec)
 	})
 
-	// Protected routes (JWT via Authorization header)
-	protected := router.Group("/api")
-	protected.Use(jwtMW)
-	{
-		protected.GET("/challenges", h.ListChallenges)
-		protected.POST("/challenges/:id/start", func(c *gin.Context) { h.StartChallenge(c, c.Param("id")) })
-		protected.POST("/challenges/:id/submit", func(c *gin.Context) { h.SubmitChallenge(c, c.Param("id")) })
-		protected.POST("/challenges/:id/reset", func(c *gin.Context) { h.ResetChallenge(c, c.Param("id")) })
-		protected.POST("/generate", h.GenerateChallenge)
-	}
+	// Protected routes — inline JWT middleware
+	router.GET("/api/challenges", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.ListChallenges(c) } })
+	router.POST("/api/challenges/:id/start", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.StartChallenge(c, c.Param("id")) } })
+	router.POST("/api/challenges/:id/submit", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.SubmitChallenge(c, c.Param("id")) } })
+	router.POST("/api/challenges/:id/reset", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.ResetChallenge(c, c.Param("id")) } })
+	router.POST("/api/generate", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.GenerateChallenge(c) } })
 
-	// Terminal WebSocket (supports query param token for browser API)
+	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {
 		if tok := c.Query("token"); tok != "" {
 			c.Request.Header.Set("Authorization", "Bearer "+tok)
@@ -55,11 +51,16 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 
 	// Serve embedded frontend SPA
 	if frontendFS != nil {
-		spaFS := &spaFallbackFS{fs: frontendFS}
 		router.NoRoute(func(c *gin.Context) {
-			f, err := spaFS.Open(c.Request.URL.Path)
+			path := c.Request.URL.Path
+			if len(path) > 0 && path[0] == '/' {
+				path = path[1:]
+			}
+			if path == "" {
+				path = "index.html"
+			}
+			f, err := frontendFS.Open(path)
 			if err != nil {
-				// Serve index.html for SPA client-side routing
 				http.ServeFileFS(c.Writer, c.Request, frontendFS, "index.html")
 				return
 			}
@@ -69,16 +70,4 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	}
 
 	return router
-}
-
-type spaFallbackFS struct {
-	fs fs.FS
-}
-
-func (s *spaFallbackFS) Open(name string) (fs.File, error) {
-	f, err := s.fs.Open(name)
-	if err != nil {
-		return s.fs.Open("index.html")
-	}
-	return f, nil
 }
