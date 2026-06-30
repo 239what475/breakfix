@@ -17,6 +17,10 @@
     "@playwright/test": "^1.61.1"
   },
   "dependencies": {
+    "@iconify/vue": "^5.0.1",
+    "@vicons/ionicons5": "^0.13.0",
+    "naive-ui": "^2.44.1",
+    "playwright": "^1.61.1",
     "qrcode": "^1.5.4"
   }
 }
