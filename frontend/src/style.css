@@ -682,7 +682,16 @@ button {
 }
 
 .auth-card {
+  border: 1px solid rgba(139, 211, 255, 0.12);
+  border-radius: 24px;
   background: linear-gradient(180deg, rgba(11, 22, 37, 0.98), rgba(10, 18, 30, 0.98));
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.42);
+}
+
+.auth-modal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .auth-head p,
@@ -695,6 +704,12 @@ button {
   margin: 10px 0 18px;
 }
 
+.auth-hint {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .auth-link {
   padding: 0;
   border: 0;
@@ -705,6 +720,37 @@ button {
 .totp-panel {
   display: grid;
   gap: 16px;
+}
+
+.totp-steps {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(139, 211, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(139, 211, 255, 0.04);
+}
+
+.totp-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.totp-step span {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(61, 169, 252, 0.18);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .totp-secret {

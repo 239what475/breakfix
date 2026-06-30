@@ -710,7 +710,13 @@ async function reconnectTerminal() {
       </footer>
     </main>
 
-    <n-modal v-model:show="showAuth" :mask-closable="false" style="width: 440px; max-width: 92vw">
+    <n-modal
+      v-model:show="showAuth"
+      :mask-closable="false"
+      preset="card"
+      class="auth-modal"
+      style="width: 520px; max-width: min(92vw, 520px)"
+    >
       <n-card :bordered="false" size="small" role="dialog" class="auth-card">
         <template v-if="authMode === 'login'">
           <div class="auth-head">
@@ -722,6 +728,7 @@ async function reconnectTerminal() {
             <n-input v-model:value="authUsername" placeholder="Username" size="large" />
             <n-input v-model:value="authPassword" type="password" placeholder="Password" size="large" />
             <n-input v-model:value="authTotp" placeholder="TOTP Code" size="large" />
+            <div class="auth-hint">Enter the 6-digit code from the authenticator app you linked during registration.</div>
             <n-button type="primary" block size="large" :loading="authLoading" @click="doLogin">Sign In</n-button>
           </n-space>
           <n-divider />
@@ -732,11 +739,16 @@ async function reconnectTerminal() {
           <div class="auth-head">
             <div class="auth-kicker">Account setup</div>
             <h3>Create Account</h3>
-            <p>Create your login first, then bind the TOTP secret in your authenticator app.</p>
+            <p>Create your login first, then bind the TOTP secret in your authenticator app before signing in.</p>
           </div>
 
           <template v-if="authTotpSecret">
             <div class="totp-panel">
+              <div class="totp-steps">
+                <div class="totp-step"><span>1</span> Scan the QR code or copy the secret into your authenticator app.</div>
+                <div class="totp-step"><span>2</span> Wait for the app to generate a fresh 6-digit TOTP code.</div>
+                <div class="totp-step"><span>3</span> Continue to sign in, then enter that code in the login form.</div>
+              </div>
               <div class="totp-secret">
                 <span class="totp-label">TOTP Secret</span>
                 <code>{{ authTotpSecret }}</code>
@@ -744,6 +756,7 @@ async function reconnectTerminal() {
               <div class="totp-qr-wrap">
                 <canvas ref="qrCanvas" width="176" height="176" />
               </div>
+              <div class="auth-hint">Keep this secret only if you need to re-add the account later. Otherwise the QR scan is enough.</div>
               <n-button type="primary" block size="large" @click="authMode = 'login'">Continue to Sign In</n-button>
             </div>
           </template>
@@ -751,6 +764,7 @@ async function reconnectTerminal() {
             <n-space vertical size="small">
               <n-input v-model:value="authUsername" placeholder="Username" size="large" />
               <n-input v-model:value="authPassword" type="password" placeholder="Password (min 6 chars)" size="large" />
+              <div class="auth-hint">Use a password with at least 6 characters. You will add TOTP in the next step.</div>
               <n-button type="primary" block size="large" :loading="authLoading" @click="doRegister">Register</n-button>
             </n-space>
           </template>
