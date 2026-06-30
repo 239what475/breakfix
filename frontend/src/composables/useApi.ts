@@ -51,8 +51,14 @@ export const api = {
   resetChallenge: (id: string) =>
     request<{ challenge_title: string }>('POST', `/challenges/${id}/reset`),
 
-  generateChallenge: (topic: string) =>
-    request<{ challenge_id: string; status: string; detail: string }>('POST', '/generate', { topic }),
+  reviewGenerationDraft: (topic: string) =>
+    request<GenerateDraftResponse>('POST', '/generate/draft', { topic }),
+
+  createGenerationJob: (draft: ChallengeDraft) =>
+    request<GenerationJobResponse>('POST', '/generate', { draft }),
+
+  getGenerationJob: (id: string) =>
+    request<GenerationJobResponse>('GET', `/generate/jobs/${id}`),
 }
 
 export interface Challenge {
@@ -64,4 +70,34 @@ export interface Challenge {
   description: string
   solved: boolean
   active: boolean
+}
+
+export interface ChallengeDraft {
+  title: string
+  difficulty: string
+  tags: string[]
+  description: string
+  operator_story: string
+  broken_state: string
+  expected_fix: string
+  verification_expectations: string
+  constraints: string
+  notes?: string
+}
+
+export interface GenerateDraftResponse {
+  status: string
+  verdict: string
+  reason: string
+  warnings?: string[]
+  draft?: ChallengeDraft
+}
+
+export interface GenerationJobResponse {
+  job_id?: string
+  challenge_id?: string
+  status: string
+  message: string
+  started_at?: string
+  completed_at?: string
 }

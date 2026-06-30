@@ -136,8 +136,8 @@ paths:
 
   /generate:
     post:
-      operationId: generateChallenge
-      summary: Generate a new challenge (admin)
+      operationId: createGenerationJob
+      summary: Start generation for a reviewed challenge draft
       tags: [agent]
       security:
         - bearerAuth: []
@@ -146,14 +146,58 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/GenerateRequest"
+              $ref: "#/components/schemas/GenerationJobCreateRequest"
       responses:
         "200":
-          description: Generation result
+          description: Generation job created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenerateResponse"
+                $ref: "#/components/schemas/GenerationJobResponse"
+
+  /generate/draft:
+    post:
+      operationId: reviewGenerationDraft
+      summary: Review and expand a challenge idea into a structured draft
+      tags: [agent]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateDraftRequest"
+      responses:
+        "200":
+          description: Draft review result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateDraftResponse"
+
+  /generate/jobs/{id}:
+    get:
+      operationId: getGenerationJob
+      summary: Get generation job status
+      tags: [agent]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Generation job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationJobResponse"
+        "404":
+          $ref: "#/components/responses/Error"
 
 components:
   securitySchemes:
@@ -271,19 +315,86 @@ components:
         challenge_title:
           type: string
 
-    GenerateRequest:
+    ChallengeDraft:
+      type: object
+      required:
+        - title
+        - difficulty
+        - tags
+        - description
+        - operator_story
+        - broken_state
+        - expected_fix
+        - verification_expectations
+        - constraints
+      properties:
+        title:
+          type: string
+        difficulty:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        operator_story:
+          type: string
+        broken_state:
+          type: string
+        expected_fix:
+          type: string
+        verification_expectations:
+          type: string
+        constraints:
+          type: string
+        notes:
+          type: string
+
+    GenerateDraftRequest:
       type: object
       required: [topic]
       properties:
         topic:
           type: string
 
-    GenerateResponse:
+    GenerateDraftResponse:
       type: object
       properties:
+        status:
+          type: string
+        verdict:
+          type: string
+        reason:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        draft:
+          $ref: "#/components/schemas/ChallengeDraft"
+
+    GenerationJobCreateRequest:
+      type: object
+      required: [draft]
+      properties:
+        draft:
+          $ref: "#/components/schemas/ChallengeDraft"
+
+    GenerationJobResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
         challenge_id:
           type: string
         status:
           type: string
-        detail:
+        message:
           type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time

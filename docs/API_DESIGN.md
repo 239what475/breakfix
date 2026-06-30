@@ -1,51 +1,33 @@
-# API Server 设计
+# Gateway API 设计
 
 ## 认证
 
-单端口 gRPC，TLS + 可选 mTLS：
+单端口 HTTP API + WebSocket 终端：
 
-| 方法 | TLS | 客户端证书 |
-|------|------|------|
-| Register / Login | ✓ 服务端认证 | 不需要 |
-| 其他所有 RPC | ✓ 服务端认证 | 需要（mTLS） |
+| 能力 | 机制 |
+|------|------|
+| Register / Login | HTTP JSON |
+| 会话鉴权 | JWT Bearer token |
+| 终端连接 | WebSocket + Authorization header |
 
 ### 注册
 
 ```
-CLI → Register(username, password) → Server
-  → bcrypt 哈希密码
+Browser → POST /auth/register → Gateway
+  → 哈希密码
   → 生成 TOTP secret + QR 码
   → 存入 SQLite
-  → 返回 secret + QR + CA 公钥
+  → 返回 secret + otpauth URL
 ```
 
 ### 登录
 
 ```
-CLI → Login(username, password, totp) → Server
-  → 验证 bcrypt 密码
+Browser → POST /auth/login → Gateway
+  → 验证密码
   → 验证 TOTP (pquerna/otp)
-  → CA 签发 12h 客户端证书 (crypto/x509)
-  → 返回证书 + 私钥 + CA 公钥
-```
-
-### mTLS + 方法级拦截器
-
-```go
-tlsConfig.ClientAuth = tls.RequestClientCert  // 请求但不强制
-
-func authInterceptor(ctx, req, info, handler) {
-    if info.FullMethod is Register or Login {
-        return handler(ctx, req)  // 放行
-    }
-    // 其他方法: 必须有客户端证书
-    p := peer.FromContext(ctx)
-    tlsInfo := p.AuthInfo.(credentials.TLSInfo)
-    cert := tlsInfo.State.PeerCertificates[0]
-    subject := cert.Subject.CommonName  // username
-    // 验证证书来源有效
-    return handler(ctx, req)
-}
+  → 签发 JWT
+  → 返回 token + user info
 ```
 
 ---
@@ -156,10 +138,10 @@ message LoginResponse {
 ## 冷静期
 
 ```
-用户 exit → Pod 状态 → draining（5 分钟定时器）
+用户断开浏览器终端 → Pod 状态 → draining（5 分钟定时器）
   │
-  ├── breakfix ssh → PingInstance → 重置为 running
-  ├── breakfix submit → 验证 → 销毁
+  ├── 浏览器重新连接终端 → PingInstance → 重置为 running
+  ├── Web UI submit → 验证 → 销毁
   └── 5 分钟到 → CooldownManager.destroy → 清理 Pod/NS/记录
 ```
 

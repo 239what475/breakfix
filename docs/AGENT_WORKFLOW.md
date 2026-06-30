@@ -2,10 +2,11 @@
 
 ## 概览
 
-管理员提交一个 topic，系统通过 K8s Job + 多 Agent 协作自动生成完整题目。
+用户先提交一个 challenge idea，系统先扩展为结构化 draft，再通过 K8s Job + 多 Agent 协作自动生成完整题目。
 
 ```
-breakfix generate --topic "Kubernetes 日志清理"
+Web UI / API 提交 challenge idea
+  → Agent 评审并扩展为 reviewed draft
   → Server 创建 K8s Job
   → Job Pod 内 Agent 生成、实验验证、正式验证
   → 成功后 Server 注册题目
@@ -26,7 +27,7 @@ breakfix generate --topic "Kubernetes 日志清理"
 
 ## 本地 vs 生产
 
-同一套 generator 二进制，区别只在环境变量。本地通过 `make generator-dev` 注入 env，生产通过 K8s ConfigMap/Secret 注入。
+同一套 generator 二进制，区别只在环境变量。本地通过 `CHALLENGE_DRAFT_JSON` 注入 reviewed draft，生产通过 K8s ConfigMap/Secret 注入。
 
 | | local | prod |
 |------|------|------|
@@ -63,7 +64,7 @@ llm:
 ### 全部环境变量
 
 ```bash
-TOPIC              # 题目主题
+CHALLENGE_DRAFT_JSON # 结构化 reviewed challenge draft
 REGISTRY           # 镜像仓库地址 (localhost:5000 或 ACR VPC)
 ACR_NAMESPACE      # registry 命名空间
 KUBECONFIG         # (仅 local) kubeconfig 路径
@@ -105,7 +106,7 @@ docker network connect kind registry
 │      client-go           ← K8s 操作库       │
 │                                             │
 │    env:                                      │
-│      TOPIC, REGISTRY, ACR_NAMESPACE          │
+│      CHALLENGE_DRAFT_JSON, REGISTRY, ACR_NAMESPACE │
 │      ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN│
 │      KUBECONFIG (仅 local)                   │
 │                                             │
@@ -117,7 +118,10 @@ docker network connect kind registry
 ## 三阶段流程
 
 ```
-  Topic
+  Challenge Idea
+    │
+    ▼
+  Reviewed Draft
     │
     ▼
 ┌─────────────────────────────────────────────────┐
@@ -147,7 +151,7 @@ docker network connect kind registry
 │  Judge Agent (每次全新 session, 隔离上下文)         │
 │    System prompt: 严格的审题人                      │
 │    Tools: Read（只能读, 不能改）                   │
-│    输入: topic + Phase 1 产出的文件                 │
+│    输入: reviewed draft + Phase 1 产出的文件         │
 │                                                   │
 │  审查: 文件一致性、验证逻辑正确、难度合理、可解性     │
 │                                                   │
@@ -182,7 +186,7 @@ Phase 1 的 Worker 使用同一个 Claude Code session。上次迭代的文件�
 
 Phase 2 每次都是全新 session，Judge 只看到：
 - 当前题目文件内容
-- Topic 和规格要求
+- reviewed draft 和规格要求
 
 Judge 不知道 Worker 的思考过程，不知道它试了几次、怎么想的。这防止确认偏差——"既然 Worker 觉得对，那应该对吧"。
 
@@ -217,7 +221,8 @@ answer.sh          # 标准答案 (agent 自验证用, 不进镜像)
 
 ```bash
 # generator 调试
-make generator-dev TOPIC="Kubernetes 日志清理"
+export CHALLENGE_DRAFT_JSON='{"title":"Cleanup runaway logs","difficulty":"medium","tags":["linux","logs"],"description":"Investigate disk pressure caused by unbounded logs and repair the cleanup flow.","operator_story":"You are the on-call engineer responding to a disk usage alert on a single Linux host.","broken_state":"The machine is healthy enough to inspect, but logs keep growing and the cleanup automation is misconfigured.","expected_fix":"Find the source of log growth, correct the cleanup path or policy, and ensure the remediation survives verification.","verification_expectations":"Disk usage drops to an acceptable level and the broken cleanup behavior is fixed.","constraints":"Use standard shell tooling inside the container; do not remove unrelated data.","notes":"Prefer a realistic journald or file-log workflow over toy files."}'
+make generator-dev
 
 # 内部做的事：
 # 1. go build -o bin/generator ./cmd/generator
@@ -225,8 +230,8 @@ make generator-dev TOPIC="Kubernetes 日志清理"
 #    REGISTRY=localhost:5000
 #    ACR_NAMESPACE=break-fix
 #    KUBECONFIG=~/.kube/config
-#    TOPIC="..."
-# 3. ./bin/generator --topic "$TOPIC"
+#    CHALLENGE_DRAFT_JSON='...'
+# 3. ./bin/generator
 # 4. 生成的题目写入 data/challenges/<id>/
 ```
 
@@ -234,13 +239,10 @@ make generator-dev TOPIC="Kubernetes 日志清理"
 
 ```bash
 make dev                     # Kind + registry + server 启动
-make generator-dev TOPIC="xxx"  # 跑 agent workflow
+export CHALLENGE_DRAFT_JSON='...'
+make generator-dev           # 跑 agent workflow
 # → 题目落地 data/challenges/<id>/
 # → server SyncChallenges() 自动注册
-
-./bin/breakfix-cli list                # 验证题目已上线
-./bin/breakfix-cli start <id>
-./bin/breakfix-cli submit <id>
 ```
 
 ## 文件结构（新增）
@@ -260,11 +262,11 @@ cmd/generator/
 ## Server 集成（后续）
 
 ```
-1. Server 新增 RPC: GenerateChallenge(topic) → instance_id
-2. Server 创建 Job, 注入 env (TOPIC, REGISTRY 等)
+1. Server 新增 HTTP API: CreateGenerationJob(draft) → job id
+2. Server 创建 Job, 注入 env (CHALLENGE_DRAFT_JSON, REGISTRY 等)
 3. Job exit 0 → Server 读 logs → 解析 JSON → 写入 data/challenges/
 4. challenge.SyncChallenges() → 上线
-5. Server 通知 CLI: 完成
+5. Web UI 轮询 job 状态并展示结果
 ```
 
 ## 未来优化

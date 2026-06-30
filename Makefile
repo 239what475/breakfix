@@ -1,9 +1,9 @@
 .PHONY: dev dev-up dev-down dev-reset dev-status \
-        dev-build dev-build-gateway dev-build-controller dev-build-cli \
+        dev-build dev-build-gateway dev-build-controller \
         dev-start-gateway dev-start-controller \
-        dev-gateway dev-controller dev-cli \
+        dev-gateway dev-controller \
         dev-registry dev-data dev-crd dev-rbac dev-images \
-        build build-gateway build-controller build-cli \
+        build build-gateway build-controller \
         deploy deploy-gateway deploy-controller deploy-images deploy-image deploy-config deploy-generator deploy-cleanup deploy-reset \
         generator-build generator-dev generator-run \
         lint proto clean status logs
@@ -45,11 +45,7 @@ dev-build-controller:
 	go build -o $(BIN_DIR)/breakfix-controller ./cmd/controller
 	@echo "  ✓ controller"
 
-dev-build-cli:
-	go build -o $(BIN_DIR)/breakfix-cli ./cmd/cli
-	@echo "  ✓ cli"
-
-dev-build: dev-build-gateway dev-build-controller dev-build-cli
+dev-build: dev-build-gateway dev-build-controller
 	@echo "  ✓ All binaries built"
 
 # ── Dev lifecycle ──
@@ -85,8 +81,6 @@ dev-reset: dev-down
 
 dev-gateway: dev-build-gateway dev-start-gateway
 dev-controller: dev-build-controller dev-start-controller
-dev-cli: dev-build-cli
-
 # ── Dev environment ──
 
 dev-registry:
@@ -128,11 +122,8 @@ dev: dev-registry dev-data dev-crd dev-rbac dev-images dev-build dev-up dev-stat
 dev-status:
 	@echo "  ✓ Proxy    :3128"
 	@echo ""
-	@echo "  CLI:"
-	@echo "    ./bin/breakfix-cli register -u <user> -p <pass>"
-	@echo "    ./bin/breakfix-cli login    -u <user> -p <pass> -t <totp>"
-	@echo "    ./bin/breakfix-cli list"
-	@echo "    ./bin/breakfix-cli start cleanup-logs"
+	@echo "  Web UI:"
+	@echo "    http://localhost:9090"
 
 # ═══════════════════════════════════════════════════════════════
 # Dev config (generated from breakfix.yaml)
@@ -158,11 +149,7 @@ build-controller:
 	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-controller-linux-amd64 ./cmd/controller
 	@echo "  ✓ Controller binary"
 
-build-cli:
-	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-cli-linux-amd64 ./cmd/cli
-	@echo "  ✓ CLI binary"
-
-build: build-gateway build-controller build-cli
+build: build-gateway build-controller
 	@echo "  ✓ All production binaries built"
 
 # ═══════════════════════════════════════════════════════════════
@@ -257,7 +244,11 @@ generator-dev: dev-rbac generator-build dev-gateway dev-controller
 	@echo "  ✓ Generator dev environment ready"
 
 generator-run:
-	./$(BIN_DIR)/breakfix-cli generate --topic "$(TOPIC)"
+	@if [ -z "$(CHALLENGE_DRAFT_JSON)" ]; then \
+		echo "  ✗ CHALLENGE_DRAFT_JSON is required"; \
+		exit 1; \
+	fi
+	CHALLENGE_DRAFT_JSON='$(CHALLENGE_DRAFT_JSON)' ./$(BIN_DIR)/generator
 
 deploy-generator: _guard-server generator-build
 	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \

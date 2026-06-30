@@ -8,7 +8,7 @@
 
 ```
 例：压缩日志
-  breakfix ssh → cat question.md → vim cleanup.sh → 跑一下 → submit
+  浏览器终端 → cat question.md → vim cleanup.sh → 跑一下 → submit
 ```
 
 ### Break-Fix（修故障）
@@ -17,7 +17,7 @@
 
 ```
 例：nginx 配置错误导致 502
-  breakfix ssh → cat question.md → 排查 → 修配置 → reload → submit
+  浏览器终端 → cat question.md → 排查 → 修配置 → reload → submit
 ```
 
 ---
@@ -84,10 +84,10 @@ Agent 自验证用的标准答案。不进镜像、不外泄。
 ## 用户流程
 
 ```
-breakfix start <id>
+Web UI start challenge
   → Pod 启动（破损环境，question.md 在 ~/）
-  → breakfix ssh → 看 question.md → 排查/写脚本
-  → breakfix submit
+  → 浏览器终端连接 → 看 question.md → 排查/写脚本
+  → Web UI submit
      → server kubectl cp verify.sh pod:/tmp/
      → server kubectl exec -- bash /tmp/verify.sh
      → exit 0 = PASS / 非 0 = FAIL

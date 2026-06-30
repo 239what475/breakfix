@@ -19,7 +19,7 @@ type Generation struct {
 }
 
 type GenerationSpec struct {
-	Topic string            `json:"topic"`
+	Draft *ChallengeDraft   `json:"draft,omitempty"`
 	Image string            `json:"image"`
 	Env   map[string]string `json:"env,omitempty"`
 }
@@ -34,6 +34,19 @@ type GenerationStatus struct {
 	CompletedAt *metav1.Time    `json:"completedAt,omitempty"`
 }
 
+type ChallengeDraft struct {
+	Title                    string   `json:"title"`
+	Difficulty               string   `json:"difficulty"`
+	Tags                     []string `json:"tags"`
+	Description              string   `json:"description"`
+	OperatorStory            string   `json:"operator_story"`
+	BrokenState              string   `json:"broken_state"`
+	ExpectedFix              string   `json:"expected_fix"`
+	VerificationExpectations string   `json:"verification_expectations"`
+	Constraints              string   `json:"constraints"`
+	Notes                    string   `json:"notes,omitempty"`
+}
+
 type GenerationPhase string
 
 const (
@@ -44,13 +57,13 @@ const (
 )
 
 type ChallengeSpec struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Type         string   `json:"type"`
-	Difficulty   string   `json:"difficulty"`
-	Tags         []string `json:"tags"`
-	Description  string   `json:"description"`
-	Image        string   `json:"image"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Difficulty  string   `json:"difficulty"`
+	Tags        []string `json:"tags"`
+	Description string   `json:"description"`
+	Image       string   `json:"image"`
 }
 
 // +kubebuilder:object:root=true
@@ -116,6 +129,11 @@ func (in *GenerationList) DeepCopyObject() runtime.Object {
 
 func (in *GenerationSpec) DeepCopyInto(out *GenerationSpec) {
 	*out = *in
+	if in.Draft != nil {
+		d := *in.Draft
+		d.Tags = append([]string{}, d.Tags...)
+		out.Draft = &d
+	}
 	if in.Env != nil {
 		out.Env = make(map[string]string, len(in.Env))
 		for k, v := range in.Env {

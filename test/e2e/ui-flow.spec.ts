@@ -187,4 +187,40 @@ test.describe('UI Flow', () => {
 
     await page.screenshot({ path: '/tmp/breakfix-terminal-idle.png', fullPage: true })
   })
+
+  test('draft review and generation job flow works from the UI', async ({ page }) => {
+    test.setTimeout(240000)
+
+    const user = `draft-${Date.now()}`
+    await registerAndLogin(page, user)
+
+    await page.getByRole('button', { name: 'Generate Challenge', exact: true }).click()
+    await expect(page.locator('.generate-card').getByText('Generate Challenge')).toBeVisible()
+
+    await page.locator('textarea').fill('Create a Linux debugging challenge where an on-call engineer must investigate disk pressure caused by stale compressed backups and restore safe cleanup automation.')
+    await page.getByRole('button', { name: 'Review with Agent', exact: true }).click()
+
+    await expect(page.locator('.generate-card')).toContainText('Step 2. Review the draft', { timeout: 120000 })
+    await expect(page.locator('.draft-form-grid')).toBeVisible()
+
+    await page.locator('.draft-field:has(label:text("Description")) textarea').fill('你是值班工程师，需要排查磁盘压力并修复不安全的清理流程。')
+    await page.locator('.draft-field:has(label:text("Notes")) textarea').fill('Favor layered investigation through shell tools before the root cause becomes obvious.')
+    await page.locator('.tag-editor input').fill('storage')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+
+    await page.getByRole('button', { name: 'Generate Challenge', exact: true }).last().click()
+
+    await expect(page.locator('.job-status-card')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.job-status-card')).toContainText(/queued|running|success|failed/)
+    await expect(page.locator('.job-status-card')).toContainText(/Job gen-/)
+    await expect(page.locator('.job-status-card')).toContainText(/building and verifying challenge|challenge .* generated|generation failed/i, { timeout: 30000 })
+
+    await page.waitForTimeout(8000)
+    const jobText = (await page.locator('.job-status-card').textContent()) ?? ''
+    expect(jobText).toMatch(/running|success|failed/i)
+
+    if (/success/i.test(jobText)) {
+      await expect(page.locator('.challenge-list .challenge-card').first()).toBeVisible()
+    }
+  })
 })

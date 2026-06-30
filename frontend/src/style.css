@@ -425,6 +425,12 @@ button {
   flex-wrap: wrap;
 }
 
+.workspace-header-side {
+  display: grid;
+  justify-items: end;
+  gap: 14px;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -694,6 +700,161 @@ button {
   justify-content: center;
 }
 
+.generate-modal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.generate-card {
+  border: 1px solid rgba(139, 211, 255, 0.12);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(11, 22, 37, 0.98), rgba(10, 18, 30, 0.98));
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.42);
+}
+
+.generate-head p {
+  margin: 10px 0 18px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.generate-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.generate-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.generate-section-copy {
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.generate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.generate-review-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.draft-warning-list {
+  display: grid;
+  gap: 10px;
+}
+
+.draft-warning-item {
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 185, 66, 0.18);
+  border-radius: 14px;
+  background: rgba(245, 185, 66, 0.08);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.draft-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.draft-field {
+  display: grid;
+  gap: 8px;
+}
+
+.draft-field label {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.draft-field-full {
+  grid-column: 1 / -1;
+}
+
+.tag-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.draft-tag-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.draft-tag-chip {
+  padding: 7px 12px;
+  border: 1px solid rgba(139, 211, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(139, 211, 255, 0.08);
+  color: var(--text);
+}
+
+.draft-tag-chip span {
+  margin-left: 8px;
+  color: var(--text-soft);
+}
+
+.job-status-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.job-status-card[data-state="success"] {
+  border-color: rgba(81, 216, 138, 0.22);
+  background: rgba(81, 216, 138, 0.06);
+}
+
+.job-status-card[data-state="failed"] {
+  border-color: rgba(255, 107, 107, 0.22);
+  background: rgba(255, 107, 107, 0.06);
+}
+
+.job-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.job-status-title {
+  font-size: 18px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.job-status-copy,
+.job-meta {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.job-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
 .auth-head p,
 .auth-foot {
   color: var(--text-muted);
@@ -809,6 +970,11 @@ button {
     flex-direction: column;
   }
 
+  .workspace-header-side {
+    width: 100%;
+    justify-items: stretch;
+  }
+
   .result-output {
     max-width: 100%;
   }
@@ -835,6 +1001,14 @@ button {
 
   .secondary-actions {
     grid-template-columns: 1fr;
+  }
+
+  .draft-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .generate-actions {
+    flex-direction: column;
   }
 
   .result-bar {

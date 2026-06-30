@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,20 @@ import (
 const (
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
+
+// ChallengeDraft defines model for ChallengeDraft.
+type ChallengeDraft struct {
+	BrokenState              string   `json:"broken_state"`
+	Constraints              string   `json:"constraints"`
+	Description              string   `json:"description"`
+	Difficulty               string   `json:"difficulty"`
+	ExpectedFix              string   `json:"expected_fix"`
+	Notes                    *string  `json:"notes,omitempty"`
+	OperatorStory            string   `json:"operator_story"`
+	Tags                     []string `json:"tags"`
+	Title                    string   `json:"title"`
+	VerificationExpectations string   `json:"verification_expectations"`
+}
 
 // ChallengeList defines model for ChallengeList.
 type ChallengeList struct {
@@ -44,16 +59,33 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// GenerateRequest defines model for GenerateRequest.
-type GenerateRequest struct {
+// GenerateDraftRequest defines model for GenerateDraftRequest.
+type GenerateDraftRequest struct {
 	Topic string `json:"topic"`
 }
 
-// GenerateResponse defines model for GenerateResponse.
-type GenerateResponse struct {
-	ChallengeId *string `json:"challenge_id,omitempty"`
-	Detail      *string `json:"detail,omitempty"`
-	Status      *string `json:"status,omitempty"`
+// GenerateDraftResponse defines model for GenerateDraftResponse.
+type GenerateDraftResponse struct {
+	Draft    *ChallengeDraft `json:"draft,omitempty"`
+	Reason   *string         `json:"reason,omitempty"`
+	Status   *string         `json:"status,omitempty"`
+	Verdict  *string         `json:"verdict,omitempty"`
+	Warnings *[]string       `json:"warnings,omitempty"`
+}
+
+// GenerationJobCreateRequest defines model for GenerationJobCreateRequest.
+type GenerationJobCreateRequest struct {
+	Draft ChallengeDraft `json:"draft"`
+}
+
+// GenerationJobResponse defines model for GenerationJobResponse.
+type GenerationJobResponse struct {
+	ChallengeId *string    `json:"challenge_id,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	JobId       *string    `json:"job_id,omitempty"`
+	Message     *string    `json:"message,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	Status      *string    `json:"status,omitempty"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -113,8 +145,11 @@ type LoginJSONRequestBody = LoginRequest
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
 
-// GenerateChallengeJSONRequestBody defines body for GenerateChallenge for application/json ContentType.
-type GenerateChallengeJSONRequestBody = GenerateRequest
+// CreateGenerationJobJSONRequestBody defines body for CreateGenerationJob for application/json ContentType.
+type CreateGenerationJobJSONRequestBody = GenerationJobCreateRequest
+
+// ReviewGenerationDraftJSONRequestBody defines body for ReviewGenerationDraft for application/json ContentType.
+type ReviewGenerationDraftJSONRequestBody = GenerateDraftRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -136,9 +171,15 @@ type ServerInterface interface {
 	// Submit solution for verification
 	// (POST /challenges/{id}/submit)
 	SubmitChallenge(c *gin.Context, id string)
-	// Generate a new challenge (admin)
+	// Start generation for a reviewed challenge draft
 	// (POST /generate)
-	GenerateChallenge(c *gin.Context)
+	CreateGenerationJob(c *gin.Context)
+	// Review and expand a challenge idea into a structured draft
+	// (POST /generate/draft)
+	ReviewGenerationDraft(c *gin.Context)
+	// Get generation job status
+	// (GET /generate/jobs/{id})
+	GetGenerationJob(c *gin.Context, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -272,8 +313,8 @@ func (siw *ServerInterfaceWrapper) SubmitChallenge(c *gin.Context) {
 	siw.Handler.SubmitChallenge(c, id)
 }
 
-// GenerateChallenge operation middleware
-func (siw *ServerInterfaceWrapper) GenerateChallenge(c *gin.Context) {
+// CreateGenerationJob operation middleware
+func (siw *ServerInterfaceWrapper) CreateGenerationJob(c *gin.Context) {
 
 	c.Set(string(BearerAuthScopes), []string{})
 
@@ -284,7 +325,49 @@ func (siw *ServerInterfaceWrapper) GenerateChallenge(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.GenerateChallenge(c)
+	siw.Handler.CreateGenerationJob(c)
+}
+
+// ReviewGenerationDraft operation middleware
+func (siw *ServerInterfaceWrapper) ReviewGenerationDraft(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ReviewGenerationDraft(c)
+}
+
+// GetGenerationJob operation middleware
+func (siw *ServerInterfaceWrapper) GetGenerationJob(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGenerationJob(c, id)
 }
 
 // GinServerOptions provides options for the Gin server.
@@ -320,7 +403,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/submit", wrapper.SubmitChallenge)
-	router.POST(options.BaseURL+"/generate", wrapper.GenerateChallenge)
+	router.POST(options.BaseURL+"/generate", wrapper.CreateGenerationJob)
+	router.POST(options.BaseURL+"/generate/draft", wrapper.ReviewGenerationDraft)
+	router.GET(options.BaseURL+"/generate/jobs/:id", wrapper.GetGenerationJob)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -328,24 +413,29 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"5NM0Le3AUhuavpq8mqS2ZW5n7b8BAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

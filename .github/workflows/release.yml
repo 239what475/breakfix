@@ -30,10 +30,10 @@ jobs:
             -X 'github.com/breakfix/breakfix/internal/build.BuildTime=${BUILD_TIME}' \
             -X 'github.com/breakfix/breakfix/internal/build.Commit=${COMMIT}'"
 
-          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-api-linux-amd64   ./cmd/server
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-api-darwin-amd64  ./cmd/server
-          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-cli-linux-amd64   ./cmd/cli
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-cli-darwin-amd64  ./cmd/cli
+          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-gateway-linux-amd64   ./cmd/gateway
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-gateway-darwin-amd64  ./cmd/gateway
+          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-linux-amd64 ./cmd/controller
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-darwin-amd64 ./cmd/controller
 
           ls -lh dist/
 

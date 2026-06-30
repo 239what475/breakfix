@@ -162,8 +162,32 @@ test.describe('API Endpoints (Direct)', () => {
 
   test('POST /api/generate requires auth', async ({ request }) => {
     const res = await request.post(BASE + '/api/generate', {
+      data: {
+        draft: {
+          title: 'test',
+          difficulty: 'easy',
+          tags: ['test'],
+          description: 'test',
+          operator_story: 'test',
+          broken_state: 'test',
+          expected_fix: 'test',
+          verification_expectations: 'test',
+          constraints: 'test',
+        },
+      },
+    })
+    expect(res.status()).toBe(401)
+  })
+
+  test('POST /api/generate/draft requires auth', async ({ request }) => {
+    const res = await request.post(BASE + '/api/generate/draft', {
       data: { topic: 'test' },
     })
+    expect(res.status()).toBe(401)
+  })
+
+  test('GET /api/generate/jobs/:id requires auth', async ({ request }) => {
+    const res = await request.get(BASE + '/api/generate/jobs/test-job')
     expect(res.status()).toBe(401)
   })
 

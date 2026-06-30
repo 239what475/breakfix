@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/auth"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/draftreview"
 	"github.com/breakfix/breakfix/internal/k8s"
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
@@ -20,21 +22,23 @@ import (
 
 // Handler implements the OpenAPI-generated ServerInterface.
 type Handler struct {
-	db            *db.DB
-	k8s           *k8s.Client
-	registryAddr  string
+	db               *db.DB
+	k8s              *k8s.Client
+	reviewer         *draftreview.Reviewer
+	registryAddr     string
 	registryInsecure bool
-	namespace     string
-	crdNamespace  string
-	cooldownMin   int
-	llm           config.LLMConfig
-	jwtSecret     []byte
+	namespace        string
+	crdNamespace     string
+	cooldownMin      int
+	llm              config.LLMConfig
+	jwtSecret        []byte
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
 	return &Handler{
 		db:               database,
 		k8s:              client,
+		reviewer:         &draftreview.Reviewer{},
 		registryAddr:     cfg.RegistryAddr,
 		registryInsecure: cfg.RegistryInsecure,
 		namespace:        cfg.Namespace,
@@ -157,13 +161,13 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		solvedVal := solved[ch.ID]
 		activeVal := active[ch.ID]
 		s := api.ChallengeSummary{
-			Id:         &ch.ID,
-			Title:      &ch.Title,
-			Type:       &ch.Type,
-			Difficulty: &ch.Difficulty,
+			Id:          &ch.ID,
+			Title:       &ch.Title,
+			Type:        &ch.Type,
+			Difficulty:  &ch.Difficulty,
 			Description: &ch.Description,
-			Solved:     &solvedVal,
-			Active:     &activeVal,
+			Solved:      &solvedVal,
+			Active:      &activeVal,
 		}
 		var tags []string
 		json.Unmarshal([]byte(ch.Tags), &tags)
@@ -285,16 +289,44 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 
 // ── Agent ──
 
-func (h *Handler) GenerateChallenge(c *gin.Context) {
-	var req api.GenerateRequest
+func (h *Handler) ReviewGenerationDraft(c *gin.Context) {
+	var req api.GenerateDraftRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
 
+	result, err := h.reviewer.Review(c.Request.Context(), req.Topic)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("review draft: %v", err)})
+		return
+	}
+
+	status := "success"
+	verdict := result.Verdict
+	reason := result.Reason
+	draft := toAPIChallengeDraft(result.Draft)
+	c.JSON(http.StatusOK, api.GenerateDraftResponse{
+		Status:   &status,
+		Verdict:  &verdict,
+		Reason:   &reason,
+		Warnings: &result.Warnings,
+		Draft:    &draft,
+	})
+}
+
+func (h *Handler) CreateGenerationJob(c *gin.Context) {
+	var req api.GenerationJobCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	draft := fromAPIChallengeDraft(req.Draft)
 	genID := "gen-" + k8s.RandomID()
+
 	env := map[string]string{
-		"TOPIC":                          req.Topic,
+		"CHALLENGE_DRAFT_JSON":           mustJSON(draft),
 		"REGISTRY_ADDR":                  h.registryAddr,
 		"LAB_NAMESPACE":                  h.crdNamespace,
 		"ANTHROPIC_BASE_URL":             h.llm.BaseURL,
@@ -316,7 +348,7 @@ func (h *Handler) GenerateChallenge(c *gin.Context) {
 			Namespace: h.crdNamespace,
 		},
 		Spec: breakfixv1.GenerationSpec{
-			Topic: req.Topic,
+			Draft: &draft,
 			Image: h.generatorImage(),
 			Env:   env,
 		},
@@ -327,31 +359,63 @@ func (h *Handler) GenerateChallenge(c *gin.Context) {
 		return
 	}
 
-	slog.Info("generation created", "generation", genID, "topic", req.Topic)
-	gen, err := h.waitGenerationDone(c.Request.Context(), genID, 30*time.Minute)
+	slog.Info("generation created", "generation", genID, "title", draft.Title)
+	status := "queued"
+	jobID := genID
+	message := "generation job created"
+	c.JSON(http.StatusOK, api.GenerationJobResponse{
+		JobId:   &jobID,
+		Status:  &status,
+		Message: &message,
+	})
+}
+
+func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
+	gen, err := h.k8s.GetGeneration(c.Request.Context(), h.crdNamespace, id)
 	if err != nil {
-		status := "failed"
-		detail := err.Error()
-		c.JSON(http.StatusOK, api.GenerateResponse{Status: &status, Detail: &detail})
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "generation job not found"})
 		return
 	}
-	if gen.Status.Phase == breakfixv1.GenerationFailed {
-		status := "failed"
-		msg := gen.Status.Message
-		c.JSON(http.StatusOK, api.GenerateResponse{Status: &status, Detail: &msg})
-		return
-	}
+
 	if gen.Status.Challenge != nil {
 		h.syncChallengeFromGeneration(gen)
 	}
 
-	status := "success"
-	detail := fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
-	cid := gen.Status.Challenge.ID
-	c.JSON(http.StatusOK, api.GenerateResponse{
-		ChallengeId: &cid,
+	status := string(gen.Status.Phase)
+	if status == "" {
+		status = "Pending"
+	}
+	status = normalizeGenerationStatus(status)
+	message := gen.Status.Message
+	if message == "" {
+		message = defaultGenerationMessage(gen)
+	}
+
+	var challengeID *string
+	if gen.Status.Challenge != nil {
+		cid := gen.Status.Challenge.ID
+		challengeID = &cid
+	}
+
+	var startedAt *time.Time
+	if gen.Status.StartedAt != nil {
+		t := gen.Status.StartedAt.Time
+		startedAt = &t
+	}
+	var completedAt *time.Time
+	if gen.Status.CompletedAt != nil {
+		t := gen.Status.CompletedAt.Time
+		completedAt = &t
+	}
+
+	jobID := gen.Name
+	c.JSON(http.StatusOK, api.GenerationJobResponse{
+		JobId:       &jobID,
+		ChallengeId: challengeID,
 		Status:      &status,
-		Detail:      &detail,
+		Message:     &message,
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
 	})
 }
 
@@ -532,5 +596,79 @@ func (h *Handler) syncChallengeFromGeneration(gen *breakfixv1.Generation) {
 		slog.Error("failed to sync generated challenge", "err", err, "id", cs.ID)
 	} else {
 		slog.Info("challenge synced from generation", "id", cs.ID)
+	}
+}
+
+func toAPIChallengeDraft(d breakfixv1.ChallengeDraft) api.ChallengeDraft {
+	tags := append([]string{}, d.Tags...)
+	return api.ChallengeDraft{
+		Title:                    d.Title,
+		Difficulty:               d.Difficulty,
+		Tags:                     tags,
+		Description:              d.Description,
+		OperatorStory:            d.OperatorStory,
+		BrokenState:              d.BrokenState,
+		ExpectedFix:              d.ExpectedFix,
+		VerificationExpectations: d.VerificationExpectations,
+		Constraints:              d.Constraints,
+		Notes:                    &d.Notes,
+	}
+}
+
+func fromAPIChallengeDraft(d api.ChallengeDraft) breakfixv1.ChallengeDraft {
+	tags := append([]string{}, d.Tags...)
+	notes := ""
+	if d.Notes != nil {
+		notes = *d.Notes
+	}
+	return breakfixv1.ChallengeDraft{
+		Title:                    d.Title,
+		Difficulty:               d.Difficulty,
+		Tags:                     tags,
+		Description:              d.Description,
+		OperatorStory:            d.OperatorStory,
+		BrokenState:              d.BrokenState,
+		ExpectedFix:              d.ExpectedFix,
+		VerificationExpectations: d.VerificationExpectations,
+		Constraints:              d.Constraints,
+		Notes:                    notes,
+	}
+}
+
+func mustJSON(v any) string {
+	data, _ := json.Marshal(v)
+	return string(data)
+}
+
+func normalizeGenerationStatus(status string) string {
+	switch status {
+	case "Pending":
+		return "queued"
+	case "Running":
+		return "running"
+	case "Succeeded":
+		return "success"
+	case "Failed":
+		return "failed"
+	default:
+		return strings.ToLower(status)
+	}
+}
+
+func defaultGenerationMessage(gen *breakfixv1.Generation) string {
+	switch gen.Status.Phase {
+	case breakfixv1.GenerationPending:
+		return "generation request accepted"
+	case breakfixv1.GenerationRunning:
+		return "building and verifying challenge"
+	case breakfixv1.GenerationSucceeded:
+		if gen.Status.Challenge != nil {
+			return fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
+		}
+		return "challenge generated"
+	case breakfixv1.GenerationFailed:
+		return "generation failed"
+	default:
+		return "generation status updated"
 	}
 }

@@ -32,11 +32,48 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	})
 
 	// Protected routes — inline JWT middleware
-	router.GET("/api/challenges", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.ListChallenges(c) } })
-	router.POST("/api/challenges/:id/start", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.StartChallenge(c, c.Param("id")) } })
-	router.POST("/api/challenges/:id/submit", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.SubmitChallenge(c, c.Param("id")) } })
-	router.POST("/api/challenges/:id/reset", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.ResetChallenge(c, c.Param("id")) } })
-	router.POST("/api/generate", func(c *gin.Context) { jwtMW(c); if !c.IsAborted() { h.GenerateChallenge(c) } })
+	router.GET("/api/challenges", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.ListChallenges(c)
+		}
+	})
+	router.POST("/api/challenges/:id/start", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.StartChallenge(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/challenges/:id/submit", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.SubmitChallenge(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/challenges/:id/reset", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.ResetChallenge(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/generate/draft", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.ReviewGenerationDraft(c)
+		}
+	})
+	router.POST("/api/generate", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CreateGenerationJob(c)
+		}
+	})
+	router.GET("/api/generate/jobs/:id", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetGenerationJob(c, c.Param("id"))
+		}
+	})
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {

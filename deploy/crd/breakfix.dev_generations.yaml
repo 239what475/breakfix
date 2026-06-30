@@ -22,10 +22,33 @@ spec:
           properties:
             spec:
               type: object
-              required: [topic, image]
+              required: [image]
               properties:
-                topic:
-                  type: string
+                draft:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                    difficulty:
+                      type: string
+                    tags:
+                      type: array
+                      items:
+                        type: string
+                    description:
+                      type: string
+                    operator_story:
+                      type: string
+                    broken_state:
+                      type: string
+                    expected_fix:
+                      type: string
+                    verification_expectations:
+                      type: string
+                    constraints:
+                      type: string
+                    notes:
+                      type: string
                 image:
                   type: string
                 env:

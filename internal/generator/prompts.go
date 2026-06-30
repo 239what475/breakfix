@@ -4,7 +4,7 @@ package generator
 func WorkerSystemPrompt(registryAddr string) string {
 	return `You are an expert SRE challenge designer. You create realistic challenges for a platform called Breakfix.
 
-Your task: create all files for a challenge based on the given topic.
+Your task: create all files for a challenge based on the reviewed challenge draft.
 
 ## Required Files
 
@@ -62,9 +62,9 @@ Write COMPLETE files. No placeholders. Every script must be fully functional.`
 }
 
 // WorkerPromptCreate is used for the first round.
-const WorkerPromptCreate = `Create a complete breakfix challenge for this topic:
+const WorkerPromptCreate = `Create a complete breakfix challenge from this reviewed challenge draft:
 
-"%s"
+%s
 
 Create all 6 files in the directory. Then test them using the lab tools.
 
@@ -77,7 +77,8 @@ const WorkerPromptFix = `The previous round was rejected by the Judge with these
 
 The existing files are in the directory. Fix ALL the issues listed above, then re-test using the lab tools.
 
-Topic: "%s"
+Reviewed challenge draft:
+%s
 Directory: %s`
 
 // JudgeSystemPrompt is the system prompt for Phase 2 (Judge Agent).
@@ -90,7 +91,7 @@ You check:
 1. challenge.yaml: valid id, type, title, image
 2. Dockerfile: correct base image, COPY verify.sh + chmod, proper COPY and RUN
 3. generate.sh: creates appropriate test environment
-4. question.md: clear, complete, matches the topic
+4. question.md: clear, complete, matches the reviewed challenge draft
 5. verify.sh: checks ALL requirements, exit 0 = pass
 6. answer.sh: actually solves the problem, would pass verify.sh
 
@@ -101,9 +102,10 @@ FAIL: <specific issues> — if anything needs fixing
 Be strict. If answer.sh wouldn't pass verify.sh, FAIL.`
 }
 
-const JudgePrompt = `Review these challenge files for the topic:
+const JudgePrompt = `Review these challenge files against the reviewed challenge draft:
 
-Topic: %s
+Reviewed challenge draft:
+%s
 
 %s
 
@@ -143,7 +145,7 @@ Or propose new tags that fit the challenge.
 ## Instructions
 
 1. Read ALL challenge files carefully
-2. Based on the ACTUAL generated content (not the topic), determine:
+2. Based on the ACTUAL generated content (not the reviewed draft wording alone), determine:
    - difficulty (easy/medium/hard)
    - 2-5 most relevant tags
    - A well-written Chinese description (50-200 chars) explaining what the user needs to do
@@ -154,7 +156,8 @@ The challenge has already passed verification (verify.sh and answer.sh both work
 
 const EnrichPrompt = `Review this verified challenge and add difficulty, tags, and description to challenge.yaml.
 
-Topic: %s
+Reviewed challenge draft:
+%s
 
 %s
 

@@ -14,12 +14,14 @@ import {
   NModal,
   NSpace,
   NTag,
+  NSelect,
   useMessage,
 } from 'naive-ui'
 import {
   CheckmarkCircleOutline,
   EllipseOutline,
   FlashOutline,
+  ConstructOutline,
   LogInOutline,
   PlayOutline,
   PowerOutline,
@@ -28,7 +30,7 @@ import {
   SparklesOutline,
   TerminalOutline,
 } from '@vicons/ionicons5'
-import { api, clearToken, isLoggedIn, setToken, token, type Challenge } from './composables/useApi'
+import { api, clearToken, isLoggedIn, setToken, token, type Challenge, type ChallengeDraft, type GenerateDraftResponse, type GenerationJobResponse } from './composables/useApi'
 import '@xterm/xterm/css/xterm.css'
 
 const message = useMessage()
@@ -51,6 +53,27 @@ const terminalReady = ref(false)
 const terminalDisconnected = ref(false)
 const terminalHasFocus = ref(false)
 const reconnecting = ref(false)
+const showGenerate = ref(false)
+const generateStep = ref<'idea' | 'draft' | 'job'>('idea')
+const draftReviewing = ref(false)
+const jobStarting = ref(false)
+const generateTopic = ref('')
+const draftVerdict = ref('')
+const draftReason = ref('')
+const draftWarnings = ref<string[]>([])
+const generationJob = ref<GenerationJobResponse | null>(null)
+const editableDraft = ref<ChallengeDraft>({
+  title: '',
+  difficulty: 'medium',
+  tags: [],
+  description: '',
+  operator_story: '',
+  broken_state: '',
+  expected_fix: '',
+  verification_expectations: '',
+  constraints: '',
+  notes: '',
+})
 
 const showAuth = ref(false)
 const authMode = ref<'login' | 'register'>('login')
@@ -73,6 +96,7 @@ let reconnectTimeoutId: number | null = null
 let visibilityHandler: (() => void) | null = null
 let focusHandler: (() => void) | null = null
 let onlineHandler: (() => void) | null = null
+let generationPollId: number | null = null
 
 const diffColors: Record<string, string> = {
   easy: '#51d88a',
@@ -104,6 +128,28 @@ const challengeStats = computed(() => {
   const solved = challenges.value.filter((challenge) => challenge.solved).length
   const active = challenges.value.filter((challenge) => challenge.active).length
   return { total, solved, active }
+})
+
+const draftTagInput = ref('')
+const difficultyOptions = [
+  { label: 'Easy', value: 'easy' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'Hard', value: 'hard' },
+]
+const canReviewDraft = computed(() => generateTopic.value.trim().length >= 8)
+const canStartGeneration = computed(() => {
+  const draft = editableDraft.value
+  return Boolean(
+    draft.title.trim() &&
+    draft.difficulty.trim() &&
+    draft.tags.length &&
+    draft.description.trim() &&
+    draft.operator_story.trim() &&
+    draft.broken_state.trim() &&
+    draft.expected_fix.trim() &&
+    draft.verification_expectations.trim() &&
+    draft.constraints.trim(),
+  )
 })
 
 const primaryActionLabel = computed(() => {
@@ -161,6 +207,7 @@ onUnmounted(() => {
   window.removeEventListener('focus', focusHandler!)
   window.removeEventListener('online', onlineHandler!)
   clearReconnectTimer()
+  clearGenerationPoll()
   disposeTerminal()
 })
 
@@ -180,6 +227,12 @@ watch(challenges, (value) => {
     selectedId.value = value[0].id
   }
 }, { immediate: true })
+
+watch(showGenerate, (value) => {
+  if (!value) {
+    clearGenerationPoll()
+  }
+})
 
 function difficultyColor(level: string) {
   return diffColors[level] ?? '#8ca3b8'
@@ -244,6 +297,133 @@ async function loadChallenges() {
     message.error(error.message)
   } finally {
     loading.value = false
+  }
+}
+
+function openGenerateModal() {
+  showGenerate.value = true
+  generateStep.value = 'idea'
+  generateTopic.value = ''
+  draftVerdict.value = ''
+  draftReason.value = ''
+  draftWarnings.value = []
+  generationJob.value = null
+  draftTagInput.value = ''
+  editableDraft.value = {
+    title: '',
+    difficulty: 'medium',
+    tags: [],
+    description: '',
+    operator_story: '',
+    broken_state: '',
+    expected_fix: '',
+    verification_expectations: '',
+    constraints: '',
+    notes: '',
+  }
+}
+
+function clearGenerationPoll() {
+  if (generationPollId !== null) {
+    window.clearTimeout(generationPollId)
+    generationPollId = null
+  }
+}
+
+function queueGenerationPoll(jobId: string, delay = 2500) {
+  clearGenerationPoll()
+  generationPollId = window.setTimeout(() => {
+    generationPollId = null
+    void pollGenerationJob(jobId)
+  }, delay)
+}
+
+async function reviewDraft() {
+  if (!canReviewDraft.value) return
+  draftReviewing.value = true
+  try {
+    const result = await api.reviewGenerationDraft(generateTopic.value.trim())
+    applyDraftReview(result)
+    generateStep.value = 'draft'
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    draftReviewing.value = false
+  }
+}
+
+function applyDraftReview(result: GenerateDraftResponse) {
+  draftVerdict.value = result.verdict ?? 'good'
+  draftReason.value = result.reason ?? ''
+  draftWarnings.value = result.warnings ?? []
+  if (result.draft) {
+    editableDraft.value = {
+      ...result.draft,
+      tags: [...result.draft.tags],
+      notes: result.draft.notes ?? '',
+    }
+  }
+}
+
+function addDraftTag() {
+  const nextTag = draftTagInput.value.trim()
+  if (!nextTag) return
+  if (!editableDraft.value.tags.includes(nextTag)) {
+    editableDraft.value.tags = [...editableDraft.value.tags, nextTag]
+  }
+  draftTagInput.value = ''
+}
+
+function removeDraftTag(tag: string) {
+  editableDraft.value.tags = editableDraft.value.tags.filter((item) => item !== tag)
+}
+
+async function startGenerationJob() {
+  if (!canStartGeneration.value) return
+  jobStarting.value = true
+  try {
+    const result = await api.createGenerationJob({
+      ...editableDraft.value,
+      tags: [...editableDraft.value.tags],
+      notes: editableDraft.value.notes?.trim() || '',
+    })
+    generationJob.value = result
+    generateStep.value = 'job'
+    if (result.job_id) {
+      queueGenerationPoll(result.job_id, 1000)
+    }
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    jobStarting.value = false
+  }
+}
+
+async function pollGenerationJob(jobId: string) {
+  try {
+    const result = await api.getGenerationJob(jobId)
+    generationJob.value = result
+    if (result.status === 'success') {
+      clearGenerationPoll()
+      await loadChallenges()
+      if (result.challenge_id) {
+        selectedId.value = result.challenge_id
+      }
+      message.success('Challenge generated')
+      if (!inChallenge.value) {
+        showGenerate.value = false
+      }
+      return
+    }
+    if (result.status === 'failed') {
+      clearGenerationPoll()
+      message.error(result.message || 'Generation failed')
+      return
+    }
+    queueGenerationPoll(jobId)
+  } catch (error: any) {
+    clearGenerationPoll()
+    message.error(error.message)
   }
 }
 
@@ -641,15 +821,23 @@ async function reconnectTerminal() {
           <p>{{ stageSubtitle }}</p>
         </div>
 
-        <div class="workspace-status">
-          <span class="status-badge" :data-state="loggedIn ? 'online' : 'offline'">
-            <n-icon :component="EllipseOutline" size="10" />
-            {{ loggedIn ? 'Authenticated' : 'Guest mode' }}
-          </span>
-          <span class="status-badge" :data-state="inChallenge ? 'running' : 'idle'">
-            <n-icon :component="FlashOutline" size="14" />
-            {{ inChallenge ? 'Terminal attached' : 'Waiting to launch' }}
-          </span>
+        <div class="workspace-header-side">
+          <n-button v-if="loggedIn" type="primary" secondary strong @click="openGenerateModal">
+            <template #icon>
+              <n-icon :component="ConstructOutline" />
+            </template>
+            Generate Challenge
+          </n-button>
+          <div class="workspace-status">
+            <span class="status-badge" :data-state="loggedIn ? 'online' : 'offline'">
+              <n-icon :component="EllipseOutline" size="10" />
+              {{ loggedIn ? 'Authenticated' : 'Guest mode' }}
+            </span>
+            <span class="status-badge" :data-state="inChallenge ? 'running' : 'idle'">
+              <n-icon :component="FlashOutline" size="14" />
+              {{ inChallenge ? 'Terminal attached' : 'Waiting to launch' }}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -771,6 +959,139 @@ async function reconnectTerminal() {
 
           <n-divider />
           <div class="auth-foot">Have an account? <button class="auth-link" @click="authMode = 'login'">Sign In</button></div>
+        </template>
+      </n-card>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showGenerate"
+      preset="card"
+      class="generate-modal"
+      style="width: 820px; max-width: min(94vw, 820px)"
+      :mask-closable="!draftReviewing && !jobStarting"
+    >
+      <n-card :bordered="false" size="small" role="dialog" class="generate-card">
+        <div class="generate-head">
+          <div class="auth-kicker">Challenge authoring</div>
+          <h3>Generate Challenge</h3>
+          <p>Draft the scenario with the agent first, then launch the full build and verification pipeline.</p>
+        </div>
+
+        <template v-if="generateStep === 'idea'">
+          <div class="generate-panel">
+            <div class="generate-section-title">Step 1. Describe the idea</div>
+            <p class="generate-section-copy">Start with a short operator problem, outage, or debugging scenario. The agent will expand it into a structured challenge brief.</p>
+            <n-input
+              v-model:value="generateTopic"
+              type="textarea"
+              :autosize="{ minRows: 6, maxRows: 10 }"
+              placeholder="Example: Create a challenge where an on-call engineer must diagnose why nginx is returning 502 even though the backend process looks healthy at first glance."
+            />
+            <div class="generate-actions">
+              <n-button quaternary @click="showGenerate = false">Cancel</n-button>
+              <n-button type="primary" :disabled="!canReviewDraft" :loading="draftReviewing" @click="reviewDraft">Review with Agent</n-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="generateStep === 'draft'">
+          <div class="generate-panel">
+            <div class="generate-review-summary">
+              <div>
+                <div class="generate-section-title">Step 2. Review the draft</div>
+                <p class="generate-section-copy">{{ draftReason }}</p>
+              </div>
+              <n-tag :bordered="false" :type="draftVerdict === 'good' ? 'success' : draftVerdict === 'weak' ? 'warning' : 'error'">
+                {{ draftVerdict }}
+              </n-tag>
+            </div>
+
+            <div v-if="draftWarnings.length" class="draft-warning-list">
+              <div v-for="warning in draftWarnings" :key="warning" class="draft-warning-item">{{ warning }}</div>
+            </div>
+
+            <div class="draft-form-grid">
+              <div class="draft-field draft-field-full">
+                <label>Title</label>
+                <n-input v-model:value="editableDraft.title" placeholder="Challenge title" />
+              </div>
+              <div class="draft-field">
+                <label>Difficulty</label>
+                <n-select v-model:value="editableDraft.difficulty" :options="difficultyOptions" />
+              </div>
+              <div class="draft-field">
+                <label>Add Tag</label>
+                <div class="tag-editor">
+                  <n-input v-model:value="draftTagInput" placeholder="linux" @keydown.enter.prevent="addDraftTag" />
+                  <n-button quaternary @click="addDraftTag">Add</n-button>
+                </div>
+              </div>
+              <div class="draft-field draft-field-full">
+                <div class="draft-tag-list">
+                  <button v-for="tag in editableDraft.tags" :key="tag" class="draft-tag-chip" @click="removeDraftTag(tag)">
+                    {{ tag }} <span>x</span>
+                  </button>
+                </div>
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Description</label>
+                <n-input v-model:value="editableDraft.description" data-testid="draft-description" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Operator Story</label>
+                <n-input v-model:value="editableDraft.operator_story" data-testid="draft-operator-story" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Broken State</label>
+                <n-input v-model:value="editableDraft.broken_state" data-testid="draft-broken-state" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Expected Fix</label>
+                <n-input v-model:value="editableDraft.expected_fix" data-testid="draft-expected-fix" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Verification Expectations</label>
+                <n-input v-model:value="editableDraft.verification_expectations" data-testid="draft-verification" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Constraints</label>
+                <n-input v-model:value="editableDraft.constraints" data-testid="draft-constraints" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Notes</label>
+                <n-input v-model:value="editableDraft.notes" data-testid="draft-notes" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="Optional notes for the generator pipeline." />
+              </div>
+            </div>
+
+            <div class="generate-actions">
+              <n-button quaternary @click="generateStep = 'idea'">Back</n-button>
+              <n-button quaternary :loading="draftReviewing" @click="reviewDraft">Regenerate Draft</n-button>
+              <n-button type="primary" :disabled="!canStartGeneration" :loading="jobStarting" @click="startGenerationJob">Generate Challenge</n-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="generate-panel">
+            <div class="generate-section-title">Step 3. Build and verify</div>
+            <p class="generate-section-copy">The backend is now building, testing, and packaging the challenge. This can take several minutes.</p>
+            <div class="job-status-card" :data-state="generationJob?.status || 'queued'">
+              <div class="job-status-head">
+                <div class="job-status-title">{{ generationJob?.status || 'queued' }}</div>
+                <n-tag v-if="generationJob?.challenge_id" :bordered="false" type="success">{{ generationJob?.challenge_id }}</n-tag>
+              </div>
+              <p class="job-status-copy">{{ generationJob?.message || 'Waiting for the generation controller to start the job.' }}</p>
+              <div class="job-meta">
+                <span v-if="generationJob?.job_id">Job {{ generationJob.job_id }}</span>
+                <span v-if="generationJob?.started_at">Started {{ generationJob.started_at }}</span>
+                <span v-if="generationJob?.completed_at">Completed {{ generationJob.completed_at }}</span>
+              </div>
+            </div>
+            <div class="generate-actions">
+              <n-button quaternary :disabled="generationJob?.status === 'running' || generationJob?.status === 'queued'" @click="generateStep = 'draft'">Back to Draft</n-button>
+              <n-button v-if="generationJob?.status === 'success'" type="primary" @click="showGenerate = false">Open Challenge</n-button>
+            </div>
+          </div>
         </template>
       </n-card>
     </n-modal>

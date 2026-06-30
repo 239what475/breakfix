@@ -16,11 +16,12 @@ import (
 	"gopkg.in/yaml.v3"
 	"log/slog"
 
+	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 )
 
 type Generator struct {
-	Topic            string
+	Draft            *breakfixv1.ChallengeDraft
 	OutputDir        string
 	RegistryAddr     string
 	RegistryInsecure bool
@@ -35,17 +36,17 @@ func (g *Generator) Run(ctx context.Context) error {
 	if absOutput, err := filepath.Abs(g.OutputDir); err == nil {
 		g.OutputDir = absOutput
 	}
-	g.workDir = filepath.Join(g.OutputDir, ".gen-"+sanitizeID(g.Topic))
+	g.workDir = filepath.Join(g.OutputDir, ".gen-"+sanitizeID(g.identitySeed()))
 	if err := os.RemoveAll(g.workDir); err != nil {
 		slog.Error("failed to clean workdir", "err", err, "dir", g.workDir)
 	}
-	g.challengeID = sanitizeID(g.Topic)
+	g.challengeID = sanitizeID(g.identitySeed())
 	chalDir := filepath.Join(g.workDir, g.challengeID)
 	if err := os.MkdirAll(chalDir, 0755); err != nil {
 		return fmt.Errorf("create challenge dir: %w", err)
 	}
 
-	slog.Info("generator started", "topic", g.Topic, "challengeID", g.challengeID)
+	slog.Info("generator started", "title", g.defaultTitle(), "challengeID", g.challengeID)
 	genStart := time.Now()
 
 	k8sClient, err := k8s.New(g.Kubeconfig)
@@ -88,7 +89,7 @@ func (g *Generator) Run(ctx context.Context) error {
 			}
 			slog.Info("phase done", "phase", "enrich", "round", round+1, "duration", time.Since(eStart))
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "success")
-			slog.Info("generation done", "topic", g.Topic, "challengeID", g.challengeID, "rounds", round+1, "duration", time.Since(genStart))
+			slog.Info("generation done", "title", g.defaultTitle(), "challengeID", g.challengeID, "rounds", round+1, "duration", time.Since(genStart))
 			return g.finalize(chalDir)
 		}
 		judgeFeedback = "verify failed: " + verifyErr
@@ -96,7 +97,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "verify_fail")
 	}
 
-	return fmt.Errorf("exceeded max rounds for topic: %s", g.Topic)
+	return fmt.Errorf("exceeded max rounds for challenge draft: %s", g.defaultTitle())
 }
 
 func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools []tool.InvokableTool, judgeFeedback string) error {
@@ -115,9 +116,9 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 
 	var prompt string
 	if judgeFeedback == "" {
-		prompt = fmt.Sprintf(WorkerPromptCreate, g.Topic, chalDir)
+		prompt = fmt.Sprintf(WorkerPromptCreate, g.draftContext(), chalDir)
 	} else {
-		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.Topic, chalDir)
+		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.draftContext(), chalDir)
 	}
 	slog.Info("agent prompt", "phase", "generate", "prompt", truncateStr(prompt, 500))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
@@ -148,7 +149,7 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 		return false, ""
 	}
 
-	prompt := fmt.Sprintf(JudgePrompt, g.Topic, fileContents.String())
+	prompt := fmt.Sprintf(JudgePrompt, g.draftContext(), fileContents.String())
 	slog.Info("agent prompt", "phase", "judge", "prompt_len", len(prompt))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	events := runner.Run(ctx, []adk.Message{schema.UserMessage(prompt)})
@@ -265,7 +266,7 @@ func (g *Generator) phaseEnrich(ctx context.Context, chalDir string) error {
 		return fmt.Errorf("create enrich agent: %w", err)
 	}
 
-	prompt := fmt.Sprintf(EnrichPrompt, g.Topic, fileContents.String())
+	prompt := fmt.Sprintf(EnrichPrompt, g.draftContext(), fileContents.String())
 	slog.Info("agent prompt", "phase", "enrich", "prompt_len", len(prompt))
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	events := runner.Run(ctx, []adk.Message{schema.UserMessage(prompt)})
@@ -298,7 +299,7 @@ func (g *Generator) finalize(chalDir string) error {
 
 	metadata := challengeMetadata{
 		ID:    g.challengeID,
-		Title: g.Topic,
+		Title: g.defaultTitle(),
 		Type:  "script",
 		Image: fmt.Sprintf("%s/%s:latest", g.RegistryAddr, g.challengeID),
 	}
@@ -324,7 +325,7 @@ func (g *Generator) finalize(chalDir string) error {
 			if spec.Description != "" {
 				metadata.Description = spec.Description
 			} else {
-				metadata.Description = g.Topic
+				metadata.Description = g.defaultDescription()
 			}
 		}
 	}
@@ -391,8 +392,8 @@ func truncateStr(s string, max int) string {
 	return s[:max] + "..."
 }
 
-func sanitizeID(topic string) string {
-	words := strings.Fields(strings.ToLower(topic))
+func sanitizeID(seed string) string {
+	words := strings.Fields(strings.ToLower(seed))
 	var id string
 	for _, w := range words {
 		clean := strings.Map(func(r rune) rune {
@@ -412,13 +413,62 @@ func sanitizeID(topic string) string {
 		}
 	}
 	if id == "" {
-		h := fmt.Sprintf("%x", sum([]byte(topic)))
+		h := fmt.Sprintf("%x", sum([]byte(seed)))
 		id = "challenge-" + h[:8]
 	}
 	if len(id) > 50 {
 		id = id[:50]
 	}
 	return strings.Trim(id, "-")
+}
+
+func (g *Generator) identitySeed() string {
+	if g.Draft == nil {
+		return "challenge"
+	}
+	if strings.TrimSpace(g.Draft.Title) != "" {
+		return g.Draft.Title
+	}
+	if strings.TrimSpace(g.Draft.Description) != "" {
+		return g.Draft.Description
+	}
+	return "challenge"
+}
+
+func (g *Generator) defaultTitle() string {
+	if g.Draft != nil && strings.TrimSpace(g.Draft.Title) != "" {
+		return g.Draft.Title
+	}
+	return "Untitled challenge"
+}
+
+func (g *Generator) defaultDescription() string {
+	if g.Draft != nil && strings.TrimSpace(g.Draft.Description) != "" {
+		return g.Draft.Description
+	}
+	return g.defaultTitle()
+}
+
+func (g *Generator) draftContext() string {
+	if g.Draft == nil {
+		return "No reviewed challenge draft provided."
+	}
+	var parts []string
+	parts = append(parts, fmt.Sprintf("Title: %s", g.Draft.Title))
+	parts = append(parts, fmt.Sprintf("Difficulty: %s", g.Draft.Difficulty))
+	if len(g.Draft.Tags) > 0 {
+		parts = append(parts, fmt.Sprintf("Tags: %s", strings.Join(g.Draft.Tags, ", ")))
+	}
+	parts = append(parts, fmt.Sprintf("Description: %s", g.Draft.Description))
+	parts = append(parts, fmt.Sprintf("Operator story: %s", g.Draft.OperatorStory))
+	parts = append(parts, fmt.Sprintf("Broken state: %s", g.Draft.BrokenState))
+	parts = append(parts, fmt.Sprintf("Expected fix: %s", g.Draft.ExpectedFix))
+	parts = append(parts, fmt.Sprintf("Verification expectations: %s", g.Draft.VerificationExpectations))
+	parts = append(parts, fmt.Sprintf("Constraints: %s", g.Draft.Constraints))
+	if strings.TrimSpace(g.Draft.Notes) != "" {
+		parts = append(parts, fmt.Sprintf("Notes: %s", g.Draft.Notes))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func sum(b []byte) [16]byte {

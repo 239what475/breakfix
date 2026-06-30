@@ -33,12 +33,9 @@ make docker-challenge NAME=xxx  # 重建单个题目镜像
 
 ```bash
 make dev
-./bin/breakfix-cli register -u test -p pass123   # 扫 QR 码
-./bin/breakfix-cli login    -u test -p pass123 -t <totp>
-./bin/breakfix-cli list
-./bin/breakfix-cli start cleanup-logs
-./bin/breakfix-cli submit <instance-id>
 ```
+
+打开 `http://localhost:9090`，在 Web UI 里完成注册、登录、启动题目和提交。
 
 > `make dev` 保留 DB 和 CA，之后 `make dev-server` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
 
@@ -75,7 +72,7 @@ sudo mv /tmp/kubeconfig /var/lib/breakfix/kubeconfig
 sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
 ```
 
-### 1.3 安装 API Server
+### 1.3 安装 Gateway
 
 **前置**：在本地仓库创建 `.breakfix-server` 文件，一行写服务器 SSH 主机名：
 ```bash
@@ -85,9 +82,9 @@ echo myserver2 > .breakfix-server
 **方式一：GitHub Releases（推荐）**
 
 ```bash
-sudo curl -Lo /usr/local/bin/breakfix-api \
-  https://github.com/your-org/breakfix/releases/latest/download/breakfix-api-linux-amd64
-sudo chown breakfix:breakfix /usr/local/bin/breakfix-api
+sudo curl -Lo /usr/local/bin/breakfix-gateway \
+  https://github.com/your-org/breakfix/releases/latest/download/breakfix-gateway-linux-amd64
+sudo chown breakfix:breakfix /usr/local/bin/breakfix-gateway
 ```
 
 **方式二：make deploy-server（本地构建 + 自动部署）**
@@ -103,13 +100,13 @@ make deploy-server     # 编译 → scp → systemctl restart，一条命令
 ```bash
 sudo tee /etc/systemd/system/breakfix-api.service <<'EOF' > /dev/null
 [Unit]
-Description=Breakfix API Server
+Description=Breakfix Gateway
 After=network.target
 
 [Service]
 Type=simple
 User=breakfix
-ExecStart=/usr/local/bin/breakfix-api -config /var/lib/breakfix/breakfix.yaml
+ExecStart=/usr/local/bin/breakfix-gateway -config /var/lib/breakfix/breakfix.yaml
 Restart=always
 RestartSec=5
 
@@ -147,7 +144,7 @@ sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
 | 集群类型 | ACK 托管版 Standard | 控制面免费 |
 | Auto Mode | 关闭 | 需要 Pro 版，且 ContainerOS 不兼容 |
 | VPC | 网关 ECS 所在 VPC | 同内网通信 |
-| API Server | 仅内网 | 安全，不暴露公网 |
+| Gateway API | 仅内网 | 安全，不暴露公网 |
 | SNAT | 不配 | 镜像走 ACR VPC 内网，不需要出网 |
 | 网络插件 | Flannel | 简单，无特殊网络需求 |
 | IPv6 双栈 | 不开 | 全内网 IPv4 |
@@ -219,37 +216,9 @@ make logs                 # 查看远程实时日志
 
 ---
 
-## 5. CLI 分发（给面试者）
+## 5. 面试者入口
 
-CLI 是面试者在自己电脑上用的，用于注册、登录、连接题目环境。**不要装到服务器上**。
-
-**方式一：GitHub Releases**
-
-面试者在自己的机器上执行：
-```bash
-curl -Lo /usr/local/bin/breakfix https://github.com/your-org/breakfix/releases/latest/download/breakfix-cli-linux-amd64
-chmod +x /usr/local/bin/breakfix
-```
-
-**方式二：本地构建**
-
-```bash
-go build -ldflags "-s -w -X github.com/breakfix/breakfix/internal/build.Version=v0.1.0" \
-  -o dist/breakfix-cli-linux-amd64 ./cmd/cli
-```
-
-> 跨平台构建由 GitHub Actions 的 release workflow 处理，本地不需要手动设 GOOS/GOARCH。
-
-### 连接远程服务器
-
-CLI 通过 `--server` 指定网关 ECS 地址，默认连接端口 9090（TLS 加密，单端口）：
-
-```bash
-breakfix --server <ecs-公网IP> register -u user -p pass
-breakfix --server <ecs-公网IP> login -u user -p pass -t <totp>
-breakfix --server <ecs-公网IP> list
-breakfix --server <ecs-公网IP> start cleanup-logs
-```
+面试者直接通过浏览器访问网关地址，使用 Web UI 完成注册、登录、启动题目和提交。
 
 ---
 
@@ -257,10 +226,6 @@ breakfix --server <ecs-公网IP> start cleanup-logs
 
 ```bash
 make status                                  # active
-breakfix --server <ecs-ip> register -u test -p test123
-breakfix --server <ecs-ip> login -u test -p test123 -t <totp>
-breakfix --server <ecs-ip> list
-breakfix --server <ecs-ip> start cleanup-logs
-breakfix --server <ecs-ip> ssh <id>
-breakfix --server <ecs-ip> submit <id>
 ```
+
+然后用浏览器打开 `http://<ecs-ip>:9090` 验证注册、登录、启动题目、终端连接和提交流程。

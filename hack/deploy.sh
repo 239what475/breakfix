@@ -2,10 +2,9 @@
 set -euo pipefail
 
 SERVER="${SERVER:-myserver2}"
-SERVER_BIN="${SERVER_BIN:-/usr/local/bin/breakfix-api}"
+SERVER_BIN="${SERVER_BIN:-/usr/local/bin/breakfix-gateway}"
 SERVER_CONF="${SERVER_CONF:-/var/lib/breakfix/breakfix.yaml}"
-SERVICE="${SERVICE:-breakfix-api}"
-CLI_BIN="${CLI_BIN:-/usr/local/bin/breakfix}"
+SERVICE="${SERVICE:-breakfix-gateway}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -17,46 +16,27 @@ LDFLAGS="-s -w \
 
 build_server() {
     echo "=== Building server (${VERSION} ${COMMIT}) ==="
-    go build -ldflags "${LDFLAGS}" -o dist/breakfix-api-linux-amd64 ./cmd/server
-}
-
-build_cli() {
-    echo "=== Building CLI (${VERSION} ${COMMIT}) ==="
-    go build -ldflags "${LDFLAGS}" -o dist/breakfix-cli-linux-amd64 ./cmd/cli
+    go build -ldflags "${LDFLAGS}" -o dist/breakfix-gateway-linux-amd64 ./cmd/gateway
 }
 
 deploy_server() {
     build_server
     echo "=== Deploying to ${SERVER} ==="
-    scp dist/breakfix-api-linux-amd64 "${SERVER}:/tmp/breakfix-api"
-    ssh "${SERVER}" "sudo mv /tmp/breakfix-api ${SERVER_BIN} && sudo systemctl restart ${SERVICE}"
+    scp dist/breakfix-gateway-linux-amd64 "${SERVER}:/tmp/breakfix-gateway"
+    ssh "${SERVER}" "sudo mv /tmp/breakfix-gateway ${SERVER_BIN} && sudo systemctl restart ${SERVICE}"
     echo "✓ Server deployed and restarted"
     ssh "${SERVER}" "sudo systemctl status ${SERVICE} --no-pager" || true
-}
-
-deploy_cli() {
-    build_cli
-    echo "=== Installing CLI ==="
-    sudo cp dist/breakfix-cli-linux-amd64 "${CLI_BIN}"
-    echo "✓ CLI installed to ${CLI_BIN}"
 }
 
 case "${1:-}" in
     server)
         deploy_server
         ;;
-    cli)
-        deploy_cli
-        ;;
     all)
         deploy_server
-        deploy_cli
         ;;
     build-server)
         build_server
-        ;;
-    build-cli)
-        build_cli
         ;;
     status)
         ssh "${SERVER}" "sudo systemctl status ${SERVICE} --no-pager"
@@ -71,7 +51,7 @@ case "${1:-}" in
         echo "✓ Config deployed and server restarted"
         ;;
     *)
-        echo "Usage: $0 {server|cli|all|config|build-server|build-cli|status|logs}"
+        echo "Usage: $0 {server|all|config|build-server|status|logs}"
         exit 1
         ;;
 esac

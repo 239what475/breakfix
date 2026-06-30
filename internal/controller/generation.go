@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"log/slog"
 )
 
 const generationFinalizer = "breakfix.dev/generation-cleanup"
@@ -62,7 +62,6 @@ func (r *GenerationReconciler) createJob(ctx context.Context, gen *breakfixv1.Ge
 	if env == nil {
 		env = map[string]string{}
 	}
-	env["TOPIC"] = gen.Spec.Topic
 
 	if err := r.K8s.CreateJob(r.CRDNamespace, jobName, gen.Spec.Image, env); err != nil {
 		gen.Status.Phase = breakfixv1.GenerationFailed
@@ -75,6 +74,7 @@ func (r *GenerationReconciler) createJob(ctx context.Context, gen *breakfixv1.Ge
 
 	gen.Status.Phase = breakfixv1.GenerationRunning
 	gen.Status.JobName = jobName
+	gen.Status.Message = "building and verifying challenge"
 	now := metav1.Now()
 	gen.Status.StartedAt = &now
 	slog.Info("job created", "generation", gen.Name, "job", jobName, "duration", time.Since(phaseStart))
@@ -107,6 +107,11 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 			gen.Status.PodName = r.findJobPod(ctx, gen.Status.JobName)
 			r.extractAndSetMetadata(ctx, gen)
 			gen.Status.Phase = breakfixv1.GenerationSucceeded
+			if gen.Status.Challenge != nil {
+				gen.Status.Message = fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
+			} else {
+				gen.Status.Message = "challenge generated"
+			}
 			now := metav1.Now()
 			gen.Status.CompletedAt = &now
 			slog.Info("job done", "generation", gen.Name, "result", "success", "duration", time.Since(phaseStart))
