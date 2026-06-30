@@ -25,11 +25,12 @@ func main() {
 	}
 
 	g := &generator.Generator{
-		Topic:      *topic,
-		OutputDir:  *outputDir,
-		Registry:   envOr("REGISTRY", "localhost:5000"),
-		ACRNS:      envOr("ACR_NAMESPACE", "break-fix"),
-		Kubeconfig: os.Getenv("KUBECONFIG"),
+		Topic:            *topic,
+		OutputDir:        *outputDir,
+		RegistryAddr:     envOr("REGISTRY_ADDR", "172.18.0.1:5000/break-fix"),
+		RegistryInsecure: os.Getenv("REGISTRY_INSECURE") == "true",
+		Kubeconfig:       os.Getenv("KUBECONFIG"),
+		LabNS:            envOr("LAB_NAMESPACE", "breakfix-system"),
 	}
 
 	if err := g.Run(context.Background()); err != nil {

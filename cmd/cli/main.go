@@ -9,16 +9,18 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"golang.org/x/term"
 
 	"github.com/breakfix/breakfix/internal/build"
-	pb "github.com/breakfix/breakfix/internal/proto"
+	pb "github.com/breakfix/breakfix/pkg/proto"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"log/slog"
+	"rsc.io/qr"
 )
 
 var serverAddr, configDir string
@@ -28,28 +30,22 @@ func main() {
 	configDir = filepath.Join(home, ".breakfix")
 	root := &cobra.Command{Use: "breakfix", Short: "Breakfix - SRE/DevOps interview practice platform"}
 	root.PersistentFlags().StringVar(&serverAddr, "server", "localhost", "API Server hostname (:9090 auto-derived)")
-	root.AddCommand(regCmd(), logCmd(), listC(), startC(), sshC(), subC(), stopC(), statC(), genCmd())
+	root.AddCommand(regCmd(), logCmd(), listC(), startC(), subC(), resetC(), genCmd())
 	root.Execute() //nolint:errcheck
 }
 
-// grpcDial returns a gRPC client connection using TLS.
-// On first use (no saved CA cert), InsecureSkipVerify is set.
-// After register, the CA cert is saved and used for verification.
-// After login, client certificates are also presented (mTLS).
 func grpcDial() (pb.BreakfixClient, *grpc.ClientConn, error) {
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
 
-	// Try to load CA cert for server verification
 	caPEM, _ := os.ReadFile(filepath.Join(configDir, "ca-cert.pem"))
 	if len(caPEM) > 0 {
 		cp := x509.NewCertPool()
 		cp.AppendCertsFromPEM(caPEM)
 		tlsCfg.RootCAs = cp
 	} else {
-		tlsCfg.InsecureSkipVerify = true // first-time: skip, but save CA after register
+		tlsCfg.InsecureSkipVerify = true
 	}
 
-	// Try to load client cert for mTLS
 	certPEM, _ := os.ReadFile(filepath.Join(configDir, "cert.pem"))
 	keyPEM, _ := os.ReadFile(filepath.Join(configDir, "key.pem"))
 	if len(certPEM) > 0 && len(keyPEM) > 0 {
@@ -93,7 +89,9 @@ func regCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		fmt.Println(r.TotpQr)
+
+		// Render QR code locally
+		renderQR(r.TotpUrl)
 
 		if err := os.MkdirAll(configDir, 0700); err != nil {
 			return fmt.Errorf("mkdir config: %w", err)
@@ -108,6 +106,49 @@ func regCmd() *cobra.Command {
 	c.Flags().StringVarP(&u, "user", "u", "", "Username")
 	c.Flags().StringVarP(&p, "pass", "p", "", "Password")
 	return c
+}
+
+func renderQR(url string) {
+	code, err := qr.Encode(url, qr.L)
+	if err != nil {
+		return
+	}
+
+	const (
+		bgBlack = "\033[40m  \033[0m"
+		bgWhite = "\033[47m  \033[0m"
+		qz      = "\033[47m  \033[0m"
+	)
+
+	scale := code.Size
+	var sb strings.Builder
+	sb.WriteByte('\n')
+
+	qzCol := strings.Repeat(qz, 2)
+	qzRow := strings.Repeat(qz, scale+4)
+
+	for i := 0; i < 2; i++ {
+		sb.WriteString(qzRow)
+		sb.WriteByte('\n')
+	}
+	for y := 0; y < scale; y++ {
+		sb.WriteString(qzCol)
+		for x := 0; x < scale; x++ {
+			if code.Black(x, y) {
+				sb.WriteString(bgBlack)
+			} else {
+				sb.WriteString(bgWhite)
+			}
+		}
+		sb.WriteString(qzCol)
+		sb.WriteByte('\n')
+	}
+	for i := 0; i < 2; i++ {
+		sb.WriteString(qzRow)
+		sb.WriteByte('\n')
+	}
+
+	fmt.Print(sb.String())
 }
 
 func logCmd() *cobra.Command {
@@ -148,7 +189,7 @@ func logCmd() *cobra.Command {
 }
 
 func listC() *cobra.Command {
-	return &cobra.Command{Use: "list", Short: "List", RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "list", Short: "List challenges", RunE: func(cmd *cobra.Command, args []string) error {
 		c, conn, err := grpcDial()
 		if err != nil {
 			return err
@@ -159,104 +200,64 @@ func listC() *cobra.Command {
 			return err
 		}
 		for _, ch := range r.Challenges {
-			fmt.Printf("%-25s %-10s %s\n", ch.Id, ch.Type, ch.Title)
+			badge := ""
+			if ch.Active {
+				badge = " [进行中]"
+			} else if ch.Solved {
+				badge = " ✓"
+			}
+			fmt.Printf("%-25s %-10s %-10s %s%s\n", ch.Id, ch.Type, ch.Difficulty, ch.Title, badge)
 		}
 		return nil
 	}}
 }
 
 func startC() *cobra.Command {
-	return &cobra.Command{Use: "start", Short: "Start", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "start", Short: "Start a challenge and connect", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		challengeID := args[0]
 		c, conn, err := grpcDial()
 		if err != nil {
 			return err
 		}
 		defer closeConn(conn)
-		r, err := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: args[0]})
+
+		r, err := c.StartChallenge(context.Background(), &pb.StartChallengeRequest{ChallengeId: challengeID})
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Challenge: %s\nInstance:  %s\n\nRun: breakfix ssh %s\n", r.ChallengeTitle, r.InstanceId, r.InstanceId)
-		return nil
+		fmt.Printf("Challenge: %s\n", r.ChallengeTitle)
+
+		return doExec(c, challengeID)
 	}}
 }
 
-func sshC() *cobra.Command {
-	return &cobra.Command{Use: "ssh", Short: "SSH", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+func resetC() *cobra.Command {
+	return &cobra.Command{Use: "reset", Short: "Reset a challenge (destroy old, create new)", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		challengeID := args[0]
 		c, conn, err := grpcDial()
 		if err != nil {
 			return err
 		}
 		defer closeConn(conn)
-		c.PingInstance(context.Background(), &pb.PingInstanceRequest{InstanceId: args[0]}) //nolint:errcheck
-		stream, err := c.ExecInstance(context.Background())
+
+		r, err := c.ResetChallenge(context.Background(), &pb.ResetChallengeRequest{ChallengeId: challengeID})
 		if err != nil {
-			return fmt.Errorf("exec: %w", err)
+			return err
 		}
-		stream.Send(&pb.PTYData{Data: []byte(args[0])}) //nolint:errcheck
+		fmt.Printf("Challenge: %s (fresh instance)\n", r.ChallengeTitle)
 
-		// Terminal setup (only if stdin is a terminal)
-		if term.IsTerminal(int(os.Stdin.Fd())) {
-			oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-			if err != nil {
-				return err
-			}
-			defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
-
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGWINCH)
-			defer signal.Stop(sigCh)
-			go func() {
-				if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-					stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
-				}
-				for range sigCh {
-					if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-						stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
-					}
-				}
-			}()
-		}
-
-		// stdin → stream
-		go func() {
-			buf := make([]byte, 4096)
-			for {
-				n, err := os.Stdin.Read(buf)
-				if n > 0 {
-					stream.Send(&pb.PTYData{Data: buf[:n]}) //nolint:errcheck
-				}
-				if err != nil {
-					stream.CloseSend() //nolint:errcheck
-					return
-				}
-			}
-		}()
-
-		// stream → stdout
-		for {
-			data, err := stream.Recv()
-			if err != nil {
-				if err != io.EOF {
-					fmt.Fprintf(os.Stderr, "\nssh: %v\n", err)
-				}
-				return nil
-			}
-			if _, err := os.Stdout.Write(data.Data); err != nil {
-				return fmt.Errorf("write: %w", err)
-			}
-		}
+		return doExec(c, challengeID)
 	}}
 }
 
 func subC() *cobra.Command {
-	return &cobra.Command{Use: "submit", Short: "Submit", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "submit", Short: "Submit solution", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c, conn, err := grpcDial()
 		if err != nil {
 			return err
 		}
 		defer closeConn(conn)
-		r, err := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{InstanceId: args[0]})
+		r, err := c.SubmitChallenge(context.Background(), &pb.SubmitChallengeRequest{ChallengeId: args[0]})
 		if err != nil {
 			return err
 		}
@@ -264,36 +265,10 @@ func subC() *cobra.Command {
 			fmt.Println("✓ PASSED!")
 		} else {
 			fmt.Printf("✗ FAILED (exit=%d)\n", r.ExitCode)
+			if r.Output != "" {
+				fmt.Println(r.Output)
+			}
 		}
-		return nil
-	}}
-}
-
-func stopC() *cobra.Command {
-	return &cobra.Command{Use: "stop", Short: "Stop", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		c, conn, err := grpcDial()
-		if err != nil {
-			return err
-		}
-		defer closeConn(conn)
-		c.StopChallenge(context.Background(), &pb.StopChallengeRequest{InstanceId: args[0]}) //nolint:errcheck
-		fmt.Printf("Instance %s destroyed.\n", args[0])
-		return nil
-	}}
-}
-
-func statC() *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "Status", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		c, conn, err := grpcDial()
-		if err != nil {
-			return err
-		}
-		defer closeConn(conn)
-		r, err := c.GetInstance(context.Background(), &pb.GetInstanceRequest{InstanceId: args[0]})
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Instance: %s Status: %d\n", r.InstanceId, r.Status)
 		return nil
 	}}
 }
@@ -306,12 +281,15 @@ func genCmd() *cobra.Command {
 			return err
 		}
 		defer closeConn(conn)
-		fmt.Printf("Generating challenge for: %s\n", topic)
+		fmt.Printf("Generating challenge for: %s\n(agent workflow may take 5-30 minutes)\n", topic)
 		r, err := c.GenerateChallenge(context.Background(), &pb.GenerateChallengeRequest{Topic: topic})
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Status: %s\n", r.Status)
+		if r.ChallengeId != "" {
+			fmt.Printf("Challenge: %s\n", r.ChallengeId)
+		}
 		if r.Detail != "" {
 			fmt.Println(r.Detail)
 		}
@@ -319,4 +297,68 @@ func genCmd() *cobra.Command {
 	}}
 	c.Flags().StringVar(&topic, "topic", "", "Challenge topic description")
 	return c
+}
+
+// doExec opens a PTY session for the given challenge.
+func doExec(client pb.BreakfixClient, challengeID string) error {
+	stream, err := client.ExecInstance(context.Background())
+	if err != nil {
+		return fmt.Errorf("exec: %w", err)
+	}
+	stream.Send(&pb.PTYData{Data: []byte(challengeID)}) //nolint:errcheck
+
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(os.Stderr, "stdin is not a terminal")
+		return nil
+	}
+
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return err
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGWINCH)
+	defer signal.Stop(sigCh)
+
+	go func() {
+		if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+			stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
+		}
+		for range sigCh {
+			if w, h, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+				stream.Send(&pb.PTYData{Cols: uint32(w), Rows: uint32(h)}) //nolint:errcheck
+			}
+		}
+	}()
+
+	// stdin → stream
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				stream.Send(&pb.PTYData{Data: buf[:n]}) //nolint:errcheck
+			}
+			if err != nil {
+				stream.CloseSend() //nolint:errcheck
+				return
+			}
+		}
+	}()
+
+	// stream → stdout
+	for {
+		data, err := stream.Recv()
+		if err != nil {
+			if err != io.EOF {
+				fmt.Fprintf(os.Stderr, "\nDisconnected: %v\n", err)
+			}
+			return nil
+		}
+		if _, err := os.Stdout.Write(data.Data); err != nil {
+			return fmt.Errorf("write: %w", err)
+		}
+	}
 }

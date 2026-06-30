@@ -7,7 +7,6 @@ tags:
   - find
   - tar
   - shell
-timeout: 600
 image: cleanup-logs:v1
 
 description: |

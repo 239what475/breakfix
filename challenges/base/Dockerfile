@@ -1,6 +1,6 @@
-FROM alpine:3.20
+FROM ubuntu:22.04
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     vim \
@@ -14,12 +14,11 @@ RUN apk add --no-cache \
     procps \
     htop \
     net-tools \
-    iputils \
-    bind-tools \
+    iputils-ping \
+    dnsutils \
     tcpdump \
     python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python
+    && rm -rf /var/lib/apt/lists/*
 
-# Default shell
 SHELL ["/bin/bash", "-c"]
 CMD ["sleep", "infinity"]

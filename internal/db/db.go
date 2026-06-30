@@ -34,7 +34,6 @@ func New(path string) (*DB, error) {
 
 func (d *DB) Close() error { return d.conn.Close() }
 
-// migrations is the ordered list of schema migrations.
 var migrations = []string{
 	// v1: initial schema
 	`
@@ -54,40 +53,19 @@ var migrations = []string{
 		difficulty  TEXT NOT NULL,
 		tags        TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL,
-		timeout     INTEGER NOT NULL DEFAULT 600,
 		image       TEXT NOT NULL,
-		dir_path    TEXT NOT NULL,
+		dir_path    TEXT NOT NULL DEFAULT '',
 		created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 	);
-
-	CREATE TABLE IF NOT EXISTS instances (
-		id           TEXT PRIMARY KEY,
-		user_id      TEXT NOT NULL REFERENCES users(id),
-		challenge_id TEXT NOT NULL REFERENCES challenges(id),
-		status       TEXT NOT NULL DEFAULT 'running',
-		namespace    TEXT NOT NULL,
-		pod_name     TEXT NOT NULL,
-		created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-		destroyed_at TEXT
-	);
-	CREATE INDEX IF NOT EXISTS idx_instances_user ON instances(user_id, status);
-
-	CREATE TABLE IF NOT EXISTS submissions (
-		id           TEXT PRIMARY KEY,
-		instance_id  TEXT NOT NULL REFERENCES instances(id),
-		user_id      TEXT NOT NULL REFERENCES users(id),
-		challenge_id TEXT NOT NULL REFERENCES challenges(id),
-		passed       INTEGER NOT NULL,
-		exit_code    INTEGER NOT NULL,
-		output       TEXT NOT NULL DEFAULT '',
-		created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-	);
-	CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id, created_at);
+	`,
+	// v2: drop legacy tables (instances + submissions moved to CRDs)
+	`
+	DROP TABLE IF EXISTS instances;
+	DROP TABLE IF EXISTS submissions;
 	`,
 }
 
 func (d *DB) migrate() error {
-	// Read current schema version.
 	var version int
 	if err := d.conn.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)

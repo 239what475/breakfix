@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	pb "github.com/breakfix/breakfix/internal/proto"
+	pb "github.com/breakfix/breakfix/pkg/proto"
 	"k8s.io/client-go/tools/remotecommand"
 )
 

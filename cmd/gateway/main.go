@@ -17,11 +17,11 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/proxy"
-	"github.com/breakfix/breakfix/internal/server"
+	"github.com/breakfix/breakfix/internal/gateway"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	pb "github.com/breakfix/breakfix/internal/proto"
+	pb "github.com/breakfix/breakfix/pkg/proto"
 )
 
 var allowAnon = map[string]bool{
@@ -43,7 +43,7 @@ func main() {
 	}
 	_ = os.MkdirAll(cfg.DataDir, 0700)
 
-	slog.Info("Breakfix API Server starting", "version", build.Version, "data_dir", cfg.DataDir)
+	slog.Info("Breakfix Gateway starting", "version", build.Version, "data_dir", cfg.DataDir)
 
 	database, err := db.New(filepath.Join(cfg.DataDir, "breakfix.db"))
 	if err != nil {
@@ -88,13 +88,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	cooldown := server.NewCooldownManager(database, k8sClient, nil)
-	srv := server.New(database, k8sClient, cooldown, cfg, caCert)
-	cooldown.SetCleanup(srv.CleanupInstance)
+	srv := server.New(database, k8sClient, cfg, caCert)
 
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.UnaryInterceptor(server.AuthInterceptor(allowAnon)),
+		grpc.ChainUnaryInterceptor(
+			server.LoggingInterceptor(),
+			server.AuthInterceptor(allowAnon),
+		),
 	)
 	pb.RegisterBreakfixServer(grpcServer, srv)
 
@@ -111,7 +112,6 @@ func main() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		slog.Info("shutting down")
-		cooldown.Stop()
 		grpcServer.GracefulStop()
 	}()
 
@@ -120,4 +120,3 @@ func main() {
 		slog.Error("grpc serve error", "err", err)
 	}
 }
-

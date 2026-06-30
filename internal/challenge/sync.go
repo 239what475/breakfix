@@ -17,7 +17,6 @@ type Spec struct {
 	Difficulty  string   `yaml:"difficulty"`
 	Tags        []string `yaml:"tags"`
 	Description string   `yaml:"description"`
-	Timeout     int      `yaml:"timeout"`
 	Image       string   `yaml:"image"`
 }
 
@@ -28,7 +27,7 @@ func SyncChallenges(database *db.DB, challengesDir string) error {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "base" {
 			continue
 		}
 		dirPath := filepath.Join(challengesDir, entry.Name())
@@ -46,9 +45,6 @@ func SyncChallenges(database *db.DB, challengesDir string) error {
 		if spec.ID == "" {
 			spec.ID = entry.Name()
 		}
-		if spec.Timeout <= 0 {
-			spec.Timeout = 600
-		}
 		if spec.Type == "" {
 			spec.Type = "script"
 		}
@@ -65,7 +61,6 @@ func SyncChallenges(database *db.DB, challengesDir string) error {
 			Difficulty:  spec.Difficulty,
 			Tags:        string(tags),
 			Description: spec.Description,
-			Timeout:     spec.Timeout,
 			Image:       spec.Image,
 			DirPath:     dirPath,
 		}

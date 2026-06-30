@@ -5,26 +5,20 @@ package breakfix;
 option go_package = "github.com/breakfix/breakfix/internal/proto";
 
 service Breakfix {
-    // User
-
-    // Challenges
-    rpc ListChallenges (ListChallengesRequest) returns (ListChallengesResponse);
-
-    // Instances
-    rpc StartChallenge (StartChallengeRequest) returns (StartChallengeResponse);
-    rpc GetInstance (GetInstanceRequest) returns (GetInstanceResponse);
-    rpc PingInstance (PingInstanceRequest) returns (PingInstanceResponse);
-    rpc StopChallenge (StopChallengeRequest) returns (StopChallengeResponse);
-
     // Auth
     rpc Register (RegisterRequest) returns (RegisterResponse);
     rpc Login (LoginRequest) returns (LoginResponse);
 
-    // Terminal
-    rpc ExecInstance (stream PTYData) returns (stream PTYData);
+    // Challenges
+    rpc ListChallenges (ListChallengesRequest) returns (ListChallengesResponse);
 
-    // Submission
+    // Instance lifecycle (keyed by user + challenge_id)
+    rpc StartChallenge (StartChallengeRequest) returns (StartChallengeResponse);
     rpc SubmitChallenge (SubmitChallengeRequest) returns (SubmitChallengeResponse);
+    rpc ResetChallenge (ResetChallengeRequest) returns (ResetChallengeResponse);
+
+    // Terminal (first PTYData.data = challenge_id)
+    rpc ExecInstance (stream PTYData) returns (stream PTYData);
 
     // Agent
     rpc GenerateChallenge (GenerateChallengeRequest) returns (GenerateChallengeResponse);
@@ -38,9 +32,9 @@ message RegisterRequest {
 }
 
 message RegisterResponse {
-    string totp_secret = 1;     // 给用户扫的密钥
-    string totp_qr = 2;         // ASCII QR 码
-    string ca_cert = 3;         // CA 公钥 PEM（用于 TLS 服务端认证）
+    string totp_secret = 1;
+    string totp_url = 2;    // otpauth:// URL for local QR rendering
+    string ca_cert = 3;
 }
 
 message LoginRequest {
@@ -52,22 +46,18 @@ message LoginRequest {
 message LoginResponse {
     string user_id = 1;
     string name = 2;
-    string client_cert = 3;     // 客户端证书 PEM
-    string client_key = 4;      // 客户端私钥 PEM
-    string ca_cert = 5;         // CA 公钥 PEM（用于 TLS 服务端认证）
+    string client_cert = 3;
+    string client_key = 4;
+    string ca_cert = 5;
 }
 
 // ── Terminal ──
 
 message PTYData {
-    bytes data = 1;             // stdin/stdout 字节流
-    uint32 cols = 2;            // 终端列数（resize）
-    uint32 rows = 3;            // 终端行数（resize）
+    bytes data = 1;
+    uint32 cols = 2;
+    uint32 rows = 3;
 }
-
-// ── User ──
-
-
 
 // ── Challenges ──
 
@@ -80,6 +70,7 @@ message ChallengeSummary {
     string difficulty = 4;
     repeated string tags = 5;
     bool solved = 6;
+    bool active = 7;          // running or draining instance exists
 }
 
 message ListChallengesResponse {
@@ -93,52 +84,25 @@ message StartChallengeRequest {
 }
 
 message StartChallengeResponse {
-    string instance_id = 1;
-    string challenge_title = 2;
-    int64 timeout_sec = 3;
+    string challenge_title = 1;
 }
-
-message GetInstanceRequest {
-    string instance_id = 1;
-}
-
-enum InstanceStatus {
-    RUNNING = 0;
-    DRAINING = 1;
-    DESTROYED = 2;
-}
-
-message GetInstanceResponse {
-    string instance_id = 1;
-    string challenge_id = 2;
-    InstanceStatus status = 3;
-    int64 remaining_sec = 4;
-}
-
-message PingInstanceRequest {
-    string instance_id = 1;
-}
-
-message PingInstanceResponse {
-    InstanceStatus status = 1;
-}
-
-message StopChallengeRequest {
-    string instance_id = 1;
-}
-
-message StopChallengeResponse {}
-
-// ── Submission ──
 
 message SubmitChallengeRequest {
-    string instance_id = 1;
+    string challenge_id = 1;
 }
 
 message SubmitChallengeResponse {
     bool passed = 1;
     int32 exit_code = 2;
     string output = 3;
+}
+
+message ResetChallengeRequest {
+    string challenge_id = 1;
+}
+
+message ResetChallengeResponse {
+    string challenge_title = 1;
 }
 
 // ── Agent ──
@@ -150,5 +114,5 @@ message GenerateChallengeRequest {
 message GenerateChallengeResponse {
     string challenge_id = 1;
     string status = 2;          // "success" | "failed"
-    string detail = 3;          // log output
+    string detail = 3;
 }

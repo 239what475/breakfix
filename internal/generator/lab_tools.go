@@ -6,26 +6,28 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // LabClient wraps the k8s client for lab pod MCP tools.
 type LabClient struct {
-	K8s       *k8s.Client
-	Namespace string
+	K8s          *k8s.Client
+	Namespace    string
+	WorkDir      string // challenge directory where agent writes files
+	RegistryAddr string // same as challenge Dockerfile FROM
 }
 
-// NewLabClient creates a LabClient.
-func NewLabClient(client *k8s.Client, namespace string) *LabClient {
-	return &LabClient{K8s: client, Namespace: namespace}
+func NewLabClient(client *k8s.Client, namespace, workDir, registryAddr string) *LabClient {
+	return &LabClient{K8s: client, Namespace: namespace, WorkDir: workDir, RegistryAddr: registryAddr}
 }
 
-// Tools returns all lab tools as InvokableTool slice for eino-claude-code.
 func (c *LabClient) Tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
 		&labCreateTool{c},
@@ -48,31 +50,33 @@ func (t *labCreateTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *labCreateTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	start := time.Now()
 	ns := t.lc.Namespace
 
-	// Clean up any old lab pods first (one lab at a time)
+	// Clean up old lab pods
 	oldPods, _ := t.lc.K8s.ListPods(ns)
 	for _, p := range oldPods {
 		if strings.HasPrefix(p, "lab-") {
-			if err := t.lc.K8s.DeletePod(ns, p); err != nil {
-				slog.Error("cleanup old lab pod", "pod", p, "err", err)
-			}
+			t.lc.K8s.DeletePod(ns, p) //nolint:errcheck
 		}
-	}
-	if len(oldPods) > 0 {
-		time.Sleep(2 * time.Second) // let old pods terminate
 	}
 
 	podName := "lab-" + k8s.RandomID()
 	if err := t.lc.K8s.EnsureNamespace(ns); err != nil {
+		slog.Info("tool done", "tool", "lab_create", "duration", time.Since(start), "err", err)
 		return "", fmt.Errorf("ensure namespace: %w", err)
 	}
-	if err := t.lc.K8s.CreatePod(ns, podName, k8s.CreatePodOpts{Image: "breakfix-base:latest"}); err != nil {
+	labImage := t.lc.RegistryAddr + "/breakfix-base:latest"
+	if err := t.lc.K8s.CreatePod(ns, podName, k8s.CreatePodOpts{Image: labImage}); err != nil {
+		slog.Info("tool done", "tool", "lab_create", "duration", time.Since(start), "err", err)
 		return "", fmt.Errorf("create pod: %w", err)
 	}
 	if err := t.lc.K8s.WaitForPod(ns, podName, "challenge"); err != nil {
+		slog.Info("tool done", "tool", "lab_create", "duration", time.Since(start), "err", err)
 		return "", fmt.Errorf("wait pod: %w", err)
 	}
+
+	slog.Info("tool done", "tool", "lab_create", "pod", podName, "duration", time.Since(start))
 	return podName, nil
 }
 
@@ -92,14 +96,17 @@ func (t *labExecTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *labExecTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	start := time.Now()
 	var a struct {
 		Pod    string `json:"pod"`
 		Script string `json:"script"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
+		slog.Info("tool done", "tool", "lab_exec", "duration", time.Since(start), "err", err)
 		return "", fmt.Errorf("parse args: %w", err)
 	}
 	exitCode, output, err := t.lc.K8s.ExecInPod(t.lc.Namespace, a.Pod, "bash", "-c", a.Script)
+	slog.Info("tool done", "tool", "lab_exec", "pod", a.Pod, "exit", exitCode, "duration", time.Since(start), "err", err)
 	result := fmt.Sprintf("exit=%d output=%s", exitCode, output)
 	if err != nil {
 		result += fmt.Sprintf(" error=%v", err)
@@ -122,19 +129,18 @@ func (t *labVerifyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *labVerifyTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	var a struct {
-		Pod string `json:"pod"`
-	}
+	start := time.Now()
+	var a struct{ Pod string `json:"pod"` }
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}
-	// Read verify.sh and run it
-	data, _ := os.ReadFile("verify.sh")
+	data, _ := os.ReadFile(filepath.Join(t.lc.WorkDir, "verify.sh"))
 	script := string(data)
 	if script == "" {
 		script = "echo verify.sh not found; exit 1"
 	}
 	exitCode, output, err := t.lc.K8s.ExecInPod(t.lc.Namespace, a.Pod, "bash", "-c", script)
+	slog.Info("tool done", "tool", "lab_verify", "pod", a.Pod, "exit", exitCode, "duration", time.Since(start), "err", err)
 	result := fmt.Sprintf("exit=%d output=%s", exitCode, output)
 	if err != nil {
 		result += fmt.Sprintf(" error=%v", err)
@@ -157,14 +163,17 @@ func (t *labLogsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *labLogsTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	var a struct {
-		Pod string `json:"pod"`
-	}
+	start := time.Now()
+	var a struct{ Pod string `json:"pod"` }
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}
-	// Redirect to lab_exec for simplicity — just capture pod output from verify
-	return fmt.Sprintf("log output for pod %s", a.Pod), nil
+	logs, err := t.lc.K8s.Clientset().CoreV1().Pods(t.lc.Namespace).GetLogs(a.Pod, &corev1.PodLogOptions{}).Do(ctx).Raw()
+	slog.Info("tool done", "tool", "lab_logs", "pod", a.Pod, "duration", time.Since(start), "err", err)
+	if err != nil {
+		return "", err
+	}
+	return string(logs), nil
 }
 
 // ── labDestroy ──
@@ -174,7 +183,7 @@ type labDestroyTool struct{ lc *LabClient }
 func (t *labDestroyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "lab_destroy",
-		Desc: "Delete a lab pod and its namespace. pod: pod name.",
+		Desc: "Delete a lab pod. pod: pod name.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"pod": {Type: schema.String, Desc: "Pod name", Required: true},
 		}),
@@ -182,17 +191,15 @@ func (t *labDestroyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t *labDestroyTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	var a struct {
-		Pod string `json:"pod"`
-	}
+	start := time.Now()
+	var a struct{ Pod string `json:"pod"` }
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}
 	if err := t.lc.K8s.DeletePod(t.lc.Namespace, a.Pod); err != nil {
+		slog.Info("tool done", "tool", "lab_destroy", "pod", a.Pod, "duration", time.Since(start), "err", err)
 		return "", err
 	}
-	if err := t.lc.K8s.DeleteNamespace(t.lc.Namespace); err != nil {
-		slog.Error("delete lab namespace", "ns", t.lc.Namespace, "err", err)
-	}
+	slog.Info("tool done", "tool", "lab_destroy", "pod", a.Pod, "duration", time.Since(start))
 	return "destroyed", nil
 }

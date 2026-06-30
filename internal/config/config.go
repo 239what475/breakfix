@@ -10,14 +10,18 @@ import (
 )
 
 type Config struct {
-	Port         int       `yaml:"port"`
-	ProxyPort    int       `yaml:"proxy_port"`
-	DataDir      string    `yaml:"data_dir"`
-	Kubeconfig   string    `yaml:"kubeconfig"`
-	Registry     string    `yaml:"registry"`
-	ServerHost string `yaml:"server_host"`
-	Namespace  string `yaml:"acr_namespace"`
-	LLM          LLMConfig `yaml:"llm"`
+	Port             int       `yaml:"port"`
+	ProxyPort        int       `yaml:"proxy_port"`
+	HealthPort       int       `yaml:"health_port"`
+	DataDir          string    `yaml:"data_dir"`
+	Kubeconfig       string    `yaml:"kubeconfig"`
+	RegistryAddr     string    `yaml:"registry_addr"`
+	RegistryInsecure bool      `yaml:"registry_insecure"`
+	ServerHost       string    `yaml:"server_host"`
+	Namespace        string    `yaml:"namespace"`
+	CRDNamespace     string    `yaml:"crd_namespace"`
+	CooldownMinutes  int       `yaml:"cooldown_minutes"`
+	LLM              LLMConfig `yaml:"llm"`
 }
 
 type LLMConfig struct {
@@ -30,10 +34,15 @@ type LLMConfig struct {
 
 func defaults() Config {
 	return Config{
-		Port:         9090,
-		ProxyPort:    3128,
-		DataDir:      "/var/lib/breakfix",
-		Namespace: "breakfix",
+		Port:            9090,
+		ProxyPort:       3128,
+		HealthPort:      8081,
+		DataDir:          "/var/lib/breakfix",
+		RegistryAddr:     "172.18.0.1:5000/break-fix",
+		RegistryInsecure: true,
+		Namespace:        "breakfix",
+		CRDNamespace:    "breakfix-system",
+		CooldownMinutes: 5,
 		LLM: LLMConfig{
 			BaseURL:    "https://api.deepseek.com/anthropic",
 			Model:      "deepseek-v4-pro",
@@ -43,12 +52,16 @@ func defaults() Config {
 	}
 }
 
+func (c Config) CooldownDuration() string {
+	return fmt.Sprintf("%dm", c.CooldownMinutes)
+}
+
 // ImageURL prepends registry to image name if not already a full URL.
 func (c Config) ImageURL(image string) string {
-	if c.Registry == "" || strings.Contains(image, ".") {
+	if c.RegistryAddr == "" || strings.Contains(image, "/") {
 		return image
 	}
-	return c.Registry + "/" + c.Namespace + "/" + image
+	return c.RegistryAddr + "/" + image
 }
 
 func Load(path string) (Config, error) {

@@ -32,3 +32,6 @@ bin/
 
 # Kind kubeconfig
 .kube/
+.local/
+bin/
+dist/

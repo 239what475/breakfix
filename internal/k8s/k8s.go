@@ -29,6 +29,16 @@ func New(kubeconfig string) (*Client, error) {
 	return &Client{clientset: clientset, restConfig: config}, nil
 }
 
+// RESTConfig returns a copy of the underlying REST config.
+func (c *Client) RESTConfig() *rest.Config {
+	return rest.CopyConfig(c.restConfig)
+}
+
+// Clientset returns the underlying Kubernetes clientset.
+func (c *Client) Clientset() *kubernetes.Clientset {
+	return c.clientset
+}
+
 func restConfig(kubeconfig string) (*rest.Config, error) {
 	if kubeconfig != "" {
 		return clientcmd.BuildConfigFromFlags("", kubeconfig)

@@ -1,8 +1,9 @@
 # Generator image — runs the agent workflow as a K8s Job
-FROM node:24-alpine
+FROM node:24
 
 # BuildKit daemon (for building challenge images)
 COPY --from=moby/buildkit:master /usr/bin/buildkitd /usr/local/bin/
+COPY --from=moby/buildkit:master /usr/bin/buildctl /usr/local/bin/
 COPY --from=moby/buildkit:master /usr/bin/buildkit-runc /usr/local/bin/
 COPY --from=moby/buildkit:master /usr/bin/buildkit-cni-* /usr/local/bin/
 
