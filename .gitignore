@@ -28,12 +28,12 @@ breakfix-local.yaml
 
 # Build output
 dist/
+!cmd/gateway/frontend/dist/
 bin/
 
 # Kind kubeconfig
 .kube/
 .local/
 bin/
-dist/
 node_modules/
 test-results/

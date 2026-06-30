@@ -18,7 +18,7 @@ let ws: WebSocket | null = null
 let fitAddon: FitAddon | null = null
 
 onMounted(async () => {
-  if (!isLoggedIn()) { router.push('/login'); return }
+  if (!isLoggedIn()) { router.push('/'); return }
 
   const id = route.params.id as string
   try {
