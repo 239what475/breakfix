@@ -21,7 +21,7 @@ var upgrader = websocket.Upgrader{
 }
 
 type wsMsg struct {
-	Type string `json:"type"` // "data", "resize"
+	Type string `json:"type"`
 	Data []byte `json:"data,omitempty"`
 	Cols uint32 `json:"cols,omitempty"`
 	Rows uint32 `json:"rows,omitempty"`
@@ -36,39 +36,35 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, inst *breakfixv1.Instance
 	defer conn.Close()
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
+	stdinR, stdinW := io.Pipe()
 
-	pr, pw := io.Pipe()
-
+	// Read from WebSocket → pipe to PTY stdin
 	go func() {
+		defer stdinW.Close()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
-				pw.Close()
 				return
 			}
 			var m wsMsg
-			if json.Unmarshal(msg, &m) == nil && m.Type == "resize" {
+			if err := json.Unmarshal(msg, &m); err != nil {
+				stdinW.Write(msg)
+				continue
+			}
+			if m.Type == "resize" {
 				select {
 				case resizeCh <- remotecommand.TerminalSize{Width: uint16(m.Cols), Height: uint16(m.Rows)}:
 				default:
 				}
 				continue
 			}
-			pw.Write(m.Data)
-		}
-	}()
-
-	go func() {
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				return
+			if len(m.Data) > 0 {
+				stdinW.Write(m.Data)
 			}
-			_ = msg
 		}
 	}()
 
-	err = k8sClient.ExecPTY(pr, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, inst.Status.Namespace, inst.Status.PodName)
+	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, inst.Status.Namespace, inst.Status.PodName)
 
 	// On disconnect, start cooldown
 	if inst.Status.Phase == breakfixv1.InstanceRunning {
@@ -97,3 +93,6 @@ func (w *wsWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// ensure io import
+var _ io.Reader

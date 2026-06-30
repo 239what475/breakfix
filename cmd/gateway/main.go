@@ -57,7 +57,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	router := gateway.SetupRouter(database, k8sClient, cfg)
+	router := gateway.SetupRouter(database, k8sClient, cfg, frontendFS)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
