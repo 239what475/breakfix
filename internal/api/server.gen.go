@@ -29,13 +29,14 @@ type ChallengeList struct {
 
 // ChallengeSummary defines model for ChallengeSummary.
 type ChallengeSummary struct {
-	Active     *bool     `json:"active,omitempty"`
-	Difficulty *string   `json:"difficulty,omitempty"`
-	Id         *string   `json:"id,omitempty"`
-	Solved     *bool     `json:"solved,omitempty"`
-	Tags       *[]string `json:"tags,omitempty"`
-	Title      *string   `json:"title,omitempty"`
-	Type       *string   `json:"type,omitempty"`
+	Active      *bool     `json:"active,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Difficulty  *string   `json:"difficulty,omitempty"`
+	Id          *string   `json:"id,omitempty"`
+	Solved      *bool     `json:"solved,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+	Type        *string   `json:"type,omitempty"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -330,21 +331,21 @@ var swaggerSpec = []string{
 	"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",
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

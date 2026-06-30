@@ -61,6 +61,7 @@ export interface Challenge {
   type: string
   difficulty: string
   tags: string[]
+  description: string
   solved: boolean
   active: boolean
 }

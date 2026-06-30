@@ -50,12 +50,16 @@ func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, s
 }
 
 // ExecPTY opens a PTY session via client-go remotecommand.
-func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName string) error {
+func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName, sessionName string) error {
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Name(podName).Namespace(namespace).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Command: []string{"/bin/bash"},
+			Command: []string{
+				"/bin/bash",
+				"-lc",
+				fmt.Sprintf("export TERM=xterm-256color; tmux new-session -A -s %s", shellQuote(sessionName)),
+			},
 			Stdin:   true,
 			Stdout:  true,
 			Stderr:  true,
@@ -74,6 +78,10 @@ func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-cha
 		Tty:               true,
 		TerminalSizeQueue: &sizeQueue{ch: resize},
 	})
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 type sizeQueue struct {

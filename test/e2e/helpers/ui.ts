@@ -1,8 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
-const BASE = 'http://localhost:9090'
+export const BASE = 'http://localhost:9090'
 
-async function totpCode(page: any, secret: string): Promise<string> {
+export function uniqueUser(prefix = 'e2e') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+export async function totpCode(page: Page, secret: string): Promise<string> {
   return page.evaluate(async (sec: string) => {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
     const result: number[] = []
@@ -35,19 +39,7 @@ async function totpCode(page: any, secret: string): Promise<string> {
   }, secret)
 }
 
-test('single-page workspace loads for guests', async ({ page }) => {
-  await page.goto(BASE + '/#/')
-  await expect(page.locator('text=Breakfix')).toBeVisible()
-  await expect(page.locator('text=SRE terminal labs')).toBeVisible()
-  await expect(page.locator('text=Terminal Workspace')).toBeVisible()
-  await expect(page.locator('text=Pick a challenge from the left')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeVisible()
-})
-
-test('register and login into the single-page workspace', async ({ page }) => {
-  const user = `e2e-${Date.now()}`
-
+export async function registerAndLogin(page: Page, user = uniqueUser()): Promise<{ user: string; secret: string }> {
   await page.goto(BASE + '/#/')
   await page.getByRole('button', { name: 'Register', exact: true }).click()
   await expect(page.locator('h3:has-text("Create Account")')).toBeVisible()
@@ -56,7 +48,7 @@ test('register and login into the single-page workspace', async ({ page }) => {
   await page.locator('input[placeholder="Password (min 6 chars)"]').fill('testpass123')
   await page.getByRole('button', { name: 'Register' }).last().click()
 
-  await expect(page.locator('text=TOTP Secret')).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.totp-secret code')).toBeVisible({ timeout: 10000 })
   const secret = (await page.locator('.totp-secret code').textContent()) ?? ''
   await page.getByRole('button', { name: 'Continue to Sign In' }).click()
 
@@ -68,4 +60,20 @@ test('register and login into the single-page workspace', async ({ page }) => {
 
   await expect(page.locator('.account-value').getByText('Authenticated')).toBeVisible({ timeout: 10000 })
   await expect(page.locator('text=Challenge brief')).toBeVisible()
-})
+
+  return { user, secret }
+}
+
+export async function selectCleanupLogs(page: Page) {
+  const challengeButton = page.getByRole('button', { name: /批量压缩旧日志/ })
+  await expect(challengeButton).toBeVisible({ timeout: 10000 })
+  await challengeButton.click()
+  await expect(page.locator('.challenge-brief h2')).toContainText('批量压缩旧日志')
+  await expect(page.locator('.brief-description')).toContainText('服务器磁盘空间不足')
+}
+
+export async function signOut(page: Page) {
+  await page.locator('.account-avatar').click()
+  await page.getByText('Sign Out', { exact: true }).click()
+  await expect(page.locator('text=Signed out')).toBeVisible({ timeout: 5000 })
+}

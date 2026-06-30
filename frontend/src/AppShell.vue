@@ -1,22 +1,57 @@
 <script setup lang="ts">
-// All logic lives here — inside <n-message-provider> which is in parent
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, h } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import QRCode from 'qrcode'
 import {
-  NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NLayoutFooter,
-  NModal, NInput, NButton, NTag, NSpace, NDivider, NDropdown, NAvatar,
-  NIcon, NCard, useMessage,
+  NAvatar,
+  NButton,
+  NCard,
+  NDivider,
+  NDropdown,
+  NIcon,
+  NInput,
+  NModal,
+  NSpace,
+  NTag,
+  useMessage,
 } from 'naive-ui'
-import { LogInOutline, PowerOutline, PlayOutline, CheckmarkCircleOutline, RefreshOutline, ArrowBackOutline, TerminalOutline } from '@vicons/ionicons5'
-import { api, setToken, clearToken, isLoggedIn, token, type Challenge } from './composables/useApi'
+import {
+  CheckmarkCircleOutline,
+  EllipseOutline,
+  FlashOutline,
+  LogInOutline,
+  PlayOutline,
+  PowerOutline,
+  RefreshOutline,
+  SearchOutline,
+  SparklesOutline,
+  TerminalOutline,
+} from '@vicons/ionicons5'
+import { api, clearToken, isLoggedIn, setToken, token, type Challenge } from './composables/useApi'
 import '@xterm/xterm/css/xterm.css'
 
 const message = useMessage()
 
-// ── Auth ──
 const loggedIn = ref(isLoggedIn())
+const loading = ref(false)
+const challengeStarting = ref(false)
+const challengeSubmitting = ref(false)
+const challengeResetting = ref(false)
+const inChallenge = ref(false)
+const searchQuery = ref('')
+const challenges = ref<Challenge[]>([])
+const selectedId = ref<string | null>(null)
+const challengeTitle = ref('')
+const terminalEl = ref<HTMLDivElement>()
+const qrCanvas = ref<HTMLCanvasElement>()
+const submitResult = ref<'pass' | 'fail' | null>(null)
+const submitOutput = ref('')
+const terminalReady = ref(false)
+const terminalDisconnected = ref(false)
+const terminalHasFocus = ref(false)
+const reconnecting = ref(false)
+
 const showAuth = ref(false)
 const authMode = ref<'login' | 'register'>('login')
 const authLoading = ref(false)
@@ -25,221 +60,705 @@ const authPassword = ref('')
 const authTotp = ref('')
 const authTotpSecret = ref('')
 const authTotpUrl = ref('')
-const qrCanvas = ref<HTMLCanvasElement>()
 
-// ── Challenges ──
-const challenges = ref<Challenge[]>([])
-const selectedId = ref<string | null>(null)
-const loading = ref(false)
-
-// ── Terminal ──
-const inChallenge = ref(false)
-const challengeTitle = ref('')
-const terminalEl = ref<HTMLDivElement>()
-const submitResult = ref<'pass' | 'fail' | null>(null)
-const submitOutput = ref('')
 let term: Terminal | null = null
 let ws: WebSocket | null = null
 let fitAddon: FitAddon | null = null
+let resizeObserver: ResizeObserver | null = null
+let textareaFocusHandler: (() => void) | null = null
+let textareaBlurHandler: (() => void) | null = null
+let termKeyHandlerDisposable: { dispose: () => void } | null = null
+let terminalSessionNonce = 0
+let reconnectTimeoutId: number | null = null
+let visibilityHandler: (() => void) | null = null
+let focusHandler: (() => void) | null = null
+let onlineHandler: (() => void) | null = null
 
-const selectedChallenge = computed(() => challenges.value.find(c => c.id === selectedId.value))
-const sidebarMode = computed(() => inChallenge.value && selectedChallenge.value ? 'description' : 'list')
+const diffColors: Record<string, string> = {
+  easy: '#51d88a',
+  medium: '#f5b942',
+  hard: '#ff6b6b',
+}
 
-onMounted(async () => { if (loggedIn.value) await loadChallenges() })
-onUnmounted(() => { term?.dispose(); ws?.close() })
+const selectedChallenge = computed(() => challenges.value.find((challenge) => challenge.id === selectedId.value) ?? null)
+
+const filteredChallenges = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query) return challenges.value
+  return challenges.value.filter((challenge) => {
+    const haystack = [
+      challenge.title,
+      challenge.difficulty,
+      challenge.type,
+      challenge.description,
+      ...challenge.tags,
+    ]
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+const challengeStats = computed(() => {
+  const total = challenges.value.length
+  const solved = challenges.value.filter((challenge) => challenge.solved).length
+  const active = challenges.value.filter((challenge) => challenge.active).length
+  return { total, solved, active }
+})
+
+const primaryActionLabel = computed(() => {
+  if (!loggedIn.value) return 'Sign In to Start'
+  if (!selectedChallenge.value) return 'Select a Challenge'
+  if (selectedChallenge.value.active) return 'Resume Session'
+  return 'Start Challenge'
+})
+
+const stageTitle = computed(() => {
+  if (inChallenge.value && selectedChallenge.value) {
+    return challengeTitle.value || selectedChallenge.value.title
+  }
+  if (selectedChallenge.value) {
+    return selectedChallenge.value.title
+  }
+  return 'Terminal Workspace'
+})
+
+const stageSubtitle = computed(() => {
+  if (inChallenge.value) {
+    if (reconnecting.value) return 'Connection lost. Reattaching to your tmux session when the browser becomes active.'
+    if (terminalDisconnected.value) return 'Session disconnected. Resume to reconnect to the existing tmux session.'
+    if (!terminalReady.value) return 'Provisioning your lab environment and attaching the terminal.'
+    return 'Interactive tmux session attached to the current challenge environment.'
+  }
+  if (!loggedIn.value) return 'Authenticate to browse labs, open terminals, and submit fixes.'
+  if (selectedChallenge.value) return 'Review the brief on the left, then launch the lab when ready.'
+  return 'Choose a challenge from the sidebar to open its terminal workspace.'
+})
+
+onMounted(async () => {
+  if (loggedIn.value) {
+    await loadChallenges()
+  }
+
+  visibilityHandler = () => {
+    if (!document.hidden) {
+      void reconnectTerminal()
+    }
+  }
+  focusHandler = () => {
+    void reconnectTerminal()
+  }
+  onlineHandler = () => {
+    void reconnectTerminal()
+  }
+  document.addEventListener('visibilitychange', visibilityHandler)
+  window.addEventListener('focus', focusHandler)
+  window.addEventListener('online', onlineHandler)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', visibilityHandler!)
+  window.removeEventListener('focus', focusHandler!)
+  window.removeEventListener('online', onlineHandler!)
+  clearReconnectTimer()
+  disposeTerminal()
+})
 
 watch(authTotpUrl, async (url) => {
   await nextTick()
-  if (qrCanvas.value && url) await QRCode.toCanvas(qrCanvas.value, url, { width: 160 })
+  if (qrCanvas.value && url) {
+    await QRCode.toCanvas(qrCanvas.value, url, { width: 176, margin: 1 })
+  }
 })
+
+watch(challenges, (value) => {
+  if (!value.length) {
+    selectedId.value = null
+    return
+  }
+  if (!selectedId.value || !value.some((challenge) => challenge.id === selectedId.value)) {
+    selectedId.value = value[0].id
+  }
+}, { immediate: true })
+
+function difficultyColor(level: string) {
+  return diffColors[level] ?? '#8ca3b8'
+}
 
 function openAuth(mode: 'login' | 'register') {
   authMode.value = mode
-  authUsername.value = ''; authPassword.value = ''; authTotp.value = ''
-  authTotpSecret.value = ''; authTotpUrl.value = ''; authLoading.value = false
+  authUsername.value = ''
+  authPassword.value = ''
+  authTotp.value = ''
+  authTotpSecret.value = ''
+  authTotpUrl.value = ''
+  authLoading.value = false
   showAuth.value = true
 }
+
 async function doRegister() {
   authLoading.value = true
   try {
-    const res = await api.register(authUsername.value, authPassword.value)
-    authTotpSecret.value = res.totp_secret; authTotpUrl.value = res.totp_url
+    const result = await api.register(authUsername.value, authPassword.value)
+    authTotpSecret.value = result.totp_secret
+    authTotpUrl.value = result.totp_url
     message.success('Account created')
-  } catch (e: any) { message.error(e.message) }
-  finally { authLoading.value = false }
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    authLoading.value = false
+  }
 }
+
 async function doLogin() {
   authLoading.value = true
   try {
-    const res = await api.login(authUsername.value, authPassword.value, authTotp.value)
-    setToken(res.token); loggedIn.value = true; showAuth.value = false
-    message.success(`Welcome, ${res.name}`)
+    const result = await api.login(authUsername.value, authPassword.value, authTotp.value)
+    setToken(result.token)
+    loggedIn.value = true
+    showAuth.value = false
+    message.success(`Welcome, ${result.name}`)
     await loadChallenges()
-  } catch (e: any) { message.error(e.message) }
-  finally { authLoading.value = false }
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    authLoading.value = false
+  }
 }
+
 function doLogout() {
-  clearToken(); loggedIn.value = false; selectedId.value = null; exitChallenge(); message.info('Signed out')
+  clearToken()
+  loggedIn.value = false
+  challenges.value = []
+  selectedId.value = null
+  exitChallenge()
+  message.info('Signed out')
 }
+
 async function loadChallenges() {
   loading.value = true
-  try { challenges.value = (await api.listChallenges()).challenges || [] } catch { /* */ }
-  finally { loading.value = false }
+  try {
+    const result = await api.listChallenges()
+    challenges.value = result.challenges ?? []
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    loading.value = false
+  }
 }
+
+async function handlePrimaryAction() {
+  if (!loggedIn.value) {
+    openAuth('login')
+    return
+  }
+  if (!selectedId.value) return
+  await startChallenge()
+}
+
 async function startChallenge() {
   if (!selectedId.value) return
+  challengeStarting.value = true
+  terminalReady.value = false
+  terminalDisconnected.value = false
+  reconnecting.value = false
+  submitResult.value = null
+  submitOutput.value = ''
+
   try {
-    const res = await api.startChallenge(selectedId.value)
-    challengeTitle.value = res.challenge_title; inChallenge.value = true; submitResult.value = null
-    await nextTick(); initTerminal(selectedId.value)
-  } catch (e: any) { message.error(e.message) }
+    const result = await api.startChallenge(selectedId.value)
+    challengeTitle.value = result.challenge_title
+    inChallenge.value = true
+    await nextTick()
+    initTerminal(selectedId.value)
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    challengeStarting.value = false
+  }
 }
+
 function initTerminal(challengeId: string) {
   if (!terminalEl.value) return
-  term?.dispose(); ws?.close()
-  term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: "'JetBrains Mono','Fira Code',monospace", theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#58a6ff' } })
-  fitAddon = new FitAddon(); term.loadAddon(fitAddon); term.open(terminalEl.value); fitAddon.fit()
+
+  disposeTerminal()
+  terminalReady.value = false
+  terminalDisconnected.value = false
+  reconnecting.value = false
+  const sessionNonce = ++terminalSessionNonce
+
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
+    letterSpacing: 0.2,
+    lineHeight: 1.2,
+    convertEol: true,
+    theme: {
+      background: '#08111d',
+      foreground: '#d8e3ef',
+      cursor: '#8bd3ff',
+      black: '#08111d',
+      brightBlack: '#36506d',
+      red: '#ff7b72',
+      green: '#51d88a',
+      yellow: '#f5b942',
+      blue: '#7cc6ff',
+      magenta: '#d2a8ff',
+      cyan: '#7ce2ff',
+      white: '#d8e3ef',
+    },
+  })
+  fitAddon = new FitAddon()
+  term.loadAddon(fitAddon)
+  term.open(terminalEl.value)
+  fitAddon.fit()
+  if (term.textarea) {
+    textareaFocusHandler = () => { terminalHasFocus.value = true }
+    textareaBlurHandler = () => { terminalHasFocus.value = false }
+    term.textarea.addEventListener('focus', textareaFocusHandler)
+    term.textarea.addEventListener('blur', textareaBlurHandler)
+  }
+
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const tok = token()
-  ws = new WebSocket(`${proto}//${location.host}/api/challenges/${challengeId}/terminal${tok ? '?token=' + encodeURIComponent(tok) : ''}`)
-  ws.onmessage = (e) => { try { const m = JSON.parse(e.data); if (m.type === 'data' && term) term.write(new Uint8Array(m.data)) } catch { if (term) term.write(e.data) } }
-  ws.onclose = () => term?.write('\r\n\x1b[33mDisconnected\x1b[0m\r\n')
-  term.onData((d) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'data', data: Array.from(new TextEncoder().encode(d)) })) })
-  new ResizeObserver(() => fitAddon?.fit()).observe(terminalEl.value)
+  const currentToken = token()
+  const query = currentToken ? `?token=${encodeURIComponent(currentToken)}` : ''
+  ws = new WebSocket(`${proto}//${location.host}/api/challenges/${challengeId}/terminal${query}`)
+
+  ws.onopen = () => {
+    if (sessionNonce !== terminalSessionNonce) return
+    terminalReady.value = true
+    terminalDisconnected.value = false
+    reconnecting.value = false
+    clearReconnectTimer()
+    sendTerminalResize()
+    requestAnimationFrame(() => focusTerminal())
+  }
+
+  ws.onmessage = (event) => {
+    if (sessionNonce !== terminalSessionNonce) return
+    try {
+      const messageData = JSON.parse(event.data)
+      if (messageData.type === 'data' && term) {
+        term.write(messageData.data)
+      }
+    } catch {
+      term?.write(event.data)
+    }
+  }
+
+  ws.onclose = () => {
+    if (sessionNonce !== terminalSessionNonce) return
+    terminalReady.value = false
+    terminalDisconnected.value = true
+    terminalHasFocus.value = false
+    reconnecting.value = inChallenge.value
+    term?.write('\r\n\x1b[33mDisconnected\x1b[0m\r\n')
+    scheduleReconnect()
+  }
+
+  ws.onerror = () => {
+    if (sessionNonce !== terminalSessionNonce) return
+    terminalReady.value = false
+    terminalDisconnected.value = true
+    terminalHasFocus.value = false
+    reconnecting.value = inChallenge.value
+  }
+
+  term.onData((data) => {
+    if (sessionNonce !== terminalSessionNonce) return
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'data', data }))
+    }
+  })
+
+  termKeyHandlerDisposable = term.onKey(() => {
+    if (ws?.readyState !== WebSocket.OPEN) {
+      focusTerminal()
+    }
+  })
+
+  resizeObserver = new ResizeObserver(() => {
+    fitAddon?.fit()
+    sendTerminalResize()
+  })
+  resizeObserver.observe(terminalEl.value)
+  requestAnimationFrame(() => focusTerminal())
 }
-function exitChallenge() { inChallenge.value = false; challengeTitle.value = ''; submitResult.value = null; term?.dispose(); term = null; ws?.close(); ws = null }
+
+function focusTerminal() {
+  term?.focus()
+  term?.textarea?.focus()
+}
+
+function sendTerminalResize() {
+  if (!term || ws?.readyState !== WebSocket.OPEN) return
+  ws.send(JSON.stringify({
+    type: 'resize',
+    cols: term.cols,
+    rows: term.rows,
+  }))
+}
+
+function disposeTerminal() {
+  terminalSessionNonce += 1
+  clearReconnectTimer()
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  termKeyHandlerDisposable?.dispose()
+  termKeyHandlerDisposable = null
+  if (term?.textarea && textareaFocusHandler) {
+    term.textarea.removeEventListener('focus', textareaFocusHandler)
+  }
+  if (term?.textarea && textareaBlurHandler) {
+    term.textarea.removeEventListener('blur', textareaBlurHandler)
+  }
+  textareaFocusHandler = null
+  textareaBlurHandler = null
+  fitAddon = null
+  term?.dispose()
+  term = null
+  ws?.close()
+  ws = null
+  terminalHasFocus.value = false
+}
+
+function exitChallenge() {
+  inChallenge.value = false
+  challengeTitle.value = ''
+  terminalReady.value = false
+  terminalDisconnected.value = false
+  reconnecting.value = false
+  submitResult.value = null
+  disposeTerminal()
+}
+
 async function doSubmit() {
   if (!selectedId.value) return
-  try { const res = await api.submitChallenge(selectedId.value); submitResult.value = res.passed ? 'pass' : 'fail'; submitOutput.value = res.output } catch (e: any) { message.error(e.message) }
+  challengeSubmitting.value = true
+  try {
+    const result = await api.submitChallenge(selectedId.value)
+    submitResult.value = result.passed ? 'pass' : 'fail'
+    submitOutput.value = result.output
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    challengeSubmitting.value = false
+  }
 }
+
 async function doReset() {
   if (!selectedId.value) return
-  try { await api.resetChallenge(selectedId.value); submitResult.value = null; if (inChallenge.value) { exitChallenge(); await startChallenge() } } catch (e: any) { message.error(e.message) }
+  challengeResetting.value = true
+  try {
+    await api.resetChallenge(selectedId.value)
+    submitResult.value = null
+    submitOutput.value = ''
+    if (inChallenge.value) {
+      await startChallenge()
+    }
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    challengeResetting.value = false
+  }
 }
-const diffColors: Record<string, string> = { easy: '#3fb950', medium: '#d29922', hard: '#f85149' }
+
+function statusTone(challenge: Challenge) {
+  if (challenge.active) return 'running'
+  if (challenge.solved) return 'solved'
+  return 'idle'
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimeoutId !== null) {
+    window.clearTimeout(reconnectTimeoutId)
+    reconnectTimeoutId = null
+  }
+}
+
+function scheduleReconnect() {
+  if (!inChallenge.value || !selectedId.value || reconnectTimeoutId !== null) return
+  reconnectTimeoutId = window.setTimeout(() => {
+    reconnectTimeoutId = null
+    void reconnectTerminal()
+  }, document.hidden ? 5000 : 1200)
+}
+
+async function reconnectTerminal() {
+  if (!inChallenge.value || !selectedId.value || ws?.readyState === WebSocket.OPEN || challengeStarting.value) return
+  reconnecting.value = true
+  terminalDisconnected.value = false
+
+  try {
+    const result = await api.startChallenge(selectedId.value)
+    challengeTitle.value = result.challenge_title
+    await nextTick()
+    initTerminal(selectedId.value)
+  } catch (error: any) {
+    terminalDisconnected.value = true
+    reconnecting.value = true
+    message.error(error.message)
+    scheduleReconnect()
+  }
+}
+
 </script>
 
 <template>
-  <n-layout style="height:100vh">
-    <!-- Header -->
-    <n-layout-header bordered style="height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 16px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-weight:600;font-size:14px;color:#e6edf3">● Breakfix</span>
-        <span style="font-size:11px;color:#484f58">SRE Practice</span>
-      </div>
-      <n-space v-if="loggedIn" size="small">
-        <n-dropdown trigger="click" :options="[{label:'Sign Out',key:'logout', icon:()=>h(NIcon,{component:PowerOutline})}]" @select="doLogout">
-          <n-avatar round size="small" style="background:#30363d;cursor:pointer" />
-        </n-dropdown>
-      </n-space>
-      <n-space v-else size="small">
-        <n-button quaternary size="small" @click="openAuth('login')">Sign In</n-button>
-        <n-button size="small" @click="openAuth('register')">Register</n-button>
-      </n-space>
-    </n-layout-header>
-
-    <n-layout has-sider style="flex:1;overflow:hidden">
-      <!-- Sidebar -->
-      <n-layout-sider bordered width="260" style="background:#0d1117">
-        <!-- List mode -->
-        <template v-if="sidebarMode === 'list'">
-          <div style="padding:12px;border-bottom:1px solid #30363d">
-            <input placeholder="Search..." style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;height:32px;padding:0 10px;color:#e6edf3;font-size:13px;outline:none" />
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-panel">
+        <div class="brand-mark">
+          <span class="brand-orb" />
+          <div>
+            <div class="brand-title">Breakfix</div>
+            <div class="brand-subtitle">SRE terminal labs</div>
           </div>
-          <div v-if="loading" style="padding:20px;text-align:center;color:#8b949e;font-size:13px">Loading...</div>
-          <div v-else-if="challenges.length === 0" style="padding:24px 16px;text-align:center;color:#8b949e;font-size:12px">No challenges yet</div>
-          <div v-for="ch in challenges" :key="ch.id"
-            :style="{padding:'10px 14px',borderBottom:'1px solid #30363d40',cursor:'pointer',transition:'background 0.15s',background:selectedId===ch.id?'#1c2128':'transparent',borderLeft:selectedId===ch.id?'2px solid #58a6ff':'2px solid transparent'}"
-            @click="selectedId = ch.id">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              <n-tag :bordered="false" size="tiny" :color="{color:diffColors[ch.difficulty]||'#8b949e'}" style="font-size:10px">{{ ch.difficulty }}</n-tag>
-              <n-tag v-if="ch.solved" :bordered="false" size="tiny" type="success" style="font-size:10px">solved</n-tag>
-              <n-tag v-if="ch.active" :bordered="false" size="tiny" type="warning" style="font-size:10px">running</n-tag>
-            </div>
-            <div style="font-size:13px;color:#e6edf3;margin-bottom:4px">{{ ch.title }}</div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap">
-              <n-tag v-for="t in ch.tags" :key="t" :bordered="false" size="tiny" style="background:#30363d;color:#8b949e;font-size:10px">{{ t }}</n-tag>
-            </div>
-          </div>
-        </template>
-        <!-- Description mode -->
-        <template v-if="sidebarMode === 'description' && selectedChallenge">
-          <div style="padding:14px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px">
-            <n-button quaternary size="small" @click="exitChallenge"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-            <span style="font-weight:600;font-size:14px;color:#e6edf3">{{ challengeTitle }}</span>
-          </div>
-          <div style="padding:14px;display:flex;flex-direction:column;gap:12px">
-            <n-space size="small">
-              <n-tag :bordered="false" size="small" :color="{color:diffColors[selectedChallenge.difficulty]||'#8b949e'}">{{ selectedChallenge.difficulty }}</n-tag>
-              <n-tag v-for="t in selectedChallenge.tags" :key="t" :bordered="false" size="small" style="background:#30363d;color:#8b949e">{{ t }}</n-tag>
-            </n-space>
-            <n-divider style="margin:4px 0" />
-            <div style="font-size:12px;color:#8b949e;line-height:1.6;white-space:pre-wrap">{{ (selectedChallenge as any).description || 'Connect to the terminal and solve the challenge. Submit when done.' }}</div>
-            <n-divider style="margin:4px 0" />
-            <n-space vertical size="small">
-              <n-button type="primary" block @click="doSubmit"><template #icon><n-icon :component="CheckmarkCircleOutline" /></template>Submit</n-button>
-              <n-button quaternary block @click="doReset"><template #icon><n-icon :component="RefreshOutline" /></template>Reset</n-button>
-            </n-space>
-          </div>
-        </template>
-      </n-layout-sider>
-
-      <!-- Main content -->
-      <n-layout-content>
-        <div v-if="!inChallenge" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px">
-          <n-icon :component="TerminalOutline" size="48" color="#30363d" />
-          <div style="font-size:15px;color:#8b949e">Select a challenge to begin</div>
-          <div style="font-size:12px;color:#484f58;text-align:center;max-width:360px;line-height:1.6">Browse the challenge list and click Start Challenge to open a terminal session.</div>
-          <n-button v-if="selectedId && loggedIn" type="primary" @click="startChallenge"><template #icon><n-icon :component="PlayOutline" /></template>Start Challenge</n-button>
-          <n-button v-else-if="!loggedIn" @click="openAuth('login')"><template #icon><n-icon :component="LogInOutline" /></template>Sign In to Start</n-button>
         </div>
-        <div v-else ref="terminalEl" style="height:100%;overflow:hidden" />
-      </n-layout-content>
-    </n-layout>
-
-    <!-- Result bar -->
-    <n-layout-footer v-if="submitResult" bordered :style="{background:submitResult==='pass'?'#3fb95015':'#f8514915',borderColor:submitResult==='pass'?'#3fb95040':'#f8514940'}">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px">
-        <span :style="{color:submitResult==='pass'?'#3fb950':'#f85149',fontSize:'13px',fontWeight:500}">{{ submitResult === 'pass' ? '✓ PASSED' : '✗ FAILED' }}</span>
-        <span style="font-size:11px;color:#8b949e">{{ submitOutput }}</span>
+        <div class="brand-badges">
+          <span class="metric-pill">Challenges {{ challengeStats.total }}</span>
+          <span class="metric-pill">Solved {{ challengeStats.solved }}</span>
+          <span class="metric-pill">Active {{ challengeStats.active }}</span>
+        </div>
       </div>
-    </n-layout-footer>
-  </n-layout>
 
-  <!-- Auth Modal -->
-  <n-modal v-model:show="showAuth" :mask-closable="false" style="width:400px;max-width:90vw">
-    <n-card :bordered="false" size="small" role="dialog">
-      <template v-if="authMode==='login'">
-        <h3 style="font-size:16px;font-weight:600;color:#e6edf3;margin:0 0 16px">Sign In</h3>
-        <n-space vertical size="small">
-          <n-input v-model:value="authUsername" placeholder="Username" size="medium" />
-          <n-input v-model:value="authPassword" type="password" placeholder="Password" size="medium" />
-          <n-input v-model:value="authTotp" placeholder="TOTP Code" size="medium" />
-          <n-button type="primary" block @click="doLogin" :loading="authLoading">Sign In</n-button>
-        </n-space>
-        <n-divider />
-        <div style="text-align:center;font-size:12px;color:#8b949e">No account? <n-button text size="small" @click="authMode='register'">Register</n-button></div>
-      </template>
-      <template v-if="authMode==='register'">
-        <h3 style="font-size:16px;font-weight:600;color:#e6edf3;margin:0 0 16px">Create Account</h3>
-        <template v-if="authTotpSecret">
-          <n-space vertical size="small">
-            <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px">
-              <div style="font-size:10px;color:#484f58;text-transform:uppercase;margin-bottom:4px">TOTP Secret</div>
-              <div style="font-family:monospace;font-size:12px;word-break:break-all;color:#e6edf3">{{ authTotpSecret }}</div>
+      <div class="sidebar-toolbar">
+        <label class="search-box">
+          <n-icon :component="SearchOutline" size="16" />
+          <input v-model="searchQuery" class="search-input" type="text" placeholder="Search by title, tag, or difficulty" />
+        </label>
+
+        <div v-if="loggedIn" class="account-row">
+          <div class="account-copy">
+            <div class="account-label">Workspace</div>
+            <div class="account-value">Authenticated</div>
+          </div>
+          <n-dropdown
+            trigger="click"
+            :options="[{ label: 'Sign Out', key: 'logout', icon: () => h(NIcon, { component: PowerOutline }) }]"
+            @select="doLogout"
+          >
+            <n-avatar round size="small" class="account-avatar" />
+          </n-dropdown>
+        </div>
+        <div v-else class="guest-actions">
+          <n-button quaternary strong size="small" @click="openAuth('login')">Sign In</n-button>
+          <n-button type="primary" size="small" @click="openAuth('register')">Register</n-button>
+        </div>
+      </div>
+
+      <div class="challenge-list">
+        <div v-if="loading" class="empty-state compact">Loading challenge catalog...</div>
+        <template v-else-if="filteredChallenges.length">
+          <button
+            v-for="challenge in filteredChallenges"
+            :key="challenge.id"
+            class="challenge-card"
+            :class="{ selected: selectedId === challenge.id }"
+            @click="selectedId = challenge.id"
+          >
+            <div class="challenge-card-top">
+              <div class="challenge-card-title">{{ challenge.title }}</div>
+              <span class="status-dot" :data-tone="statusTone(challenge)" />
             </div>
-            <div style="display:flex;justify-content:center"><canvas ref="qrCanvas" width="160" height="160" style="background:white;padding:6px;border-radius:4px" /></div>
-            <n-button type="primary" block @click="authMode='login'">Continue to Sign In</n-button>
-          </n-space>
+            <div class="challenge-card-meta">
+              <n-tag :bordered="false" size="small" :color="{ color: difficultyColor(challenge.difficulty), textColor: '#08111d' }">
+                {{ challenge.difficulty }}
+              </n-tag>
+              <n-tag v-if="challenge.active" :bordered="false" size="small" type="warning">running</n-tag>
+              <n-tag v-else-if="challenge.solved" :bordered="false" size="small" type="success">solved</n-tag>
+              <span class="challenge-type">{{ challenge.type }}</span>
+            </div>
+            <p class="challenge-card-desc">{{ challenge.description || 'Open the lab to inspect and repair the environment.' }}</p>
+            <div class="challenge-tags">
+              <span v-for="tag in challenge.tags" :key="tag" class="tag-chip">{{ tag }}</span>
+            </div>
+          </button>
         </template>
-        <n-space v-else vertical size="small">
-          <n-input v-model:value="authUsername" placeholder="Username" size="medium" />
-          <n-input v-model:value="authPassword" type="password" placeholder="Password (min 6 chars)" size="medium" />
-          <n-button type="primary" block @click="doRegister" :loading="authLoading">Register</n-button>
-        </n-space>
-        <n-divider />
-        <div style="text-align:center;font-size:12px;color:#8b949e">Have an account? <n-button text size="small" @click="authMode='login'">Sign In</n-button></div>
-      </template>
-    </n-card>
-  </n-modal>
+        <div v-else class="empty-state compact">No challenges match the current filter.</div>
+      </div>
+
+      <div class="challenge-brief" v-if="selectedChallenge">
+        <div class="brief-header">
+          <div>
+            <div class="brief-kicker">Challenge brief</div>
+            <h2>{{ selectedChallenge.title }}</h2>
+          </div>
+          <n-icon :component="SparklesOutline" size="18" />
+        </div>
+
+        <div class="brief-tags">
+          <n-tag :bordered="false" size="small" :color="{ color: difficultyColor(selectedChallenge.difficulty), textColor: '#08111d' }">
+            {{ selectedChallenge.difficulty }}
+          </n-tag>
+          <n-tag v-for="tag in selectedChallenge.tags" :key="tag" :bordered="false" size="small" class="brief-tag">
+            {{ tag }}
+          </n-tag>
+        </div>
+
+        <p class="brief-description">
+          {{ selectedChallenge.description || 'Connect to the terminal, inspect the environment, apply a fix, and submit for verification.' }}
+        </p>
+
+        <div class="brief-actions">
+          <n-button
+            block
+            type="primary"
+            size="large"
+            :disabled="!selectedId"
+            :loading="challengeStarting"
+            @click="handlePrimaryAction"
+          >
+            <template #icon>
+              <n-icon :component="loggedIn ? PlayOutline : LogInOutline" />
+            </template>
+            {{ primaryActionLabel }}
+          </n-button>
+          <div class="secondary-actions">
+            <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeSubmitting" @click="doSubmit">
+              <template #icon>
+                <n-icon :component="CheckmarkCircleOutline" />
+              </template>
+              Submit
+            </n-button>
+            <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeResetting" @click="doReset">
+              <template #icon>
+                <n-icon :component="RefreshOutline" />
+              </template>
+              Reset
+            </n-button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-header">
+        <div>
+          <div class="workspace-kicker">Live terminal</div>
+          <h1>{{ stageTitle }}</h1>
+          <p>{{ stageSubtitle }}</p>
+        </div>
+
+        <div class="workspace-status">
+          <span class="status-badge" :data-state="loggedIn ? 'online' : 'offline'">
+            <n-icon :component="EllipseOutline" size="10" />
+            {{ loggedIn ? 'Authenticated' : 'Guest mode' }}
+          </span>
+          <span class="status-badge" :data-state="inChallenge ? 'running' : 'idle'">
+            <n-icon :component="FlashOutline" size="14" />
+            {{ inChallenge ? 'Terminal attached' : 'Waiting to launch' }}
+          </span>
+        </div>
+      </header>
+
+      <section class="workspace-stage">
+        <div v-if="!inChallenge" class="terminal-empty">
+          <div class="terminal-empty-grid" />
+          <div class="terminal-empty-card">
+            <div class="terminal-icon-wrap">
+              <n-icon :component="TerminalOutline" size="34" />
+            </div>
+            <h2>{{ selectedChallenge ? selectedChallenge.title : 'Pick a challenge from the left' }}</h2>
+            <p>
+              {{
+                selectedChallenge
+                  ? 'The right side becomes your live shell after launch. Keep the brief visible on the left while you work.'
+                  : 'Browse the challenge catalog, inspect the problem statement, then launch a terminal-based lab from the sidebar.'
+              }}
+            </p>
+            <n-button type="primary" size="large" :disabled="!selectedId" :loading="challengeStarting" @click="handlePrimaryAction">
+              <template #icon>
+                <n-icon :component="loggedIn ? PlayOutline : LogInOutline" />
+              </template>
+              {{ primaryActionLabel }}
+            </n-button>
+          </div>
+        </div>
+
+        <div v-else class="terminal-frame" @pointerdown="focusTerminal">
+          <div class="terminal-topbar">
+            <div class="terminal-lights">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div class="terminal-session">{{ selectedChallenge?.id || 'session' }}</div>
+            <div class="terminal-actions">
+              <n-button text @click="doReset">Reset</n-button>
+              <n-button text @click="doSubmit">Submit</n-button>
+            </div>
+          </div>
+          <div class="terminal-body">
+            <div ref="terminalEl" class="terminal-surface" @pointerdown.stop="focusTerminal" />
+            <div v-if="!terminalReady && !terminalDisconnected" class="terminal-overlay">
+              <div class="terminal-overlay-card">
+                <div class="terminal-spinner" />
+                <div>Connecting to the challenge environment...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer v-if="submitResult" class="result-bar" :data-result="submitResult">
+        <div class="result-title">
+          {{ submitResult === 'pass' ? 'Verification passed' : 'Verification failed' }}
+        </div>
+        <div class="result-output">{{ submitOutput }}</div>
+      </footer>
+    </main>
+
+    <n-modal v-model:show="showAuth" :mask-closable="false" style="width: 440px; max-width: 92vw">
+      <n-card :bordered="false" size="small" role="dialog" class="auth-card">
+        <template v-if="authMode === 'login'">
+          <div class="auth-head">
+            <div class="auth-kicker">Authentication</div>
+            <h3>Sign In</h3>
+            <p>Use your password and authenticator code to access the terminal workspace.</p>
+          </div>
+          <n-space vertical size="small">
+            <n-input v-model:value="authUsername" placeholder="Username" size="large" />
+            <n-input v-model:value="authPassword" type="password" placeholder="Password" size="large" />
+            <n-input v-model:value="authTotp" placeholder="TOTP Code" size="large" />
+            <n-button type="primary" block size="large" :loading="authLoading" @click="doLogin">Sign In</n-button>
+          </n-space>
+          <n-divider />
+          <div class="auth-foot">No account? <button class="auth-link" @click="authMode = 'register'">Register</button></div>
+        </template>
+
+        <template v-else>
+          <div class="auth-head">
+            <div class="auth-kicker">Account setup</div>
+            <h3>Create Account</h3>
+            <p>Create your login first, then bind the TOTP secret in your authenticator app.</p>
+          </div>
+
+          <template v-if="authTotpSecret">
+            <div class="totp-panel">
+              <div class="totp-secret">
+                <span class="totp-label">TOTP Secret</span>
+                <code>{{ authTotpSecret }}</code>
+              </div>
+              <div class="totp-qr-wrap">
+                <canvas ref="qrCanvas" width="176" height="176" />
+              </div>
+              <n-button type="primary" block size="large" @click="authMode = 'login'">Continue to Sign In</n-button>
+            </div>
+          </template>
+          <template v-else>
+            <n-space vertical size="small">
+              <n-input v-model:value="authUsername" placeholder="Username" size="large" />
+              <n-input v-model:value="authPassword" type="password" placeholder="Password (min 6 chars)" size="large" />
+              <n-button type="primary" block size="large" :loading="authLoading" @click="doRegister">Register</n-button>
+            </n-space>
+          </template>
+
+          <n-divider />
+          <div class="auth-foot">Have an account? <button class="auth-link" @click="authMode = 'login'">Sign In</button></div>
+        </template>
+      </n-card>
+    </n-modal>
+  </div>
 </template>

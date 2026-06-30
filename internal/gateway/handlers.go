@@ -161,6 +161,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Title:      &ch.Title,
 			Type:       &ch.Type,
 			Difficulty: &ch.Difficulty,
+			Description: &ch.Description,
 			Solved:     &solvedVal,
 			Active:     &activeVal,
 		}
@@ -188,6 +189,14 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 
 	existing, _ := h.findInstance(c.Request.Context(), user.ID, id)
 	if existing != nil {
+		if existing.Status.Phase == breakfixv1.InstanceDraining {
+			existing.Status.Phase = breakfixv1.InstanceRunning
+			existing.Status.CooldownUntil = nil
+			if _, err := h.k8s.UpdateInstanceStatus(c.Request.Context(), h.crdNamespace, existing); err != nil {
+				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("resume instance: %v", err)})
+				return
+			}
+		}
 		slog.Info("resuming existing instance", "instance", existing.Name, "challenge", id)
 		title := challenge.Title
 		c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})

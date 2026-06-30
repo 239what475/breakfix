@@ -38,3 +38,5 @@ bin/
 node_modules/
 test/node_modules/
 test-results/
+playwright-report/
+test/test-results/

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -22,7 +23,7 @@ var upgrader = websocket.Upgrader{
 
 type wsMsg struct {
 	Type string `json:"type"`
-	Data []byte `json:"data,omitempty"`
+	Data string `json:"data,omitempty"`
 	Cols uint32 `json:"cols,omitempty"`
 	Rows uint32 `json:"rows,omitempty"`
 }
@@ -58,13 +59,16 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, inst *breakfixv1.Instance
 				}
 				continue
 			}
-			if len(m.Data) > 0 {
-				stdinW.Write(m.Data)
+			if m.Type == "data" && len(m.Data) > 0 {
+				if _, writeErr := stdinW.Write([]byte(m.Data)); writeErr != nil {
+					return
+				}
 			}
 		}
 	}()
 
-	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, inst.Status.Namespace, inst.Status.PodName)
+	sessionName := fmt.Sprintf("breakfix-%s", inst.Name)
+	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, inst.Status.Namespace, inst.Status.PodName, sessionName)
 
 	// On disconnect, start cooldown
 	if inst.Status.Phase == breakfixv1.InstanceRunning {
@@ -87,7 +91,7 @@ type wsWriter struct {
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
-	msg, _ := json.Marshal(wsMsg{Type: "data", Data: p})
+	msg, _ := json.Marshal(wsMsg{Type: "data", Data: string(p)})
 	if err := w.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 		return 0, err
 	}

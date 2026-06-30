@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     vim \
+    tmux \
     grep \
     gawk \
     sed \

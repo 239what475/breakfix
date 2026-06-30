@@ -234,6 +234,8 @@ components:
           type: array
           items:
             type: string
+        description:
+          type: string
         solved:
           type: boolean
         active:
