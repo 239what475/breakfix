@@ -36,4 +36,5 @@ bin/
 .local/
 bin/
 node_modules/
+test/node_modules/
 test-results/

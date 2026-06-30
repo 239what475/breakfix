@@ -103,12 +103,12 @@ dev-data:
 	@echo "  ✓ Data dir ready"
 
 dev-crd:
-	@kubectl apply -f config/crd/breakfix.dev_generations.yaml >/dev/null 2>&1 || true
-	@kubectl apply -f config/crd/breakfix.dev_instances.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/crd/breakfix.dev_instances.yaml >/dev/null 2>&1 || true
 	@echo "  ✓ CRDs applied"
 
 dev-rbac:
-	@kubectl apply -f config/rbac/controller.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/rbac/controller.yaml >/dev/null 2>&1 || true
 	@echo "  ✓ RBAC applied"
 
 dev-images:
@@ -247,7 +247,7 @@ docker-push:
 
 generator-build:
 	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/generator ./cmd/generator
-	docker build -t breakfix-generator:latest -f Dockerfile.generator .
+	docker build -t breakfix-generator:latest -f images/generator/Dockerfile .
 	kind load docker-image breakfix-generator:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Generator image built and loaded into Kind"
 
