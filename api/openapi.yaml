@@ -1,0 +1,287 @@
+openapi: "3.0.3"
+info:
+  title: Breakfix API
+  version: "1.0.0"
+  description: SRE/DevOps interview practice platform
+servers:
+  - url: http://localhost:9090/api
+    description: Local dev
+
+paths:
+  /auth/register:
+    post:
+      operationId: register
+      summary: Register a new user
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /auth/login:
+    post:
+      operationId: login
+      summary: Login with password + TOTP
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful, returns JWT token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /challenges:
+    get:
+      operationId: listChallenges
+      summary: List all challenges
+      tags: [challenges]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Challenge list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeList"
+
+  /challenges/{id}/start:
+    post:
+      operationId: startChallenge
+      summary: Start or resume a challenge instance
+      tags: [instances]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Instance ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/submit:
+    post:
+      operationId: submitChallenge
+      summary: Submit solution for verification
+      tags: [instances]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Submission result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/reset:
+    post:
+      operationId: resetChallenge
+      summary: Reset challenge to initial state
+      tags: [instances]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Challenge reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /generate:
+    post:
+      operationId: generateChallenge
+      summary: Generate a new challenge (admin)
+      tags: [agent]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "200":
+          description: Generation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 2
+        password:
+          type: string
+          minLength: 6
+
+    RegisterResponse:
+      type: object
+      properties:
+        totp_secret:
+          type: string
+        totp_url:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password, totp_code]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        totp_code:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token
+        user_id:
+          type: string
+        name:
+          type: string
+
+    ChallengeSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        difficulty:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        solved:
+          type: boolean
+        active:
+          type: boolean
+
+    ChallengeList:
+      type: object
+      properties:
+        challenges:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChallengeSummary"
+
+    StartResponse:
+      type: object
+      properties:
+        challenge_title:
+          type: string
+
+    SubmitResponse:
+      type: object
+      properties:
+        passed:
+          type: boolean
+        exit_code:
+          type: integer
+        output:
+          type: string
+
+    ResetResponse:
+      type: object
+      properties:
+        challenge_title:
+          type: string
+
+    GenerateRequest:
+      type: object
+      required: [topic]
+      properties:
+        topic:
+          type: string
+
+    GenerateResponse:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+        status:
+          type: string
+        detail:
+          type: string

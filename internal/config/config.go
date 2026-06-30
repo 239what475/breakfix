@@ -21,6 +21,7 @@ type Config struct {
 	Namespace        string    `yaml:"namespace"`
 	CRDNamespace     string    `yaml:"crd_namespace"`
 	CooldownMinutes  int       `yaml:"cooldown_minutes"`
+	JWTSecret        string    `yaml:"jwt_secret"`
 	LLM              LLMConfig `yaml:"llm"`
 }
 
@@ -42,6 +43,7 @@ func defaults() Config {
 		RegistryInsecure: true,
 		Namespace:        "breakfix",
 		CRDNamespace:    "breakfix-system",
+		JWTSecret:       "breakfix-dev-secret-change-in-production",
 		CooldownMinutes: 5,
 		LLM: LLMConfig{
 			BaseURL:    "https://api.deepseek.com/anthropic",

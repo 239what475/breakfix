@@ -1,34 +1,24 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
-	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/build"
-	"github.com/breakfix/breakfix/internal/ca"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/k8s"
-	"github.com/breakfix/breakfix/internal/proxy"
 	"github.com/breakfix/breakfix/internal/gateway"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
-	pb "github.com/breakfix/breakfix/pkg/proto"
+	"github.com/breakfix/breakfix/internal/k8s"
 )
-
-var allowAnon = map[string]bool{
-	"/breakfix.Breakfix/Register":          true,
-	"/breakfix.Breakfix/Login":             true,
-	"/breakfix.Breakfix/GenerateChallenge": true,
-}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -61,62 +51,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	caCert, err := ca.LoadOrCreate(cfg.CertFile(), cfg.KeyFile())
-	if err != nil {
-		slog.Error("failed to load CA", "err", err)
-		os.Exit(1)
-	}
-
-	host := cfg.ServerHost
-	if host == "" {
-		host = os.Getenv("SERVER_HOST")
-	}
-	serverCert, serverKey, err := caCert.ServerCert(host)
-	if err != nil {
-		slog.Error("failed to generate server cert", "err", err)
-		os.Exit(1)
-	}
-	tlsConfig, err := caCert.TLSConfig(serverCert, serverKey)
-	if err != nil {
-		slog.Error("failed to create TLS config", "err", err)
-		os.Exit(1)
-	}
-
 	k8sClient, err := k8s.New(cfg.Kubeconfig)
 	if err != nil {
 		slog.Error("failed to create K8s client", "err", err)
 		os.Exit(1)
 	}
 
-	srv := server.New(database, k8sClient, cfg, caCert)
+	router := gateway.SetupRouter(database, k8sClient, cfg)
 
-	grpcServer := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.ChainUnaryInterceptor(
-			server.LoggingInterceptor(),
-			server.AuthInterceptor(allowAnon),
-		),
-	)
-	pb.RegisterBreakfixServer(grpcServer, srv)
-
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
-	if err != nil {
-		slog.Error("failed to listen", "port", cfg.Port, "err", err)
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: router,
 	}
-
-	go proxy.Start(cfg.ProxyPort)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		slog.Info("shutting down")
-		grpcServer.GracefulStop()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
 	}()
 
-	slog.Info("listening", "port", cfg.Port, "proxy", cfg.ProxyPort)
-	if err := grpcServer.Serve(lis); err != nil {
-		slog.Error("grpc serve error", "err", err)
+	slog.Info("listening", "port", cfg.Port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("serve error", "err", err)
 	}
 }
