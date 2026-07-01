@@ -36,7 +36,7 @@ async function totpCode(page: any, secret: string): Promise<string> {
 }
 
 async function registerAndLogin(page: any, user: string) {
-  await page.goto(BASE + '/#/')
+  await page.goto(BASE + '/')
   await page.getByRole('button', { name: 'Register', exact: true }).click()
   await page.locator('input[placeholder="Username"]').first().fill(user)
   await page.locator('input[placeholder="Password (min 6 chars)"]').fill('testpass123')
@@ -57,7 +57,7 @@ async function selectCleanupLogs(page: any) {
   const challengeButton = page.getByRole('button', { name: /批量压缩旧日志/ })
   await expect(challengeButton).toBeVisible({ timeout: 10000 })
   await expect(page.getByRole('heading', { name: '批量压缩旧日志', exact: true }).first()).toBeVisible()
-  await expect(page.locator('.brief-description').getByText('服务器磁盘空间不足')).toBeVisible()
+  await expect(page.locator('.terminal-empty-card .brief-description').getByText('服务器磁盘空间不足')).toBeVisible()
   await challengeButton.click()
 }
 
@@ -73,8 +73,8 @@ test.describe('UI Flow', () => {
     await page.locator('main').getByRole('button', { name: 'Start Challenge' }).click()
 
     await expect(page.locator('.terminal-frame')).toBeVisible({ timeout: 90000 })
-    await expect(page.locator('.brief-actions').getByRole('button', { name: 'Submit', exact: true })).toBeEnabled()
-    await expect(page.locator('.brief-actions').getByRole('button', { name: 'Reset', exact: true })).toBeEnabled()
+    await expect(page.locator('.terminal-actions').getByRole('button', { name: 'Submit', exact: true })).toBeEnabled()
+    await expect(page.locator('.terminal-actions').getByRole('button', { name: 'Reset', exact: true })).toBeEnabled()
     await expect(page.locator('.terminal-overlay')).toBeHidden({ timeout: 90000 })
 
     const terminalSurface = page.locator('.terminal-surface')
@@ -107,22 +107,22 @@ test.describe('UI Flow', () => {
     await page.locator('main').getByRole('button', { name: 'Start Challenge' }).click()
 
     await expect(page.locator('.terminal-frame')).toBeVisible({ timeout: 90000 })
-    await expect(page.locator('.brief-actions').getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+    await expect(page.locator('.terminal-actions').getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
     await expect(page.locator('.terminal-overlay')).toBeHidden({ timeout: 90000 })
 
     await page.close()
     await new Promise((resolve) => setTimeout(resolve, 1500))
 
     const resumePage = await context.newPage()
-    await resumePage.goto(BASE + '/#/')
+    await resumePage.goto(BASE + '/')
     await expect(resumePage.locator('.account-value').getByText('Authenticated')).toBeVisible({ timeout: 10000 })
     await expect(resumePage.getByRole('button', { name: /批量压缩旧日志/ })).toBeVisible({ timeout: 10000 })
-    await expect(resumePage.locator('.brief-actions').getByRole('button', { name: 'Resume Session', exact: true })).toBeVisible()
+    await expect(resumePage.locator('.terminal-empty-card').getByRole('button', { name: 'Resume Session', exact: true })).toBeVisible()
 
-    await resumePage.locator('.brief-actions').getByRole('button', { name: 'Resume Session', exact: true }).click()
+    await resumePage.locator('.terminal-empty-card').getByRole('button', { name: 'Resume Session', exact: true }).click()
     await expect(resumePage.locator('.terminal-frame')).toBeVisible({ timeout: 90000 })
     await expect(resumePage.locator('.terminal-overlay')).toBeHidden({ timeout: 90000 })
-    await expect(resumePage.locator('.brief-actions').getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+    await expect(resumePage.locator('.terminal-actions').getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
 
     await context.close()
   })
@@ -151,9 +151,9 @@ test.describe('UI Flow', () => {
     await new Promise((resolve) => setTimeout(resolve, 1500))
 
     const resumePage = await context.newPage()
-    await resumePage.goto(BASE + '/#/')
+    await resumePage.goto(BASE + '/')
     await expect(resumePage.locator('.account-value').getByText('Authenticated')).toBeVisible({ timeout: 10000 })
-    await resumePage.locator('.brief-actions').getByRole('button', { name: 'Resume Session', exact: true }).click()
+    await resumePage.locator('.terminal-empty-card').getByRole('button', { name: 'Resume Session', exact: true }).click()
     await expect(resumePage.locator('.terminal-frame')).toBeVisible({ timeout: 90000 })
     await expect(resumePage.locator('.terminal-overlay')).toBeHidden({ timeout: 90000 })
 

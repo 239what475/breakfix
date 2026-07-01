@@ -31,11 +31,14 @@ func main() {
 
 	g := &generator.Generator{
 		Draft:            draft,
-		OutputDir:        *outputDir,
+		OutputDir:        envOr("CHALLENGE_OUTPUT_DIR", *outputDir),
 		RegistryAddr:     envOr("REGISTRY_ADDR", "172.18.0.1:5000/break-fix"),
 		RegistryInsecure: os.Getenv("REGISTRY_INSECURE") == "true",
 		Kubeconfig:       os.Getenv("KUBECONFIG"),
 		LabNS:            envOr("LAB_NAMESPACE", "breakfix-system"),
+		GenerationID:     os.Getenv("GENERATION_ID"),
+		GatewayURL:       os.Getenv("GATEWAY_INTERNAL_URL"),
+		InternalAPIKey:   os.Getenv("GATEWAY_INTERNAL_API_KEY"),
 	}
 
 	if err := g.Run(context.Background()); err != nil {

@@ -40,7 +40,7 @@ export async function totpCode(page: Page, secret: string): Promise<string> {
 }
 
 export async function registerAndLogin(page: Page, user = uniqueUser()): Promise<{ user: string; secret: string }> {
-  await page.goto(BASE + '/#/')
+  await page.goto(BASE + '/')
   await page.getByRole('button', { name: 'Register', exact: true }).click()
   await expect(page.locator('h3:has-text("Create Account")')).toBeVisible()
 
@@ -59,7 +59,7 @@ export async function registerAndLogin(page: Page, user = uniqueUser()): Promise
   await page.getByRole('button', { name: 'Sign In' }).last().click()
 
   await expect(page.locator('.account-value').getByText('Authenticated')).toBeVisible({ timeout: 10000 })
-  await expect(page.locator('text=Challenge brief')).toBeVisible()
+  await expect(page.locator('.terminal-empty-card')).toBeVisible()
 
   return { user, secret }
 }
@@ -68,8 +68,8 @@ export async function selectCleanupLogs(page: Page) {
   const challengeButton = page.getByRole('button', { name: /批量压缩旧日志/ })
   await expect(challengeButton).toBeVisible({ timeout: 10000 })
   await challengeButton.click()
-  await expect(page.locator('.challenge-brief h2')).toContainText('批量压缩旧日志')
-  await expect(page.locator('.brief-description')).toContainText('服务器磁盘空间不足')
+  await expect(page.locator('.terminal-empty-card h2')).toContainText('批量压缩旧日志')
+  await expect(page.locator('.terminal-empty-card .brief-description')).toContainText('服务器磁盘空间不足')
 }
 
 export async function signOut(page: Page) {

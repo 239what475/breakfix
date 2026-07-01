@@ -2,14 +2,12 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,8 +19,8 @@ const generationFinalizer = "breakfix.dev/generation-cleanup"
 
 type GenerationReconciler struct {
 	client.Client
-	K8s          *k8s.Client
-	CRDNamespace string
+	K8s           *k8s.Client
+	CRDNamespace  string
 }
 
 func (r *GenerationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -104,8 +102,14 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 	for _, c := range job.Status.Conditions {
 		switch c.Type {
 		case batchv1.JobComplete:
-			gen.Status.PodName = r.findJobPod(ctx, gen.Status.JobName)
-			r.extractAndSetMetadata(ctx, gen)
+			if gen.Status.Challenge == nil {
+				gen.Status.Phase = breakfixv1.GenerationFailed
+				gen.Status.Message = "generation finished but artifact was not uploaded"
+				now := metav1.Now()
+				gen.Status.CompletedAt = &now
+				slog.Error("job done", "generation", gen.Name, "result", "failed", "reason", "artifact_missing", "duration", time.Since(phaseStart))
+				break
+			}
 			gen.Status.Phase = breakfixv1.GenerationSucceeded
 			if gen.Status.Challenge != nil {
 				gen.Status.Message = fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
@@ -132,32 +136,6 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 	}
 
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-func (r *GenerationReconciler) findJobPod(ctx context.Context, jobName string) string {
-	var pods corev1.PodList
-	r.List(ctx, &pods, client.InNamespace(r.CRDNamespace), client.MatchingLabels{"job-name": jobName}) //nolint:errcheck
-	if len(pods.Items) > 0 {
-		return pods.Items[0].Name
-	}
-	return ""
-}
-
-func (r *GenerationReconciler) extractAndSetMetadata(ctx context.Context, gen *breakfixv1.Generation) {
-	if gen.Status.PodName == "" {
-		return
-	}
-	exitCode, out, err := r.K8s.ExecInPod(r.CRDNamespace, gen.Status.PodName, "cat", k8s.PodMetadataPath)
-	if err != nil || exitCode != 0 {
-		slog.Error("extract metadata failed", "err", err, "exit", exitCode)
-		return
-	}
-	var meta breakfixv1.ChallengeSpec
-	if err := json.Unmarshal([]byte(out), &meta); err != nil {
-		slog.Error("parse metadata failed", "err", err)
-		return
-	}
-	gen.Status.Challenge = &meta
 }
 
 func (r *GenerationReconciler) cleanup(ctx context.Context, gen *breakfixv1.Generation, reconcileStart time.Time) (ctrl.Result, error) {

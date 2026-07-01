@@ -1,9 +1,16 @@
 package generator
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +34,9 @@ type Generator struct {
 	RegistryInsecure bool
 	Kubeconfig       string
 	LabNS            string
+	GenerationID     string
+	GatewayURL       string
+	InternalAPIKey   string
 
 	workDir     string
 	challengeID string
@@ -88,6 +98,12 @@ func (g *Generator) Run(ctx context.Context) error {
 				continue
 			}
 			slog.Info("phase done", "phase", "enrich", "round", round+1, "duration", time.Since(eStart))
+			uStart := time.Now()
+			if err := g.uploadArtifact(ctx, chalDir); err != nil {
+				slog.Error("phase failed", "phase", "upload", "round", round+1, "duration", time.Since(uStart), "err", err)
+				continue
+			}
+			slog.Info("phase done", "phase", "upload", "round", round+1, "duration", time.Since(uStart))
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "success")
 			slog.Info("generation done", "title", g.defaultTitle(), "challengeID", g.challengeID, "rounds", round+1, "duration", time.Since(genStart))
 			return g.finalize(chalDir)
@@ -273,7 +289,42 @@ func (g *Generator) phaseEnrich(ctx context.Context, chalDir string) error {
 	return g.drainEvents(events)
 }
 
+func (g *Generator) syncChallengeManifest(chalDir string) error {
+	path := filepath.Join(chalDir, "challenge.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read challenge.yaml: %w", err)
+	}
+
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return fmt.Errorf("parse challenge.yaml: %w", err)
+	}
+
+	spec["id"] = g.challengeID
+	spec["image"] = g.challengeID + ":latest"
+	if strings.TrimSpace(fmt.Sprint(spec["type"])) == "" || fmt.Sprint(spec["type"]) == "<nil>" {
+		spec["type"] = "script"
+	}
+	if strings.TrimSpace(fmt.Sprint(spec["title"])) == "" || fmt.Sprint(spec["title"]) == "<nil>" {
+		spec["title"] = g.defaultTitle()
+	}
+
+	normalized, err := yaml.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal challenge.yaml: %w", err)
+	}
+	if err := os.WriteFile(path, normalized, 0644); err != nil {
+		return fmt.Errorf("write challenge.yaml: %w", err)
+	}
+	return nil
+}
+
 func (g *Generator) finalize(chalDir string) error {
+	if err := g.syncChallengeManifest(chalDir); err != nil {
+		return err
+	}
+
 	dst := filepath.Join(g.OutputDir, g.challengeID)
 	if err := os.RemoveAll(dst); err != nil {
 		slog.Error("failed to clean output", "err", err, "dir", dst)
@@ -295,44 +346,6 @@ func (g *Generator) finalize(chalDir string) error {
 		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0644); err != nil { //nolint:gosec
 			slog.Error("failed to write output file", "err", err, "name", e.Name())
 		}
-	}
-
-	metadata := challengeMetadata{
-		ID:    g.challengeID,
-		Title: g.defaultTitle(),
-		Type:  "script",
-		Image: fmt.Sprintf("%s/%s:latest", g.RegistryAddr, g.challengeID),
-	}
-	if yamlData, err := os.ReadFile(filepath.Join(chalDir, "challenge.yaml")); err == nil {
-		var spec struct {
-			Title       string   `yaml:"title"`
-			Difficulty  string   `yaml:"difficulty"`
-			Tags        []string `yaml:"tags"`
-			Description string   `yaml:"description"`
-		}
-		if err := yaml.Unmarshal(yamlData, &spec); err == nil { //nolint:errcheck
-			if spec.Title != "" {
-				metadata.Title = spec.Title
-			}
-			if spec.Difficulty != "" {
-				metadata.Difficulty = spec.Difficulty
-			} else {
-				metadata.Difficulty = "medium"
-			}
-			if len(spec.Tags) > 0 {
-				metadata.Tags = spec.Tags
-			}
-			if spec.Description != "" {
-				metadata.Description = spec.Description
-			} else {
-				metadata.Description = g.defaultDescription()
-			}
-		}
-	}
-
-	metaJSON, _ := json.Marshal(metadata)
-	if err := os.WriteFile(k8s.PodMetadataPath, metaJSON, 0644); err != nil { //nolint:gosec
-		slog.Error("failed to write metadata.json", "err", err)
 	}
 
 	fmt.Println(g.challengeID)
@@ -373,16 +386,6 @@ func (g *Generator) drainEvents(events *adk.AsyncIterator[*adk.AgentEvent]) erro
 			return nil
 		}
 	}
-}
-
-type challengeMetadata struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Difficulty  string   `json:"difficulty"`
-	Tags        []string `json:"tags"`
-	Description string   `json:"description"`
-	Image       string   `json:"image"`
 }
 
 func truncateStr(s string, max int) string {
@@ -460,11 +463,12 @@ func (g *Generator) draftContext() string {
 		parts = append(parts, fmt.Sprintf("Tags: %s", strings.Join(g.Draft.Tags, ", ")))
 	}
 	parts = append(parts, fmt.Sprintf("Description: %s", g.Draft.Description))
-	parts = append(parts, fmt.Sprintf("Operator story: %s", g.Draft.OperatorStory))
-	parts = append(parts, fmt.Sprintf("Broken state: %s", g.Draft.BrokenState))
-	parts = append(parts, fmt.Sprintf("Expected fix: %s", g.Draft.ExpectedFix))
-	parts = append(parts, fmt.Sprintf("Verification expectations: %s", g.Draft.VerificationExpectations))
-	parts = append(parts, fmt.Sprintf("Constraints: %s", g.Draft.Constraints))
+	parts = append(parts, fmt.Sprintf("Goal: %s", g.Draft.Goal))
+	parts = append(parts, fmt.Sprintf("Symptoms: %s", g.Draft.Symptoms))
+	parts = append(parts, fmt.Sprintf("Fault mechanism: %s", g.Draft.FaultMechanism))
+	parts = append(parts, fmt.Sprintf("Environment shape: %s", g.Draft.EnvironmentShape))
+	parts = append(parts, fmt.Sprintf("Acceptance criteria: %s", g.Draft.AcceptanceCriteria))
+	parts = append(parts, fmt.Sprintf("Difficulty reason: %s", g.Draft.DifficultyReason))
 	if strings.TrimSpace(g.Draft.Notes) != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", g.Draft.Notes))
 	}
@@ -477,4 +481,170 @@ func sum(b []byte) [16]byte {
 		h[i%16] ^= c + byte(i)
 	}
 	return h
+}
+
+func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
+	if strings.TrimSpace(g.GenerationID) == "" {
+		return fmt.Errorf("GENERATION_ID is required")
+	}
+	if strings.TrimSpace(g.GatewayURL) == "" {
+		return fmt.Errorf("GATEWAY_INTERNAL_URL is required")
+	}
+	if strings.TrimSpace(g.InternalAPIKey) == "" {
+		return fmt.Errorf("GATEWAY_INTERNAL_API_KEY is required")
+	}
+	if err := g.syncChallengeManifest(chalDir); err != nil {
+		return err
+	}
+
+	meta, err := g.challengeMetadata(chalDir)
+	if err != nil {
+		return err
+	}
+	payload, err := archiveDir(chalDir)
+	if err != nil {
+		return err
+	}
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fields := map[string]string{
+		"challenge_id": meta.ID,
+		"title":        meta.Title,
+		"type":         meta.Type,
+		"difficulty":   meta.Difficulty,
+		"description":  meta.Description,
+	}
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			return fmt.Errorf("write multipart field %s: %w", k, err)
+		}
+	}
+	tagsJSON, _ := json.Marshal(meta.Tags)
+	if err := mw.WriteField("tags_b64", base64.StdEncoding.EncodeToString(tagsJSON)); err != nil {
+		return fmt.Errorf("write multipart tags: %w", err)
+	}
+	part, err := mw.CreateFormFile("artifact", meta.ID+".tar.gz")
+	if err != nil {
+		return fmt.Errorf("create multipart artifact part: %w", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		return fmt.Errorf("write artifact payload: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("close multipart body: %w", err)
+	}
+
+	url := strings.TrimRight(g.GatewayURL, "/") + "/api/internal/generations/" + g.GenerationID + "/artifact"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	if err != nil {
+		return fmt.Errorf("create upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-Breakfix-Internal-Key", g.InternalAPIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload artifact: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("upload artifact: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
+}
+
+type challengeMetadata struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Difficulty  string   `json:"difficulty"`
+	Tags        []string `json:"tags"`
+	Description string   `json:"description"`
+	Image       string   `json:"image"`
+}
+
+func (g *Generator) challengeMetadata(chalDir string) (*challengeMetadata, error) {
+	metadata := &challengeMetadata{
+		ID:          g.challengeID,
+		Title:       g.defaultTitle(),
+		Type:        "script",
+		Difficulty:  "medium",
+		Description: g.defaultDescription(),
+		Image:       fmt.Sprintf("%s/%s:latest", g.RegistryAddr, g.challengeID),
+	}
+	if yamlData, err := os.ReadFile(filepath.Join(chalDir, "challenge.yaml")); err == nil {
+		var spec struct {
+			Title       string   `yaml:"title"`
+			Type        string   `yaml:"type"`
+			Difficulty  string   `yaml:"difficulty"`
+			Tags        []string `yaml:"tags"`
+			Description string   `yaml:"description"`
+		}
+		if err := yaml.Unmarshal(yamlData, &spec); err != nil {
+			return nil, fmt.Errorf("parse challenge.yaml for metadata: %w", err)
+		}
+		if spec.Title != "" {
+			metadata.Title = spec.Title
+		}
+		if spec.Type != "" {
+			metadata.Type = spec.Type
+		}
+		if spec.Difficulty != "" {
+			metadata.Difficulty = spec.Difficulty
+		}
+		if len(spec.Tags) > 0 {
+			metadata.Tags = append([]string{}, spec.Tags...)
+		}
+		if spec.Description != "" {
+			metadata.Description = spec.Description
+		}
+	}
+	return metadata, nil
+}
+
+func archiveDir(root string) ([]byte, error) {
+	var buf bytes.Buffer
+	gzw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gzw)
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read challenge dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", path, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		hdr := &tar.Header{
+			Name:    entry.Name(),
+			Mode:    int64(info.Mode().Perm()),
+			Size:    int64(len(data)),
+			ModTime: info.ModTime(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, fmt.Errorf("write tar header for %s: %w", path, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			return nil, fmt.Errorf("write tar body for %s: %w", path, err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("close tar stream: %w", err)
+	}
+	if err := gzw.Close(); err != nil {
+		return nil, fmt.Errorf("close gzip stream: %w", err)
+	}
+	return buf.Bytes(), nil
 }

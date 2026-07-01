@@ -37,15 +37,17 @@ spec:
                         type: string
                     description:
                       type: string
-                    operator_story:
+                    goal:
                       type: string
-                    broken_state:
+                    symptoms:
                       type: string
-                    expected_fix:
+                    fault_mechanism:
                       type: string
-                    verification_expectations:
+                    environment_shape:
                       type: string
-                    constraints:
+                    acceptance_criteria:
+                      type: string
+                    difficulty_reason:
                       type: string
                     notes:
                       type: string

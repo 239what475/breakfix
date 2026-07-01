@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/auth"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/draftreview"
@@ -29,9 +32,13 @@ type Handler struct {
 	registryInsecure bool
 	namespace        string
 	crdNamespace     string
+	challengesDir    string
 	cooldownMin      int
 	llm              config.LLMConfig
 	jwtSecret        []byte
+	internalAPIKey   string
+	serverHost       string
+	port             int
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
@@ -43,9 +50,13 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		registryInsecure: cfg.RegistryInsecure,
 		namespace:        cfg.Namespace,
 		crdNamespace:     cfg.CRDNamespace,
+		challengesDir:    cfg.ChallengesDir(),
 		cooldownMin:      cfg.CooldownMinutes,
 		llm:              cfg.LLM,
 		jwtSecret:        []byte(cfg.JWTSecret),
+		internalAPIKey:   cfg.InternalAPIKey,
+		serverHost:       cfg.ServerHost,
+		port:             cfg.Port,
 	}
 }
 
@@ -134,7 +145,7 @@ func (h *Handler) Login(c *gin.Context) {
 func (h *Handler) ListChallenges(c *gin.Context) {
 	user := h.getUser(c)
 
-	challenges, err := h.db.ListChallenges()
+	challenges, err := challenge.List(h.challengesDir)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -169,8 +180,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Solved:      &solvedVal,
 			Active:      &activeVal,
 		}
-		var tags []string
-		json.Unmarshal([]byte(ch.Tags), &tags)
+		tags := append([]string{}, ch.Tags...)
 		s.Tags = &tags
 		summaries = append(summaries, s)
 	}
@@ -185,7 +195,7 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challenge, err := h.db.GetChallenge(id)
+	challengeEntry, err := challenge.Get(h.challengesDir, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -202,19 +212,19 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 			}
 		}
 		slog.Info("resuming existing instance", "instance", existing.Name, "challenge", id)
-		title := challenge.Title
+		title := challengeEntry.Title
 		c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})
 		return
 	}
 
-	inst, err := h.createInstance(c.Request.Context(), user, challenge)
+	inst, err := h.createInstance(c.Request.Context(), user, challengeEntry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	slog.Info("instance started", "instance", inst.Name, "user", user.ID, "challenge", challenge.ID)
-	title := challenge.Title
+	slog.Info("instance started", "instance", inst.Name, "user", user.ID, "challenge", challengeEntry.ID)
+	title := challengeEntry.Title
 	c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})
 }
 
@@ -260,7 +270,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challenge, err := h.db.GetChallenge(id)
+	challengeEntry, err := challenge.Get(h.challengesDir, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -276,14 +286,14 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		slog.Info("old instance destroyed", "instance", existing.Name)
 	}
 
-	inst, err := h.createInstance(c.Request.Context(), user, challenge)
+	inst, err := h.createInstance(c.Request.Context(), user, challengeEntry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	slog.Info("instance reset", "instance", inst.Name, "user", user.ID, "challenge", challenge.ID)
-	title := challenge.Title
+	slog.Info("instance reset", "instance", inst.Name, "user", user.ID, "challenge", challengeEntry.ID)
+	title := challengeEntry.Title
 	c.JSON(http.StatusOK, api.ResetResponse{ChallengeTitle: &title})
 }
 
@@ -327,8 +337,12 @@ func (h *Handler) CreateGenerationJob(c *gin.Context) {
 
 	env := map[string]string{
 		"CHALLENGE_DRAFT_JSON":           mustJSON(draft),
+		"CHALLENGE_OUTPUT_DIR":           "/workspace/out",
 		"REGISTRY_ADDR":                  h.registryAddr,
 		"LAB_NAMESPACE":                  h.crdNamespace,
+		"GATEWAY_INTERNAL_URL":           h.internalGatewayURL(),
+		"GATEWAY_INTERNAL_API_KEY":       h.internalAPIKey,
+		"GENERATION_ID":                  genID,
 		"ANTHROPIC_BASE_URL":             h.llm.BaseURL,
 		"ANTHROPIC_AUTH_TOKEN":           h.llm.APIKey,
 		"ANTHROPIC_MODEL":                h.llm.Model,
@@ -377,10 +391,6 @@ func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
 		return
 	}
 
-	if gen.Status.Challenge != nil {
-		h.syncChallengeFromGeneration(gen)
-	}
-
 	status := string(gen.Status.Phase)
 	if status == "" {
 		status = "Pending"
@@ -417,6 +427,82 @@ func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
 	})
+}
+
+func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
+	if h.internalAPIKey == "" {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal upload disabled"})
+		return
+	}
+	if c.GetHeader("X-Breakfix-Internal-Key") != h.internalAPIKey {
+		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid internal key"})
+		return
+	}
+
+	genID := strings.TrimSpace(c.Param("id"))
+	if genID == "" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "missing generation id"})
+		return
+	}
+
+	gen, err := h.k8s.GetGeneration(c.Request.Context(), h.crdNamespace, genID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "generation job not found"})
+		return
+	}
+
+	id := strings.TrimSpace(c.PostForm("challenge_id"))
+	title := strings.TrimSpace(c.PostForm("title"))
+	typ := strings.TrimSpace(c.PostForm("type"))
+	difficulty := strings.TrimSpace(c.PostForm("difficulty"))
+	description := strings.TrimSpace(c.PostForm("description"))
+	if id == "" || title == "" || typ == "" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "missing challenge metadata"})
+		return
+	}
+
+	var tags []string
+	if rawTags := strings.TrimSpace(c.PostForm("tags_b64")); rawTags != "" {
+		decoded, err := base64.StdEncoding.DecodeString(rawTags)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid tags_b64"})
+			return
+		}
+		if err := json.Unmarshal(decoded, &tags); err != nil {
+			c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid tags payload"})
+			return
+		}
+	}
+
+	file, _, err := c.Request.FormFile("artifact")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "artifact file is required"})
+		return
+	}
+	defer file.Close()
+
+	if _, err := challenge.Materialize(h.challengesDir, id, func(dst string) error {
+		return challenge.ExtractTarGz(dst, file)
+	}); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: fmt.Sprintf("materialize artifact: %v", err)})
+		return
+	}
+
+	gen.Status.Challenge = &breakfixv1.ChallengeSpec{
+		ID:          id,
+		Title:       title,
+		Type:        typ,
+		Difficulty:  difficulty,
+		Tags:        append([]string{}, tags...),
+		Description: description,
+		Image:       fmt.Sprintf("%s/%s:latest", h.registryAddr, id),
+	}
+	if _, err := h.k8s.UpdateGenerationStatus(c.Request.Context(), h.crdNamespace, gen); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("update generation status: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // ── Terminal (WebSocket) ──
@@ -490,7 +576,7 @@ func (h *Handler) findInstance(ctx context.Context, userID, challengeID string) 
 	return nil, fmt.Errorf("no active instance for %s/%s", userID, challengeID)
 }
 
-func (h *Handler) createInstance(ctx context.Context, user *db.User, challenge *db.Challenge) (*breakfixv1.Instance, error) {
+func (h *Handler) createInstance(ctx context.Context, user *db.User, challenge *challenge.Entry) (*breakfixv1.Instance, error) {
 	instanceID := k8s.RandomID()
 	inst := &breakfixv1.Instance{
 		ObjectMeta: metav1.ObjectMeta{
@@ -562,56 +648,20 @@ func (h *Handler) waitDestroyed(ctx context.Context, name string) {
 	}
 }
 
-func (h *Handler) waitGenerationDone(ctx context.Context, name string, timeout time.Duration) (*breakfixv1.Generation, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		gen, err := h.k8s.GetGeneration(ctx, h.crdNamespace, name)
-		if err != nil {
-			return nil, err
-		}
-		if gen.Status.Phase == breakfixv1.GenerationSucceeded || gen.Status.Phase == breakfixv1.GenerationFailed {
-			return gen, nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return nil, fmt.Errorf("timeout waiting for generation")
-}
-
-func (h *Handler) syncChallengeFromGeneration(gen *breakfixv1.Generation) {
-	if gen.Status.Challenge == nil {
-		return
-	}
-	cs := gen.Status.Challenge
-	tags, _ := json.Marshal(cs.Tags)
-	c := db.Challenge{
-		ID:          cs.ID,
-		Title:       cs.Title,
-		Type:        cs.Type,
-		Difficulty:  cs.Difficulty,
-		Tags:        string(tags),
-		Description: cs.Description,
-		Image:       cs.Image,
-	}
-	if err := h.db.UpsertChallenge(c); err != nil {
-		slog.Error("failed to sync generated challenge", "err", err, "id", cs.ID)
-	} else {
-		slog.Info("challenge synced from generation", "id", cs.ID)
-	}
-}
-
 func toAPIChallengeDraft(d breakfixv1.ChallengeDraft) api.ChallengeDraft {
 	tags := append([]string{}, d.Tags...)
 	return api.ChallengeDraft{
-		Title:                    d.Title,
-		Difficulty:               d.Difficulty,
-		Tags:                     tags,
-		Description:              d.Description,
-		OperatorStory:            d.OperatorStory,
-		BrokenState:              d.BrokenState,
-		ExpectedFix:              d.ExpectedFix,
-		VerificationExpectations: d.VerificationExpectations,
-		Constraints:              d.Constraints,
-		Notes:                    &d.Notes,
+		Title:              d.Title,
+		Difficulty:         d.Difficulty,
+		Tags:               tags,
+		Description:        d.Description,
+		Goal:               d.Goal,
+		Symptoms:           d.Symptoms,
+		FaultMechanism:     d.FaultMechanism,
+		EnvironmentShape:   d.EnvironmentShape,
+		AcceptanceCriteria: d.AcceptanceCriteria,
+		DifficultyReason:   d.DifficultyReason,
+		Notes:              &d.Notes,
 	}
 }
 
@@ -622,16 +672,17 @@ func fromAPIChallengeDraft(d api.ChallengeDraft) breakfixv1.ChallengeDraft {
 		notes = *d.Notes
 	}
 	return breakfixv1.ChallengeDraft{
-		Title:                    d.Title,
-		Difficulty:               d.Difficulty,
-		Tags:                     tags,
-		Description:              d.Description,
-		OperatorStory:            d.OperatorStory,
-		BrokenState:              d.BrokenState,
-		ExpectedFix:              d.ExpectedFix,
-		VerificationExpectations: d.VerificationExpectations,
-		Constraints:              d.Constraints,
-		Notes:                    notes,
+		Title:              d.Title,
+		Difficulty:         d.Difficulty,
+		Tags:               tags,
+		Description:        d.Description,
+		Goal:               d.Goal,
+		Symptoms:           d.Symptoms,
+		FaultMechanism:     d.FaultMechanism,
+		EnvironmentShape:   d.EnvironmentShape,
+		AcceptanceCriteria: d.AcceptanceCriteria,
+		DifficultyReason:   d.DifficultyReason,
+		Notes:              notes,
 	}
 }
 
@@ -671,4 +722,13 @@ func defaultGenerationMessage(gen *breakfixv1.Generation) string {
 	default:
 		return "generation status updated"
 	}
+}
+
+func (h *Handler) internalGatewayURL() string {
+	host := strings.TrimSpace(h.serverHost)
+	if host == "" {
+		host = "172.18.0.1"
+	}
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", h.port))
+	return "http://" + addr
 }

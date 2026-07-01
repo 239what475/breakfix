@@ -3,7 +3,7 @@ import { BASE, registerAndLogin, selectCleanupLogs, signOut, uniqueUser } from '
 
 test.describe('Main Page', () => {
   test('displays single-page workspace for guests', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await expect(page.locator('.brand-title')).toHaveText('Breakfix')
     await expect(page.locator('.brand-subtitle')).toHaveText('SRE terminal labs')
     await expect(page.locator('.workspace-header h1')).toHaveText('Terminal Workspace')
@@ -13,16 +13,16 @@ test.describe('Main Page', () => {
   })
 
   test('shows terminal empty state before launch', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await expect(page.locator('.terminal-empty-card h2')).toHaveText('Pick a challenge from the left')
     await expect(page.locator('.terminal-empty-card')).toContainText('Browse the challenge catalog')
-    await expect(page.getByRole('button', { name: 'Sign In to Start', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign In', exact: true })).toBeVisible()
   })
 })
 
 test.describe('Auth Modal', () => {
   test('login modal opens and closes with escape', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await page.getByRole('button', { name: 'Sign In', exact: true }).click()
     await expect(page.locator('h3:has-text("Sign In")')).toBeVisible()
     await expect(page.locator('input[placeholder="Username"]')).toBeVisible()
@@ -33,7 +33,7 @@ test.describe('Auth Modal', () => {
   })
 
   test('can switch from login to register', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await page.getByRole('button', { name: 'Sign In', exact: true }).click()
     await page.locator('.auth-foot').getByRole('button', { name: 'Register', exact: true }).click()
     await expect(page.locator('h3:has-text("Create Account")')).toBeVisible()
@@ -41,7 +41,7 @@ test.describe('Auth Modal', () => {
   })
 
   test('shows error toast on invalid credentials', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await page.getByRole('button', { name: 'Sign In', exact: true }).click()
     await page.locator('input[placeholder="Username"]').first().fill('nonexistent')
     await page.locator('input[placeholder="Password"]').first().fill('wrongpass')
@@ -53,7 +53,7 @@ test.describe('Auth Modal', () => {
 
 test.describe('Register Flow', () => {
   test('shows TOTP secret and QR after successful register', async ({ page }) => {
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await page.getByRole('button', { name: 'Register', exact: true }).click()
     await page.locator('input[placeholder="Username"]').first().fill(uniqueUser('register'))
     await page.locator('input[placeholder="Password (min 6 chars)"]').fill('testpass123')
@@ -67,7 +67,7 @@ test.describe('Register Flow', () => {
 
   test('shows error on duplicate username', async ({ page }) => {
     const user = uniqueUser('dupe')
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await page.getByRole('button', { name: 'Register', exact: true }).click()
     await page.locator('input[placeholder="Username"]').first().fill(user)
     await page.locator('input[placeholder="Password (min 6 chars)"]').fill('testpass123')
@@ -88,15 +88,16 @@ test.describe('Authenticated Workspace', () => {
     await registerAndLogin(page)
     await expect(page.locator('.account-value')).toHaveText('Authenticated')
     await expect(page.locator('.challenge-list .challenge-card').first()).toBeVisible()
-    await expect(page.locator('.workspace-header h1')).not.toHaveText('')
-    await expect(page.locator('.brief-kicker')).toHaveText('Challenge brief')
+    await expect(page.locator('.workspace-header h1')).toHaveText('Terminal Workspace')
+    await expect(page.locator('.terminal-empty-card h2')).toBeVisible()
   })
 
   test('can select a challenge and view its brief', async ({ page }) => {
     await registerAndLogin(page)
     await selectCleanupLogs(page)
     await expect(page.locator('.brief-kicker')).toHaveText('Challenge brief')
-    await expect(page.locator('.brief-actions').getByRole('button', { name: 'Start Challenge', exact: true })).toBeVisible()
+    await expect(page.locator('.terminal-empty-card .brief-kicker')).toHaveText('Challenge brief')
+    await expect(page.locator('.terminal-empty-card .brief-actions').getByRole('button', { name: 'Start Challenge', exact: true })).toBeVisible()
   })
 
   test('logout returns to guest mode', async ({ page }) => {
@@ -109,7 +110,7 @@ test.describe('Authenticated Workspace', () => {
 
 test.describe('Hash Routes', () => {
   test('unknown hash route still renders the single-page app', async ({ page }) => {
-    await page.goto(BASE + '/#/terminal/any-challenge')
+    await page.goto(BASE + '/terminal/any-challenge')
     await expect(page.locator('.brand-title')).toHaveText('Breakfix')
     await expect(page.locator('.workspace-header h1')).toBeVisible()
   })
@@ -168,11 +169,12 @@ test.describe('API Endpoints (Direct)', () => {
           difficulty: 'easy',
           tags: ['test'],
           description: 'test',
-          operator_story: 'test',
-          broken_state: 'test',
-          expected_fix: 'test',
-          verification_expectations: 'test',
-          constraints: 'test',
+          goal: 'test',
+          symptoms: 'test',
+          fault_mechanism: 'test',
+          environment_shape: 'test',
+          acceptance_criteria: 'test',
+          difficulty_reason: 'test',
         },
       },
     })

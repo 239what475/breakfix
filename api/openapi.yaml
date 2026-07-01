@@ -322,11 +322,12 @@ components:
         - difficulty
         - tags
         - description
-        - operator_story
-        - broken_state
-        - expected_fix
-        - verification_expectations
-        - constraints
+        - goal
+        - symptoms
+        - fault_mechanism
+        - environment_shape
+        - acceptance_criteria
+        - difficulty_reason
       properties:
         title:
           type: string
@@ -338,15 +339,17 @@ components:
             type: string
         description:
           type: string
-        operator_story:
+        goal:
           type: string
-        broken_state:
+        symptoms:
           type: string
-        expected_fix:
+        fault_mechanism:
           type: string
-        verification_expectations:
+        environment_shape:
           type: string
-        constraints:
+        acceptance_criteria:
+          type: string
+        difficulty_reason:
           type: string
         notes:
           type: string

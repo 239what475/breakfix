@@ -54,6 +54,23 @@ func (c *Client) GetGeneration(ctx context.Context, ns, name string) (*breakfixv
 	return fromUnstructured[*breakfixv1.Generation](result)
 }
 
+func (c *Client) UpdateGeneration(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
+	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	obj, err := toUnstructured(gen)
+	if err != nil {
+		return nil, err
+	}
+	result, err := dyn.Resource(generationGVR).Namespace(ns).Update(ctx, obj, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("update generation: %w", err)
+	}
+	return fromUnstructured[*breakfixv1.Generation](result)
+}
+
 func (c *Client) UpdateGenerationStatus(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
 	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
 	dyn, err := c.crdClient()

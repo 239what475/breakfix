@@ -36,7 +36,7 @@ async function totpCode(page: any, secret: string): Promise<string> {
 }
 
 test('single-page workspace loads for guests', async ({ page }) => {
-  await page.goto(BASE + '/#/')
+  await page.goto(BASE + '/')
   await expect(page.locator('text=Breakfix')).toBeVisible()
   await expect(page.locator('text=SRE terminal labs')).toBeVisible()
   await expect(page.locator('text=Terminal Workspace')).toBeVisible()
@@ -48,7 +48,7 @@ test('single-page workspace loads for guests', async ({ page }) => {
 test('register and login into the single-page workspace', async ({ page }) => {
   const user = `e2e-${Date.now()}`
 
-  await page.goto(BASE + '/#/')
+  await page.goto(BASE + '/')
   await page.getByRole('button', { name: 'Register', exact: true }).click()
   await expect(page.locator('h3:has-text("Create Account")')).toBeVisible()
 
@@ -67,5 +67,5 @@ test('register and login into the single-page workspace', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign In' }).last().click()
 
   await expect(page.locator('.account-value').getByText('Authenticated')).toBeVisible({ timeout: 10000 })
-  await expect(page.locator('text=Challenge brief')).toBeVisible()
+  await expect(page.locator('.terminal-empty-card .brief-kicker')).toHaveText('Challenge brief')
 })

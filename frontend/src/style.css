@@ -226,10 +226,10 @@ button {
 
 .challenge-card {
   width: 100%;
-  padding: 16px;
-  margin-bottom: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
   border: 1px solid transparent;
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.025);
   color: inherit;
   text-align: left;
@@ -286,7 +286,7 @@ button {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .challenge-type {
@@ -297,20 +297,14 @@ button {
 }
 
 .challenge-card-desc {
-  display: -webkit-box;
-  margin: 12px 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  display: none;
 }
 
 .challenge-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 10px;
 }
 
 .tag-chip {
@@ -319,18 +313,6 @@ button {
   background: rgba(136, 179, 219, 0.1);
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.challenge-brief {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 16px;
-  min-height: 0;
-  padding: 20px 24px 24px;
-  border-top: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
-  overflow: hidden;
-  max-height: 42vh;
 }
 
 .brief-header {
@@ -371,21 +353,19 @@ button {
 
 .brief-description {
   min-height: 0;
-  padding-right: 4px;
+  padding-right: 6px;
   overflow: auto;
   color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.75;
   white-space: pre-wrap;
+  max-height: min(30vh, 260px);
 }
 
 .brief-actions {
   display: grid;
   gap: 12px;
-  position: sticky;
-  bottom: 0;
   padding-top: 8px;
-  background: linear-gradient(180deg, rgba(12, 24, 40, 0), rgba(12, 24, 40, 0.98) 24%);
 }
 
 .secondary-actions {
@@ -491,12 +471,14 @@ button {
   z-index: 1;
   display: grid;
   gap: 18px;
-  width: min(520px, calc(100% - 48px));
+  width: min(760px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  overflow: auto;
   padding: 34px;
   border: 1px solid rgba(139, 211, 255, 0.14);
   border-radius: 24px;
   background: rgba(12, 24, 40, 0.78);
-  text-align: center;
+  text-align: left;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
 }
 
@@ -505,7 +487,7 @@ button {
   place-items: center;
   width: 72px;
   height: 72px;
-  margin: 0 auto;
+  margin: 0;
   border-radius: 22px;
   background: linear-gradient(135deg, rgba(139, 211, 255, 0.22), rgba(61, 169, 252, 0.12));
   color: var(--accent);

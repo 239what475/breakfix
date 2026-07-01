@@ -1,15 +1,16 @@
 import { createApp } from 'vue'
 import naive, { createDiscreteApi } from 'naive-ui'
 import App from './App.vue'
-import router from './router'
 import './style.css'
 
-const app = createApp(App)
-app.use(naive)
-app.use(router)
+async function bootstrap() {
+  const app = createApp(App)
+  app.use(naive)
 
-// Make message available globally (before components mount)
-const { message } = createDiscreteApi(['message'])
-app.config.globalProperties.$message = message
+  const { message } = createDiscreteApi(['message'])
+  app.config.globalProperties.$message = message
 
-app.mount('#app')
+  app.mount('#app')
+}
+
+void bootstrap()

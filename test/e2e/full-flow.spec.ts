@@ -25,7 +25,7 @@ test.describe('Full Challenge Flow via UI', () => {
     await expect(resultBar).toBeVisible({ timeout: 30000 })
     await expect(resultBar).toContainText(/Verification passed|Verification failed/)
 
-    await page.goto(BASE + '/#/')
+    await page.goto(BASE + '/')
     await expect(page.locator('.account-value').getByText('Authenticated')).toBeVisible()
   })
 })

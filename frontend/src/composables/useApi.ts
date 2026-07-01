@@ -77,11 +77,12 @@ export interface ChallengeDraft {
   difficulty: string
   tags: string[]
   description: string
-  operator_story: string
-  broken_state: string
-  expected_fix: string
-  verification_expectations: string
-  constraints: string
+  goal: string
+  symptoms: string
+  fault_mechanism: string
+  environment_shape: string
+  acceptance_criteria: string
+  difficulty_reason: string
   notes?: string
 }
 

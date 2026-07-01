@@ -32,7 +32,9 @@ func (c *Client) CreateJob(ns, jobName, image string, env map[string]string) err
 					Containers: []corev1.Container{{
 						Name:            "generator",
 						Image:           image,
-						ImagePullPolicy: corev1.PullIfNotPresent,
+						// Generator images are rebuilt frequently during authoring.
+						// Always pull to avoid stale cached :latest images on cluster nodes.
+						ImagePullPolicy: corev1.PullAlways,
 						SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 						Env:             envVars,
 					}},

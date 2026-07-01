@@ -68,6 +68,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 			h.CreateGenerationJob(c)
 		}
 	})
+	router.POST("/api/internal/generations/:id/artifact", h.UploadGenerationArtifact)
 	router.GET("/api/generate/jobs/:id", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

@@ -67,11 +67,12 @@ const editableDraft = ref<ChallengeDraft>({
   difficulty: 'medium',
   tags: [],
   description: '',
-  operator_story: '',
-  broken_state: '',
-  expected_fix: '',
-  verification_expectations: '',
-  constraints: '',
+  goal: '',
+  symptoms: '',
+  fault_mechanism: '',
+  environment_shape: '',
+  acceptance_criteria: '',
+  difficulty_reason: '',
   notes: '',
 })
 
@@ -92,10 +93,8 @@ let textareaFocusHandler: (() => void) | null = null
 let textareaBlurHandler: (() => void) | null = null
 let termKeyHandlerDisposable: { dispose: () => void } | null = null
 let terminalSessionNonce = 0
-let reconnectTimeoutId: number | null = null
 let visibilityHandler: (() => void) | null = null
-let focusHandler: (() => void) | null = null
-let onlineHandler: (() => void) | null = null
+let blurHandler: (() => void) | null = null
 let generationPollId: number | null = null
 
 const diffColors: Record<string, string> = {
@@ -144,11 +143,12 @@ const canStartGeneration = computed(() => {
     draft.difficulty.trim() &&
     draft.tags.length &&
     draft.description.trim() &&
-    draft.operator_story.trim() &&
-    draft.broken_state.trim() &&
-    draft.expected_fix.trim() &&
-    draft.verification_expectations.trim() &&
-    draft.constraints.trim(),
+    draft.goal.trim() &&
+    draft.symptoms.trim() &&
+    draft.fault_mechanism.trim() &&
+    draft.environment_shape.trim() &&
+    draft.acceptance_criteria.trim() &&
+    draft.difficulty_reason.trim(),
   )
 })
 
@@ -163,9 +163,6 @@ const stageTitle = computed(() => {
   if (inChallenge.value && selectedChallenge.value) {
     return challengeTitle.value || selectedChallenge.value.title
   }
-  if (selectedChallenge.value) {
-    return selectedChallenge.value.title
-  }
   return 'Terminal Workspace'
 })
 
@@ -177,36 +174,32 @@ const stageSubtitle = computed(() => {
     return 'Interactive tmux session attached to the current challenge environment.'
   }
   if (!loggedIn.value) return 'Authenticate to browse labs, open terminals, and submit fixes.'
-  if (selectedChallenge.value) return 'Review the brief on the left, then launch the lab when ready.'
+  if (selectedChallenge.value) return 'Review the challenge brief on the right, then launch the lab when ready.'
   return 'Choose a challenge from the sidebar to open its terminal workspace.'
 })
 
 onMounted(async () => {
   if (loggedIn.value) {
-    await loadChallenges()
+    await restoreSession()
   }
 
   visibilityHandler = () => {
-    if (!document.hidden) {
-      void reconnectTerminal()
+    if (document.hidden) {
+      terminalHasFocus.value = false
+      term?.blur()
     }
   }
-  focusHandler = () => {
-    void reconnectTerminal()
-  }
-  onlineHandler = () => {
-    void reconnectTerminal()
+  blurHandler = () => {
+    terminalHasFocus.value = false
+    term?.blur()
   }
   document.addEventListener('visibilitychange', visibilityHandler)
-  window.addEventListener('focus', focusHandler)
-  window.addEventListener('online', onlineHandler)
+  window.addEventListener('blur', blurHandler)
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', visibilityHandler!)
-  window.removeEventListener('focus', focusHandler!)
-  window.removeEventListener('online', onlineHandler!)
-  clearReconnectTimer()
+  window.removeEventListener('blur', blurHandler!)
   clearGenerationPoll()
   disposeTerminal()
 })
@@ -288,13 +281,25 @@ function doLogout() {
   message.info('Signed out')
 }
 
-async function loadChallenges() {
+async function restoreSession() {
+  try {
+    await loadChallenges({ silent: true })
+  } catch {
+    clearToken()
+    loggedIn.value = false
+  }
+}
+
+async function loadChallenges(options?: { silent?: boolean }) {
   loading.value = true
   try {
     const result = await api.listChallenges()
     challenges.value = result.challenges ?? []
   } catch (error: any) {
-    message.error(error.message)
+    if (!options?.silent) {
+      message.error(error.message)
+    }
+    throw error
   } finally {
     loading.value = false
   }
@@ -314,11 +319,12 @@ function openGenerateModal() {
     difficulty: 'medium',
     tags: [],
     description: '',
-    operator_story: '',
-    broken_state: '',
-    expected_fix: '',
-    verification_expectations: '',
-    constraints: '',
+    goal: '',
+    symptoms: '',
+    fault_mechanism: '',
+    environment_shape: '',
+    acceptance_criteria: '',
+    difficulty_reason: '',
     notes: '',
   }
 }
@@ -510,9 +516,7 @@ function initTerminal(challengeId: string) {
     terminalReady.value = true
     terminalDisconnected.value = false
     reconnecting.value = false
-    clearReconnectTimer()
     sendTerminalResize()
-    requestAnimationFrame(() => focusTerminal())
   }
 
   ws.onmessage = (event) => {
@@ -532,9 +536,8 @@ function initTerminal(challengeId: string) {
     terminalReady.value = false
     terminalDisconnected.value = true
     terminalHasFocus.value = false
-    reconnecting.value = inChallenge.value
+    reconnecting.value = false
     term?.write('\r\n\x1b[33mDisconnected\x1b[0m\r\n')
-    scheduleReconnect()
   }
 
   ws.onerror = () => {
@@ -542,7 +545,7 @@ function initTerminal(challengeId: string) {
     terminalReady.value = false
     terminalDisconnected.value = true
     terminalHasFocus.value = false
-    reconnecting.value = inChallenge.value
+    reconnecting.value = false
   }
 
   term.onData((data) => {
@@ -554,7 +557,7 @@ function initTerminal(challengeId: string) {
 
   termKeyHandlerDisposable = term.onKey(() => {
     if (ws?.readyState !== WebSocket.OPEN) {
-      focusTerminal()
+      terminalHasFocus.value = false
     }
   })
 
@@ -563,12 +566,12 @@ function initTerminal(challengeId: string) {
     sendTerminalResize()
   })
   resizeObserver.observe(terminalEl.value)
-  requestAnimationFrame(() => focusTerminal())
 }
 
 function focusTerminal() {
+  if (document.hidden || !document.hasFocus()) return
   term?.focus()
-  term?.textarea?.focus()
+  term?.textarea?.focus({ preventScroll: true })
 }
 
 function sendTerminalResize() {
@@ -582,7 +585,6 @@ function sendTerminalResize() {
 
 function disposeTerminal() {
   terminalSessionNonce += 1
-  clearReconnectTimer()
   resizeObserver?.disconnect()
   resizeObserver = null
   termKeyHandlerDisposable?.dispose()
@@ -650,21 +652,6 @@ function statusTone(challenge: Challenge) {
   return 'idle'
 }
 
-function clearReconnectTimer() {
-  if (reconnectTimeoutId !== null) {
-    window.clearTimeout(reconnectTimeoutId)
-    reconnectTimeoutId = null
-  }
-}
-
-function scheduleReconnect() {
-  if (!inChallenge.value || !selectedId.value || reconnectTimeoutId !== null) return
-  reconnectTimeoutId = window.setTimeout(() => {
-    reconnectTimeoutId = null
-    void reconnectTerminal()
-  }, document.hidden ? 5000 : 1200)
-}
-
 async function reconnectTerminal() {
   if (!inChallenge.value || !selectedId.value || ws?.readyState === WebSocket.OPEN || challengeStarting.value) return
   reconnecting.value = true
@@ -677,9 +664,8 @@ async function reconnectTerminal() {
     initTerminal(selectedId.value)
   } catch (error: any) {
     terminalDisconnected.value = true
-    reconnecting.value = true
+    reconnecting.value = false
     message.error(error.message)
-    scheduleReconnect()
   }
 }
 
@@ -759,58 +745,6 @@ async function reconnectTerminal() {
         <div v-else class="empty-state compact">No challenges match the current filter.</div>
       </div>
 
-      <div class="challenge-brief" v-if="selectedChallenge">
-        <div class="brief-header">
-          <div>
-            <div class="brief-kicker">Challenge brief</div>
-            <h2>{{ selectedChallenge.title }}</h2>
-          </div>
-          <n-icon :component="SparklesOutline" size="18" />
-        </div>
-
-        <div class="brief-tags">
-          <n-tag :bordered="false" size="small" :color="{ color: difficultyColor(selectedChallenge.difficulty), textColor: '#08111d' }">
-            {{ selectedChallenge.difficulty }}
-          </n-tag>
-          <n-tag v-for="tag in selectedChallenge.tags" :key="tag" :bordered="false" size="small" class="brief-tag">
-            {{ tag }}
-          </n-tag>
-        </div>
-
-        <p class="brief-description">
-          {{ selectedChallenge.description || 'Connect to the terminal, inspect the environment, apply a fix, and submit for verification.' }}
-        </p>
-
-        <div class="brief-actions">
-          <n-button
-            block
-            type="primary"
-            size="large"
-            :disabled="!selectedId"
-            :loading="challengeStarting"
-            @click="handlePrimaryAction"
-          >
-            <template #icon>
-              <n-icon :component="loggedIn ? PlayOutline : LogInOutline" />
-            </template>
-            {{ primaryActionLabel }}
-          </n-button>
-          <div class="secondary-actions">
-            <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeSubmitting" @click="doSubmit">
-              <template #icon>
-                <n-icon :component="CheckmarkCircleOutline" />
-              </template>
-              Submit
-            </n-button>
-            <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeResetting" @click="doReset">
-              <template #icon>
-                <n-icon :component="RefreshOutline" />
-              </template>
-              Reset
-            </n-button>
-          </div>
-        </div>
-      </div>
     </aside>
 
     <main class="workspace">
@@ -845,23 +779,65 @@ async function reconnectTerminal() {
         <div v-if="!inChallenge" class="terminal-empty">
           <div class="terminal-empty-grid" />
           <div class="terminal-empty-card">
-            <div class="terminal-icon-wrap">
-              <n-icon :component="TerminalOutline" size="34" />
-            </div>
-            <h2>{{ selectedChallenge ? selectedChallenge.title : 'Pick a challenge from the left' }}</h2>
-            <p>
-              {{
-                selectedChallenge
-                  ? 'The right side becomes your live shell after launch. Keep the brief visible on the left while you work.'
-                  : 'Browse the challenge catalog, inspect the problem statement, then launch a terminal-based lab from the sidebar.'
-              }}
-            </p>
-            <n-button type="primary" size="large" :disabled="!selectedId" :loading="challengeStarting" @click="handlePrimaryAction">
-              <template #icon>
-                <n-icon :component="loggedIn ? PlayOutline : LogInOutline" />
-              </template>
-              {{ primaryActionLabel }}
-            </n-button>
+            <template v-if="selectedChallenge">
+              <div class="brief-header">
+                <div>
+                  <div class="brief-kicker">Challenge brief</div>
+                  <h2>{{ selectedChallenge.title }}</h2>
+                </div>
+                <n-icon :component="SparklesOutline" size="18" />
+              </div>
+
+              <div class="brief-tags">
+                <n-tag :bordered="false" size="small" :color="{ color: difficultyColor(selectedChallenge.difficulty), textColor: '#08111d' }">
+                  {{ selectedChallenge.difficulty }}
+                </n-tag>
+                <n-tag v-for="tag in selectedChallenge.tags" :key="tag" :bordered="false" size="small" class="brief-tag">
+                  {{ tag }}
+                </n-tag>
+              </div>
+
+              <p class="brief-description">
+                {{ selectedChallenge.description || 'Connect to the terminal, inspect the environment, apply a fix, and submit for verification.' }}
+              </p>
+
+              <div class="brief-actions">
+                <n-button
+                  block
+                  type="primary"
+                  size="large"
+                  :disabled="!selectedId"
+                  :loading="challengeStarting"
+                  @click="handlePrimaryAction"
+                >
+                  <template #icon>
+                    <n-icon :component="loggedIn ? PlayOutline : LogInOutline" />
+                  </template>
+                  {{ primaryActionLabel }}
+                </n-button>
+                <div class="secondary-actions">
+                  <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeSubmitting" @click="doSubmit">
+                    <template #icon>
+                      <n-icon :component="CheckmarkCircleOutline" />
+                    </template>
+                    Submit
+                  </n-button>
+                  <n-button block quaternary size="large" :disabled="!loggedIn || !selectedId" :loading="challengeResetting" @click="doReset">
+                    <template #icon>
+                      <n-icon :component="RefreshOutline" />
+                    </template>
+                    Reset
+                  </n-button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <div class="terminal-icon-wrap">
+                <n-icon :component="TerminalOutline" size="34" />
+              </div>
+              <h2>Pick a challenge from the left</h2>
+              <p>Browse the challenge catalog, inspect the problem statement, then launch a terminal-based lab from the sidebar.</p>
+            </template>
           </div>
         </div>
 
@@ -880,10 +856,17 @@ async function reconnectTerminal() {
           </div>
           <div class="terminal-body">
             <div ref="terminalEl" class="terminal-surface" @pointerdown.stop="focusTerminal" />
-            <div v-if="!terminalReady && !terminalDisconnected" class="terminal-overlay">
+            <div v-if="!terminalReady || terminalDisconnected" class="terminal-overlay">
               <div class="terminal-overlay-card">
-                <div class="terminal-spinner" />
-                <div>Connecting to the challenge environment...</div>
+                <template v-if="terminalDisconnected">
+                  <div class="terminal-overlay-title">Terminal disconnected</div>
+                  <div class="terminal-overlay-copy">The session is still retained. Reconnect when you are ready.</div>
+                  <n-button type="primary" @click="reconnectTerminal">Reconnect terminal</n-button>
+                </template>
+                <template v-else>
+                  <div class="terminal-spinner" />
+                  <div>Connecting to the challenge environment...</div>
+                </template>
               </div>
             </div>
           </div>
@@ -1038,24 +1021,28 @@ async function reconnectTerminal() {
                 <n-input v-model:value="editableDraft.description" data-testid="draft-description" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" />
               </div>
               <div class="draft-field draft-field-full">
-                <label>Operator Story</label>
-                <n-input v-model:value="editableDraft.operator_story" data-testid="draft-operator-story" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+                <label>Goal</label>
+                <n-input v-model:value="editableDraft.goal" data-testid="draft-goal" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
               </div>
               <div class="draft-field draft-field-full">
-                <label>Broken State</label>
-                <n-input v-model:value="editableDraft.broken_state" data-testid="draft-broken-state" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+                <label>Symptoms</label>
+                <n-input v-model:value="editableDraft.symptoms" data-testid="draft-symptoms" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
               </div>
               <div class="draft-field draft-field-full">
-                <label>Expected Fix</label>
-                <n-input v-model:value="editableDraft.expected_fix" data-testid="draft-expected-fix" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+                <label>Fault Mechanism</label>
+                <n-input v-model:value="editableDraft.fault_mechanism" data-testid="draft-fault-mechanism" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
               </div>
               <div class="draft-field draft-field-full">
-                <label>Verification Expectations</label>
-                <n-input v-model:value="editableDraft.verification_expectations" data-testid="draft-verification" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+                <label>Environment Shape</label>
+                <n-input v-model:value="editableDraft.environment_shape" data-testid="draft-environment-shape" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
               </div>
               <div class="draft-field draft-field-full">
-                <label>Constraints</label>
-                <n-input v-model:value="editableDraft.constraints" data-testid="draft-constraints" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+                <label>Acceptance Criteria</label>
+                <n-input v-model:value="editableDraft.acceptance_criteria" data-testid="draft-acceptance-criteria" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
+              </div>
+              <div class="draft-field draft-field-full">
+                <label>Difficulty Reason</label>
+                <n-input v-model:value="editableDraft.difficulty_reason" data-testid="draft-difficulty-reason" type="textarea" :autosize="{ minRows: 3, maxRows: 6 }" />
               </div>
               <div class="draft-field draft-field-full">
                 <label>Notes</label>

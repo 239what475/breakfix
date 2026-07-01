@@ -1,10 +1,10 @@
 .PHONY: dev dev-up dev-down dev-reset dev-status \
-        dev-build dev-build-gateway dev-build-controller \
-        dev-start-gateway dev-start-controller \
-        dev-gateway dev-controller \
+        dev-build dev-build-gateway \
+        dev-start-gateway \
+        dev-gateway \
         dev-registry dev-data dev-crd dev-rbac dev-images \
-        build build-gateway build-controller \
-        deploy deploy-gateway deploy-controller deploy-images deploy-image deploy-config deploy-generator deploy-cleanup deploy-reset \
+        build build-gateway \
+        deploy deploy-gateway deploy-images deploy-image deploy-config deploy-generator deploy-cleanup deploy-reset \
         generator-build generator-dev generator-run \
         lint proto clean status logs
 
@@ -41,36 +41,30 @@ dev-build-gateway:
 	go build -o $(BIN_DIR)/breakfix-gateway ./cmd/gateway
 	@echo "  ✓ gateway"
 
-dev-build-controller:
-	go build -o $(BIN_DIR)/breakfix-controller ./cmd/controller
-	@echo "  ✓ controller"
-
-dev-build: dev-build-gateway dev-build-controller
-	@echo "  ✓ All binaries built"
+dev-build: dev-build-gateway
+	@echo "  ✓ Binary built"
 
 # ── Dev lifecycle ──
 
 dev-start-gateway:
 	@lsof -ti:9090 | xargs kill -9 2>/dev/null || true
-	@sleep 1
-	@$(BIN_DIR)/breakfix-gateway -config breakfix-local.yaml >/tmp/breakfix-gateway.log 2>&1 &
-	@sleep 2
-	@grep -q "listening" /tmp/breakfix-gateway.log || { echo "  ✗ Gateway failed to start"; tail -5 /tmp/breakfix-gateway.log; exit 1; }
-	@echo "  ✓ Gateway :9090"
-
-dev-start-controller:
 	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
 	@sleep 1
-	@$(BIN_DIR)/breakfix-controller -config breakfix-local.yaml >/tmp/breakfix-controller.log 2>&1 &
-	@sleep 2
-	@echo "  ✓ Controller"
+	@rm -f /tmp/breakfix-gateway.log /tmp/breakfix-gateway.pid
+	@nohup $(BIN_DIR)/breakfix-gateway -config breakfix-local.yaml >/tmp/breakfix-gateway.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-gateway.pid
+	@sleep 3
+	@pid=$$(cat /tmp/breakfix-gateway.pid 2>/dev/null); \
+	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Gateway failed to stay up"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
+	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Gateway HTTP check failed"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
+	@echo "  ✓ Gateway :9090"
 
-dev-up: dev-start-gateway dev-start-controller
-	@echo "  ✓ All services running"
+dev-up: dev-start-gateway
+	@echo "  ✓ Service running"
 
 dev-down:
-	@lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Gateway stopped" || echo "  - Gateway not running"
-	@lsof -ti:8081 | xargs kill 2>/dev/null && echo "  ✓ Controller stopped" || echo "  - Controller not running"
+	@{ [ -f /tmp/breakfix-gateway.pid ] && kill $$(cat /tmp/breakfix-gateway.pid) 2>/dev/null && rm -f /tmp/breakfix-gateway.pid && echo "  ✓ Gateway stopped"; } || \
+	 { lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Gateway stopped"; } || echo "  - Gateway not running"
+	@lsof -ti:8081 | xargs kill 2>/dev/null || true
 	@docker stop registry 2>/dev/null && echo "  ✓ Registry stopped" || echo "  - Registry not running"
 
 dev-reset: dev-down
@@ -80,7 +74,6 @@ dev-reset: dev-down
 # ── Dev shortcuts (build + restart) ──
 
 dev-gateway: dev-build-gateway dev-start-gateway
-dev-controller: dev-build-controller dev-start-controller
 # ── Dev environment ──
 
 dev-registry:
@@ -145,12 +138,8 @@ build-gateway:
 	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-gateway-linux-amd64 ./cmd/gateway
 	@echo "  ✓ Gateway binary"
 
-build-controller:
-	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-controller-linux-amd64 ./cmd/controller
-	@echo "  ✓ Controller binary"
-
-build: build-gateway build-controller
-	@echo "  ✓ All production binaries built"
+build: build-gateway
+	@echo "  ✓ Production binary built"
 
 # ═══════════════════════════════════════════════════════════════
 # Remote deploy
@@ -169,15 +158,10 @@ deploy-gateway: build-gateway _guard-server
 	ssh $(SERVER) 'sudo mv /tmp/breakfix-gateway $(SERVER_BIN) && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Gateway deployed and restarted"
 
-deploy-controller: build-controller _guard-server
-	scp $(DIST_DIR)/breakfix-controller-linux-amd64 $(SERVER):/tmp/breakfix-controller
-	ssh $(SERVER) 'sudo mv /tmp/breakfix-controller /usr/local/bin/breakfix-controller && sudo systemctl restart breakfix-controller'
-	@echo "✓ Controller deployed and restarted"
-
 deploy-config: _guard-server
 	scp breakfix.yaml $(SERVER):/tmp/breakfix.yaml
-	ssh $(SERVER) 'sudo mv /tmp/breakfix.yaml $(SERVER_CONF) && sudo chown breakfix:breakfix $(SERVER_CONF) && sudo systemctl restart $(SERVICE) breakfix-controller'
-	@echo "✓ Config deployed, services restarted"
+	ssh $(SERVER) 'sudo mv /tmp/breakfix.yaml $(SERVER_CONF) && sudo chown breakfix:breakfix $(SERVER_CONF) && sudo systemctl restart $(SERVICE)'
+	@echo "✓ Config deployed, service restarted"
 
 deploy-images: _guard-server
 	@for d in challenges/*/; do \
@@ -206,10 +190,10 @@ deploy-cleanup: _guard-server
 	@echo "✓ K8s namespaces cleaned up"
 
 deploy-reset: deploy-cleanup _guard-server
-	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVICE) breakfix-controller'
+	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
 
-deploy: deploy-generator deploy-images deploy-gateway deploy-controller
+deploy: deploy-generator deploy-images deploy-gateway
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -235,10 +219,13 @@ docker-push:
 generator-build:
 	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/generator ./cmd/generator
 	docker build -t breakfix-generator:latest -f images/generator/Dockerfile .
+	docker tag breakfix-generator:latest $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
+	docker push $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
 	kind load docker-image breakfix-generator:latest --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Generator image built and loaded into Kind"
 
-generator-dev: dev-rbac generator-build dev-gateway dev-controller
+generator-dev: dev-rbac generator-build dev-gateway
 	@kubectl delete jobs -n breakfix-system --all 2>/dev/null || true
 	@kubectl delete pods -n breakfix-system --all 2>/dev/null || true
 	@echo "  ✓ Generator dev environment ready"

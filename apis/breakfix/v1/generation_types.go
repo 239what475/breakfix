@@ -35,16 +35,17 @@ type GenerationStatus struct {
 }
 
 type ChallengeDraft struct {
-	Title                    string   `json:"title"`
-	Difficulty               string   `json:"difficulty"`
-	Tags                     []string `json:"tags"`
-	Description              string   `json:"description"`
-	OperatorStory            string   `json:"operator_story"`
-	BrokenState              string   `json:"broken_state"`
-	ExpectedFix              string   `json:"expected_fix"`
-	VerificationExpectations string   `json:"verification_expectations"`
-	Constraints              string   `json:"constraints"`
-	Notes                    string   `json:"notes,omitempty"`
+	Title              string   `json:"title"`
+	Difficulty         string   `json:"difficulty"`
+	Tags               []string `json:"tags"`
+	Description        string   `json:"description"`
+	Goal               string   `json:"goal"`
+	Symptoms           string   `json:"symptoms"`
+	FaultMechanism     string   `json:"fault_mechanism"`
+	EnvironmentShape   string   `json:"environment_shape"`
+	AcceptanceCriteria string   `json:"acceptance_criteria"`
+	DifficultyReason   string   `json:"difficulty_reason"`
+	Notes              string   `json:"notes,omitempty"`
 }
 
 type GenerationPhase string
