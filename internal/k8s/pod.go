@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,11 +24,17 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if len(opts.Command) == 0 {
-		opts.Command = []string{"sleep", "infinity"}
-	}
 	if opts.ImagePullPolicy == "" {
 		opts.ImagePullPolicy = corev1.PullIfNotPresent
+	}
+
+	container := corev1.Container{
+		Name:            "challenge",
+		Image:           opts.Image,
+		ImagePullPolicy: opts.ImagePullPolicy,
+	}
+	if len(opts.Command) > 0 {
+		container.Command = opts.Command
 	}
 
 	pod := &corev1.Pod{
@@ -39,12 +46,7 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 			},
 		},
 		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name:            "challenge",
-				Image:           opts.Image,
-				Command:         opts.Command,
-				ImagePullPolicy: opts.ImagePullPolicy,
-			}},
+			Containers:    []corev1.Container{container},
 			RestartPolicy: corev1.RestartPolicyNever,
 		},
 	}
@@ -62,7 +64,7 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 
 // WaitForPod polls until the named container is ready.
 func (c *Client) WaitForPod(namespace, podName, containerName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	for {
@@ -79,14 +81,84 @@ func (c *Client) WaitForPod(namespace, podName, containerName string) error {
 		}
 		switch pod.Status.Phase {
 		case corev1.PodFailed, corev1.PodSucceeded:
-			return fmt.Errorf("pod %s entered %s state", podName, pod.Status.Phase)
+			return fmt.Errorf("pod %s entered %s state: %s", podName, pod.Status.Phase, podFailureSummary(pod, containerName))
+		}
+		if summary, failed := podContainerFailure(pod, containerName); failed {
+			return fmt.Errorf("pod %s failed before ready: %s", podName, summary)
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for pod %s", podName)
+			return fmt.Errorf("timeout waiting for pod %s: %s", podName, podFailureSummary(pod, containerName))
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+func podContainerFailure(pod *corev1.Pod, containerName string) (string, bool) {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != containerName {
+			continue
+		}
+		if waiting := cs.State.Waiting; waiting != nil {
+			switch waiting.Reason {
+			case "CreateContainerConfigError", "CreateContainerError", "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "RunContainerError":
+				return formatContainerState(waiting.Reason, waiting.Message), true
+			}
+		}
+		if terminated := cs.State.Terminated; terminated != nil {
+			return formatContainerTermination(terminated), true
+		}
+		if waiting := cs.LastTerminationState.Terminated; waiting != nil {
+			return formatContainerTermination(waiting), true
+		}
+	}
+	return "", false
+}
+
+func podFailureSummary(pod *corev1.Pod, containerName string) string {
+	if summary, failed := podContainerFailure(pod, containerName); failed {
+		return summary
+	}
+	var reasons []string
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != containerName {
+			continue
+		}
+		if cs.State.Waiting != nil {
+			reasons = append(reasons, formatContainerState(cs.State.Waiting.Reason, cs.State.Waiting.Message))
+		}
+	}
+	if len(reasons) > 0 {
+		return strings.Join(reasons, "; ")
+	}
+	if strings.TrimSpace(pod.Status.Message) != "" {
+		return strings.TrimSpace(pod.Status.Message)
+	}
+	if strings.TrimSpace(pod.Status.Reason) != "" {
+		return strings.TrimSpace(pod.Status.Reason)
+	}
+	return "no detailed pod status available"
+}
+
+func formatContainerState(reason, message string) string {
+	if strings.TrimSpace(message) == "" {
+		return reason
+	}
+	return fmt.Sprintf("%s: %s", reason, strings.TrimSpace(message))
+}
+
+func formatContainerTermination(state *corev1.ContainerStateTerminated) string {
+	if state == nil {
+		return "terminated"
+	}
+	base := fmt.Sprintf("terminated with exit code %d", state.ExitCode)
+	if strings.TrimSpace(state.Reason) != "" {
+		base = fmt.Sprintf("%s (%s)", base, strings.TrimSpace(state.Reason))
+	}
+	if strings.TrimSpace(state.Message) != "" {
+		base += ": " + strings.TrimSpace(state.Message)
+	}
+	return base
 }
 
 // ListPods returns pod names in a namespace.

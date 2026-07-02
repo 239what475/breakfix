@@ -27,8 +27,8 @@
 ```
 challenges/<id>/
 ├── challenge.yaml     # 元数据
-├── Dockerfile         # FROM base + COPY question.md + RUN generate.sh
-├── generate.sh        # 注入故障 (docker build 时执行)
+├── Dockerfile         # FROM base + COPY challenge files + ENTRYPOINT runtime-init
+├── generate.sh        # 注入故障 (Pod 首次启动时执行一次)
 ├── question.md        # 用户看到的任务说明书
 ├── verify.sh          # 验收脚本 (server 持有, 不进镜像)
 └── answer.sh          # 标准答案 (agent 自验证用, 不进镜像)
@@ -59,14 +59,19 @@ description: |
 ```dockerfile
 ARG BREAKFIX_BASE_IMAGE=<registry>/breakfix-base:latest
 FROM ${BREAKFIX_BASE_IMAGE}
+COPY challenge.yaml /breakfix/challenge.yaml
 COPY question.md /home/user/question.md
-COPY generate.sh /tmp/generate.sh
-RUN bash /tmp/generate.sh && rm /tmp/generate.sh
+COPY generate.sh /breakfix/generate.sh
+COPY verify.sh /verify.sh
+COPY answer.sh /answer.sh
+RUN chmod +x /breakfix/generate.sh /verify.sh /answer.sh
+ENTRYPOINT ["/breakfix/runtime-init.sh"]
+CMD ["sleep", "infinity"]
 ```
 
 ### generate.sh
 
-制造故障或准备测试数据，docker build 时执行。
+制造故障或准备测试数据，在 Pod 第一次启动时执行一次。
 
 ### question.md
 
@@ -86,7 +91,8 @@ Agent 自验证用的标准答案。不进镜像、不外泄。
 
 ```
 Web UI start challenge
-  → Pod 启动（破损环境，question.md 在 ~/）
+  → Pod 启动，runtime-init 执行 generate.sh 构造破损环境
+  → Pod 进入 sleep infinity（question.md 在 ~/）
   → 浏览器终端连接 → 看 question.md → 排查/写脚本
   → Web UI submit
      → server kubectl cp verify.sh pod:/tmp/

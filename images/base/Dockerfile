@@ -21,5 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
+COPY runtime-init.sh /breakfix/runtime-init.sh
+RUN chmod +x /breakfix/runtime-init.sh && mkdir -p /breakfix /var/lib/breakfix
+
 SHELL ["/bin/bash", "-c"]
 CMD ["sleep", "infinity"]

@@ -101,7 +101,14 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	defer client.DeletePod(cfg.LabNS, podName) //nolint:errcheck
 
 	if err := client.WaitForPod(cfg.LabNS, podName, "challenge"); err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("VERIFY_POD_NOT_READY", err.Error()))
+		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, &breakfixv1.VerifyReport{
+			BuildPassed: true,
+			Summary:     "challenge pod failed before verification",
+			Issues: []breakfixv1.VerifyIssue{{
+				Code:    "VERIFY_POD_INIT_FAILED",
+				Message: truncateStr(err.Error(), 4000),
+			}},
+		})
 	}
 
 	answerPath := filepath.Join(chalDir, "answer.sh")

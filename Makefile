@@ -2,9 +2,9 @@
         dev-build dev-build-gateway \
         dev-start-gateway \
         dev-gateway \
-        dev-registry dev-data dev-crd dev-rbac dev-images \
+        dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         build build-gateway \
-        deploy deploy-gateway deploy-images deploy-image deploy-config deploy-generator deploy-cleanup deploy-reset \
+        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-cleanup deploy-reset \
         generator-build generator-dev generator-run \
         lint proto clean status logs
 
@@ -100,6 +100,7 @@ dev-rbac:
 	@echo "  ✓ RBAC applied"
 
 dev-images:
+	@$(MAKE) --no-print-directory docker-base
 	@for d in challenges/*/; do \
 		name=$$(basename $$d); \
 		[ "$$name" = "base" ] && continue; \
@@ -165,12 +166,27 @@ deploy-config: _guard-server
 	@echo "✓ Config deployed, service restarted"
 
 deploy-images: _guard-server
+	@$(MAKE) --no-print-directory deploy-base
 	@for d in challenges/*/; do \
 		name=$$(basename $$d); \
 		[ "$$name" = "base" ] && continue; \
 		$(MAKE) --no-print-directory deploy-image NAME=$$name; \
 	done
 	@echo "✓ All images deployed"
+
+deploy-base: _guard-server
+	@[ -f breakfix.yaml ] || { echo "ERROR: breakfix.yaml not found."; exit 1; }
+	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000" ]; then \
+		echo "  ✗ Registry not configured. Skipping breakfix-base."; \
+		exit 0; \
+	fi; \
+	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
+	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
+	docker build -t breakfix-base:latest ./images/base; \
+	docker tag breakfix-base:latest $$pub/$$acr_ns/breakfix-base:latest; \
+	docker push $$pub/$$acr_ns/breakfix-base:latest
+	@echo "  ✓ breakfix-base → ACR"
 
 deploy-image: _guard-server
 	@[ -f breakfix.yaml ] || { echo "ERROR: breakfix.yaml not found."; exit 1; }
@@ -199,6 +215,14 @@ deploy: deploy-generator deploy-images deploy-gateway
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
 # ═══════════════════════════════════════════════════════════════
+
+docker-base:
+	docker build -t breakfix-base:latest ./images/base
+	docker tag breakfix-base:latest $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
+	docker push $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
+	kind load docker-image breakfix-base:latest --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-base:latest --name $(KIND_CLUSTER)
+	@echo "  ✓ breakfix-base → registry + Kind"
 
 docker-challenge:
 	docker build -t $(NAME):v1 ./challenges/$(NAME)

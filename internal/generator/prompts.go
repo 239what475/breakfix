@@ -44,17 +44,18 @@ challenge.yaml 是最终题目元数据，不是占位文件。
 ` + "```dockerfile" + `
 ARG BREAKFIX_BASE_IMAGE=` + registryAddr + `/breakfix-base:latest
 FROM ${BREAKFIX_BASE_IMAGE}
+COPY challenge.yaml /breakfix/challenge.yaml
 COPY question.md /home/user/question.md
-COPY generate.sh /tmp/generate.sh
-RUN bash /tmp/generate.sh && rm /tmp/generate.sh
+COPY generate.sh /breakfix/generate.sh
 COPY verify.sh /verify.sh
-RUN chmod +x /verify.sh
 COPY answer.sh /answer.sh
-RUN chmod +x /answer.sh
+RUN chmod +x /breakfix/generate.sh /verify.sh /answer.sh
+ENTRYPOINT ["/breakfix/runtime-init.sh"]
+CMD ["sleep", "infinity"]
 ` + "```" + `
 
 ### 3. generate.sh
-用于构造测试数据或损坏环境的 shell 脚本，在 docker build 期间执行。
+用于构造测试数据或损坏环境的 shell 脚本，在 challenge Pod 第一次启动时执行一次。
 
 ### 4. question.md
 给最终用户阅读的题目说明。必须包含目标、现象、预期结果和必要提示。
@@ -104,8 +105,8 @@ RUN chmod +x /answer.sh
 - 不要直接给出根因和标准答案
 
 7. generate.sh 的职责
-- 在镜像构建阶段构造故障环境
-- 必须可重复执行
+- 在 challenge Pod 首次启动时构造故障环境
+- 必须幂等；新 Pod 首次启动会再次执行
 - 不要引入随机性或外部不稳定依赖
 
 ## 可用实验工具

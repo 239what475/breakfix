@@ -8,7 +8,7 @@
 Web UI / API 提交 challenge idea
   → Agent 评审并扩展为 reviewed draft
   → Server 创建 K8s Job
-  → Job Pod 内 Agent 生成、实验验证、正式验证
+  → Job Pod 内 Agent 生成、实验验证、提交真实验证
   → 成功后 Server 注册题目
   → "✓ 题目 cleanup-kubernetes-logs 已上线"
 ```
@@ -162,14 +162,15 @@ docker network connect kind registry
 └───────────────────────┬─────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
-│  Phase 3: VERIFY (Go 代码, 确定性执行)            │
+│  Phase 3: SUBMIT + VERIFY TASK                     │
 │                                                   │
-│  1. 启动 buildkitd, client.Solve() 构建+推 registry│
-│  2. client-go CreatePod（用正式镜像）              │
-│  3. client-go ExecInPod -- bash answer.sh         │
-│  4. client-go ExecInPod -- bash verify.sh         │
+│  1. judge 通过后系统自动 submit artifact          │
+│  2. gateway 创建 VerifyTask                       │
+│  3. VerifyTask 构建镜像并起真实 challenge Pod      │
+│  4. Pod 首次启动时运行 generate.sh                │
+│  5. verifier 执行 answer.sh 与 verify.sh          │
 │                                                   │
-│  PASS → output JSON → exit 0                      │
+│  PASS → publish challenge                         │
 │  FAIL → 回到 Phase 2 (Judge 分析失败原因)          │
 │                                                   │
 │  最多 5 轮全局循环                                  │
@@ -210,8 +211,8 @@ Worker 在 `/workspace/challenges/<id>/` 下生成：
 
 ```
 challenge.yaml     # 元数据
-Dockerfile         # FROM base + COPY question.md + RUN generate.sh
-generate.sh        # 注入故障 (docker build 时执行)
+Dockerfile         # FROM base + COPY challenge files + ENTRYPOINT runtime-init
+generate.sh        # 注入故障 (challenge Pod 首次启动时执行)
 question.md        # 用户看到的任务说明书
 verify.sh          # 验收脚本 (server 持有, 不进镜像)
 answer.sh          # 标准答案 (agent 自验证用, 不进镜像)
