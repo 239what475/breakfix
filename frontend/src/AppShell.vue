@@ -19,6 +19,8 @@ import {
 } from 'naive-ui'
 import {
   CheckmarkCircleOutline,
+  CloudDoneOutline,
+  CloudUploadOutline,
   EllipseOutline,
   FlashOutline,
   ConstructOutline,
@@ -30,7 +32,18 @@ import {
   SparklesOutline,
   TerminalOutline,
 } from '@vicons/ionicons5'
-import { api, clearToken, isLoggedIn, setToken, token, type Challenge, type ChallengeDraft, type GenerateDraftResponse, type GenerationJobResponse } from './composables/useApi'
+import {
+  api,
+  clearToken,
+  isLoggedIn,
+  setToken,
+  token,
+  type Challenge,
+  type ChallengeDraft,
+  type GenerateDraftResponse,
+  type GenerationJobResponse,
+  type VerifyTaskResponse,
+} from './composables/useApi'
 import '@xterm/xterm/css/xterm.css'
 
 const message = useMessage()
@@ -54,14 +67,20 @@ const terminalDisconnected = ref(false)
 const terminalHasFocus = ref(false)
 const reconnecting = ref(false)
 const showGenerate = ref(false)
+const showSubmit = ref(false)
 const generateStep = ref<'idea' | 'draft' | 'job'>('idea')
+const submitStep = ref<'select' | 'job'>('select')
 const draftReviewing = ref(false)
 const jobStarting = ref(false)
+const submitStarting = ref(false)
 const generateTopic = ref('')
 const draftVerdict = ref('')
 const draftReason = ref('')
 const draftWarnings = ref<string[]>([])
 const generationJob = ref<GenerationJobResponse | null>(null)
+const verifyTask = ref<VerifyTaskResponse | null>(null)
+const submitFile = ref<File | null>(null)
+const submitFileInput = ref<HTMLInputElement | null>(null)
 const editableDraft = ref<ChallengeDraft>({
   title: '',
   difficulty: 'medium',
@@ -96,6 +115,7 @@ let terminalSessionNonce = 0
 let visibilityHandler: (() => void) | null = null
 let blurHandler: (() => void) | null = null
 let generationPollId: number | null = null
+let verifyPollId: number | null = null
 
 const diffColors: Record<string, string> = {
   easy: '#51d88a',
@@ -227,6 +247,12 @@ watch(showGenerate, (value) => {
   }
 })
 
+watch(showSubmit, (value) => {
+  if (!value) {
+    clearVerifyPoll()
+  }
+})
+
 function difficultyColor(level: string) {
   return diffColors[level] ?? '#8ca3b8'
 }
@@ -329,10 +355,27 @@ function openGenerateModal() {
   }
 }
 
+function openSubmitModal() {
+  showSubmit.value = true
+  submitStep.value = 'select'
+  verifyTask.value = null
+  submitFile.value = null
+  if (submitFileInput.value) {
+    submitFileInput.value.value = ''
+  }
+}
+
 function clearGenerationPoll() {
   if (generationPollId !== null) {
     window.clearTimeout(generationPollId)
     generationPollId = null
+  }
+}
+
+function clearVerifyPoll() {
+  if (verifyPollId !== null) {
+    window.clearTimeout(verifyPollId)
+    verifyPollId = null
   }
 }
 
@@ -341,6 +384,14 @@ function queueGenerationPoll(jobId: string, delay = 2500) {
   generationPollId = window.setTimeout(() => {
     generationPollId = null
     void pollGenerationJob(jobId)
+  }, delay)
+}
+
+function queueVerifyPoll(taskId: string, delay = 2500) {
+  clearVerifyPoll()
+  verifyPollId = window.setTimeout(() => {
+    verifyPollId = null
+    void pollVerifyTask(taskId)
   }, delay)
 }
 
@@ -429,6 +480,59 @@ async function pollGenerationJob(jobId: string) {
     queueGenerationPoll(jobId)
   } catch (error: any) {
     clearGenerationPoll()
+    message.error(error.message)
+  }
+}
+
+function onSubmitFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  submitFile.value = input.files?.[0] ?? null
+}
+
+const canStartVerifySubmission = computed(() => submitFile.value !== null)
+
+const verifyIssueList = computed(() => verifyTask.value?.report?.issues ?? [])
+
+async function startVerifySubmission() {
+  if (!submitFile.value) return
+  submitStarting.value = true
+  try {
+    const result = await api.createVerifySubmission(submitFile.value)
+    verifyTask.value = {
+      verify_task_id: result.verify_task_id,
+      submission_id: result.submission_id,
+      status: result.status,
+      message: result.status === 'queued' ? 'Verification task accepted' : 'Submission received',
+    }
+    submitStep.value = 'job'
+    if (result.verify_task_id) {
+      queueVerifyPoll(result.verify_task_id, 1000)
+    }
+  } catch (error: any) {
+    message.error(error.message)
+  } finally {
+    submitStarting.value = false
+  }
+}
+
+async function pollVerifyTask(taskId: string) {
+  try {
+    const result = await api.getVerifyTask(taskId)
+    verifyTask.value = result
+    if (result.status === 'success') {
+      clearVerifyPoll()
+      await loadChallenges({ silent: true })
+      message.success('Challenge published')
+      return
+    }
+    if (result.status === 'failed') {
+      clearVerifyPoll()
+      message.error(result.message || 'Verification failed')
+      return
+    }
+    queueVerifyPoll(taskId)
+  } catch (error: any) {
+    clearVerifyPoll()
     message.error(error.message)
   }
 }
@@ -756,12 +860,20 @@ async function reconnectTerminal() {
         </div>
 
         <div class="workspace-header-side">
-          <n-button v-if="loggedIn" type="primary" secondary strong @click="openGenerateModal">
-            <template #icon>
-              <n-icon :component="ConstructOutline" />
-            </template>
-            Generate Challenge
-          </n-button>
+          <div v-if="loggedIn" class="workspace-header-actions">
+            <n-button type="default" secondary strong @click="openSubmitModal">
+              <template #icon>
+                <n-icon :component="CloudUploadOutline" />
+              </template>
+              Submit Challenge
+            </n-button>
+            <n-button type="primary" secondary strong @click="openGenerateModal">
+              <template #icon>
+                <n-icon :component="ConstructOutline" />
+              </template>
+              Generate Challenge
+            </n-button>
+          </div>
           <div class="workspace-status">
             <span class="status-badge" :data-state="loggedIn ? 'online' : 'offline'">
               <n-icon :component="EllipseOutline" size="10" />
@@ -942,6 +1054,81 @@ async function reconnectTerminal() {
 
           <n-divider />
           <div class="auth-foot">Have an account? <button class="auth-link" @click="authMode = 'login'">Sign In</button></div>
+        </template>
+      </n-card>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showSubmit"
+      preset="card"
+      class="generate-modal"
+      style="width: 720px; max-width: min(94vw, 720px)"
+      :mask-closable="!submitStarting"
+    >
+      <n-card :bordered="false" size="small" role="dialog" class="generate-card">
+        <div class="generate-head">
+          <div class="auth-kicker">Direct submission</div>
+          <h3>Submit Challenge</h3>
+          <p>Upload a challenge artifact archive and run it through the same verification and publish pipeline used by generated challenges.</p>
+        </div>
+
+        <template v-if="submitStep === 'select'">
+          <div class="generate-panel">
+            <div class="generate-section-title">Step 1. Upload an artifact</div>
+            <p class="generate-section-copy">Select a `.tar.gz` challenge artifact. The server will create a `VerifyTask`, build the image, run `answer.sh`, run `verify.sh`, and publish only if the full pipeline succeeds.</p>
+
+            <label class="upload-dropzone" :data-filled="submitFile ? 'true' : 'false'">
+              <input ref="submitFileInput" class="upload-input" type="file" accept=".tar.gz,application/gzip,.gz" @change="onSubmitFileChange" />
+              <div class="upload-icon">
+                <n-icon :component="submitFile ? CloudDoneOutline : CloudUploadOutline" size="22" />
+              </div>
+              <div class="upload-copy">
+                <div class="upload-title">{{ submitFile ? submitFile.name : 'Choose a challenge archive' }}</div>
+                <div class="upload-subtitle">
+                  {{ submitFile ? `Ready to submit • ${(submitFile.size / 1024).toFixed(1)} KB` : 'Expected format: .tar.gz artifact containing challenge.yaml, Dockerfile, generate.sh, question.md, verify.sh, and answer.sh.' }}
+                </div>
+              </div>
+            </label>
+
+            <div class="generate-actions">
+              <n-button quaternary @click="showSubmit = false">Cancel</n-button>
+              <n-button type="primary" :disabled="!canStartVerifySubmission" :loading="submitStarting" @click="startVerifySubmission">Submit for Verification</n-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="generate-panel">
+            <div class="generate-section-title">Step 2. Verify and publish</div>
+            <p class="generate-section-copy">The backend is validating the artifact in the real runtime path. Publish happens automatically only after verification succeeds.</p>
+
+            <div class="job-status-card" :data-state="verifyTask?.status || 'queued'">
+              <div class="job-status-head">
+                <div class="job-status-title">{{ verifyTask?.status || 'queued' }}</div>
+                <n-tag v-if="verifyTask?.verify_task_id" :bordered="false" :type="verifyTask?.status === 'success' ? 'success' : verifyTask?.status === 'failed' ? 'error' : 'warning'">
+                  {{ verifyTask?.verify_task_id }}
+                </n-tag>
+              </div>
+              <p class="job-status-copy">{{ verifyTask?.message || 'Waiting for the verification controller to start the task.' }}</p>
+              <div class="job-meta">
+                <span v-if="verifyTask?.submission_id">Submission {{ verifyTask.submission_id }}</span>
+                <span v-if="verifyTask?.started_at">Started {{ verifyTask.started_at }}</span>
+                <span v-if="verifyTask?.completed_at">Completed {{ verifyTask.completed_at }}</span>
+              </div>
+            </div>
+
+            <div v-if="verifyIssueList.length" class="verify-report-list">
+              <div v-for="issue in verifyIssueList" :key="`${issue.code}-${issue.message}`" class="verify-report-item">
+                <div class="verify-report-code">{{ issue.code || 'VERIFY_ERROR' }}</div>
+                <div class="verify-report-message">{{ issue.message }}</div>
+              </div>
+            </div>
+
+            <div class="generate-actions">
+              <n-button quaternary :disabled="verifyTask?.status === 'running' || verifyTask?.status === 'queued' || verifyTask?.status === 'publishing'" @click="submitStep = 'select'">Back</n-button>
+              <n-button v-if="verifyTask?.status === 'success'" type="primary" @click="showSubmit = false">Done</n-button>
+            </div>
+          </div>
         </template>
       </n-card>
     </n-modal>

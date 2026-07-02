@@ -32,6 +32,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T
 }
 
+async function multipartRequest<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {}
+  const tok = token()
+  if (tok) headers['Authorization'] = `Bearer ${tok}`
+
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || `${res.status}`)
+  return data as T
+}
+
 export const api = {
   register: (username: string, password: string) =>
     request<{ totp_secret: string; totp_url: string }>('POST', '/auth/register', { username, password }),
@@ -59,6 +75,15 @@ export const api = {
 
   getGenerationJob: (id: string) =>
     request<GenerationJobResponse>('GET', `/generate/jobs/${id}`),
+
+  createVerifySubmission: (artifact: File) => {
+    const form = new FormData()
+    form.append('artifact', artifact)
+    return multipartRequest<VerifySubmissionResponse>('/verify/submissions', form)
+  },
+
+  getVerifyTask: (id: string) =>
+    request<VerifyTaskResponse>('GET', `/verify/tasks/${id}`),
 }
 
 export interface Challenge {
@@ -101,4 +126,33 @@ export interface GenerationJobResponse {
   message: string
   started_at?: string
   completed_at?: string
+}
+
+export interface VerifySubmissionResponse {
+  verify_task_id?: string
+  submission_id?: string
+  status: string
+}
+
+export interface VerifyIssue {
+  code?: string
+  message?: string
+}
+
+export interface VerifyReport {
+  build_passed?: boolean
+  answer_passed?: boolean
+  verify_passed?: boolean
+  summary?: string
+  issues?: VerifyIssue[]
+}
+
+export interface VerifyTaskResponse {
+  verify_task_id?: string
+  submission_id?: string
+  status: string
+  message: string
+  started_at?: string
+  completed_at?: string
+  report?: VerifyReport
 }

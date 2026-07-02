@@ -223,4 +223,26 @@ test.describe('UI Flow', () => {
       await expect(page.locator('.challenge-list .challenge-card').first()).toBeVisible()
     }
   })
+
+  test('direct submit challenge flow works from the UI', async ({ page }) => {
+    test.setTimeout(240000)
+
+    const user = `submit-${Date.now()}`
+    await registerAndLogin(page, user)
+
+    await page.getByRole('button', { name: 'Submit Challenge', exact: true }).click()
+    await expect(page.locator('.generate-card').getByText('Submit Challenge')).toBeVisible()
+
+    const fileInput = page.locator('.upload-input')
+    await fileInput.setInputFiles('/home/what/myproject/breakfix/test/fixtures/cleanup-logs.tar.gz')
+
+    await expect(page.locator('.upload-title')).toContainText('cleanup-logs.tar.gz')
+    await page.getByRole('button', { name: 'Submit for Verification', exact: true }).click()
+
+    await expect(page.locator('.job-status-card')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.job-status-card')).toContainText(/queued|running|publishing|success|failed/i)
+    await expect(page.locator('.job-status-card')).toContainText(/Submission sub-|vt-/i)
+
+    await page.screenshot({ path: '/tmp/breakfix-submit-challenge-modal.png', fullPage: true })
+  })
 })
