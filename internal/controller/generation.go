@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,7 +63,11 @@ func (r *GenerationReconciler) createJob(ctx context.Context, gen *breakfixv1.Ge
 		env = map[string]string{}
 	}
 
-	if err := r.K8s.CreateJob(r.CRDNamespace, jobName, gen.Spec.Image, env); err != nil {
+	if err := r.K8s.CreateJob(r.CRDNamespace, jobName, k8s.CreateJobOpts{
+		Image:           gen.Spec.Image,
+		Env:             env,
+		ImagePullPolicy: corev1.PullAlways,
+	}); err != nil {
 		gen.Status.Phase = breakfixv1.GenerationFailed
 		gen.Status.Message = fmt.Sprintf("create job: %v", err)
 		now := metav1.Now()
@@ -102,23 +108,46 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 	for _, c := range job.Status.Conditions {
 		switch c.Type {
 		case batchv1.JobComplete:
-			if gen.Status.Challenge == nil {
-				gen.Status.Phase = breakfixv1.GenerationFailed
-				gen.Status.Message = "generation finished but artifact was not uploaded"
+			if strings.TrimSpace(gen.Status.VerifyTaskRef) == "" {
+				gen.Status.Message = "generator finished, waiting for artifact submission"
+				r.Status().Update(ctx, gen) //nolint:errcheck
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+
+			task, err := r.K8s.GetVerifyTask(ctx, r.CRDNamespace, gen.Status.VerifyTaskRef)
+			if err != nil {
+				gen.Status.Message = fmt.Sprintf("waiting for verify task %s", gen.Status.VerifyTaskRef)
+				r.Status().Update(ctx, gen) //nolint:errcheck
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+
+			switch task.Status.Phase {
+			case breakfixv1.VerifyTaskVerified:
+				gen.Status.Message = "verification passed, publishing challenge"
+				r.Status().Update(ctx, gen) //nolint:errcheck
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			case breakfixv1.VerifyTaskSucceeded:
+				if gen.Status.Challenge == nil {
+					gen.Status.Message = "publish finished, waiting for challenge metadata"
+					r.Status().Update(ctx, gen) //nolint:errcheck
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
+				gen.Status.Phase = breakfixv1.GenerationSucceeded
+				gen.Status.Message = fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
 				now := metav1.Now()
 				gen.Status.CompletedAt = &now
-				slog.Error("job done", "generation", gen.Name, "result", "failed", "reason", "artifact_missing", "duration", time.Since(phaseStart))
-				break
+				slog.Info("job done", "generation", gen.Name, "result", "success", "duration", time.Since(phaseStart))
+			case breakfixv1.VerifyTaskFailed:
+				gen.Status.Phase = breakfixv1.GenerationFailed
+				gen.Status.Message = task.Status.Message
+				now := metav1.Now()
+				gen.Status.CompletedAt = &now
+				slog.Error("job done", "generation", gen.Name, "result", "failed", "reason", "verify_failed", "duration", time.Since(phaseStart))
+			default:
+				gen.Status.Message = "artifact submitted, verification running"
+				r.Status().Update(ctx, gen) //nolint:errcheck
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
-			gen.Status.Phase = breakfixv1.GenerationSucceeded
-			if gen.Status.Challenge != nil {
-				gen.Status.Message = fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
-			} else {
-				gen.Status.Message = "challenge generated"
-			}
-			now := metav1.Now()
-			gen.Status.CompletedAt = &now
-			slog.Info("job done", "generation", gen.Name, "result", "success", "duration", time.Since(phaseStart))
 
 		case batchv1.JobFailed:
 			gen.Status.Phase = breakfixv1.GenerationFailed

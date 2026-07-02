@@ -13,6 +13,7 @@ import (
 // Uses buildkitd + buildctl (already in the Docker image).
 func BuildAndPush(ctx context.Context, imageName, contextDir string, insecure bool) bool {
 	sock := "unix:///tmp/buildkit.sock"
+	baseImage := baseImageForTarget(imageName)
 
 	// Write buildkitd config — only add insecure flags when needed
 	configDir := "/tmp/buildkit-config"
@@ -69,6 +70,7 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string, insecure bo
 		"--frontend", "dockerfile.v0",
 		"--local", "context="+contextDir,
 		"--local", "dockerfile="+contextDir,
+		"--opt", "build-arg:BREAKFIX_BASE_IMAGE="+baseImage,
 		"--output", "type=image,name="+imageName+",push=true",
 	)
 	cmd.Env = os.Environ()
@@ -89,4 +91,25 @@ func firstSlash(s string) int {
 		}
 	}
 	return -1
+}
+
+func baseImageForTarget(imageName string) string {
+	repoPrefix := imageName
+	if idx := lastSlash(imageName); idx >= 0 {
+		repoPrefix = imageName[:idx]
+	}
+	if repoPrefix == "" {
+		return "breakfix-base:latest"
+	}
+	return repoPrefix + "/breakfix-base:latest"
+}
+
+func lastSlash(s string) int {
+	last := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' {
+			last = i
+		}
+	}
+	return last
 }

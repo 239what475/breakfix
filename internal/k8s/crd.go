@@ -16,6 +16,7 @@ import (
 var (
 	generationGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "generations"}
 	instanceGVR   = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "instances"}
+	verifyTaskGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "verifytasks"}
 )
 
 // crdClient lazily creates a dynamic client for CRD operations.
@@ -228,6 +229,82 @@ func (c *Client) WatchGeneration(ctx context.Context, ns, name string) (watch.In
 	return dyn.Resource(generationGVR).Namespace(ns).Watch(ctx, metav1.ListOptions{
 		FieldSelector:  "metadata.name=" + name,
 		TimeoutSeconds: ptr(int64(300)),
+	})
+}
+
+// ── VerifyTask CRD ──
+
+func (c *Client) CreateVerifyTask(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
+	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	obj, err := toUnstructured(task)
+	if err != nil {
+		return nil, err
+	}
+	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create verify task: %w", err)
+	}
+	return fromUnstructured[*breakfixv1.VerifyTask](result)
+}
+
+func (c *Client) GetVerifyTask(ctx context.Context, ns, name string) (*breakfixv1.VerifyTask, error) {
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get verify task %s: %w", name, err)
+	}
+	return fromUnstructured[*breakfixv1.VerifyTask](result)
+}
+
+func (c *Client) UpdateVerifyTask(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
+	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	obj, err := toUnstructured(task)
+	if err != nil {
+		return nil, err
+	}
+	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Update(ctx, obj, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("update verify task: %w", err)
+	}
+	return fromUnstructured[*breakfixv1.VerifyTask](result)
+}
+
+func (c *Client) UpdateVerifyTaskStatus(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
+	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	obj, err := toUnstructured(task)
+	if err != nil {
+		return nil, err
+	}
+	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("update verify task status: %w", err)
+	}
+	return fromUnstructured[*breakfixv1.VerifyTask](result)
+}
+
+func (c *Client) WatchVerifyTask(ctx context.Context, ns, name string) (watch.Interface, error) {
+	dyn, err := c.crdClient()
+	if err != nil {
+		return nil, err
+	}
+	return dyn.Resource(verifyTaskGVR).Namespace(ns).Watch(ctx, metav1.ListOptions{
+		FieldSelector:  "metadata.name=" + name,
+		TimeoutSeconds: ptr(int64(600)),
 	})
 }
 

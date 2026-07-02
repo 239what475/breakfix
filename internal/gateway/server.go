@@ -69,10 +69,23 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 		}
 	})
 	router.POST("/api/internal/generations/:id/artifact", h.UploadGenerationArtifact)
+	router.GET("/api/internal/verify-submissions/:id/artifact", h.DownloadVerifySubmissionArtifact)
 	router.GET("/api/generate/jobs/:id", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetGenerationJob(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/verify/submissions", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CreateVerifySubmission(c)
+		}
+	})
+	router.GET("/api/verify/tasks/:id", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetVerifyTask(c, c.Param("id"))
 		}
 	})
 

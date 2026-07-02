@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,11 +20,12 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"gopkg.in/yaml.v3"
 	"log/slog"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"gopkg.in/yaml.v3"
 )
 
 type Generator struct {
@@ -37,6 +38,7 @@ type Generator struct {
 	GenerationID     string
 	GatewayURL       string
 	InternalAPIKey   string
+	ServerJWT        string
 
 	workDir     string
 	challengeID string
@@ -79,6 +81,12 @@ func (g *Generator) Run(ctx context.Context) error {
 		}
 		slog.Info("phase done", "phase", "generate", "round", round+1, "duration", time.Since(gStart))
 
+		if err := g.validateChallengeManifest(chalDir); err != nil {
+			judgeFeedback = "challenge 文件结构或元数据不完整: " + err.Error()
+			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "artifact_invalid", "feedback", truncateStr(judgeFeedback, 300))
+			continue
+		}
+
 		jStart := time.Now()
 		passed, feedback := g.phaseJudge(ctx, chalDir)
 		judgeFeedback = feedback
@@ -88,28 +96,20 @@ func (g *Generator) Run(ctx context.Context) error {
 			continue
 		}
 
-		vStart := time.Now()
-		verifyOK, verifyErr := g.phaseVerify(ctx, chalDir)
-		if verifyOK {
-			slog.Info("phase done", "phase", "verify", "round", round+1, "duration", time.Since(vStart))
-			eStart := time.Now()
-			if err := g.phaseEnrich(ctx, chalDir); err != nil {
-				slog.Error("phase failed", "phase", "enrich", "round", round+1, "duration", time.Since(eStart), "err", err)
-				continue
-			}
-			slog.Info("phase done", "phase", "enrich", "round", round+1, "duration", time.Since(eStart))
-			uStart := time.Now()
-			if err := g.uploadArtifact(ctx, chalDir); err != nil {
-				slog.Error("phase failed", "phase", "upload", "round", round+1, "duration", time.Since(uStart), "err", err)
-				continue
-			}
-			slog.Info("phase done", "phase", "upload", "round", round+1, "duration", time.Since(uStart))
+		uStart := time.Now()
+		verifyPassed, verifyFeedback, err := g.submitAndWaitVerify(ctx, chalDir)
+		if err != nil {
+			slog.Error("phase failed", "phase", "submit", "round", round+1, "duration", time.Since(uStart), "err", err)
+			judgeFeedback = err.Error()
+			continue
+		}
+		slog.Info("phase done", "phase", "submit", "round", round+1, "duration", time.Since(uStart), "passed", verifyPassed)
+		if verifyPassed {
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "success")
 			slog.Info("generation done", "title", g.defaultTitle(), "challengeID", g.challengeID, "rounds", round+1, "duration", time.Since(genStart))
-			return g.finalize(chalDir)
+			return nil
 		}
-		judgeFeedback = "verify failed: " + verifyErr
-		slog.Info("phase done", "phase", "verify", "round", round+1, "duration", time.Since(vStart), "passed", false, "err", verifyErr)
+		judgeFeedback = verifyFeedback
 		slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "verify_fail")
 	}
 
@@ -194,102 +194,11 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 			break
 		}
 	}
-
 	passed := strings.Contains(lastMsg, "PASS") || strings.Contains(lastMsg, `"pass": true`)
 	return passed, lastMsg
 }
 
-func (g *Generator) phaseVerify(ctx context.Context, chalDir string) (bool, string) {
-	imageName := fmt.Sprintf("%s/%s:latest", g.RegistryAddr, g.challengeID)
-	if !BuildAndPush(ctx, imageName, chalDir, g.RegistryInsecure) {
-		return false, "image build or push failed"
-	}
-
-	k8sClient, err := k8s.New(g.Kubeconfig)
-	if err != nil {
-		slog.Error("k8s client", "err", err)
-		return false, fmt.Sprintf("k8s client: %v", err)
-	}
-	ns := g.LabNS
-	podName := "verify-" + g.challengeID
-
-	k8sClient.EnsureNamespace(ns) //nolint:errcheck
-
-	if err := k8sClient.CreatePod(ns, podName, k8s.CreatePodOpts{Image: imageName}); err != nil {
-		slog.Error("create verify pod", "err", err)
-		return false, fmt.Sprintf("create pod: %v", err)
-	}
-	defer k8sClient.DeletePod(ns, podName) //nolint:errcheck
-
-	if err := k8sClient.WaitForPod(ns, podName, "challenge"); err != nil {
-		slog.Error("wait verify pod", "err", err)
-		return false, fmt.Sprintf("wait pod: %v", err)
-	}
-
-	answerPath := filepath.Join(chalDir, "answer.sh")
-	if err := k8sClient.CopyToPod(ns, podName, answerPath, k8s.PodAnswerPath); err != nil {
-		slog.Error("copy answer.sh", "err", err)
-		return false, fmt.Sprintf("copy answer.sh: %v", err)
-	}
-	ansExit, ansOut, err := k8sClient.ExecInPod(ns, podName, "bash", k8s.PodAnswerPath)
-	if err != nil {
-		slog.Error("exec answer.sh", "err", err)
-		return false, fmt.Sprintf("exec answer.sh: %v", err)
-	}
-	if ansExit != 0 {
-		slog.Error("answer.sh failed", "exit", ansExit, "output", ansOut)
-		return false, fmt.Sprintf("answer.sh exit=%d: %s", ansExit, ansOut)
-	}
-
-	verifyPath := filepath.Join(chalDir, "verify.sh")
-	if err := k8sClient.CopyToPod(ns, podName, verifyPath, k8s.PodVerifyPath); err != nil {
-		slog.Error("copy verify.sh", "err", err)
-		return false, fmt.Sprintf("copy verify.sh: %v", err)
-	}
-	exitCode, output, err := k8sClient.ExecInPod(ns, podName, "bash", k8s.PodVerifyPath)
-	if err != nil {
-		slog.Error("exec verify.sh", "err", err)
-		return false, fmt.Sprintf("exec verify.sh: %v", err)
-	}
-
-	if exitCode == 0 {
-		slog.Info("verification PASSED")
-		return true, ""
-	}
-	slog.Error("verification FAILED", "exit", exitCode, "output", output)
-	return false, fmt.Sprintf("verify.sh exit=%d: %s", exitCode, output)
-}
-
-func (g *Generator) phaseEnrich(ctx context.Context, chalDir string) error {
-	var fileContents strings.Builder
-	entries, _ := os.ReadDir(chalDir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, _ := os.ReadFile(filepath.Join(chalDir, e.Name()))
-		fmt.Fprintf(&fileContents, "\n--- %s ---\n%s\n", e.Name(), string(data))
-	}
-
-	agent, err := claudecode.New(
-		claudecode.WithSystemPrompt(EnrichSystemPrompt()),
-		claudecode.WithTools("Read", "Write", "Edit"),
-		claudecode.WithCWD(chalDir),
-		claudecode.WithPermissionMode("acceptEdits"),
-		claudecode.WithStderr(func(line string) { slog.Debug("claude", "msg", line) }),
-	)
-	if err != nil {
-		return fmt.Errorf("create enrich agent: %w", err)
-	}
-
-	prompt := fmt.Sprintf(EnrichPrompt, g.draftContext(), fileContents.String())
-	slog.Info("agent prompt", "phase", "enrich", "prompt_len", len(prompt))
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
-	events := runner.Run(ctx, []adk.Message{schema.UserMessage(prompt)})
-	return g.drainEvents(events)
-}
-
-func (g *Generator) syncChallengeManifest(chalDir string) error {
+func (g *Generator) validateChallengeManifest(chalDir string) error {
 	path := filepath.Join(chalDir, "challenge.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -300,14 +209,46 @@ func (g *Generator) syncChallengeManifest(chalDir string) error {
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		return fmt.Errorf("parse challenge.yaml: %w", err)
 	}
-
-	spec["id"] = g.challengeID
-	spec["image"] = g.challengeID + ":latest"
-	if strings.TrimSpace(fmt.Sprint(spec["type"])) == "" || fmt.Sprint(spec["type"]) == "<nil>" {
-		spec["type"] = "script"
+	if spec == nil {
+		spec = map[string]any{}
 	}
-	if strings.TrimSpace(fmt.Sprint(spec["title"])) == "" || fmt.Sprint(spec["title"]) == "<nil>" {
-		spec["title"] = g.defaultTitle()
+
+	// id/image are platform-managed. Strip them if the agent wrote them.
+	delete(spec, "id")
+	delete(spec, "image")
+
+	var errs []string
+	if scalarString(spec["type"]) == "" {
+		errs = append(errs, "challenge.yaml 缺少 type")
+	} else if scalarString(spec["type"]) != "script" {
+		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 script，当前为 %q", scalarString(spec["type"])))
+	}
+	if scalarString(spec["title"]) == "" {
+		errs = append(errs, "challenge.yaml 缺少 title")
+	}
+	switch scalarString(spec["difficulty"]) {
+	case "":
+		errs = append(errs, "challenge.yaml 缺少 difficulty")
+	case "easy", "medium", "hard":
+	default:
+		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", scalarString(spec["difficulty"])))
+	}
+	var cleanTags []string
+	if rawTags, ok := spec["tags"].([]any); ok {
+		cleanTags = make([]string, 0, len(rawTags))
+		for _, tag := range rawTags {
+			tag := scalarString(tag)
+			if tag != "" {
+				cleanTags = append(cleanTags, tag)
+			}
+		}
+	}
+	if len(cleanTags) == 0 {
+		errs = append(errs, "challenge.yaml 缺少非空 tags")
+	}
+	spec["tags"] = slices.Compact(cleanTags)
+	if scalarString(spec["description"]) == "" {
+		errs = append(errs, "challenge.yaml 缺少 description")
 	}
 
 	normalized, err := yaml.Marshal(spec)
@@ -317,40 +258,17 @@ func (g *Generator) syncChallengeManifest(chalDir string) error {
 	if err := os.WriteFile(path, normalized, 0644); err != nil {
 		return fmt.Errorf("write challenge.yaml: %w", err)
 	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 
-func (g *Generator) finalize(chalDir string) error {
-	if err := g.syncChallengeManifest(chalDir); err != nil {
-		return err
+func scalarString(v any) string {
+	if v == nil {
+		return ""
 	}
-
-	dst := filepath.Join(g.OutputDir, g.challengeID)
-	if err := os.RemoveAll(dst); err != nil {
-		slog.Error("failed to clean output", "err", err, "dir", dst)
-	}
-	if err := os.MkdirAll(dst, 0755); err != nil {
-		return fmt.Errorf("create output dir: %w", err)
-	}
-
-	entries, _ := os.ReadDir(chalDir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(chalDir, e.Name()))
-		if err != nil {
-			slog.Error("failed to read generated file", "err", err, "name", e.Name())
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0644); err != nil { //nolint:gosec
-			slog.Error("failed to write output file", "err", err, "name", e.Name())
-		}
-	}
-
-	fmt.Println(g.challengeID)
-	slog.Info("challenge finalized", "id", g.challengeID, "dir", dst)
-	return nil
+	return strings.TrimSpace(fmt.Sprint(v))
 }
 
 // drainEvents processes agent events, logging all interactions.
@@ -445,32 +363,25 @@ func (g *Generator) defaultTitle() string {
 	return "Untitled challenge"
 }
 
-func (g *Generator) defaultDescription() string {
-	if g.Draft != nil && strings.TrimSpace(g.Draft.Description) != "" {
-		return g.Draft.Description
-	}
-	return g.defaultTitle()
-}
-
 func (g *Generator) draftContext() string {
 	if g.Draft == nil {
-		return "No reviewed challenge draft provided."
+		return "未提供已审阅的题目草案。"
 	}
 	var parts []string
-	parts = append(parts, fmt.Sprintf("Title: %s", g.Draft.Title))
-	parts = append(parts, fmt.Sprintf("Difficulty: %s", g.Draft.Difficulty))
+	parts = append(parts, fmt.Sprintf("标题：%s", g.Draft.Title))
+	parts = append(parts, fmt.Sprintf("难度：%s", g.Draft.Difficulty))
 	if len(g.Draft.Tags) > 0 {
-		parts = append(parts, fmt.Sprintf("Tags: %s", strings.Join(g.Draft.Tags, ", ")))
+		parts = append(parts, fmt.Sprintf("标签：%s", strings.Join(g.Draft.Tags, "、")))
 	}
-	parts = append(parts, fmt.Sprintf("Description: %s", g.Draft.Description))
-	parts = append(parts, fmt.Sprintf("Goal: %s", g.Draft.Goal))
-	parts = append(parts, fmt.Sprintf("Symptoms: %s", g.Draft.Symptoms))
-	parts = append(parts, fmt.Sprintf("Fault mechanism: %s", g.Draft.FaultMechanism))
-	parts = append(parts, fmt.Sprintf("Environment shape: %s", g.Draft.EnvironmentShape))
-	parts = append(parts, fmt.Sprintf("Acceptance criteria: %s", g.Draft.AcceptanceCriteria))
-	parts = append(parts, fmt.Sprintf("Difficulty reason: %s", g.Draft.DifficultyReason))
+	parts = append(parts, fmt.Sprintf("说明：%s", g.Draft.Description))
+	parts = append(parts, fmt.Sprintf("目标：%s", g.Draft.Goal))
+	parts = append(parts, fmt.Sprintf("表象：%s", g.Draft.Symptoms))
+	parts = append(parts, fmt.Sprintf("故障机制：%s", g.Draft.FaultMechanism))
+	parts = append(parts, fmt.Sprintf("环境形态：%s", g.Draft.EnvironmentShape))
+	parts = append(parts, fmt.Sprintf("验收标准：%s", g.Draft.AcceptanceCriteria))
+	parts = append(parts, fmt.Sprintf("难度理由：%s", g.Draft.DifficultyReason))
 	if strings.TrimSpace(g.Draft.Notes) != "" {
-		parts = append(parts, fmt.Sprintf("Notes: %s", g.Draft.Notes))
+		parts = append(parts, fmt.Sprintf("备注：%s", g.Draft.Notes))
 	}
 	return strings.Join(parts, "\n")
 }
@@ -493,14 +404,10 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	if strings.TrimSpace(g.InternalAPIKey) == "" {
 		return fmt.Errorf("GATEWAY_INTERNAL_API_KEY is required")
 	}
-	if err := g.syncChallengeManifest(chalDir); err != nil {
+	if err := g.validateChallengeManifest(chalDir); err != nil {
 		return err
 	}
 
-	meta, err := g.challengeMetadata(chalDir)
-	if err != nil {
-		return err
-	}
 	payload, err := archiveDir(chalDir)
 	if err != nil {
 		return err
@@ -508,23 +415,7 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	fields := map[string]string{
-		"challenge_id": meta.ID,
-		"title":        meta.Title,
-		"type":         meta.Type,
-		"difficulty":   meta.Difficulty,
-		"description":  meta.Description,
-	}
-	for k, v := range fields {
-		if err := mw.WriteField(k, v); err != nil {
-			return fmt.Errorf("write multipart field %s: %w", k, err)
-		}
-	}
-	tagsJSON, _ := json.Marshal(meta.Tags)
-	if err := mw.WriteField("tags_b64", base64.StdEncoding.EncodeToString(tagsJSON)); err != nil {
-		return fmt.Errorf("write multipart tags: %w", err)
-	}
-	part, err := mw.CreateFormFile("artifact", meta.ID+".tar.gz")
+	part, err := mw.CreateFormFile("artifact", g.challengeID+".tar.gz")
 	if err != nil {
 		return fmt.Errorf("create multipart artifact part: %w", err)
 	}
@@ -553,55 +444,6 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 		return fmt.Errorf("upload artifact: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return nil
-}
-
-type challengeMetadata struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Difficulty  string   `json:"difficulty"`
-	Tags        []string `json:"tags"`
-	Description string   `json:"description"`
-	Image       string   `json:"image"`
-}
-
-func (g *Generator) challengeMetadata(chalDir string) (*challengeMetadata, error) {
-	metadata := &challengeMetadata{
-		ID:          g.challengeID,
-		Title:       g.defaultTitle(),
-		Type:        "script",
-		Difficulty:  "medium",
-		Description: g.defaultDescription(),
-		Image:       fmt.Sprintf("%s/%s:latest", g.RegistryAddr, g.challengeID),
-	}
-	if yamlData, err := os.ReadFile(filepath.Join(chalDir, "challenge.yaml")); err == nil {
-		var spec struct {
-			Title       string   `yaml:"title"`
-			Type        string   `yaml:"type"`
-			Difficulty  string   `yaml:"difficulty"`
-			Tags        []string `yaml:"tags"`
-			Description string   `yaml:"description"`
-		}
-		if err := yaml.Unmarshal(yamlData, &spec); err != nil {
-			return nil, fmt.Errorf("parse challenge.yaml for metadata: %w", err)
-		}
-		if spec.Title != "" {
-			metadata.Title = spec.Title
-		}
-		if spec.Type != "" {
-			metadata.Type = spec.Type
-		}
-		if spec.Difficulty != "" {
-			metadata.Difficulty = spec.Difficulty
-		}
-		if len(spec.Tags) > 0 {
-			metadata.Tags = append([]string{}, spec.Tags...)
-		}
-		if spec.Description != "" {
-			metadata.Description = spec.Description
-		}
-	}
-	return metadata, nil
 }
 
 func archiveDir(root string) ([]byte, error) {
@@ -647,4 +489,57 @@ func archiveDir(root string) ([]byte, error) {
 		return nil, fmt.Errorf("close gzip stream: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bool, string, error) {
+	if err := g.uploadArtifact(ctx, chalDir); err != nil {
+		return false, "", err
+	}
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	url := strings.TrimRight(g.GatewayURL, "/") + "/api/generate/jobs/" + g.GenerationID
+	deadline := time.Now().Add(30 * time.Minute)
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return false, "", fmt.Errorf("create generation poll request: %w", err)
+		}
+		if strings.TrimSpace(g.ServerJWT) != "" {
+			req.Header.Set("Authorization", "Bearer "+g.ServerJWT)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		var body api.GenerationJobResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		if decodeErr != nil {
+			return false, "", fmt.Errorf("decode generation status: %w", decodeErr)
+		}
+
+		status := strings.ToLower(strings.TrimSpace(ptrString(body.Status)))
+		message := ptrString(body.Message)
+		switch status {
+		case "success":
+			return true, message, nil
+		case "failed":
+			return false, message, nil
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+	return false, "", fmt.Errorf("timeout waiting for generation verification result")
+}
+
+func ptrString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }

@@ -199,6 +199,57 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /verify/submissions:
+    post:
+      operationId: createVerifySubmission
+      summary: Upload a challenge artifact for platform verification
+      tags: [verify]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [artifact]
+              properties:
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Verification task created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifySubmissionResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /verify/tasks/{id}:
+    get:
+      operationId: getVerifyTask
+      summary: Get verification task status
+      tags: [verify]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification task status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyTaskResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -401,3 +452,57 @@ components:
         completed_at:
           type: string
           format: date-time
+
+    VerifySubmissionResponse:
+      type: object
+      properties:
+        verify_task_id:
+          type: string
+        submission_id:
+          type: string
+        status:
+          type: string
+
+    VerifyIssue:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    VerifyReport:
+      type: object
+      properties:
+        build_passed:
+          type: boolean
+        answer_passed:
+          type: boolean
+        verify_passed:
+          type: boolean
+        summary:
+          type: string
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifyIssue"
+
+    VerifyTaskResponse:
+      type: object
+      properties:
+        verify_task_id:
+          type: string
+        submission_id:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        report:
+          $ref: "#/components/schemas/VerifyReport"

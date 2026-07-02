@@ -57,7 +57,8 @@ description: |
 ### Dockerfile
 
 ```dockerfile
-FROM breakfix-base:latest
+ARG BREAKFIX_BASE_IMAGE=<registry>/breakfix-base:latest
+FROM ${BREAKFIX_BASE_IMAGE}
 COPY question.md /home/user/question.md
 COPY generate.sh /tmp/generate.sh
 RUN bash /tmp/generate.sh && rm /tmp/generate.sh

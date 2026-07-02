@@ -2,11 +2,12 @@ package gateway
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type Handler struct {
 	namespace        string
 	crdNamespace     string
 	challengesDir    string
+	dataDir          string
 	cooldownMin      int
 	llm              config.LLMConfig
 	jwtSecret        []byte
@@ -51,6 +53,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		namespace:        cfg.Namespace,
 		crdNamespace:     cfg.CRDNamespace,
 		challengesDir:    cfg.ChallengesDir(),
+		dataDir:          cfg.DataDir,
 		cooldownMin:      cfg.CooldownMinutes,
 		llm:              cfg.LLM,
 		jwtSecret:        []byte(cfg.JWTSecret),
@@ -326,6 +329,11 @@ func (h *Handler) ReviewGenerationDraft(c *gin.Context) {
 }
 
 func (h *Handler) CreateGenerationJob(c *gin.Context) {
+	if err := h.checkRegistryReady(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+
 	var req api.GenerationJobCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
@@ -351,6 +359,9 @@ func (h *Handler) CreateGenerationJob(c *gin.Context) {
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  h.llm.HaikuModel,
 		"CLAUDE_CODE_SUBAGENT_MODEL":     h.llm.HaikuModel,
 		"CLAUDE_CODE_EFFORT_LEVEL":       h.llm.Effort,
+	}
+	if authz := strings.TrimSpace(c.GetHeader("Authorization")); authz != "" {
+		env["BREAKFIX_GENERATION_JWT"] = strings.TrimPrefix(authz, "Bearer ")
 	}
 	if h.registryInsecure {
 		env["REGISTRY_INSECURE"] = "true"
@@ -429,6 +440,96 @@ func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
 	})
 }
 
+func (h *Handler) CreateVerifySubmission(c *gin.Context) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	if err := h.checkRegistryReady(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	file, _, err := c.Request.FormFile("artifact")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "artifact file is required"})
+		return
+	}
+	defer file.Close()
+
+	submissionID := "sub-" + k8s.RandomID()
+	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
+		return
+	}
+
+	verifyTaskID := "vt-" + k8s.RandomID()
+	task := &breakfixv1.VerifyTask{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      verifyTaskID,
+			Namespace: h.crdNamespace,
+		},
+		Spec: breakfixv1.VerifyTaskSpec{
+			Source: breakfixv1.VerifyTaskSource{
+				Kind: "user",
+				Ref:  user.ID,
+			},
+			Submission: breakfixv1.VerifyTaskSubmission{
+				ID: submissionID,
+			},
+		},
+		Status: breakfixv1.VerifyTaskStatus{
+			Phase:   breakfixv1.VerifyTaskPending,
+			Message: "verification task accepted",
+		},
+	}
+	if _, err := h.k8s.CreateVerifyTask(c.Request.Context(), h.crdNamespace, task); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create verify task: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"verify_task_id": verifyTaskID,
+		"submission_id":  submissionID,
+		"status":         "queued",
+	})
+}
+
+func (h *Handler) GetVerifyTask(c *gin.Context, id string) {
+	task, err := h.k8s.GetVerifyTask(c.Request.Context(), h.crdNamespace, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "verify task not found"})
+		return
+	}
+
+	status := normalizeVerifyTaskStatus(task.Status.Phase)
+	message := task.Status.Message
+	if strings.TrimSpace(message) == "" {
+		message = defaultVerifyTaskMessage(task)
+	}
+
+	resp := api.VerifyTaskResponse{
+		VerifyTaskId: &task.Name,
+		SubmissionId: &task.Spec.Submission.ID,
+		Status:       &status,
+		Message:      &message,
+	}
+	if task.Status.StartedAt != nil {
+		t := task.Status.StartedAt.Time
+		resp.StartedAt = &t
+	}
+	if task.Status.CompletedAt != nil {
+		t := task.Status.CompletedAt.Time
+		resp.CompletedAt = &t
+	}
+	if task.Status.Report != nil {
+		report := toAPIVerifyReport(task.Status.Report)
+		resp.Report = &report
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	if h.internalAPIKey == "" {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal upload disabled"})
@@ -451,29 +552,6 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 		return
 	}
 
-	id := strings.TrimSpace(c.PostForm("challenge_id"))
-	title := strings.TrimSpace(c.PostForm("title"))
-	typ := strings.TrimSpace(c.PostForm("type"))
-	difficulty := strings.TrimSpace(c.PostForm("difficulty"))
-	description := strings.TrimSpace(c.PostForm("description"))
-	if id == "" || title == "" || typ == "" {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "missing challenge metadata"})
-		return
-	}
-
-	var tags []string
-	if rawTags := strings.TrimSpace(c.PostForm("tags_b64")); rawTags != "" {
-		decoded, err := base64.StdEncoding.DecodeString(rawTags)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid tags_b64"})
-			return
-		}
-		if err := json.Unmarshal(decoded, &tags); err != nil {
-			c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid tags payload"})
-			return
-		}
-	}
-
 	file, _, err := c.Request.FormFile("artifact")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "artifact file is required"})
@@ -481,28 +559,49 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	}
 	defer file.Close()
 
-	if _, err := challenge.Materialize(h.challengesDir, id, func(dst string) error {
-		return challenge.ExtractTarGz(dst, file)
-	}); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: fmt.Sprintf("materialize artifact: %v", err)})
+	submissionID := "sub-" + k8s.RandomID()
+	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
 		return
 	}
 
-	gen.Status.Challenge = &breakfixv1.ChallengeSpec{
-		ID:          id,
-		Title:       title,
-		Type:        typ,
-		Difficulty:  difficulty,
-		Tags:        append([]string{}, tags...),
-		Description: description,
-		Image:       fmt.Sprintf("%s/%s:latest", h.registryAddr, id),
+	verifyTaskID := "vt-" + k8s.RandomID()
+	task := &breakfixv1.VerifyTask{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      verifyTaskID,
+			Namespace: h.crdNamespace,
+		},
+		Spec: breakfixv1.VerifyTaskSpec{
+			Source: breakfixv1.VerifyTaskSource{
+				Kind: "agent",
+				Ref:  genID,
+			},
+			Submission: breakfixv1.VerifyTaskSubmission{
+				ID: submissionID,
+			},
+		},
+		Status: breakfixv1.VerifyTaskStatus{
+			Phase:   breakfixv1.VerifyTaskPending,
+			Message: "verification task accepted",
+		},
 	}
+	if _, err := h.k8s.CreateVerifyTask(c.Request.Context(), h.crdNamespace, task); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create verify task: %v", err)})
+		return
+	}
+
+	gen.Status.VerifyTaskRef = verifyTaskID
+	gen.Status.Message = "artifact submitted for verification"
 	if _, err := h.k8s.UpdateGenerationStatus(c.Request.Context(), h.crdNamespace, gen); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("update generation status: %v", err)})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "ok",
+		"submission_id":  submissionID,
+		"verify_task_id": verifyTaskID,
+	})
 }
 
 // ── Terminal (WebSocket) ──
@@ -526,6 +625,35 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 
 	slog.Info("terminal session started", "challenge", challengeID, "user", user.ID)
 	wsUpgrade(c.Writer, c.Request, inst, h.k8s, h.crdNamespace, h.cooldownMin)
+}
+
+func (h *Handler) DownloadVerifySubmissionArtifact(c *gin.Context) {
+	if h.internalAPIKey == "" {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal download disabled"})
+		return
+	}
+	if c.GetHeader("X-Breakfix-Internal-Key") != h.internalAPIKey {
+		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid internal key"})
+		return
+	}
+
+	submissionID := strings.TrimSpace(c.Param("id"))
+	if submissionID == "" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "missing submission id"})
+		return
+	}
+	path := challenge.SubmissionPath(h.dataDir, submissionID)
+	f, err := os.Open(path)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "submission artifact not found"})
+		return
+	}
+	defer f.Close()
+
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.tar.gz", submissionID))
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, f)
 }
 
 // ── Auth helpers ──
@@ -706,12 +834,32 @@ func normalizeGenerationStatus(status string) string {
 	}
 }
 
+func normalizeVerifyTaskStatus(status breakfixv1.VerifyTaskPhase) string {
+	switch status {
+	case breakfixv1.VerifyTaskPending:
+		return "queued"
+	case breakfixv1.VerifyTaskRunning:
+		return "running"
+	case breakfixv1.VerifyTaskVerified:
+		return "publishing"
+	case breakfixv1.VerifyTaskSucceeded:
+		return "success"
+	case breakfixv1.VerifyTaskFailed:
+		return "failed"
+	default:
+		return strings.ToLower(string(status))
+	}
+}
+
 func defaultGenerationMessage(gen *breakfixv1.Generation) string {
 	switch gen.Status.Phase {
 	case breakfixv1.GenerationPending:
 		return "generation request accepted"
 	case breakfixv1.GenerationRunning:
-		return "building and verifying challenge"
+		if strings.TrimSpace(gen.Status.VerifyTaskRef) != "" {
+			return "artifact submitted, verification running"
+		}
+		return "generating challenge files"
 	case breakfixv1.GenerationSucceeded:
 		if gen.Status.Challenge != nil {
 			return fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
@@ -722,6 +870,71 @@ func defaultGenerationMessage(gen *breakfixv1.Generation) string {
 	default:
 		return "generation status updated"
 	}
+}
+
+func defaultVerifyTaskMessage(task *breakfixv1.VerifyTask) string {
+	switch task.Status.Phase {
+	case breakfixv1.VerifyTaskPending:
+		return "verification task accepted"
+	case breakfixv1.VerifyTaskRunning:
+		return "verification running"
+	case breakfixv1.VerifyTaskVerified:
+		return "verification passed, publishing challenge"
+	case breakfixv1.VerifyTaskSucceeded:
+		return "verification passed and published"
+	case breakfixv1.VerifyTaskFailed:
+		return "verification failed"
+	default:
+		return "verification status updated"
+	}
+}
+
+func toAPIVerifyReport(report *breakfixv1.VerifyReport) api.VerifyReport {
+	out := api.VerifyReport{}
+	out.BuildPassed = &report.BuildPassed
+	out.AnswerPassed = &report.AnswerPassed
+	out.VerifyPassed = &report.VerifyPassed
+	if strings.TrimSpace(report.Summary) != "" {
+		out.Summary = &report.Summary
+	}
+	if len(report.Issues) > 0 {
+		issues := make([]api.VerifyIssue, 0, len(report.Issues))
+		for _, issue := range report.Issues {
+			code := issue.Code
+			message := issue.Message
+			issues = append(issues, api.VerifyIssue{
+				Code:    &code,
+				Message: &message,
+			})
+		}
+		out.Issues = &issues
+	}
+	return out
+}
+
+func (h *Handler) checkRegistryReady(ctx context.Context) error {
+	addr := strings.TrimSpace(h.registryAddr)
+	if addr == "" {
+		return fmt.Errorf("registry is not configured")
+	}
+	registry := addr
+	if idx := strings.IndexByte(registry, '/'); idx >= 0 {
+		registry = registry[:idx]
+	}
+	url := "http://" + registry + "/v2/"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("build registry health request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("registry %s is unavailable: %w", registry, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+		return fmt.Errorf("registry %s health check failed: status %d", registry, resp.StatusCode)
+	}
+	return nil
 }
 
 func (h *Handler) internalGatewayURL() string {

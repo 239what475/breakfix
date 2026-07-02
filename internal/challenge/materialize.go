@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 )
 
-var requiredFiles = []string{"challenge.yaml", "Dockerfile", "verify.sh"}
+var requiredFiles = []string{"challenge.yaml", "Dockerfile", "generate.sh", "question.md", "verify.sh", "answer.sh"}
 
 func Materialize(root, id string, populate func(dst string) error) (*Entry, error) {
 	if !ValidID(id) {
@@ -72,6 +74,33 @@ func ValidateDir(dir string) (*Entry, error) {
 		if info.IsDir() {
 			return nil, fmt.Errorf("%s must be a file", name)
 		}
+	}
+	if strings.TrimSpace(challenge.Title) == "" {
+		return nil, fmt.Errorf("challenge title is required")
+	}
+	switch strings.TrimSpace(challenge.Type) {
+	case "", "script":
+	default:
+		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
+	}
+	switch strings.TrimSpace(challenge.Difficulty) {
+	case "easy", "medium", "hard":
+	default:
+		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
+	}
+	cleanTags := make([]string, 0, len(challenge.Tags))
+	for _, tag := range challenge.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" {
+			cleanTags = append(cleanTags, tag)
+		}
+	}
+	if len(cleanTags) == 0 {
+		return nil, fmt.Errorf("challenge tags are required")
+	}
+	challenge.Tags = slices.Compact(cleanTags)
+	if strings.TrimSpace(challenge.Description) == "" {
+		return nil, fmt.Errorf("challenge description is required")
 	}
 	return challenge, nil
 }

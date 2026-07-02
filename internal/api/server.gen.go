@@ -17,6 +17,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 const (
@@ -134,11 +135,49 @@ type SubmitResponse struct {
 	Passed   *bool   `json:"passed,omitempty"`
 }
 
+// VerifyIssue defines model for VerifyIssue.
+type VerifyIssue struct {
+	Code    *string `json:"code,omitempty"`
+	Message *string `json:"message,omitempty"`
+}
+
+// VerifyReport defines model for VerifyReport.
+type VerifyReport struct {
+	AnswerPassed *bool          `json:"answer_passed,omitempty"`
+	BuildPassed  *bool          `json:"build_passed,omitempty"`
+	Issues       *[]VerifyIssue `json:"issues,omitempty"`
+	Summary      *string        `json:"summary,omitempty"`
+	VerifyPassed *bool          `json:"verify_passed,omitempty"`
+}
+
+// VerifySubmissionResponse defines model for VerifySubmissionResponse.
+type VerifySubmissionResponse struct {
+	Status       *string `json:"status,omitempty"`
+	SubmissionId *string `json:"submission_id,omitempty"`
+	VerifyTaskId *string `json:"verify_task_id,omitempty"`
+}
+
+// VerifyTaskResponse defines model for VerifyTaskResponse.
+type VerifyTaskResponse struct {
+	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
+	Message      *string       `json:"message,omitempty"`
+	Report       *VerifyReport `json:"report,omitempty"`
+	StartedAt    *time.Time    `json:"started_at,omitempty"`
+	Status       *string       `json:"status,omitempty"`
+	SubmissionId *string       `json:"submission_id,omitempty"`
+	VerifyTaskId *string       `json:"verify_task_id,omitempty"`
+}
+
 // Error defines model for Error.
 type Error = ErrorResponse
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
+
+// CreateVerifySubmissionMultipartBody defines parameters for CreateVerifySubmission.
+type CreateVerifySubmissionMultipartBody struct {
+	Artifact openapi_types.File `json:"artifact"`
+}
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -151,6 +190,9 @@ type CreateGenerationJobJSONRequestBody = GenerationJobCreateRequest
 
 // ReviewGenerationDraftJSONRequestBody defines body for ReviewGenerationDraft for application/json ContentType.
 type ReviewGenerationDraftJSONRequestBody = GenerateDraftRequest
+
+// CreateVerifySubmissionMultipartRequestBody defines body for CreateVerifySubmission for multipart/form-data ContentType.
+type CreateVerifySubmissionMultipartRequestBody CreateVerifySubmissionMultipartBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -181,6 +223,12 @@ type ServerInterface interface {
 	// Get generation job status
 	// (GET /generate/jobs/{id})
 	GetGenerationJob(c *gin.Context, id string)
+	// Upload a challenge artifact for platform verification
+	// (POST /verify/submissions)
+	CreateVerifySubmission(c *gin.Context)
+	// Get verification task status
+	// (GET /verify/tasks/{id})
+	GetVerifyTask(c *gin.Context, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -371,6 +419,48 @@ func (siw *ServerInterfaceWrapper) GetGenerationJob(c *gin.Context) {
 	siw.Handler.GetGenerationJob(c, id)
 }
 
+// CreateVerifySubmission operation middleware
+func (siw *ServerInterfaceWrapper) CreateVerifySubmission(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateVerifySubmission(c)
+}
+
+// GetVerifyTask operation middleware
+func (siw *ServerInterfaceWrapper) GetVerifyTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetVerifyTask(c, id)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -407,6 +497,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/generate", wrapper.CreateGenerationJob)
 	router.POST(options.BaseURL+"/generate/draft", wrapper.ReviewGenerationDraft)
 	router.GET(options.BaseURL+"/generate/jobs/:id", wrapper.GetGenerationJob)
+	router.POST(options.BaseURL+"/verify/submissions", wrapper.CreateVerifySubmission)
+	router.GET(options.BaseURL+"/verify/tasks/:id", wrapper.GetVerifyTask)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -414,29 +506,33 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"pXZhpQ1NXo9fjyORS76dbv8NAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

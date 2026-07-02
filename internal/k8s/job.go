@@ -9,32 +9,46 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type CreateJobOpts struct {
+	Image           string
+	Env             map[string]string
+	ImagePullPolicy corev1.PullPolicy
+	ActiveDeadlineSeconds *int64
+}
+
 // CreateJob creates a K8s Job. Returns the created Job name.
-func (c *Client) CreateJob(ns, jobName, image string, env map[string]string) error {
+func (c *Client) CreateJob(ns, jobName string, opts CreateJobOpts) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	envVars := make([]corev1.EnvVar, 0, len(env))
-	for k, v := range env {
+	envVars := make([]corev1.EnvVar, 0, len(opts.Env))
+	for k, v := range opts.Env {
 		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+	}
+	pullPolicy := opts.ImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullAlways
 	}
 
 	backoff := int32(0)
 	ttl := int32(3600) // keep Job for 1h for log access
+	activeDeadline := opts.ActiveDeadlineSeconds
+	if activeDeadline == nil {
+		activeDeadline = ptr(int64(3600)) // cap runtime at 1h
+	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: ns},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoff,
+			ActiveDeadlineSeconds:   activeDeadline,
 			TTLSecondsAfterFinished: &ttl,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:            "generator",
-						Image:           image,
-						// Generator images are rebuilt frequently during authoring.
-						// Always pull to avoid stale cached :latest images on cluster nodes.
-						ImagePullPolicy: corev1.PullAlways,
+						Image:           opts.Image,
+						ImagePullPolicy: pullPolicy,
 						SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 						Env:             envVars,
 					}},

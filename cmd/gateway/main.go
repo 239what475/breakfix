@@ -72,7 +72,20 @@ func main() {
 		slog.Error("failed to create manager", "err", err)
 		os.Exit(1)
 	}
-	if err := controller.Setup(mgr, k8sClient, cfg.RegistryAddr, cfg.Namespace, cfg.CRDNamespace, challengesDir, cfg.CooldownMinutes); err != nil {
+	if err := controller.Setup(
+		mgr,
+		k8sClient,
+		cfg.RegistryAddr,
+		cfg.Namespace,
+		cfg.CRDNamespace,
+		challengesDir,
+		cfg.DataDir,
+		cfg.CooldownMinutes,
+		cfg.RegistryInsecure,
+		cfg.InternalAPIKey,
+		cfg.ServerHost,
+		cfg.Port,
+	); err != nil {
 		slog.Error("failed to setup controllers", "err", err)
 		os.Exit(1)
 	}

@@ -21,6 +21,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Generation{}, &GenerationList{},
 		&Instance{}, &InstanceList{},
+		&VerifyTask{}, &VerifyTaskList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

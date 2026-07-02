@@ -92,6 +92,7 @@ dev-data:
 dev-crd:
 	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null 2>&1 || true
 	@kubectl apply -f deploy/crd/breakfix.dev_instances.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/crd/breakfix.dev_verifytasks.yaml >/dev/null 2>&1 || true
 	@echo "  ✓ CRDs applied"
 
 dev-rbac:

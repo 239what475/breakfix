@@ -9,7 +9,7 @@ import (
 )
 
 // Setup registers all reconcilers with the controller-runtime manager.
-func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir string, cooldownMin int) error {
+func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir, dataDir string, cooldownMin int, registryInsecure bool, internalAPIKey, serverHost string, serverPort int) error {
 	if err := breakfixv1.AddToScheme(mgr.GetScheme()); err != nil {
 		return err
 	}
@@ -20,6 +20,21 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 		Client:       mgr.GetClient(),
 		K8s:          k8sClient,
 		CRDNamespace: crdNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+
+	if err := (&VerifyTaskReconciler{
+		Client:           mgr.GetClient(),
+		K8s:              k8sClient,
+		RegistryAddr:     registryAddr,
+		RegistryInsecure: registryInsecure,
+		CRDNamespace:     crdNamespace,
+		ChallengesDir:    challengesDir,
+		DataDir:          dataDir,
+		InternalAPIKey:   internalAPIKey,
+		ServerHost:       serverHost,
+		ServerPort:       serverPort,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}

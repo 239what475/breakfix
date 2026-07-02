@@ -193,6 +193,20 @@ test.describe('API Endpoints (Direct)', () => {
     expect(res.status()).toBe(401)
   })
 
+  test('POST /api/verify/submissions requires auth', async ({ request }) => {
+    const res = await request.fetch(BASE + '/api/verify/submissions', {
+      method: 'POST',
+      multipart: {
+        artifact: {
+          name: 'demo.tar.gz',
+          mimeType: 'application/gzip',
+          buffer: Buffer.from('demo'),
+        },
+      },
+    })
+    expect(res.status()).toBe(401)
+  })
+
   test('GET /api/openapi.json returns spec', async ({ request }) => {
     const res = await request.get(BASE + '/api/openapi.json')
     expect(res.ok()).toBeTruthy()

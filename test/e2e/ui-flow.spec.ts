@@ -213,7 +213,7 @@ test.describe('UI Flow', () => {
     await expect(page.locator('.job-status-card')).toBeVisible({ timeout: 15000 })
     await expect(page.locator('.job-status-card')).toContainText(/queued|running|success|failed/)
     await expect(page.locator('.job-status-card')).toContainText(/Job gen-/)
-    await expect(page.locator('.job-status-card')).toContainText(/building and verifying challenge|challenge .* generated|generation failed/i, { timeout: 30000 })
+    await expect(page.locator('.job-status-card')).toContainText(/generating challenge files|artifact submitted, verification running|challenge .* generated|generation failed/i, { timeout: 30000 })
 
     await page.waitForTimeout(8000)
     const jobText = (await page.locator('.job-status-card').textContent()) ?? ''

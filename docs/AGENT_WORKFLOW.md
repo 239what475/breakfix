@@ -195,7 +195,7 @@ Judge 不知道 Worker 的思考过程，不知道它试了几次、怎么想的
 lab 操作不经过 LLM 决策——Go 代码通过 client-go 提供确定性的 MCP 工具，Claude Code 调用：
 
 ```go
-labCreate(ctx)    → client-go CreatePod (breakfix-base 镜像)
+labCreate(ctx)    → client-go CreatePod (registry 中的 breakfix-base 镜像)
 labExec(pod, script) → client-go ExecInPod
 labVerify(pod)    → client-go CopyToPod(verify.sh) + ExecInPod
 labLogs(pod)      → client-go GetPodLogs

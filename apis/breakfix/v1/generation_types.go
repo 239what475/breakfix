@@ -25,13 +25,14 @@ type GenerationSpec struct {
 }
 
 type GenerationStatus struct {
-	Phase       GenerationPhase `json:"phase"`
-	JobName     string          `json:"jobName,omitempty"`
-	PodName     string          `json:"podName,omitempty"`
-	Challenge   *ChallengeSpec  `json:"challenge,omitempty"`
-	Message     string          `json:"message,omitempty"`
-	StartedAt   *metav1.Time    `json:"startedAt,omitempty"`
-	CompletedAt *metav1.Time    `json:"completedAt,omitempty"`
+	Phase        GenerationPhase `json:"phase"`
+	JobName      string          `json:"jobName,omitempty"`
+	PodName      string          `json:"podName,omitempty"`
+	Challenge    *ChallengeSpec  `json:"challenge,omitempty"`
+	VerifyTaskRef string         `json:"verifyTaskRef,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	StartedAt    *metav1.Time    `json:"startedAt,omitempty"`
+	CompletedAt  *metav1.Time    `json:"completedAt,omitempty"`
 }
 
 type ChallengeDraft struct {
