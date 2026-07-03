@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -47,6 +48,31 @@ func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, s
 		output += stderr.String()
 	}
 	return exitCode, strings.TrimSpace(output), nil
+}
+
+// WaitForFileInPod polls until the target file exists inside the pod.
+func (c *Client) WaitForFileInPod(namespace, podName, path string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	checkCmd := fmt.Sprintf("test -f %q", path)
+	for {
+		exitCode, output, err := c.ExecInPod(namespace, podName, "bash", "-lc", checkCmd)
+		if err == nil && exitCode == 0 {
+			return nil
+		}
+		if exitCode != 0 && strings.TrimSpace(output) == "" {
+			output = "file not present yet"
+		}
+		select {
+		case <-ctx.Done():
+			if err != nil {
+				return fmt.Errorf("timeout waiting for file %s in pod %s: %w", path, podName, err)
+			}
+			return fmt.Errorf("timeout waiting for file %s in pod %s: %s", path, podName, strings.TrimSpace(output))
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // ExecPTY opens a PTY session via client-go remotecommand.

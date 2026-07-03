@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/gorilla/websocket"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,7 +27,7 @@ type wsMsg struct {
 	Rows uint32 `json:"rows,omitempty"`
 }
 
-func wsUpgrade(w http.ResponseWriter, r *http.Request, inst *breakfixv1.Instance, k8sClient *k8s.Client, crdNamespace string, cooldownMin int) {
+func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, crdNamespace string, cooldownMin int) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade", "err", err)
@@ -67,18 +66,33 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, inst *breakfixv1.Instance
 		}
 	}()
 
-	sessionName := fmt.Sprintf("breakfix-%s", inst.Name)
-	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, inst.Status.Namespace, inst.Status.PodName, sessionName)
+	sessionName := fmt.Sprintf("breakfix-%s", env.Name)
+	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, env.Namespace, env.WorkspacePod, sessionName)
 
-	// On disconnect, start cooldown
-	if inst.Status.Phase == breakfixv1.InstanceRunning {
-		drainTime := metav1.NewTime(time.Now().Add(time.Duration(cooldownMin) * time.Minute))
-		inst.Status.Phase = breakfixv1.InstanceDraining
-		inst.Status.CooldownUntil = &drainTime
-		if _, updateErr := k8sClient.UpdateInstanceStatus(r.Context(), crdNamespace, inst); updateErr != nil {
-			slog.Error("failed to start draining", "err", updateErr, "instance", inst.Name)
+	// On disconnect, mark the environment with an expiry deadline for auto-reclaim.
+	if env.Phase == "Ready" {
+		expiresAt := metav1.NewTime(time.Now().Add(time.Duration(cooldownMin) * time.Minute))
+		switch env.Runtime {
+		case "container":
+			current, getErr := k8sClient.GetContainerEnvironment(r.Context(), crdNamespace, env.Name)
+			if getErr == nil {
+				current.Status.Phase = "Draining"
+				current.Status.ExpiresAt = &expiresAt
+				if _, updateErr := k8sClient.UpdateContainerEnvironmentStatus(r.Context(), crdNamespace, current); updateErr != nil {
+					slog.Error("failed to start draining", "err", updateErr, "environment", env.Name)
+				}
+			}
+		case "vcluster":
+			current, getErr := k8sClient.GetVClusterEnvironment(r.Context(), crdNamespace, env.Name)
+			if getErr == nil {
+				current.Status.Phase = "Draining"
+				current.Status.ExpiresAt = &expiresAt
+				if _, updateErr := k8sClient.UpdateVClusterEnvironmentStatus(r.Context(), crdNamespace, current); updateErr != nil {
+					slog.Error("failed to start draining", "err", updateErr, "environment", env.Name)
+				}
+			}
 		}
-		slog.Info("instance draining", "instance", inst.Name, "cooldown_min", cooldownMin)
+		slog.Info("environment draining", "environment", env.Name, "expires_in_min", cooldownMin)
 	}
 
 	if err != nil {

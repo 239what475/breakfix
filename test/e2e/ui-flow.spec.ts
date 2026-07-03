@@ -61,6 +61,14 @@ async function selectCleanupLogs(page: any) {
   await challengeButton.click()
 }
 
+async function selectVclusterSmoke(page: any) {
+  const challengeButton = page.getByRole('button', { name: /检查 vcluster 连接/ })
+  await expect(challengeButton).toBeVisible({ timeout: 10000 })
+  await challengeButton.click()
+  await expect(page.locator('.terminal-empty-card h2')).toContainText('检查 vcluster 连接')
+  await expect(page.locator('.terminal-empty-card .brief-description')).toContainText('你正在一个带有 kubeconfig 的工作容器中排查 Kubernetes 环境。')
+}
+
 test.describe('UI Flow', () => {
   test('manual flow with real challenge', async ({ page }) => {
     test.setTimeout(180000)
@@ -93,6 +101,38 @@ test.describe('UI Flow', () => {
     expect(hasPageScroll).toBe(false)
 
     await page.screenshot({ path: '/tmp/breakfix-terminal-live.png', fullPage: true })
+  })
+
+  test('vcluster challenge flow works end-to-end through the web terminal', async ({ page }) => {
+    test.setTimeout(240000)
+
+    const user = `vcluster-ui-${Date.now()}`
+
+    await registerAndLogin(page, user)
+    await selectVclusterSmoke(page)
+
+    await page.locator('main').getByRole('button', { name: 'Start Challenge' }).click()
+
+    await expect(page.locator('.terminal-frame')).toBeVisible({ timeout: 120000 })
+    await expect(page.locator('.terminal-overlay')).toBeHidden({ timeout: 120000 })
+
+    const terminalSurface = page.locator('.terminal-surface')
+    await terminalSurface.click({ position: { x: 120, y: 120 } })
+    await page.keyboard.type('kubectl get ns >/workspace/namespaces.txt', { delay: 20 })
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(1500)
+    await page.keyboard.type('wc -l /workspace/namespaces.txt', { delay: 20 })
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('.terminal-frame')).toContainText('/workspace/namespaces.txt', { timeout: 15000 })
+
+    await page.locator('.terminal-actions').getByRole('button', { name: 'Submit', exact: true }).click()
+
+    const resultBar = page.locator('.result-bar')
+    await expect(resultBar).toBeVisible({ timeout: 60000 })
+    await expect(resultBar).toContainText('Verification passed', { timeout: 60000 })
+
+    await page.screenshot({ path: '/tmp/breakfix-vcluster-smoke-pass.png', fullPage: true })
   })
 
   test('resume reconnects to an existing running environment after disconnect', async ({ browser }) => {
@@ -213,7 +253,7 @@ test.describe('UI Flow', () => {
     await expect(page.locator('.job-status-card')).toBeVisible({ timeout: 15000 })
     await expect(page.locator('.job-status-card')).toContainText(/queued|running|success|failed/)
     await expect(page.locator('.job-status-card')).toContainText(/Job gen-/)
-    await expect(page.locator('.job-status-card')).toContainText(/generating challenge files|artifact submitted, verification running|challenge .* generated|generation failed/i, { timeout: 30000 })
+    await expect(page.locator('.job-status-card')).toContainText(/generating challenge files|building and verifying challenge|artifact submitted for verification|artifact submitted, verification running|challenge .* generated|generation failed/i, { timeout: 30000 })
 
     await page.waitForTimeout(8000)
     const jobText = (await page.locator('.job-status-card').textContent()) ?? ''

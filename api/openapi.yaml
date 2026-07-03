@@ -68,8 +68,8 @@ paths:
   /challenges/{id}/start:
     post:
       operationId: startChallenge
-      summary: Start or resume a challenge instance
-      tags: [instances]
+      summary: Start or resume a challenge environment
+      tags: [environments]
       security:
         - bearerAuth: []
       parameters:
@@ -80,7 +80,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Instance ready
+          description: Environment ready
           content:
             application/json:
               schema:
@@ -92,7 +92,7 @@ paths:
     post:
       operationId: submitChallenge
       summary: Submit solution for verification
-      tags: [instances]
+      tags: [environments]
       security:
         - bearerAuth: []
       parameters:
@@ -115,7 +115,7 @@ paths:
     post:
       operationId: resetChallenge
       summary: Reset challenge to initial state
-      tags: [instances]
+      tags: [environments]
       security:
         - bearerAuth: []
       parameters:
@@ -131,6 +131,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResetResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/stop:
+    post:
+      operationId: stopChallenge
+      summary: Stop the current challenge environment
+      tags: [environments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Challenge stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StopResponse"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -323,6 +346,9 @@ components:
           type: string
         type:
           type: string
+        runtime:
+          type: string
+          enum: [container, vcluster]
         difficulty:
           type: string
         tags:
@@ -363,6 +389,13 @@ components:
     ResetResponse:
       type: object
       properties:
+        challenge_title:
+          type: string
+    StopResponse:
+      type: object
+      properties:
+        stopped:
+          type: boolean
         challenge_title:
           type: string
 

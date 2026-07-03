@@ -17,6 +17,7 @@ type Entry struct {
 	ID          string
 	Title       string
 	Type        string
+	Runtime     string
 	Difficulty  string
 	Tags        []string
 	Description string
@@ -28,6 +29,7 @@ type Spec struct {
 	ID          string   `yaml:"id"`
 	Title       string   `yaml:"title"`
 	Type        string   `yaml:"type"`
+	Runtime     string   `yaml:"runtime"`
 	Difficulty  string   `yaml:"difficulty"`
 	Tags        []string `yaml:"tags"`
 	Description string   `yaml:"description"`
@@ -103,6 +105,9 @@ func LoadDir(dir string) (*Entry, error) {
 	if spec.Type == "" {
 		spec.Type = "script"
 	}
+	if spec.Runtime == "" {
+		spec.Runtime = "container"
+	}
 	if spec.Image == "" {
 		spec.Image = fmt.Sprintf("breakfix-%s:dev", spec.ID)
 	}
@@ -111,6 +116,7 @@ func LoadDir(dir string) (*Entry, error) {
 		ID:          spec.ID,
 		Title:       spec.Title,
 		Type:        spec.Type,
+		Runtime:     spec.Runtime,
 		Difficulty:  spec.Difficulty,
 		Tags:        append([]string{}, spec.Tags...),
 		Description: spec.Description,

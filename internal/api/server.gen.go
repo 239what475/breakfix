@@ -50,6 +50,7 @@ type ChallengeSummary struct {
 	Description *string   `json:"description,omitempty"`
 	Difficulty  *string   `json:"difficulty,omitempty"`
 	Id          *string   `json:"id,omitempty"`
+	Runtime     *string   `json:"runtime,omitempty"`
 	Solved      *bool     `json:"solved,omitempty"`
 	Tags        *[]string `json:"tags,omitempty"`
 	Title       *string   `json:"title,omitempty"`
@@ -126,6 +127,12 @@ type ResetResponse struct {
 // StartResponse defines model for StartResponse.
 type StartResponse struct {
 	ChallengeTitle *string `json:"challenge_title,omitempty"`
+}
+
+// StopResponse defines model for StopResponse.
+type StopResponse struct {
+	ChallengeTitle *string `json:"challenge_title,omitempty"`
+	Stopped        *bool   `json:"stopped,omitempty"`
 }
 
 // SubmitResponse defines model for SubmitResponse.
@@ -208,9 +215,12 @@ type ServerInterface interface {
 	// Reset challenge to initial state
 	// (POST /challenges/{id}/reset)
 	ResetChallenge(c *gin.Context, id string)
-	// Start or resume a challenge instance
+	// Start or resume a challenge environment
 	// (POST /challenges/{id}/start)
 	StartChallenge(c *gin.Context, id string)
+	// Stop the current challenge environment
+	// (POST /challenges/{id}/stop)
+	StopChallenge(c *gin.Context, id string)
 	// Submit solution for verification
 	// (POST /challenges/{id}/submit)
 	SubmitChallenge(c *gin.Context, id string)
@@ -333,6 +343,33 @@ func (siw *ServerInterfaceWrapper) StartChallenge(c *gin.Context) {
 	}
 
 	siw.Handler.StartChallenge(c, id)
+}
+
+// StopChallenge operation middleware
+func (siw *ServerInterfaceWrapper) StopChallenge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StopChallenge(c, id)
 }
 
 // SubmitChallenge operation middleware
@@ -493,6 +530,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
 	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
+	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/submit", wrapper.SubmitChallenge)
 	router.POST(options.BaseURL+"/generate", wrapper.CreateGenerationJob)
 	router.POST(options.BaseURL+"/generate/draft", wrapper.ReviewGenerationDraft)
@@ -506,33 +544,34 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"pXZhpQ1NXo9fjyORS76dbv8NAAD//w==",
+	"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",
+	"AAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

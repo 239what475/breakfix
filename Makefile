@@ -29,6 +29,10 @@ SERVICE     ?= breakfix-gateway
 REGISTRY    ?= localhost:5000
 ACR_NS      ?= break-fix
 KIND_CLUSTER ?= breakfix-dev
+DEV_IMAGE_PREFIX ?= $(shell awk '/^registry_addr:/{print $$2}' breakfix-local.yaml 2>/dev/null)
+ifeq ($(strip $(DEV_IMAGE_PREFIX)),)
+DEV_IMAGE_PREFIX := $(REGISTRY)/$(ACR_NS)
+endif
 
 BIN_DIR  := bin
 DIST_DIR := dist
@@ -91,7 +95,8 @@ dev-data:
 
 dev-crd:
 	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null 2>&1 || true
-	@kubectl apply -f deploy/crd/breakfix.dev_instances.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/crd/breakfix.dev_containerenvironments.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/crd/breakfix.dev_vclusterenvironments.yaml >/dev/null 2>&1 || true
 	@kubectl apply -f deploy/crd/breakfix.dev_verifytasks.yaml >/dev/null 2>&1 || true
 	@echo "  ✓ CRDs applied"
 
@@ -183,10 +188,13 @@ deploy-base: _guard-server
 	fi; \
 	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
 	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
-	docker build -t breakfix-base:latest ./images/base; \
+	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./images/base; \
 	docker tag breakfix-base:latest $$pub/$$acr_ns/breakfix-base:latest; \
-	docker push $$pub/$$acr_ns/breakfix-base:latest
-	@echo "  ✓ breakfix-base → ACR"
+	docker push $$pub/$$acr_ns/breakfix-base:latest; \
+	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./images/k8s-base; \
+	docker tag breakfix-k8s-base:latest $$pub/$$acr_ns/breakfix-k8s-base:latest; \
+	docker push $$pub/$$acr_ns/breakfix-k8s-base:latest
+	@echo "  ✓ breakfix-base + breakfix-k8s-base → ACR"
 
 deploy-image: _guard-server
 	@[ -f breakfix.yaml ] || { echo "ERROR: breakfix.yaml not found."; exit 1; }
@@ -217,18 +225,30 @@ deploy: deploy-generator deploy-images deploy-gateway
 # ═══════════════════════════════════════════════════════════════
 
 docker-base:
-	docker build -t breakfix-base:latest ./images/base
+	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./images/base
 	docker tag breakfix-base:latest $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
+	docker tag breakfix-base:latest $(DEV_IMAGE_PREFIX)/breakfix-base:latest
 	docker push $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
 	kind load docker-image breakfix-base:latest --name $(KIND_CLUSTER)
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-base:latest --name $(KIND_CLUSTER)
-	@echo "  ✓ breakfix-base → registry + Kind"
+	kind load docker-image $(DEV_IMAGE_PREFIX)/breakfix-base:latest --name $(KIND_CLUSTER)
+	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./images/k8s-base
+	docker tag breakfix-k8s-base:latest $(REGISTRY)/$(ACR_NS)/breakfix-k8s-base:latest
+	docker tag breakfix-k8s-base:latest $(DEV_IMAGE_PREFIX)/breakfix-k8s-base:latest
+	docker push $(REGISTRY)/$(ACR_NS)/breakfix-k8s-base:latest
+	kind load docker-image breakfix-k8s-base:latest --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-k8s-base:latest --name $(KIND_CLUSTER)
+	kind load docker-image $(DEV_IMAGE_PREFIX)/breakfix-k8s-base:latest --name $(KIND_CLUSTER)
+	@echo "  ✓ breakfix-base + breakfix-k8s-base → registry + Kind"
 
 docker-challenge:
 	docker build -t $(NAME):v1 ./challenges/$(NAME)
 	docker tag $(NAME):v1 $(REGISTRY)/$(ACR_NS)/$(NAME):v1
+	docker tag $(NAME):v1 $(DEV_IMAGE_PREFIX)/$(NAME):v1
 	docker push $(REGISTRY)/$(ACR_NS)/$(NAME):v1
+	kind load docker-image $(NAME):v1 --name $(KIND_CLUSTER)
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/$(NAME):v1 --name $(KIND_CLUSTER)
+	kind load docker-image $(DEV_IMAGE_PREFIX)/$(NAME):v1 --name $(KIND_CLUSTER)
 	@echo "  ✓ $(NAME) → registry + Kind"
 
 docker-push:

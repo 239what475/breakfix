@@ -22,6 +22,7 @@ import (
 	"github.com/breakfix/breakfix/internal/k8s"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
 )
 
 func main() {
@@ -67,6 +68,9 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: ":" + strconv.Itoa(cfg.HealthPort),
 		LeaderElection:         false,
+		Cache: crcache.Options{
+			SyncPeriod: func() *time.Duration { d := time.Minute; return &d }(),
+		},
 	})
 	if err != nil {
 		slog.Error("failed to create manager", "err", err)

@@ -1,5 +1,6 @@
 id: cleanup-logs
 type: script
+runtime: container
 title: "批量压缩旧日志"
 difficulty: easy
 tags:

@@ -76,6 +76,8 @@ spec:
                       type: string
                     type:
                       type: string
+                    runtime:
+                      type: string
                     difficulty:
                       type: string
                     tags:

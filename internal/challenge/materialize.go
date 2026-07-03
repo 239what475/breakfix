@@ -83,6 +83,11 @@ func ValidateDir(dir string) (*Entry, error) {
 	default:
 		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
 	}
+	switch strings.TrimSpace(challenge.Runtime) {
+	case "", "container", "vcluster":
+	default:
+		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
+	}
 	switch strings.TrimSpace(challenge.Difficulty) {
 	case "easy", "medium", "hard":
 	default:

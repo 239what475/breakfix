@@ -9,6 +9,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// GetNamespace returns the namespace object.
+func (c *Client) GetNamespace(name string) (*corev1.Namespace, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return c.clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+}
+
 // EnsureNamespace creates the namespace if it doesn't exist.
 func (c *Client) EnsureNamespace(name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

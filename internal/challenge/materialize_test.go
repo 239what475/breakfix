@@ -12,7 +12,7 @@ func TestListAndGet(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), "id: demo-task\ntitle: Demo\ntype: script\ndifficulty: easy\ntags:\n  - linux\nimage: demo-task:v1\ndescription: demo\n")
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), "id: demo-task\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: demo-task:v1\ndescription: demo\n")
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
 	writeFile(t, filepath.Join(dir, "verify.sh"), "#!/bin/sh\nexit 0\n")
 	writeFile(t, filepath.Join(dir, "answer.sh"), "#!/bin/sh\nexit 0\n")
@@ -35,12 +35,15 @@ func TestListAndGet(t *testing.T) {
 	if challenge.Title != "Demo" {
 		t.Fatalf("unexpected title %q", challenge.Title)
 	}
+	if challenge.Runtime != "container" {
+		t.Fatalf("unexpected runtime %q", challenge.Runtime)
+	}
 }
 
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
 	_, err := Materialize(root, "fresh-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: fresh-task\ntitle: Fresh\ntype: script\ndifficulty: easy\ntags:\n  - linux\nimage: fresh-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: fresh-task\ntitle: Fresh\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: fresh-task:v1\ndescription: demo\n")
 		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
 		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
 		writeFile(t, filepath.Join(dst, "question.md"), "fix it\n")
@@ -61,7 +64,7 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
 	_, err := Materialize(root, "broken-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\ntitle: Broken\ntype: script\ndifficulty: easy\ntags:\n  - linux\nimage: broken-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
@@ -75,7 +78,7 @@ func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 
 func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\ndifficulty: \ntags: []\ndescription: \"\"\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ntags: []\ndescription: \"\"\n")
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
 	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
@@ -84,6 +87,24 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 
 	if _, err := ValidateDir(root); err == nil {
 		t.Fatal("expected ValidateDir to reject missing metadata")
+	}
+}
+
+func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: vcluster-demo\ntitle: VCluster Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: vcluster-demo:v1\n")
+	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
+	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
+	writeFile(t, filepath.Join(root, "verify.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+
+	entry, err := ValidateDir(root)
+	if err != nil {
+		t.Fatalf("expected vcluster runtime to validate, got %v", err)
+	}
+	if entry.Runtime != "vcluster" {
+		t.Fatalf("unexpected runtime %q", entry.Runtime)
 	}
 }
 

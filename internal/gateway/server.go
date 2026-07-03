@@ -56,6 +56,12 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 			h.ResetChallenge(c, c.Param("id"))
 		}
 	})
+	router.POST("/api/challenges/:id/stop", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.StopChallenge(c, c.Param("id"))
+		}
+	})
 	router.POST("/api/generate/draft", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

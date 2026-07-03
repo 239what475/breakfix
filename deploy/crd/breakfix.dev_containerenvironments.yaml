@@ -1,14 +1,14 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: instances.breakfix.dev
+  name: containerenvironments.breakfix.dev
 spec:
   group: breakfix.dev
   names:
-    kind: Instance
-    listKind: InstanceList
-    plural: instances
-    singular: instance
+    kind: ContainerEnvironment
+    listKind: ContainerEnvironmentList
+    plural: containerenvironments
+    singular: containerenvironment
   scope: Namespaced
   versions:
     - name: v1
@@ -30,8 +30,6 @@ spec:
                   type: string
                 image:
                   type: string
-                verifyScript:
-                  type: string
                 submit:
                   type: boolean
             status:
@@ -39,17 +37,19 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Running, Draining, Destroyed]
-                podName:
-                  type: string
+                  enum: [Pending, Provisioning, Ready, Draining, Destroyed, Failed]
                 namespace:
+                  type: string
+                workspacePodName:
                   type: string
                 startedAt:
                   type: string
                   format: date-time
-                cooldownUntil:
+                expiresAt:
                   type: string
                   format: date-time
+                message:
+                  type: string
                 submitResult:
                   type: object
                   properties:

@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
 // BuildAndPush builds the challenge image and pushes to the registry.
 // Uses buildkitd + buildctl (already in the Docker image).
-func BuildAndPush(ctx context.Context, imageName, contextDir string, insecure bool) bool {
+func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, insecure bool) bool {
 	sock := "unix:///tmp/buildkit.sock"
-	baseImage := baseImageForTarget(imageName)
 
 	// Write buildkitd config — only add insecure flags when needed
 	configDir := "/tmp/buildkit-config"
@@ -23,7 +23,7 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string, insecure bo
 	if insecure {
 		// Extract registry host from imageName (first segment before /)
 		host := imageName
-		if idx := firstSlash(imageName); idx >= 0 {
+		if idx := strings.IndexByte(imageName, '/'); idx >= 0 {
 			host = imageName[:idx]
 		}
 		cfg = fmt.Sprintf(`
@@ -64,52 +64,29 @@ func BuildAndPush(ctx context.Context, imageName, contextDir string, insecure bo
 
 	// Build + push via buildctl
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "buildctl",
+	buildArgs := []string{
 		"--addr", sock,
 		"build",
 		"--frontend", "dockerfile.v0",
-		"--local", "context="+contextDir,
-		"--local", "dockerfile="+contextDir,
-		"--opt", "build-arg:BREAKFIX_BASE_IMAGE="+baseImage,
-		"--output", "type=image,name="+imageName+",push=true",
-	)
+		"--local", "context=" + contextDir,
+		"--local", "dockerfile=" + contextDir,
+	}
+	if strings.TrimSpace(baseImage) != "" {
+		buildArgs = append(buildArgs, "--opt", "build-arg:BREAKFIX_BASE_IMAGE="+baseImage)
+	}
+	buildArgs = append(buildArgs, "--output", "type=image,name="+imageName+",push=true")
+
+	cmd := exec.CommandContext(ctx, "buildctl", append(buildArgs, "--progress", "plain")...)
 	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("buildctl failed", "err", err, "output", string(output))
 		return false
 	}
+	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
+		slog.Info("buildctl output", "output", trimmed)
+	}
 
 	slog.Info("image built and pushed", "image", imageName, "duration", time.Since(start))
 	return true
-}
-
-func firstSlash(s string) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '/' {
-			return i
-		}
-	}
-	return -1
-}
-
-func baseImageForTarget(imageName string) string {
-	repoPrefix := imageName
-	if idx := lastSlash(imageName); idx >= 0 {
-		repoPrefix = imageName[:idx]
-	}
-	if repoPrefix == "" {
-		return "breakfix-base:latest"
-	}
-	return repoPrefix + "/breakfix-base:latest"
-}
-
-func lastSlash(s string) int {
-	last := -1
-	for i := 0; i < len(s); i++ {
-		if s[i] == '/' {
-			last = i
-		}
-	}
-	return last
 }

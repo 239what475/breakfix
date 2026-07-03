@@ -6,14 +6,18 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"os/user"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	claudecode "github.com/239what475/eino-claude-code"
@@ -24,6 +28,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"gopkg.in/yaml.v3"
 )
@@ -44,21 +49,26 @@ type Generator struct {
 	challengeID string
 }
 
+const claudeRunAsNode = "/usr/local/bin/breakfix-claude"
+
 func (g *Generator) Run(ctx context.Context) error {
 	if absOutput, err := filepath.Abs(g.OutputDir); err == nil {
 		g.OutputDir = absOutput
 	}
-	g.workDir = filepath.Join(g.OutputDir, ".gen-"+sanitizeID(g.identitySeed()))
+	g.workDir = filepath.Join(g.OutputDir, ".gen-"+challenge.DeriveID(g.identitySeed()))
 	if err := os.RemoveAll(g.workDir); err != nil {
 		slog.Error("failed to clean workdir", "err", err, "dir", g.workDir)
 	}
-	g.challengeID = sanitizeID(g.identitySeed())
+	g.challengeID = challenge.DeriveID(g.identitySeed())
 	chalDir := filepath.Join(g.workDir, g.challengeID)
 	if err := os.MkdirAll(chalDir, 0755); err != nil {
 		return fmt.Errorf("create challenge dir: %w", err)
 	}
+	if err := ensureClaudeWorkspaceWritable(g.workDir); err != nil {
+		return fmt.Errorf("prepare claude workspace permissions: %w", err)
+	}
 
-	slog.Info("generator started", "title", g.defaultTitle(), "challengeID", g.challengeID)
+	slog.Info("generator started", "title", g.defaultTitle(), "generationID", g.GenerationID, "challengeID", g.challengeID, "workDir", g.workDir)
 	genStart := time.Now()
 
 	k8sClient, err := k8s.New(g.Kubeconfig)
@@ -72,22 +82,36 @@ func (g *Generator) Run(ctx context.Context) error {
 
 	for round := 0; round < 5; round++ {
 		roundStart := time.Now()
-		slog.Info("round start", "n", round+1)
+		slog.Info("round start", "n", round+1, "generationID", g.GenerationID, "challengeID", g.challengeID)
 
 		gStart := time.Now()
+		slog.Info("phase start", "phase", "generate", "round", round+1, "runtimeHint", runtimeHint(g.prefersVClusterAuthoring()))
 		if err := g.phaseGenerate(ctx, chalDir, labTools, judgeFeedback); err != nil {
 			slog.Error("phase failed", "phase", "generate", "round", round+1, "duration", time.Since(gStart), "err", err)
 			continue
 		}
 		slog.Info("phase done", "phase", "generate", "round", round+1, "duration", time.Since(gStart))
 
+		validateStart := time.Now()
 		if err := g.validateChallengeManifest(chalDir); err != nil {
 			judgeFeedback = "challenge 文件结构或元数据不完整: " + err.Error()
+			slog.Info("phase failed", "phase", "validate_manifest", "round", round+1, "duration", time.Since(validateStart), "feedback", truncateStr(judgeFeedback, 300))
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "artifact_invalid", "feedback", truncateStr(judgeFeedback, 300))
 			continue
 		}
+		slog.Info("phase done", "phase", "validate_manifest", "round", round+1, "duration", time.Since(validateStart))
+
+		semanticStart := time.Now()
+		if err := g.validateChallengeSemantics(chalDir); err != nil {
+			judgeFeedback = "challenge 语义检查失败: " + err.Error()
+			slog.Info("phase failed", "phase", "validate_semantics", "round", round+1, "duration", time.Since(semanticStart), "feedback", truncateStr(judgeFeedback, 300))
+			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "semantic_invalid", "feedback", truncateStr(judgeFeedback, 300))
+			continue
+		}
+		slog.Info("phase done", "phase", "validate_semantics", "round", round+1, "duration", time.Since(semanticStart))
 
 		jStart := time.Now()
+		slog.Info("phase start", "phase", "judge", "round", round+1)
 		passed, feedback := g.phaseJudge(ctx, chalDir)
 		judgeFeedback = feedback
 		slog.Info("phase done", "phase", "judge", "round", round+1, "duration", time.Since(jStart), "passed", passed, "feedback", truncateStr(feedback, 200))
@@ -97,6 +121,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		}
 
 		uStart := time.Now()
+		slog.Info("phase start", "phase", "submit", "round", round+1)
 		verifyPassed, verifyFeedback, err := g.submitAndWaitVerify(ctx, chalDir)
 		if err != nil {
 			slog.Error("phase failed", "phase", "submit", "round", round+1, "duration", time.Since(uStart), "err", err)
@@ -117,10 +142,32 @@ func (g *Generator) Run(ctx context.Context) error {
 }
 
 func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools []tool.InvokableTool, judgeFeedback string) error {
+	timeout := 12 * time.Minute
+	if g.prefersVClusterAuthoring() {
+		timeout = 8 * time.Minute
+	}
+	baseCtx, stop := context.WithTimeout(ctx, timeout)
+	defer stop()
+
+	runCtx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
+
+	tools := []string{"Read", "Write", "Edit", "Bash"}
+	customTools := labTools
+	maxTurns := 40
+	if g.prefersVClusterAuthoring() {
+		tools = []string{"Read", "Write", "Edit"}
+		customTools = nil
+		maxTurns = 20
+	}
+
 	agent, err := claudecode.New(
+		claudecode.WithBin(claudeRunAsNode),
 		claudecode.WithSystemPrompt(WorkerSystemPrompt(g.RegistryAddr)),
-		claudecode.WithTools("Read", "Write", "Edit", "Bash"),
-		claudecode.WithCustomTools(labTools...),
+		claudecode.WithTools(tools...),
+		claudecode.WithCustomTools(customTools...),
+		claudecode.WithMaxTurns(maxTurns),
+		claudecode.WithNoSessionPersistence(true),
 		claudecode.WithCWD(chalDir),
 		claudecode.WithAddDirs(g.OutputDir),
 		claudecode.WithPermissionMode("acceptEdits"),
@@ -129,6 +176,7 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 	if err != nil {
 		return fmt.Errorf("create worker agent: %w", err)
 	}
+	slog.Info("agent configured", "phase", "generate", "cwd", chalDir, "maxTurns", maxTurns, "toolCount", len(tools), "customToolCount", len(customTools), "timeout", timeout)
 
 	var prompt string
 	if judgeFeedback == "" {
@@ -137,12 +185,37 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.draftContext(), chalDir)
 	}
 	slog.Info("agent prompt", "phase", "generate", "prompt", truncateStr(prompt, 500))
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
-	events := runner.Run(ctx, []adk.Message{schema.UserMessage(prompt)})
-	return g.drainEvents(events)
+	runner := adk.NewRunner(runCtx, adk.RunnerConfig{Agent: agent})
+	events := runner.Run(runCtx, []adk.Message{schema.UserMessage(prompt)})
+
+	var lastEvent atomic.Int64
+	lastEvent.Store(time.Now().UnixNano())
+	var quiesced atomic.Bool
+	go g.watchGenerateQuiescence(runCtx, chalDir, &lastEvent, &quiesced, cancel)
+
+	err = g.drainEvents(events, func() {
+		lastEvent.Store(time.Now().UnixNano())
+	})
+	if quiesced.Load() && (err == nil || errors.Is(err, context.Canceled)) {
+		slog.Info("phase done", "phase", "generate", "mode", "vcluster_quiesced")
+		return nil
+	}
+	if errors.Is(baseCtx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("generate phase timeout after %s", timeout)
+	}
+	if err != nil && g.prefersVClusterAuthoring() {
+		if runtime, ready, _ := generatedChallengeState(chalDir); runtime == "vcluster" && ready {
+			slog.Info("phase done", "phase", "generate", "mode", "vcluster_salvaged_after_agent_error", "err", err.Error())
+			return nil
+		}
+	}
+	return err
 }
 
 func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, string) {
+	judgeCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
 	var fileContents strings.Builder
 	entries, _ := os.ReadDir(chalDir)
 	for _, e := range entries {
@@ -154,8 +227,11 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 	}
 
 	agent, err := claudecode.New(
+		claudecode.WithBin(claudeRunAsNode),
 		claudecode.WithSystemPrompt(JudgeSystemPrompt()),
-		claudecode.WithTools("Read"),
+		claudecode.WithTools(),
+		claudecode.WithMaxTurns(8),
+		claudecode.WithNoSessionPersistence(true),
 		claudecode.WithCWD(chalDir),
 		claudecode.WithPermissionMode("acceptEdits"),
 		claudecode.WithStderr(func(line string) { slog.Debug("claude", "msg", line) }),
@@ -164,11 +240,12 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 		slog.Error("create judge agent", "err", err)
 		return false, ""
 	}
+	slog.Info("agent configured", "phase", "judge", "cwd", chalDir, "maxTurns", 8, "timeout", 3*time.Minute)
 
 	prompt := fmt.Sprintf(JudgePrompt, g.draftContext(), fileContents.String())
 	slog.Info("agent prompt", "phase", "judge", "prompt_len", len(prompt))
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
-	events := runner.Run(ctx, []adk.Message{schema.UserMessage(prompt)})
+	runner := adk.NewRunner(judgeCtx, adk.RunnerConfig{Agent: agent})
+	events := runner.Run(judgeCtx, []adk.Message{schema.UserMessage(prompt)})
 
 	var lastMsg string
 	for {
@@ -194,8 +271,15 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 			break
 		}
 	}
-	passed := strings.Contains(lastMsg, "PASS") || strings.Contains(lastMsg, `"pass": true`)
-	return passed, lastMsg
+	if errors.Is(judgeCtx.Err(), context.DeadlineExceeded) {
+		return false, "judge 超时，未能在限定时间内完成审核"
+	}
+	msg := strings.TrimSpace(lastMsg)
+	if msg == "" {
+		return false, "judge 未返回 PASS/FAIL，视为审核失败；请直接检查 challenge.yaml、generate.sh、question.md、verify.sh、answer.sh 是否围绕同一套真实环境事实，并确认 verify.sh 不会把滚动更新中的 Terminating 旧 Pod 误判为失败"
+	}
+	passed := strings.HasPrefix(msg, "PASS") || strings.Contains(msg, `"pass": true`)
+	return passed, msg
 }
 
 func (g *Generator) validateChallengeManifest(chalDir string) error {
@@ -222,6 +306,11 @@ func (g *Generator) validateChallengeManifest(chalDir string) error {
 		errs = append(errs, "challenge.yaml 缺少 type")
 	} else if scalarString(spec["type"]) != "script" {
 		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 script，当前为 %q", scalarString(spec["type"])))
+	}
+	switch scalarString(spec["runtime"]) {
+	case "", "container", "vcluster":
+	default:
+		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须为 container/vcluster，当前为 %q", scalarString(spec["runtime"])))
 	}
 	if scalarString(spec["title"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 title")
@@ -264,6 +353,126 @@ func (g *Generator) validateChallengeManifest(chalDir string) error {
 	return nil
 }
 
+func (g *Generator) validateChallengeSemantics(chalDir string) error {
+	entry, err := loadChallengeEntry(chalDir)
+	if err != nil {
+		return err
+	}
+
+	verifyPath := filepath.Join(chalDir, "verify.sh")
+	verifyData, err := os.ReadFile(verifyPath)
+	if err != nil {
+		return fmt.Errorf("read verify.sh: %w", err)
+	}
+	verifyText := string(verifyData)
+
+	var errs []string
+	if entry.Runtime == "vcluster" {
+		if err := validateKubectlPodReadinessPattern(verifyText); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := validateVClusterVerifyNoEphemeralProbePods(verifyText); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := validateVClusterVerifyNoNaivePodHealthLoop(verifyText); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := validateVClusterVerifyNoNaivePodGrepFilter(verifyText); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func loadChallengeEntry(chalDir string) (*breakfixv1.ChallengeSpec, error) {
+	path := filepath.Join(chalDir, "challenge.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read challenge.yaml: %w", err)
+	}
+
+	var spec breakfixv1.ChallengeSpec
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("parse challenge.yaml: %w", err)
+	}
+	spec.Runtime = strings.TrimSpace(spec.Runtime)
+	return &spec, nil
+}
+
+func validateKubectlPodReadinessPattern(verifyText string) error {
+	normalized := strings.ReplaceAll(verifyText, " ", "")
+	normalized = strings.ReplaceAll(normalized, "\t", "")
+
+	badPatterns := []string{
+		"Running\\s+1/1",
+		"Running[[:space:]]+1/1",
+		"Running.*1/1",
+	}
+	for _, pattern := range badPatterns {
+		if strings.Contains(normalized, strings.ReplaceAll(pattern, " ", "")) {
+			return fmt.Errorf("verify.sh 对 `kubectl get pods --no-headers` 的 READY/STATUS 列顺序判断错误：检测到 %q，这会把 `1/1   Running` 误判为失败；应按 `1/1` 在前、`Running` 在后设计匹配", pattern)
+		}
+	}
+	return nil
+}
+
+func validateVClusterVerifyNoEphemeralProbePods(verifyText string) error {
+	normalized := strings.ToLower(verifyText)
+	badSnippets := []string{
+		"kubectl run",
+		"busybox:1.36",
+		"busybox:stable",
+		"--rm -i --restart=never --image=",
+	}
+	for _, snippet := range badSnippets {
+		if strings.Contains(normalized, snippet) {
+			return fmt.Errorf("runtime=vcluster 的 verify.sh 不应依赖 `kubectl run` 拉外部探测镜像或临时 Pod；这会引入镜像可用性和时序不稳定，请改用现有工作负载、Service、endpoints 或 port-forward 等平台内可闭环的验证方式")
+		}
+	}
+	return nil
+}
+
+func validateVClusterVerifyNoNaivePodHealthLoop(verifyText string) error {
+	normalized := strings.ToLower(verifyText)
+	requiredSignals := []string{
+		"kubectl get pods",
+		"while ifs= read -r",
+		"awk '{print $3}'",
+		"awk '{print $2}'",
+		"!= \"running\"",
+		"!= \"1/1\"",
+	}
+	for _, signal := range requiredSignals {
+		if !strings.Contains(normalized, signal) {
+			return nil
+		}
+	}
+	if strings.Contains(normalized, "deletiontimestamp") || strings.Contains(normalized, "ownerreferences") || strings.Contains(normalized, "rollout status") {
+		return nil
+	}
+	return fmt.Errorf("runtime=vcluster 的 verify.sh 不应通过遍历标签下的所有 Pod 并硬判 `Running 1/1` 来验收；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或只检查最终目标 Pod 集，并显式忽略 deletionTimestamp 不为空的旧 Pod")
+}
+
+func validateVClusterVerifyNoNaivePodGrepFilter(verifyText string) error {
+	normalized := strings.ToLower(verifyText)
+	if !strings.Contains(normalized, "kubectl get pods") {
+		return nil
+	}
+	if !strings.Contains(normalized, "grep -v") {
+		return nil
+	}
+	if !strings.Contains(normalized, "1/1") || !strings.Contains(normalized, "running") {
+		return nil
+	}
+	if strings.Contains(normalized, "deletiontimestamp") || strings.Contains(normalized, "ownerreferences") || strings.Contains(normalized, "rollout status") {
+		return nil
+	}
+	return fmt.Errorf("runtime=vcluster 的 verify.sh 不应通过 `kubectl get pods ... | grep -v ... 1/1 ... Running` 这类全量 Pod 过滤方式直接判失败；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或显式过滤 deletionTimestamp 不为空的旧 Pod")
+}
+
 func scalarString(v any) string {
 	if v == nil {
 		return ""
@@ -272,11 +481,14 @@ func scalarString(v any) string {
 }
 
 // drainEvents processes agent events, logging all interactions.
-func (g *Generator) drainEvents(events *adk.AsyncIterator[*adk.AgentEvent]) error {
+func (g *Generator) drainEvents(events *adk.AsyncIterator[*adk.AgentEvent], onEvent func()) error {
 	for {
 		evt, ok := events.Next()
 		if !ok {
 			return nil
+		}
+		if onEvent != nil {
+			onEvent()
 		}
 		if evt.Err != nil {
 			slog.Error("agent error", "err", evt.Err)
@@ -306,41 +518,62 @@ func (g *Generator) drainEvents(events *adk.AsyncIterator[*adk.AgentEvent]) erro
 	}
 }
 
+func (g *Generator) watchGenerateQuiescence(ctx context.Context, chalDir string, lastEvent *atomic.Int64, quiesced *atomic.Bool, cancel context.CancelFunc) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	const idleThreshold = 15 * time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runtime, ready, modTime := generatedChallengeState(chalDir)
+			if runtime != "vcluster" || !ready {
+				continue
+			}
+			last := time.Unix(0, lastEvent.Load())
+			if time.Since(last) < idleThreshold || time.Since(modTime) < idleThreshold {
+				continue
+			}
+			quiesced.Store(true)
+			cancel()
+			return
+		}
+	}
+}
+
+func generatedChallengeState(chalDir string) (runtime string, ready bool, modTime time.Time) {
+	manifestPath := filepath.Join(chalDir, "challenge.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return "", false, time.Time{}
+	}
+
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return "", false, time.Time{}
+	}
+	runtime = scalarString(spec["runtime"])
+
+	required := []string{"challenge.yaml", "Dockerfile", "generate.sh", "question.md", "verify.sh", "answer.sh"}
+	for _, name := range required {
+		info, err := os.Stat(filepath.Join(chalDir, name))
+		if err != nil || info.IsDir() || info.Size() == 0 {
+			return runtime, false, time.Time{}
+		}
+		if info.ModTime().After(modTime) {
+			modTime = info.ModTime()
+		}
+	}
+	return runtime, true, modTime
+}
+
 func truncateStr(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
 	return s[:max] + "..."
-}
-
-func sanitizeID(seed string) string {
-	words := strings.Fields(strings.ToLower(seed))
-	var id string
-	for _, w := range words {
-		clean := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-				return r
-			}
-			return -1
-		}, w)
-		if len(clean) > 0 {
-			if id != "" {
-				id += "-"
-			}
-			id += clean
-			if strings.Count(id, "-") >= 3 {
-				break
-			}
-		}
-	}
-	if id == "" {
-		h := fmt.Sprintf("%x", sum([]byte(seed)))
-		id = "challenge-" + h[:8]
-	}
-	if len(id) > 50 {
-		id = id[:50]
-	}
-	return strings.Trim(id, "-")
 }
 
 func (g *Generator) identitySeed() string {
@@ -354,6 +587,21 @@ func (g *Generator) identitySeed() string {
 		return g.Draft.Description
 	}
 	return "challenge"
+}
+
+func (g *Generator) prefersVClusterAuthoring() bool {
+	if g.Draft == nil {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		g.Draft.EnvironmentShape,
+		g.Draft.Goal,
+		g.Draft.Symptoms,
+		g.Draft.FaultMechanism,
+		g.Draft.AcceptanceCriteria,
+		g.Draft.Description,
+	}, "\n"))
+	return strings.Contains(text, "kubectl") || strings.Contains(text, "kubernetes") || strings.Contains(text, "vcluster")
 }
 
 func (g *Generator) defaultTitle() string {
@@ -386,14 +634,6 @@ func (g *Generator) draftContext() string {
 	return strings.Join(parts, "\n")
 }
 
-func sum(b []byte) [16]byte {
-	var h [16]byte
-	for i, c := range b {
-		h[i%16] ^= c + byte(i)
-	}
-	return h
-}
-
 func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	if strings.TrimSpace(g.GenerationID) == "" {
 		return fmt.Errorf("GENERATION_ID is required")
@@ -412,6 +652,7 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("artifact archived", "generationID", g.GenerationID, "challengeID", g.challengeID, "bytes", len(payload))
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -443,6 +684,7 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("upload artifact: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
+	slog.Info("artifact uploaded", "generationID", g.GenerationID, "challengeID", g.challengeID, "status", resp.StatusCode)
 	return nil
 }
 
@@ -492,6 +734,7 @@ func archiveDir(root string) ([]byte, error) {
 }
 
 func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bool, string, error) {
+	slog.Info("submit verify start", "generationID", g.GenerationID, "challengeID", g.challengeID)
 	if err := g.uploadArtifact(ctx, chalDir); err != nil {
 		return false, "", err
 	}
@@ -499,6 +742,9 @@ func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bo
 	client := &http.Client{Timeout: 20 * time.Second}
 	url := strings.TrimRight(g.GatewayURL, "/") + "/api/generate/jobs/" + g.GenerationID
 	deadline := time.Now().Add(30 * time.Minute)
+	lastStatus := ""
+	lastMessage := ""
+	lastLogAt := time.Time{}
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
@@ -525,6 +771,12 @@ func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bo
 
 		status := strings.ToLower(strings.TrimSpace(ptrString(body.Status)))
 		message := ptrString(body.Message)
+		if status != lastStatus || message != lastMessage || lastLogAt.IsZero() || time.Since(lastLogAt) >= time.Minute {
+			slog.Info("submit verify poll", "generationID", g.GenerationID, "challengeID", g.challengeID, "status", status, "message", truncateStr(message, 200))
+			lastStatus = status
+			lastMessage = message
+			lastLogAt = time.Now()
+		}
 		switch status {
 		case "success":
 			return true, message, nil
@@ -542,4 +794,35 @@ func ptrString(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+func runtimeHint(vcluster bool) string {
+	if vcluster {
+		return "vcluster"
+	}
+	return "container"
+}
+
+func ensureClaudeWorkspaceWritable(path string) error {
+	usr, err := user.Lookup("node")
+	if err != nil {
+		return nil
+	}
+	uid, err := strconv.Atoi(usr.Uid)
+	if err != nil {
+		return fmt.Errorf("parse node uid: %w", err)
+	}
+	gid, err := strconv.Atoi(usr.Gid)
+	if err != nil {
+		return fmt.Errorf("parse node gid: %w", err)
+	}
+	return filepath.Walk(path, func(current string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := os.Chown(current, uid, gid); err != nil {
+			return err
+		}
+		return nil
+	})
 }

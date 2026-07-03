@@ -14,17 +14,15 @@ import (
 )
 
 var (
-	generationGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "generations"}
-	instanceGVR   = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "instances"}
-	verifyTaskGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "verifytasks"}
+	generationGVR           = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "generations"}
+	containerEnvironmentGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "containerenvironments"}
+	vclusterEnvironmentGVR  = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "vclusterenvironments"}
+	verifyTaskGVR           = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "verifytasks"}
 )
 
-// crdClient lazily creates a dynamic client for CRD operations.
 func (c *Client) crdClient() (dynamic.Interface, error) {
 	return dynamic.NewForConfig(c.restConfig)
 }
-
-// ── Generation CRD ──
 
 func (c *Client) CreateGeneration(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
 	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
@@ -111,116 +109,6 @@ func (c *Client) ListGenerations(ctx context.Context, ns string) (*breakfixv1.Ge
 	return &list, nil
 }
 
-// ── Instance CRD ──
-
-func (c *Client) CreateInstance(ctx context.Context, ns string, inst *breakfixv1.Instance) (*breakfixv1.Instance, error) {
-	inst.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Instance"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(inst)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(instanceGVR).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("create instance: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Instance](result)
-}
-
-func (c *Client) GetInstance(ctx context.Context, ns, name string) (*breakfixv1.Instance, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(instanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get instance %s: %w", name, err)
-	}
-	return fromUnstructured[*breakfixv1.Instance](result)
-}
-
-func (c *Client) UpdateInstance(ctx context.Context, ns string, inst *breakfixv1.Instance) (*breakfixv1.Instance, error) {
-	inst.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Instance"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(inst)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(instanceGVR).Namespace(ns).Update(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update instance: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Instance](result)
-}
-
-func (c *Client) UpdateInstanceStatus(ctx context.Context, ns string, inst *breakfixv1.Instance) (*breakfixv1.Instance, error) {
-	inst.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Instance"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(inst)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(instanceGVR).Namespace(ns).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update instance status: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Instance](result)
-}
-
-func (c *Client) ListInstances(ctx context.Context, ns string, selector string) (*breakfixv1.InstanceList, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(instanceGVR).Namespace(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list instances: %w", err)
-	}
-
-	// Convert items one by one from unstructured
-	var list breakfixv1.InstanceList
-	list.Items = make([]breakfixv1.Instance, 0, len(result.Items))
-	for _, item := range result.Items {
-		var inst breakfixv1.Instance
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &inst); err != nil {
-			return nil, fmt.Errorf("convert instance item: %w", err)
-		}
-		list.Items = append(list.Items, inst)
-	}
-	return &list, nil
-}
-
-func (c *Client) DeleteInstance(ctx context.Context, ns, name string) error {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return err
-	}
-	return dyn.Resource(instanceGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
-}
-
-func (c *Client) WatchInstance(ctx context.Context, ns, name, resourceVersion string) (watch.Interface, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	return dyn.Resource(instanceGVR).Namespace(ns).Watch(ctx, metav1.ListOptions{
-		FieldSelector:   "metadata.name=" + name,
-		ResourceVersion: resourceVersion,
-		TimeoutSeconds:  ptr(int64(60)),
-	})
-}
-
 func (c *Client) WatchGeneration(ctx context.Context, ns, name string) (watch.Interface, error) {
 	dyn, err := c.crdClient()
 	if err != nil {
@@ -232,69 +120,77 @@ func (c *Client) WatchGeneration(ctx context.Context, ns, name string) (watch.In
 	})
 }
 
-// ── VerifyTask CRD ──
+func (c *Client) CreateContainerEnvironment(ctx context.Context, ns string, env *breakfixv1.ContainerEnvironment) (*breakfixv1.ContainerEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironment"}
+	return createCRD[*breakfixv1.ContainerEnvironment](ctx, c, containerEnvironmentGVR, ns, env, "create container environment")
+}
+
+func (c *Client) GetContainerEnvironment(ctx context.Context, ns, name string) (*breakfixv1.ContainerEnvironment, error) {
+	return getCRD[*breakfixv1.ContainerEnvironment](ctx, c, containerEnvironmentGVR, ns, name, "get container environment")
+}
+
+func (c *Client) UpdateContainerEnvironment(ctx context.Context, ns string, env *breakfixv1.ContainerEnvironment) (*breakfixv1.ContainerEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironment"}
+	return updateCRD[*breakfixv1.ContainerEnvironment](ctx, c, containerEnvironmentGVR, ns, env, false, "update container environment")
+}
+
+func (c *Client) UpdateContainerEnvironmentStatus(ctx context.Context, ns string, env *breakfixv1.ContainerEnvironment) (*breakfixv1.ContainerEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironment"}
+	return updateCRD[*breakfixv1.ContainerEnvironment](ctx, c, containerEnvironmentGVR, ns, env, true, "update container environment status")
+}
+
+func (c *Client) ListContainerEnvironments(ctx context.Context, ns, selector string) (*breakfixv1.ContainerEnvironmentList, error) {
+	return listCRD[breakfixv1.ContainerEnvironment, breakfixv1.ContainerEnvironmentList](ctx, c, containerEnvironmentGVR, ns, selector, "list container environments")
+}
+
+func (c *Client) DeleteContainerEnvironment(ctx context.Context, ns, name string) error {
+	return deleteCRD(ctx, c, containerEnvironmentGVR, ns, name)
+}
+
+func (c *Client) CreateVClusterEnvironment(ctx context.Context, ns string, env *breakfixv1.VClusterEnvironment) (*breakfixv1.VClusterEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironment"}
+	return createCRD[*breakfixv1.VClusterEnvironment](ctx, c, vclusterEnvironmentGVR, ns, env, "create vcluster environment")
+}
+
+func (c *Client) GetVClusterEnvironment(ctx context.Context, ns, name string) (*breakfixv1.VClusterEnvironment, error) {
+	return getCRD[*breakfixv1.VClusterEnvironment](ctx, c, vclusterEnvironmentGVR, ns, name, "get vcluster environment")
+}
+
+func (c *Client) UpdateVClusterEnvironment(ctx context.Context, ns string, env *breakfixv1.VClusterEnvironment) (*breakfixv1.VClusterEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironment"}
+	return updateCRD[*breakfixv1.VClusterEnvironment](ctx, c, vclusterEnvironmentGVR, ns, env, false, "update vcluster environment")
+}
+
+func (c *Client) UpdateVClusterEnvironmentStatus(ctx context.Context, ns string, env *breakfixv1.VClusterEnvironment) (*breakfixv1.VClusterEnvironment, error) {
+	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironment"}
+	return updateCRD[*breakfixv1.VClusterEnvironment](ctx, c, vclusterEnvironmentGVR, ns, env, true, "update vcluster environment status")
+}
+
+func (c *Client) ListVClusterEnvironments(ctx context.Context, ns, selector string) (*breakfixv1.VClusterEnvironmentList, error) {
+	return listCRD[breakfixv1.VClusterEnvironment, breakfixv1.VClusterEnvironmentList](ctx, c, vclusterEnvironmentGVR, ns, selector, "list vcluster environments")
+}
+
+func (c *Client) DeleteVClusterEnvironment(ctx context.Context, ns, name string) error {
+	return deleteCRD(ctx, c, vclusterEnvironmentGVR, ns, name)
+}
 
 func (c *Client) CreateVerifyTask(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
 	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(task)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("create verify task: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.VerifyTask](result)
+	return createCRD[*breakfixv1.VerifyTask](ctx, c, verifyTaskGVR, ns, task, "create verify task")
 }
 
 func (c *Client) GetVerifyTask(ctx context.Context, ns, name string) (*breakfixv1.VerifyTask, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get verify task %s: %w", name, err)
-	}
-	return fromUnstructured[*breakfixv1.VerifyTask](result)
+	return getCRD[*breakfixv1.VerifyTask](ctx, c, verifyTaskGVR, ns, name, "get verify task")
 }
 
 func (c *Client) UpdateVerifyTask(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
 	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(task)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).Update(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update verify task: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.VerifyTask](result)
+	return updateCRD[*breakfixv1.VerifyTask](ctx, c, verifyTaskGVR, ns, task, false, "update verify task")
 }
 
 func (c *Client) UpdateVerifyTaskStatus(ctx context.Context, ns string, task *breakfixv1.VerifyTask) (*breakfixv1.VerifyTask, error) {
 	task.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(task)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(verifyTaskGVR).Namespace(ns).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update verify task status: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.VerifyTask](result)
+	return updateCRD[*breakfixv1.VerifyTask](ctx, c, verifyTaskGVR, ns, task, true, "update verify task status")
 }
 
 func (c *Client) WatchVerifyTask(ctx context.Context, ns, name string) (watch.Interface, error) {
@@ -304,26 +200,114 @@ func (c *Client) WatchVerifyTask(ctx context.Context, ns, name string) (watch.In
 	}
 	return dyn.Resource(verifyTaskGVR).Namespace(ns).Watch(ctx, metav1.ListOptions{
 		FieldSelector:  "metadata.name=" + name,
-		TimeoutSeconds: ptr(int64(600)),
+		TimeoutSeconds: ptr(int64(300)),
 	})
 }
 
-// ── Conversion helpers ──
+func createCRD[T any](ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns string, obj T, action string) (T, error) {
+	dyn, err := c.crdClient()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	u, err := toUnstructured(obj)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	result, err := dyn.Resource(gvr).Namespace(ns).Create(ctx, u, metav1.CreateOptions{})
+	if err != nil {
+		var zero T
+		return zero, fmt.Errorf("%s: %w", action, err)
+	}
+	return fromUnstructured[T](result)
+}
 
-func toUnstructured(obj runtime.Object) (*unstructured.Unstructured, error) {
-	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+func getCRD[T any](ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns, name, action string) (T, error) {
+	dyn, err := c.crdClient()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	result, err := dyn.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		var zero T
+		return zero, fmt.Errorf("%s %s: %w", action, name, err)
+	}
+	return fromUnstructured[T](result)
+}
+
+func updateCRD[T any](ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns string, obj T, status bool, action string) (T, error) {
+	dyn, err := c.crdClient()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	u, err := toUnstructured(obj)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	var result *unstructured.Unstructured
+	if status {
+		result, err = dyn.Resource(gvr).Namespace(ns).UpdateStatus(ctx, u, metav1.UpdateOptions{})
+	} else {
+		result, err = dyn.Resource(gvr).Namespace(ns).Update(ctx, u, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		var zero T
+		return zero, fmt.Errorf("%s: %w", action, err)
+	}
+	return fromUnstructured[T](result)
+}
+
+func listCRD[T any, L any](ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns, selector, action string) (*L, error) {
+	dyn, err := c.crdClient()
 	if err != nil {
 		return nil, err
 	}
-	return &unstructured.Unstructured{Object: u}, nil
-}
-
-func fromUnstructured[T any](u *unstructured.Unstructured) (T, error) {
-	var result T
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &result); err != nil {
-		return result, err
+	result, err := dyn.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", action, err)
 	}
-	return result, nil
+
+	list := new(L)
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(result.Object, list); err != nil {
+		return nil, fmt.Errorf("convert %s list metadata: %w", action, err)
+	}
+
+	var converted any = list
+	switch typed := converted.(type) {
+	case *breakfixv1.ContainerEnvironmentList:
+		typed.Items = make([]breakfixv1.ContainerEnvironment, 0, len(result.Items))
+		for _, item := range result.Items {
+			var env breakfixv1.ContainerEnvironment
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
+				return nil, fmt.Errorf("convert container environment item: %w", err)
+			}
+			typed.Items = append(typed.Items, env)
+		}
+	case *breakfixv1.VClusterEnvironmentList:
+		typed.Items = make([]breakfixv1.VClusterEnvironment, 0, len(result.Items))
+		for _, item := range result.Items {
+			var env breakfixv1.VClusterEnvironment
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
+				return nil, fmt.Errorf("convert vcluster environment item: %w", err)
+			}
+			typed.Items = append(typed.Items, env)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported list type")
+	}
+	return list, nil
 }
 
-func ptr[T any](v T) *T { return &v }
+func deleteCRD(ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns, name string) error {
+	dyn, err := c.crdClient()
+	if err != nil {
+		return err
+	}
+	return dyn.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+}

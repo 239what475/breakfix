@@ -20,7 +20,8 @@ var (
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&Generation{}, &GenerationList{},
-		&Instance{}, &InstanceList{},
+		&ContainerEnvironment{}, &ContainerEnvironmentList{},
+		&VClusterEnvironment{}, &VClusterEnvironmentList{},
 		&VerifyTask{}, &VerifyTaskList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)

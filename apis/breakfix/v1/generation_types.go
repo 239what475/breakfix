@@ -62,6 +62,7 @@ type ChallengeSpec struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Type        string   `json:"type"`
+	Runtime     string   `json:"runtime,omitempty"`
 	Difficulty  string   `json:"difficulty"`
 	Tags        []string `json:"tags"`
 	Description string   `json:"description"`

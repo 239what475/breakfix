@@ -279,7 +279,7 @@ func (r *VerifyTaskReconciler) syncGenerationFailure(ctx context.Context, task *
 		return ctrl.Result{}, nil
 	}
 	gen.Status.Phase = breakfixv1.GenerationFailed
-	gen.Status.Message = task.Status.Message
+	gen.Status.Message = generationFailureMessage(task)
 	now := metav1.Now()
 	gen.Status.CompletedAt = &now
 	if _, err := r.K8s.UpdateGenerationStatus(ctx, r.CRDNamespace, gen); err != nil {
@@ -304,6 +304,48 @@ func (r *VerifyTaskReconciler) syncGenerationPublishFailure(ctx context.Context,
 	return err
 }
 
+func generationFailureMessage(task *breakfixv1.VerifyTask) string {
+	if task == nil {
+		return ""
+	}
+	base := strings.TrimSpace(task.Status.Message)
+	report := task.Status.Report
+	if report == nil {
+		return base
+	}
+
+	var parts []string
+	if summary := strings.TrimSpace(report.Summary); summary != "" && summary != base {
+		parts = append(parts, summary)
+	}
+	for _, issue := range report.Issues {
+		msg := strings.TrimSpace(issue.Message)
+		if msg == "" {
+			continue
+		}
+		if code := strings.TrimSpace(issue.Code); code != "" {
+			msg = code + ": " + msg
+		}
+		parts = append(parts, msg)
+		break
+	}
+	if len(parts) == 0 {
+		return base
+	}
+	if base != "" {
+		parts = append([]string{base}, parts...)
+	}
+	return truncateFailureText(strings.Join(parts, "\n\n"))
+}
+
+func truncateFailureText(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= 4000 {
+		return s
+	}
+	return strings.TrimSpace(s[:4000]) + "..."
+}
+
 func (r *VerifyTaskReconciler) syncGenerationSuccess(ctx context.Context, task *breakfixv1.VerifyTask, ch *challenge.Entry) error {
 	if task.Spec.Source.Kind != "agent" || strings.TrimSpace(task.Spec.Source.Ref) == "" {
 		return nil
@@ -321,6 +363,7 @@ func (r *VerifyTaskReconciler) syncGenerationSuccess(ctx context.Context, task *
 		ID:          ch.ID,
 		Title:       ch.Title,
 		Type:        ch.Type,
+		Runtime:     ch.Runtime,
 		Difficulty:  ch.Difficulty,
 		Tags:        append([]string{}, ch.Tags...),
 		Description: ch.Description,
@@ -361,33 +404,7 @@ func materializedID(title, description string) string {
 	if seed == "" {
 		seed = "challenge"
 	}
-	words := strings.Fields(strings.ToLower(seed))
-	var id string
-	for _, w := range words {
-		clean := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-				return r
-			}
-			return -1
-		}, w)
-		if clean == "" {
-			continue
-		}
-		if id != "" {
-			id += "-"
-		}
-		id += clean
-		if strings.Count(id, "-") >= 3 {
-			break
-		}
-	}
-	if id == "" {
-		id = "challenge"
-	}
-	if len(id) > 50 {
-		id = id[:50]
-	}
-	return strings.Trim(id, "-")
+	return challenge.DeriveID(seed)
 }
 
 func copyDirForPublish(src, dst string) error {

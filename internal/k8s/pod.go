@@ -15,8 +15,11 @@ type CreatePodOpts struct {
 	Image           string
 	Command         []string
 	ChallengeID     string
-	InstanceID      string
+	EnvironmentID   string
 	ImagePullPolicy corev1.PullPolicy
+	Env             map[string]string
+	VolumeMounts    []corev1.VolumeMount
+	Volumes         []corev1.Volume
 }
 
 // CreatePod creates a pod in the given namespace and returns an error on failure.
@@ -32,9 +35,17 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 		Name:            "challenge",
 		Image:           opts.Image,
 		ImagePullPolicy: opts.ImagePullPolicy,
+		VolumeMounts:    append([]corev1.VolumeMount{}, opts.VolumeMounts...),
 	}
 	if len(opts.Command) > 0 {
 		container.Command = opts.Command
+	}
+	if len(opts.Env) > 0 {
+		envVars := make([]corev1.EnvVar, 0, len(opts.Env))
+		for k, v := range opts.Env {
+			envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+		}
+		container.Env = envVars
 	}
 
 	pod := &corev1.Pod{
@@ -48,14 +59,15 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 		Spec: corev1.PodSpec{
 			Containers:    []corev1.Container{container},
 			RestartPolicy: corev1.RestartPolicyNever,
+			Volumes:       append([]corev1.Volume{}, opts.Volumes...),
 		},
 	}
 
 	if opts.ChallengeID != "" {
 		pod.Labels["challenge-id"] = opts.ChallengeID
 	}
-	if opts.InstanceID != "" {
-		pod.Labels["instance-id"] = opts.InstanceID
+	if opts.EnvironmentID != "" {
+		pod.Labels["environment-id"] = opts.EnvironmentID
 	}
 
 	_, err := c.clientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})

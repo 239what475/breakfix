@@ -11,6 +11,12 @@ COPY --from=moby/buildkit:master /usr/bin/buildkit-cni-* /usr/local/bin/
 RUN npm config set registry https://registry.npmmirror.com/ && \
     npm install -g @anthropic-ai/claude-code@latest
 
+RUN cat >/usr/local/bin/breakfix-claude <<'EOF' && chmod +x /usr/local/bin/breakfix-claude
+#!/bin/sh
+set -eu
+exec runuser -u node -- /usr/local/bin/claude "$@"
+EOF
+
 # Generator binary
 COPY bin/generator /usr/local/bin/generator
 

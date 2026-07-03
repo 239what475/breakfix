@@ -12,21 +12,18 @@ metadata:
   name: breakfix-generator
   namespace: breakfix-system
 ---
-# Namespace-scoped permissions (pods, exec, logs, jobs)
+# Namespace-scoped permissions (CRDs + jobs in breakfix-system)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: breakfix-generator
   namespace: breakfix-system
 rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/exec", "pods/log"]
-    verbs: ["create", "get", "list", "delete"]
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations", "instances", "verifytasks"]
+    resources: ["generations", "containerenvironments", "vclusterenvironments", "verifytasks"]
     verbs: ["create", "get", "list", "update", "patch", "delete", "watch"]
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations/status", "instances/status", "verifytasks/status"]
+    resources: ["generations/status", "containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
     verbs: ["update", "patch"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -54,6 +51,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec", "pods/log"]
     verbs: ["create", "get", "list", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

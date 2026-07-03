@@ -17,6 +17,7 @@ type Config struct {
 	Kubeconfig       string    `yaml:"kubeconfig"`
 	RegistryAddr     string    `yaml:"registry_addr"`
 	RegistryInsecure bool      `yaml:"registry_insecure"`
+	K8sBaseImage     string    `yaml:"k8s_base_image"`
 	ServerHost       string    `yaml:"server_host"`
 	Namespace        string    `yaml:"namespace"`
 	CRDNamespace     string    `yaml:"crd_namespace"`
@@ -42,6 +43,7 @@ func defaults() Config {
 		DataDir:          "/var/lib/breakfix",
 		RegistryAddr:     "172.18.0.1:5000/break-fix",
 		RegistryInsecure: true,
+		K8sBaseImage:     "breakfix-k8s-base:latest",
 		Namespace:        "breakfix",
 		CRDNamespace:    "breakfix-system",
 		JWTSecret:       "breakfix-dev-secret-change-in-production",
