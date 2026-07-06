@@ -83,12 +83,11 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 	}
 
 	if err := r.ensureVCluster(ns, vclusterName); err != nil {
-		env.Status.Phase = breakfixv1.EnvironmentProvisioning
 		env.Status.Namespace = ns
 		env.Status.VClusterName = vclusterName
 		env.Status.KubeconfigSecretName = kubeconfigSecret
 		env.Status.WorkspacePodName = workspacePodName
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -114,8 +113,7 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 
 	podName := env.Status.VClusterName + "-0"
 	if err := r.K8s.WaitForPod(ns, podName, "syncer"); err != nil {
-		env.Status.Phase = breakfixv1.EnvironmentProvisioning
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -155,10 +153,7 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	env.Status.Phase = breakfixv1.EnvironmentReady
-	env.Status.Message = "vcluster environment ready"
-	now := metav1.Now()
-	env.Status.StartedAt = &now
+	setEnvironmentReady(&env.Status.CommonEnvironmentStatus, "vcluster environment ready")
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -170,17 +165,7 @@ func (r *VClusterEnvironmentReconciler) submit(ctx context.Context, env *breakfi
 	if err != nil {
 		slog.Error("exec verify.sh", "err", err, "environment", env.Name)
 	}
-	passed := exitCode == 0
-	result := &breakfixv1.SubmitResult{
-		Passed:   passed,
-		ExitCode: exitCode,
-		Output:   truncate(output, 4000),
-	}
-	now := metav1.Now()
-	result.SubmittedAt = &now
-	env.Status.SubmitResult = result
-	env.Status.Phase = breakfixv1.EnvironmentDestroyed
-	env.Status.Message = "environment submitted"
+	setEnvironmentSubmitted(&env.Status.CommonEnvironmentStatus, exitCode, output)
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -188,23 +173,13 @@ func (r *VClusterEnvironmentReconciler) submit(ctx context.Context, env *breakfi
 }
 
 func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
-	if env.Status.ExpiresAt == nil {
+	destroy, remaining := shouldDestroyEnvironment(&env.Status.CommonEnvironmentStatus)
+	if destroy {
 		env.Status.Phase = breakfixv1.EnvironmentDestroyed
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
 		return r.cleanup(env)
-	}
-	if time.Now().After(env.Status.ExpiresAt.Time) {
-		env.Status.Phase = breakfixv1.EnvironmentDestroyed
-		if err := r.Status().Update(ctx, env); err != nil {
-			return ctrl.Result{}, err
-		}
-		return r.cleanup(env)
-	}
-	remaining := time.Until(env.Status.ExpiresAt.Time)
-	if remaining > 30*time.Second {
-		remaining = 30 * time.Second
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
@@ -226,16 +201,8 @@ func (r *VClusterEnvironmentReconciler) cleanup(env *breakfixv1.VClusterEnvironm
 }
 
 func (r *VClusterEnvironmentReconciler) requestDeletion(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
-	if env.DeletionTimestamp != nil {
-		slog.Info("vcluster environment deletion already requested", "environment", env.Name)
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
 	slog.Info("requesting vcluster environment deletion", "environment", env.Name, "namespace", env.Status.Namespace)
-	if err := r.Delete(ctx, env); err != nil {
-		slog.Error("request vcluster environment deletion failed", "environment", env.Name, "err", err)
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	return requestEnvironmentDeletion(ctx, r.Client, env)
 }
 
 func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
@@ -245,8 +212,11 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 		_ = r.deleteVCluster(env.Status.Namespace, env.Status.VClusterName)
 		_ = r.K8s.DeleteNamespace(env.Status.Namespace)
 
-		ns, err := r.K8s.GetNamespace(env.Status.Namespace)
-		if err == nil && ns != nil {
+		done, err := finalizeCommonEnvironment(ctx, r.K8s, env.Status.Namespace)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !done {
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 	}

@@ -12,8 +12,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,8 +45,8 @@ type Generator struct {
 	InternalAPIKey   string
 	ServerJWT        string
 
-	workDir     string
-	challengeID string
+	workDir    string
+	artifactID string
 }
 
 const claudeRunAsNode = "/usr/local/bin/breakfix-claude"
@@ -55,12 +55,12 @@ func (g *Generator) Run(ctx context.Context) error {
 	if absOutput, err := filepath.Abs(g.OutputDir); err == nil {
 		g.OutputDir = absOutput
 	}
-	g.workDir = filepath.Join(g.OutputDir, ".gen-"+challenge.DeriveID(g.identitySeed()))
+	g.artifactID = challenge.NewID()
+	g.workDir = filepath.Join(g.OutputDir, ".gen-"+g.artifactID)
 	if err := os.RemoveAll(g.workDir); err != nil {
 		slog.Error("failed to clean workdir", "err", err, "dir", g.workDir)
 	}
-	g.challengeID = challenge.DeriveID(g.identitySeed())
-	chalDir := filepath.Join(g.workDir, g.challengeID)
+	chalDir := filepath.Join(g.workDir, g.artifactID)
 	if err := os.MkdirAll(chalDir, 0755); err != nil {
 		return fmt.Errorf("create challenge dir: %w", err)
 	}
@@ -68,7 +68,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		return fmt.Errorf("prepare claude workspace permissions: %w", err)
 	}
 
-	slog.Info("generator started", "title", g.defaultTitle(), "generationID", g.GenerationID, "challengeID", g.challengeID, "workDir", g.workDir)
+	slog.Info("generator started", "title", g.defaultTitle(), "generationID", g.GenerationID, "artifactID", g.artifactID, "workDir", g.workDir)
 	genStart := time.Now()
 
 	k8sClient, err := k8s.New(g.Kubeconfig)
@@ -82,7 +82,7 @@ func (g *Generator) Run(ctx context.Context) error {
 
 	for round := 0; round < 5; round++ {
 		roundStart := time.Now()
-		slog.Info("round start", "n", round+1, "generationID", g.GenerationID, "challengeID", g.challengeID)
+		slog.Info("round start", "n", round+1, "generationID", g.GenerationID, "artifactID", g.artifactID)
 
 		gStart := time.Now()
 		slog.Info("phase start", "phase", "generate", "round", round+1, "runtimeHint", runtimeHint(g.prefersVClusterAuthoring()))
@@ -131,7 +131,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		slog.Info("phase done", "phase", "submit", "round", round+1, "duration", time.Since(uStart), "passed", verifyPassed)
 		if verifyPassed {
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "success")
-			slog.Info("generation done", "title", g.defaultTitle(), "challengeID", g.challengeID, "rounds", round+1, "duration", time.Since(genStart))
+			slog.Info("generation done", "title", g.defaultTitle(), "artifactID", g.artifactID, "rounds", round+1, "duration", time.Since(genStart))
 			return nil
 		}
 		judgeFeedback = verifyFeedback
@@ -204,7 +204,7 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 		err = fmt.Errorf("generate phase timeout after %s", timeout)
 	}
 	if err != nil && g.prefersVClusterAuthoring() {
-		if runtime, ready, _ := generatedChallengeState(chalDir); runtime == "vcluster" && ready {
+		if runtime, ready, _ := generatedChallengeState(chalDir); runtime == challenge.RuntimeVCluster && ready {
 			slog.Info("phase done", "phase", "generate", "mode", "vcluster_salvaged_after_agent_error", "err", err.Error())
 			return nil
 		}
@@ -304,11 +304,11 @@ func (g *Generator) validateChallengeManifest(chalDir string) error {
 	var errs []string
 	if scalarString(spec["type"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 type")
-	} else if scalarString(spec["type"]) != "script" {
-		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 script，当前为 %q", scalarString(spec["type"])))
+	} else if scalarString(spec["type"]) != challenge.TypeScript {
+		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 %s，当前为 %q", challenge.TypeScript, scalarString(spec["type"])))
 	}
-	switch scalarString(spec["runtime"]) {
-	case "", "container", "vcluster":
+	switch challenge.NormalizeRuntime(scalarString(spec["runtime"])) {
+	case challenge.RuntimeContainer, challenge.RuntimeVCluster:
 	default:
 		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须为 container/vcluster，当前为 %q", scalarString(spec["runtime"])))
 	}
@@ -367,7 +367,7 @@ func (g *Generator) validateChallengeSemantics(chalDir string) error {
 	verifyText := string(verifyData)
 
 	var errs []string
-	if entry.Runtime == "vcluster" {
+	if challenge.NormalizeRuntime(entry.Runtime) == challenge.RuntimeVCluster {
 		if err := validateKubectlPodReadinessPattern(verifyText); err != nil {
 			errs = append(errs, err.Error())
 		}
@@ -398,7 +398,7 @@ func loadChallengeEntry(chalDir string) (*breakfixv1.ChallengeSpec, error) {
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("parse challenge.yaml: %w", err)
 	}
-	spec.Runtime = strings.TrimSpace(spec.Runtime)
+	spec.Runtime = challenge.NormalizeRuntime(spec.Runtime)
 	return &spec, nil
 }
 
@@ -529,7 +529,7 @@ func (g *Generator) watchGenerateQuiescence(ctx context.Context, chalDir string,
 			return
 		case <-ticker.C:
 			runtime, ready, modTime := generatedChallengeState(chalDir)
-			if runtime != "vcluster" || !ready {
+			if runtime != challenge.RuntimeVCluster || !ready {
 				continue
 			}
 			last := time.Unix(0, lastEvent.Load())
@@ -554,7 +554,7 @@ func generatedChallengeState(chalDir string) (runtime string, ready bool, modTim
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		return "", false, time.Time{}
 	}
-	runtime = scalarString(spec["runtime"])
+	runtime = challenge.NormalizeRuntime(scalarString(spec["runtime"]))
 
 	required := []string{"challenge.yaml", "Dockerfile", "generate.sh", "question.md", "verify.sh", "answer.sh"}
 	for _, name := range required {
@@ -652,11 +652,11 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("artifact archived", "generationID", g.GenerationID, "challengeID", g.challengeID, "bytes", len(payload))
+	slog.Info("artifact archived", "generationID", g.GenerationID, "artifactID", g.artifactID, "bytes", len(payload))
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	part, err := mw.CreateFormFile("artifact", g.challengeID+".tar.gz")
+	part, err := mw.CreateFormFile("artifact", g.artifactID+".tar.gz")
 	if err != nil {
 		return fmt.Errorf("create multipart artifact part: %w", err)
 	}
@@ -684,7 +684,7 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("upload artifact: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
-	slog.Info("artifact uploaded", "generationID", g.GenerationID, "challengeID", g.challengeID, "status", resp.StatusCode)
+	slog.Info("artifact uploaded", "generationID", g.GenerationID, "artifactID", g.artifactID, "status", resp.StatusCode)
 	return nil
 }
 
@@ -734,7 +734,7 @@ func archiveDir(root string) ([]byte, error) {
 }
 
 func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bool, string, error) {
-	slog.Info("submit verify start", "generationID", g.GenerationID, "challengeID", g.challengeID)
+	slog.Info("submit verify start", "generationID", g.GenerationID, "artifactID", g.artifactID)
 	if err := g.uploadArtifact(ctx, chalDir); err != nil {
 		return false, "", err
 	}
@@ -772,7 +772,7 @@ func (g *Generator) submitAndWaitVerify(ctx context.Context, chalDir string) (bo
 		status := strings.ToLower(strings.TrimSpace(ptrString(body.Status)))
 		message := ptrString(body.Message)
 		if status != lastStatus || message != lastMessage || lastLogAt.IsZero() || time.Since(lastLogAt) >= time.Minute {
-			slog.Info("submit verify poll", "generationID", g.GenerationID, "challengeID", g.challengeID, "status", status, "message", truncateStr(message, 200))
+			slog.Info("submit verify poll", "generationID", g.GenerationID, "artifactID", g.artifactID, "status", status, "message", truncateStr(message, 200))
 			lastStatus = status
 			lastMessage = message
 			lastLogAt = time.Now()
@@ -798,9 +798,9 @@ func ptrString(v *string) string {
 
 func runtimeHint(vcluster bool) string {
 	if vcluster {
-		return "vcluster"
+		return challenge.RuntimeVCluster
 	}
-	return "container"
+	return challenge.RuntimeContainer
 }
 
 func ensureClaudeWorkspaceWritable(path string) error {

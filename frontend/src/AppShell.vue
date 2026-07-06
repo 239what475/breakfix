@@ -499,6 +499,7 @@ async function startVerifySubmission() {
   try {
     const result = await api.createVerifySubmission(submitFile.value)
     verifyTask.value = {
+      challenge_id: result.challenge_id,
       verify_task_id: result.verify_task_id,
       submission_id: result.submission_id,
       status: result.status,
@@ -522,6 +523,9 @@ async function pollVerifyTask(taskId: string) {
     if (result.status === 'success') {
       clearVerifyPoll()
       await loadChallenges({ silent: true })
+      if (result.challenge_id) {
+        selectedId.value = result.challenge_id
+      }
       message.success('Challenge published')
       return
     }
@@ -1111,6 +1115,7 @@ async function reconnectTerminal() {
               </div>
               <p class="job-status-copy">{{ verifyTask?.message || 'Waiting for the verification controller to start the task.' }}</p>
               <div class="job-meta">
+                <span v-if="verifyTask?.challenge_id">Challenge {{ verifyTask.challenge_id }}</span>
                 <span v-if="verifyTask?.submission_id">Submission {{ verifyTask.submission_id }}</span>
                 <span v-if="verifyTask?.started_at">Started {{ verifyTask.started_at }}</span>
                 <span v-if="verifyTask?.completed_at">Completed {{ verifyTask.completed_at }}</span>

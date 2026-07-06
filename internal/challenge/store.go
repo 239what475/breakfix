@@ -89,6 +89,25 @@ func Get(root, id string) (*Entry, error) {
 }
 
 func LoadDir(dir string) (*Entry, error) {
+	spec, err := loadSpec(dir)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(spec.ID) == "" {
+		return nil, fmt.Errorf("challenge id is required")
+	}
+	return entryFromSpec(dir, spec), nil
+}
+
+func LoadSubmissionDir(dir string) (*Entry, error) {
+	spec, err := loadSpec(dir)
+	if err != nil {
+		return nil, err
+	}
+	return entryFromSpec(dir, spec), nil
+}
+
+func loadSpec(dir string) (*Spec, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "challenge.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", filepath.Join(dir, "challenge.yaml"), err)
@@ -98,16 +117,14 @@ func LoadDir(dir string) (*Entry, error) {
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", filepath.Join(dir, "challenge.yaml"), err)
 	}
+	return &spec, nil
+}
 
-	if spec.ID == "" {
-		spec.ID = filepath.Base(dir)
-	}
+func entryFromSpec(dir string, spec *Spec) *Entry {
 	if spec.Type == "" {
-		spec.Type = "script"
+		spec.Type = TypeScript
 	}
-	if spec.Runtime == "" {
-		spec.Runtime = "container"
-	}
+	spec.Runtime = NormalizeRuntime(spec.Runtime)
 	if spec.Image == "" {
 		spec.Image = fmt.Sprintf("breakfix-%s:dev", spec.ID)
 	}
@@ -122,5 +139,5 @@ func LoadDir(dir string) (*Entry, error) {
 		Description: spec.Description,
 		Image:       spec.Image,
 		Dir:         dir,
-	}, nil
+	}
 }

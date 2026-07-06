@@ -37,6 +37,40 @@ type activeEnvironment struct {
 	Message      string
 }
 
+func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvironment {
+	if env == nil {
+		return nil
+	}
+	return &activeEnvironment{
+		Runtime:      challenge.RuntimeContainer,
+		Name:         env.Name,
+		ChallengeRef: env.Spec.ChallengeRef,
+		Namespace:    env.Status.Namespace,
+		WorkspacePod: env.Status.WorkspacePodName,
+		Phase:        env.Status.Phase,
+		ExpiresAt:    env.Status.ExpiresAt,
+		SubmitResult: env.Status.SubmitResult,
+		Message:      env.Status.Message,
+	}
+}
+
+func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnvironment {
+	if env == nil {
+		return nil
+	}
+	return &activeEnvironment{
+		Runtime:      challenge.RuntimeVCluster,
+		Name:         env.Name,
+		ChallengeRef: env.Spec.ChallengeRef,
+		Namespace:    env.Status.Namespace,
+		WorkspacePod: env.Status.WorkspacePodName,
+		Phase:        env.Status.Phase,
+		ExpiresAt:    env.Status.ExpiresAt,
+		SubmitResult: env.Status.SubmitResult,
+		Message:      env.Status.Message,
+	}
+}
+
 // Handler implements the OpenAPI-generated ServerInterface.
 type Handler struct {
 	db               *db.DB
@@ -506,6 +540,7 @@ func (h *Handler) CreateVerifySubmission(c *gin.Context) {
 	defer file.Close()
 
 	submissionID := "sub-" + k8s.RandomID()
+	challengeID := challenge.NewID()
 	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
 		return
@@ -522,6 +557,7 @@ func (h *Handler) CreateVerifySubmission(c *gin.Context) {
 				Kind: "user",
 				Ref:  user.ID,
 			},
+			ChallengeID: challengeID,
 			Submission: breakfixv1.VerifyTaskSubmission{
 				ID: submissionID,
 			},
@@ -537,6 +573,7 @@ func (h *Handler) CreateVerifySubmission(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"challenge_id":   challengeID,
 		"verify_task_id": verifyTaskID,
 		"submission_id":  submissionID,
 		"status":         "queued",
@@ -557,6 +594,7 @@ func (h *Handler) GetVerifyTask(c *gin.Context, id string) {
 	}
 
 	resp := api.VerifyTaskResponse{
+		ChallengeId:  &task.Spec.ChallengeID,
 		VerifyTaskId: &task.Name,
 		SubmissionId: &task.Spec.Submission.ID,
 		Status:       &status,
@@ -608,6 +646,7 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	defer file.Close()
 
 	submissionID := "sub-" + k8s.RandomID()
+	challengeID := challenge.NewID()
 	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
 		return
@@ -624,6 +663,7 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 				Kind: "agent",
 				Ref:  genID,
 			},
+			ChallengeID: challengeID,
 			Submission: breakfixv1.VerifyTaskSubmission{
 				ID: submissionID,
 			},
@@ -646,6 +686,7 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"challenge_id":   challengeID,
 		"status":         "ok",
 		"submission_id":  submissionID,
 		"verify_task_id": verifyTaskID,
@@ -743,257 +784,82 @@ func (h *Handler) generatorImage() string {
 // ── Environment helpers ──
 
 func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]activeEnvironment, error) {
-	var result []activeEnvironment
 	selector := fmt.Sprintf("breakfix.dev/user=%s", userID)
-
-	containerEnvs, err := h.k8s.ListContainerEnvironments(ctx, h.crdNamespace, selector)
-	if err != nil {
-		return nil, err
-	}
-	for i := range containerEnvs.Items {
-		env := containerEnvs.Items[i]
-		if env.DeletionTimestamp != nil {
-			continue
+	result := make([]activeEnvironment, 0, 4)
+	for _, runtime := range []string{challenge.RuntimeContainer, challenge.RuntimeVCluster} {
+		adapter, err := h.environmentRuntimeAdapter(runtime)
+		if err != nil {
+			return nil, err
 		}
-		result = append(result, activeEnvironment{
-			Runtime:      "container",
-			Name:         env.Name,
-			ChallengeRef: env.Spec.ChallengeRef,
-			Namespace:    env.Status.Namespace,
-			WorkspacePod: env.Status.WorkspacePodName,
-			Phase:        env.Status.Phase,
-			ExpiresAt:    env.Status.ExpiresAt,
-			SubmitResult: env.Status.SubmitResult,
-			Message:      env.Status.Message,
-		})
-	}
-
-	vclusterEnvs, err := h.k8s.ListVClusterEnvironments(ctx, h.crdNamespace, selector)
-	if err != nil {
-		return nil, err
-	}
-	for i := range vclusterEnvs.Items {
-		env := vclusterEnvs.Items[i]
-		if env.DeletionTimestamp != nil {
-			continue
+		envs, err := adapter.list(ctx, selector)
+		if err != nil {
+			return nil, err
 		}
-		result = append(result, activeEnvironment{
-			Runtime:      "vcluster",
-			Name:         env.Name,
-			ChallengeRef: env.Spec.ChallengeRef,
-			Namespace:    env.Status.Namespace,
-			WorkspacePod: env.Status.WorkspacePodName,
-			Phase:        env.Status.Phase,
-			ExpiresAt:    env.Status.ExpiresAt,
-			SubmitResult: env.Status.SubmitResult,
-			Message:      env.Status.Message,
-		})
+		result = append(result, envs...)
 	}
-
 	return result, nil
 }
 
 func (h *Handler) findEnvironment(ctx context.Context, userID string, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, challengeEntry.ID)
-	switch challengeEntry.Runtime {
-	case "", "container":
-		envs, err := h.k8s.ListContainerEnvironments(ctx, h.crdNamespace, selector)
-		if err != nil {
-			return nil, err
+	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	envs, err := adapter.list(ctx, selector)
+	if err != nil {
+		return nil, err
+	}
+	for i := range envs {
+		env := envs[i]
+		if isLiveEnvironmentPhase(env.Phase) {
+			return &env, nil
 		}
-		for i := range envs.Items {
-			env := envs.Items[i]
-			if env.DeletionTimestamp != nil {
-				continue
-			}
-			if isLiveEnvironmentPhase(env.Status.Phase) {
-				return &activeEnvironment{
-					Runtime:      "container",
-					Name:         env.Name,
-					ChallengeRef: env.Spec.ChallengeRef,
-					Namespace:    env.Status.Namespace,
-					WorkspacePod: env.Status.WorkspacePodName,
-					Phase:        env.Status.Phase,
-					ExpiresAt:    env.Status.ExpiresAt,
-					SubmitResult: env.Status.SubmitResult,
-					Message:      env.Status.Message,
-				}, nil
-			}
-		}
-	case "vcluster":
-		envs, err := h.k8s.ListVClusterEnvironments(ctx, h.crdNamespace, selector)
-		if err != nil {
-			return nil, err
-		}
-		for i := range envs.Items {
-			env := envs.Items[i]
-			if env.DeletionTimestamp != nil {
-				continue
-			}
-			if isLiveEnvironmentPhase(env.Status.Phase) {
-				return &activeEnvironment{
-					Runtime:      "vcluster",
-					Name:         env.Name,
-					ChallengeRef: env.Spec.ChallengeRef,
-					Namespace:    env.Status.Namespace,
-					WorkspacePod: env.Status.WorkspacePodName,
-					Phase:        env.Status.Phase,
-					ExpiresAt:    env.Status.ExpiresAt,
-					SubmitResult: env.Status.SubmitResult,
-					Message:      env.Status.Message,
-				}, nil
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unsupported runtime %q", challengeEntry.Runtime)
 	}
 	return nil, errors.New("no active environment")
 }
 
 func (h *Handler) createEnvironment(ctx context.Context, user *db.User, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	switch challengeEntry.Runtime {
-	case "", "container":
-		return h.createContainerEnvironment(ctx, user, challengeEntry)
-	case "vcluster":
-		return h.createVClusterEnvironment(ctx, user, challengeEntry)
-	default:
-		return nil, fmt.Errorf("unsupported runtime %q", challengeEntry.Runtime)
-	}
-}
-
-func (h *Handler) createContainerEnvironment(ctx context.Context, user *db.User, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	name := k8s.RandomID()
-	env := &breakfixv1.ContainerEnvironment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: h.crdNamespace,
-			Labels: map[string]string{
-				"breakfix.dev/user":      user.ID,
-				"breakfix.dev/challenge": challengeEntry.ID,
-			},
-		},
-		Spec: breakfixv1.CommonEnvironmentSpec{
-			ChallengeRef: challengeEntry.ID,
-			UserRef:      user.ID,
-			Image:        challengeEntry.Image,
-		},
-	}
-	if _, err := h.k8s.CreateContainerEnvironment(ctx, h.crdNamespace, env); err != nil {
-		return nil, fmt.Errorf("create container environment: %w", err)
-	}
-	return h.waitEnvironmentReady(ctx, "container", name, 60*time.Second)
-}
-
-func (h *Handler) createVClusterEnvironment(ctx context.Context, user *db.User, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	name := k8s.RandomID()
-	env := &breakfixv1.VClusterEnvironment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: h.crdNamespace,
-			Labels: map[string]string{
-				"breakfix.dev/user":      user.ID,
-				"breakfix.dev/challenge": challengeEntry.ID,
-			},
-		},
-		Spec: breakfixv1.VClusterEnvironmentSpec{
-			CommonEnvironmentSpec: breakfixv1.CommonEnvironmentSpec{
-				ChallengeRef: challengeEntry.ID,
-				UserRef:      user.ID,
-				Image:        challengeEntry.Image,
-			},
-		},
-	}
-	if _, err := h.k8s.CreateVClusterEnvironment(ctx, h.crdNamespace, env); err != nil {
-		return nil, fmt.Errorf("create vcluster environment: %w", err)
-	}
-	return h.waitEnvironmentReady(ctx, "vcluster", name, 5*time.Minute)
-}
-
-func (h *Handler) resumeContainerEnvironment(ctx context.Context, name string) error {
-	env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
+	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	env.Status.Phase = breakfixv1.EnvironmentReady
-	env.Status.ExpiresAt = nil
-	_, err = h.k8s.UpdateContainerEnvironmentStatus(ctx, h.crdNamespace, env)
-	return err
-}
-
-func (h *Handler) resumeVClusterEnvironment(ctx context.Context, name string) error {
-	env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
+	name, err := adapter.create(ctx, user, challengeEntry)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	env.Status.Phase = breakfixv1.EnvironmentReady
-	env.Status.ExpiresAt = nil
-	_, err = h.k8s.UpdateVClusterEnvironmentStatus(ctx, h.crdNamespace, env)
-	return err
+	return h.waitEnvironmentReady(ctx, adapter.runtime, name, time.Duration(adapter.readyTimeoutDuration())*time.Second)
 }
 
 func (h *Handler) resumeEnvironment(ctx context.Context, env *activeEnvironment) error {
-	switch env.Runtime {
-	case "container":
-		return h.resumeContainerEnvironment(ctx, env.Name)
-	case "vcluster":
-		return h.resumeVClusterEnvironment(ctx, env.Name)
-	default:
-		return fmt.Errorf("unsupported environment runtime %q", env.Runtime)
-	}
-}
-
-func (h *Handler) submitContainerEnvironment(ctx context.Context, name string) error {
-	env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
+	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
 	if err != nil {
 		return err
 	}
-	env.Spec.Submit = true
-	_, err = h.k8s.UpdateContainerEnvironment(ctx, h.crdNamespace, env)
-	return err
-}
-
-func (h *Handler) submitVClusterEnvironment(ctx context.Context, name string) error {
-	env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
-	if err != nil {
-		return err
-	}
-	env.Spec.Submit = true
-	_, err = h.k8s.UpdateVClusterEnvironment(ctx, h.crdNamespace, env)
-	return err
+	return adapter.updateStatus(ctx, env.Name, func(status *breakfixv1.CommonEnvironmentStatus) {
+		status.Phase = breakfixv1.EnvironmentReady
+		status.ExpiresAt = nil
+	})
 }
 
 func (h *Handler) submitEnvironment(ctx context.Context, env *activeEnvironment) error {
-	switch env.Runtime {
-	case "container":
-		return h.submitContainerEnvironment(ctx, env.Name)
-	case "vcluster":
-		return h.submitVClusterEnvironment(ctx, env.Name)
-	default:
-		return fmt.Errorf("unsupported environment runtime %q", env.Runtime)
+	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
+	if err != nil {
+		return err
 	}
+	return adapter.updateSpec(ctx, env.Name, func(spec *breakfixv1.CommonEnvironmentSpec) {
+		spec.Submit = true
+	})
 }
 
 func (h *Handler) destroyEnvironment(ctx context.Context, env *activeEnvironment) error {
-	switch env.Runtime {
-	case "container":
-		current, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, env.Name)
-		if err != nil {
-			return err
-		}
-		current.Status.Phase = breakfixv1.EnvironmentDestroyed
-		_, err = h.k8s.UpdateContainerEnvironmentStatus(ctx, h.crdNamespace, current)
+	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
+	if err != nil {
 		return err
-	case "vcluster":
-		current, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, env.Name)
-		if err != nil {
-			return err
-		}
-		current.Status.Phase = breakfixv1.EnvironmentDestroyed
-		_, err = h.k8s.UpdateVClusterEnvironmentStatus(ctx, h.crdNamespace, current)
-		return err
-	default:
-		return fmt.Errorf("unsupported environment runtime %q", env.Runtime)
 	}
+	return adapter.updateStatus(ctx, env.Name, func(status *breakfixv1.CommonEnvironmentStatus) {
+		status.Phase = breakfixv1.EnvironmentDestroyed
+	})
 }
 
 func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string, timeout time.Duration) (*activeEnvironment, error) {
@@ -1018,42 +884,11 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 }
 
 func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*activeEnvironment, error) {
-	switch runtime {
-	case "container":
-		env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
-		if err != nil {
-			return nil, err
-		}
-		return &activeEnvironment{
-			Runtime:      "container",
-			Name:         env.Name,
-			ChallengeRef: env.Spec.ChallengeRef,
-			Namespace:    env.Status.Namespace,
-			WorkspacePod: env.Status.WorkspacePodName,
-			Phase:        env.Status.Phase,
-			ExpiresAt:    env.Status.ExpiresAt,
-			SubmitResult: env.Status.SubmitResult,
-			Message:      env.Status.Message,
-		}, nil
-	case "vcluster":
-		env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
-		if err != nil {
-			return nil, err
-		}
-		return &activeEnvironment{
-			Runtime:      "vcluster",
-			Name:         env.Name,
-			ChallengeRef: env.Spec.ChallengeRef,
-			Namespace:    env.Status.Namespace,
-			WorkspacePod: env.Status.WorkspacePodName,
-			Phase:        env.Status.Phase,
-			ExpiresAt:    env.Status.ExpiresAt,
-			SubmitResult: env.Status.SubmitResult,
-			Message:      env.Status.Message,
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported runtime %q", runtime)
+	adapter, err := h.environmentRuntimeAdapter(runtime)
+	if err != nil {
+		return nil, err
 	}
+	return adapter.get(ctx, name)
 }
 
 func (h *Handler) waitSubmitResult(ctx context.Context, runtime, name string, timeout time.Duration) (*breakfixv1.SubmitResult, error) {

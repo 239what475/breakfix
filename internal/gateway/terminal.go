@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/gorilla/websocket"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,7 +74,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	if env.Phase == "Ready" {
 		expiresAt := metav1.NewTime(time.Now().Add(time.Duration(cooldownMin) * time.Minute))
 		switch env.Runtime {
-		case "container":
+		case challenge.RuntimeContainer:
 			current, getErr := k8sClient.GetContainerEnvironment(r.Context(), crdNamespace, env.Name)
 			if getErr == nil {
 				current.Status.Phase = "Draining"
@@ -82,7 +83,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 					slog.Error("failed to start draining", "err", updateErr, "environment", env.Name)
 				}
 			}
-		case "vcluster":
+		case challenge.RuntimeVCluster:
 			current, getErr := k8sClient.GetVClusterEnvironment(r.Context(), crdNamespace, env.Name)
 			if getErr == nil {
 				current.Status.Phase = "Draining"

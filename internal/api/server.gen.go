@@ -159,6 +159,7 @@ type VerifyReport struct {
 
 // VerifySubmissionResponse defines model for VerifySubmissionResponse.
 type VerifySubmissionResponse struct {
+	ChallengeId  *string `json:"challenge_id,omitempty"`
 	Status       *string `json:"status,omitempty"`
 	SubmissionId *string `json:"submission_id,omitempty"`
 	VerifyTaskId *string `json:"verify_task_id,omitempty"`
@@ -166,6 +167,7 @@ type VerifySubmissionResponse struct {
 
 // VerifyTaskResponse defines model for VerifyTaskResponse.
 type VerifyTaskResponse struct {
+	ChallengeId  *string       `json:"challenge_id,omitempty"`
 	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
 	Message      *string       `json:"message,omitempty"`
 	Report       *VerifyReport `json:"report,omitempty"`

@@ -489,6 +489,8 @@ components:
     VerifySubmissionResponse:
       type: object
       properties:
+        challenge_id:
+          type: string
         verify_task_id:
           type: string
         submission_id:
@@ -523,6 +525,8 @@ components:
     VerifyTaskResponse:
       type: object
       properties:
+        challenge_id:
+          type: string
         verify_task_id:
           type: string
         submission_id:

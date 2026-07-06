@@ -129,6 +129,7 @@ export interface GenerationJobResponse {
 }
 
 export interface VerifySubmissionResponse {
+  challenge_id?: string
   verify_task_id?: string
   submission_id?: string
   status: string
@@ -148,6 +149,7 @@ export interface VerifyReport {
 }
 
 export interface VerifyTaskResponse {
+  challenge_id?: string
   verify_task_id?: string
   submission_id?: string
   status: string

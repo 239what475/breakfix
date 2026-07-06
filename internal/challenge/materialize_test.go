@@ -108,6 +108,24 @@ func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 	}
 }
 
+func TestValidateSubmissionDirAllowsMissingID(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "title: Draft Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\ndescription: demo\nimage: demo:v1\n")
+	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
+	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
+	writeFile(t, filepath.Join(root, "verify.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+
+	entry, err := ValidateSubmissionDir(root)
+	if err != nil {
+		t.Fatalf("expected submission dir to validate, got %v", err)
+	}
+	if entry.ID != "" {
+		t.Fatalf("expected empty submission id, got %q", entry.ID)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

@@ -75,14 +75,14 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	if err := challenge.ExtractTarGz(chalDir, f); err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("ARTIFACT_EXTRACT_FAILED", err.Error()))
 	}
-	if _, err := challenge.ValidateDir(chalDir); err != nil {
+	if _, err := challenge.ValidateSubmissionDir(chalDir); err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("STRUCTURE_INVALID", err.Error()))
 	}
-	challengeEntry, err := challenge.LoadDir(chalDir)
+	challengeEntry, err := challenge.LoadSubmissionDir(chalDir)
 	if err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHALLENGE_MANIFEST_INVALID", err.Error()))
 	}
-	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "challengeID", challengeEntry.ID, "runtime", challengeEntry.Runtime)
+	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "challengeID", task.Spec.ChallengeID, "runtime", challengeEntry.Runtime)
 
 	tempImage := fmt.Sprintf("%s/verify-%s:latest", cfg.RegistryAddr, cfg.VerifyTaskID)
 	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
@@ -106,7 +106,7 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "runtime", challengeEntry.Runtime)
-	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, challengeEntry, tempImage)
+	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, task.Spec.ChallengeID, challengeEntry, tempImage)
 	if err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("VERIFY_ENV_CREATE_FAILED", err.Error()))
 	}
@@ -212,7 +212,7 @@ func verifyBaseImage(targetImage, runtime string) string {
 		repoPrefix = targetImage[:idx]
 	}
 	baseName := "breakfix-base:latest"
-	if strings.TrimSpace(runtime) == "vcluster" {
+	if challenge.NormalizeRuntime(runtime) == challenge.RuntimeVCluster {
 		baseName = "breakfix-k8s-base:latest"
 	}
 	if repoPrefix == "" {
@@ -221,10 +221,10 @@ func verifyBaseImage(targetImage, runtime string) string {
 	return repoPrefix + "/" + baseName
 }
 
-func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
+func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID, challengeID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
 	name := "verify-" + k8s.RandomID()
 	common := breakfixv1.CommonEnvironmentSpec{
-		ChallengeRef: entry.ID,
+		ChallengeRef: challengeID,
 		UserRef:      "verify-" + verifyTaskID,
 		Image:        image,
 	}
@@ -234,7 +234,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 		"breakfix.dev/submission":  submissionID,
 	}
 
-	if strings.TrimSpace(entry.Runtime) == "vcluster" {
+	if challenge.NormalizeRuntime(entry.Runtime) == challenge.RuntimeVCluster {
 		_, err := client.CreateVClusterEnvironment(ctx, ns, &breakfixv1.VClusterEnvironment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
@@ -246,7 +246,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 		if err != nil {
 			return nil, err
 		}
-		return &verifyEnvironmentRef{Runtime: "vcluster", Name: name}, nil
+		return &verifyEnvironmentRef{Runtime: challenge.RuntimeVCluster, Name: name}, nil
 	}
 
 	_, err := client.CreateContainerEnvironment(ctx, ns, &breakfixv1.ContainerEnvironment{
@@ -260,7 +260,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 	if err != nil {
 		return nil, err
 	}
-	return &verifyEnvironmentRef{Runtime: "container", Name: name}, nil
+	return &verifyEnvironmentRef{Runtime: challenge.RuntimeContainer, Name: name}, nil
 }
 
 func waitVerifyEnvironmentReady(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef, timeout time.Duration) (*verifyEnvironmentState, error) {
@@ -289,8 +289,8 @@ func waitVerifyEnvironmentReady(ctx context.Context, client *k8s.Client, ns stri
 }
 
 func getVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef) (*verifyEnvironmentState, error) {
-	switch envRef.Runtime {
-	case "vcluster":
+	switch challenge.NormalizeRuntime(envRef.Runtime) {
+	case challenge.RuntimeVCluster:
 		env, err := client.GetVClusterEnvironment(ctx, ns, envRef.Name)
 		if err != nil {
 			return nil, err
@@ -316,8 +316,8 @@ func getVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, en
 }
 
 func destroyVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef) error {
-	switch envRef.Runtime {
-	case "vcluster":
+	switch challenge.NormalizeRuntime(envRef.Runtime) {
+	case challenge.RuntimeVCluster:
 		env, err := client.GetVClusterEnvironment(ctx, ns, envRef.Name)
 		if err != nil {
 			return nil

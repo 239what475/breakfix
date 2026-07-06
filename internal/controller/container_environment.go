@@ -8,7 +8,6 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -91,8 +90,7 @@ func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *bre
 		EnvironmentID: env.Name,
 	}); err != nil {
 		slog.Error("failed to create pod", "err", err, "environment", env.Name)
-		env.Status.Phase = breakfixv1.EnvironmentProvisioning
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status, err.Error())
 		_, _ = r.K8s.UpdateContainerEnvironmentStatus(ctx, r.CRDNamespace, env)
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 	}
@@ -113,23 +111,18 @@ func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *bre
 func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
 	if err := r.K8s.WaitForPod(env.Status.Namespace, env.Status.WorkspacePodName, "challenge"); err != nil {
 		slog.Debug("pod not ready yet", "environment", env.Name, "err", err)
-		env.Status.Phase = breakfixv1.EnvironmentProvisioning
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status, err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 	if err := r.K8s.WaitForFileInPod(env.Status.Namespace, env.Status.WorkspacePodName, breakfixInitSentinel, 2*time.Minute); err != nil {
 		slog.Debug("pod initialized sentinel not ready yet", "environment", env.Name, "err", err)
-		env.Status.Phase = breakfixv1.EnvironmentProvisioning
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status, err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
-	env.Status.Phase = breakfixv1.EnvironmentReady
-	env.Status.Message = "environment ready"
-	now := metav1.Now()
-	env.Status.StartedAt = &now
+	setEnvironmentReady(&env.Status, "environment ready")
 
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -147,18 +140,7 @@ func (r *ContainerEnvironmentReconciler) submit(ctx context.Context, env *breakf
 		slog.Error("exec verify.sh", "err", err, "environment", env.Name)
 	}
 
-	passed := exitCode == 0
-	result := &breakfixv1.SubmitResult{
-		Passed:   passed,
-		ExitCode: exitCode,
-		Output:   truncate(output, 4000),
-	}
-	now := metav1.Now()
-	result.SubmittedAt = &now
-
-	env.Status.SubmitResult = result
-	env.Status.Phase = breakfixv1.EnvironmentDestroyed
-	env.Status.Message = "environment submitted"
+	setEnvironmentSubmitted(&env.Status, exitCode, output)
 
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -168,15 +150,8 @@ func (r *ContainerEnvironmentReconciler) submit(ctx context.Context, env *breakf
 }
 
 func (r *ContainerEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if env.Status.ExpiresAt == nil {
-		env.Status.Phase = breakfixv1.EnvironmentDestroyed
-		if err := r.Status().Update(ctx, env); err != nil {
-			return ctrl.Result{}, err
-		}
-		return r.cleanup(ctx, env)
-	}
-
-	if time.Now().After(env.Status.ExpiresAt.Time) {
+	destroy, remaining := shouldDestroyEnvironment(&env.Status)
+	if destroy {
 		slog.Info("environment expired", "environment", env.Name)
 		env.Status.Phase = breakfixv1.EnvironmentDestroyed
 		if err := r.Status().Update(ctx, env); err != nil {
@@ -184,54 +159,27 @@ func (r *ContainerEnvironmentReconciler) checkCooldown(ctx context.Context, env 
 		}
 		return r.cleanup(ctx, env)
 	}
-
-	remaining := time.Until(env.Status.ExpiresAt.Time)
-	if remaining > 30*time.Second {
-		remaining = 30 * time.Second
-	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
 
 func (r *ContainerEnvironmentReconciler) cleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if env.Status.WorkspacePodName != "" {
-		if err := r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName); err != nil {
-			slog.Debug("cleanup pod", "err", err)
-		}
-	}
-	if env.Status.Namespace != "" {
-		if err := r.K8s.DeleteNamespace(env.Status.Namespace); err != nil {
-			slog.Debug("cleanup namespace", "err", err)
-		}
-	}
+	cleanupCommonEnvironment(r.K8s, &env.Status)
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 func (r *ContainerEnvironmentReconciler) requestDeletion(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if env.DeletionTimestamp != nil {
-		slog.Info("container environment deletion already requested", "environment", env.Name)
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
 	slog.Info("requesting container environment deletion", "environment", env.Name, "namespace", env.Status.Namespace)
-	if err := r.Delete(ctx, env); err != nil {
-		slog.Error("request container environment deletion failed", "environment", env.Name, "err", err)
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	return requestEnvironmentDeletion(ctx, r.Client, env)
 }
 
 func (r *ContainerEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if env.Status.WorkspacePodName != "" {
-		r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName) //nolint:errcheck
+	cleanupCommonEnvironment(r.K8s, &env.Status)
+	done, err := finalizeCommonEnvironment(ctx, r.K8s, env.Status.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-	if env.Status.Namespace != "" {
-		r.K8s.DeleteNamespace(env.Status.Namespace) //nolint:errcheck
-	}
-
-	if env.Status.Namespace != "" {
-		ns, err := r.K8s.GetNamespace(env.Status.Namespace)
-		if err == nil && ns != nil {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
+	if !done {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	controllerutil.RemoveFinalizer(env, containerEnvironmentFinalizer)

@@ -79,15 +79,66 @@ func ValidateDir(dir string) (*Entry, error) {
 		return nil, fmt.Errorf("challenge title is required")
 	}
 	switch strings.TrimSpace(challenge.Type) {
-	case "", "script":
+	case "", TypeScript:
 	default:
 		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
 	}
-	switch strings.TrimSpace(challenge.Runtime) {
-	case "", "container", "vcluster":
+	switch NormalizeRuntime(challenge.Runtime) {
+	case RuntimeContainer, RuntimeVCluster:
 	default:
 		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
 	}
+	challenge.Runtime = NormalizeRuntime(challenge.Runtime)
+	switch strings.TrimSpace(challenge.Difficulty) {
+	case "easy", "medium", "hard":
+	default:
+		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
+	}
+	cleanTags := make([]string, 0, len(challenge.Tags))
+	for _, tag := range challenge.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" {
+			cleanTags = append(cleanTags, tag)
+		}
+	}
+	if len(cleanTags) == 0 {
+		return nil, fmt.Errorf("challenge tags are required")
+	}
+	challenge.Tags = slices.Compact(cleanTags)
+	if strings.TrimSpace(challenge.Description) == "" {
+		return nil, fmt.Errorf("challenge description is required")
+	}
+	return challenge, nil
+}
+
+func ValidateSubmissionDir(dir string) (*Entry, error) {
+	challenge, err := LoadSubmissionDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range requiredFiles {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("missing %s: %w", name, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("%s must be a file", name)
+		}
+	}
+	if strings.TrimSpace(challenge.Title) == "" {
+		return nil, fmt.Errorf("challenge title is required")
+	}
+	switch strings.TrimSpace(challenge.Type) {
+	case "", TypeScript:
+	default:
+		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
+	}
+	switch NormalizeRuntime(challenge.Runtime) {
+	case RuntimeContainer, RuntimeVCluster:
+	default:
+		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
+	}
+	challenge.Runtime = NormalizeRuntime(challenge.Runtime)
 	switch strings.TrimSpace(challenge.Difficulty) {
 	case "easy", "medium", "hard":
 	default:

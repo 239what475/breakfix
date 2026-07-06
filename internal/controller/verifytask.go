@@ -170,7 +170,10 @@ func (r *VerifyTaskReconciler) publish(ctx context.Context, task *breakfixv1.Ver
 			}
 		}
 	}
-	ch, err := r.materializeSubmission(task.Spec.Submission.ID, task.Status.TempImage)
+	ch, err := challenge.Get(r.ChallengesDir, task.Spec.ChallengeID)
+	if err != nil {
+		ch, err = r.materializeSubmission(task.Spec.ChallengeID, task.Spec.Submission.ID, task.Status.TempImage)
+	}
 	if err != nil {
 		if err := r.syncGenerationPublishFailure(ctx, task, err.Error()); err != nil {
 			return ctrl.Result{}, err
@@ -197,7 +200,7 @@ func (r *VerifyTaskReconciler) publish(ctx context.Context, task *breakfixv1.Ver
 	return ctrl.Result{}, nil
 }
 
-func (r *VerifyTaskReconciler) materializeSubmission(submissionID, publishedImage string) (*challenge.Entry, error) {
+func (r *VerifyTaskReconciler) materializeSubmission(challengeID, submissionID, publishedImage string) (*challenge.Entry, error) {
 	path := challenge.SubmissionPath(r.DataDir, submissionID)
 	f, err := os.Open(path)
 	if err != nil {
@@ -215,11 +218,13 @@ func (r *VerifyTaskReconciler) materializeSubmission(submissionID, publishedImag
 	if err := challenge.ExtractTarGz(staging, f); err != nil {
 		return nil, fmt.Errorf("extract submission artifact: %w", err)
 	}
-	spec, err := challenge.LoadDir(staging)
+	_, err = challenge.LoadSubmissionDir(staging)
 	if err != nil {
 		return nil, err
 	}
-	id := r.nextChallengeID(materializedID(spec.Title, spec.Description))
+	if !challenge.ValidID(challengeID) {
+		return nil, fmt.Errorf("invalid challenge id %q", challengeID)
+	}
 
 	manifestPath := filepath.Join(staging, "challenge.yaml")
 	data, err := os.ReadFile(manifestPath)
@@ -230,13 +235,13 @@ func (r *VerifyTaskReconciler) materializeSubmission(submissionID, publishedImag
 	if err := yaml.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parse challenge manifest: %w", err)
 	}
-	manifest.ID = id
+	manifest.ID = challengeID
 	if strings.TrimSpace(publishedImage) == "" {
 		return nil, fmt.Errorf("published image is empty")
 	}
 	manifest.Image = publishedImage
 	if strings.TrimSpace(manifest.Type) == "" {
-		manifest.Type = "script"
+		manifest.Type = challenge.TypeScript
 	}
 	normalized, err := yaml.Marshal(manifest)
 	if err != nil {
@@ -246,25 +251,9 @@ func (r *VerifyTaskReconciler) materializeSubmission(submissionID, publishedImag
 		return nil, fmt.Errorf("write challenge manifest: %w", err)
 	}
 
-	return challenge.Materialize(r.ChallengesDir, id, func(dst string) error {
+	return challenge.Materialize(r.ChallengesDir, challengeID, func(dst string) error {
 		return copyDirForPublish(staging, dst)
 	})
-}
-
-func (r *VerifyTaskReconciler) nextChallengeID(base string) string {
-	id := strings.TrimSpace(base)
-	if id == "" {
-		id = "challenge"
-	}
-	if _, err := os.Stat(filepath.Join(r.ChallengesDir, id)); os.IsNotExist(err) {
-		return id
-	}
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s-%d", id, i)
-		if _, err := os.Stat(filepath.Join(r.ChallengesDir, candidate)); os.IsNotExist(err) {
-			return candidate
-		}
-	}
 }
 
 func (r *VerifyTaskReconciler) syncGenerationFailure(ctx context.Context, task *breakfixv1.VerifyTask) (ctrl.Result, error) {
@@ -394,17 +383,6 @@ func generatorImage(registryAddr string) string {
 		return "breakfix-generator:latest"
 	}
 	return registryAddr + "/breakfix-generator:latest"
-}
-
-func materializedID(title, description string) string {
-	seed := strings.TrimSpace(title)
-	if seed == "" {
-		seed = strings.TrimSpace(description)
-	}
-	if seed == "" {
-		seed = "challenge"
-	}
-	return challenge.DeriveID(seed)
 }
 
 func copyDirForPublish(src, dst string) error {
