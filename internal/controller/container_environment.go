@@ -32,33 +32,7 @@ func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl
 	if err := r.Get(ctx, req.NamespacedName, &env); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-
-	if env.DeletionTimestamp != nil {
-		result, err := r.finalCleanup(ctx, &env)
-		slog.Info("reconcile done", "resource", "containerEnvironment", "name", env.Name, "phase", env.Status.Phase, "duration", time.Since(start))
-		return result, err
-	}
-
-	var result ctrl.Result
-	var err error
-	switch env.Status.Phase {
-	case "":
-		result, err = r.createPod(ctx, &env)
-	case breakfixv1.EnvironmentPending, breakfixv1.EnvironmentProvisioning:
-		result, err = r.waitForPod(ctx, &env)
-	case breakfixv1.EnvironmentReady:
-		if env.Spec.Submit {
-			result, err = r.submit(ctx, &env)
-		}
-	case breakfixv1.EnvironmentDraining:
-		if env.Spec.Submit {
-			result, err = r.submit(ctx, &env)
-		} else {
-			result, err = r.checkCooldown(ctx, &env)
-		}
-	case breakfixv1.EnvironmentDestroyed, breakfixv1.EnvironmentFailed:
-		result, err = r.requestDeletion(ctx, &env)
-	}
+	result, err := reconcileCommonEnvironment(ctx, &env, containerEnvironmentRuntime{r: r})
 
 	slog.Info("reconcile done", "resource", "containerEnvironment", "name", env.Name, "phase", env.Status.Phase, "duration", time.Since(start))
 	return result, err
@@ -149,6 +123,11 @@ func (r *ContainerEnvironmentReconciler) submit(ctx context.Context, env *breakf
 	return r.cleanup(ctx, env)
 }
 
+func (r *ContainerEnvironmentReconciler) cleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	cleanupCommonEnvironment(r.K8s, &env.Status)
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
 func (r *ContainerEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
 	destroy, remaining := shouldDestroyEnvironment(&env.Status)
 	if destroy {
@@ -160,11 +139,6 @@ func (r *ContainerEnvironmentReconciler) checkCooldown(ctx context.Context, env 
 		return r.cleanup(ctx, env)
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
-}
-
-func (r *ContainerEnvironmentReconciler) cleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	cleanupCommonEnvironment(r.K8s, &env.Status)
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 func (r *ContainerEnvironmentReconciler) requestDeletion(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
@@ -195,6 +169,38 @@ func (r *ContainerEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) erro
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&breakfixv1.ContainerEnvironment{}).
 		Complete(r)
+}
+
+type containerEnvironmentRuntime struct {
+	r *ContainerEnvironmentReconciler
+}
+
+func (rt containerEnvironmentRuntime) provision(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.createPod(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) waitReady(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.waitForPod(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) submit(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.submit(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.checkCooldown(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) cleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.cleanup(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) finalCleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.finalCleanup(ctx, env.(*breakfixv1.ContainerEnvironment))
+}
+
+func (rt containerEnvironmentRuntime) requestDeletion(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.requestDeletion(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 
 func looksLikeURL(s string) bool {

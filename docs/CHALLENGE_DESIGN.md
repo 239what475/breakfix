@@ -25,7 +25,7 @@
 ## 题目文件结构
 
 ```
-challenges/<id>/
+data/challenges/<id>/
 ├── challenge.yaml     # 元数据
 ├── Dockerfile         # FROM base + COPY challenge files + ENTRYPOINT runtime-init
 ├── generate.sh        # 注入故障 (Pod 首次启动时执行一次)
@@ -79,7 +79,7 @@ CMD ["sleep", "infinity"]
 
 ### verify.sh
 
-submit 时由 server 拷贝到 Pod 内执行。exit 0 = 通过。
+submit 时由 server 执行。exit 0 = 通过。
 
 ### answer.sh
 

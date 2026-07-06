@@ -21,6 +21,10 @@ func setEnvironmentReady(status *breakfixv1.CommonEnvironmentStatus, msg string)
 	status.Message = msg
 	now := metav1.Now()
 	status.StartedAt = &now
+	if status.ExpiresAt == nil || status.ExpiresAt.Before(&now) {
+		expires := metav1.NewTime(now.Add(10 * time.Minute))
+		status.ExpiresAt = &expires
+	}
 }
 
 func setEnvironmentSubmitted(status *breakfixv1.CommonEnvironmentStatus, exitCode int, output string) {

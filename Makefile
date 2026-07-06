@@ -4,7 +4,7 @@
         dev-gateway \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         build build-gateway \
-        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-cleanup deploy-reset \
+        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-catalog deploy-cleanup deploy-reset \
         generator-build generator-dev generator-run \
         lint proto clean status logs
 
@@ -72,7 +72,8 @@ dev-down:
 	@docker stop registry 2>/dev/null && echo "  ✓ Registry stopped" || echo "  - Registry not running"
 
 dev-reset: dev-down
-	@rm -rf data/
+	@if [ -d data ]; then find data -mindepth 1 -maxdepth 1 ! -name challenges -exec rm -rf {} +; fi
+	@mkdir -p data/challenges
 	@echo "  ✓ Data directory reset"
 
 # ── Dev shortcuts (build + restart) ──
@@ -89,8 +90,7 @@ dev-registry:
 	@echo "  ✓ Registry :5000"
 
 dev-data:
-	@mkdir -p data
-	@[ -L data/challenges ] || ln -s ../challenges data/challenges
+	@mkdir -p data/challenges
 	@echo "  ✓ Data dir ready"
 
 dev-crd:
@@ -106,7 +106,7 @@ dev-rbac:
 
 dev-images:
 	@$(MAKE) --no-print-directory docker-base
-	@for d in challenges/*/; do \
+	@for d in data/challenges/*/; do \
 		name=$$(basename $$d); \
 		[ "$$name" = "base" ] && continue; \
 		$(MAKE) --no-print-directory docker-challenge NAME=$$name; \
@@ -170,9 +170,23 @@ deploy-config: _guard-server
 	ssh $(SERVER) 'sudo mv /tmp/breakfix.yaml $(SERVER_CONF) && sudo chown breakfix:breakfix $(SERVER_CONF) && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Config deployed, service restarted"
 
+deploy-catalog: _guard-server
+	tar -C data -czf /tmp/breakfix-challenges.tar.gz challenges
+	scp /tmp/breakfix-challenges.tar.gz $(SERVER):/tmp/breakfix-challenges.tar.gz
+	ssh $(SERVER) 'set -e; \
+		sudo rm -rf /tmp/breakfix-challenges && sudo mkdir -p /tmp/breakfix-challenges; \
+		sudo tar -C /tmp/breakfix-challenges -xzf /tmp/breakfix-challenges.tar.gz; \
+		sudo rm -rf $(SERVER_DATA)/challenges.tmp; \
+		sudo mv /tmp/breakfix-challenges/challenges $(SERVER_DATA)/challenges.tmp; \
+		sudo chown -R breakfix:breakfix $(SERVER_DATA)/challenges.tmp; \
+		sudo rm -rf $(SERVER_DATA)/challenges && sudo mv $(SERVER_DATA)/challenges.tmp $(SERVER_DATA)/challenges; \
+		sudo rm -rf /tmp/breakfix-challenges /tmp/breakfix-challenges.tar.gz'
+	@rm -f /tmp/breakfix-challenges.tar.gz
+	@echo "✓ Challenge catalog deployed"
+
 deploy-images: _guard-server
 	@$(MAKE) --no-print-directory deploy-base
-	@for d in challenges/*/; do \
+	@for d in data/challenges/*/; do \
 		name=$$(basename $$d); \
 		[ "$$name" = "base" ] && continue; \
 		$(MAKE) --no-print-directory deploy-image NAME=$$name; \
@@ -205,7 +219,7 @@ deploy-image: _guard-server
 	fi; \
 	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
 	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
-	docker build -t $(NAME):v1 ./challenges/$(NAME); \
+	docker build -t $(NAME):v1 ./data/challenges/$(NAME); \
 	docker tag $(NAME):v1 $$pub/$$acr_ns/$(NAME):v1; \
 	docker push $$pub/$$acr_ns/$(NAME):v1
 	@echo "  ✓ $(NAME) → ACR"
@@ -218,7 +232,7 @@ deploy-reset: deploy-cleanup _guard-server
 	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
 
-deploy: deploy-generator deploy-images deploy-gateway
+deploy: deploy-generator deploy-images deploy-catalog deploy-gateway
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -242,7 +256,7 @@ docker-base:
 	@echo "  ✓ breakfix-base + breakfix-k8s-base → registry + Kind"
 
 docker-challenge:
-	docker build -t $(NAME):v1 ./challenges/$(NAME)
+	docker build -t $(NAME):v1 ./data/challenges/$(NAME)
 	docker tag $(NAME):v1 $(REGISTRY)/$(ACR_NS)/$(NAME):v1
 	docker tag $(NAME):v1 $(DEV_IMAGE_PREFIX)/$(NAME):v1
 	docker push $(REGISTRY)/$(ACR_NS)/$(NAME):v1
@@ -252,7 +266,7 @@ docker-challenge:
 	@echo "  ✓ $(NAME) → registry + Kind"
 
 docker-push:
-	docker build -t $(NAME):v1 ./challenges/$(NAME)
+	docker build -t $(NAME):v1 ./data/challenges/$(NAME)
 	docker tag $(NAME):v1 $(REGISTRY)/$(ACR_NS)/$(NAME):v1
 	docker push $(REGISTRY)/$(ACR_NS)/$(NAME):v1
 	@echo "  ✓ $(NAME) → $(REGISTRY)"

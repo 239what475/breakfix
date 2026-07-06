@@ -113,7 +113,7 @@
 ├── breakfix.db        # SQLite
 ├── ca-cert.pem        # CA 证书（重启不变）
 ├── ca-key.pem         # CA 私钥
-└── challenges/        # 题目
+└── challenges/        # 题目目录（即 data_dir/challenges）
 ```
 
 ## 配置文件

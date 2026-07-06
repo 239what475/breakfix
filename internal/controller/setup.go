@@ -61,5 +61,9 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 		return err
 	}
 
+	if err := startEnvironmentCleanupLoop(mgr, k8sClient, crdNamespace); err != nil {
+		return err
+	}
+
 	return nil
 }

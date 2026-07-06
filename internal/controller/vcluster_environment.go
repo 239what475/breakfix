@@ -38,31 +38,7 @@ func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	slog.Info("reconcile vcluster environment", "name", env.Name, "phase", env.Status.Phase, "deleting", env.DeletionTimestamp != nil)
-
-	if env.DeletionTimestamp != nil {
-		slog.Info("vcluster environment entering final cleanup", "name", env.Name, "namespace", env.Status.Namespace)
-		return r.finalCleanup(ctx, &env)
-	}
-
-	switch env.Status.Phase {
-	case "":
-		return r.provision(ctx, &env)
-	case breakfixv1.EnvironmentPending, breakfixv1.EnvironmentProvisioning:
-		return r.waitReady(ctx, &env)
-	case breakfixv1.EnvironmentReady:
-		if env.Spec.Submit {
-			return r.submit(ctx, &env)
-		}
-	case breakfixv1.EnvironmentDraining:
-		if env.Spec.Submit {
-			return r.submit(ctx, &env)
-		}
-		return r.checkCooldown(ctx, &env)
-	case breakfixv1.EnvironmentDestroyed, breakfixv1.EnvironmentFailed:
-		return r.requestDeletion(ctx, &env)
-	}
-
-	return ctrl.Result{}, nil
+	return reconcileCommonEnvironment(ctx, &env, vclusterEnvironmentRuntime{r: r})
 }
 
 func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
@@ -124,7 +100,13 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-	rewriteKubeconfig, err := rewriteVClusterKubeconfig(kubeconfig, env.Status.VClusterName)
+	server, err := r.vclusterServerAddress(ns, env.Status.VClusterName)
+	if err != nil {
+		env.Status.Message = truncate(err.Error(), 4000)
+		_ = r.Status().Update(ctx, env)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	rewriteKubeconfig, err := rewriteVClusterKubeconfig(kubeconfig, server)
 	if err != nil {
 		env.Status.Message = truncate(err.Error(), 4000)
 		_ = r.Status().Update(ctx, env)
@@ -169,7 +151,7 @@ func (r *VClusterEnvironmentReconciler) submit(ctx context.Context, env *breakfi
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.cleanup(env)
+	return r.cleanup(ctx, env)
 }
 
 func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
@@ -179,12 +161,12 @@ func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.cleanup(env)
+		return r.cleanup(ctx, env)
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
 
-func (r *VClusterEnvironmentReconciler) cleanup(env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+func (r *VClusterEnvironmentReconciler) cleanup(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
 	if env.Status.WorkspacePodName != "" {
 		_ = r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName)
 	}
@@ -206,6 +188,7 @@ func (r *VClusterEnvironmentReconciler) requestDeletion(ctx context.Context, env
 }
 
 func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+	slog.Info("vcluster environment entering final cleanup", "name", env.Name, "namespace", env.Status.Namespace)
 	if env.Status.Namespace != "" {
 		_ = r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName)
 		_ = r.K8s.DeleteSecret(env.Status.Namespace, env.Status.KubeconfigSecretName)
@@ -269,6 +252,17 @@ func (r *VClusterEnvironmentReconciler) readVClusterKubeconfig(namespace, name s
 	return config, nil
 }
 
+func (r *VClusterEnvironmentReconciler) vclusterServerAddress(namespace, name string) (string, error) {
+	svc, err := r.K8s.Clientset().CoreV1().Services(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("get vcluster service %s/%s: %w", namespace, name, err)
+	}
+	if ip := strings.TrimSpace(svc.Spec.ClusterIP); ip != "" && ip != corev1.ClusterIPNone {
+		return fmt.Sprintf("https://%s:443", ip), nil
+	}
+	return fmt.Sprintf("https://%s.%s.svc.cluster.local:443", name, namespace), nil
+}
+
 func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClusterEnvironment) error {
 	pods, err := r.K8s.Clientset().CoreV1().Pods(env.Status.Namespace).Get(context.Background(), env.Status.WorkspacePodName, metav1.GetOptions{})
 	if err == nil && pods != nil {
@@ -310,12 +304,11 @@ func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClus
 	})
 }
 
-func rewriteVClusterKubeconfig(raw []byte, vclusterName string) ([]byte, error) {
+func rewriteVClusterKubeconfig(raw []byte, server string) ([]byte, error) {
 	cfg, err := clientcmd.Load(raw)
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)
 	}
-	server := "https://" + vclusterName + ":443"
 	for name, cluster := range cfg.Clusters {
 		if cluster == nil {
 			cfg.Clusters[name] = &clientcmdapi.Cluster{Server: server}
@@ -334,4 +327,36 @@ func (r *VClusterEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&breakfixv1.VClusterEnvironment{}).
 		Complete(r)
+}
+
+type vclusterEnvironmentRuntime struct {
+	r *VClusterEnvironmentReconciler
+}
+
+func (rt vclusterEnvironmentRuntime) provision(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.provision(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) waitReady(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.waitReady(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) submit(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.submit(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.checkCooldown(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) cleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.cleanup(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) finalCleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.finalCleanup(ctx, env.(*breakfixv1.VClusterEnvironment))
+}
+
+func (rt vclusterEnvironmentRuntime) requestDeletion(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.requestDeletion(ctx, env.(*breakfixv1.VClusterEnvironment))
 }

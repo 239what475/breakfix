@@ -31,6 +31,17 @@ func (c *Client) EnsureNamespace(name string) error {
 	return err
 }
 
+// ListNamespaces returns namespaces matching the label selector.
+func (c *Client) ListNamespaces(selector string) ([]corev1.Namespace, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	list, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // DeleteNamespace deletes a namespace, ignoring NotFound errors.
 func (c *Client) DeleteNamespace(name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

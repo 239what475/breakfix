@@ -11,6 +11,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type commonGatewayEnvironment interface {
+	CommonSpec() *breakfixv1.CommonEnvironmentSpec
+	CommonStatus() *breakfixv1.CommonEnvironmentStatus
+}
+
 type environmentRuntimeAdapter struct {
 	runtime      string
 	readyTimeout func() int64
@@ -18,6 +23,7 @@ type environmentRuntimeAdapter struct {
 	get          func(context.Context, string) (*activeEnvironment, error)
 	create       func(context.Context, *db.User, *challenge.Entry) (string, error)
 	updateStatus func(context.Context, string, func(*breakfixv1.CommonEnvironmentStatus)) error
+	updateSessionStatus func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error
 	updateSpec   func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec)) error
 }
 
@@ -28,9 +34,77 @@ func (a *environmentRuntimeAdapter) readyTimeoutDuration() int64 {
 	return a.readyTimeout()
 }
 
+func (a *environmentRuntimeAdapter) markDraining(ctx context.Context, name string, expiresAt metav1.Time) error {
+	return a.updateSessionStatus(ctx, name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
+		if spec.Submit || status.Phase != breakfixv1.EnvironmentReady || status.SubmitResult != nil {
+			return
+		}
+		status.Phase = breakfixv1.EnvironmentDraining
+		status.ExpiresAt = &expiresAt
+	})
+}
+
+func (a *environmentRuntimeAdapter) renewLease(ctx context.Context, name string, expiresAt metav1.Time) error {
+	return a.updateSessionStatus(ctx, name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
+		if spec.Submit || status.SubmitResult != nil {
+			return
+		}
+		if status.Phase == breakfixv1.EnvironmentReady || status.Phase == breakfixv1.EnvironmentDraining {
+			status.Phase = breakfixv1.EnvironmentReady
+			status.ExpiresAt = &expiresAt
+		}
+	})
+}
+
+func collectActiveEnvironments[T commonGatewayEnvironment](items []T, toActive func(T) *activeEnvironment) []activeEnvironment {
+	result := make([]activeEnvironment, 0, len(items))
+	for _, item := range items {
+		result = append(result, *toActive(item))
+	}
+	return result
+}
+
+func mutateEnvironmentStatus[T commonGatewayEnvironment](ctx context.Context, name string, get func(context.Context, string) (T, error), update func(context.Context, T) error, mutate func(*breakfixv1.CommonEnvironmentStatus)) error {
+	env, err := get(ctx, name)
+	if err != nil {
+		return err
+	}
+	mutate(env.CommonStatus())
+	return update(ctx, env)
+}
+
+func mutateEnvironmentSessionStatus[T commonGatewayEnvironment](ctx context.Context, name string, get func(context.Context, string) (T, error), update func(context.Context, T) error, mutate func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error {
+	env, err := get(ctx, name)
+	if err != nil {
+		return err
+	}
+	mutate(env.CommonSpec(), env.CommonStatus())
+	return update(ctx, env)
+}
+
+func mutateEnvironmentSpec[T commonGatewayEnvironment](ctx context.Context, name string, get func(context.Context, string) (T, error), update func(context.Context, T) error, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
+	env, err := get(ctx, name)
+	if err != nil {
+		return err
+	}
+	mutate(env.CommonSpec())
+	return update(ctx, env)
+}
+
 func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntimeAdapter, error) {
 	switch challenge.NormalizeRuntime(runtime) {
 	case challenge.RuntimeContainer:
+		getContainer := func(ctx context.Context, name string) (*breakfixv1.ContainerEnvironment, error) {
+			return h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
+		}
+		updateContainer := func(ctx context.Context, env *breakfixv1.ContainerEnvironment) error {
+			_, err := h.k8s.UpdateContainerEnvironment(ctx, h.crdNamespace, env)
+			return err
+		}
+		updateContainerStatus := func(ctx context.Context, env *breakfixv1.ContainerEnvironment) error {
+			_, err := h.k8s.UpdateContainerEnvironmentStatus(ctx, h.crdNamespace, env)
+			return err
+		}
 		return &environmentRuntimeAdapter{
 			runtime: challenge.RuntimeContainer,
 			readyTimeout: func() int64 {
@@ -41,18 +115,18 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				if err != nil {
 					return nil, err
 				}
-				result := make([]activeEnvironment, 0, len(envs.Items))
+				items := make([]*breakfixv1.ContainerEnvironment, 0, len(envs.Items))
 				for i := range envs.Items {
 					env := envs.Items[i]
 					if env.DeletionTimestamp != nil {
 						continue
 					}
-					result = append(result, *environmentFromContainer(&env))
+					items = append(items, &env)
 				}
-				return result, nil
+				return collectActiveEnvironments(items, environmentFromContainer), nil
 			},
 			get: func(ctx context.Context, name string) (*activeEnvironment, error) {
-				env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
+				env, err := getContainer(ctx, name)
 				if err != nil {
 					return nil, err
 				}
@@ -81,25 +155,27 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				return name, nil
 			},
 			updateStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentStatus)) error {
-				env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
-				if err != nil {
-					return err
-				}
-				mutate(&env.Status)
-				_, err = h.k8s.UpdateContainerEnvironmentStatus(ctx, h.crdNamespace, env)
-				return err
+				return mutateEnvironmentStatus(ctx, name, getContainer, updateContainerStatus, mutate)
+			},
+			updateSessionStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error {
+				return mutateEnvironmentSessionStatus(ctx, name, getContainer, updateContainerStatus, mutate)
 			},
 			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
-				env, err := h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
-				if err != nil {
-					return err
-				}
-				mutate(&env.Spec)
-				_, err = h.k8s.UpdateContainerEnvironment(ctx, h.crdNamespace, env)
-				return err
+				return mutateEnvironmentSpec(ctx, name, getContainer, updateContainer, mutate)
 			},
 		}, nil
 	case challenge.RuntimeVCluster:
+		getVCluster := func(ctx context.Context, name string) (*breakfixv1.VClusterEnvironment, error) {
+			return h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
+		}
+		updateVCluster := func(ctx context.Context, env *breakfixv1.VClusterEnvironment) error {
+			_, err := h.k8s.UpdateVClusterEnvironment(ctx, h.crdNamespace, env)
+			return err
+		}
+		updateVClusterStatus := func(ctx context.Context, env *breakfixv1.VClusterEnvironment) error {
+			_, err := h.k8s.UpdateVClusterEnvironmentStatus(ctx, h.crdNamespace, env)
+			return err
+		}
 		return &environmentRuntimeAdapter{
 			runtime: challenge.RuntimeVCluster,
 			readyTimeout: func() int64 {
@@ -110,18 +186,18 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				if err != nil {
 					return nil, err
 				}
-				result := make([]activeEnvironment, 0, len(envs.Items))
+				items := make([]*breakfixv1.VClusterEnvironment, 0, len(envs.Items))
 				for i := range envs.Items {
 					env := envs.Items[i]
 					if env.DeletionTimestamp != nil {
 						continue
 					}
-					result = append(result, *environmentFromVCluster(&env))
+					items = append(items, &env)
 				}
-				return result, nil
+				return collectActiveEnvironments(items, environmentFromVCluster), nil
 			},
 			get: func(ctx context.Context, name string) (*activeEnvironment, error) {
-				env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
+				env, err := getVCluster(ctx, name)
 				if err != nil {
 					return nil, err
 				}
@@ -152,22 +228,13 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				return name, nil
 			},
 			updateStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentStatus)) error {
-				env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
-				if err != nil {
-					return err
-				}
-				mutate(&env.Status.CommonEnvironmentStatus)
-				_, err = h.k8s.UpdateVClusterEnvironmentStatus(ctx, h.crdNamespace, env)
-				return err
+				return mutateEnvironmentStatus(ctx, name, getVCluster, updateVClusterStatus, mutate)
+			},
+			updateSessionStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error {
+				return mutateEnvironmentSessionStatus(ctx, name, getVCluster, updateVClusterStatus, mutate)
 			},
 			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
-				env, err := h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
-				if err != nil {
-					return err
-				}
-				mutate(&env.Spec.CommonEnvironmentSpec)
-				_, err = h.k8s.UpdateVClusterEnvironment(ctx, h.crdNamespace, env)
-				return err
+				return mutateEnvironmentSpec(ctx, name, getVCluster, updateVCluster, mutate)
 			},
 		}, nil
 	default:

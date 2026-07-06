@@ -188,6 +188,13 @@ func (c *Client) ListPods(namespace string) ([]string, error) {
 	return names, nil
 }
 
+// GetPod returns a pod by name.
+func (c *Client) GetPod(namespace, podName string) (*corev1.Pod, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return c.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+}
+
 // DeletePod deletes a pod, ignoring NotFound errors.
 func (c *Client) DeletePod(namespace, podName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -121,15 +121,11 @@ sudo systemctl enable --now breakfix-api
 ### 1.5 同步题目
 
 ```bash
-# 方式一：Git 克隆
-sudo git clone https://github.com/your-org/breakfix-challenges.git /var/lib/breakfix/challenges
-sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
-
-# 方式二：本地 scp 上传
-# scp -r ./challenges <服务器名>:/tmp/
-# ssh <服务器名> sudo mv /tmp/challenges/* /var/lib/breakfix/challenges/
-# ssh <服务器名> sudo chown -R breakfix:breakfix /var/lib/breakfix/challenges
+# 推荐：直接用仓库内的 data/challenges 作为权威来源同步到远程
+make deploy-catalog
 ```
+
+这会把本地仓库中的 `data/challenges` 原子替换到远程 `data_dir/challenges`。
 
 ---
 
@@ -203,8 +199,9 @@ make deploy-images                       # 推送全部镜像
 ## 4. 日常远程部署
 
 ```bash
-make deploy               # 全量部署（镜像 → ACR + 二进制 → ECS）
+make deploy               # 全量部署（镜像 + challenge catalog + 二进制）
 make deploy-server        # 只推二进制
+make deploy-catalog       # 只同步题目目录
 make deploy-image NAME=xxx  # 只推单个镜像
 make deploy-images        # 只推全部镜像
 make deploy-cleanup       # 清理 ACK 中残留的 break* 命名空间

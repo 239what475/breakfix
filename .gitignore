@@ -13,6 +13,12 @@ Thumbs.db
 
 # Project data (SQLite + CA certs + challenges)
 data/
+!data/
+!data/challenges/
+!data/challenges/**
+data/*
+!data/challenges/
+!data/challenges/**
 *.db
 *.db-journal
 *.db-wal

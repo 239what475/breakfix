@@ -718,8 +718,14 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 		return
 	}
 
+	runtimeAdapter, err := h.environmentRuntimeAdapter(env.Runtime)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+
 	slog.Info("terminal session started", "challenge", challengeID, "user", user.ID)
-	wsUpgrade(c.Writer, c.Request, env, h.k8s, h.crdNamespace, h.cooldownMin)
+	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin)
 }
 
 func (h *Handler) DownloadVerifySubmissionArtifact(c *gin.Context) {

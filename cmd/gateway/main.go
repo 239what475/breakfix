@@ -50,6 +50,7 @@ func main() {
 	challengesDir := filepath.Join(cfg.DataDir, "challenges")
 	if err := os.MkdirAll(challengesDir, 0755); err != nil {
 		slog.Error("failed to create challenges dir", "err", err)
+		os.Exit(1)
 	}
 
 	k8sClient, err := k8s.New(cfg.Kubeconfig)

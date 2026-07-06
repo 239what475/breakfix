@@ -1,0 +1,26 @@
+id: fix-broken-deployment-image
+type: script
+runtime: vcluster
+title: "修复错误的 Deployment 镜像"
+difficulty: easy
+tags:
+  - kubernetes
+  - kubectl
+  - deployment
+  - image
+image: fix-broken-deployment-image:v1
+
+description: |
+  你正在一个带有 kubeconfig 的工作容器中排查 Kubernetes 环境。
+
+  `default` 命名空间里有一个名为 `web` 的 Deployment，但它当前不可用。
+
+  你的任务：
+  1. 使用 `kubectl` 检查 `web` Deployment 的状态
+  2. 找出它无法正常运行的原因
+  3. 修复问题，使 Deployment 恢复为可用状态
+
+  完成后直接提交，平台会自动验证：
+  - `web` Deployment 是否成功变为 Available
+  - Pod 是否全部 Ready
+  - Service 是否仍然存在

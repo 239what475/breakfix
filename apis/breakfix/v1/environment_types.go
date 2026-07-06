@@ -69,6 +69,22 @@ type VClusterEnvironmentStatus struct {
 	KubeconfigSecretName    string `json:"kubeconfigSecretName,omitempty"`
 }
 
+func (in *ContainerEnvironment) CommonSpec() *CommonEnvironmentSpec {
+	return &in.Spec
+}
+
+func (in *ContainerEnvironment) CommonStatus() *CommonEnvironmentStatus {
+	return &in.Status
+}
+
+func (in *VClusterEnvironment) CommonSpec() *CommonEnvironmentSpec {
+	return &in.Spec.CommonEnvironmentSpec
+}
+
+func (in *VClusterEnvironment) CommonStatus() *CommonEnvironmentStatus {
+	return &in.Status.CommonEnvironmentStatus
+}
+
 // +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
