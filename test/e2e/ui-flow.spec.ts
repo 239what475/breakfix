@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { solveFixBrokenDeploymentImage } from './helpers/ui'
 
 const BASE = 'http://localhost:9090'
 
@@ -62,10 +63,10 @@ async function selectCleanupLogs(page: any) {
 }
 
 async function selectVclusterSmoke(page: any) {
-  const challengeButton = page.getByRole('button', { name: /检查 vcluster 连接/ })
+  const challengeButton = page.getByRole('button', { name: /修复错误的 Deployment 镜像/ })
   await expect(challengeButton).toBeVisible({ timeout: 10000 })
   await challengeButton.click()
-  await expect(page.locator('.terminal-empty-card h2')).toContainText('检查 vcluster 连接')
+  await expect(page.locator('.terminal-empty-card h2')).toContainText('修复错误的 Deployment 镜像')
   await expect(page.locator('.terminal-empty-card .brief-description')).toContainText('你正在一个带有 kubeconfig 的工作容器中排查 Kubernetes 环境。')
 }
 
@@ -116,15 +117,7 @@ test.describe('UI Flow', () => {
     await expect(page.locator('.terminal-frame')).toBeVisible({ timeout: 120000 })
     await expect(page.locator('.terminal-overlay')).toBeHidden({ timeout: 120000 })
 
-    const terminalSurface = page.locator('.terminal-surface')
-    await terminalSurface.click({ position: { x: 120, y: 120 } })
-    await page.keyboard.type('kubectl get ns >/workspace/namespaces.txt', { delay: 20 })
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(1500)
-    await page.keyboard.type('wc -l /workspace/namespaces.txt', { delay: 20 })
-    await page.keyboard.press('Enter')
-
-    await expect(page.locator('.terminal-frame')).toContainText('/workspace/namespaces.txt', { timeout: 15000 })
+    await solveFixBrokenDeploymentImage(page)
 
     await page.locator('.terminal-actions').getByRole('button', { name: 'Submit', exact: true }).click()
 

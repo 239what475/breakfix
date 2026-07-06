@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -167,6 +168,7 @@ func (r *ContainerEnvironmentReconciler) finalCleanup(ctx context.Context, env *
 
 func (r *ContainerEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: containerEnvironmentMaxConcurrentReconciles}).
 		For(&breakfixv1.ContainerEnvironment{}).
 		Complete(r)
 }

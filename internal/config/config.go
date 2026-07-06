@@ -10,21 +10,24 @@ import (
 )
 
 type Config struct {
-	Port             int       `yaml:"port"`
-	ProxyPort        int       `yaml:"proxy_port"`
-	HealthPort       int       `yaml:"health_port"`
-	DataDir          string    `yaml:"data_dir"`
-	Kubeconfig       string    `yaml:"kubeconfig"`
-	RegistryAddr     string    `yaml:"registry_addr"`
-	RegistryInsecure bool      `yaml:"registry_insecure"`
-	K8sBaseImage     string    `yaml:"k8s_base_image"`
-	ServerHost       string    `yaml:"server_host"`
-	Namespace        string    `yaml:"namespace"`
-	CRDNamespace     string    `yaml:"crd_namespace"`
-	CooldownMinutes  int       `yaml:"cooldown_minutes"`
-	JWTSecret        string    `yaml:"jwt_secret"`
-	InternalAPIKey   string    `yaml:"internal_api_key"`
-	LLM              LLMConfig `yaml:"llm"`
+	Port                 int       `yaml:"port"`
+	ProxyPort            int       `yaml:"proxy_port"`
+	HealthPort           int       `yaml:"health_port"`
+	DataDir              string    `yaml:"data_dir"`
+	Kubeconfig           string    `yaml:"kubeconfig"`
+	RegistryAddr         string    `yaml:"registry_addr"`
+	RegistryInsecure     bool      `yaml:"registry_insecure"`
+	K8sBaseImage         string    `yaml:"k8s_base_image"`
+	VClusterBinary       string    `yaml:"vcluster_binary"`
+	VClusterChartRepo    string    `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion string    `yaml:"vcluster_chart_version"`
+	ServerHost           string    `yaml:"server_host"`
+	Namespace            string    `yaml:"namespace"`
+	CRDNamespace         string    `yaml:"crd_namespace"`
+	CooldownMinutes      int       `yaml:"cooldown_minutes"`
+	JWTSecret            string    `yaml:"jwt_secret"`
+	InternalAPIKey       string    `yaml:"internal_api_key"`
+	LLM                  LLMConfig `yaml:"llm"`
 }
 
 type LLMConfig struct {
@@ -37,18 +40,20 @@ type LLMConfig struct {
 
 func defaults() Config {
 	return Config{
-		Port:            9090,
-		ProxyPort:       3128,
-		HealthPort:      8081,
-		DataDir:          "/var/lib/breakfix",
-		RegistryAddr:     "172.18.0.1:5000/break-fix",
-		RegistryInsecure: true,
-		K8sBaseImage:     "breakfix-k8s-base:latest",
-		Namespace:        "breakfix",
-		CRDNamespace:    "breakfix-system",
-		JWTSecret:       "breakfix-dev-secret-change-in-production",
-		InternalAPIKey:  "breakfix-dev-internal-key-change-in-production",
-		CooldownMinutes: 5,
+		Port:              9090,
+		ProxyPort:         3128,
+		HealthPort:        8081,
+		DataDir:           "/var/lib/breakfix",
+		RegistryAddr:      "172.18.0.1:5000/break-fix",
+		RegistryInsecure:  true,
+		K8sBaseImage:      "breakfix-k8s-base:latest",
+		VClusterBinary:    "vcluster",
+		VClusterChartRepo: "https://charts.loft.sh",
+		Namespace:         "breakfix",
+		CRDNamespace:      "breakfix-system",
+		JWTSecret:         "breakfix-dev-secret-change-in-production",
+		InternalAPIKey:    "breakfix-dev-internal-key-change-in-production",
+		CooldownMinutes:   5,
 		LLM: LLMConfig{
 			BaseURL:    "https://api.deepseek.com/anthropic",
 			Model:      "deepseek-v4-pro",

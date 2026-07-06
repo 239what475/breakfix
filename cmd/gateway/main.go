@@ -20,6 +20,7 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/gateway"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	crcache "sigs.k8s.io/controller-runtime/pkg/cache"
@@ -27,6 +28,7 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	ctrl.SetLogger(logr.FromSlogHandler(slog.Default().Handler()))
 
 	configPath := flag.String("config", "breakfix.yaml", "Config file path")
 	flag.Parse()
@@ -90,6 +92,9 @@ func main() {
 		cfg.InternalAPIKey,
 		cfg.ServerHost,
 		cfg.Port,
+		cfg.VClusterBinary,
+		cfg.VClusterChartRepo,
+		cfg.VClusterChartVersion,
 	); err != nil {
 		slog.Error("failed to setup controllers", "err", err)
 		os.Exit(1)

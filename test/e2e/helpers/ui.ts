@@ -72,6 +72,29 @@ export async function selectCleanupLogs(page: Page) {
   await expect(page.locator('.terminal-empty-card .brief-description')).toContainText('服务器磁盘空间不足')
 }
 
+export async function selectFixBrokenDeploymentImage(page: Page) {
+  const challengeButton = page.getByRole('button', { name: /修复错误的 Deployment 镜像/ })
+  await expect(challengeButton).toBeVisible({ timeout: 10000 })
+  await challengeButton.click()
+  await expect(page.locator('.terminal-empty-card h2')).toContainText('修复错误的 Deployment 镜像')
+  await expect(page.locator('.terminal-empty-card .brief-description')).toContainText('default')
+}
+
+export async function solveFixBrokenDeploymentImage(page: Page) {
+  const terminalSurface = page.locator('.terminal-surface')
+  await terminalSurface.click({ position: { x: 140, y: 120 } })
+
+  await page.keyboard.type('kubectl get deployment web -n default', { delay: 20 })
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.terminal-frame')).toContainText('web', { timeout: 15000 })
+
+  await page.keyboard.type('kubectl set image deployment/web web=nginx:1.25.5 -n default', { delay: 20 })
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('kubectl rollout status deployment/web -n default --timeout=120s', { delay: 20 })
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.terminal-frame')).toContainText('successfully rolled out', { timeout: 120000 })
+}
+
 export async function signOut(page: Page) {
   await page.locator('.account-avatar').click()
   await page.getByText('Sign Out', { exact: true }).click()

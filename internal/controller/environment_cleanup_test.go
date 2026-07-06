@@ -64,6 +64,22 @@ func TestStaleCommonEnvironmentDoesNotTreatPendingPodAsStale(t *testing.T) {
 	}
 }
 
+func TestStaleCommonEnvironmentDoesNotTreatProvisioningVClusterWithoutWorkspacePodAsStale(t *testing.T) {
+	client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	status := &breakfixv1.CommonEnvironmentStatus{
+		Phase:            breakfixv1.EnvironmentProvisioning,
+		Namespace:        "demo",
+		WorkspacePodName: "",
+	}
+
+	if staleCommonEnvironment(client, status) {
+		t.Fatalf("expected provisioning vcluster environment without workspace pod to remain non-stale")
+	}
+}
+
 func TestStaleCommonEnvironmentTreatsMissingPodAsStale(t *testing.T) {
 	client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)

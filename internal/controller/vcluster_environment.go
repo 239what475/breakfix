@@ -1,15 +1,14 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"github.com/breakfix/breakfix/pkg/vclustercli"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -17,6 +16,7 @@ import (
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -25,6 +25,9 @@ const vclusterEnvironmentFinalizer = "breakfix.dev/vcluster-environment-cleanup"
 type VClusterEnvironmentReconciler struct {
 	client.Client
 	K8s          *k8s.Client
+	VCluster     *vclustercli.Client
+	ChartRepo    string
+	ChartVersion string
 	RegistryAddr string
 	NS           string
 	CRDNamespace string
@@ -52,17 +55,15 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 	ns := k8s.UserNamespace(r.NS, env.Spec.UserRef) + "-" + env.Name
 	vclusterName := "vc-" + env.Name
 	kubeconfigSecret := "vc-kubeconfig"
-	workspacePodName := "workspace"
 
 	if err := r.K8s.EnsureNamespace(ns); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureVCluster(ns, vclusterName); err != nil {
+	if err := r.ensureVCluster(ctx, ns, vclusterName); err != nil {
 		env.Status.Namespace = ns
 		env.Status.VClusterName = vclusterName
 		env.Status.KubeconfigSecretName = kubeconfigSecret
-		env.Status.WorkspacePodName = workspacePodName
 		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -72,7 +73,6 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 	env.Status.Namespace = ns
 	env.Status.VClusterName = vclusterName
 	env.Status.KubeconfigSecretName = kubeconfigSecret
-	env.Status.WorkspacePodName = workspacePodName
 	env.Status.Message = "vcluster created, waiting for readiness"
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -85,6 +85,10 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 	ns := env.Status.Namespace
 	if ns == "" {
 		return ctrl.Result{}, fmt.Errorf("namespace missing")
+	}
+	workspacePodName := env.Status.WorkspacePodName
+	if strings.TrimSpace(workspacePodName) == "" {
+		workspacePodName = "workspace"
 	}
 
 	podName := env.Status.VClusterName + "-0"
@@ -118,18 +122,24 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureWorkspacePod(env); err != nil {
+	if err := r.ensureWorkspacePod(env, workspacePodName); err != nil {
 		env.Status.Message = truncate(err.Error(), 4000)
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	if env.Status.WorkspacePodName != workspacePodName {
+		env.Status.WorkspacePodName = workspacePodName
+		if err := r.Status().Update(ctx, env); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
-	if err := r.K8s.WaitForPod(ns, env.Status.WorkspacePodName, "challenge"); err != nil {
+	if err := r.K8s.WaitForPod(ns, workspacePodName, "challenge"); err != nil {
 		env.Status.Message = truncate(err.Error(), 4000)
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-	if err := r.K8s.WaitForFileInPod(ns, env.Status.WorkspacePodName, breakfixInitSentinel, 2*time.Minute); err != nil {
+	if err := r.K8s.WaitForFileInPod(ns, workspacePodName, breakfixInitSentinel, 2*time.Minute); err != nil {
 		env.Status.Message = truncate(err.Error(), 4000)
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -174,7 +184,9 @@ func (r *VClusterEnvironmentReconciler) cleanup(ctx context.Context, env *breakf
 		_ = r.K8s.DeleteSecret(env.Status.Namespace, env.Status.KubeconfigSecretName)
 	}
 	if env.Status.VClusterName != "" {
-		_ = r.deleteVCluster(env.Status.Namespace, env.Status.VClusterName)
+		if err := r.deleteVCluster(ctx, env.Status.Namespace, env.Status.VClusterName); err != nil && !vclustercli.IsCode(err, vclustercli.ErrNotFound) {
+			slog.Warn("delete vcluster during cleanup", "environment", env.Name, "err", err)
+		}
 	}
 	if env.Status.Namespace != "" {
 		_ = r.K8s.DeleteNamespace(env.Status.Namespace)
@@ -192,7 +204,9 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 	if env.Status.Namespace != "" {
 		_ = r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName)
 		_ = r.K8s.DeleteSecret(env.Status.Namespace, env.Status.KubeconfigSecretName)
-		_ = r.deleteVCluster(env.Status.Namespace, env.Status.VClusterName)
+		if err := r.deleteVCluster(ctx, env.Status.Namespace, env.Status.VClusterName); err != nil && !vclustercli.IsCode(err, vclustercli.ErrNotFound) {
+			slog.Warn("delete vcluster during final cleanup", "environment", env.Name, "err", err)
+		}
 		_ = r.K8s.DeleteNamespace(env.Status.Namespace)
 
 		done, err := finalizeCommonEnvironment(ctx, r.K8s, env.Status.Namespace)
@@ -211,27 +225,34 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 	return ctrl.Result{}, nil
 }
 
-func (r *VClusterEnvironmentReconciler) ensureVCluster(namespace, name string) error {
-	cmd := exec.Command("vcluster", "create", name, "-n", namespace, "--connect=false", "--background-proxy=false")
-	var stderr bytes.Buffer
-	cmd.Stdout = &stderr
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if strings.Contains(stderr.String(), "already exists") {
-			return nil
-		}
-		return fmt.Errorf("vcluster create: %w: %s", err, strings.TrimSpace(stderr.String()))
+func (r *VClusterEnvironmentReconciler) ensureVCluster(ctx context.Context, namespace, name string) error {
+	if r.VCluster == nil {
+		return fmt.Errorf("vcluster cli client is not configured")
+	}
+	_, err := r.VCluster.Create(ctx, vclustercli.CreateOptions{
+		Name:            name,
+		Namespace:       namespace,
+		Connect:         false,
+		BackgroundProxy: false,
+		ChartRepo:       r.ChartRepo,
+		ChartVersion:    r.ChartVersion,
+	})
+	if err != nil && !vclustercli.IsCode(err, vclustercli.ErrAlreadyExists) {
+		return err
 	}
 	return nil
 }
 
-func (r *VClusterEnvironmentReconciler) deleteVCluster(namespace, name string) error {
-	cmd := exec.Command("vcluster", "delete", name, "-n", namespace)
-	var stderr bytes.Buffer
-	cmd.Stdout = &stderr
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil && !strings.Contains(stderr.String(), "not found") {
-		return fmt.Errorf("vcluster delete: %w: %s", err, strings.TrimSpace(stderr.String()))
+func (r *VClusterEnvironmentReconciler) deleteVCluster(ctx context.Context, namespace, name string) error {
+	if r.VCluster == nil {
+		return fmt.Errorf("vcluster cli client is not configured")
+	}
+	_, err := r.VCluster.Delete(ctx, vclustercli.DeleteOptions{
+		Name:      name,
+		Namespace: namespace,
+	})
+	if err != nil && !vclustercli.IsCode(err, vclustercli.ErrNotFound) {
+		return err
 	}
 	return nil
 }
@@ -263,8 +284,8 @@ func (r *VClusterEnvironmentReconciler) vclusterServerAddress(namespace, name st
 	return fmt.Sprintf("https://%s.%s.svc.cluster.local:443", name, namespace), nil
 }
 
-func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClusterEnvironment) error {
-	pods, err := r.K8s.Clientset().CoreV1().Pods(env.Status.Namespace).Get(context.Background(), env.Status.WorkspacePodName, metav1.GetOptions{})
+func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClusterEnvironment, workspacePodName string) error {
+	pods, err := r.K8s.Clientset().CoreV1().Pods(env.Status.Namespace).Get(context.Background(), workspacePodName, metav1.GetOptions{})
 	if err == nil && pods != nil {
 		return nil
 	}
@@ -277,7 +298,7 @@ func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClus
 		imageURL = r.RegistryAddr + "/" + imageURL
 	}
 
-	return r.K8s.CreatePod(env.Status.Namespace, env.Status.WorkspacePodName, k8s.CreatePodOpts{
+	return r.K8s.CreatePod(env.Status.Namespace, workspacePodName, k8s.CreatePodOpts{
 		Image:         imageURL,
 		ChallengeID:   env.Spec.ChallengeRef,
 		EnvironmentID: env.Name,
@@ -325,6 +346,7 @@ func rewriteVClusterKubeconfig(raw []byte, server string) ([]byte, error) {
 
 func (r *VClusterEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		WithOptions(controller.Options{MaxConcurrentReconciles: vclusterEnvironmentMaxConcurrentReconciles}).
 		For(&breakfixv1.VClusterEnvironment{}).
 		Complete(r)
 }
