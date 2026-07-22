@@ -3,28 +3,32 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type commonGatewayEnvironment interface {
+	GetGeneration() int64
 	CommonSpec() *breakfixv1.CommonEnvironmentSpec
 	CommonStatus() *breakfixv1.CommonEnvironmentStatus
 }
 
 type environmentRuntimeAdapter struct {
-	runtime      string
-	readyTimeout func() int64
-	list         func(context.Context, string) ([]activeEnvironment, error)
-	get          func(context.Context, string) (*activeEnvironment, error)
-	create       func(context.Context, *db.User, *challenge.Entry) (string, error)
-	updateStatus func(context.Context, string, func(*breakfixv1.CommonEnvironmentStatus)) error
+	runtime             string
+	readyTimeout        func() int64
+	list                func(context.Context, string) ([]activeEnvironment, error)
+	get                 func(context.Context, string) (*activeEnvironment, error)
+	create              func(context.Context, *db.User, *challenge.Entry) (string, error)
+	updateStatus        func(context.Context, string, func(*breakfixv1.CommonEnvironmentStatus)) error
 	updateSessionStatus func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error
-	updateSpec   func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec)) error
+	updateSpec          func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec)) error
+	requestDeletion     func(context.Context, string) error
 }
 
 func (a *environmentRuntimeAdapter) readyTimeoutDuration() int64 {
@@ -39,8 +43,7 @@ func (a *environmentRuntimeAdapter) markDraining(ctx context.Context, name strin
 		if spec.Submit || status.Phase != breakfixv1.EnvironmentReady || status.SubmitResult != nil {
 			return
 		}
-		status.Phase = breakfixv1.EnvironmentDraining
-		status.ExpiresAt = &expiresAt
+		setGatewayEnvironmentDraining(status, expiresAt, "SessionDetached", "session disconnected, environment draining")
 	})
 }
 
@@ -50,8 +53,7 @@ func (a *environmentRuntimeAdapter) renewLease(ctx context.Context, name string,
 			return
 		}
 		if status.Phase == breakfixv1.EnvironmentReady || status.Phase == breakfixv1.EnvironmentDraining {
-			status.Phase = breakfixv1.EnvironmentReady
-			status.ExpiresAt = &expiresAt
+			setGatewayEnvironmentReady(status, expiresAt, "SessionActive", "environment lease renewed")
 		}
 	})
 }
@@ -69,7 +71,9 @@ func mutateEnvironmentStatus[T commonGatewayEnvironment](ctx context.Context, na
 	if err != nil {
 		return err
 	}
-	mutate(env.CommonStatus())
+	status := env.CommonStatus()
+	status.ObservedGeneration = env.GetGeneration()
+	mutate(status)
 	return update(ctx, env)
 }
 
@@ -78,7 +82,9 @@ func mutateEnvironmentSessionStatus[T commonGatewayEnvironment](ctx context.Cont
 	if err != nil {
 		return err
 	}
-	mutate(env.CommonSpec(), env.CommonStatus())
+	status := env.CommonStatus()
+	status.ObservedGeneration = env.GetGeneration()
+	mutate(env.CommonSpec(), status)
 	return update(ctx, env)
 }
 
@@ -163,6 +169,9 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
 				return mutateEnvironmentSpec(ctx, name, getContainer, updateContainer, mutate)
 			},
+			requestDeletion: func(ctx context.Context, name string) error {
+				return h.k8s.DeleteContainerEnvironment(ctx, h.crdNamespace, name)
+			},
 		}, nil
 	case challenge.RuntimeVCluster:
 		getVCluster := func(ctx context.Context, name string) (*breakfixv1.VClusterEnvironment, error) {
@@ -236,8 +245,49 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
 				return mutateEnvironmentSpec(ctx, name, getVCluster, updateVCluster, mutate)
 			},
+			requestDeletion: func(ctx context.Context, name string) error {
+				return h.k8s.DeleteVClusterEnvironment(ctx, h.crdNamespace, name)
+			},
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime %q", runtime)
 	}
+}
+
+func setGatewayEnvironmentDraining(status *breakfixv1.CommonEnvironmentStatus, expiresAt metav1.Time, reason, msg string) {
+	status.Phase = breakfixv1.EnvironmentDraining
+	status.Reason = reason
+	status.Message = msg
+	status.ExpiresAt = &expiresAt
+	setGatewayCondition(status, breakfixv1.ConditionDraining, metav1.ConditionTrue, reason, msg)
+	setGatewayCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, reason, msg)
+}
+
+func setGatewayEnvironmentReady(status *breakfixv1.CommonEnvironmentStatus, expiresAt metav1.Time, reason, msg string) {
+	status.Phase = breakfixv1.EnvironmentReady
+	status.Reason = reason
+	status.Message = msg
+	status.ExpiresAt = &expiresAt
+	status.LastError = nil
+	setGatewayCondition(status, breakfixv1.ConditionReady, metav1.ConditionTrue, reason, msg)
+	setGatewayCondition(status, breakfixv1.ConditionDraining, metav1.ConditionFalse, "", "")
+	setGatewayCondition(status, breakfixv1.ConditionFailed, metav1.ConditionFalse, "", "")
+}
+
+func setGatewayCondition(status *breakfixv1.CommonEnvironmentStatus, conditionType string, conditionStatus metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             conditionStatus,
+		Reason:             truncate(reason, 1024),
+		Message:            truncate(msg, 4000),
+		ObservedGeneration: status.ObservedGeneration,
+		LastTransitionTime: metav1.NewTime(time.Now()),
+	})
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

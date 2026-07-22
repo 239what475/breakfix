@@ -26,15 +26,22 @@ import (
 )
 
 type activeEnvironment struct {
-	Runtime      string
-	Name         string
-	ChallengeRef string
-	Namespace    string
-	WorkspacePod string
-	Phase        breakfixv1.EnvironmentPhase
-	ExpiresAt    *metav1.Time
-	SubmitResult *breakfixv1.SubmitResult
-	Message      string
+	Runtime                string
+	Name                   string
+	ChallengeRef           string
+	Namespace              string
+	WorkspacePod           string
+	Phase                  breakfixv1.EnvironmentPhase
+	ExpiresAt              *metav1.Time
+	SubmitResult           *breakfixv1.SubmitResult
+	Message                string
+	Reason                 string
+	LastError              *breakfixv1.EnvironmentErrorStatus
+	ReadyTimeoutSeconds    *int64
+	IdleTTLSeconds         *int64
+	DrainGraceSeconds      *int64
+	DestroyTimeoutSeconds  *int64
+	AutoDestroyAfterSubmit *bool
 }
 
 func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvironment {
@@ -42,15 +49,22 @@ func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvir
 		return nil
 	}
 	return &activeEnvironment{
-		Runtime:      challenge.RuntimeContainer,
-		Name:         env.Name,
-		ChallengeRef: env.Spec.ChallengeRef,
-		Namespace:    env.Status.Namespace,
-		WorkspacePod: env.Status.WorkspacePodName,
-		Phase:        env.Status.Phase,
-		ExpiresAt:    env.Status.ExpiresAt,
-		SubmitResult: env.Status.SubmitResult,
-		Message:      env.Status.Message,
+		Runtime:                challenge.RuntimeContainer,
+		Name:                   env.Name,
+		ChallengeRef:           env.Spec.ChallengeRef,
+		Namespace:              env.Status.Namespace,
+		WorkspacePod:           env.Status.WorkspacePodName,
+		Phase:                  env.Status.Phase,
+		ExpiresAt:              env.Status.ExpiresAt,
+		SubmitResult:           env.Status.SubmitResult,
+		Message:                env.Status.Message,
+		Reason:                 env.Status.Reason,
+		LastError:              env.Status.LastError,
+		ReadyTimeoutSeconds:    env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:         env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:      env.Spec.Timeouts.DrainGracePeriodSeconds,
+		DestroyTimeoutSeconds:  env.Spec.Timeouts.DestroyTimeoutSeconds,
+		AutoDestroyAfterSubmit: env.Spec.CleanupPolicy.AutoDestroyAfterSubmit,
 	}
 }
 
@@ -59,15 +73,22 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 		return nil
 	}
 	return &activeEnvironment{
-		Runtime:      challenge.RuntimeVCluster,
-		Name:         env.Name,
-		ChallengeRef: env.Spec.ChallengeRef,
-		Namespace:    env.Status.Namespace,
-		WorkspacePod: env.Status.WorkspacePodName,
-		Phase:        env.Status.Phase,
-		ExpiresAt:    env.Status.ExpiresAt,
-		SubmitResult: env.Status.SubmitResult,
-		Message:      env.Status.Message,
+		Runtime:                challenge.RuntimeVCluster,
+		Name:                   env.Name,
+		ChallengeRef:           env.Spec.ChallengeRef,
+		Namespace:              env.Status.Namespace,
+		WorkspacePod:           env.Status.WorkspacePodName,
+		Phase:                  env.Status.Phase,
+		ExpiresAt:              env.Status.ExpiresAt,
+		SubmitResult:           env.Status.SubmitResult,
+		Message:                env.Status.Message,
+		Reason:                 env.Status.Reason,
+		LastError:              env.Status.LastError,
+		ReadyTimeoutSeconds:    env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:         env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:      env.Spec.Timeouts.DrainGracePeriodSeconds,
+		DestroyTimeoutSeconds:  env.Spec.Timeouts.DestroyTimeoutSeconds,
+		AutoDestroyAfterSubmit: env.Spec.CleanupPolicy.AutoDestroyAfterSubmit,
 	}
 }
 
@@ -311,6 +332,11 @@ func (h *Handler) SubmitChallenge(c *gin.Context, id string) {
 	}
 
 	exitCode := int(result.ExitCode)
+	if environmentAutoDestroyAfterSubmit(env) {
+		if err := h.destroyEnvironment(c.Request.Context(), env); err != nil {
+			slog.Warn("failed to cleanup submitted environment", "environment", env.Name, "err", err)
+		}
+	}
 	c.JSON(http.StatusOK, api.SubmitResponse{
 		Passed:   &result.Passed,
 		ExitCode: &exitCode,
@@ -842,9 +868,9 @@ func (h *Handler) resumeEnvironment(ctx context.Context, env *activeEnvironment)
 	if err != nil {
 		return err
 	}
-	return adapter.updateStatus(ctx, env.Name, func(status *breakfixv1.CommonEnvironmentStatus) {
-		status.Phase = breakfixv1.EnvironmentReady
-		status.ExpiresAt = nil
+	return adapter.updateSessionStatus(ctx, env.Name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
+		expiresAt := metav1.NewTime(time.Now().Add(spec.IdleTTLOr(time.Duration(h.cooldownMin) * time.Minute)))
+		setGatewayEnvironmentReady(status, expiresAt, "SessionResumed", "environment resumed")
 	})
 }
 
@@ -863,26 +889,29 @@ func (h *Handler) destroyEnvironment(ctx context.Context, env *activeEnvironment
 	if err != nil {
 		return err
 	}
-	return adapter.updateStatus(ctx, env.Name, func(status *breakfixv1.CommonEnvironmentStatus) {
-		status.Phase = breakfixv1.EnvironmentDestroyed
-	})
+	if adapter.requestDeletion == nil {
+		return fmt.Errorf("runtime %q does not support deletion", env.Runtime)
+	}
+	return adapter.requestDeletion(ctx, env.Name)
 }
 
 func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string, timeout time.Duration) (*activeEnvironment, error) {
-	deadline := time.Now().Add(timeout)
+	effectiveTimeout := timeout
+	deadline := time.Now().Add(effectiveTimeout)
 	for time.Now().Before(deadline) {
 		env, err := h.getEnvironment(ctx, runtime, name)
 		if err != nil {
 			return nil, err
 		}
+		if readyTimeout := environmentReadyTimeout(env, effectiveTimeout); readyTimeout > 0 && readyTimeout != effectiveTimeout {
+			effectiveTimeout = readyTimeout
+			deadline = time.Now().Add(effectiveTimeout)
+		}
 		if env.Phase == breakfixv1.EnvironmentReady {
 			return env, nil
 		}
 		if env.Phase == breakfixv1.EnvironmentDestroyed || env.Phase == breakfixv1.EnvironmentFailed {
-			if strings.TrimSpace(env.Message) != "" {
-				return nil, errors.New(env.Message)
-			}
-			return nil, fmt.Errorf("environment became unavailable before ready")
+			return nil, environmentUnavailableError(env)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -913,7 +942,13 @@ func (h *Handler) waitSubmitResult(ctx context.Context, runtime, name string, ti
 }
 
 func (h *Handler) waitDestroyed(ctx context.Context, runtime, name string) {
-	deadline := time.Now().Add(30 * time.Second)
+	effectiveTimeout := 30 * time.Second
+	if env, err := h.getEnvironment(ctx, runtime, name); err == nil {
+		if timeout := environmentDestroyTimeout(env, effectiveTimeout); timeout > 0 {
+			effectiveTimeout = timeout
+		}
+	}
+	deadline := time.Now().Add(effectiveTimeout)
 	for time.Now().Before(deadline) {
 		env, err := h.getEnvironment(ctx, runtime, name)
 		if err != nil {
@@ -932,6 +967,54 @@ func isLiveEnvironmentPhase(phase breakfixv1.EnvironmentPhase) bool {
 		phase == breakfixv1.EnvironmentProvisioning ||
 		phase == breakfixv1.EnvironmentReady ||
 		phase == breakfixv1.EnvironmentDraining
+}
+
+func environmentReadyTimeout(env *activeEnvironment, fallback time.Duration) time.Duration {
+	if env == nil || env.ReadyTimeoutSeconds == nil || *env.ReadyTimeoutSeconds <= 0 {
+		return fallback
+	}
+	return time.Duration(*env.ReadyTimeoutSeconds) * time.Second
+}
+
+func environmentIdleTTL(env *activeEnvironment, fallback time.Duration) time.Duration {
+	if env == nil || env.IdleTTLSeconds == nil || *env.IdleTTLSeconds <= 0 {
+		return fallback
+	}
+	return time.Duration(*env.IdleTTLSeconds) * time.Second
+}
+
+func environmentDrainGracePeriod(env *activeEnvironment, fallback time.Duration) time.Duration {
+	if env == nil || env.DrainGraceSeconds == nil || *env.DrainGraceSeconds <= 0 {
+		return fallback
+	}
+	return time.Duration(*env.DrainGraceSeconds) * time.Second
+}
+
+func environmentDestroyTimeout(env *activeEnvironment, fallback time.Duration) time.Duration {
+	if env == nil || env.DestroyTimeoutSeconds == nil || *env.DestroyTimeoutSeconds <= 0 {
+		return fallback
+	}
+	return time.Duration(*env.DestroyTimeoutSeconds) * time.Second
+}
+
+func environmentAutoDestroyAfterSubmit(env *activeEnvironment) bool {
+	return env == nil || env.AutoDestroyAfterSubmit == nil || *env.AutoDestroyAfterSubmit
+}
+
+func environmentUnavailableError(env *activeEnvironment) error {
+	if env == nil {
+		return errors.New("environment became unavailable before ready")
+	}
+	if env.LastError != nil && strings.TrimSpace(env.LastError.Message) != "" {
+		return errors.New(env.LastError.Message)
+	}
+	if strings.TrimSpace(env.Message) != "" {
+		return errors.New(env.Message)
+	}
+	if strings.TrimSpace(env.Reason) != "" {
+		return fmt.Errorf("environment became unavailable before ready: %s", env.Reason)
+	}
+	return errors.New("environment became unavailable before ready")
 }
 
 func toAPIChallengeDraft(d breakfixv1.ChallengeDraft) api.ChallengeDraft {

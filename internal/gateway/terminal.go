@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/gorilla/websocket"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,18 +71,20 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	sessionName := fmt.Sprintf("breakfix-%s", env.Name)
 	stopLease := make(chan struct{})
 	defer close(stopLease)
-	if env.Phase == "Ready" && runtime != nil {
-		go keepEnvironmentLeaseAlive(r.Context(), runtime, env.Name, cooldownMin, stopLease)
+	idleTTL := environmentIdleTTL(env, time.Duration(cooldownMin)*time.Minute)
+	drainGrace := environmentDrainGracePeriod(env, idleTTL)
+	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
+		go keepEnvironmentLeaseAlive(r.Context(), runtime, env.Name, idleTTL, stopLease)
 	}
 	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, env.Namespace, env.WorkspacePod, sessionName)
 
 	// On disconnect, mark the environment with an expiry deadline for auto-reclaim.
-	if env.Phase == "Ready" && runtime != nil {
-		expiresAt := metav1.NewTime(time.Now().Add(time.Duration(cooldownMin) * time.Minute))
+	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
+		expiresAt := metav1.NewTime(time.Now().Add(drainGrace))
 		if updateErr := runtime.markDraining(r.Context(), env.Name, expiresAt); updateErr != nil {
 			slog.Error("failed to start draining", "err", updateErr, "environment", env.Name)
 		}
-		slog.Info("environment draining", "environment", env.Name, "expires_in_min", cooldownMin)
+		slog.Info("environment draining", "environment", env.Name, "expires_in", drainGrace.String())
 	}
 
 	if err != nil {
@@ -89,11 +92,11 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	}
 }
 
-func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeAdapter, environmentName string, cooldownMin int, stop <-chan struct{}) {
-	if runtime == nil || cooldownMin <= 0 {
+func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeAdapter, environmentName string, idleTTL time.Duration, stop <-chan struct{}) {
+	if runtime == nil || idleTTL <= 0 {
 		return
 	}
-	interval := time.Duration(cooldownMin) * time.Minute / 2
+	interval := idleTTL / 2
 	if interval < time.Minute {
 		interval = time.Minute
 	}
@@ -102,7 +105,7 @@ func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeA
 	defer ticker.Stop()
 
 	for {
-		expiresAt := metav1.NewTime(time.Now().Add(time.Duration(cooldownMin) * time.Minute))
+		expiresAt := metav1.NewTime(time.Now().Add(idleTTL))
 		renewCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := runtime.renewLease(renewCtx, environmentName, expiresAt)
 		cancel()

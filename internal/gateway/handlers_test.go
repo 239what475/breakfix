@@ -13,6 +13,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestEnvironmentAutoDestroyAfterSubmitDefaultsTrue(t *testing.T) {
+	if !environmentAutoDestroyAfterSubmit(nil) {
+		t.Fatal("expected nil environment to use the default cleanup policy")
+	}
+	if !environmentAutoDestroyAfterSubmit(&activeEnvironment{}) {
+		t.Fatal("expected unset cleanup policy to default to cleanup")
+	}
+
+	no := false
+	if environmentAutoDestroyAfterSubmit(&activeEnvironment{AutoDestroyAfterSubmit: &no}) {
+		t.Fatal("expected explicit autoDestroyAfterSubmit=false to retain the environment")
+	}
+
+	yes := true
+	if !environmentAutoDestroyAfterSubmit(&activeEnvironment{AutoDestroyAfterSubmit: &yes}) {
+		t.Fatal("expected explicit autoDestroyAfterSubmit=true to clean up")
+	}
+
+}
+
 func TestListChallengesIncludesRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -20,6 +20,7 @@ type CreatePodOpts struct {
 	Env             map[string]string
 	VolumeMounts    []corev1.VolumeMount
 	Volumes         []corev1.Volume
+	Resources       corev1.ResourceRequirements
 }
 
 // CreatePod creates a pod in the given namespace and returns an error on failure.
@@ -36,6 +37,7 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 		Image:           opts.Image,
 		ImagePullPolicy: opts.ImagePullPolicy,
 		VolumeMounts:    append([]corev1.VolumeMount{}, opts.VolumeMounts...),
+		Resources:       opts.Resources,
 	}
 	if len(opts.Command) > 0 {
 		container.Command = opts.Command

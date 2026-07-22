@@ -3,13 +3,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/pkg/vclustercli"
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -55,25 +58,45 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 	ns := k8s.UserNamespace(r.NS, env.Spec.UserRef) + "-" + env.Name
 	vclusterName := "vc-" + env.Name
 	kubeconfigSecret := "vc-kubeconfig"
+	effectiveRuntime, err := resolveVClusterRuntime(env.Spec.VCluster)
+	if err != nil {
+		env.Status.Namespace = ns
+		env.Status.VClusterName = vclusterName
+		env.Status.KubeconfigSecretName = kubeconfigSecret
+		env.Status.Profile = strings.TrimSpace(env.Spec.VCluster.Profile)
+		env.Status.Version = strings.TrimSpace(env.Spec.VCluster.Version)
+		markEnvironmentFailed(&env.Status.CommonEnvironmentStatus, "vcluster", "invalid_vcluster_runtime", "InvalidVClusterRuntime", err.Error(), false)
+		_ = r.Status().Update(ctx, env)
+		return ctrl.Result{}, nil
+	}
 
 	if err := r.K8s.EnsureNamespace(ns); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureVCluster(ctx, ns, vclusterName); err != nil {
+	if err := r.ensureVCluster(ctx, ns, vclusterName, effectiveRuntime); err != nil {
 		env.Status.Namespace = ns
 		env.Status.VClusterName = vclusterName
 		env.Status.KubeconfigSecretName = kubeconfigSecret
-		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, err.Error())
+		env.Status.Profile = effectiveRuntime.Profile
+		env.Status.Version = effectiveRuntime.Version
+		if vclustercli.IsCode(err, vclustercli.ErrInvalidConfig) {
+			markEnvironmentFailed(&env.Status.CommonEnvironmentStatus, "vcluster", "create_invalid_config", "CreateVClusterFailed", err.Error(), false)
+			_ = r.Status().Update(ctx, env)
+			return ctrl.Result{}, nil
+		}
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "CreateVClusterFailed", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	env.Status.Phase = breakfixv1.EnvironmentProvisioning
 	env.Status.Namespace = ns
 	env.Status.VClusterName = vclusterName
 	env.Status.KubeconfigSecretName = kubeconfigSecret
-	env.Status.Message = "vcluster created, waiting for readiness"
+	env.Status.Profile = effectiveRuntime.Profile
+	env.Status.Version = effectiveRuntime.Version
+	setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "VClusterCreated", "vcluster created, waiting for readiness")
+	setEnvironmentCondition(&env.Status.CommonEnvironmentStatus, breakfixv1.ConditionProvisioned, metav1.ConditionTrue, "VClusterCreated", "vcluster created")
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -93,26 +116,26 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 
 	podName := env.Status.VClusterName + "-0"
 	if err := r.K8s.WaitForPod(ns, podName, "syncer"); err != nil {
-		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, err.Error())
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForVCluster", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	kubeconfig, err := r.readVClusterKubeconfig(ns, env.Status.VClusterName)
 	if err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForKubeconfig", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	server, err := r.vclusterServerAddress(ns, env.Status.VClusterName)
 	if err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForVClusterService", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	rewriteKubeconfig, err := rewriteVClusterKubeconfig(kubeconfig, server)
 	if err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "RewriteKubeconfigFailed", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -121,9 +144,18 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
+	env.Status.KubeconfigReady = true
+	setEnvironmentCondition(&env.Status.CommonEnvironmentStatus, breakfixv1.ConditionKubeconfigReady, metav1.ConditionTrue, "KubeconfigReady", "kubeconfig secret is ready")
 
-	if err := r.ensureWorkspacePod(env, workspacePodName); err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+	resources, err := workspaceResourceRequirements(&env.Spec.CommonEnvironmentSpec)
+	if err != nil {
+		markEnvironmentFailed(&env.Status.CommonEnvironmentStatus, "workspace", "invalid_workspace_resources", "InvalidWorkspaceResources", err.Error(), false)
+		_ = r.Status().Update(ctx, env)
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.ensureWorkspacePod(env, workspacePodName, resources); err != nil {
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForWorkspacePod", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
@@ -135,17 +167,17 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 	}
 
 	if err := r.K8s.WaitForPod(ns, workspacePodName, "challenge"); err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForWorkspacePod", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 	if err := r.K8s.WaitForFileInPod(ns, workspacePodName, breakfixInitSentinel, 2*time.Minute); err != nil {
-		env.Status.Message = truncate(err.Error(), 4000)
+		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForInitSentinel", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	setEnvironmentReady(&env.Status.CommonEnvironmentStatus, "vcluster environment ready")
+	setEnvironmentReady(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus, "WorkspaceReady", "vcluster environment ready")
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -161,17 +193,20 @@ func (r *VClusterEnvironmentReconciler) submit(ctx context.Context, env *breakfi
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.cleanup(ctx, env)
+	return ctrl.Result{}, nil
 }
 
 func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+	if !env.Spec.AutoDestroyAfterIdleOr(true) {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	destroy, remaining := shouldDestroyEnvironment(&env.Status.CommonEnvironmentStatus)
 	if destroy {
-		env.Status.Phase = breakfixv1.EnvironmentDestroyed
+		markEnvironmentDestroyed(&env.Status.CommonEnvironmentStatus, "IdleTTLExpired", "environment expired")
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.cleanup(ctx, env)
+		return r.requestDeletion(ctx, env)
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
@@ -217,6 +252,10 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 	}
+	markEnvironmentDestroyed(&env.Status.CommonEnvironmentStatus, "CleanupCompleted", "vcluster environment destroyed")
+	if err := r.Status().Update(ctx, env); err != nil {
+		return ctrl.Result{}, err
+	}
 	controllerutil.RemoveFinalizer(env, vclusterEnvironmentFinalizer)
 	if err := r.Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -225,18 +264,32 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 	return ctrl.Result{}, nil
 }
 
-func (r *VClusterEnvironmentReconciler) ensureVCluster(ctx context.Context, namespace, name string) error {
+func (r *VClusterEnvironmentReconciler) ensureVCluster(ctx context.Context, namespace, name string, runtime effectiveVClusterRuntime) error {
 	if r.VCluster == nil {
 		return fmt.Errorf("vcluster cli client is not configured")
 	}
-	_, err := r.VCluster.Create(ctx, vclustercli.CreateOptions{
+
+	valuesFile, err := writeVClusterValuesFile(runtime)
+	if err != nil {
+		return err
+	}
+	if valuesFile != "" {
+		defer os.Remove(valuesFile)
+	}
+
+	opts := vclustercli.CreateOptions{
 		Name:            name,
 		Namespace:       namespace,
 		Connect:         false,
 		BackgroundProxy: false,
 		ChartRepo:       r.ChartRepo,
 		ChartVersion:    r.ChartVersion,
-	})
+	}
+	if valuesFile != "" {
+		opts.ValuesFiles = []string{valuesFile}
+	}
+
+	_, err = r.VCluster.Create(ctx, opts)
 	if err != nil && !vclustercli.IsCode(err, vclustercli.ErrAlreadyExists) {
 		return err
 	}
@@ -284,7 +337,7 @@ func (r *VClusterEnvironmentReconciler) vclusterServerAddress(namespace, name st
 	return fmt.Sprintf("https://%s.%s.svc.cluster.local:443", name, namespace), nil
 }
 
-func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClusterEnvironment, workspacePodName string) error {
+func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClusterEnvironment, workspacePodName string, resources corev1.ResourceRequirements) error {
 	pods, err := r.K8s.Clientset().CoreV1().Pods(env.Status.Namespace).Get(context.Background(), workspacePodName, metav1.GetOptions{})
 	if err == nil && pods != nil {
 		return nil
@@ -302,6 +355,7 @@ func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClus
 		Image:         imageURL,
 		ChallengeID:   env.Spec.ChallengeRef,
 		EnvironmentID: env.Name,
+		Resources:     resources,
 		Env: map[string]string{
 			"KUBECONFIG": "/root/.kube/config",
 		},
@@ -323,6 +377,173 @@ func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClus
 			ReadOnly:  true,
 		}},
 	})
+}
+
+type effectiveVClusterRuntime struct {
+	Profile               string
+	Version               string
+	ControlPlaneCPU       string
+	ControlPlaneMemory    string
+	QuotaCPU              string
+	QuotaMemory           string
+	QuotaEphemeralStorage string
+}
+
+func resolveVClusterRuntime(spec breakfixv1.VClusterRuntimeSpec) (effectiveVClusterRuntime, error) {
+	profile := strings.TrimSpace(spec.Profile)
+	effective, err := vclusterProfileDefaults(profile)
+	if err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+
+	effective.Profile = profile
+	effective.Version = strings.TrimSpace(spec.Version)
+	if v := strings.TrimSpace(spec.ControlPlaneCPU); v != "" {
+		effective.ControlPlaneCPU = v
+	}
+	if v := strings.TrimSpace(spec.ControlPlaneMemory); v != "" {
+		effective.ControlPlaneMemory = v
+	}
+	if v := strings.TrimSpace(spec.QuotaCPU); v != "" {
+		effective.QuotaCPU = v
+	}
+	if v := strings.TrimSpace(spec.QuotaMemory); v != "" {
+		effective.QuotaMemory = v
+	}
+	if v := strings.TrimSpace(spec.QuotaEphemeralStorage); v != "" {
+		effective.QuotaEphemeralStorage = v
+	}
+
+	if err := validateVClusterQuantity("controlPlaneCpu", effective.ControlPlaneCPU); err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+	if err := validateVClusterQuantity("controlPlaneMemory", effective.ControlPlaneMemory); err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+	if err := validateVClusterQuantity("quotaCpu", effective.QuotaCPU); err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+	if err := validateVClusterQuantity("quotaMemory", effective.QuotaMemory); err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+	if err := validateVClusterQuantity("quotaEphemeralStorage", effective.QuotaEphemeralStorage); err != nil {
+		return effectiveVClusterRuntime{}, err
+	}
+	return effective, nil
+}
+
+func vclusterProfileDefaults(profile string) (effectiveVClusterRuntime, error) {
+	switch profile {
+	case "":
+		return effectiveVClusterRuntime{}, nil
+	case "tiny-k8s":
+		return effectiveVClusterRuntime{
+			ControlPlaneCPU:       "150m",
+			ControlPlaneMemory:    "384Mi",
+			QuotaCPU:              "2",
+			QuotaMemory:           "2Gi",
+			QuotaEphemeralStorage: "8Gi",
+		}, nil
+	case "default-k8s":
+		return effectiveVClusterRuntime{
+			ControlPlaneCPU:       "250m",
+			ControlPlaneMemory:    "512Mi",
+			QuotaCPU:              "4",
+			QuotaMemory:           "4Gi",
+			QuotaEphemeralStorage: "12Gi",
+		}, nil
+	case "troubleshooting-k8s":
+		return effectiveVClusterRuntime{
+			ControlPlaneCPU:       "400m",
+			ControlPlaneMemory:    "768Mi",
+			QuotaCPU:              "8",
+			QuotaMemory:           "8Gi",
+			QuotaEphemeralStorage: "20Gi",
+		}, nil
+	default:
+		return effectiveVClusterRuntime{}, fmt.Errorf("unsupported vcluster profile %q", profile)
+	}
+}
+
+func validateVClusterQuantity(field, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if _, err := resource.ParseQuantity(value); err != nil {
+		return fmt.Errorf("invalid %s %q: %w", field, value, err)
+	}
+	return nil
+}
+
+func writeVClusterValuesFile(runtime effectiveVClusterRuntime) (string, error) {
+	values := buildVClusterValues(runtime)
+	if len(values) == 0 {
+		return "", nil
+	}
+
+	data, err := yaml.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("marshal vcluster values: %w", err)
+	}
+	f, err := os.CreateTemp("", "breakfix-vcluster-values-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("create vcluster values file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return "", fmt.Errorf("write vcluster values file: %w", err)
+	}
+	return f.Name(), nil
+}
+
+func buildVClusterValues(runtime effectiveVClusterRuntime) map[string]any {
+	values := map[string]any{}
+
+	if runtime.Version != "" {
+		setNested(values, true, "controlPlane", "distro", "k8s", "enabled")
+		setNested(values, runtime.Version, "controlPlane", "distro", "k8s", "version")
+	}
+	if runtime.ControlPlaneCPU != "" {
+		setNested(values, runtime.ControlPlaneCPU, "controlPlane", "statefulSet", "resources", "requests", "cpu")
+		setNested(values, runtime.ControlPlaneCPU, "controlPlane", "statefulSet", "resources", "limits", "cpu")
+	}
+	if runtime.ControlPlaneMemory != "" {
+		setNested(values, runtime.ControlPlaneMemory, "controlPlane", "statefulSet", "resources", "requests", "memory")
+		setNested(values, runtime.ControlPlaneMemory, "controlPlane", "statefulSet", "resources", "limits", "memory")
+	}
+	if runtime.QuotaCPU != "" || runtime.QuotaMemory != "" || runtime.QuotaEphemeralStorage != "" {
+		setNested(values, true, "policies", "resourceQuota", "enabled")
+	}
+	if runtime.QuotaCPU != "" {
+		setNested(values, runtime.QuotaCPU, "policies", "resourceQuota", "quota", "requests.cpu")
+		setNested(values, runtime.QuotaCPU, "policies", "resourceQuota", "quota", "limits.cpu")
+	}
+	if runtime.QuotaMemory != "" {
+		setNested(values, runtime.QuotaMemory, "policies", "resourceQuota", "quota", "requests.memory")
+		setNested(values, runtime.QuotaMemory, "policies", "resourceQuota", "quota", "limits.memory")
+	}
+	if runtime.QuotaEphemeralStorage != "" {
+		setNested(values, runtime.QuotaEphemeralStorage, "policies", "resourceQuota", "quota", "requests.ephemeral-storage")
+		setNested(values, runtime.QuotaEphemeralStorage, "policies", "resourceQuota", "quota", "limits.ephemeral-storage")
+	}
+
+	return values
+}
+
+func setNested(root map[string]any, value any, path ...string) {
+	current := root
+	for i, key := range path {
+		if i == len(path)-1 {
+			current[key] = value
+			return
+		}
+		next, ok := current[key].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			current[key] = next
+		}
+		current = next
+	}
 }
 
 func rewriteVClusterKubeconfig(raw []byte, server string) ([]byte, error) {

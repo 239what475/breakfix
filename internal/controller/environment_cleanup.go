@@ -65,7 +65,7 @@ func staleCommonEnvironment(k8sClient *k8s.Client, status *breakfixv1.CommonEnvi
 	if status == nil {
 		return false
 	}
-	if status.Phase == breakfixv1.EnvironmentDestroyed || status.Phase == breakfixv1.EnvironmentFailed {
+	if status.Phase == breakfixv1.EnvironmentSubmitted || status.Phase == breakfixv1.EnvironmentDestroyed || status.Phase == breakfixv1.EnvironmentFailed {
 		return false
 	}
 	ns := strings.TrimSpace(status.Namespace)
@@ -108,14 +108,12 @@ func staleCommonEnvironment(k8sClient *k8s.Client, status *breakfixv1.CommonEnvi
 
 func markContainerDestroyed(env *breakfixv1.ContainerEnvironment) *breakfixv1.ContainerEnvironment {
 	copy := env.DeepCopy()
-	copy.Status.Phase = breakfixv1.EnvironmentDestroyed
-	copy.Status.Message = "cleanup marked stale environment destroyed"
+	markEnvironmentDestroyed(&copy.Status, "CleanupMarkedStale", "cleanup marked stale environment destroyed")
 	return copy
 }
 
 func markVClusterDestroyed(env *breakfixv1.VClusterEnvironment) *breakfixv1.VClusterEnvironment {
 	copy := env.DeepCopy()
-	copy.Status.Phase = breakfixv1.EnvironmentDestroyed
-	copy.Status.Message = "cleanup marked stale environment destroyed"
+	markEnvironmentDestroyed(&copy.Status.CommonEnvironmentStatus, "CleanupMarkedStale", "cleanup marked stale environment destroyed")
 	return copy
 }

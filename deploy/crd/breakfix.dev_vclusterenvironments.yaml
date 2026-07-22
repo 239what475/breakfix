@@ -32,12 +32,65 @@ spec:
                   type: string
                 submit:
                   type: boolean
+                timeouts:
+                  type: object
+                  properties:
+                    readyTimeoutSeconds:
+                      type: integer
+                      format: int64
+                    idleTtlSeconds:
+                      type: integer
+                      format: int64
+                    drainGracePeriodSeconds:
+                      type: integer
+                      format: int64
+                    destroyTimeoutSeconds:
+                      type: integer
+                      format: int64
+                cleanupPolicy:
+                  type: object
+                  properties:
+                    autoDestroyAfterSubmit:
+                      type: boolean
+                    autoDestroyAfterIdle:
+                      type: boolean
+                    forceCleanupOnFailure:
+                      type: boolean
+                resources:
+                  type: object
+                  properties:
+                    workspaceCpu:
+                      type: string
+                    workspaceMemory:
+                      type: string
+                    workspaceEphemeralStorage:
+                      type: string
+                vcluster:
+                  type: object
+                  properties:
+                    profile:
+                      type: string
+                    version:
+                      type: string
+                    controlPlaneCpu:
+                      type: string
+                    controlPlaneMemory:
+                      type: string
+                    quotaCpu:
+                      type: string
+                    quotaMemory:
+                      type: string
+                    quotaEphemeralStorage:
+                      type: string
             status:
               type: object
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Provisioning, Ready, Draining, Destroyed, Failed]
+                  enum: [Pending, Provisioning, Ready, Draining, Submitted, Destroyed, Failed]
+                observedGeneration:
+                  type: integer
+                  format: int64
                 namespace:
                   type: string
                 workspacePodName:
@@ -46,12 +99,60 @@ spec:
                   type: string
                 kubeconfigSecretName:
                   type: string
+                kubeconfigReady:
+                  type: boolean
+                profile:
+                  type: string
+                version:
+                  type: string
                 startedAt:
+                  type: string
+                  format: date-time
+                readyAt:
                   type: string
                   format: date-time
                 expiresAt:
                   type: string
                   format: date-time
+                destroyedAt:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                lastError:
+                  type: object
+                  properties:
+                    component:
+                      type: string
+                    code:
+                      type: string
+                    message:
+                      type: string
+                    at:
+                      type: string
+                      format: date-time
+                    retriable:
+                      type: boolean
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason, message]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
                 message:
                   type: string
                 submitResult:

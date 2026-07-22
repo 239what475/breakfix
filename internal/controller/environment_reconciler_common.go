@@ -26,6 +26,9 @@ type commonEnvironmentRuntime interface {
 
 func reconcileCommonEnvironment(ctx context.Context, env commonEnvironmentObject, runtime commonEnvironmentRuntime) (ctrl.Result, error) {
 	status := env.CommonStatus()
+	if status.ObservedGeneration != env.GetGeneration() {
+		status.ObservedGeneration = env.GetGeneration()
+	}
 	if env.GetDeletionTimestamp() != nil {
 		return runtime.finalCleanup(ctx, env)
 	}
@@ -45,8 +48,15 @@ func reconcileCommonEnvironment(ctx context.Context, env commonEnvironmentObject
 			return runtime.submit(ctx, env)
 		}
 		return runtime.handleDraining(ctx, env)
-	case breakfixv1.EnvironmentDestroyed, breakfixv1.EnvironmentFailed:
+	case breakfixv1.EnvironmentSubmitted:
+		return ctrl.Result{}, nil
+	case breakfixv1.EnvironmentDestroyed:
 		return runtime.requestDeletion(ctx, env)
+	case breakfixv1.EnvironmentFailed:
+		if env.CommonSpec().ForceCleanupOnFailureOr(false) {
+			return runtime.requestDeletion(ctx, env)
+		}
+		return ctrl.Result{}, nil
 	}
 
 	return ctrl.Result{}, nil
