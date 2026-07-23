@@ -31,3 +31,15 @@ func SubmissionPath(root, id string) string {
 	return filepath.Join(root, "submissions", id, "input.tar.gz")
 }
 
+// RemoveSubmission discards an internal handoff archive once it can no longer
+// be published or used as the base of a later verified revision.
+func RemoveSubmission(root, id string) error {
+	if !ValidID(id) {
+		return fmt.Errorf("invalid submission id %q", id)
+	}
+	err := os.RemoveAll(filepath.Join(root, "submissions", id))
+	if err != nil {
+		return fmt.Errorf("remove submission: %w", err)
+	}
+	return nil
+}

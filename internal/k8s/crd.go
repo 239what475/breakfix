@@ -193,6 +193,10 @@ func (c *Client) UpdateVerifyTaskStatus(ctx context.Context, ns string, task *br
 	return updateCRD[*breakfixv1.VerifyTask](ctx, c, verifyTaskGVR, ns, task, true, "update verify task status")
 }
 
+func (c *Client) DeleteVerifyTask(ctx context.Context, ns, name string) error {
+	return deleteCRD(ctx, c, verifyTaskGVR, ns, name)
+}
+
 func (c *Client) WatchVerifyTask(ctx context.Context, ns, name string) (watch.Interface, error) {
 	dyn, err := c.crdClient()
 	if err != nil {

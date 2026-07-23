@@ -38,7 +38,6 @@ type VerifyTaskPhase string
 const (
 	VerifyTaskPending   VerifyTaskPhase = "Pending"
 	VerifyTaskRunning   VerifyTaskPhase = "Running"
-	VerifyTaskVerified  VerifyTaskPhase = "Verified"
 	VerifyTaskFailed    VerifyTaskPhase = "Failed"
 	VerifyTaskSucceeded VerifyTaskPhase = "Succeeded"
 )
@@ -49,11 +48,11 @@ type VerifyIssue struct {
 }
 
 type VerifyReport struct {
-	BuildPassed  bool          `json:"buildPassed,omitempty"`
-	AnswerPassed bool          `json:"answerPassed,omitempty"`
+	BuildPassed       bool          `json:"buildPassed,omitempty"`
+	AnswerPassed      bool          `json:"answerPassed,omitempty"`
 	CheckpointsPassed bool          `json:"checkpointsPassed,omitempty"`
-	Summary      string        `json:"summary,omitempty"`
-	Issues       []VerifyIssue `json:"issues,omitempty"`
+	Summary           string        `json:"summary,omitempty"`
+	Issues            []VerifyIssue `json:"issues,omitempty"`
 }
 
 type VerifyTaskStatus struct {

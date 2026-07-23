@@ -3,31 +3,27 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
-	"gopkg.in/yaml.v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// VerifyTaskReconciler owns only real artifact verification. Publishing is a
+// separate, explicit Gateway operation over a successful immutable task.
 type VerifyTaskReconciler struct {
 	client.Client
 	K8s              *k8s.Client
 	RegistryAddr     string
 	RegistryInsecure bool
 	CRDNamespace     string
-	ChallengesDir    string
-	DataDir          string
 	InternalAPIKey   string
 	ServerHost       string
 	ServerPort       int
@@ -47,12 +43,8 @@ func (r *VerifyTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.createVerifyJob(ctx, &task)
 	case breakfixv1.VerifyTaskRunning:
 		return r.trackVerifyJob(ctx, &task)
-	case breakfixv1.VerifyTaskVerified:
-		return r.publish(ctx, &task)
-	case breakfixv1.VerifyTaskSucceeded:
+	case breakfixv1.VerifyTaskSucceeded, breakfixv1.VerifyTaskFailed:
 		return ctrl.Result{}, nil
-	case breakfixv1.VerifyTaskFailed:
-		return r.syncGenerationFailure(ctx, &task)
 	default:
 		return ctrl.Result{}, nil
 	}
@@ -136,255 +128,23 @@ func (r *VerifyTaskReconciler) trackVerifyJob(ctx context.Context, task *breakfi
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	for _, c := range job.Status.Conditions {
-		switch c.Type {
+	for _, condition := range job.Status.Conditions {
+		switch condition.Type {
 		case batchv1.JobComplete:
 			refreshed, err := r.K8s.GetVerifyTask(ctx, r.CRDNamespace, task.Name)
 			if err != nil {
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 			if refreshed.Status.Phase == breakfixv1.VerifyTaskRunning {
-				refreshed.Status.Phase = breakfixv1.VerifyTaskFailed
-				refreshed.Status.Message = "verify job finished without reporting result"
-				now := metav1.Now()
-				refreshed.Status.CompletedAt = &now
-				refreshed.Status.Report = &breakfixv1.VerifyReport{
-					Summary: "verify job finished without reporting result",
-					Issues: []breakfixv1.VerifyIssue{{
-						Code:    "VERIFY_RESULT_MISSING",
-						Message: "verify job finished without reporting result",
-					}},
-				}
-				if _, err := r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, refreshed); err != nil {
-					return ctrl.Result{}, err
-				}
+				return r.failTask(ctx, refreshed, "VERIFY_RESULT_MISSING", "verify job finished without reporting result")
 			}
 			return ctrl.Result{}, nil
 		case batchv1.JobFailed:
-			task.Status.Phase = breakfixv1.VerifyTaskFailed
-			task.Status.Message = fmt.Sprintf("verify job failed: %s", c.Message)
-			now := metav1.Now()
-			task.Status.CompletedAt = &now
-			task.Status.Report = &breakfixv1.VerifyReport{
-				Summary: task.Status.Message,
-				Issues: []breakfixv1.VerifyIssue{{
-					Code:    "VERIFY_JOB_FAILED",
-					Message: task.Status.Message,
-				}},
-			}
-			if _, err := r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, task); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
+			return r.failTask(ctx, task, "VERIFY_JOB_FAILED", fmt.Sprintf("verify job failed: %s", condition.Message))
 		}
 	}
 
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-func (r *VerifyTaskReconciler) publish(ctx context.Context, task *breakfixv1.VerifyTask) (ctrl.Result, error) {
-	if strings.TrimSpace(task.Annotations["breakfix.dev/published"]) == "true" {
-		if task.Status.Phase != breakfixv1.VerifyTaskSucceeded {
-			task.Status.Phase = breakfixv1.VerifyTaskSucceeded
-			if strings.TrimSpace(task.Status.Message) == "" || task.Status.Message == "verification passed, waiting for publish" {
-				task.Status.Message = "verification passed and published"
-			}
-			if task.Status.CompletedAt == nil {
-				done := metav1.Now()
-				task.Status.CompletedAt = &done
-			}
-			if _, err := r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, task); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
-	}
-	if task.Spec.Source.Kind == "agent" && strings.TrimSpace(task.Spec.Source.Ref) != "" {
-		if gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref); err == nil {
-			if gen.Status.Phase == breakfixv1.GenerationSucceeded && gen.Status.Challenge != nil {
-				return ctrl.Result{}, nil
-			}
-		}
-	}
-	ch, err := challenge.Get(r.ChallengesDir, task.Spec.ChallengeID)
-	if err != nil {
-		ch, err = r.materializeSubmission(task.Spec.ChallengeID, task.Spec.Submission.ID, task.Status.TempImage)
-	}
-	if err != nil {
-		return r.failTask(ctx, task, "PUBLISH_FAILED", fmt.Sprintf("publish challenge: %v", err))
-	}
-	if err := r.syncGenerationSuccess(ctx, task, ch); err != nil {
-		return ctrl.Result{}, err
-	}
-	if task.Annotations == nil {
-		task.Annotations = map[string]string{}
-	}
-	task.Annotations["breakfix.dev/published"] = "true"
-	if _, err := r.K8s.UpdateVerifyTask(ctx, r.CRDNamespace, task); err != nil {
-		return ctrl.Result{}, err
-	}
-	task.Status.Phase = breakfixv1.VerifyTaskSucceeded
-	task.Status.Message = fmt.Sprintf("verification passed and published as %s", ch.ID)
-	done := metav1.Now()
-	task.Status.CompletedAt = &done
-	if _, err := r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, task); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func (r *VerifyTaskReconciler) materializeSubmission(challengeID, submissionID, publishedImage string) (*challenge.Entry, error) {
-	path := challenge.SubmissionPath(r.DataDir, submissionID)
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open submission artifact: %w", err)
-	}
-	defer f.Close()
-
-	staging := filepath.Join(r.DataDir, ".publish-"+submissionID)
-	_ = os.RemoveAll(staging)
-	if err := os.MkdirAll(staging, 0755); err != nil {
-		return nil, fmt.Errorf("create publish staging: %w", err)
-	}
-	defer os.RemoveAll(staging) //nolint:errcheck
-
-	if err := challenge.ExtractTarGz(staging, f); err != nil {
-		return nil, fmt.Errorf("extract submission artifact: %w", err)
-	}
-	_, err = challenge.LoadSubmissionDir(staging)
-	if err != nil {
-		return nil, err
-	}
-	if !challenge.ValidID(challengeID) {
-		return nil, fmt.Errorf("invalid challenge id %q", challengeID)
-	}
-
-	manifestPath := filepath.Join(staging, "challenge.yaml")
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("read challenge manifest: %w", err)
-	}
-	var manifest challenge.Spec
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("parse challenge manifest: %w", err)
-	}
-	manifest.ID = challengeID
-	if strings.TrimSpace(publishedImage) == "" {
-		return nil, fmt.Errorf("published image is empty")
-	}
-	manifest.Image = publishedImage
-	if strings.TrimSpace(manifest.Type) == "" {
-		manifest.Type = challenge.TypeScript
-	}
-	normalized, err := yaml.Marshal(manifest)
-	if err != nil {
-		return nil, fmt.Errorf("marshal challenge manifest: %w", err)
-	}
-	if err := os.WriteFile(manifestPath, normalized, 0644); err != nil {
-		return nil, fmt.Errorf("write challenge manifest: %w", err)
-	}
-
-	return challenge.Materialize(r.ChallengesDir, challengeID, func(dst string) error {
-		return copyDirForPublish(staging, dst)
-	})
-}
-
-func (r *VerifyTaskReconciler) syncGenerationFailure(ctx context.Context, task *breakfixv1.VerifyTask) (ctrl.Result, error) {
-	if task.Spec.Source.Kind != "agent" || strings.TrimSpace(task.Spec.Source.Ref) == "" {
-		return ctrl.Result{}, nil
-	}
-	gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref)
-	if err != nil {
-		if k8sErrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
-	}
-	if gen.Status.Phase == breakfixv1.GenerationFailed {
-		return ctrl.Result{}, nil
-	}
-	gen.Status.Phase = breakfixv1.GenerationFailed
-	gen.Status.Message = generationFailureMessage(task)
-	now := metav1.Now()
-	gen.Status.CompletedAt = &now
-	if _, err := r.K8s.UpdateGenerationStatus(ctx, r.CRDNamespace, gen); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func generationFailureMessage(task *breakfixv1.VerifyTask) string {
-	if task == nil {
-		return ""
-	}
-	base := strings.TrimSpace(task.Status.Message)
-	report := task.Status.Report
-	if report == nil {
-		return base
-	}
-
-	var parts []string
-	if summary := strings.TrimSpace(report.Summary); summary != "" && summary != base {
-		parts = append(parts, summary)
-	}
-	for _, issue := range report.Issues {
-		msg := strings.TrimSpace(issue.Message)
-		if msg == "" {
-			continue
-		}
-		if code := strings.TrimSpace(issue.Code); code != "" {
-			msg = code + ": " + msg
-		}
-		parts = append(parts, msg)
-		break
-	}
-	if len(parts) == 0 {
-		return base
-	}
-	if base != "" {
-		parts = append([]string{base}, parts...)
-	}
-	return truncateFailureText(strings.Join(parts, "\n\n"))
-}
-
-func truncateFailureText(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= 4000 {
-		return s
-	}
-	return strings.TrimSpace(s[:4000]) + "..."
-}
-
-func (r *VerifyTaskReconciler) syncGenerationSuccess(ctx context.Context, task *breakfixv1.VerifyTask, ch *challenge.Entry) error {
-	if task.Spec.Source.Kind != "agent" || strings.TrimSpace(task.Spec.Source.Ref) == "" {
-		return nil
-	}
-	gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref)
-	if err != nil {
-		if k8sErrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	if gen.Status.Phase == breakfixv1.GenerationSucceeded && gen.Status.Challenge != nil {
-		return nil
-	}
-	gen.Status.Phase = breakfixv1.GenerationSucceeded
-	gen.Status.Message = fmt.Sprintf("challenge %s generated", ch.ID)
-	gen.Status.Challenge = &breakfixv1.ChallengeSpec{
-		ID:          ch.ID,
-		Title:       ch.Title,
-		Type:        ch.Type,
-		Runtime:     ch.Runtime,
-		Difficulty:  ch.Difficulty,
-		Tags:        append([]string{}, ch.Tags...),
-		Description: ch.Description,
-		Image:       ch.Image,
-	}
-	now := metav1.Now()
-	gen.Status.CompletedAt = &now
-	_, err = r.K8s.UpdateGenerationStatus(ctx, r.CRDNamespace, gen)
-	return err
 }
 
 func (r *VerifyTaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -406,38 +166,4 @@ func generatorImage(registryAddr string) string {
 		return "breakfix-generator:latest"
 	}
 	return registryAddr + "/breakfix-generator:latest"
-}
-
-func copyDirForPublish(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return os.MkdirAll(dst, 0755)
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("publish does not allow symlink %s", path)
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		dstPath := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("publish does not allow non-regular file %s", path)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dstPath, data, info.Mode().Perm())
-	})
 }

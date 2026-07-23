@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/generator"
 )
 
@@ -33,23 +31,19 @@ func main() {
 		return
 	}
 
-	draftJSON := flag.String("draft-json", "", "Reviewed challenge draft JSON")
-	outputDir := flag.String("output", "data/challenges", "Output directory")
-	flag.Parse()
-
-	rawDraft := *draftJSON
-	if rawDraft == "" {
-		rawDraft = os.Getenv("CHALLENGE_DRAFT_JSON")
-	}
-	draft, err := parseDraft(rawDraft)
+	plan, err := parsePlan(os.Getenv("CHALLENGE_PLAN_JSON"))
 	if err != nil {
-		slog.Error("invalid challenge draft", "err", err)
+		slog.Error("invalid authoring plan", "err", err)
+		os.Exit(1)
+	}
+	if plan == nil {
+		slog.Error("invalid challenge input", "err", "CHALLENGE_PLAN_JSON is required")
 		os.Exit(1)
 	}
 
 	g := &generator.Generator{
-		Draft:            draft,
-		OutputDir:        envOr("CHALLENGE_OUTPUT_DIR", *outputDir),
+		Plan:             plan,
+		OutputDir:        envOr("CHALLENGE_OUTPUT_DIR", "data/challenges"),
 		RegistryAddr:     envOr("REGISTRY_ADDR", "172.18.0.1:5000/break-fix"),
 		RegistryInsecure: os.Getenv("REGISTRY_INSECURE") == "true",
 		Kubeconfig:       os.Getenv("KUBECONFIG"),
@@ -57,7 +51,10 @@ func main() {
 		GenerationID:     os.Getenv("GENERATION_ID"),
 		GatewayURL:       os.Getenv("GATEWAY_INTERNAL_URL"),
 		InternalAPIKey:   os.Getenv("GATEWAY_INTERNAL_API_KEY"),
-		ServerJWT:        os.Getenv("BREAKFIX_GENERATION_JWT"),
+		InitialFeedback:  os.Getenv("GENERATION_FEEDBACK"),
+		SeedSubmissionID: os.Getenv("GENERATION_BASE_SUBMISSION_ID"),
+		AgentSessionID:   os.Getenv("GENERATION_AGENT_SESSION_ID"),
+		ResumeAgent:      os.Getenv("GENERATION_AGENT_RESUME") == "true",
 	}
 
 	if err := g.Run(context.Background()); err != nil {
@@ -66,22 +63,18 @@ func main() {
 	}
 }
 
-func parseDraft(raw string) (*breakfixv1.ChallengeDraft, error) {
+func parsePlan(raw string) (*authoring.Plan, error) {
 	if raw == "" {
-		return nil, fmt.Errorf("CHALLENGE_DRAFT_JSON or --draft-json is required")
+		return nil, nil
 	}
-
-	var draft breakfixv1.ChallengeDraft
-	if err := json.Unmarshal([]byte(raw), &draft); err != nil {
+	var plan authoring.Plan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
 		return nil, err
 	}
-	if draft.Title == "" {
-		return nil, fmt.Errorf("draft.title is required")
+	if err := plan.ValidateForGeneration(); err != nil {
+		return nil, err
 	}
-	if draft.Description == "" {
-		return nil, fmt.Errorf("draft.description is required")
-	}
-	return &draft, nil
+	return &plan, nil
 }
 
 func envOr(key, def string) string {

@@ -209,70 +209,115 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /generate:
+  /authoring/sessions:
     post:
-      operationId: createGenerationJob
-      summary: Start generation for a reviewed challenge draft
-      tags: [agent]
+      operationId: createAuthoringSession
+      summary: Create a human-reviewed challenge authoring session
+      tags: [authoring]
       security:
         - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GenerationJobCreateRequest"
       responses:
         "200":
-          description: Generation job created
+          description: Authoring session created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenerationJobResponse"
+                $ref: "#/components/schemas/AuthoringSession"
 
-  /generate/draft:
-    post:
-      operationId: reviewGenerationDraft
-      summary: Review and expand a challenge idea into a structured draft
-      tags: [agent]
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GenerateDraftRequest"
-      responses:
-        "200":
-          description: Draft review result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenerateDraftResponse"
-
-  /generate/jobs/{id}:
+  /authoring/sessions/current:
     get:
-      operationId: getGenerationJob
-      summary: Get generation job status
-      tags: [agent]
+      operationId: getCurrentAuthoringSession
+      summary: Resume the latest unfinished authoring session for the current user
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current unfinished authoring session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /authoring/sessions/{id}:
+    get:
+      operationId: getAuthoringSession
+      summary: Read the current authoring revision, conversation, assets, and diff
+      tags: [authoring]
       security:
         - bearerAuth: []
       parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/AuthoringSessionID"
       responses:
         "200":
-          description: Generation job status
+          description: Current authoring session
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenerationJobResponse"
+                $ref: "#/components/schemas/AuthoringSession"
         "404":
           $ref: "#/components/responses/Error"
+
+  /authoring/sessions/{id}/messages:
+    post:
+      operationId: sendAuthoringMessage
+      summary: Send one natural-language instruction to the authoring agent
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthoringMessageRequest"
+      responses:
+        "200":
+          description: Updated authoring session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /authoring/sessions/{id}/generate:
+    post:
+      operationId: confirmAuthoringGeneration
+      summary: Explicitly start generation and real verification for the current intent revision
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+      responses:
+        "200":
+          description: Generation and verification started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+
+  /authoring/sessions/{id}/publish:
+    post:
+      operationId: publishAuthoringRevision
+      summary: Explicitly publish the current verified authoring revision
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+      responses:
+        "200":
+          description: Verified revision published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
 
 components:
   securitySchemes:
@@ -288,6 +333,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+
+  parameters:
+    AuthoringSessionID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
 
   schemas:
     ErrorResponse:
@@ -452,19 +505,14 @@ components:
         closed:
           type: boolean
 
-    ChallengeDraft:
+    AuthoringMetadata:
       type: object
       required:
         - title
         - difficulty
         - tags
         - description
-        - goal
-        - symptoms
-        - fault_mechanism
-        - environment_shape
-        - acceptance_criteria
-        - difficulty_reason
+        - runtime
       properties:
         title:
           type: string
@@ -476,65 +524,203 @@ components:
             type: string
         description:
           type: string
-        goal:
-          type: string
-        symptoms:
-          type: string
-        fault_mechanism:
-          type: string
-        environment_shape:
-          type: string
-        acceptance_criteria:
-          type: string
-        difficulty_reason:
-          type: string
-        notes:
+        runtime:
           type: string
 
-    GenerateDraftRequest:
+    AuthoringCheckpoint:
       type: object
-      required: [topic]
+      required: [id, title, markdown, position]
       properties:
-        topic:
+        id:
           type: string
+        title:
+          type: string
+        markdown:
+          type: string
+        position:
+          type: integer
 
-    GenerateDraftResponse:
+    AuthoringPlan:
       type: object
+      required: [metadata, overview, checkpoints]
       properties:
-        status:
+        metadata:
+          $ref: "#/components/schemas/AuthoringMetadata"
+        overview:
           type: string
-        verdict:
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringCheckpoint"
+
+    VerifiedCheckpoint:
+      type: object
+      required: [id, title, description]
+      properties:
+        id:
           type: string
-        reason:
+        title:
           type: string
-        warnings:
+        description:
+          type: string
+        hint:
+          type: string
+        depends_on:
           type: array
           items:
             type: string
-        draft:
-          $ref: "#/components/schemas/ChallengeDraft"
 
-    GenerationJobCreateRequest:
+    VerifiedChallenge:
       type: object
-      required: [draft]
+      required: [metadata, checkpoints]
       properties:
-        draft:
-          $ref: "#/components/schemas/ChallengeDraft"
+        metadata:
+          $ref: "#/components/schemas/AuthoringMetadata"
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifiedCheckpoint"
 
-    GenerationJobResponse:
+    AuthoringArtifact:
       type: object
       properties:
-        job_id:
+        submission_id:
           type: string
-        challenge_id:
+        directory:
           type: string
-        status:
+        generation_id:
+          type: string
+
+    AuthoringVerification:
+      type: object
+      properties:
+        task_id:
+          type: string
+        phase:
           type: string
         message:
           type: string
-        started_at:
+        report:
+          $ref: "#/components/schemas/AuthoringVerificationReport"
+        challenge_id:
+          type: string
+
+    AuthoringVerificationReport:
+      type: object
+      properties:
+        build_passed:
+          type: boolean
+        answer_passed:
+          type: boolean
+        checkpoints_passed:
+          type: boolean
+        summary:
+          type: string
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringVerificationIssue"
+
+    AuthoringVerificationIssue:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    AuthoringChange:
+      type: object
+      required: [kind, summary, difficulty_impact, revision]
+      properties:
+        kind:
+          type: string
+        summary:
+          type: string
+        difficulty_impact:
+          type: string
+        revision:
+          type: integer
+
+    AuthoringMessage:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+        content:
+          type: string
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringChange"
+        created_at:
           type: string
           format: date-time
-        completed_at:
+
+    AuthoringAsset:
+      type: object
+      required: [path, content]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+
+    AuthoringFileDiff:
+      type: object
+      required: [path, diff]
+      properties:
+        path:
+          type: string
+        diff:
+          type: string
+
+    AuthoringMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    AuthoringSession:
+      type: object
+      required: [id, state, intent_revision, visible_revision, updated_at, intent, messages, assets, diff]
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+        intent_revision:
+          type: integer
+        visible_revision:
+          type: integer
+        generation_id:
+          type: string
+        verify_task_id:
+          type: string
+        updated_at:
           type: string
           format: date-time
+        intent:
+          $ref: "#/components/schemas/AuthoringPlan"
+        artifact:
+          $ref: "#/components/schemas/AuthoringArtifact"
+        verified:
+          $ref: "#/components/schemas/VerifiedChallenge"
+        verification:
+          $ref: "#/components/schemas/AuthoringVerification"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringMessage"
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringAsset"
+        diff:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringFileDiff"

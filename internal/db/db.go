@@ -63,6 +63,68 @@ var migrations = []string{
 	DROP TABLE IF EXISTS instances;
 	DROP TABLE IF EXISTS submissions;
 	`,
+	// v3: human-reviewed challenge authoring sessions
+	`
+	CREATE TABLE IF NOT EXISTS authoring_sessions (
+		id                TEXT PRIMARY KEY,
+		user_id           TEXT NOT NULL,
+		agent_session_id  TEXT NOT NULL,
+		agent_started     INTEGER NOT NULL DEFAULT 0,
+		state             TEXT NOT NULL,
+		current_revision  INTEGER NOT NULL DEFAULT 0,
+		generation_id     TEXT NOT NULL DEFAULT '',
+		verify_task_id    TEXT NOT NULL DEFAULT '',
+		last_error        TEXT NOT NULL DEFAULT '',
+		created_at        TEXT NOT NULL,
+		updated_at        TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS authoring_revisions (
+		session_id              TEXT NOT NULL,
+		revision                INTEGER NOT NULL,
+		plan_json               TEXT NOT NULL,
+		candidate_submission_id TEXT NOT NULL DEFAULT '',
+		candidate_dir           TEXT NOT NULL DEFAULT '',
+		candidate_generation_id TEXT NOT NULL DEFAULT '',
+		verification_json       TEXT NOT NULL DEFAULT '',
+		created_at              TEXT NOT NULL,
+		PRIMARY KEY (session_id, revision)
+	);
+
+	CREATE TABLE IF NOT EXISTS authoring_messages (
+		id           TEXT PRIMARY KEY,
+		session_id   TEXT NOT NULL,
+		role         TEXT NOT NULL,
+		content      TEXT NOT NULL,
+		changes_json TEXT NOT NULL DEFAULT '[]',
+		created_at   TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS authoring_messages_session_created
+		ON authoring_messages(session_id, created_at);
+	`,
+	// v4: verified artifacts are distinct from the old unverified candidate
+	// workflow, and sessions retain the last author-visible verified revision.
+	`
+	ALTER TABLE authoring_sessions ADD COLUMN visible_revision INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE authoring_revisions RENAME COLUMN candidate_submission_id TO artifact_submission_id;
+	ALTER TABLE authoring_revisions RENAME COLUMN candidate_dir TO artifact_dir;
+	ALTER TABLE authoring_revisions RENAME COLUMN candidate_generation_id TO artifact_generation_id;
+	`,
+	// v5: retain an allocated opaque id across the external filesystem promote.
+	`
+	ALTER TABLE authoring_sessions ADD COLUMN publish_challenge_id TEXT NOT NULL DEFAULT '';
+	`,
+	// v6: generation jobs need their own resumable Claude Code session. It is
+	// deliberately distinct from the author-facing planning conversation.
+	`
+	ALTER TABLE authoring_sessions ADD COLUMN workflow_session_id TEXT NOT NULL DEFAULT '';
+	ALTER TABLE authoring_sessions ADD COLUMN workflow_started INTEGER NOT NULL DEFAULT 0;
+	`,
+	// v7: a failed VerifyTask must survive transient Generation job creation
+	// failures so the same workflow session receives the diagnostic on retry.
+	`
+	ALTER TABLE authoring_sessions ADD COLUMN pending_feedback TEXT NOT NULL DEFAULT '';
+	`,
 }
 
 func (d *DB) migrate() error {

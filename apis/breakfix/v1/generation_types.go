@@ -19,34 +19,24 @@ type Generation struct {
 }
 
 type GenerationSpec struct {
-	Draft        *ChallengeDraft `json:"draft,omitempty"`
-	Image        string          `json:"image"`
-	EnvSecretRef string          `json:"envSecretRef"`
+	Image               string `json:"image"`
+	EnvSecretRef        string `json:"envSecretRef"`
+	AuthoringSessionRef string `json:"authoringSessionRef,omitempty"`
+	AuthoringRevision   int64  `json:"authoringRevision,omitempty"`
 }
 
 type GenerationStatus struct {
-	Phase         GenerationPhase `json:"phase"`
-	JobName       string          `json:"jobName,omitempty"`
-	PodName       string          `json:"podName,omitempty"`
-	Challenge     *ChallengeSpec  `json:"challenge,omitempty"`
-	VerifyTaskRef string          `json:"verifyTaskRef,omitempty"`
-	Message       string          `json:"message,omitempty"`
-	StartedAt     *metav1.Time    `json:"startedAt,omitempty"`
-	CompletedAt   *metav1.Time    `json:"completedAt,omitempty"`
-}
-
-type ChallengeDraft struct {
-	Title              string   `json:"title"`
-	Difficulty         string   `json:"difficulty"`
-	Tags               []string `json:"tags"`
-	Description        string   `json:"description"`
-	Goal               string   `json:"goal"`
-	Symptoms           string   `json:"symptoms"`
-	FaultMechanism     string   `json:"fault_mechanism"`
-	EnvironmentShape   string   `json:"environment_shape"`
-	AcceptanceCriteria string   `json:"acceptance_criteria"`
-	DifficultyReason   string   `json:"difficulty_reason"`
-	Notes              string   `json:"notes,omitempty"`
+	Phase            GenerationPhase `json:"phase"`
+	JobName          string          `json:"jobName,omitempty"`
+	PodName          string          `json:"podName,omitempty"`
+	Challenge        *ChallengeSpec  `json:"challenge,omitempty"`
+	VerifyTaskRef    string          `json:"verifyTaskRef,omitempty"`
+	SubmissionID     string          `json:"submissionID,omitempty"`
+	ArtifactRevision int64           `json:"artifactRevision,omitempty"`
+	Attempt          int64           `json:"attempt,omitempty"`
+	Message          string          `json:"message,omitempty"`
+	StartedAt        *metav1.Time    `json:"startedAt,omitempty"`
+	CompletedAt      *metav1.Time    `json:"completedAt,omitempty"`
 }
 
 type GenerationPhase string
@@ -54,7 +44,8 @@ type GenerationPhase string
 const (
 	GenerationPending   GenerationPhase = "Pending"
 	GenerationRunning   GenerationPhase = "Running"
-	GenerationSucceeded GenerationPhase = "Succeeded"
+	GenerationVerifying GenerationPhase = "Verifying"
+	GenerationVerified  GenerationPhase = "Verified"
 	GenerationFailed    GenerationPhase = "Failed"
 )
 
@@ -132,11 +123,6 @@ func (in *GenerationList) DeepCopyObject() runtime.Object {
 
 func (in *GenerationSpec) DeepCopyInto(out *GenerationSpec) {
 	*out = *in
-	if in.Draft != nil {
-		d := *in.Draft
-		d.Tags = append([]string{}, d.Tags...)
-		out.Draft = &d
-	}
 }
 
 func (in *GenerationStatus) DeepCopyInto(out *GenerationStatus) {

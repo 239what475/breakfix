@@ -119,6 +119,34 @@ func TestValidateSubmissionDirAllowsMissingID(t *testing.T) {
 	}
 }
 
+func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "authoring", "revision")
+	writeFile(t, filepath.Join(source, "challenge.yaml"), validManifest("title: Verified source\n"))
+	writeFile(t, filepath.Join(source, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeFile(t, filepath.Join(source, "generate.sh"), "#!/bin/sh\n")
+	writeChallengeAssets(t, source)
+	sourceBefore, err := LoadSubmissionDir(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published, err := PromoteDirectory(filepath.Join(root, "challenges"), source, "opaque-challenge", "registry.example/verify:latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.ID != "opaque-challenge" || published.Image != "registry.example/verify:latest" {
+		t.Fatalf("unexpected published entry: %#v", published)
+	}
+	sourceEntry, err := LoadSubmissionDir(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceEntry.ID != sourceBefore.ID || sourceEntry.Image != sourceBefore.Image {
+		t.Fatalf("platform fields leaked into immutable source artifact: %#v", sourceEntry)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

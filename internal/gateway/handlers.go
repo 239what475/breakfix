@@ -15,10 +15,10 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/auth"
+	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/draftreview"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -93,7 +93,7 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 type Handler struct {
 	db               *db.DB
 	k8s              *k8s.Client
-	reviewer         *draftreview.Reviewer
+	authoring        *authoring.Service
 	registryAddr     string
 	registryInsecure bool
 	namespace        string
@@ -113,7 +113,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 	return &Handler{
 		db:               database,
 		k8s:              client,
-		reviewer:         &draftreview.Reviewer{},
+		authoring:        authoring.NewService(database, cfg.LLM),
 		registryAddr:     cfg.RegistryAddr,
 		registryInsecure: cfg.RegistryInsecure,
 		namespace:        cfg.Namespace,
@@ -416,233 +416,6 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 	c.JSON(http.StatusOK, api.StopResponse{
 		Stopped:        &stopped,
 		ChallengeTitle: &title,
-	})
-}
-
-// ── Agent ──
-
-func (h *Handler) ReviewGenerationDraft(c *gin.Context) {
-	var req api.GenerateDraftRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	result, err := h.reviewer.Review(c.Request.Context(), req.Topic)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("review draft: %v", err)})
-		return
-	}
-
-	status := "success"
-	verdict := result.Verdict
-	reason := result.Reason
-	draft := toAPIChallengeDraft(result.Draft)
-	c.JSON(http.StatusOK, api.GenerateDraftResponse{
-		Status:   &status,
-		Verdict:  &verdict,
-		Reason:   &reason,
-		Warnings: &result.Warnings,
-		Draft:    &draft,
-	})
-}
-
-func (h *Handler) CreateGenerationJob(c *gin.Context) {
-	if err := h.checkRegistryReady(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	var req api.GenerationJobCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	draft := fromAPIChallengeDraft(req.Draft)
-	genID := "gen-" + k8s.RandomID()
-
-	env := map[string]string{
-		"CHALLENGE_DRAFT_JSON":           mustJSON(draft),
-		"CHALLENGE_OUTPUT_DIR":           "/workspace/out",
-		"REGISTRY_ADDR":                  h.registryAddr,
-		"LAB_NAMESPACE":                  h.crdNamespace,
-		"GATEWAY_INTERNAL_URL":           h.internalGatewayURL(),
-		"GATEWAY_INTERNAL_API_KEY":       h.internalAPIKey,
-		"GENERATION_ID":                  genID,
-		"ANTHROPIC_BASE_URL":             h.llm.BaseURL,
-		"ANTHROPIC_AUTH_TOKEN":           h.llm.APIKey,
-		"ANTHROPIC_MODEL":                h.llm.Model,
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   h.llm.Model,
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": h.llm.Model,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  h.llm.HaikuModel,
-		"CLAUDE_CODE_SUBAGENT_MODEL":     h.llm.HaikuModel,
-		"CLAUDE_CODE_EFFORT_LEVEL":       h.llm.Effort,
-	}
-	if authz := strings.TrimSpace(c.GetHeader("Authorization")); authz != "" {
-		env["BREAKFIX_GENERATION_JWT"] = strings.TrimPrefix(authz, "Bearer ")
-	}
-	if h.registryInsecure {
-		env["REGISTRY_INSECURE"] = "true"
-	}
-	secretName := genID + "-env"
-	secretData := make(map[string][]byte, len(env))
-	for key, value := range env {
-		secretData[key] = []byte(value)
-	}
-	if err := h.k8s.UpsertSecret(h.crdNamespace, secretName, secretData); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create generation secret: %v", err)})
-		return
-	}
-
-	gen := &breakfixv1.Generation{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      genID,
-			Namespace: h.crdNamespace,
-		},
-		Spec: breakfixv1.GenerationSpec{
-			Draft:        &draft,
-			Image:        h.generatorImage(),
-			EnvSecretRef: secretName,
-		},
-	}
-
-	if _, err := h.k8s.CreateGeneration(c.Request.Context(), h.crdNamespace, gen); err != nil {
-		_ = h.k8s.DeleteSecret(h.crdNamespace, secretName)
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create generation: %v", err)})
-		return
-	}
-
-	slog.Info("generation created", "generation", genID, "title", draft.Title)
-	status := "queued"
-	jobID := genID
-	message := "generation job created"
-	c.JSON(http.StatusOK, api.GenerationJobResponse{
-		JobId:   &jobID,
-		Status:  &status,
-		Message: &message,
-	})
-}
-
-func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
-	gen, err := h.k8s.GetGeneration(c.Request.Context(), h.crdNamespace, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "generation job not found"})
-		return
-	}
-
-	status := string(gen.Status.Phase)
-	if status == "" {
-		status = "Pending"
-	}
-	status = normalizeGenerationStatus(status)
-	message := gen.Status.Message
-	if message == "" {
-		message = defaultGenerationMessage(gen)
-	}
-
-	var challengeID *string
-	if gen.Status.Challenge != nil {
-		cid := gen.Status.Challenge.ID
-		challengeID = &cid
-	}
-
-	var startedAt *time.Time
-	if gen.Status.StartedAt != nil {
-		t := gen.Status.StartedAt.Time
-		startedAt = &t
-	}
-	var completedAt *time.Time
-	if gen.Status.CompletedAt != nil {
-		t := gen.Status.CompletedAt.Time
-		completedAt = &t
-	}
-
-	jobID := gen.Name
-	c.JSON(http.StatusOK, api.GenerationJobResponse{
-		JobId:       &jobID,
-		ChallengeId: challengeID,
-		Status:      &status,
-		Message:     &message,
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-	})
-}
-
-func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
-	if h.internalAPIKey == "" {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal upload disabled"})
-		return
-	}
-	if c.GetHeader("X-Breakfix-Internal-Key") != h.internalAPIKey {
-		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid internal key"})
-		return
-	}
-
-	genID := strings.TrimSpace(c.Param("id"))
-	if genID == "" {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "missing generation id"})
-		return
-	}
-
-	gen, err := h.k8s.GetGeneration(c.Request.Context(), h.crdNamespace, genID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "generation job not found"})
-		return
-	}
-
-	file, _, err := c.Request.FormFile("artifact")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "artifact file is required"})
-		return
-	}
-	defer file.Close()
-
-	submissionID := "sub-" + k8s.RandomID()
-	challengeID := challenge.NewID()
-	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
-		return
-	}
-
-	verifyTaskID := "vt-" + k8s.RandomID()
-	task := &breakfixv1.VerifyTask{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      verifyTaskID,
-			Namespace: h.crdNamespace,
-		},
-		Spec: breakfixv1.VerifyTaskSpec{
-			Source: breakfixv1.VerifyTaskSource{
-				Kind: "agent",
-				Ref:  genID,
-			},
-			ChallengeID: challengeID,
-			Submission: breakfixv1.VerifyTaskSubmission{
-				ID: submissionID,
-			},
-		},
-		Status: breakfixv1.VerifyTaskStatus{
-			Phase:   breakfixv1.VerifyTaskPending,
-			Message: "verification task accepted",
-		},
-	}
-	if _, err := h.k8s.CreateVerifyTask(c.Request.Context(), h.crdNamespace, task); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create verify task: %v", err)})
-		return
-	}
-
-	gen.Status.VerifyTaskRef = verifyTaskID
-	gen.Status.Message = "artifact accepted for verification"
-	if _, err := h.k8s.UpdateGenerationStatus(c.Request.Context(), h.crdNamespace, gen); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("update generation status: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"challenge_id":   challengeID,
-		"status":         "ok",
-		"submission_id":  submissionID,
-		"verify_task_id": verifyTaskID,
 	})
 }
 
@@ -1054,83 +827,9 @@ func toAPICheckStatusResults(checks []breakfixv1.CheckpointResultStatus) []api.C
 	return result
 }
 
-func toAPIChallengeDraft(d breakfixv1.ChallengeDraft) api.ChallengeDraft {
-	tags := append([]string{}, d.Tags...)
-	return api.ChallengeDraft{
-		Title:              d.Title,
-		Difficulty:         d.Difficulty,
-		Tags:               tags,
-		Description:        d.Description,
-		Goal:               d.Goal,
-		Symptoms:           d.Symptoms,
-		FaultMechanism:     d.FaultMechanism,
-		EnvironmentShape:   d.EnvironmentShape,
-		AcceptanceCriteria: d.AcceptanceCriteria,
-		DifficultyReason:   d.DifficultyReason,
-		Notes:              &d.Notes,
-	}
-}
-
-func fromAPIChallengeDraft(d api.ChallengeDraft) breakfixv1.ChallengeDraft {
-	tags := append([]string{}, d.Tags...)
-	notes := ""
-	if d.Notes != nil {
-		notes = *d.Notes
-	}
-	return breakfixv1.ChallengeDraft{
-		Title:              d.Title,
-		Difficulty:         d.Difficulty,
-		Tags:               tags,
-		Description:        d.Description,
-		Goal:               d.Goal,
-		Symptoms:           d.Symptoms,
-		FaultMechanism:     d.FaultMechanism,
-		EnvironmentShape:   d.EnvironmentShape,
-		AcceptanceCriteria: d.AcceptanceCriteria,
-		DifficultyReason:   d.DifficultyReason,
-		Notes:              notes,
-	}
-}
-
 func mustJSON(v any) string {
 	data, _ := json.Marshal(v)
 	return string(data)
-}
-
-func normalizeGenerationStatus(status string) string {
-	switch status {
-	case "Pending":
-		return "queued"
-	case "Running":
-		return "running"
-	case "Succeeded":
-		return "success"
-	case "Failed":
-		return "failed"
-	default:
-		return strings.ToLower(status)
-	}
-}
-
-func defaultGenerationMessage(gen *breakfixv1.Generation) string {
-	switch gen.Status.Phase {
-	case breakfixv1.GenerationPending:
-		return "generation request accepted"
-	case breakfixv1.GenerationRunning:
-		if strings.TrimSpace(gen.Status.VerifyTaskRef) != "" {
-			return "artifact accepted, verification running"
-		}
-		return "generating challenge files"
-	case breakfixv1.GenerationSucceeded:
-		if gen.Status.Challenge != nil {
-			return fmt.Sprintf("challenge %s generated", gen.Status.Challenge.ID)
-		}
-		return "challenge generated"
-	case breakfixv1.GenerationFailed:
-		return "generation failed"
-	default:
-		return "generation status updated"
-	}
 }
 
 func (h *Handler) checkRegistryReady(ctx context.Context) error {

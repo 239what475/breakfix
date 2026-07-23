@@ -14,7 +14,11 @@ RUN npm config set registry https://registry.npmmirror.com/ && \
 RUN cat >/usr/local/bin/breakfix-claude <<'EOF' && chmod +x /usr/local/bin/breakfix-claude
 #!/bin/sh
 set -eu
-exec runuser -u node -- /usr/local/bin/claude "$@"
+# runuser waits for a child process. exec.CommandContext can then kill only
+# runuser while Claude keeps stdout open, leaving the caller blocked in its
+# output reader. setpriv execs the CLI in place after dropping privileges.
+exec env HOME=/home/node USER=node LOGNAME=node \
+    setpriv --reuid=node --regid=node --init-groups /usr/local/bin/claude "$@"
 EOF
 
 # Generator binary

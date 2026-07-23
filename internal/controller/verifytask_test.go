@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/challenge"
 )
 
 func TestValidateVerifyTaskSpec(t *testing.T) {
@@ -59,8 +60,8 @@ func TestCopyDirForPublishPreservesNestedAssets(t *testing.T) {
 		}
 	}
 
-	if err := copyDirForPublish(src, dst); err != nil {
-		t.Fatalf("copyDirForPublish: %v", err)
+	if err := challenge.CopyRegularFiles(src, dst); err != nil {
+		t.Fatalf("CopyRegularFiles: %v", err)
 	}
 	for _, name := range []string{"challenge.yaml", "checks/checkpoints.sh", "hints/checkpoint-one.md"} {
 		if _, err := os.Stat(filepath.Join(dst, name)); err != nil {

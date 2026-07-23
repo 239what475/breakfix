@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 
@@ -18,6 +19,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	router.Use(gin.Recovery())
 
 	h := NewHandler(database, k8sClient, cfg)
+	h.StartAuthoringReconciler(context.Background())
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 
@@ -64,26 +66,44 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 			h.StopChallenge(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/generate/draft", func(c *gin.Context) {
+	router.POST("/api/authoring/sessions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.ReviewGenerationDraft(c)
+			h.CreateAuthoringSession(c)
 		}
 	})
-	router.POST("/api/generate", func(c *gin.Context) {
+	router.GET("/api/authoring/sessions/current", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.CreateGenerationJob(c)
+			h.GetCurrentAuthoringSession(c)
+		}
+	})
+	router.GET("/api/authoring/sessions/:id", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetAuthoringSession(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/authoring/sessions/:id/messages", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.SendAuthoringMessage(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/authoring/sessions/:id/generate", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.ConfirmAuthoringGeneration(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
 	router.POST("/api/internal/generations/:id/artifact", h.UploadGenerationArtifact)
 	router.GET("/api/internal/verify-submissions/:id/artifact", h.DownloadVerifySubmissionArtifact)
-	router.GET("/api/generate/jobs/:id", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.GetGenerationJob(c, c.Param("id"))
-		}
-	})
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {

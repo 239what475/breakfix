@@ -85,6 +85,18 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "challengeID", task.Spec.ChallengeID, "runtime", challengeEntry.Runtime)
 
 	tempImage := fmt.Sprintf("%s/verify-%s:latest", cfg.RegistryAddr, cfg.VerifyTaskID)
+	imageBuilt := false
+	keepTempImage := false
+	defer func() {
+		if !imageBuilt || keepTempImage {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := DeleteRegistryImage(cleanupCtx, tempImage, cfg.RegistryInsecure); err != nil {
+			slog.Warn("remove failed verification image", "verifyTaskID", cfg.VerifyTaskID, "image", tempImage, "err", err)
+		}
+	}()
 	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
 		current.Status.TempImage = tempImage
 		current.Status.Message = "building verification image"
@@ -102,6 +114,7 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 			}},
 		})
 	}
+	imageBuilt = true
 	slog.Info("verify stage done", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "image", tempImage)
 
 	stageStart = time.Now()
@@ -189,15 +202,20 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 		})
 	}
 
+	// Once success has been attempted, retain the image: the status write may
+	// have reached the API server even if the client loses its response.
+	keepTempImage = true
 	err = mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
-		current.Status.Phase = breakfixv1.VerifyTaskVerified
-		current.Status.Message = "verification passed, waiting for publish"
+		current.Status.Phase = breakfixv1.VerifyTaskSucceeded
+		current.Status.Message = "verification passed"
 		current.Status.Report = &breakfixv1.VerifyReport{
 			BuildPassed:       true,
 			AnswerPassed:      true,
 			CheckpointsPassed: true,
 			Summary:           "all checkpoints passed",
 		}
+		done := metav1.Now()
+		current.Status.CompletedAt = &done
 	})
 	if err == nil {
 		slog.Info("verify task done", "verifyTaskID", cfg.VerifyTaskID, "submissionID", cfg.SubmissionID, "duration", time.Since(verifyStart))

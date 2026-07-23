@@ -5,7 +5,7 @@
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         build build-gateway \
         deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-catalog deploy-cleanup deploy-reset \
-        generator-build generator-dev generator-run \
+        generator-build generator-dev \
         lint proto clean status logs
 
 # ── Build info ──
@@ -288,13 +288,6 @@ generator-dev: dev-rbac generator-build dev-gateway
 	@kubectl delete jobs -n breakfix-system --all 2>/dev/null || true
 	@kubectl delete pods -n breakfix-system --all 2>/dev/null || true
 	@echo "  ✓ Generator dev environment ready"
-
-generator-run:
-	@if [ -z "$(CHALLENGE_DRAFT_JSON)" ]; then \
-		echo "  ✗ CHALLENGE_DRAFT_JSON is required"; \
-		exit 1; \
-	fi
-	CHALLENGE_DRAFT_JSON='$(CHALLENGE_DRAFT_JSON)' ./$(BIN_DIR)/generator
 
 deploy-generator: _guard-server generator-build
 	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \

@@ -37,8 +37,6 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 		RegistryAddr:     registryAddr,
 		RegistryInsecure: registryInsecure,
 		CRDNamespace:     crdNamespace,
-		ChallengesDir:    challengesDir,
-		DataDir:          dataDir,
 		InternalAPIKey:   internalAPIKey,
 		ServerHost:       serverHost,
 		ServerPort:       serverPort,

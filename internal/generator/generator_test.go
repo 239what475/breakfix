@@ -7,8 +7,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 )
+
+func TestReviewedPlanContextUsesEachPlanSectionOnce(t *testing.T) {
+	plan := &authoring.Plan{
+		Metadata: authoring.Metadata{
+			Title:       "唯一标题",
+			Description: "唯一简介",
+			Difficulty:  "medium",
+			Tags:        []string{"linux", "shell"},
+			Runtime:     challenge.RuntimeContainer,
+		},
+		Overview:    "唯一概览",
+		Checkpoints: []authoring.Checkpoint{{ID: "old-logs", Title: "唯一检查点", Markdown: "唯一检查点说明", Position: 1}},
+	}
+
+	context := (&Generator{Plan: plan}).reviewedPlanContext()
+	for _, value := range []string{"唯一标题", "唯一简介", "唯一概览", "唯一检查点说明"} {
+		if count := strings.Count(context, value); count != 1 {
+			t.Fatalf("reviewedPlanContext() contains %q %d times, want once:\n%s", value, count, context)
+		}
+	}
+	if strings.Contains(context, "表象：") || strings.Contains(context, "故障机制：") || strings.Contains(context, "验收标准：") {
+		t.Fatalf("reviewedPlanContext() retained legacy draft fields:\n%s", context)
+	}
+}
 
 func TestArchiveDirPreservesNestedChallengeAssets(t *testing.T) {
 	source := t.TempDir()
@@ -194,16 +219,18 @@ fi
 	}
 }
 
-func TestJudgeResponsePassedUsesExplicitFinalVerdict(t *testing.T) {
+func TestJudgeResponsePassedRequiresExactPass(t *testing.T) {
 	tests := []struct {
 		name     string
 		response string
 		want     bool
 	}{
 		{name: "plain pass", response: "PASS", want: true},
+		{name: "trailing newline is invalid", response: "PASS\n", want: false},
 		{name: "plain failure", response: "FAIL: missing answer", want: false},
-		{name: "report with final pass", response: "检查完成。\n**Final Verdict: PASS**", want: true},
-		{name: "report with final failure", response: "PASS: metadata is present\n**Overall Verdict: FAIL**", want: false},
+		{name: "report with final pass is invalid", response: "检查完成。\n**Final Verdict: PASS**", want: false},
+		{name: "Chinese Markdown pass is invalid", response: "## 审查结果：PASS", want: false},
+		{name: "JSON pass is invalid", response: `{"pass": true}`, want: false},
 		{name: "no explicit verdict", response: "All files appear correct.", want: false},
 	}
 

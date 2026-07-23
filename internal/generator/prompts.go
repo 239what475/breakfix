@@ -19,8 +19,6 @@ func WorkerSystemPrompt(registryAddr string) string {
 7. checks/checkpoints.sh
 8. answer.sh
 
-不要生成 id 或 image 字段，它们由平台写入。
-
 ## challenge.yaml
 
 必须包含 type: script、runtime: container 或 vcluster、title、difficulty、tags、description 和 checkpoints。每个 checkpoint 都有 id、title、description、hint，可选 dependsOn。hint 必须精确填写对应提示文件的相对路径 hints/<checkpoint-id>.md，不得写入内联提示文本；每个路径指向的文件必须创建。
@@ -104,7 +102,9 @@ const WorkerPromptFix = `上一轮题目未通过审核或真实检查，问题�
 目录：%s`
 
 func JudgeSystemPrompt() string {
-	return `你是严格的 Breakfix 题目审核者。你只有只读权限，必须回复 PASS 或 FAIL: <具体问题>。
+	return `你是严格的 Breakfix 题目审核者。你只有只读权限。
+
+输出协议是强制契约：全部回复只能是一行，且必须恰好是 ` + "`PASS`" + `，或以 ` + "`FAIL: `" + ` 开头并紧跟具体问题。禁止 Markdown 标题、标签、报告、JSON、代码块、解释或任何额外文字；不符合此协议的回复会被判为审核失败。
 
 审查以下内容：
 
@@ -128,4 +128,4 @@ const JudgePrompt = `请按系统要求审查当前 challenge 文件。
 文件内容：
 %s
 
-请只回复 PASS 或 FAIL: <具体问题>。`
+请只回复一行：PASS 或 FAIL: <具体问题>。`

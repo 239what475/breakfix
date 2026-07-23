@@ -41,6 +41,113 @@ func (e ChallengeSummaryRuntime) Valid() bool {
 	}
 }
 
+// AuthoringArtifact defines model for AuthoringArtifact.
+type AuthoringArtifact struct {
+	Directory    *string `json:"directory,omitempty"`
+	GenerationId *string `json:"generation_id,omitempty"`
+	SubmissionId *string `json:"submission_id,omitempty"`
+}
+
+// AuthoringAsset defines model for AuthoringAsset.
+type AuthoringAsset struct {
+	Content string `json:"content"`
+	Path    string `json:"path"`
+}
+
+// AuthoringChange defines model for AuthoringChange.
+type AuthoringChange struct {
+	DifficultyImpact string `json:"difficulty_impact"`
+	Kind             string `json:"kind"`
+	Revision         int    `json:"revision"`
+	Summary          string `json:"summary"`
+}
+
+// AuthoringCheckpoint defines model for AuthoringCheckpoint.
+type AuthoringCheckpoint struct {
+	Id       string `json:"id"`
+	Markdown string `json:"markdown"`
+	Position int    `json:"position"`
+	Title    string `json:"title"`
+}
+
+// AuthoringFileDiff defines model for AuthoringFileDiff.
+type AuthoringFileDiff struct {
+	Diff string `json:"diff"`
+	Path string `json:"path"`
+}
+
+// AuthoringMessage defines model for AuthoringMessage.
+type AuthoringMessage struct {
+	Changes   *[]AuthoringChange `json:"changes,omitempty"`
+	Content   string             `json:"content"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        string             `json:"id"`
+	Role      string             `json:"role"`
+}
+
+// AuthoringMessageRequest defines model for AuthoringMessageRequest.
+type AuthoringMessageRequest struct {
+	Content string `json:"content"`
+}
+
+// AuthoringMetadata defines model for AuthoringMetadata.
+type AuthoringMetadata struct {
+	Description string   `json:"description"`
+	Difficulty  string   `json:"difficulty"`
+	Runtime     string   `json:"runtime"`
+	Tags        []string `json:"tags"`
+	Title       string   `json:"title"`
+}
+
+// AuthoringPlan defines model for AuthoringPlan.
+type AuthoringPlan struct {
+	Checkpoints []AuthoringCheckpoint `json:"checkpoints"`
+	Metadata    AuthoringMetadata     `json:"metadata"`
+	Overview    string                `json:"overview"`
+}
+
+// AuthoringSession defines model for AuthoringSession.
+type AuthoringSession struct {
+	Artifact        *AuthoringArtifact     `json:"artifact,omitempty"`
+	Assets          []AuthoringAsset       `json:"assets"`
+	Diff            []AuthoringFileDiff    `json:"diff"`
+	GenerationId    *string                `json:"generation_id,omitempty"`
+	Id              string                 `json:"id"`
+	Intent          AuthoringPlan          `json:"intent"`
+	IntentRevision  int                    `json:"intent_revision"`
+	Messages        []AuthoringMessage     `json:"messages"`
+	State           string                 `json:"state"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	Verification    *AuthoringVerification `json:"verification,omitempty"`
+	Verified        *VerifiedChallenge     `json:"verified,omitempty"`
+	VerifyTaskId    *string                `json:"verify_task_id,omitempty"`
+	VisibleRevision int                    `json:"visible_revision"`
+}
+
+// AuthoringVerification defines model for AuthoringVerification.
+type AuthoringVerification struct {
+	ChallengeId *string                      `json:"challenge_id,omitempty"`
+	Message     *string                      `json:"message,omitempty"`
+	Phase       *string                      `json:"phase,omitempty"`
+	Report      *AuthoringVerificationReport `json:"report,omitempty"`
+	TaskId      *string                      `json:"task_id,omitempty"`
+}
+
+// AuthoringVerificationIssue defines model for AuthoringVerificationIssue.
+type AuthoringVerificationIssue struct {
+	Code    *string `json:"code,omitempty"`
+	Message *string `json:"message,omitempty"`
+}
+
+// AuthoringVerificationReport defines model for AuthoringVerificationReport.
+type AuthoringVerificationReport struct {
+	AnswerPassed      *bool                         `json:"answer_passed,omitempty"`
+	BuildPassed       *bool                         `json:"build_passed,omitempty"`
+	CheckpointsPassed *bool                         `json:"checkpoints_passed,omitempty"`
+	Issues            *[]AuthoringVerificationIssue `json:"issues,omitempty"`
+	Summary           *string                       `json:"summary,omitempty"`
+}
+
 // ChallengeCheckpoint defines model for ChallengeCheckpoint.
 type ChallengeCheckpoint struct {
 	DependsOn   *[]string `json:"depends_on,omitempty"`
@@ -58,21 +165,6 @@ type ChallengeContent struct {
 	Problem     *string                `json:"problem,omitempty"`
 	Solution    *string                `json:"solution,omitempty"`
 	Title       *string                `json:"title,omitempty"`
-}
-
-// ChallengeDraft defines model for ChallengeDraft.
-type ChallengeDraft struct {
-	AcceptanceCriteria string   `json:"acceptance_criteria"`
-	Description        string   `json:"description"`
-	Difficulty         string   `json:"difficulty"`
-	DifficultyReason   string   `json:"difficulty_reason"`
-	EnvironmentShape   string   `json:"environment_shape"`
-	FaultMechanism     string   `json:"fault_mechanism"`
-	Goal               string   `json:"goal"`
-	Notes              *string  `json:"notes,omitempty"`
-	Symptoms           string   `json:"symptoms"`
-	Tags               []string `json:"tags"`
-	Title              string   `json:"title"`
 }
 
 // ChallengeList defines model for ChallengeList.
@@ -112,35 +204,6 @@ type CheckpointResult struct {
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
-}
-
-// GenerateDraftRequest defines model for GenerateDraftRequest.
-type GenerateDraftRequest struct {
-	Topic string `json:"topic"`
-}
-
-// GenerateDraftResponse defines model for GenerateDraftResponse.
-type GenerateDraftResponse struct {
-	Draft    *ChallengeDraft `json:"draft,omitempty"`
-	Reason   *string         `json:"reason,omitempty"`
-	Status   *string         `json:"status,omitempty"`
-	Verdict  *string         `json:"verdict,omitempty"`
-	Warnings *[]string       `json:"warnings,omitempty"`
-}
-
-// GenerationJobCreateRequest defines model for GenerationJobCreateRequest.
-type GenerationJobCreateRequest struct {
-	Draft ChallengeDraft `json:"draft"`
-}
-
-// GenerationJobResponse defines model for GenerationJobResponse.
-type GenerationJobResponse struct {
-	ChallengeId *string    `json:"challenge_id,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	JobId       *string    `json:"job_id,omitempty"`
-	Message     *string    `json:"message,omitempty"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	Status      *string    `json:"status,omitempty"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -192,6 +255,24 @@ type TerminalWindowCloseResponse struct {
 	Closed *bool `json:"closed,omitempty"`
 }
 
+// VerifiedChallenge defines model for VerifiedChallenge.
+type VerifiedChallenge struct {
+	Checkpoints []VerifiedCheckpoint `json:"checkpoints"`
+	Metadata    AuthoringMetadata    `json:"metadata"`
+}
+
+// VerifiedCheckpoint defines model for VerifiedCheckpoint.
+type VerifiedCheckpoint struct {
+	DependsOn   *[]string `json:"depends_on,omitempty"`
+	Description string    `json:"description"`
+	Hint        *string   `json:"hint,omitempty"`
+	Id          string    `json:"id"`
+	Title       string    `json:"title"`
+}
+
+// AuthoringSessionID defines model for AuthoringSessionID.
+type AuthoringSessionID = string
+
 // Error defines model for Error.
 type Error = ErrorResponse
 
@@ -204,11 +285,8 @@ type LoginJSONRequestBody = LoginRequest
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
 
-// CreateGenerationJobJSONRequestBody defines body for CreateGenerationJob for application/json ContentType.
-type CreateGenerationJobJSONRequestBody = GenerationJobCreateRequest
-
-// ReviewGenerationDraftJSONRequestBody defines body for ReviewGenerationDraft for application/json ContentType.
-type ReviewGenerationDraftJSONRequestBody = GenerateDraftRequest
+// SendAuthoringMessageJSONRequestBody defines body for SendAuthoringMessage for application/json ContentType.
+type SendAuthoringMessageJSONRequestBody = AuthoringMessageRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -218,6 +296,24 @@ type ServerInterface interface {
 	// Register a new user
 	// (POST /auth/register)
 	Register(c *gin.Context)
+	// Create a human-reviewed challenge authoring session
+	// (POST /authoring/sessions)
+	CreateAuthoringSession(c *gin.Context)
+	// Resume the latest unfinished authoring session for the current user
+	// (GET /authoring/sessions/current)
+	GetCurrentAuthoringSession(c *gin.Context)
+	// Read the current authoring revision, conversation, assets, and diff
+	// (GET /authoring/sessions/{id})
+	GetAuthoringSession(c *gin.Context, id AuthoringSessionID)
+	// Explicitly start generation and real verification for the current intent revision
+	// (POST /authoring/sessions/{id}/generate)
+	ConfirmAuthoringGeneration(c *gin.Context, id AuthoringSessionID)
+	// Send one natural-language instruction to the authoring agent
+	// (POST /authoring/sessions/{id}/messages)
+	SendAuthoringMessage(c *gin.Context, id AuthoringSessionID)
+	// Explicitly publish the current verified authoring revision
+	// (POST /authoring/sessions/{id}/publish)
+	PublishAuthoringRevision(c *gin.Context, id AuthoringSessionID)
 	// List all challenges
 	// (GET /challenges)
 	ListChallenges(c *gin.Context)
@@ -239,15 +335,6 @@ type ServerInterface interface {
 	// Close one terminal tab in the current challenge environment
 	// (DELETE /challenges/{id}/terminals/{window})
 	CloseTerminalWindow(c *gin.Context, id string, window string)
-	// Start generation for a reviewed challenge draft
-	// (POST /generate)
-	CreateGenerationJob(c *gin.Context)
-	// Review and expand a challenge idea into a structured draft
-	// (POST /generate/draft)
-	ReviewGenerationDraft(c *gin.Context)
-	// Get generation job status
-	// (GET /generate/jobs/{id})
-	GetGenerationJob(c *gin.Context, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -283,6 +370,144 @@ func (siw *ServerInterfaceWrapper) Register(c *gin.Context) {
 	}
 
 	siw.Handler.Register(c)
+}
+
+// CreateAuthoringSession operation middleware
+func (siw *ServerInterfaceWrapper) CreateAuthoringSession(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateAuthoringSession(c)
+}
+
+// GetCurrentAuthoringSession operation middleware
+func (siw *ServerInterfaceWrapper) GetCurrentAuthoringSession(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetCurrentAuthoringSession(c)
+}
+
+// GetAuthoringSession operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthoringSession(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AuthoringSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAuthoringSession(c, id)
+}
+
+// ConfirmAuthoringGeneration operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmAuthoringGeneration(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AuthoringSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ConfirmAuthoringGeneration(c, id)
+}
+
+// SendAuthoringMessage operation middleware
+func (siw *ServerInterfaceWrapper) SendAuthoringMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AuthoringSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SendAuthoringMessage(c, id)
+}
+
+// PublishAuthoringRevision operation middleware
+func (siw *ServerInterfaceWrapper) PublishAuthoringRevision(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AuthoringSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PublishAuthoringRevision(c, id)
 }
 
 // ListChallenges operation middleware
@@ -469,63 +694,6 @@ func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
 	siw.Handler.CloseTerminalWindow(c, id, window)
 }
 
-// CreateGenerationJob operation middleware
-func (siw *ServerInterfaceWrapper) CreateGenerationJob(c *gin.Context) {
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CreateGenerationJob(c)
-}
-
-// ReviewGenerationDraft operation middleware
-func (siw *ServerInterfaceWrapper) ReviewGenerationDraft(c *gin.Context) {
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ReviewGenerationDraft(c)
-}
-
-// GetGenerationJob operation middleware
-func (siw *ServerInterfaceWrapper) GetGenerationJob(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetGenerationJob(c, id)
-}
-
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -555,6 +723,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.POST(options.BaseURL+"/auth/login", wrapper.Login)
 	router.POST(options.BaseURL+"/auth/register", wrapper.Register)
+	router.POST(options.BaseURL+"/authoring/sessions", wrapper.CreateAuthoringSession)
+	router.GET(options.BaseURL+"/authoring/sessions/current", wrapper.GetCurrentAuthoringSession)
+	router.GET(options.BaseURL+"/authoring/sessions/:id", wrapper.GetAuthoringSession)
+	router.POST(options.BaseURL+"/authoring/sessions/:id/generate", wrapper.ConfirmAuthoringGeneration)
+	router.POST(options.BaseURL+"/authoring/sessions/:id/messages", wrapper.SendAuthoringMessage)
+	router.POST(options.BaseURL+"/authoring/sessions/:id/publish", wrapper.PublishAuthoringRevision)
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
 	router.GET(options.BaseURL+"/challenges/:id/content", wrapper.GetChallengeContent)
 	router.GET(options.BaseURL+"/challenges/:id/progress", wrapper.GetChallengeProgress)
@@ -562,9 +736,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
 	router.DELETE(options.BaseURL+"/challenges/:id/terminals/:window", wrapper.CloseTerminalWindow)
-	router.POST(options.BaseURL+"/generate", wrapper.CreateGenerationJob)
-	router.POST(options.BaseURL+"/generate/draft", wrapper.ReviewGenerationDraft)
-	router.GET(options.BaseURL+"/generate/jobs/:id", wrapper.GetGenerationJob)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -572,34 +743,43 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"c7TZZMLMg6VQevZ2+nY6IQXF29vt/wMAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

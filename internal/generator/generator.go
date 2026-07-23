@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,15 +25,14 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"log/slog"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
-	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"gopkg.in/yaml.v3"
 )
 
 type Generator struct {
-	Draft            *breakfixv1.ChallengeDraft
+	Plan             *authoring.Plan
 	OutputDir        string
 	RegistryAddr     string
 	RegistryInsecure bool
@@ -43,15 +41,22 @@ type Generator struct {
 	GenerationID     string
 	GatewayURL       string
 	InternalAPIKey   string
-	ServerJWT        string
+	InitialFeedback  string
+	SeedSubmissionID string
+	AgentSessionID   string
+	ResumeAgent      bool
 
-	workDir    string
-	artifactID string
+	workDir      string
+	artifactID   string
+	agentStarted bool
 }
 
 const claudeRunAsNode = "/usr/local/bin/breakfix-claude"
 
+const judgeTimeout = 10 * time.Minute
+
 func (g *Generator) Run(ctx context.Context) error {
+	g.agentStarted = g.ResumeAgent
 	if absOutput, err := filepath.Abs(g.OutputDir); err == nil {
 		g.OutputDir = absOutput
 	}
@@ -63,6 +68,25 @@ func (g *Generator) Run(ctx context.Context) error {
 	chalDir := filepath.Join(g.workDir, g.artifactID)
 	if err := os.MkdirAll(chalDir, 0755); err != nil {
 		return fmt.Errorf("create challenge dir: %w", err)
+	}
+	if strings.TrimSpace(g.SeedSubmissionID) != "" {
+		seedArchive := filepath.Join(g.workDir, "verified-artifact.tar.gz")
+		if err := downloadSubmission(ctx, VerifyTaskConfig{
+			GatewayURL:     g.GatewayURL,
+			InternalAPIKey: g.InternalAPIKey,
+			SubmissionID:   g.SeedSubmissionID,
+		}, seedArchive); err != nil {
+			return fmt.Errorf("download verified artifact %s: %w", g.SeedSubmissionID, err)
+		}
+		seed, err := os.Open(seedArchive)
+		if err != nil {
+			return fmt.Errorf("open verified artifact %s: %w", g.SeedSubmissionID, err)
+		}
+		extractErr := challenge.ExtractTarGz(chalDir, seed)
+		_ = seed.Close()
+		if extractErr != nil {
+			return fmt.Errorf("extract verified artifact %s: %w", g.SeedSubmissionID, extractErr)
+		}
 	}
 	if err := ensureClaudeWorkspaceWritable(g.workDir); err != nil {
 		return fmt.Errorf("prepare claude workspace permissions: %w", err)
@@ -78,7 +102,7 @@ func (g *Generator) Run(ctx context.Context) error {
 	labClient := NewLabClient(k8sClient, g.LabNS, chalDir, g.RegistryAddr)
 	labTools := labClient.Tools()
 
-	var judgeFeedback string
+	judgeFeedback := strings.TrimSpace(g.InitialFeedback)
 
 	for round := 0; ; round++ {
 		if err := ctx.Err(); err != nil {
@@ -125,20 +149,14 @@ func (g *Generator) Run(ctx context.Context) error {
 
 		uStart := time.Now()
 		slog.Info("phase start", "phase", "upload_artifact", "round", round+1)
-		verifyPassed, verifyFeedback, err := g.uploadArtifactAndWaitVerify(ctx, chalDir)
-		if err != nil {
+		if err := g.uploadArtifact(ctx, chalDir); err != nil {
 			slog.Error("phase failed", "phase", "upload_artifact", "round", round+1, "duration", time.Since(uStart), "err", err)
-			judgeFeedback = err.Error()
-			continue
+			return err
 		}
-		slog.Info("phase done", "phase", "upload_artifact", "round", round+1, "duration", time.Since(uStart), "passed", verifyPassed)
-		if verifyPassed {
-			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "success")
-			slog.Info("generation done", "title", g.defaultTitle(), "artifactID", g.artifactID, "rounds", round+1, "duration", time.Since(genStart))
-			return nil
-		}
-		judgeFeedback = verifyFeedback
-		slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "verify_fail")
+		slog.Info("phase done", "phase", "upload_artifact", "round", round+1, "duration", time.Since(uStart))
+		slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "artifact_uploaded")
+		slog.Info("artifact generation done", "title", g.defaultTitle(), "artifactID", g.artifactID, "rounds", round+1, "duration", time.Since(genStart))
+		return nil
 	}
 
 }
@@ -163,18 +181,25 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 		maxTurns = 20
 	}
 
-	agent, err := claudecode.New(
+	opts := []claudecode.Option{
 		claudecode.WithBin(claudeRunAsNode),
 		claudecode.WithSystemPrompt(WorkerSystemPrompt(g.RegistryAddr)),
 		claudecode.WithTools(tools...),
 		claudecode.WithCustomTools(customTools...),
 		claudecode.WithMaxTurns(maxTurns),
-		claudecode.WithNoSessionPersistence(true),
 		claudecode.WithCWD(chalDir),
 		claudecode.WithAddDirs(g.OutputDir),
 		claudecode.WithPermissionMode("acceptEdits"),
 		claudecode.WithStderr(func(line string) { slog.Debug("claude", "msg", line) }),
-	)
+	}
+	if strings.TrimSpace(g.AgentSessionID) != "" {
+		if g.agentStarted {
+			opts = append(opts, claudecode.WithResume(g.AgentSessionID))
+		} else {
+			opts = append(opts, claudecode.WithSessionID(g.AgentSessionID))
+		}
+	}
+	agent, err := claudecode.New(opts...)
 	if err != nil {
 		return fmt.Errorf("create worker agent: %w", err)
 	}
@@ -182,9 +207,9 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 
 	var prompt string
 	if judgeFeedback == "" {
-		prompt = fmt.Sprintf(WorkerPromptCreate, g.draftContext(), chalDir)
+		prompt = fmt.Sprintf(WorkerPromptCreate, g.reviewedPlanContext(), chalDir)
 	} else {
-		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.draftContext(), chalDir)
+		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.reviewedPlanContext(), chalDir)
 	}
 	slog.Info("agent prompt", "phase", "generate", "prompt", truncateStr(prompt, 500))
 	runner := adk.NewRunner(runCtx, adk.RunnerConfig{Agent: agent})
@@ -198,6 +223,12 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 	err = g.drainEvents(events, func() {
 		lastEvent.Store(time.Now().UnixNano())
 	})
+	// A subsequent local judge retry or a later VerifyTask repair must resume
+	// this same Claude Code conversation instead of regenerating without the
+	// implementation context it has already established.
+	if strings.TrimSpace(g.AgentSessionID) != "" {
+		g.agentStarted = true
+	}
 	if quiesced.Load() && (err == nil || errors.Is(err, context.Canceled)) {
 		slog.Info("phase done", "phase", "generate", "mode", "vcluster_quiesced")
 		return nil
@@ -215,7 +246,7 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 }
 
 func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, string) {
-	judgeCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	judgeCtx, cancel := context.WithTimeout(ctx, judgeTimeout)
 	defer cancel()
 
 	var fileContents strings.Builder
@@ -246,9 +277,9 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 		slog.Error("create judge agent", "err", err)
 		return false, ""
 	}
-	slog.Info("agent configured", "phase", "judge", "cwd", chalDir, "maxTurns", 8, "timeout", 3*time.Minute)
+	slog.Info("agent configured", "phase", "judge", "cwd", chalDir, "maxTurns", 8, "timeout", judgeTimeout)
 
-	prompt := fmt.Sprintf(JudgePrompt, g.draftContext(), fileContents.String())
+	prompt := fmt.Sprintf(JudgePrompt, g.reviewedPlanContext(), fileContents.String())
 	slog.Info("agent prompt", "phase", "judge", "prompt_len", len(prompt))
 	runner := adk.NewRunner(judgeCtx, adk.RunnerConfig{Agent: agent})
 	events := runner.Run(judgeCtx, []adk.Message{schema.UserMessage(prompt)})
@@ -264,14 +295,14 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 		}
 		if evt.Output != nil && evt.Output.MessageOutput != nil && evt.Output.MessageOutput.Message != nil {
 			msg := evt.Output.MessageOutput.Message
-			if c := strings.TrimSpace(msg.Content); c != "" {
-				lastMsg = c
+			if msg.Content != "" {
+				lastMsg = msg.Content
 			}
 		}
 		if evt.Action != nil && evt.Action.Exit {
 			if evt.Output != nil && evt.Output.MessageOutput != nil && evt.Output.MessageOutput.Message != nil {
-				if c := strings.TrimSpace(evt.Output.MessageOutput.Message.Content); c != "" {
-					lastMsg = c
+				if content := evt.Output.MessageOutput.Message.Content; content != "" {
+					lastMsg = content
 				}
 			}
 			break
@@ -280,7 +311,7 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 	if errors.Is(judgeCtx.Err(), context.DeadlineExceeded) {
 		return false, "judge 超时，未能在限定时间内完成审核"
 	}
-	msg := strings.TrimSpace(lastMsg)
+	msg := lastMsg
 	if msg == "" {
 		return false, "judge 未返回 PASS/FAIL，视为审核失败；请直接检查 challenge.yaml、generate.sh、problem.md、solution.md、checks/checkpoints.sh、answer.sh 是否围绕同一套真实环境事实"
 	}
@@ -288,31 +319,10 @@ func (g *Generator) phaseJudge(ctx context.Context, chalDir string) (bool, strin
 	return passed, msg
 }
 
-// Judge agents occasionally wrap their required conclusion in a report. Accept
-// only an explicit verdict, preferring the last one when a report has sections.
+// The judge protocol is one line: exactly PASS, or FAIL: followed by a reason.
+// Any other model output is an invalid judgment and must not approve a challenge.
 func judgeResponsePassed(message string) bool {
-	var verdict string
-	for _, raw := range strings.Split(message, "\n") {
-		line := strings.Trim(strings.TrimSpace(raw), "*`")
-		upper := strings.ToUpper(line)
-
-		switch {
-		case upper == "PASS" || strings.HasPrefix(upper, "PASS:"):
-			verdict = "PASS"
-		case upper == "FAIL" || strings.HasPrefix(upper, "FAIL:"):
-			verdict = "FAIL"
-		case strings.HasPrefix(upper, "FINAL VERDICT:") || strings.HasPrefix(upper, "OVERALL VERDICT:"):
-			if strings.Contains(upper, "PASS") {
-				verdict = "PASS"
-			} else if strings.Contains(upper, "FAIL") {
-				verdict = "FAIL"
-			}
-		}
-	}
-	if verdict != "" {
-		return verdict == "PASS"
-	}
-	return strings.Contains(message, `"pass": true`)
+	return message == "PASS"
 }
 
 func (g *Generator) validateChallengeManifest(chalDir string) error {
@@ -618,62 +628,34 @@ func truncateStr(s string, max int) string {
 	return s[:max] + "..."
 }
 
-func (g *Generator) identitySeed() string {
-	if g.Draft == nil {
-		return "challenge"
-	}
-	if strings.TrimSpace(g.Draft.Title) != "" {
-		return g.Draft.Title
-	}
-	if strings.TrimSpace(g.Draft.Description) != "" {
-		return g.Draft.Description
-	}
-	return "challenge"
-}
-
 func (g *Generator) prefersVClusterAuthoring() bool {
-	if g.Draft == nil {
-		return false
-	}
-	text := strings.ToLower(strings.Join([]string{
-		g.Draft.EnvironmentShape,
-		g.Draft.Goal,
-		g.Draft.Symptoms,
-		g.Draft.FaultMechanism,
-		g.Draft.AcceptanceCriteria,
-		g.Draft.Description,
-	}, "\n"))
-	return strings.Contains(text, "kubectl") || strings.Contains(text, "kubernetes") || strings.Contains(text, "vcluster")
+	return g.Plan != nil && challenge.NormalizeRuntime(g.Plan.Metadata.Runtime) == challenge.RuntimeVCluster
 }
 
 func (g *Generator) defaultTitle() string {
-	if g.Draft != nil && strings.TrimSpace(g.Draft.Title) != "" {
-		return g.Draft.Title
+	if g.Plan != nil && strings.TrimSpace(g.Plan.Metadata.Title) != "" {
+		return g.Plan.Metadata.Title
 	}
 	return "Untitled challenge"
 }
 
-func (g *Generator) draftContext() string {
-	if g.Draft == nil {
-		return "未提供已审阅的题目草案。"
+func (g *Generator) reviewedPlanContext() string {
+	if g.Plan == nil {
+		return "未提供已审阅的题目方案。"
 	}
-	var parts []string
-	parts = append(parts, fmt.Sprintf("标题：%s", g.Draft.Title))
-	parts = append(parts, fmt.Sprintf("难度：%s", g.Draft.Difficulty))
-	if len(g.Draft.Tags) > 0 {
-		parts = append(parts, fmt.Sprintf("标签：%s", strings.Join(g.Draft.Tags, "、")))
+	metadata := g.Plan.Metadata
+	parts := []string{
+		fmt.Sprintf("标题：%s", metadata.Title),
+		fmt.Sprintf("简介：%s", metadata.Description),
+		fmt.Sprintf("难度：%s", metadata.Difficulty),
+		fmt.Sprintf("标签：%s", strings.Join(metadata.Tags, "、")),
+		fmt.Sprintf("运行时：%s", challenge.NormalizeRuntime(metadata.Runtime)),
+		fmt.Sprintf("作者审核方案概览：\n%s", g.Plan.Overview),
 	}
-	parts = append(parts, fmt.Sprintf("说明：%s", g.Draft.Description))
-	parts = append(parts, fmt.Sprintf("目标：%s", g.Draft.Goal))
-	parts = append(parts, fmt.Sprintf("表象：%s", g.Draft.Symptoms))
-	parts = append(parts, fmt.Sprintf("故障机制：%s", g.Draft.FaultMechanism))
-	parts = append(parts, fmt.Sprintf("环境形态：%s", g.Draft.EnvironmentShape))
-	parts = append(parts, fmt.Sprintf("验收标准：%s", g.Draft.AcceptanceCriteria))
-	parts = append(parts, fmt.Sprintf("难度理由：%s", g.Draft.DifficultyReason))
-	if strings.TrimSpace(g.Draft.Notes) != "" {
-		parts = append(parts, fmt.Sprintf("备注：%s", g.Draft.Notes))
+	for _, checkpoint := range g.Plan.SortedCheckpoints() {
+		parts = append(parts, fmt.Sprintf("公开检查点 %d（%s）：\n%s", checkpoint.Position, checkpoint.Title, checkpoint.Markdown))
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
 }
 
 func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
@@ -795,69 +777,6 @@ func archiveDir(root string) ([]byte, error) {
 		return nil, fmt.Errorf("close gzip stream: %w", err)
 	}
 	return buf.Bytes(), nil
-}
-
-func (g *Generator) uploadArtifactAndWaitVerify(ctx context.Context, chalDir string) (bool, string, error) {
-	slog.Info("artifact upload start", "generationID", g.GenerationID, "artifactID", g.artifactID)
-	if err := g.uploadArtifact(ctx, chalDir); err != nil {
-		return false, "", err
-	}
-
-	client := &http.Client{Timeout: 20 * time.Second}
-	url := strings.TrimRight(g.GatewayURL, "/") + "/api/generate/jobs/" + g.GenerationID
-	deadline := time.Now().Add(30 * time.Minute)
-	lastStatus := ""
-	lastMessage := ""
-	lastLogAt := time.Time{}
-	for time.Now().Before(deadline) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return false, "", fmt.Errorf("create generation poll request: %w", err)
-		}
-		if strings.TrimSpace(g.ServerJWT) != "" {
-			req.Header.Set("Authorization", "Bearer "+g.ServerJWT)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		var body api.GenerationJobResponse
-		decodeErr := json.NewDecoder(resp.Body).Decode(&body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		if decodeErr != nil {
-			return false, "", fmt.Errorf("decode generation status: %w", decodeErr)
-		}
-
-		status := strings.ToLower(strings.TrimSpace(ptrString(body.Status)))
-		message := ptrString(body.Message)
-		if status != lastStatus || message != lastMessage || lastLogAt.IsZero() || time.Since(lastLogAt) >= time.Minute {
-			slog.Info("artifact verification poll", "generationID", g.GenerationID, "artifactID", g.artifactID, "status", status, "message", truncateStr(message, 200))
-			lastStatus = status
-			lastMessage = message
-			lastLogAt = time.Now()
-		}
-		switch status {
-		case "success":
-			return true, message, nil
-		case "failed":
-			return false, message, nil
-		}
-
-		time.Sleep(5 * time.Second)
-	}
-	return false, "", fmt.Errorf("timeout waiting for generation verification result")
-}
-
-func ptrString(v *string) string {
-	if v == nil {
-		return ""
-	}
-	return *v
 }
 
 func runtimeHint(vcluster bool) string {

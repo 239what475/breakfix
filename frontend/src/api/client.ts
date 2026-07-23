@@ -1,10 +1,8 @@
 import type {
-  Challenge,
-  ChallengeContent,
-  ChallengeDraft,
-  CheckpointResult,
-  GenerateDraftResponse,
-  GenerationJobResponse,
+	AuthoringSession,
+	Challenge,
+	ChallengeContent,
+	CheckpointResult,
 } from "./types";
 
 const base = "/api";
@@ -79,10 +77,21 @@ export const api = {
       "DELETE",
       `/challenges/${id}/terminals/${window}`,
     ),
-  reviewGenerationDraft: (topic: string) =>
-    request<GenerateDraftResponse>("POST", "/generate/draft", { topic }),
-  createGenerationJob: (draft: ChallengeDraft) =>
-    request<GenerationJobResponse>("POST", "/generate", { draft }),
-  getGenerationJob: (id: string) =>
-    request<GenerationJobResponse>("GET", `/generate/jobs/${id}`),
+  createAuthoringSession: () =>
+    request<AuthoringSession>("POST", "/authoring/sessions"),
+  getCurrentAuthoringSession: () =>
+    request<AuthoringSession>("GET", "/authoring/sessions/current"),
+  getAuthoringSession: (id: string) =>
+    request<AuthoringSession>("GET", `/authoring/sessions/${id}`),
+  sendAuthoringMessage: (id: string, content: string) =>
+    request<AuthoringSession>("POST", `/authoring/sessions/${id}/messages`, {
+      content,
+    }),
+  confirmAuthoringGeneration: (id: string) =>
+    request<AuthoringSession>(
+      "POST",
+      `/authoring/sessions/${id}/generate`,
+    ),
+  publishAuthoringRevision: (id: string) =>
+    request<AuthoringSession>("POST", `/authoring/sessions/${id}/publish`),
 };

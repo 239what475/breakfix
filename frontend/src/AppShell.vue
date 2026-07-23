@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import AuthDialog from "./features/auth/AuthDialog.vue";
-import GenerateChallengeDialog from "./features/authoring/GenerateChallengeDialog.vue";
+import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
 import ChallengeCatalog from "./features/catalog/ChallengeCatalog.vue";
 import ChallengeWorkspace from "./features/workspace/ChallengeWorkspace.vue";
 import { useChallengeSession } from "./features/workspace/useChallengeSession";
 
 const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
-const generateOpen = ref(false);
+const authoringOpen = ref(false);
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
 let noticeTimer: number | undefined;
 
@@ -45,10 +45,15 @@ async function startWorkspace() {
 }
 function onPublished(id: string) {
   notify("Challenge published.");
-  generateOpen.value = false;
+  authoringOpen.value = false;
   void loadChallenges().then(() => {
     selectChallenge(id);
   });
+}
+
+function openAuthoring() {
+  notice.value = null;
+  authoringOpen.value = true;
 }
 </script>
 
@@ -68,6 +73,11 @@ function onPublished(id: string) {
       @changed="loadChallenges(true)"
       @notice="notify"
     />
+    <AuthoringWorkspace
+      v-else-if="authoringOpen"
+      @exit="authoringOpen = false"
+      @published="onPublished"
+    />
     <div v-else class="catalog-layout">
       <ChallengeCatalog
         :challenges="challenges"
@@ -78,7 +88,7 @@ function onPublished(id: string) {
         @login="openAuth('login')"
         @register="openAuth('register')"
         @logout="logout"
-        @generate="generateOpen = true"
+        @generate="openAuthoring"
       />
       <main class="catalog-detail">
         <template v-if="selected">
@@ -131,11 +141,6 @@ function onPublished(id: string) {
       :initial-mode="authMode"
       @close="authOpen = false"
       @authenticated="authenticated"
-    />
-    <GenerateChallengeDialog
-      :open="generateOpen"
-      @close="generateOpen = false"
-      @published="onPublished"
     />
   </div>
 </template>

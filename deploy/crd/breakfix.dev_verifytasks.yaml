@@ -45,7 +45,7 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Running, Verified, Failed, Succeeded]
+                  enum: [Pending, Running, Failed, Succeeded]
                 message:
                   type: string
                 jobName:

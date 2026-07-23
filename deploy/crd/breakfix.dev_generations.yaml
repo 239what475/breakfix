@@ -24,43 +24,21 @@ spec:
               type: object
               required: [image, envSecretRef]
               properties:
-                draft:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                    difficulty:
-                      type: string
-                    tags:
-                      type: array
-                      items:
-                        type: string
-                    description:
-                      type: string
-                    goal:
-                      type: string
-                    symptoms:
-                      type: string
-                    fault_mechanism:
-                      type: string
-                    environment_shape:
-                      type: string
-                    acceptance_criteria:
-                      type: string
-                    difficulty_reason:
-                      type: string
-                    notes:
-                      type: string
                 image:
                   type: string
                 envSecretRef:
                   type: string
+                authoringSessionRef:
+                  type: string
+                authoringRevision:
+                  type: integer
+                  format: int64
             status:
               type: object
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Running, Succeeded, Failed]
+                  enum: [Pending, Running, Verifying, Verified, Failed]
                 jobName:
                   type: string
                 podName:
@@ -88,6 +66,14 @@ spec:
                       type: string
                 verifyTaskRef:
                   type: string
+                submissionID:
+                  type: string
+                artifactRevision:
+                  type: integer
+                  format: int64
+                attempt:
+                  type: integer
+                  format: int64
                 message:
                   type: string
                 startedAt:
