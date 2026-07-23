@@ -6,11 +6,18 @@ import (
 	"time"
 )
 
-type SubmitResult struct {
-	Passed      bool         `json:"passed"`
-	ExitCode    int          `json:"exitCode"`
-	Output      string       `json:"output,omitempty"`
-	SubmittedAt *metav1.Time `json:"submittedAt,omitempty"`
+type CheckpointResultStatus struct {
+	ID      string `json:"id"`
+	Passed  bool   `json:"passed"`
+	Summary string `json:"summary"`
+	Details string `json:"details,omitempty"`
+}
+
+// CheckpointStatus is controller-owned state from the most recent checkpoint run.
+type CheckpointStatus struct {
+	Results   []CheckpointResultStatus `json:"results,omitempty"`
+	CheckedAt *metav1.Time             `json:"checkedAt,omitempty"`
+	Error     string                   `json:"error,omitempty"`
 }
 
 type EnvironmentPhase string
@@ -20,7 +27,7 @@ const (
 	EnvironmentProvisioning EnvironmentPhase = "Provisioning"
 	EnvironmentReady        EnvironmentPhase = "Ready"
 	EnvironmentDraining     EnvironmentPhase = "Draining"
-	EnvironmentSubmitted    EnvironmentPhase = "Submitted"
+	EnvironmentCompleted    EnvironmentPhase = "Completed"
 	EnvironmentDestroyed    EnvironmentPhase = "Destroyed"
 	EnvironmentFailed       EnvironmentPhase = "Failed"
 )
@@ -31,7 +38,7 @@ const (
 	ConditionKubeconfigReady = "KubeconfigReady"
 	ConditionReady           = "Ready"
 	ConditionDraining        = "Draining"
-	ConditionSubmitted       = "Submitted"
+	ConditionCompleted       = "Completed"
 	ConditionCleanedUp       = "CleanedUp"
 	ConditionFailed          = "Failed"
 )
@@ -44,9 +51,8 @@ type EnvironmentTimeoutsSpec struct {
 }
 
 type CleanupPolicySpec struct {
-	AutoDestroyAfterSubmit *bool `json:"autoDestroyAfterSubmit,omitempty"`
-	AutoDestroyAfterIdle   *bool `json:"autoDestroyAfterIdle,omitempty"`
-	ForceCleanupOnFailure  *bool `json:"forceCleanupOnFailure,omitempty"`
+	AutoDestroyAfterIdle  *bool `json:"autoDestroyAfterIdle,omitempty"`
+	ForceCleanupOnFailure *bool `json:"forceCleanupOnFailure,omitempty"`
 }
 
 type EnvironmentResourcesSpec struct {
@@ -59,7 +65,6 @@ type CommonEnvironmentSpec struct {
 	ChallengeRef  string                   `json:"challengeRef"`
 	UserRef       string                   `json:"userRef"`
 	Image         string                   `json:"image"`
-	Submit        bool                     `json:"submit,omitempty"`
 	Timeouts      EnvironmentTimeoutsSpec  `json:"timeouts,omitempty"`
 	CleanupPolicy CleanupPolicySpec        `json:"cleanupPolicy,omitempty"`
 	Resources     EnvironmentResourcesSpec `json:"resources,omitempty"`
@@ -80,12 +85,13 @@ type CommonEnvironmentStatus struct {
 	WorkspacePodName   string                  `json:"workspacePodName,omitempty"`
 	StartedAt          *metav1.Time            `json:"startedAt,omitempty"`
 	ReadyAt            *metav1.Time            `json:"readyAt,omitempty"`
+	CompletedAt        *metav1.Time            `json:"completedAt,omitempty"`
 	ExpiresAt          *metav1.Time            `json:"expiresAt,omitempty"`
 	DestroyedAt        *metav1.Time            `json:"destroyedAt,omitempty"`
 	Reason             string                  `json:"reason,omitempty"`
 	LastError          *EnvironmentErrorStatus `json:"lastError,omitempty"`
 	Conditions         []metav1.Condition      `json:"conditions,omitempty"`
-	SubmitResult       *SubmitResult           `json:"submitResult,omitempty"`
+	Checkpoints        *CheckpointStatus       `json:"checkpoints,omitempty"`
 	Message            string                  `json:"message,omitempty"`
 }
 
@@ -295,10 +301,6 @@ func (in *EnvironmentTimeoutsSpec) DeepCopyInto(out *EnvironmentTimeoutsSpec) {
 
 func (in *CleanupPolicySpec) DeepCopyInto(out *CleanupPolicySpec) {
 	*out = *in
-	if in.AutoDestroyAfterSubmit != nil {
-		v := *in.AutoDestroyAfterSubmit
-		out.AutoDestroyAfterSubmit = &v
-	}
 	if in.AutoDestroyAfterIdle != nil {
 		v := *in.AutoDestroyAfterIdle
 		out.AutoDestroyAfterIdle = &v
@@ -329,9 +331,16 @@ func (in *CommonEnvironmentStatus) DeepCopyInto(out *CommonEnvironmentStatus) {
 		out.Conditions = make([]metav1.Condition, len(in.Conditions))
 		copy(out.Conditions, in.Conditions)
 	}
-	if in.SubmitResult != nil {
-		r := *in.SubmitResult
-		out.SubmitResult = &r
+	if in.Checkpoints != nil {
+		checkpoints := *in.Checkpoints
+		if in.Checkpoints.Results != nil {
+			checkpoints.Results = append([]CheckpointResultStatus{}, in.Checkpoints.Results...)
+		}
+		if in.Checkpoints.CheckedAt != nil {
+			t := *in.Checkpoints.CheckedAt
+			checkpoints.CheckedAt = &t
+		}
+		out.Checkpoints = &checkpoints
 	}
 	if in.StartedAt != nil {
 		t := *in.StartedAt
@@ -345,13 +354,13 @@ func (in *CommonEnvironmentStatus) DeepCopyInto(out *CommonEnvironmentStatus) {
 		t := *in.ReadyAt
 		out.ReadyAt = &t
 	}
+	if in.CompletedAt != nil {
+		t := *in.CompletedAt
+		out.CompletedAt = &t
+	}
 	if in.DestroyedAt != nil {
 		t := *in.DestroyedAt
 		out.DestroyedAt = &t
-	}
-	if in.SubmitResult != nil && in.SubmitResult.SubmittedAt != nil {
-		t := *in.SubmitResult.SubmittedAt
-		out.SubmitResult.SubmittedAt = &t
 	}
 }
 
@@ -391,13 +400,6 @@ func (in *CommonEnvironmentSpec) DestroyTimeoutOr(fallback time.Duration) time.D
 		return fallback
 	}
 	return time.Duration(*in.Timeouts.DestroyTimeoutSeconds) * time.Second
-}
-
-func (in *CommonEnvironmentSpec) AutoDestroyAfterSubmitOr(fallback bool) bool {
-	if in == nil || in.CleanupPolicy.AutoDestroyAfterSubmit == nil {
-		return fallback
-	}
-	return *in.CleanupPolicy.AutoDestroyAfterSubmit
 }
 
 func (in *CommonEnvironmentSpec) AutoDestroyAfterIdleOr(fallback bool) bool {

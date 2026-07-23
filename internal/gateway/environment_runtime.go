@@ -27,7 +27,6 @@ type environmentRuntimeAdapter struct {
 	create              func(context.Context, *db.User, *challenge.Entry) (string, error)
 	updateStatus        func(context.Context, string, func(*breakfixv1.CommonEnvironmentStatus)) error
 	updateSessionStatus func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error
-	updateSpec          func(context.Context, string, func(*breakfixv1.CommonEnvironmentSpec)) error
 	requestDeletion     func(context.Context, string) error
 }
 
@@ -40,7 +39,7 @@ func (a *environmentRuntimeAdapter) readyTimeoutDuration() int64 {
 
 func (a *environmentRuntimeAdapter) markDraining(ctx context.Context, name string, expiresAt metav1.Time) error {
 	return a.updateSessionStatus(ctx, name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
-		if spec.Submit || status.Phase != breakfixv1.EnvironmentReady || status.SubmitResult != nil {
+		if status.Phase != breakfixv1.EnvironmentReady {
 			return
 		}
 		setGatewayEnvironmentDraining(status, expiresAt, "SessionDetached", "session disconnected, environment draining")
@@ -49,9 +48,6 @@ func (a *environmentRuntimeAdapter) markDraining(ctx context.Context, name strin
 
 func (a *environmentRuntimeAdapter) renewLease(ctx context.Context, name string, expiresAt metav1.Time) error {
 	return a.updateSessionStatus(ctx, name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
-		if spec.Submit || status.SubmitResult != nil {
-			return
-		}
 		if status.Phase == breakfixv1.EnvironmentReady || status.Phase == breakfixv1.EnvironmentDraining {
 			setGatewayEnvironmentReady(status, expiresAt, "SessionActive", "environment lease renewed")
 		}
@@ -88,24 +84,11 @@ func mutateEnvironmentSessionStatus[T commonGatewayEnvironment](ctx context.Cont
 	return update(ctx, env)
 }
 
-func mutateEnvironmentSpec[T commonGatewayEnvironment](ctx context.Context, name string, get func(context.Context, string) (T, error), update func(context.Context, T) error, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
-	env, err := get(ctx, name)
-	if err != nil {
-		return err
-	}
-	mutate(env.CommonSpec())
-	return update(ctx, env)
-}
-
 func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntimeAdapter, error) {
 	switch challenge.NormalizeRuntime(runtime) {
 	case challenge.RuntimeContainer:
 		getContainer := func(ctx context.Context, name string) (*breakfixv1.ContainerEnvironment, error) {
 			return h.k8s.GetContainerEnvironment(ctx, h.crdNamespace, name)
-		}
-		updateContainer := func(ctx context.Context, env *breakfixv1.ContainerEnvironment) error {
-			_, err := h.k8s.UpdateContainerEnvironment(ctx, h.crdNamespace, env)
-			return err
 		}
 		updateContainerStatus := func(ctx context.Context, env *breakfixv1.ContainerEnvironment) error {
 			_, err := h.k8s.UpdateContainerEnvironmentStatus(ctx, h.crdNamespace, env)
@@ -166,9 +149,6 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			updateSessionStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error {
 				return mutateEnvironmentSessionStatus(ctx, name, getContainer, updateContainerStatus, mutate)
 			},
-			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
-				return mutateEnvironmentSpec(ctx, name, getContainer, updateContainer, mutate)
-			},
 			requestDeletion: func(ctx context.Context, name string) error {
 				return h.k8s.DeleteContainerEnvironment(ctx, h.crdNamespace, name)
 			},
@@ -176,10 +156,6 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 	case challenge.RuntimeVCluster:
 		getVCluster := func(ctx context.Context, name string) (*breakfixv1.VClusterEnvironment, error) {
 			return h.k8s.GetVClusterEnvironment(ctx, h.crdNamespace, name)
-		}
-		updateVCluster := func(ctx context.Context, env *breakfixv1.VClusterEnvironment) error {
-			_, err := h.k8s.UpdateVClusterEnvironment(ctx, h.crdNamespace, env)
-			return err
 		}
 		updateVClusterStatus := func(ctx context.Context, env *breakfixv1.VClusterEnvironment) error {
 			_, err := h.k8s.UpdateVClusterEnvironmentStatus(ctx, h.crdNamespace, env)
@@ -241,9 +217,6 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			},
 			updateSessionStatus: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec, *breakfixv1.CommonEnvironmentStatus)) error {
 				return mutateEnvironmentSessionStatus(ctx, name, getVCluster, updateVClusterStatus, mutate)
-			},
-			updateSpec: func(ctx context.Context, name string, mutate func(*breakfixv1.CommonEnvironmentSpec)) error {
-				return mutateEnvironmentSpec(ctx, name, getVCluster, updateVCluster, mutate)
 			},
 			requestDeletion: func(ctx context.Context, name string) error {
 				return h.k8s.DeleteVClusterEnvironment(ctx, h.crdNamespace, name)

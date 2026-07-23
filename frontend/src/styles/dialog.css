@@ -1,0 +1,79 @@
+.dialog-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: #18302838;
+}
+.dialog {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 27px;
+  border: 1px solid #cfd9d2;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 18px 70px #20362c30;
+}
+.dialog.large {
+  width: min(760px, 100%);
+}
+.dialog h2 {
+  margin: 0;
+  font-size: 23px;
+}
+.dialog-copy {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.dialog-close {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+}
+.dialog label {
+  display: grid;
+  gap: 5px;
+  color: #53615b;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dialog input,
+.dialog textarea,
+.dialog select {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd6cf;
+  border-radius: 4px;
+  padding: 8px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 13px;
+}
+.form-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+.dialog-foot {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 660px) {
+  .dialog {
+    padding: 22px;
+  }
+}

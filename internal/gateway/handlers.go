@@ -26,22 +26,21 @@ import (
 )
 
 type activeEnvironment struct {
-	Runtime                string
-	Name                   string
-	ChallengeRef           string
-	Namespace              string
-	WorkspacePod           string
-	Phase                  breakfixv1.EnvironmentPhase
-	ExpiresAt              *metav1.Time
-	SubmitResult           *breakfixv1.SubmitResult
-	Message                string
-	Reason                 string
-	LastError              *breakfixv1.EnvironmentErrorStatus
-	ReadyTimeoutSeconds    *int64
-	IdleTTLSeconds         *int64
-	DrainGraceSeconds      *int64
-	DestroyTimeoutSeconds  *int64
-	AutoDestroyAfterSubmit *bool
+	Runtime               string
+	Name                  string
+	ChallengeRef          string
+	Namespace             string
+	WorkspacePod          string
+	Phase                 breakfixv1.EnvironmentPhase
+	ExpiresAt             *metav1.Time
+	Checkpoints           *breakfixv1.CheckpointStatus
+	Message               string
+	Reason                string
+	LastError             *breakfixv1.EnvironmentErrorStatus
+	ReadyTimeoutSeconds   *int64
+	IdleTTLSeconds        *int64
+	DrainGraceSeconds     *int64
+	DestroyTimeoutSeconds *int64
 }
 
 func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvironment {
@@ -49,22 +48,21 @@ func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvir
 		return nil
 	}
 	return &activeEnvironment{
-		Runtime:                challenge.RuntimeContainer,
-		Name:                   env.Name,
-		ChallengeRef:           env.Spec.ChallengeRef,
-		Namespace:              env.Status.Namespace,
-		WorkspacePod:           env.Status.WorkspacePodName,
-		Phase:                  env.Status.Phase,
-		ExpiresAt:              env.Status.ExpiresAt,
-		SubmitResult:           env.Status.SubmitResult,
-		Message:                env.Status.Message,
-		Reason:                 env.Status.Reason,
-		LastError:              env.Status.LastError,
-		ReadyTimeoutSeconds:    env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:         env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:      env.Spec.Timeouts.DrainGracePeriodSeconds,
-		DestroyTimeoutSeconds:  env.Spec.Timeouts.DestroyTimeoutSeconds,
-		AutoDestroyAfterSubmit: env.Spec.CleanupPolicy.AutoDestroyAfterSubmit,
+		Runtime:               challenge.RuntimeContainer,
+		Name:                  env.Name,
+		ChallengeRef:          env.Spec.ChallengeRef,
+		Namespace:             env.Status.Namespace,
+		WorkspacePod:          env.Status.WorkspacePodName,
+		Phase:                 env.Status.Phase,
+		ExpiresAt:             env.Status.ExpiresAt,
+		Checkpoints:           env.Status.Checkpoints,
+		Message:               env.Status.Message,
+		Reason:                env.Status.Reason,
+		LastError:             env.Status.LastError,
+		ReadyTimeoutSeconds:   env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:        env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:     env.Spec.Timeouts.DrainGracePeriodSeconds,
+		DestroyTimeoutSeconds: env.Spec.Timeouts.DestroyTimeoutSeconds,
 	}
 }
 
@@ -73,22 +71,21 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 		return nil
 	}
 	return &activeEnvironment{
-		Runtime:                challenge.RuntimeVCluster,
-		Name:                   env.Name,
-		ChallengeRef:           env.Spec.ChallengeRef,
-		Namespace:              env.Status.Namespace,
-		WorkspacePod:           env.Status.WorkspacePodName,
-		Phase:                  env.Status.Phase,
-		ExpiresAt:              env.Status.ExpiresAt,
-		SubmitResult:           env.Status.SubmitResult,
-		Message:                env.Status.Message,
-		Reason:                 env.Status.Reason,
-		LastError:              env.Status.LastError,
-		ReadyTimeoutSeconds:    env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:         env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:      env.Spec.Timeouts.DrainGracePeriodSeconds,
-		DestroyTimeoutSeconds:  env.Spec.Timeouts.DestroyTimeoutSeconds,
-		AutoDestroyAfterSubmit: env.Spec.CleanupPolicy.AutoDestroyAfterSubmit,
+		Runtime:               challenge.RuntimeVCluster,
+		Name:                  env.Name,
+		ChallengeRef:          env.Spec.ChallengeRef,
+		Namespace:             env.Status.Namespace,
+		WorkspacePod:          env.Status.WorkspacePodName,
+		Phase:                 env.Status.Phase,
+		ExpiresAt:             env.Status.ExpiresAt,
+		Checkpoints:           env.Status.Checkpoints,
+		Message:               env.Status.Message,
+		Reason:                env.Status.Reason,
+		LastError:             env.Status.LastError,
+		ReadyTimeoutSeconds:   env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:        env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:     env.Spec.Timeouts.DrainGracePeriodSeconds,
+		DestroyTimeoutSeconds: env.Spec.Timeouts.DestroyTimeoutSeconds,
 	}
 }
 
@@ -109,6 +106,7 @@ type Handler struct {
 	internalAPIKey   string
 	serverHost       string
 	port             int
+	terminals        *terminalConnectionTracker
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
@@ -128,6 +126,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		internalAPIKey:   cfg.InternalAPIKey,
 		serverHost:       cfg.ServerHost,
 		port:             cfg.Port,
+		terminals:        newTerminalConnectionTracker(time.Second),
 	}
 }
 
@@ -228,7 +227,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		envs, err := h.listActiveEnvironments(c.Request.Context(), user.ID)
 		if err == nil {
 			for _, env := range envs {
-				if env.SubmitResult != nil && env.SubmitResult.Passed {
+				if env.Phase == breakfixv1.EnvironmentCompleted {
 					solved[env.ChallengeRef] = true
 				}
 				if env.Phase == breakfixv1.EnvironmentReady || env.Phase == breakfixv1.EnvironmentDraining {
@@ -246,7 +245,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Id:          &ch.ID,
 			Title:       &ch.Title,
 			Type:        &ch.Type,
-			Runtime:     &ch.Runtime,
+			Runtime:     challengeSummaryRuntime(ch.Runtime),
 			Difficulty:  &ch.Difficulty,
 			Description: &ch.Description,
 			Solved:      &solvedVal,
@@ -257,6 +256,64 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		summaries = append(summaries, s)
 	}
 	c.JSON(http.StatusOK, api.ChallengeList{Challenges: &summaries})
+}
+
+func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
+	if h.requireUser(c) == nil {
+		return
+	}
+	entry, err := challenge.Get(h.challengesDir, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+		return
+	}
+	content, err := challenge.ReadContent(entry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	checkpoints := toAPICheckpoints(entry.Checkpoints)
+	hints := content.Hints
+	c.JSON(http.StatusOK, api.ChallengeContent{
+		Id:          &entry.ID,
+		Title:       &entry.Title,
+		Problem:     &content.Problem,
+		Solution:    &content.Solution,
+		Hints:       &hints,
+		Checkpoints: &checkpoints,
+	})
+}
+
+func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	entry, err := challenge.Get(h.challengesDir, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+		return
+	}
+	env, err := h.findProgressEnvironment(c.Request.Context(), user.ID, entry)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
+		return
+	}
+	if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining && env.Phase != breakfixv1.EnvironmentCompleted {
+		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "environment is not ready for checkpoint checks"})
+		return
+	}
+	if env.Checkpoints == nil {
+		checks := []api.CheckpointResult{}
+		c.JSON(http.StatusOK, api.ChallengeProgress{Checks: &checks})
+		return
+	}
+	if env.Checkpoints.Error != "" {
+		c.JSON(http.StatusUnprocessableEntity, api.ErrorResponse{Error: env.Checkpoints.Error})
+		return
+	}
+	checks := toAPICheckStatusResults(env.Checkpoints.Results)
+	c.JSON(http.StatusOK, api.ChallengeProgress{Checks: &checks})
 }
 
 // ── Environments ──
@@ -298,52 +355,6 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 	c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})
 }
 
-func (h *Handler) SubmitChallenge(c *gin.Context, id string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-
-	challengeEntry, err := challenge.Get(h.challengesDir, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
-
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
-		return
-	}
-	if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
-		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "environment not ready"})
-		return
-	}
-
-	if err := h.submitEnvironment(c.Request.Context(), env); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("update environment: %v", err)})
-		return
-	}
-
-	result, err := h.waitSubmitResult(c.Request.Context(), env.Runtime, env.Name, 30*time.Second)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("submit failed: %v", err)})
-		return
-	}
-
-	exitCode := int(result.ExitCode)
-	if environmentAutoDestroyAfterSubmit(env) {
-		if err := h.destroyEnvironment(c.Request.Context(), env); err != nil {
-			slog.Warn("failed to cleanup submitted environment", "environment", env.Name, "err", err)
-		}
-	}
-	c.JSON(http.StatusOK, api.SubmitResponse{
-		Passed:   &result.Passed,
-		ExitCode: &exitCode,
-		Output:   &result.Output,
-	})
-}
-
 func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 	user := h.requireUser(c)
 	if user == nil {
@@ -356,7 +367,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	existing, _ := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
+	existing, _ := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
 	if existing != nil {
 		if err := h.destroyEnvironment(c.Request.Context(), existing); err != nil {
 			slog.Error("failed to destroy old environment", "err", err)
@@ -388,7 +399,7 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
+	env, err := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
@@ -474,6 +485,15 @@ func (h *Handler) CreateGenerationJob(c *gin.Context) {
 	if h.registryInsecure {
 		env["REGISTRY_INSECURE"] = "true"
 	}
+	secretName := genID + "-env"
+	secretData := make(map[string][]byte, len(env))
+	for key, value := range env {
+		secretData[key] = []byte(value)
+	}
+	if err := h.k8s.UpsertSecret(h.crdNamespace, secretName, secretData); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create generation secret: %v", err)})
+		return
+	}
 
 	gen := &breakfixv1.Generation{
 		ObjectMeta: metav1.ObjectMeta{
@@ -481,13 +501,14 @@ func (h *Handler) CreateGenerationJob(c *gin.Context) {
 			Namespace: h.crdNamespace,
 		},
 		Spec: breakfixv1.GenerationSpec{
-			Draft: &draft,
-			Image: h.generatorImage(),
-			Env:   env,
+			Draft:        &draft,
+			Image:        h.generatorImage(),
+			EnvSecretRef: secretName,
 		},
 	}
 
 	if _, err := h.k8s.CreateGeneration(c.Request.Context(), h.crdNamespace, gen); err != nil {
+		_ = h.k8s.DeleteSecret(h.crdNamespace, secretName)
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create generation: %v", err)})
 		return
 	}
@@ -546,100 +567,6 @@ func (h *Handler) GetGenerationJob(c *gin.Context, id string) {
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
 	})
-}
-
-func (h *Handler) CreateVerifySubmission(c *gin.Context) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	if err := h.checkRegistryReady(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	file, _, err := c.Request.FormFile("artifact")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "artifact file is required"})
-		return
-	}
-	defer file.Close()
-
-	submissionID := "sub-" + k8s.RandomID()
-	challengeID := challenge.NewID()
-	if _, err := challenge.SaveSubmission(h.dataDir, submissionID, file); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("save submission: %v", err)})
-		return
-	}
-
-	verifyTaskID := "vt-" + k8s.RandomID()
-	task := &breakfixv1.VerifyTask{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      verifyTaskID,
-			Namespace: h.crdNamespace,
-		},
-		Spec: breakfixv1.VerifyTaskSpec{
-			Source: breakfixv1.VerifyTaskSource{
-				Kind: "user",
-				Ref:  user.ID,
-			},
-			ChallengeID: challengeID,
-			Submission: breakfixv1.VerifyTaskSubmission{
-				ID: submissionID,
-			},
-		},
-		Status: breakfixv1.VerifyTaskStatus{
-			Phase:   breakfixv1.VerifyTaskPending,
-			Message: "verification task accepted",
-		},
-	}
-	if _, err := h.k8s.CreateVerifyTask(c.Request.Context(), h.crdNamespace, task); err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create verify task: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"challenge_id":   challengeID,
-		"verify_task_id": verifyTaskID,
-		"submission_id":  submissionID,
-		"status":         "queued",
-	})
-}
-
-func (h *Handler) GetVerifyTask(c *gin.Context, id string) {
-	task, err := h.k8s.GetVerifyTask(c.Request.Context(), h.crdNamespace, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "verify task not found"})
-		return
-	}
-
-	status := normalizeVerifyTaskStatus(task.Status.Phase)
-	message := task.Status.Message
-	if strings.TrimSpace(message) == "" {
-		message = defaultVerifyTaskMessage(task)
-	}
-
-	resp := api.VerifyTaskResponse{
-		ChallengeId:  &task.Spec.ChallengeID,
-		VerifyTaskId: &task.Name,
-		SubmissionId: &task.Spec.Submission.ID,
-		Status:       &status,
-		Message:      &message,
-	}
-	if task.Status.StartedAt != nil {
-		t := task.Status.StartedAt.Time
-		resp.StartedAt = &t
-	}
-	if task.Status.CompletedAt != nil {
-		t := task.Status.CompletedAt.Time
-		resp.CompletedAt = &t
-	}
-	if task.Status.Report != nil {
-		report := toAPIVerifyReport(task.Status.Report)
-		resp.Report = &report
-	}
-
-	c.JSON(http.StatusOK, resp)
 }
 
 func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
@@ -705,7 +632,7 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	}
 
 	gen.Status.VerifyTaskRef = verifyTaskID
-	gen.Status.Message = "artifact submitted for verification"
+	gen.Status.Message = "artifact accepted for verification"
 	if _, err := h.k8s.UpdateGenerationStatus(c.Request.Context(), h.crdNamespace, gen); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("update generation status: %v", err)})
 		return
@@ -743,15 +670,71 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "pod not ready"})
 		return
 	}
+	windowName, err := parseTerminalWindow(c.Query("window"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
 
 	runtimeAdapter, err := h.environmentRuntimeAdapter(env.Runtime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
+	if env.Phase == breakfixv1.EnvironmentDraining {
+		if err := h.resumeEnvironment(c.Request.Context(), env); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("resume environment: %v", err)})
+			return
+		}
+		env.Phase = breakfixv1.EnvironmentReady
+	}
 
 	slog.Info("terminal session started", "challenge", challengeID, "user", user.ID)
-	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin)
+	key := env.Runtime + "/" + env.Name
+	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName,
+		func() { h.terminals.open(key) },
+		func() {
+			h.terminals.close(key, func() {
+				expiresAt := metav1.NewTime(time.Now().Add(environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute))))
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := runtimeAdapter.markDraining(ctx, env.Name, expiresAt); err != nil {
+					slog.Error("failed to start draining", "err", err, "environment", env.Name)
+					return
+				}
+				slog.Info("environment draining", "environment", env.Name, "expires_in", environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute)).String())
+			})
+		},
+	)
+}
+
+func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	windowName, err := parseTerminalWindow(windowName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	entry, err := challenge.Get(h.challengesDir, challengeID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+		return
+	}
+	env, err := h.findEnvironment(c.Request.Context(), user.ID, entry)
+	if err != nil || env.WorkspacePod == "" {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
+		return
+	}
+	sessionName := fmt.Sprintf("breakfix-%s", env.Name)
+	if err := h.k8s.ClosePTYWindow(env.Namespace, env.WorkspacePod, sessionName, windowName); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("close terminal window: %v", err)})
+		return
+	}
+	closed := true
+	c.JSON(http.StatusOK, api.TerminalWindowCloseResponse{Closed: &closed})
 }
 
 func (h *Handler) DownloadVerifySubmissionArtifact(c *gin.Context) {
@@ -851,6 +834,31 @@ func (h *Handler) findEnvironment(ctx context.Context, userID string, challengeE
 	return nil, errors.New("no active environment")
 }
 
+func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, challengeEntry.ID)
+	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	envs, err := adapter.list(ctx, selector)
+	if err != nil {
+		return nil, err
+	}
+	for i := range envs {
+		env := envs[i]
+		if isLiveEnvironmentPhase(env.Phase) {
+			return &env, nil
+		}
+	}
+	for i := range envs {
+		env := envs[i]
+		if env.Phase == breakfixv1.EnvironmentCompleted {
+			return &env, nil
+		}
+	}
+	return nil, errors.New("no environment with checkpoint status")
+}
+
 func (h *Handler) createEnvironment(ctx context.Context, user *db.User, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
 	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
 	if err != nil {
@@ -871,16 +879,6 @@ func (h *Handler) resumeEnvironment(ctx context.Context, env *activeEnvironment)
 	return adapter.updateSessionStatus(ctx, env.Name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
 		expiresAt := metav1.NewTime(time.Now().Add(spec.IdleTTLOr(time.Duration(h.cooldownMin) * time.Minute)))
 		setGatewayEnvironmentReady(status, expiresAt, "SessionResumed", "environment resumed")
-	})
-}
-
-func (h *Handler) submitEnvironment(ctx context.Context, env *activeEnvironment) error {
-	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
-	if err != nil {
-		return err
-	}
-	return adapter.updateSpec(ctx, env.Name, func(spec *breakfixv1.CommonEnvironmentSpec) {
-		spec.Submit = true
 	})
 }
 
@@ -924,21 +922,6 @@ func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*ac
 		return nil, err
 	}
 	return adapter.get(ctx, name)
-}
-
-func (h *Handler) waitSubmitResult(ctx context.Context, runtime, name string, timeout time.Duration) (*breakfixv1.SubmitResult, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		env, err := h.getEnvironment(ctx, runtime, name)
-		if err != nil {
-			return nil, err
-		}
-		if env.SubmitResult != nil {
-			return env.SubmitResult, nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("timeout waiting for submit result")
 }
 
 func (h *Handler) waitDestroyed(ctx context.Context, runtime, name string) {
@@ -997,10 +980,6 @@ func environmentDestroyTimeout(env *activeEnvironment, fallback time.Duration) t
 	return time.Duration(*env.DestroyTimeoutSeconds) * time.Second
 }
 
-func environmentAutoDestroyAfterSubmit(env *activeEnvironment) bool {
-	return env == nil || env.AutoDestroyAfterSubmit == nil || *env.AutoDestroyAfterSubmit
-}
-
 func environmentUnavailableError(env *activeEnvironment) error {
 	if env == nil {
 		return errors.New("environment became unavailable before ready")
@@ -1015,6 +994,64 @@ func environmentUnavailableError(env *activeEnvironment) error {
 		return fmt.Errorf("environment became unavailable before ready: %s", env.Reason)
 	}
 	return errors.New("environment became unavailable before ready")
+}
+
+func challengeSummaryRuntime(runtime string) *api.ChallengeSummaryRuntime {
+	value := api.ChallengeSummaryRuntime(challenge.NormalizeRuntime(runtime))
+	return &value
+}
+
+func toAPICheckpoints(checkpoints []challenge.Checkpoint) []api.ChallengeCheckpoint {
+	result := make([]api.ChallengeCheckpoint, 0, len(checkpoints))
+	for _, checkpoint := range checkpoints {
+		id := checkpoint.ID
+		title := checkpoint.Title
+		description := checkpoint.Description
+		hint := checkpoint.Hint
+		dependsOn := append([]string{}, checkpoint.DependsOn...)
+		result = append(result, api.ChallengeCheckpoint{
+			Id:          &id,
+			Title:       &title,
+			Description: &description,
+			Hint:        &hint,
+			DependsOn:   &dependsOn,
+		})
+	}
+	return result
+}
+
+func toAPICheckResults(checks []challenge.CheckResult) []api.CheckpointResult {
+	result := make([]api.CheckpointResult, 0, len(checks))
+	for _, check := range checks {
+		id := check.ID
+		passed := check.Passed
+		summary := check.Summary
+		details := check.Details
+		result = append(result, api.CheckpointResult{
+			Id:      &id,
+			Passed:  &passed,
+			Summary: &summary,
+			Details: &details,
+		})
+	}
+	return result
+}
+
+func toAPICheckStatusResults(checks []breakfixv1.CheckpointResultStatus) []api.CheckpointResult {
+	result := make([]api.CheckpointResult, 0, len(checks))
+	for _, check := range checks {
+		id := check.ID
+		passed := check.Passed
+		summary := check.Summary
+		details := check.Details
+		result = append(result, api.CheckpointResult{
+			Id:      &id,
+			Passed:  &passed,
+			Summary: &summary,
+			Details: &details,
+		})
+	}
+	return result
 }
 
 func toAPIChallengeDraft(d breakfixv1.ChallengeDraft) api.ChallengeDraft {
@@ -1075,30 +1112,13 @@ func normalizeGenerationStatus(status string) string {
 	}
 }
 
-func normalizeVerifyTaskStatus(status breakfixv1.VerifyTaskPhase) string {
-	switch status {
-	case breakfixv1.VerifyTaskPending:
-		return "queued"
-	case breakfixv1.VerifyTaskRunning:
-		return "running"
-	case breakfixv1.VerifyTaskVerified:
-		return "publishing"
-	case breakfixv1.VerifyTaskSucceeded:
-		return "success"
-	case breakfixv1.VerifyTaskFailed:
-		return "failed"
-	default:
-		return strings.ToLower(string(status))
-	}
-}
-
 func defaultGenerationMessage(gen *breakfixv1.Generation) string {
 	switch gen.Status.Phase {
 	case breakfixv1.GenerationPending:
 		return "generation request accepted"
 	case breakfixv1.GenerationRunning:
 		if strings.TrimSpace(gen.Status.VerifyTaskRef) != "" {
-			return "artifact submitted, verification running"
+			return "artifact accepted, verification running"
 		}
 		return "generating challenge files"
 	case breakfixv1.GenerationSucceeded:
@@ -1111,46 +1131,6 @@ func defaultGenerationMessage(gen *breakfixv1.Generation) string {
 	default:
 		return "generation status updated"
 	}
-}
-
-func defaultVerifyTaskMessage(task *breakfixv1.VerifyTask) string {
-	switch task.Status.Phase {
-	case breakfixv1.VerifyTaskPending:
-		return "verification task accepted"
-	case breakfixv1.VerifyTaskRunning:
-		return "verification running"
-	case breakfixv1.VerifyTaskVerified:
-		return "verification passed, publishing challenge"
-	case breakfixv1.VerifyTaskSucceeded:
-		return "verification passed and published"
-	case breakfixv1.VerifyTaskFailed:
-		return "verification failed"
-	default:
-		return "verification status updated"
-	}
-}
-
-func toAPIVerifyReport(report *breakfixv1.VerifyReport) api.VerifyReport {
-	out := api.VerifyReport{}
-	out.BuildPassed = &report.BuildPassed
-	out.AnswerPassed = &report.AnswerPassed
-	out.VerifyPassed = &report.VerifyPassed
-	if strings.TrimSpace(report.Summary) != "" {
-		out.Summary = &report.Summary
-	}
-	if len(report.Issues) > 0 {
-		issues := make([]api.VerifyIssue, 0, len(report.Issues))
-		for _, issue := range report.Issues {
-			code := issue.Code
-			message := issue.Message
-			issues = append(issues, api.VerifyIssue{
-				Code:    &code,
-				Message: &message,
-			})
-		}
-		out.Issues = &issues
-	}
-	return out
 }
 
 func (h *Handler) checkRegistryReady(ctx context.Context) error {

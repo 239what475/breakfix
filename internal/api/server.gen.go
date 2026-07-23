@@ -17,12 +17,48 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
-	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 const (
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
+
+// Defines values for ChallengeSummaryRuntime.
+const (
+	Container ChallengeSummaryRuntime = "container"
+	Vcluster  ChallengeSummaryRuntime = "vcluster"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeSummaryRuntime enum.
+func (e ChallengeSummaryRuntime) Valid() bool {
+	switch e {
+	case Container:
+		return true
+	case Vcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// ChallengeCheckpoint defines model for ChallengeCheckpoint.
+type ChallengeCheckpoint struct {
+	DependsOn   *[]string `json:"depends_on,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Hint        *string   `json:"hint,omitempty"`
+	Id          *string   `json:"id,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+}
+
+// ChallengeContent defines model for ChallengeContent.
+type ChallengeContent struct {
+	Checkpoints *[]ChallengeCheckpoint `json:"checkpoints,omitempty"`
+	Hints       *map[string]string     `json:"hints,omitempty"`
+	Id          *string                `json:"id,omitempty"`
+	Problem     *string                `json:"problem,omitempty"`
+	Solution    *string                `json:"solution,omitempty"`
+	Title       *string                `json:"title,omitempty"`
+}
 
 // ChallengeDraft defines model for ChallengeDraft.
 type ChallengeDraft struct {
@@ -44,17 +80,33 @@ type ChallengeList struct {
 	Challenges *[]ChallengeSummary `json:"challenges,omitempty"`
 }
 
+// ChallengeProgress defines model for ChallengeProgress.
+type ChallengeProgress struct {
+	Checks *[]CheckpointResult `json:"checks,omitempty"`
+}
+
 // ChallengeSummary defines model for ChallengeSummary.
 type ChallengeSummary struct {
-	Active      *bool     `json:"active,omitempty"`
-	Description *string   `json:"description,omitempty"`
-	Difficulty  *string   `json:"difficulty,omitempty"`
-	Id          *string   `json:"id,omitempty"`
-	Runtime     *string   `json:"runtime,omitempty"`
-	Solved      *bool     `json:"solved,omitempty"`
-	Tags        *[]string `json:"tags,omitempty"`
-	Title       *string   `json:"title,omitempty"`
-	Type        *string   `json:"type,omitempty"`
+	Active      *bool                    `json:"active,omitempty"`
+	Description *string                  `json:"description,omitempty"`
+	Difficulty  *string                  `json:"difficulty,omitempty"`
+	Id          *string                  `json:"id,omitempty"`
+	Runtime     *ChallengeSummaryRuntime `json:"runtime,omitempty"`
+	Solved      *bool                    `json:"solved,omitempty"`
+	Tags        *[]string                `json:"tags,omitempty"`
+	Title       *string                  `json:"title,omitempty"`
+	Type        *string                  `json:"type,omitempty"`
+}
+
+// ChallengeSummaryRuntime defines model for ChallengeSummary.Runtime.
+type ChallengeSummaryRuntime string
+
+// CheckpointResult defines model for CheckpointResult.
+type CheckpointResult struct {
+	Details *string `json:"details,omitempty"`
+	Id      *string `json:"id,omitempty"`
+	Passed  *bool   `json:"passed,omitempty"`
+	Summary *string `json:"summary,omitempty"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -135,46 +187,9 @@ type StopResponse struct {
 	Stopped        *bool   `json:"stopped,omitempty"`
 }
 
-// SubmitResponse defines model for SubmitResponse.
-type SubmitResponse struct {
-	ExitCode *int    `json:"exit_code,omitempty"`
-	Output   *string `json:"output,omitempty"`
-	Passed   *bool   `json:"passed,omitempty"`
-}
-
-// VerifyIssue defines model for VerifyIssue.
-type VerifyIssue struct {
-	Code    *string `json:"code,omitempty"`
-	Message *string `json:"message,omitempty"`
-}
-
-// VerifyReport defines model for VerifyReport.
-type VerifyReport struct {
-	AnswerPassed *bool          `json:"answer_passed,omitempty"`
-	BuildPassed  *bool          `json:"build_passed,omitempty"`
-	Issues       *[]VerifyIssue `json:"issues,omitempty"`
-	Summary      *string        `json:"summary,omitempty"`
-	VerifyPassed *bool          `json:"verify_passed,omitempty"`
-}
-
-// VerifySubmissionResponse defines model for VerifySubmissionResponse.
-type VerifySubmissionResponse struct {
-	ChallengeId  *string `json:"challenge_id,omitempty"`
-	Status       *string `json:"status,omitempty"`
-	SubmissionId *string `json:"submission_id,omitempty"`
-	VerifyTaskId *string `json:"verify_task_id,omitempty"`
-}
-
-// VerifyTaskResponse defines model for VerifyTaskResponse.
-type VerifyTaskResponse struct {
-	ChallengeId  *string       `json:"challenge_id,omitempty"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	Message      *string       `json:"message,omitempty"`
-	Report       *VerifyReport `json:"report,omitempty"`
-	StartedAt    *time.Time    `json:"started_at,omitempty"`
-	Status       *string       `json:"status,omitempty"`
-	SubmissionId *string       `json:"submission_id,omitempty"`
-	VerifyTaskId *string       `json:"verify_task_id,omitempty"`
+// TerminalWindowCloseResponse defines model for TerminalWindowCloseResponse.
+type TerminalWindowCloseResponse struct {
+	Closed *bool `json:"closed,omitempty"`
 }
 
 // Error defines model for Error.
@@ -182,11 +197,6 @@ type Error = ErrorResponse
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
-
-// CreateVerifySubmissionMultipartBody defines parameters for CreateVerifySubmission.
-type CreateVerifySubmissionMultipartBody struct {
-	Artifact openapi_types.File `json:"artifact"`
-}
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -200,9 +210,6 @@ type CreateGenerationJobJSONRequestBody = GenerationJobCreateRequest
 // ReviewGenerationDraftJSONRequestBody defines body for ReviewGenerationDraft for application/json ContentType.
 type ReviewGenerationDraftJSONRequestBody = GenerateDraftRequest
 
-// CreateVerifySubmissionMultipartRequestBody defines body for CreateVerifySubmission for multipart/form-data ContentType.
-type CreateVerifySubmissionMultipartRequestBody CreateVerifySubmissionMultipartBody
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Login with password + TOTP
@@ -214,6 +221,12 @@ type ServerInterface interface {
 	// List all challenges
 	// (GET /challenges)
 	ListChallenges(c *gin.Context)
+	// Get challenge problem, solution, hints, and checkpoint metadata
+	// (GET /challenges/{id}/content)
+	GetChallengeContent(c *gin.Context, id string)
+	// Run the current challenge checkpoint checks
+	// (GET /challenges/{id}/progress)
+	GetChallengeProgress(c *gin.Context, id string)
 	// Reset challenge to initial state
 	// (POST /challenges/{id}/reset)
 	ResetChallenge(c *gin.Context, id string)
@@ -223,9 +236,9 @@ type ServerInterface interface {
 	// Stop the current challenge environment
 	// (POST /challenges/{id}/stop)
 	StopChallenge(c *gin.Context, id string)
-	// Submit solution for verification
-	// (POST /challenges/{id}/submit)
-	SubmitChallenge(c *gin.Context, id string)
+	// Close one terminal tab in the current challenge environment
+	// (DELETE /challenges/{id}/terminals/{window})
+	CloseTerminalWindow(c *gin.Context, id string, window string)
 	// Start generation for a reviewed challenge draft
 	// (POST /generate)
 	CreateGenerationJob(c *gin.Context)
@@ -235,12 +248,6 @@ type ServerInterface interface {
 	// Get generation job status
 	// (GET /generate/jobs/{id})
 	GetGenerationJob(c *gin.Context, id string)
-	// Upload a challenge artifact for platform verification
-	// (POST /verify/submissions)
-	CreateVerifySubmission(c *gin.Context)
-	// Get verification task status
-	// (GET /verify/tasks/{id})
-	GetVerifyTask(c *gin.Context, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -281,6 +288,31 @@ func (siw *ServerInterfaceWrapper) Register(c *gin.Context) {
 // ListChallenges operation middleware
 func (siw *ServerInterfaceWrapper) ListChallenges(c *gin.Context) {
 
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListChallenges(c)
+}
+
+// GetChallengeContent operation middleware
+func (siw *ServerInterfaceWrapper) GetChallengeContent(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	c.Set(string(BearerAuthScopes), []string{})
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -290,7 +322,34 @@ func (siw *ServerInterfaceWrapper) ListChallenges(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListChallenges(c)
+	siw.Handler.GetChallengeContent(c, id)
+}
+
+// GetChallengeProgress operation middleware
+func (siw *ServerInterfaceWrapper) GetChallengeProgress(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetChallengeProgress(c, id)
 }
 
 // ResetChallenge operation middleware
@@ -374,8 +433,8 @@ func (siw *ServerInterfaceWrapper) StopChallenge(c *gin.Context) {
 	siw.Handler.StopChallenge(c, id)
 }
 
-// SubmitChallenge operation middleware
-func (siw *ServerInterfaceWrapper) SubmitChallenge(c *gin.Context) {
+// CloseTerminalWindow operation middleware
+func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
 
 	var err error
 	_ = err
@@ -389,6 +448,15 @@ func (siw *ServerInterfaceWrapper) SubmitChallenge(c *gin.Context) {
 		return
 	}
 
+	// ------------- Path parameter "window" -------------
+	var window string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "window", c.Param("window"), &window, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter window: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	c.Set(string(BearerAuthScopes), []string{})
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -398,7 +466,7 @@ func (siw *ServerInterfaceWrapper) SubmitChallenge(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.SubmitChallenge(c, id)
+	siw.Handler.CloseTerminalWindow(c, id, window)
 }
 
 // CreateGenerationJob operation middleware
@@ -458,48 +526,6 @@ func (siw *ServerInterfaceWrapper) GetGenerationJob(c *gin.Context) {
 	siw.Handler.GetGenerationJob(c, id)
 }
 
-// CreateVerifySubmission operation middleware
-func (siw *ServerInterfaceWrapper) CreateVerifySubmission(c *gin.Context) {
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CreateVerifySubmission(c)
-}
-
-// GetVerifyTask operation middleware
-func (siw *ServerInterfaceWrapper) GetVerifyTask(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetVerifyTask(c, id)
-}
-
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -530,15 +556,15 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/auth/login", wrapper.Login)
 	router.POST(options.BaseURL+"/auth/register", wrapper.Register)
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
+	router.GET(options.BaseURL+"/challenges/:id/content", wrapper.GetChallengeContent)
+	router.GET(options.BaseURL+"/challenges/:id/progress", wrapper.GetChallengeProgress)
 	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
-	router.POST(options.BaseURL+"/challenges/:id/submit", wrapper.SubmitChallenge)
+	router.DELETE(options.BaseURL+"/challenges/:id/terminals/:window", wrapper.CloseTerminalWindow)
 	router.POST(options.BaseURL+"/generate", wrapper.CreateGenerationJob)
 	router.POST(options.BaseURL+"/generate/draft", wrapper.ReviewGenerationDraft)
 	router.GET(options.BaseURL+"/generate/jobs/:id", wrapper.GetGenerationJob)
-	router.POST(options.BaseURL+"/verify/submissions", wrapper.CreateVerifySubmission)
-	router.GET(options.BaseURL+"/verify/tasks/:id", wrapper.GetVerifyTask)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -546,34 +572,34 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"AAAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

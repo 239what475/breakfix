@@ -21,11 +21,12 @@ const breakfixInitSentinel = "/var/lib/breakfix/.initialized"
 
 type ContainerEnvironmentReconciler struct {
 	client.Client
-	K8s          *k8s.Client
-	RegistryAddr string
-	NS           string
-	CRDNamespace string
-	Cooldown     time.Duration
+	K8s           *k8s.Client
+	RegistryAddr  string
+	ChallengesDir string
+	NS            string
+	CRDNamespace  string
+	Cooldown      time.Duration
 }
 
 func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -115,20 +116,31 @@ func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *br
 	return ctrl.Result{}, nil
 }
 
-func (r *ContainerEnvironmentReconciler) submit(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	slog.Info("submitting environment", "environment", env.Name)
-
-	exitCode, output, err := r.K8s.ExecInPod(env.Status.Namespace, env.Status.WorkspacePodName, "/verify.sh")
-	if err != nil {
-		slog.Error("exec verify.sh", "err", err, "environment", env.Name)
+func (r *ContainerEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
+	changed := recordCheckpointStatus(&env.Status, report, checkErr)
+	if checkErr != nil {
+		if changed {
+			if err := r.Status().Update(ctx, env); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 	}
-
-	setEnvironmentSubmitted(&env.Status, exitCode, output)
-
-	if err := r.Status().Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+	if report.Passed() {
+		slog.Info("environment checkpoints completed", "environment", env.Name)
+		setEnvironmentCompleted(&env.Status)
+		if err := r.Status().Update(ctx, env); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, nil
+	if changed {
+		if err := r.Status().Update(ctx, env); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 }
 
 func (r *ContainerEnvironmentReconciler) cleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
@@ -199,8 +211,8 @@ func (rt containerEnvironmentRuntime) waitReady(ctx context.Context, env commonE
 	return rt.r.waitForPod(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 
-func (rt containerEnvironmentRuntime) submit(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	return rt.r.submit(ctx, env.(*breakfixv1.ContainerEnvironment))
+func (rt containerEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.evaluateCheckpoints(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 
 func (rt containerEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {

@@ -67,16 +67,16 @@ func TestSetEnvironmentProvisioningPreservesProvisionedCondition(t *testing.T) {
 	t.Fatal("expected Provisioned condition to be retained")
 }
 
-func TestSetEnvironmentSubmittedUsesSubmittedPhase(t *testing.T) {
+func TestSetEnvironmentCompletedUsesCompletedPhase(t *testing.T) {
 	var status breakfixv1.CommonEnvironmentStatus
 
-	setEnvironmentSubmitted(&status, 0, "PASS")
+	setEnvironmentCompleted(&status)
 
-	if status.Phase != breakfixv1.EnvironmentSubmitted {
-		t.Fatalf("expected Submitted, got %s", status.Phase)
+	if status.Phase != breakfixv1.EnvironmentCompleted {
+		t.Fatalf("expected Completed, got %s", status.Phase)
 	}
-	if status.SubmitResult == nil || !status.SubmitResult.Passed {
-		t.Fatalf("expected passing submit result, got %#v", status.SubmitResult)
+	if status.CompletedAt == nil {
+		t.Fatal("expected completed timestamp")
 	}
 }
 
@@ -106,14 +106,10 @@ func TestWorkspaceResourceRequirementsUsesSpecLimitsForRequestsAndLimits(t *test
 
 func TestCleanupPolicyDefaultsCanBeOverridden(t *testing.T) {
 	yes := true
-	no := false
 	drain := int64(45)
 	destroy := int64(120)
 
 	var empty breakfixv1.CommonEnvironmentSpec
-	if !empty.AutoDestroyAfterSubmitOr(true) {
-		t.Fatalf("expected default submit cleanup to remain true")
-	}
 	if !empty.AutoDestroyAfterIdleOr(true) {
 		t.Fatalf("expected default idle cleanup to remain true")
 	}
@@ -133,13 +129,9 @@ func TestCleanupPolicyDefaultsCanBeOverridden(t *testing.T) {
 			DestroyTimeoutSeconds:   &destroy,
 		},
 		CleanupPolicy: breakfixv1.CleanupPolicySpec{
-			AutoDestroyAfterSubmit: &no,
-			AutoDestroyAfterIdle:   &yes,
-			ForceCleanupOnFailure:  &yes,
+			AutoDestroyAfterIdle:  &yes,
+			ForceCleanupOnFailure: &yes,
 		},
-	}
-	if spec.AutoDestroyAfterSubmitOr(true) {
-		t.Fatalf("expected submit cleanup override to be false")
 	}
 	if !spec.AutoDestroyAfterIdleOr(false) {
 		t.Fatalf("expected idle cleanup override to be true")

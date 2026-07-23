@@ -22,7 +22,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [image]
+              required: [image, envSecretRef]
               properties:
                 draft:
                   type: object
@@ -53,10 +53,8 @@ spec:
                       type: string
                 image:
                   type: string
-                env:
-                  type: object
-                  additionalProperties:
-                    type: string
+                envSecretRef:
+                  type: string
             status:
               type: object
               properties:

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var requiredFiles = []string{"challenge.yaml", "Dockerfile", "generate.sh", "question.md", "verify.sh", "answer.sh"}
+var requiredFiles = []string{"challenge.yaml", "Dockerfile", "generate.sh", "problem.md", "solution.md", "checks/checkpoints.sh", "answer.sh"}
 
 func Materialize(root, id string, populate func(dst string) error) (*Entry, error) {
 	if !ValidID(id) {
@@ -108,6 +108,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")
 	}
+	if err := validateCheckpoints(challenge, dir); err != nil {
+		return nil, err
+	}
 	return challenge, nil
 }
 
@@ -158,7 +161,53 @@ func ValidateSubmissionDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")
 	}
+	if err := validateCheckpoints(challenge, dir); err != nil {
+		return nil, err
+	}
 	return challenge, nil
+}
+
+func validateCheckpoints(challenge *Entry, dir string) error {
+	if len(challenge.Checkpoints) == 0 {
+		return fmt.Errorf("challenge checkpoints are required")
+	}
+	known := make(map[string]struct{}, len(challenge.Checkpoints))
+	for _, checkpoint := range challenge.Checkpoints {
+		id := strings.TrimSpace(checkpoint.ID)
+		if id == "" || !ValidID(id) {
+			return fmt.Errorf("invalid checkpoint id %q", checkpoint.ID)
+		}
+		if _, ok := known[id]; ok {
+			return fmt.Errorf("duplicate checkpoint id %q", id)
+		}
+		if strings.TrimSpace(checkpoint.Title) == "" {
+			return fmt.Errorf("checkpoint %q title is required", id)
+		}
+		if strings.TrimSpace(checkpoint.Description) == "" {
+			return fmt.Errorf("checkpoint %q description is required", id)
+		}
+		if checkpoint.Hint != "" {
+			path, err := safeChallengePath(dir, checkpoint.Hint)
+			if err != nil {
+				return fmt.Errorf("checkpoint %q hint: %w", id, err)
+			}
+			if info, err := os.Stat(path); err != nil || info.IsDir() {
+				return fmt.Errorf("checkpoint %q hint is not a file", id)
+			}
+		}
+		known[id] = struct{}{}
+	}
+	for _, checkpoint := range challenge.Checkpoints {
+		for _, dependency := range checkpoint.DependsOn {
+			if _, ok := known[dependency]; !ok {
+				return fmt.Errorf("checkpoint %q depends on unknown checkpoint %q", checkpoint.ID, dependency)
+			}
+			if dependency == checkpoint.ID {
+				return fmt.Errorf("checkpoint %q cannot depend on itself", checkpoint.ID)
+			}
+		}
+	}
+	return nil
 }
 
 func ValidID(id string) bool {

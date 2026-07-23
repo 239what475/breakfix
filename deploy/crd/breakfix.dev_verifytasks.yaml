@@ -22,7 +22,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [source, submission]
+              required: [source, challengeID, submission]
               properties:
                 source:
                   type: object
@@ -32,6 +32,8 @@ spec:
                       type: string
                     ref:
                       type: string
+                challengeID:
+                  type: string
                 submission:
                   type: object
                   required: [id]
@@ -65,7 +67,7 @@ spec:
                       type: boolean
                     answerPassed:
                       type: boolean
-                    verifyPassed:
+                    checkpointsPassed:
                       type: boolean
                     summary:
                       type: string

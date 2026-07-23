@@ -195,7 +195,7 @@ func systemPrompt() string {
     "symptoms": "用户在初始状态下能观察到什么现象、报错、异常行为",
     "fault_mechanism": "这道题底层到底是什么类型的故障机制。描述机制，不要直接给唯一解法。",
     "environment_shape": "这道题需要什么样的环境形态，例如涉及哪些服务、文件、进程、目录、工具或系统能力",
-    "acceptance_criteria": "题目通过时必须满足哪些可验证的结果。必须是可以被 verify.sh 断言的结果，而不是模糊描述。",
+    "acceptance_criteria": "题目通过时必须满足哪些可验证的结果。必须能拆成公开检查点验证的结果，而不是模糊描述。",
     "difficulty_reason": "为什么这道题属于这个难度",
     "notes": "给后续生成器的补充说明。只写真正有帮助的实现提示，不要写长故事。"
   }

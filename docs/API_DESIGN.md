@@ -67,15 +67,6 @@ CREATE TABLE instances (
     destroyed_at TEXT
 );
 
-CREATE TABLE submissions (
-    id           TEXT PRIMARY KEY,
-    instance_id  TEXT NOT NULL REFERENCES instances(id),
-    user_id      TEXT NOT NULL REFERENCES users(id),
-    challenge_id TEXT NOT NULL REFERENCES challenges(id),
-    passed       INTEGER NOT NULL,
-    exit_code    INTEGER NOT NULL,
-    output       TEXT NOT NULL DEFAULT ''
-);
 ```
 
 ---
@@ -99,9 +90,6 @@ service Breakfix {
 
     // Terminal (bidirectional stream)
     rpc ExecInstance (stream PTYData) returns (stream PTYData);
-
-    // Submission
-    rpc SubmitChallenge (SubmitChallengeRequest) returns (SubmitChallengeResponse);
 
     // Agent (future)
     // rpc GenerateChallenge (GenerateChallengeRequest) returns (GenerateChallengeResponse);
@@ -141,7 +129,7 @@ message LoginResponse {
 用户断开浏览器终端 → Pod 状态 → draining（5 分钟定时器）
   │
   ├── 浏览器重新连接终端 → PingInstance → 重置为 running
-  ├── Web UI submit → 验证 → 销毁
+  ├── 检查点全部通过 → 自动完成
   └── 5 分钟到 → CooldownManager.destroy → 清理 Pod/NS/记录
 ```
 

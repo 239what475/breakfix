@@ -47,26 +47,28 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 	}
 
 	if err := (&ContainerEnvironmentReconciler{
-		Client:       mgr.GetClient(),
-		K8s:          k8sClient,
-		RegistryAddr: registryAddr,
-		NS:           namespace,
-		CRDNamespace: crdNamespace,
-		Cooldown:     cooldown,
+		Client:        mgr.GetClient(),
+		K8s:           k8sClient,
+		RegistryAddr:  registryAddr,
+		ChallengesDir: challengesDir,
+		NS:            namespace,
+		CRDNamespace:  crdNamespace,
+		Cooldown:      cooldown,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 
 	if err := (&VClusterEnvironmentReconciler{
-		Client:       mgr.GetClient(),
-		K8s:          k8sClient,
-		VCluster:     vclusterClient,
-		ChartRepo:    vclusterChartRepo,
-		ChartVersion: vclusterChartVersion,
-		RegistryAddr: registryAddr,
-		NS:           namespace,
-		CRDNamespace: crdNamespace,
-		Cooldown:     cooldown,
+		Client:        mgr.GetClient(),
+		K8s:           k8sClient,
+		VCluster:      vclusterClient,
+		ChartRepo:     vclusterChartRepo,
+		ChartVersion:  vclusterChartVersion,
+		RegistryAddr:  registryAddr,
+		ChallengesDir: challengesDir,
+		NS:            namespace,
+		CRDNamespace:  crdNamespace,
+		Cooldown:      cooldown,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}

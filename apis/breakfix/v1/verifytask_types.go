@@ -51,7 +51,7 @@ type VerifyIssue struct {
 type VerifyReport struct {
 	BuildPassed  bool          `json:"buildPassed,omitempty"`
 	AnswerPassed bool          `json:"answerPassed,omitempty"`
-	VerifyPassed bool          `json:"verifyPassed,omitempty"`
+	CheckpointsPassed bool          `json:"checkpointsPassed,omitempty"`
 	Summary      string        `json:"summary,omitempty"`
 	Issues       []VerifyIssue `json:"issues,omitempty"`
 }

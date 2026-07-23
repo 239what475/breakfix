@@ -80,19 +80,19 @@ func TestStaleCommonEnvironmentDoesNotTreatProvisioningVClusterWithoutWorkspaceP
 	}
 }
 
-func TestStaleCommonEnvironmentDoesNotTreatSubmittedEnvironmentAsStale(t *testing.T) {
+func TestStaleCommonEnvironmentDoesNotTreatCompletedEnvironmentAsStale(t *testing.T) {
 	client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
 
 	status := &breakfixv1.CommonEnvironmentStatus{
-		Phase:            breakfixv1.EnvironmentSubmitted,
+		Phase:            breakfixv1.EnvironmentCompleted,
 		Namespace:        "demo",
 		WorkspacePodName: "workspace",
 	}
 
 	if staleCommonEnvironment(client, status) {
-		t.Fatalf("expected submitted environment to remain non-stale")
+		t.Fatalf("expected completed environment to remain non-stale")
 	}
 }
 

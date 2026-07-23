@@ -17,7 +17,7 @@ type commonEnvironmentObject interface {
 type commonEnvironmentRuntime interface {
 	provision(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	waitReady(context.Context, commonEnvironmentObject) (ctrl.Result, error)
-	submit(context.Context, commonEnvironmentObject) (ctrl.Result, error)
+	evaluateCheckpoints(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	handleDraining(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	cleanup(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	finalCleanup(context.Context, commonEnvironmentObject) (ctrl.Result, error)
@@ -39,17 +39,11 @@ func reconcileCommonEnvironment(ctx context.Context, env commonEnvironmentObject
 	case breakfixv1.EnvironmentPending, breakfixv1.EnvironmentProvisioning:
 		return runtime.waitReady(ctx, env)
 	case breakfixv1.EnvironmentReady:
-		if env.CommonSpec().Submit {
-			return runtime.submit(ctx, env)
-		}
-		return runtime.handleDraining(ctx, env)
+		return runtime.evaluateCheckpoints(ctx, env)
 	case breakfixv1.EnvironmentDraining:
-		if env.CommonSpec().Submit {
-			return runtime.submit(ctx, env)
-		}
+		return runtime.evaluateCheckpoints(ctx, env)
+	case breakfixv1.EnvironmentCompleted:
 		return runtime.handleDraining(ctx, env)
-	case breakfixv1.EnvironmentSubmitted:
-		return ctrl.Result{}, nil
 	case breakfixv1.EnvironmentDestroyed:
 		return runtime.requestDeletion(ctx, env)
 	case breakfixv1.EnvironmentFailed:

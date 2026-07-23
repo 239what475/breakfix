@@ -21,8 +21,8 @@ const generationFinalizer = "breakfix.dev/generation-cleanup"
 
 type GenerationReconciler struct {
 	client.Client
-	K8s           *k8s.Client
-	CRDNamespace  string
+	K8s          *k8s.Client
+	CRDNamespace string
 }
 
 func (r *GenerationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -31,6 +31,9 @@ func (r *GenerationReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var gen breakfixv1.Generation
 	if err := r.Get(ctx, req.NamespacedName, &gen); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !gen.DeletionTimestamp.IsZero() {
+		return r.cleanup(ctx, &gen, start)
 	}
 
 	switch gen.Status.Phase {
@@ -57,15 +60,14 @@ func (r *GenerationReconciler) createJob(ctx context.Context, gen *breakfixv1.Ge
 		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
 	}
 
-	jobName := "gen-" + k8s.RandomID()
-	env := gen.Spec.Env
-	if env == nil {
-		env = map[string]string{}
+	if gen.Spec.EnvSecretRef != generationEnvSecretName(gen.Name) {
+		return r.failGeneration(ctx, gen, "generation env secret reference is invalid")
 	}
+	jobName := "gen-" + k8s.RandomID()
 
 	if err := r.K8s.CreateJob(r.CRDNamespace, jobName, k8s.CreateJobOpts{
 		Image:           gen.Spec.Image,
-		Env:             env,
+		EnvSecretName:   gen.Spec.EnvSecretRef,
 		ImagePullPolicy: corev1.PullAlways,
 	}); err != nil {
 		gen.Status.Phase = breakfixv1.GenerationFailed
@@ -91,6 +93,21 @@ func (r *GenerationReconciler) createJob(ctx context.Context, gen *breakfixv1.Ge
 	return ctrl.Result{}, nil
 }
 
+func generationEnvSecretName(generationName string) string {
+	return generationName + "-env"
+}
+
+func (r *GenerationReconciler) failGeneration(ctx context.Context, gen *breakfixv1.Generation, message string) (ctrl.Result, error) {
+	gen.Status.Phase = breakfixv1.GenerationFailed
+	gen.Status.Message = message
+	now := metav1.Now()
+	gen.Status.CompletedAt = &now
+	if err := r.Status().Update(ctx, gen); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
 func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Generation, reconcileStart time.Time) (ctrl.Result, error) {
 	phaseStart := time.Now()
 
@@ -109,7 +126,7 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 		switch c.Type {
 		case batchv1.JobComplete:
 			if strings.TrimSpace(gen.Status.VerifyTaskRef) == "" {
-				gen.Status.Message = "generator finished, waiting for artifact submission"
+				gen.Status.Message = "generator finished, waiting for artifact upload"
 				r.Status().Update(ctx, gen) //nolint:errcheck
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
@@ -144,7 +161,7 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 				gen.Status.CompletedAt = &now
 				slog.Error("job done", "generation", gen.Name, "result", "failed", "reason", "verify_failed", "duration", time.Since(phaseStart))
 			default:
-				gen.Status.Message = "artifact submitted, verification running"
+				gen.Status.Message = "artifact accepted, verification running"
 				r.Status().Update(ctx, gen) //nolint:errcheck
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
@@ -169,6 +186,16 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 
 func (r *GenerationReconciler) cleanup(ctx context.Context, gen *breakfixv1.Generation, reconcileStart time.Time) (ctrl.Result, error) {
 	start := time.Now()
+	if gen.Status.JobName != "" {
+		if err := r.K8s.DeleteJob(r.CRDNamespace, gen.Status.JobName); err != nil {
+			return ctrl.Result{}, fmt.Errorf("delete generation job: %w", err)
+		}
+	}
+	if gen.Spec.EnvSecretRef == generationEnvSecretName(gen.Name) {
+		if err := r.K8s.DeleteSecret(r.CRDNamespace, gen.Spec.EnvSecretRef); err != nil {
+			return ctrl.Result{}, fmt.Errorf("delete generation secret: %w", err)
+		}
+	}
 	controllerutil.RemoveFinalizer(gen, generationFinalizer)
 	if err := r.Update(ctx, gen); err != nil {
 		return ctrl.Result{}, err

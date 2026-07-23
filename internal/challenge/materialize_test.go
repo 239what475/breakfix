@@ -3,6 +3,7 @@ package challenge
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,10 +13,9 @@ func TestListAndGet(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), "id: demo-task\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: demo-task:v1\ndescription: demo\n")
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\ntitle: Demo\n"))
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(dir, "verify.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(dir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeChallengeAssets(t, dir)
 
 	challenges, err := List(root)
 	if err != nil {
@@ -43,12 +43,10 @@ func TestListAndGet(t *testing.T) {
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
 	_, err := Materialize(root, "fresh-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: fresh-task\ntitle: Fresh\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: fresh-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\ntitle: Fresh\n"))
 		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
 		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
-		writeFile(t, filepath.Join(dst, "question.md"), "fix it\n")
-		writeFile(t, filepath.Join(dst, "verify.sh"), "#!/bin/sh\nexit 0\n")
-		writeFile(t, filepath.Join(dst, "answer.sh"), "#!/bin/sh\nexit 0\n")
+		writeChallengeAssets(t, dst)
 		writeFile(t, filepath.Join(dst, "notes.txt"), "hello\n")
 		return nil
 	})
@@ -78,12 +76,10 @@ func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 
 func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ntags: []\ndescription: \"\"\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ntags: []\ndescription: \"\"\ncheckpoints: []\n")
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
-	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
-	writeFile(t, filepath.Join(root, "verify.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeChallengeAssets(t, root)
 
 	if _, err := ValidateDir(root); err == nil {
 		t.Fatal("expected ValidateDir to reject missing metadata")
@@ -92,12 +88,11 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 
 func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: vcluster-demo\ntitle: VCluster Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: vcluster-demo:v1\n")
+	manifest := validManifest("id: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), strings.Replace(manifest, "runtime: container", "runtime: vcluster", 1))
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
-	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
-	writeFile(t, filepath.Join(root, "verify.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeChallengeAssets(t, root)
 
 	entry, err := ValidateDir(root)
 	if err != nil {
@@ -110,12 +105,10 @@ func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 
 func TestValidateSubmissionDirAllowsMissingID(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "title: Draft Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\ndescription: demo\nimage: demo:v1\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("title: Draft Demo\nimage: demo:v1\n"))
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
-	writeFile(t, filepath.Join(root, "question.md"), "fix it\n")
-	writeFile(t, filepath.Join(root, "verify.sh"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeChallengeAssets(t, root)
 
 	entry, err := ValidateSubmissionDir(root)
 	if err != nil {
@@ -134,4 +127,17 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func validManifest(prefix string) string {
+	return prefix + "type: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+}
+
+func writeChallengeAssets(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "problem.md"), "problem\n")
+	writeFile(t, filepath.Join(root, "solution.md"), "solution\n")
+	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
+	writeFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
+	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
 }

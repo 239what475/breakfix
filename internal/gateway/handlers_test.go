@@ -8,29 +8,155 @@ import (
 	"path/filepath"
 	"testing"
 
+	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/gin-gonic/gin"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestEnvironmentAutoDestroyAfterSubmitDefaultsTrue(t *testing.T) {
-	if !environmentAutoDestroyAfterSubmit(nil) {
-		t.Fatal("expected nil environment to use the default cleanup policy")
+func TestGetChallengeProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
+	handler := newProgressTestHandler(t, nil)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Set("user_id", "u-demo")
+
+	handler.GetChallengeProgress(ctx, "demo")
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 without environment, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	if !environmentAutoDestroyAfterSubmit(&activeEnvironment{}) {
-		t.Fatal("expected unset cleanup policy to default to cleanup")
+}
+
+func TestGetChallengeProgressRejectsNonReadyEnvironment(t *testing.T) {
+	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
+		Spec:   breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
+		Status: breakfixv1.CommonEnvironmentStatus{Phase: breakfixv1.EnvironmentProvisioning},
+	}})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Set("user_id", "u-demo")
+
+	handler.GetChallengeProgress(ctx, "demo")
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for non-ready environment, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetChallengeProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
+	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
+		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
+		Status: breakfixv1.CommonEnvironmentStatus{
+			Phase: breakfixv1.EnvironmentReady,
+			Checkpoints: &breakfixv1.CheckpointStatus{
+				Error: "checkpoint runner exited with 1",
+			},
+		},
+	}})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Set("user_id", "u-demo")
+
+	handler.GetChallengeProgress(ctx, "demo")
+
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for failed checkpoint runner, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
+	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
+		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
+		Status: breakfixv1.CommonEnvironmentStatus{
+			Phase: breakfixv1.EnvironmentCompleted,
+			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+				ID: "complete", Summary: "done", Passed: true,
+			}}},
+		},
+	}})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Set("user_id", "u-demo")
+
+	handler.GetChallengeProgress(ctx, "demo")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var progress api.ChallengeProgress
+	if err := json.Unmarshal(recorder.Body.Bytes(), &progress); err != nil {
+		t.Fatal(err)
+	}
+	if progress.Checks == nil || len(*progress.Checks) != 1 || (*progress.Checks)[0].Passed == nil || !*(*progress.Checks)[0].Passed {
+		t.Fatalf("unexpected checkpoint snapshot: %#v", progress.Checks)
+	}
+}
+
+func TestGetChallengeProgressRequiresLogin(t *testing.T) {
+	handler := NewHandler(nil, nil, config.Config{})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+
+	handler.GetChallengeProgress(ctx, "demo")
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without login, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	root := t.TempDir()
+	challengesDir := filepath.Join(root, "challenges")
+	challengeDir := filepath.Join(challengesDir, "demo")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\nRepair it this way.\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+
+	database, err := db.New(filepath.Join(root, "breakfix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+		t.Fatal(err)
 	}
 
-	no := false
-	if environmentAutoDestroyAfterSubmit(&activeEnvironment{AutoDestroyAfterSubmit: &no}) {
-		t.Fatal("expected explicit autoDestroyAfterSubmit=false to retain the environment")
-	}
+	handler := NewHandler(database, nil, config.Config{DataDir: root})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/content", nil)
+	ctx.Set("user_id", "u-demo")
 
-	yes := true
-	if !environmentAutoDestroyAfterSubmit(&activeEnvironment{AutoDestroyAfterSubmit: &yes}) {
-		t.Fatal("expected explicit autoDestroyAfterSubmit=true to clean up")
-	}
+	handler.GetChallengeContent(ctx, "demo")
 
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var content api.ChallengeContent
+	if err := json.Unmarshal(recorder.Body.Bytes(), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Problem == nil || *content.Problem != "# Problem\nRepair it.\n" {
+		t.Fatalf("unexpected problem: %#v", content.Problem)
+	}
+	if content.Hints == nil || (*content.Hints)["complete"] != "Look at the service.\n" {
+		t.Fatalf("unexpected hints: %#v", content.Hints)
+	}
 }
 
 func TestListChallengesIncludesRuntime(t *testing.T) {
@@ -43,11 +169,13 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: demo:v1\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "question.md"), "question\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "verify.sh"), "#!/bin/sh\nexit 0\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 
 	cfg := config.Config{DataDir: root}
@@ -84,4 +212,61 @@ func writeGatewayTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnvironment) *Handler {
+	t.Helper()
+	root := t.TempDir()
+	writeGatewayChallenge(t, root)
+	database, err := db.New(filepath.Join(root, "breakfix.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/namespaces/workspace-demo/pods/workspace/exec" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(metav1.Status{
+				Status:  metav1.StatusFailure,
+				Message: "test Kubernetes exec endpoint rejected request",
+				Code:    http.StatusInternalServerError,
+			})
+			return
+		}
+		if r.URL.Path != "/apis/breakfix.dev/v1/namespaces/breakfix-system/containerenvironments" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(breakfixv1.ContainerEnvironmentList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironmentList"},
+			Items:    environments,
+		})
+	}))
+	t.Cleanup(server.Close)
+	kubeconfig := filepath.Join(root, "kubeconfig")
+	writeGatewayTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
+	client, err := k8s.New(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewHandler(database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
+}
+
+func writeGatewayChallenge(t *testing.T, root string) {
+	t.Helper()
+	challengeDir := filepath.Join(root, "challenges", "demo")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 }

@@ -22,18 +22,30 @@ type Entry struct {
 	Tags        []string
 	Description string
 	Image       string
+	Checkpoints []Checkpoint
 	Dir         string
 }
 
 type Spec struct {
-	ID          string   `yaml:"id"`
-	Title       string   `yaml:"title"`
-	Type        string   `yaml:"type"`
-	Runtime     string   `yaml:"runtime"`
-	Difficulty  string   `yaml:"difficulty"`
-	Tags        []string `yaml:"tags"`
-	Description string   `yaml:"description"`
-	Image       string   `yaml:"image"`
+	ID          string       `yaml:"id"`
+	Title       string       `yaml:"title"`
+	Type        string       `yaml:"type"`
+	Runtime     string       `yaml:"runtime"`
+	Difficulty  string       `yaml:"difficulty"`
+	Tags        []string     `yaml:"tags"`
+	Description string       `yaml:"description"`
+	Image       string       `yaml:"image"`
+	Checkpoints []Checkpoint `yaml:"checkpoints"`
+}
+
+// Checkpoint is a user-visible, independently verifiable challenge outcome.
+// It describes a state of the environment, never a prescribed command sequence.
+type Checkpoint struct {
+	ID          string   `yaml:"id" json:"id"`
+	Title       string   `yaml:"title" json:"title"`
+	Description string   `yaml:"description" json:"description"`
+	Hint        string   `yaml:"hint,omitempty" json:"hint,omitempty"`
+	DependsOn   []string `yaml:"dependsOn,omitempty" json:"depends_on,omitempty"`
 }
 
 func List(root string) ([]Entry, error) {
@@ -138,6 +150,7 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 		Tags:        append([]string{}, spec.Tags...),
 		Description: spec.Description,
 		Image:       spec.Image,
+		Checkpoints: append([]Checkpoint{}, spec.Checkpoints...),
 		Dir:         dir,
 	}
 }

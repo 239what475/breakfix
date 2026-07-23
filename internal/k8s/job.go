@@ -6,13 +6,15 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type CreateJobOpts struct {
-	Image           string
-	Env             map[string]string
-	ImagePullPolicy corev1.PullPolicy
+	Image                 string
+	Env                   map[string]string
+	EnvSecretName         string
+	ImagePullPolicy       corev1.PullPolicy
 	ActiveDeadlineSeconds *int64
 }
 
@@ -24,6 +26,14 @@ func (c *Client) CreateJob(ns, jobName string, opts CreateJobOpts) error {
 	envVars := make([]corev1.EnvVar, 0, len(opts.Env))
 	for k, v := range opts.Env {
 		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+	}
+	envFrom := []corev1.EnvFromSource(nil)
+	if opts.EnvSecretName != "" {
+		envFrom = append(envFrom, corev1.EnvFromSource{
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: opts.EnvSecretName},
+			},
+		})
 	}
 	pullPolicy := opts.ImagePullPolicy
 	if pullPolicy == "" {
@@ -51,6 +61,7 @@ func (c *Client) CreateJob(ns, jobName string, opts CreateJobOpts) error {
 						ImagePullPolicy: pullPolicy,
 						SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 						Env:             envVars,
+						EnvFrom:         envFrom,
 					}},
 					ServiceAccountName: "breakfix-generator",
 					RestartPolicy:      corev1.RestartPolicyNever,
@@ -60,5 +71,18 @@ func (c *Client) CreateJob(ns, jobName string, opts CreateJobOpts) error {
 	}
 
 	_, err := c.clientset.BatchV1().Jobs(ns).Create(ctx, job, metav1.CreateOptions{})
+	return err
+}
+
+func (c *Client) DeleteJob(ns, jobName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	propagation := metav1.DeletePropagationForeground
+	err := c.clientset.BatchV1().Jobs(ns).Delete(ctx, jobName, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
+	if k8sErrors.IsNotFound(err) {
+		return nil
+	}
 	return err
 }

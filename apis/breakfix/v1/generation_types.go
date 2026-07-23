@@ -19,20 +19,20 @@ type Generation struct {
 }
 
 type GenerationSpec struct {
-	Draft *ChallengeDraft   `json:"draft,omitempty"`
-	Image string            `json:"image"`
-	Env   map[string]string `json:"env,omitempty"`
+	Draft        *ChallengeDraft `json:"draft,omitempty"`
+	Image        string          `json:"image"`
+	EnvSecretRef string          `json:"envSecretRef"`
 }
 
 type GenerationStatus struct {
-	Phase        GenerationPhase `json:"phase"`
-	JobName      string          `json:"jobName,omitempty"`
-	PodName      string          `json:"podName,omitempty"`
-	Challenge    *ChallengeSpec  `json:"challenge,omitempty"`
-	VerifyTaskRef string         `json:"verifyTaskRef,omitempty"`
-	Message      string          `json:"message,omitempty"`
-	StartedAt    *metav1.Time    `json:"startedAt,omitempty"`
-	CompletedAt  *metav1.Time    `json:"completedAt,omitempty"`
+	Phase         GenerationPhase `json:"phase"`
+	JobName       string          `json:"jobName,omitempty"`
+	PodName       string          `json:"podName,omitempty"`
+	Challenge     *ChallengeSpec  `json:"challenge,omitempty"`
+	VerifyTaskRef string          `json:"verifyTaskRef,omitempty"`
+	Message       string          `json:"message,omitempty"`
+	StartedAt     *metav1.Time    `json:"startedAt,omitempty"`
+	CompletedAt   *metav1.Time    `json:"completedAt,omitempty"`
 }
 
 type ChallengeDraft struct {
@@ -136,12 +136,6 @@ func (in *GenerationSpec) DeepCopyInto(out *GenerationSpec) {
 		d := *in.Draft
 		d.Tags = append([]string{}, d.Tags...)
 		out.Draft = &d
-	}
-	if in.Env != nil {
-		out.Env = make(map[string]string, len(in.Env))
-		for k, v := range in.Env {
-			out.Env[k] = v
-		}
 	}
 }
 

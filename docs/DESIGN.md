@@ -81,7 +81,7 @@
   → 查看题目列表
   → start challenge
   → 浏览器内终端连接 WebSocket PTY
-  → submit / reset
+  → checkpoints complete automatically / reset
 
 ---
 

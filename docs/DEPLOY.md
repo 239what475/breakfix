@@ -35,7 +35,7 @@ make docker-challenge NAME=xxx  # 重建单个题目镜像
 make dev
 ```
 
-打开 `http://localhost:9090`，在 Web UI 里完成注册、登录、启动题目和提交。
+打开 `http://localhost:9090`，在 Web UI 里完成注册、登录和启动题目；检查点全部通过后会自动完成。
 
 > `make dev` 保留 DB 和 CA，之后 `make dev-server` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
 
@@ -215,7 +215,7 @@ make logs                 # 查看远程实时日志
 
 ## 5. 面试者入口
 
-面试者直接通过浏览器访问网关地址，使用 Web UI 完成注册、登录、启动题目和提交。
+面试者直接通过浏览器访问网关地址，使用 Web UI 完成注册、登录和启动题目；检查点全部通过后会自动完成。
 
 ---
 
@@ -225,4 +225,4 @@ make logs                 # 查看远程实时日志
 make status                                  # active
 ```
 
-然后用浏览器打开 `http://<ecs-ip>:9090` 验证注册、登录、启动题目、终端连接和提交流程。
+然后用浏览器打开 `http://<ecs-ip>:9090` 验证注册、登录、启动题目、终端连接和检查点自动完成流程。

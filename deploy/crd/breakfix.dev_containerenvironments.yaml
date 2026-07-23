@@ -30,8 +30,6 @@ spec:
                   type: string
                 image:
                   type: string
-                submit:
-                  type: boolean
                 timeouts:
                   type: object
                   properties:
@@ -50,8 +48,6 @@ spec:
                 cleanupPolicy:
                   type: object
                   properties:
-                    autoDestroyAfterSubmit:
-                      type: boolean
                     autoDestroyAfterIdle:
                       type: boolean
                     forceCleanupOnFailure:
@@ -70,7 +66,7 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Provisioning, Ready, Draining, Submitted, Destroyed, Failed]
+                  enum: [Pending, Provisioning, Ready, Draining, Completed, Destroyed, Failed]
                 observedGeneration:
                   type: integer
                   format: int64
@@ -82,6 +78,9 @@ spec:
                   type: string
                   format: date-time
                 readyAt:
+                  type: string
+                  format: date-time
+                completedAt:
                   type: string
                   format: date-time
                 expiresAt:
@@ -128,15 +127,24 @@ spec:
                         type: string
                 message:
                   type: string
-                submitResult:
+                checkpoints:
                   type: object
                   properties:
-                    passed:
-                      type: boolean
-                    exitCode:
-                      type: integer
-                    output:
-                      type: string
-                    submittedAt:
+                    results:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          passed:
+                            type: boolean
+                          summary:
+                            type: string
+                          details:
+                            type: string
+                    checkedAt:
                       type: string
                       format: date-time
+                    error:
+                      type: string

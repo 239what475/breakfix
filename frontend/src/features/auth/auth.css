@@ -1,0 +1,17 @@
+.totp-setup {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f0f5f2;
+}
+.totp-setup canvas {
+  background: #fff;
+}
+.totp-setup code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font:
+    11px "DM Mono",
+    monospace;
+}

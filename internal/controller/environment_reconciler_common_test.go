@@ -20,7 +20,7 @@ func (f *fakeCommonRuntime) waitReady(context.Context, commonEnvironmentObject) 
 	return ctrl.Result{}, nil
 }
 
-func (f *fakeCommonRuntime) submit(context.Context, commonEnvironmentObject) (ctrl.Result, error) {
+func (f *fakeCommonRuntime) evaluateCheckpoints(context.Context, commonEnvironmentObject) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 
@@ -41,16 +41,10 @@ func (f *fakeCommonRuntime) requestDeletion(context.Context, commonEnvironmentOb
 	return ctrl.Result{}, nil
 }
 
-func TestReconcileCommonEnvironmentKeepsSubmittedWhenAutoDestroyDisabled(t *testing.T) {
-	no := false
+func TestReconcileCommonEnvironmentRetainsCompletedEnvironmentForIdleCleanup(t *testing.T) {
 	env := &breakfixv1.ContainerEnvironment{
-		Spec: breakfixv1.CommonEnvironmentSpec{
-			CleanupPolicy: breakfixv1.CleanupPolicySpec{
-				AutoDestroyAfterSubmit: &no,
-			},
-		},
 		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentSubmitted,
+			Phase: breakfixv1.EnvironmentCompleted,
 		},
 	}
 	runtime := &fakeCommonRuntime{}
@@ -59,23 +53,7 @@ func TestReconcileCommonEnvironmentKeepsSubmittedWhenAutoDestroyDisabled(t *test
 		t.Fatalf("reconcileCommonEnvironment: %v", err)
 	}
 	if runtime.requestDeletionCalls != 0 {
-		t.Fatalf("expected submitted environment to be retained, got %d delete calls", runtime.requestDeletionCalls)
-	}
-}
-
-func TestReconcileCommonEnvironmentRetainsSubmittedResultForGateway(t *testing.T) {
-	env := &breakfixv1.ContainerEnvironment{
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentSubmitted,
-		},
-	}
-	runtime := &fakeCommonRuntime{}
-
-	if _, err := reconcileCommonEnvironment(context.Background(), env, runtime); err != nil {
-		t.Fatalf("reconcileCommonEnvironment: %v", err)
-	}
-	if runtime.requestDeletionCalls != 0 {
-		t.Fatalf("expected submitted environment to be retained until gateway reads the result, got %d delete calls", runtime.requestDeletionCalls)
+		t.Fatalf("expected completed environment to be retained for idle cleanup, got %d delete calls", runtime.requestDeletionCalls)
 	}
 }
 

@@ -1,0 +1,173 @@
+.catalog-layout {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  height: 100%;
+}
+.catalog-pane {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: #f8faf7;
+}
+.catalog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 0 15px;
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+.brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: #fff;
+  background: #23816a;
+  font-family: "DM Mono", monospace;
+}
+.catalog-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.catalog-search {
+  padding: 13px 14px 8px;
+}
+.catalog-search input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 10px;
+  background: #fff;
+  font-size: 12px;
+}
+.catalog-summary {
+  display: flex;
+  gap: 12px;
+  padding: 0 15px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.challenge-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 8px 12px;
+}
+.challenge-row {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+  margin: 2px 0;
+  padding: 11px 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+.challenge-row:hover {
+  background: #eff4f0;
+}
+.challenge-row.selected {
+  border-color: #b8d2e3;
+  background: #eaf4fa;
+}
+.challenge-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.runtime-pill {
+  color: var(--muted);
+  font:
+    10px "DM Mono",
+    monospace;
+}
+.challenge-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.challenge-meta,
+.catalog-detail-meta,
+.workspace-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font:
+    10px "DM Mono",
+    monospace;
+}
+.catalog-detail {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 36px;
+  background: linear-gradient(135deg, #f9fbf8, #eef5f1);
+}
+.catalog-detail > * {
+  width: min(650px, 100%);
+}
+.catalog-detail h1,
+.catalog-empty h1 {
+  margin: 7px 0 16px;
+  font-size: clamp(27px, 3vw, 44px);
+  line-height: 1.12;
+}
+.catalog-detail-description,
+.catalog-empty p {
+  max-width: 620px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+.catalog-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+.catalog-detail-actions p {
+  color: var(--muted);
+  font-size: 12px;
+}
+.catalog-empty {
+  max-width: 640px;
+}
+.empty-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 660px) {
+  .catalog-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 45% 55%;
+  }
+  .catalog-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .catalog-detail {
+    place-items: start;
+    overflow: auto;
+    padding: 23px;
+  }
+}

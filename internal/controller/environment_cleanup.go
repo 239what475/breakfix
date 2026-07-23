@@ -65,7 +65,7 @@ func staleCommonEnvironment(k8sClient *k8s.Client, status *breakfixv1.CommonEnvi
 	if status == nil {
 		return false
 	}
-	if status.Phase == breakfixv1.EnvironmentSubmitted || status.Phase == breakfixv1.EnvironmentDestroyed || status.Phase == breakfixv1.EnvironmentFailed {
+	if status.Phase == breakfixv1.EnvironmentCompleted || status.Phase == breakfixv1.EnvironmentDestroyed || status.Phase == breakfixv1.EnvironmentFailed {
 		return false
 	}
 	ns := strings.TrimSpace(status.Namespace)

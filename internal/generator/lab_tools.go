@@ -32,7 +32,7 @@ func (c *LabClient) Tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
 		&labCreateTool{c},
 		&labExecTool{c},
-		&labVerifyTool{c},
+		&labCheckpointsTool{c},
 		&labLogsTool{c},
 		&labDestroyTool{c},
 	}
@@ -114,33 +114,45 @@ func (t *labExecTool) InvokableRun(ctx context.Context, argsJSON string, _ ...to
 	return result, nil
 }
 
-// ── labVerify ──
+// ── labCheckpoints ──
 
-type labVerifyTool struct{ lc *LabClient }
+type labCheckpointsTool struct{ lc *LabClient }
 
-func (t *labVerifyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+func (t *labCheckpointsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "lab_verify",
-		Desc: "Copy verify.sh from workspace to pod and run it. pod: pod name. Returns verification result.",
+		Name: "lab_checkpoints",
+		Desc: "Copy checks/checkpoints.sh from the workspace to a lab pod and run it with --json. pod: pod name. Returns the checkpoint report.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"pod": {Type: schema.String, Desc: "Pod name", Required: true},
 		}),
 	}, nil
 }
 
-func (t *labVerifyTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+func (t *labCheckpointsTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	start := time.Now()
-	var a struct{ Pod string `json:"pod"` }
+	var a struct {
+		Pod string `json:"pod"`
+	}
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}
-	data, _ := os.ReadFile(filepath.Join(t.lc.WorkDir, "verify.sh"))
+	data, _ := os.ReadFile(filepath.Join(t.lc.WorkDir, "checks", "checkpoints.sh"))
 	script := string(data)
 	if script == "" {
-		script = "echo verify.sh not found; exit 1"
+		script = "echo checks/checkpoints.sh not found; exit 1"
 	}
-	exitCode, output, err := t.lc.K8s.ExecInPod(t.lc.Namespace, a.Pod, "bash", "-c", script)
-	slog.Info("tool done", "tool", "lab_verify", "pod", a.Pod, "exit", exitCode, "duration", time.Since(start), "err", err)
+	// The checker contract is always JSON. Supplying $0 also keeps scripts that
+	// inspect positional arguments from seeing an empty program name.
+	exitCode, output, err := t.lc.K8s.ExecInPod(
+		t.lc.Namespace,
+		a.Pod,
+		"bash",
+		"-c",
+		script,
+		"breakfix-checkpoints",
+		"--json",
+	)
+	slog.Info("tool done", "tool", "lab_checkpoints", "pod", a.Pod, "exit", exitCode, "duration", time.Since(start), "err", err)
 	result := fmt.Sprintf("exit=%d output=%s", exitCode, output)
 	if err != nil {
 		result += fmt.Sprintf(" error=%v", err)
@@ -164,7 +176,9 @@ func (t *labLogsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 
 func (t *labLogsTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	start := time.Now()
-	var a struct{ Pod string `json:"pod"` }
+	var a struct {
+		Pod string `json:"pod"`
+	}
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}
@@ -192,7 +206,9 @@ func (t *labDestroyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 
 func (t *labDestroyTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	start := time.Now()
-	var a struct{ Pod string `json:"pod"` }
+	var a struct {
+		Pod string `json:"pod"`
+	}
 	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
 		return "", err
 	}

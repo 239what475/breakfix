@@ -31,23 +31,25 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 		c.Data(http.StatusOK, "application/json", spec)
 	})
 
-	// Protected routes — inline JWT middleware
-	router.GET("/api/challenges", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.ListChallenges(c)
-		}
-	})
+	// The catalog is public read-only. Starting, viewing full content, and every
+	// environment operation below remain bound to an authenticated user.
+	router.GET("/api/challenges", h.ListChallenges)
 	router.POST("/api/challenges/:id/start", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.StartChallenge(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/challenges/:id/submit", func(c *gin.Context) {
+	router.GET("/api/challenges/:id/content", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.SubmitChallenge(c, c.Param("id"))
+			h.GetChallengeContent(c, c.Param("id"))
+		}
+	})
+	router.GET("/api/challenges/:id/progress", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetChallengeProgress(c, c.Param("id"))
 		}
 	})
 	router.POST("/api/challenges/:id/reset", func(c *gin.Context) {
@@ -82,18 +84,6 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 			h.GetGenerationJob(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/verify/submissions", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.CreateVerifySubmission(c)
-		}
-	})
-	router.GET("/api/verify/tasks/:id", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.GetVerifyTask(c, c.Param("id"))
-		}
-	})
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {
@@ -103,6 +93,12 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.HandleTerminal(c)
+		}
+	})
+	router.DELETE("/api/challenges/:id/terminals/:window", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CloseTerminalWindow(c, c.Param("id"), c.Param("window"))
 		}
 	})
 

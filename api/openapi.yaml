@@ -55,8 +55,6 @@ paths:
       operationId: listChallenges
       summary: List all challenges
       tags: [challenges]
-      security:
-        - bearerAuth: []
       responses:
         "200":
           description: Challenge list
@@ -88,10 +86,33 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/submit:
-    post:
-      operationId: submitChallenge
-      summary: Submit solution for verification
+  /challenges/{id}/content:
+    get:
+      operationId: getChallengeContent
+      summary: Get challenge problem, solution, hints, and checkpoint metadata
+      tags: [challenges]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Challenge content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChallengeContent"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/progress:
+    get:
+      operationId: getChallengeProgress
+      summary: Run the current challenge checkpoint checks
       tags: [environments]
       security:
         - bearerAuth: []
@@ -103,12 +124,14 @@ paths:
             type: string
       responses:
         "200":
-          description: Submission result
+          description: Current checkpoint results
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SubmitResponse"
+                $ref: "#/components/schemas/ChallengeProgress"
         "404":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
 
   /challenges/{id}/reset:
@@ -154,6 +177,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StopResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/terminals/{window}:
+    delete:
+      operationId: closeTerminalWindow
+      summary: Close one terminal tab in the current challenge environment
+      tags: [environments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: window
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9-]{0,31}$"
+      responses:
+        "200":
+          description: Terminal window closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWindowCloseResponse"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -219,57 +271,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GenerationJobResponse"
-        "404":
-          $ref: "#/components/responses/Error"
-
-  /verify/submissions:
-    post:
-      operationId: createVerifySubmission
-      summary: Upload a challenge artifact for platform verification
-      tags: [verify]
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [artifact]
-              properties:
-                artifact:
-                  type: string
-                  format: binary
-      responses:
-        "200":
-          description: Verification task created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VerifySubmissionResponse"
-        "400":
-          $ref: "#/components/responses/Error"
-
-  /verify/tasks/{id}:
-    get:
-      operationId: getVerifyTask
-      summary: Get verification task status
-      tags: [verify]
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Verification task status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/VerifyTaskResponse"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -370,20 +371,66 @@ components:
           items:
             $ref: "#/components/schemas/ChallengeSummary"
 
+    ChallengeCheckpoint:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        hint:
+          type: string
+        depends_on:
+          type: array
+          items:
+            type: string
+
+    CheckpointResult:
+      type: object
+      properties:
+        id:
+          type: string
+        passed:
+          type: boolean
+        summary:
+          type: string
+        details:
+          type: string
+
+    ChallengeContent:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        problem:
+          type: string
+        solution:
+          type: string
+        hints:
+          type: object
+          additionalProperties:
+            type: string
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChallengeCheckpoint"
+
+    ChallengeProgress:
+      type: object
+      properties:
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckpointResult"
+
     StartResponse:
       type: object
       properties:
         challenge_title:
-          type: string
-
-    SubmitResponse:
-      type: object
-      properties:
-        passed:
-          type: boolean
-        exit_code:
-          type: integer
-        output:
           type: string
 
     ResetResponse:
@@ -398,6 +445,12 @@ components:
           type: boolean
         challenge_title:
           type: string
+
+    TerminalWindowCloseResponse:
+      type: object
+      properties:
+        closed:
+          type: boolean
 
     ChallengeDraft:
       type: object
@@ -485,61 +538,3 @@ components:
         completed_at:
           type: string
           format: date-time
-
-    VerifySubmissionResponse:
-      type: object
-      properties:
-        challenge_id:
-          type: string
-        verify_task_id:
-          type: string
-        submission_id:
-          type: string
-        status:
-          type: string
-
-    VerifyIssue:
-      type: object
-      properties:
-        code:
-          type: string
-        message:
-          type: string
-
-    VerifyReport:
-      type: object
-      properties:
-        build_passed:
-          type: boolean
-        answer_passed:
-          type: boolean
-        verify_passed:
-          type: boolean
-        summary:
-          type: string
-        issues:
-          type: array
-          items:
-            $ref: "#/components/schemas/VerifyIssue"
-
-    VerifyTaskResponse:
-      type: object
-      properties:
-        challenge_id:
-          type: string
-        verify_task_id:
-          type: string
-        submission_id:
-          type: string
-        status:
-          type: string
-        message:
-          type: string
-        started_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: string
-          format: date-time
-        report:
-          $ref: "#/components/schemas/VerifyReport"

@@ -27,14 +27,15 @@ const vclusterEnvironmentFinalizer = "breakfix.dev/vcluster-environment-cleanup"
 
 type VClusterEnvironmentReconciler struct {
 	client.Client
-	K8s          *k8s.Client
-	VCluster     *vclustercli.Client
-	ChartRepo    string
-	ChartVersion string
-	RegistryAddr string
-	NS           string
-	CRDNamespace string
-	Cooldown     time.Duration
+	K8s           *k8s.Client
+	VCluster      *vclustercli.Client
+	ChartRepo     string
+	ChartVersion  string
+	RegistryAddr  string
+	ChallengesDir string
+	NS            string
+	CRDNamespace  string
+	Cooldown      time.Duration
 }
 
 func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -184,16 +185,31 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 	return ctrl.Result{}, nil
 }
 
-func (r *VClusterEnvironmentReconciler) submit(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
-	exitCode, output, err := r.K8s.ExecInPod(env.Status.Namespace, env.Status.WorkspacePodName, "/verify.sh")
-	if err != nil {
-		slog.Error("exec verify.sh", "err", err, "environment", env.Name)
+func (r *VClusterEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
+	changed := recordCheckpointStatus(&env.Status.CommonEnvironmentStatus, report, checkErr)
+	if checkErr != nil {
+		if changed {
+			if err := r.Status().Update(ctx, env); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 	}
-	setEnvironmentSubmitted(&env.Status.CommonEnvironmentStatus, exitCode, output)
-	if err := r.Status().Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+	if report.Passed() {
+		slog.Info("environment checkpoints completed", "environment", env.Name)
+		setEnvironmentCompleted(&env.Status.CommonEnvironmentStatus)
+		if err := r.Status().Update(ctx, env); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, nil
+	if changed {
+		if err := r.Status().Update(ctx, env); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 }
 
 func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
@@ -584,8 +600,8 @@ func (rt vclusterEnvironmentRuntime) waitReady(ctx context.Context, env commonEn
 	return rt.r.waitReady(ctx, env.(*breakfixv1.VClusterEnvironment))
 }
 
-func (rt vclusterEnvironmentRuntime) submit(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	return rt.r.submit(ctx, env.(*breakfixv1.VClusterEnvironment))
+func (rt vclusterEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	return rt.r.evaluateCheckpoints(ctx, env.(*breakfixv1.VClusterEnvironment))
 }
 
 func (rt vclusterEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {

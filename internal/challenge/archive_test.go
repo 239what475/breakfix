@@ -16,7 +16,9 @@ func TestExtractTarGz(t *testing.T) {
 
 	writeTarFile(t, tw, "challenge.yaml", []byte("id: archive-task\ntitle: Archive\n"))
 	writeTarFile(t, tw, "Dockerfile", []byte("FROM alpine:3.20\n"))
-	writeTarFile(t, tw, "verify.sh", []byte("#!/bin/sh\nexit 0\n"))
+	writeTarFile(t, tw, "problem.md", []byte("# Archive task\n"))
+	writeTarFile(t, tw, "solution.md", []byte("# Solution\n"))
+	writeTarFile(t, tw, "checks/checkpoints.sh", []byte("#!/bin/sh\nexit 0\n"))
 	writeTarFile(t, tw, "answer.sh", []byte("#!/bin/sh\nexit 0\n"))
 
 	if err := tw.Close(); err != nil {

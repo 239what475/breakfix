@@ -1,105 +1,40 @@
 # 题目系统设计
 
-## 题目类型
+## 题目模型
 
-### Script（写脚本）
+题目是 `data/challenges/<id>/` 下的文件系统目录。题目不进数据库，也不是 Kubernetes CRD；Gateway 启动时扫描该目录并建立可查询目录。
 
-用户编写脚本解决问题，verify 检查脚本执行结果。
+每道题必须包含：
 
-```
-例：压缩日志
-  浏览器终端 → cat question.md → vim cleanup.sh → 跑一下 → submit
-```
-
-### Break-Fix（修故障）
-
-环境已被破坏，用户排查并修复。verify 检查系统状态。
-
-```
-例：nginx 配置错误导致 502
-  浏览器终端 → cat question.md → 排查 → 修配置 → reload → submit
+```text
+challenge.yaml
+Dockerfile
+generate.sh
+problem.md
+solution.md
+hints/<checkpoint-id>.md
+checks/checkpoints.sh
+answer.sh
 ```
 
----
+`generate.sh` 在题目 Pod 首次启动时由基础镜像的 runtime init 执行，用于构造初始环境。`problem.md`、`solution.md`、提示和检查器会打包进入镜像；`answer.sh` 仅供平台真实验证和题目作者自测使用。
 
-## 题目文件结构
+## 检查点
 
-```
-data/challenges/<id>/
-├── challenge.yaml     # 元数据
-├── Dockerfile         # FROM base + COPY challenge files + ENTRYPOINT runtime-init
-├── generate.sh        # 注入故障 (Pod 首次启动时执行一次)
-├── question.md        # 用户看到的任务说明书
-├── verify.sh          # 验收脚本 (server 持有, 不进镜像)
-└── answer.sh          # 标准答案 (agent 自验证用, 不进镜像)
-```
+`challenge.yaml` 声明按学习目标组织的检查点。`checks/checkpoints.sh --json` 一次读取当前环境并输出每个检查点的 JSON 结果。检查器只检查环境结果，不能修改环境或要求用户使用固定命令、文件编辑路径。
 
-### challenge.yaml
+全部必需检查点通过即为题目完成。不存在独立的 `verify.sh`，也不存在只在某个用户动作时执行的隐藏规则。controller 周期执行同一个检查器协议并保存结果快照；进度接口只展示该权威状态，全部通过后环境自动完成并按闲置策略清理。
 
-```yaml
-id: cleanup-logs
-type: script
-title: "批量压缩旧日志"
-difficulty: easy
-tags: [linux, find, tar, shell]
-timeout: 600
-image: cleanup-logs:v1
-description: |
-  服务器磁盘空间不足，/var/log 下有大量历史日志文件。
-  你的任务：编写 /usr/local/bin/cleanup.sh，实现：
-  1. 找出 /var/log 下 7 天前（mtime > 6 天）、大于 100MB 的 .log 文件
-  2. 批量压缩到 /backup 目录（用 tar.gz 格式）
-  3. 原文件可以不保留
-```
+## 运行时
 
-> image 只需写短名称，Server 自动拼 `{registry}/{acr_namespace}/` 前缀。
+`runtime: container` 创建一个用户 workspace Pod。
 
-### Dockerfile
+`runtime: vcluster` 创建一个完整的 `VClusterEnvironment`：隔离 namespace、vcluster、kubeconfig Secret 和带 `kubectl` 的 workspace Pod。用户仍然连接 workspace Pod，再通过其中的 kubeconfig 操作 vcluster。
 
-```dockerfile
-ARG BREAKFIX_BASE_IMAGE=<registry>/breakfix-base:latest
-FROM ${BREAKFIX_BASE_IMAGE}
-COPY challenge.yaml /breakfix/challenge.yaml
-COPY question.md /home/user/question.md
-COPY generate.sh /breakfix/generate.sh
-COPY verify.sh /verify.sh
-COPY answer.sh /answer.sh
-RUN chmod +x /breakfix/generate.sh /verify.sh /answer.sh
-ENTRYPOINT ["/breakfix/runtime-init.sh"]
-CMD ["sleep", "infinity"]
-```
+两种运行时都遵循同一题目包格式和检查点协议。运行环境由 controller 调和，题目本身不需要成为 CRD。
 
-### generate.sh
+## 真实发布验证
 
-制造故障或准备测试数据，在 Pod 第一次启动时执行一次。
+生成工作流将题目 artifact 交给 Gateway。Gateway 创建 `VerifyTask`；controller 在真实对应 runtime 中构建镜像、启动环境、运行 `answer.sh`，再运行所有检查点。全部通过才发布镜像和题目目录；失败只返回结构化检查结果和诊断。
 
-### question.md
-
-用户登录 Pod 后看到的任务说明书。
-
-### verify.sh
-
-submit 时由 server 执行。exit 0 = 通过。
-
-### answer.sh
-
-Agent 自验证用的标准答案。不进镜像、不外泄。
-
----
-
-## 用户流程
-
-```
-Web UI start challenge
-  → Pod 启动，runtime-init 执行 generate.sh 构造破损环境
-  → Pod 进入 sleep infinity（question.md 在 ~/）
-  → 浏览器终端连接 → 看 question.md → 排查/写脚本
-  → Web UI submit
-     → server kubectl cp verify.sh pod:/tmp/
-     → server kubectl exec -- bash /tmp/verify.sh
-     → exit 0 = PASS / 非 0 = FAIL
-```
-
-## Agent 自动生成
-
-见 AGENT_WORKFLOW.md。
+详情与工作台改造计划见 [`../iximiuz/next-steps.md`](../iximiuz/next-steps.md)。

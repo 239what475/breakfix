@@ -28,7 +28,7 @@ func setEnvironmentProvisioning(status *breakfixv1.CommonEnvironmentStatus, reas
 	status.Message = truncate(msg, 4000)
 	status.LastError = nil
 	setEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, reason, msg)
-	setEnvironmentCondition(status, breakfixv1.ConditionSubmitted, metav1.ConditionFalse, "", "")
+	setEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionFalse, "", "")
 	setEnvironmentCondition(status, breakfixv1.ConditionFailed, metav1.ConditionFalse, "", "")
 }
 
@@ -50,24 +50,19 @@ func setEnvironmentReady(spec *breakfixv1.CommonEnvironmentSpec, status *breakfi
 	setEnvironmentCondition(status, breakfixv1.ConditionWorkspaceReady, metav1.ConditionTrue, reason, msg)
 	setEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionTrue, reason, msg)
 	setEnvironmentCondition(status, breakfixv1.ConditionDraining, metav1.ConditionFalse, "", "")
-	setEnvironmentCondition(status, breakfixv1.ConditionSubmitted, metav1.ConditionFalse, "", "")
+	setEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionFalse, "", "")
 	setEnvironmentCondition(status, breakfixv1.ConditionFailed, metav1.ConditionFalse, "", "")
 }
 
-func setEnvironmentSubmitted(status *breakfixv1.CommonEnvironmentStatus, exitCode int, output string) {
+func setEnvironmentCompleted(status *breakfixv1.CommonEnvironmentStatus) {
 	now := metav1.Now()
-	status.SubmitResult = &breakfixv1.SubmitResult{
-		Passed:      exitCode == 0,
-		ExitCode:    exitCode,
-		Output:      truncate(output, 4000),
-		SubmittedAt: &now,
-	}
-	status.Phase = breakfixv1.EnvironmentSubmitted
-	status.Reason = "SubmitCompleted"
-	status.Message = "environment submitted"
+	status.Phase = breakfixv1.EnvironmentCompleted
+	status.CompletedAt = &now
+	status.Reason = "CheckpointsCompleted"
+	status.Message = "all checkpoints completed"
 	status.LastError = nil
-	setEnvironmentCondition(status, breakfixv1.ConditionSubmitted, metav1.ConditionTrue, "SubmitCompleted", "environment submitted")
-	setEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "SubmitCompleted", "environment submitted")
+	setEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionTrue, "CheckpointsCompleted", "all checkpoints completed")
+	setEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "all checkpoints completed")
 	setEnvironmentCondition(status, breakfixv1.ConditionDraining, metav1.ConditionFalse, "", "")
 }
 

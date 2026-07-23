@@ -1,11 +1,36 @@
 package generator
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/breakfix/breakfix/internal/challenge"
 )
+
+func TestArchiveDirPreservesNestedChallengeAssets(t *testing.T) {
+	source := t.TempDir()
+	writeGeneratorSemanticChallenge(t, source, "container", "#!/bin/sh\nprintf '{\"checks\":[]}'\n")
+
+	payload, err := archiveDir(source)
+	if err != nil {
+		t.Fatalf("archiveDir: %v", err)
+	}
+	destination := t.TempDir()
+	if err := challenge.ExtractTarGz(destination, bytes.NewReader(payload)); err != nil {
+		t.Fatalf("ExtractTarGz: %v", err)
+	}
+	if _, err := challenge.ValidateSubmissionDir(destination); err != nil {
+		t.Fatalf("archived challenge no longer validates: %v", err)
+	}
+	for _, name := range []string{"checks/checkpoints.sh", "hints/deployment-ready.md"} {
+		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
+			t.Fatalf("archive omitted nested asset %s: %v", name, err)
+		}
+	}
+}
 
 func TestValidateChallengeManifestStripsPlatformFields(t *testing.T) {
 	dir := t.TempDir()
@@ -64,16 +89,7 @@ description: ""
 
 func TestValidateChallengeSemanticsRejectsWrongKubectlColumnOrderPattern(t *testing.T) {
 	dir := t.TempDir()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
-runtime: vcluster
-title: Fix Deployment
-difficulty: easy
-tags:
-  - kubernetes
-description: |
-  demo
-`)
-	writeGeneratorTestFile(t, filepath.Join(dir, "verify.sh"), `#!/bin/bash
+	writeGeneratorSemanticChallenge(t, dir, "vcluster", `#!/bin/bash
 kubectl get pods -n default -l app=web --no-headers
 BAD_PODS=$(echo "${ACTIVE_PODS}" | grep -vE '(Running\s+1/1)' || echo "")
 `)
@@ -90,16 +106,7 @@ BAD_PODS=$(echo "${ACTIVE_PODS}" | grep -vE '(Running\s+1/1)' || echo "")
 
 func TestValidateChallengeSemanticsAcceptsVClusterVerifyWithoutBadPattern(t *testing.T) {
 	dir := t.TempDir()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
-runtime: vcluster
-title: Fix Deployment
-difficulty: easy
-tags:
-  - kubernetes
-description: |
-  demo
-`)
-	writeGeneratorTestFile(t, filepath.Join(dir, "verify.sh"), `#!/bin/bash
+	writeGeneratorSemanticChallenge(t, dir, "vcluster", `#!/bin/bash
 READY=$(kubectl get deployment web -n default -o jsonpath='{.status.readyReplicas}')
 REPLICAS=$(kubectl get deployment web -n default -o jsonpath='{.spec.replicas}')
 [ -n "$READY" ] && [ "$READY" = "$REPLICAS" ] && [ "$READY" -gt 0 ]
@@ -111,18 +118,24 @@ REPLICAS=$(kubectl get deployment web -n default -o jsonpath='{.spec.replicas}')
 	}
 }
 
+func TestValidateChallengeSemanticsRejectsBuildTimeNetworkInstall(t *testing.T) {
+	dir := t.TempDir()
+	writeGeneratorSemanticChallenge(t, dir, "container", "#!/bin/sh\nprintf '{\"checks\":[]}'\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-base:latest\nRUN apt-get update && apt-get install -y curl\n")
+
+	var g Generator
+	err := g.validateChallengeSemantics(dir)
+	if err == nil {
+		t.Fatal("expected validateChallengeSemantics() to reject build-time package installation")
+	}
+	if !strings.Contains(err.Error(), "构建期使用") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateChallengeSemanticsRejectsEphemeralProbePodsForVCluster(t *testing.T) {
 	dir := t.TempDir()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
-runtime: vcluster
-title: Fix Deployment
-difficulty: easy
-tags:
-  - kubernetes
-description: |
-  demo
-`)
-	writeGeneratorTestFile(t, filepath.Join(dir, "verify.sh"), `#!/bin/bash
+	writeGeneratorSemanticChallenge(t, dir, "vcluster", `#!/bin/bash
 kubectl run verify-http-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://web
 `)
 
@@ -138,16 +151,7 @@ kubectl run verify-http-test --rm -i --restart=Never --image=busybox:1.36 -- wge
 
 func TestValidateChallengeSemanticsRejectsNaivePodHealthLoopForVCluster(t *testing.T) {
 	dir := t.TempDir()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
-runtime: vcluster
-title: Fix Deployment
-difficulty: easy
-tags:
-  - kubernetes
-description: |
-  demo
-`)
-	writeGeneratorTestFile(t, filepath.Join(dir, "verify.sh"), `#!/bin/bash
+	writeGeneratorSemanticChallenge(t, dir, "vcluster", `#!/bin/bash
 POD_LINES=$(kubectl get pods -n default -l app=web --no-headers 2>/dev/null)
 while IFS= read -r line; do
     STATUS=$(echo "$line" | awk '{print $3}')
@@ -171,16 +175,7 @@ done <<< "$POD_LINES"
 
 func TestValidateChallengeSemanticsRejectsNaivePodGrepFilterForVCluster(t *testing.T) {
 	dir := t.TempDir()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
-runtime: vcluster
-title: Fix Deployment
-difficulty: easy
-tags:
-  - kubernetes
-description: |
-  demo
-`)
-	writeGeneratorTestFile(t, filepath.Join(dir, "verify.sh"), `#!/bin/bash
+	writeGeneratorSemanticChallenge(t, dir, "vcluster", `#!/bin/bash
 POD_OUTPUT=$(kubectl get pods -n default -l app=web --no-headers)
 NOT_READY=$(echo "$POD_OUTPUT" | grep -v -E '1/1\s+Running' | wc -l || true)
 if [ "$NOT_READY" -ne 0 ]; then
@@ -199,6 +194,28 @@ fi
 	}
 }
 
+func TestJudgeResponsePassedUsesExplicitFinalVerdict(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     bool
+	}{
+		{name: "plain pass", response: "PASS", want: true},
+		{name: "plain failure", response: "FAIL: missing answer", want: false},
+		{name: "report with final pass", response: "检查完成。\n**Final Verdict: PASS**", want: true},
+		{name: "report with final failure", response: "PASS: metadata is present\n**Overall Verdict: FAIL**", want: false},
+		{name: "no explicit verdict", response: "All files appear correct.", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := judgeResponsePassed(tt.response); got != tt.want {
+				t.Fatalf("judgeResponsePassed(%q) = %t, want %t", tt.response, got, tt.want)
+			}
+		})
+	}
+}
+
 func writeGeneratorTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -207,4 +224,16 @@ func writeGeneratorTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeGeneratorSemanticChallenge(t *testing.T, dir, runtime, checkpointScript string) {
+	t.Helper()
+	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), "type: script\nruntime: "+runtime+"\ntitle: Fix Deployment\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\ncheckpoints:\n  - id: deployment-ready\n    title: Deployment ready\n    description: The deployment is ready\n    hint: hints/deployment-ready.md\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "problem.md"), "problem\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "solution.md"), "solution\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "hints", "deployment-ready.md"), "hint\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "checks", "checkpoints.sh"), checkpointScript)
+	writeGeneratorTestFile(t, filepath.Join(dir, "answer.sh"), "#!/bin/sh\n")
 }

@@ -136,7 +136,7 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 
 	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
 		current.Status.PodName = readyEnv.PodName
-		current.Status.Message = "running answer.sh and verify.sh"
+		current.Status.Message = "running answer.sh and checkpoint checks"
 	}); err != nil {
 		return fmt.Errorf("update verify task status: %w", err)
 	}
@@ -160,21 +160,32 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	}
 
 	stageStart = time.Now()
-	slog.Info("verify stage start", "phase", "run_verify", "verifyTaskID", cfg.VerifyTaskID, "pod", readyEnv.PodName)
-	verifyExit, verifyOut, err := client.ExecInPod(readyEnv.Namespace, readyEnv.PodName, "bash", "/verify.sh")
+	slog.Info("verify stage start", "phase", "run_checkpoints", "verifyTaskID", cfg.VerifyTaskID, "pod", readyEnv.PodName)
+	checkExit, checkOut, err := client.ExecInPod(readyEnv.Namespace, readyEnv.PodName, challenge.CheckpointCommand, "--json")
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("VERIFY_EXEC_FAILED", err.Error()))
+		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_EXEC_FAILED", err.Error()))
 	}
-	slog.Info("verify stage done", "phase", "run_verify", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "exitCode", verifyExit)
-	if verifyExit != 0 {
+	if checkExit != 0 {
+		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_PROTOCOL_FAILED", fmt.Sprintf("checkpoint runner exit=%d: %s", checkExit, truncateStr(checkOut, 4000))))
+	}
+	report, err := challenge.ParseCheckReport(checkOut, challengeEntry.Checkpoints)
+	if err != nil {
+		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_REPORT_INVALID", fmt.Sprintf("%v; output=%q", err, truncateStr(checkOut, 4000))))
+	}
+	slog.Info("verify stage done", "phase", "run_checkpoints", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "passed", report.Passed())
+	if !report.Passed() {
+		issues := make([]breakfixv1.VerifyIssue, 0)
+		for _, check := range report.Checks {
+			if check.Passed {
+				continue
+			}
+			issues = append(issues, breakfixv1.VerifyIssue{Code: "CHECKPOINT_" + strings.ToUpper(strings.ReplaceAll(check.ID, "-", "_")), Message: truncateStr(check.Summary+": "+check.Details, 4000)})
+		}
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, &breakfixv1.VerifyReport{
 			BuildPassed:  true,
 			AnswerPassed: true,
-			Summary:      fmt.Sprintf("verify.sh exit=%d", verifyExit),
-			Issues: []breakfixv1.VerifyIssue{{
-				Code:    "VERIFY_EXIT_NONZERO",
-				Message: truncateStr(verifyOut, 4000),
-			}},
+			Summary:      "one or more checkpoints did not pass after answer.sh",
+			Issues:       issues,
 		})
 	}
 
@@ -182,10 +193,10 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 		current.Status.Phase = breakfixv1.VerifyTaskVerified
 		current.Status.Message = "verification passed, waiting for publish"
 		current.Status.Report = &breakfixv1.VerifyReport{
-			BuildPassed:  true,
-			AnswerPassed: true,
-			VerifyPassed: true,
-			Summary:      "verification passed",
+			BuildPassed:       true,
+			AnswerPassed:      true,
+			CheckpointsPassed: true,
+			Summary:           "all checkpoints passed",
 		}
 	})
 	if err == nil {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"sync"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
@@ -29,13 +31,19 @@ type wsMsg struct {
 	Rows uint32 `json:"rows,omitempty"`
 }
 
-func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int) {
+func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, onOpen, onClose func()) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade", "err", err)
 		return
 	}
 	defer conn.Close()
+	if onOpen != nil {
+		onOpen()
+	}
+	if onClose != nil {
+		defer onClose()
+	}
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
 	stdinR, stdinW := io.Pipe()
@@ -72,24 +80,78 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	stopLease := make(chan struct{})
 	defer close(stopLease)
 	idleTTL := environmentIdleTTL(env, time.Duration(cooldownMin)*time.Minute)
-	drainGrace := environmentDrainGracePeriod(env, idleTTL)
 	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
 		go keepEnvironmentLeaseAlive(r.Context(), runtime, env.Name, idleTTL, stopLease)
 	}
-	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, env.Namespace, env.WorkspacePod, sessionName)
-
-	// On disconnect, mark the environment with an expiry deadline for auto-reclaim.
-	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
-		expiresAt := metav1.NewTime(time.Now().Add(drainGrace))
-		if updateErr := runtime.markDraining(r.Context(), env.Name, expiresAt); updateErr != nil {
-			slog.Error("failed to start draining", "err", updateErr, "environment", env.Name)
-		}
-		slog.Info("environment draining", "environment", env.Name, "expires_in", drainGrace.String())
-	}
+	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
 
 	if err != nil {
 		slog.Debug("pty session ended", "err", err)
 	}
+}
+
+// terminalConnectionTracker treats all terminal windows of one environment as
+// one interactive session. The settle delay prevents a tab switch from being
+// interpreted as an abandoned environment during WebSocket handover.
+type terminalConnectionTracker struct {
+	mu          sync.Mutex
+	active      map[string]int
+	pending     map[string]*time.Timer
+	settleDelay time.Duration
+}
+
+func newTerminalConnectionTracker(settleDelay time.Duration) *terminalConnectionTracker {
+	return &terminalConnectionTracker{
+		active:      make(map[string]int),
+		pending:     make(map[string]*time.Timer),
+		settleDelay: settleDelay,
+	}
+}
+
+func (t *terminalConnectionTracker) open(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if timer := t.pending[key]; timer != nil {
+		timer.Stop()
+		delete(t.pending, key)
+	}
+	t.active[key]++
+}
+
+func (t *terminalConnectionTracker) close(key string, onEmpty func()) {
+	t.mu.Lock()
+	if t.active[key] > 1 {
+		t.active[key]--
+		t.mu.Unlock()
+		return
+	}
+	delete(t.active, key)
+	if timer := t.pending[key]; timer != nil {
+		timer.Stop()
+	}
+	t.pending[key] = time.AfterFunc(t.settleDelay, func() {
+		t.mu.Lock()
+		if t.active[key] != 0 {
+			t.mu.Unlock()
+			return
+		}
+		delete(t.pending, key)
+		t.mu.Unlock()
+		onEmpty()
+	})
+	t.mu.Unlock()
+}
+
+var terminalWindowName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+func parseTerminalWindow(raw string) (string, error) {
+	if raw == "" {
+		return "shell-1", nil
+	}
+	if !terminalWindowName.MatchString(raw) {
+		return "", fmt.Errorf("invalid terminal window")
+	}
+	return raw, nil
 }
 
 func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeAdapter, environmentName string, idleTTL time.Duration, stop <-chan struct{}) {

@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +41,9 @@ func (r *VerifyTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	switch task.Status.Phase {
 	case "", breakfixv1.VerifyTaskPending:
+		if err := validateVerifyTaskSpec(&task); err != nil {
+			return r.failTask(ctx, &task, "INVALID_VERIFY_TASK", err.Error())
+		}
 		return r.createVerifyJob(ctx, &task)
 	case breakfixv1.VerifyTaskRunning:
 		return r.trackVerifyJob(ctx, &task)
@@ -52,6 +56,43 @@ func (r *VerifyTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	default:
 		return ctrl.Result{}, nil
 	}
+}
+
+func validateVerifyTaskSpec(task *breakfixv1.VerifyTask) error {
+	if task == nil {
+		return fmt.Errorf("verify task is nil")
+	}
+	if !challenge.ValidID(task.Spec.ChallengeID) {
+		return fmt.Errorf("invalid challenge id %q", task.Spec.ChallengeID)
+	}
+	if strings.TrimSpace(task.Spec.Submission.ID) == "" {
+		return fmt.Errorf("submission id is required")
+	}
+	if task.Spec.Source.Kind != "agent" {
+		return fmt.Errorf("invalid verify task source kind %q", task.Spec.Source.Kind)
+	}
+	if strings.TrimSpace(task.Spec.Source.Ref) == "" {
+		return fmt.Errorf("agent source requires a generation reference")
+	}
+	return nil
+}
+
+func (r *VerifyTaskReconciler) failTask(ctx context.Context, task *breakfixv1.VerifyTask, code, message string) (ctrl.Result, error) {
+	task.Status.Phase = breakfixv1.VerifyTaskFailed
+	task.Status.Message = strings.TrimSpace(message)
+	now := metav1.Now()
+	task.Status.CompletedAt = &now
+	task.Status.Report = &breakfixv1.VerifyReport{
+		Summary: task.Status.Message,
+		Issues: []breakfixv1.VerifyIssue{{
+			Code:    code,
+			Message: task.Status.Message,
+		}},
+	}
+	if _, err := r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, task); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *VerifyTaskReconciler) createVerifyJob(ctx context.Context, task *breakfixv1.VerifyTask) (ctrl.Result, error) {
@@ -75,12 +116,7 @@ func (r *VerifyTaskReconciler) createVerifyJob(ctx context.Context, task *breakf
 		Env:             env,
 		ImagePullPolicy: corev1.PullAlways,
 	}); err != nil {
-		task.Status.Phase = breakfixv1.VerifyTaskFailed
-		task.Status.Message = fmt.Sprintf("create verify job: %v", err)
-		now := metav1.Now()
-		task.Status.CompletedAt = &now
-		_, _ = r.K8s.UpdateVerifyTaskStatus(ctx, r.CRDNamespace, task)
-		return ctrl.Result{}, err
+		return r.failTask(ctx, task, "VERIFY_JOB_CREATE_FAILED", fmt.Sprintf("create verify job: %v", err))
 	}
 
 	task.Status.Phase = breakfixv1.VerifyTaskRunning
@@ -175,10 +211,7 @@ func (r *VerifyTaskReconciler) publish(ctx context.Context, task *breakfixv1.Ver
 		ch, err = r.materializeSubmission(task.Spec.ChallengeID, task.Spec.Submission.ID, task.Status.TempImage)
 	}
 	if err != nil {
-		if err := r.syncGenerationPublishFailure(ctx, task, err.Error()); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, err
+		return r.failTask(ctx, task, "PUBLISH_FAILED", fmt.Sprintf("publish challenge: %v", err))
 	}
 	if err := r.syncGenerationSuccess(ctx, task, ch); err != nil {
 		return ctrl.Result{}, err
@@ -262,6 +295,9 @@ func (r *VerifyTaskReconciler) syncGenerationFailure(ctx context.Context, task *
 	}
 	gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref)
 	if err != nil {
+		if k8sErrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	if gen.Status.Phase == breakfixv1.GenerationFailed {
@@ -275,22 +311,6 @@ func (r *VerifyTaskReconciler) syncGenerationFailure(ctx context.Context, task *
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-func (r *VerifyTaskReconciler) syncGenerationPublishFailure(ctx context.Context, task *breakfixv1.VerifyTask, msg string) error {
-	if task.Spec.Source.Kind != "agent" || strings.TrimSpace(task.Spec.Source.Ref) == "" {
-		return nil
-	}
-	gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref)
-	if err != nil {
-		return err
-	}
-	gen.Status.Phase = breakfixv1.GenerationFailed
-	gen.Status.Message = fmt.Sprintf("publish failed: %s", msg)
-	now := metav1.Now()
-	gen.Status.CompletedAt = &now
-	_, err = r.K8s.UpdateGenerationStatus(ctx, r.CRDNamespace, gen)
-	return err
 }
 
 func generationFailureMessage(task *breakfixv1.VerifyTask) string {
@@ -341,6 +361,9 @@ func (r *VerifyTaskReconciler) syncGenerationSuccess(ctx context.Context, task *
 	}
 	gen, err := r.K8s.GetGeneration(ctx, r.CRDNamespace, task.Spec.Source.Ref)
 	if err != nil {
+		if k8sErrors.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 	if gen.Status.Phase == breakfixv1.GenerationSucceeded && gen.Status.Challenge != nil {
@@ -386,33 +409,35 @@ func generatorImage(registryAddr string) string {
 }
 
 func copyDirForPublish(src, dst string) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, 0755); err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0755)
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("publish does not allow symlink %s", path)
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			if err := os.MkdirAll(dstPath, info.Mode().Perm()); err != nil {
-				return err
-			}
-			continue
+		dstPath := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode().Perm())
 		}
-		data, err := os.ReadFile(srcPath)
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("publish does not allow non-regular file %s", path)
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dstPath, data, info.Mode().Perm()); err != nil {
-			return err
-		}
-	}
-	return nil
+		return os.WriteFile(dstPath, data, info.Mode().Perm())
+	})
 }

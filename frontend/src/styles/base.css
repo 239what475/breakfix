@@ -1,0 +1,137 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app,
+.app-root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #a8cae0;
+  outline-offset: 2px;
+}
+.app-root {
+  background: var(--wash);
+}
+.icon-button {
+  border: 0;
+  border-radius: 4px;
+  padding: 7px;
+  color: var(--muted);
+  background: transparent;
+  font:
+    500 11px "DM Mono",
+    monospace;
+}
+.icon-button:hover {
+  color: var(--ink);
+  background: #e8eeea;
+}
+.compact-button,
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border-radius: 4px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.compact-button {
+  border: 1px solid #cbd6cf;
+  color: var(--ink);
+  background: #fff;
+}
+.compact-button:hover {
+  background: #f1f5f2;
+}
+.primary-button {
+  border: 1px solid #19679d;
+  color: #fff;
+  background: var(--blue);
+}
+.primary-button:hover {
+  background: #1d6699;
+}
+.text-button {
+  border: 0;
+  padding: 5px;
+  color: var(--blue);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--blue);
+  font:
+    11px "DM Mono",
+    monospace;
+  text-transform: uppercase;
+}
+.difficulty {
+  display: inline-flex;
+  width: max-content;
+  padding: 2px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font:
+    10px "DM Mono",
+    monospace;
+}
+.difficulty.easy {
+  color: var(--green);
+  background: #e0f1e9;
+}
+.difficulty.medium {
+  color: var(--amber);
+  background: #f8eddb;
+}
+.difficulty.hard {
+  color: var(--red);
+  background: #f7e6e2;
+}
+.toast {
+  position: fixed;
+  z-index: 20;
+  top: 14px;
+  left: 50%;
+  max-width: min(560px, calc(100vw - 28px));
+  padding: 10px 14px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 28px #28383220;
+  font-size: 13px;
+}
+.toast.error {
+  border-color: #e6b5ad;
+  color: var(--red);
+}
+.workspace-toast {
+  top: auto;
+  bottom: 18px;
+}

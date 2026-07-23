@@ -1,0 +1,88 @@
+import type {
+  Challenge,
+  ChallengeContent,
+  ChallengeDraft,
+  CheckpointResult,
+  GenerateDraftResponse,
+  GenerationJobResponse,
+} from "./types";
+
+const base = "/api";
+
+export function token(): string | null {
+  return localStorage.getItem("token");
+}
+
+export function setToken(value: string) {
+  localStorage.setItem("token", value);
+}
+
+export function clearToken() {
+  localStorage.removeItem("token");
+}
+
+export function isLoggedIn() {
+  return token() !== null;
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const currentToken = token();
+  if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+
+  const response = await fetch(base + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new Error(data.error || `Request failed (${response.status})`);
+  return data as T;
+}
+
+export const api = {
+  register: (username: string, password: string) =>
+    request<{ totp_secret: string; totp_url: string }>(
+      "POST",
+      "/auth/register",
+      { username, password },
+    ),
+  login: (username: string, password: string, totp_code: string) =>
+    request<{ token: string; user_id: string; name: string }>(
+      "POST",
+      "/auth/login",
+      { username, password, totp_code },
+    ),
+  listChallenges: () =>
+    request<{ challenges: Challenge[] }>("GET", "/challenges"),
+  getChallengeContent: (id: string) =>
+    request<ChallengeContent>("GET", `/challenges/${id}/content`),
+  getChallengeProgress: (id: string) =>
+    request<{ checks: CheckpointResult[] }>(
+      "GET",
+      `/challenges/${id}/progress`,
+    ),
+  startChallenge: (id: string) =>
+    request<{ challenge_title: string }>("POST", `/challenges/${id}/start`),
+  resetChallenge: (id: string) =>
+    request<{ challenge_title: string }>("POST", `/challenges/${id}/reset`),
+  stopChallenge: (id: string) =>
+    request<{ stopped: boolean }>("POST", `/challenges/${id}/stop`),
+  closeTerminalWindow: (id: string, window: string) =>
+    request<{ closed: boolean }>(
+      "DELETE",
+      `/challenges/${id}/terminals/${window}`,
+    ),
+  reviewGenerationDraft: (topic: string) =>
+    request<GenerateDraftResponse>("POST", "/generate/draft", { topic }),
+  createGenerationJob: (draft: ChallengeDraft) =>
+    request<GenerationJobResponse>("POST", "/generate", { draft }),
+  getGenerationJob: (id: string) =>
+    request<GenerationJobResponse>("GET", `/generate/jobs/${id}`),
+};
