@@ -4,20 +4,15 @@ import type { Challenge } from "../../api/types";
 
 type Notice = (message: string, kind?: "error" | "info") => void;
 
-// Owns the catalog selection and the one active workspace. The app shell only
-// composes feature views and dialogs; it does not implement environment flow.
+// Owns challenge loading and the one visible workspace. Catalog filtering and
+// scroll state stay in the catalog page while it is hidden behind a workspace.
 export function useChallengeSession(notify: Notice) {
-  const loggedIn = ref(isLoggedIn());
-  const loading = ref(false);
-  const challenges = ref<Challenge[]>([]);
-  const selectedId = ref<string | null>(null);
-  const workspaceId = ref<string | null>(null);
-
-  const selected = computed(
-    () =>
-      challenges.value.find((challenge) => challenge.id === selectedId.value) ??
-      null,
-  );
+	const loggedIn = ref(isLoggedIn());
+	const loading = ref(false);
+	const challenges = ref<Challenge[]>([]);
+	const workspaceId = ref<string | null>(null);
+	const startingId = ref<string | null>(null);
+	const pendingStartId = ref<string | null>(null);
   const workspace = computed(
     () =>
       challenges.value.find(
@@ -28,13 +23,7 @@ export function useChallengeSession(notify: Notice) {
   async function loadChallenges(silent = false) {
     loading.value = true;
     try {
-      challenges.value = (await api.listChallenges()).challenges ?? [];
-      if (
-        !selectedId.value ||
-        !challenges.value.some((challenge) => challenge.id === selectedId.value)
-      ) {
-        selectedId.value = challenges.value[0]?.id ?? null;
-      }
+		challenges.value = (await api.listChallenges()).challenges ?? [];
     } catch (err) {
       if (!silent) {
         notify(
@@ -47,61 +36,71 @@ export function useChallengeSession(notify: Notice) {
     }
   }
 
-  function authenticated(name: string) {
-    loggedIn.value = true;
-    notify(`Signed in as ${name}`);
-    void loadChallenges();
-  }
+	function authenticated(name: string) {
+		loggedIn.value = true;
+		notify(`Signed in as ${name}`);
+		void (async () => {
+			await loadChallenges();
+			const challengeID = pendingStartId.value;
+			pendingStartId.value = null;
+			if (challengeID) await activateChallenge(challengeID);
+		})();
+	}
 
   function logout() {
-    clearToken();
-    loggedIn.value = false;
-    workspaceId.value = null;
-    notify("Signed out");
-    void loadChallenges(true);
-  }
+		clearToken();
+		loggedIn.value = false;
+		workspaceId.value = null;
+		pendingStartId.value = null;
+		notify("Signed out");
+		void loadChallenges(true);
+	}
 
-  async function openWorkspace(openAuth: () => void) {
-    if (!loggedIn.value) {
-      openAuth();
-      return;
-    }
-    if (!selected.value) return;
-    try {
-      await api.startChallenge(selected.value.id);
-      workspaceId.value = selected.value.id;
-      await loadChallenges(true);
-    } catch (err) {
-      notify(
-        err instanceof Error ? err.message : "Unable to start challenge",
-        "error",
-      );
-    }
-  }
+	async function activateChallenge(id: string) {
+		startingId.value = id;
+		try {
+			await api.startChallenge(id);
+			workspaceId.value = id;
+			await loadChallenges(true);
+			return true;
+		} catch (err) {
+			notify(
+				err instanceof Error ? err.message : "Unable to start challenge",
+				"error",
+			);
+			return false;
+		} finally {
+			startingId.value = null;
+		}
+	}
 
-  function closeWorkspace() {
-    workspaceId.value = null;
-  }
+	async function startChallenge(id: string, openAuth: () => void) {
+		if (!loggedIn.value) {
+			pendingStartId.value = id;
+			openAuth();
+			return false;
+		}
+		return activateChallenge(id);
+	}
 
-  function selectChallenge(id: string) {
-    selectedId.value = id;
-  }
+	function closeWorkspace() {
+		workspaceId.value = null;
+		void loadChallenges(true);
+	}
 
-  watch(loggedIn, () => void loadChallenges(true));
+	watch(loggedIn, () => void loadChallenges(true));
   onMounted(() => void loadChallenges());
 
   return {
     loggedIn,
-    loading,
-    challenges,
-    selectedId,
-    workspace,
-    selected,
-    loadChallenges,
-    authenticated,
-    logout,
-    openWorkspace,
-    closeWorkspace,
-    selectChallenge,
-  };
+		loading,
+		challenges,
+		workspace,
+		startingId,
+		loadChallenges,
+		authenticated,
+		logout,
+		startChallenge,
+		closeWorkspace,
+	};
 }

@@ -227,26 +227,33 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		return
 	}
 
-	solved := make(map[string]bool)
-	active := make(map[string]bool)
+	completed := make(map[string]struct{})
+	active := make(map[string]activeEnvironment)
 	if user != nil {
+		var err error
+		completed, err = h.db.ListCompletedChallengeIDs(c.Request.Context(), user.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+			return
+		}
 		envs, err := h.listActiveEnvironments(c.Request.Context(), user.ID)
-		if err == nil {
-			for _, env := range envs {
-				if env.Phase == breakfixv1.EnvironmentCompleted {
-					solved[env.ChallengeRef] = true
-				}
-				if env.Phase == breakfixv1.EnvironmentReady || env.Phase == breakfixv1.EnvironmentDraining {
-					active[env.ChallengeRef] = true
-				}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("list active environments: %v", err)})
+			return
+		}
+		for _, env := range envs {
+			if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
+				continue
+			}
+			current, exists := active[env.ChallengeRef]
+			if !exists || passedCheckpointCount(env.Checkpoints) > passedCheckpointCount(current.Checkpoints) {
+				active[env.ChallengeRef] = env
 			}
 		}
 	}
 
 	var summaries []api.ChallengeSummary
 	for _, ch := range challenges {
-		solvedVal := solved[ch.ID]
-		activeVal := active[ch.ID]
 		s := api.ChallengeSummary{
 			Id:          &ch.ID,
 			Title:       &ch.Title,
@@ -254,14 +261,47 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Runtime:     challengeSummaryRuntime(ch.Runtime),
 			Difficulty:  &ch.Difficulty,
 			Description: &ch.Description,
-			Solved:      &solvedVal,
-			Active:      &activeVal,
+		}
+		publishedAt := ch.PublishedAt.UTC()
+		s.PublishedAt = &publishedAt
+		if user != nil {
+			_, solved := completed[ch.ID]
+			solvedVal := solved
+			s.Solved = &solvedVal
+			activeEnv, isActive := active[ch.ID]
+			activeVal := isActive
+			s.Active = &activeVal
+			if isActive {
+				progress := checkpointProgressSummary(activeEnv.Checkpoints, len(ch.Checkpoints))
+				s.Progress = &progress
+			}
 		}
 		tags := append([]string{}, ch.Tags...)
 		s.Tags = &tags
 		summaries = append(summaries, s)
 	}
 	c.JSON(http.StatusOK, api.ChallengeList{Challenges: &summaries})
+}
+
+func passedCheckpointCount(status *breakfixv1.CheckpointStatus) int {
+	if status == nil {
+		return 0
+	}
+	passed := 0
+	for _, result := range status.Results {
+		if result.Passed {
+			passed++
+		}
+	}
+	return passed
+}
+
+func checkpointProgressSummary(status *breakfixv1.CheckpointStatus, total int) api.CheckpointProgressSummary {
+	passed := passedCheckpointCount(status)
+	if passed > total {
+		passed = total
+	}
+	return api.CheckpointProgressSummary{Passed: &passed, Total: &total}
 }
 
 func (h *Handler) GetChallengeContent(c *gin.Context, id string) {

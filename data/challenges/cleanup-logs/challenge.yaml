@@ -9,6 +9,7 @@ tags:
   - tar
   - shell
 image: cleanup-logs:v1
+published_at: 2026-07-23T07:33:11Z
 
 description: |
   服务器磁盘空间不足，/var/log 下有大量历史日志文件。

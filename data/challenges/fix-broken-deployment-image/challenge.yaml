@@ -9,6 +9,7 @@ tags:
   - deployment
   - image
 image: fix-broken-deployment-image:v1
+published_at: 2026-07-06T09:36:06Z
 
 description: |
   你正在一个带有 kubeconfig 的工作容器中排查 Kubernetes 环境。

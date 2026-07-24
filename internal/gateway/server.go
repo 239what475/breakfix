@@ -23,6 +23,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	h.StartAssistantCleanup(context.Background())
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
+	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
@@ -36,7 +37,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 
 	// The catalog is public read-only. Starting, viewing full content, and every
 	// environment operation below remain bound to an authenticated user.
-	router.GET("/api/challenges", h.ListChallenges)
+	router.GET("/api/challenges", optionalJWTMW, h.ListChallenges)
 	router.POST("/api/challenges/:id/start", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

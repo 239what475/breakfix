@@ -499,10 +499,25 @@ components:
             type: string
         description:
           type: string
+        published_at:
+          type: string
+          format: date-time
         solved:
           type: boolean
         active:
           type: boolean
+        progress:
+          $ref: "#/components/schemas/CheckpointProgressSummary"
+
+    CheckpointProgressSummary:
+      type: object
+      properties:
+        passed:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
 
     ChallengeList:
       type: object

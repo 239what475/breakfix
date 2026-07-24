@@ -21,12 +21,13 @@ const breakfixInitSentinel = "/var/lib/breakfix/.initialized"
 
 type ContainerEnvironmentReconciler struct {
 	client.Client
-	K8s           *k8s.Client
-	RegistryAddr  string
-	ChallengesDir string
-	NS            string
-	CRDNamespace  string
-	Cooldown      time.Duration
+	K8s                *k8s.Client
+	RegistryAddr       string
+	ChallengesDir      string
+	NS                 string
+	CRDNamespace       string
+	Cooldown           time.Duration
+	CompletionRecorder CompletionRecorder
 }
 
 func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -129,7 +130,11 @@ func (r *ContainerEnvironmentReconciler) evaluateCheckpoints(ctx context.Context
 	}
 	if report.Passed() {
 		slog.Info("environment checkpoints completed", "environment", env.Name)
-		setEnvironmentCompleted(&env.Status)
+		completedAt := time.Now().UTC()
+		if err := recordEnvironmentCompletion(ctx, r.CompletionRecorder, env, completedAt); err != nil {
+			return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
+		}
+		setEnvironmentCompletedAt(&env.Status, completedAt)
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -216,6 +221,9 @@ func (rt containerEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, e
 }
 
 func (rt containerEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	if err := recordEnvironmentCompletion(ctx, rt.r.CompletionRecorder, env, completionTime(env.CommonStatus())); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
+	}
 	return rt.r.checkCooldown(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 

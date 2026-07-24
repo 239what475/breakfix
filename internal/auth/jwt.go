@@ -32,36 +32,61 @@ func GenerateJWT(userID, userName string, secret []byte) (string, error) {
 func JWTMiddleware(secret []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
-			return
-		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
-			return
-		}
-
-		token, err := jwt.ParseWithClaims(parts[1], &Claims{}, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		claims, err := claimsFromAuthorization(authHeader, secret)
+		if err != nil {
+			if authHeader == "" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
+				return
 			}
-			return secret, nil
-		})
-		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
-			return
-		}
-
-		claims, ok := token.Claims.(*Claims)
-		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 			return
 		}
-
-		c.Set("user_id", claims.UserID)
-		c.Set("user_name", claims.UserName)
+		setClaims(c, claims)
 		c.Next()
 	}
+}
+
+// OptionalJWTMiddleware attaches an authenticated identity when a valid bearer
+// token is present, while preserving public access for anonymous catalog reads.
+// Invalid optional credentials are treated as anonymous because the route has
+// no privileged behavior without a verified identity.
+func OptionalJWTMiddleware(secret []byte) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" {
+			if claims, err := claimsFromAuthorization(authHeader, secret); err == nil {
+				setClaims(c, claims)
+			}
+		}
+		c.Next()
+	}
+}
+
+func claimsFromAuthorization(authHeader string, secret []byte) (*Claims, error) {
+	if authHeader == "" {
+		return nil, fmt.Errorf("missing authorization header")
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return nil, fmt.Errorf("invalid authorization format")
+	}
+	token, err := jwt.ParseWithClaims(parts[1], &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return secret, nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid or expired token")
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+	return claims, nil
+}
+
+func setClaims(c *gin.Context, claims *Claims) {
+	c.Set("user_id", claims.UserID)
+	c.Set("user_name", claims.UserName)
 }

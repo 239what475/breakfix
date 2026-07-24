@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +23,7 @@ type Entry struct {
 	Tags        []string
 	Description string
 	Image       string
+	PublishedAt time.Time
 	Checkpoints []Checkpoint
 	Dir         string
 }
@@ -35,6 +37,7 @@ type Spec struct {
 	Tags        []string     `yaml:"tags"`
 	Description string       `yaml:"description"`
 	Image       string       `yaml:"image"`
+	PublishedAt time.Time    `yaml:"published_at,omitempty"`
 	Checkpoints []Checkpoint `yaml:"checkpoints"`
 }
 
@@ -108,7 +111,11 @@ func LoadDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(spec.ID) == "" {
 		return nil, fmt.Errorf("challenge id is required")
 	}
-	return entryFromSpec(dir, spec), nil
+	entry := entryFromSpec(dir, spec)
+	if entry.PublishedAt.IsZero() {
+		return nil, fmt.Errorf("challenge published_at is required")
+	}
+	return entry, nil
 }
 
 func LoadSubmissionDir(dir string) (*Entry, error) {
@@ -150,6 +157,7 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 		Tags:        append([]string{}, spec.Tags...),
 		Description: spec.Description,
 		Image:       spec.Image,
+		PublishedAt: spec.PublishedAt,
 		Checkpoints: append([]Checkpoint{}, spec.Checkpoints...),
 		Dir:         dir,
 	}

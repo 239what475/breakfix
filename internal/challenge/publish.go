@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,11 +39,20 @@ func PromoteSubmission(dataDir, challengesDir, submissionID, challengeID, image 
 // catalog challenge. The source directory is never modified: platform-owned
 // identity and image metadata are written only to Materialize's staging copy.
 func PromoteDirectory(challengesDir, sourceDir, challengeID, image string) (*Entry, error) {
+	return PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, time.Now().UTC())
+}
+
+// PromoteDirectoryAt has the same publication behavior as PromoteDirectory,
+// with an explicit platform publication time for deterministic callers.
+func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image string, publishedAt time.Time) (*Entry, error) {
 	if !ValidID(challengeID) {
 		return nil, fmt.Errorf("invalid challenge id %q", challengeID)
 	}
 	if strings.TrimSpace(image) == "" {
 		return nil, fmt.Errorf("published image is empty")
+	}
+	if publishedAt.IsZero() {
+		return nil, fmt.Errorf("published time is required")
 	}
 	if _, err := ValidateSubmissionDir(sourceDir); err != nil {
 		return nil, fmt.Errorf("validate verified artifact: %w", err)
@@ -51,11 +61,11 @@ func PromoteDirectory(challengesDir, sourceDir, challengeID, image string) (*Ent
 		if err := CopyRegularFiles(sourceDir, staging); err != nil {
 			return err
 		}
-		return writePublishedManifest(staging, challengeID, image)
+		return writePublishedManifest(staging, challengeID, image, publishedAt)
 	})
 }
 
-func writePublishedManifest(dir, challengeID, image string) error {
+func writePublishedManifest(dir, challengeID, image string, publishedAt time.Time) error {
 	manifestPath := filepath.Join(dir, "challenge.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -67,6 +77,7 @@ func writePublishedManifest(dir, challengeID, image string) error {
 	}
 	manifest.ID = challengeID
 	manifest.Image = image
+	manifest.PublishedAt = publishedAt.UTC()
 	if strings.TrimSpace(manifest.Type) == "" {
 		manifest.Type = TypeScript
 	}

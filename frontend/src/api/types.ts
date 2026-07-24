@@ -6,8 +6,15 @@ export interface Challenge {
   difficulty: "easy" | "medium" | "hard";
   tags: string[];
   description: string;
-  solved: boolean;
-  active: boolean;
+  published_at: string;
+  solved?: boolean;
+  active?: boolean;
+  progress?: CheckpointProgressSummary;
+}
+
+export interface CheckpointProgressSummary {
+  passed: number;
+  total: number;
 }
 
 export interface Checkpoint {

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestListAndGet(t *testing.T) {
@@ -13,7 +14,7 @@ func TestListAndGet(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\ntitle: Demo\n"))
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
 	writeChallengeAssets(t, dir)
 
@@ -26,6 +27,9 @@ func TestListAndGet(t *testing.T) {
 	}
 	if challenges[0].ID != "demo-task" {
 		t.Fatalf("unexpected challenge id %q", challenges[0].ID)
+	}
+	if got := challenges[0].PublishedAt; !got.Equal(time.Date(2026, time.July, 23, 7, 33, 11, 0, time.UTC)) {
+		t.Fatalf("unexpected published time %s", got)
 	}
 
 	challenge, err := Get(root, "demo-task")
@@ -43,7 +47,7 @@ func TestListAndGet(t *testing.T) {
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
 	_, err := Materialize(root, "fresh-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\ntitle: Fresh\n"))
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
 		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
 		writeChallengeAssets(t, dst)
@@ -88,7 +92,7 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 
 func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 	root := t.TempDir()
-	manifest := validManifest("id: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\n")
+	manifest := validManifest("id: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\npublished_at: 2026-07-24T08:00:00Z\n")
 	writeFile(t, filepath.Join(root, "challenge.yaml"), strings.Replace(manifest, "runtime: container", "runtime: vcluster", 1))
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
@@ -100,6 +104,15 @@ func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 	}
 	if entry.Runtime != "vcluster" {
 		t.Fatalf("unexpected runtime %q", entry.Runtime)
+	}
+}
+
+func TestLoadDirRejectsMissingPublishedTime(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("id: unpublished\ntitle: Unpublished\n"))
+
+	if _, err := LoadDir(root); err == nil {
+		t.Fatal("expected published challenge without published_at to fail")
 	}
 }
 
@@ -131,12 +144,16 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	published, err := PromoteDirectory(filepath.Join(root, "challenges"), source, "opaque-challenge", "registry.example/verify:latest")
+	publishedAt := time.Date(2026, time.July, 24, 8, 15, 0, 0, time.UTC)
+	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", "registry.example/verify:latest", publishedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if published.ID != "opaque-challenge" || published.Image != "registry.example/verify:latest" {
 		t.Fatalf("unexpected published entry: %#v", published)
+	}
+	if !published.PublishedAt.Equal(publishedAt) {
+		t.Fatalf("published time = %s, want %s", published.PublishedAt, publishedAt)
 	}
 	sourceEntry, err := LoadSubmissionDir(source)
 	if err != nil {
@@ -144,6 +161,9 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	}
 	if sourceEntry.ID != sourceBefore.ID || sourceEntry.Image != sourceBefore.Image {
 		t.Fatalf("platform fields leaked into immutable source artifact: %#v", sourceEntry)
+	}
+	if !sourceEntry.PublishedAt.IsZero() {
+		t.Fatalf("published timestamp leaked into immutable source artifact: %s", sourceEntry.PublishedAt)
 	}
 }
 

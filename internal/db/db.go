@@ -154,6 +154,18 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS assistant_sessions_environment_uid
 		ON assistant_sessions(environment_uid);
 	`,
+	// v9: completion history outlives the ephemeral Environment CRD.
+	`
+	CREATE TABLE IF NOT EXISTS user_challenge_progress (
+		user_id         TEXT NOT NULL,
+		challenge_id    TEXT NOT NULL,
+		completed_at    TEXT NOT NULL,
+		environment_uid TEXT NOT NULL,
+		PRIMARY KEY (user_id, challenge_id)
+	);
+	CREATE INDEX IF NOT EXISTS user_challenge_progress_user
+		ON user_challenge_progress(user_id);
+	`,
 }
 
 func (d *DB) migrate() error {

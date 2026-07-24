@@ -27,15 +27,16 @@ const vclusterEnvironmentFinalizer = "breakfix.dev/vcluster-environment-cleanup"
 
 type VClusterEnvironmentReconciler struct {
 	client.Client
-	K8s           *k8s.Client
-	VCluster      *vclustercli.Client
-	ChartRepo     string
-	ChartVersion  string
-	RegistryAddr  string
-	ChallengesDir string
-	NS            string
-	CRDNamespace  string
-	Cooldown      time.Duration
+	K8s                *k8s.Client
+	VCluster           *vclustercli.Client
+	ChartRepo          string
+	ChartVersion       string
+	RegistryAddr       string
+	ChallengesDir      string
+	NS                 string
+	CRDNamespace       string
+	Cooldown           time.Duration
+	CompletionRecorder CompletionRecorder
 }
 
 func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -198,7 +199,11 @@ func (r *VClusterEnvironmentReconciler) evaluateCheckpoints(ctx context.Context,
 	}
 	if report.Passed() {
 		slog.Info("environment checkpoints completed", "environment", env.Name)
-		setEnvironmentCompleted(&env.Status.CommonEnvironmentStatus)
+		completedAt := time.Now().UTC()
+		if err := recordEnvironmentCompletion(ctx, r.CompletionRecorder, env, completedAt); err != nil {
+			return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
+		}
+		setEnvironmentCompletedAt(&env.Status.CommonEnvironmentStatus, completedAt)
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -605,6 +610,9 @@ func (rt vclusterEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, en
 }
 
 func (rt vclusterEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
+	if err := recordEnvironmentCompletion(ctx, rt.r.CompletionRecorder, env, completionTime(env.CommonStatus())); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
+	}
 	return rt.r.checkCooldown(ctx, env.(*breakfixv1.VClusterEnvironment))
 }
 

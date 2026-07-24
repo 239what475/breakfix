@@ -46,10 +46,14 @@ async function totpCode(page: Page, secret: string): Promise<string> {
   }, secret);
 }
 
-async function registerAndLogin(page: Page) {
+async function registerAndLogin(page: Page, openRegistration = true) {
   const username = `workspace-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  await page.goto("/");
-  await page.getByRole("button", { name: "Register", exact: true }).click();
+  if (openRegistration) {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Register", exact: true }).click();
+  } else {
+    await page.getByRole("dialog").getByRole("button", { name: "Create one", exact: true }).click();
+  }
   await page.locator('input[autocomplete="username"]').fill(username);
   await page
     .locator('input[autocomplete="new-password"]')
@@ -69,6 +73,18 @@ async function registerAndLogin(page: Page) {
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Sign in", exact: true })
+    .click();
+}
+
+function challengeCard(page: Page, title: string) {
+  return page.locator("article.challenge-card", {
+    has: page.getByRole("heading", { name: title, exact: true }),
+  });
+}
+
+async function startChallengeFromCatalog(page: Page, title: string) {
+  await challengeCard(page, title)
+    .getByRole("button", { name: "Start challenge", exact: true })
     .click();
 }
 
@@ -122,22 +138,48 @@ async function waitForVerifiedRevision(page: Page) {
   ).toBeVisible({ timeout: 50 * 60_000 });
 }
 
-test("guest can browse the public catalog without page overflow", async ({
+test("guest can filter, sort, and browse the public catalog without page overflow", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  const contentRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/content")) contentRequests.push(request.url());
+  });
   await page.goto("/");
 
-  await expect(
-    page.getByRole("button", { name: /批量压缩旧日志/ }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /批量压缩旧日志/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "批量压缩旧日志", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Sign in to start", exact: true }),
-  ).toBeVisible();
+  await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+  await expect(challengeCard(page, "修复错误的 Deployment 镜像")).toBeVisible();
+  expect(contentRequests).toEqual([]);
+
+  await page.getByRole("textbox", { name: "Search challenges" }).fill("deployment");
+  await expect(challengeCard(page, "批量压缩旧日志")).toHaveCount(0);
+  await expect(challengeCard(page, "修复错误的 Deployment 镜像")).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Search challenges" }).fill("");
+  await page.locator(".catalog-filters").getByLabel("linux", { exact: true }).check();
+  await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+  await expect(challengeCard(page, "修复错误的 Deployment 镜像")).toHaveCount(0);
+  await page.locator(".catalog-filters").getByLabel("VCluster", { exact: true }).check();
+  await expect(page.getByText("No challenges match these filters.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters", exact: true }).click();
+
+  await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+  await page.getByLabel("Sort challenges").selectOption("oldest");
+  await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([
+    "修复错误的 Deployment 镜像",
+    "批量压缩旧日志",
+  ]);
+  await page.getByLabel("Sort challenges").selectOption("newest");
+  await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([
+    "批量压缩旧日志",
+    "修复错误的 Deployment 镜像",
+  ]);
+
+  await challengeCard(page, "批量压缩旧日志")
+    .getByRole("button", { name: "Start challenge", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expectViewportWithoutPageOverflow(page);
 });
 
@@ -145,10 +187,56 @@ test("narrow catalog has no overflow", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  await expect(
-    page.getByRole("button", { name: /批量压缩旧日志/ }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Find a challenge", exact: true })).toBeVisible();
   await expectViewportWithoutPageOverflow(page);
+});
+
+liveTest("catalog preserves completion after the challenge environment is stopped", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await registerAndLogin(page);
+
+  await startChallengeFromCatalog(page, "批量压缩旧日志");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({
+    timeout: 90_000,
+  });
+  await page.getByTitle("Back to challenges").click();
+  const cleanupCard = challengeCard(page, "批量压缩旧日志");
+  const activeState = cleanupCard.locator(".challenge-state.in-progress");
+  await expect(activeState).toContainText("In progress", {
+    timeout: 30_000,
+  });
+  await expect(activeState).toContainText(/\d\/3 checkpoints/);
+
+  await startChallengeFromCatalog(page, "批量压缩旧日志");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({
+    timeout: 90_000,
+  });
+  await runAnswer(page);
+  await expect(
+    page.getByText("All checkpoints complete", { exact: true }),
+  ).toBeVisible({ timeout: 60_000 });
+
+  await page.getByTitle("Back to challenges").click();
+  await expect(
+    cleanupCard.getByText("Completed", { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  await page.evaluate(async () => {
+    const response = await fetch("/api/challenges/cleanup-logs/stop", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+      },
+    });
+    if (!response.ok) throw new Error(await response.text());
+  });
+  await page.reload();
+  await expect(
+    challengeCard(page, "批量压缩旧日志").getByText("Completed", { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
 });
 
 liveTest(
@@ -156,12 +244,10 @@ liveTest(
   async ({ page }) => {
     test.setTimeout(10 * 60_000);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await registerAndLogin(page);
-
-    await page.getByRole("button", { name: /批量压缩旧日志/ }).click();
-    await page
-      .getByRole("button", { name: "Start challenge", exact: true })
-      .click();
+    await page.goto("/");
+    await startChallengeFromCatalog(page, "批量压缩旧日志");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await registerAndLogin(page, false);
     await expect(page.getByText("Connected", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
@@ -200,10 +286,7 @@ liveTest(
     await expect(page.getByRole("textbox", { name: "Assistant message" })).toBeVisible();
 
     await page.reload();
-    await page.getByRole("button", { name: /批量压缩旧日志/ }).click();
-    await page
-      .getByRole("button", { name: /^(Start|Resume) challenge$/ })
-      .click();
+    await startChallengeFromCatalog(page, "批量压缩旧日志");
     await expect(page.getByText("Connected", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
@@ -249,10 +332,7 @@ liveTest(
 
     await page.getByRole("button", { name: "Reset", exact: true }).click();
     await page.reload();
-    await page.getByRole("button", { name: /批量压缩旧日志/ }).click();
-    await page
-      .getByRole("button", { name: /^(Start|Resume) challenge$/ })
-      .click();
+    await startChallengeFromCatalog(page, "批量压缩旧日志");
     await expect(page.getByText("Connected", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
@@ -312,6 +392,11 @@ liveTest(
       page.getByText("All checkpoints complete", { exact: true }),
     ).toBeVisible({ timeout: 45_000 });
 
+    await page.getByTitle("Back to challenges").click();
+    await expect(
+      challengeCard(page, "批量压缩旧日志").getByText("Completed", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+
     await page.evaluate(async () => {
       const response = await fetch("/api/challenges/cleanup-logs/stop", {
         method: "POST",
@@ -321,6 +406,10 @@ liveTest(
       });
       if (!response.ok) throw new Error(await response.text());
     });
+    await page.reload();
+    await expect(
+      challengeCard(page, "批量压缩旧日志").getByText("Completed", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
   },
 );
 
@@ -329,12 +418,7 @@ liveTest("vcluster workspace reports checkpoint progress", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await registerAndLogin(page);
 
-  await page
-    .getByRole("button", { name: /修复错误的 Deployment 镜像/ })
-    .click();
-  await page
-    .getByRole("button", { name: "Start challenge", exact: true })
-    .click();
+  await startChallengeFromCatalog(page, "修复错误的 Deployment 镜像");
   await expect(page.getByText("Connected", { exact: true })).toBeVisible({
     timeout: 5 * 60_000,
   });
@@ -495,13 +579,11 @@ generationLiveTest(
     await page
       .getByRole("button", { name: "查看已发布题目", exact: true })
       .click();
-    await expect(page.locator(".catalog-detail-actions")).toBeVisible({
+    await expect(page.locator("article.challenge-card").first()).toBeVisible({
       timeout: 35 * 60_000,
     });
 
-    await page
-      .getByRole("button", { name: "Start challenge", exact: true })
-      .click();
+    await page.locator("article.challenge-card").first().getByRole("button", { name: "Start challenge", exact: true }).click();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible({
       timeout: 5 * 60_000,
     });

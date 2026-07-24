@@ -1,12 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
@@ -131,7 +133,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
 	challengeDir := filepath.Join(challengesDir, "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
@@ -182,7 +184,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
@@ -214,6 +216,76 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	got := (*resp.Challenges)[0]
 	if got.Runtime == nil || *got.Runtime != "vcluster" {
 		t.Fatalf("expected runtime vcluster, got %#v", got.Runtime)
+	}
+	if got.PublishedAt == nil || !got.PublishedAt.Equal(time.Date(2026, time.July, 24, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected published time: %#v", got.PublishedAt)
+	}
+	if got.Active != nil || got.Solved != nil || got.Progress != nil {
+		t.Fatalf("guest catalog exposed personal state: %#v", got)
+	}
+}
+
+func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) {
+	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
+		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
+		Status: breakfixv1.CommonEnvironmentStatus{
+			Phase: breakfixv1.EnvironmentReady,
+			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+				ID: "complete", Passed: true, Summary: "done",
+			}}},
+		},
+	}})
+	if err := handler.db.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	c.Set("user_id", "u-demo")
+	handler.ListChallenges(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response api.ChallengeList
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Challenges == nil || len(*response.Challenges) != 1 {
+		t.Fatalf("unexpected challenges: %#v", response.Challenges)
+	}
+	got := (*response.Challenges)[0]
+	if got.Active == nil || !*got.Active || got.Solved == nil || !*got.Solved {
+		t.Fatalf("unexpected user state: %#v", got)
+	}
+	if got.Progress == nil || got.Progress.Passed == nil || got.Progress.Total == nil || *got.Progress.Passed != 1 || *got.Progress.Total != 1 {
+		t.Fatalf("unexpected checkpoint progress: %#v", got.Progress)
+	}
+}
+
+func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
+	handler := newProgressTestHandler(t, nil)
+	if err := handler.db.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	c.Set("user_id", "u-demo")
+	handler.ListChallenges(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response api.ChallengeList
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	got := (*response.Challenges)[0]
+	if got.Solved == nil || !*got.Solved || got.Active == nil || *got.Active || got.Progress != nil {
+		t.Fatalf("unexpected durable completion state: %#v", got)
 	}
 }
 
@@ -251,6 +323,13 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 			})
 			return
 		}
+		if r.URL.Path == "/apis/breakfix.dev/v1/namespaces/breakfix-system/vclusterenvironments" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(breakfixv1.VClusterEnvironmentList{
+				TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironmentList"},
+			})
+			return
+		}
 		if r.URL.Path != "/apis/breakfix.dev/v1/namespaces/breakfix-system/containerenvironments" {
 			http.NotFound(w, r)
 			return
@@ -274,7 +353,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 func writeGatewayChallenge(t *testing.T, root string) {
 	t.Helper()
 	challengeDir := filepath.Join(root, "challenges", "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")

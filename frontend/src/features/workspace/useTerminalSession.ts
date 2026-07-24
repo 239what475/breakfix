@@ -87,7 +87,6 @@ export function useTerminalSession(
     );
     socket.onopen = () => {
       if (currentEpoch !== epoch) return;
-      state.value = "connected";
       stateMessage.value = "";
       sendResize();
       terminal?.focus();
@@ -100,6 +99,10 @@ export function useTerminalSession(
       } catch {
         terminal?.write(event.data);
       }
+      // A WebSocket may be open before tmux has attached the shell. Reporting
+      // Connected only after its first bytes arrive prevents early keystrokes
+      // from being lost during a workspace re-entry.
+      if (state.value === "connecting") state.value = "connected";
     };
     socket.onclose = () => {
       if (currentEpoch !== epoch) return;

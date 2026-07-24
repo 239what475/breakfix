@@ -12,7 +12,7 @@ import (
 )
 
 // Setup registers all reconcilers with the controller-runtime manager.
-func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir, dataDir string, cooldownMin int, registryInsecure bool, internalAPIKey, serverHost string, serverPort int, vclusterBinary, vclusterChartRepo, vclusterChartVersion string) error {
+func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir, dataDir string, cooldownMin int, registryInsecure bool, internalAPIKey, serverHost string, serverPort int, vclusterBinary, vclusterChartRepo, vclusterChartVersion string, completionRecorder CompletionRecorder) error {
 	if err := breakfixv1.AddToScheme(mgr.GetScheme()); err != nil {
 		return err
 	}
@@ -45,28 +45,30 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 	}
 
 	if err := (&ContainerEnvironmentReconciler{
-		Client:        mgr.GetClient(),
-		K8s:           k8sClient,
-		RegistryAddr:  registryAddr,
-		ChallengesDir: challengesDir,
-		NS:            namespace,
-		CRDNamespace:  crdNamespace,
-		Cooldown:      cooldown,
+		Client:             mgr.GetClient(),
+		K8s:                k8sClient,
+		RegistryAddr:       registryAddr,
+		ChallengesDir:      challengesDir,
+		NS:                 namespace,
+		CRDNamespace:       crdNamespace,
+		Cooldown:           cooldown,
+		CompletionRecorder: completionRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 
 	if err := (&VClusterEnvironmentReconciler{
-		Client:        mgr.GetClient(),
-		K8s:           k8sClient,
-		VCluster:      vclusterClient,
-		ChartRepo:     vclusterChartRepo,
-		ChartVersion:  vclusterChartVersion,
-		RegistryAddr:  registryAddr,
-		ChallengesDir: challengesDir,
-		NS:            namespace,
-		CRDNamespace:  crdNamespace,
-		Cooldown:      cooldown,
+		Client:             mgr.GetClient(),
+		K8s:                k8sClient,
+		VCluster:           vclusterClient,
+		ChartRepo:          vclusterChartRepo,
+		ChartVersion:       vclusterChartVersion,
+		RegistryAddr:       registryAddr,
+		ChallengesDir:      challengesDir,
+		NS:                 namespace,
+		CRDNamespace:       crdNamespace,
+		Cooldown:           cooldown,
+		CompletionRecorder: completionRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}

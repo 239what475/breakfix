@@ -55,7 +55,11 @@ func setEnvironmentReady(spec *breakfixv1.CommonEnvironmentSpec, status *breakfi
 }
 
 func setEnvironmentCompleted(status *breakfixv1.CommonEnvironmentStatus) {
-	now := metav1.Now()
+	setEnvironmentCompletedAt(status, time.Now().UTC())
+}
+
+func setEnvironmentCompletedAt(status *breakfixv1.CommonEnvironmentStatus, completedAt time.Time) {
+	now := metav1.NewTime(completedAt.UTC())
 	status.Phase = breakfixv1.EnvironmentCompleted
 	status.CompletedAt = &now
 	status.Reason = "CheckpointsCompleted"
