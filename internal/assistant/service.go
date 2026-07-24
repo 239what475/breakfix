@@ -93,7 +93,7 @@ func (s *Service) GetOrCreate(ctx context.Context, request Request) (*Session, [
 
 // StartTurn persists the user message, then starts a response independently of
 // the request that created it. keepAlive receives the response lifetime and is
-// used by Gateway to retain the challenge environment while tools may run.
+// used by Server to retain the challenge environment while tools may run.
 func (s *Service) StartTurn(ctx context.Context, request Request, content string, keepAlive func(context.Context)) (*Session, Turn, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {

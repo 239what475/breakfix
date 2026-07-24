@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [vue(), tailwindcss()],
   base: '/',
   build: {
-    outDir: '../cmd/gateway/frontend/dist',
+    outDir: '../cmd/server/frontend/dist',
     emptyOutDir: true,
   },
 })

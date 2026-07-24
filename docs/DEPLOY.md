@@ -3,8 +3,8 @@
 ## 前置条件
 
 - 阿里云账号（科研包 2000 元抵扣金）
-- 一台 ECS（2C2G，已备案域名）作为网关
-- 域名解析到网关 ECS
+- 一台 ECS（2C2G，已备案域名）运行 Server 和 Controller
+- 域名解析到该 ECS
 
 ---
 
@@ -22,9 +22,10 @@ make dev-config
 ### 0.2 日常命令
 
 ```bash
-make dev            # 启动完整环境（registry + 镜像 + 编译 + server）
-make dev-gateway    # 改代码后重编译+重启（不动 DB，不用重登录）
-make dev-down       # 停 server + 停 registry
+make dev            # 启动完整环境（registry + 镜像 + 编译 + Server + Controller）
+make dev-server     # 改 Server 后重编译+重启（不动 DB，不用重登录）
+make dev-controller # 改 Controller 后重编译+重启
+make dev-down       # 停 Server、Controller 和 registry
 make dev-reset      # 停所有 + 清 DB（需要重新 register → login）
 
 make docker-challenge NAME=xxx  # 重建单个题目镜像
@@ -38,11 +39,11 @@ make dev
 
 打开 `http://localhost:9090`，在 Web UI 里完成注册、登录和启动题目；检查点全部通过后会自动完成。
 
-> `make dev` 保留 DB 和 CA，之后 `make dev-gateway` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
+> `make dev` 保留 DB 和 CA，之后 `make dev-server` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
 
 ---
 
-## 1. 网关 ECS
+## 1. Server 与 Controller 主机
 
 ### 1.1 创建用户和数据目录
 
@@ -54,7 +55,7 @@ data_dir: /var/lib/breakfix
 kubeconfig: /var/lib/breakfix/kubeconfig
 registry_addr: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com/breakfix
 registry_insecure: false
-server_host: <gateway-ecs-private-ip>
+server_host: <server-ecs-private-ip>
 port: 9090
 proxy_port: 3128
 EOF
@@ -63,18 +64,18 @@ sudo chown -R breakfix:breakfix /var/lib/breakfix
 
 ### 1.2 安装 kubeconfig
 
-集群 → 连接信息 → 复制 kubeconfig（内网接入）→ 上传到网关：
+集群 → 连接信息 → 复制 kubeconfig（内网接入）→ 上传到 Server 与 Controller 主机：
 
 ```bash
 # 本地
 scp kubeconfig <服务器名>:/tmp/kubeconfig
 
-# 网关 ECS
+# Server 与 Controller 主机
 sudo mv /tmp/kubeconfig /var/lib/breakfix/kubeconfig
 sudo chown breakfix:breakfix /var/lib/breakfix/kubeconfig
 ```
 
-### 1.3 安装 Gateway
+### 1.3 安装二进制
 
 **前置**：在本地仓库创建 `.breakfix-server` 文件，一行写服务器 SSH 主机名：
 ```bash
@@ -84,31 +85,33 @@ echo myserver2 > .breakfix-server
 **方式一：GitHub Releases（推荐）**
 
 ```bash
-sudo curl -Lo /usr/local/bin/breakfix-gateway \
-  https://github.com/your-org/breakfix/releases/latest/download/breakfix-gateway-linux-amd64
-sudo chown breakfix:breakfix /usr/local/bin/breakfix-gateway
+sudo curl -Lo /usr/local/bin/breakfix-server \
+  https://github.com/your-org/breakfix/releases/latest/download/breakfix-server-linux-amd64
+sudo curl -Lo /usr/local/bin/breakfix-controller \
+  https://github.com/your-org/breakfix/releases/latest/download/breakfix-controller-linux-amd64
+sudo chown breakfix:breakfix /usr/local/bin/breakfix-server /usr/local/bin/breakfix-controller
 ```
 
-**方式二：make deploy-gateway（本地构建 + 自动部署）**
+**方式二：make deploy（本地构建 + 自动部署）**
 
 ```bash
-make deploy-gateway    # 编译 → scp → systemctl restart，一条命令
+make deploy             # 编译 → scp → 重启 Server 与 Controller
 ```
 
-> 之后每次改代码，只需 `make deploy-gateway` 即可更新远程服务端。
+> 之后可用 `make deploy-server` 或 `make deploy-controller` 单独更新对应进程。
 
 ### 1.4 systemd
 
 ```bash
-sudo tee /etc/systemd/system/breakfix-gateway.service <<'EOF' > /dev/null
+sudo tee /etc/systemd/system/breakfix-server.service <<'EOF' > /dev/null
 [Unit]
-Description=Breakfix Gateway
+Description=Breakfix Server
 After=network.target
 
 [Service]
 Type=simple
 User=breakfix
-ExecStart=/usr/local/bin/breakfix-gateway -config /var/lib/breakfix/breakfix.yaml
+ExecStart=/usr/local/bin/breakfix-server -config /var/lib/breakfix/breakfix.yaml
 Restart=always
 RestartSec=5
 
@@ -117,7 +120,26 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now breakfix-gateway
+sudo systemctl enable --now breakfix-server
+
+sudo tee /etc/systemd/system/breakfix-controller.service <<'EOF' > /dev/null
+[Unit]
+Description=Breakfix Controller
+After=network.target
+
+[Service]
+Type=simple
+User=breakfix
+ExecStart=/usr/local/bin/breakfix-controller -config /var/lib/breakfix/breakfix.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now breakfix-controller
 ```
 
 ### 1.5 同步题目
@@ -141,7 +163,7 @@ make deploy-catalog
 |------|------|------|
 | 集群类型 | ACK 托管版 Standard | 控制面免费 |
 | Auto Mode | 关闭 | 需要 Pro 版，且 ContainerOS 不兼容 |
-| VPC | 网关 ECS 所在 VPC | 同内网通信 |
+| VPC | Server 与 Controller 主机所在 VPC | 同内网通信 |
 | Gateway API | 仅内网 | 安全，不暴露公网 |
 | SNAT | 不配 | 镜像走 ACR VPC 内网，不需要出网 |
 | 网络插件 | Flannel | 简单，无特殊网络需求 |
@@ -194,7 +216,7 @@ make deploy-images                       # 推送全部镜像
 
 `deploy-image` 自动读取 `config/breakfix.yaml` 中的 VPC 地址，去掉 `-vpc` 得到公网推送地址。
 
-> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `cleanup-logs:v1`，Gateway 会自动拼上 `registry_addr` 前缀。
+> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `cleanup-logs:v1`，Controller 会自动拼上 `registry_addr` 前缀。
 
 ---
 
@@ -202,7 +224,8 @@ make deploy-images                       # 推送全部镜像
 
 ```bash
 make deploy               # 全量部署（镜像 + challenge catalog + 二进制）
-make deploy-gateway       # 只推二进制
+make deploy-server        # 只推 Server 二进制
+make deploy-controller    # 只推 Controller 二进制
 make deploy-catalog       # 只同步题目目录
 make deploy-image NAME=xxx  # 只推单个镜像
 make deploy-images        # 只推全部镜像
@@ -219,7 +242,7 @@ make logs                 # 查看远程实时日志
 
 ## 5. 面试者入口
 
-面试者直接通过浏览器访问网关地址，使用 Web UI 完成注册、登录和启动题目；检查点全部通过后会自动完成。
+面试者直接通过浏览器访问 Server 地址，使用 Web UI 完成注册、登录和启动题目；检查点全部通过后会自动完成。
 
 ---
 

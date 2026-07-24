@@ -11,7 +11,7 @@ import (
 )
 
 // AuthoringSpaceSession is the database-owned portion of an author's card.
-// Challenge presentation remains a filesystem concern in Gateway.
+// Challenge presentation remains a filesystem concern in Server.
 type AuthoringSpaceSession struct {
 	ID                 string
 	Title              string

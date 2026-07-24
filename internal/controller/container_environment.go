@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,14 +21,11 @@ const breakfixInitSentinel = "/var/lib/breakfix/.initialized"
 
 type ContainerEnvironmentReconciler struct {
 	client.Client
-	K8s                *k8s.Client
-	RegistryAddr       string
-	ChallengesDir      string
-	NS                 string
-	CRDNamespace       string
-	Cooldown           time.Duration
-	CompletionRecorder CompletionRecorder
-	AttemptRecorder    AttemptRecorder
+	K8s          *k8s.Client
+	RegistryAddr string
+	NS           string
+	CRDNamespace string
+	Cooldown     time.Duration
 }
 
 func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -44,6 +41,13 @@ func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl
 }
 
 func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	if err := validateEnvironmentSnapshot(&env.Spec, "container"); err != nil {
+		markEnvironmentFailed(&env.Status, "environment", "invalid_execution_snapshot", "InvalidExecutionSnapshot", err.Error(), false)
+		if updateErr := r.Status().Update(ctx, env); updateErr != nil {
+			return ctrl.Result{}, updateErr
+		}
+		return ctrl.Result{}, nil
+	}
 	if !controllerutil.ContainsFinalizer(env, containerEnvironmentFinalizer) {
 		controllerutil.AddFinalizer(env, containerEnvironmentFinalizer)
 		if err := r.Update(ctx, env); err != nil {
@@ -108,9 +112,7 @@ func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *br
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
-	if err := setEnvironmentReadyAndRecordAttempt(ctx, r.AttemptRecorder, env, "container", "WorkspaceReady", "environment ready"); err != nil {
-		return ctrl.Result{}, fmt.Errorf("record environment attempt: %w", err)
-	}
+	setEnvironmentReady(&env.Spec, &env.Status, "WorkspaceReady", "environment ready")
 
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -121,11 +123,20 @@ func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *br
 }
 
 func (r *ContainerEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if readyEnvironmentLeaseExpired(&env.Spec, &env.Status) {
-		return r.checkCooldown(ctx, env)
+	leaseChanged, evaluate, requeueAfter := advanceEnvironmentLease(&env.Spec, &env.Status)
+	if !evaluate {
+		if leaseChanged {
+			if err := r.Status().Update(ctx, env); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if env.Status.Phase == breakfixv1.EnvironmentDestroyed {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
-	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
-	changed := recordCheckpointStatus(&env.Status, report, checkErr)
+	results, checkErr := runCheckpointEvaluation(ctx, r.K8s, env.Spec.CheckpointIDs, env.Status.Namespace, env.Status.WorkspacePodName)
+	changed := leaseChanged || recordCheckpointStatus(&env.Status, results, checkErr)
 	if checkErr != nil {
 		if changed {
 			if err := r.Status().Update(ctx, env); err != nil {
@@ -134,13 +145,9 @@ func (r *ContainerEnvironmentReconciler) evaluateCheckpoints(ctx context.Context
 		}
 		return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 	}
-	if report.Passed() {
+	if checkpointsPassed(results) {
 		slog.Info("environment checkpoints completed", "environment", env.Name)
-		completedAt := time.Now().UTC()
-		if err := recordEnvironmentCompletion(ctx, r.CompletionRecorder, env, completedAt); err != nil {
-			return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
-		}
-		setEnvironmentCompletedAt(&env.Status, completedAt)
+		setEnvironmentCompleted(&env.Status)
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -170,20 +177,12 @@ func (r *ContainerEnvironmentReconciler) checkCooldown(ctx context.Context, env 
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.requestDeletion(ctx, env)
+		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
 
-func (r *ContainerEnvironmentReconciler) requestDeletion(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	slog.Info("requesting container environment deletion", "environment", env.Name, "namespace", env.Status.Namespace)
-	return requestEnvironmentDeletion(ctx, r.Client, env)
-}
-
 func (r *ContainerEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
-	if err := finishEnvironmentAttempt(ctx, r.AttemptRecorder, env, "expired", time.Now().UTC()); err != nil {
-		return ctrl.Result{}, fmt.Errorf("finish environment attempt: %w", err)
-	}
 	cleanupCommonEnvironment(r.K8s, &env.Status)
 	done, err := finalizeCommonEnvironment(ctx, r.K8s, env.Status.Namespace)
 	if err != nil {
@@ -230,9 +229,6 @@ func (rt containerEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, e
 }
 
 func (rt containerEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	if err := recordEnvironmentCompletion(ctx, rt.r.CompletionRecorder, env, completionTime(env.CommonStatus())); err != nil {
-		return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
-	}
 	return rt.r.checkCooldown(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 
@@ -242,10 +238,6 @@ func (rt containerEnvironmentRuntime) cleanup(ctx context.Context, env commonEnv
 
 func (rt containerEnvironmentRuntime) finalCleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
 	return rt.r.finalCleanup(ctx, env.(*breakfixv1.ContainerEnvironment))
-}
-
-func (rt containerEnvironmentRuntime) requestDeletion(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	return rt.r.requestDeletion(ctx, env.(*breakfixv1.ContainerEnvironment))
 }
 
 func looksLikeURL(s string) bool {

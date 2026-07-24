@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,13 +12,46 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
 	defaultEnvironmentIdleTTL = 10 * time.Minute
 )
+
+func validateEnvironmentSnapshot(spec *breakfixv1.CommonEnvironmentSpec, expectedRuntime string) error {
+	if spec == nil {
+		return fmt.Errorf("environment spec is required")
+	}
+	for name, value := range map[string]string{
+		"challengeRef":      spec.ChallengeRef,
+		"challengeRevision": spec.ChallengeRevision,
+		"userRef":           spec.UserRef,
+		"runtime":           spec.Runtime,
+		"image":             spec.Image,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("environment spec %s is required", name)
+		}
+	}
+	if spec.Runtime != expectedRuntime {
+		return fmt.Errorf("environment runtime %q does not match %s resource", spec.Runtime, expectedRuntime)
+	}
+	if len(spec.CheckpointIDs) == 0 {
+		return fmt.Errorf("environment spec checkpointIDs is required")
+	}
+	seen := make(map[string]struct{}, len(spec.CheckpointIDs))
+	for _, rawID := range spec.CheckpointIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return fmt.Errorf("environment spec checkpoint id is empty")
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("environment spec checkpoint id %q is duplicated", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
 
 func setEnvironmentProvisioning(status *breakfixv1.CommonEnvironmentStatus, reason, msg string) {
 	now := metav1.Now()
@@ -38,14 +72,13 @@ func setEnvironmentReady(spec *breakfixv1.CommonEnvironmentSpec, status *breakfi
 	if status.StartedAt == nil {
 		status.StartedAt = &now
 	}
-	status.ReadyAt = &now
+	if status.ReadyAt == nil {
+		status.ReadyAt = &now
+	}
 	status.Phase = breakfixv1.EnvironmentReady
 	status.Reason = reason
 	status.Message = msg
-	if status.ExpiresAt == nil || status.ExpiresAt.Before(&now) {
-		expires := metav1.NewTime(now.Add(spec.IdleTTLOr(defaultEnvironmentIdleTTL)))
-		status.ExpiresAt = &expires
-	}
+	applyEnvironmentActivity(spec, status, status.ReadyAt)
 	status.LastError = nil
 	setEnvironmentCondition(status, breakfixv1.ConditionProvisioned, metav1.ConditionTrue, reason, msg)
 	setEnvironmentCondition(status, breakfixv1.ConditionWorkspaceReady, metav1.ConditionTrue, reason, msg)
@@ -53,6 +86,79 @@ func setEnvironmentReady(spec *breakfixv1.CommonEnvironmentSpec, status *breakfi
 	setEnvironmentCondition(status, breakfixv1.ConditionDraining, metav1.ConditionFalse, "", "")
 	setEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionFalse, "", "")
 	setEnvironmentCondition(status, breakfixv1.ConditionFailed, metav1.ConditionFalse, "", "")
+}
+
+// applyEnvironmentActivity converts the Server-owned desired activity input
+// into Controller-owned lease status. A stale Server write can never shorten a
+// lease that has already observed newer activity.
+func applyEnvironmentActivity(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus, fallback *metav1.Time) bool {
+	if spec == nil || status == nil {
+		return false
+	}
+	activity := fallback
+	if spec.ActivityAt != nil && !spec.ActivityAt.IsZero() {
+		activity = spec.ActivityAt
+	}
+	if activity == nil || activity.IsZero() {
+		return false
+	}
+	if spec.ActivityAt == nil && status.LastActivityAt == nil && status.ExpiresAt != nil && status.ExpiresAt.After(time.Now()) {
+		// Preserve a lease written by the pre-split runtime while it remains
+		// active. New Server activity will replace it through spec.activityAt.
+		nextActivity := metav1.NewTime(activity.UTC())
+		status.LastActivityAt = &nextActivity
+		return true
+	}
+	if status.LastActivityAt != nil && !activity.After(status.LastActivityAt.Time) {
+		return false
+	}
+	nextActivity := metav1.NewTime(activity.UTC())
+	status.LastActivityAt = &nextActivity
+	expires := metav1.NewTime(nextActivity.Add(spec.IdleTTLOr(defaultEnvironmentIdleTTL)))
+	status.ExpiresAt = &expires
+	if status.Phase == breakfixv1.EnvironmentDraining {
+		status.Phase = breakfixv1.EnvironmentReady
+		status.Reason = "ActivityResumed"
+		status.Message = "environment lease renewed"
+		setEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionTrue, "ActivityResumed", "environment lease renewed")
+		setEnvironmentCondition(status, breakfixv1.ConditionDraining, metav1.ConditionFalse, "ActivityResumed", "environment lease renewed")
+	}
+	return true
+}
+
+// advanceEnvironmentLease owns every Ready-to-Draining-to-Destroyed
+// transition. Server activity arrives only through spec.activityAt.
+func advanceEnvironmentLease(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) (changed, evaluate bool, requeueAfter time.Duration) {
+	if spec == nil || status == nil {
+		return false, true, 0
+	}
+	changed = applyEnvironmentActivity(spec, status, status.ReadyAt)
+	if !spec.AutoDestroyAfterIdleOr(true) {
+		return changed, true, 0
+	}
+	switch status.Phase {
+	case breakfixv1.EnvironmentReady:
+		destroy, _ := shouldDestroyEnvironment(status)
+		if !destroy {
+			return changed, true, 0
+		}
+		grace := spec.DrainGracePeriodOr(spec.IdleTTLOr(defaultEnvironmentIdleTTL))
+		expiresAt := metav1.NewTime(time.Now().Add(grace))
+		setEnvironmentDraining(status, expiresAt, "IdleTTLExpired", "environment idle lease expired")
+		return true, false, grace
+	case breakfixv1.EnvironmentDraining:
+		if status.Phase == breakfixv1.EnvironmentReady {
+			return true, true, 0
+		}
+		destroy, remaining := shouldDestroyEnvironment(status)
+		if !destroy {
+			return changed, false, remaining
+		}
+		markEnvironmentDestroyed(status, "IdleDrainCompleted", "environment idle drain completed")
+		return true, false, 0
+	default:
+		return changed, true, 0
+	}
 }
 
 func setEnvironmentCompleted(status *breakfixv1.CommonEnvironmentStatus) {
@@ -83,7 +189,7 @@ func shouldDestroyEnvironment(status *breakfixv1.CommonEnvironmentStatus) (bool,
 }
 
 // readyEnvironmentLeaseExpired applies the existing idle lease to a Ready
-// environment when Gateway has no opportunity to transition it to Draining,
+// environment when Server has no opportunity to transition it to Draining,
 // such as after a process restart or a lost WebSocket close frame.
 func readyEnvironmentLeaseExpired(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) bool {
 	if spec == nil || status == nil || !spec.AutoDestroyAfterIdleOr(true) {
@@ -166,16 +272,6 @@ func setEnvironmentCondition(status *breakfixv1.CommonEnvironmentStatus, conditi
 		ObservedGeneration: status.ObservedGeneration,
 		LastTransitionTime: metav1.Now(),
 	})
-}
-
-func requestEnvironmentDeletion(ctx context.Context, kubeClient client.Client, env client.Object) (ctrl.Result, error) {
-	if env.GetDeletionTimestamp() != nil {
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
-	if err := kubeClient.Delete(ctx, env); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 }
 
 func workspaceResourceRequirements(spec *breakfixv1.CommonEnvironmentSpec) (corev1.ResourceRequirements, error) {

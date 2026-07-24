@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -132,7 +132,7 @@ func (r *GenerationReconciler) trackJob(ctx context.Context, gen *breakfixv1.Gen
 	for _, c := range job.Status.Conditions {
 		switch c.Type {
 		case batchv1.JobComplete:
-			// The generator reports verification scheduling through Gateway before it
+			// The generator reports verification scheduling through Server before it
 			// exits. Read the uncached CRD so a stale controller event cannot
 			// overwrite that state with the old Running value.
 			fresh, freshErr := r.K8s.GetGeneration(ctx, r.CRDNamespace, gen.Name)

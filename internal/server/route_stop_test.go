@@ -1,6 +1,7 @@
-package gateway
+package server
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
-	router := SetupRouter(nil, nil, config.Config{}, nil)
+	router := SetupRouter(context.Background(), nil, nil, config.Config{}, nil)
 
 	routes := map[string]bool{}
 	for _, route := range router.Routes() {

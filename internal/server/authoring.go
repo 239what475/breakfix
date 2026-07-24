@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -334,8 +334,8 @@ func (h *Handler) createAuthoringGeneration(ctx context.Context, session *author
 		"CHALLENGE_OUTPUT_DIR":           "/workspace/out",
 		"REGISTRY_ADDR":                  h.registryAddr,
 		"LAB_NAMESPACE":                  h.crdNamespace,
-		"GATEWAY_INTERNAL_URL":           h.internalGatewayURL(),
-		"GATEWAY_INTERNAL_API_KEY":       h.internalAPIKey,
+		"SERVER_INTERNAL_URL":            h.internalServerURL(),
+		"SERVER_INTERNAL_API_KEY":        h.internalAPIKey,
 		"GENERATION_ID":                  generationID,
 		"GENERATION_AGENT_SESSION_ID":    session.WorkflowSessionID,
 		"ANTHROPIC_BASE_URL":             h.llm.BaseURL,

@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

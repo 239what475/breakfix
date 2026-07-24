@@ -24,26 +24,26 @@ func startEnvironmentCleanupLoop(mgr ctrl.Manager, k8sClient *k8s.Client, crdNam
 }
 
 func (l *cleanupLoop) Start(runCtx context.Context) error {
-		ticker := time.NewTicker(cleanupSweepInterval)
-		defer ticker.Stop()
+	ticker := time.NewTicker(cleanupSweepInterval)
+	defer ticker.Stop()
 
-		sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
-		if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
-			cancel()
-			return err
-		}
+	sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
+	if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
 		cancel()
+		return err
+	}
+	cancel()
 
-		for {
-			select {
-			case <-runCtx.Done():
-				return nil
-			case <-ticker.C:
-				sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
-				if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
-					slog.Error("cleanup sweep failed", "err", err)
-				}
-				cancel()
+	for {
+		select {
+		case <-runCtx.Done():
+			return nil
+		case <-ticker.C:
+			sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
+			if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
+				slog.Error("cleanup sweep failed", "err", err)
 			}
+			cancel()
 		}
+	}
 }

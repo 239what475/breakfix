@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,7 +22,7 @@ import (
 
 func TestMySpaceRequiresJWT(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	router := SetupRouter(handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil)
+	router := SetupRouter(context.Background(), handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil)
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/me/space", nil))
@@ -49,7 +49,7 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", "demo", "environment-demo-uid", "container", readyAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := handler.db.OpenTerminalConnection(ctx, db.TerminalConnection{ID: "terminal-demo", EnvironmentUID: "environment-demo-uid", UserID: "u-demo", ChallengeID: "demo", GatewayInstanceID: "gateway-test", ConnectedAt: readyAt}); err != nil {
+	if err := handler.db.OpenTerminalConnection(ctx, db.TerminalConnection{ID: "terminal-demo", EnvironmentUID: "environment-demo-uid", UserID: "u-demo", ChallengeID: "demo", ServerInstanceID: "server-test", ConnectedAt: readyAt}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := handler.db.CloseTerminalConnection(ctx, "terminal-demo", readyAt.Add(75*time.Second)); err != nil {

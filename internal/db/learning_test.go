@@ -100,6 +100,16 @@ func TestLearningMigrationAcceptsDevelopmentV10WithoutDuplicateDuration(t *testi
 			ended_at TEXT NOT NULL DEFAULT '',
 			outcome TEXT NOT NULL DEFAULT 'active'
 		);
+		CREATE TABLE terminal_connections (
+			id                  TEXT PRIMARY KEY,
+			environment_uid     TEXT NOT NULL,
+			user_id             TEXT NOT NULL,
+			challenge_id        TEXT NOT NULL,
+			gateway_instance_id TEXT NOT NULL,
+			connected_at        TEXT NOT NULL,
+			heartbeat_at        TEXT NOT NULL,
+			disconnected_at     TEXT NOT NULL DEFAULT ''
+		);
 		INSERT INTO user_challenge_attempts
 			(environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome)
 		VALUES ('environment-one', 'u-one', 'challenge-one', 'container', '2026-07-24T01:02:03Z', '', 'active');
@@ -130,6 +140,51 @@ func TestLearningMigrationAcceptsDevelopmentV10WithoutDuplicateDuration(t *testi
 	}
 }
 
+func TestLearningMigrationRenamesGatewayConnectionOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "breakfix.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`
+		CREATE TABLE terminal_connections (
+			id                  TEXT PRIMARY KEY,
+			environment_uid     TEXT NOT NULL,
+			user_id             TEXT NOT NULL,
+			challenge_id        TEXT NOT NULL,
+			gateway_instance_id TEXT NOT NULL,
+			connected_at        TEXT NOT NULL,
+			heartbeat_at        TEXT NOT NULL,
+			disconnected_at     TEXT NOT NULL DEFAULT ''
+		);
+		INSERT INTO terminal_connections
+			(id, environment_uid, user_id, challenge_id, gateway_instance_id, connected_at, heartbeat_at)
+		VALUES ('connection-one', 'environment-one', 'user-one', 'challenge-one', 'server-before-rename', '2026-07-25T00:00:00Z', '2026-07-25T00:00:00Z');
+		PRAGMA user_version = 13;
+	`)
+	if err != nil {
+		_ = legacy.Close()
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+
+	var owner string
+	if err := database.conn.QueryRow(`SELECT server_instance_id FROM terminal_connections WHERE id = 'connection-one'`).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "server-before-rename" {
+		t.Fatalf("migrated server instance = %q", owner)
+	}
+}
+
 func TestChallengeAttemptCompletionNeverOverwritesTerminalOutcome(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
@@ -157,8 +212,8 @@ func TestTerminalUsageSessionDeduplicatesConnections(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 2, 0, 0, 0, time.UTC)
-	first := TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", GatewayInstanceID: "gateway-a", ConnectedAt: started}
-	second := TerminalConnection{ID: "connection-two", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", GatewayInstanceID: "gateway-b", ConnectedAt: started.Add(5 * time.Second)}
+	first := TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}
+	second := TerminalConnection{ID: "connection-two", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-b", ConnectedAt: started.Add(5 * time.Second)}
 	if err := database.OpenTerminalConnection(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +274,7 @@ func TestCleanupTerminalActivityClosesStaleConnectionAndSession(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 3, 0, 0, 0, time.UTC)
-	if err := database.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", GatewayInstanceID: "gateway-a", ConnectedAt: started}); err != nil {
+	if err := database.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.CleanupTerminalActivity(ctx, started.Add(time.Minute), started.Add(4*time.Minute)); err != nil {
@@ -256,7 +311,7 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	if err := database.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-one", "container", started); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", GatewayInstanceID: "gateway-a", ConnectedAt: started}); err != nil {
+	if err := database.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.CloseTerminalConnection(ctx, "connection-one", started.Add(90*time.Second)); err != nil {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 )
@@ -24,7 +24,7 @@ type VerifyTaskConfig struct {
 	LabNS            string
 	RegistryAddr     string
 	RegistryInsecure bool
-	GatewayURL       string
+	ServerURL        string
 	InternalAPIKey   string
 	VerifyTaskID     string
 	VerifyTaskNS     string
@@ -252,10 +252,19 @@ func verifyBaseImage(targetImage, runtime string) string {
 
 func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID, challengeID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
 	name := "verify-" + k8s.RandomID()
+	checkpointIDs := make([]string, 0, len(entry.Checkpoints))
+	for _, checkpoint := range entry.Checkpoints {
+		checkpointIDs = append(checkpointIDs, checkpoint.ID)
+	}
+	activityAt := metav1.Now()
 	common := breakfixv1.CommonEnvironmentSpec{
-		ChallengeRef: challengeID,
-		UserRef:      "verify-" + verifyTaskID,
-		Image:        image,
+		ChallengeRef:      challengeID,
+		ChallengeRevision: "submission:" + submissionID,
+		UserRef:           "verify-" + verifyTaskID,
+		Runtime:           challenge.NormalizeRuntime(entry.Runtime),
+		Image:             image,
+		CheckpointIDs:     checkpointIDs,
+		ActivityAt:        &activityAt,
 	}
 
 	labels := map[string]string{
@@ -370,7 +379,7 @@ func destroyVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string
 }
 
 func downloadSubmission(ctx context.Context, cfg VerifyTaskConfig, dst string) error {
-	url := strings.TrimRight(cfg.GatewayURL, "/") + "/api/internal/verify-submissions/" + cfg.SubmissionID + "/artifact"
+	url := strings.TrimRight(cfg.ServerURL, "/") + "/api/internal/verify-submissions/" + cfg.SubmissionID + "/artifact"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

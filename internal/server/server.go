@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -14,15 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS) *gin.Engine {
+func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	h := NewHandler(database, k8sClient, cfg)
-	h.StartAuthoringReconciler(context.Background())
-	h.StartAssistantCleanup(context.Background())
-	h.StartLearningCleanup(context.Background())
+	h.StartAuthoringReconciler(runCtx)
+	h.StartAssistantCleanup(runCtx)
+	h.StartLearningCleanup(runCtx)
+	h.StartEnvironmentStatusProjector(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)

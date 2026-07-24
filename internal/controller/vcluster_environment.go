@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/vclustercli"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -27,17 +27,14 @@ const vclusterEnvironmentFinalizer = "breakfix.dev/vcluster-environment-cleanup"
 
 type VClusterEnvironmentReconciler struct {
 	client.Client
-	K8s                *k8s.Client
-	VCluster           *vclustercli.Client
-	ChartRepo          string
-	ChartVersion       string
-	RegistryAddr       string
-	ChallengesDir      string
-	NS                 string
-	CRDNamespace       string
-	Cooldown           time.Duration
-	CompletionRecorder CompletionRecorder
-	AttemptRecorder    AttemptRecorder
+	K8s          *k8s.Client
+	VCluster     *vclustercli.Client
+	ChartRepo    string
+	ChartVersion string
+	RegistryAddr string
+	NS           string
+	CRDNamespace string
+	Cooldown     time.Duration
 }
 
 func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -51,6 +48,13 @@ func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.
 }
 
 func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+	if err := validateEnvironmentSnapshot(&env.Spec.CommonEnvironmentSpec, "vcluster"); err != nil {
+		markEnvironmentFailed(&env.Status.CommonEnvironmentStatus, "environment", "invalid_execution_snapshot", "InvalidExecutionSnapshot", err.Error(), false)
+		if updateErr := r.Status().Update(ctx, env); updateErr != nil {
+			return ctrl.Result{}, updateErr
+		}
+		return ctrl.Result{}, nil
+	}
 	if !controllerutil.ContainsFinalizer(env, vclusterEnvironmentFinalizer) {
 		controllerutil.AddFinalizer(env, vclusterEnvironmentFinalizer)
 		if err := r.Update(ctx, env); err != nil {
@@ -180,9 +184,7 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	if err := setEnvironmentReadyAndRecordAttempt(ctx, r.AttemptRecorder, env, "vcluster", "WorkspaceReady", "vcluster environment ready"); err != nil {
-		return ctrl.Result{}, fmt.Errorf("record environment attempt: %w", err)
-	}
+	setEnvironmentReady(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus, "WorkspaceReady", "vcluster environment ready")
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -190,11 +192,20 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 }
 
 func (r *VClusterEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
-	if readyEnvironmentLeaseExpired(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus) {
-		return r.checkCooldown(ctx, env)
+	leaseChanged, evaluate, requeueAfter := advanceEnvironmentLease(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus)
+	if !evaluate {
+		if leaseChanged {
+			if err := r.Status().Update(ctx, env); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if env.Status.Phase == breakfixv1.EnvironmentDestroyed {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
-	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
-	changed := recordCheckpointStatus(&env.Status.CommonEnvironmentStatus, report, checkErr)
+	results, checkErr := runCheckpointEvaluation(ctx, r.K8s, env.Spec.CheckpointIDs, env.Status.Namespace, env.Status.WorkspacePodName)
+	changed := leaseChanged || recordCheckpointStatus(&env.Status.CommonEnvironmentStatus, results, checkErr)
 	if checkErr != nil {
 		if changed {
 			if err := r.Status().Update(ctx, env); err != nil {
@@ -203,13 +214,9 @@ func (r *VClusterEnvironmentReconciler) evaluateCheckpoints(ctx context.Context,
 		}
 		return ctrl.Result{RequeueAfter: checkpointInterval}, nil
 	}
-	if report.Passed() {
+	if checkpointsPassed(results) {
 		slog.Info("environment checkpoints completed", "environment", env.Name)
-		completedAt := time.Now().UTC()
-		if err := recordEnvironmentCompletion(ctx, r.CompletionRecorder, env, completedAt); err != nil {
-			return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
-		}
-		setEnvironmentCompletedAt(&env.Status.CommonEnvironmentStatus, completedAt)
+		setEnvironmentCompleted(&env.Status.CommonEnvironmentStatus)
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -233,7 +240,7 @@ func (r *VClusterEnvironmentReconciler) checkCooldown(ctx context.Context, env *
 		if err := r.Status().Update(ctx, env); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.requestDeletion(ctx, env)
+		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
@@ -256,16 +263,8 @@ func (r *VClusterEnvironmentReconciler) cleanup(ctx context.Context, env *breakf
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (r *VClusterEnvironmentReconciler) requestDeletion(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
-	slog.Info("requesting vcluster environment deletion", "environment", env.Name, "namespace", env.Status.Namespace)
-	return requestEnvironmentDeletion(ctx, r.Client, env)
-}
-
 func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
 	slog.Info("vcluster environment entering final cleanup", "name", env.Name, "namespace", env.Status.Namespace)
-	if err := finishEnvironmentAttempt(ctx, r.AttemptRecorder, env, "expired", time.Now().UTC()); err != nil {
-		return ctrl.Result{}, fmt.Errorf("finish environment attempt: %w", err)
-	}
 	if env.Status.Namespace != "" {
 		_ = r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName)
 		_ = r.K8s.DeleteSecret(env.Status.Namespace, env.Status.KubeconfigSecretName)
@@ -619,9 +618,6 @@ func (rt vclusterEnvironmentRuntime) evaluateCheckpoints(ctx context.Context, en
 }
 
 func (rt vclusterEnvironmentRuntime) handleDraining(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	if err := recordEnvironmentCompletion(ctx, rt.r.CompletionRecorder, env, completionTime(env.CommonStatus())); err != nil {
-		return ctrl.Result{}, fmt.Errorf("record environment completion: %w", err)
-	}
 	return rt.r.checkCooldown(ctx, env.(*breakfixv1.VClusterEnvironment))
 }
 
@@ -631,8 +627,4 @@ func (rt vclusterEnvironmentRuntime) cleanup(ctx context.Context, env commonEnvi
 
 func (rt vclusterEnvironmentRuntime) finalCleanup(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
 	return rt.r.finalCleanup(ctx, env.(*breakfixv1.VClusterEnvironment))
-}
-
-func (rt vclusterEnvironmentRuntime) requestDeletion(ctx context.Context, env commonEnvironmentObject) (ctrl.Result, error) {
-	return rt.r.requestDeletion(ctx, env.(*breakfixv1.VClusterEnvironment))
 }

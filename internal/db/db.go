@@ -260,6 +260,10 @@ var migrations = []string{
 	`
 	DROP TABLE IF EXISTS challenges;
 	`,
+	// v14: terminal connection ownership belongs to the Server process.
+	`
+	ALTER TABLE terminal_connections RENAME COLUMN gateway_instance_id TO server_instance_id;
+	`,
 }
 
 func (d *DB) migrate() error {

@@ -55,4 +55,5 @@ jobs:
           npm run build --prefix frontend
       - name: Build
         run: |
-          go build -ldflags "-X github.com/breakfix/breakfix/internal/build.Version=dev" -o /dev/null ./cmd/gateway
+          go build -ldflags "-X github.com/breakfix/breakfix/internal/build.Version=dev" -o /dev/null ./cmd/server
+          go build -ldflags "-X github.com/breakfix/breakfix/internal/build.Version=dev" -o /dev/null ./cmd/controller

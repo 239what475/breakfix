@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/auth"
@@ -21,6 +20,7 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
@@ -48,9 +48,13 @@ func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvir
 	if env == nil {
 		return nil
 	}
+	runtime := challenge.NormalizeRuntime(env.Spec.Runtime)
+	if strings.TrimSpace(env.Spec.Runtime) == "" {
+		runtime = challenge.RuntimeContainer
+	}
 	return &activeEnvironment{
 		UID:                 string(env.UID),
-		Runtime:             challenge.RuntimeContainer,
+		Runtime:             runtime,
 		Name:                env.Name,
 		ChallengeRef:        env.Spec.ChallengeRef,
 		Namespace:           env.Status.Namespace,
@@ -71,9 +75,13 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 	if env == nil {
 		return nil
 	}
+	runtime := challenge.NormalizeRuntime(env.Spec.Runtime)
+	if strings.TrimSpace(env.Spec.Runtime) == "" {
+		runtime = challenge.RuntimeVCluster
+	}
 	return &activeEnvironment{
 		UID:                 string(env.UID),
-		Runtime:             challenge.RuntimeVCluster,
+		Runtime:             runtime,
 		Name:                env.Name,
 		ChallengeRef:        env.Spec.ChallengeRef,
 		Namespace:           env.Status.Namespace,
@@ -109,7 +117,7 @@ type Handler struct {
 	serverHost       string
 	port             int
 	terminals        *terminalConnectionTracker
-	gatewayInstance  string
+	serverInstance   string
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
@@ -131,7 +139,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		serverHost:       cfg.ServerHost,
 		port:             cfg.Port,
 		terminals:        newTerminalConnectionTracker(time.Second),
-		gatewayInstance:  newGatewayInstanceID(),
+		serverInstance:   newServerInstanceID(),
 	}
 }
 
@@ -540,12 +548,12 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName, terminalSocketLifecycle{
 		open: func() error {
 			if err := h.db.OpenTerminalConnection(c.Request.Context(), db.TerminalConnection{
-				ID:                connectionID,
-				EnvironmentUID:    env.UID,
-				UserID:            user.ID,
-				ChallengeID:       challengeID,
-				GatewayInstanceID: h.gatewayInstance,
-				ConnectedAt:       time.Now().UTC(),
+				ID:               connectionID,
+				EnvironmentUID:   env.UID,
+				UserID:           user.ID,
+				ChallengeID:      challengeID,
+				ServerInstanceID: h.serverInstance,
+				ConnectedAt:      time.Now().UTC(),
 			}); err != nil {
 				return err
 			}
@@ -577,14 +585,10 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 				if !closed {
 					return
 				}
-				expiresAt := metav1.NewTime(time.Now().Add(environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute))))
-				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := runtimeAdapter.markDraining(ctx, env.Name, expiresAt); err != nil {
-					slog.Error("failed to start draining", "err", err, "environment", env.Name)
-					return
-				}
-				slog.Info("environment draining", "environment", env.Name, "expires_in", environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute)).String())
+				// The Server owns connection history, but the Controller owns the
+				// lease state machine. With no new spec.activityAt input, it will
+				// transition this environment to Draining at the idle deadline.
+				slog.Info("terminal activity ended", "environment", env.Name)
 			})
 		},
 	})
@@ -758,10 +762,7 @@ func (h *Handler) resumeEnvironment(ctx context.Context, env *activeEnvironment)
 	if err != nil {
 		return err
 	}
-	return adapter.updateSessionStatus(ctx, env.Name, func(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) {
-		expiresAt := metav1.NewTime(time.Now().Add(spec.IdleTTLOr(time.Duration(h.cooldownMin) * time.Minute)))
-		setGatewayEnvironmentReady(status, expiresAt, "SessionResumed", "environment resumed")
-	})
+	return adapter.renewActivity(ctx, env.Name, nowActivity())
 }
 
 func (h *Handler) destroyEnvironment(ctx context.Context, env *activeEnvironment) error {
@@ -939,7 +940,7 @@ func (h *Handler) checkRegistryReady(ctx context.Context) error {
 	return nil
 }
 
-func (h *Handler) internalGatewayURL() string {
+func (h *Handler) internalServerURL() string {
 	host := strings.TrimSpace(h.serverHost)
 	if host == "" {
 		host = "172.18.0.1"

@@ -309,7 +309,7 @@ func stateAllowsAuthorMessage(state SessionState) bool {
 
 // stateAllowsAgentPlanRevision also admits RevisingAndVerifying. A single
 // author message can require several function calls (for example, changing
-// metadata, the overview, and a checkpoint). The Gateway starts generation
+// metadata, the overview, and a checkpoint). The Server starts generation
 // only after that turn returns, so those calls must be allowed to finish the
 // same revisioning turn without admitting another user message.
 func stateAllowsAgentPlanRevision(state SessionState) bool {

@@ -39,7 +39,7 @@ type Generator struct {
 	Kubeconfig       string
 	LabNS            string
 	GenerationID     string
-	GatewayURL       string
+	ServerURL        string
 	InternalAPIKey   string
 	InitialFeedback  string
 	SeedSubmissionID string
@@ -72,7 +72,7 @@ func (g *Generator) Run(ctx context.Context) error {
 	if strings.TrimSpace(g.SeedSubmissionID) != "" {
 		seedArchive := filepath.Join(g.workDir, "verified-artifact.tar.gz")
 		if err := downloadSubmission(ctx, VerifyTaskConfig{
-			GatewayURL:     g.GatewayURL,
+			ServerURL:      g.ServerURL,
 			InternalAPIKey: g.InternalAPIKey,
 			SubmissionID:   g.SeedSubmissionID,
 		}, seedArchive); err != nil {
@@ -662,11 +662,11 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	if strings.TrimSpace(g.GenerationID) == "" {
 		return fmt.Errorf("GENERATION_ID is required")
 	}
-	if strings.TrimSpace(g.GatewayURL) == "" {
-		return fmt.Errorf("GATEWAY_INTERNAL_URL is required")
+	if strings.TrimSpace(g.ServerURL) == "" {
+		return fmt.Errorf("SERVER_INTERNAL_URL is required")
 	}
 	if strings.TrimSpace(g.InternalAPIKey) == "" {
-		return fmt.Errorf("GATEWAY_INTERNAL_API_KEY is required")
+		return fmt.Errorf("SERVER_INTERNAL_API_KEY is required")
 	}
 	if err := g.validateChallengeManifest(chalDir); err != nil {
 		return err
@@ -691,7 +691,7 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 		return fmt.Errorf("close multipart body: %w", err)
 	}
 
-	url := strings.TrimRight(g.GatewayURL, "/") + "/api/internal/generations/" + g.GenerationID + "/artifact"
+	url := strings.TrimRight(g.ServerURL, "/") + "/api/internal/generations/" + g.GenerationID + "/artifact"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
 	if err != nil {
 		return fmt.Errorf("create upload request: %w", err)

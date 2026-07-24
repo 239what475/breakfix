@@ -21,7 +21,6 @@ type commonEnvironmentRuntime interface {
 	handleDraining(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	cleanup(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 	finalCleanup(context.Context, commonEnvironmentObject) (ctrl.Result, error)
-	requestDeletion(context.Context, commonEnvironmentObject) (ctrl.Result, error)
 }
 
 func reconcileCommonEnvironment(ctx context.Context, env commonEnvironmentObject, runtime commonEnvironmentRuntime) (ctrl.Result, error) {
@@ -45,11 +44,13 @@ func reconcileCommonEnvironment(ctx context.Context, env commonEnvironmentObject
 	case breakfixv1.EnvironmentCompleted:
 		return runtime.handleDraining(ctx, env)
 	case breakfixv1.EnvironmentDestroyed:
-		return runtime.requestDeletion(ctx, env)
+		// Server projects the terminal status into its database before issuing
+		// the delete request. Keeping the CRD observable makes that projection
+		// resilient to Server restarts.
+		return ctrl.Result{}, nil
 	case breakfixv1.EnvironmentFailed:
-		if env.CommonSpec().ForceCleanupOnFailureOr(false) {
-			return runtime.requestDeletion(ctx, env)
-		}
+		// Failed environments are likewise retained until the Server projects
+		// the final status and decides whether to delete the CRD.
 		return ctrl.Result{}, nil
 	}
 

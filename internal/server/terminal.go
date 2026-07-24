@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -12,10 +12,9 @@ import (
 	"sync"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gorilla/websocket"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/remotecommand"
 	"log/slog"
 )
@@ -219,9 +218,8 @@ func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeA
 	defer ticker.Stop()
 
 	for {
-		expiresAt := metav1.NewTime(time.Now().Add(idleTTL))
 		renewCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err := runtime.renewLease(renewCtx, environmentName, expiresAt)
+		err := runtime.renewActivity(renewCtx, environmentName, nowActivity())
 		cancel()
 		if err != nil {
 			slog.Debug("failed to renew environment lease", "environment", environmentName, "err", err)

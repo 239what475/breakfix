@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
-	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,7 +16,7 @@ import (
 )
 
 // VerifyTaskReconciler owns only real artifact verification. Publishing is a
-// separate, explicit Gateway operation over a successful immutable task.
+// separate, explicit Server operation over a successful immutable task.
 type VerifyTaskReconciler struct {
 	client.Client
 	K8s              *k8s.Client
@@ -54,7 +53,7 @@ func validateVerifyTaskSpec(task *breakfixv1.VerifyTask) error {
 	if task == nil {
 		return fmt.Errorf("verify task is nil")
 	}
-	if !challenge.ValidID(task.Spec.ChallengeID) {
+	if !validVerifyTaskChallengeID(task.Spec.ChallengeID) {
 		return fmt.Errorf("invalid challenge id %q", task.Spec.ChallengeID)
 	}
 	if strings.TrimSpace(task.Spec.Submission.ID) == "" {
@@ -67,6 +66,19 @@ func validateVerifyTaskSpec(task *breakfixv1.VerifyTask) error {
 		return fmt.Errorf("agent source requires a generation reference")
 	}
 	return nil
+}
+
+func validVerifyTaskChallengeID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for i, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || (r == '-' && i > 0 && i < len(id)-1) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (r *VerifyTaskReconciler) failTask(ctx context.Context, task *breakfixv1.VerifyTask, code, message string) (ctrl.Result, error) {
@@ -90,14 +102,14 @@ func (r *VerifyTaskReconciler) failTask(ctx context.Context, task *breakfixv1.Ve
 func (r *VerifyTaskReconciler) createVerifyJob(ctx context.Context, task *breakfixv1.VerifyTask) (ctrl.Result, error) {
 	jobName := "verify-" + k8s.RandomID()
 	env := map[string]string{
-		"BREAKFIX_MODE":            "verify",
-		"VERIFY_TASK_ID":           task.Name,
-		"VERIFY_TASK_NAMESPACE":    r.CRDNamespace,
-		"VERIFY_SUBMISSION_ID":     task.Spec.Submission.ID,
-		"GATEWAY_INTERNAL_URL":     r.internalGatewayURL(),
-		"GATEWAY_INTERNAL_API_KEY": r.InternalAPIKey,
-		"REGISTRY_ADDR":            r.RegistryAddr,
-		"LAB_NAMESPACE":            r.CRDNamespace,
+		"BREAKFIX_MODE":           "verify",
+		"VERIFY_TASK_ID":          task.Name,
+		"VERIFY_TASK_NAMESPACE":   r.CRDNamespace,
+		"VERIFY_SUBMISSION_ID":    task.Spec.Submission.ID,
+		"SERVER_INTERNAL_URL":     r.internalServerURL(),
+		"SERVER_INTERNAL_API_KEY": r.InternalAPIKey,
+		"REGISTRY_ADDR":           r.RegistryAddr,
+		"LAB_NAMESPACE":           r.CRDNamespace,
 	}
 	if r.RegistryInsecure {
 		env["REGISTRY_INSECURE"] = "true"
@@ -153,7 +165,7 @@ func (r *VerifyTaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *VerifyTaskReconciler) internalGatewayURL() string {
+func (r *VerifyTaskReconciler) internalServerURL() string {
 	host := strings.TrimSpace(r.ServerHost)
 	if host == "" {
 		host = "172.18.0.1"

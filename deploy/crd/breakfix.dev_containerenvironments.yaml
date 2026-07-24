@@ -37,8 +37,21 @@ spec:
             type: object
           spec:
             properties:
+              activityAt:
+                format: date-time
+                type: string
               challengeRef:
                 type: string
+              challengeRevision:
+                description: |-
+                  These fields stay schema-optional so pre-split Environment CRDs can be
+                  finalized after an upgrade. The Controller requires them before provision.
+                type: string
+              checkpointIDs:
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               cleanupPolicy:
                 properties:
                   autoDestroyAfterIdle:
@@ -57,6 +70,11 @@ spec:
                   workspaceMemory:
                     type: string
                 type: object
+              runtime:
+                enum:
+                - container
+                - vcluster
+                type: string
               timeouts:
                 properties:
                   destroyTimeoutSeconds:
@@ -171,6 +189,9 @@ spec:
                 format: date-time
                 type: string
               expiresAt:
+                format: date-time
+                type: string
+              lastActivityAt:
                 format: date-time
                 type: string
               lastError:

@@ -1,13 +1,13 @@
 .PHONY: dev dev-up dev-down dev-reset dev-status dev-config frontend-build \
-        dev-build dev-build-gateway \
-        dev-start-gateway \
-        dev-gateway \
+        dev-build dev-build-server dev-build-controller \
+        dev-start-server dev-start-controller \
+        dev-server dev-controller \
         e2e \
-        e2e-gateway-recovery \
+        e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated \
-        build build-gateway \
-        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-generator deploy-catalog deploy-cleanup deploy-reset \
+        build build-server build-controller \
+        deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-generator deploy-catalog deploy-cleanup deploy-reset \
         generator-build generator-dev \
         lint proto clean status logs
 
@@ -29,9 +29,11 @@ CRD_TYPES_DIR := internal/k8s/apis/breakfix/v1
 # ── Remote server ──
 
 SERVER      ?= $(shell cat .breakfix-server 2>/dev/null || echo "")
-SERVER_BIN  ?= /usr/local/bin/breakfix-gateway
+SERVER_BIN  ?= /usr/local/bin/breakfix-server
+CONTROLLER_BIN ?= /usr/local/bin/breakfix-controller
 SERVER_DATA ?= /var/lib/breakfix
-SERVICE     ?= breakfix-gateway
+SERVER_SERVICE ?= breakfix-server
+CONTROLLER_SERVICE ?= breakfix-controller
 REGISTRY    ?= localhost:5000
 ACR_NS      ?= break-fix
 KIND_CLUSTER ?= breakfix-dev
@@ -55,34 +57,51 @@ frontend-build:
 	npm ci --prefix frontend
 	npm run build --prefix frontend
 
-dev-build-gateway: frontend-build
-	go build -o $(BIN_DIR)/breakfix-gateway ./cmd/gateway
-	@echo "  ✓ gateway"
+dev-build-server: frontend-build
+	go build -o $(BIN_DIR)/breakfix-server ./cmd/server
+	@echo "  ✓ server"
 
-dev-build: dev-build-gateway
-	@echo "  ✓ Binary built"
+dev-build-controller:
+	go build -o $(BIN_DIR)/breakfix-controller ./cmd/controller
+	@echo "  ✓ controller"
+
+dev-build: dev-build-server dev-build-controller
+	@echo "  ✓ Binaries built"
 
 # ── Dev lifecycle ──
 
-dev-start-gateway:
+dev-start-controller:
 	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
-	@lsof -ti:9090 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
 	@sleep 1
-	@rm -f /tmp/breakfix-gateway.log /tmp/breakfix-gateway.pid
-	@nohup $(BIN_DIR)/breakfix-gateway -config $(DEV_CONFIG) >/tmp/breakfix-gateway.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-gateway.pid
+	@find /tmp/breakfix-controller.log /tmp/breakfix-controller.pid -depth -delete 2>/dev/null || true
+	@nohup $(BIN_DIR)/breakfix-controller -config $(DEV_CONFIG) >/tmp/breakfix-controller.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-controller.pid
 	@sleep 3
-	@pid=$$(cat /tmp/breakfix-gateway.pid 2>/dev/null); \
-	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Gateway failed to stay up"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
-	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Gateway HTTP check failed"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
-	@echo "  ✓ Gateway :9090"
+	@pid=$$(cat /tmp/breakfix-controller.pid 2>/dev/null); \
+	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Controller failed to stay up"; tail -20 /tmp/breakfix-controller.log; exit 1; }
+	@curl -fsS http://localhost:8081/healthz >/dev/null || { echo "  ✗ Controller health check failed"; tail -20 /tmp/breakfix-controller.log; exit 1; }
+	@echo "  ✓ Controller :8081"
 
-dev-up: dev-config dev-start-gateway
-	@echo "  ✓ Service running"
+dev-start-server:
+	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
+	@lsof -ti:9090 | xargs kill -9 2>/dev/null || true
+	@sleep 1
+	@find /tmp/breakfix-server.log /tmp/breakfix-server.pid -depth -delete 2>/dev/null || true
+	@nohup $(BIN_DIR)/breakfix-server -config $(DEV_CONFIG) >/tmp/breakfix-server.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-server.pid
+	@sleep 3
+	@pid=$$(cat /tmp/breakfix-server.pid 2>/dev/null); \
+	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Server failed to stay up"; tail -20 /tmp/breakfix-server.log; exit 1; }
+	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Server HTTP check failed"; tail -20 /tmp/breakfix-server.log; exit 1; }
+	@echo "  ✓ Server :9090"
+
+dev-up: dev-config dev-start-controller dev-start-server
+	@echo "  ✓ Server and Controller running"
 
 dev-down:
-	@{ [ -f /tmp/breakfix-gateway.pid ] && kill $$(cat /tmp/breakfix-gateway.pid) 2>/dev/null && rm -f /tmp/breakfix-gateway.pid && echo "  ✓ Gateway stopped"; } || \
-	 { lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Gateway stopped"; } || echo "  - Gateway not running"
+	@{ [ -f /tmp/breakfix-server.pid ] && kill $$(cat /tmp/breakfix-server.pid) 2>/dev/null && find /tmp/breakfix-server.pid -depth -delete && echo "  ✓ Server stopped"; } || \
+	 { lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Server stopped"; } || echo "  - Server not running"
+	@{ [ -f /tmp/breakfix-controller.pid ] && kill $$(cat /tmp/breakfix-controller.pid) 2>/dev/null && find /tmp/breakfix-controller.pid -depth -delete && echo "  ✓ Controller stopped"; } || \
+	 { lsof -ti:8081 | xargs kill 2>/dev/null && echo "  ✓ Controller stopped"; } || echo "  - Controller not running"
 	@lsof -ti:8081 | xargs kill 2>/dev/null || true
 	@docker stop registry 2>/dev/null && echo "  ✓ Registry stopped" || echo "  - Registry not running"
 
@@ -93,11 +112,12 @@ dev-reset: dev-down
 
 # ── Dev shortcuts (build + restart) ──
 
-dev-gateway: dev-config dev-build-gateway dev-start-gateway
+dev-server: dev-config dev-build-server dev-start-server
+dev-controller: dev-config dev-build-controller dev-start-controller
 
-e2e-gateway-recovery:
+e2e-server-recovery:
 	npm ci --prefix test
-	RUN_GATEWAY_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'gateway restart expires an abandoned ready environment'
+	RUN_SERVER_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'server restart leaves controller reconciliation active'
 
 e2e:
 	npm ci --prefix test
@@ -180,12 +200,16 @@ $(DEV_CONFIG): $(CONFIG)
 # Production build (dist/ — stripped, with LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
-build-gateway: frontend-build
-	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-gateway-linux-amd64 ./cmd/gateway
-	@echo "  ✓ Gateway binary"
+build-server: frontend-build
+	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-server-linux-amd64 ./cmd/server
+	@echo "  ✓ Server binary"
 
-build: build-gateway
-	@echo "  ✓ Production binary built"
+build-controller:
+	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-controller-linux-amd64 ./cmd/controller
+	@echo "  ✓ Controller binary"
+
+build: build-server build-controller
+	@echo "  ✓ Production binaries built"
 
 # ═══════════════════════════════════════════════════════════════
 # Remote deploy
@@ -199,10 +223,15 @@ _guard-server:
 		exit 1; \
 	fi
 
-deploy-gateway: build-gateway _guard-server
-	scp $(DIST_DIR)/breakfix-gateway-linux-amd64 $(SERVER):/tmp/breakfix-gateway
-	ssh $(SERVER) 'sudo mv /tmp/breakfix-gateway $(SERVER_BIN) && sudo systemctl restart $(SERVICE)'
-	@echo "✓ Gateway deployed and restarted"
+deploy-server: build-server _guard-server
+	scp $(DIST_DIR)/breakfix-server-linux-amd64 $(SERVER):/tmp/breakfix-server
+	ssh $(SERVER) 'sudo mv /tmp/breakfix-server $(SERVER_BIN) && sudo systemctl restart $(SERVER_SERVICE)'
+	@echo "✓ Server deployed and restarted"
+
+deploy-controller: build-controller _guard-server
+	scp $(DIST_DIR)/breakfix-controller-linux-amd64 $(SERVER):/tmp/breakfix-controller
+	ssh $(SERVER) 'sudo mv /tmp/breakfix-controller $(CONTROLLER_BIN) && sudo systemctl restart $(CONTROLLER_SERVICE)'
+	@echo "✓ Controller deployed and restarted"
 
 deploy-catalog: _guard-server
 	tar -C data -czf /tmp/breakfix-challenges.tar.gz challenges
@@ -261,10 +290,10 @@ deploy-cleanup: _guard-server
 	@echo "✓ K8s namespaces cleaned up"
 
 deploy-reset: deploy-cleanup _guard-server
-	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVICE)'
+	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVER_SERVICE)'
 	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
 
-deploy: deploy-generator deploy-images deploy-catalog deploy-gateway
+deploy: deploy-generator deploy-images deploy-catalog deploy-controller deploy-server
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -316,7 +345,7 @@ generator-build:
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Generator image built and loaded into Kind"
 
-generator-dev: dev-rbac generator-build dev-gateway
+generator-dev: dev-rbac generator-build dev-up
 	@kubectl delete jobs -n breakfix-system --all 2>/dev/null || true
 	@kubectl delete pods -n breakfix-system --all 2>/dev/null || true
 	@echo "  ✓ Generator dev environment ready"
@@ -348,10 +377,10 @@ proto:
 	docker run --rm -v $(CURDIR):/workspace alpine chown -R 1000:1000 /workspace/pkg/proto/
 
 status: _guard-server
-	ssh $(SERVER) 'sudo systemctl status $(SERVICE) --no-pager'
+	ssh $(SERVER) 'sudo systemctl status $(SERVER_SERVICE) $(CONTROLLER_SERVICE) --no-pager'
 
 logs: _guard-server
-	ssh $(SERVER) 'sudo journalctl -u $(SERVICE) -f'
+	ssh $(SERVER) 'sudo journalctl -u $(SERVER_SERVICE) -u $(CONTROLLER_SERVICE) -f'
 
 clean:
 	rm -rf $(BIN_DIR)/ $(DIST_DIR)/

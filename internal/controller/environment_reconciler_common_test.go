@@ -8,9 +8,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-type fakeCommonRuntime struct {
-	requestDeletionCalls int
-}
+type fakeCommonRuntime struct{}
 
 func (f *fakeCommonRuntime) provision(context.Context, commonEnvironmentObject) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
@@ -36,11 +34,6 @@ func (f *fakeCommonRuntime) finalCleanup(context.Context, commonEnvironmentObjec
 	return ctrl.Result{}, nil
 }
 
-func (f *fakeCommonRuntime) requestDeletion(context.Context, commonEnvironmentObject) (ctrl.Result, error) {
-	f.requestDeletionCalls++
-	return ctrl.Result{}, nil
-}
-
 func TestReconcileCommonEnvironmentRetainsCompletedEnvironmentForIdleCleanup(t *testing.T) {
 	env := &breakfixv1.ContainerEnvironment{
 		Status: breakfixv1.CommonEnvironmentStatus{
@@ -51,9 +44,6 @@ func TestReconcileCommonEnvironmentRetainsCompletedEnvironmentForIdleCleanup(t *
 
 	if _, err := reconcileCommonEnvironment(context.Background(), env, runtime); err != nil {
 		t.Fatalf("reconcileCommonEnvironment: %v", err)
-	}
-	if runtime.requestDeletionCalls != 0 {
-		t.Fatalf("expected completed environment to be retained for idle cleanup, got %d delete calls", runtime.requestDeletionCalls)
 	}
 }
 
@@ -68,12 +58,9 @@ func TestReconcileCommonEnvironmentKeepsFailedByDefault(t *testing.T) {
 	if _, err := reconcileCommonEnvironment(context.Background(), env, runtime); err != nil {
 		t.Fatalf("reconcileCommonEnvironment: %v", err)
 	}
-	if runtime.requestDeletionCalls != 0 {
-		t.Fatalf("expected failed environment to be retained, got %d delete calls", runtime.requestDeletionCalls)
-	}
 }
 
-func TestReconcileCommonEnvironmentDeletesFailedWhenForced(t *testing.T) {
+func TestReconcileCommonEnvironmentRetainsForcedFailureForServerProjection(t *testing.T) {
 	yes := true
 	env := &breakfixv1.ContainerEnvironment{
 		Spec: breakfixv1.CommonEnvironmentSpec{
@@ -89,8 +76,5 @@ func TestReconcileCommonEnvironmentDeletesFailedWhenForced(t *testing.T) {
 
 	if _, err := reconcileCommonEnvironment(context.Background(), env, runtime); err != nil {
 		t.Fatalf("reconcileCommonEnvironment: %v", err)
-	}
-	if runtime.requestDeletionCalls != 1 {
-		t.Fatalf("expected failed environment to be deleted when forced, got %d delete calls", runtime.requestDeletionCalls)
 	}
 }

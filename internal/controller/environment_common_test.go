@@ -93,6 +93,61 @@ func TestSetEnvironmentCompletedUsesCompletedPhase(t *testing.T) {
 	}
 }
 
+func TestValidateEnvironmentSnapshotRequiresControllerInputs(t *testing.T) {
+	spec := &breakfixv1.CommonEnvironmentSpec{
+		ChallengeRef:      "cleanup-logs",
+		ChallengeRevision: "sha256:abc",
+		UserRef:           "u-demo",
+		Runtime:           "container",
+		Image:             "cleanup-logs:v1",
+		CheckpointIDs:     []string{"archive-old-logs"},
+	}
+	if err := validateEnvironmentSnapshot(spec, "container"); err != nil {
+		t.Fatalf("valid execution snapshot rejected: %v", err)
+	}
+	spec.CheckpointIDs = nil
+	if err := validateEnvironmentSnapshot(spec, "container"); err == nil {
+		t.Fatal("missing checkpoint IDs accepted")
+	}
+}
+
+func TestAdvanceEnvironmentLeaseUsesServerActivityInput(t *testing.T) {
+	activityAt := metav1.NewTime(time.Now().UTC())
+	idle := int64(60)
+	spec := &breakfixv1.CommonEnvironmentSpec{
+		ActivityAt: &activityAt,
+		Timeouts:   breakfixv1.EnvironmentTimeoutsSpec{IdleTTLSeconds: &idle},
+	}
+	status := &breakfixv1.CommonEnvironmentStatus{Phase: breakfixv1.EnvironmentReady}
+	changed, evaluate, _ := advanceEnvironmentLease(spec, status)
+	if !changed || !evaluate || status.LastActivityAt == nil || status.ExpiresAt == nil {
+		t.Fatalf("activity input was not projected into lease status: %#v", status)
+	}
+	if !status.LastActivityAt.Equal(&activityAt) {
+		t.Fatalf("last activity = %v, want %v", status.LastActivityAt, activityAt)
+	}
+}
+
+func TestAdvanceEnvironmentLeaseHonorsDisabledAutoDestroy(t *testing.T) {
+	disabled := false
+	expired := metav1.NewTime(time.Now().Add(-time.Minute))
+	spec := &breakfixv1.CommonEnvironmentSpec{
+		CleanupPolicy: breakfixv1.CleanupPolicySpec{AutoDestroyAfterIdle: &disabled},
+	}
+	status := &breakfixv1.CommonEnvironmentStatus{
+		Phase:     breakfixv1.EnvironmentReady,
+		ExpiresAt: &expired,
+	}
+
+	changed, evaluate, requeueAfter := advanceEnvironmentLease(spec, status)
+	if changed || !evaluate || requeueAfter != 0 {
+		t.Fatalf("disabled cleanup result = changed:%v evaluate:%v requeue:%s", changed, evaluate, requeueAfter)
+	}
+	if status.Phase != breakfixv1.EnvironmentReady {
+		t.Fatalf("disabled cleanup moved phase to %s", status.Phase)
+	}
+}
+
 func TestWorkspaceResourceRequirementsUsesSpecLimitsForRequestsAndLimits(t *testing.T) {
 	spec := breakfixv1.CommonEnvironmentSpec{
 		Resources: breakfixv1.EnvironmentResourcesSpec{

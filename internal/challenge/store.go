@@ -1,6 +1,8 @@
 package challenge
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +25,7 @@ type Entry struct {
 	Tags        []string
 	Description string
 	Image       string
+	Revision    string
 	PublishedAt time.Time
 	Checkpoints []Checkpoint
 	Dir         string
@@ -115,6 +118,11 @@ func LoadDir(dir string) (*Entry, error) {
 	if entry.PublishedAt.IsZero() {
 		return nil, fmt.Errorf("challenge published_at is required")
 	}
+	revision, err := manifestRevision(dir)
+	if err != nil {
+		return nil, err
+	}
+	entry.Revision = revision
 	return entry, nil
 }
 
@@ -137,6 +145,15 @@ func loadSpec(dir string) (*Spec, error) {
 		return nil, fmt.Errorf("parse %s: %w", filepath.Join(dir, "challenge.yaml"), err)
 	}
 	return &spec, nil
+}
+
+func manifestRevision(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "challenge.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("read challenge manifest for revision: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func entryFromSpec(dir string, spec *Spec) *Entry {

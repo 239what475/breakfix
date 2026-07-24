@@ -61,9 +61,17 @@ type EnvironmentResourcesSpec struct {
 }
 
 type CommonEnvironmentSpec struct {
-	ChallengeRef  string                   `json:"challengeRef"`
-	UserRef       string                   `json:"userRef"`
-	Image         string                   `json:"image"`
+	ChallengeRef string `json:"challengeRef"`
+	// These fields stay schema-optional so pre-split Environment CRDs can be
+	// finalized after an upgrade. The Controller requires them before provision.
+	ChallengeRevision string `json:"challengeRevision,omitempty"`
+	UserRef           string `json:"userRef"`
+	// +kubebuilder:validation:Enum=container;vcluster
+	Runtime string `json:"runtime,omitempty"`
+	Image   string `json:"image"`
+	// +listType=set
+	CheckpointIDs []string                 `json:"checkpointIDs,omitempty"`
+	ActivityAt    *metav1.Time             `json:"activityAt,omitempty"`
 	Timeouts      EnvironmentTimeoutsSpec  `json:"timeouts,omitempty"`
 	CleanupPolicy CleanupPolicySpec        `json:"cleanupPolicy,omitempty"`
 	Resources     EnvironmentResourcesSpec `json:"resources,omitempty"`
@@ -85,6 +93,7 @@ type CommonEnvironmentStatus struct {
 	WorkspacePodName   string                  `json:"workspacePodName,omitempty"`
 	StartedAt          *metav1.Time            `json:"startedAt,omitempty"`
 	ReadyAt            *metav1.Time            `json:"readyAt,omitempty"`
+	LastActivityAt     *metav1.Time            `json:"lastActivityAt,omitempty"`
 	CompletedAt        *metav1.Time            `json:"completedAt,omitempty"`
 	ExpiresAt          *metav1.Time            `json:"expiresAt,omitempty"`
 	DestroyedAt        *metav1.Time            `json:"destroyedAt,omitempty"`

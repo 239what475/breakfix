@@ -104,7 +104,7 @@ type EnvironmentFiles struct {
 }
 
 // Reader is the assistant's complete view of the current environment. Each
-// method is implemented by Gateway with a fixed, read-only Kubernetes action.
+// method is implemented by Server with a fixed, read-only Kubernetes action.
 type Reader interface {
 	TerminalScrollback(context.Context, string, int, int) (Scrollback, error)
 	CheckpointStatus(context.Context) (CheckpointSnapshot, error)

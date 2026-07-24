@@ -28,12 +28,12 @@ type ChallengeAttempt struct {
 }
 
 type TerminalConnection struct {
-	ID                string
-	EnvironmentUID    string
-	UserID            string
-	ChallengeID       string
-	GatewayInstanceID string
-	ConnectedAt       time.Time
+	ID               string
+	EnvironmentUID   string
+	UserID           string
+	ChallengeID      string
+	ServerInstanceID string
+	ConnectedAt      time.Time
 }
 
 type EnvironmentUsageSession struct {
@@ -61,7 +61,7 @@ type LearningHistoryItem struct {
 }
 
 // LearningHistoryCursor identifies an attempt in the same order used by the
-// history query. It remains internal to the DB; Gateway turns it into an
+// history query. It remains internal to the DB; Server turns it into an
 // opaque API token.
 type LearningHistoryCursor struct {
 	ReadyAt        time.Time
@@ -150,11 +150,11 @@ func (d *DB) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome
 // active usage-session index makes the first connection transition atomic.
 func (d *DB) OpenTerminalConnection(ctx context.Context, connection TerminalConnection) error {
 	for name, value := range map[string]string{
-		"connection id":       connection.ID,
-		"environment uid":     connection.EnvironmentUID,
-		"user id":             connection.UserID,
-		"challenge id":        connection.ChallengeID,
-		"gateway instance id": connection.GatewayInstanceID,
+		"connection id":      connection.ID,
+		"environment uid":    connection.EnvironmentUID,
+		"user id":            connection.UserID,
+		"challenge id":       connection.ChallengeID,
+		"server instance id": connection.ServerInstanceID,
 	} {
 		if err := requiredLearningValue(name, value); err != nil {
 			return err
@@ -172,13 +172,13 @@ func (d *DB) OpenTerminalConnection(ctx context.Context, connection TerminalConn
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO terminal_connections
-			(id, environment_uid, user_id, challenge_id, gateway_instance_id, connected_at, heartbeat_at)
+			(id, environment_uid, user_id, challenge_id, server_instance_id, connected_at, heartbeat_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, connection.ID, connection.EnvironmentUID, connection.UserID, connection.ChallengeID, connection.GatewayInstanceID, nowText(now), nowText(now)); err != nil {
+	`, connection.ID, connection.EnvironmentUID, connection.UserID, connection.ChallengeID, connection.ServerInstanceID, nowText(now), nowText(now)); err != nil {
 		return fmt.Errorf("insert terminal connection: %w", err)
 	}
 
-	// The partial unique index resolves concurrent opens from multiple Gateway
+	// The partial unique index resolves concurrent opens from multiple Server
 	// replicas without treating a process-local counter as global state.
 	usageID := fmt.Sprintf("usage-%s-%d", connection.EnvironmentUID, now.UnixNano())
 	if _, err := tx.ExecContext(ctx, `
@@ -223,7 +223,7 @@ func (d *DB) TouchTerminalConnection(ctx context.Context, connectionID string, a
 }
 
 // CloseTerminalConnection records an individual WebSocket close immediately.
-// A usage session is deliberately left open for the Gateway's settle delay so
+// A usage session is deliberately left open for the Server's settle delay so
 // a tab handover does not create a false gap in learning time.
 func (d *DB) CloseTerminalConnection(ctx context.Context, connectionID string, at time.Time) (bool, error) {
 	if err := requiredLearningValue("connection id", connectionID); err != nil {
@@ -261,7 +261,7 @@ func (d *DB) CloseTerminalConnection(ctx context.Context, connectionID string, a
 }
 
 // FinishTerminalUsageSession closes an environment-level usage interval only
-// after a local settle delay. It checks all Gateway connections transactionally
+// after a local settle delay. It checks all Server connections transactionally
 // so a connection hosted by another replica keeps the interval alive.
 func (d *DB) FinishTerminalUsageSession(ctx context.Context, environmentUID string, at time.Time) (bool, error) {
 	if err := requiredLearningValue("environment uid", environmentUID); err != nil {
@@ -303,7 +303,7 @@ func (d *DB) FinishTerminalUsageSession(ctx context.Context, environmentUID stri
 	return changed == 1, nil
 }
 
-// CleanupTerminalActivity makes Gateway restarts and lost WebSocket close
+// CleanupTerminalActivity makes Server restarts and lost WebSocket close
 // events bounded. It closes stale records and their orphaned usage sessions.
 func (d *DB) CleanupTerminalActivity(ctx context.Context, staleBefore, now time.Time) error {
 	if staleBefore.IsZero() || now.IsZero() {

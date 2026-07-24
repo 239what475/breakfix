@@ -11,7 +11,7 @@ import (
 )
 
 // PromoteSubmission atomically turns a previously verified submission archive
-// into a catalog challenge. Verification never calls this function; Gateway
+// into a catalog challenge. Verification never calls this function; Server
 // invokes it only after the author explicitly publishes a verified revision.
 func PromoteSubmission(dataDir, challengesDir, submissionID, challengeID, image string) (*Entry, error) {
 	archive, err := os.Open(SubmissionPath(dataDir, submissionID))

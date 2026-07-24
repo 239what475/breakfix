@@ -1,4 +1,4 @@
-package gateway
+package server
 
 import (
 	"context"
@@ -15,16 +15,16 @@ const (
 	terminalConnectionRetention = 24 * time.Hour
 )
 
-func newGatewayInstanceID() string {
+func newServerInstanceID() string {
 	hostname, err := os.Hostname()
 	if err != nil || strings.TrimSpace(hostname) == "" {
-		hostname = "gateway"
+		hostname = "server"
 	}
 	return fmt.Sprintf("%s-%d", hostname, time.Now().UnixNano())
 }
 
 // StartLearningCleanup bounds durable terminal activity records after a
-// Gateway crash or a lost close frame. Environment idle leases remain owned by
+// Server crash or a lost close frame. Environment idle leases remain owned by
 // the controllers and are not modified here.
 func (h *Handler) StartLearningCleanup(ctx context.Context) {
 	if h == nil || h.db == nil {
