@@ -1,6 +1,3 @@
-# Binaries
-bin/
-
 # IDE
 .idea/
 .vscode/
@@ -12,10 +9,6 @@ bin/
 Thumbs.db
 
 # Project data (SQLite + CA certs + challenges)
-data/
-!data/
-!data/challenges/
-!data/challenges/**
 data/*
 !data/challenges/
 !data/challenges/**
@@ -27,21 +20,21 @@ data/*
 # CLI user data
 .breakfix/
 
-# Config (instance-specific, copy from breakfix.example.yaml)
-breakfix.yaml
-breakfix-local.yaml
+# Runtime config (instance-specific, copy from config/breakfix.example.yaml)
+config/breakfix.yaml
+config/breakfix.local.yaml
 .breakfix-server
 
 # Build output
-dist/
 bin/
+dist/
 
 # Kind kubeconfig
 .kube/
 .local/
-bin/
-node_modules/
+
+# Node dependencies and test output
 test/node_modules/
-test-results/
-playwright-report/
-test/test-results/
+test/results/
+test/report/
+frontend/test-results/

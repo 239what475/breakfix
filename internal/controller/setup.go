@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
-	"github.com/breakfix/breakfix/pkg/vclustercli"
+	"github.com/breakfix/breakfix/internal/vclustercli"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 

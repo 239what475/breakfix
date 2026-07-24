@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 )
 

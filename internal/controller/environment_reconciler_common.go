@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 )
 
 // CompletionRecorder persists user learning progress outside the lifecycle of

@@ -12,7 +12,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26.3"
 
       - uses: actions/setup-node@v4
         with:
@@ -43,8 +43,6 @@ jobs:
 
           GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-gateway-linux-amd64   ./cmd/gateway
           GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-gateway-darwin-amd64  ./cmd/gateway
-          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-linux-amd64 ./cmd/controller
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-darwin-amd64 ./cmd/controller
 
           ls -lh dist/
 

@@ -2,10 +2,11 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -153,6 +154,10 @@ func clearEnvironmentFailure(status *breakfixv1.CommonEnvironmentStatus) {
 }
 
 func setEnvironmentCondition(status *breakfixv1.CommonEnvironmentStatus, conditionType string, conditionStatus metav1.ConditionStatus, reason, msg string) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "NotApplicable"
+	}
 	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             conditionStatus,

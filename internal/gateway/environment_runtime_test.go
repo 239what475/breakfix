@@ -5,9 +5,25 @@ import (
 	"testing"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/challenge"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestNewCommonEnvironmentSpecPersistsConfiguredIdleTTL(t *testing.T) {
+	handler := &Handler{cooldownMin: 1}
+	spec := handler.newCommonEnvironmentSpec("u-demo", &challenge.Entry{
+		ID:    "cleanup-logs",
+		Image: "breakfix-cleanup-logs:latest",
+	})
+
+	if spec.ChallengeRef != "cleanup-logs" || spec.UserRef != "u-demo" || spec.Image != "breakfix-cleanup-logs:latest" {
+		t.Fatalf("unexpected common environment spec: %#v", spec)
+	}
+	if spec.Timeouts.IdleTTLSeconds == nil || *spec.Timeouts.IdleTTLSeconds != 60 {
+		t.Fatalf("expected configured 60-second idle TTL, got %#v", spec.Timeouts.IdleTTLSeconds)
+	}
+}
 
 func TestMarkDrainingSkipsCompletedEnvironment(t *testing.T) {
 	spec := breakfixv1.CommonEnvironmentSpec{}

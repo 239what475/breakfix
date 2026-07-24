@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -17,6 +17,18 @@ type commonGatewayEnvironment interface {
 	GetGeneration() int64
 	CommonSpec() *breakfixv1.CommonEnvironmentSpec
 	CommonStatus() *breakfixv1.CommonEnvironmentStatus
+}
+
+func (h *Handler) newCommonEnvironmentSpec(userID string, challengeEntry *challenge.Entry) breakfixv1.CommonEnvironmentSpec {
+	idleTTLSeconds := int64(h.cooldownMin * 60)
+	return breakfixv1.CommonEnvironmentSpec{
+		ChallengeRef: challengeEntry.ID,
+		UserRef:      userID,
+		Image:        challengeEntry.Image,
+		Timeouts: breakfixv1.EnvironmentTimeoutsSpec{
+			IdleTTLSeconds: &idleTTLSeconds,
+		},
+	}
 }
 
 type environmentRuntimeAdapter struct {
@@ -132,11 +144,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 							"breakfix.dev/challenge": challengeEntry.ID,
 						},
 					},
-					Spec: breakfixv1.CommonEnvironmentSpec{
-						ChallengeRef: challengeEntry.ID,
-						UserRef:      user.ID,
-						Image:        challengeEntry.Image,
-					},
+					Spec: h.newCommonEnvironmentSpec(user.ID, challengeEntry),
 				}
 				if _, err := h.k8s.CreateContainerEnvironment(ctx, h.crdNamespace, env); err != nil {
 					return "", fmt.Errorf("create container environment: %w", err)
@@ -200,11 +208,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 						},
 					},
 					Spec: breakfixv1.VClusterEnvironmentSpec{
-						CommonEnvironmentSpec: breakfixv1.CommonEnvironmentSpec{
-							ChallengeRef: challengeEntry.ID,
-							UserRef:      user.ID,
-							Image:        challengeEntry.Image,
-						},
+						CommonEnvironmentSpec: h.newCommonEnvironmentSpec(user.ID, challengeEntry),
 					},
 				}
 				if _, err := h.k8s.CreateVClusterEnvironment(ctx, h.crdNamespace, env); err != nil {

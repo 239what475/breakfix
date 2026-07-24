@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"

@@ -1,11 +1,13 @@
-.PHONY: dev dev-up dev-down dev-reset dev-status frontend-build \
+.PHONY: dev dev-up dev-down dev-reset dev-status dev-config frontend-build \
         dev-build dev-build-gateway \
         dev-start-gateway \
         dev-gateway \
+        e2e \
         e2e-gateway-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
+        generate-crd verify-crd-generated \
         build build-gateway \
-        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-catalog deploy-cleanup deploy-reset \
+        deploy deploy-gateway deploy-images deploy-image deploy-base deploy-generator deploy-catalog deploy-cleanup deploy-reset \
         generator-build generator-dev \
         lint proto clean status logs
 
@@ -20,24 +22,30 @@ LDFLAGS   := -s -w \
   -X 'github.com/breakfix/breakfix/internal/build.BuildTime=$(BUILD_TIME)' \
   -X 'github.com/breakfix/breakfix/internal/build.Commit=$(COMMIT)'
 
+CONTROLLER_GEN_VERSION := v0.21.0
+CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
+CRD_TYPES_DIR := internal/k8s/apis/breakfix/v1
+
 # ── Remote server ──
 
 SERVER      ?= $(shell cat .breakfix-server 2>/dev/null || echo "")
 SERVER_BIN  ?= /usr/local/bin/breakfix-gateway
-SERVER_CONF ?= /var/lib/breakfix/breakfix.yaml
 SERVER_DATA ?= /var/lib/breakfix
 SERVICE     ?= breakfix-gateway
 REGISTRY    ?= localhost:5000
 ACR_NS      ?= break-fix
 KIND_CLUSTER ?= breakfix-dev
-DEV_IMAGE_PREFIX ?= $(shell awk '/^registry_addr:/{print $$2}' breakfix-local.yaml 2>/dev/null)
+
+CONFIG_DIR ?= config
+CONFIG ?= $(CONFIG_DIR)/breakfix.yaml
+DEV_CONFIG ?= $(CONFIG_DIR)/breakfix.local.yaml
+DEV_IMAGE_PREFIX ?= $(shell awk '/^registry_addr:/{print $$2}' $(DEV_CONFIG) 2>/dev/null)
 ifeq ($(strip $(DEV_IMAGE_PREFIX)),)
 DEV_IMAGE_PREFIX := $(REGISTRY)/$(ACR_NS)
 endif
 
 BIN_DIR  := bin
 DIST_DIR := dist
-DEV_CONFIG ?= breakfix-local.yaml
 
 # ═══════════════════════════════════════════════════════════════
 # Dev build (bin/ — fast, no LDFLAGS)
@@ -57,6 +65,7 @@ dev-build: dev-build-gateway
 # ── Dev lifecycle ──
 
 dev-start-gateway:
+	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
 	@lsof -ti:9090 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
 	@sleep 1
@@ -68,7 +77,7 @@ dev-start-gateway:
 	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Gateway HTTP check failed"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
 	@echo "  ✓ Gateway :9090"
 
-dev-up: dev-start-gateway
+dev-up: dev-config dev-start-gateway
 	@echo "  ✓ Service running"
 
 dev-down:
@@ -84,10 +93,15 @@ dev-reset: dev-down
 
 # ── Dev shortcuts (build + restart) ──
 
-dev-gateway: dev-build-gateway dev-start-gateway
+dev-gateway: dev-config dev-build-gateway dev-start-gateway
 
 e2e-gateway-recovery:
-	RUN_GATEWAY_RECOVERY_E2E=1 npx playwright test --workers=1 --grep 'gateway restart expires an abandoned ready environment'
+	npm ci --prefix test
+	RUN_GATEWAY_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'gateway restart expires an abandoned ready environment'
+
+e2e:
+	npm ci --prefix test
+	npm run test:e2e --prefix test
 # ── Dev environment ──
 
 dev-registry:
@@ -102,15 +116,27 @@ dev-data:
 	@mkdir -p data/challenges
 	@echo "  ✓ Data dir ready"
 
-dev-crd:
-	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null 2>&1 || true
-	@kubectl apply -f deploy/crd/breakfix.dev_containerenvironments.yaml >/dev/null 2>&1 || true
-	@kubectl apply -f deploy/crd/breakfix.dev_vclusterenvironments.yaml >/dev/null 2>&1 || true
-	@kubectl apply -f deploy/crd/breakfix.dev_verifytasks.yaml >/dev/null 2>&1 || true
+generate-crd:
+	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crd
+
+verify-crd-generated:
+	@tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR) output:dir=$$tmp; \
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=$$tmp/crd; \
+	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
+	diff -ru deploy/crd $$tmp/crd
+
+dev-crd: generate-crd
+	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null
+	@kubectl apply -f deploy/crd/breakfix.dev_containerenvironments.yaml >/dev/null
+	@kubectl apply -f deploy/crd/breakfix.dev_vclusterenvironments.yaml >/dev/null
+	@kubectl apply -f deploy/crd/breakfix.dev_verifytasks.yaml >/dev/null
 	@echo "  ✓ CRDs applied"
 
 dev-rbac:
-	@kubectl apply -f deploy/rbac/controller.yaml >/dev/null 2>&1 || true
+	@kubectl apply -f deploy/rbac/controller.yaml >/dev/null
 	@echo "  ✓ RBAC applied"
 
 dev-images:
@@ -122,7 +148,7 @@ dev-images:
 	done
 	@echo "  ✓ Challenge images"
 
-dev: dev-registry dev-data dev-crd dev-rbac dev-images dev-build dev-up dev-status
+dev: dev-config dev-registry dev-data dev-crd dev-rbac dev-images dev-build dev-up dev-status
 	@echo ""
 	@echo "══════════════════════════════════════"
 	@echo "  Breakfix dev environment ready"
@@ -135,14 +161,18 @@ dev-status:
 	@echo "    http://localhost:9090"
 
 # ═══════════════════════════════════════════════════════════════
-# Dev config (generated from breakfix.yaml)
+# Dev config
 # ═══════════════════════════════════════════════════════════════
 
-breakfix-local.yaml: breakfix.yaml
+dev-config: $(DEV_CONFIG)
+
+$(DEV_CONFIG): $(CONFIG)
+	@mkdir -p $(dir $@)
 	@sed \
 		-e 's|^data_dir:.*|data_dir: ./data|' \
 		-e "s|^kubeconfig:.*|kubeconfig: $${HOME}/.kube/config|" \
-		-e 's|^registry:.*|registry: localhost:5000|' \
+		-e 's|^registry_addr:.*|registry_addr: 172.18.0.1:5000/break-fix|' \
+		-e 's|^registry_insecure:.*|registry_insecure: true|' \
 		$< > $@
 	@echo "  ✓ $@ generated"
 
@@ -174,11 +204,6 @@ deploy-gateway: build-gateway _guard-server
 	ssh $(SERVER) 'sudo mv /tmp/breakfix-gateway $(SERVER_BIN) && sudo systemctl restart $(SERVICE)'
 	@echo "✓ Gateway deployed and restarted"
 
-deploy-config: _guard-server
-	scp breakfix.yaml $(SERVER):/tmp/breakfix.yaml
-	ssh $(SERVER) 'sudo mv /tmp/breakfix.yaml $(SERVER_CONF) && sudo chown breakfix:breakfix $(SERVER_CONF) && sudo systemctl restart $(SERVICE)'
-	@echo "✓ Config deployed, service restarted"
-
 deploy-catalog: _guard-server
 	tar -C data -czf /tmp/breakfix-challenges.tar.gz challenges
 	scp /tmp/breakfix-challenges.tar.gz $(SERVER):/tmp/breakfix-challenges.tar.gz
@@ -203,34 +228,32 @@ deploy-images: _guard-server
 	@echo "✓ All images deployed"
 
 deploy-base: _guard-server
-	@[ -f breakfix.yaml ] || { echo "ERROR: breakfix.yaml not found."; exit 1; }
-	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000" ]; then \
+	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
+	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
 		echo "  ✗ Registry not configured. Skipping breakfix-base."; \
 		exit 0; \
 	fi; \
 	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
-	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./images/base; \
-	docker tag breakfix-base:latest $$pub/$$acr_ns/breakfix-base:latest; \
-	docker push $$pub/$$acr_ns/breakfix-base:latest; \
-	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./images/k8s-base; \
-	docker tag breakfix-k8s-base:latest $$pub/$$acr_ns/breakfix-k8s-base:latest; \
-	docker push $$pub/$$acr_ns/breakfix-k8s-base:latest
+	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./deploy/images/base; \
+	docker tag breakfix-base:latest $$pub/breakfix-base:latest; \
+	docker push $$pub/breakfix-base:latest; \
+	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./deploy/images/k8s-base; \
+	docker tag breakfix-k8s-base:latest $$pub/breakfix-k8s-base:latest; \
+	docker push $$pub/breakfix-k8s-base:latest
 	@echo "  ✓ breakfix-base + breakfix-k8s-base → ACR"
 
 deploy-image: _guard-server
-	@[ -f breakfix.yaml ] || { echo "ERROR: breakfix.yaml not found."; exit 1; }
-	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000" ]; then \
+	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
+	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
 		echo "  ✗ Registry not configured. Skipping $(NAME)."; \
 		exit 0; \
 	fi; \
 	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
 	docker build -t $(NAME):v1 ./data/challenges/$(NAME); \
-	docker tag $(NAME):v1 $$pub/$$acr_ns/$(NAME):v1; \
-	docker push $$pub/$$acr_ns/$(NAME):v1
+	docker tag $(NAME):v1 $$pub/$(NAME):v1; \
+	docker push $$pub/$(NAME):v1
 	@echo "  ✓ $(NAME) → ACR"
 
 deploy-cleanup: _guard-server
@@ -248,14 +271,14 @@ deploy: deploy-generator deploy-images deploy-catalog deploy-gateway
 # ═══════════════════════════════════════════════════════════════
 
 docker-base:
-	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./images/base
+	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./deploy/images/base
 	docker tag breakfix-base:latest $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
 	docker tag breakfix-base:latest $(DEV_IMAGE_PREFIX)/breakfix-base:latest
 	docker push $(REGISTRY)/$(ACR_NS)/breakfix-base:latest
 	kind load docker-image breakfix-base:latest --name $(KIND_CLUSTER)
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-base:latest --name $(KIND_CLUSTER)
 	kind load docker-image $(DEV_IMAGE_PREFIX)/breakfix-base:latest --name $(KIND_CLUSTER)
-	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./images/k8s-base
+	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./deploy/images/k8s-base
 	docker tag breakfix-k8s-base:latest $(REGISTRY)/$(ACR_NS)/breakfix-k8s-base:latest
 	docker tag breakfix-k8s-base:latest $(DEV_IMAGE_PREFIX)/breakfix-k8s-base:latest
 	docker push $(REGISTRY)/$(ACR_NS)/breakfix-k8s-base:latest
@@ -286,7 +309,7 @@ docker-push:
 
 generator-build:
 	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/generator ./cmd/generator
-	docker build -t breakfix-generator:latest -f images/generator/Dockerfile .
+	docker build -t breakfix-generator:latest -f deploy/images/generator/Dockerfile .
 	docker tag breakfix-generator:latest $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
 	docker push $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
 	kind load docker-image breakfix-generator:latest --name $(KIND_CLUSTER)
@@ -299,14 +322,14 @@ generator-dev: dev-rbac generator-build dev-gateway
 	@echo "  ✓ Generator dev environment ready"
 
 deploy-generator: _guard-server generator-build
-	@vpc=$$(grep '^registry:' breakfix.yaml | sed 's/^registry: *//'); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000" ]; then \
+	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
+	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
 		echo "  ✗ Registry not configured. Skipping."; exit 1; \
 	fi; \
 	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	acr_ns=$$(grep '^acr_namespace:' breakfix.yaml | sed 's/^acr_namespace: *//'); \
-	docker tag breakfix-generator:latest $$pub/$$acr_ns/breakfix-generator:latest; \
-	docker push $$pub/$$acr_ns/breakfix-generator:latest
+	docker tag breakfix-generator:latest $$pub/breakfix-generator:latest; \
+	docker push $$pub/breakfix-generator:latest
 	@echo "  ✓ Generator image pushed to ACR"
 
 # ═══════════════════════════════════════════════════════════════

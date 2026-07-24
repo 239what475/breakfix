@@ -2,10 +2,8 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
@@ -56,6 +54,7 @@ type VerifyReport struct {
 }
 
 type VerifyTaskStatus struct {
+	// +kubebuilder:validation:Enum=Pending;Running;Failed;Succeeded
 	Phase       VerifyTaskPhase `json:"phase,omitempty"`
 	Message     string          `json:"message,omitempty"`
 	JobName     string          `json:"jobName,omitempty"`
@@ -71,80 +70,4 @@ type VerifyTaskList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []VerifyTask `json:"items"`
-}
-
-func (in *VerifyTask) DeepCopyInto(out *VerifyTask) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	in.Spec.DeepCopyInto(&out.Spec)
-	in.Status.DeepCopyInto(&out.Status)
-}
-
-func (in *VerifyTask) DeepCopy() *VerifyTask {
-	if in == nil {
-		return nil
-	}
-	out := new(VerifyTask)
-	in.DeepCopyInto(out)
-	return out
-}
-
-func (in *VerifyTask) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-func (in *VerifyTaskList) DeepCopyInto(out *VerifyTaskList) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ListMeta.DeepCopyInto(&out.ListMeta)
-	if in.Items != nil {
-		items := make([]VerifyTask, len(in.Items))
-		for i := range in.Items {
-			in.Items[i].DeepCopyInto(&items[i])
-		}
-		out.Items = items
-	}
-}
-
-func (in *VerifyTaskList) DeepCopy() *VerifyTaskList {
-	if in == nil {
-		return nil
-	}
-	out := new(VerifyTaskList)
-	in.DeepCopyInto(out)
-	return out
-}
-
-func (in *VerifyTaskList) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-func (in *VerifyTaskSpec) DeepCopyInto(out *VerifyTaskSpec) {
-	*out = *in
-}
-
-func (in *VerifyTaskStatus) DeepCopyInto(out *VerifyTaskStatus) {
-	*out = *in
-	if in.StartedAt != nil {
-		t := *in.StartedAt
-		out.StartedAt = &t
-	}
-	if in.CompletedAt != nil {
-		t := *in.CompletedAt
-		out.CompletedAt = &t
-	}
-	if in.Report != nil {
-		report := *in.Report
-		if in.Report.Issues != nil {
-			report.Issues = append([]VerifyIssue{}, in.Report.Issues...)
-		}
-		out.Report = &report
-	}
 }

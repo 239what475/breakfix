@@ -13,7 +13,8 @@
 ### 0.1 一次性初始化
 
 ```bash
-cp breakfix.example.yaml breakfix.yaml        # 编辑填入生产配置
+cp config/breakfix.example.yaml config/breakfix.yaml
+make dev-config
 ```
 
 前置依赖：Docker、Kind（集群名 `breakfix-dev`）。
@@ -22,7 +23,7 @@ cp breakfix.example.yaml breakfix.yaml        # 编辑填入生产配置
 
 ```bash
 make dev            # 启动完整环境（registry + 镜像 + 编译 + server）
-make dev-server     # 改代码后重编译+重启（不动 DB，不用重登录）
+make dev-gateway    # 改代码后重编译+重启（不动 DB，不用重登录）
 make dev-down       # 停 server + 停 registry
 make dev-reset      # 停所有 + 清 DB（需要重新 register → login）
 
@@ -37,7 +38,7 @@ make dev
 
 打开 `http://localhost:9090`，在 Web UI 里完成注册、登录和启动题目；检查点全部通过后会自动完成。
 
-> `make dev` 保留 DB 和 CA，之后 `make dev-server` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
+> `make dev` 保留 DB 和 CA，之后 `make dev-gateway` 重启不需要重新登录。需要全新开始时用 `make dev-reset`。
 
 ---
 
@@ -51,8 +52,9 @@ sudo mkdir -p /var/lib/breakfix/challenges
 sudo tee /var/lib/breakfix/breakfix.yaml <<EOF > /dev/null
 data_dir: /var/lib/breakfix
 kubeconfig: /var/lib/breakfix/kubeconfig
-registry: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
-acr_namespace: breakfix
+registry_addr: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com/breakfix
+registry_insecure: false
+server_host: <gateway-ecs-private-ip>
 port: 9090
 proxy_port: 3128
 EOF
@@ -87,18 +89,18 @@ sudo curl -Lo /usr/local/bin/breakfix-gateway \
 sudo chown breakfix:breakfix /usr/local/bin/breakfix-gateway
 ```
 
-**方式二：make deploy-server（本地构建 + 自动部署）**
+**方式二：make deploy-gateway（本地构建 + 自动部署）**
 
 ```bash
-make deploy-server     # 编译 → scp → systemctl restart，一条命令
+make deploy-gateway    # 编译 → scp → systemctl restart，一条命令
 ```
 
-> 之后每次改代码，只需 `make deploy-server` 即可更新远程服务端。
+> 之后每次改代码，只需 `make deploy-gateway` 即可更新远程服务端。
 
 ### 1.4 systemd
 
 ```bash
-sudo tee /etc/systemd/system/breakfix-api.service <<'EOF' > /dev/null
+sudo tee /etc/systemd/system/breakfix-gateway.service <<'EOF' > /dev/null
 [Unit]
 Description=Breakfix Gateway
 After=network.target
@@ -115,7 +117,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now breakfix-api
+sudo systemctl enable --now breakfix-gateway
 ```
 
 ### 1.5 同步题目
@@ -173,10 +175,10 @@ make deploy-catalog
 
 ACR 控制台 → 个人版实例 → 创建命名空间 `breakfix`。
 
-记录实例的 **VPC 内网地址**（实例概览页），填入 `breakfix.yaml` 的 `registry` 字段。格式：
+记录实例的 **VPC 内网地址**（实例概览页）和命名空间，填入 `config/breakfix.yaml` 的 `registry_addr` 字段。格式：
 
 ```
-crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
+crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com/breakfix
 ```
 
 ### 3.2 推送镜像
@@ -190,9 +192,9 @@ make deploy-image NAME=cleanup-logs      # 推送单个镜像
 make deploy-images                       # 推送全部镜像
 ```
 
-`deploy-image` 自动读取 `breakfix.yaml` 中的 VPC 地址，去掉 `-vpc` 得到公网推送地址。
+`deploy-image` 自动读取 `config/breakfix.yaml` 中的 VPC 地址，去掉 `-vpc` 得到公网推送地址。
 
-> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `cleanup-logs:v1`，Server 会自动拼上 `{registry}/{acr_namespace}/` 前缀。
+> 注意：题目 `challenge.yaml` 中的 `image` 只需写 `cleanup-logs:v1`，Gateway 会自动拼上 `registry_addr` 前缀。
 
 ---
 
@@ -200,7 +202,7 @@ make deploy-images                       # 推送全部镜像
 
 ```bash
 make deploy               # 全量部署（镜像 + challenge catalog + 二进制）
-make deploy-server        # 只推二进制
+make deploy-gateway       # 只推二进制
 make deploy-catalog       # 只同步题目目录
 make deploy-image NAME=xxx  # 只推单个镜像
 make deploy-images        # 只推全部镜像
@@ -210,6 +212,8 @@ make deploy-reset         # 清理 K8s + 清远程 DB + 重启（彻底重置）
 make status               # 查看远程服务状态
 make logs                 # 查看远程实时日志
 ```
+
+> 远端 `/var/lib/breakfix/breakfix.yaml` 只在服务器上维护，不通过仓库中的 Makefile 覆盖。
 
 ---
 

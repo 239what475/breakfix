@@ -1,0 +1,39 @@
+# Breakfix runtime configuration.
+# Copy this file to config/breakfix.yaml and adjust it for the target environment.
+
+# HTTP, proxy, and controller health endpoints.
+port: 9090
+proxy_port: 3128
+health_port: 8081
+
+# Persistent server state: SQLite, CA material, and the filesystem challenge catalog.
+data_dir: ./data
+kubeconfig: ~/.kube/config
+
+# Registry address includes the repository namespace used for challenge images.
+registry_addr: localhost:5000/break-fix
+registry_insecure: true
+k8s_base_image: breakfix-k8s-base:latest
+
+# vcluster command and chart source.
+vcluster_binary: vcluster
+vcluster_chart_repo: https://charts.loft.sh
+vcluster_chart_version: ""
+
+# Empty uses the default host reachable from cluster Jobs. Set an explicit host in remote deployments.
+server_host: ""
+namespace: breakfix
+crd_namespace: breakfix-system
+cooldown_minutes: 5
+
+# Replace these development-only values before any public deployment.
+jwt_secret: breakfix-dev-secret-change-in-production
+internal_api_key: breakfix-dev-internal-key-change-in-production
+
+# Agent workflow (Anthropic-compatible API).
+llm:
+  base_url: https://api.deepseek.com/anthropic
+  model: deepseek-v4-pro
+  haiku_model: deepseek-v4-flash
+  effort: max
+  api_key: sk-your-deepseek-api-key

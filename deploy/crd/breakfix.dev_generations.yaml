@@ -1,6 +1,9 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: generations.breakfix.dev
 spec:
   group: breakfix.dev
@@ -11,74 +14,108 @@ spec:
     singular: generation
   scope: Namespaced
   versions:
-    - name: v1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              required: [image, envSecretRef]
-              properties:
-                image:
-                  type: string
-                envSecretRef:
-                  type: string
-                authoringSessionRef:
-                  type: string
-                authoringRevision:
-                  type: integer
-                  format: int64
-            status:
-              type: object
-              properties:
-                phase:
-                  type: string
-                  enum: [Pending, Running, Verifying, Verified, Failed]
-                jobName:
-                  type: string
-                podName:
-                  type: string
-                challenge:
-                  type: object
-                  properties:
-                    id:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              authoringRevision:
+                format: int64
+                type: integer
+              authoringSessionRef:
+                type: string
+              envSecretRef:
+                type: string
+              image:
+                type: string
+            required:
+            - envSecretRef
+            - image
+            type: object
+          status:
+            properties:
+              artifactRevision:
+                format: int64
+                type: integer
+              attempt:
+                format: int64
+                type: integer
+              challenge:
+                properties:
+                  description:
+                    type: string
+                  difficulty:
+                    type: string
+                  id:
+                    type: string
+                  image:
+                    type: string
+                  runtime:
+                    type: string
+                  tags:
+                    items:
                       type: string
-                    title:
-                      type: string
-                    type:
-                      type: string
-                    runtime:
-                      type: string
-                    difficulty:
-                      type: string
-                    tags:
-                      type: array
-                      items:
-                        type: string
-                    description:
-                      type: string
-                    image:
-                      type: string
-                verifyTaskRef:
-                  type: string
-                submissionID:
-                  type: string
-                artifactRevision:
-                  type: integer
-                  format: int64
-                attempt:
-                  type: integer
-                  format: int64
-                message:
-                  type: string
-                startedAt:
-                  type: string
-                  format: date-time
-                completedAt:
-                  type: string
-                  format: date-time
+                    type: array
+                  title:
+                    type: string
+                  type:
+                    type: string
+                required:
+                - description
+                - difficulty
+                - id
+                - image
+                - tags
+                - title
+                - type
+                type: object
+              completedAt:
+                format: date-time
+                type: string
+              jobName:
+                type: string
+              message:
+                type: string
+              phase:
+                enum:
+                - Pending
+                - Running
+                - Verifying
+                - Verified
+                - Failed
+                type: string
+              podName:
+                type: string
+              startedAt:
+                format: date-time
+                type: string
+              submissionID:
+                type: string
+              verifyTaskRef:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

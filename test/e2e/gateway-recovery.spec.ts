@@ -1,7 +1,8 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -12,7 +13,7 @@ import {
 
 const recoveryTest = process.env.RUN_GATEWAY_RECOVERY_E2E === "1" ? test : test.skip;
 const execFile = promisify(execFileCallback);
-const projectRoot = process.cwd();
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const gatewayPIDPath = "/tmp/breakfix-gateway.pid";
 
 type ActiveEnvironment = {
@@ -71,7 +72,9 @@ async function stopGateway() {
 
 async function createRecoveryConfig() {
   const directory = await mkdtemp(join(tmpdir(), "breakfix-gateway-recovery-"));
-  const source = await readFile(join(projectRoot, "breakfix-local.yaml"), "utf8");
+  const localConfigPath = join(projectRoot, "config", "breakfix.local.yaml");
+  await runMake("dev-config", localConfigPath);
+  const source = await readFile(localConfigPath, "utf8");
   const config = `${source.replace(/^cooldown_minutes:.*(?:\r?\n|$)/m, "").trimEnd()}\ncooldown_minutes: 1\n`;
   const path = join(directory, "breakfix-recovery.yaml");
   await writeFile(path, config, "utf8");
@@ -146,7 +149,7 @@ recoveryTest("gateway restart expires an abandoned ready environment", async ({ 
         { cwd: projectRoot },
       ).catch(() => undefined);
     }
-    await runMake("dev-start-gateway", join(projectRoot, "breakfix-local.yaml")).catch(() => undefined);
+    await runMake("dev-start-gateway", join(projectRoot, "config", "breakfix.local.yaml")).catch(() => undefined);
     await rm(recovery.directory, { recursive: true, force: true });
   }
 });

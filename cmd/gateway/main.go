@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/controller"
@@ -30,7 +30,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	ctrl.SetLogger(logr.FromSlogHandler(slog.Default().Handler()))
 
-	configPath := flag.String("config", "breakfix.yaml", "Config file path")
+	configPath := flag.String("config", "config/breakfix.yaml", "Config file path")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)

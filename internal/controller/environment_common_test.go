@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -65,6 +65,19 @@ func TestSetEnvironmentProvisioningPreservesProvisionedCondition(t *testing.T) {
 		return
 	}
 	t.Fatal("expected Provisioned condition to be retained")
+}
+
+func TestSetEnvironmentConditionUsesReasonForInactiveCondition(t *testing.T) {
+	var status breakfixv1.CommonEnvironmentStatus
+
+	setEnvironmentCondition(&status, breakfixv1.ConditionFailed, metav1.ConditionFalse, "", "")
+
+	if len(status.Conditions) != 1 {
+		t.Fatalf("expected one condition, got %d", len(status.Conditions))
+	}
+	if got := status.Conditions[0].Reason; got != "NotApplicable" {
+		t.Fatalf("expected NotApplicable reason, got %q", got)
+	}
 }
 
 func TestSetEnvironmentCompletedUsesCompletedPhase(t *testing.T) {

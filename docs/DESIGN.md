@@ -119,13 +119,14 @@
 ## 配置文件
 
 ```yaml
-# breakfix.yaml
+# 本地：config/breakfix.yaml；远端：/var/lib/breakfix/breakfix.yaml
 data_dir: /var/lib/breakfix
 port: 9090
 proxy_port: 3128
 kubeconfig: /var/lib/breakfix/kubeconfig
-registry: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com
-acr_namespace: break-fix
+registry_addr: crpi-xxxx-vpc.cn-hangzhou.personal.cr.aliyuncs.com/break-fix
+registry_insecure: false
+server_host: <gateway-ecs-private-ip>
 ```
 
 ---
