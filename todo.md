@@ -49,7 +49,7 @@
 
 验收：CRD 字段只在 Go 类型中定义；DeepCopy 和 CRD YAML 均可重复生成且无 diff；CI 能阻止未生成的变更；真实集群流程保持通过。
 
-## 5. 建立 Server/Controller 数据所有权与可执行边界
+## 5. [x] 建立 Server/Controller 数据所有权与可执行边界
 
 当前 `cmd/gateway` 同时运行 HTTP/WebSocket 服务和 controller-runtime manager。目标不是把相同的数据目录和 SQLite 暴露给两个进程，而是明确数据所有权后拆为 `breakfix-server` 与 `breakfix-controller`。
 
