@@ -37,6 +37,7 @@ type VClusterEnvironmentReconciler struct {
 	CRDNamespace       string
 	Cooldown           time.Duration
 	CompletionRecorder CompletionRecorder
+	AttemptRecorder    AttemptRecorder
 }
 
 func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -179,7 +180,9 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	setEnvironmentReady(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus, "WorkspaceReady", "vcluster environment ready")
+	if err := setEnvironmentReadyAndRecordAttempt(ctx, r.AttemptRecorder, env, "vcluster", "WorkspaceReady", "vcluster environment ready"); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record environment attempt: %w", err)
+	}
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -187,6 +190,9 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 }
 
 func (r *VClusterEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
+	if readyEnvironmentLeaseExpired(&env.Spec.CommonEnvironmentSpec, &env.Status.CommonEnvironmentStatus) {
+		return r.checkCooldown(ctx, env)
+	}
 	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
 	changed := recordCheckpointStatus(&env.Status.CommonEnvironmentStatus, report, checkErr)
 	if checkErr != nil {
@@ -257,6 +263,9 @@ func (r *VClusterEnvironmentReconciler) requestDeletion(ctx context.Context, env
 
 func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
 	slog.Info("vcluster environment entering final cleanup", "name", env.Name, "namespace", env.Status.Namespace)
+	if err := finishEnvironmentAttempt(ctx, r.AttemptRecorder, env, "expired", time.Now().UTC()); err != nil {
+		return ctrl.Result{}, fmt.Errorf("finish environment attempt: %w", err)
+	}
 	if env.Status.Namespace != "" {
 		_ = r.K8s.DeletePod(env.Status.Namespace, env.Status.WorkspacePodName)
 		_ = r.K8s.DeleteSecret(env.Status.Namespace, env.Status.KubeconfigSecretName)

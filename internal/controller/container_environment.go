@@ -28,6 +28,7 @@ type ContainerEnvironmentReconciler struct {
 	CRDNamespace       string
 	Cooldown           time.Duration
 	CompletionRecorder CompletionRecorder
+	AttemptRecorder    AttemptRecorder
 }
 
 func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -107,7 +108,9 @@ func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *br
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
-	setEnvironmentReady(&env.Spec, &env.Status, "WorkspaceReady", "environment ready")
+	if err := setEnvironmentReadyAndRecordAttempt(ctx, r.AttemptRecorder, env, "container", "WorkspaceReady", "environment ready"); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record environment attempt: %w", err)
+	}
 
 	if err := r.Status().Update(ctx, env); err != nil {
 		return ctrl.Result{}, err
@@ -118,6 +121,9 @@ func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *br
 }
 
 func (r *ContainerEnvironmentReconciler) evaluateCheckpoints(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	if readyEnvironmentLeaseExpired(&env.Spec, &env.Status) {
+		return r.checkCooldown(ctx, env)
+	}
 	report, checkErr := runCheckpointEvaluation(ctx, r.K8s, r.ChallengesDir, env.Spec.ChallengeRef, env.Status.Namespace, env.Status.WorkspacePodName)
 	changed := recordCheckpointStatus(&env.Status, report, checkErr)
 	if checkErr != nil {
@@ -175,6 +181,9 @@ func (r *ContainerEnvironmentReconciler) requestDeletion(ctx context.Context, en
 }
 
 func (r *ContainerEnvironmentReconciler) finalCleanup(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	if err := finishEnvironmentAttempt(ctx, r.AttemptRecorder, env, "expired", time.Now().UTC()); err != nil {
+		return ctrl.Result{}, fmt.Errorf("finish environment attempt: %w", err)
+	}
 	cleanupCommonEnvironment(r.K8s, &env.Status)
 	done, err := finalizeCommonEnvironment(ctx, r.K8s, env.Status.Namespace)
 	if err != nil {

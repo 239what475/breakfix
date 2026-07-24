@@ -31,7 +31,115 @@ select:focus-visible {
   outline-offset: 2px;
 }
 .app-root {
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
   background: var(--wash);
+}
+.app-main {
+  min-width: 0;
+  min-height: 0;
+}
+.app-topbar {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  height: 58px;
+  gap: 18px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fffefd;
+}
+.app-topbar-start,
+.app-topbar-end,
+.app-global-nav {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.app-topbar-start {
+  gap: 9px;
+}
+.app-topbar-end {
+  justify-content: flex-end;
+  gap: 7px;
+}
+.app-global-nav {
+  align-self: stretch;
+  gap: 3px;
+}
+.app-global-nav button {
+  align-self: stretch;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0 11px;
+  color: #66736d;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+.app-global-nav button:hover,
+.app-global-nav button.active {
+  color: var(--ink);
+}
+.app-global-nav button.active {
+  border-bottom-color: var(--blue);
+}
+.app-mobile-nav,
+.app-mobile-nav-toggle {
+  display: none;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.brand-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+.brand-symbol {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 4px;
+  color: #fff;
+  background: #247763;
+  font: 500 12px "DM Mono", monospace;
+}
+.app-account-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  color: #17614e;
+  background: #dceee5;
+  font: 700 11px "DM Mono", monospace;
+}
+.app-account-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #40504a;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-logout-button {
+  flex: 0 0 auto;
+}
+.app-register-button {
+  min-height: 30px;
+  padding: 5px 9px;
 }
 .icon-button {
   border: 0;
@@ -134,4 +242,57 @@ select:focus-visible {
 .workspace-toast {
   top: auto;
   bottom: 18px;
+}
+.my-space-toast {
+  top: auto;
+  bottom: 18px;
+}
+.catalog-toast {
+  top: auto;
+  bottom: 18px;
+}
+@media (max-width: 760px) {
+  .app-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 0 14px;
+  }
+  .app-global-nav {
+    display: none;
+  }
+  .app-mobile-nav-toggle {
+    display: inline-flex;
+  }
+  .app-mobile-nav {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    right: 10px;
+    display: grid;
+    min-width: 156px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 4px;
+    background: #fffefd;
+    box-shadow: 0 10px 24px #2838321f;
+  }
+  .app-mobile-nav button {
+    border: 0;
+    border-radius: 3px;
+    padding: 9px 10px;
+    color: #53615a;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+  }
+  .app-mobile-nav button.active,
+  .app-mobile-nav button:hover {
+    color: #176a9d;
+    background: #e5f0f6;
+  }
+  .app-account-name {
+    display: none;
+  }
 }

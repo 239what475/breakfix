@@ -1,4 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import {
+  challengeCard,
+  registerAndLogin,
+  startChallengeFromCatalog,
+} from "./live-helpers";
 
 const liveTest = process.env.RUN_LIVE_E2E === "1" ? test : test.skip;
 const generationLiveTest =
@@ -8,84 +13,6 @@ const screenshotDir = process.env.CAPTURE_E2E_SCREENSHOTS;
 async function captureWorkspace(page: Page, name: string) {
   if (!screenshotDir) return;
   await page.screenshot({ path: `${screenshotDir}/${name}.png` });
-}
-
-async function totpCode(page: Page, secret: string): Promise<string> {
-  return page.evaluate(async (value: string) => {
-    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    const bytes: number[] = [];
-    let bits = 0;
-    let accumulator = 0;
-    for (const char of value) {
-      accumulator = (accumulator << 5) | alphabet.indexOf(char);
-      bits += 5;
-      if (bits >= 8) {
-        bytes.push((accumulator >>> (bits - 8)) & 0xff);
-        bits -= 8;
-      }
-    }
-    const counter = Math.floor(Date.now() / 30_000);
-    const buffer = new ArrayBuffer(8);
-    new DataView(buffer).setBigUint64(0, BigInt(counter), false);
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new Uint8Array(bytes),
-      { name: "HMAC", hash: "SHA-1" },
-      false,
-      ["sign"],
-    );
-    const hash = new Uint8Array(await crypto.subtle.sign("HMAC", key, buffer));
-    const offset = hash[hash.length - 1] & 0x0f;
-    const code =
-      (((hash[offset] & 0x7f) << 24) |
-        (hash[offset + 1] << 16) |
-        (hash[offset + 2] << 8) |
-        hash[offset + 3]) %
-      1_000_000;
-    return String(code).padStart(6, "0");
-  }, secret);
-}
-
-async function registerAndLogin(page: Page, openRegistration = true) {
-  const username = `workspace-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  if (openRegistration) {
-    await page.goto("/");
-    await page.getByRole("button", { name: "Register", exact: true }).click();
-  } else {
-    await page.getByRole("dialog").getByRole("button", { name: "Create one", exact: true }).click();
-  }
-  await page.locator('input[autocomplete="username"]').fill(username);
-  await page
-    .locator('input[autocomplete="new-password"]')
-    .fill("test-password-123");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  const secret = await page.locator(".totp-setup code").textContent();
-  await page
-    .getByRole("button", { name: "Continue to sign in", exact: true })
-    .click();
-  await page.locator('input[autocomplete="username"]').fill(username);
-  await page
-    .locator('input[autocomplete="current-password"]')
-    .fill("test-password-123");
-  await page
-    .locator('input[autocomplete="one-time-code"]')
-    .fill(await totpCode(page, secret ?? ""));
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Sign in", exact: true })
-    .click();
-}
-
-function challengeCard(page: Page, title: string) {
-  return page.locator("article.challenge-card", {
-    has: page.getByRole("heading", { name: title, exact: true }),
-  });
-}
-
-async function startChallengeFromCatalog(page: Page, title: string) {
-  await challengeCard(page, title)
-    .getByRole("button", { name: "Start challenge", exact: true })
-    .click();
 }
 
 async function expectViewportWithoutPageOverflow(page: Page) {
@@ -190,7 +117,78 @@ test("narrow catalog has no overflow", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Filters", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Find a challenge", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start challenge", exact: true })).toHaveCount(0);
   await expectViewportWithoutPageOverflow(page);
+});
+
+test("authenticated learner can navigate the responsive My space shell", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await registerAndLogin(page);
+  await expect(page.locator(".app-topbar:visible")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Catalog", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Challenge studio", exact: true })).toBeVisible();
+  await captureWorkspace(page, "catalog-authenticated-desktop");
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your learning space", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "My space", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("Active environments", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Learning", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "Learning history", exact: true })).toBeVisible();
+  const stateRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/me/space/learning" && url.searchParams.get("state") === "completed";
+  });
+  await page.getByLabel("Filter learning state").selectOption("completed");
+  await stateRequest;
+  await expect(page.getByLabel("Filter learning state")).toHaveValue("completed");
+  const runtimeRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/me/space/learning" && url.searchParams.get("runtime") === "container";
+  });
+  await page.getByLabel("Filter learning runtime").selectOption("container");
+  await runtimeRequest;
+  await expect(page.getByLabel("Filter learning runtime")).toHaveValue("container");
+  await page.getByRole("button", { name: "Authoring", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "Challenge authoring", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open studio", exact: true }).click();
+  await expect(page.getByLabel("Challenge authoring workspace")).toBeVisible();
+  await expect(page.locator(".app-topbar:visible")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Challenge studio", exact: true })).toHaveAttribute("aria-current", "page");
+  await captureWorkspace(page, "authoring-shell-desktop");
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Challenge authoring", exact: true })).toBeVisible();
+  await expect(page.locator(".authoring-draft")).toHaveCount(1);
+  await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
+  await expect(page.getByLabel("Challenge authoring workspace")).toBeVisible();
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Challenge authoring", exact: true })).toBeVisible();
+  const draftRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return request.method() === "GET" && /^\/api\/authoring\/sessions\/[^/]+$/.test(url.pathname);
+  });
+  await page.locator(".authoring-draft").click();
+  await draftRequest;
+  await expect(page.getByLabel("Challenge authoring workspace")).toBeVisible();
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Challenge authoring", exact: true })).toBeVisible();
+  await expectViewportWithoutPageOverflow(page);
+  await expectElementsWithinViewport(page, ".app-topbar:visible, .my-space-layout");
+  await captureWorkspace(page, "my-space-desktop");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Authoring", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Navigation", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Mobile primary" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Challenge studio", exact: true })).toHaveCount(0);
+  await captureWorkspace(page, "my-space-mobile-menu");
+  await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Catalog", exact: true }).click();
+  await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start challenge", exact: true })).toHaveCount(0);
+  await expectViewportWithoutPageOverflow(page);
+  await captureWorkspace(page, "catalog-mobile");
 });
 
 liveTest("catalog preserves completion after the challenge environment is stopped", async ({ page }) => {
@@ -202,7 +200,7 @@ liveTest("catalog preserves completion after the challenge environment is stoppe
   await expect(page.getByText("Connected", { exact: true })).toBeVisible({
     timeout: 90_000,
   });
-  await page.getByTitle("Back to challenges").click();
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
   const cleanupCard = challengeCard(page, "批量压缩旧日志");
   const activeState = cleanupCard.locator(".challenge-state.in-progress");
   await expect(activeState).toContainText("In progress", {
@@ -219,7 +217,7 @@ liveTest("catalog preserves completion after the challenge environment is stoppe
     page.getByText("All checkpoints complete", { exact: true }),
   ).toBeVisible({ timeout: 60_000 });
 
-  await page.getByTitle("Back to challenges").click();
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
   await expect(
     cleanupCard.getByText("Completed", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
@@ -237,6 +235,79 @@ liveTest("catalog preserves completion after the challenge environment is stoppe
   await expect(
     challengeCard(page, "批量压缩旧日志").getByText("Completed", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
+});
+
+liveTest("workbench keeps the environment active when opening Challenge studio", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await registerAndLogin(page);
+  await startChallengeFromCatalog(page, "批量压缩旧日志");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({
+    timeout: 90_000,
+  });
+
+  await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
+  await expect(page.getByLabel("Challenge authoring workspace")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Challenge studio", exact: true })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+
+  const cleanupCard = challengeCard(page, "批量压缩旧日志");
+  await expect(cleanupCard.locator(".challenge-state.in-progress")).toContainText(
+    "In progress",
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    const response = await fetch("/api/challenges/cleanup-logs/stop", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+    });
+    if (!response.ok) throw new Error(await response.text());
+  });
+});
+
+liveTest("My space records the real terminal and checkpoint lifecycle", async ({ page }) => {
+  test.setTimeout(10 * 60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await registerAndLogin(page);
+  await startChallengeFromCatalog(page, "批量压缩旧日志");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await page.waitForTimeout(1200);
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.getByText("Active environments", { exact: true })).toBeVisible();
+  await expect(page.locator(".active-environment-row")).toContainText("批量压缩旧日志", { timeout: 30_000 });
+  await expect(page.locator(".active-environment-row")).toContainText(/\d\/3 checkpoints/);
+  await captureWorkspace(page, "my-space-live-active");
+  const startedSpace = await page.evaluate(async () => {
+    const response = await fetch("/api/me/space", { headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` } });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<{ summary: { attempted_count: number; terminal_learning_seconds: number } }>;
+  });
+  expect(startedSpace.summary.attempted_count).toBe(1);
+  expect(startedSpace.summary.terminal_learning_seconds).toBeGreaterThan(0);
+
+  await page.locator(".active-environment-row").getByRole("button", { name: "Start challenge", exact: true }).click();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await runAnswer(page);
+  await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  const learningRow = page.locator(".history-row", { hasText: "批量压缩旧日志" });
+  await expect(learningRow).toContainText("Completed", { timeout: 30_000 });
+  await captureWorkspace(page, "my-space-live-completed");
+
+  await page.evaluate(async () => {
+    const response = await fetch("/api/challenges/cleanup-logs/stop", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+    });
+    if (!response.ok) throw new Error(await response.text());
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "My space", exact: true }).click();
+  await expect(page.locator(".history-row", { hasText: "批量压缩旧日志" })).toContainText("Completed", { timeout: 30_000 });
+  await expect(page.getByText("Attempt ended", { exact: true })).toHaveCount(0);
 });
 
 liveTest(
@@ -392,7 +463,7 @@ liveTest(
       page.getByText("All checkpoints complete", { exact: true }),
     ).toBeVisible({ timeout: 45_000 });
 
-    await page.getByTitle("Back to challenges").click();
+    await page.getByRole("button", { name: "Catalog", exact: true }).click();
     await expect(
       challengeCard(page, "批量压缩旧日志").getByText("Completed", { exact: true }),
     ).toBeVisible({ timeout: 30_000 });
@@ -447,17 +518,17 @@ generationLiveTest(
     await page.setViewportSize({ width: 1440, height: 900 });
     await registerAndLogin(page);
 
-    await page.getByRole("button", { name: "Generate", exact: true }).click();
+    await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
     await expect(
       page.getByRole("region", { name: "Challenge authoring workspace" }),
     ).toBeVisible();
     await expect(page.locator(".toast")).toHaveCount(0);
-    await expectElementsWithinViewport(page, ".authoring-header > *");
+    await expectElementsWithinViewport(page, ".app-topbar:visible, .authoring-plan-heading > *");
     await expectViewportWithoutPageOverflow(page);
     await captureWorkspace(page, "authoring-desktop");
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expectElementsWithinViewport(page, ".authoring-header > *");
+    await expectElementsWithinViewport(page, ".app-topbar:visible, .authoring-narrow-tabs > *");
     await expect(page.locator(".authoring-plan-pane")).toBeVisible();
     await expect(page.locator(".authoring-chat-pane")).toBeHidden();
     await expectViewportWithoutPageOverflow(page);

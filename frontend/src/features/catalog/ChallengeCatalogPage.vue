@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { Challenge } from "../../api/types";
 import CatalogFilters from "./CatalogFilters.vue";
 import ChallengeList from "./ChallengeList.vue";
@@ -11,13 +11,12 @@ const props = defineProps<{
 	loading: boolean;
 	loggedIn: boolean;
 	startingId: string | null;
+	focusChallengeId?: string;
 }>();
 const emit = defineEmits<{
 	start: [id: string];
-	login: [];
-	register: [];
-	logout: [];
-	generate: [];
+	studio: [];
+	focused: [];
 }>();
 
 const query = ref("");
@@ -27,6 +26,7 @@ const tags = ref<string[]>([]);
 const statuses = ref<string[]>([]);
 const sort = ref<CatalogSort>("newest");
 const filtersOpen = ref(false);
+const catalogPage = ref<HTMLElement>();
 
 const availableTags = computed(() =>
 	[...new Set(props.challenges.flatMap((challenge) => challenge.tags))].sort((a, b) =>
@@ -65,22 +65,23 @@ function resetFilters() {
 	tags.value = [];
 	statuses.value = [];
 }
+
+async function focusChallenge(id: string) {
+	resetFilters();
+	await nextTick();
+	const card = catalogPage.value?.querySelector<HTMLElement>(`[data-challenge-id="${CSS.escape(id)}"]`);
+	if (!card) return;
+	card.scrollIntoView({ behavior: "smooth", block: "center" });
+	emit("focused");
+}
+
+watch([() => props.focusChallengeId, () => props.challenges], ([id]) => {
+	if (id) void focusChallenge(id);
+});
 </script>
 
 <template>
-	<section class="catalog-page">
-		<header class="catalog-topbar">
-			<div class="brand"><span class="brand-symbol">B</span><span>breakfix</span></div>
-			<div v-if="loggedIn" class="catalog-account-actions">
-				<button class="text-button" type="button" @click="emit('generate')">Generate</button>
-				<button class="text-button" type="button" @click="emit('logout')">Sign out</button>
-			</div>
-			<div v-else class="catalog-account-actions">
-				<button class="text-button" type="button" @click="emit('login')">Sign in</button>
-				<button class="compact-button" type="button" @click="emit('register')">Register</button>
-			</div>
-		</header>
-
+	<section ref="catalogPage" class="catalog-page">
 		<div class="catalog-content">
 			<CatalogFilters
 				:query="query"

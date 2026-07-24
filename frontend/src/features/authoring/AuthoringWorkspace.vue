@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from "vue";
-import { ArrowLeft, FileCode2, MessageSquareText, Send } from "lucide-vue-next";
+import { FileCode2, MessageSquareText, Send } from "lucide-vue-next";
 import { api } from "../../api/client";
 import type {
   AuthoringAsset,
@@ -10,7 +10,8 @@ import type {
 import MarkdownDocument from "../workspace/MarkdownDocument.vue";
 import "./authoring.css";
 
-const emit = defineEmits<{ exit: []; published: [challengeId: string] }>();
+const props = defineProps<{ initialSessionId?: string }>();
+const emit = defineEmits<{ published: [challengeId: string] }>();
 const session = ref<AuthoringSession>();
 const message = ref("");
 const busy = ref(false);
@@ -154,13 +155,17 @@ async function createOrResume() {
   busy.value = true;
   error.value = "";
   try {
-    try {
-      session.value = await api.getCurrentAuthoringSession();
-    } catch (err) {
-      if (!(err instanceof Error) || err.message !== "authoring session not found") {
-        throw err;
+    if (props.initialSessionId) {
+      session.value = await api.getAuthoringSession(props.initialSessionId);
+    } else {
+      try {
+        session.value = await api.getCurrentAuthoringSession();
+      } catch (err) {
+        if (!(err instanceof Error) || err.message !== "authoring session not found") {
+          throw err;
+        }
+        session.value = await api.createAuthoringSession();
       }
-      session.value = await api.createAuthoringSession();
     }
     syncSelections();
   } catch (err) {
@@ -230,37 +235,20 @@ onScopeDispose(clearPoll);
 
 <template>
   <section class="authoring-workspace" aria-label="Challenge authoring workspace">
-    <header class="authoring-header">
-      <button class="icon-button" title="返回题目目录" aria-label="返回题目目录" @click="emit('exit')">
-        <ArrowLeft :size="16" />
-      </button>
-      <div class="authoring-brand"><span class="brand-symbol">B</span><strong>breakfix</strong></div>
-      <div class="authoring-header-copy">
-        <p class="eyebrow">Challenge authoring</p>
-        <strong>{{ displayMetadata?.title || "新建题目" }}</strong>
-      </div>
-      <div v-if="session" class="authoring-status" :data-state="session.state">
-        <i></i><span>{{ stateLabel[session.state] }}</span><span>{{ session.artifact ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span>
-      </div>
-      <div class="authoring-header-actions">
-        <button v-if="actionLabel" class="primary-button" :disabled="busy" @click="confirmAction">
-          {{ actionLabel }}
-        </button>
-      </div>
-    </header>
-
     <nav class="authoring-narrow-tabs" aria-label="作者工作区视图">
       <button :class="{ active: narrowPane === 'plan' }" @click="narrowPane = 'plan'">内容</button>
       <button :class="{ active: narrowPane === 'chat' }" @click="narrowPane = 'chat'">对话</button>
+      <button v-if="actionLabel" class="authoring-narrow-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
     </nav>
 
     <div class="authoring-body">
       <section class="authoring-plan-pane" :class="{ 'narrow-hidden': narrowPane !== 'plan' }">
         <header class="authoring-plan-heading">
           <div><p class="eyebrow">{{ session?.artifact ? "Verified revision" : "Intent revision" }}</p><h1>{{ session?.artifact ? "已验证题目" : "题意约定" }}</h1></div>
-          <div v-if="session" class="authoring-meta">
-            <span>{{ displayMetadata?.runtime || "runtime 待定" }}</span>
-            <span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span>
+          <div class="authoring-plan-actions">
+            <div v-if="session" class="authoring-status" :data-state="session.state"><i></i><span>{{ stateLabel[session.state] }}</span><span>{{ session.artifact ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
+            <div v-if="session" class="authoring-meta"><span>{{ displayMetadata?.runtime || "runtime 待定" }}</span><span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span></div>
+            <button v-if="actionLabel" class="primary-button authoring-primary-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
           </div>
         </header>
         <nav class="authoring-tabs" aria-label="Authoring plan tabs">

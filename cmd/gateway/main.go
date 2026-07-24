@@ -96,6 +96,7 @@ func main() {
 		cfg.VClusterChartRepo,
 		cfg.VClusterChartVersion,
 		database,
+		database,
 	); err != nil {
 		slog.Error("failed to setup controllers", "err", err)
 		os.Exit(1)

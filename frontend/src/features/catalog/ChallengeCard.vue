@@ -11,7 +11,7 @@ const emit = defineEmits<{ start: [id: string] }>();
 </script>
 
 <template>
-	<article class="challenge-card">
+<article class="challenge-card" :data-challenge-id="challenge.id">
 		<div class="challenge-card-main">
 			<div class="challenge-card-topline">
 				<div class="challenge-pills">

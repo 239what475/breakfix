@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"net/http"
+	"strconv"
 
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/auth"
@@ -21,6 +22,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	h := NewHandler(database, k8sClient, cfg)
 	h.StartAuthoringReconciler(context.Background())
 	h.StartAssistantCleanup(context.Background())
+	h.StartLearningCleanup(context.Background())
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
@@ -28,6 +30,40 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
 	router.POST("/api/auth/login", h.Login)
+	router.GET("/api/me/space", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetMySpace(c)
+		}
+	})
+	router.GET("/api/me/space/learning", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			limit := 0
+			params := api.GetMySpaceLearningParams{}
+			if raw := c.Query("limit"); raw != "" {
+				parsed, err := strconv.Atoi(raw)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid learning history limit"})
+					return
+				}
+				limit = parsed
+				params.Limit = &limit
+			}
+			if raw := c.Query("cursor"); raw != "" {
+				params.Cursor = &raw
+			}
+			if raw := c.Query("state"); raw != "" {
+				state := api.GetMySpaceLearningParamsState(raw)
+				params.State = &state
+			}
+			if raw := c.Query("runtime"); raw != "" {
+				runtime := api.GetMySpaceLearningParamsRuntime(raw)
+				params.Runtime = &runtime
+			}
+			h.GetMySpaceLearning(c, params)
+		}
+	})
 
 	// OpenAPI spec
 	router.GET("/api/openapi.json", func(c *gin.Context) {

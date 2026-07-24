@@ -23,13 +23,39 @@ func (d *DB) RecordChallengeCompletion(ctx context.Context, userID, challengeID,
 		return fmt.Errorf("completion time is required")
 	}
 
-	_, err := d.conn.ExecContext(ctx, `
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin challenge completion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO user_challenge_progress (user_id, challenge_id, completed_at, environment_uid)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(user_id, challenge_id) DO NOTHING
-	`, userID, challengeID, completedAt.UTC().Format(time.RFC3339Nano), environmentUID)
-	if err != nil {
+	`, userID, challengeID, completedAt.UTC().Format(time.RFC3339Nano), environmentUID); err != nil {
 		return fmt.Errorf("record challenge completion: %w", err)
+	}
+	// Ready reconciliation normally creates the attempt first. Keeping this
+	// fallback in the same transaction preserves attempt >= completion even for
+	// pre-existing environments created before activity tracking was enabled.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_challenge_attempts
+			(environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome)
+		VALUES (?, ?, ?, '', ?, ?, ?)
+		ON CONFLICT(environment_uid) DO NOTHING
+	`, environmentUID, userID, challengeID, completedAt.UTC().Format(time.RFC3339Nano), completedAt.UTC().Format(time.RFC3339Nano), AttemptCompleted); err != nil {
+		return fmt.Errorf("backfill completed challenge attempt: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE user_challenge_attempts
+		SET outcome = ?, ended_at = ?
+		WHERE environment_uid = ? AND outcome = ?
+	`, AttemptCompleted, completedAt.UTC().Format(time.RFC3339Nano), environmentUID, AttemptActive); err != nil {
+		return fmt.Errorf("complete challenge attempt: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit challenge completion: %w", err)
 	}
 	return nil
 }

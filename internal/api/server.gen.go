@@ -43,19 +43,19 @@ func (e AssistantMessageRole) Valid() bool {
 
 // Defines values for AssistantTurnStatus.
 const (
-	Completed AssistantTurnStatus = "completed"
-	Failed    AssistantTurnStatus = "failed"
-	Running   AssistantTurnStatus = "running"
+	AssistantTurnStatusCompleted AssistantTurnStatus = "completed"
+	AssistantTurnStatusFailed    AssistantTurnStatus = "failed"
+	AssistantTurnStatusRunning   AssistantTurnStatus = "running"
 )
 
 // Valid indicates whether the value is a known member of the AssistantTurnStatus enum.
 func (e AssistantTurnStatus) Valid() bool {
 	switch e {
-	case Completed:
+	case AssistantTurnStatusCompleted:
 		return true
-	case Failed:
+	case AssistantTurnStatusFailed:
 		return true
-	case Running:
+	case AssistantTurnStatusRunning:
 		return true
 	default:
 		return false
@@ -64,16 +64,118 @@ func (e AssistantTurnStatus) Valid() bool {
 
 // Defines values for ChallengeSummaryRuntime.
 const (
-	Container ChallengeSummaryRuntime = "container"
-	Vcluster  ChallengeSummaryRuntime = "vcluster"
+	ChallengeSummaryRuntimeContainer ChallengeSummaryRuntime = "container"
+	ChallengeSummaryRuntimeVcluster  ChallengeSummaryRuntime = "vcluster"
 )
 
 // Valid indicates whether the value is a known member of the ChallengeSummaryRuntime enum.
 func (e ChallengeSummaryRuntime) Valid() bool {
 	switch e {
-	case Container:
+	case ChallengeSummaryRuntimeContainer:
 		return true
-	case Vcluster:
+	case ChallengeSummaryRuntimeVcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceActiveEnvironmentRuntime.
+const (
+	MySpaceActiveEnvironmentRuntimeContainer MySpaceActiveEnvironmentRuntime = "container"
+	MySpaceActiveEnvironmentRuntimeVcluster  MySpaceActiveEnvironmentRuntime = "vcluster"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceActiveEnvironmentRuntime enum.
+func (e MySpaceActiveEnvironmentRuntime) Valid() bool {
+	switch e {
+	case MySpaceActiveEnvironmentRuntimeContainer:
+		return true
+	case MySpaceActiveEnvironmentRuntimeVcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceChallengeRuntime.
+const (
+	MySpaceChallengeRuntimeContainer MySpaceChallengeRuntime = "container"
+	MySpaceChallengeRuntimeVcluster  MySpaceChallengeRuntime = "vcluster"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceChallengeRuntime enum.
+func (e MySpaceChallengeRuntime) Valid() bool {
+	switch e {
+	case MySpaceChallengeRuntimeContainer:
+		return true
+	case MySpaceChallengeRuntimeVcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceLearningHistoryState.
+const (
+	MySpaceLearningHistoryStateActive    MySpaceLearningHistoryState = "active"
+	MySpaceLearningHistoryStateCompleted MySpaceLearningHistoryState = "completed"
+	MySpaceLearningHistoryStateExpired   MySpaceLearningHistoryState = "expired"
+	MySpaceLearningHistoryStateReset     MySpaceLearningHistoryState = "reset"
+	MySpaceLearningHistoryStateStopped   MySpaceLearningHistoryState = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceLearningHistoryState enum.
+func (e MySpaceLearningHistoryState) Valid() bool {
+	switch e {
+	case MySpaceLearningHistoryStateActive:
+		return true
+	case MySpaceLearningHistoryStateCompleted:
+		return true
+	case MySpaceLearningHistoryStateExpired:
+		return true
+	case MySpaceLearningHistoryStateReset:
+		return true
+	case MySpaceLearningHistoryStateStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetMySpaceLearningParamsState.
+const (
+	Active    GetMySpaceLearningParamsState = "active"
+	Completed GetMySpaceLearningParamsState = "completed"
+	Ended     GetMySpaceLearningParamsState = "ended"
+)
+
+// Valid indicates whether the value is a known member of the GetMySpaceLearningParamsState enum.
+func (e GetMySpaceLearningParamsState) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Completed:
+		return true
+	case Ended:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetMySpaceLearningParamsRuntime.
+const (
+	GetMySpaceLearningParamsRuntimeContainer GetMySpaceLearningParamsRuntime = "container"
+	GetMySpaceLearningParamsRuntimeVcluster  GetMySpaceLearningParamsRuntime = "vcluster"
+)
+
+// Valid indicates whether the value is a known member of the GetMySpaceLearningParamsRuntime enum.
+func (e GetMySpaceLearningParamsRuntime) Valid() bool {
+	switch e {
+	case GetMySpaceLearningParamsRuntimeContainer:
+		return true
+	case GetMySpaceLearningParamsRuntimeVcluster:
 		return true
 	default:
 		return false
@@ -318,6 +420,105 @@ type LoginResponse struct {
 	UserId *string `json:"user_id,omitempty"`
 }
 
+// MySpace defines model for MySpace.
+type MySpace struct {
+	ActiveEnvironments       []MySpaceActiveEnvironment `json:"active_environments"`
+	Authoring                MySpaceAuthoring           `json:"authoring"`
+	Profile                  MySpaceProfile             `json:"profile"`
+	RecentLearning           []MySpaceLearningHistory   `json:"recent_learning"`
+	RecentLearningNextCursor *string                    `json:"recent_learning_next_cursor"`
+	Summary                  MySpaceSummary             `json:"summary"`
+}
+
+// MySpaceActiveEnvironment defines model for MySpaceActiveEnvironment.
+type MySpaceActiveEnvironment struct {
+	Challenge          MySpaceChallenge                `json:"challenge"`
+	CheckpointProgress CheckpointProgressSummary       `json:"checkpoint_progress"`
+	EnvironmentId      string                          `json:"environment_id"`
+	ExpiresAt          *time.Time                      `json:"expires_at,omitempty"`
+	Phase              string                          `json:"phase"`
+	Runtime            MySpaceActiveEnvironmentRuntime `json:"runtime"`
+}
+
+// MySpaceActiveEnvironmentRuntime defines model for MySpaceActiveEnvironment.Runtime.
+type MySpaceActiveEnvironmentRuntime string
+
+// MySpaceAuthoring defines model for MySpaceAuthoring.
+type MySpaceAuthoring struct {
+	Drafts    []MySpaceAuthoringDraft     `json:"drafts"`
+	Published []MySpacePublishedChallenge `json:"published"`
+}
+
+// MySpaceAuthoringDraft defines model for MySpaceAuthoringDraft.
+type MySpaceAuthoringDraft struct {
+	SessionId string    `json:"session_id"`
+	State     string    `json:"state"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// MySpaceChallenge defines model for MySpaceChallenge.
+type MySpaceChallenge struct {
+	Difficulty string                  `json:"difficulty"`
+	Id         string                  `json:"id"`
+	Runtime    MySpaceChallengeRuntime `json:"runtime"`
+	Title      string                  `json:"title"`
+}
+
+// MySpaceChallengeRuntime defines model for MySpaceChallenge.Runtime.
+type MySpaceChallengeRuntime string
+
+// MySpaceEnvironmentQuota defines model for MySpaceEnvironmentQuota.
+type MySpaceEnvironmentQuota struct {
+	Maximum  *int `json:"maximum"`
+	Occupied int  `json:"occupied"`
+}
+
+// MySpaceLearningHistory defines model for MySpaceLearningHistory.
+type MySpaceLearningHistory struct {
+	Challenge       MySpaceChallenge            `json:"challenge"`
+	CompletedAt     *time.Time                  `json:"completed_at,omitempty"`
+	LearningSeconds int                         `json:"learning_seconds"`
+	ReadyAt         time.Time                   `json:"ready_at"`
+	State           MySpaceLearningHistoryState `json:"state"`
+}
+
+// MySpaceLearningHistoryState defines model for MySpaceLearningHistory.State.
+type MySpaceLearningHistoryState string
+
+// MySpaceLearningPage defines model for MySpaceLearningPage.
+type MySpaceLearningPage struct {
+	Items      []MySpaceLearningHistory `json:"items"`
+	NextCursor *string                  `json:"next_cursor,omitempty"`
+}
+
+// MySpaceProfile defines model for MySpaceProfile.
+type MySpaceProfile struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        string    `json:"id"`
+	Name      string    `json:"name"`
+}
+
+// MySpacePublishedChallenge defines model for MySpacePublishedChallenge.
+type MySpacePublishedChallenge struct {
+	AttemptedUsers int              `json:"attempted_users"`
+	Challenge      MySpaceChallenge `json:"challenge"`
+	CompletedUsers int              `json:"completed_users"`
+	PassRate       *float32         `json:"pass_rate,omitempty"`
+	PublishedAt    time.Time        `json:"published_at"`
+}
+
+// MySpaceSummary defines model for MySpaceSummary.
+type MySpaceSummary struct {
+	AttemptedCount             int                     `json:"attempted_count"`
+	AuthoringCount             int                     `json:"authoring_count"`
+	CompletedCount             int                     `json:"completed_count"`
+	EnvironmentQuota           MySpaceEnvironmentQuota `json:"environment_quota"`
+	InProgressEnvironmentCount int                     `json:"in_progress_environment_count"`
+	PublishedCount             int                     `json:"published_count"`
+	TerminalLearningSeconds    int                     `json:"terminal_learning_seconds"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	Password string `json:"password"`
@@ -374,6 +575,25 @@ type Error = ErrorResponse
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
+
+// GetMySpaceLearningParams defines parameters for GetMySpaceLearning.
+type GetMySpaceLearningParams struct {
+	// Cursor Opaque cursor from a previous page
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// State Filter attempts by their current learning state
+	State *GetMySpaceLearningParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// Runtime Filter attempts by environment runtime
+	Runtime *GetMySpaceLearningParamsRuntime `form:"runtime,omitempty" json:"runtime,omitempty"`
+}
+
+// GetMySpaceLearningParamsState defines parameters for GetMySpaceLearning.
+type GetMySpaceLearningParamsState string
+
+// GetMySpaceLearningParamsRuntime defines parameters for GetMySpaceLearning.
+type GetMySpaceLearningParamsRuntime string
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -443,6 +663,12 @@ type ServerInterface interface {
 	// Close one terminal tab in the current challenge environment
 	// (DELETE /challenges/{id}/terminals/{window})
 	CloseTerminalWindow(c *gin.Context, id string, window string)
+	// Get the authenticated user's learning space
+	// (GET /me/space)
+	GetMySpace(c *gin.Context)
+	// Page durable learning history for the authenticated user
+	// (GET /me/space/learning)
+	GetMySpaceLearning(c *gin.Context, params GetMySpaceLearningParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -892,6 +1118,74 @@ func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
 	siw.Handler.CloseTerminalWindow(c, id, window)
 }
 
+// GetMySpace operation middleware
+func (siw *ServerInterfaceWrapper) GetMySpace(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetMySpace(c)
+}
+
+// GetMySpaceLearning operation middleware
+func (siw *ServerInterfaceWrapper) GetMySpaceLearning(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMySpaceLearningParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "runtime" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "runtime", c.Request.URL.Query(), &params.Runtime, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter runtime: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetMySpaceLearning(c, params)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -937,6 +1231,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
 	router.DELETE(options.BaseURL+"/challenges/:id/terminals/:window", wrapper.CloseTerminalWindow)
+	router.GET(options.BaseURL+"/me/space", wrapper.GetMySpace)
+	router.GET(options.BaseURL+"/me/space/learning", wrapper.GetMySpaceLearning)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -944,51 +1240,64 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"ZppgFrMZ1Q/WXKrFu/m7+QyXJNleb/8TAAD//w==",
+	"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",
+	"q4cC57NZoT5smJDzF5cvLme4IsnufvevAAAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -7,7 +7,16 @@ import type {
 	Challenge,
 	ChallengeContent,
 	CheckpointResult,
+	MySpace,
+	MySpaceLearningPage,
 } from "./types";
+
+export interface MySpaceLearningQuery {
+	cursor?: string;
+	limit?: number;
+	state?: "active" | "completed" | "ended";
+	runtime?: "container" | "vcluster";
+}
 
 const base = "/api";
 
@@ -25,6 +34,19 @@ export function clearToken() {
 
 export function isLoggedIn() {
   return token() !== null;
+}
+
+export function tokenUserName(): string | undefined {
+  const payload = token()?.split(".")[1];
+  if (!payload) return undefined;
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")), (value) => value.charCodeAt(0));
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as { name?: unknown };
+    return typeof value.name === "string" && value.name.trim() ? value.name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function request<T>(
@@ -143,6 +165,14 @@ export const api = {
     ),
   listChallenges: () =>
     request<{ challenges: Challenge[] }>("GET", "/challenges"),
+	getMySpace: () => request<MySpace>("GET", "/me/space"),
+	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (cursor) query.set("cursor", cursor);
+		if (state) query.set("state", state);
+		if (runtime) query.set("runtime", runtime);
+		return request<MySpaceLearningPage>("GET", `/me/space/learning?${query.toString()}`);
+	},
   getChallengeContent: (id: string) =>
     request<ChallengeContent>("GET", `/challenges/${id}/content`),
   getChallengeProgress: (id: string) =>

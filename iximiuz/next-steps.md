@@ -1,6 +1,6 @@
 # 下一阶段产品改造
 
-现有平台已经具备文件系统题目目录、公开检查点、运行时初始化、真实 `VerifyTask` 验证，以及自动完成的挑战工作台。下一阶段不再改动这些基础契约，而是解决三个产品问题：题目作者必须能审核 AI 实际生成的题目；做题用户必须能在卡住时获得与当前环境相关的帮助；学习者必须能在可筛选、可比较的题库中找到并开始合适的挑战。
+现有平台已经具备文件系统题目目录、公开检查点、运行时初始化、真实 `VerifyTask` 验证，以及自动完成的挑战工作台。下一阶段不再改动这些基础契约，而是解决四个产品问题：题目作者必须能审核 AI 实际生成的题目；做题用户必须能在卡住时获得与当前环境相关的帮助；学习者必须能在可筛选、可比较的题库中找到并开始合适的挑战；登录用户必须能回顾自己的学习与创作轨迹。
 
 ## 视觉与交互参考
 
@@ -328,7 +328,7 @@ Catalog 的信息密度和结构参考 iximiuz 的筛选栏与挑战列表：固
 - 列表没有选中态、没有右侧详情面板，也不在点击卡片正文时隐式创建环境。
 - 当前用户已有进行中环境的题目仍出现在原筛选位置，并以轻量状态标识说明可继续；已完成题同样可以再次开始，目录不把它们隐藏。
 
-窄屏下，筛选栏收为一个带结果数的 `Filters` 按钮，打开后覆盖目录列表而不是压缩成上下两段；关闭筛选后回到同一列表滚动位置。挑战卡片保持单列，`Start challenge` 始终可见且不与标签重叠。
+手机宽度（`<= 760px`）是配套浏览模式：筛选栏收为一个带结果数的 `Filters` 按钮，打开后覆盖目录列表而不是压缩成上下两段；关闭筛选后回到同一列表滚动位置。挑战卡片保持单列，但不暴露 `Start challenge`、工作台或 Challenge studio 入口；做题和创作仍为桌面端工作流。
 
 ### 前端边界
 
@@ -380,6 +380,123 @@ Controller 检查点全部通过
 - 从工作台返回后，目录恢复用户刚才的筛选条件与滚动位置；不会重新出现旧的左侧窄列表和右侧摘要区域。
 - 桌面与窄屏均没有页面横向溢出，筛选与挑战列表的长内容不会撑高应用根节点。
 
+## 四、用户空间与学习档案
+
+### 目标
+
+在 Catalog 与 ChallengeWorkspace 之外建立受登录用户所有的 `My space`。它不是一个只展示头像和用户名的资料页，而是用户的学习、运行环境与题目创作的统一入口：用户能知道自己做过什么、当前在做什么、投入了多少有效学习时间，以及自己发布的题目被多少人尝试和完成。
+
+这部分是环境并发限制、每日题、AI 复习和付费权益的共同产品基础，应先建立可靠的用户行为事实和聚合边界，再向其中增加后续产品能力。
+
+<img src="my-space-design.png" alt="Breakfix My space 的浅色分栏设计草图" width="100%">
+
+### 产品语言与边界
+
+- 用户不再直接上传或提交 challenge artifact。因此用户创建的内容统一称为“创作的题目”与“已发布题目”，不能在 UI 或统计中重新出现“提交题目”这一已删除流程的术语。
+- Challenge 的题意、镜像、检查点和 `published_at` 仍以 `data/challenges/<id>/` 为唯一权威来源；用户空间不建立 challenge catalog 的数据库副本。
+- 用户完成、尝试、终端在线时长、作者归属和环境配额都是平台行为数据，属于 SQLite 或未来独立账户数据服务，不写回 challenge 文件夹。
+- 页面只向本人展示个人学习历史与创作草案。作者只能看到自己题目的匿名聚合人数和通过率，不能通过题目统计获知具体学习者身份、终端内容或答案。
+- 保持单页应用模型，不引入 `vue-router`。Catalog 顶栏中的登录用户入口进入 `My space`；从个人空间打开题目仍复用既有 `Start challenge` 和 Workspace，返回时恢复个人空间的列表位置与筛选状态。
+
+### 统计口径
+
+统计必须来自持久化的原始事实，不能以仍存在的 Environment CRD 数量、浏览器内存或 challenge 文件修改时间推测。
+
+| 指标 | 定义 | 权威来源 |
+| --- | --- | --- |
+| 已完成题目 | 用户至少一次通过该题全部检查点的不同 challenge 数 | 现有 `user_challenge_progress` |
+| 进行中题目 | 当前仍处于 Ready 或 Draining 的不同 challenge 数 | ContainerEnvironment 与 VClusterEnvironment CRD |
+| 已尝试题目 | 用户至少一次获得可用环境的不同 challenge 数，不等同于打开 catalog | 新增持久化的挑战尝试记录 |
+| 终端学习时长 | 某环境至少一个终端窗口保持连接的去重累计时长；同时打开多个 shell 不重复计时，不把空闲环境寿命或只阅读题目的时间计入。浏览器标签隐藏但终端连接仍存活时继续计时 | 新增环境终端使用会话 |
+| 创作中题目 | 当前用户的 authoring session 中处于讨论、生成、验证或待发布状态的数量 | 现有 authoring sessions |
+| 已发布题目 | 当前用户通过 authoring workflow 成功发布且仍可从文件系统读取的 challenge 数 | authoring session 的发布关联 + challenge 文件系统 |
+| 题目尝试人数 | 至少一次获得该题可用环境的去重用户数，包含作者本人对自己题目的实际尝试 | 挑战尝试记录的 `COUNT(DISTINCT user_id)` |
+| 题目通过人数 | 至少一次完成该题的去重用户数 | `user_challenge_progress` |
+| 通过率 | `通过人数 / 尝试人数`；尝试人数为零时显示 `--`，不能显示 0% | 上述两个聚合 |
+
+`user_challenge_progress` 继续只表达首次完成这一账户事实，不能被改造成承载开始时间、未完成状态或学习时长的混合表。
+
+### 持久化事实与生命周期
+
+新增两类与 challenge 文件系统正交的平台记录。
+
+`user_challenge_attempts`：每个 `(user_id, challenge_id, environment_uid)` 一条尝试。Controller 在环境首次达到 Ready 后写入，至少保存 runtime、`ready_at`、`ended_at` 和最终状态 `active`、`completed`、`stopped`、`reset` 或 `expired`。环境创建但从未 Ready 不计入尝试人数；用户重新开始已完成题会有新的 attempt，但聚合人数始终按用户去重。Reset 必须结束旧 attempt 并在新环境 Ready 后创建新 attempt；Stop、TTL 与最终 CRD 清理在删除前结束 attempt。Controller 写入失败时不能把环境标为 Ready，必须重试，避免环境可用而统计永久缺失。既有 `user_challenge_progress` 中的完成记录在迁移时必须补出一条历史 attempt，使尝试人数始终不小于通过人数；历史 attempt 的时长未知，不伪造学习时长。
+
+`terminal_connections`：每个 WebSocket 连接一条记录，至少保存 `connection_id`、`environment_uid`、`user_id`、`gateway_instance_id`、`connected_at`、`heartbeat_at` 与 `disconnected_at`。Gateway 在升级终端连接后创建记录，并由服务端 WebSocket Ping/Pong 每 `60s` 更新 heartbeat；`180s` 未更新视为失联。关闭连接后保留 `24h` 作为短期运维记录，再由清理器删除。它不记录终端字节、命令或输出，也不把每次键盘输入写入数据库。
+
+`environment_usage_sessions`：每个连续的“该环境至少有一个有效 terminal_connection”区间一条记录。Gateway 在数据库事务内观察全局连接记录：首个有效连接创建环境级会话，最后一个连接在 settle delay 后结束会话；多个 shell、多个浏览器标签和多个 Gateway 副本仍只产生一段环境级时长。活动会话以环境 UID 唯一，但它的存续由全局的 terminal_connections 决定，不能由任一 Gateway 的内存计数或 sticky session 决定。清理任务关闭 heartbeat 过期的连接及无有效连接的使用会话。总终端学习时间只累加这些完成或仍活跃会话的去重时长。
+
+单 Gateway 的本地开发可以继续使用 SQLite；多 Gateway 部署必须让所有 Gateway 连接到同一个共享关系数据库和同一个 Kubernetes API 集群。SQLite 数据文件不能放在共享 PVC 上供多个 Gateway 同时写；生产横向扩展使用 PostgreSQL 等支持并发写入的数据库。按照每个连接仅在建立、关闭及每 `30-60s` heartbeat 写入的策略，即使一千个活跃终端也仅产生约 `17-33` 次写入/秒，数据库不是终端流量热点。
+
+完成、尝试和使用时长的写入路径：
+
+```text
+Environment 变为 Ready
+  -> Controller 幂等写入 user_challenge_attempts
+  -> Gateway 每个终端连接写入 terminal_connection 并保持 heartbeat
+  -> 全局首个有效连接在事务中开启 environment_usage_session
+  -> 全局最后一个有效连接关闭或过期后结束该会话
+  -> 全部检查点通过时 Controller 写入 user_challenge_progress
+  -> Stop / Reset / TTL 回收 / CRD 删除前结束 attempt；清理器关闭遗留连接与使用会话
+```
+
+题目作者归属暂时由现有 authoring session 的 `user_id` 与成功发布后的 challenge ID 关联得出。预置或系统导入题目没有个人作者，显示为平台题目且不出现在任一用户的创作列表；不能为此向 challenge.yaml 添加平台账户字段。
+
+### API 与聚合边界
+
+新增受 JWT 保护的 `GET /api/me/space`，一次返回当前用户的首屏所需聚合，避免前端将 catalog、CRD、完成记录和 authoring session 拼为 N+1 请求：
+
+```text
+profile: { id, name, created_at }
+summary: { completed_count, attempted_count, in_progress_environment_count,
+           terminal_learning_seconds, authoring_count, published_count,
+           environment_quota: { occupied: number, maximum: number | null } }
+active_environments: [{ challenge, runtime, phase, checkpoint_progress, expires_at }]
+recent_learning: [{ challenge, ready_at, completed_at, learning_seconds, state }]
+authoring: {
+  drafts: [{ session_id, title, state, updated_at }],
+  published: [{ challenge, published_at, attempted_users, completed_users, pass_rate }]
+}
+```
+
+- 题目摘要始终在 Gateway 聚合时从 challenge 文件系统读取；已被删除或不再可读取的历史关联不返回伪造题目卡片。
+- `active_environments` 直接从处于 Ready 或 Draining 的 CRD 查询，因而实时反映用户可继续做题的环境和 checkpoint 进度；它不是数据库缓存或镜像。
+- `recent_learning` 从 attempt、completion 与 usage session 聚合得到，按 attempt 的 `ready_at` 倒序排列；`GET /api/me/space` 返回首屏和 `recent_learning_next_cursor`，`GET /api/me/space/learning?cursor=...&state=...&runtime=...` 使用不透明复合 cursor 分页加载其余历史，并可按状态和运行时筛选。
+- 作者题目指标只返回当前用户拥有的题目。聚合查询应由数据库完成，不能为每张题目卡片扫描所有用户或所有 CRD。
+- `environment_quota.maximum = null` 明确表示不限额，而不是混用数字与字符串。`occupied` 用于资源配额，计入 Pending、Provisioning、Ready、Draining 以及仍持有资源的 Completed 环境；`in_progress_environment_count` 与 `active_environments` 只表达用户当前可继续做题的 Ready/Draining 环境。未来并发限制在创建 CRD 前必须通过数据库中的原子 quota reservation 获取占用位，不能以“先 count 再 create”绕过并发上限。
+
+### 信息架构与交互
+
+桌面页面使用与 Catalog 一致的浅色顶栏和信息密度，主体是固定的个人侧栏与独立滚动的内容区，而不是营销式个人主页。
+
+- 顶栏：品牌、`Catalog`、`My space`、用户菜单。未登录用户不显示 `My space` 入口，也不能访问其 API。
+- 侧栏：用户身份、四项紧凑统计（完成、尝试、终端学习时长、已发布），以及 `Overview`、`Learning`、`Authoring` 三个视图。首版用用户名首字母作为头像，不增加照片上传或资料编辑。统计块是信息卡，不再包裹嵌套卡片。
+- `Overview`：最上方为关键统计和环境配额，随后显示进行中的环境。每行明确 runtime、当前 checkpoint 进度、剩余时长和唯一 `Start challenge` 操作；它进入或恢复工作台，不提供第二套 Resume/Stop 生命周期按钮。
+- `Learning`：显示近期尝试与已完成记录，可按状态和运行时筛选。已完成题目显示首次完成时间；未完成但已回收的尝试显示为历史尝试，不伪装成进行中环境。
+- `Authoring`：上方是仍在进行的生成/审核会话，下方是已发布题目。每张已发布题显示匿名尝试人数、通过人数与通过率，统计包含作者本人对题目的实际尝试；可进入该题所在 Catalog 或重新进入创作会话，但不展示学习者名单。
+- 手机宽度（`<= 760px`）下，个人侧栏折叠为顶部账户摘要与 `Overview`/`Learning` 分段控制，内容保持单列。活跃环境的 runtime、checkpoint 进度和剩余时间仍可见，但不提供 `Start challenge` 或 `Authoring` 入口；手机导航仅保留 `Catalog` 和 `My space`。
+
+每日题、AI 复习和付费功能当前不制造空白入口。它们未来分别在 Overview 增加当天学习状态、在 Learning 增加基于已完成题的复习建议、在账户摘要增加权益与限额说明；前提是本节的事实记录和 API 已稳定。
+
+### 前端与后端边界
+
+- 前端新增 `my-space` feature：页面容器、概览统计、活动环境列表、学习历史列表、创作列表分离为组件；不要继续把页面状态堆入 `AppShell.vue`。
+- 一个 `useMySpace` composable 持有 `/api/me/space` 请求、轻量刷新和分页游标。它不拥有 Workspace 的终端、检查点轮询或 Environment 状态机。
+- Gateway 负责认证、从文件系统补齐挑战摘要、从共享数据库读取账户聚合并查询 CRD；Controller 仍是环境 Ready、完成、回收生命周期的唯一所有者。当前本地单实例的 SQLite 实现不改变，但数据库访问边界不能假定它将永远是本地文件。
+- Gateway 终端跟踪器需要从仅服务当前进程的内存计数升级为写入 `terminal_connections` 与 `environment_usage_sessions` 的账户行为边界；多 Gateway 副本经共享数据库观察全局连接，不能依赖 sticky session。它不改变终端字节转发、tmux 会话或环境回收语义。
+- 所有 schema 先更新 OpenAPI 并重新生成 `internal/api/server.gen.go`，再更新 Gateway、前端类型和 Playwright 测试；不允许手改生成文件来伪造契约。
+
+### 验收标准
+
+- 登录用户在 My space 首屏能同时看到真实完成数、尝试数、环境数、终端学习时长、创作数和发布数；匿名请求返回 401，不能退化为公共空页面。
+- 完成题目后，即使环境被 Stop 或 TTL 删除，完成数与历史学习记录仍存在；尝试数和学习时长同样不依赖 CRD 存活。
+- 连续打开两个 shell、两个浏览器标签或不同 Gateway 副本承载的连接时，终端学习时长按环境连接区间去重；浏览器隐藏但连接存活仍按终端连接时长计入；Gateway 重启、横向扩展或环境强制回收不会留下无限增长的活跃连接或使用会话。
+- 对历史完成记录回填 attempt 后，任一题目的尝试人数始终不小于通过人数；无法可靠追溯的历史终端时长保持为零而非虚构。
+- 用户 A 创作并发布题目，用户 B 成功启动和完成后，A 的 Authoring 区增加匿名尝试人数和通过人数；统计也包含 A 本人对该题的实际尝试，但 A 看不到 B 的账户、命令或终端输出。
+- 当前有多个 Ready/Draining 环境时，Overview 与 `in_progress_environment_count` 一致；未来配置并发上限后，页面与开始接口对 `environment_quota.occupied`、`environment_quota.maximum` 和同一原子配额 reservation 给出一致结果。
+- 预置题目、已删除 challenge 目录和未发布 authoring revision 不会被错误计入用户的已发布题目或公开题目指标。
+- 桌面与窄屏不产生页面级横向溢出，历史学习和作者题目列表独立滚动，进入 Workspace 再返回不会丢失当前个人空间视图与列表位置。
+
 ## 推荐实施顺序
 
-第三部分应作为下一项实现：它只消费已存在的 catalog 元数据与开始挑战接口，却能立即修正用户进入平台后的核心路径。第一部分仍是生成题质量和发布门槛的长期重点；第二部分已经具备只读助手基础，后续只在真实学习反馈证明需要时扩展工具或体验。
+第四部分应作为下一项实现：它以已经完成的 Catalog、checkpoint、Environment 与 authoring workflow 为输入，补齐用户事实、统计和账户视图的稳定边界。第一部分仍是生成题质量和发布门槛的长期重点；第二部分已经具备只读助手基础，后续只在真实学习反馈证明需要时扩展工具或体验。每日题、AI 复习、付费和环境并发限制都在第四部分落地后分别设计，不在当前阶段提前制造空状态或孤立的数据模型。

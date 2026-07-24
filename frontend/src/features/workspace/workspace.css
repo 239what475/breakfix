@@ -10,21 +10,15 @@
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  min-height: 64px;
+  min-height: 58px;
   gap: 18px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: #fffefd;
 }
 .workspace-title {
-  display: flex;
-  align-items: center;
   min-width: 0;
-  max-width: min(46vw, 500px);
-  gap: 8px;
-}
-.back-button {
-  flex: none;
+  overflow: hidden;
 }
 .workspace-title h1 {
   overflow: hidden;

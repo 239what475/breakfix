@@ -12,7 +12,7 @@ import (
 )
 
 // Setup registers all reconcilers with the controller-runtime manager.
-func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir, dataDir string, cooldownMin int, registryInsecure bool, internalAPIKey, serverHost string, serverPort int, vclusterBinary, vclusterChartRepo, vclusterChartVersion string, completionRecorder CompletionRecorder) error {
+func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crdNamespace, challengesDir, dataDir string, cooldownMin int, registryInsecure bool, internalAPIKey, serverHost string, serverPort int, vclusterBinary, vclusterChartRepo, vclusterChartVersion string, completionRecorder CompletionRecorder, attemptRecorder AttemptRecorder) error {
 	if err := breakfixv1.AddToScheme(mgr.GetScheme()); err != nil {
 		return err
 	}
@@ -53,6 +53,7 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 		CRDNamespace:       crdNamespace,
 		Cooldown:           cooldown,
 		CompletionRecorder: completionRecorder,
+		AttemptRecorder:    attemptRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
@@ -69,6 +70,7 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, registryAddr, namespace, crd
 		CRDNamespace:       crdNamespace,
 		Cooldown:           cooldown,
 		CompletionRecorder: completionRecorder,
+		AttemptRecorder:    attemptRecorder,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}

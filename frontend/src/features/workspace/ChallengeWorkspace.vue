@@ -13,7 +13,6 @@ import "./assistant.css";
 
 const props = defineProps<{ challenge: Challenge }>();
 const emit = defineEmits<{
-  exit: [];
   changed: [];
   notice: [message: string, kind?: "error" | "info"];
 }>();
@@ -149,7 +148,6 @@ onUnmounted(() => {
       :resetting="resetting"
       :mobile-view="mobileView"
       @reset="reset"
-      @exit="emit('exit')"
       @update-mobile-view="mobileView = $event"
     />
     <div class="workspace-body" :class="`mobile-${mobileView}`">

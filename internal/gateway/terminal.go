@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,18 +33,41 @@ type wsMsg struct {
 	Rows uint32 `json:"rows,omitempty"`
 }
 
-func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, onOpen, onClose func()) {
+const terminalHeartbeatInterval = time.Minute
+
+type terminalSocketLifecycle struct {
+	open      func() error
+	heartbeat func()
+	close     func()
+}
+
+func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, lifecycle terminalSocketLifecycle) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade", "err", err)
 		return
 	}
 	defer conn.Close()
-	if onOpen != nil {
-		onOpen()
+	if lifecycle.open != nil {
+		if err := lifecycle.open(); err != nil {
+			slog.Error("open terminal activity", "err", err, "environment", env.Name)
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "unable to start terminal"), time.Now().Add(time.Second))
+			return
+		}
 	}
-	if onClose != nil {
-		defer onClose()
+	stopHeartbeat := make(chan struct{})
+	defer func() {
+		close(stopHeartbeat)
+		if lifecycle.close != nil {
+			lifecycle.close()
+		}
+	}()
+	if lifecycle.heartbeat != nil {
+		conn.SetPongHandler(func(string) error {
+			lifecycle.heartbeat()
+			return nil
+		})
+		go keepTerminalConnectionAlive(r.Context(), conn, stopHeartbeat)
 	}
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
@@ -88,6 +113,33 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	if err != nil {
 		slog.Debug("pty session ended", "err", err)
 	}
+}
+
+func keepTerminalConnectionAlive(ctx context.Context, conn *websocket.Conn, stop <-chan struct{}) {
+	ticker := time.NewTicker(terminalHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// WriteControl is safe alongside the PTY data writer and gives the
+			// server a real liveness signal even while a browser tab is hidden.
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func newTerminalConnectionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("read terminal connection id: %w", err)
+	}
+	return "term-" + hex.EncodeToString(raw[:]), nil
 }
 
 // terminalConnectionTracker treats all terminal windows of one environment as

@@ -166,6 +166,100 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS user_challenge_progress_user
 		ON user_challenge_progress(user_id);
 	`,
+	// v10: user learning activity is durable, while Environment CRDs and
+	// terminal WebSockets remain ephemeral runtime resources.
+	`
+	CREATE TABLE IF NOT EXISTS user_challenge_attempts (
+		environment_uid  TEXT PRIMARY KEY,
+		user_id          TEXT NOT NULL,
+		challenge_id     TEXT NOT NULL,
+		runtime          TEXT NOT NULL DEFAULT '',
+		ready_at         TEXT NOT NULL,
+		ended_at         TEXT NOT NULL DEFAULT '',
+		outcome          TEXT NOT NULL DEFAULT 'active',
+		learning_seconds INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS user_challenge_attempts_user_recent
+		ON user_challenge_attempts(user_id, ready_at DESC);
+	CREATE INDEX IF NOT EXISTS user_challenge_attempts_challenge_user
+		ON user_challenge_attempts(challenge_id, user_id);
+
+	-- Preserve the invariant that historical completions always count as an
+	-- attempt, without inventing a runtime or a duration that was never stored.
+	INSERT INTO user_challenge_attempts
+		(environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome, learning_seconds)
+	SELECT environment_uid, user_id, challenge_id, '', completed_at, completed_at, 'completed', 0
+	FROM user_challenge_progress
+	WHERE true
+	ON CONFLICT(environment_uid) DO NOTHING;
+
+	CREATE TABLE IF NOT EXISTS terminal_connections (
+		id                  TEXT PRIMARY KEY,
+		environment_uid     TEXT NOT NULL,
+		user_id             TEXT NOT NULL,
+		challenge_id        TEXT NOT NULL,
+		gateway_instance_id TEXT NOT NULL,
+		connected_at        TEXT NOT NULL,
+		heartbeat_at        TEXT NOT NULL,
+		disconnected_at     TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS terminal_connections_environment_active
+		ON terminal_connections(environment_uid, disconnected_at, heartbeat_at);
+
+	CREATE TABLE IF NOT EXISTS environment_usage_sessions (
+		id              TEXT PRIMARY KEY,
+		environment_uid TEXT NOT NULL,
+		user_id         TEXT NOT NULL,
+		challenge_id    TEXT NOT NULL,
+		started_at      TEXT NOT NULL,
+		heartbeat_at    TEXT NOT NULL,
+		ended_at        TEXT NOT NULL DEFAULT ''
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS environment_usage_sessions_one_active
+		ON environment_usage_sessions(environment_uid) WHERE ended_at = '';
+	CREATE INDEX IF NOT EXISTS environment_usage_sessions_user
+		ON environment_usage_sessions(user_id, started_at DESC);
+	`,
+	// v11: duration is derived solely from usage sessions. Rebuild the table
+	// rather than dropping the duplicate field directly: an earlier local v10
+	// development schema already omitted it, while the committed v10 schema
+	// included it. Selecting the durable columns works for either history.
+	`
+	BEGIN;
+	CREATE TABLE user_challenge_attempts_v11 (
+		environment_uid TEXT PRIMARY KEY,
+		user_id         TEXT NOT NULL,
+		challenge_id    TEXT NOT NULL,
+		runtime         TEXT NOT NULL DEFAULT '',
+		ready_at        TEXT NOT NULL,
+		ended_at        TEXT NOT NULL DEFAULT '',
+		outcome         TEXT NOT NULL DEFAULT 'active'
+	);
+	INSERT INTO user_challenge_attempts_v11
+		(environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome)
+	SELECT environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome
+	FROM user_challenge_attempts;
+	DROP TABLE user_challenge_attempts;
+	ALTER TABLE user_challenge_attempts_v11 RENAME TO user_challenge_attempts;
+	CREATE INDEX user_challenge_attempts_user_recent
+		ON user_challenge_attempts(user_id, ready_at DESC);
+	CREATE INDEX user_challenge_attempts_challenge_user
+		ON user_challenge_attempts(challenge_id, user_id);
+	COMMIT;
+	`,
+	// v12: learning history uses a compound cursor so attempts created in the
+	// same timestamp bucket cannot be skipped between pages.
+	`
+	DROP INDEX IF EXISTS user_challenge_attempts_user_recent;
+	CREATE INDEX user_challenge_attempts_user_recent
+		ON user_challenge_attempts(user_id, ready_at DESC, environment_uid DESC);
+	`,
+	// v13: challenge directories are the sole catalog authority. The v1 table
+	// was never part of the filesystem-backed catalog and must not remain as a
+	// misleading, stale copy of challenge metadata.
+	`
+	DROP TABLE IF EXISTS challenges;
+	`,
 }
 
 func (d *DB) migrate() error {

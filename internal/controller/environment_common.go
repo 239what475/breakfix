@@ -81,6 +81,17 @@ func shouldDestroyEnvironment(status *breakfixv1.CommonEnvironmentStatus) (bool,
 	return false, remaining
 }
 
+// readyEnvironmentLeaseExpired applies the existing idle lease to a Ready
+// environment when Gateway has no opportunity to transition it to Draining,
+// such as after a process restart or a lost WebSocket close frame.
+func readyEnvironmentLeaseExpired(spec *breakfixv1.CommonEnvironmentSpec, status *breakfixv1.CommonEnvironmentStatus) bool {
+	if spec == nil || status == nil || !spec.AutoDestroyAfterIdleOr(true) {
+		return false
+	}
+	expired, _ := shouldDestroyEnvironment(status)
+	return expired
+}
+
 func cleanupCommonEnvironment(k8sClient *k8s.Client, status *breakfixv1.CommonEnvironmentStatus) {
 	if status.WorkspacePodName != "" {
 		_ = k8sClient.DeletePod(status.Namespace, status.WorkspacePodName)

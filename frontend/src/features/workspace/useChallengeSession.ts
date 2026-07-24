@@ -1,5 +1,5 @@
 import { computed, onMounted, ref, watch } from "vue";
-import { api, clearToken, isLoggedIn } from "../../api/client";
+import { api, clearToken, isLoggedIn, tokenUserName } from "../../api/client";
 import type { Challenge } from "../../api/types";
 
 type Notice = (message: string, kind?: "error" | "info") => void;
@@ -8,6 +8,7 @@ type Notice = (message: string, kind?: "error" | "info") => void;
 // scroll state stay in the catalog page while it is hidden behind a workspace.
 export function useChallengeSession(notify: Notice) {
 	const loggedIn = ref(isLoggedIn());
+	const accountName = ref(tokenUserName());
 	const loading = ref(false);
 	const challenges = ref<Challenge[]>([]);
 	const workspaceId = ref<string | null>(null);
@@ -38,6 +39,7 @@ export function useChallengeSession(notify: Notice) {
 
 	function authenticated(name: string) {
 		loggedIn.value = true;
+		accountName.value = name;
 		notify(`Signed in as ${name}`);
 		void (async () => {
 			await loadChallenges();
@@ -50,6 +52,7 @@ export function useChallengeSession(notify: Notice) {
   function logout() {
 		clearToken();
 		loggedIn.value = false;
+		accountName.value = undefined;
 		workspaceId.value = null;
 		pendingStartId.value = null;
 		notify("Signed out");
@@ -92,7 +95,8 @@ export function useChallengeSession(notify: Notice) {
   onMounted(() => void loadChallenges());
 
   return {
-    loggedIn,
+		loggedIn,
+		accountName,
 		loading,
 		challenges,
 		workspace,

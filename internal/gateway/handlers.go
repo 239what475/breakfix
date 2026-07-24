@@ -27,22 +27,21 @@ import (
 )
 
 type activeEnvironment struct {
-	UID                   string
-	Runtime               string
-	Name                  string
-	ChallengeRef          string
-	Namespace             string
-	WorkspacePod          string
-	Phase                 breakfixv1.EnvironmentPhase
-	ExpiresAt             *metav1.Time
-	Checkpoints           *breakfixv1.CheckpointStatus
-	Message               string
-	Reason                string
-	LastError             *breakfixv1.EnvironmentErrorStatus
-	ReadyTimeoutSeconds   *int64
-	IdleTTLSeconds        *int64
-	DrainGraceSeconds     *int64
-	DestroyTimeoutSeconds *int64
+	UID                 string
+	Runtime             string
+	Name                string
+	ChallengeRef        string
+	Namespace           string
+	WorkspacePod        string
+	Phase               breakfixv1.EnvironmentPhase
+	ExpiresAt           *metav1.Time
+	Checkpoints         *breakfixv1.CheckpointStatus
+	Message             string
+	Reason              string
+	LastError           *breakfixv1.EnvironmentErrorStatus
+	ReadyTimeoutSeconds *int64
+	IdleTTLSeconds      *int64
+	DrainGraceSeconds   *int64
 }
 
 func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvironment {
@@ -50,22 +49,21 @@ func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvir
 		return nil
 	}
 	return &activeEnvironment{
-		UID:                   string(env.UID),
-		Runtime:               challenge.RuntimeContainer,
-		Name:                  env.Name,
-		ChallengeRef:          env.Spec.ChallengeRef,
-		Namespace:             env.Status.Namespace,
-		WorkspacePod:          env.Status.WorkspacePodName,
-		Phase:                 env.Status.Phase,
-		ExpiresAt:             env.Status.ExpiresAt,
-		Checkpoints:           env.Status.Checkpoints,
-		Message:               env.Status.Message,
-		Reason:                env.Status.Reason,
-		LastError:             env.Status.LastError,
-		ReadyTimeoutSeconds:   env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:        env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:     env.Spec.Timeouts.DrainGracePeriodSeconds,
-		DestroyTimeoutSeconds: env.Spec.Timeouts.DestroyTimeoutSeconds,
+		UID:                 string(env.UID),
+		Runtime:             challenge.RuntimeContainer,
+		Name:                env.Name,
+		ChallengeRef:        env.Spec.ChallengeRef,
+		Namespace:           env.Status.Namespace,
+		WorkspacePod:        env.Status.WorkspacePodName,
+		Phase:               env.Status.Phase,
+		ExpiresAt:           env.Status.ExpiresAt,
+		Checkpoints:         env.Status.Checkpoints,
+		Message:             env.Status.Message,
+		Reason:              env.Status.Reason,
+		LastError:           env.Status.LastError,
+		ReadyTimeoutSeconds: env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:      env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:   env.Spec.Timeouts.DrainGracePeriodSeconds,
 	}
 }
 
@@ -74,22 +72,21 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 		return nil
 	}
 	return &activeEnvironment{
-		UID:                   string(env.UID),
-		Runtime:               challenge.RuntimeVCluster,
-		Name:                  env.Name,
-		ChallengeRef:          env.Spec.ChallengeRef,
-		Namespace:             env.Status.Namespace,
-		WorkspacePod:          env.Status.WorkspacePodName,
-		Phase:                 env.Status.Phase,
-		ExpiresAt:             env.Status.ExpiresAt,
-		Checkpoints:           env.Status.Checkpoints,
-		Message:               env.Status.Message,
-		Reason:                env.Status.Reason,
-		LastError:             env.Status.LastError,
-		ReadyTimeoutSeconds:   env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:        env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:     env.Spec.Timeouts.DrainGracePeriodSeconds,
-		DestroyTimeoutSeconds: env.Spec.Timeouts.DestroyTimeoutSeconds,
+		UID:                 string(env.UID),
+		Runtime:             challenge.RuntimeVCluster,
+		Name:                env.Name,
+		ChallengeRef:        env.Spec.ChallengeRef,
+		Namespace:           env.Status.Namespace,
+		WorkspacePod:        env.Status.WorkspacePodName,
+		Phase:               env.Status.Phase,
+		ExpiresAt:           env.Status.ExpiresAt,
+		Checkpoints:         env.Status.Checkpoints,
+		Message:             env.Status.Message,
+		Reason:              env.Status.Reason,
+		LastError:           env.Status.LastError,
+		ReadyTimeoutSeconds: env.Spec.Timeouts.ReadyTimeoutSeconds,
+		IdleTTLSeconds:      env.Spec.Timeouts.IdleTTLSeconds,
+		DrainGraceSeconds:   env.Spec.Timeouts.DrainGracePeriodSeconds,
 	}
 }
 
@@ -112,6 +109,7 @@ type Handler struct {
 	serverHost       string
 	port             int
 	terminals        *terminalConnectionTracker
+	gatewayInstance  string
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
@@ -133,6 +131,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		serverHost:       cfg.ServerHost,
 		port:             cfg.Port,
 		terminals:        newTerminalConnectionTracker(time.Second),
+		gatewayInstance:  newGatewayInstanceID(),
 	}
 }
 
@@ -415,6 +414,10 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 
 	existing, _ := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
 	if existing != nil {
+		if err := h.db.FinishChallengeAttempt(c.Request.Context(), existing.UID, db.AttemptReset, time.Now().UTC()); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record reset attempt: %v", err)})
+			return
+		}
 		if err := h.assistant.DeleteEnvironment(c.Request.Context(), existing.UID); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
 			return
@@ -422,8 +425,9 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		if err := h.destroyEnvironment(c.Request.Context(), existing); err != nil {
 			slog.Error("failed to destroy old environment", "err", err)
 		}
-		h.waitDestroyed(c.Request.Context(), existing.Runtime, existing.Name)
-		slog.Info("old environment destroyed", "environment", existing.Name, "runtime", existing.Runtime)
+		// The controller owns final cleanup. The replacement gets a fresh name,
+		// while deleting CRDs are excluded from subsequent environment lookups.
+		slog.Info("old environment deletion requested", "environment", existing.Name, "runtime", existing.Runtime)
 	}
 
 	env, err := h.createEnvironment(c.Request.Context(), user, challengeEntry)
@@ -455,6 +459,10 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
+	if err := h.db.FinishChallengeAttempt(c.Request.Context(), env.UID, db.AttemptStopped, time.Now().UTC()); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record stopped attempt: %v", err)})
+		return
+	}
 	// A user-requested Stop invalidates the conversation even when Kubernetes
 	// cannot accept the deletion request immediately. This matches Reset and
 	// prevents a later environment retry from reviving stale assistant context.
@@ -466,7 +474,6 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("stop environment: %v", err)})
 		return
 	}
-	h.waitDestroyed(c.Request.Context(), env.Runtime, env.Name)
 
 	stopped := true
 	title := challengeEntry.Title
@@ -505,6 +512,15 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
+	if env.UID == "" {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "environment identity is not ready"})
+		return
+	}
+	connectionID, err := newTerminalConnectionID()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
 
 	runtimeAdapter, err := h.environmentRuntimeAdapter(env.Runtime)
 	if err != nil {
@@ -521,12 +537,48 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 
 	slog.Info("terminal session started", "challenge", challengeID, "user", user.ID)
 	key := env.Runtime + "/" + env.Name
-	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName,
-		func() { h.terminals.open(key) },
-		func() {
+	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName, terminalSocketLifecycle{
+		open: func() error {
+			if err := h.db.OpenTerminalConnection(c.Request.Context(), db.TerminalConnection{
+				ID:                connectionID,
+				EnvironmentUID:    env.UID,
+				UserID:            user.ID,
+				ChallengeID:       challengeID,
+				GatewayInstanceID: h.gatewayInstance,
+				ConnectedAt:       time.Now().UTC(),
+			}); err != nil {
+				return err
+			}
+			h.terminals.open(key)
+			return nil
+		},
+		heartbeat: func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.db.TouchTerminalConnection(ctx, connectionID, time.Now().UTC()); err != nil {
+				slog.Warn("touch terminal connection", "err", err, "environment", env.Name)
+			}
+		},
+		close: func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err := h.db.CloseTerminalConnection(ctx, connectionID, time.Now().UTC())
+			cancel()
+			if err != nil {
+				slog.Error("close terminal connection", "err", err, "environment", env.Name)
+			}
 			h.terminals.close(key, func() {
-				expiresAt := metav1.NewTime(time.Now().Add(environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute))))
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				closed, err := h.db.FinishTerminalUsageSession(ctx, env.UID, time.Now().UTC())
+				cancel()
+				if err != nil {
+					slog.Error("finish terminal usage session", "err", err, "environment", env.Name)
+					return
+				}
+				if !closed {
+					return
+				}
+				expiresAt := metav1.NewTime(time.Now().Add(environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute))))
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				if err := runtimeAdapter.markDraining(ctx, env.Name, expiresAt); err != nil {
 					slog.Error("failed to start draining", "err", err, "environment", env.Name)
@@ -535,7 +587,7 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 				slog.Info("environment draining", "environment", env.Name, "expires_in", environmentDrainGracePeriod(env, environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute)).String())
 			})
 		},
-	)
+	})
 }
 
 func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName string) {
@@ -754,26 +806,6 @@ func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*ac
 	return adapter.get(ctx, name)
 }
 
-func (h *Handler) waitDestroyed(ctx context.Context, runtime, name string) {
-	effectiveTimeout := 30 * time.Second
-	if env, err := h.getEnvironment(ctx, runtime, name); err == nil {
-		if timeout := environmentDestroyTimeout(env, effectiveTimeout); timeout > 0 {
-			effectiveTimeout = timeout
-		}
-	}
-	deadline := time.Now().Add(effectiveTimeout)
-	for time.Now().Before(deadline) {
-		env, err := h.getEnvironment(ctx, runtime, name)
-		if err != nil {
-			return
-		}
-		if env.Phase == breakfixv1.EnvironmentDestroyed {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
 func isLiveEnvironmentPhase(phase breakfixv1.EnvironmentPhase) bool {
 	return phase == "" ||
 		phase == breakfixv1.EnvironmentPending ||
@@ -801,13 +833,6 @@ func environmentDrainGracePeriod(env *activeEnvironment, fallback time.Duration)
 		return fallback
 	}
 	return time.Duration(*env.DrainGraceSeconds) * time.Second
-}
-
-func environmentDestroyTimeout(env *activeEnvironment, fallback time.Duration) time.Duration {
-	if env == nil || env.DestroyTimeoutSeconds == nil || *env.DestroyTimeoutSeconds <= 0 {
-		return fallback
-	}
-	return time.Duration(*env.DestroyTimeoutSeconds) * time.Second
 }
 
 func environmentUnavailableError(env *activeEnvironment) error {

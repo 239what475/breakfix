@@ -2,6 +2,7 @@
         dev-build dev-build-gateway \
         dev-start-gateway \
         dev-gateway \
+        e2e-gateway-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         build build-gateway \
         deploy deploy-gateway deploy-images deploy-image deploy-base deploy-config deploy-generator deploy-catalog deploy-cleanup deploy-reset \
@@ -36,6 +37,7 @@ endif
 
 BIN_DIR  := bin
 DIST_DIR := dist
+DEV_CONFIG ?= breakfix-local.yaml
 
 # ═══════════════════════════════════════════════════════════════
 # Dev build (bin/ — fast, no LDFLAGS)
@@ -59,7 +61,7 @@ dev-start-gateway:
 	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
 	@sleep 1
 	@rm -f /tmp/breakfix-gateway.log /tmp/breakfix-gateway.pid
-	@nohup $(BIN_DIR)/breakfix-gateway -config breakfix-local.yaml >/tmp/breakfix-gateway.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-gateway.pid
+	@nohup $(BIN_DIR)/breakfix-gateway -config $(DEV_CONFIG) >/tmp/breakfix-gateway.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-gateway.pid
 	@sleep 3
 	@pid=$$(cat /tmp/breakfix-gateway.pid 2>/dev/null); \
 	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Gateway failed to stay up"; tail -20 /tmp/breakfix-gateway.log; exit 1; }
@@ -83,6 +85,9 @@ dev-reset: dev-down
 # ── Dev shortcuts (build + restart) ──
 
 dev-gateway: dev-build-gateway dev-start-gateway
+
+e2e-gateway-recovery:
+	RUN_GATEWAY_RECOVERY_E2E=1 npx playwright test --workers=1 --grep 'gateway restart expires an abandoned ready environment'
 # ── Dev environment ──
 
 dev-registry:

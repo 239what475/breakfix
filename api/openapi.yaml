@@ -50,6 +50,65 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
+  /me/space:
+    get:
+      operationId: getMySpace
+      summary: Get the authenticated user's learning space
+      tags: [users]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Learning history, active environments, and authoring summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MySpace"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /me/space/learning:
+    get:
+      operationId: getMySpaceLearning
+      summary: Page durable learning history for the authenticated user
+      tags: [users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: state
+          in: query
+          description: Filter attempts by their current learning state
+          schema:
+            type: string
+            enum: [active, completed, ended]
+        - name: runtime
+          in: query
+          description: Filter attempts by environment runtime
+          schema:
+            type: string
+            enum: [container, vcluster]
+      responses:
+        "200":
+          description: One page of learning history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MySpaceLearningPage"
+        "401":
+          $ref: "#/components/responses/Error"
+
   /challenges:
     get:
       operationId: listChallenges
@@ -478,6 +537,190 @@ components:
           type: string
         name:
           type: string
+
+    MySpaceChallenge:
+      type: object
+      required: [id, title, runtime, difficulty]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        runtime:
+          type: string
+          enum: [container, vcluster]
+        difficulty:
+          type: string
+
+    MySpaceProfile:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    MySpaceEnvironmentQuota:
+      type: object
+      required: [occupied, maximum]
+      properties:
+        occupied:
+          type: integer
+          minimum: 0
+        maximum:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    MySpaceSummary:
+      type: object
+      required: [completed_count, attempted_count, in_progress_environment_count, terminal_learning_seconds, authoring_count, published_count, environment_quota]
+      properties:
+        completed_count:
+          type: integer
+          minimum: 0
+        attempted_count:
+          type: integer
+          minimum: 0
+        in_progress_environment_count:
+          type: integer
+          minimum: 0
+        terminal_learning_seconds:
+          type: integer
+          minimum: 0
+        authoring_count:
+          type: integer
+          minimum: 0
+        published_count:
+          type: integer
+          minimum: 0
+        environment_quota:
+          $ref: "#/components/schemas/MySpaceEnvironmentQuota"
+
+    MySpaceActiveEnvironment:
+      type: object
+      required: [environment_id, challenge, runtime, phase, checkpoint_progress]
+      properties:
+        environment_id:
+          type: string
+        challenge:
+          $ref: "#/components/schemas/MySpaceChallenge"
+        runtime:
+          type: string
+          enum: [container, vcluster]
+        phase:
+          type: string
+        checkpoint_progress:
+          $ref: "#/components/schemas/CheckpointProgressSummary"
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MySpaceLearningHistory:
+      type: object
+      required: [challenge, ready_at, learning_seconds, state]
+      properties:
+        challenge:
+          $ref: "#/components/schemas/MySpaceChallenge"
+        ready_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        learning_seconds:
+          type: integer
+          minimum: 0
+        state:
+          type: string
+          enum: [active, completed, stopped, reset, expired]
+
+    MySpaceLearningPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MySpaceLearningHistory"
+        next_cursor:
+          type: string
+          nullable: true
+
+    MySpaceAuthoringDraft:
+      type: object
+      required: [session_id, title, state, updated_at]
+      properties:
+        session_id:
+          type: string
+        title:
+          type: string
+        state:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    MySpacePublishedChallenge:
+      type: object
+      required: [challenge, published_at, attempted_users, completed_users]
+      properties:
+        challenge:
+          $ref: "#/components/schemas/MySpaceChallenge"
+        published_at:
+          type: string
+          format: date-time
+        attempted_users:
+          type: integer
+          minimum: 0
+        completed_users:
+          type: integer
+          minimum: 0
+        pass_rate:
+          type: number
+          format: float
+          nullable: true
+
+    MySpaceAuthoring:
+      type: object
+      required: [drafts, published]
+      properties:
+        drafts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MySpaceAuthoringDraft"
+        published:
+          type: array
+          items:
+            $ref: "#/components/schemas/MySpacePublishedChallenge"
+
+    MySpace:
+      type: object
+      required: [profile, summary, active_environments, recent_learning, recent_learning_next_cursor, authoring]
+      properties:
+        profile:
+          $ref: "#/components/schemas/MySpaceProfile"
+        summary:
+          $ref: "#/components/schemas/MySpaceSummary"
+        active_environments:
+          type: array
+          items:
+            $ref: "#/components/schemas/MySpaceActiveEnvironment"
+        recent_learning:
+          type: array
+          items:
+            $ref: "#/components/schemas/MySpaceLearningHistory"
+        recent_learning_next_cursor:
+          type: string
+          nullable: true
+        authoring:
+          $ref: "#/components/schemas/MySpaceAuthoring"
 
     ChallengeSummary:
       type: object

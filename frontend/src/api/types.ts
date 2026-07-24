@@ -204,3 +204,82 @@ export interface AuthoringSession {
   assets: AuthoringAsset[];
   diff: AuthoringFileDiff[];
 }
+
+export interface MySpaceChallenge {
+  id: string;
+  title: string;
+  runtime: "container" | "vcluster";
+  difficulty: string;
+}
+
+export interface MySpaceProfile {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface MySpaceEnvironmentQuota {
+  occupied: number;
+  maximum: number | null;
+}
+
+export interface MySpaceSummary {
+  completed_count: number;
+  attempted_count: number;
+  in_progress_environment_count: number;
+  terminal_learning_seconds: number;
+  authoring_count: number;
+  published_count: number;
+  environment_quota: MySpaceEnvironmentQuota;
+}
+
+export interface MySpaceActiveEnvironment {
+  environment_id: string;
+  challenge: MySpaceChallenge;
+  runtime: "container" | "vcluster";
+  phase: string;
+  checkpoint_progress: CheckpointProgressSummary;
+  expires_at?: string;
+}
+
+export interface MySpaceLearningHistory {
+  challenge: MySpaceChallenge;
+  ready_at: string;
+  completed_at?: string;
+  learning_seconds: number;
+  state: "active" | "completed" | "stopped" | "reset" | "expired";
+}
+
+export interface MySpaceAuthoringDraft {
+  session_id: string;
+  title: string;
+  state: AuthoringState;
+  updated_at: string;
+}
+
+export interface MySpacePublishedChallenge {
+  challenge: MySpaceChallenge;
+  published_at: string;
+  attempted_users: number;
+  completed_users: number;
+  pass_rate?: number;
+}
+
+export interface MySpaceAuthoring {
+  drafts: MySpaceAuthoringDraft[];
+  published: MySpacePublishedChallenge[];
+}
+
+export interface MySpace {
+  profile: MySpaceProfile;
+  summary: MySpaceSummary;
+  active_environments: MySpaceActiveEnvironment[];
+  recent_learning: MySpaceLearningHistory[];
+  recent_learning_next_cursor: string | null;
+  authoring: MySpaceAuthoring;
+}
+
+export interface MySpaceLearningPage {
+  items: MySpaceLearningHistory[];
+  next_cursor: string | null;
+}
