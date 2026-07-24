@@ -4,19 +4,23 @@ import type {
 	AssistantMessageRequest,
 	AssistantStreamComplete,
 	AssistantStreamEvent,
-	Challenge,
 	ChallengeContent,
-	CheckpointResult,
 	MySpace,
 	MySpaceLearningPage,
 } from "./types";
+import type {
+	ChallengeList,
+	ChallengeProgress,
+	CloseTerminalWindowResponse,
+	GetMySpaceLearningData,
+	LoginResponse,
+	RegisterResponse,
+	ResetResponse,
+	StartResponse,
+	StopResponse,
+} from "./generated";
 
-export interface MySpaceLearningQuery {
-	cursor?: string;
-	limit?: number;
-	state?: "active" | "completed" | "ended";
-	runtime?: "container" | "vcluster";
-}
+export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
 
 const base = "/api";
 
@@ -152,19 +156,19 @@ export async function subscribeAssistantTurn(
 
 export const api = {
   register: (username: string, password: string) =>
-    request<{ totp_secret: string; totp_url: string }>(
+    request<RegisterResponse>(
       "POST",
       "/auth/register",
       { username, password },
     ),
   login: (username: string, password: string, totp_code: string) =>
-    request<{ token: string; user_id: string; name: string }>(
+    request<LoginResponse>(
       "POST",
       "/auth/login",
       { username, password, totp_code },
     ),
   listChallenges: () =>
-    request<{ challenges: Challenge[] }>("GET", "/challenges"),
+		request<ChallengeList>("GET", "/challenges"),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });
@@ -176,20 +180,20 @@ export const api = {
   getChallengeContent: (id: string) =>
     request<ChallengeContent>("GET", `/challenges/${id}/content`),
   getChallengeProgress: (id: string) =>
-    request<{ checks: CheckpointResult[] }>(
+		request<ChallengeProgress>(
       "GET",
       `/challenges/${id}/progress`,
     ),
   getChallengeAssistant: (id: string) =>
     request<AssistantConversation>("GET", `/challenges/${id}/assistant`),
   startChallenge: (id: string) =>
-    request<{ challenge_title: string }>("POST", `/challenges/${id}/start`),
+		request<StartResponse>("POST", `/challenges/${id}/start`),
   resetChallenge: (id: string) =>
-    request<{ challenge_title: string }>("POST", `/challenges/${id}/reset`),
+		request<ResetResponse>("POST", `/challenges/${id}/reset`),
   stopChallenge: (id: string) =>
-    request<{ stopped: boolean }>("POST", `/challenges/${id}/stop`),
+		request<StopResponse>("POST", `/challenges/${id}/stop`),
   closeTerminalWindow: (id: string, window: string) =>
-    request<{ closed: boolean }>(
+		request<CloseTerminalWindowResponse>(
       "DELETE",
       `/challenges/${id}/terminals/${window}`,
     ),

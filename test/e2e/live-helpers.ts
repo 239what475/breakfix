@@ -79,7 +79,66 @@ export async function startChallengeFromCatalog(page: Page, title: string) {
 }
 
 export async function expectTerminalConnected(page: Page) {
-  await expect(page.getByText("Connected", { exact: true })).toBeVisible({
-    timeout: 90_000,
-  });
+	await expect(page.getByText("Connected", { exact: true })).toBeVisible({
+		timeout: 90_000,
+	});
+}
+
+const screenshotDir = process.env.CAPTURE_E2E_SCREENSHOTS;
+
+export async function captureWorkspace(page: Page, name: string) {
+	if (!screenshotDir) return;
+	await page.screenshot({ path: `${screenshotDir}/${name}.png` });
+}
+
+export async function expectViewportWithoutPageOverflow(page: Page) {
+	const viewport = await page.evaluate(() => ({
+		scrollHeight: document.documentElement.scrollHeight,
+		innerHeight: window.innerHeight,
+		scrollWidth: document.documentElement.scrollWidth,
+		innerWidth: window.innerWidth,
+	}));
+	expect(viewport.scrollHeight).toBeLessThanOrEqual(viewport.innerHeight);
+	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.innerWidth);
+}
+
+export async function expectElementsWithinViewport(page: Page, selector: string) {
+	const bounds = await page.locator(selector).evaluateAll((elements) =>
+		elements.map((element) => {
+			const rect = element.getBoundingClientRect();
+			return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+		}),
+	);
+	for (const bound of bounds) {
+		expect(bound.left).toBeGreaterThanOrEqual(0);
+		expect(bound.right).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
+		expect(bound.top).toBeGreaterThanOrEqual(0);
+		expect(bound.bottom).toBeLessThanOrEqual(await page.evaluate(() => innerHeight));
+	}
+}
+
+export async function runTerminalCommand(page: Page, command: string) {
+	await page.getByRole("textbox", { name: "Terminal input" }).focus();
+	await page.keyboard.type(command);
+	await page.keyboard.press("Enter");
+}
+
+export async function runAnswer(page: Page) {
+	await runTerminalCommand(page, "/answer.sh");
+}
+
+export async function stopChallenge(page: Page, challengeID: string) {
+	await page.evaluate(async (id) => {
+		const response = await fetch(`/api/challenges/${id}/stop`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+		});
+		if (!response.ok) throw new Error(await response.text());
+	}, challengeID);
+}
+
+export async function waitForVerifiedRevision(page: Page) {
+	await expect(
+		page.getByRole("button", { name: "发布挑战", exact: true }),
+	).toBeVisible({ timeout: 50 * 60_000 });
 }

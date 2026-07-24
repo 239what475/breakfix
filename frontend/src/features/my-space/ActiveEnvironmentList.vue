@@ -9,7 +9,7 @@ function checkpointLabel(environment: MySpaceActiveEnvironment) {
   return `${environment.checkpoint_progress.passed}/${environment.checkpoint_progress.total} checkpoints`;
 }
 
-function expiryLabel(expiresAt?: string) {
+function expiryLabel(expiresAt?: string | null) {
   if (!expiresAt) return "No expiry";
   const remaining = Math.max(0, new Date(expiresAt).getTime() - Date.now());
   const minutes = Math.ceil(remaining / 60000);

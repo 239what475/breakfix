@@ -5,7 +5,7 @@
         e2e \
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
-        generate-crd verify-crd-generated \
+        generate-crd verify-crd-generated generate-api verify-api-generated \
         build build-server build-controller \
         deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-generator deploy-catalog deploy-cleanup deploy-reset \
         generator-build generator-dev \
@@ -117,7 +117,7 @@ dev-controller: dev-config dev-build-controller dev-start-controller
 
 e2e-server-recovery:
 	npm ci --prefix test
-	RUN_SERVER_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'server restart leaves controller reconciliation active'
+	RUN_SERVER_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'server restart leaves controller reconciliation active|controller restart reconciles an existing environment'
 
 e2e:
 	npm ci --prefix test
@@ -147,6 +147,13 @@ verify-crd-generated:
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=$$tmp/crd; \
 	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
 	diff -ru deploy/crd $$tmp/crd
+
+generate-api:
+	npm run generate:api --prefix frontend
+
+verify-api-generated:
+	@$(MAKE) --no-print-directory generate-api
+	@git diff --exit-code -- frontend/src/api/generated
 
 dev-crd: generate-crd
 	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null

@@ -31,6 +31,8 @@ jobs:
           npm run test:e2e --prefix test -- --list
       - name: Verify generated CRD files
         run: make verify-crd-generated
+      - name: Verify generated API types
+        run: make verify-api-generated
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest

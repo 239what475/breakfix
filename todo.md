@@ -65,7 +65,7 @@
 
 验收：Server 重启不停止 Controller 调和；Controller 重启后继续处理已有 CRD；Controller 代码不依赖数据库或 challenge 目录；本地组合启动、真实环境和恢复 e2e 均通过。
 
-## 6. Server 文件职责拆分
+## 6. [x] Server 文件职责拆分
 
 完成 Server/Controller 边界后，`internal/server/handlers.go` 仍会混合认证、题库、挑战 HTTP 接口、环境生命周期和内部 artifact 下载。保持公开路由不变，仅按职责拆分文件：
 
@@ -78,7 +78,7 @@
 
 验收：路由、鉴权、WebSocket 和环境恢复行为不变；现有 Server 单元测试与真实恢复 e2e 通过。
 
-## 7. Generator 文件职责拆分
+## 7. [x] Generator 文件职责拆分
 
 `internal/generator/generator.go` 同时承担 agent 编排、静态校验、流处理、归档和上传。保持 `generator` 包和工作流语义不变，拆分为：
 
@@ -90,7 +90,7 @@
 
 验收：生成 prompt、judge 的严格 PASS/FAIL 契约、VerifyTask 交接格式和真实验证流程均不改变。
 
-## 8. Playwright 按产品场景拆分
+## 8. [x] Playwright 按产品场景拆分
 
 `test/e2e/workspace.spec.ts` 当前混合静态页面、个人空间、容器工作台、vcluster 和作者流程。按场景拆分，并复用已有 `live-helpers.ts`：
 
@@ -103,7 +103,7 @@
 
 验收：普通浏览器测试默认可运行；真实环境测试仍由显式环境变量启用；Server 恢复和 Controller 恢复 e2e 均保持可运行。
 
-## 9. 统一 API 契约类型
+## 9. [x] 统一 API 契约类型
 
 `api/openapi.yaml` 已是服务端路由和模型的生成源，但 `frontend/src/api/types.ts` 仍人工维护，存在漂移风险。
 

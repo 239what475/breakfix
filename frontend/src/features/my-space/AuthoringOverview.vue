@@ -8,8 +8,8 @@ const emit = defineEmits<{ authoring: [sessionId?: string]; catalog: [id: string
 function date(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value));
 }
-function rate(value?: number) {
-  return value === undefined ? "--" : `${Math.round(value * 100)}%`;
+function rate(value?: number | null) {
+	return value == null ? "--" : `${Math.round(value * 100)}%`;
 }
 </script>
 
