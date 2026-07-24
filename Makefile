@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down dev-reset dev-status \
+.PHONY: dev dev-up dev-down dev-reset dev-status frontend-build \
         dev-build dev-build-gateway \
         dev-start-gateway \
         dev-gateway \
@@ -41,7 +41,11 @@ DIST_DIR := dist
 # Dev build (bin/ — fast, no LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
-dev-build-gateway:
+frontend-build:
+	npm ci --prefix frontend
+	npm run build --prefix frontend
+
+dev-build-gateway: frontend-build
 	go build -o $(BIN_DIR)/breakfix-gateway ./cmd/gateway
 	@echo "  ✓ gateway"
 
@@ -141,7 +145,7 @@ breakfix-local.yaml: breakfix.yaml
 # Production build (dist/ — stripped, with LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
-build-gateway:
+build-gateway: frontend-build
 	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-gateway-linux-amd64 ./cmd/gateway
 	@echo "  ✓ Gateway binary"
 

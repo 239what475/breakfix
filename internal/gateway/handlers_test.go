@@ -31,6 +31,19 @@ func TestGetChallengeProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
 	}
 }
 
+func TestAssistantWindowsIncludeOnlyValidatedWorkspaceTabs(t *testing.T) {
+	windows, current, err := assistantWindows("shell-2", []string{"shell-1", "shell-2", "shell-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != "shell-2" || len(windows) != 2 || windows[0] != "shell-1" || windows[1] != "shell-2" {
+		t.Fatalf("assistant windows = %#v, current = %q", windows, current)
+	}
+	if _, _, err := assistantWindows("invalid window", nil); err == nil {
+		t.Fatal("invalid terminal window accepted")
+	}
+}
+
 func TestGetChallengeProgressRejectsNonReadyEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
 		Spec:   breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},

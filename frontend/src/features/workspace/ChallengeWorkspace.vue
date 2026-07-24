@@ -3,11 +3,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { api } from "../../api/client";
 import type { Challenge, ChallengeContent } from "../../api/types";
 import MarkdownDocument from "./MarkdownDocument.vue";
+import AssistantChat from "./AssistantChat.vue";
 import TerminalPane from "./TerminalPane.vue";
 import WorkspaceHeader from "./WorkspaceHeader.vue";
 import WorkspaceSidebar from "./WorkspaceSidebar.vue";
 import { useChallengeProgress } from "./useChallengeProgress";
 import "./workspace.css";
+import "./assistant.css";
 
 const props = defineProps<{ challenge: Challenge }>();
 const emit = defineEmits<{
@@ -18,12 +20,14 @@ const emit = defineEmits<{
 const content = ref<ChallengeContent>();
 const loadingContent = ref(false);
 const contentError = ref("");
-const view = ref<"problem" | "solution">("problem");
+const view = ref<"problem" | "solution" | "assistant">("problem");
 const sidebarCollapsed = ref(false);
 const mobileView = ref<"document" | "terminal">("document");
 const isNarrow = ref(false);
 const activeHint = ref<string | null>(null);
 const terminalConnected = ref(false);
+const currentTerminalWindow = ref("shell-1");
+const terminalWindows = ref(["shell-1"]);
 const resetting = ref(false);
 const sessionStartedAt = ref(Date.now());
 const elapsedSeconds = ref(0);
@@ -77,6 +81,11 @@ function showHint(id: string) {
   activeHint.value = activeHint.value === id ? null : id;
 }
 
+function changeView(next: "problem" | "solution" | "assistant") {
+  view.value = next;
+  if (next === "assistant") activeHint.value = null;
+}
+
 async function reset() {
   resetting.value = true;
   try {
@@ -101,6 +110,8 @@ watch(
     content.value = undefined;
     checks.value = [];
     activeHint.value = null;
+    currentTerminalWindow.value = "shell-1";
+    terminalWindows.value = ["shell-1"];
     view.value = "problem";
     resetElapsed();
     void loadContent();
@@ -148,12 +159,12 @@ onUnmounted(() => {
         :results="checks"
         :collapsed="sidebarCollapsed"
         :error="progressError"
-        @update-view="view = $event"
+        @update-view="changeView"
         @toggle="sidebarCollapsed = !sidebarCollapsed"
         @refresh="refresh"
         @hint="showHint"
       />
-      <section class="document-pane">
+      <section class="document-pane" :class="{ 'assistant-view': view === 'assistant' }">
         <div v-if="loadingContent" class="document-empty">
           Loading challenge content...
         </div>
@@ -163,34 +174,43 @@ onUnmounted(() => {
         </div>
         <template v-else>
           <div class="document-toolbar">
-            <span>{{ view === "problem" ? "Problem" : "Solution" }}</span
+            <span>{{ view === "problem" ? "Problem" : view === "solution" ? "Solution" : "Assistant" }}</span
             ><span v-if="progressLoading" class="muted-copy"
               >Checking environment...</span
             >
           </div>
-          <MarkdownDocument :source="documentSource" />
-          <aside
-            v-if="activeHint && content?.hints[activeHint]"
-            class="hint-panel"
-          >
-            <div>
-              <p class="eyebrow">Hint</p>
-              <MarkdownDocument :source="content.hints[activeHint]" />
-            </div>
-            <button
-              class="icon-button"
-              title="Close hint"
-              @click="activeHint = null"
+          <AssistantChat
+            v-if="view === 'assistant'"
+            :challenge-id="challenge.id"
+            :current-window="currentTerminalWindow"
+            :open-windows="terminalWindows"
+          />
+          <template v-else>
+            <MarkdownDocument :source="documentSource" />
+            <aside
+              v-if="activeHint && content?.hints[activeHint]"
+              class="hint-panel"
             >
-              x
-            </button>
-          </aside>
+              <div>
+                <p class="eyebrow">Hint</p>
+                <MarkdownDocument :source="content.hints[activeHint]" />
+              </div>
+              <button
+                class="icon-button"
+                title="Close hint"
+                @click="activeHint = null"
+              >
+                x
+              </button>
+            </aside>
+          </template>
         </template>
       </section>
       <TerminalPane
         :challenge-id="challenge.id"
         :visible="terminalVisible"
         @connected="terminalConnected = $event"
+        @context="(current, windows) => { currentTerminalWindow = current; terminalWindows = windows; }"
       />
     </div>
   </main>

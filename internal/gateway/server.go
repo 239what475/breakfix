@@ -20,6 +20,7 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 
 	h := NewHandler(database, k8sClient, cfg)
 	h.StartAuthoringReconciler(context.Background())
+	h.StartAssistantCleanup(context.Background())
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 
@@ -52,6 +53,24 @@ func SetupRouter(database *db.DB, k8sClient *k8s.Client, cfg config.Config, fron
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetChallengeProgress(c, c.Param("id"))
+		}
+	})
+	router.GET("/api/challenges/:id/assistant", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.GetChallengeAssistant(c, c.Param("id"))
+		}
+	})
+	router.POST("/api/challenges/:id/assistant/messages", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.SendChallengeAssistantMessage(c, c.Param("id"))
+		}
+	})
+	router.GET("/api/challenges/:id/assistant/turns/:turnID/events", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.StreamChallengeAssistantTurn(c, c.Param("id"), c.Param("turnID"))
 		}
 	})
 	router.POST("/api/challenges/:id/reset", func(c *gin.Context) {

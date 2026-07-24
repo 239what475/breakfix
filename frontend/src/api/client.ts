@@ -1,5 +1,9 @@
 import type {
 	AuthoringSession,
+	AssistantConversation,
+	AssistantMessageRequest,
+	AssistantStreamComplete,
+	AssistantStreamEvent,
 	Challenge,
 	ChallengeContent,
 	CheckpointResult,
@@ -44,6 +48,86 @@ async function request<T>(
   return data as T;
 }
 
+export interface AssistantStreamHandlers {
+  onEvent: (event: AssistantStreamEvent) => void;
+  onComplete: (value: AssistantStreamComplete) => void;
+  onError: (message: string) => void;
+}
+
+async function consumeAssistantStream(
+  response: Response,
+  handlers: AssistantStreamHandlers,
+): Promise<void> {
+  if (!response.body) throw new Error("Assistant stream is unavailable");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const raw of events) {
+      const name = raw.match(/^event: (.+)$/m)?.[1];
+      const data = raw.match(/^data: (.+)$/m)?.[1];
+      if (!name || !data) continue;
+      const parsed = JSON.parse(data) as AssistantStreamEvent | AssistantStreamComplete | { error?: string };
+      if (name === "error") {
+        handlers.onError((parsed as { error?: string }).error || "Assistant request failed");
+        return;
+      }
+      if (name === "complete") {
+        handlers.onComplete(parsed as AssistantStreamComplete);
+        return;
+      }
+      handlers.onEvent({ ...(parsed as AssistantStreamEvent), type: name as AssistantStreamEvent["type"] });
+    }
+    if (done) break;
+  }
+}
+
+export async function streamAssistantMessage(
+  id: string,
+  body: AssistantMessageRequest,
+  handlers: AssistantStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const currentToken = token();
+  if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+  const response = await fetch(`${base}/challenges/${id}/assistant/messages`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  await consumeAssistantStream(response, handlers);
+}
+
+export async function subscribeAssistantTurn(
+  id: string,
+  turnID: string,
+  handlers: AssistantStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  const currentToken = token();
+  if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+  const response = await fetch(`${base}/challenges/${id}/assistant/turns/${turnID}/events`, {
+    headers,
+    signal,
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  await consumeAssistantStream(response, handlers);
+}
+
 export const api = {
   register: (username: string, password: string) =>
     request<{ totp_secret: string; totp_url: string }>(
@@ -66,6 +150,8 @@ export const api = {
       "GET",
       `/challenges/${id}/progress`,
     ),
+  getChallengeAssistant: (id: string) =>
+    request<AssistantConversation>("GET", `/challenges/${id}/assistant`),
   startChallenge: (id: string) =>
     request<{ challenge_title: string }>("POST", `/challenges/${id}/start`),
   resetChallenge: (id: string) =>

@@ -34,6 +34,58 @@ export interface ChallengeContent {
   checkpoints: Checkpoint[];
 }
 
+export interface AssistantEvidence {
+  kind: string;
+  label: string;
+}
+
+export interface AssistantMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  evidence?: AssistantEvidence[];
+  created_at: string;
+}
+
+export interface AssistantTurn {
+  id: string;
+  session_id: string;
+  status: "running" | "completed" | "failed";
+  content: string;
+  evidence?: AssistantEvidence[];
+  error?: string;
+  message?: AssistantMessage;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantConversation {
+  id: string;
+  challenge_id: string;
+  messages: AssistantMessage[];
+  active_turn?: AssistantTurn;
+}
+
+export interface AssistantMessageRequest {
+  content: string;
+  current_window: string;
+  open_windows: string[];
+}
+
+export interface AssistantStreamEvent {
+  type: "ready" | "tool" | "delta";
+  turn_id?: string;
+  content?: string;
+  tool?: string;
+  turn?: AssistantTurn;
+}
+
+export interface AssistantStreamComplete {
+  turn_id: string;
+  session_id: string;
+  message: AssistantMessage;
+}
+
 export type AuthoringState =
   | "DraftConversation"
   | "IntentReview"

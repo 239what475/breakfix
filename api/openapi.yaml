@@ -112,7 +112,7 @@ paths:
   /challenges/{id}/progress:
     get:
       operationId: getChallengeProgress
-      summary: Run the current challenge checkpoint checks
+      summary: Read the controller-owned current challenge checkpoint snapshot
       tags: [environments]
       security:
         - bearerAuth: []
@@ -129,6 +129,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChallengeProgress"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/assistant:
+    get:
+      operationId: getChallengeAssistant
+      summary: Read or create the assistant conversation for the active challenge environment
+      tags: [assistant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Environment-scoped assistant conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantConversation"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/assistant/messages:
+    post:
+      operationId: sendChallengeAssistantMessage
+      summary: Send a message to the active challenge assistant and receive SSE events
+      tags: [assistant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantMessageRequest"
+      responses:
+        "200":
+          description: Server-sent assistant status, tool, delta, complete, and error events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /challenges/{id}/assistant/turns/{turnID}/events:
+    get:
+      operationId: streamChallengeAssistantTurn
+      summary: Reconnect to a running assistant response stream
+      tags: [assistant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: turnID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Server-sent assistant status, tool, delta, complete, and error events
+          content:
+            text/event-stream:
+              schema:
+                type: string
         "404":
           $ref: "#/components/responses/Error"
         "409":
@@ -479,6 +567,87 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CheckpointResult"
+
+    AssistantEvidence:
+      type: object
+      required: [kind, label]
+      properties:
+        kind:
+          type: string
+        label:
+          type: string
+
+    AssistantMessage:
+      type: object
+      required: [id, role, content, created_at]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantEvidence"
+        created_at:
+          type: string
+
+    AssistantConversation:
+      type: object
+      required: [id, challenge_id, messages]
+      properties:
+        id:
+          type: string
+        challenge_id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantMessage"
+        active_turn:
+          $ref: "#/components/schemas/AssistantTurn"
+
+    AssistantTurn:
+      type: object
+      required: [id, session_id, status, content, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed]
+        content:
+          type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantEvidence"
+        error:
+          type: string
+        message:
+          $ref: "#/components/schemas/AssistantMessage"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    AssistantMessageRequest:
+      type: object
+      required: [content, current_window, open_windows]
+      properties:
+        content:
+          type: string
+        current_window:
+          type: string
+        open_windows:
+          type: array
+          items:
+            type: string
 
     StartResponse:
       type: object

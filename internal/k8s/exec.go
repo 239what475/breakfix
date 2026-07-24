@@ -3,9 +3,11 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,8 @@ import (
 )
 
 var ErrExecOutputLimit = errors.New("pod exec output exceeded limit")
+
+const tmuxHistoryLimit = 10000
 
 // ExecInPod runs a command in a pod and returns exit code, stdout+stderr, and any error.
 func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, string, error) {
@@ -122,6 +126,105 @@ func (c *Client) WaitForFileInPod(namespace, podName, path string, timeout time.
 	}
 }
 
+// CaptureTMUXPane returns a page of one tmux window's own scrollback buffer.
+// It reads terminal state only; it never attaches to or writes into the pane.
+func (c *Client) CaptureTMUXPane(ctx context.Context, namespace, podName, sessionName, windowName string, offset, lines int) ([]string, int, error) {
+	if offset < 0 || lines < 1 {
+		return nil, 0, errors.New("invalid scrollback range")
+	}
+	target := sessionName + ":" + windowName
+	countCommand := `set -o pipefail
+tmux capture-pane -p -J -t "$1" -S - -E - | wc -l`
+	_, countOutput, err := c.ExecInPodContext(ctx, namespace, podName, 128, "/bin/bash", "-lc", countCommand, "--", target)
+	if err != nil {
+		return nil, 0, fmt.Errorf("capture tmux scrollback count: %w", err)
+	}
+	total, err := strconv.Atoi(strings.TrimSpace(countOutput))
+	if err != nil {
+		return nil, 0, fmt.Errorf("parse tmux scrollback count %q: %w", countOutput, err)
+	}
+	pageCommand := `set -o pipefail
+tmux capture-pane -p -J -t "$1" -S - -E - | tail -n "$(( $2 + $3 ))" | head -n "$3"`
+	_, output, err := c.ExecInPodContext(ctx, namespace, podName, 128*1024, "/bin/bash", "-lc", pageCommand, "--", target, strconv.Itoa(offset), strconv.Itoa(lines))
+	if err != nil {
+		return nil, 0, fmt.Errorf("capture tmux scrollback: %w", err)
+	}
+	if output == "" {
+		return []string{}, total, nil
+	}
+	return strings.Split(output, "\n"), total, nil
+}
+
+// ListPodFiles lists a single directory level inside one workspace Pod. The
+// path is intentionally unrestricted within that Pod; the caller already owns
+// the environment and this helper does not cross Pod boundaries.
+func (c *Client) ListPodFiles(ctx context.Context, namespace, podName, path string, offset, limit int) ([]string, int, error) {
+	if offset < 0 || limit < 1 {
+		return nil, 0, errors.New("invalid file listing range")
+	}
+	listCommand := `set -euo pipefail
+path="$1"
+if [[ ! -d "$path" ]]; then
+  echo "not a directory: $path" >&2
+  exit 2
+fi
+find "$path" -mindepth 1 -maxdepth 1 -printf '%f\t%y\t%s\n' | LC_ALL=C sort`
+	countCommand := listCommand + " | wc -l"
+	_, countOutput, err := c.ExecInPodContext(ctx, namespace, podName, 128, "/bin/bash", "-lc", countCommand, "--", path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list environment files count: %w", err)
+	}
+	total, err := strconv.Atoi(strings.TrimSpace(countOutput))
+	if err != nil {
+		return nil, 0, fmt.Errorf("parse environment file count %q: %w", countOutput, err)
+	}
+	pageCommand := listCommand + ` | tail -n "+$(( $2 + 1 ))" | head -n "$3"`
+	_, output, err := c.ExecInPodContext(ctx, namespace, podName, 128*1024, "/bin/bash", "-lc", pageCommand, "--", path, strconv.Itoa(offset), strconv.Itoa(limit))
+	if err != nil {
+		return nil, 0, fmt.Errorf("list environment files: %w", err)
+	}
+	if output == "" {
+		return []string{}, total, nil
+	}
+	return strings.Split(output, "\n"), total, nil
+}
+
+// ReadPodFile reads one bounded byte range from a regular file in a workspace
+// Pod. It deliberately permits any Pod-local path but excludes streams and
+// device files so an assistant request cannot block indefinitely.
+func (c *Client) ReadPodFile(ctx context.Context, namespace, podName, path string, offset int64, maxBytes int) (string, int64, error) {
+	if offset < 0 || maxBytes < 1 {
+		return "", 0, errors.New("invalid file read range")
+	}
+	sizeCommand := `set -euo pipefail
+path="$1"
+if [[ ! -f "$path" ]]; then
+  echo "not a regular file: $path" >&2
+  exit 2
+fi
+wc -c < "$path"`
+	_, sizeOutput, err := c.ExecInPodContext(ctx, namespace, podName, 128, "/bin/bash", "-lc", sizeCommand, "--", path)
+	if err != nil {
+		return "", 0, fmt.Errorf("read environment file size: %w", err)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(sizeOutput), 10, 64)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse environment file size %q: %w", sizeOutput, err)
+	}
+	readCommand := `set -euo pipefail
+dd if="$1" iflag=skip_bytes,count_bytes skip="$2" count="$3" status=none | base64 -w 0`
+	encodedMax := base64.StdEncoding.EncodedLen(maxBytes) + 1024
+	_, output, err := c.ExecInPodContext(ctx, namespace, podName, encodedMax, "/bin/bash", "-lc", readCommand, "--", path, strconv.FormatInt(offset, 10), strconv.Itoa(maxBytes))
+	if err != nil {
+		return "", 0, fmt.Errorf("read environment file: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(output)
+	if err != nil {
+		return "", 0, fmt.Errorf("decode environment file: %w", err)
+	}
+	return string(data), size, nil
+}
+
 // ExecPTY opens a named tmux window through a PTY session. The tmux session
 // remains in the workspace Pod, so reconnecting a browser tab preserves shell
 // state and opening another tab never creates another user environment.
@@ -132,7 +235,8 @@ if ! tmux has-session -t %[1]s 2>/dev/null; then
 elif ! tmux list-windows -t %[1]s -F '#W' | grep -Fx -- %[2]s >/dev/null; then
   tmux new-window -d -t %[1]s -n %[2]s
 fi
-exec tmux attach-session -t %[3]s`, shellQuote(sessionName), shellQuote(windowName), shellQuote(sessionName+":"+windowName))
+tmux set-option -q -t %[1]s history-limit %[4]d
+exec tmux attach-session -t %[3]s`, shellQuote(sessionName), shellQuote(windowName), shellQuote(sessionName+":"+windowName), tmuxHistoryLimit)
 
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Name(podName).Namespace(namespace).

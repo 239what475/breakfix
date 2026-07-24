@@ -14,8 +14,14 @@ LDFLAGS="-s -w \
   -X 'github.com/breakfix/breakfix/internal/build.BuildTime=${BUILD_TIME}' \
   -X 'github.com/breakfix/breakfix/internal/build.Commit=${COMMIT}'"
 
+build_frontend() {
+    npm ci --prefix frontend
+    npm run build --prefix frontend
+}
+
 build_server() {
     echo "=== Building server (${VERSION} ${COMMIT}) ==="
+    build_frontend
     go build -ldflags "${LDFLAGS}" -o dist/breakfix-gateway-linux-amd64 ./cmd/gateway
 }
 

@@ -34,7 +34,6 @@ breakfix-local.yaml
 
 # Build output
 dist/
-!cmd/gateway/frontend/dist/
 bin/
 
 # Kind kubeconfig

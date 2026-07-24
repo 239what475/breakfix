@@ -23,6 +23,45 @@ const (
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
 
+// Defines values for AssistantMessageRole.
+const (
+	Assistant AssistantMessageRole = "assistant"
+	User      AssistantMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AssistantMessageRole enum.
+func (e AssistantMessageRole) Valid() bool {
+	switch e {
+	case Assistant:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AssistantTurnStatus.
+const (
+	Completed AssistantTurnStatus = "completed"
+	Failed    AssistantTurnStatus = "failed"
+	Running   AssistantTurnStatus = "running"
+)
+
+// Valid indicates whether the value is a known member of the AssistantTurnStatus enum.
+func (e AssistantTurnStatus) Valid() bool {
+	switch e {
+	case Completed:
+		return true
+	case Failed:
+		return true
+	case Running:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ChallengeSummaryRuntime.
 const (
 	Container ChallengeSummaryRuntime = "container"
@@ -40,6 +79,55 @@ func (e ChallengeSummaryRuntime) Valid() bool {
 		return false
 	}
 }
+
+// AssistantConversation defines model for AssistantConversation.
+type AssistantConversation struct {
+	ActiveTurn  *AssistantTurn     `json:"active_turn,omitempty"`
+	ChallengeId string             `json:"challenge_id"`
+	Id          string             `json:"id"`
+	Messages    []AssistantMessage `json:"messages"`
+}
+
+// AssistantEvidence defines model for AssistantEvidence.
+type AssistantEvidence struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+}
+
+// AssistantMessage defines model for AssistantMessage.
+type AssistantMessage struct {
+	Content   string               `json:"content"`
+	CreatedAt string               `json:"created_at"`
+	Evidence  *[]AssistantEvidence `json:"evidence,omitempty"`
+	Id        string               `json:"id"`
+	Role      AssistantMessageRole `json:"role"`
+}
+
+// AssistantMessageRole defines model for AssistantMessage.Role.
+type AssistantMessageRole string
+
+// AssistantMessageRequest defines model for AssistantMessageRequest.
+type AssistantMessageRequest struct {
+	Content       string   `json:"content"`
+	CurrentWindow string   `json:"current_window"`
+	OpenWindows   []string `json:"open_windows"`
+}
+
+// AssistantTurn defines model for AssistantTurn.
+type AssistantTurn struct {
+	Content   string               `json:"content"`
+	CreatedAt string               `json:"created_at"`
+	Error     *string              `json:"error,omitempty"`
+	Evidence  *[]AssistantEvidence `json:"evidence,omitempty"`
+	Id        string               `json:"id"`
+	Message   *AssistantMessage    `json:"message,omitempty"`
+	SessionId string               `json:"session_id"`
+	Status    AssistantTurnStatus  `json:"status"`
+	UpdatedAt string               `json:"updated_at"`
+}
+
+// AssistantTurnStatus defines model for AssistantTurn.Status.
+type AssistantTurnStatus string
 
 // AuthoringArtifact defines model for AuthoringArtifact.
 type AuthoringArtifact struct {
@@ -288,6 +376,9 @@ type RegisterJSONRequestBody = RegisterRequest
 // SendAuthoringMessageJSONRequestBody defines body for SendAuthoringMessage for application/json ContentType.
 type SendAuthoringMessageJSONRequestBody = AuthoringMessageRequest
 
+// SendChallengeAssistantMessageJSONRequestBody defines body for SendChallengeAssistantMessage for application/json ContentType.
+type SendChallengeAssistantMessageJSONRequestBody = AssistantMessageRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Login with password + TOTP
@@ -317,10 +408,19 @@ type ServerInterface interface {
 	// List all challenges
 	// (GET /challenges)
 	ListChallenges(c *gin.Context)
+	// Read or create the assistant conversation for the active challenge environment
+	// (GET /challenges/{id}/assistant)
+	GetChallengeAssistant(c *gin.Context, id string)
+	// Send a message to the active challenge assistant and receive SSE events
+	// (POST /challenges/{id}/assistant/messages)
+	SendChallengeAssistantMessage(c *gin.Context, id string)
+	// Reconnect to a running assistant response stream
+	// (GET /challenges/{id}/assistant/turns/{turnID}/events)
+	StreamChallengeAssistantTurn(c *gin.Context, id string, turnID string)
 	// Get challenge problem, solution, hints, and checkpoint metadata
 	// (GET /challenges/{id}/content)
 	GetChallengeContent(c *gin.Context, id string)
-	// Run the current challenge checkpoint checks
+	// Read the controller-owned current challenge checkpoint snapshot
 	// (GET /challenges/{id}/progress)
 	GetChallengeProgress(c *gin.Context, id string)
 	// Reset challenge to initial state
@@ -521,6 +621,96 @@ func (siw *ServerInterfaceWrapper) ListChallenges(c *gin.Context) {
 	}
 
 	siw.Handler.ListChallenges(c)
+}
+
+// GetChallengeAssistant operation middleware
+func (siw *ServerInterfaceWrapper) GetChallengeAssistant(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetChallengeAssistant(c, id)
+}
+
+// SendChallengeAssistantMessage operation middleware
+func (siw *ServerInterfaceWrapper) SendChallengeAssistantMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SendChallengeAssistantMessage(c, id)
+}
+
+// StreamChallengeAssistantTurn operation middleware
+func (siw *ServerInterfaceWrapper) StreamChallengeAssistantTurn(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "turnID" -------------
+	var turnID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "turnID", c.Param("turnID"), &turnID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter turnID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StreamChallengeAssistantTurn(c, id, turnID)
 }
 
 // GetChallengeContent operation middleware
@@ -730,6 +920,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/authoring/sessions/:id/messages", wrapper.SendAuthoringMessage)
 	router.POST(options.BaseURL+"/authoring/sessions/:id/publish", wrapper.PublishAuthoringRevision)
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
+	router.GET(options.BaseURL+"/challenges/:id/assistant", wrapper.GetChallengeAssistant)
+	router.POST(options.BaseURL+"/challenges/:id/assistant/messages", wrapper.SendChallengeAssistantMessage)
+	router.GET(options.BaseURL+"/challenges/:id/assistant/turns/:turnID/events", wrapper.StreamChallengeAssistantTurn)
 	router.GET(options.BaseURL+"/challenges/:id/content", wrapper.GetChallengeContent)
 	router.GET(options.BaseURL+"/challenges/:id/progress", wrapper.GetChallengeProgress)
 	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
@@ -743,43 +936,50 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"c7TZZMLMg6VQevZ2+nY6IQXF29vt/wMAAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -7,19 +7,20 @@ import {
 	CircleDashed,
 	FileText,
 	ListChecks,
+	MessageCircle,
 	RefreshCw,
 } from "lucide-vue-next";
 import type { Checkpoint, CheckpointResult } from "../../api/types";
 
 defineProps<{
-  view: "problem" | "solution";
+  view: "problem" | "solution" | "assistant";
   checkpoints: Checkpoint[];
   results: CheckpointResult[];
   collapsed: boolean;
   error: string;
 }>();
 const emit = defineEmits<{
-  updateView: [view: "problem" | "solution"];
+  updateView: [view: "problem" | "solution" | "assistant"];
   toggle: [];
   refresh: [];
   hint: [id: string];
@@ -48,6 +49,12 @@ const emit = defineEmits<{
           @click="emit('updateView', 'solution')"
         >
           Solution
+        </button>
+        <button
+          :class="{ active: view === 'assistant' }"
+          @click="emit('updateView', 'assistant')"
+        >
+          Assistant
         </button>
       </div>
       <div class="checkpoint-heading">
@@ -111,6 +118,15 @@ const emit = defineEmits<{
         @click="emit('updateView', 'solution')"
       >
         <BookOpen :size="16" aria-hidden="true" />
+      </button>
+      <button
+        class="icon-button"
+        :class="{ active: view === 'assistant' }"
+        aria-label="Show Assistant"
+        title="Show Assistant"
+        @click="emit('updateView', 'assistant')"
+      >
+        <MessageCircle :size="16" aria-hidden="true" />
       </button>
       <button
         class="icon-button"

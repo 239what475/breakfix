@@ -7,18 +7,22 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 )
 
-func TestStopRouteRegistered(t *testing.T) {
+func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
 	router := SetupRouter(nil, nil, config.Config{}, nil)
 
-	found := false
+	routes := map[string]bool{}
 	for _, route := range router.Routes() {
-		if route.Method == "POST" && route.Path == "/api/challenges/:id/stop" {
-			found = true
-			break
-		}
+		routes[route.Method+" "+route.Path] = true
 	}
-	if !found {
-		t.Fatal("stop route not registered")
+	for _, expected := range []string{
+		"POST /api/challenges/:id/stop",
+		"GET /api/challenges/:id/assistant",
+		"POST /api/challenges/:id/assistant/messages",
+		"GET /api/challenges/:id/assistant/turns/:turnID/events",
+	} {
+		if !routes[expected] {
+			t.Fatalf("route not registered: %s", expected)
+		}
 	}
 
 	rec := httptest.NewRecorder()

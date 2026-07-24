@@ -14,6 +14,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/auth"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -26,6 +27,7 @@ import (
 )
 
 type activeEnvironment struct {
+	UID                   string
 	Runtime               string
 	Name                  string
 	ChallengeRef          string
@@ -48,6 +50,7 @@ func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvir
 		return nil
 	}
 	return &activeEnvironment{
+		UID:                   string(env.UID),
 		Runtime:               challenge.RuntimeContainer,
 		Name:                  env.Name,
 		ChallengeRef:          env.Spec.ChallengeRef,
@@ -71,6 +74,7 @@ func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnviron
 		return nil
 	}
 	return &activeEnvironment{
+		UID:                   string(env.UID),
 		Runtime:               challenge.RuntimeVCluster,
 		Name:                  env.Name,
 		ChallengeRef:          env.Spec.ChallengeRef,
@@ -94,6 +98,7 @@ type Handler struct {
 	db               *db.DB
 	k8s              *k8s.Client
 	authoring        *authoring.Service
+	assistant        *assistant.Service
 	registryAddr     string
 	registryInsecure bool
 	namespace        string
@@ -114,6 +119,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		db:               database,
 		k8s:              client,
 		authoring:        authoring.NewService(database, cfg.LLM),
+		assistant:        assistant.NewService(database, cfg.LLM),
 		registryAddr:     cfg.RegistryAddr,
 		registryInsecure: cfg.RegistryInsecure,
 		namespace:        cfg.Namespace,
@@ -369,6 +375,10 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 
 	existing, _ := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
 	if existing != nil {
+		if err := h.assistant.DeleteEnvironment(c.Request.Context(), existing.UID); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
+			return
+		}
 		if err := h.destroyEnvironment(c.Request.Context(), existing); err != nil {
 			slog.Error("failed to destroy old environment", "err", err)
 		}
@@ -405,6 +415,13 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
+	// A user-requested Stop invalidates the conversation even when Kubernetes
+	// cannot accept the deletion request immediately. This matches Reset and
+	// prevents a later environment retry from reviving stale assistant context.
+	if err := h.assistant.DeleteEnvironment(c.Request.Context(), env.UID); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
+		return
+	}
 	if err := h.destroyEnvironment(c.Request.Context(), env); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("stop environment: %v", err)})
 		return

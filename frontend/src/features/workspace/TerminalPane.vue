@@ -4,8 +4,14 @@ import { Plus, X } from "lucide-vue-next";
 import { api } from "../../api/client";
 import { useTerminalSession } from "./useTerminalSession";
 
-const props = defineProps<{ challengeId: string; visible: boolean }>();
-const emit = defineEmits<{ connected: [connected: boolean] }>();
+const props = defineProps<{
+  challengeId: string;
+  visible: boolean;
+}>();
+const emit = defineEmits<{
+  connected: [connected: boolean];
+  context: [currentWindow: string, openWindows: string[]];
+}>();
 const host = ref<HTMLDivElement>();
 const tabs = ref(["shell-1"]);
 const active = ref<string | null>("shell-1");
@@ -14,6 +20,11 @@ const { state, stateMessage, connect, focus, refreshLayout } =
   useTerminalSession(host, challenge, active);
 const connected = computed(() => state.value === "connected");
 watch(connected, (value) => emit("connected", value), { immediate: true });
+watch(
+  [active, tabs],
+  () => emit("context", active.value ?? "shell-1", [...tabs.value]),
+  { deep: true, immediate: true },
+);
 watch(
   () => props.challengeId,
   () => {
@@ -29,7 +40,6 @@ watch(
     refreshLayout();
   },
 );
-
 function addTab() {
   let number = 1;
   while (tabs.value.includes(`shell-${number}`)) number += 1;

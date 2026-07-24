@@ -125,6 +125,35 @@ var migrations = []string{
 	`
 	ALTER TABLE authoring_sessions ADD COLUMN pending_feedback TEXT NOT NULL DEFAULT '';
 	`,
+	// v8: environment-scoped challenge assistant conversations.
+	`
+	CREATE TABLE IF NOT EXISTS assistant_sessions (
+		id                TEXT PRIMARY KEY,
+		user_id           TEXT NOT NULL,
+		environment_uid   TEXT NOT NULL,
+		environment_name  TEXT NOT NULL,
+		runtime           TEXT NOT NULL,
+		challenge_id      TEXT NOT NULL,
+		agent_session_id  TEXT NOT NULL,
+		agent_started     INTEGER NOT NULL DEFAULT 0,
+		created_at        TEXT NOT NULL,
+		updated_at        TEXT NOT NULL,
+		UNIQUE(user_id, environment_uid, challenge_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS assistant_messages (
+		id             TEXT PRIMARY KEY,
+		session_id     TEXT NOT NULL,
+		role           TEXT NOT NULL,
+		content        TEXT NOT NULL,
+		evidence_json  TEXT NOT NULL DEFAULT '[]',
+		created_at     TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS assistant_messages_session_created
+		ON assistant_messages(session_id, created_at);
+	CREATE INDEX IF NOT EXISTS assistant_sessions_environment_uid
+		ON assistant_sessions(environment_uid);
+	`,
 }
 
 func (d *DB) migrate() error {
