@@ -8,6 +8,7 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
@@ -22,6 +23,8 @@ type Handler struct {
 	namespace        string
 	crdNamespace     string
 	challengesDir    string
+	taxonomy         *taxonomy.Store
+	taxonomyWorkflow *taxonomy.Service
 	dataDir          string
 	cooldownMin      int
 	llm              config.LLMConfig
@@ -34,7 +37,8 @@ type Handler struct {
 }
 
 func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
-	return &Handler{
+	taxonomyStore := taxonomy.NewStore(cfg.DataDir)
+	handler := &Handler{
 		db:               database,
 		k8s:              client,
 		authoring:        authoring.NewService(database, cfg.LLM),
@@ -44,6 +48,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		namespace:        cfg.Namespace,
 		crdNamespace:     cfg.CRDNamespace,
 		challengesDir:    cfg.ChallengesDir(),
+		taxonomy:         taxonomyStore,
 		dataDir:          cfg.DataDir,
 		cooldownMin:      cfg.CooldownMinutes,
 		llm:              cfg.LLM,
@@ -54,4 +59,8 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		terminals:        newTerminalConnectionTracker(time.Second),
 		serverInstance:   newServerInstanceID(),
 	}
+	if database != nil {
+		handler.taxonomyWorkflow = taxonomy.NewService(database, taxonomyStore, cfg.ChallengesDir(), cfg.LLM)
+	}
+	return handler
 }

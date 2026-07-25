@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -253,7 +254,8 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 	if err != nil {
 		return fmt.Errorf("resolve verified artifact: %w", err)
 	}
-	if _, err := challenge.PromoteDirectory(h.challengesDir, artifactDir, challengeID, task.Status.TempImage); err != nil {
+	published, err := challenge.PromoteDirectory(h.challengesDir, artifactDir, challengeID, task.Status.TempImage)
+	if err != nil {
 		return fmt.Errorf("publish verified revision: %w", err)
 	}
 	if err := h.db.CompletePublish(ctx, session.ID, user.ID, revision.Number, challengeID); err != nil {
@@ -261,6 +263,19 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 	}
 	if err := challenge.RemoveSubmission(h.dataDir, revision.Artifact.SubmissionID); err != nil {
 		slog.Warn("remove published authoring submission", "session", session.ID, "submission", revision.Artifact.SubmissionID, "err", err)
+	}
+	if h.taxonomyWorkflow != nil {
+		baseRevision := ""
+		if current, currentErr := h.taxonomy.LoadCurrent(); currentErr == nil {
+			baseRevision = current.Revision
+		} else if !errors.Is(currentErr, taxonomy.ErrNoCurrentRevision) {
+			slog.Warn("read taxonomy before enqueue", "challenge", challengeID, "err", currentErr)
+		}
+		if _, enqueueErr := h.taxonomyWorkflow.EnqueueChallenge(ctx, *published, baseRevision); enqueueErr != nil {
+			// Challenge publication is already durable. The periodic scanner will
+			// retry this operational enqueue path after a transient DB error.
+			slog.Warn("enqueue taxonomy mapping", "challenge", challengeID, "err", enqueueErr)
+		}
 	}
 	return nil
 }

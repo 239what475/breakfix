@@ -13,7 +13,7 @@ import (
 func (h *Handler) ListChallenges(c *gin.Context) {
 	user := h.getUser(c)
 
-	challenges, err := challenge.List(h.challengesDir)
+	challenges, err := h.publishedChallenges()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -43,8 +43,9 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		}
 	}
 
-	var summaries []api.ChallengeSummary
-	for _, ch := range challenges {
+	summaries := make([]api.ChallengeSummary, 0, len(challenges))
+	for _, published := range challenges {
+		ch := published.Entry
 		s := api.ChallengeSummary{
 			Id:          &ch.ID,
 			Title:       &ch.Title,
@@ -67,7 +68,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 				s.Progress = &progress
 			}
 		}
-		tags := append([]string{}, ch.Tags...)
+		tags := mappingTagTitles(published.Mapping)
 		s.Tags = &tags
 		summaries = append(summaries, s)
 	}
@@ -78,7 +79,7 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	if h.requireUser(c) == nil {
 		return
 	}
-	entry, err := challenge.Get(h.challengesDir, id)
+	entry, err := h.publishedChallenge(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -105,7 +106,7 @@ func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
 	if user == nil {
 		return
 	}
-	entry, err := challenge.Get(h.challengesDir, id)
+	entry, err := h.publishedChallenge(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return

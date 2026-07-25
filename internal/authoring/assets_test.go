@@ -52,7 +52,6 @@ func TestReadVerifiedChallengeUsesActualArtifactMetadata(t *testing.T) {
 type: script
 runtime: container
 difficulty: medium
-tags: [linux, service]
 description: Actual verified description
 checkpoints:
   - id: service-ready

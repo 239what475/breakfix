@@ -166,7 +166,7 @@ func validAuthoringPlan(overview string) authoring.Plan {
 	return authoring.Plan{
 		Metadata: authoring.Metadata{
 			Title: "Repair service configuration", Description: "Repair a service configuration and verify health.",
-			Difficulty: "easy", Tags: []string{"linux"}, Runtime: "container",
+			Difficulty: "easy", Runtime: "container",
 		},
 		Overview:    overview,
 		Checkpoints: []authoring.Checkpoint{{ID: "health", Title: "Health endpoint works", Markdown: "The health endpoint returns success.", Position: 1}},

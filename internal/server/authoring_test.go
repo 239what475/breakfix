@@ -205,7 +205,7 @@ func getAuthoringSessionResponse(t *testing.T, handler *Handler, sessionID strin
 
 func testAuthoringPlan(title, overview string) authoring.Plan {
 	return authoring.Plan{
-		Metadata: authoring.Metadata{Title: title, Description: "intent description", Difficulty: "easy", Tags: []string{"linux"}, Runtime: "container"},
+		Metadata: authoring.Metadata{Title: title, Description: "intent description", Difficulty: "easy", Runtime: "container"},
 		Overview: overview,
 		Checkpoints: []authoring.Checkpoint{{
 			ID: "service-ready", Title: "Service ready", Markdown: "The service is ready.", Position: 1,
@@ -215,7 +215,7 @@ func testAuthoringPlan(title, overview string) authoring.Plan {
 
 func writeAuthoringArtifact(t *testing.T, root, title, description string) {
 	t.Helper()
-	writeGatewayTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\ntype: script\nruntime: container\ndifficulty: medium\ntags: [linux, service]\ndescription: "+description+"\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n")
+	writeGatewayTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\ntype: script\nruntime: container\ndifficulty: medium\ndescription: "+description+"\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n")
 	writeGatewayTestFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(root, "problem.md"), "# Actual problem\n")

@@ -223,7 +223,6 @@ export type TerminalWindowCloseResponse = {
 export type AuthoringMetadata = {
     title: string;
     difficulty: 'easy' | 'medium' | 'hard';
-    tags: Array<string>;
     description: string;
     runtime: 'container' | 'vcluster';
 };

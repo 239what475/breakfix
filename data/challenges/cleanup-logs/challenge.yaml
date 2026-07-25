@@ -3,11 +3,6 @@ type: script
 runtime: container
 title: "批量压缩旧日志"
 difficulty: easy
-tags:
-  - linux
-  - find
-  - tar
-  - shell
 image: cleanup-logs:v1
 published_at: 2026-07-23T07:33:11Z
 

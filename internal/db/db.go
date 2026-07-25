@@ -264,6 +264,55 @@ var migrations = []string{
 	`
 	ALTER TABLE terminal_connections RENAME COLUMN gateway_instance_id TO server_instance_id;
 	`,
+	// v15: filesystem taxonomy remains the content authority; SQLite stores
+	// only resumable Mapping Work List state and expiring publisher leases.
+	`
+	CREATE TABLE IF NOT EXISTS taxonomy_work_items (
+		id                  TEXT PRIMARY KEY,
+		kind                TEXT NOT NULL,
+		challenge_id        TEXT NOT NULL,
+		challenge_revision  TEXT NOT NULL,
+		base_revision       TEXT NOT NULL DEFAULT '',
+		mapper_session_id   TEXT NOT NULL,
+		mapper_started      INTEGER NOT NULL DEFAULT 0,
+		curriculum_session  TEXT NOT NULL,
+		curriculum_started  INTEGER NOT NULL DEFAULT 0,
+		sre_session         TEXT NOT NULL,
+		sre_started         INTEGER NOT NULL DEFAULT 0,
+		candidate_json      TEXT NOT NULL DEFAULT '',
+		curriculum_review_json TEXT NOT NULL DEFAULT '',
+		sre_review_json     TEXT NOT NULL DEFAULT '',
+		round               INTEGER NOT NULL DEFAULT 0,
+		state               TEXT NOT NULL,
+		published_revision  TEXT NOT NULL DEFAULT '',
+		last_error          TEXT NOT NULL DEFAULT '',
+		lease_owner         TEXT NOT NULL DEFAULT '',
+		lease_expires_at    TEXT NOT NULL DEFAULT '',
+		created_at          TEXT NOT NULL,
+		updated_at          TEXT NOT NULL,
+		UNIQUE(kind, challenge_id, challenge_revision)
+	);
+	CREATE INDEX IF NOT EXISTS taxonomy_work_items_ready
+		ON taxonomy_work_items(state, lease_expires_at, updated_at, created_at);
+
+	CREATE TABLE IF NOT EXISTS taxonomy_leases (
+		name            TEXT PRIMARY KEY,
+		owner           TEXT NOT NULL,
+		expires_at      TEXT NOT NULL,
+		updated_at      TEXT NOT NULL
+	);
+	`,
+	// v16: a committee Work Item survives technical execution failures. The
+	// current semantic round owns one shared failure budget; exhaustion delays
+	// the next claim instead of creating a new work item or review round.
+	`
+	ALTER TABLE taxonomy_work_items ADD COLUMN technical_failures INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE taxonomy_work_items ADD COLUMN execution_failures INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE taxonomy_work_items ADD COLUMN next_run_at TEXT NOT NULL DEFAULT '';
+	DROP INDEX IF EXISTS taxonomy_work_items_ready;
+	CREATE INDEX taxonomy_work_items_ready
+		ON taxonomy_work_items(state, next_run_at, lease_expires_at, updated_at, created_at);
+	`,
 }
 
 func (d *DB) migrate() error {

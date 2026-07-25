@@ -220,12 +220,11 @@ type planConversation struct {
 
 func (c *planConversation) tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
-		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介、难度、标签和运行时。只有这些字段真实反映题意约定时才调用。", params: map[string]*schema.ParameterInfo{
+		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介、难度和运行时。只有这些字段真实反映题意约定时才调用。", params: map[string]*schema.ParameterInfo{
 			"intent_version":    {Type: schema.Integer, Desc: "当前题意约定版本", Required: true},
 			"title":             {Type: schema.String, Desc: "题目标题", Required: true},
 			"description":       {Type: schema.String, Desc: "给学习者看的简短题目简介", Required: true},
 			"difficulty":        {Type: schema.String, Enum: []string{"easy", "medium", "hard"}, Required: true},
-			"tags":              {Type: schema.Array, ElemInfo: &schema.ParameterInfo{Type: schema.String}, Required: true},
 			"runtime":           {Type: schema.String, Enum: []string{"container", "vcluster"}, Required: true},
 			"reason":            {Type: schema.String, Desc: "本次修改的简短理由", Required: true},
 			"difficulty_impact": {Type: schema.String, Desc: "本次修改对题目难度的具体影响；没有变化时明确写“难度不变”", Required: true},
@@ -332,14 +331,13 @@ func nextPlanRevisionState(state SessionState) SessionState {
 
 func (c *planConversation) setMetadata(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		PlanVersion      int64    `json:"intent_version"`
-		Title            string   `json:"title"`
-		Description      string   `json:"description"`
-		Difficulty       string   `json:"difficulty"`
-		Tags             []string `json:"tags"`
-		Runtime          string   `json:"runtime"`
-		Reason           string   `json:"reason"`
-		DifficultyImpact string   `json:"difficulty_impact"`
+		PlanVersion      int64  `json:"intent_version"`
+		Title            string `json:"title"`
+		Description      string `json:"description"`
+		Difficulty       string `json:"difficulty"`
+		Runtime          string `json:"runtime"`
+		Reason           string `json:"reason"`
+		DifficultyImpact string `json:"difficulty_impact"`
 	}
 	if err := json.Unmarshal([]byte(raw), &args); err != nil {
 		return "", err
@@ -355,16 +353,7 @@ func (c *planConversation) setMetadata(ctx context.Context, raw string) (string,
 		if runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster {
 			return errors.New("runtime 必须是 container 或 vcluster")
 		}
-		tags := make([]string, 0, len(args.Tags))
-		for _, tag := range args.Tags {
-			if tag = strings.TrimSpace(tag); tag != "" {
-				tags = append(tags, tag)
-			}
-		}
-		if len(tags) == 0 {
-			return errors.New("至少需要一个非空标签")
-		}
-		plan.Metadata = Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Tags: tags, Runtime: runtime}
+		plan.Metadata = Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Runtime: runtime}
 		return nil
 	})
 }

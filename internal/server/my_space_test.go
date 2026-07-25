@@ -221,7 +221,7 @@ func createPublishedAuthoringSession(t *testing.T, database *db.DB, userID, chal
 		t.Fatal(err)
 	}
 	plan := authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Demo", Description: "demo", Difficulty: "easy", Tags: []string{"linux"}, Runtime: "container"},
+		Metadata:    authoring.Metadata{Title: "Demo", Description: "demo", Difficulty: "easy", Runtime: "container"},
 		Overview:    "demo overview",
 		Checkpoints: []authoring.Checkpoint{{ID: "complete", Title: "Complete", Markdown: "complete", Position: 1}},
 	}

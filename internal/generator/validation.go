@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -51,33 +50,22 @@ func (g *Generator) validateChallengeManifest(chalDir string) error {
 	default:
 		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", scalarString(spec["difficulty"])))
 	}
-	var cleanTags []string
-	if rawTags, ok := spec["tags"].([]any); ok {
-		cleanTags = make([]string, 0, len(rawTags))
-		for _, tag := range rawTags {
-			tag := scalarString(tag)
-			if tag != "" {
-				cleanTags = append(cleanTags, tag)
-			}
-		}
+	if _, exists := spec["tags"]; exists {
+		errs = append(errs, "challenge.yaml 不得包含 tags；分类由 taxonomy workflow 维护")
 	}
-	if len(cleanTags) == 0 {
-		errs = append(errs, "challenge.yaml 缺少非空 tags")
-	}
-	spec["tags"] = slices.Compact(cleanTags)
 	if scalarString(spec["description"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 description")
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
 	normalized, err := yaml.Marshal(spec)
 	if err != nil {
 		return fmt.Errorf("marshal challenge.yaml: %w", err)
 	}
 	if err := os.WriteFile(path, normalized, 0644); err != nil {
 		return fmt.Errorf("write challenge.yaml: %w", err)
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }

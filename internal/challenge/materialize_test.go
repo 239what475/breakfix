@@ -66,7 +66,7 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
 	_, err := Materialize(root, "broken-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\nimage: broken-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
@@ -80,7 +80,7 @@ func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 
 func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ntags: []\ndescription: \"\"\ncheckpoints: []\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ndescription: \"\"\ncheckpoints: []\n")
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
 	writeChallengeAssets(t, root)
@@ -113,6 +113,27 @@ func TestLoadDirRejectsMissingPublishedTime(t *testing.T) {
 
 	if _, err := LoadDir(root); err == nil {
 		t.Fatal("expected published challenge without published_at to fail")
+	}
+}
+
+func TestChallengeRevisionCoversAllArtifactFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("id: revision-demo\ntitle: Revision Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
+	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
+	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeChallengeAssets(t, root)
+
+	first, err := LoadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "solution.md"), "revised solution\n")
+	second, err := LoadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Revision == second.Revision {
+		t.Fatalf("revision did not change after solution update: %s", first.Revision)
 	}
 }
 
@@ -178,7 +199,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func validManifest(prefix string) string {
-	return prefix + "type: script\nruntime: container\ndifficulty: easy\ntags:\n  - linux\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+	return prefix + "type: script\nruntime: container\ndifficulty: easy\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
 }
 
 func writeChallengeAssets(t *testing.T, root string) {

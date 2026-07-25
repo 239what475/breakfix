@@ -113,7 +113,6 @@ func ReadVerifiedChallenge(dataDir string, artifact *Artifact) (*VerifiedChallen
 		Metadata: Metadata{
 			Title:       entry.Title,
 			Difficulty:  entry.Difficulty,
-			Tags:        append([]string{}, entry.Tags...),
 			Description: entry.Description,
 			Runtime:     entry.Runtime,
 		},

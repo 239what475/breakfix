@@ -33,11 +33,10 @@ const (
 )
 
 type Metadata struct {
-	Title       string   `json:"title"`
-	Difficulty  string   `json:"difficulty"`
-	Tags        []string `json:"tags"`
-	Description string   `json:"description"`
-	Runtime     string   `json:"runtime"`
+	Title       string `json:"title"`
+	Difficulty  string `json:"difficulty"`
+	Description string `json:"description"`
+	Runtime     string `json:"runtime"`
 }
 
 type Checkpoint struct {
@@ -74,7 +73,6 @@ type VerifiedCheckpoint struct {
 }
 
 func (p Plan) Clone() Plan {
-	p.Metadata.Tags = append([]string{}, p.Metadata.Tags...)
 	p.Checkpoints = append([]Checkpoint{}, p.Checkpoints...)
 	return p
 }
@@ -91,14 +89,6 @@ func (p Plan) ValidateForGeneration() error {
 	case "easy", "medium", "hard":
 	default:
 		return errors.New("难度必须是 easy、medium 或 hard")
-	}
-	if len(metadata.Tags) == 0 {
-		return errors.New("至少需要一个标签")
-	}
-	for _, tag := range metadata.Tags {
-		if strings.TrimSpace(tag) == "" {
-			return errors.New("标签不能为空")
-		}
 	}
 	if runtime := challenge.NormalizeRuntime(metadata.Runtime); runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster {
 		return errors.New("运行时必须是 container 或 vcluster")

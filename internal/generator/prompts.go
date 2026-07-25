@@ -21,7 +21,7 @@ func WorkerSystemPrompt(registryAddr string) string {
 
 ## challenge.yaml
 
-必须包含 type: script、runtime: container 或 vcluster、title、difficulty、tags、description 和 checkpoints。每个 checkpoint 都有 id、title、description、hint，可选 dependsOn。hint 必须精确填写对应提示文件的相对路径 hints/<checkpoint-id>.md，不得写入内联提示文本；每个路径指向的文件必须创建。
+必须包含 type: script、runtime: container 或 vcluster、title、difficulty、description 和 checkpoints。不得包含 tags；分类由独立 taxonomy workflow 在题目通过真实验证后完成。每个 checkpoint 都有 id、title、description、hint，可选 dependsOn。hint 必须精确填写对应提示文件的相对路径 hints/<checkpoint-id>.md，不得写入内联提示文本；每个路径指向的文件必须创建。
 
 检查点是用户可见的目标状态。例如“Deployment 可用”“Service 保留”“日志已归档”，而不是“执行 kubectl 命令”或“发现故障”。所有 checkpoint 必须可通过检查器稳定验证；不要强行把探索过程变成检查点。
 
@@ -68,7 +68,7 @@ runtime-init.sh 会且只会执行 /breakfix/generate.sh，完成后才执行镜
 
 - generate.sh 构造明确、幂等的故障环境。
 - problem.md、solution.md、hints、checks/checkpoints.sh、answer.sh 必须围绕同一套真实环境事实。
-- 草案与实际实现有偏差时，修正 title、difficulty、tags、description 和 checkpoints，使元数据描述真实题目。
+- 草案与实际实现有偏差时，修正 title、difficulty、description 和 checkpoints，使元数据描述真实题目。
 - runtime=container 时，使用 lab_create、lab_exec、lab_checkpoints 测试 answer.sh 是否能让全部检查点通过。
 - runtime=vcluster 时，不伪造宿主集群实验；完成所有文件并做一次语义核对后结束。
 - 优先使用 Write/Edit 创建文件。不要在工作目录中反复 chmod，Dockerfile 负责权限。
@@ -112,7 +112,7 @@ func JudgeSystemPrompt() string {
 2. 题目学习体验：Problem 描述真实场景和目标但不直接泄露答案；Solution 按检查点解释做法；Hints 与对应检查点相关。
 3. 检查点契约：challenge.yaml 的每个 checkpoint 都是可观察的环境结果而非规定命令路径；checks/checkpoints.sh 只读、完整返回 JSON、没有未知或遗漏的 ID；所有检查点通过就是唯一提交条件。
 4. 技术正确性：generate.sh 真实构造故障；answer.sh 能恢复目标状态；检查器检查真实目标状态。Kubernetes 题必须基于最终稳定 workload 状态，不能用 kubectl run 拉外部探测镜像，也不能因 Terminating 旧 Pod 误判失败。
-5. 元数据：title、difficulty、tags、description 与实际题目一致。
+5. 元数据：title、difficulty、description 与实际题目一致，且 challenge.yaml 不包含 tags。
 6. Dockerfile 运行时契约：必须从对应基础镜像构建，将 generate.sh 放在 /breakfix/generate.sh，入口必须是 /breakfix/runtime-init.sh，并显式使用 CMD ["sleep", "infinity"]。不得覆盖 runtime-init.sh，也不得引用不存在的入口路径。验证构建没有外网，Dockerfile 不得使用包管理器、pip/npm/go install 或 curl/wget 下载内容。
 
 必须 FAIL 的情况包括：缺少任何题目资产；存在 verify.sh；存在只在提交时才检查的额外条件；Solution/检查点/答案与真实环境不一致；检查点要求固定命令路径；answer.sh 无法让全部检查点通过。

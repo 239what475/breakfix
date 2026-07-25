@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,7 +134,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
 	challengeDir := filepath.Join(challengesDir, "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
@@ -141,6 +142,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	seedTestTaxonomy(t, root)
 
 	database, err := db.New(filepath.Join(root, "breakfix.db"))
 	if err != nil {
@@ -184,7 +186,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
@@ -192,6 +194,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	seedTestTaxonomy(t, root)
 
 	cfg := config.Config{DataDir: root}
 	handler := NewHandler(nil, nil, cfg)
@@ -289,6 +292,72 @@ func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	}
 }
 
+func TestChallengeArtifactRevisionMismatchRejectsAllChallengeOperations(t *testing.T) {
+	handler := newProgressTestHandler(t, nil)
+	if _, err := handler.publishedChallenge("demo"); err != nil {
+		t.Fatalf("published challenge was unavailable before artifact change: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(handler.challengesDir, "demo", "problem.md"), []byte("changed problem\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	newContext := func(method, target, body string) (*httptest.ResponseRecorder, *gin.Context) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(method, target, strings.NewReader(body))
+		if body != "" {
+			ctx.Request.Header.Set("Content-Type", "application/json")
+		}
+		ctx.Set("user_id", "u-demo")
+		return recorder, ctx
+	}
+
+	listRecorder, listContext := newContext(http.MethodGet, "/api/challenges", "")
+	handler.ListChallenges(listContext)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("catalog status = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var list api.ChallengeList
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Challenges == nil || len(*list.Challenges) != 0 {
+		t.Fatalf("stale challenge remained in catalog: %#v", list.Challenges)
+	}
+
+	type operation struct {
+		name   string
+		method string
+		target string
+		body   string
+		run    func(*gin.Context)
+	}
+	operations := []operation{
+		{"content", http.MethodGet, "/api/challenges/demo/content", "", func(c *gin.Context) { handler.GetChallengeContent(c, "demo") }},
+		{"progress", http.MethodGet, "/api/challenges/demo/progress", "", func(c *gin.Context) { handler.GetChallengeProgress(c, "demo") }},
+		{"assistant conversation", http.MethodGet, "/api/challenges/demo/assistant", "", func(c *gin.Context) { handler.GetChallengeAssistant(c, "demo") }},
+		{"assistant message", http.MethodPost, "/api/challenges/demo/assistant/messages", `{"content":"help","current_window":"shell-1","open_windows":["shell-1"]}`, func(c *gin.Context) { handler.SendChallengeAssistantMessage(c, "demo") }},
+		{"assistant events", http.MethodGet, "/api/challenges/demo/assistant/turns/turn/events", "", func(c *gin.Context) { handler.StreamChallengeAssistantTurn(c, "demo", "turn") }},
+		{"start", http.MethodPost, "/api/challenges/demo/start", "", func(c *gin.Context) { handler.StartChallenge(c, "demo") }},
+		{"reset", http.MethodPost, "/api/challenges/demo/reset", "", func(c *gin.Context) { handler.ResetChallenge(c, "demo") }},
+		{"stop", http.MethodPost, "/api/challenges/demo/stop", "", func(c *gin.Context) { handler.StopChallenge(c, "demo") }},
+		{"terminal", http.MethodGet, "/api/challenges/demo/terminal?window=shell-1", "", func(c *gin.Context) {
+			c.Params = gin.Params{{Key: "id", Value: "demo"}}
+			handler.HandleTerminal(c)
+		}},
+		{"close terminal window", http.MethodDelete, "/api/challenges/demo/terminal/windows/shell-1", "", func(c *gin.Context) { handler.CloseTerminalWindow(c, "demo", "shell-1") }},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			recorder, ctx := newContext(operation.method, operation.target, operation.body)
+			operation.run(ctx)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func writeGatewayTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -303,6 +372,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 	t.Helper()
 	root := t.TempDir()
 	writeGatewayChallenge(t, root)
+	seedTestTaxonomy(t, root)
 	database, err := db.New(filepath.Join(root, "breakfix.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +423,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 func writeGatewayChallenge(t *testing.T, root string) {
 	t.Helper()
 	challengeDir := filepath.Join(root, "challenges", "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ntags: [linux]\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")

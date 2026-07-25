@@ -952,7 +952,6 @@ components:
       required:
         - title
         - difficulty
-        - tags
         - description
         - runtime
       properties:
@@ -961,10 +960,6 @@ components:
         difficulty:
           type: string
           enum: [easy, medium, hard]
-        tags:
-          type: array
-          items:
-            type: string
         description:
           type: string
         runtime:

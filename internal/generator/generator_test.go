@@ -17,7 +17,6 @@ func TestReviewedPlanContextUsesEachPlanSectionOnce(t *testing.T) {
 			Title:       "唯一标题",
 			Description: "唯一简介",
 			Difficulty:  "medium",
-			Tags:        []string{"linux", "shell"},
 			Runtime:     challenge.RuntimeContainer,
 		},
 		Overview:    "唯一概览",
@@ -64,9 +63,6 @@ image: should-disappear
 type: script
 title: Cleanup Logs
 difficulty: medium
-tags:
-  - linux
-  - logs
 description: |
   修复日志清理流程并恢复磁盘空间。
 `)
@@ -94,7 +90,6 @@ func TestValidateChallengeManifestRejectsMissingMetadata(t *testing.T) {
 	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `type: script
 title: Cleanup Logs
 difficulty: medium
-tags: []
 description: ""
 `)
 
@@ -104,9 +99,6 @@ description: ""
 		t.Fatal("expected validateChallengeManifest() to fail")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "缺少非空 tags") {
-		t.Fatalf("expected tags error, got %q", msg)
-	}
 	if !strings.Contains(msg, "缺少 description") {
 		t.Fatalf("expected description error, got %q", msg)
 	}
@@ -255,7 +247,7 @@ func writeGeneratorTestFile(t *testing.T, path, content string) {
 
 func writeGeneratorSemanticChallenge(t *testing.T, dir, runtime, checkpointScript string) {
 	t.Helper()
-	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), "type: script\nruntime: "+runtime+"\ntitle: Fix Deployment\ndifficulty: easy\ntags:\n  - kubernetes\ndescription: demo\ncheckpoints:\n  - id: deployment-ready\n    title: Deployment ready\n    description: The deployment is ready\n    hint: hints/deployment-ready.md\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), "type: script\nruntime: "+runtime+"\ntitle: Fix Deployment\ndifficulty: easy\ndescription: demo\ncheckpoints:\n  - id: deployment-ready\n    title: Deployment ready\n    description: The deployment is ready\n    hint: hints/deployment-ready.md\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "problem.md"), "problem\n")

@@ -21,6 +21,9 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 
 	h := NewHandler(database, k8sClient, cfg)
 	h.StartAuthoringReconciler(runCtx)
+	if h.taxonomyWorkflow != nil {
+		h.taxonomyWorkflow.Start(runCtx)
+	}
 	h.StartAssistantCleanup(runCtx)
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -94,17 +93,6 @@ func ValidateDir(dir string) (*Entry, error) {
 	default:
 		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
 	}
-	cleanTags := make([]string, 0, len(challenge.Tags))
-	for _, tag := range challenge.Tags {
-		tag = strings.TrimSpace(tag)
-		if tag != "" {
-			cleanTags = append(cleanTags, tag)
-		}
-	}
-	if len(cleanTags) == 0 {
-		return nil, fmt.Errorf("challenge tags are required")
-	}
-	challenge.Tags = slices.Compact(cleanTags)
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")
 	}
@@ -147,17 +135,6 @@ func ValidateSubmissionDir(dir string) (*Entry, error) {
 	default:
 		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
 	}
-	cleanTags := make([]string, 0, len(challenge.Tags))
-	for _, tag := range challenge.Tags {
-		tag = strings.TrimSpace(tag)
-		if tag != "" {
-			cleanTags = append(cleanTags, tag)
-		}
-	}
-	if len(cleanTags) == 0 {
-		return nil, fmt.Errorf("challenge tags are required")
-	}
-	challenge.Tags = slices.Compact(cleanTags)
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")
 	}

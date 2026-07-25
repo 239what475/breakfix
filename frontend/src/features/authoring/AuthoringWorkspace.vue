@@ -73,7 +73,7 @@ const overview = computed(() => {
   const body = usingVerifiedRevision.value
     ? problem || "已验证题目未包含可展示的 problem.md。"
     : session.value?.intent.overview || "等待 agent 写入题意约定。";
-  return `# ${metadata.title || "未命名题目"}\n\n${metadata.description || "等待 agent 根据题意补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n- **难度**：${metadata.difficulty || "待定"}\n- **标签**：${metadata.tags?.join("、") || "待定"}\n\n${body}`;
+  return `# ${metadata.title || "未命名题目"}\n\n${metadata.description || "等待 agent 根据题意补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n- **难度**：${metadata.difficulty || "待定"}\n\n${body}`;
 });
 const activeCheckpoint = computed(() => {
   const id = activeTab.value.replace("checkpoint:", "");

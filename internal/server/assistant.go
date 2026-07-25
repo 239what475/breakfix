@@ -137,7 +137,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, subscription *assistant.Su
 }
 
 func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challengeID, currentWindow string, openWindows []string) (assistant.Request, error) {
-	entry, err := challenge.Get(h.challengesDir, challengeID)
+	entry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		return assistant.Request{}, err
 	}

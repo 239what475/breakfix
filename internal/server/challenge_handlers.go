@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/api"
-	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
@@ -20,7 +19,7 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := challenge.Get(h.challengesDir, id)
+	challengeEntry, err := h.publishedChallenge(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -57,7 +56,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := challenge.Get(h.challengesDir, id)
+	challengeEntry, err := h.publishedChallenge(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -96,7 +95,7 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := challenge.Get(h.challengesDir, id)
+	challengeEntry, err := h.publishedChallenge(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -136,7 +135,7 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 		return
 	}
 
-	challengeEntry, err := challenge.Get(h.challengesDir, challengeID)
+	challengeEntry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -237,7 +236,7 @@ func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName st
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	entry, err := challenge.Get(h.challengesDir, challengeID)
+	entry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
