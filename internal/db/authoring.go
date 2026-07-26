@@ -561,6 +561,50 @@ func (d *DB) RestartGeneration(ctx context.Context, sessionID, failedGenerationI
 	return d.GetAuthoringSession(ctx, sessionID, session.UserID)
 }
 
+// RecordVerificationInfrastructureFailure preserves the immutable candidate
+// and report. Unlike an artifact failure, infrastructure failure cannot be
+// repaired by asking the Generator to change challenge files.
+func (d *DB) RecordVerificationInfrastructureFailure(ctx context.Context, sessionID, generationID string, verification authoring.Verification) error {
+	if verification.TaskID == "" || verification.Phase != "Failed" || verification.Report == nil || verification.Report.Class != authoring.VerificationFailureInfrastructure {
+		return authoring.ErrInvalidState
+	}
+	verificationJSON, err := json.Marshal(verification)
+	if err != nil {
+		return fmt.Errorf("marshal infrastructure verification: %w", err)
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	session, err := readAuthoringSessionTx(ctx, tx, sessionID, "")
+	if err != nil {
+		return err
+	}
+	if session.State == authoring.StateVerificationInfrastructureFailed && session.GenerationID == generationID && session.VerifyTaskID == verification.TaskID {
+		return tx.Commit()
+	}
+	if session.GenerationID != generationID || session.VerifyTaskID != verification.TaskID ||
+		(session.State != authoring.StateGeneratingAndVerifying && session.State != authoring.StateRevisingAndVerifying) {
+		return authoring.ErrInvalidState
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET verification_json = ?
+		WHERE session_id = ? AND revision = ?`, string(verificationJSON), sessionID, session.CurrentRevision); err != nil {
+		return fmt.Errorf("store infrastructure verification report: %w", err)
+	}
+	lastError := verification.ReportSummary()
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+		authoring.StateVerificationInfrastructureFailed, lastError, nowText(now), sessionID); err != nil {
+		return fmt.Errorf("mark infrastructure verification failure: %w", err)
+	}
+	if err := appendAuthoringEventTx(ctx, tx, "verification-infrastructure-"+verification.TaskID, sessionID,
+		"真实验证因基础设施故障未能完成，已保留候选与诊断，未要求生成器修改题目。", now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (d *DB) AttachVerificationTask(ctx context.Context, sessionID, generationID string, revision int64, taskID string) error {
 	now := time.Now().UTC()
 	result, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET verify_task_id = ?, updated_at = ?

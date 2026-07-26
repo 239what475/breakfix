@@ -71,6 +71,31 @@ func (g *Generator) uploadArtifact(ctx context.Context, chalDir string) error {
 	return nil
 }
 
+func downloadSubmission(ctx context.Context, serverURL, internalAPIKey, submissionID, dst string) error {
+	url := strings.TrimRight(serverURL, "/") + "/api/internal/verify-submissions/" + submissionID + "/artifact"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Breakfix-Internal-Key", internalAPIKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("download submission: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
 func archiveDir(root string) ([]byte, error) {
 	var buf bytes.Buffer
 	gzw := gzip.NewWriter(&buf)

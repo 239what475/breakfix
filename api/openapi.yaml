@@ -665,7 +665,7 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, VerificationInfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
         updated_at:
           type: string
           format: date-time
@@ -1050,6 +1050,9 @@ components:
       type: object
       required: [build_passed, answer_passed, checkpoints_passed]
       properties:
+        class:
+          type: string
+          enum: [artifact, infrastructure]
         build_passed:
           type: boolean
         answer_passed:
@@ -1137,7 +1140,7 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, VerificationInfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
         intent_revision:
           type: integer
         visible_revision:

@@ -45,10 +45,11 @@ func main() {
 		os.Exit(1)
 	}
 	mgr, err := ctrl.NewManager(k8sClient.RESTConfig(), ctrl.Options{
-		Scheme:                 scheme,
-		HealthProbeBindAddress: ":" + strconv.Itoa(cfg.HealthPort),
-		LeaderElection:         true,
-		LeaderElectionID:       "breakfix-controller.breakfix.dev",
+		Scheme:                  scheme,
+		HealthProbeBindAddress:  ":" + strconv.Itoa(cfg.HealthPort),
+		LeaderElection:          true,
+		LeaderElectionID:        "breakfix-controller.breakfix.dev",
+		LeaderElectionNamespace: cfg.CRDNamespace,
 		Cache: crcache.Options{SyncPeriod: func() *time.Duration {
 			d := time.Minute
 			return &d

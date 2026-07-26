@@ -2,6 +2,27 @@
 
 本文只记录实现过程中确认的设计缺口及已采用的调整；它不是兼容层，也不改变 `EINO-RESEARCH.md` 的总体边界。
 
+## 2026-07-26：独立 verifier 仍需要 rootful BuildKit 权限
+
+Verifier 必须与 Agent Worker 使用不同的 Job 模板和最小化的 ServiceAccount，但当前实际构建实现通过
+rootful `buildkitd` 在 Job 内构建并推送镜像。该模式需要 privileged container；把 verifier 简单改为
+non-privileged 会使真实镜像构建失败，不能作为安全改进提交。
+
+调整：首轮 verifier 保留 explicit `privileged: true`，但只使用 `breakfix-verifier` ServiceAccount。该
+ServiceAccount 仅可读取/更新 VerifyTask status、创建和清理本 VerifyTask 的 Environment，以及读取目标
+Pod 并使用 `pods/exec` 执行 answer/checkpoints；它没有 Agent Worker 的模型、PostgreSQL、Server 领域写入或
+OpenSandbox 凭据。若要去除特权，必须先单独完成 rootless BuildKit 或远程 BuildKit 的真实 Kubernetes POC，
+不能把它和 Agent Runtime 迁移混为一谈。
+
+## 2026-07-26：旧 Generator 存在期间的 VerifyTask source ref
+
+最终设计要求 `VerifyTask.spec.source.ref` 是提交它的 Agent Run ID。独立 verifier 和 VerifyTask 先行迁移时，
+旧 `Generation` CRD 仍负责启动尚未迁移的 Claude Generator，因此这条临时路径只能写入 legacy Generation 名称。
+
+调整：CRD 已删除没有信息量的固定 `source.kind`，只保留 `source.ref`。在 OpenSandbox 前置条件满足并迁移
+Generator 后，Server 必须改为写入实际 Generator Agent Run ID，随后删除 Generation CRD、Reconciler、旧
+Generator 镜像和这一临时语义；不能把当前 ref 的值误认为已满足最终 Agent Runtime 数据所有权。
+
 ## 2026-07-26：Assistant Run 缺少可恢复的工作区输入
 
 原设计的 `agent_runs` 列出了 `input_revision`，但没有记录一次 Assistant 请求中的 `current_window` 与 `open_windows`。这两个值决定

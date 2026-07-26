@@ -60,11 +60,7 @@ func (g *Generator) Run(ctx context.Context) error {
 	}
 	if strings.TrimSpace(g.SeedSubmissionID) != "" {
 		seedArchive := filepath.Join(g.workDir, "verified-artifact.tar.gz")
-		if err := downloadSubmission(ctx, VerifyTaskConfig{
-			ServerURL:      g.ServerURL,
-			InternalAPIKey: g.InternalAPIKey,
-			SubmissionID:   g.SeedSubmissionID,
-		}, seedArchive); err != nil {
+		if err := downloadSubmission(ctx, g.ServerURL, g.InternalAPIKey, g.SeedSubmissionID, seedArchive); err != nil {
 			return fmt.Errorf("download verified artifact %s: %w", g.SeedSubmissionID, err)
 		}
 		seed, err := os.Open(seedArchive)

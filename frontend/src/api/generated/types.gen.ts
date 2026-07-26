@@ -86,7 +86,7 @@ export type MySpaceLearningPage = {
 export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
     updated_at: string;
 };
 
@@ -268,6 +268,7 @@ export type AuthoringVerification = {
 };
 
 export type AuthoringVerificationReport = {
+    class?: 'artifact' | 'infrastructure';
     build_passed: boolean;
     answer_passed: boolean;
     checkpoints_passed: boolean;
@@ -311,7 +312,7 @@ export type AuthoringMessageRequest = {
 
 export type AuthoringSession = {
     id: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
     intent_revision: number;
     visible_revision: number;
     generation_id?: string;

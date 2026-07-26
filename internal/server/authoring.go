@@ -395,7 +395,7 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	task := &breakfixv1.VerifyTask{
 		ObjectMeta: metav1.ObjectMeta{Name: taskID, Namespace: h.crdNamespace},
 		Spec: breakfixv1.VerifyTaskSpec{
-			Source:      breakfixv1.VerifyTaskSource{Kind: "agent", Ref: gen.Name},
+			Source:      breakfixv1.VerifyTaskSource{Ref: gen.Name},
 			ChallengeID: challenge.NewID(),
 			Submission:  breakfixv1.VerifyTaskSubmission{ID: submissionID},
 		},
@@ -504,6 +504,9 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 				}
 				return h.db.CompleteVerification(ctx, session.ID, session.GenerationID, artifact, verification)
 			case breakfixv1.VerifyTaskFailed:
+				if task.Status.Report == nil || task.Status.Report.Class != breakfixv1.VerifyFailureArtifact {
+					return h.db.RecordVerificationInfrastructureFailure(ctx, session.ID, session.GenerationID, verification)
+				}
 				if submissionID := strings.TrimSpace(task.Spec.Submission.ID); submissionID != "" {
 					if err := challenge.RemoveSubmission(h.dataDir, submissionID); err != nil {
 						slog.Warn("remove failed authoring submission", "session", session.ID, "submission", submissionID, "err", err)
@@ -577,6 +580,7 @@ func authoringVerificationReport(report *breakfixv1.VerifyReport) *authoring.Ver
 		return nil
 	}
 	value := &authoring.VerificationReport{
+		Class:             authoring.VerificationFailureClass(report.Class),
 		BuildPassed:       report.BuildPassed,
 		AnswerPassed:      report.AnswerPassed,
 		CheckpointsPassed: report.CheckpointsPassed,

@@ -7,8 +7,8 @@
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated generate-api verify-api-generated \
         build build-server build-controller \
-        deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-generator deploy-catalog deploy-cleanup deploy-reset \
-        generator-build generator-dev \
+        deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-generator deploy-verifier deploy-catalog deploy-cleanup deploy-reset \
+        generator-build verifier-build generator-dev \
         lint proto clean status logs
 
 # ── Build info ──
@@ -300,7 +300,7 @@ deploy-reset: deploy-cleanup _guard-server
 	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVER_SERVICE)'
 	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
 
-deploy: deploy-generator deploy-images deploy-catalog deploy-controller deploy-server
+deploy: deploy-generator deploy-verifier deploy-images deploy-catalog deploy-controller deploy-server
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -352,7 +352,16 @@ generator-build:
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Generator image built and loaded into Kind"
 
-generator-dev: dev-rbac generator-build dev-up
+verifier-build:
+	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/verifier ./cmd/verifier
+	docker build -t breakfix-verifier:latest -f deploy/images/verifier/Dockerfile .
+	docker tag breakfix-verifier:latest $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
+	docker push $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
+	kind load docker-image breakfix-verifier:latest --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest --name $(KIND_CLUSTER)
+	@echo "  ✓ Verifier image built and loaded into Kind"
+
+generator-dev: dev-rbac generator-build verifier-build dev-up
 	@kubectl delete jobs -n breakfix-system --all 2>/dev/null || true
 	@kubectl delete pods -n breakfix-system --all 2>/dev/null || true
 	@echo "  ✓ Generator dev environment ready"
@@ -367,6 +376,17 @@ deploy-generator: _guard-server generator-build
 	docker tag breakfix-generator:latest $$pub/breakfix-generator:latest; \
 	docker push $$pub/breakfix-generator:latest
 	@echo "  ✓ Generator image pushed to ACR"
+
+deploy-verifier: _guard-server verifier-build
+	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
+	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
+	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
+		echo "  ✗ Registry not configured. Skipping."; exit 1; \
+	fi; \
+	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
+	docker tag breakfix-verifier:latest $$pub/breakfix-verifier:latest; \
+	docker push $$pub/breakfix-verifier:latest
+	@echo "  ✓ Verifier image pushed to ACR"
 
 # ═══════════════════════════════════════════════════════════════
 # Ops

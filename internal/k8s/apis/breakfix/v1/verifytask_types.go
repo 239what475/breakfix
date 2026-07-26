@@ -23,8 +23,7 @@ type VerifyTaskSpec struct {
 }
 
 type VerifyTaskSource struct {
-	Kind string `json:"kind"`
-	Ref  string `json:"ref,omitempty"`
+	Ref string `json:"ref"`
 }
 
 type VerifyTaskSubmission struct {
@@ -45,12 +44,21 @@ type VerifyIssue struct {
 	Message string `json:"message"`
 }
 
+// +kubebuilder:validation:Enum=artifact;infrastructure
+type VerifyFailureClass string
+
+const (
+	VerifyFailureArtifact       VerifyFailureClass = "artifact"
+	VerifyFailureInfrastructure VerifyFailureClass = "infrastructure"
+)
+
 type VerifyReport struct {
-	BuildPassed       bool          `json:"buildPassed,omitempty"`
-	AnswerPassed      bool          `json:"answerPassed,omitempty"`
-	CheckpointsPassed bool          `json:"checkpointsPassed,omitempty"`
-	Summary           string        `json:"summary,omitempty"`
-	Issues            []VerifyIssue `json:"issues,omitempty"`
+	Class             VerifyFailureClass `json:"class,omitempty"`
+	BuildPassed       bool               `json:"buildPassed,omitempty"`
+	AnswerPassed      bool               `json:"answerPassed,omitempty"`
+	CheckpointsPassed bool               `json:"checkpointsPassed,omitempty"`
+	Summary           string             `json:"summary,omitempty"`
+	Issues            []VerifyIssue      `json:"issues,omitempty"`
 }
 
 type VerifyTaskStatus struct {
@@ -58,7 +66,6 @@ type VerifyTaskStatus struct {
 	Phase       VerifyTaskPhase `json:"phase,omitempty"`
 	Message     string          `json:"message,omitempty"`
 	JobName     string          `json:"jobName,omitempty"`
-	PodName     string          `json:"podName,omitempty"`
 	TempImage   string          `json:"tempImage,omitempty"`
 	StartedAt   *metav1.Time    `json:"startedAt,omitempty"`
 	CompletedAt *metav1.Time    `json:"completedAt,omitempty"`

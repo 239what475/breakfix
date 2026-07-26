@@ -9,6 +9,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 )
 
 func TestAuthoringRunStagesThenAtomicallyFinalizesOneRevision(t *testing.T) {
@@ -221,6 +222,51 @@ func TestAuthoringVerificationFailureRestartsExactlyOnceWithoutArtifact(t *testi
 	}
 	if _, err := database.RestartGeneration(ctx, sessionID, "gen-failed", "vt-failed", "gen-duplicate", "duplicate"); err == nil {
 		t.Fatal("same failed VerifyTask started a duplicate generation")
+	}
+}
+
+func TestAuthoringInfrastructureVerificationFailureDoesNotRestartGeneration(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+
+	const sessionID = "author-infrastructure"
+	const userID = "user-infrastructure"
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := database.ReplaceAuthoringPlan(ctx, sessionID, userID, 0, validAuthoringPlan("overview"), authoring.StateIntentReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.BeginGeneration(ctx, sessionID, userID, revision.Number, "gen-infrastructure"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AttachVerificationTask(ctx, sessionID, "gen-infrastructure", revision.Number, "vt-infrastructure"); err != nil {
+		t.Fatal(err)
+	}
+	verification := authoring.Verification{
+		TaskID: "vt-infrastructure", Phase: string(breakfixv1.VerifyTaskFailed), Message: "registry unavailable",
+		Report: &authoring.VerificationReport{Class: authoring.VerificationFailureInfrastructure, Summary: "registry unavailable"},
+	}
+	if err := database.RecordVerificationInfrastructureFailure(ctx, sessionID, "gen-infrastructure", verification); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.RecordVerificationInfrastructureFailure(ctx, sessionID, "gen-infrastructure", verification); err != nil {
+		t.Fatalf("recording the same task must be idempotent: %v", err)
+	}
+	session, err := database.GetAuthoringSession(ctx, sessionID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.State != authoring.StateVerificationInfrastructureFailed || session.GenerationID != "gen-infrastructure" || session.VerifyTaskID != "vt-infrastructure" {
+		t.Fatalf("infrastructure failure must preserve the workflow references without restart: %#v", session)
+	}
+	stored, err := database.GetAuthoringRevision(ctx, sessionID, revision.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Verification == nil || stored.Verification.Report == nil || stored.Verification.Report.Class != authoring.VerificationFailureInfrastructure {
+		t.Fatalf("infrastructure report was not retained: %#v", stored.Verification)
 	}
 }
 

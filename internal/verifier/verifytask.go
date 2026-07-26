@@ -1,4 +1,4 @@
-package generator
+package verifier
 
 import (
 	"context"
@@ -15,13 +15,14 @@ import (
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/verification"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 )
 
-type VerifyTaskConfig struct {
+type Config struct {
 	Kubeconfig       string
-	LabNS            string
 	RegistryAddr     string
 	RegistryInsecure bool
 	ServerURL        string
@@ -31,7 +32,7 @@ type VerifyTaskConfig struct {
 	SubmissionID     string
 }
 
-func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
+func Run(ctx context.Context, cfg Config) error {
 	if strings.TrimSpace(cfg.VerifyTaskID) == "" || strings.TrimSpace(cfg.SubmissionID) == "" {
 		return fmt.Errorf("VERIFY_TASK_ID and VERIFY_SUBMISSION_ID are required")
 	}
@@ -45,6 +46,9 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	if err != nil {
 		return fmt.Errorf("get verify task: %w", err)
 	}
+	if task.Status.Phase == breakfixv1.VerifyTaskSucceeded || task.Status.Phase == breakfixv1.VerifyTaskFailed {
+		return nil
+	}
 
 	workDir, err := os.MkdirTemp("", "breakfix-verify-*")
 	if err != nil {
@@ -56,7 +60,7 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	stageStart := time.Now()
 	slog.Info("verify stage start", "phase", "download_submission", "verifyTaskID", cfg.VerifyTaskID)
 	if err := downloadSubmission(ctx, cfg, downloadPath); err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("SUBMISSION_DOWNLOAD_FAILED", err.Error()))
+		return fmt.Errorf("download submission: %w", err)
 	}
 	slog.Info("verify stage done", "phase", "download_submission", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "path", downloadPath)
 
@@ -64,13 +68,13 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	slog.Info("verify stage start", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID)
 	f, err := os.Open(downloadPath)
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("SUBMISSION_OPEN_FAILED", err.Error()))
+		return fmt.Errorf("open downloaded submission: %w", err)
 	}
 	defer f.Close()
 
 	chalDir := filepath.Join(workDir, "challenge")
 	if err := os.MkdirAll(chalDir, 0755); err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("VERIFY_WORKDIR_CREATE_FAILED", err.Error()))
+		return fmt.Errorf("create challenge workdir: %w", err)
 	}
 	if err := challenge.ExtractTarGz(chalDir, f); err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("ARTIFACT_EXTRACT_FAILED", err.Error()))
@@ -84,81 +88,38 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	}
 	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "challengeID", task.Spec.ChallengeID, "runtime", challengeEntry.Runtime)
 
-	tempImage := fmt.Sprintf("%s/verify-%s:latest", cfg.RegistryAddr, cfg.VerifyTaskID)
-	imageBuilt := false
-	keepTempImage := false
-	defer func() {
-		if !imageBuilt || keepTempImage {
-			return
-		}
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if err := DeleteRegistryImage(cleanupCtx, tempImage, cfg.RegistryInsecure); err != nil {
-			slog.Warn("remove failed verification image", "verifyTaskID", cfg.VerifyTaskID, "image", tempImage, "err", err)
-		}
-	}()
-	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
-		current.Status.TempImage = tempImage
-		current.Status.Message = "building verification image"
-	}); err != nil {
-		return fmt.Errorf("update verify task status: %w", err)
-	}
+	tempImage := verification.ImageName(cfg.RegistryAddr, cfg.VerifyTaskID)
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "image", tempImage)
-	if ok := BuildAndPush(ctx, tempImage, chalDir, verifyBaseImage(tempImage, challengeEntry.Runtime), cfg.RegistryInsecure); !ok {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, &breakfixv1.VerifyReport{
-			Summary: "image build or push failed",
-			Issues: []breakfixv1.VerifyIssue{{
-				Code:    "BUILD_FAILED",
-				Message: "image build or push failed",
-			}},
-		})
+	if err := BuildAndPush(ctx, tempImage, chalDir, verifyBaseImage(tempImage, challengeEntry.Runtime), cfg.RegistryInsecure); err != nil {
+		if isArtifactBuildError(err) {
+			return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("BUILD_FAILED", err.Error()))
+		}
+		return fmt.Errorf("build and push verification image: %w", err)
 	}
-	imageBuilt = true
 	slog.Info("verify stage done", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "image", tempImage)
 
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "runtime", challengeEntry.Runtime)
 	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, task.Spec.ChallengeID, challengeEntry, tempImage)
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("VERIFY_ENV_CREATE_FAILED", err.Error()))
+		return fmt.Errorf("create verification environment: %w", err)
 	}
-	defer destroyVerifyEnvironment(context.Background(), client, cfg.VerifyTaskNS, envRef) //nolint:errcheck
 	slog.Info("verify stage done", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "environment", envRef.Name, "runtime", envRef.Runtime)
-
-	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
-		current.Status.Message = "starting verification environment"
-	}); err != nil {
-		return fmt.Errorf("update verify task status: %w", err)
-	}
 
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "wait_environment_ready", "verifyTaskID", cfg.VerifyTaskID, "environment", envRef.Name)
 	readyEnv, err := waitVerifyEnvironmentReady(ctx, client, cfg.VerifyTaskNS, envRef, 15*time.Minute)
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, &breakfixv1.VerifyReport{
-			BuildPassed: true,
-			Summary:     "verification environment failed before ready",
-			Issues: []breakfixv1.VerifyIssue{{
-				Code:    "VERIFY_ENV_NOT_READY",
-				Message: truncateStr(err.Error(), 4000),
-			}},
-		})
+		return fmt.Errorf("wait for verification environment: %w", err)
 	}
 	slog.Info("verify stage done", "phase", "wait_environment_ready", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "pod", readyEnv.PodName, "namespace", readyEnv.Namespace)
-
-	if err := mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
-		current.Status.PodName = readyEnv.PodName
-		current.Status.Message = "running answer.sh and checkpoint checks"
-	}); err != nil {
-		return fmt.Errorf("update verify task status: %w", err)
-	}
 
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "run_answer", "verifyTaskID", cfg.VerifyTaskID, "pod", readyEnv.PodName)
 	ansExit, ansOut, err := client.ExecInPod(readyEnv.Namespace, readyEnv.PodName, "bash", "/answer.sh")
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("ANSWER_EXEC_FAILED", err.Error()))
+		return fmt.Errorf("run answer.sh: %w", err)
 	}
 	slog.Info("verify stage done", "phase", "run_answer", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "exitCode", ansExit)
 	if ansExit != 0 {
@@ -176,7 +137,7 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 	slog.Info("verify stage start", "phase", "run_checkpoints", "verifyTaskID", cfg.VerifyTaskID, "pod", readyEnv.PodName)
 	checkExit, checkOut, err := client.ExecInPod(readyEnv.Namespace, readyEnv.PodName, challenge.CheckpointCommand, "--json")
 	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_EXEC_FAILED", err.Error()))
+		return fmt.Errorf("run checkpoints: %w", err)
 	}
 	if checkExit != 0 {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_PROTOCOL_FAILED", fmt.Sprintf("checkpoint runner exit=%d: %s", checkExit, truncateStr(checkOut, 4000))))
@@ -202,9 +163,6 @@ func RunVerifyTask(ctx context.Context, cfg VerifyTaskConfig) error {
 		})
 	}
 
-	// Once success has been attempted, retain the image: the status write may
-	// have reached the API server even if the client loses its response.
-	keepTempImage = true
 	err = mutateVerifyTaskStatus(ctx, client, cfg.VerifyTaskNS, task.Name, func(current *breakfixv1.VerifyTask) {
 		current.Status.Phase = breakfixv1.VerifyTaskSucceeded
 		current.Status.Message = "verification passed"
@@ -251,7 +209,14 @@ func verifyBaseImage(targetImage, runtime string) string {
 }
 
 func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID, challengeID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
-	name := "verify-" + k8s.RandomID()
+	ref := &verifyEnvironmentRef{Runtime: challenge.NormalizeRuntime(entry.Runtime), Name: verification.EnvironmentName(verifyTaskID)}
+	if err := deleteVerifyEnvironment(ctx, client, ns, ref); err != nil {
+		return nil, fmt.Errorf("delete previous verification environment: %w", err)
+	}
+	if err := waitVerifyEnvironmentDeleted(ctx, client, ns, ref, 2*time.Minute); err != nil {
+		return nil, err
+	}
+
 	checkpointIDs := make([]string, 0, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
 		checkpointIDs = append(checkpointIDs, checkpoint.ID)
@@ -275,7 +240,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 	if challenge.NormalizeRuntime(entry.Runtime) == challenge.RuntimeVCluster {
 		_, err := client.CreateVClusterEnvironment(ctx, ns, &breakfixv1.VClusterEnvironment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
+				Name:      ref.Name,
 				Namespace: ns,
 				Labels:    labels,
 			},
@@ -284,12 +249,12 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 		if err != nil {
 			return nil, err
 		}
-		return &verifyEnvironmentRef{Runtime: challenge.RuntimeVCluster, Name: name}, nil
+		return ref, nil
 	}
 
 	_, err := client.CreateContainerEnvironment(ctx, ns, &breakfixv1.ContainerEnvironment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      ref.Name,
 			Namespace: ns,
 			Labels:    labels,
 		},
@@ -298,7 +263,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 	if err != nil {
 		return nil, err
 	}
-	return &verifyEnvironmentRef{Runtime: challenge.RuntimeContainer, Name: name}, nil
+	return ref, nil
 }
 
 func waitVerifyEnvironmentReady(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef, timeout time.Duration) (*verifyEnvironmentState, error) {
@@ -353,32 +318,43 @@ func getVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, en
 	}
 }
 
-func destroyVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef) error {
+func deleteVerifyEnvironment(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef) error {
 	switch challenge.NormalizeRuntime(envRef.Runtime) {
 	case challenge.RuntimeVCluster:
-		env, err := client.GetVClusterEnvironment(ctx, ns, envRef.Name)
-		if err != nil {
+		err := client.DeleteVClusterEnvironment(ctx, ns, envRef.Name)
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		env.Status.Phase = breakfixv1.EnvironmentDestroyed
-		if _, err := client.UpdateVClusterEnvironmentStatus(ctx, ns, env); err != nil {
-			return err
-		}
-		return client.DeleteVClusterEnvironment(ctx, ns, envRef.Name)
+		return err
 	default:
-		env, err := client.GetContainerEnvironment(ctx, ns, envRef.Name)
-		if err != nil {
+		err := client.DeleteContainerEnvironment(ctx, ns, envRef.Name)
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		env.Status.Phase = breakfixv1.EnvironmentDestroyed
-		if _, err := client.UpdateContainerEnvironmentStatus(ctx, ns, env); err != nil {
-			return err
-		}
-		return client.DeleteContainerEnvironment(ctx, ns, envRef.Name)
+		return err
 	}
 }
 
-func downloadSubmission(ctx context.Context, cfg VerifyTaskConfig, dst string) error {
+func waitVerifyEnvironmentDeleted(ctx context.Context, client *k8s.Client, ns string, envRef *verifyEnvironmentRef, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		_, err := getVerifyEnvironment(ctx, client, ns, envRef)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	return fmt.Errorf("timeout waiting for previous verification environment %s deletion", envRef.Name)
+}
+
+func downloadSubmission(ctx context.Context, cfg Config, dst string) error {
 	url := strings.TrimRight(cfg.ServerURL, "/") + "/api/internal/verify-submissions/" + cfg.SubmissionID + "/artifact"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -404,6 +380,10 @@ func downloadSubmission(ctx context.Context, cfg VerifyTaskConfig, dst string) e
 }
 
 func updateVerifyFailure(ctx context.Context, client *k8s.Client, ns string, task *breakfixv1.VerifyTask, report *breakfixv1.VerifyReport) error {
+	if report == nil {
+		return fmt.Errorf("artifact verification failure has no report")
+	}
+	report.Class = breakfixv1.VerifyFailureArtifact
 	return mutateVerifyTaskStatus(ctx, client, ns, task.Name, func(current *breakfixv1.VerifyTask) {
 		current.Status.Phase = breakfixv1.VerifyTaskFailed
 		current.Status.Report = report
@@ -415,6 +395,7 @@ func updateVerifyFailure(ctx context.Context, client *k8s.Client, ns string, tas
 
 func failureReport(code, msg string) *breakfixv1.VerifyReport {
 	return &breakfixv1.VerifyReport{
+		Class:   breakfixv1.VerifyFailureArtifact,
 		Summary: msg,
 		Issues: []breakfixv1.VerifyIssue{{
 			Code:    code,
@@ -429,8 +410,18 @@ func mutateVerifyTaskStatus(ctx context.Context, client *k8s.Client, ns, name st
 		if err != nil {
 			return err
 		}
+		if current.Status.Phase == breakfixv1.VerifyTaskSucceeded || current.Status.Phase == breakfixv1.VerifyTaskFailed {
+			return nil
+		}
 		mutate(current)
 		_, err = client.UpdateVerifyTaskStatus(ctx, ns, current)
 		return err
 	})
+}
+
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

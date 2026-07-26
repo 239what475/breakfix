@@ -26,6 +26,7 @@ const stateLabel: Record<string, string> = {
   DraftConversation: "等待题意",
   IntentReview: "题意约定待确认",
   GeneratingAndVerifying: "正在生成并验证",
+  VerificationInfrastructureFailed: "验证基础设施故障",
   AwaitingVerifiedReview: "等待已验证题目审核",
   RevisingAndVerifying: "正在生成并验证修订题目",
   Publishing: "正在发布",
@@ -60,6 +61,8 @@ const tabs = computed(() => {
   if (session.value?.artifact) {
     entries.push({ id: "assets", label: "Assets" });
     entries.push({ id: "diff", label: "Diff" });
+  }
+  if (session.value?.verification) {
     entries.push({ id: "verification", label: "验证" });
   }
   return entries;
@@ -275,7 +278,7 @@ onScopeDispose(clearPoll);
             <pre v-if="selectedDiff"><code>{{ selectedDiff.diff }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'verification'" class="authoring-verification">
-            <strong>真实验证已通过</strong>
+            <strong>{{ session.verification?.phase === "Succeeded" ? "真实验证已通过" : session.verification?.report?.class === "infrastructure" ? "真实验证因基础设施故障未完成" : "真实验证未通过" }}</strong>
             <p>{{ session.verification?.report?.summary || session.verification?.message || "全部检查点通过" }}</p>
             <dl>
               <div><dt>镜像构建</dt><dd>{{ session.verification?.report?.build_passed ? "通过" : "-" }}</dd></div>

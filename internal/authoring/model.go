@@ -23,13 +23,14 @@ var (
 type SessionState string
 
 const (
-	StateDraftConversation      SessionState = "DraftConversation"
-	StateIntentReview           SessionState = "IntentReview"
-	StateGeneratingAndVerifying SessionState = "GeneratingAndVerifying"
-	StateAwaitingVerifiedReview SessionState = "AwaitingVerifiedReview"
-	StateRevisingAndVerifying   SessionState = "RevisingAndVerifying"
-	StatePublishing             SessionState = "Publishing"
-	StatePublished              SessionState = "Published"
+	StateDraftConversation                SessionState = "DraftConversation"
+	StateIntentReview                     SessionState = "IntentReview"
+	StateGeneratingAndVerifying           SessionState = "GeneratingAndVerifying"
+	StateVerificationInfrastructureFailed SessionState = "VerificationInfrastructureFailed"
+	StateAwaitingVerifiedReview           SessionState = "AwaitingVerifiedReview"
+	StateRevisingAndVerifying             SessionState = "RevisingAndVerifying"
+	StatePublishing                       SessionState = "Publishing"
+	StatePublished                        SessionState = "Published"
 )
 
 type Metadata struct {
@@ -138,14 +139,22 @@ type VerificationIssue struct {
 	Message string `json:"message"`
 }
 
+type VerificationFailureClass string
+
+const (
+	VerificationFailureArtifact       VerificationFailureClass = "artifact"
+	VerificationFailureInfrastructure VerificationFailureClass = "infrastructure"
+)
+
 // VerificationReport carries the same result dimensions as VerifyTaskStatus,
 // but uses the public authoring API's snake_case representation.
 type VerificationReport struct {
-	BuildPassed       bool                `json:"build_passed"`
-	AnswerPassed      bool                `json:"answer_passed"`
-	CheckpointsPassed bool                `json:"checkpoints_passed"`
-	Summary           string              `json:"summary,omitempty"`
-	Issues            []VerificationIssue `json:"issues,omitempty"`
+	Class             VerificationFailureClass `json:"class,omitempty"`
+	BuildPassed       bool                     `json:"build_passed"`
+	AnswerPassed      bool                     `json:"answer_passed"`
+	CheckpointsPassed bool                     `json:"checkpoints_passed"`
+	Summary           string                   `json:"summary,omitempty"`
+	Issues            []VerificationIssue      `json:"issues,omitempty"`
 }
 
 // FailureFeedback is the bounded, actionable context given to the next author

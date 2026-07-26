@@ -41,12 +41,10 @@ spec:
                 type: string
               source:
                 properties:
-                  kind:
-                    type: string
                   ref:
                     type: string
                 required:
-                - kind
+                - ref
                 type: object
               submission:
                 properties:
@@ -76,8 +74,6 @@ spec:
                 - Failed
                 - Succeeded
                 type: string
-              podName:
-                type: string
               report:
                 properties:
                   answerPassed:
@@ -86,6 +82,11 @@ spec:
                     type: boolean
                   checkpointsPassed:
                     type: boolean
+                  class:
+                    enum:
+                    - artifact
+                    - infrastructure
+                    type: string
                   issues:
                     items:
                       properties:

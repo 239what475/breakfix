@@ -1,4 +1,4 @@
-package generator
+package registry
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestDeleteRegistryImageDeletesResolvedManifestDigest(t *testing.T) {
+func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests = append(requests, request.Method+" "+request.URL.Path)
@@ -31,7 +31,7 @@ func TestDeleteRegistryImageDeletesResolvedManifestDigest(t *testing.T) {
 	defer server.Close()
 
 	registry := strings.TrimPrefix(server.URL, "http://")
-	if err := DeleteRegistryImage(context.Background(), registry+"/team/challenge:latest", true); err != nil {
+	if err := DeleteImage(context.Background(), registry+"/team/challenge:latest", true); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.Join(requests, ", "), "HEAD /v2/team/challenge/manifests/latest, DELETE /v2/team/challenge/manifests/sha256:verified"; got != want {
@@ -39,7 +39,7 @@ func TestDeleteRegistryImageDeletesResolvedManifestDigest(t *testing.T) {
 	}
 }
 
-func TestRegistryImageReference(t *testing.T) {
+func TestImageReference(t *testing.T) {
 	tests := []struct {
 		image                     string
 		registry, repository, ref string
@@ -49,12 +49,12 @@ func TestRegistryImageReference(t *testing.T) {
 		{image: "registry.example/team/challenge@sha256:abc", registry: "registry.example", repository: "team/challenge", ref: "sha256:abc"},
 	}
 	for _, test := range tests {
-		registry, repository, reference, err := registryImageReference(test.image)
+		registry, repository, reference, err := imageReference(test.image)
 		if err != nil {
-			t.Fatalf("registryImageReference(%q): %v", test.image, err)
+			t.Fatalf("imageReference(%q): %v", test.image, err)
 		}
 		if registry != test.registry || repository != test.repository || reference != test.ref {
-			t.Fatalf("registryImageReference(%q) = (%q, %q, %q), want (%q, %q, %q)", test.image, registry, repository, reference, test.registry, test.repository, test.ref)
+			t.Fatalf("imageReference(%q) = (%q, %q, %q), want (%q, %q, %q)", test.image, registry, repository, reference, test.registry, test.repository, test.ref)
 		}
 	}
 }

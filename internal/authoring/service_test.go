@@ -14,6 +14,7 @@ func TestStateAllowsAuthorMessage(t *testing.T) {
 		{StateIntentReview, true},
 		{StateAwaitingVerifiedReview, true},
 		{StateGeneratingAndVerifying, false},
+		{StateVerificationInfrastructureFailed, false},
 		{StateRevisingAndVerifying, false},
 		{StatePublishing, false},
 		{StatePublished, false},
