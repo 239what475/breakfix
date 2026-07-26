@@ -11,7 +11,7 @@ import (
 
 // Client wraps the Kubernetes clientset and REST config.
 type Client struct {
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	restConfig *rest.Config
 }
 
@@ -35,7 +35,7 @@ func (c *Client) RESTConfig() *rest.Config {
 }
 
 // Clientset returns the underlying Kubernetes clientset.
-func (c *Client) Clientset() *kubernetes.Clientset {
+func (c *Client) Clientset() kubernetes.Interface {
 	return c.clientset
 }
 

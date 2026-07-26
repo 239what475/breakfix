@@ -509,4 +509,21 @@ var schemaMigrations = []schemaMigration{
 		`CREATE INDEX taxonomy_work_items_ready ON taxonomy_work_items(state, next_run_at, lease_expires_at, updated_at, created_at)`,
 		`CREATE INDEX IF NOT EXISTS taxonomy_work_items_active_run ON taxonomy_work_items(active_run_id) WHERE active_run_id <> ''`,
 	}},
+	{version: 6, statements: []string{
+		`CREATE TABLE generator_workspaces (
+			generator_session_id TEXT PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+			namespace TEXT NOT NULL,
+			pvc_name TEXT NOT NULL UNIQUE,
+			sandbox_id TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL,
+			provision_deadline TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			deleted_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX generator_workspaces_pending ON generator_workspaces(state, provision_deadline)
+			WHERE state = 'pending'`,
+		`CREATE INDEX generator_workspaces_deleting ON generator_workspaces(updated_at)
+			WHERE state = 'deleting'`,
+	}},
 }

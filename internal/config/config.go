@@ -14,27 +14,28 @@ import (
 )
 
 type Config struct {
-	Port                 int         `yaml:"port"`
-	ProxyPort            int         `yaml:"proxy_port"`
-	HealthPort           int         `yaml:"health_port"`
-	DataDir              string      `yaml:"data_dir"`
-	DatabaseURL          string      `yaml:"database_url"`
-	AgentDatabaseURL     string      `yaml:"agent_database_url"`
-	AgentDatabaseRole    string      `yaml:"agent_database_role"`
-	Kubeconfig           string      `yaml:"kubeconfig"`
-	RegistryAddr         string      `yaml:"registry_addr"`
-	RegistryInsecure     bool        `yaml:"registry_insecure"`
-	K8sBaseImage         string      `yaml:"k8s_base_image"`
-	VClusterBinary       string      `yaml:"vcluster_binary"`
-	VClusterChartRepo    string      `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion string      `yaml:"vcluster_chart_version"`
-	ServerHost           string      `yaml:"server_host"`
-	Namespace            string      `yaml:"namespace"`
-	CRDNamespace         string      `yaml:"crd_namespace"`
-	CooldownMinutes      int         `yaml:"cooldown_minutes"`
-	JWTSecret            string      `yaml:"jwt_secret"`
-	InternalAPIKey       string      `yaml:"internal_api_key"`
-	Agent                AgentConfig `yaml:"agent"`
+	Port                 int               `yaml:"port"`
+	ProxyPort            int               `yaml:"proxy_port"`
+	HealthPort           int               `yaml:"health_port"`
+	DataDir              string            `yaml:"data_dir"`
+	DatabaseURL          string            `yaml:"database_url"`
+	AgentDatabaseURL     string            `yaml:"agent_database_url"`
+	AgentDatabaseRole    string            `yaml:"agent_database_role"`
+	Kubeconfig           string            `yaml:"kubeconfig"`
+	RegistryAddr         string            `yaml:"registry_addr"`
+	RegistryInsecure     bool              `yaml:"registry_insecure"`
+	K8sBaseImage         string            `yaml:"k8s_base_image"`
+	VClusterBinary       string            `yaml:"vcluster_binary"`
+	VClusterChartRepo    string            `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion string            `yaml:"vcluster_chart_version"`
+	ServerHost           string            `yaml:"server_host"`
+	Namespace            string            `yaml:"namespace"`
+	CRDNamespace         string            `yaml:"crd_namespace"`
+	CooldownMinutes      int               `yaml:"cooldown_minutes"`
+	JWTSecret            string            `yaml:"jwt_secret"`
+	InternalAPIKey       string            `yaml:"internal_api_key"`
+	Agent                AgentConfig       `yaml:"agent"`
+	OpenSandbox          OpenSandboxConfig `yaml:"opensandbox"`
 }
 
 type AgentConfig struct {
@@ -44,6 +45,18 @@ type AgentConfig struct {
 	RequestTimeout string `yaml:"request_timeout"`
 	ServerURL      string `yaml:"server_url"`
 	APIKey         string `yaml:"-"`
+}
+
+// OpenSandboxConfig describes the Server-owned Generator workspace plane.
+// Its lifecycle key intentionally never appears in the Agent Worker config.
+type OpenSandboxConfig struct {
+	BaseURL          string `yaml:"base_url"`
+	APIKeyEnv        string `yaml:"api_key_env"`
+	Namespace        string `yaml:"namespace"`
+	WorkspaceImage   string `yaml:"workspace_image"`
+	WorkspaceStorage string `yaml:"workspace_storage"`
+	WorkspaceTimeout string `yaml:"workspace_timeout"`
+	APIKey           string `yaml:"-"`
 }
 
 func defaults() Config {
@@ -71,6 +84,14 @@ func defaults() Config {
 			RequestTimeout: "2m",
 			ServerURL:      "http://breakfix-server",
 		},
+		OpenSandbox: OpenSandboxConfig{
+			BaseURL:          "http://opensandbox-server.opensandbox.svc.cluster.local",
+			APIKeyEnv:        "OPEN_SANDBOX_API_KEY",
+			Namespace:        "opensandbox",
+			WorkspaceImage:   "breakfix-authoring:latest",
+			WorkspaceStorage: "5Gi",
+			WorkspaceTimeout: "1h",
+		},
 	}
 }
 
@@ -84,6 +105,25 @@ func (c AgentConfig) Timeout() (time.Duration, error) {
 		return 0, fmt.Errorf("agent request_timeout must be a positive duration")
 	}
 	return value, nil
+}
+
+func (c OpenSandboxConfig) Timeout() (time.Duration, error) {
+	value, err := time.ParseDuration(c.WorkspaceTimeout)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("opensandbox workspace_timeout must be a positive duration")
+	}
+	return value, nil
+}
+
+func (c OpenSandboxConfig) Validate() error {
+	if strings.TrimSpace(c.BaseURL) == "" || strings.TrimSpace(c.APIKeyEnv) == "" || strings.TrimSpace(c.Namespace) == "" {
+		return fmt.Errorf("opensandbox base_url, api_key_env, and namespace are required")
+	}
+	if strings.TrimSpace(c.WorkspaceImage) == "" || strings.TrimSpace(c.WorkspaceStorage) == "" {
+		return fmt.Errorf("opensandbox workspace_image and workspace_storage are required")
+	}
+	_, err := c.Timeout()
+	return err
 }
 
 // ImageURL prepends registry to image name if not already a full URL.
@@ -119,10 +159,12 @@ func Load(path string) (Config, error) {
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
 	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
 	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
+	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	if err := applyRuntimeEnvironment(&cfg); err != nil {
 		return cfg, err
 	}
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
+	cfg.OpenSandbox.APIKey = os.Getenv(cfg.OpenSandbox.APIKeyEnv)
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {

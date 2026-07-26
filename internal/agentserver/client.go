@@ -43,32 +43,11 @@ func (c *Client) Post(ctx context.Context, path string, body any, output any) er
 	if !strings.HasPrefix(path, "/") {
 		return errors.New("internal API path must be absolute")
 	}
-	data, err := json.Marshal(body)
+	response, err := c.post(ctx, path, body, c.http)
 	if err != nil {
-		return fmt.Errorf("encode internal request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("create internal request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Breakfix-Internal-Key", c.apiKey)
-	response, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("call server internal API: %w", err)
+		return err
 	}
 	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		var failure struct {
-			Error string `json:"error"`
-		}
-		_ = json.Unmarshal(data, &failure)
-		if failure.Error == "" {
-			failure.Error = response.Status
-		}
-		return fmt.Errorf("server internal API: %s", failure.Error)
-	}
 	if output == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
@@ -76,4 +55,68 @@ func (c *Client) Post(ctx context.Context, path string, body any, output any) er
 		return fmt.Errorf("decode internal response: %w", err)
 	}
 	return nil
+}
+
+// PostStream reads a Server-produced NDJSON response. It is deliberately
+// separate from Post because long-running sandbox commands must not inherit
+// the Client's ordinary 30-second request timeout.
+func (c *Client) PostStream(ctx context.Context, path string, body any, consume func(json.RawMessage) error) error {
+	if consume == nil {
+		return errors.New("internal stream consumer is required")
+	}
+	streamHTTP := *c.http
+	streamHTTP.Timeout = 0
+	response, err := c.post(ctx, path, body, &streamHTTP)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	decoder := json.NewDecoder(response.Body)
+	for {
+		var event json.RawMessage
+		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("decode internal stream: %w", err)
+		}
+		if err := consume(event); err != nil {
+			return err
+		}
+	}
+}
+
+func (c *Client) post(ctx context.Context, path string, body any, httpClient *http.Client) (*http.Response, error) {
+	if c == nil || httpClient == nil {
+		return nil, errors.New("server internal client is not configured")
+	}
+	if !strings.HasPrefix(path, "/") {
+		return nil, errors.New("internal API path must be absolute")
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode internal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create internal request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Breakfix-Internal-Key", c.apiKey)
+	response, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call server internal API: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		_ = response.Body.Close()
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(data, &failure)
+		if failure.Error == "" {
+			failure.Error = response.Status
+		}
+		return nil, fmt.Errorf("server internal API: %s", failure.Error)
+	}
+	return response, nil
 }

@@ -87,6 +87,27 @@ Server/Chart revision 重跑 POC；若在本阶段没有官方修复，则需要
 并用独立设计说明替换“依赖 OpenSandbox TTL 回收 PVC”的前提，不能在实现中悄悄增加扫尾逻辑。在这两者之一完成前，不开始
 `OpenSandboxBackend` 或 Generator 迁移。
 
+## 2026-07-26：以 Server-owned BYO PVC 解除 OpenSandbox workspace 阻断
+
+重新核对官方 releases 后，最新正式 OpenSandbox Server 仍是 `server/v0.2.2`；没有可用的发布版本修复其 server-managed PVC
+ownerReference 路径。不能使用未发布的 upstream main、`latest` 或本地 patch 来假装该路径可用。
+
+随后在 Kind 的官方组合 Controller `v0.2.0`、Server `v0.2.2`、`execd v1.0.21`、egress `v1.1.4` 上完成了新的真实
+BYO PVC POC。Breakfix 预先创建 `breakfix-byo-workspace-poc`，调用官方 SDK 时传入
+`claimName=breakfix-byo-workspace-poc` 和 `createIfNotExists=false`。实际结果如下：
+
+- Sandbox create、文件上传、streaming command 均成功，client 输出 `CREATE_FILES_AND_STREAM=PASS`。
+- 重启 OpenSandbox Server 后，以同一个 opaque Sandbox ID 重连并下载 marker，随后官方 delete 成功，输出
+  `RECONNECT_AND_DELETE=PASS`。
+- OpenSandbox delete 后 PVC 仍是 `Bound`；由 POC 的平台侧 `kubectl delete pvc` 回收，证实 provider 没有取得 PVC 所有权。
+- `default-deny` NetworkPolicy 的 sandbox command 以 DNS 失败退出，输出 `EGRESS_DENY=PASS`。
+- 无卷、75 秒 TTL 的 Sandbox 到期后对应 `BatchSandbox` 和 Pod 均不存在，证实 provider 的 Sandbox TTL/delete 路径可用。官方 Server 对 timeout 的最小值为 60 秒，POC 据此使用 75 秒。
+
+调整：workspace PVC 生命周期正式收归 Breakfix Server，并在 `EINO-RESEARCH.md` 中补全记录、创建、未知 create 响应、删除和权限
+边界。Server 使用 `generator_workspaces` 记录自己创建的确定 PVC 名称，OpenSandbox 永远以 BYO 模式挂载；Server cleanup loop
+负责删除 PVC，OpenSandbox TTL 只兜底回收尚未持久化 Sandbox ID 的孤儿 Sandbox。这个调整没有建立第二个 provider、没有使用未发布
+provider，也没有实现 Sandbox metadata adopt。
+
 ## 2026-07-26：Taxonomy reviewer 的持久化边界
 
 `EINO-RESEARCH.md` 原先将 Curriculum Reviewer 和 SRE Reviewer 描述为两个可并行的独立 Agent Run；但这会与既有
