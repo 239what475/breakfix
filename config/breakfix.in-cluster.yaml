@@ -1,0 +1,34 @@
+# In-cluster configuration. The runtime Deployment mounts this as
+# /etc/breakfix/config.yaml; secret values are expanded from its environment.
+port: 9090
+proxy_port: 3128
+health_port: 8081
+
+data_dir: /var/lib/breakfix
+database_url: ${BREAKFIX_DATABASE_URL}
+agent_database_url: ${BREAKFIX_AGENT_DATABASE_URL}
+agent_database_role: breakfix_agent
+kubeconfig: ""
+
+registry_addr: registry.example.invalid/breakfix
+registry_insecure: false
+k8s_base_image: registry.example.invalid/breakfix/breakfix-k8s-base:latest
+
+vcluster_binary: /usr/local/bin/vcluster
+vcluster_chart_repo: https://charts.loft.sh
+vcluster_chart_version: ""
+
+server_host: breakfix-server
+namespace: breakfix
+crd_namespace: breakfix-system
+cooldown_minutes: 5
+
+jwt_secret: ${BREAKFIX_JWT_SECRET}
+internal_api_key: ${BREAKFIX_INTERNAL_API_KEY}
+
+agent:
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-v4-pro
+  request_timeout: 2m
+  server_url: http://breakfix-server:9090

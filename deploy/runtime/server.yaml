@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: breakfix-server-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: breakfix-server
+spec:
+  selector:
+    app.kubernetes.io/name: breakfix-server
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: breakfix-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: breakfix-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: breakfix-server
+    spec:
+      serviceAccountName: breakfix-server
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: server
+          image: ghcr.io/breakfix/breakfix-server:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/etc/breakfix/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 9090
+          env:
+            - name: BREAKFIX_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: database_url
+            - name: BREAKFIX_AGENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: agent_database_url
+            - name: BREAKFIX_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: jwt_secret
+            - name: BREAKFIX_INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: internal_api_key
+            - name: BREAKFIX_REGISTRY_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_addr
+            - name: BREAKFIX_REGISTRY_INSECURE
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_insecure
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: deepseek_api_key
+          volumeMounts:
+            - name: config
+              mountPath: /etc/breakfix
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/breakfix
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /api/openapi.json
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/openapi.json
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: breakfix-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: breakfix-server-data
+        - name: tmp
+          emptyDir: {}

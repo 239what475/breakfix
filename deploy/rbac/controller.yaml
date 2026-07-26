@@ -1,10 +1,4 @@
 # RBAC for generator Jobs and controller
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: breakfix-system
----
 # ServiceAccount for generator Jobs
 apiVersion: v1
 kind: ServiceAccount

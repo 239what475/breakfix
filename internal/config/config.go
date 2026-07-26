@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,7 +116,12 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.AgentDatabaseURL = os.ExpandEnv(cfg.AgentDatabaseURL)
+	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
+	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
 	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
+	if err := applyRuntimeEnvironment(&cfg); err != nil {
+		return cfg, err
+	}
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
@@ -125,6 +131,24 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
 	return cfg, nil
+}
+
+// applyRuntimeEnvironment contains deployment-time values that cannot be
+// safely committed into the shared in-cluster configuration. Empty variables
+// deliberately leave the YAML value intact so local configuration stays
+// self-contained.
+func applyRuntimeEnvironment(cfg *Config) error {
+	if value := strings.TrimSpace(os.Getenv("BREAKFIX_REGISTRY_ADDR")); value != "" {
+		cfg.RegistryAddr = value
+	}
+	if value, exists := os.LookupEnv("BREAKFIX_REGISTRY_INSECURE"); exists && strings.TrimSpace(value) != "" {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("parse BREAKFIX_REGISTRY_INSECURE: %w", err)
+		}
+		cfg.RegistryInsecure = parsed
+	}
+	return nil
 }
 
 func (c Config) CertFile() string      { return filepath.Join(c.DataDir, "ca-cert.pem") }

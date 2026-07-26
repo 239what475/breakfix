@@ -33,3 +33,48 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 		t.Fatalf("Load() error = %q, want unknown field name", err)
 	}
 }
+
+func TestLoadExpandsRuntimeSecretEnvironment(t *testing.T) {
+	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
+	t.Setenv("BREAKFIX_TEST_INTERNAL", "internal-from-environment")
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("jwt_secret: ${BREAKFIX_TEST_JWT}\ninternal_api_key: ${BREAKFIX_TEST_INTERNAL}\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalAPIKey != "internal-from-environment" {
+		t.Fatalf("runtime secret expansion = jwt %q, internal %q", cfg.JWTSecret, cfg.InternalAPIKey)
+	}
+}
+
+func TestLoadAppliesRuntimeRegistryOverrides(t *testing.T) {
+	t.Setenv("BREAKFIX_REGISTRY_ADDR", "registry.internal.example/breakfix")
+	t.Setenv("BREAKFIX_REGISTRY_INSECURE", "true")
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("registry_addr: registry.example.invalid/breakfix\nregistry_insecure: false\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RegistryAddr != "registry.internal.example/breakfix" || !cfg.RegistryInsecure {
+		t.Fatalf("runtime registry override = %q, insecure=%t", cfg.RegistryAddr, cfg.RegistryInsecure)
+	}
+}
+
+func TestLoadRejectsInvalidRuntimeRegistryInsecureOverride(t *testing.T) {
+	t.Setenv("BREAKFIX_REGISTRY_INSECURE", "sometimes")
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("port: 9090\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "BREAKFIX_REGISTRY_INSECURE") {
+		t.Fatalf("Load() error = %v, want registry override validation", err)
+	}
+}

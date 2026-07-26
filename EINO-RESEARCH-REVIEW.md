@@ -2,6 +2,15 @@
 
 本文只记录实现过程中确认的设计缺口及已采用的调整；它不是兼容层，也不改变 `EINO-RESEARCH.md` 的总体边界。
 
+## 2026-07-26：运行镜像构建上下文混入本地数据和依赖目录
+
+首次构建新的 Server 镜像时，仓库没有 `.dockerignore`。Docker 因此会把本地 `node_modules`、测试结果、data、二进制和
+未追踪运行时配置一并发送给 builder；当前工作区的上下文约为 626 MB。这既会拖慢构建，也会让本地 artifact 或实例配置意外
+进入构建上下文，不符合运行镜像只由受版本控制源码构成的边界。
+
+调整：增加仓库级 `.dockerignore`，明确排除运行数据、构建产物、Node 依赖、测试输出、实例配置和本地 kubeconfig。新的
+Server 构建上下文已降至约 17 KB；前端依赖仍只在 Docker build stage 中由 lockfile 安装。该调整不引入新的运行时数据源。
+
 ## 2026-07-26：独立 verifier 仍需要 rootful BuildKit 权限
 
 Verifier 必须与 Agent Worker 使用不同的 Job 模板和最小化的 ServiceAccount，但当前实际构建实现通过
