@@ -34,9 +34,9 @@ agent:
   server_url: http://breakfix-server:9090
 
 opensandbox:
-  base_url: http://opensandbox-server.opensandbox.svc.cluster.local
+  base_url: ${BREAKFIX_OPENSANDBOX_BASE_URL}
   api_key_env: OPEN_SANDBOX_API_KEY
-  namespace: opensandbox
+  namespace: ${BREAKFIX_OPENSANDBOX_NAMESPACE}
   workspace_image: ubuntu:22.04
   workspace_storage: 5Gi
   workspace_timeout: 1h

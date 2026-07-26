@@ -160,6 +160,7 @@ func Load(path string) (Config, error) {
 	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
 	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
+	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	if err := applyRuntimeEnvironment(&cfg); err != nil {
 		return cfg, err
 	}

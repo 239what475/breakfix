@@ -88,6 +88,10 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: opensandbox_api_key
+            - name: BREAKFIX_OPENSANDBOX_BASE_URL
+              value: http://opensandbox-server.opensandbox.svc.cluster.local
+            - name: BREAKFIX_OPENSANDBOX_NAMESPACE
+              value: opensandbox
           volumeMounts:
             - name: config
               mountPath: /etc/breakfix

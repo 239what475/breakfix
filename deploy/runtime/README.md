@@ -9,9 +9,9 @@ Build and publish the three runtime images, then replace their development tags 
 environment overlay):
 
 ```bash
-docker build -t ghcr.io/breakfix/breakfix-server:dev -f deploy/images/server/Dockerfile .
-docker build -t ghcr.io/breakfix/breakfix-controller:dev -f deploy/images/controller/Dockerfile .
-docker build -t ghcr.io/breakfix/breakfix-agent-worker:dev -f deploy/images/agent-worker/Dockerfile .
+docker build --build-arg GOPROXY="$(go env GOPROXY)" -t ghcr.io/breakfix/breakfix-server:dev -f deploy/images/server/Dockerfile .
+docker build --build-arg GOPROXY="$(go env GOPROXY)" -t ghcr.io/breakfix/breakfix-controller:dev -f deploy/images/controller/Dockerfile .
+docker build --build-arg GOPROXY="$(go env GOPROXY)" -t ghcr.io/breakfix/breakfix-agent-worker:dev -f deploy/images/agent-worker/Dockerfile .
 ```
 
 The Controller image pins the bundled vcluster CLI to `v0.35.1`. The runtime Secret also supplies `registry_addr`

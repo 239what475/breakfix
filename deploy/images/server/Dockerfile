@@ -10,6 +10,8 @@ RUN npm run build --prefix frontend
 
 FROM golang:1.26.3-bookworm AS build
 WORKDIR /workspace
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

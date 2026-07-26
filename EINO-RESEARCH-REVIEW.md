@@ -131,3 +131,13 @@ pair 作为不可分割的持久化边界。
 调整：本次仅让 Go API 模型与 OpenAPI 的字段重命名保持一致，前端类型继续由 `make verify-api-generated`
 验证。生成器配置、版本锁定和 Go 生成物的精确校验应作为独立构建工具链任务处理，届时必须先解释并消除完整 diff，不能
 通过静默接受大范围生成漂移来掩盖契约变化。
+
+## 2026-07-26：运行镜像需要显式继承 Go module proxy
+
+Agent Runtime 的三个 Go 镜像在 Docker build stage 中执行 `go mod download`。Docker 不会继承主机通过 `go env`
+配置的 `GOPROXY`，因此在无法访问 `proxy.golang.org`、但配置了其他可用 module proxy 的环境中，构建会卡在依赖下载，
+即使本机的 `go test` 已经能正常运行。
+
+调整：Server、Controller 和 Agent Worker Dockerfile 都接受 `GOPROXY` build arg，默认保持 Go 的标准
+`https://proxy.golang.org,direct`。部署文档要求构建命令显式传入 `$(go env GOPROXY)`；这只影响构建期依赖解析，
+不向运行镜像、Worker、Sandbox 或模型提示传递代理配置。
