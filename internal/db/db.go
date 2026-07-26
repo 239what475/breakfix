@@ -476,4 +476,37 @@ var schemaMigrations = []schemaMigration{
 		)`,
 		`CREATE INDEX IF NOT EXISTS authoring_stages_session ON authoring_stages(session_id)`,
 	}},
+	{version: 5, statements: []string{
+		// Taxonomy Agent execution is represented by generic agent_runs. Remove
+		// provider-specific session bookkeeping from the domain WorkItem.
+		`ALTER TABLE taxonomy_work_items
+			DROP COLUMN IF EXISTS mapper_session_id,
+			DROP COLUMN IF EXISTS mapper_started,
+			DROP COLUMN IF EXISTS curriculum_session,
+			DROP COLUMN IF EXISTS curriculum_started,
+			DROP COLUMN IF EXISTS sre_session,
+			DROP COLUMN IF EXISTS sre_started`,
+		`ALTER TABLE taxonomy_work_items
+			ADD COLUMN IF NOT EXISTS active_stage TEXT NOT NULL DEFAULT '',
+			ADD COLUMN IF NOT EXISTS active_run_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN candidate_json DROP DEFAULT`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN curriculum_review_json DROP DEFAULT`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN sre_review_json DROP DEFAULT`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN candidate_json TYPE JSONB USING NULLIF(candidate_json, '')::jsonb`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN curriculum_review_json TYPE JSONB USING NULLIF(curriculum_review_json, '')::jsonb`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN sre_review_json TYPE JSONB USING NULLIF(sre_review_json, '')::jsonb`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN next_run_at DROP DEFAULT`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN lease_expires_at DROP DEFAULT`,
+		`UPDATE taxonomy_work_items SET next_run_at = NULL WHERE next_run_at = ''`,
+		`UPDATE taxonomy_work_items SET lease_expires_at = NULL WHERE lease_expires_at = ''`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN next_run_at TYPE TIMESTAMPTZ USING next_run_at::timestamptz`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN lease_expires_at TYPE TIMESTAMPTZ USING lease_expires_at::timestamptz`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN next_run_at DROP NOT NULL`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN lease_expires_at DROP NOT NULL`,
+		`DROP INDEX IF EXISTS taxonomy_work_items_ready`,
+		`CREATE INDEX taxonomy_work_items_ready ON taxonomy_work_items(state, next_run_at, lease_expires_at, updated_at, created_at)`,
+		`CREATE INDEX IF NOT EXISTS taxonomy_work_items_active_run ON taxonomy_work_items(active_run_id) WHERE active_run_id <> ''`,
+	}},
 }

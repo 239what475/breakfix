@@ -58,6 +58,36 @@ func TestWorkerCompletesReadOnlyRunAfterBestEffortDeltaFailure(t *testing.T) {
 	}
 }
 
+func TestWorkerTerminatesDomainManagedFailureWithoutGenericRequeue(t *testing.T) {
+	database := testpostgres.New(t)
+	ctx := context.Background()
+	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
+		ID: "taxonomy-run", Purpose: "taxonomy-mapper", OwnerKind: "taxonomy-work", OwnerRef: "work-one",
+		Model: "deepseek-v4-pro", PromptVersion: "taxonomy-v2", DeadlineAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := agentworker.New(database, map[string]agentworker.Executor{
+		"taxonomy-mapper": agentworker.ExecutorFunc(func(context.Context, agentruntime.Claim, agentworker.Emitter) (agentworker.ExecutionResult, error) {
+			return agentworker.ExecutionResult{}, agentworker.Terminal(errors.New("typed result protocol failure"))
+		}),
+	}, nil, agentworker.Config{WorkerID: "worker-one", LeaseTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := worker.ProcessOne(ctx)
+	if err != nil || !processed {
+		t.Fatalf("process run = %v, %v", processed, err)
+	}
+	run, err := database.GetRun(ctx, "taxonomy-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != agentruntime.RunFailed || run.Attempt != 1 || run.NextAttemptAt.After(time.Now().UTC()) {
+		t.Fatalf("terminal domain failure was requeued instead of failed: %#v", run)
+	}
+}
+
 type failingDeltaSink struct{}
 
 func (failingDeltaSink) EmitDelta(context.Context, agentruntime.Claim, string) error {

@@ -116,6 +116,6 @@ func TestTaxonomyPublisherLeaseIsExclusive(t *testing.T) {
 func testTaxonomyWork(id, challengeID, revision string) taxonomy.WorkItem {
 	return taxonomy.WorkItem{
 		ID: id, Kind: taxonomy.WorkKindMapping, ChallengeID: challengeID, ChallengeRevision: revision,
-		MapperSessionID: "mapper", CurriculumSession: "curriculum", SRESession: "sre", State: taxonomy.WorkPending,
+		State: taxonomy.WorkPending,
 	}
 }

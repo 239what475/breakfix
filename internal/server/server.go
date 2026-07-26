@@ -170,6 +170,9 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	router.POST("/api/internal/agent-runs/:id/authoring/context", h.InternalAuthoringContext)
 	router.POST("/api/internal/agent-runs/:id/authoring/stage", h.InternalAuthoringStage)
 	router.POST("/api/internal/agent-runs/:id/authoring/finalize", h.InternalAuthoringFinalize)
+	router.POST("/api/internal/agent-runs/:id/taxonomy/context", h.InternalTaxonomyContext)
+	router.POST("/api/internal/agent-runs/:id/taxonomy/mapper/finalize", h.InternalTaxonomyFinalizeMapper)
+	router.POST("/api/internal/agent-runs/:id/taxonomy/review/finalize", h.InternalTaxonomyFinalizeReviewPair)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {

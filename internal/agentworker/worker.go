@@ -36,6 +36,31 @@ type ExecutionResult struct {
 	Finalized bool
 }
 
+// TerminalError marks an executor failure that must end the current logical
+// Run rather than use the generic attempt requeue. Domains with their own
+// durable failure budget, such as the Taxonomy committee, use this after their
+// model-level transport retry has been exhausted.
+type TerminalError struct{ cause error }
+
+func (e *TerminalError) Error() string { return e.cause.Error() }
+func (e *TerminalError) Unwrap() error { return e.cause }
+
+func Terminal(err error) error {
+	if err == nil {
+		return nil
+	}
+	var terminal *TerminalError
+	if errors.As(err, &terminal) {
+		return err
+	}
+	return &TerminalError{cause: err}
+}
+
+func isTerminal(err error) bool {
+	var terminal *TerminalError
+	return errors.As(err, &terminal)
+}
+
 type Executor interface {
 	Execute(context.Context, agentruntime.Claim, Emitter) (ExecutionResult, error)
 }
@@ -144,6 +169,10 @@ func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) 
 		if leaseLost.Load() || parent.Err() != nil {
 			return
 		}
+		if isTerminal(err) {
+			w.fail(parent, claim, err)
+			return
+		}
 		w.requeueOrFail(parent, claim, err)
 		return
 	}
@@ -164,6 +193,16 @@ func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) 
 	}
 	if err := w.store.CompleteWithMessage(parent, claim, *result.Message, w.now()); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
 		w.requeueOrFail(parent, claim, fmt.Errorf("persist final message: %w", err))
+	}
+}
+
+func (w *Worker) fail(ctx context.Context, claim agentruntime.Claim, executionErr error) {
+	message := strings.TrimSpace(executionErr.Error())
+	if message == "" {
+		message = "agent execution failed"
+	}
+	if err := w.store.Fail(ctx, claim, message, w.now()); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
+		slog.Error("fail terminal agent run", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(executionErr))
 	}
 }
 

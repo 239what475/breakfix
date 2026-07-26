@@ -2,90 +2,82 @@ package taxonomy
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	claudecode "github.com/239what475/eino-claude-code"
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/schema"
 	"log/slog"
 )
 
 const (
-	defaultWorkerCount = 3
-	workLeaseTTL       = 3 * time.Minute
-	agentCallTimeout   = 10 * time.Minute
-	publisherLeaseTTL  = 2 * time.Minute
-	publisherLeaseName = "taxonomy-publisher"
+	defaultReconcilerCount = 3
+	workLeaseTTL           = 3 * time.Minute
+	agentCallTimeout       = 10 * time.Minute
+	publisherLeaseTTL      = 2 * time.Minute
+	publisherLeaseName     = "taxonomy-publisher"
 
 	maxTechnicalFailures = 10
 	retryInitialDelay    = time.Minute
 	retryMaximumDelay    = time.Hour
+
+	mapperPromptVersion = "taxonomy-mapper-v2"
+	reviewPromptVersion = "taxonomy-review-v2"
 )
 
+// WorkRepository contains Server-owned taxonomy state. Agent Workers only use
+// agentruntime.Repository and the authenticated internal API; they never hold
+// this repository or the taxonomy filesystem.
 type WorkRepository interface {
 	EnqueueTaxonomyWork(context.Context, WorkItem) (*WorkItem, error)
+	GetTaxonomyWork(context.Context, string) (*WorkItem, error)
 	ClaimTaxonomyWork(context.Context, string, time.Duration) (*WorkItem, error)
 	ExtendTaxonomyWorkLease(context.Context, string, string, time.Duration) error
-	MarkTaxonomyWorkAgentStarted(context.Context, string, string, WorkAgent) error
 	SaveClaimedTaxonomyWork(context.Context, WorkItem) error
+	CancelClaimedTaxonomyWork(context.Context, WorkItem, string) error
+	ScheduleTaxonomyRun(context.Context, WorkItem, agentruntime.CreateRun) (*agentruntime.Run, error)
+	FinalizeTaxonomyMapperRun(context.Context, agentruntime.Claim, string, string, ChangeSet) error
+	FinalizeTaxonomyReviewRun(context.Context, agentruntime.Claim, string, Review, Review) error
 	AcquireTaxonomyLease(context.Context, string, string, time.Duration) (bool, error)
 	ReleaseTaxonomyLease(context.Context, string, string) error
-}
-
-type AgentRequest struct {
-	Role         string
-	SessionID    string
-	Resume       bool
-	SystemPrompt string
-	Prompt       string
-	OutputSchema string
-}
-
-// AgentRunner is intentionally small: agents return strict JSON only, while
-// snapshot mutation and publication remain model-free and testable.
-type AgentRunner interface {
-	Run(context.Context, AgentRequest) (string, error)
+	GetRun(context.Context, string) (*agentruntime.Run, error)
 }
 
 type Service struct {
 	repo          WorkRepository
 	store         *Store
 	challengesDir string
-	agent         AgentRunner
+	model         string
 	instanceID    string
 }
 
 func NewService(repo WorkRepository, store *Store, challengesDir string, llm config.AgentConfig) *Service {
-	return NewServiceWithRunner(repo, store, challengesDir, &claudeRunner{llm: llm})
+	return &Service{
+		repo:          repo,
+		store:         store,
+		challengesDir: strings.TrimSpace(challengesDir),
+		model:         strings.TrimSpace(llm.Model),
+		instanceID:    agentruntime.NewID("taxonomy-server"),
+	}
 }
 
-func NewServiceWithRunner(repo WorkRepository, store *Store, challengesDir string, runner AgentRunner) *Service {
-	return &Service{repo: repo, store: store, challengesDir: challengesDir, agent: runner, instanceID: newWorkID("taxonomy-worker")}
-}
-
-// Start runs a durable scanner and multiple fair workers. All cross-process
-// coordination is delegated to DB leases, so Server instances may scale out.
+// Start runs only Server-side scheduling, artifact checks, and publication.
+// Eino calls run exclusively in Agent Worker deployments through agent_runs.
 func (s *Service) Start(ctx context.Context) {
-	if s == nil || s.repo == nil || s.store == nil || s.agent == nil || strings.TrimSpace(s.challengesDir) == "" {
+	if s == nil || s.repo == nil || s.store == nil || s.challengesDir == "" || s.model == "" {
 		return
 	}
 	go s.scanLoop(ctx)
-	for index := 0; index < defaultWorkerCount; index++ {
-		go s.workerLoop(ctx, index)
+	for index := 0; index < defaultReconcilerCount; index++ {
+		go s.reconcileLoop(ctx, index)
 	}
 }
 
@@ -94,7 +86,7 @@ func (s *Service) scanLoop(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		if err := s.EnqueueUnmapped(ctx); err != nil {
-			slog.Warn("scan taxonomy mappings", "err", err)
+			slog.Warn("scan taxonomy mappings", "error_class", taxonomyErrorClass(err))
 		}
 		select {
 		case <-ctx.Done():
@@ -104,11 +96,11 @@ func (s *Service) scanLoop(ctx context.Context) {
 	}
 }
 
-func (s *Service) workerLoop(ctx context.Context, index int) {
+func (s *Service) reconcileLoop(ctx context.Context, index int) {
 	for {
 		processed, err := s.ProcessOne(ctx, fmt.Sprintf("%s-%d", s.instanceID, index))
 		if err != nil {
-			slog.Warn("process taxonomy work", "worker", index, "err", err)
+			slog.Warn("reconcile taxonomy work", "worker", index, "error_class", taxonomyErrorClass(err))
 		}
 		wait := time.Second
 		if processed {
@@ -139,8 +131,6 @@ func (s *Service) EnqueueUnmapped(ctx context.Context) error {
 	}
 	index, err := NewCatalogIndex(snapshot, entries)
 	if err != nil {
-		// An invalid current snapshot cannot be silently repaired by mapping a
-		// random challenge. Publisher is the only valid source of snapshots.
 		return fmt.Errorf("index current taxonomy: %w", err)
 	}
 	for _, entry := range entries {
@@ -159,14 +149,11 @@ func (s *Service) EnqueueChallenge(ctx context.Context, entry challenge.Entry, b
 		return nil, errors.New("taxonomy mapping requires a published challenge revision")
 	}
 	item, err := s.repo.EnqueueTaxonomyWork(ctx, WorkItem{
-		ID:                newWorkID("mapping"),
+		ID:                agentruntime.NewID("taxonomy-work"),
 		Kind:              WorkKindMapping,
 		ChallengeID:       entry.ID,
 		ChallengeRevision: entry.Revision,
 		BaseRevision:      baseRevision,
-		MapperSessionID:   claudecode.NewSessionID(),
-		CurriculumSession: claudecode.NewSessionID(),
-		SRESession:        claudecode.NewSessionID(),
 		State:             WorkPending,
 	})
 	if err == nil {
@@ -175,8 +162,8 @@ func (s *Service) EnqueueChallenge(ctx context.Context, entry challenge.Entry, b
 	return item, err
 }
 
-// ProcessOne advances one durable committee stage or publishes an approved
-// candidate. Each call persists before releasing its worker lease.
+// ProcessOne advances one Server-side scheduling or publishing step. It never
+// waits for a model response while holding a WorkItem lease.
 func (s *Service) ProcessOne(ctx context.Context, workerID string) (bool, error) {
 	item, err := s.repo.ClaimTaxonomyWork(ctx, workerID, workLeaseTTL)
 	if err != nil {
@@ -187,51 +174,111 @@ func (s *Service) ProcessOne(ctx context.Context, workerID string) (bool, error)
 	}
 	stopHeartbeat := s.keepWorkLeaseAlive(ctx, item.ID, item.LeaseOwner)
 	defer stopHeartbeat()
-	slog.Info("taxonomy work claimed", "work", item.ID, "challenge", item.ChallengeID, "revision", item.ChallengeRevision, "state", item.State, "round", item.Round)
 	if item.Kind != WorkKindMapping {
 		item.State = WorkFailed
 		item.LastError = fmt.Sprintf("unsupported taxonomy work kind %q", item.Kind)
 		return true, s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 	}
+	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
+	if err != nil || entry.Revision != item.ChallengeRevision {
+		return true, s.repo.CancelClaimedTaxonomyWork(ctx, *item, "目标 challenge artifact 已不存在或 revision 已变化")
+	}
+	if item.ActiveRunID != "" {
+		return true, s.observeRun(ctx, item)
+	}
 	if item.State == WorkReadyPublish {
 		return true, s.publish(ctx, item, workerID)
 	}
-	return true, s.runCommittee(ctx, item)
+	return true, s.scheduleNextStage(ctx, item)
 }
 
-// runCommittee derives the next stage entirely from durable work state. A
-// candidate with a complete review pair is a rejected semantic round and must
-// return to the Mapper; a candidate without that pair belongs to both reviewers.
-func (s *Service) runCommittee(ctx context.Context, item *WorkItem) error {
-	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
-	if err != nil || entry.Revision != item.ChallengeRevision {
-		item.State = WorkCancelled
-		item.LastError = "目标 challenge artifact 已不存在或 revision 已变化"
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+func (s *Service) observeRun(ctx context.Context, item *WorkItem) error {
+	run, err := s.repo.GetRun(ctx, item.ActiveRunID)
+	if err != nil {
+		item.ActiveStage = ""
+		item.ActiveRunID = ""
+		return s.retryTechnical(ctx, item, fmt.Errorf("load active taxonomy run: %w", err))
 	}
+	switch run.Status {
+	case agentruntime.RunPending, agentruntime.RunRunning:
+		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+	case agentruntime.RunFailed, agentruntime.RunCancelled:
+		item.ActiveStage = ""
+		item.ActiveRunID = ""
+		message := strings.TrimSpace(run.LastError)
+		if message == "" {
+			message = "taxonomy agent run ended without a result"
+		}
+		return s.retryTechnical(ctx, item, errors.New(message))
+	case agentruntime.RunSucceeded:
+		// Server finalization clears active_run_id atomically with completion. A
+		// completed Run still referenced by a WorkItem is an invariant breach.
+		item.ActiveStage = ""
+		item.ActiveRunID = ""
+		return s.retryTechnical(ctx, item, errors.New("taxonomy run succeeded without finalizing its domain stage"))
+	default:
+		item.ActiveStage = ""
+		item.ActiveRunID = ""
+		return s.retryTechnical(ctx, item, fmt.Errorf("taxonomy run has unknown status %q", run.Status))
+	}
+}
+
+func (s *Service) scheduleNextStage(ctx context.Context, item *WorkItem) error {
 	if item.hasPartialReviews() {
-		// Reviewer output is only meaningful as a complete pair. Clear legacy or
-		// interrupted partial state before any retry path can persist it again.
+		// This cannot be created by the new finalizer. Clear old/incomplete
+		// state before the pair is rerun instead of treating one conclusion as
+		// an official committee result.
 		item.CurriculumReview = nil
 		item.SREReview = nil
+		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 	}
-	artifact, err := readArtifact(entry.Dir)
-	if err != nil {
-		return s.retryTechnical(ctx, item, fmt.Errorf("read challenge artifact: %w", err))
-	}
+	stage := WorkStageReview
+	baseRevision := item.BaseRevision
 	if item.needsMapper() {
-		base, err := s.currentSnapshot()
+		current, err := s.currentSnapshot()
 		if err != nil {
 			return s.retryTechnical(ctx, item, fmt.Errorf("load current taxonomy: %w", err))
 		}
-		return s.runMapperStage(ctx, item, *entry, base, artifact)
+		stage = WorkStageMapper
+		baseRevision = current.Revision
 	}
-
-	base, err := s.snapshotForRevision(item.BaseRevision)
+	if stage == WorkStageReview {
+		if item.Candidate == nil {
+			return s.retryTechnical(ctx, item, errors.New("taxonomy review stage has no mapper candidate"))
+		}
+		if _, err := s.snapshotForRevision(baseRevision); err != nil {
+			return s.retryTechnical(ctx, item, fmt.Errorf("load candidate taxonomy revision: %w", err))
+		}
+	}
+	item.BaseRevision = baseRevision
+	purpose, err := PurposeForStage(stage)
 	if err != nil {
-		return s.retryTechnical(ctx, item, fmt.Errorf("load candidate taxonomy revision: %w", err))
+		return err
 	}
-	return s.runReviewerStage(ctx, item, *entry, base, artifact)
+	promptVersion := mapperPromptVersion
+	if stage == WorkStageReview {
+		promptVersion = reviewPromptVersion
+	}
+	input, err := json.Marshal(RunInput{WorkID: item.ID, Stage: stage, Round: item.Round})
+	if err != nil {
+		return fmt.Errorf("encode taxonomy run input: %w", err)
+	}
+	run, err := s.repo.ScheduleTaxonomyRun(ctx, *item, agentruntime.CreateRun{
+		ID:            agentruntime.NewID("taxonomy-run"),
+		Purpose:       purpose,
+		OwnerKind:     "taxonomy-work",
+		OwnerRef:      item.ID,
+		InputRevision: baseRevision,
+		Input:         input,
+		Model:         s.model,
+		PromptVersion: promptVersion,
+		DeadlineAt:    time.Now().UTC().Add(agentCallTimeout),
+	})
+	if err != nil {
+		return fmt.Errorf("schedule taxonomy %s run: %w", stage, err)
+	}
+	slog.Info("taxonomy agent run scheduled", "work", item.ID, "run", run.ID, "stage", stage, "round", item.Round)
+	return nil
 }
 
 func (item WorkItem) needsMapper() bool {
@@ -240,57 +287,6 @@ func (item WorkItem) needsMapper() bool {
 
 func (item WorkItem) hasPartialReviews() bool {
 	return item.Candidate != nil && (item.CurriculumReview == nil) != (item.SREReview == nil)
-}
-
-func (s *Service) runMapperStage(ctx context.Context, item *WorkItem, entry challenge.Entry, base Snapshot, artifact string) error {
-	changes, err := s.runMapper(ctx, item, entry, base, artifact)
-	if err != nil {
-		return s.retryTechnical(ctx, item, err)
-	}
-	if _, err := validateMappingChangeSet(changes, entry, base); err != nil {
-		return s.retryTechnical(ctx, item, fmt.Errorf("mapper candidate failed deterministic validation: %w", err))
-	}
-	item.BaseRevision = base.Revision
-	item.Candidate = &changes
-	item.CurriculumReview = nil
-	item.SREReview = nil
-	item.State = WorkPending
-	item.LastError = ""
-	item.TechnicalFailures = 0
-	item.ExecutionFailures = 0
-	item.NextRunAt = time.Time{}
-	slog.Info("taxonomy mapper candidate persisted", "work", item.ID, "challenge", entry.ID, "round", item.Round+1)
-	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
-}
-
-func (s *Service) runReviewerStage(ctx context.Context, item *WorkItem, entry challenge.Entry, base Snapshot, artifact string) error {
-	if item.Candidate == nil {
-		return s.retryTechnical(ctx, item, errors.New("review stage has no mapper candidate"))
-	}
-	// A reviewer pair is indivisible. Legacy or interrupted partial results are
-	// discarded before both reviewers are run again.
-	item.CurriculumReview = nil
-	item.SREReview = nil
-	curriculum, sre, err := s.runReviews(ctx, item, entry, base, artifact, *item.Candidate)
-	if err != nil {
-		return s.retryTechnical(ctx, item, err)
-	}
-	item.Round++
-	item.CurriculumReview = &curriculum
-	item.SREReview = &sre
-	item.TechnicalFailures = 0
-	item.ExecutionFailures = 0
-	item.NextRunAt = time.Time{}
-	if curriculum.Decision == ReviewApprove && sre.Decision == ReviewApprove {
-		item.State = WorkReadyPublish
-	} else {
-		// The same Mapper session receives both review results on its next fair
-		// queue turn. There is intentionally no automatic retry limit.
-		item.State = WorkPending
-	}
-	item.LastError = ""
-	slog.Info("taxonomy review completed", "work", item.ID, "round", item.Round, "curriculum", curriculum.Decision, "sre", sre.Decision, "next_state", item.State)
-	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 }
 
 func (s *Service) publish(ctx context.Context, item *WorkItem, workerID string) error {
@@ -303,27 +299,20 @@ func (s *Service) publish(ctx context.Context, item *WorkItem, workerID string) 
 	}
 	acquired, err := s.repo.AcquireTaxonomyLease(ctx, publisherLeaseName, workerID, publisherLeaseTTL)
 	if err != nil {
-		// The database may be unavailable, so this error cannot be durably
-		// recorded through the same repository.
 		return err
 	}
 	if !acquired {
-		// Another Publisher will make progress; release this worker lease so the
-		// Work List remains fair rather than waiting while holding it.
 		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 	}
-	slog.Info("taxonomy publisher acquired lease", "work", item.ID, "challenge", item.ChallengeID)
 	defer func() {
 		if err := s.repo.ReleaseTaxonomyLease(context.Background(), publisherLeaseName, workerID); err != nil {
-			slog.Warn("release taxonomy publisher lease", "err", err)
+			slog.Warn("release taxonomy publisher lease", "error_class", taxonomyErrorClass(err))
 		}
 	}()
 
 	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
 	if err != nil || entry.Revision != item.ChallengeRevision {
-		item.State = WorkCancelled
-		item.LastError = "目标 challenge artifact 已不存在或 revision 已变化"
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+		return s.repo.CancelClaimedTaxonomyWork(ctx, *item, "目标 challenge artifact 已不存在或 revision 已变化")
 	}
 	current, err := s.currentSnapshot()
 	if err != nil {
@@ -362,6 +351,8 @@ func (s *Service) resetForLatest(ctx context.Context, item *WorkItem, revision, 
 	item.Candidate = nil
 	item.CurriculumReview = nil
 	item.SREReview = nil
+	item.ActiveStage = ""
+	item.ActiveRunID = ""
 	item.State = WorkPending
 	item.LastError = reason
 	item.TechnicalFailures = 0
@@ -370,16 +361,14 @@ func (s *Service) resetForLatest(ctx context.Context, item *WorkItem, revision, 
 	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 }
 
-// retryTechnical preserves semantic progress. A failed execution re-enters the
-// Work List with bounded exponential delay only after its round's shared agent
-// failure budget is exhausted; active calls have already returned before this
-// function is reached.
 func (s *Service) retryTechnical(ctx context.Context, item *WorkItem, err error) error {
 	item.TechnicalFailures++
 	item.LastError = strings.TrimSpace(err.Error())
 	if item.LastError == "" {
 		item.LastError = "taxonomy work encountered an unspecified technical failure"
 	}
+	item.ActiveStage = ""
+	item.ActiveRunID = ""
 	if item.State != WorkReadyPublish {
 		item.State = WorkPending
 	}
@@ -388,9 +377,9 @@ func (s *Service) retryTechnical(ctx context.Context, item *WorkItem, err error)
 		item.TechnicalFailures = 0
 		item.ExecutionFailures++
 		item.NextRunAt = time.Now().UTC().Add(retryDelay(item.ExecutionFailures))
-		slog.Warn("taxonomy execution failure budget exhausted", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "execution_failures", item.ExecutionFailures, "next_run_at", item.NextRunAt, "err", err)
+		slog.Warn("taxonomy execution failure budget exhausted", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "execution_failures", item.ExecutionFailures, "error_class", taxonomyErrorClass(err))
 	} else {
-		slog.Warn("taxonomy technical failure", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "technical_failures", item.TechnicalFailures, "err", err)
+		slog.Warn("taxonomy technical failure", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "technical_failures", item.TechnicalFailures, "error_class", taxonomyErrorClass(err))
 	}
 	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
 }
@@ -424,7 +413,7 @@ func (s *Service) keepWorkLeaseAlive(ctx context.Context, workID, owner string) 
 				return
 			case <-ticker.C:
 				if err := s.repo.ExtendTaxonomyWorkLease(context.Background(), workID, owner, workLeaseTTL); err != nil {
-					slog.Warn("extend taxonomy work lease", "work", workID, "err", err)
+					slog.Warn("extend taxonomy work lease", "work", workID, "error_class", taxonomyErrorClass(err))
 				}
 			}
 		}
@@ -457,31 +446,32 @@ func (s *Service) snapshotForRevision(revision string) (Snapshot, error) {
 	return *snapshot, nil
 }
 
-func (s *Service) runMapper(ctx context.Context, item *WorkItem, entry challenge.Entry, base Snapshot, artifact string) (ChangeSet, error) {
-	resume := item.MapperStarted
-	if !item.MapperStarted {
-		if err := s.repo.MarkTaxonomyWorkAgentStarted(ctx, item.ID, item.LeaseOwner, WorkAgentMapper); err != nil {
-			return ChangeSet{}, err
-		}
-		item.MapperStarted = true
-	}
-	slog.Info("taxonomy mapper started", "work", item.ID, "challenge", entry.ID, "round", item.Round+1, "resume", resume)
-	baseJSON, err := json.MarshalIndent(base, "", "  ")
+// ExecutionContext is reconstructed by the Server for one claimed Agent Run.
+// It contains model input but no credentials, database handle, or filesystem
+// path. The Worker sends only a typed result back through the internal API.
+type ExecutionContext struct {
+	Stage        WorkStage `json:"stage"`
+	WorkID       string    `json:"work_id"`
+	SystemPrompt string    `json:"system_prompt"`
+	Prompt       string    `json:"prompt"`
+}
+
+func (s *Service) LoadExecutionContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
+	item, input, entry, base, artifact, err := s.contextForClaim(ctx, claim)
 	if err != nil {
-		return ChangeSet{}, err
+		return ExecutionContext{}, err
 	}
-	var prior string
-	if item.Candidate != nil {
-		candidate, err := json.MarshalIndent(item.Candidate, "", "  ")
+	switch input.Stage {
+	case WorkStageMapper:
+		baseJSON, err := json.MarshalIndent(base, "", "  ")
 		if err != nil {
-			return ChangeSet{}, err
+			return ExecutionContext{}, err
 		}
-		prior = fmt.Sprintf("\n上一轮候选 ChangeSet：\n%s\n课程审核意见：%s\nSRE 审核意见：%s\n", candidate, formatReview(item.CurriculumReview), formatReview(item.SREReview))
-	}
-	if item.LastError != "" {
-		prior += fmt.Sprintf("\n上一次处理信息：%s\n请基于当前 challenge、taxonomy 和候选上下文输出完整 ChangeSet。\n", item.LastError)
-	}
-	prompt := fmt.Sprintf(`已验证 challenge：
+		prior, err := mapperPriorContext(item)
+		if err != nil {
+			return ExecutionContext{}, err
+		}
+		return ExecutionContext{Stage: input.Stage, WorkID: item.ID, SystemPrompt: mapperSystemPrompt, Prompt: fmt.Sprintf(`已验证 challenge：
 - id: %s
 - title: %s
 - revision: %s
@@ -492,82 +482,111 @@ func (s *Service) runMapper(ctx context.Context, item *WorkItem, entry challenge
 challenge 完整 artifact：
 %s
 %s
-请输出一个完整 ChangeSet。它必须只映射这个 challenge；可以新增或修改 Skill、Tag 和 Skill.requires，但不得修改其他 challenge mapping。`, entry.ID, entry.Title, entry.Revision, baseJSON, artifact, prior)
-	output, err := s.agent.Run(ctx, AgentRequest{Role: string(WorkAgentMapper), SessionID: item.MapperSessionID, Resume: resume, SystemPrompt: mapperSystemPrompt, Prompt: prompt, OutputSchema: changeSetOutputSchema})
-	if err != nil {
-		return ChangeSet{}, fmt.Errorf("run taxonomy mapper: %w", err)
-	}
-	var result ChangeSet
-	if err := decodeStrictJSON(output, &result); err != nil {
-		return ChangeSet{}, fmt.Errorf("mapper must return one valid ChangeSet JSON document: %w", err)
-	}
-	slog.Info("taxonomy mapper returned candidate", "work", item.ID, "challenge", entry.ID)
-	for index := range result.ChallengeMappings {
-		if result.ChallengeMappings[index].Value != nil && result.ChallengeMappings[index].Value.Challenge.ID == entry.ID {
-			result.ChallengeMappings[index].Value.File = filepath.Base(entry.Dir)
+请调用 submit_changeset 提交一个完整 ChangeSet。它必须只映射这个 challenge；可以新增或修改 Skill、Tag 和 Skill.requires，但不得修改其他 challenge mapping。`, entry.ID, entry.Title, entry.Revision, baseJSON, artifact, prior)}, nil
+	case WorkStageReview:
+		if item.Candidate == nil {
+			return ExecutionContext{}, errors.New("taxonomy review stage has no mapper candidate")
 		}
+		baseJSON, err := json.MarshalIndent(base, "", "  ")
+		if err != nil {
+			return ExecutionContext{}, err
+		}
+		changesJSON, err := json.MarshalIndent(item.Candidate, "", "  ")
+		if err != nil {
+			return ExecutionContext{}, err
+		}
+		return ExecutionContext{Stage: input.Stage, WorkID: item.ID, SystemPrompt: reviewerSystemPrompt, Prompt: fmt.Sprintf(`已验证 challenge：%s (%s)
+
+当前 taxonomy：
+%s
+
+候选 ChangeSet：
+%s
+
+challenge artifact：
+%s`, entry.Title, entry.Revision, baseJSON, changesJSON, artifact)}, nil
+	default:
+		return ExecutionContext{}, errors.New("taxonomy run has an unknown stage")
 	}
-	return result, nil
 }
 
-func (s *Service) runReviews(ctx context.Context, item *WorkItem, entry challenge.Entry, base Snapshot, artifact string, changes ChangeSet) (Review, Review, error) {
-	slog.Info("taxonomy reviewers started", "work", item.ID, "challenge", entry.ID, "round", item.Round+1)
-	baseJSON, err := json.MarshalIndent(base, "", "  ")
+func (s *Service) FinalizeMapper(ctx context.Context, claim agentruntime.Claim, changes ChangeSet) error {
+	item, input, entry, base, _, err := s.contextForClaim(ctx, claim)
 	if err != nil {
-		return Review{}, Review{}, err
+		return err
 	}
-	changesJSON, err := json.MarshalIndent(changes, "", "  ")
+	if input.Stage != WorkStageMapper {
+		return errors.New("taxonomy run is not a mapper stage")
+	}
+	if _, err := validateMappingChangeSet(changes, entry, base); err != nil {
+		return fmt.Errorf("mapper candidate failed deterministic validation: %w", err)
+	}
+	return s.repo.FinalizeTaxonomyMapperRun(ctx, claim, item.ID, base.Revision, changes)
+}
+
+func (s *Service) FinalizeReviewPair(ctx context.Context, claim agentruntime.Claim, curriculum, sre Review) error {
+	item, input, _, _, _, err := s.contextForClaim(ctx, claim)
 	if err != nil {
-		return Review{}, Review{}, err
+		return err
 	}
-	prompt := fmt.Sprintf("已验证 challenge：%s (%s)\n\n当前 taxonomy：\n%s\n\n候选 ChangeSet：\n%s\n\nchallenge artifact：\n%s", entry.Title, entry.Revision, baseJSON, changesJSON, artifact)
-	curriculumResume := item.CurriculumStarted
-	sreResume := item.SREStarted
-	if !item.CurriculumStarted {
-		if err := s.repo.MarkTaxonomyWorkAgentStarted(ctx, item.ID, item.LeaseOwner, WorkAgentCurriculum); err != nil {
-			return Review{}, Review{}, err
-		}
-		item.CurriculumStarted = true
+	if input.Stage != WorkStageReview {
+		return errors.New("taxonomy run is not a review stage")
 	}
-	if !item.SREStarted {
-		if err := s.repo.MarkTaxonomyWorkAgentStarted(ctx, item.ID, item.LeaseOwner, WorkAgentSRE); err != nil {
-			return Review{}, Review{}, err
-		}
-		item.SREStarted = true
+	if err := ValidateReview(curriculum); err != nil {
+		return fmt.Errorf("invalid curriculum review: %w", err)
 	}
-	type result struct {
-		review Review
-		err    error
+	if err := ValidateReview(sre); err != nil {
+		return fmt.Errorf("invalid SRE review: %w", err)
 	}
-	var curriculum, sre result
-	var wait sync.WaitGroup
-	wait.Add(2)
-	go func() {
-		defer wait.Done()
-		output, err := s.agent.Run(ctx, AgentRequest{Role: string(WorkAgentCurriculum), SessionID: item.CurriculumSession, Resume: curriculumResume, SystemPrompt: curriculumReviewerPrompt, Prompt: prompt, OutputSchema: reviewOutputSchema})
-		if err != nil {
-			curriculum.err = fmt.Errorf("run curriculum reviewer: %w", err)
-			return
-		}
-		curriculum.review, curriculum.err = decodeReview(output)
-	}()
-	go func() {
-		defer wait.Done()
-		output, err := s.agent.Run(ctx, AgentRequest{Role: string(WorkAgentSRE), SessionID: item.SRESession, Resume: sreResume, SystemPrompt: sreReviewerPrompt, Prompt: prompt, OutputSchema: reviewOutputSchema})
-		if err != nil {
-			sre.err = fmt.Errorf("run SRE reviewer: %w", err)
-			return
-		}
-		sre.review, sre.err = decodeReview(output)
-	}()
-	wait.Wait()
-	if curriculum.err != nil {
-		return Review{}, Review{}, curriculum.err
+	return s.repo.FinalizeTaxonomyReviewRun(ctx, claim, item.ID, curriculum, sre)
+}
+
+func (s *Service) contextForClaim(ctx context.Context, claim agentruntime.Claim) (*WorkItem, RunInput, challenge.Entry, Snapshot, string, error) {
+	if !claim.Valid() {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("taxonomy execution requires a valid run claim")
 	}
-	if sre.err != nil {
-		return Review{}, Review{}, sre.err
+	input, err := DecodeRunInput(claim.Run.Input)
+	if err != nil {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", fmt.Errorf("decode taxonomy run input: %w", err)
 	}
-	return curriculum.review, sre.review, nil
+	purpose, err := PurposeForStage(input.Stage)
+	if err != nil {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", err
+	}
+	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-work" || claim.Run.OwnerRef != input.WorkID {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("taxonomy run does not own its work item")
+	}
+	item, err := s.repo.GetTaxonomyWork(ctx, input.WorkID)
+	if err != nil {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", err
+	}
+	if item.ActiveRunID != claim.Run.ID || item.ActiveStage != input.Stage || item.Round != input.Round {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("taxonomy run no longer owns its scheduled stage")
+	}
+	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
+	if err != nil || entry.Revision != item.ChallengeRevision {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("目标 challenge artifact 已不存在或 revision 已变化")
+	}
+	base, err := s.snapshotForRevision(claim.Run.InputRevision)
+	if err != nil {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", fmt.Errorf("load taxonomy base revision: %w", err)
+	}
+	artifact, err := readArtifact(entry.Dir)
+	if err != nil {
+		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", fmt.Errorf("read challenge artifact: %w", err)
+	}
+	return item, input, *entry, base, artifact, nil
+}
+
+func mapperPriorContext(item *WorkItem) (string, error) {
+	if item.Candidate == nil {
+		return "", nil
+	}
+	candidate, err := json.MarshalIndent(item.Candidate, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("\n上一轮候选 ChangeSet：\n%s\n课程审核意见：%s\nSRE 审核意见：%s\n", candidate, formatReview(item.CurriculumReview), formatReview(item.SREReview)), nil
 }
 
 func validateMappingChangeSet(changes ChangeSet, entry challenge.Entry, base Snapshot) (Snapshot, error) {
@@ -582,6 +601,22 @@ func validateMappingChangeSet(changes ChangeSet, entry challenge.Entry, base Sna
 		return Snapshot{}, errors.New("mapper challenge mapping must exactly match the verified challenge id, title, and revision")
 	}
 	return ApplyChangeSet(base, changes)
+}
+
+func ValidateReview(review Review) error {
+	switch review.Decision {
+	case ReviewApprove:
+		if strings.TrimSpace(review.Feedback) != "" {
+			return errors.New("approve review must not include feedback")
+		}
+	case ReviewReject:
+		if strings.TrimSpace(review.Feedback) == "" {
+			return errors.New("reject review must include concrete feedback")
+		}
+	default:
+		return fmt.Errorf("review decision must be approve or reject, got %q", review.Decision)
+	}
+	return nil
 }
 
 func referencedDefinitionsUnchanged(base, current Snapshot, changes ChangeSet) bool {
@@ -664,42 +699,6 @@ func readArtifact(root string) (string, error) {
 	return builder.String(), nil
 }
 
-func decodeStrictJSON(input string, target any) error {
-	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(input)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON documents")
-		}
-		return err
-	}
-	return nil
-}
-
-func decodeReview(input string) (Review, error) {
-	var review Review
-	if err := decodeStrictJSON(input, &review); err != nil {
-		return Review{}, fmt.Errorf("reviewer must return one valid review JSON document: %w", err)
-	}
-	switch review.Decision {
-	case ReviewApprove:
-		if strings.TrimSpace(review.Feedback) != "" {
-			return Review{}, errors.New("approve review must not include feedback")
-		}
-	case ReviewReject:
-		if strings.TrimSpace(review.Feedback) == "" {
-			return Review{}, errors.New("reject review must include concrete feedback")
-		}
-	default:
-		return Review{}, fmt.Errorf("review decision must be approve or reject, got %q", review.Decision)
-	}
-	return review, nil
-}
-
 func formatReview(review *Review) string {
 	if review == nil {
 		return "无"
@@ -711,199 +710,28 @@ func formatReview(review *Review) string {
 	return string(data)
 }
 
-func newWorkID(prefix string) string {
-	bytes := make([]byte, 8)
-	if _, err := rand.Read(bytes); err != nil {
-		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+func taxonomyErrorClass(err error) string {
+	if err == nil {
+		return ""
 	}
-	return prefix + "-" + hex.EncodeToString(bytes)
-}
-
-type claudeRunner struct {
-	llm config.AgentConfig
-}
-
-func (r *claudeRunner) Run(ctx context.Context, request AgentRequest) (string, error) {
-	options := []claudecode.Option{
-		claudecode.WithSystemPrompt(request.SystemPrompt),
-		claudecode.WithTools(),
-		claudecode.WithPermissionMode("dontAsk"),
-		claudecode.WithMaxTurns(8),
+	if errors.Is(err, agentruntime.ErrLeaseLost) {
+		return "lease_lost"
 	}
-	if strings.TrimSpace(request.OutputSchema) != "" {
-		options = append(options,
-			claudecode.WithStructuredOutput(request.OutputSchema),
-			claudecode.WithEmitToolEvents(),
-		)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "cancelled"
 	}
-	if env := taxonomyClaudeEnvironment(r.llm); len(env) > 0 {
-		options = append(options, claudecode.WithEnv(env...))
-	}
-	if request.Resume {
-		options = append(options, claudecode.WithResume(request.SessionID))
-	} else {
-		options = append(options, claudecode.WithSessionID(request.SessionID))
-	}
-	agent, err := claudecode.New(options...)
-	if err != nil {
-		return "", err
-	}
-	runCtx, cancel := context.WithTimeout(ctx, agentCallTimeout)
-	defer cancel()
-	events := agent.Run(runCtx, &adk.AgentInput{
-		Messages: []adk.Message{schema.UserMessage(request.Prompt)},
-	})
-	var last, structured string
-	for {
-		event, ok := events.Next()
-		if !ok {
-			break
-		}
-		if event.Err != nil {
-			return "", event.Err
-		}
-		if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.Message != nil {
-			message := event.Output.MessageOutput.Message
-			for _, call := range message.ToolCalls {
-				if call.Function.Name == "StructuredOutput" {
-					if structured != "" {
-						return "", errors.New("agent emitted structured output more than once")
-					}
-					structured = strings.TrimSpace(call.Function.Arguments)
-				}
-			}
-			if content := strings.TrimSpace(message.Content); content != "" {
-				last = content
-			}
-		}
-		if event.Action != nil && event.Action.Exit {
-			break
-		}
-	}
-	if err := runCtx.Err(); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(request.OutputSchema) != "" {
-		if structured == "" {
-			return "", errors.New("agent did not emit structured output")
-		}
-		return structured, nil
-	}
-	if strings.TrimSpace(last) == "" {
-		return "", errors.New("agent returned an empty response")
-	}
-	return last, nil
-}
-
-func taxonomyClaudeEnvironment(llm config.AgentConfig) []string {
-	values := []struct{ key, value string }{
-		{"ANTHROPIC_BASE_URL", llm.BaseURL},
-		{"ANTHROPIC_AUTH_TOKEN", llm.APIKey},
-		{"ANTHROPIC_MODEL", llm.Model},
-		{"ANTHROPIC_DEFAULT_OPUS_MODEL", llm.Model},
-		{"ANTHROPIC_DEFAULT_SONNET_MODEL", llm.Model},
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value.value) != "" {
-			result = append(result, value.key+"="+value.value)
-		}
-	}
-	return result
+	return "taxonomy"
 }
 
 const mapperSystemPrompt = `你是 Breakfix Taxonomy Mapper。你只负责将已经真实验证并发布的 challenge 映射到独立的 Skill、Tag 和关系；不得修改 challenge 本身。
 
-你必须只输出一个 JSON 对象，不能输出 Markdown、代码围栏、解释或任何额外文本。根对象只能有 skills、tags、challenge_mappings、skill_mappings 四个数组，且四个数组都必须出现。唯一允许的结构如下；字段名、嵌套层级和引用对象都必须完全一致：
+Skill 必须是可独立解释、能在多题复用的能力；Tag 仅用于稳定的 Catalog 浏览维度，不能用 Tag 复述细粒度 Skill。优先复用现有定义；新增 Skill、Tag 或 requires 关系时，必须有明确、可复用的语义理由。只映射当前 challenge，不能修改其他 challenge 的 mapping。
 
-{
-  "skills": [
-    {
-      "operation": "upsert",
-      "value": {
-        "kind": "Skill",
-        "id": "skill-7d6f1b7e522c4a21",
-        "title": "可读标题",
-        "definition": "能力定义",
-        "mapping_guidance": {
-          "outcome_when": ["何时作为练习结果"],
-          "entry_when": ["何时只是进入题目的前置能力"],
-          "exclude_when": ["何时不应归入此能力"]
-        }
-      }
-    }
-  ],
-  "tags": [
-    {
-      "operation": "upsert",
-      "value": {
-        "kind": "Tag",
-        "id": "tag-7d6f1b7e522c4a21",
-        "title": "可读标题",
-        "definition": "浏览维度定义",
-        "mapping_guidance": {
-          "include_when": ["何时应归入此浏览维度"],
-          "exclude_when": ["何时不应归入此浏览维度"]
-        }
-      }
-    }
-  ],
-  "challenge_mappings": [
-    {
-      "operation": "upsert",
-      "value": {
-        "challenge": {
-          "id": "题目 id",
-          "title": "题目 title",
-          "revision": "题目 revision"
-        },
-        "tags": [{"id": "tag id", "title": "Tag title"}],
-        "entry_skills": [{"id": "skill id", "title": "Skill title"}],
-        "outcomes": [{"id": "skill id", "title": "Skill title", "primary": true}]
-      }
-    }
-  ],
-  "skill_mappings": [
-    {
-      "operation": "upsert",
-      "value": {
-        "source": {"id": "skill id", "title": "Skill title"},
-        "requires": [{"id": "skill id", "title": "Skill title"}]
-      }
-    }
-  ]
-}
+完成分析后必须且只能调用 submit_changeset。`
 
-新增 ID 必须使用不包含题意的稳定 opaque ID：Skill 必须严格匹配 skill- 后接 16 位小写十六进制字符，Tag 必须严格匹配 tag- 后接 16 位小写十六进制字符。不得在 ChangeSet 根对象或任意 change wrapper 写 kind；kind 只能在 value 内的 Skill 或 Tag 上。不得使用 challenge_id、skill_id、checkpoint_id、裸字符串引用或 checkpoint 到 Skill 的映射。每个 challenge mapping 的 outcomes 全部合计必须恰好一个 primary=true。没有前置依赖的 Skill 不要创建 skill_mappings 条目。删除时只使用 {"operation":"delete","id":"..."}、{"operation":"delete","challenge_id":"..."} 或 {"operation":"delete","source_id":"..."}，且不得包含 value。
+const reviewerSystemPrompt = `你是 Breakfix Taxonomy Committee Reviewer。你将以两个独立视角同时审查同一份候选 ChangeSet：
 
-Skill 必须是可独立解释、能在多题复用的能力；Tag 仅用于受控的 Catalog 浏览维度，不能用 Tag 复述细粒度 Skill。优先复用现有定义，新增时才提出明确、可复用的定义。`
+1. Curriculum：检查 Skill、Tag、entry/outcome 和 requires 是否清楚、可复用且教学上合理；不要把宽泛领域或单条命令参数伪装成 Skill。
+2. SRE：依据已经验证的 challenge artifact，检查候选是否忠实描述实际排障目标、环境和检查点，而不是题意猜测；检查关系是否造成技术误导。
 
-const changeSetOutputSchema = `{
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["skills", "tags", "challenge_mappings", "skill_mappings"],
-  "properties": {
-    "skills": {"type": "array"},
-    "tags": {"type": "array"},
-    "challenge_mappings": {"type": "array"},
-    "skill_mappings": {"type": "array"}
-  }
-}`
-
-const reviewOutputSchema = `{
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["decision"],
-  "properties": {
-    "decision": {"type": "string", "enum": ["approve", "reject"]},
-    "feedback": {"type": "string"}
-  }
-}`
-
-const curriculumReviewerPrompt = `你是 Breakfix Curriculum Reviewer。检查候选 taxonomy ChangeSet 是否建立了清楚、可复用且教学上合理的 Skill、Tag、entry/outcome 和 requires 关系。不要因 challenge 的基础镜像或偶然词汇误分类；不要把宽泛领域或单条命令参数伪装成 Skill。
-
-只能输出一个 JSON 对象，禁止 Markdown 或额外文本。通过时必须恰好输出 {"decision":"approve"}；驳回时必须恰好输出 {"decision":"reject","feedback":"具体、可执行的中文问题"}。`
-
-const sreReviewerPrompt = `你是 Breakfix SRE Reviewer。依据已验证 challenge artifact，检查候选 taxonomy ChangeSet 是否忠实描述实际排障目标、环境和检查点，而不是题意猜测；检查 Skill/Tag/entry/outcome/requires 是否有技术上的误导。
-
-只能输出一个 JSON 对象，禁止 Markdown 或额外文本。通过时必须恰好输出 {"decision":"approve"}；驳回时必须恰好输出 {"decision":"reject","feedback":"具体、可执行的中文问题"}。`
+每个视角完成后必须且只能调用自己的结果工具。通过时不能附带 feedback；驳回时 feedback 必须是具体、可执行的中文问题。`

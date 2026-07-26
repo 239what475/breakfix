@@ -56,3 +56,17 @@ controller 驱动的 TTL 删除依赖该 ownerReference；失败后 lifecycle `D
 Server/Chart revision 重跑 POC；若在本阶段没有官方修复，则需要先把 workspace PVC 的权威生命周期明确改由 Breakfix Server 管理，
 并用独立设计说明替换“依赖 OpenSandbox TTL 回收 PVC”的前提，不能在实现中悄悄增加扫尾逻辑。在这两者之一完成前，不开始
 `OpenSandboxBackend` 或 Generator 迁移。
+
+## 2026-07-26：Taxonomy reviewer 的持久化边界
+
+`EINO-RESEARCH.md` 原先将 Curriculum Reviewer 和 SRE Reviewer 描述为两个可并行的独立 Agent Run；但这会与既有
+Taxonomy 委员会约束冲突：一名 reviewer 的结论不能在另一名 reviewer 因模型或协议错误失败时成为可恢复的半成品。若把两份
+结论分别写入领域表，下一次调度必须维护并恢复不对称的 reviewer 状态，既扩大 WorkItem 状态机，也让一次不完整审查看起来像
+领域事实。
+
+调整：Mapper 保持无 Session 的 `taxonomy-mapper` Run。两名 reviewer 由一个 `taxonomy-review` Run 负责，在同一 Worker
+attempt 内并行执行两个独立的 Eino typed-result 调用；只有两者都正常返回并通过严格领域校验时，Server 才在一个事务中持久化
+完整 review pair、完成该 Run 并推进 Round。任一调用失败时，review pair 不写入领域表；该 Run 在模型层最多完成三次传输重试后
+直接进入终态，由 Server 对当前 Round 计入一次 Taxonomy 技术失败预算并安排下一 Run。这样没有供应商 session、没有 partial review
+事实，也不会在运行中的调用被十次预算提前中断。该调整不改变 Mapper 与两名 reviewer 的职责分工或并行模型调用，只把 reviewer
+pair 作为不可分割的持久化边界。

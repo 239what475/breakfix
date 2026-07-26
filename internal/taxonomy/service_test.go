@@ -3,54 +3,54 @@ package taxonomy_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/config"
 	. "github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 )
 
-func TestMappingWorkflowPublishesOnlyAfterBothReviewersApprove(t *testing.T) {
+func TestMappingWorkflowUsesGenericRunsAndPublishesAfterReviewPair(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
 	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapping: mappingChangeSet(entry)}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
-	if err := service.EnqueueUnmapped(context.Background()); err != nil {
+	service := NewService(database, NewStore(root), filepath.Join(root, "challenges"), config.AgentConfig{Model: "test-model"})
+
+	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
 		t.Fatal(err)
 	}
-	processed, err := service.ProcessOne(context.Background(), "worker-a")
-	if err != nil || !processed {
-		t.Fatalf("mapper stage = %v, %v", processed, err)
+	mapperRun := scheduleAndClaim(t, service, database, WorkStageMapper)
+	if mapperRun.Run.Purpose != RuntimePurposeMapper || mapperRun.Run.SessionID != "" || mapperRun.Run.OwnerKind != "taxonomy-work" {
+		t.Fatalf("mapper is not a generic no-session runtime run: %#v", mapperRun.Run)
 	}
+	if err := service.FinalizeMapper(context.Background(), *mapperRun, mappingChangeSet(entry)); err != nil {
+		t.Fatal(err)
+	}
+
 	items, err := database.ListTaxonomyWork(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].State != WorkPending || items[0].Round != 0 || items[0].Candidate == nil || items[0].CurriculumReview != nil || items[0].SREReview != nil {
-		t.Fatalf("mapper candidate was not durably staged: %#v", items)
+	if len(items) != 1 || items[0].Candidate == nil || items[0].ActiveRunID != "" || items[0].CurriculumReview != nil || items[0].SREReview != nil {
+		t.Fatalf("mapper finalization did not atomically stage candidate: %#v", items)
 	}
-	processed, err = service.ProcessOne(context.Background(), "worker-b")
-	if err != nil || !processed {
-		t.Fatalf("reviewer stage = %v, %v", processed, err)
+
+	reviewRun := scheduleAndClaim(t, service, database, WorkStageReview)
+	if reviewRun.Run.Purpose != RuntimePurposeReview || reviewRun.Run.SessionID != "" {
+		t.Fatalf("review pair is not a generic no-session runtime run: %#v", reviewRun.Run)
 	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil {
+	if err := service.FinalizeReviewPair(context.Background(), *reviewRun, Review{Decision: ReviewApprove}, Review{Decision: ReviewApprove}); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].State != WorkReadyPublish || items[0].Round != 1 || items[0].CurriculumReview == nil || items[0].SREReview == nil {
-		t.Fatalf("candidate was not durably approved: %#v", items)
+	if _, err := service.ProcessOne(context.Background(), "publisher"); err != nil {
+		t.Fatal(err)
 	}
-	processed, err = service.ProcessOne(context.Background(), "worker-c")
-	if err != nil || !processed {
-		t.Fatalf("publish stage = %v, %v", processed, err)
-	}
+
 	current, err := NewStore(root).LoadCurrent()
 	if err != nil {
 		t.Fatal(err)
@@ -60,334 +60,125 @@ func TestMappingWorkflowPublishesOnlyAfterBothReviewersApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 	if mapping, ok := index.Mapping(entry.ID); !ok || mapping.Challenge.Revision != entry.Revision {
-		t.Fatalf("published taxonomy does not expose the verified challenge: %#v, %v", mapping, ok)
+		t.Fatalf("published taxonomy does not expose verified challenge: %#v, %v", mapping, ok)
 	}
 	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkPublished || items[0].PublishedRevision != current.Revision {
-		t.Fatalf("work publication state is not durable: %#v, %v", items, err)
-	}
-	if !runner.sawRoles("mapper", "curriculum-reviewer", "sre-reviewer") {
-		t.Fatalf("workflow did not invoke all committee roles: %#v", runner.roles)
+	if err != nil || len(items) != 1 || items[0].State != WorkPublished || items[0].PublishedRevision != current.Revision || items[0].Round != 1 {
+		t.Fatalf("publication state is not durable: %#v, %v", items, err)
 	}
 }
 
-func TestMappingWorkflowRequeuesRejectedCandidateUsingSameMapperSession(t *testing.T) {
+func TestMappingWorkflowRejectStartsNewMapperRoundWithBothReviews(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
 	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapping: mappingChangeSet(entry), rejectCurriculumOnce: true}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
-	if err := service.EnqueueUnmapped(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-b"); err != nil {
-		t.Fatal(err)
-	}
-	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkPending || items[0].CurriculumReview == nil || items[0].CurriculumReview.Decision != ReviewReject {
-		t.Fatalf("rejected candidate was not requeued: %#v, %v", items, err)
-	}
-	if items[0].SREReview == nil || items[0].Round != 1 {
-		t.Fatalf("rejected round did not persist the complete review pair: %#v", items)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-c"); err != nil {
-		t.Fatal(err)
-	}
-	if !runner.mapperResumed {
-		t.Fatal("mapper revision did not resume its persisted session")
-	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkPending || items[0].Round != 1 || items[0].CurriculumReview != nil || items[0].SREReview != nil {
-		t.Fatalf("revised candidate was not staged for a new reviewer pair: %#v, %v", items, err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-d"); err != nil {
-		t.Fatal(err)
-	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkReadyPublish || items[0].Round != 2 {
-		t.Fatalf("revised candidate was not re-reviewed: %#v, %v", items, err)
-	}
-}
-
-func TestMappingWorkflowPersistsMapperSessionBeforeAgentFailure(t *testing.T) {
-	root := t.TempDir()
-	entry := writeWorkflowChallenge(t, root)
-	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapperFailures: 1}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
+	service := NewService(database, NewStore(root), filepath.Join(root, "challenges"), config.AgentConfig{Model: "test-model"})
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
+	mapper := scheduleAndClaim(t, service, database, WorkStageMapper)
+	if err := service.FinalizeMapper(context.Background(), *mapper, mappingChangeSet(entry)); err != nil {
 		t.Fatal(err)
 	}
+	review := scheduleAndClaim(t, service, database, WorkStageReview)
+	if err := service.FinalizeReviewPair(context.Background(), *review,
+		Review{Decision: ReviewReject, Feedback: "请将 outcome 与实际检查点对齐。"},
+		Review{Decision: ReviewApprove}); err != nil {
+		t.Fatal(err)
+	}
+
 	items, err := database.ListTaxonomyWork(context.Background())
+	if err != nil || len(items) != 1 || items[0].State != WorkPending || items[0].Round != 1 || items[0].CurriculumReview == nil || items[0].SREReview == nil {
+		t.Fatalf("rejected review pair was not durably committed: %#v, %v", items, err)
+	}
+	nextMapper := scheduleAndClaim(t, service, database, WorkStageMapper)
+	input, err := DecodeRunInput(nextMapper.Run.Input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].State != WorkPending || !items[0].MapperStarted || items[0].TechnicalFailures != 1 || items[0].ExecutionFailures != 0 || items[0].LastError == "" {
-		t.Fatalf("failed mapper did not persist its session start: %#v", items)
+	if input.Round != 1 {
+		t.Fatalf("mapper did not start the next semantic round: %#v", input)
 	}
 }
 
-func TestMappingWorkflowRequeuesInvalidMapperOutputUsingSameSession(t *testing.T) {
+func TestFailedAgentRunConsumesOneTechnicalBudgetAndRerunsStage(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
 	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapping: mappingChangeSet(entry), invalidMapperOnce: true}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
+	service := NewService(database, NewStore(root), filepath.Join(root, "challenges"), config.AgentConfig{Model: "test-model"})
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
+	mapper := scheduleAndClaim(t, service, database, WorkStageMapper)
+	if err := database.Fail(context.Background(), *mapper, "typed result protocol failure", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessOne(context.Background(), "server-observer"); err != nil {
 		t.Fatal(err)
 	}
 	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(items) != 1 || items[0].TechnicalFailures != 1 || items[0].ActiveRunID != "" || items[0].Round != 0 {
+		t.Fatalf("terminal generic run did not become a single taxonomy technical failure: %#v, %v", items, err)
 	}
-	if len(items) != 1 || items[0].State != WorkPending || !items[0].MapperStarted || items[0].TechnicalFailures != 1 || items[0].LastError == "" {
-		t.Fatalf("invalid mapper output was not strictly rejected and requeued: %#v", items)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-b"); err != nil {
-		t.Fatal(err)
-	}
-	if !runner.mapperResumed {
-		t.Fatal("corrected mapper output did not resume the persisted session")
-	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkPending || items[0].Candidate == nil || items[0].CurriculumReview != nil || items[0].SREReview != nil {
-		t.Fatalf("corrected mapper output did not reach the reviewer stage: %#v, %v", items, err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-c"); err != nil {
-		t.Fatal(err)
-	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkReadyPublish {
-		t.Fatalf("corrected mapper output was not approved by the reviewer pair: %#v, %v", items, err)
+	next := scheduleAndClaim(t, service, database, WorkStageMapper)
+	if next.Run.ID == mapper.Run.ID {
+		t.Fatal("technical failure reused a terminal agent run")
 	}
 }
 
-func TestMappingWorkflowRerunsBothReviewersAfterOneFails(t *testing.T) {
+func TestMappingWorkflowCancelsActiveRunWhenArtifactDisappears(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
 	database := testpostgres.New(t)
-	runner := &scriptedRunner{
-		mapping:          mappingChangeSet(entry),
-		reviewerFailures: map[string]int{"sre-reviewer": 1},
-	}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
+	service := NewService(database, NewStore(root), filepath.Join(root, "challenges"), config.AgentConfig{Model: "test-model"})
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-b"); err != nil {
-		t.Fatal(err)
-	}
-	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].State != WorkPending || items[0].Candidate == nil || items[0].CurriculumReview != nil || items[0].SREReview != nil || items[0].TechnicalFailures != 1 {
-		t.Fatalf("failed reviewer pair left partial durable state: %#v", items)
-	}
-	if runner.callCount("curriculum-reviewer") != 1 || runner.callCount("sre-reviewer") != 1 {
-		t.Fatalf("reviewer pair was not run together: %#v", runner.roles)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-c"); err != nil {
-		t.Fatal(err)
-	}
-	items, err = database.ListTaxonomyWork(context.Background())
-	if err != nil || items[0].State != WorkReadyPublish || items[0].TechnicalFailures != 0 || items[0].CurriculumReview == nil || items[0].SREReview == nil {
-		t.Fatalf("reviewer retry did not complete as a pair: %#v, %v", items, err)
-	}
-	if runner.callCount("curriculum-reviewer") != 2 || runner.callCount("sre-reviewer") != 2 || !runner.curriculumResumed || !runner.sreResumed {
-		t.Fatalf("reviewers did not both resume after pair failure: %#v", runner)
-	}
-}
-
-func TestMappingWorkflowClearsPartialReviewerStateBeforeRetryingPair(t *testing.T) {
-	root := t.TempDir()
-	entry := writeWorkflowChallenge(t, root)
-	database := testpostgres.New(t)
-	runner := &scriptedRunner{
-		mapping:          mappingChangeSet(entry),
-		reviewerFailures: map[string]int{"sre-reviewer": 1},
-	}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
-	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := database.ClaimTaxonomyWork(context.Background(), "worker-b", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed == nil || claimed.Candidate == nil {
-		t.Fatalf("mapper candidate was not available for partial-state recovery: %#v", claimed)
-	}
-	claimed.CurriculumReview = &Review{Decision: ReviewApprove}
-	if err := database.SaveClaimedTaxonomyWork(context.Background(), *claimed); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ProcessOne(context.Background(), "worker-c"); err != nil {
-		t.Fatal(err)
-	}
-	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil || len(items) != 1 || items[0].CurriculumReview != nil || items[0].SREReview != nil || items[0].TechnicalFailures != 1 {
-		t.Fatalf("partial reviewer state survived retry preparation: %#v, %v", items, err)
-	}
-	if runner.callCount("curriculum-reviewer") != 1 || runner.callCount("sre-reviewer") != 1 {
-		t.Fatalf("partial reviewer state did not rerun the full pair: %#v", runner.roles)
-	}
-}
-
-func TestMappingWorkflowBacksOffAfterTenTechnicalFailures(t *testing.T) {
-	root := t.TempDir()
-	entry := writeWorkflowChallenge(t, root)
-	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapperFailures: 10}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
-	queued, err := service.EnqueueChallenge(context.Background(), entry, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for attempt := 0; attempt < 10; attempt++ {
-		processed, err := service.ProcessOne(context.Background(), fmt.Sprintf("worker-%d", attempt))
-		if err != nil || !processed {
-			t.Fatalf("attempt %d = %v, %v", attempt+1, processed, err)
-		}
-	}
-	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].State != WorkPending || items[0].Round != 0 || items[0].TechnicalFailures != 0 || items[0].ExecutionFailures != 1 || !items[0].NextRunAt.After(time.Now()) || items[0].MapperSessionID != queued.MapperSessionID || !items[0].MapperStarted {
-		t.Fatalf("ten technical failures did not produce resumable delayed work: %#v", items)
-	}
-	claimed, err := database.ClaimTaxonomyWork(context.Background(), "worker-later", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed != nil {
-		t.Fatalf("delayed work was claimed before next_run_at: %#v", claimed)
-	}
-}
-
-func TestMappingWorkflowCancelsWhenArtifactRevisionDisappears(t *testing.T) {
-	root := t.TempDir()
-	entry := writeWorkflowChallenge(t, root)
-	database := testpostgres.New(t)
-	runner := &scriptedRunner{mapping: mappingChangeSet(entry)}
-	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
-	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
-		t.Fatal(err)
-	}
+	mapper := scheduleAndClaim(t, service, database, WorkStageMapper)
 	if err := os.RemoveAll(entry.Dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessOne(context.Background(), "worker-a"); err != nil {
+	if _, err := service.ProcessOne(context.Background(), "server-cancel"); err != nil {
 		t.Fatal(err)
 	}
-	items, err := database.ListTaxonomyWork(context.Background())
-	if err != nil || len(items) != 1 || items[0].State != WorkCancelled || items[0].TechnicalFailures != 0 {
-		t.Fatalf("missing artifact was retried instead of cancelled: %#v, %v", items, err)
+	item, err := database.GetTaxonomyWork(context.Background(), mapper.Run.OwnerRef)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(runner.roles) != 0 {
-		t.Fatalf("cancelled work invoked an agent: %#v", runner.roles)
+	if item.State != WorkCancelled || item.ActiveRunID != "" {
+		t.Fatalf("missing artifact did not cancel work: %#v", item)
 	}
-}
-
-type scriptedRunner struct {
-	mu                   sync.Mutex
-	mapping              ChangeSet
-	mapperFailures       int
-	invalidMapperOnce    bool
-	rejectCurriculumOnce bool
-	mapperResumed        bool
-	curriculumResumed    bool
-	sreResumed           bool
-	roles                []string
-	reviewerFailures     map[string]int
-	roleCalls            map[string]int
-}
-
-func (r *scriptedRunner) Run(_ context.Context, request AgentRequest) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.roles = append(r.roles, request.Role)
-	if r.roleCalls == nil {
-		r.roleCalls = make(map[string]int)
+	run, err := database.GetRun(context.Background(), mapper.Run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	r.roleCalls[request.Role]++
-	switch request.Role {
-	case "mapper":
-		if request.Resume {
-			r.mapperResumed = true
-		}
-		if r.mapperFailures > 0 {
-			r.mapperFailures--
-			return "", errors.New("model unavailable")
-		}
-		if r.invalidMapperOnce {
-			r.invalidMapperOnce = false
-			return `{"skills":[],"tags":[],"challenge_mappings":[],"skill_mappings":[]}`, nil
-		}
-		data, err := json.Marshal(r.mapping)
-		return string(data), err
-	case "curriculum-reviewer":
-		if request.Resume {
-			r.curriculumResumed = true
-		}
-		if r.reviewerFailures[request.Role] > 0 {
-			r.reviewerFailures[request.Role]--
-			return "", errors.New("reviewer unavailable")
-		}
-		if r.rejectCurriculumOnce {
-			r.rejectCurriculumOnce = false
-			return `{"decision":"reject","feedback":"请重新核对主要学习目标。"}`, nil
-		}
-		return `{"decision":"approve"}`, nil
-	case "sre-reviewer":
-		if request.Resume {
-			r.sreResumed = true
-		}
-		if r.reviewerFailures[request.Role] > 0 {
-			r.reviewerFailures[request.Role]--
-			return "", errors.New("reviewer unavailable")
-		}
-		return `{"decision":"approve"}`, nil
-	default:
-		return "", os.ErrInvalid
+	if run.Status != agentruntime.RunCancelled {
+		t.Fatalf("missing artifact did not cancel active run: %#v", run)
 	}
 }
 
-func (r *scriptedRunner) callCount(role string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.roleCalls[role]
-}
-
-func (r *scriptedRunner) sawRoles(expected ...string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	seen := make(map[string]bool, len(r.roles))
-	for _, role := range r.roles {
-		seen[role] = true
+func scheduleAndClaim(t *testing.T, service *Service, database interface {
+	ClaimNext(context.Context, string, time.Duration, time.Time) (*agentruntime.Claim, error)
+}, stage WorkStage) *agentruntime.Claim {
+	t.Helper()
+	if _, err := service.ProcessOne(context.Background(), "server-scheduler"); err != nil {
+		t.Fatal(err)
 	}
-	for _, role := range expected {
-		if !seen[role] {
-			return false
-		}
+	claim, err := database.ClaimNext(context.Background(), "agent-worker", time.Minute, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
 	}
-	return true
+	if claim == nil {
+		t.Fatalf("%s stage did not schedule an agent run", stage)
+	}
+	input, err := DecodeRunInput(claim.Run.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Stage != stage {
+		t.Fatalf("scheduled stage = %q, want %q", input.Stage, stage)
+	}
+	return claim
 }
 
 func writeWorkflowChallenge(t *testing.T, root string) challenge.Entry {
@@ -433,5 +224,35 @@ func mappingChangeSet(entry challenge.Entry) ChangeSet {
 			Tags:      []Ref{{ID: "tag-3333333333333333", Title: "Linux"}},
 			Outcomes:  []OutcomeRef{{ID: "skill-3333333333333333", Title: "Repair log cleanup failures", Primary: true}},
 		}}},
+	}
+}
+
+func TestDecodeRunInputRejectsUnknownAndTrailingData(t *testing.T) {
+	for _, raw := range []string{
+		`{"work_id":"work","stage":"mapper","round":0,"extra":true}`,
+		`{"work_id":"work","stage":"mapper","round":0} {}`,
+		`{"work_id":"","stage":"mapper","round":0}`,
+	} {
+		if _, err := DecodeRunInput(json.RawMessage(raw)); err == nil {
+			t.Fatalf("DecodeRunInput(%s) succeeded", raw)
+		}
+	}
+	if _, err := DecodeRunInput(json.RawMessage(`{"work_id":"work","stage":"review","round":0}`)); err != nil {
+		t.Fatalf("valid run input: %v", err)
+	}
+}
+
+func TestValidateReviewRejectsIncompleteDecision(t *testing.T) {
+	for _, review := range []Review{
+		{Decision: ReviewApprove, Feedback: "unexpected"},
+		{Decision: ReviewReject},
+		{Decision: "unknown"},
+	} {
+		if err := ValidateReview(review); err == nil {
+			t.Fatalf("ValidateReview(%#v) succeeded", review)
+		}
+	}
+	if err := ValidateReview(Review{Decision: ReviewReject, Feedback: "具体问题"}); err != nil {
+		t.Fatal(err)
 	}
 }

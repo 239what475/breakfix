@@ -14,6 +14,7 @@ import (
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 func main() {
@@ -58,9 +59,21 @@ func main() {
 		slog.Error("failed to create authoring executor", "err", err)
 		os.Exit(1)
 	}
+	taxonomyClient, err := taxonomy.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	if err != nil {
+		slog.Error("failed to create taxonomy internal client", "err", err)
+		os.Exit(1)
+	}
+	taxonomyExecutor, err := taxonomy.NewWorkerExecutor(cfg.Agent, taxonomyClient)
+	if err != nil {
+		slog.Error("failed to create taxonomy executor", "err", err)
+		os.Exit(1)
+	}
 	worker, err := agentworker.New(database, map[string]agentworker.Executor{
-		"assistant": assistantExecutor,
-		"authoring": authoringExecutor,
+		"assistant":                   assistantExecutor,
+		"authoring":                   authoringExecutor,
+		taxonomy.RuntimePurposeMapper: taxonomyExecutor,
+		taxonomy.RuntimePurposeReview: taxonomyExecutor,
 	}, assistant.DeltaSink{Client: serverClient}, agentworker.Config{WorkerID: *workerID})
 	if err != nil {
 		slog.Error("failed to create agent worker", "err", err)

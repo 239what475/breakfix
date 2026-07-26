@@ -60,15 +60,15 @@ Tag 保留，但只服务于 Catalog 的快速筛选和浏览，使用受控词�
 
 每个 mapping Work Item 是一个完整的三 agent 委员会任务，不拆成三个独立队列任务。Mapper 基于固定 revision 产出 ChangeSet；严格 JSON 解码与基础静态校验先拒绝格式错误、悬空引用或图约束错误的候选，绝不剥离 Markdown、补字段或猜测引用。合法 Candidate 必须先持久化，再交给 Curriculum Reviewer 和 SRE Reviewer 并行返回结构化 `approve` 或 `reject`。reviewer 的半成品结论不持久化：只有两者都返回合法结构化结论，才将这一对结论作为本 round 的正式审查结果保存；任一 reviewer 的调用或输出失败时，下一次重新并行运行整个 reviewer 对。
 
-`Round` 只表示一次完整的、可解释的语义审查循环。任一正式 reviewer 结论为 `reject` 时，才完成当前 round：Mapper 在同一 session 中接收 Candidate 与两份意见修订，再进入下一 round 的 reviewer 审查。两个 reviewer 对同一个 ChangeSet 都通过，任务才进入 Publisher 在最新 revision 上执行最终确定性校验和发布。语义 round 没有人为上限，也不存在“审查若干次后强制通过”。
+`Round` 只表示一次完整的、可解释的语义审查循环。任一正式 reviewer 结论为 `reject` 时，才完成当前 round：新的 Mapper Run 读取 Candidate 与两份意见后修订，再进入下一 round 的 reviewer 审查。两个 reviewer 对同一个 ChangeSet 都通过，任务才进入 Publisher 在最新 revision 上执行最终确定性校验和发布。语义 round 没有人为上限，也不存在“审查若干次后强制通过”。
 
-模型调用错误、超时、StructuredOutput 缺失、无效 JSON 或静态候选校验失败都只是技术失败，不得创建新的语义 round。一个 Work Item 在当前 round 共享最多 10 次技术失败预算；Mapper 失败时只重试 Mapper，reviewer 阶段失败时重新运行两个 reviewer。重试次数只在已启动的 agent 调用全部结束后结算，预算耗尽绝不取消仍在执行的 agent；单次调用仍受自身超时与 server shutdown context 约束。技术失败保留当前 Candidate 和上一轮完整 reject 意见，以便同一 Mapper session 获得完整修订上下文。
+模型调用错误、超时、typed result 缺失、无效 JSON 或静态候选校验失败都只是技术失败，不得创建新的语义 round。一个 Work Item 在当前 round 共享最多 10 次技术失败预算；Mapper Run 失败时只重试 Mapper Run，reviewer 阶段失败时重新运行完整 reviewer pair Run。重试次数只在已启动的 agent 调用全部结束后结算，预算耗尽绝不取消仍在执行的 agent；单次调用仍受自身超时与 server shutdown context 约束。技术失败保留当前 Candidate 和上一轮完整 reject 意见，以便下一 Mapper Run 获得完整修订上下文。
 
-同一 round 累计 10 次技术失败后，“失败”的是本次执行而不是 Work Item：持久化最后错误和执行失败次数，计算带退避的 `next_run_at`，释放租约并重新放入 Work List。下一次调度继续同一个 Work Item、同一 round 和同一组 agent session，但重新开始该 round 的 10 次技术失败预算。只有 challenge artifact 消失或 revision 改变才进入 `Cancelled`，不再重试。每次 Mapper 成功、正式 reviewer 对完成或 Publisher 发布都持久化进度并释放 worker 租约，避免长时间独占 worker。
+同一 round 累计 10 次技术失败后，“失败”的是本次执行而不是 Work Item：持久化最后错误和执行失败次数，计算带退避的 `next_run_at`，释放租约并重新放入 Work List。下一次调度继续同一个 Work Item 和同一 round，但创建新的通用 Agent Run，并重新开始该 round 的 10 次技术失败预算。只有 challenge artifact 消失或 revision 改变才进入 `Cancelled`，不再重试。每次 Mapper 成功、正式 reviewer 对完成或 Publisher 发布都持久化进度并释放 worker 租约，避免长时间独占 worker。
 
 多个 Work Item 可以并行运行上述三 agent 审查循环。所有候选只进入一个无模型的 Publisher 队列，Publisher 是唯一可以写入已发布 taxonomy revision 的组件。若候选的 base revision 仍为当前 revision，Publisher 运行静态校验并发布；若候选已过期，仅修改一个 Challenge mapping 且其引用的 Skill/Tag 定义未变时，Publisher 可以在最新 revision 上重新运行确定性校验后提交。任何新增或修改 Skill、Tag、`Skill.requires` 的过期候选都不能机械 rebase，必须以最新 revision 重新运行完整的审查循环，避免并发 workflow 静默创建重复定义或错误前置边。
 
-Work List 是运行状态而不是 taxonomy 内容，必须持久化在数据库。每个 Work Item 至少保存目标 challenge revision、base taxonomy revision、三名 agent 的 session ID、当前 Candidate、成对的正式 review 结论、语义 round、当前 round 的技术失败次数、执行失败次数、`next_run_at`、状态、最后错误、租约 owner 与过期时间；同一 challenge revision 的同类任务必须去重。`next_run_at` 保证重试任务不会被 worker 立刻重新 claim 而形成热循环。数据库租约保证任意时刻只有一个 Publisher 执行发布，但数据库不保存“当前 taxonomy 是什么”的权威值。Publisher 获得租约后读取 `current`、创建新 revision、原子切换 `current`，再释放租约；进程崩溃后的接管者以文件系统中的 `current` 为准恢复工作。
+Work List 是运行状态而不是 taxonomy 内容，必须持久化在数据库。每个 Work Item 至少保存目标 challenge revision、base taxonomy revision、当前阶段及其 active Agent Run、当前 Candidate、成对的正式 review 结论、语义 round、当前 round 的技术失败次数、执行失败次数、`next_run_at`、状态、最后错误、租约 owner 与过期时间；同一 challenge revision 的同类任务必须去重。Mapper 与 reviewer pair 均是无供应商 session 的通用 Agent Run，Worker attempt 只由 PostgreSQL 租约恢复。`next_run_at` 保证重试任务不会被 worker 立刻重新 claim 而形成热循环。数据库租约保证任意时刻只有一个 Publisher 执行发布，但数据库不保存“当前 taxonomy 是什么”的权威值。Publisher 获得租约后读取 `current`、创建新 revision、原子切换 `current`，再释放租约；进程崩溃后的接管者以文件系统中的 `current` 为准恢复工作。
 
 当前的工作队列只需要处理 mapping 任务及其修复重做。结构性错误由确定性扫描器直接发现并创建修复任务，例如未映射的已验证 challenge、challenge revision 失效、悬空引用、ID/title 不一致、缺少或重复 primary outcome，以及 `Skill.requires` 成环；这些检查不需要模型参与。
 
