@@ -68,9 +68,6 @@ func validateVerifyTaskSpec(task *breakfixv1.VerifyTask) error {
 	if task == nil {
 		return fmt.Errorf("verify task is nil")
 	}
-	if !validVerifyTaskChallengeID(task.Spec.ChallengeID) {
-		return fmt.Errorf("invalid challenge id %q", task.Spec.ChallengeID)
-	}
 	if strings.TrimSpace(task.Spec.Submission.ID) == "" {
 		return fmt.Errorf("submission id is required")
 	}
@@ -78,19 +75,6 @@ func validateVerifyTaskSpec(task *breakfixv1.VerifyTask) error {
 		return fmt.Errorf("source reference is required")
 	}
 	return nil
-}
-
-func validVerifyTaskChallengeID(id string) bool {
-	if id == "" {
-		return false
-	}
-	for i, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || (r == '-' && i > 0 && i < len(id)-1) {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func (r *VerifyTaskReconciler) failTask(ctx context.Context, task *breakfixv1.VerifyTask, code, message string) (ctrl.Result, error) {

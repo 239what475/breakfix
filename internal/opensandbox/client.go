@@ -17,6 +17,8 @@ import (
 
 const workspaceMountPath = "/workspace"
 
+const workspaceArchivePath = "/tmp/breakfix-generator-candidate.tar.gz"
+
 type Client struct {
 	connection sdk.ConnectionConfig
 	lifecycle  *sdk.LifecycleClient
@@ -104,6 +106,10 @@ func (c *Client) ReadFile(ctx context.Context, sandboxID, path string) ([]byte, 
 }
 
 func (c *Client) WriteFile(ctx context.Context, sandboxID, path string, content []byte, mode int) error {
+	return c.uploadFile(ctx, sandboxID, path, content, mode)
+}
+
+func (c *Client) uploadFile(ctx context.Context, sandboxID, path string, content []byte, mode int) error {
 	sandbox, err := c.connect(ctx, sandboxID)
 	if err != nil {
 		return err
@@ -112,6 +118,48 @@ func (c *Client) WriteFile(ctx context.Context, sandboxID, path string, content 
 		FileName: "content",
 		Metadata: sdk.FileMetadata{Path: path, Mode: mode},
 	})
+}
+
+// ResetWorkspace atomically replaces the sandbox's visible workspace with the
+// supplied immutable artifact. The archive transfer and shell operations stay
+// Server-side, so the Agent Worker never receives a Sandbox connection.
+func (c *Client) ResetWorkspace(ctx context.Context, sandboxID string, archive []byte) error {
+	if _, err := c.Execute(ctx, sandboxID, "rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*; mkdir -p /workspace", "/workspace", nil); err != nil {
+		return fmt.Errorf("clear generator workspace: %w", err)
+	}
+	if len(archive) == 0 {
+		return nil
+	}
+	if err := c.uploadFile(ctx, sandboxID, workspaceArchivePath, archive, 0o600); err != nil {
+		return fmt.Errorf("upload generator seed artifact: %w", err)
+	}
+	result, err := c.Execute(ctx, sandboxID, "tar -xzf "+workspaceArchivePath+" -C /workspace && rm -f "+workspaceArchivePath, "/workspace", nil)
+	if err != nil {
+		return fmt.Errorf("extract generator seed artifact: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("extract generator seed artifact exited with code %d: %s", result.ExitCode, result.Output)
+	}
+	return nil
+}
+
+// ArchiveWorkspace serializes the current workspace through OpenSandbox. It
+// preserves executable modes for challenge scripts and never exposes provider
+// credentials or Sandbox IDs to the Worker.
+func (c *Client) ArchiveWorkspace(ctx context.Context, sandboxID string) ([]byte, error) {
+	result, err := c.Execute(ctx, sandboxID, "tar -C /workspace -czf "+workspaceArchivePath+" .", "/workspace", nil)
+	if err != nil {
+		return nil, fmt.Errorf("archive generator workspace: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("archive generator workspace exited with code %d: %s", result.ExitCode, result.Output)
+	}
+	archive, err := c.ReadFile(ctx, sandboxID, workspaceArchivePath)
+	if err != nil {
+		return nil, fmt.Errorf("download generator workspace archive: %w", err)
+	}
+	_, _ = c.Execute(context.Background(), sandboxID, "rm -f "+workspaceArchivePath, "/workspace", nil)
+	return archive, nil
 }
 
 type Execution struct {

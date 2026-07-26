@@ -39,9 +39,9 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 		return nil, fmt.Errorf("insert authoring agent session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
-		(id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.RuntimeSessionID, session.AgentSessionID, false, session.WorkflowSessionID, false, session.State, session.CurrentRevision, session.VisibleRevision, nowText(now), nowText(now)); err != nil {
+		(id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, generator_session_id, generator_run_id, state, current_revision, visible_revision, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID, session.UserID, session.RuntimeSessionID, session.AgentSessionID, false, session.WorkflowSessionID, false, "", "", session.State, session.CurrentRevision, session.VisibleRevision, nowText(now), nowText(now)); err != nil {
 		return nil, fmt.Errorf("insert authoring session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, created_at)
@@ -55,19 +55,19 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 }
 
 func (d *DB) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision,
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, generator_session_id, generator_run_id, state, current_revision, visible_revision,
 		generation_id, verify_task_id, pending_feedback, publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
 }
 
 func (d *DB) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision,
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, generator_session_id, generator_run_id, state, current_revision, visible_revision,
 		generation_id, verify_task_id, pending_feedback, publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE user_id = ? AND state != ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
 }
 
 func (d *DB) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision,
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, generator_session_id, generator_run_id, state, current_revision, visible_revision,
 		generation_id, verify_task_id, pending_feedback, publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE id = ?`, id)
 }
@@ -77,7 +77,7 @@ func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any
 	var state string
 	var createdAt, updatedAt string
 	err := d.conn.QueryRowContext(ctx, query, args...).Scan(
-		&session.ID, &session.UserID, &session.RuntimeSessionID, &session.AgentSessionID, &session.AgentStarted, &session.WorkflowSessionID, &session.WorkflowStarted, &state, &session.CurrentRevision, &session.VisibleRevision,
+		&session.ID, &session.UserID, &session.RuntimeSessionID, &session.AgentSessionID, &session.AgentStarted, &session.WorkflowSessionID, &session.WorkflowStarted, &session.GeneratorSessionID, &session.GeneratorRunID, &state, &session.CurrentRevision, &session.VisibleRevision,
 		&session.GenerationID, &session.VerifyTaskID, &session.PendingFeedback, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -811,7 +811,7 @@ func appendAuthoringEventTx(ctx context.Context, tx *Tx, id, sessionID, content 
 }
 
 func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {
-	query := `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision,
+	query := `SELECT id, user_id, runtime_session_id, agent_session_id, agent_started, workflow_session_id, workflow_started, generator_session_id, generator_run_id, state, current_revision, visible_revision,
 		generation_id, verify_task_id, pending_feedback, publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
 	args := []any{id}
 	if userID != "" {
@@ -820,7 +820,7 @@ func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*au
 	}
 	var session authoring.Session
 	var state, createdAt, updatedAt string
-	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.AgentSessionID, &session.AgentStarted, &session.WorkflowSessionID, &session.WorkflowStarted, &state,
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.AgentSessionID, &session.AgentStarted, &session.WorkflowSessionID, &session.WorkflowStarted, &session.GeneratorSessionID, &session.GeneratorRunID, &state,
 		&session.CurrentRevision, &session.VisibleRevision, &session.GenerationID, &session.VerifyTaskID, &session.PendingFeedback, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound

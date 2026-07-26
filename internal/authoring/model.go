@@ -250,11 +250,17 @@ type Session struct {
 	UserID string `json:"user_id"`
 	// RuntimeSessionID references the durable provider-neutral Agent Session.
 	// It replaces the former opaque Claude Code session identity.
-	RuntimeSessionID   string       `json:"-"`
-	AgentSessionID     string       `json:"-"`
-	AgentStarted       bool         `json:"-"`
-	WorkflowSessionID  string       `json:"-"`
-	WorkflowStarted    bool         `json:"-"`
+	RuntimeSessionID  string `json:"-"`
+	AgentSessionID    string `json:"-"`
+	AgentStarted      bool   `json:"-"`
+	WorkflowSessionID string `json:"-"`
+	WorkflowStarted   bool   `json:"-"`
+	// GeneratorSessionID is the durable Agent Session for one implementation
+	// and repair lineage. It is intentionally distinct from the authoring
+	// conversation Session: a confirmed revision gets a Generator Session, and
+	// an author-requested revision after verification starts a new lineage.
+	GeneratorSessionID string       `json:"-"`
+	GeneratorRunID     string       `json:"generator_run_id,omitempty"`
 	State              SessionState `json:"state"`
 	CurrentRevision    int64        `json:"current_revision"`
 	VisibleRevision    int64        `json:"visible_revision"`

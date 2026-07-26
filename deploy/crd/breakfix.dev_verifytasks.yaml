@@ -37,8 +37,6 @@ spec:
             type: object
           spec:
             properties:
-              challengeID:
-                type: string
               source:
                 properties:
                   ref:
@@ -54,7 +52,6 @@ spec:
                 - id
                 type: object
             required:
-            - challengeID
             - source
             - submission
             type: object

@@ -16,9 +16,8 @@ import (
 func TestValidateVerifyTaskSpec(t *testing.T) {
 	valid := func() *breakfixv1.VerifyTask {
 		return &breakfixv1.VerifyTask{Spec: breakfixv1.VerifyTaskSpec{
-			Source:      breakfixv1.VerifyTaskSource{Ref: "run-abc123"},
-			ChallengeID: "chal-abc123def456",
-			Submission:  breakfixv1.VerifyTaskSubmission{ID: "sub-abc123"},
+			Source:     breakfixv1.VerifyTaskSource{Ref: "run-abc123"},
+			Submission: breakfixv1.VerifyTaskSubmission{ID: "sub-abc123"},
 		}}
 	}
 
@@ -28,7 +27,6 @@ func TestValidateVerifyTaskSpec(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "agent artifact", mutate: func(*breakfixv1.VerifyTask) {}},
-		{name: "missing challenge id", mutate: func(task *breakfixv1.VerifyTask) { task.Spec.ChallengeID = "" }, wantErr: true},
 		{name: "missing submission id", mutate: func(task *breakfixv1.VerifyTask) { task.Spec.Submission.ID = "" }, wantErr: true},
 		{name: "missing source reference", mutate: func(task *breakfixv1.VerifyTask) { task.Spec.Source.Ref = "" }, wantErr: true},
 	}

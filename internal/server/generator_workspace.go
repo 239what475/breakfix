@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/opensandbox"
 	"github.com/breakfix/breakfix/internal/workspace"
@@ -35,6 +38,11 @@ type internalGeneratorExecuteRequest struct {
 	Command string `json:"command"`
 }
 
+type internalGeneratorSubmitRequest struct {
+	generator.LeaseCredential
+	Archive []byte `json:"archive"`
+}
+
 // InternalGeneratorContext creates or reconnects the single Server-owned
 // workspace for a valid Generator attempt. The Worker sees neither sandbox ID
 // nor provider credentials.
@@ -48,7 +56,32 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		h.writeInternalGeneratorError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, generator.WorkspaceContext{GeneratorSessionID: claim.Run.SessionID, WorkspaceReady: record.State == workspace.StateActive})
+	runRecord, err := h.db.GetGeneratorRun(c.Request.Context(), claim.Run.ID)
+	if err != nil {
+		h.writeInternalGeneratorError(c, err)
+		return
+	}
+	input, err := generator.DecodeRunInput(claim.Run.Input)
+	if err != nil || input.AuthoringSessionID != runRecord.AuthoringSessionID || input.Revision != runRecord.AuthoringRevision || input.SeedSubmissionID != runRecord.SeedSubmissionID || input.VerifyTaskID != runRecord.VerifyTaskID {
+		h.writeInternalGeneratorError(c, errors.New("generator run input does not match its durable record"))
+		return
+	}
+	if !runRecord.WorkspaceInitialized {
+		if err := h.materializeGeneratorWorkspace(c.Request.Context(), record, runRecord); err != nil {
+			h.writeInternalGeneratorError(c, err)
+			return
+		}
+		if err := h.db.MarkGeneratorWorkspaceInitialized(c.Request.Context(), *claim); err != nil {
+			h.writeInternalGeneratorError(c, err)
+			return
+		}
+	}
+	revision, err := h.db.GetAuthoringRevision(c.Request.Context(), runRecord.AuthoringSessionID, runRecord.AuthoringRevision)
+	if err != nil {
+		h.writeInternalGeneratorError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, generator.WorkspaceContext{Plan: revision.Plan, Feedback: input.Feedback})
 }
 
 func (h *Handler) InternalGeneratorReadFile(c *gin.Context) {
@@ -92,6 +125,24 @@ func (h *Handler) InternalGeneratorWriteFile(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) InternalGeneratorArchiveWorkspace(c *gin.Context) {
+	var credential generator.LeaseCredential
+	if !h.decodeInternalAgentRequest(c, &credential) {
+		return
+	}
+	_, record, err := h.generatorWorkspaceForClaim(c.Request.Context(), c.Param("id"), credential, false)
+	if err != nil {
+		h.writeInternalGeneratorError(c, err)
+		return
+	}
+	archive, err := h.generatorSandbox.ArchiveWorkspace(c.Request.Context(), record.SandboxID)
+	if err != nil {
+		h.writeInternalGeneratorError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, generator.ArchiveResponse{Archive: archive})
 }
 
 // InternalGeneratorExecute proxies a streaming command to the workspace. A
@@ -178,6 +229,13 @@ func (h *Handler) generatorWorkspaceForClaim(ctx context.Context, runID string, 
 	if err := h.db.ValidateLease(ctx, *claim, time.Now().UTC()); err != nil {
 		return nil, nil, err
 	}
+	generatorRun, err := h.db.GetGeneratorRun(ctx, run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if generatorRun.GeneratorSessionID != run.SessionID || generatorRun.AuthoringSessionID != run.OwnerRef {
+		return nil, nil, errors.New("generator run does not match the claimed runtime session")
+	}
 	var record *workspace.Record
 	if ensure {
 		record, err = h.generatorWorkspace.Ensure(ctx, run.SessionID)
@@ -191,6 +249,24 @@ func (h *Handler) generatorWorkspaceForClaim(ctx context.Context, runID string, 
 		return nil, nil, errors.New("generator workspace is not active")
 	}
 	return claim, record, nil
+}
+
+func (h *Handler) materializeGeneratorWorkspace(ctx context.Context, workspaceRecord *workspace.Record, run *generator.Record) error {
+	if workspaceRecord == nil || run == nil || strings.TrimSpace(workspaceRecord.SandboxID) == "" {
+		return errors.New("generator workspace record is incomplete")
+	}
+	var archive []byte
+	if submissionID := strings.TrimSpace(run.SeedSubmissionID); submissionID != "" {
+		var err error
+		archive, err = os.ReadFile(challenge.SubmissionPath(h.dataDir, submissionID))
+		if err != nil {
+			return fmt.Errorf("read generator seed artifact: %w", err)
+		}
+	}
+	if err := h.generatorSandbox.ResetWorkspace(ctx, workspaceRecord.SandboxID, archive); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *Handler) monitorGeneratorCommandLease(ctx context.Context, done <-chan struct{}, cancel context.CancelFunc, claim *agentruntime.Claim, target *error, mu *sync.Mutex) {

@@ -86,7 +86,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHALLENGE_MANIFEST_INVALID", err.Error()))
 	}
-	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "challengeID", task.Spec.ChallengeID, "runtime", challengeEntry.Runtime)
+	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "runtime", challengeEntry.Runtime)
 
 	tempImage := verification.ImageName(cfg.RegistryAddr, cfg.VerifyTaskID)
 	stageStart = time.Now()
@@ -101,7 +101,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "runtime", challengeEntry.Runtime)
-	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, task.Spec.ChallengeID, challengeEntry, tempImage)
+	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, challengeEntry, tempImage)
 	if err != nil {
 		return fmt.Errorf("create verification environment: %w", err)
 	}
@@ -208,7 +208,7 @@ func verifyBaseImage(targetImage, runtime string) string {
 	return repoPrefix + "/" + baseName
 }
 
-func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID, challengeID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
+func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
 	ref := &verifyEnvironmentRef{Runtime: challenge.NormalizeRuntime(entry.Runtime), Name: verification.EnvironmentName(verifyTaskID)}
 	if err := deleteVerifyEnvironment(ctx, client, ns, ref); err != nil {
 		return nil, fmt.Errorf("delete previous verification environment: %w", err)
@@ -223,7 +223,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 	}
 	activityAt := metav1.Now()
 	common := breakfixv1.CommonEnvironmentSpec{
-		ChallengeRef:      challengeID,
+		ChallengeRef:      "verify-" + verifyTaskID,
 		ChallengeRevision: "submission:" + submissionID,
 		UserRef:           "verify-" + verifyTaskID,
 		Runtime:           challenge.NormalizeRuntime(entry.Runtime),

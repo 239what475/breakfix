@@ -395,9 +395,8 @@ func (h *Handler) UploadGenerationArtifact(c *gin.Context) {
 	task := &breakfixv1.VerifyTask{
 		ObjectMeta: metav1.ObjectMeta{Name: taskID, Namespace: h.crdNamespace},
 		Spec: breakfixv1.VerifyTaskSpec{
-			Source:      breakfixv1.VerifyTaskSource{Ref: gen.Name},
-			ChallengeID: challenge.NewID(),
-			Submission:  breakfixv1.VerifyTaskSubmission{ID: submissionID},
+			Source:     breakfixv1.VerifyTaskSource{Ref: gen.Name},
+			Submission: breakfixv1.VerifyTaskSubmission{ID: submissionID},
 		},
 		Status: breakfixv1.VerifyTaskStatus{Phase: breakfixv1.VerifyTaskPending, Message: "generated artifact waiting for real verification"},
 	}

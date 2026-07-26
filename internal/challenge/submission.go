@@ -8,6 +8,13 @@ import (
 )
 
 func SaveSubmission(root, id string, r io.Reader) (string, error) {
+	return SaveSubmissionAtomic(root, id, r)
+}
+
+// SaveSubmissionAtomic persists a deterministic submission exactly once. A
+// concurrent retry observes the existing immutable archive instead of
+// truncating or replacing it.
+func SaveSubmissionAtomic(root, id string, r io.Reader) (string, error) {
 	if !ValidID(id) {
 		return "", fmt.Errorf("invalid submission id %q", id)
 	}
@@ -16,13 +23,34 @@ func SaveSubmission(root, id string, r io.Reader) (string, error) {
 		return "", fmt.Errorf("create submission dir: %w", err)
 	}
 	path := filepath.Join(dir, "input.tar.gz")
-	f, err := os.Create(path)
-	if err != nil {
-		return "", fmt.Errorf("create submission artifact: %w", err)
+	if info, err := os.Stat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("existing submission artifact is not a regular file")
+		}
+		return path, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat submission artifact: %w", err)
 	}
-	defer f.Close()
-	if _, err := io.Copy(f, r); err != nil {
+	temporary, err := os.CreateTemp(dir, ".input-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temporary submission artifact: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath) //nolint:errcheck
+	if _, err := io.Copy(temporary, r); err != nil {
+		_ = temporary.Close()
 		return "", fmt.Errorf("write submission artifact: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return "", fmt.Errorf("close submission artifact: %w", err)
+	}
+	if err := os.Link(temporaryPath, path); err == nil {
+		return path, nil
+	} else if !os.IsExist(err) {
+		return "", fmt.Errorf("link immutable submission artifact: %w", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("read concurrent submission artifact: %w", err)
 	}
 	return path, nil
 }

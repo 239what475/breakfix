@@ -526,4 +526,25 @@ var schemaMigrations = []schemaMigration{
 		`CREATE INDEX generator_workspaces_deleting ON generator_workspaces(updated_at)
 			WHERE state = 'deleting'`,
 	}},
+	{version: 7, statements: []string{
+		`ALTER TABLE authoring_sessions
+			ADD COLUMN IF NOT EXISTS generator_session_id TEXT NOT NULL DEFAULT '',
+			ADD COLUMN IF NOT EXISTS generator_run_id TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE generator_runs (
+			run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+			generator_session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+			authoring_session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
+			authoring_revision BIGINT NOT NULL,
+			seed_submission_id TEXT NOT NULL DEFAULT '',
+			verify_task_id TEXT NOT NULL DEFAULT '',
+			workspace_initialized_at TIMESTAMPTZ,
+			submission_id TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			UNIQUE(generator_session_id, run_id)
+		)`,
+		`CREATE INDEX generator_runs_authoring_session ON generator_runs(authoring_session_id, authoring_revision, created_at)`,
+		`CREATE UNIQUE INDEX generator_runs_submission ON generator_runs(submission_id) WHERE submission_id <> ''`,
+		`CREATE UNIQUE INDEX generator_runs_verify_task ON generator_runs(verify_task_id) WHERE verify_task_id <> ''`,
+	}},
 }

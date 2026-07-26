@@ -17,9 +17,8 @@ type VerifyTask struct {
 }
 
 type VerifyTaskSpec struct {
-	Source      VerifyTaskSource     `json:"source"`
-	ChallengeID string               `json:"challengeID"`
-	Submission  VerifyTaskSubmission `json:"submission"`
+	Source     VerifyTaskSource     `json:"source"`
+	Submission VerifyTaskSubmission `json:"submission"`
 }
 
 type VerifyTaskSource struct {

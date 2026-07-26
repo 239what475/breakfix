@@ -178,6 +178,8 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	router.POST("/api/internal/agent-runs/:id/generator/files/read", h.InternalGeneratorReadFile)
 	router.POST("/api/internal/agent-runs/:id/generator/files/write", h.InternalGeneratorWriteFile)
 	router.POST("/api/internal/agent-runs/:id/generator/execute", h.InternalGeneratorExecute)
+	router.POST("/api/internal/agent-runs/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
+	router.POST("/api/internal/agent-runs/:id/generator/submit", h.InternalGeneratorSubmitCandidate)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {
