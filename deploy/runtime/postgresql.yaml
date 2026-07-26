@@ -40,6 +40,30 @@ spec:
       labels:
         app.kubernetes.io/name: breakfix-postgresql
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # The PostgreSQL process stays non-root. This narrowly scoped step owns
+        # the dynamically provisioned data directory before PostgreSQL starts.
+        - name: prepare-data-directory
+          image: postgres:17.4-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec", "chown 70:70 /var/lib/postgresql/data"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
       containers:
         - name: postgresql
           image: postgres:17.4-alpine

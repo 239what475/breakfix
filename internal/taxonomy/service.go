@@ -121,15 +121,22 @@ func (s *Service) EnqueueUnmapped(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list challenges for taxonomy: %w", err)
 	}
-	var snapshot Snapshot
 	current, err := s.store.LoadCurrent()
 	if err != nil && !errors.Is(err, ErrNoCurrentRevision) {
 		return err
 	}
-	if current != nil {
-		snapshot = *current
+	if current == nil {
+		// The first published challenge must bootstrap taxonomy through the
+		// normal durable mapping workflow. There is no valid empty Snapshot to
+		// pass through NewCatalogIndex yet.
+		for _, entry := range entries {
+			if _, err := s.EnqueueChallenge(ctx, entry, ""); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	index, err := NewCatalogIndex(snapshot, entries)
+	index, err := NewCatalogIndex(*current, entries)
 	if err != nil {
 		return fmt.Errorf("index current taxonomy: %w", err)
 	}
@@ -137,7 +144,7 @@ func (s *Service) EnqueueUnmapped(ctx context.Context) error {
 		if _, mapped := index.Mapping(entry.ID); mapped {
 			continue
 		}
-		if _, err := s.EnqueueChallenge(ctx, entry, snapshot.Revision); err != nil {
+		if _, err := s.EnqueueChallenge(ctx, entry, current.Revision); err != nil {
 			return err
 		}
 	}
@@ -727,7 +734,11 @@ const mapperSystemPrompt = `你是 Breakfix Taxonomy Mapper。你只负责将已
 
 Skill 必须是可独立解释、能在多题复用的能力；Tag 仅用于稳定的 Catalog 浏览维度，不能用 Tag 复述细粒度 Skill。优先复用现有定义；新增 Skill、Tag 或 requires 关系时，必须有明确、可复用的语义理由。只映射当前 challenge，不能修改其他 challenge 的 mapping。
 
-完成分析后必须且只能调用 submit_changeset。`
+完成分析后必须且只能调用 submit_changeset。工具参数必须显式包含 ` + "`skills`" + `、` + "`tags`" + `、` + "`challenge_mappings`" + ` 和 ` + "`skill_mappings`" + ` 四个数组；没有改动的数组也必须传 ` + "`[]`" + `，不得省略。
+
+每个 mapping 任务都必须以 upsert 提交当前 challenge 的 ChallengeMapping。首次建立空 taxonomy 时，必须同时创建至少一个可复用 Skill 和一个稳定 Tag，并在该 ChallengeMapping 中引用它们；后续任务可复用现有定义。
+
+字段契约必须精确遵守：Skill 的 kind 只能是 Skill，Tag 的 kind 只能是 Tag；新 Skill ID 必须是 skill- 加 16 位小写十六进制，新 Tag ID 必须是 tag- 加 16 位小写十六进制。不要包裹 changeset 对象，直接传工具 schema 的四个顶层数组。`
 
 const reviewerSystemPrompt = `你是 Breakfix Taxonomy Committee Reviewer。你将以两个独立视角同时审查同一份候选 ChangeSet：
 

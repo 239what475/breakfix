@@ -68,6 +68,28 @@ func TestMappingWorkflowUsesGenericRunsAndPublishesAfterReviewPair(t *testing.T)
 	}
 }
 
+func TestEnqueueUnmappedBootstrapsFirstTaxonomySnapshot(t *testing.T) {
+	root := t.TempDir()
+	entry := writeWorkflowChallenge(t, root)
+	database := testpostgres.New(t)
+	service := NewService(database, NewStore(root), filepath.Join(root, "challenges"), config.AgentConfig{Model: "test-model"})
+
+	if err := service.EnqueueUnmapped(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items, err := database.ListTaxonomyWork(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("initial taxonomy work count = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.ChallengeID != entry.ID || item.ChallengeRevision != entry.Revision || item.BaseRevision != "" || item.State != WorkPending {
+		t.Fatalf("initial taxonomy work = %#v", item)
+	}
+}
+
 func TestMappingWorkflowRejectStartsNewMapperRoundWithBothReviews(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)

@@ -141,3 +141,27 @@ Agent Runtime 的三个 Go 镜像在 Docker build stage 中执行 `go mod downlo
 调整：Server、Controller 和 Agent Worker Dockerfile 都接受 `GOPROXY` build arg，默认保持 Go 的标准
 `https://proxy.golang.org,direct`。部署文档要求构建命令显式传入 `$(go env GOPROXY)`；这只影响构建期依赖解析，
 不向运行镜像、Worker、Sandbox 或模型提示传递代理配置。
+
+## 2026-07-26：本地 E2E 不覆盖 Controller Dockerfile 的 GitHub 下载路径
+
+Controller Dockerfile 会在构建时从 GitHub 下载并校验 `vcluster v0.35.1`。当前网络环境对该 release 下载严重限速，
+无法在合理时间内完成镜像构建。真实 Kubernetes E2E 因而临时使用当前源码编译的 Controller 二进制和本机已校验的
+同版本 `vcluster` 二进制组成的 Kind 专用镜像。
+
+调整：该临时镜像只用于验证 Controller、vcluster 和 VerifyTask 的运行时行为，不进入 Git，也不替代正式 Dockerfile
+的供应链验证。正式发布构建仍必须执行 Dockerfile 的下载和 checksum 校验；该链路需要在可正常访问 GitHub release
+的构建环境中单独验收。
+
+## 2026-07-26：Taxonomy 首次导入暴露两个 PostgreSQL 迁移遗漏
+
+空数据库启动时，预置 challenge 没有 current taxonomy snapshot。`EnqueueUnmapped` 原先把空 Snapshot 传给完整
+catalog 校验，因此第一道题无法进入 Mapper 队列。修正后，缺少 snapshot 时所有已发布目录都会通过既有的 durable
+mapping WorkItem 入队，首个 Mapper 以空 base revision 建立 taxonomy；不会绕过委员会或直接写入 mapping。
+
+真实 PostgreSQL 验证还发现 migration 5 将 legacy taxonomy JSON 列转为 JSONB 后保留了 `NOT NULL` 约束，但
+Mapper 前的 candidate 和 reviewer 结论在语义上必须为空。新增 migration 9 解除这三列的约束，兼容已经执行过
+migration 5 的数据库。该调整使数据库模式与既定的 WorkItem 状态机一致，不改变 taxonomy 或 Agent Runtime 设计。
+
+真实 Mapper 调用还表明原 system prompt 仅以“完整 ChangeSet”描述工具参数，未显式列出 strict schema 的四个必填数组和
+当前 challenge mapping 的提交义务。补充 prompt 后，模型仍必须满足同一严格解码和领域校验；没有加入 Markdown 解析、
+字段默认值或近似结果兼容。

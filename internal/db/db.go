@@ -561,4 +561,12 @@ var schemaMigrations = []schemaMigration{
 		`DROP TABLE IF EXISTS authoring_messages`,
 		`ALTER TABLE authoring_revisions RENAME COLUMN artifact_generation_id TO artifact_generator_run_id`,
 	}},
+	{version: 9, statements: []string{
+		// A mapping WorkItem has no candidate or reviewer conclusions before the
+		// Mapper and Review stages complete. Migration 5 converted the legacy
+		// text columns to JSONB but left their original NOT NULL constraints.
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN candidate_json DROP NOT NULL`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN curriculum_review_json DROP NOT NULL`,
+		`ALTER TABLE taxonomy_work_items ALTER COLUMN sre_review_json DROP NOT NULL`,
+	}},
 }
