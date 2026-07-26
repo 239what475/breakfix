@@ -34,3 +34,25 @@ Run attempt、过期时间或撤销接口。它们不能满足 Worker 失去租�
 调整：Server 是唯一 OpenSandbox SDK/lifecycle credential 持有者。Generator Worker 的 files、exec 和 archive 操作均通过受内部 API 保护的
 Server proxy；每个请求由 Server 使用 `run_id`、`attempt` 和 `lease_owner` 校验当前租约后才转发到绑定的 Sandbox。这个选择使用
 `EINO-RESEARCH.md` 已规定的“没有官方可撤销 scoped credential 时使用 Server 代理”分支，不建立双 backend 或向 Worker 注入 OpenSandbox key。
+
+## 2026-07-26：OpenSandbox Helm 0.2.0 与 Server 0.2.2 的 POC 阻断项
+
+`helm/opensandbox/0.2.0` 的 `Chart.lock` 声明 controller dependency 为 `0.1.0`，而同一 tag 的 `Chart.yaml` 声明为 `0.2.0`。
+因此 `helm dependency build` 直接失败，必须在 POC worktree 中以同 tag 的本地 dependency 运行 `helm dependency update` 才能渲染。该
+tag 的默认 Server 镜像还是 `v0.1.13`，与 SDK `v1.0.5` 的源码版本不对应；POC 显式固定为 Controller `v0.2.0`、Server `v0.2.2`、
+`execd v1.0.21` 和 egress `v1.1.4`，不能直接把 chart default 当作已验证组合。
+
+真实 Kubernetes POC 中，Server `v0.2.2` 成功创建 `BatchSandbox` 和 server-managed PVC，但在给 PVC 写 ownerReference 时记录
+`Got an unexpected keyword argument '_content_type' to method patch_namespaced_persistent_volume_claim`。OpenSandbox 自身也明确说明：
+controller 驱动的 TTL 删除依赖该 ownerReference；失败后 lifecycle `DELETE` 的 label sweep 只能作为回退，因此 TTL 路径可能遗留 PVC。
+
+`helm/opensandbox/0.2.0` 还实际嵌入旧 `opensandbox-server` chart `0.1.0`。该模板对 PVC 仅授予 `create/get`，缺少
+`list/delete/patch`。所以 POC 中显式 `DELETE /sandboxes/{id}` 虽返回 `204` 并删除 `BatchSandbox`，同样无法列出或删除带有
+`opensandbox.io/volume-managed-by=server` 标签的 PVC。SDK `v1.0.5` 对应的上游源码 commit 已在 chart 模板中补全这三个权限，
+但尚未发布与该源码匹配的 Helm tag。即使补全 RBAC，`v0.2.2` 的 `_content_type` 调用仍会在本地 Kubernetes Python client `35.0.0`
+上先于 API 请求失败，ownerReference 依然不能创建。
+
+调整：不能使用 `v0.2.2` 作为固定生产 provider，也不能用 `latest` 或本地 patch 掩盖该缺陷。上游若发布修复版本，必须以固定
+Server/Chart revision 重跑 POC；若在本阶段没有官方修复，则需要先把 workspace PVC 的权威生命周期明确改由 Breakfix Server 管理，
+并用独立设计说明替换“依赖 OpenSandbox TTL 回收 PVC”的前提，不能在实现中悄悄增加扫尾逻辑。在这两者之一完成前，不开始
+`OpenSandboxBackend` 或 Generator 迁移。
