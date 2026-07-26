@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -40,7 +39,7 @@ func main() {
 	}
 
 	slog.Info("Breakfix Server starting", "version", build.Version, "data_dir", cfg.DataDir)
-	database, err := db.New(filepath.Join(cfg.DataDir, "breakfix.db"))
+	database, err := db.NewWithAgentRole(cfg.DatabaseURL, cfg.AgentDatabaseRole)
 	if err != nil {
 		slog.Error("failed to open database", "err", err)
 		os.Exit(1)

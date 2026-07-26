@@ -69,7 +69,7 @@ type Service struct {
 	instanceID    string
 }
 
-func NewService(repo WorkRepository, store *Store, challengesDir string, llm config.LLMConfig) *Service {
+func NewService(repo WorkRepository, store *Store, challengesDir string, llm config.AgentConfig) *Service {
 	return NewServiceWithRunner(repo, store, challengesDir, &claudeRunner{llm: llm})
 }
 
@@ -720,7 +720,7 @@ func newWorkID(prefix string) string {
 }
 
 type claudeRunner struct {
-	llm config.LLMConfig
+	llm config.AgentConfig
 }
 
 func (r *claudeRunner) Run(ctx context.Context, request AgentRequest) (string, error) {
@@ -795,16 +795,13 @@ func (r *claudeRunner) Run(ctx context.Context, request AgentRequest) (string, e
 	return last, nil
 }
 
-func taxonomyClaudeEnvironment(llm config.LLMConfig) []string {
+func taxonomyClaudeEnvironment(llm config.AgentConfig) []string {
 	values := []struct{ key, value string }{
 		{"ANTHROPIC_BASE_URL", llm.BaseURL},
 		{"ANTHROPIC_AUTH_TOKEN", llm.APIKey},
 		{"ANTHROPIC_MODEL", llm.Model},
 		{"ANTHROPIC_DEFAULT_OPUS_MODEL", llm.Model},
 		{"ANTHROPIC_DEFAULT_SONNET_MODEL", llm.Model},
-		{"ANTHROPIC_DEFAULT_HAIKU_MODEL", llm.HaikuModel},
-		{"CLAUDE_CODE_SUBAGENT_MODEL", llm.HaikuModel},
-		{"CLAUDE_CODE_EFFORT_LEVEL", llm.Effort},
 	}
 	result := make([]string, 0, len(values))
 	for _, value := range values {

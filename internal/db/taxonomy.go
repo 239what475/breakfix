@@ -179,7 +179,7 @@ func (d *DB) MarkTaxonomyWorkAgentStarted(ctx context.Context, id, owner string,
 		return fmt.Errorf("unknown taxonomy work agent %q", agent)
 	}
 	now := time.Now().UTC()
-	result, err := d.conn.ExecContext(ctx, fmt.Sprintf(`UPDATE taxonomy_work_items SET %s = 1, updated_at = ? WHERE id = ? AND lease_owner = ?`, column), nowText(now), id, owner)
+	result, err := d.conn.ExecContext(ctx, fmt.Sprintf(`UPDATE taxonomy_work_items SET %s = TRUE, updated_at = ? WHERE id = ? AND lease_owner = ?`, column), nowText(now), id, owner)
 	if err != nil {
 		return fmt.Errorf("mark taxonomy work agent started: %w", err)
 	}

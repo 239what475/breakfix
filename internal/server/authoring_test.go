@@ -11,7 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,11 +19,7 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-author", "author", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +82,7 @@ func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-current", "current", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +114,7 @@ func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-publish", "publish", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}

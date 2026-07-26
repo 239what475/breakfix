@@ -372,9 +372,9 @@ func (d *DB) LearningSummary(ctx context.Context, userID string, now time.Time) 
 	}
 	if err := d.conn.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(
-			CASE WHEN ended_at = '' THEN MAX(0, unixepoch(?) - unixepoch(started_at))
-			ELSE MAX(0, unixepoch(ended_at) - unixepoch(started_at)) END
-		), 0)
+			CASE WHEN ended_at = '' THEN GREATEST(0, EXTRACT(EPOCH FROM (?::timestamptz - started_at::timestamptz))::BIGINT)
+			ELSE GREATEST(0, EXTRACT(EPOCH FROM (ended_at::timestamptz - started_at::timestamptz))::BIGINT) END
+		), 0)::BIGINT
 		FROM environment_usage_sessions WHERE user_id = ?
 	`, nowText(now.UTC()), userID).Scan(&summary.TerminalLearningSecond); err != nil {
 		return LearningSummary{}, fmt.Errorf("sum terminal learning time: %w", err)
@@ -430,8 +430,8 @@ func (d *DB) ListLearningHistory(ctx context.Context, userID string, filter Lear
 	rows, err := d.conn.QueryContext(ctx, `
 		SELECT a.environment_uid, a.challenge_id, a.runtime, a.ready_at, a.ended_at, a.outcome,
 			CASE WHEN a.outcome = 'completed' AND a.ended_at != '' THEN a.ended_at END AS completed_at,
-			COALESCE(SUM(CASE WHEN s.ended_at = '' THEN MAX(0, unixepoch(?) - unixepoch(s.started_at))
-				ELSE MAX(0, unixepoch(s.ended_at) - unixepoch(s.started_at)) END), 0) AS learning_seconds,
+			COALESCE(SUM(CASE WHEN s.ended_at = '' THEN GREATEST(0, EXTRACT(EPOCH FROM (?::timestamptz - s.started_at::timestamptz))::BIGINT)
+				ELSE GREATEST(0, EXTRACT(EPOCH FROM (s.ended_at::timestamptz - s.started_at::timestamptz))::BIGINT) END), 0)::BIGINT AS learning_seconds,
 			COALESCE(MAX(CASE WHEN s.ended_at = '' THEN ? ELSE s.ended_at END), a.ended_at, a.ready_at) AS last_activity_at
 		FROM user_challenge_attempts a
 		LEFT JOIN environment_usage_sessions s ON s.environment_uid = a.environment_uid

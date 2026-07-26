@@ -6,8 +6,14 @@ port: 9090
 proxy_port: 3128
 health_port: 8081
 
-# Persistent server state: SQLite, CA material, and the filesystem challenge catalog.
+# Persistent server state: CA material, artifacts, and the filesystem challenge catalog.
 data_dir: ./data
+# PostgreSQL is the only relational database. The Server data directory is not
+# a database volume and must not be shared with the Controller or Agent Worker.
+database_url: ${BREAKFIX_DATABASE_URL}
+# Agent Worker uses a separate credential restricted to agent_* tables.
+agent_database_url: ${BREAKFIX_AGENT_DATABASE_URL}
+agent_database_role: breakfix_agent
 kubeconfig: ~/.kube/config
 
 # Registry address includes the repository namespace used for challenge images.
@@ -30,10 +36,9 @@ cooldown_minutes: 5
 jwt_secret: breakfix-dev-secret-change-in-production
 internal_api_key: breakfix-dev-internal-key-change-in-production
 
-# Agent workflow (Anthropic-compatible API).
-llm:
-  base_url: https://api.deepseek.com/anthropic
+# Agent workflow (DeepSeek Chat Completions API).
+agent:
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
-  haiku_model: deepseek-v4-flash
-  effort: max
-  api_key: sk-your-deepseek-api-key
+  request_timeout: 2m

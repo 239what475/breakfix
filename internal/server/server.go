@@ -24,7 +24,6 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	if h.taxonomyWorkflow != nil {
 		h.taxonomyWorkflow.Start(runCtx)
 	}
-	h.StartAssistantCleanup(runCtx)
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)

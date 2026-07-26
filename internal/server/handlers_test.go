@@ -13,9 +13,9 @@ import (
 
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -144,11 +144,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 	seedTestTaxonomy(t, root)
 
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
@@ -373,11 +369,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 	root := t.TempDir()
 	writeGatewayChallenge(t, root)
 	seedTestTaxonomy(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}

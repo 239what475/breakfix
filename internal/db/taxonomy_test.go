@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,11 +9,7 @@ import (
 )
 
 func TestTaxonomyWorkDeduplicatesAndUsesExpiringLeases(t *testing.T) {
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTestDB(t)
 	ctx := context.Background()
 	item := testTaxonomyWork("mapping-one", "challenge-a", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	first, err := database.EnqueueTaxonomyWork(ctx, item)
@@ -61,11 +56,7 @@ func TestTaxonomyWorkDeduplicatesAndUsesExpiringLeases(t *testing.T) {
 }
 
 func TestTaxonomyWorkPersistsDelayedRetryBeforeItCanBeClaimed(t *testing.T) {
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTestDB(t)
 	ctx := context.Background()
 	item, err := database.EnqueueTaxonomyWork(ctx, testTaxonomyWork("mapping-delayed", "challenge-delayed", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 	if err != nil {
@@ -103,11 +94,7 @@ func TestTaxonomyWorkPersistsDelayedRetryBeforeItCanBeClaimed(t *testing.T) {
 }
 
 func TestTaxonomyPublisherLeaseIsExclusive(t *testing.T) {
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTestDB(t)
 	ctx := context.Background()
 	first, err := database.AcquireTaxonomyLease(ctx, "publisher", "server-a", time.Minute)
 	if err != nil || !first {

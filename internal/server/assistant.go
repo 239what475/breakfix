@@ -47,7 +47,7 @@ func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
 		ID:          session.ID,
 		ChallengeID: challengeID,
 		Messages:    messages,
-		ActiveTurn:  h.assistant.ActiveTurn(session.ID),
+		ActiveTurn:  h.assistant.ActiveTurn(c.Request.Context(), session.ID),
 	})
 }
 
@@ -79,7 +79,7 @@ func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID stri
 		h.writeAssistantError(c, err)
 		return
 	}
-	subscription, err := h.assistant.Subscribe(session.ID, turn.ID)
+	subscription, err := h.assistant.Subscribe(c.Request.Context(), session.ID, turn.ID)
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
@@ -102,7 +102,7 @@ func (h *Handler) StreamChallengeAssistantTurn(c *gin.Context, challengeID, turn
 		h.writeAssistantError(c, err)
 		return
 	}
-	subscription, err := h.assistant.Subscribe(session.ID, turnID)
+	subscription, err := h.assistant.Subscribe(c.Request.Context(), session.ID, turnID)
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return

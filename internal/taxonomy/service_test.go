@@ -12,18 +12,14 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	. "github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/testpostgres"
 )
 
 func TestMappingWorkflowPublishesOnlyAfterBothReviewersApprove(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapping: mappingChangeSet(entry)}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	if err := service.EnqueueUnmapped(context.Background()); err != nil {
@@ -78,11 +74,7 @@ func TestMappingWorkflowPublishesOnlyAfterBothReviewersApprove(t *testing.T) {
 func TestMappingWorkflowRequeuesRejectedCandidateUsingSameMapperSession(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapping: mappingChangeSet(entry), rejectCurriculumOnce: true}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	if err := service.EnqueueUnmapped(context.Background()); err != nil {
@@ -123,11 +115,7 @@ func TestMappingWorkflowRequeuesRejectedCandidateUsingSameMapperSession(t *testi
 func TestMappingWorkflowPersistsMapperSessionBeforeAgentFailure(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapperFailures: 1}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
@@ -148,11 +136,7 @@ func TestMappingWorkflowPersistsMapperSessionBeforeAgentFailure(t *testing.T) {
 func TestMappingWorkflowRequeuesInvalidMapperOutputUsingSameSession(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapping: mappingChangeSet(entry), invalidMapperOnce: true}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {
@@ -190,11 +174,7 @@ func TestMappingWorkflowRequeuesInvalidMapperOutputUsingSameSession(t *testing.T
 func TestMappingWorkflowRerunsBothReviewersAfterOneFails(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{
 		mapping:          mappingChangeSet(entry),
 		reviewerFailures: map[string]int{"sre-reviewer": 1},
@@ -234,11 +214,7 @@ func TestMappingWorkflowRerunsBothReviewersAfterOneFails(t *testing.T) {
 func TestMappingWorkflowClearsPartialReviewerStateBeforeRetryingPair(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{
 		mapping:          mappingChangeSet(entry),
 		reviewerFailures: map[string]int{"sre-reviewer": 1},
@@ -276,11 +252,7 @@ func TestMappingWorkflowClearsPartialReviewerStateBeforeRetryingPair(t *testing.
 func TestMappingWorkflowBacksOffAfterTenTechnicalFailures(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapperFailures: 10}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	queued, err := service.EnqueueChallenge(context.Background(), entry, "")
@@ -312,11 +284,7 @@ func TestMappingWorkflowBacksOffAfterTenTechnicalFailures(t *testing.T) {
 func TestMappingWorkflowCancelsWhenArtifactRevisionDisappears(t *testing.T) {
 	root := t.TempDir()
 	entry := writeWorkflowChallenge(t, root)
-	database, err := db.New(filepath.Join(root, "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	runner := &scriptedRunner{mapping: mappingChangeSet(entry)}
 	service := NewServiceWithRunner(database, NewStore(root), filepath.Join(root, "challenges"), runner)
 	if _, err := service.EnqueueChallenge(context.Background(), entry, ""); err != nil {

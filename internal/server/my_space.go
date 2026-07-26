@@ -66,9 +66,9 @@ func (h *Handler) mySpace(ctx context.Context, user *db.User, learningLimit int)
 		return api.MySpace{}, fmt.Errorf("user space dependencies are not configured")
 	}
 	now := time.Now().UTC()
-	createdAt, err := parseUserCreatedAt(user.CreatedAt)
-	if err != nil {
-		return api.MySpace{}, fmt.Errorf("parse user creation time: %w", err)
+	createdAt := user.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		return api.MySpace{}, fmt.Errorf("user creation time is missing")
 	}
 	entries, err := challenge.List(h.challengesDir)
 	if err != nil {
@@ -326,17 +326,6 @@ func authoringSessionTitle(title string) string {
 		return "Untitled challenge"
 	}
 	return title
-}
-
-func parseUserCreatedAt(value string) (time.Time, error) {
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed.UTC(), nil
-	}
-	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.UTC)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return parsed.UTC(), nil
 }
 
 func safeInt(value int64) int {

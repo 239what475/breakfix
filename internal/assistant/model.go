@@ -23,8 +23,6 @@ type Session struct {
 	EnvironmentName string    `json:"-"`
 	Runtime         string    `json:"-"`
 	ChallengeID     string    `json:"challenge_id"`
-	AgentSessionID  string    `json:"-"`
-	AgentStarted    bool      `json:"-"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -138,16 +136,6 @@ type Event struct {
 	SessionID string   `json:"session_id,omitempty"`
 	Message   *Message `json:"message,omitempty"`
 	Error     string   `json:"error,omitempty"`
-}
-
-type Repository interface {
-	CreateAssistantSession(context.Context, Session) (*Session, error)
-	GetAssistantSession(context.Context, string, string, string) (*Session, error)
-	ListAssistantMessages(context.Context, string) ([]Message, error)
-	AppendAssistantMessage(context.Context, string, Message) error
-	SetAssistantAgentStarted(context.Context, string) error
-	DeleteAssistantSessionsForEnvironment(context.Context, string) error
-	ListAssistantSessions(context.Context) ([]Session, error)
 }
 
 func NewID(prefix string) string {

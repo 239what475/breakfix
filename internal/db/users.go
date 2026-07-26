@@ -1,6 +1,6 @@
 package db
 
-import ()
+import "time"
 
 type User struct {
 	ID           string
@@ -8,7 +8,7 @@ type User struct {
 	Name         string
 	PasswordHash string
 	TOTPSecret   string
-	CreatedAt    string
+	CreatedAt    time.Time
 }
 
 func (d *DB) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (string, error) {

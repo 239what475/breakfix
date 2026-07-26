@@ -20,13 +20,13 @@ import (
 
 type Service struct {
 	repo Repository
-	llm  config.LLMConfig
+	llm  config.AgentConfig
 
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
 }
 
-func NewService(repo Repository, llm config.LLMConfig) *Service {
+func NewService(repo Repository, llm config.AgentConfig) *Service {
 	return &Service{repo: repo, llm: llm, locks: make(map[string]*sync.Mutex)}
 }
 
@@ -189,16 +189,13 @@ func (s *Service) runAgent(ctx context.Context, conversation *planConversation, 
 	return lastMessage, nil
 }
 
-func claudeEnvironment(llm config.LLMConfig) []string {
+func claudeEnvironment(llm config.AgentConfig) []string {
 	values := []struct{ key, value string }{
 		{"ANTHROPIC_BASE_URL", llm.BaseURL},
 		{"ANTHROPIC_AUTH_TOKEN", llm.APIKey},
 		{"ANTHROPIC_MODEL", llm.Model},
 		{"ANTHROPIC_DEFAULT_OPUS_MODEL", llm.Model},
 		{"ANTHROPIC_DEFAULT_SONNET_MODEL", llm.Model},
-		{"ANTHROPIC_DEFAULT_HAIKU_MODEL", llm.HaikuModel},
-		{"CLAUDE_CODE_SUBAGENT_MODEL", llm.HaikuModel},
-		{"CLAUDE_CODE_EFFORT_LEVEL", llm.Effort},
 	}
 	env := make([]string, 0, len(values))
 	for _, item := range values {

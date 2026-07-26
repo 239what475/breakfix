@@ -27,7 +27,7 @@ type Handler struct {
 	taxonomyWorkflow *taxonomy.Service
 	dataDir          string
 	cooldownMin      int
-	llm              config.LLMConfig
+	llm              config.AgentConfig
 	jwtSecret        []byte
 	internalAPIKey   string
 	serverHost       string
@@ -41,8 +41,8 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 	handler := &Handler{
 		db:               database,
 		k8s:              client,
-		authoring:        authoring.NewService(database, cfg.LLM),
-		assistant:        assistant.NewService(database, cfg.LLM),
+		authoring:        authoring.NewService(database, cfg.Agent),
+		assistant:        assistant.NewService(database, cfg.Agent.Model),
 		registryAddr:     cfg.RegistryAddr,
 		registryInsecure: cfg.RegistryInsecure,
 		namespace:        cfg.Namespace,
@@ -51,7 +51,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		taxonomy:         taxonomyStore,
 		dataDir:          cfg.DataDir,
 		cooldownMin:      cfg.CooldownMinutes,
-		llm:              cfg.LLM,
+		llm:              cfg.Agent,
 		jwtSecret:        []byte(cfg.JWTSecret),
 		internalAPIKey:   cfg.InternalAPIKey,
 		serverHost:       cfg.ServerHost,
@@ -60,7 +60,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		serverInstance:   newServerInstanceID(),
 	}
 	if database != nil {
-		handler.taxonomyWorkflow = taxonomy.NewService(database, taxonomyStore, cfg.ChallengesDir(), cfg.LLM)
+		handler.taxonomyWorkflow = taxonomy.NewService(database, taxonomyStore, cfg.ChallengesDir(), cfg.Agent)
 	}
 	return handler
 }

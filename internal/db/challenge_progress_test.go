@@ -2,17 +2,12 @@ package db
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestChallengeCompletionPersistsFirstCompletion(t *testing.T) {
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = database.Close() }()
+	database := newTestDB(t)
 
 	first := time.Date(2026, time.July, 24, 9, 30, 0, 0, time.UTC)
 	if err := database.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-a", first); err != nil {

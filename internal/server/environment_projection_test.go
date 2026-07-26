@@ -2,22 +2,18 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/db"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/testpostgres"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func newProjectionTestHandler(t *testing.T) *Handler {
 	t.Helper()
-	database, err := db.New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := testpostgres.New(t)
 	return &Handler{db: database}
 }
 

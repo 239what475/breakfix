@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/authoring"
@@ -11,11 +10,7 @@ import (
 
 func TestAuthoringOnlyExposesVerifiedArtifactAndPublishesExplicitly(t *testing.T) {
 	ctx := context.Background()
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTestDB(t)
 
 	const sessionID = "author-test"
 	const userID = "user-test"
@@ -126,11 +121,7 @@ func TestAuthoringOnlyExposesVerifiedArtifactAndPublishesExplicitly(t *testing.T
 
 func TestAuthoringVerificationFailureRestartsExactlyOnceWithoutArtifact(t *testing.T) {
 	ctx := context.Background()
-	database, err := New(filepath.Join(t.TempDir(), "breakfix.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTestDB(t)
 
 	const sessionID = "author-repair"
 	const userID = "user-repair"

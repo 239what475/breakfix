@@ -206,12 +206,12 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 }
 
 func (d *DB) SetAuthoringAgentStarted(ctx context.Context, sessionID string) error {
-	_, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET agent_started = 1, updated_at = ? WHERE id = ?`, nowText(time.Now().UTC()), sessionID)
+	_, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET agent_started = TRUE, updated_at = ? WHERE id = ?`, nowText(time.Now().UTC()), sessionID)
 	return err
 }
 
 func (d *DB) SetAuthoringWorkflowStarted(ctx context.Context, sessionID string) error {
-	_, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET workflow_started = 1, updated_at = ? WHERE id = ?`, nowText(time.Now().UTC()), sessionID)
+	_, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET workflow_started = TRUE, updated_at = ? WHERE id = ?`, nowText(time.Now().UTC()), sessionID)
 	return err
 }
 
@@ -472,14 +472,15 @@ func (d *DB) ListAuthoringSessionsNeedingSync(ctx context.Context) ([]string, er
 	return ids, rows.Err()
 }
 
-func appendAuthoringEventTx(ctx context.Context, tx *sql.Tx, id, sessionID, content string, createdAt time.Time) error {
-	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO authoring_messages
-		(id, session_id, role, content, changes_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+func appendAuthoringEventTx(ctx context.Context, tx *Tx, id, sessionID, content string, createdAt time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO authoring_messages
+		(id, session_id, role, content, changes_json, created_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
 		id, sessionID, "event", content, "[]", nowText(createdAt))
 	return err
 }
 
-func readAuthoringSessionTx(ctx context.Context, tx *sql.Tx, id, userID string) (*authoring.Session, error) {
+func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {
 	query := `SELECT id, user_id, agent_session_id, agent_started, workflow_session_id, workflow_started, state, current_revision, visible_revision,
 		generation_id, verify_task_id, pending_feedback, publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
 	args := []any{id}
@@ -503,7 +504,7 @@ func readAuthoringSessionTx(ctx context.Context, tx *sql.Tx, id, userID string) 
 	return &session, nil
 }
 
-func readAuthoringRevisionTx(ctx context.Context, tx *sql.Tx, sessionID string, revision int64) (*authoring.Revision, error) {
+func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, revision int64) (*authoring.Revision, error) {
 	var planJSON, artifactID, artifactDir, artifactGeneration, verificationJSON, createdAt string
 	err := tx.QueryRowContext(ctx, `SELECT plan_json, artifact_submission_id, artifact_dir, artifact_generation_id, verification_json, created_at
 		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(&planJSON, &artifactID, &artifactDir, &artifactGeneration, &verificationJSON, &createdAt)

@@ -74,44 +74,6 @@ func (h *Handler) StartAuthoringReconciler(ctx context.Context) {
 	}()
 }
 
-// StartAssistantCleanup removes conversations once the controller has removed
-// their environment. Explicit Stop and Reset clear them synchronously; this
-// loop covers timeout-driven cleanup while no browser is connected.
-func (h *Handler) StartAssistantCleanup(ctx context.Context) {
-	if h.db == nil || h.k8s == nil || h.assistant == nil {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				sessions, err := h.assistant.SessionsForCleanup(ctx)
-				if err != nil {
-					slog.Warn("list assistant sessions for cleanup", "err", err)
-					continue
-				}
-				for _, session := range sessions {
-					env, err := h.getEnvironment(ctx, session.Runtime, session.EnvironmentName)
-					if err == nil && env.UID == session.EnvironmentUID && env.Phase != breakfixv1.EnvironmentDestroyed {
-						continue
-					}
-					if err != nil && !apierrors.IsNotFound(err) {
-						slog.Warn("read assistant environment for cleanup", "session", session.ID, "err", err)
-						continue
-					}
-					if err := h.assistant.DeleteEnvironment(ctx, session.EnvironmentUID); err != nil {
-						slog.Warn("clear orphan assistant session", "session", session.ID, "err", err)
-					}
-				}
-			}
-		}
-	}()
-}
-
 func (h *Handler) CreateAuthoringSession(c *gin.Context) {
 	user := h.requireUser(c)
 	if user == nil {
@@ -358,9 +320,6 @@ func (h *Handler) createAuthoringGeneration(ctx context.Context, session *author
 		"ANTHROPIC_MODEL":                h.llm.Model,
 		"ANTHROPIC_DEFAULT_OPUS_MODEL":   h.llm.Model,
 		"ANTHROPIC_DEFAULT_SONNET_MODEL": h.llm.Model,
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  h.llm.HaikuModel,
-		"CLAUDE_CODE_SUBAGENT_MODEL":     h.llm.HaikuModel,
-		"CLAUDE_CODE_EFFORT_LEVEL":       h.llm.Effort,
 	}
 	if session.WorkflowStarted {
 		env["GENERATION_AGENT_RESUME"] = "true"
