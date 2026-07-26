@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	claudecode "github.com/239what475/eino-claude-code"
@@ -112,8 +111,8 @@ func (g *Generator) Run(ctx context.Context) error {
 		validateStart := time.Now()
 		if err := g.validateChallengeManifest(chalDir); err != nil {
 			judgeFeedback = "challenge 文件结构或元数据不完整: " + err.Error()
-			slog.Info("phase failed", "phase", "validate_manifest", "round", round+1, "duration", time.Since(validateStart), "feedback", truncateStr(judgeFeedback, 300))
-			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "artifact_invalid", "feedback", truncateStr(judgeFeedback, 300))
+			slog.Info("phase failed", "phase", "validate_manifest", "round", round+1, "duration", time.Since(validateStart))
+			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "artifact_invalid")
 			continue
 		}
 		slog.Info("phase done", "phase", "validate_manifest", "round", round+1, "duration", time.Since(validateStart))
@@ -121,8 +120,8 @@ func (g *Generator) Run(ctx context.Context) error {
 		semanticStart := time.Now()
 		if err := g.validateChallengeSemantics(chalDir); err != nil {
 			judgeFeedback = "challenge 语义检查失败: " + err.Error()
-			slog.Info("phase failed", "phase", "validate_semantics", "round", round+1, "duration", time.Since(semanticStart), "feedback", truncateStr(judgeFeedback, 300))
-			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "semantic_invalid", "feedback", truncateStr(judgeFeedback, 300))
+			slog.Info("phase failed", "phase", "validate_semantics", "round", round+1, "duration", time.Since(semanticStart))
+			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "semantic_invalid")
 			continue
 		}
 		slog.Info("phase done", "phase", "validate_semantics", "round", round+1, "duration", time.Since(semanticStart))
@@ -131,7 +130,7 @@ func (g *Generator) Run(ctx context.Context) error {
 		slog.Info("phase start", "phase", "judge", "round", round+1)
 		passed, feedback := g.phaseJudge(ctx, chalDir)
 		judgeFeedback = feedback
-		slog.Info("phase done", "phase", "judge", "round", round+1, "duration", time.Since(jStart), "passed", passed, "feedback", truncateStr(feedback, 200))
+		slog.Info("phase done", "phase", "judge", "round", round+1, "duration", time.Since(jStart), "passed", passed)
 		if !passed {
 			slog.Info("round done", "round", round+1, "duration", time.Since(roundStart), "result", "judge_fail")
 			continue
@@ -157,9 +156,6 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 	}
 	baseCtx, stop := context.WithTimeout(ctx, timeout)
 	defer stop()
-
-	runCtx, cancel := context.WithCancel(baseCtx)
-	defer cancel()
 
 	tools := []string{"Read", "Write", "Edit", "Bash"}
 	customTools := labTools
@@ -200,33 +196,16 @@ func (g *Generator) phaseGenerate(ctx context.Context, chalDir string, labTools 
 	} else {
 		prompt = fmt.Sprintf(WorkerPromptFix, judgeFeedback, g.reviewedPlanContext(), chalDir)
 	}
-	slog.Info("agent prompt", "phase", "generate", "prompt", truncateStr(prompt, 500))
-	runner := adk.NewRunner(runCtx, adk.RunnerConfig{Agent: agent})
-	events := runner.Run(runCtx, []adk.Message{schema.UserMessage(prompt)})
+	slog.Debug("agent prompt prepared", "phase", "generate", "chars", len(prompt))
+	runner := adk.NewRunner(baseCtx, adk.RunnerConfig{Agent: agent})
+	events := runner.Run(baseCtx, []adk.Message{schema.UserMessage(prompt)})
 
-	var lastEvent atomic.Int64
-	lastEvent.Store(time.Now().UnixNano())
-	var quiesced atomic.Bool
-	go g.watchGenerateQuiescence(runCtx, chalDir, &lastEvent, &quiesced, cancel)
-
-	err = g.drainEvents(events, func() {
-		lastEvent.Store(time.Now().UnixNano())
-	})
+	err = g.drainEvents(events, nil)
 	if strings.TrimSpace(g.AgentSessionID) != "" {
 		g.agentStarted = true
 	}
-	if quiesced.Load() && (err == nil || errors.Is(err, context.Canceled)) {
-		slog.Info("phase done", "phase", "generate", "mode", "vcluster_quiesced")
-		return nil
-	}
-	if errors.Is(baseCtx.Err(), context.DeadlineExceeded) {
-		err = fmt.Errorf("generate phase timeout after %s", timeout)
-	}
-	if err != nil && g.prefersVClusterAuthoring() {
-		if runtime, ready, _ := generatedChallengeState(chalDir); runtime == challenge.RuntimeVCluster && ready {
-			slog.Info("phase done", "phase", "generate", "mode", "vcluster_salvaged_after_agent_error", "err", err.Error())
-			return nil
-		}
+	if baseCtx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("generate phase timeout after %s", timeout)
 	}
 	return err
 }

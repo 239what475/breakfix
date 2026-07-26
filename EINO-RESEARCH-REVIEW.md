@@ -22,3 +22,15 @@
 Eino `v0.9.13` 的 `ModelRetryConfig` 在流式调用中会并行消费一份完整流来决定是否重试，同时让另一份流向下游发送 chunk。重试判定发生在 stream 结束后，因此浏览器可能已经看到了随后会被废弃的文字。
 
 调整：Assistant 不使用 Eino 内建流式重试。一次完整 Agent 调用遇到明确的传输错误时，最多重新执行三次；每次重新执行前通过瞬时 Server event 发布 `reset`，浏览器清空旧草稿。Assistant 没有写工具，重复该调用不会重复领域副作用。最终消息仍只在成功后写入 `agent_messages`，且只写一次。
+
+## 2026-07-26：OpenSandbox Go SDK 的模块路径与 Worker 授权边界
+
+`opensandbox-group/OpenSandbox` 的 SDK tag `sdks/sandbox/go/v1.0.5` 实际声明的 Go module 仍为
+`github.com/alibaba/OpenSandbox/sdks/sandbox/go`。以仓库新路径执行 `go get` 会因 module path 不匹配失败；接入时必须使用该声明路径并固定 `v1.0.5`，不能通过 `replace` 伪造第二份 SDK。
+
+同时，SDK 的 `ConnectSandbox` 会以 lifecycle API key 调用 `GetEndpoint`，而 endpoint headers 是按 Sandbox 返回的访问材料，并不携带
+Run attempt、过期时间或撤销接口。它们不能满足 Worker 失去租约后立即失效的 fencing 要求，也不能作为全局 lifecycle key 的安全替代物交给 Worker。
+
+调整：Server 是唯一 OpenSandbox SDK/lifecycle credential 持有者。Generator Worker 的 files、exec 和 archive 操作均通过受内部 API 保护的
+Server proxy；每个请求由 Server 使用 `run_id`、`attempt` 和 `lease_owner` 校验当前租约后才转发到绑定的 Sandbox。这个选择使用
+`EINO-RESEARCH.md` 已规定的“没有官方可撤销 scoped credential 时使用 Server 代理”分支，不建立双 backend 或向 Worker 注入 OpenSandbox key。
