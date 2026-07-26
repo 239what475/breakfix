@@ -17,7 +17,7 @@
 | `/api/challenges/{id}/*` | 读取题面、启动、重置、停止、查询检查点、终端窗口和挑战助手。 |
 | `/api/me/space*` | 当前用户的学习、环境和作者聚合视图。 |
 | `/api/authoring/sessions*` | 作者讨论、生成确认、已验证 revision 查看和发布。 |
-| `/api/internal/*` | 仅 Generator/VerifyTask 的 artifact 上传下载；必须携带内部密钥，不能当作公开上传 API。 |
+| `/api/internal/*` | 仅 Agent Worker/Verifier 使用的围栏领域工具、Generator 工作区和 artifact 下载；必须携带内部密钥，不能当作公开 API。 |
 
 终端使用 `/api/challenges/{id}/terminal` WebSocket。字节流不通过 OpenAPI JSON schema 表达；路由仍在 Server 的公开 API 表面内，并受同一 JWT 鉴权保护。
 

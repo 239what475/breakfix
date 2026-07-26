@@ -9,11 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/generator"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -217,7 +219,7 @@ func createPublishedAuthoringSession(t *testing.T, database *db.DB, userID, chal
 	t.Helper()
 	ctx := context.Background()
 	const sessionID = "authoring-demo"
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID, AgentSessionID: "agent", WorkflowSessionID: "workflow"}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
 	plan := authoring.Plan{
@@ -229,13 +231,22 @@ func createPublishedAuthoringSession(t *testing.T, database *db.DB, userID, chal
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.BeginGeneration(ctx, sessionID, userID, revision.Number, "generation-demo"); err != nil {
+	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, agentruntime.CreateRun{
+		ID: "generator-demo", Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: sessionID,
+		Model: "test-model", PromptVersion: generator.PromptVersion, DeadlineAt: time.Now().UTC().Add(time.Hour),
+	}, generator.RunInput{AuthoringSessionID: sessionID, Revision: revision.Number})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.AttachVerificationTask(ctx, sessionID, "generation-demo", revision.Number, "verify-demo"); err != nil {
+	claim, err := database.ClaimNext(ctx, "test-generator-worker", time.Minute, time.Now().UTC())
+	if err != nil || claim == nil || claim.Run.ID != run.ID {
+		t.Fatalf("claim generator run = %#v, %v", claim, err)
+	}
+	artifact := authoring.Artifact{SubmissionID: generator.SubmissionID(run.ID), Directory: "authoring/demo", GeneratorRunID: run.ID}
+	if err := database.FinalizeGeneratorSubmission(ctx, *claim, artifact.SubmissionID, "verify-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.CompleteVerification(ctx, sessionID, "generation-demo", authoring.Artifact{SubmissionID: "submission-demo", Directory: "authoring/demo", GenerationID: "generation-demo"}, authoring.Verification{TaskID: "verify-demo", Phase: "Succeeded"}); err != nil {
+	if err := database.CompleteGeneratorVerification(ctx, sessionID, run.ID, artifact, authoring.Verification{TaskID: "verify-demo", Phase: "Succeeded", Report: &authoring.VerificationReport{BuildPassed: true, AnswerPassed: true, CheckpointsPassed: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.BeginPublish(ctx, sessionID, userID, revision.Number, challengeID); err != nil {

@@ -256,7 +256,7 @@ export type VerifiedChallenge = {
 export type AuthoringArtifact = {
     submission_id: string;
     directory: string;
-    generation_id: string;
+    generator_run_id: string;
 };
 
 export type AuthoringVerification = {
@@ -315,7 +315,7 @@ export type AuthoringSession = {
     state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
     intent_revision: number;
     visible_revision: number;
-    generation_id?: string;
+    generator_run_id?: string;
     verify_task_id?: string;
     updated_at: string;
     intent: AuthoringPlan;
@@ -830,7 +830,7 @@ export type ConfirmAuthoringGenerationData = {
 
 export type ConfirmAuthoringGenerationResponses = {
     /**
-     * Generation and verification started
+     * Generator Run and verification started
      */
     200: AuthoringSession;
 };

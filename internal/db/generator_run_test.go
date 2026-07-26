@@ -30,7 +30,7 @@ func TestGeneratorRepairRunReusesSessionWithoutReusingVerifyTaskReference(t *tes
 	if err != nil {
 		t.Fatalf("start first generator run: %v", err)
 	}
-	if firstSession.GeneratorSessionID == "" || firstSession.GeneratorRunID != firstRun.ID || firstSession.GenerationID != firstRun.ID {
+	if firstSession.GeneratorSessionID == "" || firstSession.GeneratorRunID != firstRun.ID {
 		t.Fatalf("first generator session binding = %#v, run=%#v", firstSession, firstRun)
 	}
 	claim, err := database.ClaimNext(ctx, "worker-one", time.Minute, time.Now().UTC())

@@ -67,7 +67,22 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 
 	generatorSessionID := strings.TrimSpace(session.GeneratorSessionID)
 	now := time.Now().UTC()
-	if generatorSessionID == "" {
+	if session.State == authoring.StateRevisingAndVerifying {
+		if generatorSessionID != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ? AND status = ?`,
+				agentruntime.SessionClosed, now, generatorSessionID, agentruntime.SessionActive); err != nil {
+				return nil, nil, fmt.Errorf("close superseded generator session: %w", err)
+			}
+		}
+		generatorSessionID = generator.NewSessionID()
+		ownerRef := session.ID + ":" + strconv.FormatInt(expectedRevision, 10)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
+			(id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			generatorSessionID, generator.RuntimePurpose, "authoring-generator", ownerRef, session.UserID, agentruntime.SessionActive, now, now); err != nil {
+			return nil, nil, fmt.Errorf("insert replacement generator agent session: %w", err)
+		}
+	} else if generatorSessionID == "" {
 		generatorSessionID = generator.NewSessionID()
 		ownerRef := session.ID + ":" + strconv.FormatInt(expectedRevision, 10)
 		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
@@ -111,13 +126,9 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 		state = authoring.StateRevisingAndVerifying
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-		SET state = ?, generation_id = ?, generator_session_id = ?, generator_run_id = ?, verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ?
-		WHERE id = ?`, state, created.ID, generatorSessionID, created.ID, nowText(now), session.ID); err != nil {
+		SET state = ?, generator_session_id = ?, generator_run_id = ?, verify_task_id = '', last_error = '', updated_at = ?
+		WHERE id = ?`, state, generatorSessionID, created.ID, nowText(now), session.ID); err != nil {
 		return nil, nil, fmt.Errorf("mark generator run active: %w", err)
-	}
-	if err := appendAuthoringEventTx(ctx, tx, "generator-start-"+created.ID, session.ID,
-		fmt.Sprintf("正在生成并验证题目 revision %d。", expectedRevision), now); err != nil {
-		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("commit generator run: %w", err)
@@ -208,12 +219,8 @@ func (d *DB) FinalizeGeneratorSubmission(ctx context.Context, claim agentruntime
 		WHERE run_id = ?`, submissionID, verifyTaskID, now, record.RunID); err != nil {
 		return fmt.Errorf("link generator submission: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET verify_task_id = ?, updated_at = ? WHERE id = ?`, verifyTaskID, nowText(now), session.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET verify_task_id = ?, updated_at = ? WHERE id = ? AND generator_run_id = ?`, verifyTaskID, nowText(now), session.ID, claim.Run.ID); err != nil {
 		return fmt.Errorf("link authoring verify task: %w", err)
-	}
-	if err := appendAuthoringEventTx(ctx, tx, "generator-submitted-"+claim.Run.ID, session.ID,
-		"候选题目已提交真实验证。", now); err != nil {
-		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
 		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,

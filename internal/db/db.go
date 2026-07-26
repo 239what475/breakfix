@@ -547,4 +547,18 @@ var schemaMigrations = []schemaMigration{
 		`CREATE UNIQUE INDEX generator_runs_submission ON generator_runs(submission_id) WHERE submission_id <> ''`,
 		`CREATE UNIQUE INDEX generator_runs_verify_task ON generator_runs(verify_task_id) WHERE verify_task_id <> ''`,
 	}},
+	{version: 8, statements: []string{
+		// Authoring now uses the provider-neutral runtime session and durable
+		// Generator Run lineage exclusively. Remove the retired Claude/Generation
+		// bookkeeping instead of keeping a second state machine alive.
+		`ALTER TABLE authoring_sessions
+			DROP COLUMN IF EXISTS agent_session_id,
+			DROP COLUMN IF EXISTS agent_started,
+			DROP COLUMN IF EXISTS workflow_session_id,
+			DROP COLUMN IF EXISTS workflow_started,
+			DROP COLUMN IF EXISTS generation_id,
+			DROP COLUMN IF EXISTS pending_feedback`,
+		`DROP TABLE IF EXISTS authoring_messages`,
+		`ALTER TABLE authoring_revisions RENAME COLUMN artifact_generation_id TO artifact_generator_run_id`,
+	}},
 }

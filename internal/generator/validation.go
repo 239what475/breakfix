@@ -151,21 +151,6 @@ func candidateFiles(root string) ([]CandidateFile, error) {
 	return files, nil
 }
 
-// Deprecated compatibility methods keep the legacy workflow compiling until
-// the Generation CRD path is removed. They retain the new strict behavior.
-func (g *Generator) validateChallengeManifest(chalDir string) error {
-	_, err := ValidateCandidateDir(chalDir)
-	return err
-}
-
-func (g *Generator) validateChallengeSemantics(chalDir string) error {
-	entry, err := ValidateCandidateDir(chalDir)
-	if err != nil {
-		return err
-	}
-	return validateCandidateSemantics(chalDir, entry)
-}
-
 func validateCandidateSemantics(chalDir string, entry *challenge.Entry) error {
 	dockerfileData, err := os.ReadFile(filepath.Join(chalDir, "Dockerfile"))
 	if err != nil {

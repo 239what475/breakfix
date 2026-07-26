@@ -32,3 +32,11 @@ agent:
   model: deepseek-v4-pro
   request_timeout: 2m
   server_url: http://breakfix-server:9090
+
+opensandbox:
+  base_url: http://opensandbox-server.opensandbox.svc.cluster.local
+  api_key_env: OPEN_SANDBOX_API_KEY
+  namespace: opensandbox
+  workspace_image: ubuntu:22.04
+  workspace_storage: 5Gi
+  workspace_timeout: 1h

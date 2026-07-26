@@ -1,60 +1,11 @@
 package generator
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/breakfix/breakfix/internal/authoring"
-	"github.com/breakfix/breakfix/internal/challenge"
 )
-
-func TestReviewedPlanContextUsesEachPlanSectionOnce(t *testing.T) {
-	plan := &authoring.Plan{
-		Metadata: authoring.Metadata{
-			Title:       "唯一标题",
-			Description: "唯一简介",
-			Difficulty:  "medium",
-			Runtime:     challenge.RuntimeContainer,
-		},
-		Overview:    "唯一概览",
-		Checkpoints: []authoring.Checkpoint{{ID: "old-logs", Title: "唯一检查点", Markdown: "唯一检查点说明", Position: 1}},
-	}
-
-	context := (&Generator{Plan: plan}).reviewedPlanContext()
-	for _, value := range []string{"唯一标题", "唯一简介", "唯一概览", "唯一检查点说明"} {
-		if count := strings.Count(context, value); count != 1 {
-			t.Fatalf("reviewedPlanContext() contains %q %d times, want once:\n%s", value, count, context)
-		}
-	}
-	if strings.Contains(context, "表象：") || strings.Contains(context, "故障机制：") || strings.Contains(context, "验收标准：") {
-		t.Fatalf("reviewedPlanContext() retained legacy draft fields:\n%s", context)
-	}
-}
-
-func TestArchiveDirPreservesNestedChallengeAssets(t *testing.T) {
-	source := t.TempDir()
-	writeGeneratorSemanticChallenge(t, source, "container", "#!/bin/sh\nprintf '{\"checks\":[]}'\n")
-
-	payload, err := archiveDir(source)
-	if err != nil {
-		t.Fatalf("archiveDir: %v", err)
-	}
-	destination := t.TempDir()
-	if err := challenge.ExtractTarGz(destination, bytes.NewReader(payload)); err != nil {
-		t.Fatalf("ExtractTarGz: %v", err)
-	}
-	if _, err := challenge.ValidateSubmissionDir(destination); err != nil {
-		t.Fatalf("archived challenge no longer validates: %v", err)
-	}
-	for _, name := range []string{"checks/checkpoints.sh", "hints/deployment-ready.md"} {
-		if _, err := os.Stat(filepath.Join(destination, name)); err != nil {
-			t.Fatalf("archive omitted nested asset %s: %v", name, err)
-		}
-	}
-}
 
 func TestValidateChallengeManifestRejectsPlatformFields(t *testing.T) {
 	dir := t.TempDir()
@@ -68,8 +19,7 @@ description: |
   修复日志清理流程并恢复磁盘空间。
 `)
 
-	var g Generator
-	err := g.validateChallengeManifest(dir)
+	_, err := ValidateCandidateDir(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeManifest() to reject platform fields")
 	}
@@ -94,8 +44,7 @@ difficulty: medium
 description: ""
 `)
 
-	var g Generator
-	err := g.validateChallengeManifest(dir)
+	_, err := ValidateCandidateDir(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeManifest() to fail")
 	}
@@ -112,8 +61,7 @@ kubectl get pods -n default -l app=web --no-headers
 BAD_PODS=$(echo "${ACTIVE_PODS}" | grep -vE '(Running\s+1/1)' || echo "")
 `)
 
-	var g Generator
-	err := g.validateChallengeSemantics(dir)
+	err := ValidateCandidateSemantics(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeSemantics() to fail")
 	}
@@ -130,9 +78,8 @@ REPLICAS=$(kubectl get deployment web -n default -o jsonpath='{.spec.replicas}')
 [ -n "$READY" ] && [ "$READY" = "$REPLICAS" ] && [ "$READY" -gt 0 ]
 `)
 
-	var g Generator
-	if err := g.validateChallengeSemantics(dir); err != nil {
-		t.Fatalf("validateChallengeSemantics() error = %v", err)
+	if err := ValidateCandidateSemantics(dir); err != nil {
+		t.Fatalf("ValidateCandidateSemantics() error = %v", err)
 	}
 }
 
@@ -141,8 +88,7 @@ func TestValidateChallengeSemanticsRejectsBuildTimeNetworkInstall(t *testing.T) 
 	writeGeneratorSemanticChallenge(t, dir, "container", "#!/bin/sh\nprintf '{\"checks\":[]}'\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-base:latest\nRUN apt-get update && apt-get install -y curl\n")
 
-	var g Generator
-	err := g.validateChallengeSemantics(dir)
+	err := ValidateCandidateSemantics(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeSemantics() to reject build-time package installation")
 	}
@@ -157,8 +103,7 @@ func TestValidateChallengeSemanticsRejectsEphemeralProbePodsForVCluster(t *testi
 kubectl run verify-http-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://web
 `)
 
-	var g Generator
-	err := g.validateChallengeSemantics(dir)
+	err := ValidateCandidateSemantics(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeSemantics() to fail")
 	}
@@ -181,8 +126,7 @@ while IFS= read -r line; do
 done <<< "$POD_LINES"
 `)
 
-	var g Generator
-	err := g.validateChallengeSemantics(dir)
+	err := ValidateCandidateSemantics(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeSemantics() to fail")
 	}
@@ -202,37 +146,12 @@ if [ "$NOT_READY" -ne 0 ]; then
 fi
 `)
 
-	var g Generator
-	err := g.validateChallengeSemantics(dir)
+	err := ValidateCandidateSemantics(dir)
 	if err == nil {
 		t.Fatal("expected validateChallengeSemantics() to fail")
 	}
 	if !strings.Contains(err.Error(), "不应通过 `kubectl get pods ... | grep -v") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestJudgeResponsePassedRequiresExactPass(t *testing.T) {
-	tests := []struct {
-		name     string
-		response string
-		want     bool
-	}{
-		{name: "plain pass", response: "PASS", want: true},
-		{name: "trailing newline is invalid", response: "PASS\n", want: false},
-		{name: "plain failure", response: "FAIL: missing answer", want: false},
-		{name: "report with final pass is invalid", response: "检查完成。\n**Final Verdict: PASS**", want: false},
-		{name: "Chinese Markdown pass is invalid", response: "## 审查结果：PASS", want: false},
-		{name: "JSON pass is invalid", response: `{"pass": true}`, want: false},
-		{name: "no explicit verdict", response: "All files appear correct.", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := judgeResponsePassed(tt.response); got != tt.want {
-				t.Fatalf("judgeResponsePassed(%q) = %t, want %t", tt.response, got, tt.want)
-			}
-		})
 	}
 }
 

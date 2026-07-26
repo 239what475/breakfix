@@ -1,14 +1,14 @@
 .PHONY: dev dev-up dev-down dev-reset dev-status dev-config frontend-build \
-        dev-build dev-build-server dev-build-controller \
-        dev-start-server dev-start-controller \
-        dev-server dev-controller \
+	dev-build dev-build-server dev-build-controller dev-build-agent-worker \
+	dev-start-server dev-start-controller dev-start-agent-worker \
+	dev-server dev-controller dev-agent-worker \
         e2e \
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated generate-api verify-api-generated \
         build build-server build-controller \
-        deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-generator deploy-verifier deploy-catalog deploy-cleanup deploy-reset \
-        generator-build verifier-build generator-dev \
+	deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-verifier deploy-catalog deploy-cleanup deploy-reset \
+	verifier-build \
         lint proto clean status logs
 
 # ── Build info ──
@@ -65,7 +65,11 @@ dev-build-controller:
 	go build -o $(BIN_DIR)/breakfix-controller ./cmd/controller
 	@echo "  ✓ controller"
 
-dev-build: dev-build-server dev-build-controller
+dev-build-agent-worker:
+	go build -o $(BIN_DIR)/breakfix-agent-worker ./cmd/agent-worker
+	@echo "  ✓ agent worker"
+
+dev-build: dev-build-server dev-build-controller dev-build-agent-worker
 	@echo "  ✓ Binaries built"
 
 # ── Dev lifecycle ──
@@ -94,7 +98,16 @@ dev-start-server:
 	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Server HTTP check failed"; tail -20 /tmp/breakfix-server.log; exit 1; }
 	@echo "  ✓ Server :9090"
 
-dev-up: dev-config dev-start-controller dev-start-server
+dev-start-agent-worker:
+	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
+	@find /tmp/breakfix-agent-worker.log /tmp/breakfix-agent-worker.pid -depth -delete 2>/dev/null || true
+	@nohup $(BIN_DIR)/breakfix-agent-worker -config $(DEV_CONFIG) >/tmp/breakfix-agent-worker.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-agent-worker.pid
+	@sleep 1
+	@pid=$$(cat /tmp/breakfix-agent-worker.pid 2>/dev/null); \
+	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Agent Worker failed to stay up"; tail -20 /tmp/breakfix-agent-worker.log; exit 1; }
+	@echo "  ✓ Agent Worker"
+
+dev-up: dev-config dev-start-controller dev-start-server dev-start-agent-worker
 	@echo "  ✓ Server and Controller running"
 
 dev-down:
@@ -102,6 +115,7 @@ dev-down:
 	 { lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Server stopped"; } || echo "  - Server not running"
 	@{ [ -f /tmp/breakfix-controller.pid ] && kill $$(cat /tmp/breakfix-controller.pid) 2>/dev/null && find /tmp/breakfix-controller.pid -depth -delete && echo "  ✓ Controller stopped"; } || \
 	 { lsof -ti:8081 | xargs kill 2>/dev/null && echo "  ✓ Controller stopped"; } || echo "  - Controller not running"
+	@{ [ -f /tmp/breakfix-agent-worker.pid ] && kill $$(cat /tmp/breakfix-agent-worker.pid) 2>/dev/null && find /tmp/breakfix-agent-worker.pid -depth -delete && echo "  ✓ Agent Worker stopped"; } || echo "  - Agent Worker not running"
 	@lsof -ti:8081 | xargs kill 2>/dev/null || true
 	@docker stop registry 2>/dev/null && echo "  ✓ Registry stopped" || echo "  - Registry not running"
 
@@ -114,6 +128,7 @@ dev-reset: dev-down
 
 dev-server: dev-config dev-build-server dev-start-server
 dev-controller: dev-config dev-build-controller dev-start-controller
+dev-agent-worker: dev-config dev-build-agent-worker dev-start-agent-worker
 
 e2e-server-recovery:
 	npm ci --prefix test
@@ -156,7 +171,6 @@ verify-api-generated:
 	@git diff --exit-code -- frontend/src/api/generated
 
 dev-crd: generate-crd
-	@kubectl apply -f deploy/crd/breakfix.dev_generations.yaml >/dev/null
 	@kubectl apply -f deploy/crd/breakfix.dev_containerenvironments.yaml >/dev/null
 	@kubectl apply -f deploy/crd/breakfix.dev_vclusterenvironments.yaml >/dev/null
 	@kubectl apply -f deploy/crd/breakfix.dev_verifytasks.yaml >/dev/null
@@ -300,7 +314,7 @@ deploy-reset: deploy-cleanup _guard-server
 	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVER_SERVICE)'
 	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
 
-deploy: deploy-generator deploy-verifier deploy-images deploy-catalog deploy-controller deploy-server
+deploy: deploy-verifier deploy-images deploy-catalog deploy-controller deploy-server
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -339,19 +353,6 @@ docker-push:
 	docker push $(REGISTRY)/$(ACR_NS)/$(NAME):v1
 	@echo "  ✓ $(NAME) → $(REGISTRY)"
 
-# ═══════════════════════════════════════════════════════════════
-# Generator
-# ═══════════════════════════════════════════════════════════════
-
-generator-build:
-	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/generator ./cmd/generator
-	docker build -t breakfix-generator:latest -f deploy/images/generator/Dockerfile .
-	docker tag breakfix-generator:latest $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
-	docker push $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest
-	kind load docker-image breakfix-generator:latest --name $(KIND_CLUSTER)
-	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-generator:latest --name $(KIND_CLUSTER)
-	@echo "  ✓ Generator image built and loaded into Kind"
-
 verifier-build:
 	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/verifier ./cmd/verifier
 	docker build -t breakfix-verifier:latest -f deploy/images/verifier/Dockerfile .
@@ -360,22 +361,6 @@ verifier-build:
 	kind load docker-image breakfix-verifier:latest --name $(KIND_CLUSTER)
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Verifier image built and loaded into Kind"
-
-generator-dev: dev-rbac generator-build verifier-build dev-up
-	@kubectl delete jobs -n breakfix-system --all 2>/dev/null || true
-	@kubectl delete pods -n breakfix-system --all 2>/dev/null || true
-	@echo "  ✓ Generator dev environment ready"
-
-deploy-generator: _guard-server generator-build
-	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
-	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
-		echo "  ✗ Registry not configured. Skipping."; exit 1; \
-	fi; \
-	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	docker tag breakfix-generator:latest $$pub/breakfix-generator:latest; \
-	docker push $$pub/breakfix-generator:latest
-	@echo "  ✓ Generator image pushed to ACR"
 
 deploy-verifier: _guard-server verifier-build
 	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }

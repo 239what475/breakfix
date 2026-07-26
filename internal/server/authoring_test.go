@@ -3,14 +3,19 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/gin-gonic/gin"
 )
@@ -23,9 +28,7 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	if _, err := database.CreateUserWithAuth("u-author", "author", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{
-		ID: "author-visible", UserID: "u-author", AgentSessionID: "review", WorkflowSessionID: "workflow",
-	}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "author-visible", UserID: "u-author"}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
 	intent := testAuthoringPlan("Intent title", "intent overview")
@@ -33,17 +36,15 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.BeginGeneration(ctx, "author-visible", "u-author", first.Number, "gen-one"); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AttachVerificationTask(ctx, "author-visible", "gen-one", first.Number, "verify-one"); err != nil {
+	firstRun, err := startTestGeneratorRun(ctx, database, "author-visible", "u-author", first.Number, "generator-one")
+	if err != nil {
 		t.Fatal(err)
 	}
 	artifactDir := authoring.ArtifactDirectory(root, "author-visible", first.Number)
 	writeAuthoringArtifact(t, artifactDir, "Actual verified title", "actual verified description")
-	if err := database.CompleteVerification(ctx, "author-visible", "gen-one", authoring.Artifact{
-		SubmissionID: "sub-one", Directory: authoring.ArtifactRelativePath("author-visible", first.Number), GenerationID: "gen-one",
-	}, authoring.Verification{TaskID: "verify-one", Phase: "Succeeded"}); err != nil {
+	if err := completeTestGeneratorVerification(ctx, database, "author-visible", firstRun, authoring.Artifact{
+		SubmissionID: generator.SubmissionID(firstRun.ID), Directory: authoring.ArtifactRelativePath("author-visible", first.Number), GeneratorRunID: firstRun.ID,
+	}, "verify-one"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -63,7 +64,7 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.BeginGeneration(ctx, "author-visible", "u-author", second.Number, "gen-two"); err != nil {
+	if _, err := startTestGeneratorRun(ctx, database, "author-visible", "u-author", second.Number, "generator-two"); err != nil {
 		t.Fatal(err)
 	}
 	response = getAuthoringSessionResponse(t, handler, "author-visible")
@@ -86,10 +87,10 @@ func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 	if _, err := database.CreateUserWithAuth("u-current", "current", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "older", UserID: "u-current", AgentSessionID: "a", WorkflowSessionID: "w"}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "older", UserID: "u-current"}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "newer", UserID: "u-current", AgentSessionID: "a", WorkflowSessionID: "w"}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "newer", UserID: "u-current"}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,29 +119,25 @@ func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
 	if _, err := database.CreateUserWithAuth("u-publish", "publish", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{
-		ID: "author-publish", UserID: "u-publish", AgentSessionID: "review", WorkflowSessionID: "workflow",
-	}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "author-publish", UserID: "u-publish"}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
 	revision, err := database.ReplaceAuthoringPlan(ctx, "author-publish", "u-publish", 0, testAuthoringPlan("Publish title", "publish overview"), authoring.StateIntentReview)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.BeginGeneration(ctx, "author-publish", "u-publish", revision.Number, "gen-publish"); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AttachVerificationTask(ctx, "author-publish", "gen-publish", revision.Number, "vt-publish"); err != nil {
+	run, err := startTestGeneratorRun(ctx, database, "author-publish", "u-publish", revision.Number, "generator-publish")
+	if err != nil {
 		t.Fatal(err)
 	}
 	artifactDir := authoring.ArtifactDirectory(root, "author-publish", revision.Number)
 	writeAuthoringArtifact(t, artifactDir, "Verified publish title", "verified publish description")
 	artifact := authoring.Artifact{
-		SubmissionID: "sub-publish",
-		Directory:    authoring.ArtifactRelativePath("author-publish", revision.Number),
-		GenerationID: "gen-publish",
+		SubmissionID:   generator.SubmissionID(run.ID),
+		Directory:      authoring.ArtifactRelativePath("author-publish", revision.Number),
+		GeneratorRunID: run.ID,
 	}
-	if err := database.CompleteVerification(ctx, "author-publish", "gen-publish", artifact, authoring.Verification{TaskID: "vt-publish", Phase: "Succeeded"}); err != nil {
+	if err := completeTestGeneratorVerification(ctx, database, "author-publish", run, artifact, "vt-publish"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,6 +169,30 @@ func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
 	if stored.Verification == nil || stored.Verification.ChallengeID != challengeID {
 		t.Fatalf("recovered publication did not persist challenge ID: %#v", stored)
 	}
+}
+
+func startTestGeneratorRun(ctx context.Context, database *db.DB, sessionID, userID string, revision int64, runID string) (*agentruntime.Run, error) {
+	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision, agentruntime.CreateRun{
+		ID: runID, Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: sessionID,
+		Model: "test-model", PromptVersion: generator.PromptVersion, DeadlineAt: time.Now().UTC().Add(time.Hour),
+	}, generator.RunInput{AuthoringSessionID: sessionID, Revision: revision})
+	return run, err
+}
+
+func completeTestGeneratorVerification(ctx context.Context, database *db.DB, sessionID string, run *agentruntime.Run, artifact authoring.Artifact, taskID string) error {
+	claim, err := database.ClaimNext(ctx, "test-generator-worker", time.Minute, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if claim == nil || claim.Run.ID != run.ID {
+		return fmt.Errorf("claim generator run %q", run.ID)
+	}
+	if err := database.FinalizeGeneratorSubmission(ctx, *claim, artifact.SubmissionID, taskID); err != nil {
+		return err
+	}
+	return database.CompleteGeneratorVerification(ctx, sessionID, run.ID, artifact, authoring.Verification{
+		TaskID: taskID, Phase: "Succeeded", Report: &authoring.VerificationReport{BuildPassed: true, AnswerPassed: true, CheckpointsPassed: true},
+	})
 }
 
 func getAuthoringSessionResponse(t *testing.T, handler *Handler, sessionID string) authoringSessionResponse {

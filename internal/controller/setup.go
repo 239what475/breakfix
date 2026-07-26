@@ -39,14 +39,6 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, opts Options) error {
 		return fmt.Errorf("validate vcluster cli: %w", err)
 	}
 
-	if err := (&GenerationReconciler{
-		Client:       mgr.GetClient(),
-		K8s:          k8sClient,
-		CRDNamespace: opts.CRDNamespace,
-	}).SetupWithManager(mgr); err != nil {
-		return err
-	}
-
 	if err := (&VerifyTaskReconciler{
 		Client:           mgr.GetClient(),
 		K8s:              k8sClient,

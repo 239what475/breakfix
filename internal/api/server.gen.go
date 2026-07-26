@@ -233,9 +233,9 @@ type AssistantTurnStatus string
 
 // AuthoringArtifact defines model for AuthoringArtifact.
 type AuthoringArtifact struct {
-	Directory    *string `json:"directory,omitempty"`
-	GenerationId *string `json:"generation_id,omitempty"`
-	SubmissionId *string `json:"submission_id,omitempty"`
+	Directory      *string `json:"directory,omitempty"`
+	GeneratorRunId *string `json:"generator_run_id,omitempty"`
+	SubmissionId   *string `json:"submission_id,omitempty"`
 }
 
 // AuthoringAsset defines model for AuthoringAsset.
@@ -301,7 +301,7 @@ type AuthoringSession struct {
 	Artifact        *AuthoringArtifact     `json:"artifact,omitempty"`
 	Assets          []AuthoringAsset       `json:"assets"`
 	Diff            []AuthoringFileDiff    `json:"diff"`
-	GenerationId    *string                `json:"generation_id,omitempty"`
+	GeneratorRunId  *string                `json:"generator_run_id,omitempty"`
 	Id              string                 `json:"id"`
 	Intent          AuthoringPlan          `json:"intent"`
 	IntentRevision  int                    `json:"intent_revision"`
@@ -624,7 +624,7 @@ type ServerInterface interface {
 	// Read the current authoring revision, conversation, assets, and diff
 	// (GET /authoring/sessions/{id})
 	GetAuthoringSession(c *gin.Context, id AuthoringSessionID)
-	// Explicitly start generation and real verification for the current intent revision
+	// Explicitly start a Generator Run and real verification for the current intent revision
 	// (POST /authoring/sessions/{id}/generate)
 	ConfirmAuthoringGeneration(c *gin.Context, id AuthoringSessionID)
 	// Send one natural-language instruction to the authoring agent

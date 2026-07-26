@@ -1,8 +1,9 @@
 # Breakfix Runtime Deployment
 
 This package installs the independent PostgreSQL, Server, Controller, and Agent Worker workloads described in
-`EINO-RESEARCH.md`. It does not install OpenSandbox: the provider POC is an explicit migration gate recorded in
-`EINO-RESEARCH-REVIEW.md`.
+`EINO-RESEARCH.md`. OpenSandbox is an explicit prerequisite: install its tested native Kubernetes workload provider
+in the `opensandbox` namespace before applying this package. Breakfix creates and deletes its own BYO workspace PVCs;
+OpenSandbox only mounts those PVCs and must not be granted their lifecycle ownership.
 
 Build and publish the three runtime images, then replace their development tags in `kustomization.yaml` (or an
 environment overlay):
@@ -34,4 +35,5 @@ kubectl apply -k .
 ```
 
 The Server owns the RWO `breakfix-server-data` PVC and therefore uses `Recreate`. PostgreSQL owns a separate PVC.
-The Agent Worker has no Kubernetes RBAC and its Pod disables ServiceAccount token mounting.
+The Server alone receives the OpenSandbox lifecycle key and has PVC permission for the `opensandbox` namespace. The
+Agent Worker has no Kubernetes RBAC, no provider key, and disables ServiceAccount token mounting.

@@ -19,7 +19,6 @@ var (
 
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&Generation{}, &GenerationList{},
 		&ContainerEnvironment{}, &ContainerEnvironmentList{},
 		&VClusterEnvironment{}, &VClusterEnvironmentList{},
 		&VerifyTask{}, &VerifyTaskList{},

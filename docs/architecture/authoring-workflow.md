@@ -19,23 +19,23 @@ AwaitingVerifiedReview + author feedback
   -> AwaitingVerifiedReview
 ```
 
-在生成或修订验证期间，真实验证失败会留在同一内部循环中：Server 将结构化失败反馈交给工作流 session，重新创建 Generation。作者只继续看到上一个已验证 revision，或在首次生成时看到已确认的题意；未通过验证的 artifact 不进入作者审核界面。
+在生成或修订验证期间，真实验证失败会留在同一内部循环中：artifact 类失败会创建同一 Generator Session 的下一 Run，并将结构化反馈提供给它修复。基础设施失败不会要求 Agent 修改题目。作者只继续看到上一个已验证 revision，或在首次生成时看到已确认的题意；未通过验证的 artifact 不进入作者审核界面。
 
 ## 题意讨论
 
-作者创建会话后与 review agent 多轮讨论。agent 只能通过受 Server 校验的领域操作修改题意约定，形成带元数据、概览和自然语言检查点的 revision。题意约定必须包含有效 runtime、难度、标签、概览和至少一个检查点，才能进入 `IntentReview` 并允许作者点击“生成并验证题目”。
+作者创建会话后与 review agent 多轮讨论。agent 只能通过受 Server 校验的领域操作修改题意约定，形成带元数据、概览和自然语言检查点的 revision。题意约定必须包含有效 runtime、难度、概览和至少一个检查点，才能进入 `IntentReview` 并允许作者点击“生成并验证题目”。
 
 检查点在此阶段是作者可读的学习目标，不是固定的 `expected_user_edits` 模板。生成 agent 负责把它们落为实际题目资产和可执行检查。
 
 ## 生成与 judge
 
-确认生成后，Server 创建 `Generation` CRD 和仅供对应 Job 使用的 Secret。Controller 启动 Generator Job；Generator 使用持久 workflow session 写入 challenge 文件，并可借助 `lab_*` 工具实验环境。
+确认生成后，Server 创建持久 Generator Agent Run。Agent Worker 以数据库租约领取该 Run，在 Server 管理并围栏的 OpenSandbox 工作区中写入 challenge 文件。Worker 没有 Kubernetes、Registry 或 OpenSandbox 生命周期凭据；它只能经内部 API 对当前租约的工作区读写、执行命令、归档和提交候选。
 
-Generator 进行本地结构和语义检查，judge agent 再审核题意、元数据、题面、解答和检查点是否自洽。judge 协议严格要求精确的 `PASS`；任何其他输出都不能放行。生成资产的规范与静态约束在 [`internal/generator/`](../../internal/generator/) 中实现。
+Generator 先进行确定性候选校验，judge agent 再以严格 typed result 审核题意、元数据、题面、解答和检查点是否自洽。任何缺失、未知或非法字段都会使当前 Run 失败，不能按近似文本放行。生成资产的规范与静态约束在 [`internal/generator/`](../../internal/generator/) 中实现。
 
 ## VerifyTask
 
-Generator 通过内部 HTTP 向 Server 上传归档。Server 保存归档并创建 `VerifyTask`；Controller 启动真实验证 Job：
+Generator 通过内部 HTTP 向 Server 提交归档。Server 保存归档并创建 `VerifyTask`；Controller 启动真实验证 Job：
 
 1. 从 Server 下载 artifact 并构建镜像。
 2. 创建与该题 runtime 相同的临时 Environment。
@@ -43,7 +43,7 @@ Generator 通过内部 HTTP 向 Server 上传归档。Server 保存归档并创�
 4. 执行 `answer.sh`。
 5. 执行全部公开检查点。
 
-成功时，VerifyTask status 保存构建、答案和检查点维度的报告及临时镜像引用。失败时，Server 的作者会话调和器读取报告，沿用 workflow session 继续修复；它不会把失败 artifact 暴露给作者。
+成功时，VerifyTask status 保存构建、答案和检查点维度的报告及临时镜像引用。失败时，Server 的作者会话调和器按 `report.class` 区分 artifact 与基础设施错误；只有前者会启动下一 Generator Run。它不会把失败 artifact 暴露给作者。
 
 ## 审核与发布
 

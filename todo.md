@@ -43,7 +43,7 @@
 - 保留类型定义、JSON tag 与 Kubebuilder 校验标记为手写源文件；将 `DeepCopy` 实现改为 `zz_generated.deepcopy.go`。
 - 固定与 Go 1.26、Kubernetes 0.36 匹配的 `controller-gen` 版本，使用 Makefile 从类型定义生成 `zz_generated.deepcopy.go` 与 `deploy/crd/breakfix.dev_*.yaml`。
 - `deploy/crd/` 是应提交的部署契约，禁止手改；它不是可忽略的构建产物。
-- 为 phase 枚举、必填字段和 status 子资源补齐或保留 Kubebuilder 标记，生成结果必须覆盖当前 ContainerEnvironment、VClusterEnvironment、Generation 与 VerifyTask 契约。
+- 为 phase 枚举、必填字段和 status 子资源补齐或保留 Kubebuilder 标记，生成结果必须覆盖当前 ContainerEnvironment、VClusterEnvironment 与 VerifyTask 契约。
 - 新增 `make generate-crd` 与 `make verify-crd-generated`；后者生成后检查 Git diff，CI 必须执行它。
 - 在 Kind 集群 apply 新生成的 CRD，再执行真实 container、vcluster 与 VerifyTask 流程，验证 CRD 创建、status 写入、检查点和清理行为。
 
@@ -51,7 +51,7 @@
 
 ## 5. [x] 建立 Server/Controller 数据所有权与可执行边界
 
-当前 `cmd/gateway` 同时运行 HTTP/WebSocket 服务和 controller-runtime manager。目标不是把相同的数据目录和 SQLite 暴露给两个进程，而是明确数据所有权后拆为 `breakfix-server` 与 `breakfix-controller`。
+改造前 `cmd/gateway` 同时运行 HTTP/WebSocket 服务和 controller-runtime manager。目标不是把相同的数据目录和 SQLite 暴露给两个进程，而是明确数据所有权后拆为 `breakfix-server` 与 `breakfix-controller`。
 
 - 将 `cmd/gateway` 与 `internal/gateway` 重命名为 `cmd/server` 与 `internal/server`；`breakfix-server` 负责 HTTP、Web UI、WebSocket、认证、作者会话、助手、题目文件、artifact 存储和数据库。
 - 新建 `cmd/controller`，仅启动 controller-runtime manager 与环境清理循环；同时将它加入 CI/release 的构建矩阵。

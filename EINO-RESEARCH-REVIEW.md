@@ -23,14 +23,14 @@ Pod 并使用 `pods/exec` 执行 answer/checkpoints；它没有 Agent Worker 的
 OpenSandbox 凭据。若要去除特权，必须先单独完成 rootless BuildKit 或远程 BuildKit 的真实 Kubernetes POC，
 不能把它和 Agent Runtime 迁移混为一谈。
 
-## 2026-07-26：旧 Generator 存在期间的 VerifyTask source ref
+## 2026-07-26：VerifyTask source ref 的最终语义
 
-最终设计要求 `VerifyTask.spec.source.ref` 是提交它的 Agent Run ID。独立 verifier 和 VerifyTask 先行迁移时，
-旧 `Generation` CRD 仍负责启动尚未迁移的 Claude Generator，因此这条临时路径只能写入 legacy Generation 名称。
+`VerifyTask.spec.source.ref` 是提交它的 Generator Agent Run ID。CRD 不保留没有信息量的固定 `source.kind`。
+Server 只会在同一 Run 的确定 submission 已经持久化后 create-or-get 对应 VerifyTask；Server watcher 反向校验
+submission、VerifyTask 和当前 Generator Run 的三方绑定。旧 Generation CRD、Reconciler、镜像和临时 ref 语义已删除。
 
-调整：CRD 已删除没有信息量的固定 `source.kind`，只保留 `source.ref`。在 OpenSandbox 前置条件满足并迁移
-Generator 后，Server 必须改为写入实际 Generator Agent Run ID，随后删除 Generation CRD、Reconciler、旧
-Generator 镜像和这一临时语义；不能把当前 ref 的值误认为已满足最终 Agent Runtime 数据所有权。
+这个边界使 Controller 只验证不可变 artifact，不知道或不需要知道模型会话；Server 则能把 VerifyTask 的 artifact
+失败明确交给同一 Generator Session 的下一 Run。
 
 ## 2026-07-26：Assistant Run 缺少可恢复的工作区输入
 
@@ -121,3 +121,13 @@ attempt 内并行执行两个独立的 Eino typed-result 调用；只有两者�
 直接进入终态，由 Server 对当前 Round 计入一次 Taxonomy 技术失败预算并安排下一 Run。这样没有供应商 session、没有 partial review
 事实，也不会在运行中的调用被十次预算提前中断。该调整不改变 Mapper 与两名 reviewer 的职责分工或并行模型调用，只把 reviewer
 pair 作为不可分割的持久化边界。
+
+## 2026-07-26：Go OpenAPI 生成物的可复现性缺口
+
+`api/cfg.yaml` 记录了 `oapi-codegen v2.7.1`，但以当前工具重新生成 `internal/api/server.gen.go` 时，除了本次
+`generator_run_id` 字段，还会把大量既有 optional 字段改为 required 值类型并重命名 enum 常量。这会破坏现有 Handler
+映射，不能作为无关格式化变更随 Agent Runtime 迁移提交。
+
+调整：本次仅让 Go API 模型与 OpenAPI 的字段重命名保持一致，前端类型继续由 `make verify-api-generated`
+验证。生成器配置、版本锁定和 Go 生成物的精确校验应作为独立构建工具链任务处理，届时必须先解释并消除完整 diff，不能
+通过静默接受大范围生成漂移来掩盖契约变化。

@@ -253,9 +253,3 @@ Skill Committee 属于 Taxonomy workflow，而不属于 Challenge generator。�
 独立 Playground、讨论区、排行榜、证书、付费体系、团队/LMS/SSO 集成均不属于下一阶段。它们需要更大的题库、稳定用户群或组织级需求才能产生价值。
 
 并发配额、资源预算和滥用控制是公开大规模使用前的运行平台能力；在当前内容建设阶段保持现有策略，待真实并发需求出现后单独设计。
-
-## 后续技术调研
-
-### Agent Runtime 迁移
-
-后续研究从 `eino-claude-code` 迁移到 GitHub Copilot Go SDK 或纯 Eino 的可行性。先盘点当前 agent runtime 实际依赖的能力，包括会话恢复、工具调用、流式输出、权限模型和本地工作目录执行；再以真实 workflow 验证候选方案是否完整覆盖。当前不预设 `eino-claude-code` 的任何能力不可替代，也不在技能图阶段引入迁移或兼容层。

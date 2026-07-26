@@ -443,7 +443,7 @@ paths:
         - $ref: "#/components/parameters/AuthoringSessionID"
       responses:
         "200":
-          description: Generation and verification started
+          description: Generator Run and verification started
           content:
             application/json:
               schema:
@@ -1022,13 +1022,13 @@ components:
 
     AuthoringArtifact:
       type: object
-      required: [submission_id, directory, generation_id]
+      required: [submission_id, directory, generator_run_id]
       properties:
         submission_id:
           type: string
         directory:
           type: string
-        generation_id:
+        generator_run_id:
           type: string
 
     AuthoringVerification:
@@ -1145,7 +1145,7 @@ components:
           type: integer
         visible_revision:
           type: integer
-        generation_id:
+        generator_run_id:
           type: string
         verify_task_id:
           type: string

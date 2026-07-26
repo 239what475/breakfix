@@ -88,7 +88,7 @@ func defaults() Config {
 			BaseURL:          "http://opensandbox-server.opensandbox.svc.cluster.local",
 			APIKeyEnv:        "OPEN_SANDBOX_API_KEY",
 			Namespace:        "opensandbox",
-			WorkspaceImage:   "breakfix-authoring:latest",
+			WorkspaceImage:   "ubuntu:22.04",
 			WorkspaceStorage: "5Gi",
 			WorkspaceTimeout: "1h",
 		},

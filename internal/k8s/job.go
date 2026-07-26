@@ -96,10 +96,6 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 	if containerName == "" {
 		containerName = "generator"
 	}
-	serviceAccountName := opts.ServiceAccountName
-	if serviceAccountName == "" {
-		serviceAccountName = "breakfix-generator"
-	}
 	privileged := true
 	if opts.Privileged != nil {
 		privileged = *opts.Privileged
@@ -126,7 +122,7 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 						Env:             envVars,
 						EnvFrom:         envFrom,
 					}},
-					ServiceAccountName: serviceAccountName,
+					ServiceAccountName: opts.ServiceAccountName,
 					RestartPolicy:      corev1.RestartPolicyNever,
 				},
 			},

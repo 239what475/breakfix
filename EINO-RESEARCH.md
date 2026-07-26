@@ -3,6 +3,9 @@
 > 设计日期：2026-07-26
 > 目标：以 Eino、PostgreSQL 和远程 Sandbox 执行平面替换 `eino-claude-code` / Claude Code CLI
 > 范围：Agent Runtime、Authoring、Assistant、Generator/Judge、Taxonomy 和 VerifyTask 交接
+>
+> 实施说明：本文保留迁移前调研、目标设计和验收门槛。当前代码已经切换为 Eino、PostgreSQL、独立 Agent Worker
+> 与 Server-owned OpenSandbox workspace；历史问题描述不表示仓库仍保留 Claude 或 `Generation` 运行路径。
 
 ## 结论
 
@@ -27,20 +30,20 @@ Breakfix 应暂停继续扩展技能图和题库，先完成 Agent Runtime 迁�
 
 ## 研究依据
 
-### 当前仓库
+### 迁移前基线
 
-- 当前依赖 Eino `v0.9.10` 和 `eino-claude-code v0.2.0`。
+- 迁移前依赖 Eino `v0.9.10` 和 `eino-claude-code v0.2.0`。
 - 当前模型通过 DeepSeek Anthropic 兼容入口调用 `deepseek-v4-pro`，并不是 Anthropic 模型。
 - Server 和 Controller 已拆成两个二进制，但仍以集群外主机进程运行。
-- Server 当前独占本地 SQLite 和 `data_dir`；Controller 通过 kubeconfig 协调集群。
-- `cmd/generator` 同时执行 Generation workflow 和 VerifyTask verify 模式。
+- Server 当时独占本地 SQLite 和 `data_dir`；Controller 通过 kubeconfig 协调集群。
+- `cmd/generator` 当时同时执行 Generation workflow 和 VerifyTask verify 模式。
 
 ### 已核对版本
 
 | 项目 | 研究版本 | revision |
 | --- | --- | --- |
 | Eino 稳定版 | `v0.9.13` | `c5e6aef927cca02bea934541f8dff2ea711b2ca7` |
-| Breakfix 当前 Eino | `v0.9.10` | `0abcc824167071616b2a642f06792d15b7b2b23d` |
+| Breakfix 迁移前 Eino | `v0.9.10` | `0abcc824167071616b2a642f06792d15b7b2b23d` |
 | Eino Ext DeepSeek | `v0.1.7` | `9137edd89e72b72735ede69db1c5ae29178a6e41` |
 | Eino Ext local backend | `v0.2.6` | `9473ae28db1f31272ef8a16cfd2dfb14f6169d23` |
 | OpenSandbox Go SDK | `v1.0.5` | `e9d0a63919739b1bed05914373acbacb11e37d43` |
@@ -730,8 +733,8 @@ Server 运行 VerifyTask watcher：
 - OpenSandbox：<https://github.com/opensandbox-group/OpenSandbox>
 - OpenSandbox Go SDK：<https://github.com/opensandbox-group/OpenSandbox/tree/main/sdks/sandbox/go>
 - OpenSandbox Agent Sandbox integration（仅后备资料）：<https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/examples/agent-sandbox.md>
-- Breakfix Authoring：`internal/authoring/service.go`
-- Breakfix Assistant：`internal/assistant/service.go`
-- Breakfix Generator/Judge：`internal/generator/workflow.go`、`internal/generator/prompts.go`
-- Breakfix Taxonomy：`internal/taxonomy/service.go`
-- Breakfix 当前 Generation/VerifyTask：`internal/controller/generation.go`、`internal/generator/verifytask.go`
+- Breakfix Authoring：`internal/authoring/worker.go`
+- Breakfix Assistant：`internal/assistant/worker.go`
+- Breakfix Generator/Judge：`internal/generator/worker.go`、`internal/generator/prompts.go`
+- Breakfix Taxonomy：`internal/taxonomy/worker.go`
+- Breakfix VerifyTask：`internal/controller/verifytask.go`、`internal/verifier/verifytask.go`

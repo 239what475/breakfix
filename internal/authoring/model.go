@@ -127,9 +127,9 @@ func (p Plan) SortedCheckpoints() []Checkpoint {
 // Artifact is immutable generator output that has already passed its linked
 // VerifyTask. No artifact is author-visible before that point.
 type Artifact struct {
-	SubmissionID string `json:"submission_id"`
-	Directory    string `json:"directory"`
-	GenerationID string `json:"generation_id"`
+	SubmissionID   string `json:"submission_id"`
+	Directory      string `json:"directory"`
+	GeneratorRunID string `json:"generator_run_id"`
 }
 
 // VerificationIssue is an internal diagnosis returned by the real VerifyTask.
@@ -246,15 +246,9 @@ type Message struct {
 }
 
 type Session struct {
-	ID     string `json:"id"`
-	UserID string `json:"user_id"`
-	// RuntimeSessionID references the durable provider-neutral Agent Session.
-	// It replaces the former opaque Claude Code session identity.
-	RuntimeSessionID  string `json:"-"`
-	AgentSessionID    string `json:"-"`
-	AgentStarted      bool   `json:"-"`
-	WorkflowSessionID string `json:"-"`
-	WorkflowStarted   bool   `json:"-"`
+	ID               string `json:"id"`
+	UserID           string `json:"user_id"`
+	RuntimeSessionID string `json:"-"`
 	// GeneratorSessionID is the durable Agent Session for one implementation
 	// and repair lineage. It is intentionally distinct from the authoring
 	// conversation Session: a confirmed revision gets a Generator Session, and
@@ -264,9 +258,7 @@ type Session struct {
 	State              SessionState `json:"state"`
 	CurrentRevision    int64        `json:"current_revision"`
 	VisibleRevision    int64        `json:"visible_revision"`
-	GenerationID       string       `json:"generation_id,omitempty"`
 	VerifyTaskID       string       `json:"verify_task_id,omitempty"`
-	PendingFeedback    string       `json:"-"`
 	PublishChallengeID string       `json:"publish_challenge_id,omitempty"`
 	LastError          string       `json:"last_error,omitempty"`
 	CreatedAt          time.Time    `json:"created_at"`

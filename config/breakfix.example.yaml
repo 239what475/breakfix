@@ -44,3 +44,13 @@ agent:
   request_timeout: 2m
   # Agent Worker reaches the Server through its in-cluster ClusterIP Service.
   server_url: http://breakfix-server
+
+# Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
+# lifecycle API key is only present in the Server process, never Agent Worker.
+opensandbox:
+  base_url: http://opensandbox-server.opensandbox.svc.cluster.local
+  api_key_env: OPEN_SANDBOX_API_KEY
+  namespace: opensandbox
+  workspace_image: ubuntu:22.04
+  workspace_storage: 5Gi
+  workspace_timeout: 1h

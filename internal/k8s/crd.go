@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	generationGVR           = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "generations"}
 	containerEnvironmentGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "containerenvironments"}
 	vclusterEnvironmentGVR  = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "vclusterenvironments"}
 	verifyTaskGVR           = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "verifytasks"}
@@ -22,102 +21,6 @@ var (
 
 func (c *Client) crdClient() (dynamic.Interface, error) {
 	return dynamic.NewForConfig(c.restConfig)
-}
-
-func (c *Client) CreateGeneration(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
-	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(gen)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(generationGVR).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("create generation: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Generation](result)
-}
-
-func (c *Client) GetGeneration(ctx context.Context, ns, name string) (*breakfixv1.Generation, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(generationGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get generation %s: %w", name, err)
-	}
-	return fromUnstructured[*breakfixv1.Generation](result)
-}
-
-func (c *Client) UpdateGeneration(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
-	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(gen)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(generationGVR).Namespace(ns).Update(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update generation: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Generation](result)
-}
-
-func (c *Client) UpdateGenerationStatus(ctx context.Context, ns string, gen *breakfixv1.Generation) (*breakfixv1.Generation, error) {
-	gen.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "Generation"}
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	obj, err := toUnstructured(gen)
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(generationGVR).Namespace(ns).UpdateStatus(ctx, obj, metav1.UpdateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("update generation status: %w", err)
-	}
-	return fromUnstructured[*breakfixv1.Generation](result)
-}
-
-func (c *Client) ListGenerations(ctx context.Context, ns string) (*breakfixv1.GenerationList, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	result, err := dyn.Resource(generationGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list generations: %w", err)
-	}
-
-	var list breakfixv1.GenerationList
-	list.Items = make([]breakfixv1.Generation, 0, len(result.Items))
-	for _, item := range result.Items {
-		var gen breakfixv1.Generation
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &gen); err != nil {
-			return nil, fmt.Errorf("convert generation item: %w", err)
-		}
-		list.Items = append(list.Items, gen)
-	}
-	return &list, nil
-}
-
-func (c *Client) WatchGeneration(ctx context.Context, ns, name string) (watch.Interface, error) {
-	dyn, err := c.crdClient()
-	if err != nil {
-		return nil, err
-	}
-	return dyn.Resource(generationGVR).Namespace(ns).Watch(ctx, metav1.ListOptions{
-		FieldSelector:  "metadata.name=" + name,
-		TimeoutSeconds: ptr(int64(300)),
-	})
 }
 
 func (c *Client) CreateContainerEnvironment(ctx context.Context, ns string, env *breakfixv1.ContainerEnvironment) (*breakfixv1.ContainerEnvironment, error) {

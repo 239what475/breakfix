@@ -163,7 +163,6 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/internal/generations/:id/artifact", h.UploadGenerationArtifact)
 	router.GET("/api/internal/verify-submissions/:id/artifact", h.DownloadVerifySubmissionArtifact)
 	router.POST("/api/internal/agent-runs/:id/assistant/context", h.InternalAssistantContext)
 	router.POST("/api/internal/agent-runs/:id/assistant/tools/:tool", h.InternalAssistantTool)

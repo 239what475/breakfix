@@ -20,14 +20,19 @@ metadata:
   name: breakfix-server
 rules:
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations", "containerenvironments", "vclusterenvironments", "verifytasks"]
+    resources: ["containerenvironments", "vclusterenvironments", "verifytasks"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations/status", "containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
+    resources: ["containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  # Server owns Generator workspace PVCs. OpenSandbox only mounts them in
+  # BYO mode and never receives permission to manage their lifecycle.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch", "delete"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
@@ -53,10 +58,10 @@ metadata:
   name: breakfix-controller
 rules:
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations", "containerenvironments", "vclusterenvironments", "verifytasks"]
+    resources: ["containerenvironments", "vclusterenvironments", "verifytasks"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["breakfix.dev"]
-    resources: ["generations/status", "containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
+    resources: ["containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["namespaces"]
