@@ -372,7 +372,7 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, claim agentruntime.Claim,
 		}
 		nextState := authoring.NextPlanRevisionState(session.State)
 		if nextState == authoring.StateRevisingAndVerifying {
-			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, generation_id = '', verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ? WHERE id = ?`,
+			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, generation_id = '', generator_session_id = '', generator_run_id = '', verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ? WHERE id = ?`,
 				next, nextState, nowText(now), session.ID); err != nil {
 				return nil, fmt.Errorf("update finalized authoring session: %w", err)
 			}
@@ -477,7 +477,7 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 	// unverified revision.
 	if state == authoring.StateRevisingAndVerifying {
 		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-			SET current_revision = ?, state = ?, generation_id = '', verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ?
+			SET current_revision = ?, state = ?, generation_id = '', generator_session_id = '', generator_run_id = '', verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ?
 			WHERE id = ? AND user_id = ?`, next, state, nowText(now), sessionID, userID); err != nil {
 			return nil, fmt.Errorf("update authoring session revision: %w", err)
 		}

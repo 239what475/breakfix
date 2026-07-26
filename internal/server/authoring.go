@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/taxonomy"
@@ -131,20 +133,67 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 	if user == nil {
 		return
 	}
-	session, revision, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
+	session, _, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if session.State != authoring.StateIntentReview {
+	if session.State != authoring.StateIntentReview && session.State != authoring.StateRevisingAndVerifying {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current intent is not ready to generate and verify"})
 		return
 	}
-	if err := h.startAuthoringGeneration(c.Request.Context(), user, session, revision, ""); err != nil {
+	revision, err := h.db.GetAuthoringRevision(c.Request.Context(), session.ID, session.CurrentRevision)
+	if err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	input := generator.RunInput{}
+	if session.State == authoring.StateRevisingAndVerifying {
+		previous, artifactErr := h.db.FindLatestAuthoringArtifact(c.Request.Context(), session.ID, revision.Number-1)
+		if artifactErr != nil {
+			h.writeAuthoringError(c, artifactErr)
+			return
+		}
+		if previous == nil || strings.TrimSpace(previous.SubmissionID) == "" {
+			h.writeAuthoringError(c, authoring.ErrInvalidState)
+			return
+		}
+		input.SeedSubmissionID = previous.SubmissionID
+	}
+	if err := h.startAuthoringGeneratorRun(c.Request.Context(), user, session, revision, input); err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
 	h.writeAuthoringSession(c, user, sessionID)
+}
+
+// startAuthoringGeneratorRun creates a durable Agent Run. It intentionally
+// does not create a Kubernetes Generation resource or hand model credentials
+// to a Job: the Agent Worker will claim this run and reach its Server-owned
+// OpenSandbox workspace through fenced internal APIs.
+func (h *Handler) startAuthoringGeneratorRun(ctx context.Context, user *db.User, session *authoring.Session, revision *authoring.Revision, input generator.RunInput) error {
+	if h.db == nil || h.k8s == nil || h.generatorWorkspace == nil || h.generatorSandbox == nil {
+		return errors.New("generator runtime is unavailable")
+	}
+	if user == nil || session == nil || revision == nil || revision.Number != session.CurrentRevision {
+		return authoring.ErrInvalidState
+	}
+	if err := revision.Plan.ValidateForGeneration(); err != nil {
+		return err
+	}
+	input.AuthoringSessionID = session.ID
+	input.Revision = revision.Number
+	now := time.Now().UTC()
+	_, _, err := h.db.StartGeneratorRun(ctx, session.ID, user.ID, revision.Number, agentruntime.CreateRun{
+		ID:            generator.NewRunID(),
+		Purpose:       generator.RuntimePurpose,
+		OwnerKind:     "authoring-session",
+		OwnerRef:      session.ID,
+		Model:         h.llm.Model,
+		PromptVersion: generator.PromptVersion,
+		DeadlineAt:    now.Add(generator.RunDeadline),
+	}, input)
+	return err
 }
 
 func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
@@ -290,6 +339,52 @@ func (h *Handler) restartAuthoringGeneration(ctx context.Context, session *autho
 		slog.Warn("restart authoring generation deferred", "session", active.ID, "generation", nextGenID, "err", err)
 	}
 	return nil
+}
+
+// restartAuthoringGeneratorRun starts the next semantic Generator Run after a
+// real artifact failure. It deliberately retains the failed immutable
+// submission: the Server resets the same Generator Session workspace from it
+// before the next Worker attempt can make changes.
+func (h *Handler) restartAuthoringGeneratorRun(ctx context.Context, session *authoring.Session, task *breakfixv1.VerifyTask, verification authoring.Verification) error {
+	if session == nil || task == nil || strings.TrimSpace(session.GeneratorRunID) == "" {
+		return authoring.ErrInvalidState
+	}
+	if task.Status.Report == nil || task.Status.Report.Class != breakfixv1.VerifyFailureArtifact {
+		return authoring.ErrInvalidState
+	}
+	feedback, err := generatorFeedbackFromVerification(verification)
+	if err != nil {
+		return err
+	}
+	revision, err := h.db.GetAuthoringRevision(ctx, session.ID, session.CurrentRevision)
+	if err != nil {
+		return err
+	}
+	return h.startAuthoringGeneratorRun(ctx, &db.User{ID: session.UserID}, session, revision, generator.RunInput{
+		SeedSubmissionID: task.Spec.Submission.ID,
+		VerifyTaskID:     task.Name,
+		Feedback:         feedback,
+	})
+}
+
+func generatorFeedbackFromVerification(verification authoring.Verification) (generator.Feedback, error) {
+	if verification.Report == nil || verification.Report.Class != authoring.VerificationFailureArtifact {
+		return generator.Feedback{}, errors.New("artifact verification result requires a structured artifact report")
+	}
+	feedback := generator.Feedback{
+		BuildPassed:       verification.Report.BuildPassed,
+		AnswerPassed:      verification.Report.AnswerPassed,
+		CheckpointsPassed: verification.Report.CheckpointsPassed,
+		Summary:           verification.Report.Summary,
+		Issues:            make([]generator.Issue, 0, len(verification.Report.Issues)),
+	}
+	for _, issue := range verification.Report.Issues {
+		feedback.Issues = append(feedback.Issues, generator.Issue{Code: issue.Code, Message: issue.Message})
+	}
+	if err := feedback.Validate(); err != nil {
+		return generator.Feedback{}, fmt.Errorf("validate generator verification feedback: %w", err)
+	}
+	return feedback, nil
 }
 
 func (h *Handler) createAuthoringGeneration(ctx context.Context, session *authoring.Session, revision *authoring.Revision, generationID, feedback string) error {
@@ -485,6 +580,9 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 	if h.k8s == nil {
 		return nil
 	}
+	if strings.TrimSpace(session.GeneratorRunID) != "" {
+		return h.syncGeneratorRun(ctx, session)
+	}
 	if strings.TrimSpace(session.VerifyTaskID) != "" {
 		task, err := h.k8s.GetVerifyTask(ctx, h.crdNamespace, session.VerifyTaskID)
 		if err == nil {
@@ -495,21 +593,28 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 			switch task.Status.Phase {
 			case breakfixv1.VerifyTaskSucceeded:
 				if session.State == authoring.StateAwaitingVerifiedReview || session.State == authoring.StatePublished || session.State == authoring.StatePublishing {
+					if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
+						return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
+					}
 					return nil
 				}
 				artifact, err := h.storeVerifiedArtifact(ctx, session, task)
 				if err != nil {
 					return err
 				}
-				return h.db.CompleteVerification(ctx, session.ID, session.GenerationID, artifact, verification)
+				if err := h.db.CompleteVerification(ctx, session.ID, session.GenerationID, artifact, verification); err != nil {
+					return err
+				}
+				if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
+					return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
+				}
+				return nil
 			case breakfixv1.VerifyTaskFailed:
 				if task.Status.Report == nil || task.Status.Report.Class != breakfixv1.VerifyFailureArtifact {
 					return h.db.RecordVerificationInfrastructureFailure(ctx, session.ID, session.GenerationID, verification)
 				}
-				if submissionID := strings.TrimSpace(task.Spec.Submission.ID); submissionID != "" {
-					if err := challenge.RemoveSubmission(h.dataDir, submissionID); err != nil {
-						slog.Warn("remove failed authoring submission", "session", session.ID, "submission", submissionID, "err", err)
-					}
+				if session.GeneratorRunID != "" {
+					return h.restartAuthoringGeneratorRun(ctx, session, task, verification)
 				}
 				return h.restartAuthoringGeneration(ctx, session, verification)
 			}
@@ -535,6 +640,61 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 		})
 	}
 	return nil
+}
+
+// syncGeneratorRun observes only the VerifyTask produced by the durable
+// Generator Run. Before the Worker submits a candidate there is deliberately
+// no task to inspect; this must never fall through to the retired Generation
+// CRD recovery path.
+func (h *Handler) syncGeneratorRun(ctx context.Context, session *authoring.Session) error {
+	if session == nil || strings.TrimSpace(session.GeneratorRunID) == "" {
+		return authoring.ErrInvalidState
+	}
+	if strings.TrimSpace(session.VerifyTaskID) == "" {
+		return nil
+	}
+	task, err := h.k8s.GetVerifyTask(ctx, h.crdNamespace, session.VerifyTaskID)
+	if err != nil {
+		return fmt.Errorf("read generator verify task: %w", err)
+	}
+	run, err := h.db.GetGeneratorRunByVerifyTask(ctx, task.Name)
+	if err != nil {
+		return fmt.Errorf("read generator run for verify task: %w", err)
+	}
+	if run.RunID != session.GeneratorRunID || run.SubmissionID == "" || task.Spec.Source.Ref != run.RunID || task.Spec.Submission.ID != run.SubmissionID {
+		return errors.New("generator verify task does not match the active generator run")
+	}
+	verification := authoring.Verification{
+		TaskID: task.Name, Phase: string(task.Status.Phase), Message: task.Status.Message,
+		Report: authoringVerificationReport(task.Status.Report),
+	}
+	switch task.Status.Phase {
+	case breakfixv1.VerifyTaskSucceeded:
+		if session.State == authoring.StateAwaitingVerifiedReview || session.State == authoring.StatePublished || session.State == authoring.StatePublishing {
+			if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
+				return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
+			}
+			return nil
+		}
+		artifact, err := h.storeVerifiedArtifact(ctx, session, task)
+		if err != nil {
+			return err
+		}
+		if err := h.db.CompleteVerification(ctx, session.ID, session.GenerationID, artifact, verification); err != nil {
+			return err
+		}
+		if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
+			return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
+		}
+		return nil
+	case breakfixv1.VerifyTaskFailed:
+		if task.Status.Report == nil || task.Status.Report.Class != breakfixv1.VerifyFailureArtifact {
+			return h.db.RecordVerificationInfrastructureFailure(ctx, session.ID, session.GenerationID, verification)
+		}
+		return h.restartAuthoringGeneratorRun(ctx, session, task, verification)
+	default:
+		return nil
+	}
 }
 
 func (h *Handler) storeVerifiedArtifact(ctx context.Context, session *authoring.Session, task *breakfixv1.VerifyTask) (authoring.Artifact, error) {

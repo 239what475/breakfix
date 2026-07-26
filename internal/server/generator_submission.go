@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
@@ -33,7 +32,7 @@ func (h *Handler) InternalGeneratorSubmitCandidate(c *gin.Context) {
 		h.writeInternalGeneratorError(c, fmt.Errorf("generator candidate archive is required"))
 		return
 	}
-	if err := validateGeneratorCandidateArchive(h.dataDir, request.Archive); err != nil {
+	if err := validateGeneratorCandidateArchive(request.Archive); err != nil {
 		h.writeInternalGeneratorError(c, err)
 		return
 	}
@@ -54,16 +53,8 @@ func (h *Handler) InternalGeneratorSubmitCandidate(c *gin.Context) {
 	c.JSON(http.StatusOK, generator.Submission{ID: submissionID, VerifyTask: task.Name})
 }
 
-func validateGeneratorCandidateArchive(dataDir string, archive []byte) error {
-	temporary, err := os.MkdirTemp(dataDir, ".generator-candidate-")
-	if err != nil {
-		return fmt.Errorf("create generator candidate staging: %w", err)
-	}
-	defer os.RemoveAll(temporary) //nolint:errcheck
-	if err := challenge.ExtractTarGz(temporary, bytes.NewReader(archive)); err != nil {
-		return fmt.Errorf("extract generator candidate: %w", err)
-	}
-	if _, err := challenge.ValidateSubmissionDir(temporary); err != nil {
+func validateGeneratorCandidateArchive(archive []byte) error {
+	if _, err := generator.InspectCandidateArchive(archive); err != nil {
 		return fmt.Errorf("validate generator candidate: %w", err)
 	}
 	return nil

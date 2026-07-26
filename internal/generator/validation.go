@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -11,41 +12,86 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (g *Generator) validateChallengeManifest(chalDir string) error {
+// Candidate is the immutable archive inspected by the Generator and Judge
+// before it can be submitted for real verification. The Worker only holds it
+// in memory; Server is the authority that persists a passed candidate.
+type Candidate struct {
+	Archive []byte
+	Entry   challenge.Entry
+	Files   []CandidateFile
+}
+
+// CandidateFile is deliberately limited to regular workspace files. It is
+// used as untrusted data in the Judge prompt, never as instruction text.
+type CandidateFile struct {
+	Path    string
+	Content string
+}
+
+// InspectCandidateArchive validates exactly the archive returned by the
+// workspace. It makes no metadata substitutions or normalizations: platform
+// fields are rejected so a model protocol mistake cannot silently change the
+// candidate that reaches VerifyTask.
+func InspectCandidateArchive(archive []byte) (*Candidate, error) {
+	if len(archive) == 0 {
+		return nil, errors.New("generator candidate archive is empty")
+	}
+	dir, err := os.MkdirTemp("", "breakfix-generator-candidate-")
+	if err != nil {
+		return nil, fmt.Errorf("create candidate staging: %w", err)
+	}
+	defer os.RemoveAll(dir) //nolint:errcheck
+	if err := challenge.ExtractTarGz(dir, bytes.NewReader(archive)); err != nil {
+		return nil, fmt.Errorf("extract generator candidate: %w", err)
+	}
+	entry, err := ValidateCandidateDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateCandidateSemantics(dir); err != nil {
+		return nil, err
+	}
+	files, err := candidateFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &Candidate{Archive: append([]byte(nil), archive...), Entry: *entry, Files: files}, nil
+}
+
+// ValidateCandidateDir validates a generator-owned challenge directory. In
+// contrast with a published catalog entry, it must not contain platform-owned
+// id, image, or publication metadata. They are added only by publication.
+func ValidateCandidateDir(chalDir string) (*challenge.Entry, error) {
 	path := filepath.Join(chalDir, "challenge.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read challenge.yaml: %w", err)
+		return nil, fmt.Errorf("read challenge.yaml: %w", err)
 	}
-
 	var spec map[string]any
 	if err := yaml.Unmarshal(data, &spec); err != nil {
-		return fmt.Errorf("parse challenge.yaml: %w", err)
+		return nil, fmt.Errorf("parse challenge.yaml: %w", err)
 	}
 	if spec == nil {
-		spec = map[string]any{}
+		return nil, errors.New("challenge.yaml must be a mapping")
 	}
-
-	delete(spec, "id")
-	delete(spec, "image")
 
 	var errs []string
-	if scalarString(spec["type"]) == "" {
-		errs = append(errs, "challenge.yaml 缺少 type")
-	} else if scalarString(spec["type"]) != challenge.TypeScript {
-		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 %s，当前为 %q", challenge.TypeScript, scalarString(spec["type"])))
+	for _, field := range []string{"id", "image", "published_at"} {
+		if _, exists := spec[field]; exists {
+			errs = append(errs, fmt.Sprintf("challenge.yaml 不得包含平台托管字段 %q", field))
+		}
 	}
-	switch challenge.NormalizeRuntime(scalarString(spec["runtime"])) {
-	case challenge.RuntimeContainer, challenge.RuntimeVCluster:
-	default:
-		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须为 container/vcluster，当前为 %q", scalarString(spec["runtime"])))
+	if scalarString(spec["type"]) != challenge.TypeScript {
+		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须明确为 %s", challenge.TypeScript))
+	}
+	runtime := scalarString(spec["runtime"])
+	if runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster {
+		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须明确为 container/vcluster，当前为 %q", runtime))
 	}
 	if scalarString(spec["title"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 title")
 	}
 	switch scalarString(spec["difficulty"]) {
-	case "":
-		errs = append(errs, "challenge.yaml 缺少 difficulty")
 	case "easy", "medium", "hard":
 	default:
 		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", scalarString(spec["difficulty"])))
@@ -56,25 +102,71 @@ func (g *Generator) validateChallengeManifest(chalDir string) error {
 	if scalarString(spec["description"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 description")
 	}
-
 	if len(errs) > 0 {
-		return fmt.Errorf("%s", strings.Join(errs, "; "))
+		return nil, errors.New(strings.Join(errs, "; "))
 	}
-	normalized, err := yaml.Marshal(spec)
+	entry, err := challenge.ValidateSubmissionDir(chalDir)
 	if err != nil {
-		return fmt.Errorf("marshal challenge.yaml: %w", err)
+		return nil, fmt.Errorf("validate challenge structure: %w", err)
 	}
-	if err := os.WriteFile(path, normalized, 0644); err != nil {
-		return fmt.Errorf("write challenge.yaml: %w", err)
-	}
-	return nil
+	return entry, nil
 }
 
-func (g *Generator) validateChallengeSemantics(chalDir string) error {
-	entry, err := loadChallengeEntry(chalDir)
+// ValidateCandidateSemantics contains deterministic policy checks that cannot
+// be delegated to the Judge model. It never writes the workspace.
+func ValidateCandidateSemantics(chalDir string) error {
+	entry, err := ValidateCandidateDir(chalDir)
 	if err != nil {
 		return err
 	}
+	return validateCandidateSemantics(chalDir, entry)
+}
+
+func candidateFiles(root string) ([]CandidateFile, error) {
+	files := make([]CandidateFile, 0)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return fmt.Errorf("candidate contains unsupported file %s", path)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files = append(files, CandidateFile{Path: filepath.ToSlash(rel), Content: string(content)})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read candidate files: %w", err)
+	}
+	return files, nil
+}
+
+// Deprecated compatibility methods keep the legacy workflow compiling until
+// the Generation CRD path is removed. They retain the new strict behavior.
+func (g *Generator) validateChallengeManifest(chalDir string) error {
+	_, err := ValidateCandidateDir(chalDir)
+	return err
+}
+
+func (g *Generator) validateChallengeSemantics(chalDir string) error {
+	entry, err := ValidateCandidateDir(chalDir)
+	if err != nil {
+		return err
+	}
+	return validateCandidateSemantics(chalDir, entry)
+}
+
+func validateCandidateSemantics(chalDir string, entry *challenge.Entry) error {
 	dockerfileData, err := os.ReadFile(filepath.Join(chalDir, "Dockerfile"))
 	if err != nil {
 		return fmt.Errorf("read Dockerfile: %w", err)
@@ -122,10 +214,6 @@ func validateDockerfileNoBuildNetwork(dockerfile string) error {
 		}
 	}
 	return nil
-}
-
-func loadChallengeEntry(chalDir string) (*challenge.Entry, error) {
-	return challenge.ValidateSubmissionDir(chalDir)
 }
 
 func validateKubectlPodReadinessPattern(verifyText string) error {

@@ -62,7 +62,7 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		return
 	}
 	input, err := generator.DecodeRunInput(claim.Run.Input)
-	if err != nil || input.AuthoringSessionID != runRecord.AuthoringSessionID || input.Revision != runRecord.AuthoringRevision || input.SeedSubmissionID != runRecord.SeedSubmissionID || input.VerifyTaskID != runRecord.VerifyTaskID {
+	if err != nil || input.AuthoringSessionID != runRecord.AuthoringSessionID || input.Revision != runRecord.AuthoringRevision || input.SeedSubmissionID != runRecord.SeedSubmissionID {
 		h.writeInternalGeneratorError(c, errors.New("generator run input does not match its durable record"))
 		return
 	}
@@ -81,7 +81,22 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		h.writeInternalGeneratorError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, generator.WorkspaceContext{Plan: revision.Plan, Feedback: input.Feedback})
+	c.JSON(http.StatusOK, generator.WorkspaceContext{
+		Plan:      revision.Plan,
+		Feedback:  input.Feedback,
+		BaseImage: h.generatorWorkspaceBaseImage(revision.Plan.Metadata.Runtime),
+	})
+}
+
+func (h *Handler) generatorWorkspaceBaseImage(runtime string) string {
+	name := "breakfix-base:latest"
+	if challenge.NormalizeRuntime(runtime) == challenge.RuntimeVCluster {
+		name = "breakfix-k8s-base:latest"
+	}
+	if strings.TrimSpace(h.registryAddr) == "" {
+		return name
+	}
+	return strings.TrimRight(h.registryAddr, "/") + "/" + name
 }
 
 func (h *Handler) InternalGeneratorReadFile(c *gin.Context) {

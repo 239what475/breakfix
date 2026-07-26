@@ -14,6 +14,7 @@ import (
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
@@ -69,9 +70,20 @@ func main() {
 		slog.Error("failed to create taxonomy executor", "err", err)
 		os.Exit(1)
 	}
+	generatorClient, err := generator.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	if err != nil {
+		slog.Error("failed to create generator internal client", "err", err)
+		os.Exit(1)
+	}
+	generatorExecutor, err := generator.NewWorkerExecutor(cfg.Agent, generatorClient)
+	if err != nil {
+		slog.Error("failed to create generator executor", "err", err)
+		os.Exit(1)
+	}
 	worker, err := agentworker.New(database, map[string]agentworker.Executor{
 		"assistant":                   assistantExecutor,
 		"authoring":                   authoringExecutor,
+		generator.RuntimePurpose:      generatorExecutor,
 		taxonomy.RuntimePurposeMapper: taxonomyExecutor,
 		taxonomy.RuntimePurposeReview: taxonomyExecutor,
 	}, assistant.DeltaSink{Client: serverClient}, agentworker.Config{WorkerID: *workerID})

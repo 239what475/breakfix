@@ -56,11 +56,12 @@ func TestArchiveDirPreservesNestedChallengeAssets(t *testing.T) {
 	}
 }
 
-func TestValidateChallengeManifestStripsPlatformFields(t *testing.T) {
+func TestValidateChallengeManifestRejectsPlatformFields(t *testing.T) {
 	dir := t.TempDir()
 	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `id: should-disappear
 image: should-disappear
 type: script
+runtime: container
 title: Cleanup Logs
 difficulty: medium
 description: |
@@ -68,20 +69,20 @@ description: |
 `)
 
 	var g Generator
-	if err := g.validateChallengeManifest(dir); err != nil {
-		t.Fatalf("validateChallengeManifest() error = %v", err)
+	err := g.validateChallengeManifest(dir)
+	if err == nil {
+		t.Fatal("expected validateChallengeManifest() to reject platform fields")
 	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "challenge.yaml"))
-	if err != nil {
-		t.Fatalf("read challenge.yaml: %v", err)
+	if !strings.Contains(err.Error(), "平台托管字段") {
+		t.Fatalf("expected platform-field error, got %v", err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(dir, "challenge.yaml"))
+	if readErr != nil {
+		t.Fatalf("read challenge.yaml: %v", readErr)
 	}
 	got := string(data)
-	if strings.Contains(got, "id:") {
-		t.Fatalf("expected id to be stripped, got:\n%s", got)
-	}
-	if strings.Contains(got, "image:") {
-		t.Fatalf("expected image to be stripped, got:\n%s", got)
+	if !strings.Contains(got, "id: should-disappear") || !strings.Contains(got, "image: should-disappear") {
+		t.Fatalf("validation unexpectedly rewrote challenge.yaml:\n%s", got)
 	}
 }
 

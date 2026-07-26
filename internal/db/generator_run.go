@@ -50,11 +50,19 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 	if err != nil {
 		return nil, nil, err
 	}
-	if session.CurrentRevision != expectedRevision || (session.State != authoring.StateIntentReview && session.State != authoring.StateRevisingAndVerifying) {
+	if session.CurrentRevision != expectedRevision {
 		return nil, nil, authoring.ErrInvalidState
 	}
-	if strings.TrimSpace(session.GeneratorRunID) != "" {
-		return nil, nil, agentruntime.ErrRunActive
+	if session.State != authoring.StateIntentReview && session.State != authoring.StateRevisingAndVerifying && session.State != authoring.StateGeneratingAndVerifying {
+		return nil, nil, authoring.ErrInvalidState
+	}
+	if session.State == authoring.StateGeneratingAndVerifying {
+		if strings.TrimSpace(input.SeedSubmissionID) == "" || strings.TrimSpace(input.VerifyTaskID) == "" ||
+			input.VerifyTaskID != session.VerifyTaskID || input.Feedback.Empty() {
+			return nil, nil, authoring.ErrInvalidState
+		}
+	} else if !input.Feedback.Empty() || strings.TrimSpace(input.VerifyTaskID) != "" {
+		return nil, nil, authoring.ErrInvalidState
 	}
 
 	generatorSessionID := strings.TrimSpace(session.GeneratorSessionID)
@@ -95,7 +103,7 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generator_runs
 		(run_id, generator_session_id, authoring_session_id, authoring_revision, seed_submission_id, verify_task_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		created.ID, generatorSessionID, session.ID, expectedRevision, input.SeedSubmissionID, input.VerifyTaskID, now, now); err != nil {
+		created.ID, generatorSessionID, session.ID, expectedRevision, input.SeedSubmissionID, "", now, now); err != nil {
 		return nil, nil, fmt.Errorf("insert generator run record: %w", err)
 	}
 	state := authoring.StateGeneratingAndVerifying
@@ -103,8 +111,8 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 		state = authoring.StateRevisingAndVerifying
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-		SET state = ?, generator_session_id = ?, generator_run_id = ?, verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ?
-		WHERE id = ?`, state, generatorSessionID, created.ID, nowText(now), session.ID); err != nil {
+		SET state = ?, generation_id = ?, generator_session_id = ?, generator_run_id = ?, verify_task_id = '', pending_feedback = '', last_error = '', updated_at = ?
+		WHERE id = ?`, state, created.ID, generatorSessionID, created.ID, nowText(now), session.ID); err != nil {
 		return nil, nil, fmt.Errorf("mark generator run active: %w", err)
 	}
 	if err := appendAuthoringEventTx(ctx, tx, "generator-start-"+created.ID, session.ID,

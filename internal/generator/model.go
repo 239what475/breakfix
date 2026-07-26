@@ -18,7 +18,8 @@ var ErrNotFound = errors.New("generator run not found")
 
 const (
 	RuntimePurpose = "generator"
-	promptVersion  = "generator-v1"
+	PromptVersion  = "generator-deep-v1"
+	RunDeadline    = time.Hour
 )
 
 // RunInput is immutable context for a Generator Run. The plan and the
@@ -115,7 +116,6 @@ func (r Record) RunInput() RunInput {
 		AuthoringSessionID: r.AuthoringSessionID,
 		Revision:           r.AuthoringRevision,
 		SeedSubmissionID:   r.SeedSubmissionID,
-		VerifyTaskID:       r.VerifyTaskID,
 	}
 }
 

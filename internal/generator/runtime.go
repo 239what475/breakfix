@@ -19,8 +19,9 @@ type LeaseCredential struct {
 }
 
 type WorkspaceContext struct {
-	Plan     authoring.Plan `json:"plan"`
-	Feedback Feedback       `json:"feedback"`
+	Plan      authoring.Plan `json:"plan"`
+	Feedback  Feedback       `json:"feedback"`
+	BaseImage string         `json:"base_image"`
 }
 
 type FileReadResponse struct {
