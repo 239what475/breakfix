@@ -16,7 +16,7 @@ import (
 type Handler struct {
 	db               *db.DB
 	k8s              *k8s.Client
-	authoring        *authoring.Service
+	authoring        *authoring.RuntimeService
 	assistant        *assistant.Service
 	registryAddr     string
 	registryInsecure bool
@@ -41,7 +41,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 	handler := &Handler{
 		db:               database,
 		k8s:              client,
-		authoring:        authoring.NewService(database, cfg.Agent),
+		authoring:        authoring.NewRuntimeService(database, cfg.Agent.Model),
 		assistant:        assistant.NewService(database, cfg.Agent.Model),
 		registryAddr:     cfg.RegistryAddr,
 		registryInsecure: cfg.RegistryInsecure,

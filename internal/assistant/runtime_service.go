@@ -1,9 +1,12 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -59,12 +62,16 @@ func (s *Service) GetOrCreate(ctx context.Context, request Request) (*Session, [
 	if err != nil {
 		return nil, nil, err
 	}
-	return sessionProjection(session, request), projectMessages(messages), nil
+	projected, err := projectMessages(messages)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sessionProjection(session, request), projected, nil
 }
 
 // StartTurn stores the user message and pending Run in one transaction. Model
 // execution is intentionally not started in the Server process.
-func (s *Service) StartTurn(ctx context.Context, request Request, content string, keepAlive func(context.Context)) (*Session, Turn, error) {
+func (s *Service) StartTurn(ctx context.Context, request Request, content string) (*Session, Turn, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, Turn{}, errors.New("消息不能为空")
@@ -74,6 +81,10 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 		return nil, Turn{}, err
 	}
 	now := time.Now().UTC()
+	input, err := json.Marshal(RunInput{CurrentWindow: request.CurrentWindow, OpenWindows: request.OpenWindows})
+	if err != nil {
+		return nil, Turn{}, fmt.Errorf("encode assistant run input: %w", err)
+	}
 	run, err := s.repo.CreateMessageAndRun(ctx, agentruntime.Message{
 		ID:        NewID("assistant-message"),
 		SessionID: session.ID,
@@ -87,6 +98,7 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 		OwnerKind:     "environment",
 		OwnerRef:      request.EnvironmentUID,
 		InputRevision: request.EnvironmentUID,
+		Input:         input,
 		Model:         s.model,
 		PromptVersion: promptVersion,
 		DeadlineAt:    now.Add(assistantRunDeadline),
@@ -96,9 +108,6 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 	}
 	if err != nil {
 		return nil, Turn{}, err
-	}
-	if keepAlive != nil {
-		go s.keepRunAlive(run.ID, keepAlive)
 	}
 	return session, turnProjection(run), nil
 }
@@ -152,25 +161,6 @@ func (s *Service) DeleteEnvironment(ctx context.Context, environmentUID string) 
 	return err
 }
 
-func (s *Service) keepRunAlive(runID string, keepAlive func(context.Context)) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go keepAlive(ctx)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			run, err := s.repo.GetRun(context.Background(), runID)
-			if err != nil || isTerminal(run.Status) {
-				return
-			}
-		}
-	}
-}
-
 func (s *Service) watchRun(sessionID, runID string, channel chan<- Event, stop <-chan struct{}) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -207,7 +197,11 @@ func (s *Service) emitCurrentRunState(ctx context.Context, sessionID string, run
 			if messages[index].Role != "assistant" {
 				continue
 			}
-			message := projectMessage(messages[index])
+			message, err := projectMessage(messages[index])
+			if err != nil {
+				nonBlockingSend(channel, Event{Type: "error", TurnID: run.ID, Error: "assistant response metadata is unavailable"})
+				return
+			}
 			nonBlockingSend(channel, Event{Type: "complete", TurnID: run.ID, SessionID: sessionID, Message: &message})
 			return
 		}
@@ -250,16 +244,39 @@ func turnProjection(value *agentruntime.Run) Turn {
 	}
 }
 
-func projectMessages(values []agentruntime.Message) []Message {
+func projectMessages(values []agentruntime.Message) ([]Message, error) {
 	result := make([]Message, 0, len(values))
 	for _, value := range values {
-		result = append(result, projectMessage(value))
+		message, err := projectMessage(value)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, message)
 	}
-	return result
+	return result, nil
 }
 
-func projectMessage(value agentruntime.Message) Message {
-	return Message{ID: value.ID, Role: value.Role, Content: value.Content, CreatedAt: value.CreatedAt}
+func projectMessage(value agentruntime.Message) (Message, error) {
+	message := Message{ID: value.ID, Role: value.Role, Content: value.Content, CreatedAt: value.CreatedAt}
+	if len(value.Metadata) == 0 || bytes.Equal(value.Metadata, []byte("{}")) {
+		return message, nil
+	}
+	var metadata struct {
+		Evidence []Evidence `json:"evidence"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(value.Metadata))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&metadata); err != nil {
+		return Message{}, fmt.Errorf("decode assistant message metadata: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		return Message{}, errors.New("assistant message metadata has a second JSON document")
+	} else if !errors.Is(err, io.EOF) {
+		return Message{}, fmt.Errorf("decode assistant message metadata suffix: %w", err)
+	}
+	message.Evidence = metadata.Evidence
+	return message, nil
 }
 
 type eventHub struct {

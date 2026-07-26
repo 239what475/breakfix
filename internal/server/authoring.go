@@ -100,7 +100,7 @@ func (h *Handler) GetCurrentAuthoringSession(c *gin.Context) {
 	if user == nil {
 		return
 	}
-	session, err := h.db.GetLatestOpenAuthoringSession(c.Request.Context(), user.ID)
+	session, err := h.authoring.GetCurrent(c.Request.Context(), user.ID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
@@ -118,19 +118,10 @@ func (h *Handler) SendAuthoringMessage(c *gin.Context, sessionID string) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	session, revision, agentMessage, err := h.authoring.SendMessage(c.Request.Context(), user.ID, sessionID, request.Content)
+	_, _, err := h.authoring.StartTurn(c.Request.Context(), user.ID, sessionID, request.Content)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
-	}
-	// A request that changes an already verified revision immediately enters a
-	// new hidden generation/verification cycle. The previous verified revision
-	// remains the one returned by GET until this cycle succeeds.
-	if session.State == authoring.StateRevisingAndVerifying && len(agentMessage.Changes) > 0 {
-		if err := h.startAuthoringGeneration(c.Request.Context(), user, session, revision, ""); err != nil {
-			h.writeAuthoringError(c, err)
-			return
-		}
 	}
 	h.writeAuthoringSession(c, user, sessionID)
 }

@@ -10,6 +10,8 @@ import (
 	"syscall"
 
 	"github.com/breakfix/breakfix/internal/agentworker"
+	"github.com/breakfix/breakfix/internal/assistant"
+	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 )
@@ -36,7 +38,30 @@ func main() {
 	}
 	defer func() { _ = database.Close() }()
 
-	worker, err := agentworker.New(database, map[string]agentworker.Executor{}, agentworker.NopDeltaSink{}, agentworker.Config{WorkerID: *workerID})
+	serverClient, err := assistant.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	if err != nil {
+		slog.Error("failed to create server internal client", "err", err)
+		os.Exit(1)
+	}
+	assistantExecutor, err := assistant.NewWorkerExecutor(database, cfg.Agent, serverClient)
+	if err != nil {
+		slog.Error("failed to create assistant executor", "err", err)
+		os.Exit(1)
+	}
+	authoringClient, err := authoring.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	if err != nil {
+		slog.Error("failed to create authoring internal client", "err", err)
+		os.Exit(1)
+	}
+	authoringExecutor, err := authoring.NewWorkerExecutor(database, cfg.Agent, authoringClient)
+	if err != nil {
+		slog.Error("failed to create authoring executor", "err", err)
+		os.Exit(1)
+	}
+	worker, err := agentworker.New(database, map[string]agentworker.Executor{
+		"assistant": assistantExecutor,
+		"authoring": authoringExecutor,
+	}, assistant.DeltaSink{Client: serverClient}, agentworker.Config{WorkerID: *workerID})
 	if err != nil {
 		slog.Error("failed to create agent worker", "err", err)
 		os.Exit(1)

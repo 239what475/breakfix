@@ -312,6 +312,12 @@ func stateAllowsAgentPlanRevision(state SessionState) bool {
 	return stateAllowsAuthorMessage(state) || state == StateRevisingAndVerifying
 }
 
+// AllowsAgentPlanStage reports whether an Agent Run may mutate its private
+// staged Plan. Public Revisions are still only created by finalization.
+func AllowsAgentPlanStage(state SessionState) bool {
+	return stateAllowsAgentPlanRevision(state)
+}
+
 // A plan edit after an artifact exists starts a fresh generation and
 // verification cycle. The previous verified artifact stays visible until the
 // replacement is verified.
@@ -324,6 +330,12 @@ func nextPlanRevisionState(state SessionState) SessionState {
 	default:
 		return StateIntentReview
 	}
+}
+
+// NextPlanRevisionState is used by the Runtime finalizer after it validates a
+// staged Plan and commits the single public Revision for the Run.
+func NextPlanRevisionState(state SessionState) SessionState {
+	return nextPlanRevisionState(state)
 }
 
 func (c *planConversation) setMetadata(ctx context.Context, raw string) (string, error) {

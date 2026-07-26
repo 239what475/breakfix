@@ -1,4 +1,4 @@
-package agentworker
+package agentworker_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/agentworker"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 )
 
@@ -26,14 +27,14 @@ func TestWorkerCompletesReadOnlyRunAfterBestEffortDeltaFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	worker, err := New(database, map[string]Executor{
-		"assistant": ExecutorFunc(func(ctx context.Context, claim agentruntime.Claim, emit Emitter) (ExecutionResult, error) {
+	worker, err := agentworker.New(database, map[string]agentworker.Executor{
+		"assistant": agentworker.ExecutorFunc(func(ctx context.Context, claim agentruntime.Claim, emit agentworker.Emitter) (agentworker.ExecutionResult, error) {
 			emit.EmitDelta(ctx, "draft response")
-			return ExecutionResult{Message: &agentruntime.Message{
+			return agentworker.ExecutionResult{Message: &agentruntime.Message{
 				ID: "assistant-message", SessionID: claim.Run.SessionID, Role: "assistant", Content: "durable response",
 			}}, nil
 		}),
-	}, failingDeltaSink{}, Config{WorkerID: "worker-one", LeaseTTL: time.Minute})
+	}, failingDeltaSink{}, agentworker.Config{WorkerID: "worker-one", LeaseTTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,5 +65,9 @@ func (failingDeltaSink) EmitDelta(context.Context, agentruntime.Claim, string) e
 }
 
 func (failingDeltaSink) EmitTool(context.Context, agentruntime.Claim, string) error {
+	return errors.New("server stream unavailable")
+}
+
+func (failingDeltaSink) EmitReset(context.Context, agentruntime.Claim) error {
 	return errors.New("server stream unavailable")
 }

@@ -48,7 +48,7 @@ export type AuthoringState = GeneratedAuthoringSession["state"];
 // Assistant streaming uses Server-Sent Events rather than an OpenAPI JSON
 // response, so these client-side event envelopes remain local.
 export interface AssistantStreamEvent {
-	type: "ready" | "tool" | "delta";
+	type: "ready" | "tool" | "delta" | "reset";
 	turn_id?: string;
 	content?: string;
 	tool?: string;

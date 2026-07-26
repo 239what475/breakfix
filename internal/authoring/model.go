@@ -237,8 +237,11 @@ type Message struct {
 }
 
 type Session struct {
-	ID                 string       `json:"id"`
-	UserID             string       `json:"user_id"`
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+	// RuntimeSessionID references the durable provider-neutral Agent Session.
+	// It replaces the former opaque Claude Code session identity.
+	RuntimeSessionID   string       `json:"-"`
 	AgentSessionID     string       `json:"-"`
 	AgentStarted       bool         `json:"-"`
 	WorkflowSessionID  string       `json:"-"`
@@ -253,6 +256,19 @@ type Session struct {
 	LastError          string       `json:"last_error,omitempty"`
 	CreatedAt          time.Time    `json:"created_at"`
 	UpdatedAt          time.Time    `json:"updated_at"`
+}
+
+// Stage is a private, attempt-resumable Plan draft. It becomes a public
+// Revision only when the matching Agent Run is successfully finalized.
+type Stage struct {
+	RunID         string    `json:"run_id"`
+	SessionID     string    `json:"session_id"`
+	BaseRevision  int64     `json:"base_revision"`
+	StageRevision int64     `json:"stage_revision"`
+	Plan          Plan      `json:"plan"`
+	Changes       []Change  `json:"changes"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func NewID(prefix string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -125,6 +126,67 @@ type Request struct {
 	IdleTTL          time.Duration
 	Checkpoints      CheckpointSnapshot
 	Reader           Reader
+}
+
+// RunInput is the immutable browser workspace state captured with one user
+// message. It lets a replacement Worker rebuild the same tool boundary rather
+// than silently substituting a default terminal window after a restart.
+type RunInput struct {
+	CurrentWindow string   `json:"current_window"`
+	OpenWindows   []string `json:"open_windows"`
+}
+
+// ExecutionContext is the serializable Server-owned snapshot needed to run an
+// Assistant attempt. Kubernetes access remains behind Reader on the Server.
+type ExecutionContext struct {
+	UserID           string             `json:"user_id"`
+	EnvironmentUID   string             `json:"environment_uid"`
+	EnvironmentName  string             `json:"environment_name"`
+	Runtime          string             `json:"runtime"`
+	ChallengeID      string             `json:"challenge_id"`
+	ChallengeTitle   string             `json:"challenge_title"`
+	Problem          string             `json:"problem"`
+	CurrentWindow    string             `json:"current_window"`
+	OpenWindows      []string           `json:"open_windows"`
+	EnvironmentPhase string             `json:"environment_phase"`
+	Checkpoints      CheckpointSnapshot `json:"checkpoints"`
+}
+
+func (value ExecutionContext) Request(reader Reader) Request {
+	return Request{
+		UserID:           value.UserID,
+		EnvironmentUID:   value.EnvironmentUID,
+		EnvironmentName:  value.EnvironmentName,
+		Runtime:          value.Runtime,
+		ChallengeID:      value.ChallengeID,
+		ChallengeTitle:   value.ChallengeTitle,
+		Problem:          value.Problem,
+		CurrentWindow:    value.CurrentWindow,
+		OpenWindows:      append([]string(nil), value.OpenWindows...),
+		EnvironmentPhase: value.EnvironmentPhase,
+		Checkpoints:      value.Checkpoints,
+		Reader:           reader,
+	}
+}
+
+// LeaseCredential is the minimum attempt-scoped authority exposed on the
+// internal HTTP boundary. The Server resolves the remaining Run fields and
+// validates this credential before every environment access or delta publish.
+type LeaseCredential struct {
+	Attempt    int    `json:"attempt"`
+	LeaseOwner string `json:"lease_owner"`
+}
+
+type InternalToolRequest struct {
+	LeaseCredential
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type InternalEventRequest struct {
+	LeaseCredential
+	Type    string `json:"type"`
+	Content string `json:"content,omitempty"`
+	Tool    string `json:"tool,omitempty"`
 }
 
 type Event struct {

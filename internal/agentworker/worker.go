@@ -18,12 +18,14 @@ import (
 type DeltaSink interface {
 	EmitDelta(context.Context, agentruntime.Claim, string) error
 	EmitTool(context.Context, agentruntime.Claim, string) error
+	EmitReset(context.Context, agentruntime.Claim) error
 }
 
 type NopDeltaSink struct{}
 
 func (NopDeltaSink) EmitDelta(context.Context, agentruntime.Claim, string) error { return nil }
 func (NopDeltaSink) EmitTool(context.Context, agentruntime.Claim, string) error  { return nil }
+func (NopDeltaSink) EmitReset(context.Context, agentruntime.Claim) error         { return nil }
 
 type ExecutionResult struct {
 	// Message is used by read-only runs. Worker stores this final message and
@@ -280,9 +282,16 @@ func (s deltaSink) EmitTool(ctx context.Context, name string) {
 	_ = s.sink.EmitTool(ctx, s.claim, name)
 }
 
+func (s deltaSink) EmitReset(ctx context.Context) {
+	// A retry invalidates only a transient browser draft. It must not affect the
+	// durable Run, message history, or the model execution itself.
+	_ = s.sink.EmitReset(ctx, s.claim)
+}
+
 // Emitter is what executors receive. It deliberately has no read API and is
 // never persisted as an Agent event stream.
 type Emitter interface {
 	EmitDelta(context.Context, string)
 	EmitTool(context.Context, string)
+	EmitReset(context.Context)
 }

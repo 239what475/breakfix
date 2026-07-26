@@ -26,6 +26,7 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	}
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
+	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
@@ -163,6 +164,12 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	})
 	router.POST("/api/internal/generations/:id/artifact", h.UploadGenerationArtifact)
 	router.GET("/api/internal/verify-submissions/:id/artifact", h.DownloadVerifySubmissionArtifact)
+	router.POST("/api/internal/agent-runs/:id/assistant/context", h.InternalAssistantContext)
+	router.POST("/api/internal/agent-runs/:id/assistant/tools/:tool", h.InternalAssistantTool)
+	router.POST("/api/internal/agent-runs/:id/assistant/events", h.InternalAssistantEvent)
+	router.POST("/api/internal/agent-runs/:id/authoring/context", h.InternalAuthoringContext)
+	router.POST("/api/internal/agent-runs/:id/authoring/stage", h.InternalAuthoringStage)
+	router.POST("/api/internal/agent-runs/:id/authoring/finalize", h.InternalAuthoringFinalize)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {

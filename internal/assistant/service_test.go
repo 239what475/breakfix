@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -32,14 +33,25 @@ func TestRuntimeServiceScopesSessionAndPersistsPendingTurn(t *testing.T) {
 	}
 
 	request.EnvironmentUID = "env-a"
-	session, turn, err := service.StartTurn(context.Background(), request, "下一步怎么做？", nil)
+	session, turn, err := service.StartTurn(context.Background(), request, "下一步怎么做？")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if session.ID != first.ID || turn.Status != TurnRunning {
 		t.Fatalf("started turn = %#v", turn)
 	}
-	if _, _, err := service.StartTurn(context.Background(), request, "another message", nil); err != ErrTurnRunning {
+	run, err := database.GetRun(context.Background(), turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input RunInput
+	if err := json.Unmarshal(run.Input, &input); err != nil {
+		t.Fatalf("decode persisted assistant input: %v", err)
+	}
+	if input.CurrentWindow != "shell-1" || len(input.OpenWindows) != 1 || input.OpenWindows[0] != "shell-1" {
+		t.Fatalf("persisted assistant input = %#v", input)
+	}
+	if _, _, err := service.StartTurn(context.Background(), request, "another message"); err != ErrTurnRunning {
 		t.Fatalf("second active turn error = %v, want %v", err, ErrTurnRunning)
 	}
 	active := service.ActiveTurn(context.Background(), session.ID)
@@ -53,8 +65,16 @@ func TestRuntimeServiceScopesSessionAndPersistsPendingTurn(t *testing.T) {
 	}
 	if err := database.CompleteWithMessage(context.Background(), *claim, agentruntime.Message{
 		ID: "assistant-final", SessionID: session.ID, Role: "assistant", Content: "检查 /var/log。",
+		Metadata: json.RawMessage(`{"evidence":[{"kind":"terminal","label":"终端 shell-1 的近期输出"}]}`),
 	}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
+	}
+	_, persisted, err := service.GetOrCreate(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted) != 2 || len(persisted[1].Evidence) != 1 || persisted[1].Evidence[0].Kind != "terminal" {
+		t.Fatalf("persisted assistant evidence = %#v", persisted)
 	}
 	subscription, err := service.Subscribe(context.Background(), session.ID, turn.ID)
 	if err != nil {

@@ -67,14 +67,7 @@ func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID stri
 		return
 	}
 
-	adapter, err := h.environmentRuntimeAdapter(request.Runtime)
-	if err != nil {
-		h.writeAssistantError(c, err)
-		return
-	}
-	session, turn, err := h.assistant.StartTurn(c.Request.Context(), request, body.Content, func(turnCtx context.Context) {
-		keepEnvironmentLeaseAlive(turnCtx, adapter, request.EnvironmentName, request.IdleTTL, nil)
-	})
+	session, turn, err := h.assistant.StartTurn(c.Request.Context(), request, body.Content)
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return

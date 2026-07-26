@@ -20,6 +20,12 @@ func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
 		"GET /api/challenges/:id/assistant",
 		"POST /api/challenges/:id/assistant/messages",
 		"GET /api/challenges/:id/assistant/turns/:turnID/events",
+		"POST /api/internal/agent-runs/:id/assistant/context",
+		"POST /api/internal/agent-runs/:id/assistant/tools/:tool",
+		"POST /api/internal/agent-runs/:id/assistant/events",
+		"POST /api/internal/agent-runs/:id/authoring/context",
+		"POST /api/internal/agent-runs/:id/authoring/stage",
+		"POST /api/internal/agent-runs/:id/authoring/finalize",
 	} {
 		if !routes[expected] {
 			t.Fatalf("route not registered: %s", expected)

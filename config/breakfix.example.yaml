@@ -42,3 +42,5 @@ agent:
   api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
   request_timeout: 2m
+  # Agent Worker reaches the Server through its in-cluster ClusterIP Service.
+  server_url: http://breakfix-server

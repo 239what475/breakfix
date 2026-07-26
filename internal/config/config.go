@@ -41,6 +41,7 @@ type AgentConfig struct {
 	APIKeyEnv      string `yaml:"api_key_env"`
 	Model          string `yaml:"model"`
 	RequestTimeout string `yaml:"request_timeout"`
+	ServerURL      string `yaml:"server_url"`
 	APIKey         string `yaml:"-"`
 }
 
@@ -67,6 +68,7 @@ func defaults() Config {
 			APIKeyEnv:      "DEEPSEEK_API_KEY",
 			Model:          "deepseek-v4-pro",
 			RequestTimeout: "2m",
+			ServerURL:      "http://breakfix-server",
 		},
 	}
 }
@@ -113,6 +115,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.AgentDatabaseURL = os.ExpandEnv(cfg.AgentDatabaseURL)
+	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -81,7 +82,7 @@ func (d *DB) FindSession(ctx context.Context, purpose, ownerKind, ownerRef, user
 }
 
 func (d *DB) ListMessages(ctx context.Context, sessionID string) ([]agentruntime.Message, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT id, session_id, sequence, role, content, created_at
+	rows, err := d.conn.QueryContext(ctx, `SELECT id, session_id, sequence, role, content, metadata_json, created_at
 		FROM agent_messages WHERE session_id = ? ORDER BY sequence`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list agent messages: %w", err)
@@ -107,6 +108,9 @@ func (d *DB) CreateMessageAndRun(ctx context.Context, message agentruntime.Messa
 	}
 	if strings.TrimSpace(message.ID) == "" || strings.TrimSpace(message.Content) == "" || message.Role != "user" {
 		return nil, fmt.Errorf("agent user message requires id and content")
+	}
+	if len(message.Metadata) > 0 && !json.Valid(message.Metadata) {
+		return nil, fmt.Errorf("agent message metadata must be valid JSON")
 	}
 	if err := agentruntime.ValidateCreateRun(run); err != nil {
 		return nil, err
@@ -205,6 +209,30 @@ func (d *DB) GetActiveRunForSession(ctx context.Context, sessionID string) (*age
 	return run, nil
 }
 
+func (d *DB) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]agentruntime.Run, error) {
+	if strings.TrimSpace(purpose) == "" {
+		return nil, fmt.Errorf("agent run purpose is required")
+	}
+	rows, err := d.conn.QueryContext(ctx, agentRunSelect+` WHERE purpose = ? AND status IN (?, ?)
+		ORDER BY created_at, id`, purpose, agentruntime.RunPending, agentruntime.RunRunning)
+	if err != nil {
+		return nil, fmt.Errorf("list active agent runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	runs := make([]agentruntime.Run, 0)
+	for rows.Next() {
+		run, err := scanAgentRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan active agent run: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active agent runs: %w", err)
+	}
+	return runs, nil
+}
+
 func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duration, now time.Time) (*agentruntime.Claim, error) {
 	if strings.TrimSpace(worker) == "" || leaseTTL <= 0 || now.IsZero() {
 		return nil, fmt.Errorf("worker, positive lease ttl, and current time are required")
@@ -283,6 +311,9 @@ func (d *DB) Requeue(ctx context.Context, claim agentruntime.Claim, nextAttemptA
 func (d *DB) CompleteWithMessage(ctx context.Context, claim agentruntime.Claim, message agentruntime.Message, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(message.ID) == "" || strings.TrimSpace(message.Content) == "" || message.Role != "assistant" || now.IsZero() {
 		return fmt.Errorf("valid claim, non-empty assistant message, and current time are required")
+	}
+	if len(message.Metadata) > 0 && !json.Valid(message.Metadata) {
+		return fmt.Errorf("agent message metadata must be valid JSON")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -415,6 +446,7 @@ func createRunTx(ctx context.Context, tx *Tx, input agentruntime.CreateRun, now 
 		OwnerKind:     input.OwnerKind,
 		OwnerRef:      input.OwnerRef,
 		InputRevision: input.InputRevision,
+		Input:         append([]byte(nil), input.Input...),
 		Status:        agentruntime.RunPending,
 		Model:         input.Model,
 		PromptVersion: input.PromptVersion,
@@ -427,11 +459,11 @@ func createRunTx(ctx context.Context, tx *Tx, input agentruntime.CreateRun, now 
 	// makes a caller-provided deadline independent from the scheduler clock.
 	run.NextAttemptAt = now
 	row := tx.QueryRowContext(ctx, `INSERT INTO agent_runs
-		(id, session_id, purpose, owner_kind, owner_ref, input_revision, status, model, prompt_version, attempt,
+		(id, session_id, purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version, attempt,
 		next_attempt_at, deadline_at, created_at, updated_at)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING `+agentRunColumns,
-		run.ID, run.SessionID, run.Purpose, run.OwnerKind, run.OwnerRef, run.InputRevision, run.Status, run.Model, run.PromptVersion,
+		run.ID, run.SessionID, run.Purpose, run.OwnerKind, run.OwnerRef, run.InputRevision, agentRunInput(run.Input), run.Status, run.Model, run.PromptVersion,
 		run.Attempt, run.NextAttemptAt, run.DeadlineAt, run.CreatedAt, run.UpdatedAt)
 	created, err := scanAgentRun(row)
 	if err != nil {
@@ -446,14 +478,28 @@ func insertAgentMessageTx(ctx context.Context, tx *Tx, message *agentruntime.Mes
 		return fmt.Errorf("allocate agent message sequence: %w", err)
 	}
 	message.Sequence = sequence
-	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_messages (id, session_id, sequence, role, content, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, message.ID, message.SessionID, message.Sequence, message.Role, message.Content, message.CreatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_messages (id, session_id, sequence, role, content, metadata_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?::jsonb, ?)`, message.ID, message.SessionID, message.Sequence, message.Role, message.Content, agentMessageMetadata(message.Metadata), message.CreatedAt); err != nil {
 		return fmt.Errorf("insert agent message: %w", err)
 	}
 	return nil
 }
 
-const agentRunColumns = `id, COALESCE(session_id, ''), purpose, owner_kind, owner_ref, input_revision, status, model, prompt_version,
+func agentRunInput(value []byte) string {
+	if len(value) == 0 {
+		return `{}`
+	}
+	return string(value)
+}
+
+func agentMessageMetadata(value []byte) string {
+	if len(value) == 0 {
+		return `{}`
+	}
+	return string(value)
+}
+
+const agentRunColumns = `id, COALESCE(session_id, ''), purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version,
 	attempt, next_attempt_at, lease_owner, lease_expires_at, deadline_at, last_error, created_at, updated_at, completed_at`
 
 const agentRunSelect = `SELECT ` + agentRunColumns + ` FROM agent_runs`
@@ -465,7 +511,7 @@ type agentRow interface {
 func scanAgentRun(row agentRow) (*agentruntime.Run, error) {
 	var run agentruntime.Run
 	var leaseExpiresAt, completedAt sql.NullTime
-	err := row.Scan(&run.ID, &run.SessionID, &run.Purpose, &run.OwnerKind, &run.OwnerRef, &run.InputRevision, &run.Status, &run.Model, &run.PromptVersion,
+	err := row.Scan(&run.ID, &run.SessionID, &run.Purpose, &run.OwnerKind, &run.OwnerRef, &run.InputRevision, &run.Input, &run.Status, &run.Model, &run.PromptVersion,
 		&run.Attempt, &run.NextAttemptAt, &run.LeaseOwner, &leaseExpiresAt, &run.DeadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
 	if err != nil {
 		return nil, err
@@ -495,7 +541,7 @@ func scanAgentSession(row agentRow) (*agentruntime.Session, error) {
 
 func scanAgentMessage(row agentRow) (*agentruntime.Message, error) {
 	var message agentruntime.Message
-	if err := row.Scan(&message.ID, &message.SessionID, &message.Sequence, &message.Role, &message.Content, &message.CreatedAt); err != nil {
+	if err := row.Scan(&message.ID, &message.SessionID, &message.Sequence, &message.Role, &message.Content, &message.Metadata, &message.CreatedAt); err != nil {
 		return nil, fmt.Errorf("scan agent message: %w", err)
 	}
 	return &message, nil

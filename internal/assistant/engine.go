@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
 	"github.com/breakfix/breakfix/internal/agentruntime"
@@ -21,6 +22,8 @@ type EngineResult struct {
 	Evidence []Evidence
 }
 
+const maxAssistantTransportAttempts = 3
+
 // RunWithEino executes one assistant response from durable conversation
 // messages. It does not own Session, Run, or streaming persistence; the
 // Worker supplies those boundaries and only this function performs model/tool
@@ -32,6 +35,25 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 	if len(history) == 0 || history[len(history)-1].Role != "user" {
 		return EngineResult{}, errors.New("assistant execution requires a latest user message")
 	}
+	for attempt := 0; attempt < maxAssistantTransportAttempts; attempt++ {
+		result, err := runAssistantAttempt(ctx, cfg, request, history, emit)
+		if err == nil {
+			return result, nil
+		}
+		if !agentmodel.IsTransientTransportError(err) || attempt == maxAssistantTransportAttempts-1 {
+			return EngineResult{}, err
+		}
+		if emit != nil {
+			emit(Event{Type: "reset"})
+		}
+		if err := waitAssistantTransportRetry(ctx, attempt); err != nil {
+			return EngineResult{}, err
+		}
+	}
+	return EngineResult{}, errors.New("assistant transport retry exhausted")
+}
+
+func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(Event)) (EngineResult, error) {
 	chat, err := agentmodel.NewChatModel(ctx, cfg)
 	if err != nil {
 		return EngineResult{}, err
@@ -50,12 +72,6 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
 			Tools: toBaseTools(conversation.tools()),
 		}},
-		ModelRetryConfig: &adk.ModelRetryConfig{
-			MaxRetries: 3,
-			IsRetryAble: func(_ context.Context, err error) bool {
-				return agentmodel.IsTransientTransportError(err)
-			},
-		},
 	})
 	if err != nil {
 		return EngineResult{}, fmt.Errorf("create Eino assistant agent: %w", err)
@@ -112,6 +128,18 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 		return EngineResult{}, errors.New("assistant returned an empty response")
 	}
 	return EngineResult{Content: content, Evidence: conversation.evidence()}, nil
+}
+
+func waitAssistantTransportRetry(ctx context.Context, attempt int) error {
+	delay := time.Duration(attempt+1) * 200 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func assistantInputs(conversation *conversation, history []agentruntime.Message) ([]adk.Message, error) {

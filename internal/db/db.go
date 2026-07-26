@@ -214,7 +214,10 @@ func bind(query string) string {
 	return out.String()
 }
 
-const schemaVersion = 1
+type schemaMigration struct {
+	version    int
+	statements []string
+}
 
 func (d *DB) migrate(ctx context.Context, agentRole string) error {
 	if _, err := d.conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -232,19 +235,22 @@ func (d *DB) migrate(ctx context.Context, agentRole string) error {
 	if _, err := tx.ExecContext(ctx, `LOCK TABLE schema_migrations IN ACCESS EXCLUSIVE MODE`); err != nil {
 		return fmt.Errorf("lock schema migrations: %w", err)
 	}
-	var installed bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)`, schemaVersion).Scan(&installed)
-	if err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	if !installed {
-		for index, statement := range schemaStatements {
+	for _, migration := range schemaMigrations {
+		var installed bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)`, migration.version).Scan(&installed)
+		if err != nil {
+			return fmt.Errorf("read schema migration %d: %w", migration.version, err)
+		}
+		if installed {
+			continue
+		}
+		for index, statement := range migration.statements {
 			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("schema statement %d: %w", index+1, err)
+				return fmt.Errorf("schema migration %d statement %d: %w", migration.version, index+1, err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (?)`, schemaVersion); err != nil {
-			return fmt.Errorf("record schema version: %w", err)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (?)`, migration.version); err != nil {
+			return fmt.Errorf("record schema migration %d: %w", migration.version, err)
 		}
 	}
 	if err := grantAgentRuntimePrivileges(ctx, tx, agentRole); err != nil {
@@ -278,8 +284,9 @@ func grantAgentRuntimePrivileges(ctx context.Context, tx *Tx, role string) error
 	return nil
 }
 
-var schemaStatements = []string{
-	`CREATE TABLE users (
+var schemaMigrations = []schemaMigration{
+	{version: 1, statements: []string{
+		`CREATE TABLE users (
 		id TEXT PRIMARY KEY,
 		subject TEXT NOT NULL UNIQUE,
 		name TEXT NOT NULL,
@@ -287,9 +294,10 @@ var schemaStatements = []string{
 		totp_secret TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
-	`CREATE TABLE authoring_sessions (
+		`CREATE TABLE authoring_sessions (
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
+		runtime_session_id TEXT NOT NULL DEFAULT '',
 		agent_session_id TEXT NOT NULL,
 		agent_started BOOLEAN NOT NULL DEFAULT FALSE,
 		workflow_session_id TEXT NOT NULL DEFAULT '',
@@ -305,7 +313,7 @@ var schemaStatements = []string{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
-	`CREATE TABLE authoring_revisions (
+		`CREATE TABLE authoring_revisions (
 		session_id TEXT NOT NULL,
 		revision BIGINT NOT NULL,
 		plan_json TEXT NOT NULL,
@@ -316,7 +324,7 @@ var schemaStatements = []string{
 		created_at TEXT NOT NULL,
 		PRIMARY KEY (session_id, revision)
 	)`,
-	`CREATE TABLE authoring_messages (
+		`CREATE TABLE authoring_messages (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
 		role TEXT NOT NULL,
@@ -324,16 +332,16 @@ var schemaStatements = []string{
 		changes_json TEXT NOT NULL DEFAULT '[]',
 		created_at TEXT NOT NULL
 	)`,
-	`CREATE INDEX authoring_messages_session_created ON authoring_messages(session_id, created_at)`,
-	`CREATE TABLE user_challenge_progress (
+		`CREATE INDEX authoring_messages_session_created ON authoring_messages(session_id, created_at)`,
+		`CREATE TABLE user_challenge_progress (
 		user_id TEXT NOT NULL,
 		challenge_id TEXT NOT NULL,
 		completed_at TEXT NOT NULL,
 		environment_uid TEXT NOT NULL,
 		PRIMARY KEY (user_id, challenge_id)
 	)`,
-	`CREATE INDEX user_challenge_progress_user ON user_challenge_progress(user_id)`,
-	`CREATE TABLE user_challenge_attempts (
+		`CREATE INDEX user_challenge_progress_user ON user_challenge_progress(user_id)`,
+		`CREATE TABLE user_challenge_attempts (
 		environment_uid TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
 		challenge_id TEXT NOT NULL,
@@ -342,9 +350,9 @@ var schemaStatements = []string{
 		ended_at TEXT NOT NULL DEFAULT '',
 		outcome TEXT NOT NULL DEFAULT 'active'
 	)`,
-	`CREATE INDEX user_challenge_attempts_user_recent ON user_challenge_attempts(user_id, ready_at DESC, environment_uid DESC)`,
-	`CREATE INDEX user_challenge_attempts_challenge_user ON user_challenge_attempts(challenge_id, user_id)`,
-	`CREATE TABLE terminal_connections (
+		`CREATE INDEX user_challenge_attempts_user_recent ON user_challenge_attempts(user_id, ready_at DESC, environment_uid DESC)`,
+		`CREATE INDEX user_challenge_attempts_challenge_user ON user_challenge_attempts(challenge_id, user_id)`,
+		`CREATE TABLE terminal_connections (
 		id TEXT PRIMARY KEY,
 		environment_uid TEXT NOT NULL,
 		user_id TEXT NOT NULL,
@@ -354,8 +362,8 @@ var schemaStatements = []string{
 		heartbeat_at TEXT NOT NULL,
 		disconnected_at TEXT NOT NULL DEFAULT ''
 	)`,
-	`CREATE INDEX terminal_connections_environment_active ON terminal_connections(environment_uid, disconnected_at, heartbeat_at)`,
-	`CREATE TABLE environment_usage_sessions (
+		`CREATE INDEX terminal_connections_environment_active ON terminal_connections(environment_uid, disconnected_at, heartbeat_at)`,
+		`CREATE TABLE environment_usage_sessions (
 		id TEXT PRIMARY KEY,
 		environment_uid TEXT NOT NULL,
 		user_id TEXT NOT NULL,
@@ -364,9 +372,9 @@ var schemaStatements = []string{
 		heartbeat_at TEXT NOT NULL,
 		ended_at TEXT NOT NULL DEFAULT ''
 	)`,
-	`CREATE UNIQUE INDEX environment_usage_sessions_one_active ON environment_usage_sessions(environment_uid) WHERE ended_at = ''`,
-	`CREATE INDEX environment_usage_sessions_user ON environment_usage_sessions(user_id, started_at DESC)`,
-	`CREATE TABLE taxonomy_work_items (
+		`CREATE UNIQUE INDEX environment_usage_sessions_one_active ON environment_usage_sessions(environment_uid) WHERE ended_at = ''`,
+		`CREATE INDEX environment_usage_sessions_user ON environment_usage_sessions(user_id, started_at DESC)`,
+		`CREATE TABLE taxonomy_work_items (
 		id TEXT PRIMARY KEY,
 		kind TEXT NOT NULL,
 		challenge_id TEXT NOT NULL,
@@ -394,14 +402,14 @@ var schemaStatements = []string{
 		updated_at TEXT NOT NULL,
 		UNIQUE(kind, challenge_id, challenge_revision)
 	)`,
-	`CREATE INDEX taxonomy_work_items_ready ON taxonomy_work_items(state, next_run_at, lease_expires_at, updated_at, created_at)`,
-	`CREATE TABLE taxonomy_leases (
+		`CREATE INDEX taxonomy_work_items_ready ON taxonomy_work_items(state, next_run_at, lease_expires_at, updated_at, created_at)`,
+		`CREATE TABLE taxonomy_leases (
 		name TEXT PRIMARY KEY,
 		owner TEXT NOT NULL,
 		expires_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
-	`CREATE TABLE agent_sessions (
+		`CREATE TABLE agent_sessions (
 		id TEXT PRIMARY KEY,
 		purpose TEXT NOT NULL,
 		owner_kind TEXT NOT NULL,
@@ -411,19 +419,20 @@ var schemaStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL
 	)`,
-	`CREATE INDEX agent_sessions_owner ON agent_sessions(owner_kind, owner_ref)`,
-	`CREATE UNIQUE INDEX agent_sessions_owner_purpose ON agent_sessions(purpose, owner_kind, owner_ref, user_ref)`,
-	`CREATE TABLE agent_messages (
+		`CREATE INDEX agent_sessions_owner ON agent_sessions(owner_kind, owner_ref)`,
+		`CREATE UNIQUE INDEX agent_sessions_owner_purpose ON agent_sessions(purpose, owner_kind, owner_ref, user_ref)`,
+		`CREATE TABLE agent_messages (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
 		sequence BIGINT NOT NULL,
 		role TEXT NOT NULL,
 		content TEXT NOT NULL,
+		metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
 		created_at TIMESTAMPTZ NOT NULL,
 		UNIQUE(session_id, sequence)
 	)`,
-	`CREATE INDEX agent_messages_session_sequence ON agent_messages(session_id, sequence)`,
-	`CREATE TABLE agent_runs (
+		`CREATE INDEX agent_messages_session_sequence ON agent_messages(session_id, sequence)`,
+		`CREATE TABLE agent_runs (
 		id TEXT PRIMARY KEY,
 		session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
 		purpose TEXT NOT NULL,
@@ -443,7 +452,28 @@ var schemaStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL,
 		completed_at TIMESTAMPTZ
 	)`,
-	`CREATE INDEX agent_runs_claim ON agent_runs(status, next_attempt_at, deadline_at, created_at)`,
-	`CREATE UNIQUE INDEX agent_runs_session_active ON agent_runs(session_id)
+		`CREATE INDEX agent_runs_claim ON agent_runs(status, next_attempt_at, deadline_at, created_at)`,
+		`CREATE UNIQUE INDEX agent_runs_session_active ON agent_runs(session_id)
 		WHERE session_id IS NOT NULL AND status IN ('pending', 'running')`,
+	}},
+	{version: 2, statements: []string{
+		`ALTER TABLE agent_runs ADD COLUMN input_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+	}},
+	{version: 3, statements: []string{
+		`ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+	}},
+	{version: 4, statements: []string{
+		`ALTER TABLE authoring_sessions ADD COLUMN IF NOT EXISTS runtime_session_id TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS authoring_stages (
+			run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+			session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE CASCADE,
+			base_revision BIGINT NOT NULL,
+			stage_revision BIGINT NOT NULL,
+			plan_json JSONB NOT NULL,
+			changes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS authoring_stages_session ON authoring_stages(session_id)`,
+	}},
 }

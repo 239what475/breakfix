@@ -121,6 +121,20 @@ func (h *Handler) findEnvironment(ctx context.Context, userID string, challengeE
 	return nil, errors.New("no active environment")
 }
 
+func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, environmentUID string) (*activeEnvironment, error) {
+	environments, err := h.listActiveEnvironments(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range environments {
+		environment := environments[index]
+		if environment.UID == environmentUID && isLiveEnvironmentPhase(environment.Phase) {
+			return &environment, nil
+		}
+	}
+	return nil, errors.New("no active environment for assistant run")
+}
+
 func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, challengeEntry.ID)
 	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)

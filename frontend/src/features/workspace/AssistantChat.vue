@@ -154,6 +154,12 @@ function streamHandlers(): AssistantStreamHandlers {
         status.value = "正在分析...";
       }
       if (event.type === "tool") status.value = toolStatus(event.tool);
+      if (event.type === "reset" && activeTurn.value) {
+        pendingDelta = "";
+        activeTurn.value.content = "";
+        partialMessage(activeTurn.value).content = "";
+        status.value = "正在重新分析...";
+      }
       if (event.type === "delta") queueDelta(event.content ?? "");
     },
     onComplete(complete) {

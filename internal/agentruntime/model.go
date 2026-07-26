@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,16 +53,22 @@ type Message struct {
 	Sequence  int64
 	Role      string
 	Content   string
+	// Metadata holds small domain-visible annotations such as the Assistant's
+	// evidence labels. It never holds tool output, prompts, or model reasoning.
+	Metadata  json.RawMessage
 	CreatedAt time.Time
 }
 
 type Run struct {
-	ID             string
-	SessionID      string
-	Purpose        string
-	OwnerKind      string
-	OwnerRef       string
-	InputRevision  string
+	ID            string
+	SessionID     string
+	Purpose       string
+	OwnerKind     string
+	OwnerRef      string
+	InputRevision string
+	// Input is immutable, run-scoped context needed to reconstruct an attempt.
+	// It is deliberately not conversation history or a provider checkpoint.
+	Input          json.RawMessage
 	Status         RunStatus
 	Model          string
 	PromptVersion  string
@@ -95,6 +102,7 @@ type CreateRun struct {
 	OwnerKind     string
 	OwnerRef      string
 	InputRevision string
+	Input         json.RawMessage
 	Model         string
 	PromptVersion string
 	DeadlineAt    time.Time
@@ -110,6 +118,7 @@ type Repository interface {
 	CreateRun(context.Context, CreateRun) (*Run, error)
 	GetRun(context.Context, string) (*Run, error)
 	GetActiveRunForSession(context.Context, string) (*Run, error)
+	ListActiveRunsForPurpose(context.Context, string) ([]Run, error)
 	ClaimNext(context.Context, string, time.Duration, time.Time) (*Claim, error)
 	RenewLease(context.Context, Claim, time.Duration, time.Time) error
 	Requeue(context.Context, Claim, time.Time, string, time.Time) error
@@ -137,6 +146,9 @@ func ValidateCreateRun(run CreateRun) error {
 	}
 	if run.DeadlineAt.IsZero() {
 		return errors.New("agent run deadline is required")
+	}
+	if len(run.Input) > 0 && !json.Valid(run.Input) {
+		return errors.New("agent run input must be valid JSON")
 	}
 	return nil
 }
