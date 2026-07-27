@@ -10,36 +10,36 @@ import (
 
 type publishedChallenge struct {
 	Entry   challenge.Entry
-	Mapping taxonomy.ChallengeMapping
+	Mapping *taxonomy.ChallengeMapping
 }
 
-// publishedChallenges joins the current immutable taxonomy snapshot with the
-// currently visible challenge artifacts. An unmapped or changed artifact is
-// intentionally absent rather than becoming public through directory scanning.
+// publishedChallenges reads the filesystem-backed published catalog. Taxonomy
+// mapping is asynchronous classification metadata, not a publication gate.
 func (h *Handler) publishedChallenges() ([]publishedChallenge, error) {
 	entries, err := challenge.List(h.challengesDir)
 	if err != nil {
 		return nil, err
 	}
-	if h.taxonomy == nil {
-		return nil, nil
-	}
-	snapshot, err := h.taxonomy.LoadCurrent()
-	if errors.Is(err, taxonomy.ErrNoCurrentRevision) {
-		return []publishedChallenge{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load current taxonomy: %w", err)
-	}
-	index, err := taxonomy.NewCatalogIndex(*snapshot, entries)
-	if err != nil {
-		return nil, fmt.Errorf("build taxonomy catalog index: %w", err)
+	var index *taxonomy.CatalogIndex
+	if h.taxonomy != nil {
+		snapshot, err := h.taxonomy.LoadCurrent()
+		if err != nil && !errors.Is(err, taxonomy.ErrNoCurrentRevision) {
+			return nil, fmt.Errorf("load current taxonomy: %w", err)
+		}
+		if snapshot != nil {
+			index, err = taxonomy.NewCatalogIndex(*snapshot, entries)
+			if err != nil {
+				return nil, fmt.Errorf("build taxonomy catalog index: %w", err)
+			}
+		}
 	}
 	result := make([]publishedChallenge, 0, len(entries))
 	for _, entry := range entries {
-		mapping, exists := index.Mapping(entry.ID)
-		if !exists {
-			continue
+		var mapping *taxonomy.ChallengeMapping
+		if index != nil {
+			if value, exists := index.Mapping(entry.ID); exists {
+				mapping = &value
+			}
 		}
 		result = append(result, publishedChallenge{Entry: entry, Mapping: mapping})
 	}
@@ -60,7 +60,10 @@ func (h *Handler) publishedChallenge(id string) (*challenge.Entry, error) {
 	return nil, challenge.ErrNotFound
 }
 
-func mappingTagTitles(mapping taxonomy.ChallengeMapping) []string {
+func mappingTagTitles(mapping *taxonomy.ChallengeMapping) []string {
+	if mapping == nil {
+		return []string{}
+	}
 	tags := make([]string, 0, len(mapping.Tags))
 	for _, tag := range mapping.Tags {
 		tags = append(tags, tag.Title)

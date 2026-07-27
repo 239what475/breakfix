@@ -33,6 +33,12 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			return
 		}
 		for _, env := range envs {
+			if env.Phase == breakfixv1.EnvironmentCompleted {
+				// The controller has already established the completion fact. Expose it
+				// immediately instead of waiting for the asynchronous SQL projector.
+				completed[env.ChallengeRef] = struct{}{}
+				continue
+			}
 			if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
 				continue
 			}
@@ -47,15 +53,15 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 	for _, published := range challenges {
 		ch := published.Entry
 		s := api.ChallengeSummary{
-			Id:          &ch.ID,
-			Title:       &ch.Title,
-			Type:        &ch.Type,
+			Id:          ch.ID,
+			Title:       ch.Title,
+			Type:        ch.Type,
 			Runtime:     challengeSummaryRuntime(ch.Runtime),
-			Difficulty:  &ch.Difficulty,
-			Description: &ch.Description,
+			Difficulty:  api.ChallengeSummaryDifficulty(ch.Difficulty),
+			Description: ch.Description,
 		}
 		publishedAt := ch.PublishedAt.UTC()
-		s.PublishedAt = &publishedAt
+		s.PublishedAt = publishedAt
 		if user != nil {
 			_, solved := completed[ch.ID]
 			solvedVal := solved
@@ -69,10 +75,10 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			}
 		}
 		tags := mappingTagTitles(published.Mapping)
-		s.Tags = &tags
+		s.Tags = tags
 		summaries = append(summaries, s)
 	}
-	c.JSON(http.StatusOK, api.ChallengeList{Challenges: &summaries})
+	c.JSON(http.StatusOK, api.ChallengeList{Challenges: summaries})
 }
 
 func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
@@ -92,12 +98,12 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	checkpoints := toAPICheckpoints(entry.Checkpoints)
 	hints := content.Hints
 	c.JSON(http.StatusOK, api.ChallengeContent{
-		Id:          &entry.ID,
-		Title:       &entry.Title,
-		Problem:     &content.Problem,
-		Solution:    &content.Solution,
-		Hints:       &hints,
-		Checkpoints: &checkpoints,
+		Id:          entry.ID,
+		Title:       entry.Title,
+		Problem:     content.Problem,
+		Solution:    content.Solution,
+		Hints:       hints,
+		Checkpoints: checkpoints,
 	})
 }
 
@@ -122,7 +128,7 @@ func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
 	}
 	if env.Checkpoints == nil {
 		checks := []api.CheckpointResult{}
-		c.JSON(http.StatusOK, api.ChallengeProgress{Checks: &checks})
+		c.JSON(http.StatusOK, api.ChallengeProgress{Checks: checks})
 		return
 	}
 	if env.Checkpoints.Error != "" {
@@ -130,7 +136,7 @@ func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
 		return
 	}
 	checks := toAPICheckStatusResults(env.Checkpoints.Results)
-	c.JSON(http.StatusOK, api.ChallengeProgress{Checks: &checks})
+	c.JSON(http.StatusOK, api.ChallengeProgress{Checks: checks})
 }
 
 func passedCheckpointCount(status *breakfixv1.CheckpointStatus) int {
@@ -151,26 +157,22 @@ func checkpointProgressSummary(status *breakfixv1.CheckpointStatus, total int) a
 	if passed > total {
 		passed = total
 	}
-	return api.CheckpointProgressSummary{Passed: &passed, Total: &total}
+	return api.CheckpointProgressSummary{Passed: passed, Total: total}
 }
 
-func challengeSummaryRuntime(runtime string) *api.ChallengeSummaryRuntime {
-	value := api.ChallengeSummaryRuntime(challenge.NormalizeRuntime(runtime))
-	return &value
+func challengeSummaryRuntime(runtime string) api.ChallengeSummaryRuntime {
+	return api.ChallengeSummaryRuntime(challenge.NormalizeRuntime(runtime))
 }
 
 func toAPICheckpoints(checkpoints []challenge.Checkpoint) []api.ChallengeCheckpoint {
 	result := make([]api.ChallengeCheckpoint, 0, len(checkpoints))
 	for _, checkpoint := range checkpoints {
-		id := checkpoint.ID
-		title := checkpoint.Title
-		description := checkpoint.Description
 		hint := checkpoint.Hint
 		dependsOn := append([]string{}, checkpoint.DependsOn...)
 		result = append(result, api.ChallengeCheckpoint{
-			Id:          &id,
-			Title:       &title,
-			Description: &description,
+			Id:          checkpoint.ID,
+			Title:       checkpoint.Title,
+			Description: checkpoint.Description,
 			Hint:        &hint,
 			DependsOn:   &dependsOn,
 		})
@@ -181,14 +183,11 @@ func toAPICheckpoints(checkpoints []challenge.Checkpoint) []api.ChallengeCheckpo
 func toAPICheckResults(checks []challenge.CheckResult) []api.CheckpointResult {
 	result := make([]api.CheckpointResult, 0, len(checks))
 	for _, check := range checks {
-		id := check.ID
-		passed := check.Passed
-		summary := check.Summary
 		details := check.Details
 		result = append(result, api.CheckpointResult{
-			Id:      &id,
-			Passed:  &passed,
-			Summary: &summary,
+			Id:      check.ID,
+			Passed:  check.Passed,
+			Summary: check.Summary,
 			Details: &details,
 		})
 	}
@@ -198,14 +197,11 @@ func toAPICheckResults(checks []challenge.CheckResult) []api.CheckpointResult {
 func toAPICheckStatusResults(checks []breakfixv1.CheckpointResultStatus) []api.CheckpointResult {
 	result := make([]api.CheckpointResult, 0, len(checks))
 	for _, check := range checks {
-		id := check.ID
-		passed := check.Passed
-		summary := check.Summary
 		details := check.Details
 		result = append(result, api.CheckpointResult{
-			Id:      &id,
-			Passed:  &passed,
-			Summary: &summary,
+			Id:      check.ID,
+			Passed:  check.Passed,
+			Summary: check.Summary,
 			Details: &details,
 		})
 	}

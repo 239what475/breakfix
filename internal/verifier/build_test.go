@@ -1,6 +1,12 @@
 package verifier
 
-import "testing"
+import (
+	"encoding/base64"
+	"encoding/json"
+	"testing"
+
+	"github.com/breakfix/breakfix/internal/registry"
+)
 
 func TestBuildOutputInfrastructureClassification(t *testing.T) {
 	for _, output := range []string{
@@ -14,6 +20,24 @@ func TestBuildOutputInfrastructureClassification(t *testing.T) {
 	}
 	if buildOutputIsInfrastructure("failed to solve: Dockerfile parse error line 2") {
 		t.Fatal("Dockerfile syntax error must be an artifact failure")
+	}
+}
+
+func TestRegistryDockerConfigUsesExactRegistryHost(t *testing.T) {
+	config, err := registryDockerConfig("registry.breakfix.internal", registry.Credentials{Username: "verifier", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Auths map[string]struct {
+			Auth string `json:"auth"`
+		} `json:"auths"`
+	}
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.Auths["registry.breakfix.internal"].Auth; got != base64.StdEncoding.EncodeToString([]byte("verifier:secret")) {
+		t.Fatalf("registry auth = %q", got)
 	}
 }
 

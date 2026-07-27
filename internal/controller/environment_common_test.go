@@ -112,7 +112,7 @@ func TestValidateEnvironmentSnapshotRequiresControllerInputs(t *testing.T) {
 }
 
 func TestAdvanceEnvironmentLeaseUsesServerActivityInput(t *testing.T) {
-	activityAt := metav1.NewTime(time.Now().UTC())
+	activityAt := metav1.NewTime(time.Now().UTC().Add(750 * time.Millisecond))
 	idle := int64(60)
 	spec := &breakfixv1.CommonEnvironmentSpec{
 		ActivityAt: &activityAt,
@@ -123,8 +123,33 @@ func TestAdvanceEnvironmentLeaseUsesServerActivityInput(t *testing.T) {
 	if !changed || !evaluate || status.LastActivityAt == nil || status.ExpiresAt == nil {
 		t.Fatalf("activity input was not projected into lease status: %#v", status)
 	}
-	if !status.LastActivityAt.Equal(&activityAt) {
-		t.Fatalf("last activity = %v, want %v", status.LastActivityAt, activityAt)
+	wantActivity := activityAt.UTC().Truncate(time.Second)
+	if !status.LastActivityAt.Time.Equal(wantActivity) {
+		t.Fatalf("last activity = %v, want %v", status.LastActivityAt, wantActivity)
+	}
+}
+
+func TestAdvanceEnvironmentLeaseDoesNotReviveDrainingLeaseForSameRoundedActivity(t *testing.T) {
+	idle := int64(10)
+	activity := time.Now().UTC().Add(-time.Minute).Truncate(time.Second).Add(750 * time.Millisecond)
+	lastActivity := metav1.NewTime(activity.Truncate(time.Second))
+	expiresAt := metav1.NewTime(time.Now().UTC().Add(-time.Second))
+	spec := &breakfixv1.CommonEnvironmentSpec{
+		ActivityAt: &metav1.Time{Time: activity},
+		Timeouts:   breakfixv1.EnvironmentTimeoutsSpec{IdleTTLSeconds: &idle},
+	}
+	status := &breakfixv1.CommonEnvironmentStatus{
+		Phase:          breakfixv1.EnvironmentDraining,
+		LastActivityAt: &lastActivity,
+		ExpiresAt:      &expiresAt,
+	}
+
+	changed, evaluate, _ := advanceEnvironmentLease(spec, status)
+	if !changed || evaluate {
+		t.Fatalf("unexpected lease result: changed=%t evaluate=%t", changed, evaluate)
+	}
+	if status.Phase != breakfixv1.EnvironmentDestroyed {
+		t.Fatalf("phase = %s, want %s", status.Phase, breakfixv1.EnvironmentDestroyed)
 	}
 }
 

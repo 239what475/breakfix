@@ -25,16 +25,16 @@ const (
 
 // Defines values for AssistantMessageRole.
 const (
-	Assistant AssistantMessageRole = "assistant"
-	User      AssistantMessageRole = "user"
+	AssistantMessageRoleAssistant AssistantMessageRole = "assistant"
+	AssistantMessageRoleUser      AssistantMessageRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the AssistantMessageRole enum.
 func (e AssistantMessageRole) Valid() bool {
 	switch e {
-	case Assistant:
+	case AssistantMessageRoleAssistant:
 		return true
-	case User:
+	case AssistantMessageRoleUser:
 		return true
 	default:
 		return false
@@ -56,6 +56,144 @@ func (e AssistantTurnStatus) Valid() bool {
 	case AssistantTurnStatusFailed:
 		return true
 	case AssistantTurnStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthoringMessageRole.
+const (
+	AuthoringMessageRoleAgent  AuthoringMessageRole = "agent"
+	AuthoringMessageRoleEvent  AuthoringMessageRole = "event"
+	AuthoringMessageRoleSystem AuthoringMessageRole = "system"
+	AuthoringMessageRoleUser   AuthoringMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuthoringMessageRole enum.
+func (e AuthoringMessageRole) Valid() bool {
+	switch e {
+	case AuthoringMessageRoleAgent:
+		return true
+	case AuthoringMessageRoleEvent:
+		return true
+	case AuthoringMessageRoleSystem:
+		return true
+	case AuthoringMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthoringMetadataDifficulty.
+const (
+	AuthoringMetadataDifficultyEasy   AuthoringMetadataDifficulty = "easy"
+	AuthoringMetadataDifficultyHard   AuthoringMetadataDifficulty = "hard"
+	AuthoringMetadataDifficultyMedium AuthoringMetadataDifficulty = "medium"
+)
+
+// Valid indicates whether the value is a known member of the AuthoringMetadataDifficulty enum.
+func (e AuthoringMetadataDifficulty) Valid() bool {
+	switch e {
+	case AuthoringMetadataDifficultyEasy:
+		return true
+	case AuthoringMetadataDifficultyHard:
+		return true
+	case AuthoringMetadataDifficultyMedium:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthoringMetadataRuntime.
+const (
+	AuthoringMetadataRuntimeContainer AuthoringMetadataRuntime = "container"
+	AuthoringMetadataRuntimeVcluster  AuthoringMetadataRuntime = "vcluster"
+)
+
+// Valid indicates whether the value is a known member of the AuthoringMetadataRuntime enum.
+func (e AuthoringMetadataRuntime) Valid() bool {
+	switch e {
+	case AuthoringMetadataRuntimeContainer:
+		return true
+	case AuthoringMetadataRuntimeVcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthoringSessionState.
+const (
+	AuthoringSessionStateAwaitingVerifiedReview           AuthoringSessionState = "AwaitingVerifiedReview"
+	AuthoringSessionStateDraftConversation                AuthoringSessionState = "DraftConversation"
+	AuthoringSessionStateGeneratingAndVerifying           AuthoringSessionState = "GeneratingAndVerifying"
+	AuthoringSessionStateIntentReview                     AuthoringSessionState = "IntentReview"
+	AuthoringSessionStatePublished                        AuthoringSessionState = "Published"
+	AuthoringSessionStatePublishing                       AuthoringSessionState = "Publishing"
+	AuthoringSessionStateRevisingAndVerifying             AuthoringSessionState = "RevisingAndVerifying"
+	AuthoringSessionStateVerificationInfrastructureFailed AuthoringSessionState = "VerificationInfrastructureFailed"
+)
+
+// Valid indicates whether the value is a known member of the AuthoringSessionState enum.
+func (e AuthoringSessionState) Valid() bool {
+	switch e {
+	case AuthoringSessionStateAwaitingVerifiedReview:
+		return true
+	case AuthoringSessionStateDraftConversation:
+		return true
+	case AuthoringSessionStateGeneratingAndVerifying:
+		return true
+	case AuthoringSessionStateIntentReview:
+		return true
+	case AuthoringSessionStatePublished:
+		return true
+	case AuthoringSessionStatePublishing:
+		return true
+	case AuthoringSessionStateRevisingAndVerifying:
+		return true
+	case AuthoringSessionStateVerificationInfrastructureFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AuthoringVerificationReportClass.
+const (
+	Artifact       AuthoringVerificationReportClass = "artifact"
+	Infrastructure AuthoringVerificationReportClass = "infrastructure"
+)
+
+// Valid indicates whether the value is a known member of the AuthoringVerificationReportClass enum.
+func (e AuthoringVerificationReportClass) Valid() bool {
+	switch e {
+	case Artifact:
+		return true
+	case Infrastructure:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChallengeSummaryDifficulty.
+const (
+	ChallengeSummaryDifficultyEasy   ChallengeSummaryDifficulty = "easy"
+	ChallengeSummaryDifficultyHard   ChallengeSummaryDifficulty = "hard"
+	ChallengeSummaryDifficultyMedium ChallengeSummaryDifficulty = "medium"
+)
+
+// Valid indicates whether the value is a known member of the ChallengeSummaryDifficulty enum.
+func (e ChallengeSummaryDifficulty) Valid() bool {
+	switch e {
+	case ChallengeSummaryDifficultyEasy:
+		return true
+	case ChallengeSummaryDifficultyHard:
+		return true
+	case ChallengeSummaryDifficultyMedium:
 		return true
 	default:
 		return false
@@ -92,6 +230,42 @@ func (e MySpaceActiveEnvironmentRuntime) Valid() bool {
 	case MySpaceActiveEnvironmentRuntimeContainer:
 		return true
 	case MySpaceActiveEnvironmentRuntimeVcluster:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceAuthoringDraftState.
+const (
+	MySpaceAuthoringDraftStateAwaitingVerifiedReview           MySpaceAuthoringDraftState = "AwaitingVerifiedReview"
+	MySpaceAuthoringDraftStateDraftConversation                MySpaceAuthoringDraftState = "DraftConversation"
+	MySpaceAuthoringDraftStateGeneratingAndVerifying           MySpaceAuthoringDraftState = "GeneratingAndVerifying"
+	MySpaceAuthoringDraftStateIntentReview                     MySpaceAuthoringDraftState = "IntentReview"
+	MySpaceAuthoringDraftStatePublished                        MySpaceAuthoringDraftState = "Published"
+	MySpaceAuthoringDraftStatePublishing                       MySpaceAuthoringDraftState = "Publishing"
+	MySpaceAuthoringDraftStateRevisingAndVerifying             MySpaceAuthoringDraftState = "RevisingAndVerifying"
+	MySpaceAuthoringDraftStateVerificationInfrastructureFailed MySpaceAuthoringDraftState = "VerificationInfrastructureFailed"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceAuthoringDraftState enum.
+func (e MySpaceAuthoringDraftState) Valid() bool {
+	switch e {
+	case MySpaceAuthoringDraftStateAwaitingVerifiedReview:
+		return true
+	case MySpaceAuthoringDraftStateDraftConversation:
+		return true
+	case MySpaceAuthoringDraftStateGeneratingAndVerifying:
+		return true
+	case MySpaceAuthoringDraftStateIntentReview:
+		return true
+	case MySpaceAuthoringDraftStatePublished:
+		return true
+	case MySpaceAuthoringDraftStatePublishing:
+		return true
+	case MySpaceAuthoringDraftStateRevisingAndVerifying:
+		return true
+	case MySpaceAuthoringDraftStateVerificationInfrastructureFailed:
 		return true
 	default:
 		return false
@@ -166,16 +340,16 @@ func (e GetMySpaceLearningParamsState) Valid() bool {
 
 // Defines values for GetMySpaceLearningParamsRuntime.
 const (
-	GetMySpaceLearningParamsRuntimeContainer GetMySpaceLearningParamsRuntime = "container"
-	GetMySpaceLearningParamsRuntimeVcluster  GetMySpaceLearningParamsRuntime = "vcluster"
+	Container GetMySpaceLearningParamsRuntime = "container"
+	Vcluster  GetMySpaceLearningParamsRuntime = "vcluster"
 )
 
 // Valid indicates whether the value is a known member of the GetMySpaceLearningParamsRuntime enum.
 func (e GetMySpaceLearningParamsRuntime) Valid() bool {
 	switch e {
-	case GetMySpaceLearningParamsRuntimeContainer:
+	case Container:
 		return true
-	case GetMySpaceLearningParamsRuntimeVcluster:
+	case Vcluster:
 		return true
 	default:
 		return false
@@ -233,9 +407,9 @@ type AssistantTurnStatus string
 
 // AuthoringArtifact defines model for AuthoringArtifact.
 type AuthoringArtifact struct {
-	Directory      *string `json:"directory,omitempty"`
-	GeneratorRunId *string `json:"generator_run_id,omitempty"`
-	SubmissionId   *string `json:"submission_id,omitempty"`
+	Directory      string `json:"directory"`
+	GeneratorRunId string `json:"generator_run_id"`
+	SubmissionId   string `json:"submission_id"`
 }
 
 // AuthoringAsset defines model for AuthoringAsset.
@@ -268,12 +442,15 @@ type AuthoringFileDiff struct {
 
 // AuthoringMessage defines model for AuthoringMessage.
 type AuthoringMessage struct {
-	Changes   *[]AuthoringChange `json:"changes,omitempty"`
-	Content   string             `json:"content"`
-	CreatedAt time.Time          `json:"created_at"`
-	Id        string             `json:"id"`
-	Role      string             `json:"role"`
+	Changes   *[]AuthoringChange   `json:"changes,omitempty"`
+	Content   string               `json:"content"`
+	CreatedAt time.Time            `json:"created_at"`
+	Id        string               `json:"id"`
+	Role      AuthoringMessageRole `json:"role"`
 }
+
+// AuthoringMessageRole defines model for AuthoringMessage.Role.
+type AuthoringMessageRole string
 
 // AuthoringMessageRequest defines model for AuthoringMessageRequest.
 type AuthoringMessageRequest struct {
@@ -282,12 +459,17 @@ type AuthoringMessageRequest struct {
 
 // AuthoringMetadata defines model for AuthoringMetadata.
 type AuthoringMetadata struct {
-	Description string   `json:"description"`
-	Difficulty  string   `json:"difficulty"`
-	Runtime     string   `json:"runtime"`
-	Tags        []string `json:"tags"`
-	Title       string   `json:"title"`
+	Description string                      `json:"description"`
+	Difficulty  AuthoringMetadataDifficulty `json:"difficulty"`
+	Runtime     AuthoringMetadataRuntime    `json:"runtime"`
+	Title       string                      `json:"title"`
 }
+
+// AuthoringMetadataDifficulty defines model for AuthoringMetadata.Difficulty.
+type AuthoringMetadataDifficulty string
+
+// AuthoringMetadataRuntime defines model for AuthoringMetadata.Runtime.
+type AuthoringMetadataRuntime string
 
 // AuthoringPlan defines model for AuthoringPlan.
 type AuthoringPlan struct {
@@ -298,105 +480,119 @@ type AuthoringPlan struct {
 
 // AuthoringSession defines model for AuthoringSession.
 type AuthoringSession struct {
-	Artifact        *AuthoringArtifact     `json:"artifact,omitempty"`
-	Assets          []AuthoringAsset       `json:"assets"`
-	Diff            []AuthoringFileDiff    `json:"diff"`
-	GeneratorRunId  *string                `json:"generator_run_id,omitempty"`
-	Id              string                 `json:"id"`
-	Intent          AuthoringPlan          `json:"intent"`
-	IntentRevision  int                    `json:"intent_revision"`
-	Messages        []AuthoringMessage     `json:"messages"`
-	State           string                 `json:"state"`
-	UpdatedAt       time.Time              `json:"updated_at"`
-	Verification    *AuthoringVerification `json:"verification,omitempty"`
-	Verified        *VerifiedChallenge     `json:"verified,omitempty"`
-	VerifyTaskId    *string                `json:"verify_task_id,omitempty"`
-	VisibleRevision int                    `json:"visible_revision"`
+	Artifact *AuthoringArtifact `json:"artifact,omitempty"`
+	Assets   []AuthoringAsset   `json:"assets"`
+
+	// AuthoringTurnActive Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
+	AuthoringTurnActive bool                   `json:"authoring_turn_active"`
+	Diff                []AuthoringFileDiff    `json:"diff"`
+	GeneratorRunId      *string                `json:"generator_run_id,omitempty"`
+	Id                  string                 `json:"id"`
+	Intent              AuthoringPlan          `json:"intent"`
+	IntentRevision      int                    `json:"intent_revision"`
+	Messages            []AuthoringMessage     `json:"messages"`
+	PublishChallengeId  *string                `json:"publish_challenge_id,omitempty"`
+	State               AuthoringSessionState  `json:"state"`
+	UpdatedAt           time.Time              `json:"updated_at"`
+	Verification        *AuthoringVerification `json:"verification,omitempty"`
+	Verified            *VerifiedChallenge     `json:"verified,omitempty"`
+	VerifyTaskId        *string                `json:"verify_task_id,omitempty"`
+	VisibleRevision     int                    `json:"visible_revision"`
 }
+
+// AuthoringSessionState defines model for AuthoringSession.State.
+type AuthoringSessionState string
 
 // AuthoringVerification defines model for AuthoringVerification.
 type AuthoringVerification struct {
 	ChallengeId *string                      `json:"challenge_id,omitempty"`
-	Message     *string                      `json:"message,omitempty"`
-	Phase       *string                      `json:"phase,omitempty"`
+	Message     string                       `json:"message"`
+	Phase       string                       `json:"phase"`
 	Report      *AuthoringVerificationReport `json:"report,omitempty"`
-	TaskId      *string                      `json:"task_id,omitempty"`
+	TaskId      string                       `json:"task_id"`
 }
 
 // AuthoringVerificationIssue defines model for AuthoringVerificationIssue.
 type AuthoringVerificationIssue struct {
-	Code    *string `json:"code,omitempty"`
-	Message *string `json:"message,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // AuthoringVerificationReport defines model for AuthoringVerificationReport.
 type AuthoringVerificationReport struct {
-	AnswerPassed      *bool                         `json:"answer_passed,omitempty"`
-	BuildPassed       *bool                         `json:"build_passed,omitempty"`
-	CheckpointsPassed *bool                         `json:"checkpoints_passed,omitempty"`
-	Issues            *[]AuthoringVerificationIssue `json:"issues,omitempty"`
-	Summary           *string                       `json:"summary,omitempty"`
+	AnswerPassed      bool                              `json:"answer_passed"`
+	BuildPassed       bool                              `json:"build_passed"`
+	CheckpointsPassed bool                              `json:"checkpoints_passed"`
+	Class             *AuthoringVerificationReportClass `json:"class,omitempty"`
+	Issues            *[]AuthoringVerificationIssue     `json:"issues,omitempty"`
+	Summary           *string                           `json:"summary,omitempty"`
 }
+
+// AuthoringVerificationReportClass defines model for AuthoringVerificationReport.Class.
+type AuthoringVerificationReportClass string
 
 // ChallengeCheckpoint defines model for ChallengeCheckpoint.
 type ChallengeCheckpoint struct {
 	DependsOn   *[]string `json:"depends_on,omitempty"`
-	Description *string   `json:"description,omitempty"`
+	Description string    `json:"description"`
 	Hint        *string   `json:"hint,omitempty"`
-	Id          *string   `json:"id,omitempty"`
-	Title       *string   `json:"title,omitempty"`
+	Id          string    `json:"id"`
+	Title       string    `json:"title"`
 }
 
 // ChallengeContent defines model for ChallengeContent.
 type ChallengeContent struct {
-	Checkpoints *[]ChallengeCheckpoint `json:"checkpoints,omitempty"`
-	Hints       *map[string]string     `json:"hints,omitempty"`
-	Id          *string                `json:"id,omitempty"`
-	Problem     *string                `json:"problem,omitempty"`
-	Solution    *string                `json:"solution,omitempty"`
-	Title       *string                `json:"title,omitempty"`
+	Checkpoints []ChallengeCheckpoint `json:"checkpoints"`
+	Hints       map[string]string     `json:"hints"`
+	Id          string                `json:"id"`
+	Problem     string                `json:"problem"`
+	Solution    string                `json:"solution"`
+	Title       string                `json:"title"`
 }
 
 // ChallengeList defines model for ChallengeList.
 type ChallengeList struct {
-	Challenges *[]ChallengeSummary `json:"challenges,omitempty"`
+	Challenges []ChallengeSummary `json:"challenges"`
 }
 
 // ChallengeProgress defines model for ChallengeProgress.
 type ChallengeProgress struct {
-	Checks *[]CheckpointResult `json:"checks,omitempty"`
+	Checks []CheckpointResult `json:"checks"`
 }
 
 // ChallengeSummary defines model for ChallengeSummary.
 type ChallengeSummary struct {
 	Active      *bool                      `json:"active,omitempty"`
-	Description *string                    `json:"description,omitempty"`
-	Difficulty  *string                    `json:"difficulty,omitempty"`
-	Id          *string                    `json:"id,omitempty"`
+	Description string                     `json:"description"`
+	Difficulty  ChallengeSummaryDifficulty `json:"difficulty"`
+	Id          string                     `json:"id"`
 	Progress    *CheckpointProgressSummary `json:"progress,omitempty"`
-	PublishedAt *time.Time                 `json:"published_at,omitempty"`
-	Runtime     *ChallengeSummaryRuntime   `json:"runtime,omitempty"`
+	PublishedAt time.Time                  `json:"published_at"`
+	Runtime     ChallengeSummaryRuntime    `json:"runtime"`
 	Solved      *bool                      `json:"solved,omitempty"`
-	Tags        *[]string                  `json:"tags,omitempty"`
-	Title       *string                    `json:"title,omitempty"`
-	Type        *string                    `json:"type,omitempty"`
+	Tags        []string                   `json:"tags"`
+	Title       string                     `json:"title"`
+	Type        string                     `json:"type"`
 }
+
+// ChallengeSummaryDifficulty defines model for ChallengeSummary.Difficulty.
+type ChallengeSummaryDifficulty string
 
 // ChallengeSummaryRuntime defines model for ChallengeSummary.Runtime.
 type ChallengeSummaryRuntime string
 
 // CheckpointProgressSummary defines model for CheckpointProgressSummary.
 type CheckpointProgressSummary struct {
-	Passed *int `json:"passed,omitempty"`
-	Total  *int `json:"total,omitempty"`
+	Passed int `json:"passed"`
+	Total  int `json:"total"`
 }
 
 // CheckpointResult defines model for CheckpointResult.
 type CheckpointResult struct {
 	Details *string `json:"details,omitempty"`
-	Id      *string `json:"id,omitempty"`
-	Passed  *bool   `json:"passed,omitempty"`
-	Summary *string `json:"summary,omitempty"`
+	Id      string  `json:"id"`
+	Passed  bool    `json:"passed"`
+	Summary string  `json:"summary"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -413,11 +609,11 @@ type LoginRequest struct {
 
 // LoginResponse defines model for LoginResponse.
 type LoginResponse struct {
-	Name *string `json:"name,omitempty"`
+	Name string `json:"name"`
 
 	// Token JWT access token
-	Token  *string `json:"token,omitempty"`
-	UserId *string `json:"user_id,omitempty"`
+	Token  string `json:"token"`
+	UserId string `json:"user_id"`
 }
 
 // MySpace defines model for MySpace.
@@ -451,11 +647,14 @@ type MySpaceAuthoring struct {
 
 // MySpaceAuthoringDraft defines model for MySpaceAuthoringDraft.
 type MySpaceAuthoringDraft struct {
-	SessionId string    `json:"session_id"`
-	State     string    `json:"state"`
-	Title     string    `json:"title"`
-	UpdatedAt time.Time `json:"updated_at"`
+	SessionId string                     `json:"session_id"`
+	State     MySpaceAuthoringDraftState `json:"state"`
+	Title     string                     `json:"title"`
+	UpdatedAt time.Time                  `json:"updated_at"`
 }
+
+// MySpaceAuthoringDraftState defines model for MySpaceAuthoringDraft.State.
+type MySpaceAuthoringDraftState string
 
 // MySpaceChallenge defines model for MySpaceChallenge.
 type MySpaceChallenge struct {
@@ -527,29 +726,29 @@ type RegisterRequest struct {
 
 // RegisterResponse defines model for RegisterResponse.
 type RegisterResponse struct {
-	TotpSecret *string `json:"totp_secret,omitempty"`
-	TotpUrl    *string `json:"totp_url,omitempty"`
+	TotpSecret string `json:"totp_secret"`
+	TotpUrl    string `json:"totp_url"`
 }
 
 // ResetResponse defines model for ResetResponse.
 type ResetResponse struct {
-	ChallengeTitle *string `json:"challenge_title,omitempty"`
+	ChallengeTitle string `json:"challenge_title"`
 }
 
 // StartResponse defines model for StartResponse.
 type StartResponse struct {
-	ChallengeTitle *string `json:"challenge_title,omitempty"`
+	ChallengeTitle string `json:"challenge_title"`
 }
 
 // StopResponse defines model for StopResponse.
 type StopResponse struct {
-	ChallengeTitle *string `json:"challenge_title,omitempty"`
-	Stopped        *bool   `json:"stopped,omitempty"`
+	ChallengeTitle string `json:"challenge_title"`
+	Stopped        bool   `json:"stopped"`
 }
 
 // TerminalWindowCloseResponse defines model for TerminalWindowCloseResponse.
 type TerminalWindowCloseResponse struct {
-	Closed *bool `json:"closed,omitempty"`
+	Closed bool `json:"closed"`
 }
 
 // VerifiedChallenge defines model for VerifiedChallenge.
@@ -624,7 +823,7 @@ type ServerInterface interface {
 	// Read the current authoring revision, conversation, assets, and diff
 	// (GET /authoring/sessions/{id})
 	GetAuthoringSession(c *gin.Context, id AuthoringSessionID)
-	// Explicitly start a Generator Run and real verification for the current intent revision
+	// Explicitly start generation and real verification for the current intent revision
 	// (POST /authoring/sessions/{id}/generate)
 	ConfirmAuthoringGeneration(c *gin.Context, id AuthoringSessionID)
 	// Send one natural-language instruction to the authoring agent
@@ -1240,64 +1439,69 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"q4cC57NZoT5smJDzF5cvLme4IsnufvevAAAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

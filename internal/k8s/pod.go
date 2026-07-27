@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,17 +11,39 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// PodReadinessError distinguishes a permanent container startup failure from
+// a transient wait timeout so reconcilers can publish a terminal status.
+type PodReadinessError struct {
+	message  string
+	terminal bool
+}
+
+func (e *PodReadinessError) Error() string {
+	if e == nil {
+		return "pod readiness error"
+	}
+	return e.message
+}
+
+// IsTerminalPodReadinessError reports whether a readiness wait observed a Pod
+// state that cannot become ready without recreating or repairing the Pod.
+func IsTerminalPodReadinessError(err error) bool {
+	var readinessErr *PodReadinessError
+	return errors.As(err, &readinessErr) && readinessErr.terminal
+}
+
 // CreatePodOpts holds the configurable fields for CreatePod.
 type CreatePodOpts struct {
-	Image           string
-	Command         []string
-	ChallengeID     string
-	EnvironmentID   string
-	ImagePullPolicy corev1.PullPolicy
-	Env             map[string]string
-	VolumeMounts    []corev1.VolumeMount
-	Volumes         []corev1.Volume
-	Resources       corev1.ResourceRequirements
+	Image            string
+	Command          []string
+	ChallengeID      string
+	EnvironmentID    string
+	ImagePullPolicy  corev1.PullPolicy
+	Env              map[string]string
+	VolumeMounts     []corev1.VolumeMount
+	Volumes          []corev1.Volume
+	Resources        corev1.ResourceRequirements
+	ImagePullSecrets []corev1.LocalObjectReference
 }
 
 // CreatePod creates a pod in the given namespace and returns an error on failure.
@@ -59,9 +82,10 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 			},
 		},
 		Spec: corev1.PodSpec{
-			Containers:    []corev1.Container{container},
-			RestartPolicy: corev1.RestartPolicyNever,
-			Volumes:       append([]corev1.Volume{}, opts.Volumes...),
+			Containers:       []corev1.Container{container},
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Volumes:          append([]corev1.Volume{}, opts.Volumes...),
+			ImagePullSecrets: append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
 		},
 	}
 
@@ -95,14 +119,22 @@ func (c *Client) WaitForPod(namespace, podName, containerName string) error {
 		}
 		switch pod.Status.Phase {
 		case corev1.PodFailed, corev1.PodSucceeded:
-			return fmt.Errorf("pod %s entered %s state: %s", podName, pod.Status.Phase, podFailureSummary(pod, containerName))
+			return &PodReadinessError{
+				message:  fmt.Sprintf("pod %s entered %s state: %s", podName, pod.Status.Phase, podFailureSummary(pod, containerName)),
+				terminal: true,
+			}
 		}
 		if summary, failed := podContainerFailure(pod, containerName); failed {
-			return fmt.Errorf("pod %s failed before ready: %s", podName, summary)
+			return &PodReadinessError{
+				message:  fmt.Sprintf("pod %s failed before ready: %s", podName, summary),
+				terminal: true,
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for pod %s: %s", podName, podFailureSummary(pod, containerName))
+			return &PodReadinessError{
+				message: fmt.Sprintf("timeout waiting for pod %s: %s", podName, podFailureSummary(pod, containerName)),
+			}
 		case <-time.After(500 * time.Millisecond):
 		}
 	}

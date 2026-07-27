@@ -50,8 +50,8 @@ func (h *Handler) Register(c *gin.Context) {
 
 	slog.Info("user registered", "user", req.Username)
 	c.JSON(http.StatusCreated, api.RegisterResponse{
-		TotpSecret: &secret,
-		TotpUrl:    &url,
+		TotpSecret: secret,
+		TotpUrl:    url,
 	})
 }
 
@@ -84,9 +84,9 @@ func (h *Handler) Login(c *gin.Context) {
 
 	slog.Info("user logged in", "user", req.Username)
 	c.JSON(http.StatusOK, api.LoginResponse{
-		Token:  &token,
-		UserId: &user.ID,
-		Name:   &user.Name,
+		Token:  token,
+		UserId: user.ID,
+		Name:   user.Name,
 	})
 }
 

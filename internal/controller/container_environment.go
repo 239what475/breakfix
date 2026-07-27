@@ -8,6 +8,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,11 +22,12 @@ const breakfixInitSentinel = "/var/lib/breakfix/.initialized"
 
 type ContainerEnvironmentReconciler struct {
 	client.Client
-	K8s          *k8s.Client
-	RegistryAddr string
-	NS           string
-	CRDNamespace string
-	Cooldown     time.Duration
+	K8s                *k8s.Client
+	RegistryAddr       string
+	RegistryPullSecret string
+	NS                 string
+	CRDNamespace       string
+	Cooldown           time.Duration
 }
 
 func (r *ContainerEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -55,11 +57,17 @@ func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *bre
 		}
 	}
 
-	ns := k8s.UserNamespace(r.NS, env.Spec.UserRef) + "-" + env.Name
-	podName := "challenge-" + env.Name
+	ns := k8s.EnvironmentNamespace(r.NS, env.Spec.UserRef, env.Name)
+	podName := k8s.DNSLabelName("challenge", env.Name)
 
 	if err := r.K8s.EnsureNamespace(ns); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure namespace: %w", err)
+	}
+	if err := r.K8s.EnsureImagePullSecret(r.CRDNamespace, ns, r.RegistryPullSecret); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure registry pull secret: %w", err)
+	}
+	if err := r.K8s.EnsureVerifierWorkspaceExecAccess(ns, r.CRDNamespace, "breakfix-verifier"); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure verifier workspace access: %w", err)
 	}
 
 	imageURL := env.Spec.Image
@@ -74,10 +82,11 @@ func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *bre
 	}
 
 	if err := r.K8s.CreatePod(ns, podName, k8s.CreatePodOpts{
-		Image:         imageURL,
-		ChallengeID:   env.Spec.ChallengeRef,
-		EnvironmentID: env.Name,
-		Resources:     resources,
+		Image:            imageURL,
+		ChallengeID:      env.Spec.ChallengeRef,
+		EnvironmentID:    env.Name,
+		Resources:        resources,
+		ImagePullSecrets: []corev1.LocalObjectReference{{Name: r.RegistryPullSecret}},
 	}); err != nil {
 		slog.Error("failed to create pod", "err", err, "environment", env.Name)
 		setEnvironmentProvisioning(&env.Status, "CreateWorkspacePodFailed", err.Error())
@@ -99,6 +108,11 @@ func (r *ContainerEnvironmentReconciler) createPod(ctx context.Context, env *bre
 }
 
 func (r *ContainerEnvironmentReconciler) waitForPod(ctx context.Context, env *breakfixv1.ContainerEnvironment) (ctrl.Result, error) {
+	// A transient create failure leaves no durable workspace identity. Retry the
+	// provision path instead of waiting forever on empty status fields.
+	if strings.TrimSpace(env.Status.Namespace) == "" || strings.TrimSpace(env.Status.WorkspacePodName) == "" {
+		return r.createPod(ctx, env)
+	}
 	if err := r.K8s.WaitForPod(env.Status.Namespace, env.Status.WorkspacePodName, "challenge"); err != nil {
 		slog.Debug("pod not ready yet", "environment", env.Name, "err", err)
 		setEnvironmentProvisioning(&env.Status, "WaitingForWorkspacePod", err.Error())
@@ -193,12 +207,12 @@ func (r *ContainerEnvironmentReconciler) finalCleanup(ctx context.Context, env *
 	}
 	markEnvironmentDestroyed(&env.Status, "CleanupCompleted", "container environment destroyed")
 	if err := r.Status().Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	controllerutil.RemoveFinalizer(env, containerEnvironmentFinalizer)
 	if err := r.Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	slog.Info("container environment destroyed", "environment", env.Name)

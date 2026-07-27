@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,55 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestCleanupStaleEnvironmentsRetainsNamespacesForUnprovisionedEnvironments(t *testing.T) {
+	const runtimeNamespace = "breakfix"
+	const crdNamespace = "breakfix-system"
+	const userRef = "u-pending"
+	containerNamespace := k8s.EnvironmentNamespace(runtimeNamespace, userRef, "pending-container")
+	vclusterNamespace := k8s.EnvironmentNamespace(runtimeNamespace, userRef, "pending-vcluster")
+	deleted := map[string]bool{}
+
+	client := newTestK8sClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/apis/breakfix.dev/v1/namespaces/"+crdNamespace+"/containerenvironments":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&breakfixv1.ContainerEnvironmentList{
+				TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironmentList"},
+				Items: []breakfixv1.ContainerEnvironment{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pending-container", Namespace: crdNamespace},
+					Spec:       breakfixv1.CommonEnvironmentSpec{UserRef: userRef},
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/apis/breakfix.dev/v1/namespaces/"+crdNamespace+"/vclusterenvironments":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&breakfixv1.VClusterEnvironmentList{
+				TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironmentList"},
+				Items: []breakfixv1.VClusterEnvironment{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pending-vcluster", Namespace: crdNamespace},
+					Spec:       breakfixv1.VClusterEnvironmentSpec{CommonEnvironmentSpec: breakfixv1.CommonEnvironmentSpec{UserRef: userRef}},
+				}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/namespaces":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&corev1.NamespaceList{
+				Items: []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: containerNamespace}}, {ObjectMeta: metav1.ObjectMeta{Name: vclusterNamespace}}},
+			})
+		case r.Method == http.MethodDelete && (r.URL.Path == "/api/v1/namespaces/"+containerNamespace || r.URL.Path == "/api/v1/namespaces/"+vclusterNamespace):
+			deleted[r.URL.Path] = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	if err := cleanupStaleEnvironments(context.Background(), client, runtimeNamespace, crdNamespace); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("cleanup deleted namespaces owned by unprovisioned environments: %#v", deleted)
+	}
+}
 
 func TestStaleCommonEnvironmentDoesNotTreatPendingPodAsStale(t *testing.T) {
 	t.Helper()

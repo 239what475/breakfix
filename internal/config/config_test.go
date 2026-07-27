@@ -59,6 +59,8 @@ func TestLoadExpandsRuntimeSecretEnvironment(t *testing.T) {
 func TestLoadAppliesRuntimeRegistryOverrides(t *testing.T) {
 	t.Setenv("BREAKFIX_REGISTRY_ADDR", "registry.internal.example/breakfix")
 	t.Setenv("BREAKFIX_REGISTRY_INSECURE", "true")
+	t.Setenv("BREAKFIX_REGISTRY_USERNAME", "controller")
+	t.Setenv("BREAKFIX_REGISTRY_PASSWORD", "registry-secret")
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	if err := os.WriteFile(path, []byte("registry_addr: registry.example.invalid/breakfix\nregistry_insecure: false\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -68,8 +70,19 @@ func TestLoadAppliesRuntimeRegistryOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RegistryAddr != "registry.internal.example/breakfix" || !cfg.RegistryInsecure {
-		t.Fatalf("runtime registry override = %q, insecure=%t", cfg.RegistryAddr, cfg.RegistryInsecure)
+	if cfg.RegistryAddr != "registry.internal.example/breakfix" || !cfg.RegistryInsecure || cfg.RegistryUsername != "controller" || cfg.RegistryPassword != "registry-secret" {
+		t.Fatalf("runtime registry configuration = %#v", cfg)
+	}
+}
+
+func TestLoadRejectsPartialRuntimeRegistryCredentials(t *testing.T) {
+	t.Setenv("BREAKFIX_REGISTRY_USERNAME", "controller")
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("port: 9090\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "BREAKFIX_REGISTRY_USERNAME") {
+		t.Fatalf("Load() error = %v, want registry credential validation", err)
 	}
 }
 
@@ -81,5 +94,11 @@ func TestLoadRejectsInvalidRuntimeRegistryInsecureOverride(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "BREAKFIX_REGISTRY_INSECURE") {
 		t.Fatalf("Load() error = %v, want registry override validation", err)
+	}
+}
+
+func TestDefaultVClusterChartVersionIsPinned(t *testing.T) {
+	if got := defaults().VClusterChartVersion; got != "0.35.1" {
+		t.Fatalf("default vcluster chart version = %q, want 0.35.1", got)
 	}
 }

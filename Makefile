@@ -2,14 +2,20 @@
 	dev-build dev-build-server dev-build-controller dev-build-agent-worker \
 	dev-start-server dev-start-controller dev-start-agent-worker \
 	dev-server dev-controller dev-agent-worker \
+	telepresence-connect telepresence-server telepresence-controller telepresence-worker telepresence-down telepresence-status telepresence-disconnect \
         e2e \
+		e2e-runtime-verify \
+		e2e-runtime-browser \
+		e2e-agent-assistant \
+		e2e-agent-soak \
+		e2e-agent-container \
+		e2e-agent-vcluster \
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
-        generate-crd verify-crd-generated generate-api verify-api-generated \
-        build build-server build-controller \
-	deploy deploy-server deploy-controller deploy-images deploy-image deploy-base deploy-verifier deploy-catalog deploy-cleanup deploy-reset \
+        generate-crd verify-crd-generated generate-api generate-api-go generate-api-frontend verify-api-generated \
+	build build-server build-controller build-agent-worker build-verifier runtime-images runtime-push \
 	verifier-build \
-        lint proto clean status logs
+        lint proto clean
 
 # ── Build info ──
 
@@ -25,15 +31,15 @@ LDFLAGS   := -s -w \
 CONTROLLER_GEN_VERSION := v0.21.0
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 CRD_TYPES_DIR := internal/k8s/apis/breakfix/v1
+OAPI_CODEGEN_VERSION := v2.7.1
+OAPI_CODEGEN := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
+OPENAPI_SPEC := api/openapi.yaml
+OPENAPI_GO_CONFIG := api/cfg.yaml
+OPENAPI_GO_OUTPUT := internal/api/server.gen.go
+OPENAPI_FRONTEND_OUTPUT := frontend/src/api/generated
+OPENAPI_TS := npm exec --prefix frontend -- openapi-ts
+OPENAPI_TS_ARGS := -i $(CURDIR)/$(OPENAPI_SPEC) -p @hey-api/typescript --no-log-file
 
-# ── Remote server ──
-
-SERVER      ?= $(shell cat .breakfix-server 2>/dev/null || echo "")
-SERVER_BIN  ?= /usr/local/bin/breakfix-server
-CONTROLLER_BIN ?= /usr/local/bin/breakfix-controller
-SERVER_DATA ?= /var/lib/breakfix
-SERVER_SERVICE ?= breakfix-server
-CONTROLLER_SERVICE ?= breakfix-controller
 REGISTRY    ?= localhost:5000
 ACR_NS      ?= break-fix
 KIND_CLUSTER ?= breakfix-dev
@@ -47,7 +53,25 @@ DEV_IMAGE_PREFIX := $(REGISTRY)/$(ACR_NS)
 endif
 
 BIN_DIR  := bin
-DIST_DIR := dist
+TARGETOS ?= linux
+TARGETARCH ?= amd64
+RELEASE_DIR := $(BIN_DIR)/release/$(TARGETOS)-$(TARGETARCH)
+SERVER_RELEASE_DIR := $(RELEASE_DIR)/server
+CONTROLLER_RELEASE_DIR := $(RELEASE_DIR)/controller
+AGENT_WORKER_RELEASE_DIR := $(RELEASE_DIR)/agent-worker
+VERIFIER_RELEASE_DIR := $(RELEASE_DIR)/verifier
+SERVER_RELEASE_BIN := $(SERVER_RELEASE_DIR)/breakfix-server
+CONTROLLER_RELEASE_BIN := $(CONTROLLER_RELEASE_DIR)/breakfix-controller
+AGENT_WORKER_RELEASE_BIN := $(AGENT_WORKER_RELEASE_DIR)/breakfix-agent-worker
+VERIFIER_RELEASE_BIN := $(VERIFIER_RELEASE_DIR)/breakfix-verifier
+RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
+RUNTIME_IMAGE_TAG ?= dev
+# VerifyTask derives this image from registry_addr, so this repository must
+# match the configured registry_addr exactly. Runtime control-plane images may
+# live in a different registry.
+VERIFIER_IMAGE_REPOSITORY ?= $(RUNTIME_IMAGE_REPOSITORY)
+VERIFIER_IMAGE_TAG ?= latest
+TELEPRESENCE ?= ./dev/telepresence.sh
 
 # ═══════════════════════════════════════════════════════════════
 # Dev build (bin/ — fast, no LDFLAGS)
@@ -130,9 +154,56 @@ dev-server: dev-config dev-build-server dev-start-server
 dev-controller: dev-config dev-build-controller dev-start-controller
 dev-agent-worker: dev-config dev-build-agent-worker dev-start-agent-worker
 
+# ── In-cluster local debugging (Telepresence) ──
+
+telepresence-connect:
+	$(TELEPRESENCE) connect
+
+telepresence-server:
+	$(TELEPRESENCE) server
+
+telepresence-controller:
+	$(TELEPRESENCE) controller
+
+telepresence-worker:
+	$(TELEPRESENCE) worker
+
+telepresence-down:
+	$(TELEPRESENCE) down all
+
+telepresence-status:
+	$(TELEPRESENCE) status
+
+telepresence-disconnect:
+	$(TELEPRESENCE) disconnect
+
 e2e-server-recovery:
 	npm ci --prefix test
-	RUN_SERVER_RECOVERY_E2E=1 npm run test:e2e --prefix test -- --workers=1 --grep 'server restart leaves controller reconciliation active|controller restart reconciles an existing environment'
+	npm run test:recovery --prefix test -- --workers=1
+
+e2e-runtime-verify:
+	npm ci --prefix test
+	npm run test:runtime:verify --prefix test -- --workers=1
+
+e2e-runtime-browser:
+	npm ci --prefix test
+	npm run test:runtime:browser --prefix test -- --workers=1
+
+e2e-agent-assistant:
+	npm ci --prefix test
+	npm run test:agent-live:assistant --prefix test -- --workers=1
+
+e2e-agent-soak:
+	npm ci --prefix test
+	npm run test:agent-live:soak --prefix test -- --workers=1
+
+e2e-agent-container:
+	npm ci --prefix test
+	npm run test:agent-live:container --prefix test -- --workers=1
+
+e2e-agent-vcluster:
+	npm ci --prefix test
+	npm run test:agent-live:vcluster --prefix test -- --workers=1
 
 e2e:
 	npm ci --prefix test
@@ -141,11 +212,18 @@ e2e:
 
 dev-registry:
 	@if docker inspect registry >/dev/null 2>&1; then \
-		docker start registry 2>/dev/null || true; \
+		if docker inspect registry --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -qx 'REGISTRY_STORAGE_DELETE_ENABLED=true'; then \
+			docker start registry 2>/dev/null || true; \
+		else \
+			volume=$$(docker inspect registry --format '{{range .Mounts}}{{if eq .Destination "/var/lib/registry"}}{{.Source}}{{end}}{{end}}'); \
+			[ -n "$$volume" ] || { echo "ERROR: registry data volume is missing"; exit 1; }; \
+			docker rm -f registry >/dev/null; \
+			docker run -d -p 5000:5000 --name registry -e REGISTRY_STORAGE_DELETE_ENABLED=true -v "$$volume:/var/lib/registry" registry:2 >/dev/null; \
+		fi; \
 	else \
-		docker run -d -p 5000:5000 --name registry registry:2; \
+		docker run -d -p 5000:5000 --name registry -e REGISTRY_STORAGE_DELETE_ENABLED=true registry:2 >/dev/null; \
 	fi
-	@echo "  ✓ Registry :5000"
+	@echo "  ✓ Registry :5000 (manifest deletion enabled)"
 
 dev-data:
 	@mkdir -p data/challenges
@@ -163,12 +241,22 @@ verify-crd-generated:
 	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
 	diff -ru deploy/crd $$tmp/crd
 
-generate-api:
-	npm run generate:api --prefix frontend
+generate-api-go:
+	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
+
+generate-api-frontend:
+	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
+
+generate-api: generate-api-go generate-api-frontend
 
 verify-api-generated:
-	@$(MAKE) --no-print-directory generate-api
-	@git diff --exit-code -- frontend/src/api/generated
+	@tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	sed "s|^output:.*|output: $$tmp/server.gen.go|" $(OPENAPI_GO_CONFIG) >"$$tmp/oapi-codegen.yaml" && \
+	$(OAPI_CODEGEN) --config "$$tmp/oapi-codegen.yaml" $(OPENAPI_SPEC) && \
+	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o "$$tmp/frontend" && \
+	diff -u $(OPENAPI_GO_OUTPUT) "$$tmp/server.gen.go" && \
+	diff -ru $(OPENAPI_FRONTEND_OUTPUT) "$$tmp/frontend"
 
 dev-crd: generate-crd
 	@kubectl apply -f deploy/crd/breakfix.dev_containerenvironments.yaml >/dev/null
@@ -177,7 +265,12 @@ dev-crd: generate-crd
 	@echo "  ✓ CRDs applied"
 
 dev-rbac:
+	@kubectl create namespace breakfix-system --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 	@kubectl apply -f deploy/rbac/controller.yaml >/dev/null
+	@kubectl -n breakfix-system create secret generic breakfix-registry-pull \
+		--type=kubernetes.io/dockerconfigjson \
+		--from-literal=.dockerconfigjson='{"auths":{}}' \
+		--dry-run=client -o yaml | kubectl apply -f - >/dev/null
 	@echo "  ✓ RBAC applied"
 
 dev-images:
@@ -218,103 +311,45 @@ $(DEV_CONFIG): $(CONFIG)
 	@echo "  ✓ $@ generated"
 
 # ═══════════════════════════════════════════════════════════════
-# Production build (dist/ — stripped, with LDFLAGS)
+# Production build (bin/release/<os>-<arch>/ — stripped, with LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
 build-server: frontend-build
-	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-server-linux-amd64 ./cmd/server
+	@mkdir -p $(SERVER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(SERVER_RELEASE_BIN) ./cmd/server
 	@echo "  ✓ Server binary"
 
 build-controller:
-	go build -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/breakfix-controller-linux-amd64 ./cmd/controller
+	@mkdir -p $(CONTROLLER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(CONTROLLER_RELEASE_BIN) ./cmd/controller
 	@echo "  ✓ Controller binary"
 
-build: build-server build-controller
+build-agent-worker:
+	@mkdir -p $(AGENT_WORKER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(AGENT_WORKER_RELEASE_BIN) ./cmd/agent-worker
+	@echo "  ✓ Agent Worker binary"
+
+build-verifier:
+	@mkdir -p $(VERIFIER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(VERIFIER_RELEASE_BIN) ./cmd/verifier
+	@echo "  ✓ Verifier binary"
+
+build: build-server build-controller build-agent-worker build-verifier
 	@echo "  ✓ Production binaries built"
 
-# ═══════════════════════════════════════════════════════════════
-# Remote deploy
-# ═══════════════════════════════════════════════════════════════
+runtime-images: build-server build-controller build-agent-worker build-verifier
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG) -f deploy/images/server/Dockerfile $(SERVER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG) -f deploy/images/controller/Dockerfile $(CONTROLLER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-agent-worker:$(RUNTIME_IMAGE_TAG) -f deploy/images/agent-worker/Dockerfile $(AGENT_WORKER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(VERIFIER_IMAGE_REPOSITORY)/breakfix-verifier:$(VERIFIER_IMAGE_TAG) -f deploy/images/verifier/Dockerfile $(VERIFIER_RELEASE_DIR)
+	@echo "  ✓ Runtime images built"
 
-_guard-server:
-	@if [ -z "$(SERVER)" ]; then \
-		echo "ERROR: SERVER not set."; \
-		echo "  echo myserver > .breakfix-server"; \
-		echo "  or: make $@ SERVER=<host>"; \
-		exit 1; \
-	fi
-
-deploy-server: build-server _guard-server
-	scp $(DIST_DIR)/breakfix-server-linux-amd64 $(SERVER):/tmp/breakfix-server
-	ssh $(SERVER) 'sudo mv /tmp/breakfix-server $(SERVER_BIN) && sudo systemctl restart $(SERVER_SERVICE)'
-	@echo "✓ Server deployed and restarted"
-
-deploy-controller: build-controller _guard-server
-	scp $(DIST_DIR)/breakfix-controller-linux-amd64 $(SERVER):/tmp/breakfix-controller
-	ssh $(SERVER) 'sudo mv /tmp/breakfix-controller $(CONTROLLER_BIN) && sudo systemctl restart $(CONTROLLER_SERVICE)'
-	@echo "✓ Controller deployed and restarted"
-
-deploy-catalog: _guard-server
-	tar -C data -czf /tmp/breakfix-challenges.tar.gz challenges
-	scp /tmp/breakfix-challenges.tar.gz $(SERVER):/tmp/breakfix-challenges.tar.gz
-	ssh $(SERVER) 'set -e; \
-		sudo rm -rf /tmp/breakfix-challenges && sudo mkdir -p /tmp/breakfix-challenges; \
-		sudo tar -C /tmp/breakfix-challenges -xzf /tmp/breakfix-challenges.tar.gz; \
-		sudo rm -rf $(SERVER_DATA)/challenges.tmp; \
-		sudo mv /tmp/breakfix-challenges/challenges $(SERVER_DATA)/challenges.tmp; \
-		sudo chown -R breakfix:breakfix $(SERVER_DATA)/challenges.tmp; \
-		sudo rm -rf $(SERVER_DATA)/challenges && sudo mv $(SERVER_DATA)/challenges.tmp $(SERVER_DATA)/challenges; \
-		sudo rm -rf /tmp/breakfix-challenges /tmp/breakfix-challenges.tar.gz'
-	@rm -f /tmp/breakfix-challenges.tar.gz
-	@echo "✓ Challenge catalog deployed"
-
-deploy-images: _guard-server
-	@$(MAKE) --no-print-directory deploy-base
-	@for d in data/challenges/*/; do \
-		name=$$(basename $$d); \
-		[ "$$name" = "base" ] && continue; \
-		$(MAKE) --no-print-directory deploy-image NAME=$$name; \
-	done
-	@echo "✓ All images deployed"
-
-deploy-base: _guard-server
-	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
-	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
-		echo "  ✗ Registry not configured. Skipping breakfix-base."; \
-		exit 0; \
-	fi; \
-	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	docker build --platform linux/amd64 --provenance=false -t breakfix-base:latest ./deploy/images/base; \
-	docker tag breakfix-base:latest $$pub/breakfix-base:latest; \
-	docker push $$pub/breakfix-base:latest; \
-	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./deploy/images/k8s-base; \
-	docker tag breakfix-k8s-base:latest $$pub/breakfix-k8s-base:latest; \
-	docker push $$pub/breakfix-k8s-base:latest
-	@echo "  ✓ breakfix-base + breakfix-k8s-base → ACR"
-
-deploy-image: _guard-server
-	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
-	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
-		echo "  ✗ Registry not configured. Skipping $(NAME)."; \
-		exit 0; \
-	fi; \
-	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	docker build -t $(NAME):v1 ./data/challenges/$(NAME); \
-	docker tag $(NAME):v1 $$pub/$(NAME):v1; \
-	docker push $$pub/$(NAME):v1
-	@echo "  ✓ $(NAME) → ACR"
-
-deploy-cleanup: _guard-server
-	@ssh $(SERVER) 'kubectl get ns -o name 2>/dev/null | grep "^namespace/break" | sed "s|^namespace/||" | xargs -r kubectl delete ns --wait=false' || true
-	@echo "✓ K8s namespaces cleaned up"
-
-deploy-reset: deploy-cleanup _guard-server
-	@ssh $(SERVER) 'sudo rm -f $(SERVER_DATA)/breakfix.db* && sudo systemctl restart $(SERVER_SERVICE)'
-	@echo "✓ Remote reset complete (DB cleared, CA regenerated)"
-
-deploy: deploy-verifier deploy-images deploy-catalog deploy-controller deploy-server
+runtime-push: runtime-images
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG)
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG)
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-agent-worker:$(RUNTIME_IMAGE_TAG)
+	docker push $(VERIFIER_IMAGE_REPOSITORY)/breakfix-verifier:$(VERIFIER_IMAGE_TAG)
+	@echo "  ✓ Runtime images pushed"
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)
@@ -354,24 +389,13 @@ docker-push:
 	@echo "  ✓ $(NAME) → $(REGISTRY)"
 
 verifier-build:
-	CGO_ENABLED=0 go build -ldflags "-s -w" -o $(BIN_DIR)/verifier ./cmd/verifier
-	docker build -t breakfix-verifier:latest -f deploy/images/verifier/Dockerfile .
+	@$(MAKE) --no-print-directory build-verifier
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-verifier:latest -f deploy/images/verifier/Dockerfile $(VERIFIER_RELEASE_DIR)
 	docker tag breakfix-verifier:latest $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
 	docker push $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
 	kind load docker-image breakfix-verifier:latest --name $(KIND_CLUSTER)
 	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest --name $(KIND_CLUSTER)
 	@echo "  ✓ Verifier image built and loaded into Kind"
-
-deploy-verifier: _guard-server verifier-build
-	@[ -f $(CONFIG) ] || { echo "ERROR: $(CONFIG) not found."; exit 1; }
-	@vpc=$$(awk '/^registry_addr:/{print $$2}' $(CONFIG)); \
-	if [ -z "$$vpc" ] || [ "$$vpc" = "localhost:5000/break-fix" ]; then \
-		echo "  ✗ Registry not configured. Skipping."; exit 1; \
-	fi; \
-	pub=$$(echo "$$vpc" | sed 's/-vpc//'); \
-	docker tag breakfix-verifier:latest $$pub/breakfix-verifier:latest; \
-	docker push $$pub/breakfix-verifier:latest
-	@echo "  ✓ Verifier image pushed to ACR"
 
 # ═══════════════════════════════════════════════════════════════
 # Ops
@@ -388,12 +412,6 @@ proto:
 		/workspace/proto/breakfix.proto
 	docker run --rm -v $(CURDIR):/workspace alpine chown -R 1000:1000 /workspace/pkg/proto/
 
-status: _guard-server
-	ssh $(SERVER) 'sudo systemctl status $(SERVER_SERVICE) $(CONTROLLER_SERVICE) --no-pager'
-
-logs: _guard-server
-	ssh $(SERVER) 'sudo journalctl -u $(SERVER_SERVICE) -u $(CONTROLLER_SERVICE) -f'
-
 clean:
-	rm -rf $(BIN_DIR)/ $(DIST_DIR)/
+	rm -rf $(BIN_DIR)/ dist/
 	@echo "  ✓ Cleaned"

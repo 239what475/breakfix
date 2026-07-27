@@ -46,7 +46,7 @@ func (h *Handler) newCommonEnvironmentSpec(userID string, challengeEntry *challe
 	}
 
 	idleTTLSeconds := int64(h.cooldownMin * 60)
-	activityAt := metav1.Now()
+	activityAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	return breakfixv1.CommonEnvironmentSpec{
 		ChallengeRef:      challengeEntry.ID,
 		ChallengeRevision: challengeEntry.Revision,
@@ -86,8 +86,9 @@ func (a *environmentRuntimeAdapter) renewActivity(ctx context.Context, name stri
 		if spec == nil {
 			return
 		}
+		activityAt = metav1.NewTime(activityAt.UTC().Truncate(time.Second))
 		if spec.ActivityAt == nil || activityAt.After(spec.ActivityAt.Time) {
-			next := metav1.NewTime(activityAt.UTC())
+			next := activityAt
 			spec.ActivityAt = &next
 		}
 	})

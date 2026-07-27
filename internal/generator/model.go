@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("generator run not found")
 
 const (
 	RuntimePurpose = "generator"
-	PromptVersion  = "generator-deep-v1"
+	PromptVersion  = "generator-deep-v4"
 	RunDeadline    = time.Hour
 )
 

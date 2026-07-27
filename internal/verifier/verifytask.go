@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/verification"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,14 +23,15 @@ import (
 )
 
 type Config struct {
-	Kubeconfig       string
-	RegistryAddr     string
-	RegistryInsecure bool
-	ServerURL        string
-	InternalAPIKey   string
-	VerifyTaskID     string
-	VerifyTaskNS     string
-	SubmissionID     string
+	Kubeconfig          string
+	RegistryAddr        string
+	RegistryInsecure    bool
+	RegistryCredentials registry.Credentials
+	ServerURL           string
+	InternalAPIKey      string
+	VerifyTaskID        string
+	VerifyTaskNS        string
+	SubmissionID        string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -91,7 +93,7 @@ func Run(ctx context.Context, cfg Config) error {
 	tempImage := verification.ImageName(cfg.RegistryAddr, cfg.VerifyTaskID)
 	stageStart = time.Now()
 	slog.Info("verify stage start", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "image", tempImage)
-	if err := BuildAndPush(ctx, tempImage, chalDir, verifyBaseImage(tempImage, challengeEntry.Runtime), cfg.RegistryInsecure); err != nil {
+	if err := BuildAndPush(ctx, tempImage, chalDir, verifyBaseImage(tempImage, challengeEntry.Runtime), cfg.RegistryInsecure, cfg.RegistryCredentials); err != nil {
 		if isArtifactBuildError(err) {
 			return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("BUILD_FAILED", err.Error()))
 		}

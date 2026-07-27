@@ -72,6 +72,10 @@ export function challengeCard(page: Page, title: string) {
   });
 }
 
+export function challengeCardByID(page: Page, challengeID: string) {
+  return page.locator(`article.challenge-card[data-challenge-id="${challengeID}"]`);
+}
+
 export async function startChallengeFromCatalog(page: Page, title: string) {
   await challengeCard(page, title)
     .getByRole("button", { name: "Start challenge", exact: true })

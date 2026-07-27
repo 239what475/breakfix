@@ -61,12 +61,13 @@ func TestRenewActivityOnlyUpdatesEnvironmentSpec(t *testing.T) {
 			return nil
 		},
 	}
-	next := metav1.NewTime(time.Now().UTC())
+	next := metav1.NewTime(time.Now().UTC().Truncate(time.Second).Add(750 * time.Millisecond))
 	if err := adapter.renewActivity(context.Background(), "demo", next); err != nil {
 		t.Fatal(err)
 	}
-	if spec.ActivityAt == nil || !spec.ActivityAt.Equal(&next) {
-		t.Fatalf("expected spec activity update, got %#v", spec.ActivityAt)
+	want := next.UTC().Truncate(time.Second)
+	if spec.ActivityAt == nil || !spec.ActivityAt.Time.Equal(want) {
+		t.Fatalf("expected normalized spec activity %s, got %#v", want, spec.ActivityAt)
 	}
 }
 

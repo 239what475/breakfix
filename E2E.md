@@ -60,6 +60,15 @@ Playwright 只验证用户可见的工作流，不负责生成题目：
 - 真实环境测试结束后删除它创建的 VerifyTask、Environment、OpenSandbox workspace/PVC、验证 Job 和临时 challenge，仅保留仓库中的固定题目。
 - 用 Telepresence 本地接管 Server、Controller 或 Worker 时，真实验收日志应与 Playwright 输出并排观察；失败时先按阶段日志定位，不通过整条测试的最终超时猜测原因。
 
+对应入口：
+
+- `make e2e`：默认浏览器页面测试。
+- `make e2e-runtime-verify`：固定 container/vcluster artifact 的真实 VerifyTask 验收。
+- `make e2e-runtime-browser`：固定 `cleanup-logs` 的终端、检查点和学习进度浏览器验收。
+- `make e2e-server-recovery`：Server/Controller 恢复验收。
+- `make e2e-agent-assistant`、`make e2e-agent-container`、`make e2e-agent-vcluster`：分别运行显式 Agent Live 验收；它们不属于日常 CI。
+- `make e2e-agent-soak`：在一个真实 `cleanup-logs` 环境中串行完成 20 次 Assistant Run。首轮读取真实 scrollback、检查点和解答，后续轮验证同一持久会话的模型传输与完成消息；它是发布前的模型传输 soak，不属于日常 CI。
+
 ## 当前迁移要求
 
 Agent Runtime 迁移完成前，至少需要分别证明：

@@ -242,6 +242,18 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 		return nil, fmt.Errorf("begin claim agent run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A deadline ends the logical Run, regardless of whether its last Worker
+	// attempt crashed, was waiting for a retry, or is still holding a lease.
+	// Expiring due Runs in the claim transaction keeps session admission from
+	// being blocked forever without introducing a separate scheduler.
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs
+		SET status = ?, lease_owner = '', lease_expires_at = NULL,
+			last_error = ?, completed_at = ?, updated_at = ?
+		WHERE status IN (?, ?) AND deadline_at <= ?`,
+		agentruntime.RunFailed, "agent run deadline exceeded", now, now,
+		agentruntime.RunPending, agentruntime.RunRunning, now); err != nil {
+		return nil, fmt.Errorf("expire due agent runs: %w", err)
+	}
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM agent_runs
 		WHERE (
@@ -252,6 +264,11 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 		FOR UPDATE SKIP LOCKED
 		LIMIT 1`, agentruntime.RunPending, now, agentruntime.RunRunning, now, now).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
+		// The deadline update above is still meaningful even when no work can
+		// be claimed. Commit it so an expired Run cannot remain active forever.
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit expired agent runs: %w", err)
+		}
 		return nil, nil
 	}
 	if err != nil {

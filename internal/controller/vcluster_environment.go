@@ -25,16 +25,22 @@ import (
 
 const vclusterEnvironmentFinalizer = "breakfix.dev/vcluster-environment-cleanup"
 
+// Helm limits releases to 53 characters. vcluster also appends an
+// 11-character revision suffix to a label derived from the release name, so
+// the release itself must be no longer than 52 characters.
+const maxVClusterReleaseNameLength = 52
+
 type VClusterEnvironmentReconciler struct {
 	client.Client
-	K8s          *k8s.Client
-	VCluster     *vclustercli.Client
-	ChartRepo    string
-	ChartVersion string
-	RegistryAddr string
-	NS           string
-	CRDNamespace string
-	Cooldown     time.Duration
+	K8s                *k8s.Client
+	VCluster           *vclustercli.Client
+	ChartRepo          string
+	ChartVersion       string
+	RegistryAddr       string
+	RegistryPullSecret string
+	NS                 string
+	CRDNamespace       string
+	Cooldown           time.Duration
 }
 
 func (r *VClusterEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -62,8 +68,8 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 		}
 	}
 
-	ns := k8s.UserNamespace(r.NS, env.Spec.UserRef) + "-" + env.Name
-	vclusterName := "vc-" + env.Name
+	ns := k8s.EnvironmentNamespace(r.NS, env.Spec.UserRef, env.Name)
+	vclusterName := vclusterReleaseName(env.Name)
 	kubeconfigSecret := "vc-kubeconfig"
 	effectiveRuntime, err := resolveVClusterRuntime(env.Spec.VCluster)
 	if err != nil {
@@ -79,6 +85,12 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 
 	if err := r.K8s.EnsureNamespace(ns); err != nil {
 		return ctrl.Result{}, err
+	}
+	if err := r.K8s.EnsureImagePullSecret(r.CRDNamespace, ns, r.RegistryPullSecret); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure registry pull secret: %w", err)
+	}
+	if err := r.K8s.EnsureVerifierWorkspaceExecAccess(ns, r.CRDNamespace, "breakfix-verifier"); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure verifier workspace access: %w", err)
 	}
 
 	if err := r.ensureVCluster(ctx, ns, vclusterName, effectiveRuntime); err != nil {
@@ -111,6 +123,10 @@ func (r *VClusterEnvironmentReconciler) provision(ctx context.Context, env *brea
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
+func vclusterReleaseName(environmentName string) string {
+	return k8s.DNSLabelNameWithLimit(maxVClusterReleaseNameLength, "vc", environmentName)
+}
+
 func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *breakfixv1.VClusterEnvironment) (ctrl.Result, error) {
 	ns := env.Status.Namespace
 	if ns == "" {
@@ -123,6 +139,13 @@ func (r *VClusterEnvironmentReconciler) waitReady(ctx context.Context, env *brea
 
 	podName := env.Status.VClusterName + "-0"
 	if err := r.K8s.WaitForPod(ns, podName, "syncer"); err != nil {
+		if k8s.IsTerminalPodReadinessError(err) {
+			markEnvironmentFailed(&env.Status.CommonEnvironmentStatus, "vcluster", "control_plane_not_ready", "VClusterControlPlaneFailed", err.Error(), true)
+			if updateErr := r.Status().Update(ctx, env); updateErr != nil {
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{}, nil
+		}
 		setEnvironmentProvisioning(&env.Status.CommonEnvironmentStatus, "WaitingForVCluster", err.Error())
 		_ = r.Status().Update(ctx, env)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -283,11 +306,11 @@ func (r *VClusterEnvironmentReconciler) finalCleanup(ctx context.Context, env *b
 	}
 	markEnvironmentDestroyed(&env.Status.CommonEnvironmentStatus, "CleanupCompleted", "vcluster environment destroyed")
 	if err := r.Status().Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	controllerutil.RemoveFinalizer(env, vclusterEnvironmentFinalizer)
 	if err := r.Update(ctx, env); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	slog.Info("vcluster environment destroyed", "environment", env.Name)
 	return ctrl.Result{}, nil
@@ -381,10 +404,11 @@ func (r *VClusterEnvironmentReconciler) ensureWorkspacePod(env *breakfixv1.VClus
 	}
 
 	return r.K8s.CreatePod(env.Status.Namespace, workspacePodName, k8s.CreatePodOpts{
-		Image:         imageURL,
-		ChallengeID:   env.Spec.ChallengeRef,
-		EnvironmentID: env.Name,
-		Resources:     resources,
+		Image:            imageURL,
+		ChallengeID:      env.Spec.ChallengeRef,
+		EnvironmentID:    env.Name,
+		Resources:        resources,
+		ImagePullSecrets: []corev1.LocalObjectReference{{Name: r.RegistryPullSecret}},
 		Env: map[string]string{
 			"KUBECONFIG": "/root/.kube/config",
 		},
@@ -586,6 +610,11 @@ func rewriteVClusterKubeconfig(raw []byte, server string) ([]byte, error) {
 			continue
 		}
 		cluster.Server = server
+	}
+	for _, context := range cfg.Contexts {
+		if context != nil {
+			context.Namespace = "default"
+		}
 	}
 	out, err := clientcmd.Write(*cfg)
 	if err != nil {

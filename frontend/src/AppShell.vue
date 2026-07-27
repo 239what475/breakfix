@@ -13,6 +13,7 @@ const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
 const page = ref<"catalog" | "my-space">("catalog");
+const mySpaceRefreshRequest = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
 let noticeTimer: number | undefined;
@@ -79,9 +80,11 @@ function navigateCatalog() {
 }
 
 function navigateMySpace() {
+  const alreadyVisible = !workspace.value && !authoringOpen.value && page.value === "my-space";
   closeAuthoring();
   closeWorkspace();
   openMySpace();
+  if (alreadyVisible) mySpaceRefreshRequest.value += 1;
 }
 
 function navigateStudio() {
@@ -128,6 +131,7 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
 		v-show="!workspace && !authoringOpen && page === 'my-space'"
 		:active="!workspace && !authoringOpen && page === 'my-space'"
 		:logged-in="loggedIn"
+		:refresh-request="mySpaceRefreshRequest"
 			@catalog="openCatalog($event)"
 		@start="startWorkspace"
 		@studio="openAuthoring($event)"

@@ -94,6 +94,7 @@ const canCompose = computed(
   () =>
     !!session.value &&
     !busy.value &&
+    !session.value.authoring_turn_active &&
     ["DraftConversation", "IntentReview", "AwaitingVerifiedReview"].includes(
       session.value.state,
     ),
@@ -102,10 +103,16 @@ const canSend = computed(
   () => canCompose.value && message.value.trim().length > 0,
 );
 const canGenerate = computed(
-  () => session.value?.state === "IntentReview" && checkpoints.value.length > 0,
+  () =>
+    !session.value?.authoring_turn_active &&
+    session.value?.state === "IntentReview" &&
+    checkpoints.value.length > 0,
 );
 const canPublish = computed(
-  () => session.value?.state === "AwaitingVerifiedReview" && !!session.value.artifact,
+  () =>
+    !session.value?.authoring_turn_active &&
+    session.value?.state === "AwaitingVerifiedReview" &&
+    !!session.value.artifact,
 );
 const canOpenPublished = computed(
   () =>
@@ -124,8 +131,11 @@ function clearPoll() {
   pollTimer = undefined;
 }
 function shouldPoll() {
-  return ["GeneratingAndVerifying", "RevisingAndVerifying", "Publishing"].includes(
-    session.value?.state ?? "",
+  return (
+    session.value?.authoring_turn_active ||
+    ["GeneratingAndVerifying", "RevisingAndVerifying", "Publishing"].includes(
+      session.value?.state ?? "",
+    )
   );
 }
 function schedulePoll() {
@@ -309,7 +319,7 @@ onScopeDispose(clearPoll);
         <form class="authoring-composer" @submit.prevent="send">
           <textarea v-model="message" :disabled="!canCompose" rows="2" placeholder="描述题目想法，或说明希望 agent 如何修改题意约定…"></textarea>
           <button type="submit" title="发送消息" aria-label="发送消息" :disabled="!canSend"><Send :size="16" /></button>
-          <p class="authoring-composer-note">{{ busy ? 'agent 正在处理这条消息…' : canSend ? '通过自然语言指导 agent；左侧内容保持只读。' : '生成、验证或发布期间不能修改题意约定。' }}</p>
+          <p class="authoring-composer-note">{{ busy || session?.authoring_turn_active ? 'agent 正在处理这条消息…' : canSend ? '通过自然语言指导 agent；左侧内容保持只读。' : '生成、验证或发布期间不能修改题意约定。' }}</p>
         </form>
       </section>
     </div>

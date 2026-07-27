@@ -156,7 +156,7 @@ func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) 
 		w.requeueOrFail(parent, claim, fmt.Errorf("no executor registered for agent run purpose %q", claim.Run.Purpose))
 		return
 	}
-	execCtx, cancel := context.WithCancel(parent)
+	execCtx, cancel := context.WithDeadline(parent, claim.Run.DeadlineAt)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -221,6 +221,16 @@ func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cance
 			return
 		case <-ticker.C:
 			if err := w.store.RenewLease(context.Background(), claim, w.leaseTTL, w.now()); err != nil {
+				if errors.Is(err, agentruntime.ErrLeaseLost) && w.completedByDomain(claim) {
+					return
+				}
+				// A domain finalize can complete the Run while a ticker event is
+				// already selectable. Completion wins over this stale renewal.
+				select {
+				case <-done:
+					return
+				default:
+				}
 				slog.Warn("agent run lease renewal failed", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(err))
 				leaseLost.Store(true)
 				cancel()
@@ -228,6 +238,11 @@ func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cance
 			}
 		}
 	}
+}
+
+func (w *Worker) completedByDomain(claim agentruntime.Claim) bool {
+	run, err := w.store.GetRun(context.Background(), claim.Run.ID)
+	return err == nil && run.Status == agentruntime.RunSucceeded
 }
 
 func (w *Worker) requeueOrFail(ctx context.Context, claim agentruntime.Claim, executionErr error) {

@@ -95,14 +95,14 @@ export function useTerminalSession(
       if (currentEpoch !== epoch) return;
       try {
         const message = JSON.parse(event.data);
+        if (message.type === "ready") {
+          state.value = "connected";
+          return;
+        }
         if (message.type === "data") terminal?.write(message.data);
       } catch {
         terminal?.write(event.data);
       }
-      // A WebSocket may be open before tmux has attached the shell. Reporting
-      // Connected only after its first bytes arrive prevents early keystrokes
-      // from being lost during a workspace re-entry.
-      if (state.value === "connecting") state.value = "connected";
     };
     socket.onclose = () => {
       if (currentEpoch !== epoch) return;

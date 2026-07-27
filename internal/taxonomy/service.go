@@ -29,7 +29,7 @@ const (
 	retryInitialDelay    = time.Minute
 	retryMaximumDelay    = time.Hour
 
-	mapperPromptVersion = "taxonomy-mapper-v2"
+	mapperPromptVersion = "taxonomy-mapper-v3"
 	reviewPromptVersion = "taxonomy-review-v2"
 )
 
@@ -738,7 +738,9 @@ Skill 必须是可独立解释、能在多题复用的能力；Tag 仅用于稳�
 
 每个 mapping 任务都必须以 upsert 提交当前 challenge 的 ChallengeMapping。首次建立空 taxonomy 时，必须同时创建至少一个可复用 Skill 和一个稳定 Tag，并在该 ChallengeMapping 中引用它们；后续任务可复用现有定义。
 
-字段契约必须精确遵守：Skill 的 kind 只能是 Skill，Tag 的 kind 只能是 Tag；新 Skill ID 必须是 skill- 加 16 位小写十六进制，新 Tag ID 必须是 tag- 加 16 位小写十六进制。不要包裹 changeset 对象，直接传工具 schema 的四个顶层数组。`
+字段契约必须精确遵守：Skill 的 kind 只能是 Skill，Tag 的 kind 只能是 Tag；新 Skill ID 必须是 skill- 加 16 位小写十六进制，新 Tag ID 必须是 tag- 加 16 位小写十六进制。不要包裹 changeset 对象，直接传工具 schema 的四个顶层数组。
+
+字段只能出现在工具 schema 定义的对象中：Skill 或 Tag 的 upsert 使用各自 change 的 value，value 包含 kind、id、title、definition 和 mapping_guidance；ChallengeMapping 的 upsert 使用 challenge_mappings 的 value，value 包含 challenge、tags、entry_skills 和 outcomes。primary 只属于每个 outcomes 元素，Skill、Tag、各类 change 和四个顶层数组都不能有 primary 字段。Skill.requires 关系只通过 skill_mappings 提交；没有前置 Skill 时传空数组。`
 
 const reviewerSystemPrompt = `你是 Breakfix Taxonomy Committee Reviewer。你将以两个独立视角同时审查同一份候选 ChangeSet：
 

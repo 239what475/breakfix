@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, toRef } from "vue";
+import { computed, onMounted, onUnmounted, ref, toRef, watch } from "vue";
 import { BookOpen, LayoutDashboard, PenLine, RefreshCw, UserRound } from "lucide-vue-next";
 import ActiveEnvironmentList from "./ActiveEnvironmentList.vue";
 import AuthoringOverview from "./AuthoringOverview.vue";
@@ -8,7 +8,7 @@ import MySpaceSummary from "./MySpaceSummary.vue";
 import { useMySpace, type LearningRuntimeFilter, type LearningStateFilter } from "./useMySpace";
 import "./my-space.css";
 
-const props = defineProps<{ active: boolean; loggedIn: boolean }>();
+const props = defineProps<{ active: boolean; loggedIn: boolean; refreshRequest: number }>();
 const emit = defineEmits<{ catalog: [id?: string]; start: [id: string]; studio: [sessionId?: string] }>();
 const active = toRef(props, "active");
 const loggedIn = toRef(props, "loggedIn");
@@ -29,6 +29,13 @@ onMounted(() => {
   compactViewport.addEventListener("change", syncCompactWorkspace);
 });
 onUnmounted(() => compactViewport.removeEventListener("change", syncCompactWorkspace));
+
+watch(
+  () => props.refreshRequest,
+  (request, previous) => {
+    if (request !== previous && active.value && loggedIn.value) void refresh();
+  },
+);
 </script>
 
 <template>

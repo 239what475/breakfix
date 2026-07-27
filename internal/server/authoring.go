@@ -22,27 +22,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type authoringMessageRequest struct {
-	Content string `json:"content"`
-}
-
-type authoringSessionResponse struct {
-	ID              string                       `json:"id"`
-	State           authoring.SessionState       `json:"state"`
-	IntentRevision  int64                        `json:"intent_revision"`
-	VisibleRevision int64                        `json:"visible_revision"`
-	GeneratorRunID  string                       `json:"generator_run_id,omitempty"`
-	VerifyTaskID    string                       `json:"verify_task_id,omitempty"`
-	UpdatedAt       string                       `json:"updated_at"`
-	Intent          authoring.Plan               `json:"intent"`
-	Artifact        *authoring.Artifact          `json:"artifact,omitempty"`
-	Verified        *authoring.VerifiedChallenge `json:"verified,omitempty"`
-	Verification    *authoring.Verification      `json:"verification,omitempty"`
-	Messages        []authoring.Message          `json:"messages"`
-	Assets          []authoring.Asset            `json:"assets"`
-	Diff            []authoring.FileDiff         `json:"diff"`
-}
-
 // StartAuthoringReconciler keeps hidden verification-repair loops progressing
 // even when the author closes the browser. It owns no state itself; every tick
 // re-reads durable sessions and relies on the DB transitions for idempotency.
@@ -112,7 +91,7 @@ func (h *Handler) SendAuthoringMessage(c *gin.Context, sessionID string) {
 	if user == nil {
 		return
 	}
-	var request authoringMessageRequest
+	var request api.AuthoringMessageRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
@@ -139,35 +118,48 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current intent is not ready to generate and verify"})
 		return
 	}
+	if session.State == authoring.StateRevisingAndVerifying {
+		if err := h.startRevisedAuthoringGeneratorRun(c.Request.Context(), session); err != nil {
+			h.writeAuthoringError(c, err)
+			return
+		}
+		h.writeAuthoringSession(c, user, sessionID)
+		return
+	}
 	revision, err := h.db.GetAuthoringRevision(c.Request.Context(), session.ID, session.CurrentRevision)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	input := generator.RunInput{}
-	if session.State == authoring.StateRevisingAndVerifying {
-		previous, artifactErr := h.db.FindLatestAuthoringArtifact(c.Request.Context(), session.ID, revision.Number-1)
-		if artifactErr != nil {
-			h.writeAuthoringError(c, artifactErr)
-			return
-		}
-		if previous == nil || strings.TrimSpace(previous.SubmissionID) == "" {
-			h.writeAuthoringError(c, authoring.ErrInvalidState)
-			return
-		}
-		input.SeedSubmissionID = previous.SubmissionID
-		if session.GeneratorSessionID != "" {
-			if err := h.generatorWorkspace.Cleanup(c.Request.Context(), session.GeneratorSessionID); err != nil {
-				h.writeAuthoringError(c, fmt.Errorf("cleanup superseded generator workspace: %w", err))
-				return
-			}
-		}
-	}
-	if err := h.startAuthoringGeneratorRun(c.Request.Context(), user, session, revision, input); err != nil {
+	if err := h.startAuthoringGeneratorRun(c.Request.Context(), user, session, revision, generator.RunInput{}); err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
 	h.writeAuthoringSession(c, user, sessionID)
+}
+
+// startRevisedAuthoringGeneratorRun turns an author-approved change to an
+// already verified challenge into the next verification cycle. This is called
+// by the reconciler as well as the explicit endpoint, so StartGeneratorRun is
+// deliberately idempotent for a revision that another caller already started.
+func (h *Handler) startRevisedAuthoringGeneratorRun(ctx context.Context, session *authoring.Session) error {
+	if session == nil || session.State != authoring.StateRevisingAndVerifying {
+		return authoring.ErrInvalidState
+	}
+	revision, err := h.db.GetAuthoringRevision(ctx, session.ID, session.CurrentRevision)
+	if err != nil {
+		return err
+	}
+	previous, err := h.db.FindLatestAuthoringArtifact(ctx, session.ID, revision.Number-1)
+	if err != nil {
+		return err
+	}
+	if previous == nil || strings.TrimSpace(previous.SubmissionID) == "" {
+		return authoring.ErrInvalidState
+	}
+	return h.startAuthoringGeneratorRun(ctx, &db.User{ID: session.UserID}, session, revision, generator.RunInput{
+		SeedSubmissionID: previous.SubmissionID,
+	})
 }
 
 // startAuthoringGeneratorRun creates a durable Agent Run. It intentionally
@@ -287,8 +279,8 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 
 // restartAuthoringGeneratorRun starts the next semantic Generator Run after a
 // real artifact failure. It deliberately retains the failed immutable
-// submission: the Server resets the same Generator Session workspace from it
-// before the next Worker attempt can make changes.
+// submission: the next Run initializes a new workspace from it before its
+// Worker attempt can make changes.
 func (h *Handler) restartAuthoringGeneratorRun(ctx context.Context, session *authoring.Session, task *breakfixv1.VerifyTask, verification authoring.Verification) error {
 	if session == nil || task == nil || strings.TrimSpace(session.GeneratorRunID) == "" {
 		return authoring.ErrInvalidState
@@ -343,6 +335,13 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 		h.writeAuthoringError(c, err)
 		return
 	}
+	authoringTurnActive := false
+	if active, err := h.db.GetActiveRunForSession(c.Request.Context(), session.RuntimeSessionID); err == nil {
+		authoringTurnActive = active.Purpose == "authoring" && active.OwnerKind == "authoring-session" && active.OwnerRef == session.ID
+	} else if !errors.Is(err, agentruntime.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read active authoring run: %v", err)})
+		return
+	}
 	assets, err := authoring.ReadAssets(h.dataDir, revision.Artifact)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
@@ -369,13 +368,174 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 			return
 		}
 	}
-	c.JSON(http.StatusOK, authoringSessionResponse{
-		ID: session.ID, State: session.State, IntentRevision: session.CurrentRevision, VisibleRevision: revision.Number,
-		GeneratorRunID: session.GeneratorRunID, VerifyTaskID: session.VerifyTaskID,
-		UpdatedAt: session.UpdatedAt.UTC().Format(time.RFC3339),
-		Intent:    revision.Plan, Artifact: revision.Artifact, Verified: verified, Verification: revision.Verification,
-		Messages: messages, Assets: assets, Diff: diff,
-	})
+	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, authoringTurnActive, messages, assets, diff, verified))
+}
+
+func toAPIAuthoringSession(session *authoring.Session, revision *authoring.Revision, turnActive bool, messages []authoring.Message, assets []authoring.Asset, diff []authoring.FileDiff, verified *authoring.VerifiedChallenge) api.AuthoringSession {
+	return api.AuthoringSession{
+		Artifact:            toAPIAuthoringArtifact(revision.Artifact),
+		Assets:              toAPIAuthoringAssets(assets),
+		AuthoringTurnActive: turnActive,
+		Diff:                toAPIAuthoringFileDiffs(diff),
+		GeneratorRunId:      optionalString(session.GeneratorRunID),
+		Id:                  session.ID,
+		Intent:              toAPIAuthoringPlan(revision.Plan),
+		IntentRevision:      int(session.CurrentRevision),
+		Messages:            toAPIAuthoringMessages(messages),
+		PublishChallengeId:  optionalString(session.PublishChallengeID),
+		State:               api.AuthoringSessionState(session.State),
+		UpdatedAt:           session.UpdatedAt.UTC(),
+		Verification:        toAPIAuthoringVerification(revision.Verification),
+		Verified:            toAPIVerifiedChallenge(verified),
+		VerifyTaskId:        optionalString(session.VerifyTaskID),
+		VisibleRevision:     int(revision.Number),
+	}
+}
+
+func toAPIAuthoringPlan(plan authoring.Plan) api.AuthoringPlan {
+	checkpoints := make([]api.AuthoringCheckpoint, 0, len(plan.Checkpoints))
+	for _, checkpoint := range plan.Checkpoints {
+		checkpoints = append(checkpoints, api.AuthoringCheckpoint{
+			Id:       checkpoint.ID,
+			Markdown: checkpoint.Markdown,
+			Position: int(checkpoint.Position),
+			Title:    checkpoint.Title,
+		})
+	}
+	return api.AuthoringPlan{
+		Checkpoints: checkpoints,
+		Metadata:    toAPIAuthoringMetadata(plan.Metadata),
+		Overview:    plan.Overview,
+	}
+}
+
+func toAPIAuthoringMetadata(metadata authoring.Metadata) api.AuthoringMetadata {
+	return api.AuthoringMetadata{
+		Description: metadata.Description,
+		Difficulty:  api.AuthoringMetadataDifficulty(metadata.Difficulty),
+		Runtime:     api.AuthoringMetadataRuntime(metadata.Runtime),
+		Title:       metadata.Title,
+	}
+}
+
+func toAPIAuthoringArtifact(artifact *authoring.Artifact) *api.AuthoringArtifact {
+	if artifact == nil {
+		return nil
+	}
+	return &api.AuthoringArtifact{
+		Directory:      artifact.Directory,
+		GeneratorRunId: artifact.GeneratorRunID,
+		SubmissionId:   artifact.SubmissionID,
+	}
+}
+
+func toAPIVerifiedChallenge(challenge *authoring.VerifiedChallenge) *api.VerifiedChallenge {
+	if challenge == nil {
+		return nil
+	}
+	checkpoints := make([]api.VerifiedCheckpoint, 0, len(challenge.Checkpoints))
+	for _, checkpoint := range challenge.Checkpoints {
+		checkpoints = append(checkpoints, api.VerifiedCheckpoint{
+			DependsOn:   optionalSlice(checkpoint.DependsOn),
+			Description: checkpoint.Description,
+			Hint:        optionalString(checkpoint.Hint),
+			Id:          checkpoint.ID,
+			Title:       checkpoint.Title,
+		})
+	}
+	return &api.VerifiedChallenge{
+		Checkpoints: checkpoints,
+		Metadata:    toAPIAuthoringMetadata(challenge.Metadata),
+	}
+}
+
+func toAPIAuthoringVerification(verification *authoring.Verification) *api.AuthoringVerification {
+	if verification == nil {
+		return nil
+	}
+	return &api.AuthoringVerification{
+		ChallengeId: optionalString(verification.ChallengeID),
+		Message:     verification.Message,
+		Phase:       verification.Phase,
+		Report:      toAPIAuthoringVerificationReport(verification.Report),
+		TaskId:      verification.TaskID,
+	}
+}
+
+func toAPIAuthoringVerificationReport(report *authoring.VerificationReport) *api.AuthoringVerificationReport {
+	if report == nil {
+		return nil
+	}
+	issues := make([]api.AuthoringVerificationIssue, 0, len(report.Issues))
+	for _, issue := range report.Issues {
+		issues = append(issues, api.AuthoringVerificationIssue{Code: issue.Code, Message: issue.Message})
+	}
+	var class *api.AuthoringVerificationReportClass
+	if report.Class != "" {
+		value := api.AuthoringVerificationReportClass(report.Class)
+		class = &value
+	}
+	return &api.AuthoringVerificationReport{
+		AnswerPassed:      report.AnswerPassed,
+		BuildPassed:       report.BuildPassed,
+		CheckpointsPassed: report.CheckpointsPassed,
+		Class:             class,
+		Issues:            optionalSlice(issues),
+		Summary:           optionalString(report.Summary),
+	}
+}
+
+func toAPIAuthoringMessages(messages []authoring.Message) []api.AuthoringMessage {
+	result := make([]api.AuthoringMessage, 0, len(messages))
+	for _, message := range messages {
+		changes := make([]api.AuthoringChange, 0, len(message.Changes))
+		for _, change := range message.Changes {
+			changes = append(changes, api.AuthoringChange{
+				DifficultyImpact: change.DifficultyImpact,
+				Kind:             change.Kind,
+				Revision:         int(change.Revision),
+				Summary:          change.Summary,
+			})
+		}
+		result = append(result, api.AuthoringMessage{
+			Changes:   optionalSlice(changes),
+			Content:   message.Content,
+			CreatedAt: message.CreatedAt.UTC(),
+			Id:        message.ID,
+			Role:      api.AuthoringMessageRole(message.Role),
+		})
+	}
+	return result
+}
+
+func toAPIAuthoringAssets(assets []authoring.Asset) []api.AuthoringAsset {
+	result := make([]api.AuthoringAsset, 0, len(assets))
+	for _, asset := range assets {
+		result = append(result, api.AuthoringAsset{Content: asset.Content, Path: asset.Path})
+	}
+	return result
+}
+
+func toAPIAuthoringFileDiffs(diff []authoring.FileDiff) []api.AuthoringFileDiff {
+	result := make([]api.AuthoringFileDiff, 0, len(diff))
+	for _, entry := range diff {
+		result = append(result, api.AuthoringFileDiff{Diff: entry.Diff, Path: entry.Path})
+	}
+	return result
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalSlice[T any](values []T) *[]T {
+	if len(values) == 0 {
+		return nil
+	}
+	return &values
 }
 
 func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) error {
@@ -392,6 +552,9 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 	}
 	if h.k8s == nil {
 		return nil
+	}
+	if session.State == authoring.StateRevisingAndVerifying && strings.TrimSpace(session.GeneratorRunID) == "" {
+		return h.startRevisedAuthoringGeneratorRun(ctx, session)
 	}
 	if strings.TrimSpace(session.GeneratorRunID) == "" {
 		return nil
@@ -428,9 +591,6 @@ func (h *Handler) syncGeneratorRun(ctx context.Context, session *authoring.Sessi
 	switch task.Status.Phase {
 	case breakfixv1.VerifyTaskSucceeded:
 		if session.State == authoring.StateAwaitingVerifiedReview || session.State == authoring.StatePublished || session.State == authoring.StatePublishing {
-			if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
-				return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
-			}
 			return nil
 		}
 		artifact, err := h.storeVerifiedArtifact(ctx, session, task)
@@ -439,9 +599,6 @@ func (h *Handler) syncGeneratorRun(ctx context.Context, session *authoring.Sessi
 		}
 		if err := h.db.CompleteGeneratorVerification(ctx, session.ID, session.GeneratorRunID, artifact, verification); err != nil {
 			return err
-		}
-		if session.GeneratorSessionID != "" && h.generatorWorkspace != nil {
-			return h.generatorWorkspace.Cleanup(ctx, session.GeneratorSessionID)
 		}
 		return nil
 	case breakfixv1.VerifyTaskFailed:
@@ -459,14 +616,21 @@ func (h *Handler) storeVerifiedArtifact(ctx context.Context, session *authoring.
 		return authoring.Artifact{}, authoring.ErrInvalidState
 	}
 	target := authoring.ArtifactDirectory(h.dataDir, session.ID, session.CurrentRevision)
+	artifact := authoring.Artifact{
+		SubmissionID:   task.Spec.Submission.ID,
+		Directory:      authoring.ArtifactRelativePath(session.ID, session.CurrentRevision),
+		GeneratorRunID: session.GeneratorRunID,
+	}
 	if _, err := os.Stat(target); err == nil {
-		return authoring.Artifact{SubmissionID: task.Spec.Submission.ID, Directory: authoring.ArtifactRelativePath(session.ID, session.CurrentRevision), GeneratorRunID: session.GeneratorRunID}, nil
+		return artifact, nil
 	} else if !os.IsNotExist(err) {
 		return authoring.Artifact{}, fmt.Errorf("stat verified artifact: %w", err)
 	}
-	temp := authoring.TemporaryArtifactDirectory(h.dataDir, session.ID, task.Spec.Submission.ID)
-	_ = os.RemoveAll(temp)
-	if err := os.MkdirAll(temp, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return authoring.Artifact{}, fmt.Errorf("create verified artifact directory: %w", err)
+	}
+	temp, err := os.MkdirTemp(filepath.Dir(target), ".tmp-"+task.Spec.Submission.ID+"-")
+	if err != nil {
 		return authoring.Artifact{}, fmt.Errorf("create verified artifact staging: %w", err)
 	}
 	defer os.RemoveAll(temp) //nolint:errcheck
@@ -482,13 +646,16 @@ func (h *Handler) storeVerifiedArtifact(ctx context.Context, session *authoring.
 	if _, err := challenge.ValidateSubmissionDir(temp); err != nil {
 		return authoring.Artifact{}, fmt.Errorf("validate verified artifact: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-		return authoring.Artifact{}, fmt.Errorf("create verified artifact directory: %w", err)
-	}
 	if err := os.Rename(temp, target); err != nil {
+		// Concurrent polling may observe the same completed VerifyTask. Each
+		// caller has an isolated staging directory; once one atomically promotes
+		// it, every other caller can adopt the immutable target.
+		if _, statErr := os.Stat(target); statErr == nil {
+			return artifact, nil
+		}
 		return authoring.Artifact{}, fmt.Errorf("store verified artifact: %w", err)
 	}
-	return authoring.Artifact{SubmissionID: task.Spec.Submission.ID, Directory: authoring.ArtifactRelativePath(session.ID, session.CurrentRevision), GeneratorRunID: session.GeneratorRunID}, nil
+	return artifact, nil
 }
 
 func authoringVerificationReport(report *breakfixv1.VerifyReport) *authoring.VerificationReport {

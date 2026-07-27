@@ -45,7 +45,7 @@ func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, worksp
 		return fmt.Errorf("get workspace pvc: %w", err)
 	}
 	if current.Labels["breakfix.dev/workspace"] != workspaceID {
-		return fmt.Errorf("workspace pvc %s is not owned by generator session", name)
+		return fmt.Errorf("workspace pvc %s is not owned by generator run", name)
 	}
 	return nil
 }

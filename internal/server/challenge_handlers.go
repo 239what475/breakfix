@@ -34,8 +34,7 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 			}
 		}
 		slog.Info("resuming existing environment", "environment", existing.Name, "challenge", id, "runtime", existing.Runtime)
-		title := challengeEntry.Title
-		c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})
+		c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: challengeEntry.Title})
 		return
 	}
 
@@ -46,8 +45,7 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 	}
 
 	slog.Info("environment started", "environment", env.Name, "user", user.ID, "challenge", challengeEntry.ID, "runtime", challengeEntry.Runtime)
-	title := challengeEntry.Title
-	c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: &title})
+	c.JSON(http.StatusOK, api.StartResponse{ChallengeTitle: challengeEntry.Title})
 }
 
 func (h *Handler) ResetChallenge(c *gin.Context, id string) {
@@ -85,8 +83,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 	}
 
 	slog.Info("environment reset", "environment", env.Name, "user", user.ID, "challenge", challengeEntry.ID)
-	title := challengeEntry.Title
-	c.JSON(http.StatusOK, api.ResetResponse{ChallengeTitle: &title})
+	c.JSON(http.StatusOK, api.ResetResponse{ChallengeTitle: challengeEntry.Title})
 }
 
 func (h *Handler) StopChallenge(c *gin.Context, id string) {
@@ -120,11 +117,9 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	stopped := true
-	title := challengeEntry.Title
 	c.JSON(http.StatusOK, api.StopResponse{
-		Stopped:        &stopped,
-		ChallengeTitle: &title,
+		Stopped:        true,
+		ChallengeTitle: challengeEntry.Title,
 	})
 }
 
@@ -251,6 +246,5 @@ func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName st
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("close terminal window: %v", err)})
 		return
 	}
-	closed := true
-	c.JSON(http.StatusOK, api.TerminalWindowCloseResponse{Closed: &closed})
+	c.JSON(http.StatusOK, api.TerminalWindowCloseResponse{Closed: true})
 }

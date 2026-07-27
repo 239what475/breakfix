@@ -1,14 +1,5 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.26.3-bookworm AS build
-WORKDIR /workspace
-ARG GOPROXY=https://proxy.golang.org,direct
-ENV GOPROXY=${GOPROXY}
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/breakfix-controller ./cmd/controller
-
 FROM curlimages/curl:8.12.1 AS vcluster
 ARG TARGETARCH
 ARG VCLUSTER_VERSION=v0.35.1
@@ -21,9 +12,7 @@ RUN case "${TARGETARCH}" in \
     echo "${checksum}  /tmp/vcluster" | sha256sum -c - && \
     chmod 0755 /tmp/vcluster
 
-FROM debian:bookworm-slim
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=vcluster /tmp/vcluster /usr/local/bin/vcluster
-COPY --from=build /out/breakfix-controller /usr/local/bin/breakfix-controller
-USER 65532:65532
+COPY breakfix-controller /usr/local/bin/breakfix-controller
 ENTRYPOINT ["/usr/local/bin/breakfix-controller"]

@@ -6,11 +6,11 @@
 
 | 主题 | 权威来源 | 文档用途 |
 | --- | --- | --- |
-| HTTP JSON 契约 | [`api/openapi.yaml`](../api/openapi.yaml) | 路由、请求和响应模型；前端类型由此生成。 |
+| HTTP JSON 契约 | [`api/openapi.yaml`](../api/openapi.yaml) | 路由、请求和响应模型；Go 路由模型和前端类型由此生成。 |
 | Kubernetes CRD | [`internal/k8s/apis/breakfix/v1/`](../internal/k8s/apis/breakfix/v1/) | Environment、VerifyTask 的字段和校验标记。 |
 | Challenge 文件契约 | [`internal/challenge/`](../internal/challenge/) | 题目目录、检查点、归档与发布规则。 |
 | 运行时配置 | [`config/breakfix.example.yaml`](../config/breakfix.example.yaml) | 支持的 YAML 键和安全的示例值。 |
-| 构建与部署命令 | [`Makefile`](../Makefile) | 本地、测试、构建和远程部署 target。 |
+| 构建与部署命令 | [`Makefile`](../Makefile) | 本地、测试、构建和集群镜像发布 target。 |
 
 ## 架构
 
@@ -26,7 +26,8 @@
 
 ## 运维与资源
 
-- [部署与运行](operations/deployment.md)：本地环境、集群准备、双二进制、更新和验证。
+- [部署与运行](operations/deployment.md)：本地环境、集群准备、运行时镜像发布和验证。
+- [Telepresence 本地调试](operations/telepresence.md)：本地接管集群 Server、Controller 和 Agent Worker。
 - [`assets/`](assets/)：产品设计草图与参考截图，仅用于设计沟通。
 
 根目录 [`NEXT.md`](../NEXT.md) 是下一阶段方向，[`todo.md`](../todo.md) 是当前执行清单；两者不是长期架构规范。

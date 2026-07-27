@@ -277,7 +277,7 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 			view.Drafts = append(view.Drafts, api.MySpaceAuthoringDraft{
 				SessionId: session.ID,
 				Title:     authoringSessionTitle(session.Title),
-				State:     string(session.State),
+				State:     api.MySpaceAuthoringDraftState(session.State),
 				UpdatedAt: session.UpdatedAt,
 			})
 			continue

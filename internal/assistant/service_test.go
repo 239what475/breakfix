@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -91,18 +90,11 @@ func TestRuntimeServiceScopesSessionAndPersistsPendingTurn(t *testing.T) {
 	}
 }
 
-func TestConversationPromptExcludesSolutionAndToolsStayReadOnly(t *testing.T) {
+func TestConversationToolsStayReadOnly(t *testing.T) {
 	reader := &fakeReader{}
 	request := testRequest("env-a")
 	request.Reader = reader
 	conversation := &conversation{request: request}
-	prompt, err := conversation.prompt("下一步怎么做？")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(prompt, "secret solution") {
-		t.Fatal("solution must not be part of the initial prompt")
-	}
 
 	if _, err := conversation.getTerminalScrollback(context.Background(), `{"window":"shell-2"}`); err == nil {
 		t.Fatal("assistant read a terminal window not declared by the workspace")

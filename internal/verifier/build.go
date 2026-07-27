@@ -2,6 +2,8 @@ package verifier
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/registry"
 )
 
 // ArtifactBuildError means the artifact itself cannot be built. The caller
@@ -27,7 +31,10 @@ func (e *ArtifactBuildError) Unwrap() error {
 
 // BuildAndPush builds the challenge image and pushes to the registry.
 // Uses buildkitd + buildctl (already in the Docker image).
-func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, insecure bool) error {
+func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, insecure bool, credentials registry.Credentials) error {
+	if err := credentials.Validate(); err != nil {
+		return err
+	}
 	sock := "unix:///tmp/buildkit.sock"
 
 	// Write buildkitd config — only add insecure flags when needed
@@ -49,13 +56,30 @@ func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, 
 		os.WriteFile(configDir+"/buildkitd.toml", []byte(cfg), 0644) //nolint:errcheck
 	}
 
+	env := os.Environ()
+	if strings.TrimSpace(credentials.Username) != "" {
+		host := registryHost(imageName)
+		dockerConfig, err := registryDockerConfig(host, credentials)
+		if err != nil {
+			return err
+		}
+		dockerConfigDir := "/tmp/breakfix-registry-auth"
+		if err := os.MkdirAll(dockerConfigDir, 0700); err != nil {
+			return fmt.Errorf("create registry auth directory: %w", err)
+		}
+		if err := os.WriteFile(dockerConfigDir+"/config.json", dockerConfig, 0600); err != nil {
+			return fmt.Errorf("write registry auth config: %w", err)
+		}
+		env = append(env, "DOCKER_CONFIG="+dockerConfigDir)
+	}
+
 	// Start buildkitd
 	args := []string{"--root", "/var/lib/buildkit", "--addr", sock}
 	if insecure {
 		args = append(args, "--config", configDir+"/buildkitd.toml")
 	}
 	buildkitdCmd := exec.CommandContext(ctx, "buildkitd", args...)
-	buildkitdCmd.Env = os.Environ()
+	buildkitdCmd.Env = env
 	if err := buildkitdCmd.Start(); err != nil {
 		slog.Error("start buildkitd", "err", err)
 		return fmt.Errorf("start buildkitd: %w", err)
@@ -92,7 +116,7 @@ func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, 
 	buildArgs = append(buildArgs, "--output", "type=image,name="+imageName+",push=true")
 
 	cmd := exec.CommandContext(ctx, "buildctl", append(buildArgs, "--progress", "plain")...)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("buildctl failed", "err", err, "output", string(output))
@@ -108,6 +132,26 @@ func BuildAndPush(ctx context.Context, imageName, contextDir, baseImage string, 
 
 	slog.Info("image built and pushed", "image", imageName, "duration", time.Since(start))
 	return nil
+}
+
+func registryHost(imageName string) string {
+	if index := strings.IndexByte(imageName, '/'); index >= 0 {
+		return imageName[:index]
+	}
+	return imageName
+}
+
+func registryDockerConfig(host string, credentials registry.Credentials) ([]byte, error) {
+	if strings.TrimSpace(host) == "" || strings.TrimSpace(credentials.Username) == "" {
+		return nil, fmt.Errorf("registry host and credentials are required")
+	}
+	auth := base64.StdEncoding.EncodeToString([]byte(credentials.Username + ":" + credentials.Password))
+	type registryAuth struct {
+		Auth string `json:"auth"`
+	}
+	return json.Marshal(struct {
+		Auths map[string]registryAuth `json:"auths"`
+	}{Auths: map[string]registryAuth{host: {Auth: auth}}})
 }
 
 func buildOutputIsInfrastructure(output string) bool {

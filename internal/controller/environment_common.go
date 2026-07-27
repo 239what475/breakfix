@@ -102,17 +102,21 @@ func applyEnvironmentActivity(spec *breakfixv1.CommonEnvironmentSpec, status *br
 	if activity == nil || activity.IsZero() {
 		return false
 	}
+	// metav1.Time serializes through Kubernetes at whole-second precision. Keep
+	// the desired activity and observed status in that same precision so the
+	// same spec value cannot repeatedly revive an expired draining lease.
+	activityTime := activity.UTC().Truncate(time.Second)
 	if spec.ActivityAt == nil && status.LastActivityAt == nil && status.ExpiresAt != nil && status.ExpiresAt.After(time.Now()) {
 		// Preserve a lease written by the pre-split runtime while it remains
 		// active. New Server activity will replace it through spec.activityAt.
-		nextActivity := metav1.NewTime(activity.UTC())
+		nextActivity := metav1.NewTime(activityTime)
 		status.LastActivityAt = &nextActivity
 		return true
 	}
-	if status.LastActivityAt != nil && !activity.After(status.LastActivityAt.Time) {
+	if status.LastActivityAt != nil && !activityTime.After(status.LastActivityAt.UTC().Truncate(time.Second)) {
 		return false
 	}
-	nextActivity := metav1.NewTime(activity.UTC())
+	nextActivity := metav1.NewTime(activityTime)
 	status.LastActivityAt = &nextActivity
 	expires := metav1.NewTime(nextActivity.Add(spec.IdleTTLOr(defaultEnvironmentIdleTTL)))
 	status.ExpiresAt = &expires

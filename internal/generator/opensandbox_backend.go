@@ -210,6 +210,15 @@ func backendPath(value string, directory bool) (string, error) {
 	if value == "" && directory {
 		return ".", nil
 	}
+	if value == "/workspace" || value == "/workspace/" {
+		if directory {
+			return ".", nil
+		}
+		return "", errors.New("workspace root is not a file")
+	}
+	if strings.HasPrefix(value, "/workspace/") {
+		value = strings.TrimPrefix(value, "/workspace/")
+	}
 	value = strings.TrimPrefix(value, "./")
 	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
 		return "", errors.New("workspace path must be relative")

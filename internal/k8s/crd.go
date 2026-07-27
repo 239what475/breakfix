@@ -216,5 +216,9 @@ func deleteCRD(ctx context.Context, c *Client, gvr schema.GroupVersionResource, 
 	if err != nil {
 		return err
 	}
-	return dyn.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	err = dyn.Resource(gvr).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if isNotFound(err) {
+		return nil
+	}
+	return err
 }

@@ -11,7 +11,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
-func cleanupStaleEnvironments(ctx context.Context, k8sClient *k8s.Client, crdNamespace string) error {
+func cleanupStaleEnvironments(ctx context.Context, k8sClient *k8s.Client, environmentNamespace, crdNamespace string) error {
 	containerEnvs, err := k8sClient.ListContainerEnvironments(ctx, crdNamespace, "")
 	if err != nil {
 		return err
@@ -24,9 +24,7 @@ func cleanupStaleEnvironments(ctx context.Context, k8sClient *k8s.Client, crdNam
 	claimedNamespaces := map[string]struct{}{}
 	for i := range containerEnvs.Items {
 		env := &containerEnvs.Items[i]
-		if ns := strings.TrimSpace(env.Status.Namespace); ns != "" {
-			claimedNamespaces[ns] = struct{}{}
-		}
+		claimEnvironmentNamespace(claimedNamespaces, environmentNamespace, env.Spec.UserRef, env.Name, env.Status.Namespace)
 		if staleCommonEnvironment(k8sClient, &env.Status) {
 			slog.Info("cleanup deleting stale container environment", "name", env.Name, "namespace", env.Status.Namespace)
 			_, _ = k8sClient.UpdateContainerEnvironmentStatus(ctx, crdNamespace, markContainerDestroyed(env))
@@ -34,9 +32,7 @@ func cleanupStaleEnvironments(ctx context.Context, k8sClient *k8s.Client, crdNam
 	}
 	for i := range vclusterEnvs.Items {
 		env := &vclusterEnvs.Items[i]
-		if ns := strings.TrimSpace(env.Status.Namespace); ns != "" {
-			claimedNamespaces[ns] = struct{}{}
-		}
+		claimEnvironmentNamespace(claimedNamespaces, environmentNamespace, env.Spec.UserRef, env.Name, env.Status.Namespace)
 		if staleCommonEnvironment(k8sClient, &env.Status.CommonEnvironmentStatus) {
 			slog.Info("cleanup deleting stale vcluster environment", "name", env.Name, "namespace", env.Status.Namespace)
 			_, _ = k8sClient.UpdateVClusterEnvironmentStatus(ctx, crdNamespace, markVClusterDestroyed(env))
@@ -59,6 +55,19 @@ func cleanupStaleEnvironments(ctx context.Context, k8sClient *k8s.Client, crdNam
 		_ = k8sClient.DeleteNamespace(name)
 	}
 	return nil
+}
+
+// claimEnvironmentNamespace keeps a namespace owned by an existing CRD even
+// before the first reconcile has persisted its status. The runtime namespace,
+// user ref, and Environment name deterministically define that ownership.
+func claimEnvironmentNamespace(claimed map[string]struct{}, environmentNamespace, userRef, environmentID, statusNamespace string) {
+	if namespace := strings.TrimSpace(statusNamespace); namespace != "" {
+		claimed[namespace] = struct{}{}
+	}
+	if strings.TrimSpace(environmentNamespace) == "" || strings.TrimSpace(userRef) == "" || strings.TrimSpace(environmentID) == "" {
+		return
+	}
+	claimed[k8s.EnvironmentNamespace(environmentNamespace, userRef, environmentID)] = struct{}{}
 }
 
 func staleCommonEnvironment(k8sClient *k8s.Client, status *breakfixv1.CommonEnvironmentStatus) bool {

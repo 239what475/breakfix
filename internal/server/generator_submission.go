@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
@@ -14,6 +16,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const generatorWorkspaceCleanupTimeout = 2 * time.Minute
 
 // InternalGeneratorSubmitCandidate is the short, deterministic handoff after
 // a Judge pass. It validates the exact archive, persists it once, and
@@ -50,7 +54,25 @@ func (h *Handler) InternalGeneratorSubmitCandidate(c *gin.Context) {
 		h.writeInternalGeneratorError(c, err)
 		return
 	}
+	// Finalization invalidates the Worker lease, so cleanup must not inherit the
+	// request context that the Worker cancels after receiving this response.
+	h.scheduleGeneratorWorkspaceCleanup(claim.Run.ID)
 	c.JSON(http.StatusOK, generator.Submission{ID: submissionID, VerifyTask: task.Name})
+}
+
+func (h *Handler) scheduleGeneratorWorkspaceCleanup(runID string) {
+	if h.generatorWorkspace == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), generatorWorkspaceCleanupTimeout)
+		defer cancel()
+		// A cleanup failure remains durable in generator_workspaces and the
+		// Server cleanup loop retries it without involving the Generator Run.
+		if err := h.generatorWorkspace.Cleanup(ctx, runID); err != nil {
+			slog.Warn("clean generator workspace", "run_id", runID, "err", err)
+		}
+	}()
 }
 
 func validateGeneratorCandidateArchive(archive []byte) error {

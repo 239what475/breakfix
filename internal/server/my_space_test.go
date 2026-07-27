@@ -83,7 +83,7 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	if space.Summary.InProgressEnvironmentCount != 1 || space.Summary.EnvironmentQuota.Occupied != 1 {
 		t.Fatalf("environment summary = %#v", space.Summary)
 	}
-	if len(space.ActiveEnvironments) != 1 || space.ActiveEnvironments[0].Challenge.Title != "Demo" || space.ActiveEnvironments[0].CheckpointProgress.Passed == nil || *space.ActiveEnvironments[0].CheckpointProgress.Passed != 1 {
+	if len(space.ActiveEnvironments) != 1 || space.ActiveEnvironments[0].Challenge.Title != "Demo" || space.ActiveEnvironments[0].CheckpointProgress.Passed != 1 {
 		t.Fatalf("active environments = %#v", space.ActiveEnvironments)
 	}
 	if len(space.RecentLearning) != 1 || space.RecentLearning[0].Challenge.Id != "demo" || space.RecentLearning[0].CompletedAt == nil || space.RecentLearning[0].LearningSeconds != 75 {
@@ -163,7 +163,7 @@ func TestMySpaceLearningFiltersCatalogAndUsesStableCursor(t *testing.T) {
 		t.Fatalf("second page = %#v", second)
 	}
 
-	runtime := api.GetMySpaceLearningParamsRuntimeVcluster
+	runtime := api.Vcluster
 	filter, err := mySpaceLearningFilter(api.GetMySpaceLearningParams{Runtime: &runtime})
 	if err != nil {
 		t.Fatal(err)

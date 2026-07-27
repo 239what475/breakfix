@@ -71,6 +71,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
 	stdinR, stdinW := io.Pipe()
+	output := &wsWriter{conn: conn}
 
 	// Read from WebSocket → pipe to PTY stdin
 	go func() {
@@ -107,7 +108,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
 		go keepEnvironmentLeaseAlive(r.Context(), runtime, env.Name, idleTTL, stopLease)
 	}
-	err = k8sClient.ExecPTY(stdinR, &wsWriter{conn: conn}, &wsWriter{conn: conn}, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
+	err = k8sClient.ExecPTY(stdinR, output, output, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
 
 	if err != nil {
 		slog.Debug("pty session ended", "err", err)
@@ -236,15 +237,33 @@ func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeA
 }
 
 type wsWriter struct {
-	conn *websocket.Conn
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	readyOnce sync.Once
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
-	msg, _ := json.Marshal(wsMsg{Type: "data", Data: string(p)})
-	if err := w.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var readyErr error
+	w.readyOnce.Do(func() {
+		readyErr = w.writeLocked(wsMsg{Type: "ready"})
+	})
+	if readyErr != nil {
+		return 0, readyErr
+	}
+	if err := w.writeLocked(wsMsg{Type: "data", Data: string(p)}); err != nil {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+func (w *wsWriter) writeLocked(message wsMsg) error {
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+	return w.conn.WriteMessage(websocket.TextMessage, payload)
 }
 
 // ensure io import

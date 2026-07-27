@@ -24,13 +24,17 @@ const verifyTaskFinalizer = "breakfix.dev/verify-task-cleanup"
 // separate, explicit Server operation over a successful immutable task.
 type VerifyTaskReconciler struct {
 	client.Client
-	K8s              *k8s.Client
-	RegistryAddr     string
-	RegistryInsecure bool
-	CRDNamespace     string
-	InternalAPIKey   string
-	ServerHost       string
-	ServerPort       int
+	K8s                 *k8s.Client
+	RegistryAddr        string
+	RegistryInsecure    bool
+	RegistryUsername    string
+	RegistryPassword    string
+	RegistryPullSecret  string
+	RegistryWriteSecret string
+	CRDNamespace        string
+	InternalAPIKey      string
+	ServerHost          string
+	ServerPort          int
 }
 
 func (r *VerifyTaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -132,7 +136,9 @@ func (r *VerifyTaskReconciler) createVerifyJob(ctx context.Context, task *breakf
 		Privileged:         &privileged,
 		BackoffLimit:       &backoffLimit,
 		Env:                env,
+		EnvSecretName:      r.RegistryWriteSecret,
 		ImagePullPolicy:    corev1.PullAlways,
+		ImagePullSecrets:   []corev1.LocalObjectReference{{Name: r.RegistryPullSecret}},
 		Labels: map[string]string{
 			"breakfix.dev/verify-task": task.Name,
 		},
@@ -212,7 +218,10 @@ func (r *VerifyTaskReconciler) cleanupTask(ctx context.Context, task *breakfixv1
 	}
 
 	if task.Status.Phase == breakfixv1.VerifyTaskFailed && strings.TrimSpace(task.Status.TempImage) != "" {
-		if err := registry.DeleteImage(ctx, task.Status.TempImage, r.RegistryInsecure); err != nil {
+		if err := (registry.Client{
+			Insecure:    r.RegistryInsecure,
+			Credentials: registry.Credentials{Username: r.RegistryUsername, Password: r.RegistryPassword},
+		}).DeleteImage(ctx, task.Status.TempImage); err != nil {
 			return ctrl.Result{}, fmt.Errorf("delete failed verification image: %w", err)
 		}
 	}

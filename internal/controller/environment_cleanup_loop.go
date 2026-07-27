@@ -12,14 +12,16 @@ import (
 const cleanupSweepInterval = 2 * time.Minute
 
 type cleanupLoop struct {
-	k8sClient    *k8s.Client
-	crdNamespace string
+	k8sClient            *k8s.Client
+	environmentNamespace string
+	crdNamespace         string
 }
 
-func startEnvironmentCleanupLoop(mgr ctrl.Manager, k8sClient *k8s.Client, crdNamespace string) error {
+func startEnvironmentCleanupLoop(mgr ctrl.Manager, k8sClient *k8s.Client, environmentNamespace, crdNamespace string) error {
 	return mgr.Add(&cleanupLoop{
-		k8sClient:    k8sClient,
-		crdNamespace: crdNamespace,
+		k8sClient:            k8sClient,
+		environmentNamespace: environmentNamespace,
+		crdNamespace:         crdNamespace,
 	})
 }
 
@@ -28,7 +30,7 @@ func (l *cleanupLoop) Start(runCtx context.Context) error {
 	defer ticker.Stop()
 
 	sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
-	if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
+	if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.environmentNamespace, l.crdNamespace); err != nil {
 		cancel()
 		return err
 	}
@@ -40,7 +42,7 @@ func (l *cleanupLoop) Start(runCtx context.Context) error {
 			return nil
 		case <-ticker.C:
 			sweepCtx, cancel := context.WithTimeout(runCtx, 30*time.Second)
-			if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.crdNamespace); err != nil {
+			if err := cleanupStaleEnvironments(sweepCtx, l.k8sClient, l.environmentNamespace, l.crdNamespace); err != nil {
 				slog.Error("cleanup sweep failed", "err", err)
 			}
 			cancel()

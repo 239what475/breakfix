@@ -313,10 +313,15 @@ export type AuthoringMessageRequest = {
 export type AuthoringSession = {
     id: string;
     state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    /**
+     * Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
+     */
+    authoring_turn_active: boolean;
     intent_revision: number;
     visible_revision: number;
     generator_run_id?: string;
     verify_task_id?: string;
+    publish_challenge_id?: string;
     updated_at: string;
     intent: AuthoringPlan;
     artifact?: AuthoringArtifact;

@@ -10,13 +10,15 @@ agent_database_url: ${BREAKFIX_AGENT_DATABASE_URL}
 agent_database_role: breakfix_agent
 kubeconfig: ""
 
-registry_addr: registry.example.invalid/breakfix
+registry_addr: registry.breakfix.internal/breakfix
 registry_insecure: false
-k8s_base_image: registry.example.invalid/breakfix/breakfix-k8s-base:latest
+registry_pull_secret: breakfix-registry-pull
+registry_write_secret: breakfix-registry-write
+k8s_base_image: registry.breakfix.internal/breakfix/breakfix-k8s-base:latest
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh
-vcluster_chart_version: ""
+vcluster_chart_version: "0.35.1"
 
 server_host: breakfix-server
 namespace: breakfix
@@ -39,4 +41,3 @@ opensandbox:
   namespace: ${BREAKFIX_OPENSANDBOX_NAMESPACE}
   workspace_image: ubuntu:22.04
   workspace_storage: 5Gi
-  workspace_timeout: 1h

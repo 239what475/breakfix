@@ -5,6 +5,7 @@ namespace: breakfix-system
 resources:
   - namespace.yaml
   - rbac.yaml
+  - registry.yaml
   - postgresql.yaml
   - server.yaml
   - controller.yaml

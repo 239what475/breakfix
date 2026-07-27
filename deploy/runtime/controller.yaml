@@ -37,6 +37,16 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_insecure
+            - name: BREAKFIX_REGISTRY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_username
+            - name: BREAKFIX_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_password
             - name: HOME
               value: /tmp
           volumeMounts:

@@ -9,15 +9,43 @@ import (
 	"time"
 )
 
+// Credentials are the Registry V2 basic-auth credentials held only by
+// platform control-plane processes. They never describe an image pull secret.
+type Credentials struct {
+	Username string
+	Password string
+}
+
+func (c Credentials) Validate() error {
+	if (strings.TrimSpace(c.Username) == "") != (strings.TrimSpace(c.Password) == "") {
+		return fmt.Errorf("registry username and password must be set together")
+	}
+	return nil
+}
+
+func (c Credentials) apply(request *http.Request) {
+	if strings.TrimSpace(c.Username) != "" {
+		request.SetBasicAuth(c.Username, c.Password)
+	}
+}
+
+type Client struct {
+	Insecure    bool
+	Credentials Credentials
+}
+
 // DeleteImage removes an image by digest. Registry V2 does not reliably
 // support deleting a tag directly, so resolve the tag's manifest first.
-func DeleteImage(ctx context.Context, imageName string, insecure bool) error {
+func (c Client) DeleteImage(ctx context.Context, imageName string) error {
+	if err := c.Credentials.Validate(); err != nil {
+		return err
+	}
 	registry, repository, reference, err := imageReference(imageName)
 	if err != nil {
 		return err
 	}
 	scheme := "https"
-	if insecure {
+	if c.Insecure {
 		scheme = "http"
 	}
 	manifestURL := scheme + "://" + registry + "/v2/" + repositoryPath(repository) + "/manifests/" + url.PathEscape(reference)
@@ -28,6 +56,7 @@ func DeleteImage(ctx context.Context, imageName string, insecure bool) error {
 		return fmt.Errorf("create manifest request: %w", err)
 	}
 	head.Header.Set("Accept", "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json")
+	c.Credentials.apply(head)
 	response, err := client.Do(head)
 	if err != nil {
 		return fmt.Errorf("resolve image manifest: %w", err)
@@ -48,6 +77,7 @@ func DeleteImage(ctx context.Context, imageName string, insecure bool) error {
 	if err != nil {
 		return fmt.Errorf("create image delete request: %w", err)
 	}
+	c.Credentials.apply(remove)
 	response, err = client.Do(remove)
 	if err != nil {
 		return fmt.Errorf("delete image manifest: %w", err)

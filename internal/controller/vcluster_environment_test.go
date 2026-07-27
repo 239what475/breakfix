@@ -1,10 +1,58 @@
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+func TestVClusterReleaseNameRespectsHelmLimit(t *testing.T) {
+	first := vclusterReleaseName(strings.Repeat("verify-env-", 12))
+	second := vclusterReleaseName(strings.Repeat("verify-env-", 11) + "other")
+	if len(first) > maxVClusterReleaseNameLength {
+		t.Fatalf("vclusterReleaseName() length = %d, want <= %d: %q", len(first), maxVClusterReleaseNameLength, first)
+	}
+	if first == second {
+		t.Fatalf("vclusterReleaseName() collided: %q", first)
+	}
+}
+
+func TestRewriteVClusterKubeconfigTargetsVirtualClusterWithoutHostNamespace(t *testing.T) {
+	raw := []byte(`apiVersion: v1
+clusters:
+- cluster:
+    server: https://localhost:8443
+  name: vcluster
+contexts:
+- context:
+    cluster: vcluster
+    namespace: breakfix-u-author-environment
+    user: vcluster
+  name: vcluster
+current-context: vcluster
+kind: Config
+users:
+- name: vcluster
+  user:
+    token: token
+`)
+	rewritten, err := rewriteVClusterKubeconfig(raw, "https://10.96.0.10:443")
+	if err != nil {
+		t.Fatalf("rewriteVClusterKubeconfig: %v", err)
+	}
+	cfg, err := clientcmd.Load(rewritten)
+	if err != nil {
+		t.Fatalf("load rewritten kubeconfig: %v", err)
+	}
+	if got := cfg.Clusters["vcluster"].Server; got != "https://10.96.0.10:443" {
+		t.Fatalf("cluster server = %q, want rewritten service address", got)
+	}
+	if got := cfg.Contexts["vcluster"].Namespace; got != "default" {
+		t.Fatalf("context namespace = %q, want virtual cluster default namespace", got)
+	}
+}
 
 func TestResolveVClusterRuntimeAppliesProfileAndOverrides(t *testing.T) {
 	runtime, err := resolveVClusterRuntime(breakfixv1.VClusterRuntimeSpec{

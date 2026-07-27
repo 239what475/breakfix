@@ -52,29 +52,27 @@ func NewManager(repo Repository, pvcs PVCManager, sandboxes SandboxManager, conf
 	}, nil
 }
 
-// Ensure creates or resumes the one workspace belonging to a Generator
-// Session. A timeout/unknown remote create response intentionally leaves a
-// pending record; cleanup will delete its PVC and the provider TTL reclaims
-// any unrecorded Sandbox without metadata adoption.
-func (m *Manager) Ensure(ctx context.Context, generatorSessionID string) (*Record, error) {
+// Ensure creates or resumes the one workspace belonging to a Generator Run.
+// A pending record makes PVC cleanup durable if provisioning cannot complete.
+func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, error) {
 	if m == nil {
 		return nil, errors.New("workspace manager is not configured")
 	}
-	generatorSessionID = strings.TrimSpace(generatorSessionID)
-	if generatorSessionID == "" {
-		return nil, errors.New("generator session id is required")
+	generatorRunID = strings.TrimSpace(generatorRunID)
+	if generatorRunID == "" {
+		return nil, errors.New("generator run id is required")
 	}
-	record, err := m.repo.GetGeneratorWorkspace(ctx, generatorSessionID)
+	record, err := m.repo.GetGeneratorWorkspace(ctx, generatorRunID)
 	if errors.Is(err, ErrNotFound) {
 		now := m.now()
 		record, err = m.repo.CreateGeneratorWorkspace(ctx, Record{
-			GeneratorSessionID: generatorSessionID,
-			Namespace:          m.namespace,
-			PVCName:            NewPVCName(generatorSessionID),
-			State:              StatePending,
-			ProvisionDeadline:  now.Add(m.provisionTimeout),
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			GeneratorRunID:    generatorRunID,
+			Namespace:         m.namespace,
+			PVCName:           NewPVCName(generatorRunID),
+			State:             StatePending,
+			ProvisionDeadline: now.Add(m.provisionTimeout),
+			CreatedAt:         now,
+			UpdatedAt:         now,
 		})
 	}
 	if err != nil {
@@ -83,7 +81,7 @@ func (m *Manager) Ensure(ctx context.Context, generatorSessionID string) (*Recor
 	if record.State == StateDeleted || record.State == StateDeleting {
 		return nil, fmt.Errorf("generator workspace is %s", record.State)
 	}
-	if err := m.pvcs.EnsureWorkspacePVC(ctx, record.Namespace, record.PVCName, record.GeneratorSessionID, m.storage); err != nil {
+	if err := m.pvcs.EnsureWorkspacePVC(ctx, record.Namespace, record.PVCName, record.GeneratorRunID, m.storage); err != nil {
 		return nil, fmt.Errorf("ensure generator workspace pvc: %w", err)
 	}
 	if record.State == StateActive && strings.TrimSpace(record.SandboxID) != "" {
@@ -93,18 +91,18 @@ func (m *Manager) Ensure(ctx context.Context, generatorSessionID string) (*Recor
 	if err != nil {
 		return nil, fmt.Errorf("create generator sandbox: %w", err)
 	}
-	if err := m.repo.ActivateGeneratorWorkspace(ctx, record.GeneratorSessionID, sandboxID, m.now()); err != nil {
+	if err := m.repo.ActivateGeneratorWorkspace(ctx, record.GeneratorRunID, sandboxID, m.now()); err != nil {
 		_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
 		return nil, fmt.Errorf("record generator sandbox: %w", err)
 	}
-	return m.repo.GetGeneratorWorkspace(ctx, record.GeneratorSessionID)
+	return m.repo.GetGeneratorWorkspace(ctx, record.GeneratorRunID)
 }
 
-func (m *Manager) Cleanup(ctx context.Context, generatorSessionID string) error {
+func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
 	if m == nil {
 		return errors.New("workspace manager is not configured")
 	}
-	record, err := m.repo.BeginGeneratorWorkspaceCleanup(ctx, generatorSessionID, m.now())
+	record, err := m.repo.BeginGeneratorWorkspaceCleanup(ctx, generatorRunID, m.now())
 	if errors.Is(err, ErrNotFound) || (err == nil && record.State == StateDeleted) {
 		return nil
 	}
@@ -119,7 +117,7 @@ func (m *Manager) Cleanup(ctx context.Context, generatorSessionID string) error 
 	if err := m.pvcs.DeleteWorkspacePVC(ctx, record.Namespace, record.PVCName); err != nil {
 		return fmt.Errorf("delete generator workspace pvc: %w", err)
 	}
-	return m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.GeneratorSessionID, m.now())
+	return m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.GeneratorRunID, m.now())
 }
 
 func (m *Manager) CleanupDue(ctx context.Context) error {
@@ -134,8 +132,12 @@ func (m *Manager) CleanupDue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, record := range append(pending, deleting...) {
-		if err := m.Cleanup(ctx, record.GeneratorSessionID); err != nil {
+	terminal, err := m.repo.ListTerminalGeneratorWorkspaces(ctx)
+	if err != nil {
+		return err
+	}
+	for _, record := range append(append(pending, deleting...), terminal...) {
+		if err := m.Cleanup(ctx, record.GeneratorRunID); err != nil {
 			return err
 		}
 	}

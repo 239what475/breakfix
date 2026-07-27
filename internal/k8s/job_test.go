@@ -16,6 +16,7 @@ func TestNewJobAppliesVerifierExecutionBoundary(t *testing.T) {
 		Privileged:         &privileged,
 		BackoffLimit:       &backoffLimit,
 		Env:                map[string]string{"Z": "last", "A": "first"},
+		ImagePullSecrets:   []corev1.LocalObjectReference{{Name: "breakfix-registry-pull"}},
 	})
 
 	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 2 {
@@ -39,5 +40,8 @@ func TestNewJobAppliesVerifierExecutionBoundary(t *testing.T) {
 	}
 	if got := pod.Containers[0].Env; len(got) != 2 || got[0].Name != "A" || got[1].Name != "Z" {
 		t.Fatalf("env = %#v, want sorted keys", got)
+	}
+	if got := pod.ImagePullSecrets; len(got) != 1 || got[0].Name != "breakfix-registry-pull" {
+		t.Fatalf("image pull secrets = %#v", got)
 	}
 }

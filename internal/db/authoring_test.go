@@ -112,6 +112,13 @@ func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
 	if secondRun.SessionID != updated.GeneratorSessionID {
 		t.Fatalf("second run session = %q, want %q", secondRun.SessionID, updated.GeneratorSessionID)
 	}
+	replayed, replayedRun, err := database.StartGeneratorRun(ctx, sessionID, userID, second.Number, generatorCreateRun("generator-second-replayed", sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: second.Number, SeedSubmissionID: artifact.SubmissionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.GeneratorRunID != secondRun.ID || replayedRun.ID != secondRun.ID {
+		t.Fatalf("replayed revision created a duplicate run: session=%#v run=%#v", replayed, replayedRun)
+	}
 }
 
 func TestGeneratorInfrastructureFailureDoesNotStartRepairRun(t *testing.T) {

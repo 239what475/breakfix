@@ -1,17 +1,17 @@
 # 部署与运行
 
-本项目运行三个独立二进制：`breakfix-server`、`breakfix-controller` 和 `breakfix-agent-worker`。它们职责和运行过程独立；运行时使用 PostgreSQL，不支持 SQLite 回退。配置键与默认值以 [`config/breakfix.example.yaml`](../../config/breakfix.example.yaml) 为准；构建、开发和远程部署命令以 [`Makefile`](../../Makefile) 为准。
+本项目运行 Server、Controller、Agent Worker、PostgreSQL 与 OCI Registry 五个核心组件。前三者是独立 Deployment，PostgreSQL 使用 `StatefulSet`，Registry 使用单副本 `Deployment` 和独立 PVC；运行时使用 PostgreSQL，不支持 SQLite 回退。配置键与默认值以 [`config/breakfix.example.yaml`](../../config/breakfix.example.yaml) 为准；构建、开发和集群部署命令以 [`Makefile`](../../Makefile) 为准。
 
 ## 本地开发
 
-前置条件：Docker、Kind、kubectl、Go、Node.js、PostgreSQL，以及可用的 `vcluster` CLI。需要生成题目时，还需要已安装的 OpenSandbox native Kubernetes provider 和其 lifecycle key。默认 Kind 集群名为 `breakfix-dev`。
+前置条件：Docker、Kind、kubectl、Go、Node.js、PostgreSQL，以及可用的 `vcluster` CLI。需要生成题目时，还需要已安装的 OpenSandbox native Kubernetes provider 和其 lifecycle key。Breakfix 使用 OpenSandbox 的 `ManualCleanup` Sandbox：每个 Generator Run 由 Server 显式删除 Sandbox 及其 BYO PVC，不依赖 provider 的工作区超时。验证 Registry 必须支持 Docker Registry V2 的 manifest DELETE；失败的 `VerifyTask` 必须删除临时镜像，不能将该清理错误忽略为成功。默认 Kind 集群名为 `breakfix-dev`。
 
 ```bash
 cp config/breakfix.example.yaml config/breakfix.yaml
 make dev
 ```
 
-在运行 `make dev` 前，为配置中的 `database_url` 和 `agent_database_url` 提供可访问的 PostgreSQL DSN。`make dev` 会准备本地 registry、数据目录、CRD、RBAC 和题目镜像，构建三个二进制并依次启动 Controller、Server 与 Agent Worker。Web UI 位于 `http://localhost:9090`；Controller 健康检查位于 `http://localhost:8081/healthz`。
+在运行 `make dev` 前，为配置中的 `database_url` 和 `agent_database_url` 提供可访问的 PostgreSQL DSN。`make dev` 会准备本地匿名 Registry、空的 Docker pull Secret、数据目录、CRD、RBAC 和题目镜像，构建三个二进制并依次启动 Controller、Server 与 Agent Worker。Web UI 位于 `http://localhost:9090`；Controller 健康检查位于 `http://localhost:8081/healthz`。
 
 常用迭代命令：
 
@@ -24,7 +24,12 @@ make dev-reset        # 清理本地运行数据，保留受版本控制题目
 make docker-challenge NAME=<directory>
 ```
 
+`make dev-registry` 创建的本地 `registry:2` 会设置 `REGISTRY_STORAGE_DELETE_ENABLED=true`。若已有旧 registry 未启用该选项，命令会保留其数据卷并重建容器；不要以关闭 manifest DELETE 的 registry 运行 verifier。
+
 不要提交 `config/breakfix.yaml` 或 `config/breakfix.local.yaml`。它们包含环境地址、密钥和本地路径；仓库只跟踪示例配置。
+
+需要以本地代码接管已部署集群的 Server、Controller 或 Agent Worker 时，使用
+[Telepresence 本地调试](telepresence.md)，不要混用 `make dev-*` 与同一集群运行时。
 
 ## 集群准备
 
@@ -38,49 +43,30 @@ make dev-rbac
 
 生产环境应从 [`deploy/crd/`](../../deploy/crd/) 和 [`deploy/rbac/controller.yaml`](../../deploy/rbac/controller.yaml) 应用同样的资源。`deploy/crd/` 是由 Go 类型生成并受 CI 校验的部署契约，不能手改。
 
-## 主机进程
+## 集群部署
 
-Server 需要可写的 `data_dir`，其中保存证书材料、发布题目、作者 artifact 和提交归档。PostgreSQL 保存账户、领域状态与 durable Agent Runtime 记录。Controller 只需读取配置和 kubeconfig，不需要也不应拥有 Server 数据目录或 PostgreSQL 凭据；Agent Worker 只获得 `agent_*` 数据库角色、模型 key 和 Server 内部密钥。
+Server 需要自己的 RWO PVC，保存证书材料、发布题目、作者 artifact 和提交归档。PostgreSQL 保存账户、领域状态与 durable Agent Runtime 记录。Controller 没有 PostgreSQL 凭据；Agent Worker 只有 `agent_*` 数据库角色、模型 key 和 Server 内部密钥。Server 是唯一持有 OpenSandbox lifecycle key 的组件。
 
-在 systemd 中分别运行两个服务，并为它们传递同一个运行时配置路径：
-
-```ini
-# breakfix-server.service
-ExecStart=/usr/local/bin/breakfix-server -config /var/lib/breakfix/breakfix.yaml
-
-# breakfix-controller.service
-ExecStart=/usr/local/bin/breakfix-controller -config /var/lib/breakfix/breakfix.yaml
-
-# breakfix-agent-worker.service
-ExecStart=/usr/local/bin/breakfix-agent-worker -config /var/lib/breakfix/breakfix.yaml
-```
-
-为三个服务设置重启策略，并确保只有 Controller 运行用户可以读取 kubeconfig。Server 对外暴露 HTTP/WebSocket；Controller 只暴露配置的 health/ready 端口，不应作为公网入口；Agent Worker 不暴露公网端口。
-
-## 构建与远程更新
-
-`make build` 输出 Linux Server 和 Controller 二进制到 `dist/`。Agent Worker 的容器镜像由 [`deploy/images/agent-worker/Dockerfile`](../../deploy/images/agent-worker/Dockerfile) 构建；完整集群安装使用 [`deploy/runtime/`](../../deploy/runtime/)。远程更新依赖本地 `.breakfix-server` 或 `SERVER=<host>`：
+完整安装步骤、Registry TLS/认证 Secret、OpenSandbox 前置条件和 Kustomize 入口见 [`deploy/runtime/README.md`](../../deploy/runtime/README.md)。构建镜像时，控制面镜像与 verifier 镜像可使用不同 Registry，但 verifier 仓库必须等于运行时 `registry_addr`：
 
 ```bash
-make deploy-server
-make deploy-controller
-make deploy-catalog
-make deploy-images
-make deploy
+make runtime-push TARGETOS=linux TARGETARCH=amd64 \
+  RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev \
+  VERIFIER_IMAGE_REPOSITORY=registry.breakfix.internal/breakfix
+kubectl apply -k .
 ```
 
-`deploy-catalog` 将本地 `data/challenges` 原子替换到远端 `data_dir/challenges`。`deploy-images` 推送基础镜像和发布题镜像；registry 地址和是否使用不安全 registry 从配置读取。更新题目目录和镜像时应保持二者版本一致。
+Controller 为每个 `VerifyTask` 从 `registry_addr` 拉取 `breakfix-verifier:latest`；基础镜像、k8s 基础镜像和 verifier 必须在创建第一个 `VerifyTask` 前推送到该 Registry。Server 对外暴露 HTTP/WebSocket；Controller 只暴露 health/ready 端口，不作为公网入口；Agent Worker 不暴露端口。
 
 ## 运行检查
 
 ```bash
-make status
-make logs
-curl -fsS http://localhost:9090/api/openapi.json
-curl -fsS http://localhost:8081/healthz
+kubectl -n breakfix-system get deploy,statefulset,pods
+kubectl -n breakfix-system logs deploy/breakfix-server -f
+kubectl -n breakfix-system logs deploy/breakfix-controller -f
 ```
 
-部署后至少验证注册、登录、container 题终端、vcluster 题环境和检查点自动完成。真实恢复覆盖可通过 `make e2e-server-recovery` 运行；完整命令和开关位于 [`test/`](../../test/) 项目中。
+部署后至少运行 `make e2e` 验证页面与认证流程。真实运行时、恢复和 Agent 验收分开显式执行：`make e2e-runtime-verify` 验证固定 container/vcluster artifact 的完整 VerifyTask，`make e2e-runtime-browser` 验证固定题目的终端和检查点，`make e2e-server-recovery` 验证恢复行为。模型相关的 `make e2e-agent-assistant`、`make e2e-agent-container` 和 `make e2e-agent-vcluster` 只用于人工或发布前验收，不是日常 CI。完整策略见 [`E2E.md`](../../E2E.md)。
 
 ## 生成与发布前检查
 
@@ -92,4 +78,4 @@ npm run build --prefix frontend
 npm run test:e2e --prefix test -- --list
 ```
 
-这些检查分别覆盖 CRD 生成物、OpenAPI 前端类型、Go 包、前端构建和 Playwright 发现。真实环境 E2E 需要显式环境变量，避免普通浏览器套件意外创建集群资源。
+这些检查分别覆盖 CRD 生成物、OpenAPI 的 Go/前端生成物、Go 包、前端构建和 Playwright 发现。真实环境 E2E 需要显式环境变量，避免普通浏览器套件意外创建集群资源。

@@ -31,11 +31,34 @@ func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 	defer server.Close()
 
 	registry := strings.TrimPrefix(server.URL, "http://")
-	if err := DeleteImage(context.Background(), registry+"/team/challenge:latest", true); err != nil {
+	if err := (Client{Insecure: true}).DeleteImage(context.Background(), registry+"/team/challenge:latest"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.Join(requests, ", "), "HEAD /v2/team/challenge/manifests/latest, DELETE /v2/team/challenge/manifests/sha256:verified"; got != want {
 		t.Fatalf("registry requests = %q, want %q", got, want)
+	}
+}
+
+func TestDeleteImageUsesRegistryCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		username, password, ok := request.BasicAuth()
+		if !ok || username != "controller" || password != "secret" {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if request.Method == http.MethodHead {
+			writer.Header().Set("Docker-Content-Digest", "sha256:verified")
+			writer.WriteHeader(http.StatusOK)
+			return
+		}
+		writer.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	address := strings.TrimPrefix(server.URL, "http://")
+	client := Client{Insecure: true, Credentials: Credentials{Username: "controller", Password: "secret"}}
+	if err := client.DeleteImage(context.Background(), address+"/team/challenge:latest"); err != nil {
+		t.Fatal(err)
 	}
 }
 

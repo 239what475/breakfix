@@ -23,7 +23,6 @@ type Client struct {
 	connection sdk.ConnectionConfig
 	lifecycle  *sdk.LifecycleClient
 	image      string
-	timeout    int
 }
 
 func New(cfg config.OpenSandboxConfig) (*Client, error) {
@@ -32,14 +31,6 @@ func New(cfg config.OpenSandboxConfig) (*Client, error) {
 	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, errors.New("opensandbox lifecycle API key is required")
-	}
-	timeout, err := cfg.Timeout()
-	if err != nil {
-		return nil, err
-	}
-	seconds := int(timeout.Seconds())
-	if seconds < 60 {
-		return nil, errors.New("opensandbox workspace_timeout must be at least 60s")
 	}
 	connection := sdk.ConnectionConfig{
 		Domain:         strings.TrimRight(cfg.BaseURL, "/"),
@@ -53,7 +44,6 @@ func New(cfg config.OpenSandboxConfig) (*Client, error) {
 		connection: connection,
 		lifecycle:  sdk.NewLifecycleClient(connection.GetBaseURL()+"/v1", connection.GetAPIKey(), sdk.WithTimeout(30*time.Second)),
 		image:      strings.TrimSpace(cfg.WorkspaceImage),
-		timeout:    seconds,
 	}, nil
 }
 
@@ -66,7 +56,7 @@ func (c *Client) CreateWorkspace(ctx context.Context, pvcName string) (string, e
 		Image:          c.image,
 		Entrypoint:     []string{"sh", "-c", "while true; do sleep 3600; done"},
 		ResourceLimits: sdk.ResourceLimits{"cpu": "1", "memory": "1Gi"},
-		TimeoutSeconds: &c.timeout,
+		ManualCleanup:  true,
 		ReadyTimeout:   2 * time.Minute,
 		NetworkPolicy:  &sdk.NetworkPolicy{DefaultAction: "deny"},
 		Volumes: []sdk.Volume{{
@@ -116,8 +106,16 @@ func (c *Client) uploadFile(ctx context.Context, sandboxID, path string, content
 	}
 	return sandbox.UploadFile(ctx, strings.NewReader(string(content)), sdk.UploadFileOptions{
 		FileName: "content",
-		Metadata: sdk.FileMetadata{Path: path, Mode: mode},
+		Metadata: sdk.FileMetadata{Path: path, Mode: providerFileMode(mode)},
 	})
+}
+
+// providerFileMode converts Go's numeric permission bits to the OpenSandbox
+// API notation. The provider accepts decimal JSON numbers whose digits denote
+// an octal Unix mode, for example 644 rather than Go's decimal value 420.
+func providerFileMode(mode int) int {
+	mode &= 0o777
+	return ((mode>>6)&0o7)*100 + ((mode>>3)&0o7)*10 + (mode & 0o7)
 }
 
 // ResetWorkspace atomically replaces the sandbox's visible workspace with the
@@ -203,6 +201,7 @@ func IsNotFound(err error) bool {
 
 func WorkspacePath(path string) string {
 	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "./")
 	if path == "" || path == "." {
 		return workspaceMountPath
 	}
@@ -211,6 +210,7 @@ func WorkspacePath(path string) string {
 
 func ValidateWorkspacePath(path string) error {
 	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "./")
 	if path == "" || strings.HasPrefix(path, "/") || strings.Contains(path, "\\") {
 		return errors.New("workspace path must be a non-empty relative slash path")
 	}

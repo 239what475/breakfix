@@ -23,6 +23,7 @@ type CreateJobOpts struct {
 	Privileged            *bool
 	Labels                map[string]string
 	OwnerReferences       []metav1.OwnerReference
+	ImagePullSecrets      []corev1.LocalObjectReference
 }
 
 // CreateJob creates a K8s Job. Returns the created Job name.
@@ -123,6 +124,7 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 						EnvFrom:         envFrom,
 					}},
 					ServiceAccountName: opts.ServiceAccountName,
+					ImagePullSecrets:   append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
 					RestartPolicy:      corev1.RestartPolicyNever,
 				},
 			},

@@ -4,9 +4,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e": "playwright test -c playwright.config.ts",
+    "test:e2e:headed": "playwright test -c playwright.config.ts --headed",
+    "test:e2e:debug": "playwright test -c playwright.config.ts --debug",
+    "test:runtime:verify": "RUN_RUNTIME_E2E=1 playwright test -c playwright.runtime.config.ts verifytask.runtime.spec.ts",
+    "test:runtime:browser": "RUN_RUNTIME_E2E=1 playwright test -c playwright.runtime.config.ts workbench.runtime.spec.ts",
+    "test:agent-live:assistant": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts assistant.live.spec.ts",
+    "test:agent-live:soak": "RUN_AGENT_SOAK_E2E=1 playwright test -c playwright.agent-live.config.ts assistant.soak.live.spec.ts",
+    "test:agent-live:container": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts authoring.container.live.spec.ts",
+    "test:agent-live:vcluster": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts authoring.vcluster.live.spec.ts",
+    "test:recovery": "BREAKFIX_E2E_BASE_URL=http://localhost:9091 RUN_SERVER_RECOVERY_E2E=1 playwright test -c playwright.runtime.config.ts server-recovery.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1"

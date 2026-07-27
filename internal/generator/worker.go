@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,18 +74,25 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 		if err := ctx.Err(); err != nil {
 			return agentworker.ExecutionResult{}, err
 		}
+		logGeneratorStage(claim, "deep_agent_started")
 		if err := runDeepAgent(ctx, e.config, backend, workspace.Plan, workspace.BaseImage, feedback, emit); err != nil {
 			return agentworker.ExecutionResult{}, err
 		}
+		logGeneratorStage(claim, "deep_agent_completed")
+		logGeneratorStage(claim, "candidate_archive_started")
 		archive, err := e.client.ArchiveWorkspace(ctx, claim)
 		if err != nil {
 			return agentworker.ExecutionResult{}, fmt.Errorf("archive generator workspace: %w", err)
 		}
+		logGeneratorStage(claim, "candidate_validation_started")
 		candidate, err := InspectCandidateArchive(archive.Archive)
 		if err != nil {
+			logGeneratorStage(claim, "candidate_rejected")
 			feedback = validationFeedback(err)
 			continue
 		}
+		logGeneratorStage(claim, "candidate_validated")
+		logGeneratorStage(claim, "judge_started")
 		judgement, err := judgeCandidate(ctx, e.config, workspace.Plan, candidate)
 		if err != nil {
 			// Typed-result and model transport failures are technical failures.
@@ -92,17 +100,25 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 			return agentworker.ExecutionResult{}, err
 		}
 		if judgement.Decision == judgementReject {
+			logGeneratorStage(claim, "judge_rejected")
 			feedback = Feedback{
 				Summary: "题目审核未通过，请根据具体意见修复。",
 				Issues:  []Issue{{Code: "JUDGE_REJECT", Message: judgement.Feedback}},
 			}
 			continue
 		}
+		logGeneratorStage(claim, "judge_passed")
+		logGeneratorStage(claim, "submission_started")
 		if _, err := e.client.SubmitCandidate(ctx, claim, candidate.Archive); err != nil {
 			return agentworker.ExecutionResult{}, fmt.Errorf("submit generator candidate: %w", err)
 		}
+		logGeneratorStage(claim, "submission_completed")
 		return agentworker.ExecutionResult{Finalized: true}, nil
 	}
+}
+
+func logGeneratorStage(claim agentruntime.Claim, stage string) {
+	slog.Info("generator stage", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "stage", stage)
 }
 
 func sameFeedback(left, right Feedback) bool {
@@ -145,7 +161,6 @@ func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSand
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	events := runner.Run(ctx, []adk.Message{schema.UserMessage(generatorTurnPrompt(plan, baseImage, feedback))})
-	exited := false
 	for {
 		event, ok := events.Next()
 		if !ok {
@@ -159,13 +174,6 @@ func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSand
 				emit.EmitTool(ctx, call.Function.Name)
 			}
 		}
-		if event.Action != nil && event.Action.Exit {
-			exited = true
-			break
-		}
-	}
-	if !exited {
-		return errors.New("generator DeepAgent ended without a normal exit")
 	}
 	return nil
 }

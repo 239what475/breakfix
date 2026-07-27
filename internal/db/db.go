@@ -569,4 +569,24 @@ var schemaMigrations = []schemaMigration{
 		`ALTER TABLE taxonomy_work_items ALTER COLUMN curriculum_review_json DROP NOT NULL`,
 		`ALTER TABLE taxonomy_work_items ALTER COLUMN sre_review_json DROP NOT NULL`,
 	}},
+	{version: 10, statements: []string{
+		// Generator workspaces are ephemeral execution resources, not session
+		// state. Development does not preserve the retired session-keyed rows.
+		`DROP TABLE IF EXISTS generator_workspaces`,
+		`CREATE TABLE generator_workspaces (
+			generator_run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE RESTRICT,
+			namespace TEXT NOT NULL,
+			pvc_name TEXT NOT NULL UNIQUE,
+			sandbox_id TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL,
+			provision_deadline TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			deleted_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX generator_workspaces_pending ON generator_workspaces(state, provision_deadline)
+			WHERE state = 'pending'`,
+		`CREATE INDEX generator_workspaces_deleting ON generator_workspaces(updated_at)
+			WHERE state = 'deleting'`,
+	}},
 }

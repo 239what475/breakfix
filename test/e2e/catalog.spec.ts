@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
 	challengeCard,
 	expectViewportWithoutPageOverflow,
-} from "./live-helpers";
+} from "../support/live-helpers";
 
 test("guest can filter, sort, and browse the public catalog without page overflow", async ({
 	page,
@@ -26,7 +26,9 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 	const catalog = await page.evaluate(async () => {
 		const response = await fetch("/api/challenges");
 		if (!response.ok) throw new Error(await response.text());
-		return response.json() as Promise<{ challenges: Array<{ id: string; tags: string[] }> }>;
+		return response.json() as Promise<{
+			challenges: Array<{ id: string; tags: string[]; title: string; published_at: string }>;
+		}>;
 	});
 	const challenge = catalog.challenges.find((entry) => entry.id === "cleanup-logs");
 	expect(challenge?.tags.length).toBeGreaterThan(0);
@@ -39,13 +41,12 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 
 	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
 	await page.getByLabel("Sort challenges").selectOption("oldest");
-	await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([
-		"批量压缩旧日志",
-	]);
+	const oldestFirst = [...catalog.challenges]
+		.sort((left, right) => new Date(left.published_at).getTime() - new Date(right.published_at).getTime())
+		.map((entry) => entry.title);
+	await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual(oldestFirst);
 	await page.getByLabel("Sort challenges").selectOption("newest");
-	await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([
-		"批量压缩旧日志",
-	]);
+	await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([...oldestFirst].reverse());
 
 	await challengeCard(page, "批量压缩旧日志")
 		.getByRole("button", { name: "Start challenge", exact: true })

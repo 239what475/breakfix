@@ -56,6 +56,26 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 	if session.State != authoring.StateIntentReview && session.State != authoring.StateRevisingAndVerifying && session.State != authoring.StateGeneratingAndVerifying {
 		return nil, nil, authoring.ErrInvalidState
 	}
+	if session.State == authoring.StateRevisingAndVerifying && session.GeneratorRunID != "" {
+		existing, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE id = ?`, session.GeneratorRunID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, authoring.ErrInvalidState
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("read active revised generator run: %w", err)
+		}
+		record, err := readGeneratorRun(tx.QueryRowContext(ctx, generatorRunColumns+` WHERE run_id = ?`, existing.ID))
+		if err != nil {
+			return nil, nil, fmt.Errorf("read active revised generator record: %w", err)
+		}
+		if existing.SessionID != session.GeneratorSessionID || record.AuthoringSessionID != session.ID || record.AuthoringRevision != expectedRevision {
+			return nil, nil, authoring.ErrInvalidState
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, nil, fmt.Errorf("commit existing revised generator run: %w", err)
+		}
+		return session, existing, nil
+	}
 	if session.State == authoring.StateGeneratingAndVerifying {
 		if strings.TrimSpace(input.SeedSubmissionID) == "" || strings.TrimSpace(input.VerifyTaskID) == "" ||
 			input.VerifyTaskID != session.VerifyTaskID || input.Feedback.Empty() {

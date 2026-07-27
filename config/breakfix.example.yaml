@@ -19,12 +19,17 @@ kubeconfig: ~/.kube/config
 # Registry address includes the repository namespace used for challenge images.
 registry_addr: localhost:5000/break-fix
 registry_insecure: true
+# The Docker config Secret is copied into every transient challenge namespace
+# for kubelet image pulls. The separate verifier write Secret stays in the
+# control-plane namespace.
+registry_pull_secret: breakfix-registry-pull
+registry_write_secret: breakfix-registry-write
 k8s_base_image: breakfix-k8s-base:latest
 
 # vcluster command and chart source.
 vcluster_binary: vcluster
 vcluster_chart_repo: https://charts.loft.sh
-vcluster_chart_version: ""
+vcluster_chart_version: "0.35.1"
 
 # Empty uses the default host reachable from cluster Jobs. Set an explicit host in remote deployments.
 server_host: ""
@@ -47,10 +52,11 @@ agent:
 
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
 # lifecycle API key is only present in the Server process, never Agent Worker.
+# Each Generator Run creates one ManualCleanup Sandbox and Server deletes the
+# Sandbox and PVC when that Run reaches a terminal state.
 opensandbox:
   base_url: http://opensandbox-server.opensandbox.svc.cluster.local
   api_key_env: OPEN_SANDBOX_API_KEY
   namespace: opensandbox
   workspace_image: ubuntu:22.04
   workspace_storage: 5Gi
-  workspace_timeout: 1h

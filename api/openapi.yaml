@@ -1134,13 +1134,16 @@ components:
 
     AuthoringSession:
       type: object
-      required: [id, state, intent_revision, visible_revision, updated_at, intent, messages, assets, diff]
+      required: [id, state, authoring_turn_active, intent_revision, visible_revision, updated_at, intent, messages, assets, diff]
       properties:
         id:
           type: string
         state:
           type: string
           enum: [DraftConversation, IntentReview, GeneratingAndVerifying, VerificationInfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+        authoring_turn_active:
+          type: boolean
+          description: Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
         intent_revision:
           type: integer
         visible_revision:
@@ -1148,6 +1151,8 @@ components:
         generator_run_id:
           type: string
         verify_task_id:
+          type: string
+        publish_challenge_id:
           type: string
         updated_at:
           type: string

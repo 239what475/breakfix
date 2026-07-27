@@ -33,10 +33,6 @@ func ArtifactRelativePath(sessionID string, revision int64) string {
 	return filepath.ToSlash(filepath.Join("authoring", sessionID, "revisions", strconv.FormatInt(revision, 10), "artifact"))
 }
 
-func TemporaryArtifactDirectory(dataDir, sessionID, submissionID string) string {
-	return filepath.Join(dataDir, "authoring", sessionID, ".tmp-"+submissionID)
-}
-
 func ReadAssets(dataDir string, artifact *Artifact) ([]Asset, error) {
 	if artifact == nil || strings.TrimSpace(artifact.Directory) == "" {
 		return []Asset{}, nil

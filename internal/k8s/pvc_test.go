@@ -26,7 +26,7 @@ func TestEnsureWorkspacePVCCreatesAndChecksOwnership(t *testing.T) {
 		t.Fatalf("ensure same workspace pvc: %v", err)
 	}
 	if err := client.EnsureWorkspacePVC(ctx, "opensandbox", "workspace-one", "generator-two", "1Gi"); err == nil {
-		t.Fatal("different session unexpectedly adopted pvc")
+		t.Fatal("different generator run unexpectedly adopted pvc")
 	}
 	if err := client.DeleteWorkspacePVC(ctx, "opensandbox", "workspace-one"); err != nil {
 		t.Fatalf("delete workspace pvc: %v", err)

@@ -135,7 +135,8 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, claim agentruntime
 		Model:         chat,
 		MaxIterations: 18,
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
-			Tools: toBaseAuthoringTools(conversation.tools()),
+			Tools:               toBaseAuthoringTools(conversation.tools()),
+			ExecuteSequentially: true,
 		}},
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
@@ -215,47 +216,43 @@ func (c *runtimeConversation) prompt(userMessage string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(`当前私有题意约定版本为 %d。当前题意约定如下：
+	return fmt.Sprintf(`当前私有题意约定如下：
 
 %s
 
 作者本次消息：
-%s`, c.stage.StageRevision, string(plan), userMessage), nil
+%s`, string(plan), userMessage), nil
 }
 
 func (c *runtimeConversation) tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
 		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介、难度和运行时。", params: map[string]*schema.ParameterInfo{
-			"intent_version": {Type: schema.Integer, Desc: "当前私有题意约定版本", Required: true},
-			"title":          {Type: schema.String, Desc: "题目标题", Required: true}, "description": {Type: schema.String, Desc: "题目简介", Required: true},
+			"title": {Type: schema.String, Desc: "题目标题", Required: true}, "description": {Type: schema.String, Desc: "题目简介", Required: true},
 			"difficulty": {Type: schema.String, Enum: []string{"easy", "medium", "hard"}, Required: true},
 			"runtime":    {Type: schema.String, Enum: []string{"container", "vcluster"}, Required: true},
 			"reason":     {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.setMetadata},
 		&authoringTool{name: "replace_overview", desc: "替换题意约定概览。", params: map[string]*schema.ParameterInfo{
-			"intent_version": {Type: schema.Integer, Desc: "当前私有题意约定版本", Required: true}, "markdown": {Type: schema.String, Desc: "完整概览 Markdown", Required: true},
-			"reason": {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"markdown": {Type: schema.String, Desc: "完整概览 Markdown", Required: true},
+			"reason":   {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.replaceOverview},
 		&authoringTool{name: "upsert_checkpoint", desc: "新增或修改一个公开检查点。", params: map[string]*schema.ParameterInfo{
-			"intent_version": {Type: schema.Integer, Desc: "当前私有题意约定版本", Required: true}, "id": {Type: schema.String, Desc: "已有检查点 id", Required: false},
+			"id":    {Type: schema.String, Desc: "已有检查点 id", Required: false},
 			"title": {Type: schema.String, Desc: "检查点标题", Required: true}, "markdown": {Type: schema.String, Desc: "检查点说明 Markdown", Required: true}, "position": {Type: schema.Integer, Desc: "从 1 开始的展示顺序", Required: true},
 			"reason": {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.upsertCheckpoint},
 		&authoringTool{name: "remove_checkpoint", desc: "移除不再需要的检查点。", params: map[string]*schema.ParameterInfo{
-			"intent_version": {Type: schema.Integer, Desc: "当前私有题意约定版本", Required: true}, "id": {Type: schema.String, Desc: "检查点 id", Required: true},
+			"id":     {Type: schema.String, Desc: "检查点 id", Required: true},
 			"reason": {Type: schema.String, Desc: "移除理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.removeCheckpoint},
 		&authoringTool{name: "reorder_checkpoints", desc: "重新排序全部检查点。", params: map[string]*schema.ParameterInfo{
-			"intent_version": {Type: schema.Integer, Desc: "当前私有题意约定版本", Required: true}, "ids": {Type: schema.Array, ElemInfo: &schema.ParameterInfo{Type: schema.String}, Required: true},
+			"ids":    {Type: schema.Array, ElemInfo: &schema.ParameterInfo{Type: schema.String}, Required: true},
 			"reason": {Type: schema.String, Desc: "排序理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.reorderCheckpoints},
 	}
 }
 
-func (c *runtimeConversation) apply(ctx context.Context, version int64, kind, summary, difficultyImpact string, mutate func(*Plan) error) (string, error) {
-	if version != c.stage.StageRevision {
-		return "", fmt.Errorf("intent_version=%d 已过期，当前版本为 %d", version, c.stage.StageRevision)
-	}
+func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficultyImpact string, mutate func(*Plan) error) (string, error) {
 	if strings.TrimSpace(summary) == "" || strings.TrimSpace(difficultyImpact) == "" {
 		return "", errors.New("修改理由和难度影响不能为空")
 	}
@@ -268,12 +265,11 @@ func (c *runtimeConversation) apply(ctx context.Context, version int64, kind, su
 		return "", err
 	}
 	c.stage = stage
-	return fmt.Sprintf(`{"intent_version":%d,"change":%q}`, stage.StageRevision, summary), nil
+	return fmt.Sprintf(`{"change":%q}`, summary), nil
 }
 
 func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Version          int64  `json:"intent_version"`
 		Title            string `json:"title"`
 		Description      string `json:"description"`
 		Difficulty       string `json:"difficulty"`
@@ -284,7 +280,7 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, args.Version, "metadata", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "metadata", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Description) == "" {
 			return errors.New("标题和简介不能为空")
 		}
@@ -301,7 +297,6 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 
 func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Version          int64  `json:"intent_version"`
 		Markdown         string `json:"markdown"`
 		Reason           string `json:"reason"`
 		DifficultyImpact string `json:"difficulty_impact"`
@@ -309,7 +304,7 @@ func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, args.Version, "overview", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "overview", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
 		if strings.TrimSpace(args.Markdown) == "" {
 			return errors.New("概览不能为空")
 		}
@@ -320,7 +315,6 @@ func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (
 
 func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Version          int64  `json:"intent_version"`
 		ID               string `json:"id"`
 		Title            string `json:"title"`
 		Markdown         string `json:"markdown"`
@@ -331,7 +325,7 @@ func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, args.Version, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Markdown) == "" || args.Position < 1 {
 			return errors.New("检查点标题、说明不能为空，position 必须从 1 开始")
 		}
@@ -352,7 +346,6 @@ func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) 
 
 func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Version          int64  `json:"intent_version"`
 		ID               string `json:"id"`
 		Reason           string `json:"reason"`
 		DifficultyImpact string `json:"difficulty_impact"`
@@ -360,7 +353,7 @@ func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, args.Version, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
 		if strings.TrimSpace(args.ID) == "" {
 			return errors.New("检查点 id 不能为空")
 		}
@@ -376,7 +369,6 @@ func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) 
 
 func (c *runtimeConversation) reorderCheckpoints(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Version          int64    `json:"intent_version"`
 		IDs              []string `json:"ids"`
 		Reason           string   `json:"reason"`
 		DifficultyImpact string   `json:"difficulty_impact"`
@@ -384,7 +376,7 @@ func (c *runtimeConversation) reorderCheckpoints(ctx context.Context, raw string
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, args.Version, "checkpoint-order", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint-order", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
 		if len(args.IDs) != len(plan.Checkpoints) {
 			return errors.New("ids 必须恰好覆盖全部检查点")
 		}

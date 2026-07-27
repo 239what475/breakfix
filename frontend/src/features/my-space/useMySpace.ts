@@ -1,9 +1,11 @@
-import { ref, watch, type Ref } from "vue";
+import { onScopeDispose, ref, watch, type Ref } from "vue";
 import { api, type MySpaceLearningQuery } from "../../api/client";
 import type { MySpace, MySpaceLearningHistory } from "../../api/types";
 
 export type LearningStateFilter = "all" | "active" | "completed" | "ended";
 export type LearningRuntimeFilter = "all" | "container" | "vcluster";
+
+const activeEnvironmentRefreshInterval = 3_000;
 
 export function useMySpace(
   active: Ref<boolean>,
@@ -19,6 +21,19 @@ export function useMySpace(
   const loadingMore = ref(false);
   const error = ref("");
   let historyRequest = 0;
+  let refreshTimer: number | undefined;
+
+  function stopRefreshSchedule() {
+    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+    refreshTimer = undefined;
+  }
+
+  function scheduleRefresh() {
+    stopRefreshSchedule();
+    const hasActiveLearning = space.value?.recent_learning.some((item) => item.state === "active");
+    if (!active.value || !loggedIn.value || (!space.value?.active_environments.length && !hasActiveLearning)) return;
+    refreshTimer = window.setTimeout(() => void refresh(), activeEnvironmentRefreshInterval);
+  }
 
   function learningQuery(cursor?: string): MySpaceLearningQuery {
     return {
@@ -59,6 +74,7 @@ export function useMySpace(
       error.value = cause instanceof Error ? cause.message : "Unable to load your space";
     } finally {
       loading.value = false;
+      scheduleRefresh();
     }
   }
 
@@ -83,7 +99,9 @@ export function useMySpace(
     [active, loggedIn],
     ([visible, signedIn], [wasVisible]) => {
       if (visible && signedIn && (!wasVisible || !space.value)) void refresh();
+      if (!visible) stopRefreshSchedule();
       if (!signedIn) {
+        stopRefreshSchedule();
         space.value = undefined;
         history.value = [];
         nextCursor.value = undefined;
@@ -96,6 +114,8 @@ export function useMySpace(
   watch([stateFilter, runtimeFilter], () => {
     if (active.value && loggedIn.value) void refreshLearning();
   });
+
+  onScopeDispose(stopRefreshSchedule);
 
   return { space, history, nextCursor, loading, loadingLearning, loadingMore, error, refresh, loadMore };
 }

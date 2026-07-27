@@ -70,6 +70,10 @@ func main() {
 	if err := controller.Setup(mgr, k8sClient, controller.Options{
 		RegistryAddr:         cfg.RegistryAddr,
 		RegistryInsecure:     cfg.RegistryInsecure,
+		RegistryUsername:     cfg.RegistryUsername,
+		RegistryPassword:     cfg.RegistryPassword,
+		RegistryPullSecret:   cfg.RegistryPullSecret,
+		RegistryWriteSecret:  cfg.RegistryWriteSecret,
 		Namespace:            cfg.Namespace,
 		CRDNamespace:         cfg.CRDNamespace,
 		CooldownMinutes:      cfg.CooldownMinutes,

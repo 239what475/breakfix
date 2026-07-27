@@ -94,14 +94,14 @@ Breakfix 应暂停继续扩展技能图和题库，先完成 Agent Runtime 迁�
 - 模型传输错误：当前 attempt 内有限网络重试。
 - typed result 协议错误：结束当前 attempt，同一 Run 重新执行。
 - Judge reject：同一 Generator Run 内的语义修订。
-- VerifyTask artifact 错误：创建同一 Generator Session 的下一 Run。
+- VerifyTask artifact 错误：创建同一 Generator Session 的下一 Run 和新的临时 workspace。
 - VerifyTask infrastructure 错误：使用同一 artifact 重新验证，不让 Agent 修改题目。
 
 ### `lab_*` 隔离和权限边界不足
 
 当前 Generator 可以扫描、执行和删除 namespace 中的 lab Pod，并与 Verify Job 共用 privileged Job 模板和 ServiceAccount。并发 Generation 之间可以互相影响。
 
-迁移后删除 `lab_create/exec/checkpoints/logs/destroy`。Generator 只操作绑定当前 Session 的 OpenSandbox workspace；Agent Worker 没有 kubeconfig、Pod exec、VerifyTask 或 Environment 权限。
+迁移后删除 `lab_create/exec/checkpoints/logs/destroy`。Generator 只操作绑定当前 Run 的 OpenSandbox workspace；Agent Worker 没有 kubeconfig、Pod exec、VerifyTask 或 Environment 权限。
 
 ### Assistant 和 Authoring 的运行状态不持久
 
@@ -180,7 +180,7 @@ Judge 仍依赖 `PASS` / `FAIL` 文本，Taxonomy schema、prompt 和 Go 类型�
 
 - PostgreSQL PVC：关系数据。
 - Server data PVC：`challenges/`、submission、verified artifact 和 CA 材料。
-- Sandbox PVC：单个 Generator Session 的临时 workspace。Server 创建、记录和删除 PVC；OpenSandbox 只以 `createIfNotExists=false` 挂载，绝不取得 PVC 生命周期所有权。
+- Sandbox PVC：单个 Generator Run 的临时 workspace。Server 创建、记录和删除 PVC；OpenSandbox 只以 `createIfNotExists=false` 挂载，绝不取得 PVC 生命周期所有权。
 - Environment 存储：由 ContainerEnvironment 或 VClusterEnvironment 自己管理。
 
 文件系统 challenge catalog 仍是发布题目的权威来源。Server 使用单副本和可写 PVC；未来需要多个 Server 时，再单独设计 RWX 文件系统或对象存储，不在本阶段隐式解决。
@@ -218,7 +218,7 @@ Controller 不连接 PostgreSQL，也不读取 Server data PVC。Agent Worker �
 
 本阶段不增加 `agent_steps`、`agent_events` 或 `agent_checkpoints`。工具调用过程不是长期会话权威，Eino opaque checkpoint 也不进入数据库。
 
-Generator 另有一个很小的领域表 `generator_workspaces`，它不是通用 Agent 状态：每行唯一绑定一个 Generator Session，保存确定的 PVC 名称、可选 opaque Sandbox ID、状态和清理期限。它让 Server 在调用远程 lifecycle API 前先持久化自己拥有的存储对象；不记录模型状态、工具历史或 Sandbox metadata，也不执行 Sandbox adopt。
+Generator 另有一个很小的领域表 `generator_workspaces`，它不是通用 Agent 状态：每行唯一绑定一个 Generator Run，保存确定的 PVC 名称、可选 opaque Sandbox ID、状态和短暂 provisioning deadline。它让 Server 在调用远程 lifecycle API 前先持久化自己拥有的存储对象；不记录模型状态、工具历史或 Sandbox metadata，也不执行 Sandbox adopt。
 
 Authoring 和 Assistant 的用户消息与 Run 在同一个 PostgreSQL 事务中创建。消息在 Run 成功后成为完整对话的一部分；Run 最终失败或取消时，UI 明确显示失败状态，不能把它伪装成已回答消息。
 
@@ -339,7 +339,7 @@ OpenSandbox 用于 Generator workspace 的文件、命令和生命周期；用�
 
 - 固定实际验证通过的 OpenSandbox Server、SDK、`execd` 和原生 provider 版本。
 - 不使用 `latest`。
-- 真实验证 create、files、streaming exec、BYO PVC workspace、TTL/delete、NetworkPolicy 和 run/attempt fencing。
+- 真实验证 create、files、streaming exec、BYO PVC workspace、ManualCleanup/delete、NetworkPolicy 和 run/attempt fencing。
 - OpenSandbox Server 或 Agent Worker 重启后，同一 workspace 仍可访问；OpenSandbox 删除后 Pod 和路由资源全部回收，Server 随后回收对应 PVC。
 - 全部硬性要求通过后立即固定该 provider，不再测试或实现第二套 provider。
 
@@ -347,15 +347,15 @@ Kubernetes SIG Agent Sandbox 不是本阶段的并行方案。只有 OpenSandbox
 
 ### Workspace PVC 所有权
 
-OpenSandbox `server/v0.2.2` 的 server-managed PVC 清理路径不能作为平台正确性的前提。Breakfix 固定使用官方 BYO PVC API：Server 在 OpenSandbox namespace 中创建每个 Generator Session 独有的 RWO PVC，并在 create request 中传入同名 `claimName` 与 `createIfNotExists=false`。PVC 使用 Breakfix label 标识所属 workspace；OpenSandbox 不创建、不标记也不删除它。
+OpenSandbox `server/v0.2.2` 的 server-managed PVC 清理路径不能作为平台正确性的前提。Breakfix 固定使用官方 BYO PVC API：Server 在 OpenSandbox namespace 中创建每个 Generator Run 独有的 RWO PVC，并在 create request 中传入同名 `claimName` 与 `createIfNotExists=false`。PVC 使用 Breakfix label 标识所属 workspace；OpenSandbox 不创建、不标记也不删除它。
 
-Server 在同一个 PostgreSQL 事务中创建 `generator_workspaces` pending record 和确定的 PVC 名称，随后按以下顺序推进：
+Server 先持久化 `generator_workspaces` pending record 和确定的 PVC 名称，随后按以下顺序推进：
 
 1. Server create-or-gets PVC，确认它是该 workspace 的唯一带标签 PVC。
 2. Server 调用 OpenSandbox create，并将 PVC 挂载到 `/workspace`。
 3. Server 保存返回的 Sandbox ID 并将 workspace 标为 active；Worker 只能通过绑定该记录的 Server proxy 访问 files、exec 和 archive。
-4. 如果 create 的响应未知或 Server 在保存 ID 前崩溃，pending record 仍保留 PVC 名称；超过短暂 provision deadline 后 Server 删除该 PVC。Sandbox 由 OpenSandbox TTL 兜底回收，Server 不查询或 adopt 未记录的 Sandbox。
-5. 作者取消、Session 过期或验证成功后，Server 先删除已记录的 Sandbox，再以同一 workspace record 删除 PVC；删除操作可重复执行。PVC 仍在被工作负载占用时保留 deleting 状态，后续 cleanup loop 重试，不创建第二个 workspace。
+4. 如果 create 的响应未知或 Server 在保存 ID 前崩溃，pending record 仍保留 PVC 名称；超过短暂 provision deadline 后 Server 删除该 PVC。该外部响应歧义不查询或 adopt 未记录的 Sandbox。
+5. Run 提交 immutable candidate、失败、取消或超时后，Server 先删除已记录的 Sandbox，再以同一 workspace record 删除 PVC；删除操作可重复执行。PVC 仍在被工作负载占用时保留 deleting 状态，后续 cleanup loop 重试，不创建第二个 workspace。
 
 Server 因此需要在 OpenSandbox namespace 中仅拥有 Breakfix workspace PVC 的 `get/create/delete` 权限。Agent Worker 没有 Kubernetes 凭据；它既不能枚举 PVC，也不能直接调用 OpenSandbox lifecycle API。
 
@@ -369,18 +369,18 @@ Server 持有 OpenSandbox lifecycle credential，Agent Worker 不持有全局生
 - 如果不支持，files/exec 通过 Server 的受控代理访问。
 - 禁止把 OpenSandbox 全局 API key 交给 Agent Worker。
 
-该选择只影响 `OpenSandboxBackend` 的连接方式，不改变一个 Generator Session 对应一个 workspace 的业务模型。
+该选择只影响 `OpenSandboxBackend` 的连接方式，不改变一个 Generator Run 对应一个 workspace 的业务模型。
 
 ### Sandbox 生命周期
 
-1. Server 为 Generator Session 创建 pending workspace record 和确定的 BYO PVC 名称。
+1. Server 为 Generator Run 创建 pending workspace record 和确定的 BYO PVC 名称。
 2. Server create-or-gets PVC 后调用 OpenSandbox create，成功后保存 opaque sandbox ID。
-3. 如果 Server 在 create 成功后、保存 ID 前崩溃，Server 按 pending record 的 provision deadline 删除 PVC，Sandbox 由 OpenSandbox TTL 回收；不进行 metadata 查询和 adopt。
-4. Worker 使用该 Session 的 workspace 执行文件和命令工具。
+3. Sandbox 使用 `ManualCleanup`，没有正常运行时 TTL；如果 Server 在 create 成功后、保存 ID 前崩溃，Server 只会按 pending record 的 provision deadline 删除已知 PVC，不进行 metadata 查询和 adopt。
+4. Worker 使用该 Run 的 workspace 执行文件和命令工具。
 5. 同一 Run 的 Worker attempt 失败时复用相同 sandbox ID 和当前工作副本。
-6. VerifyTask artifact 错误时保留 immutable failed artifact；下一 Generator Run 开始前用它原子重置 workspace，再把结构化 report 交给 Agent。
-7. 验证成功后 Server 删除 Sandbox 和同一 record 的 PVC；作者审核后要求修改时，新 Generator Session 创建新 PVC/Sandbox，并用上一份 verified artifact 初始化。
-8. 作者取消或 Session 到期后，Server 删除 Sandbox 和 PVC；Sandbox TTL 只作为未记录 Sandbox 的最终回收保证。
+6. Judge pass 后 Server 持久化 immutable candidate 与 VerifyTask，并立即删除该 Run 的 Sandbox 和 PVC；Run 提交前失败、取消或超时时也由 cleanup loop 删除。
+7. VerifyTask artifact 错误时保留 immutable failed artifact；下一 Generator Run 创建新 PVC/Sandbox 并用该 artifact 初始化，再把结构化 report 交给 Agent。
+8. 验证成功后作者审核要求修改时，新 Generator Run 创建新 PVC/Sandbox，并用上一份 verified artifact 初始化。
 
 Sandbox 使用专用 authoring 镜像，不包含模型 Key、PostgreSQL 凭据、Server 内部凭据、Registry 写凭据、kubeconfig 或 ServiceAccount token。
 
@@ -465,7 +465,7 @@ submit_judgement:
 
 ### Generator
 
-一个 Generator Session 对应一个 Agent Session 和一个 OpenSandbox workspace。workspace 是技术执行的工作副本，immutable candidate 才是已经提交给 Judge 和 VerifyTask 的语义基线。VerifyTask artifact 错误会在同一 Session 创建下一 Run，但该 Run 必须先用失败 candidate 重置 workspace，不能同时把两份文件状态当作输入。
+一个 Generator Session 保留修复对话；每个 Generator Run 拥有一个独立的 OpenSandbox workspace。workspace 是该 Run 的技术执行副本，immutable candidate 才是已经提交给 Judge 和 VerifyTask 的语义基线。VerifyTask artifact 错误会在同一 Session 创建下一 Run；新 Run 必须在新 workspace 中用失败 candidate 初始化，不能同时把两份文件状态当作输入。
 
 单个 Generator Run：
 
@@ -536,8 +536,8 @@ Job `Complete` 后 VerifyTask 必须已经是 `phase=Succeeded` 或 `phase=Faile
 
 Server 运行 VerifyTask watcher：
 
-- `phase=Succeeded`：保存可见 verified artifact，进入作者审核并删除 Sandbox。
-- `phase=Failed, report.class=artifact`：保留 candidate/report，创建同一 Generator Session 的下一 Run；修复后的 candidate 使用新 Run 派生的新 submission 和 VerifyTask。
+- `phase=Succeeded`：保存可见 verified artifact，进入作者审核；Sandbox 已在 Generator Run 提交 candidate 后回收。
+- `phase=Failed, report.class=artifact`：保留 candidate/report，创建同一 Generator Session 的下一 Run 和新 workspace；修复后的 candidate 使用新 Run 派生的新 submission 和 VerifyTask。
 - `phase=Failed, report.class=infrastructure`：Job 未上报结果、重试耗尽或超时后出现；保留 candidate/report 并将工作流标记为基础设施失败，不创建 Generator Run。
 
 该 watcher 不创建或重试 verifier Job，只把 CRD 终态同步到产品流程。它是 Server 后台 reconciliation loop，不依赖浏览器轮询。
@@ -604,7 +604,7 @@ Server 运行 VerifyTask watcher：
 
 ### 6. OpenSandbox、Generator 和 VerifyTask
 
-- 只对 OpenSandbox 原生 Kubernetes workload provider 完成授权、files/exec、PVC、TTL、NetworkPolicy、fencing 和删除语义 POC。
+- 只对 OpenSandbox 原生 Kubernetes workload provider 完成授权、files/exec、PVC、ManualCleanup/delete、NetworkPolicy、fencing 和删除语义 POC。
 - 建立带 run/attempt fencing 的 `OpenSandboxBackend` 和 Generator Agent Session/Run。
 - 拆出 `cmd/verifier`、verifier 镜像、Job 模板和 RBAC。
 - 实现确定性 submission/VerifyTask/Job/Environment 命名、终态清理和 Server VerifyTask watcher。
@@ -685,7 +685,7 @@ Server 运行 VerifyTask watcher：
 - Judge 通过唯一 typed result tool 审核。
 - Worker 没有 kubeconfig、ServiceAccount token、Registry 写凭据或 OpenSandbox lifecycle key。
 - Sandbox 中没有模型 Key、PostgreSQL 凭据、Server 内部凭据或 kubeconfig。
-- OpenSandbox 原生 provider 通过真实 create、files、streaming exec、BYO PVC 持久化、TTL/delete、NetworkPolicy 和 fencing 验收；PVC 删除由 Server 完成，不依赖 provider 的 PVC cleanup。
+- OpenSandbox 原生 provider 通过真实 create、files、streaming exec、BYO PVC 持久化、ManualCleanup/delete、NetworkPolicy 和 fencing 验收；PVC 删除由 Server 完成，不依赖 provider 的 PVC cleanup。
 - Worker 在模型、文件修改和远程命令阶段退出后，新 attempt 复用同一 workspace 并完成任务。
 - VerifyTask artifact 错误后，下一 Generator Run 从 immutable failed artifact 重置 workspace；验证成功后作者要求修改时，从 verified artifact 创建新 workspace。
 - submission 重复提交只产生一个 immutable artifact 和一个逻辑 VerifyTask。

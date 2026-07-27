@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -110,7 +109,7 @@ func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &progress); err != nil {
 		t.Fatal(err)
 	}
-	if progress.Checks == nil || len(*progress.Checks) != 1 || (*progress.Checks)[0].Passed == nil || !*(*progress.Checks)[0].Passed {
+	if len(progress.Checks) != 1 || !progress.Checks[0].Passed {
 		t.Fatalf("unexpected checkpoint snapshot: %#v", progress.Checks)
 	}
 }
@@ -164,10 +163,10 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	if err := json.Unmarshal(recorder.Body.Bytes(), &content); err != nil {
 		t.Fatal(err)
 	}
-	if content.Problem == nil || *content.Problem != "# Problem\nRepair it.\n" {
+	if content.Problem != "# Problem\nRepair it.\n" {
 		t.Fatalf("unexpected problem: %#v", content.Problem)
 	}
-	if content.Hints == nil || (*content.Hints)["complete"] != "Look at the service.\n" {
+	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
 }
@@ -209,18 +208,45 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Challenges == nil || len(*resp.Challenges) != 1 {
+	if len(resp.Challenges) != 1 {
 		t.Fatalf("expected 1 challenge, got %#v", resp.Challenges)
 	}
-	got := (*resp.Challenges)[0]
-	if got.Runtime == nil || *got.Runtime != "vcluster" {
+	got := resp.Challenges[0]
+	if got.Runtime != api.ChallengeSummaryRuntimeVcluster {
 		t.Fatalf("expected runtime vcluster, got %#v", got.Runtime)
 	}
-	if got.PublishedAt == nil || !got.PublishedAt.Equal(time.Date(2026, time.July, 24, 9, 0, 0, 0, time.UTC)) {
+	if !got.PublishedAt.Equal(time.Date(2026, time.July, 24, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected published time: %#v", got.PublishedAt)
 	}
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
+	}
+}
+
+func TestListChallengesShowsPublishedChallengeBeforeTaxonomyMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	root := t.TempDir()
+	writeGatewayChallenge(t, root)
+	handler := NewHandler(nil, nil, config.Config{DataDir: root})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	handler.ListChallenges(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response api.ChallengeList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Challenges) != 1 {
+		t.Fatalf("unmapped published challenge was hidden: %#v", response.Challenges)
+	}
+	if response.Challenges[0].Tags == nil || len(response.Challenges[0].Tags) != 0 {
+		t.Fatalf("unmapped challenge tags = %#v, want empty array", response.Challenges[0].Tags)
 	}
 }
 
@@ -251,15 +277,48 @@ func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Challenges == nil || len(*response.Challenges) != 1 {
+	if len(response.Challenges) != 1 {
 		t.Fatalf("unexpected challenges: %#v", response.Challenges)
 	}
-	got := (*response.Challenges)[0]
+	got := response.Challenges[0]
 	if got.Active == nil || !*got.Active || got.Solved == nil || !*got.Solved {
 		t.Fatalf("unexpected user state: %#v", got)
 	}
-	if got.Progress == nil || got.Progress.Passed == nil || got.Progress.Total == nil || *got.Progress.Passed != 1 || *got.Progress.Total != 1 {
+	if got.Progress == nil || got.Progress.Passed != 1 || got.Progress.Total != 1 {
 		t.Fatalf("unexpected checkpoint progress: %#v", got.Progress)
+	}
+}
+
+func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T) {
+	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
+		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
+		Status: breakfixv1.CommonEnvironmentStatus{
+			Phase: breakfixv1.EnvironmentCompleted,
+			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+				ID: "complete", Passed: true, Summary: "done",
+			}}},
+		},
+	}})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	ctx.Set("user_id", "u-demo")
+	handler.ListChallenges(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response api.ChallengeList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Challenges) != 1 {
+		t.Fatalf("unexpected challenges: %#v", response.Challenges)
+	}
+	got := response.Challenges[0]
+	if got.Solved == nil || !*got.Solved || got.Active == nil || *got.Active || got.Progress != nil {
+		t.Fatalf("completed environment was not reflected immediately: %#v", got)
 	}
 }
 
@@ -282,13 +341,13 @@ func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	got := (*response.Challenges)[0]
+	got := response.Challenges[0]
 	if got.Solved == nil || !*got.Solved || got.Active == nil || *got.Active || got.Progress != nil {
 		t.Fatalf("unexpected durable completion state: %#v", got)
 	}
 }
 
-func TestChallengeArtifactRevisionMismatchRejectsAllChallengeOperations(t *testing.T) {
+func TestChallengeArtifactRevisionMismatchRemovesTaxonomyTagsButKeepsChallengeAvailable(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
 	if _, err := handler.publishedChallenge("demo"); err != nil {
 		t.Fatalf("published challenge was unavailable before artifact change: %v", err)
@@ -297,60 +356,25 @@ func TestChallengeArtifactRevisionMismatchRejectsAllChallengeOperations(t *testi
 		t.Fatal(err)
 	}
 
-	newContext := func(method, target, body string) (*httptest.ResponseRecorder, *gin.Context) {
-		recorder := httptest.NewRecorder()
-		ctx, _ := gin.CreateTestContext(recorder)
-		ctx.Request = httptest.NewRequest(method, target, strings.NewReader(body))
-		if body != "" {
-			ctx.Request.Header.Set("Content-Type", "application/json")
-		}
-		ctx.Set("user_id", "u-demo")
-		return recorder, ctx
-	}
-
-	listRecorder, listContext := newContext(http.MethodGet, "/api/challenges", "")
-	handler.ListChallenges(listContext)
-	if listRecorder.Code != http.StatusOK {
-		t.Fatalf("catalog status = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	handler.ListChallenges(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("catalog status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	var list api.ChallengeList
-	if err := json.Unmarshal(listRecorder.Body.Bytes(), &list); err != nil {
+	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if list.Challenges == nil || len(*list.Challenges) != 0 {
-		t.Fatalf("stale challenge remained in catalog: %#v", list.Challenges)
+	if len(list.Challenges) != 1 {
+		t.Fatalf("published challenge was hidden after its taxonomy mapping became stale: %#v", list.Challenges)
 	}
-
-	type operation struct {
-		name   string
-		method string
-		target string
-		body   string
-		run    func(*gin.Context)
+	if list.Challenges[0].Tags == nil || len(list.Challenges[0].Tags) != 0 {
+		t.Fatalf("stale mapping still supplied tags: %#v", list.Challenges[0].Tags)
 	}
-	operations := []operation{
-		{"content", http.MethodGet, "/api/challenges/demo/content", "", func(c *gin.Context) { handler.GetChallengeContent(c, "demo") }},
-		{"progress", http.MethodGet, "/api/challenges/demo/progress", "", func(c *gin.Context) { handler.GetChallengeProgress(c, "demo") }},
-		{"assistant conversation", http.MethodGet, "/api/challenges/demo/assistant", "", func(c *gin.Context) { handler.GetChallengeAssistant(c, "demo") }},
-		{"assistant message", http.MethodPost, "/api/challenges/demo/assistant/messages", `{"content":"help","current_window":"shell-1","open_windows":["shell-1"]}`, func(c *gin.Context) { handler.SendChallengeAssistantMessage(c, "demo") }},
-		{"assistant events", http.MethodGet, "/api/challenges/demo/assistant/turns/turn/events", "", func(c *gin.Context) { handler.StreamChallengeAssistantTurn(c, "demo", "turn") }},
-		{"start", http.MethodPost, "/api/challenges/demo/start", "", func(c *gin.Context) { handler.StartChallenge(c, "demo") }},
-		{"reset", http.MethodPost, "/api/challenges/demo/reset", "", func(c *gin.Context) { handler.ResetChallenge(c, "demo") }},
-		{"stop", http.MethodPost, "/api/challenges/demo/stop", "", func(c *gin.Context) { handler.StopChallenge(c, "demo") }},
-		{"terminal", http.MethodGet, "/api/challenges/demo/terminal?window=shell-1", "", func(c *gin.Context) {
-			c.Params = gin.Params{{Key: "id", Value: "demo"}}
-			handler.HandleTerminal(c)
-		}},
-		{"close terminal window", http.MethodDelete, "/api/challenges/demo/terminal/windows/shell-1", "", func(c *gin.Context) { handler.CloseTerminalWindow(c, "demo", "shell-1") }},
-	}
-	for _, operation := range operations {
-		t.Run(operation.name, func(t *testing.T) {
-			recorder, ctx := newContext(operation.method, operation.target, operation.body)
-			operation.run(ctx)
-			if recorder.Code != http.StatusNotFound {
-				t.Fatalf("status = %d, want 404: %s", recorder.Code, recorder.Body.String())
-			}
-		})
+	if _, err := handler.publishedChallenge("demo"); err != nil {
+		t.Fatalf("published challenge was unavailable after its taxonomy mapping became stale: %v", err)
 	}
 }
 

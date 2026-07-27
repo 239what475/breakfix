@@ -24,6 +24,10 @@ type Config struct {
 	Kubeconfig           string            `yaml:"kubeconfig"`
 	RegistryAddr         string            `yaml:"registry_addr"`
 	RegistryInsecure     bool              `yaml:"registry_insecure"`
+	RegistryPullSecret   string            `yaml:"registry_pull_secret"`
+	RegistryWriteSecret  string            `yaml:"registry_write_secret"`
+	RegistryUsername     string            `yaml:"-"`
+	RegistryPassword     string            `yaml:"-"`
 	K8sBaseImage         string            `yaml:"k8s_base_image"`
 	VClusterBinary       string            `yaml:"vcluster_binary"`
 	VClusterChartRepo    string            `yaml:"vcluster_chart_repo"`
@@ -55,28 +59,30 @@ type OpenSandboxConfig struct {
 	Namespace        string `yaml:"namespace"`
 	WorkspaceImage   string `yaml:"workspace_image"`
 	WorkspaceStorage string `yaml:"workspace_storage"`
-	WorkspaceTimeout string `yaml:"workspace_timeout"`
 	APIKey           string `yaml:"-"`
 }
 
 func defaults() Config {
 	return Config{
-		Port:              9090,
-		ProxyPort:         3128,
-		HealthPort:        8081,
-		DataDir:           "/var/lib/breakfix",
-		DatabaseURL:       "postgres://breakfix:breakfix@postgresql:5432/breakfix?sslmode=disable",
-		AgentDatabaseRole: "breakfix_agent",
-		RegistryAddr:      "172.18.0.1:5000/break-fix",
-		RegistryInsecure:  true,
-		K8sBaseImage:      "breakfix-k8s-base:latest",
-		VClusterBinary:    "vcluster",
-		VClusterChartRepo: "https://charts.loft.sh",
-		Namespace:         "breakfix",
-		CRDNamespace:      "breakfix-system",
-		JWTSecret:         "breakfix-dev-secret-change-in-production",
-		InternalAPIKey:    "breakfix-dev-internal-key-change-in-production",
-		CooldownMinutes:   5,
+		Port:                 9090,
+		ProxyPort:            3128,
+		HealthPort:           8081,
+		DataDir:              "/var/lib/breakfix",
+		DatabaseURL:          "postgres://breakfix:breakfix@postgresql:5432/breakfix?sslmode=disable",
+		AgentDatabaseRole:    "breakfix_agent",
+		RegistryAddr:         "172.18.0.1:5000/break-fix",
+		RegistryInsecure:     true,
+		RegistryPullSecret:   "breakfix-registry-pull",
+		RegistryWriteSecret:  "breakfix-registry-write",
+		K8sBaseImage:         "breakfix-k8s-base:latest",
+		VClusterBinary:       "vcluster",
+		VClusterChartRepo:    "https://charts.loft.sh",
+		VClusterChartVersion: "0.35.1",
+		Namespace:            "breakfix",
+		CRDNamespace:         "breakfix-system",
+		JWTSecret:            "breakfix-dev-secret-change-in-production",
+		InternalAPIKey:       "breakfix-dev-internal-key-change-in-production",
+		CooldownMinutes:      5,
 		Agent: AgentConfig{
 			BaseURL:        "https://api.deepseek.com",
 			APIKeyEnv:      "DEEPSEEK_API_KEY",
@@ -90,7 +96,6 @@ func defaults() Config {
 			Namespace:        "opensandbox",
 			WorkspaceImage:   "ubuntu:22.04",
 			WorkspaceStorage: "5Gi",
-			WorkspaceTimeout: "1h",
 		},
 	}
 }
@@ -107,14 +112,6 @@ func (c AgentConfig) Timeout() (time.Duration, error) {
 	return value, nil
 }
 
-func (c OpenSandboxConfig) Timeout() (time.Duration, error) {
-	value, err := time.ParseDuration(c.WorkspaceTimeout)
-	if err != nil || value <= 0 {
-		return 0, fmt.Errorf("opensandbox workspace_timeout must be a positive duration")
-	}
-	return value, nil
-}
-
 func (c OpenSandboxConfig) Validate() error {
 	if strings.TrimSpace(c.BaseURL) == "" || strings.TrimSpace(c.APIKeyEnv) == "" || strings.TrimSpace(c.Namespace) == "" {
 		return fmt.Errorf("opensandbox base_url, api_key_env, and namespace are required")
@@ -122,8 +119,7 @@ func (c OpenSandboxConfig) Validate() error {
 	if strings.TrimSpace(c.WorkspaceImage) == "" || strings.TrimSpace(c.WorkspaceStorage) == "" {
 		return fmt.Errorf("opensandbox workspace_image and workspace_storage are required")
 	}
-	_, err := c.Timeout()
-	return err
+	return nil
 }
 
 // ImageURL prepends registry to image name if not already a full URL.
@@ -159,6 +155,8 @@ func Load(path string) (Config, error) {
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
 	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
 	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
+	cfg.RegistryPullSecret = os.ExpandEnv(cfg.RegistryPullSecret)
+	cfg.RegistryWriteSecret = os.ExpandEnv(cfg.RegistryWriteSecret)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	if err := applyRuntimeEnvironment(&cfg); err != nil {
@@ -166,6 +164,14 @@ func Load(path string) (Config, error) {
 	}
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
 	cfg.OpenSandbox.APIKey = os.Getenv(cfg.OpenSandbox.APIKeyEnv)
+	cfg.RegistryUsername = os.Getenv("BREAKFIX_REGISTRY_USERNAME")
+	cfg.RegistryPassword = os.Getenv("BREAKFIX_REGISTRY_PASSWORD")
+	if (strings.TrimSpace(cfg.RegistryUsername) == "") != (strings.TrimSpace(cfg.RegistryPassword) == "") {
+		return cfg, fmt.Errorf("BREAKFIX_REGISTRY_USERNAME and BREAKFIX_REGISTRY_PASSWORD must be set together")
+	}
+	if strings.TrimSpace(cfg.RegistryAddr) != "" && (strings.TrimSpace(cfg.RegistryPullSecret) == "" || strings.TrimSpace(cfg.RegistryWriteSecret) == "") {
+		return cfg, fmt.Errorf("registry pull_secret and write_secret are required when registry_addr is set")
+	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {

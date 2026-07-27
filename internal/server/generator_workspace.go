@@ -44,7 +44,7 @@ type internalGeneratorSubmitRequest struct {
 }
 
 // InternalGeneratorContext creates or reconnects the single Server-owned
-// workspace for a valid Generator attempt. The Worker sees neither sandbox ID
+// workspace for a valid Generator Run. The Worker sees neither sandbox ID
 // nor provider credentials.
 func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 	var credential generator.LeaseCredential
@@ -253,9 +253,9 @@ func (h *Handler) generatorWorkspaceForClaim(ctx context.Context, runID string, 
 	}
 	var record *workspace.Record
 	if ensure {
-		record, err = h.generatorWorkspace.Ensure(ctx, run.SessionID)
+		record, err = h.generatorWorkspace.Ensure(ctx, run.ID)
 	} else {
-		record, err = h.db.GetGeneratorWorkspace(ctx, run.SessionID)
+		record, err = h.db.GetGeneratorWorkspace(ctx, run.ID)
 	}
 	if err != nil {
 		return nil, nil, err
