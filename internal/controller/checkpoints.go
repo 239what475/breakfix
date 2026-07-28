@@ -119,8 +119,32 @@ func recordCheckpointStatus(status *breakfixv1.CommonEnvironmentStatus, results 
 	next := &breakfixv1.CheckpointStatus{}
 	if checkErr != nil {
 		next.Error = truncate(checkErr.Error(), 4000)
+		if status.Checkpoints != nil {
+			next.Results = append([]breakfixv1.CheckpointResultStatus{}, status.Checkpoints.Results...)
+		}
 	} else {
-		next.Results = append([]breakfixv1.CheckpointResultStatus{}, results...)
+		previousCount := 0
+		if status.Checkpoints != nil {
+			previousCount = len(status.Checkpoints.Results)
+		}
+		firstPassedAt := make(map[string]*metav1.Time, previousCount)
+		if status.Checkpoints != nil {
+			for _, result := range status.Checkpoints.Results {
+				if result.FirstPassedAt != nil {
+					firstPassedAt[result.ID] = result.FirstPassedAt
+				}
+			}
+		}
+		next.Results = make([]breakfixv1.CheckpointResultStatus, len(results))
+		for index, result := range results {
+			if recorded, ok := firstPassedAt[result.ID]; ok {
+				result.FirstPassedAt = recorded
+			} else if result.Passed {
+				now := metav1.Now()
+				result.FirstPassedAt = &now
+			}
+			next.Results[index] = result
+		}
 	}
 	current := status.Checkpoints
 	if current != nil && current.Error == next.Error && slices.Equal(current.Results, next.Results) {

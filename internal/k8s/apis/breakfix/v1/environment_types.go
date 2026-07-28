@@ -6,10 +6,11 @@ import (
 )
 
 type CheckpointResultStatus struct {
-	ID      string `json:"id"`
-	Passed  bool   `json:"passed"`
-	Summary string `json:"summary"`
-	Details string `json:"details,omitempty"`
+	ID            string       `json:"id"`
+	Passed        bool         `json:"passed"`
+	FirstPassedAt *metav1.Time `json:"firstPassedAt,omitempty"`
+	Summary       string       `json:"summary"`
+	Details       string       `json:"details,omitempty"`
 }
 
 // CheckpointStatus is controller-owned state from the most recent checkpoint run.

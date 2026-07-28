@@ -408,7 +408,7 @@ func writeAuthoringArtifact(t *testing.T, root, title, description string) {
 	writeTestFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeTestFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(root, "problem.md"), "# Actual problem\n")
-	writeTestFile(t, filepath.Join(root, "solution.md"), "# Actual solution\n")
+	writeTestFile(t, filepath.Join(root, "solution.md"), "# Actual solution\n<!-- checkpoint: service-ready -->\n")
 	writeTestFile(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
 	writeTestFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")

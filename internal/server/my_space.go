@@ -204,14 +204,32 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 		page.NextCursor = encodeMySpaceLearningCursor(last.ReadyAt, last.EnvironmentUID)
 		items = items[:limit]
 	}
+	environmentUIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		environmentUIDs = append(environmentUIDs, item.EnvironmentUID)
+	}
+	firstPasses, err := h.db.ListCheckpointFirstPasses(ctx, environmentUIDs)
+	if err != nil {
+		return api.MySpaceLearningPage{}, err
+	}
 	for _, item := range items {
 		entry := catalog[item.ChallengeID]
+		events := firstPasses[item.EnvironmentUID]
+		checkpointFirstPasses := make([]api.CheckpointFirstPass, 0, len(events))
+		for _, event := range events {
+			checkpointFirstPasses = append(checkpointFirstPasses, api.CheckpointFirstPass{
+				CheckpointId:  event.CheckpointID,
+				FirstPassedAt: event.FirstPassedAt,
+				Summary:       event.Summary,
+			})
+		}
 		page.Items = append(page.Items, api.MySpaceLearningHistory{
-			Challenge:       mySpaceChallenge(entry),
-			ReadyAt:         item.ReadyAt,
-			CompletedAt:     item.CompletedAt,
-			LearningSeconds: safeInt(item.LearningSeconds),
-			State:           api.MySpaceLearningHistoryState(item.Outcome),
+			Challenge:             mySpaceChallenge(entry),
+			CheckpointFirstPasses: checkpointFirstPasses,
+			ReadyAt:               item.ReadyAt,
+			CompletedAt:           item.CompletedAt,
+			LearningSeconds:       safeInt(item.LearningSeconds),
+			State:                 api.MySpaceLearningHistoryState(item.Outcome),
 		})
 	}
 	return page, nil

@@ -171,7 +171,7 @@ func writeGeneratorSemanticChallenge(t *testing.T, dir, runtime, checkpointScrip
 	writeGeneratorTestFile(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "problem.md"), "problem\n")
-	writeGeneratorTestFile(t, filepath.Join(dir, "solution.md"), "solution\n")
+	writeGeneratorTestFile(t, filepath.Join(dir, "solution.md"), "<!-- checkpoint: deployment-ready -->\nsolution\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "hints", "deployment-ready.md"), "hint\n")
 	writeGeneratorTestFile(t, filepath.Join(dir, "checks", "checkpoints.sh"), checkpointScript)
 	writeGeneratorTestFile(t, filepath.Join(dir, "answer.sh"), "#!/bin/sh\n")

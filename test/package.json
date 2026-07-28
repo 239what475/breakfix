@@ -8,6 +8,7 @@
     "test:e2e:headed": "playwright test -c playwright.config.ts --headed",
     "test:e2e:debug": "playwright test -c playwright.config.ts --debug",
     "test:runtime:verify": "RUN_RUNTIME_E2E=1 playwright test -c playwright.runtime.config.ts verifytask.runtime.spec.ts",
+    "test:runtime:challenge": "RUN_RUNTIME_E2E=1 playwright test -c playwright.runtime.config.ts verifytask.runtime.spec.ts --grep developer-selected",
     "test:runtime:builder-boundary": "RUN_NETWORK_POLICY_E2E=1 playwright test -c playwright.runtime.config.ts builder-boundary.runtime.spec.ts",
     "test:runtime:browser": "RUN_RUNTIME_E2E=1 playwright test -c playwright.runtime.config.ts workbench.runtime.spec.ts",
     "test:agent-live:assistant": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts assistant.live.spec.ts",
@@ -18,6 +19,7 @@
     "test:recovery": "BREAKFIX_E2E_BASE_URL=http://localhost:9091 RUN_SERVER_RECOVERY_E2E=1 playwright test -c playwright.runtime.config.ts server-recovery.spec.ts"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1"
+    "@playwright/test": "1.61.1",
+    "yaml": "^2.8.1"
   }
 }

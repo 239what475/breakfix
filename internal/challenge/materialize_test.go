@@ -252,7 +252,7 @@ func validManifest(prefix string) string {
 func writeChallengeAssets(t *testing.T, root string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "problem.md"), "problem\n")
-	writeFile(t, filepath.Join(root, "solution.md"), "solution\n")
+	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
 	writeFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
 	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")

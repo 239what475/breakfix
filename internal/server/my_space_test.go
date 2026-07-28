@@ -69,6 +69,9 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	if err := handler.db.RecordChallengeCompletion(ctx, "u-demo", "demo", "environment-demo-uid", readyAt.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	if err := handler.db.RecordCheckpointFirstPass(ctx, db.CheckpointFirstPassEvent{EnvironmentUID: "environment-demo-uid", UserID: "u-demo", ChallengeID: "demo", ChallengeRevision: "revision-demo", CheckpointID: "complete", FirstPassedAt: readyAt.Add(time.Minute), Summary: "done"}); err != nil {
+		t.Fatal(err)
+	}
 	createPublishedAuthoringSession(t, handler.db, "u-demo", "demo")
 
 	response := httptest.NewRecorder()
@@ -92,7 +95,7 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	if len(space.ActiveEnvironments) != 1 || space.ActiveEnvironments[0].Challenge.Title != "Demo" || space.ActiveEnvironments[0].CheckpointProgress.Passed != 1 {
 		t.Fatalf("active environments = %#v", space.ActiveEnvironments)
 	}
-	if len(space.RecentLearning) != 1 || space.RecentLearning[0].Challenge.Id != "demo" || space.RecentLearning[0].CompletedAt == nil || space.RecentLearning[0].LearningSeconds != 75 {
+	if len(space.RecentLearning) != 1 || space.RecentLearning[0].Challenge.Id != "demo" || space.RecentLearning[0].CompletedAt == nil || space.RecentLearning[0].LearningSeconds != 75 || len(space.RecentLearning[0].CheckpointFirstPasses) != 1 {
 		t.Fatalf("recent learning = %#v", space.RecentLearning)
 	}
 	if len(space.Authoring.Published) != 1 {

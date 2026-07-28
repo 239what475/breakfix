@@ -5,6 +5,7 @@
 	telepresence-connect telepresence-server telepresence-controller telepresence-worker telepresence-down telepresence-status telepresence-disconnect \
         e2e \
 		e2e-runtime-verify \
+		verify-challenge \
 		e2e-builder-boundary \
 		e2e-runtime-browser \
 		e2e-agent-assistant \
@@ -190,6 +191,11 @@ e2e-server-recovery:
 e2e-runtime-verify:
 	npm ci --prefix test
 	npm run test:runtime:verify --prefix test -- --workers=1
+
+verify-challenge:
+	@test -n "$(NAME)" || { echo "  ERROR: NAME is required, for example: make verify-challenge NAME=container-runtime-init"; exit 1; }
+	npm ci --prefix test
+	VERIFY_CHALLENGE_NAME="$(NAME)" npm run test:runtime:challenge --prefix test -- --workers=1 --reporter=list
 
 # This suite needs a CNI that actually enforces Kubernetes NetworkPolicy.
 # Kind's default kindnet does not, so the isolated cluster is created with its

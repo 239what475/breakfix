@@ -194,6 +194,12 @@
   font-size: 10px;
   line-height: 1.4;
 }
+.checkpoint-first-passed {
+  display: block;
+  margin-top: 3px;
+  color: #4c7963;
+  font: 9px "DM Mono", monospace;
+}
 .document-pane {
   position: relative;
   min-width: 0;

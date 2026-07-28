@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -234,11 +235,17 @@ func toAPICheckStatusResults(checks []breakfixv1.CheckpointResultStatus) []api.C
 	result := make([]api.CheckpointResult, 0, len(checks))
 	for _, check := range checks {
 		details := check.Details
+		var firstPassedAt *time.Time
+		if check.FirstPassedAt != nil && !check.FirstPassedAt.IsZero() {
+			value := check.FirstPassedAt.UTC()
+			firstPassedAt = &value
+		}
 		result = append(result, api.CheckpointResult{
-			Id:      check.ID,
-			Passed:  check.Passed,
-			Summary: check.Summary,
-			Details: &details,
+			Id:            check.ID,
+			Passed:        check.Passed,
+			FirstPassedAt: firstPassedAt,
+			Summary:       check.Summary,
+			Details:       &details,
 		})
 	}
 	return result

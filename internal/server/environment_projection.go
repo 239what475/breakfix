@@ -15,11 +15,12 @@ import (
 const environmentProjectionInterval = 2 * time.Second
 
 type environmentProjection struct {
-	UID     string
-	Name    string
-	Runtime string
-	Spec    *breakfixv1.CommonEnvironmentSpec
-	Status  *breakfixv1.CommonEnvironmentStatus
+	UID          string
+	Name         string
+	Runtime      string
+	Verification bool
+	Spec         *breakfixv1.CommonEnvironmentSpec
+	Status       *breakfixv1.CommonEnvironmentStatus
 }
 
 // StartEnvironmentStatusProjector makes the Server the sole database writer
@@ -57,7 +58,7 @@ func (h *Handler) projectEnvironmentStatuses(ctx context.Context) error {
 	for i := range containers.Items {
 		env := &containers.Items[i]
 		if err := h.projectEnvironment(ctx, environmentProjection{
-			UID: string(env.UID), Name: env.Name, Runtime: "container", Spec: &env.Spec, Status: &env.Status,
+			UID: string(env.UID), Name: env.Name, Runtime: "container", Verification: env.Labels["breakfix.dev/verify-task"] != "", Spec: &env.Spec, Status: &env.Status,
 		}); err != nil {
 			return err
 		}
@@ -70,7 +71,7 @@ func (h *Handler) projectEnvironmentStatuses(ctx context.Context) error {
 	for i := range vclusters.Items {
 		env := &vclusters.Items[i]
 		if err := h.projectEnvironment(ctx, environmentProjection{
-			UID: string(env.UID), Name: env.Name, Runtime: "vcluster", Spec: &env.Spec.CommonEnvironmentSpec, Status: &env.Status.CommonEnvironmentStatus,
+			UID: string(env.UID), Name: env.Name, Runtime: "vcluster", Verification: env.Labels["breakfix.dev/verify-task"] != "", Spec: &env.Spec.CommonEnvironmentSpec, Status: &env.Status.CommonEnvironmentStatus,
 		}); err != nil {
 			return err
 		}
@@ -97,6 +98,9 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 	if h == nil || h.db == nil || projection.Spec == nil || projection.Status == nil {
 		return false, nil
 	}
+	if projection.Verification {
+		return false, nil
+	}
 	if strings.TrimSpace(projection.UID) == "" {
 		return false, fmt.Errorf("environment %q has no uid", projection.Name)
 	}
@@ -110,6 +114,24 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 			projection.Status.ReadyAt.UTC(),
 		); err != nil {
 			return false, fmt.Errorf("record environment attempt: %w", err)
+		}
+	}
+	if projection.Status.Checkpoints != nil {
+		for _, checkpoint := range projection.Status.Checkpoints.Results {
+			if checkpoint.FirstPassedAt == nil || checkpoint.FirstPassedAt.IsZero() {
+				continue
+			}
+			if err := h.db.RecordCheckpointFirstPass(ctx, db.CheckpointFirstPassEvent{
+				EnvironmentUID:    projection.UID,
+				UserID:            projection.Spec.UserRef,
+				ChallengeID:       projection.Spec.ChallengeRef,
+				ChallengeRevision: projection.Spec.ChallengeRevision,
+				CheckpointID:      checkpoint.ID,
+				FirstPassedAt:     checkpoint.FirstPassedAt.UTC(),
+				Summary:           checkpoint.Summary,
+			}); err != nil {
+				return false, fmt.Errorf("record checkpoint first pass %q: %w", checkpoint.ID, err)
+			}
 		}
 	}
 

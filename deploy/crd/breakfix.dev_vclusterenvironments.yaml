@@ -130,6 +130,9 @@ spec:
                       properties:
                         details:
                           type: string
+                        firstPassedAt:
+                          format: date-time
+                          type: string
                         id:
                           type: string
                         passed:

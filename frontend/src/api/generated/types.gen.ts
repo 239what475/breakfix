@@ -76,6 +76,7 @@ export type MySpaceLearningHistory = {
     completed_at?: string | null;
     learning_seconds: number;
     state: 'active' | 'completed' | 'stopped' | 'reset' | 'expired';
+    checkpoint_first_passes: Array<CheckpointFirstPass>;
 };
 
 export type MySpaceLearningPage = {
@@ -173,8 +174,15 @@ export type ChallengeCheckpoint = {
 export type CheckpointResult = {
     id: string;
     passed: boolean;
+    first_passed_at?: string | null;
     summary: string;
     details?: string;
+};
+
+export type CheckpointFirstPass = {
+    checkpoint_id: string;
+    first_passed_at: string;
+    summary: string;
 };
 
 export type ChallengeContent = {

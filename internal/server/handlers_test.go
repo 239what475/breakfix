@@ -88,12 +88,13 @@ func TestGetChallengeProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
 }
 
 func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
+	firstPassedAt := metav1.NewTime(time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC))
 	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
 		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
 		Status: breakfixv1.CommonEnvironmentStatus{
 			Phase: breakfixv1.EnvironmentCompleted,
 			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
-				ID: "complete", Summary: "done", Passed: true,
+				ID: "complete", Summary: "done", Passed: true, FirstPassedAt: &firstPassedAt,
 			}}},
 		},
 	}})
@@ -111,7 +112,7 @@ func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &progress); err != nil {
 		t.Fatal(err)
 	}
-	if len(progress.Checks) != 1 || !progress.Checks[0].Passed {
+	if len(progress.Checks) != 1 || !progress.Checks[0].Passed || progress.Checks[0].FirstPassedAt == nil || !progress.Checks[0].FirstPassedAt.Equal(firstPassedAt.Time) {
 		t.Fatalf("unexpected checkpoint snapshot: %#v", progress.Checks)
 	}
 }
@@ -139,7 +140,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\nRepair it this way.\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
 	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
@@ -194,7 +195,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
 	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
@@ -465,7 +466,7 @@ func writeTestChallenge(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
 	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")

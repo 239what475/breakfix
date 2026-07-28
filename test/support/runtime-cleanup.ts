@@ -20,6 +20,15 @@ type PublishedChallengeCleanup = {
 
 type VerifyTaskCleanup = Omit<PublishedChallengeCleanup, "challengeID">;
 
+type VerifyTaskResources = {
+	status?: {
+		buildJobName?: string;
+		publisherJobName?: string;
+		verifierJobName?: string;
+		image?: string;
+	};
+};
+
 async function kubectl(args: string[]) {
 	return execFile("kubectl", args, { cwd: projectRoot, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
 }
@@ -46,9 +55,39 @@ async function waitForResourceDeletion(kind: string, name: string) {
 	throw new Error(`${kind}/${name} was not deleted during runtime cleanup`);
 }
 
+async function waitForImageDeletion(reference: string) {
+	if (!reference) return;
+	const firstSlash = reference.indexOf("/");
+	const at = reference.lastIndexOf("@");
+	const lastColon = reference.lastIndexOf(":");
+	if (firstSlash <= 0 || (at <= firstSlash && lastColon <= firstSlash)) throw new Error(`invalid image reference ${reference}`);
+	const registry = reference.slice(0, firstSlash);
+	const separator = at > firstSlash ? at : lastColon;
+	const repository = reference.slice(firstSlash + 1, separator);
+	const manifestReference = reference.slice(separator + 1);
+	const url = `http://${registry}/v2/${repository}/manifests/${manifestReference}`;
+	const deadline = Date.now() + 3 * 60_000;
+	while (Date.now() < deadline) {
+		const response = await fetch(url, { headers: { Accept: "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" } });
+		if (response.status === 404) return;
+		if (!response.ok) throw new Error(`read image manifest during cleanup: ${response.status} ${await response.text()}`);
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+	}
+	throw new Error(`image ${reference} was not deleted during runtime cleanup`);
+}
+
 async function verifiedImage(taskID: string) {
 	const { stdout } = await kubectl(["-n", namespace, "get", "verifytask", taskID, "-o", "jsonpath={.status.image}"]);
 	return stdout.trim();
+}
+
+async function verifyTaskResources(taskID: string): Promise<VerifyTaskResources> {
+	try {
+		const { stdout } = await kubectl(["-n", namespace, "get", "verifytask", taskID, "-o", "json"]);
+		return JSON.parse(stdout) as VerifyTaskResources;
+	} catch {
+		return {};
+	}
 }
 
 async function createStagingPod(name: string, manifestPath: string) {
@@ -126,6 +165,7 @@ async function deletePublishedImage(reference: string) {
 	if (deleted.status !== 202 && deleted.status !== 404) {
 		throw new Error(`delete published image: ${deleted.status} ${await deleted.text()}`);
 	}
+	await waitForImageDeletion(reference);
 }
 
 async function removeTaxonomyWorkItem(challengeID: string) {
@@ -144,11 +184,17 @@ async function removeTaxonomyWorkItem(challengeID: string) {
 export async function cleanupVerifyTask({ submissionID, verifyTaskID }: VerifyTaskCleanup) {
 	requireGeneratedID(submissionID, "submission id");
 	requireGeneratedID(verifyTaskID, "verify task id");
-	const image = await verifiedImage(verifyTaskID).catch(() => "");
+	const resources = await verifyTaskResources(verifyTaskID);
+	const image = resources.status?.image || await verifiedImage(verifyTaskID).catch(() => "");
 	if (await resourceExists("verifytask", verifyTaskID)) {
 		await kubectl(["-n", namespace, "delete", "verifytask", verifyTaskID, "--wait=true", "--timeout=5m"]);
 	}
 	await waitForResourceDeletion("verifytask", verifyTaskID);
+	for (const job of [resources.status?.buildJobName, resources.status?.publisherJobName, resources.status?.verifierJobName]) {
+		if (job) await waitForResourceDeletion("job", job);
+	}
+	await waitForResourceDeletion("containerenvironment", `verify-env-${verifyTaskID}`);
+	await waitForResourceDeletion("vclusterenvironment", `verify-env-${verifyTaskID}`);
 	await removeDataFiles(undefined, submissionID);
 	await deletePublishedImage(image);
 }

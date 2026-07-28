@@ -62,7 +62,7 @@ checkpoints:
 	writeArtifactAsset(t, filepath.Join(dir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeArtifactAsset(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
 	writeArtifactAsset(t, filepath.Join(dir, "problem.md"), "# Actual problem\n")
-	writeArtifactAsset(t, filepath.Join(dir, "solution.md"), "# Actual solution\n")
+	writeArtifactAsset(t, filepath.Join(dir, "solution.md"), "# Actual solution\n<!-- checkpoint: service-ready -->\n")
 	writeArtifactAsset(t, filepath.Join(dir, "hints", "service-ready.md"), "hint\n")
 	writeArtifactAsset(t, filepath.Join(dir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeArtifactAsset(t, filepath.Join(dir, "answer.sh"), "#!/bin/sh\n")

@@ -25,6 +25,11 @@ const emit = defineEmits<{
   refresh: [];
   hint: [id: string];
 }>();
+
+function firstPassedLabel(value?: string | null) {
+  if (!value) return "";
+  return "First passed " + new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
 </script>
 
 <template>
@@ -94,7 +99,12 @@ const emit = defineEmits<{
               ><small>{{
                 results.find((result) => result.id === checkpoint.id)
                   ?.summary || checkpoint.description
-              }}</small></span
+              }}</small
+              ><time
+                v-if="results.find((result) => result.id === checkpoint.id)?.first_passed_at"
+                class="checkpoint-first-passed"
+                :datetime="results.find((result) => result.id === checkpoint.id)?.first_passed_at ?? undefined"
+              >{{ firstPassedLabel(results.find((result) => result.id === checkpoint.id)?.first_passed_at) }}</time></span
             >
           </button>
         </li>

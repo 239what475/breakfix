@@ -115,6 +115,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	if err := validateCheckpoints(challenge, dir); err != nil {
 		return nil, err
 	}
+	if err := validateTeachingAssets(challenge, dir); err != nil {
+		return nil, err
+	}
 	return challenge, nil
 }
 
@@ -157,6 +160,9 @@ func ValidateSubmissionDir(dir string) (*Entry, error) {
 	if err := validateCheckpoints(challenge, dir); err != nil {
 		return nil, err
 	}
+	if err := validateTeachingAssets(challenge, dir); err != nil {
+		return nil, err
+	}
 	return challenge, nil
 }
 
@@ -179,14 +185,15 @@ func validateCheckpoints(challenge *Entry, dir string) error {
 		if strings.TrimSpace(checkpoint.Description) == "" {
 			return fmt.Errorf("checkpoint %q description is required", id)
 		}
-		if checkpoint.Hint != "" {
-			path, err := safeChallengePath(dir, checkpoint.Hint)
-			if err != nil {
-				return fmt.Errorf("checkpoint %q hint: %w", id, err)
-			}
-			if info, err := os.Stat(path); err != nil || info.IsDir() {
-				return fmt.Errorf("checkpoint %q hint is not a file", id)
-			}
+		if strings.TrimSpace(checkpoint.Hint) == "" {
+			return fmt.Errorf("checkpoint %q hint is required", id)
+		}
+		path, err := safeChallengePath(dir, checkpoint.Hint)
+		if err != nil {
+			return fmt.Errorf("checkpoint %q hint: %w", id, err)
+		}
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			return fmt.Errorf("checkpoint %q hint is not a file", id)
 		}
 		known[id] = struct{}{}
 	}

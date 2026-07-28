@@ -18,6 +18,7 @@ require (
 	github.com/oapi-codegen/runtime v1.4.2
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/pquerna/otp v1.5.0
+	github.com/yuin/goldmark v1.7.16
 	golang.org/x/crypto v0.52.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -63,7 +63,7 @@ checks/checkpoints.sh 必须支持 /checks/checkpoints.sh --json，stdout 只能
 
 - problem.md 面向做题用户，清楚说明场景、目标、约束和必要背景，但不直接泄露根因或标准命令。
 - 每个 hint 从观察方向逐步推进到可行动线索，与对应检查点相关，不直接替代完整解答。
-- solution.md 按检查点说明完整做法、原理和如何验证结果；它必须与 answer.sh 和实际环境一致。
+- solution.md 按检查点说明完整做法、原理和如何验证结果；每个检查点章节前必须恰好有一个 HTML 注释标记：<!-- checkpoint: <checkpoint-id> -->；它必须与 answer.sh 和实际环境一致。
 
 如果题意约定与可实现的实际环境发生冲突，保持学习目标和难度，修正题目资产中的 title、difficulty、description 与检查点，使它们准确描述最终实现。完成文件实现和静态核对后结束，不要只输出建议或计划。`
 }

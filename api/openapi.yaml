@@ -654,7 +654,7 @@ components:
 
     MySpaceLearningHistory:
       type: object
-      required: [challenge, ready_at, learning_seconds, state]
+      required: [challenge, ready_at, learning_seconds, state, checkpoint_first_passes]
       properties:
         challenge:
           $ref: "#/components/schemas/MySpaceChallenge"
@@ -671,6 +671,10 @@ components:
         state:
           type: string
           enum: [active, completed, stopped, reset, expired]
+        checkpoint_first_passes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckpointFirstPass"
 
     MySpaceLearningPage:
       type: object
@@ -890,9 +894,25 @@ components:
           type: string
         passed:
           type: boolean
+        first_passed_at:
+          type: string
+          format: date-time
+          nullable: true
         summary:
           type: string
         details:
+          type: string
+
+    CheckpointFirstPass:
+      type: object
+      required: [checkpoint_id, first_passed_at, summary]
+      properties:
+        checkpoint_id:
+          type: string
+        first_passed_at:
+          type: string
+          format: date-time
+        summary:
           type: string
 
     ChallengeContent:

@@ -601,4 +601,17 @@ var schemaMigrations = []schemaMigration{
 		)`,
 		`CREATE INDEX terminal_tickets_expiry ON terminal_tickets(expires_at)`,
 	}},
+	{version: 12, statements: []string{
+		`CREATE TABLE checkpoint_pass_events (
+			environment_uid TEXT NOT NULL,
+			checkpoint_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			challenge_id TEXT NOT NULL,
+			challenge_revision TEXT NOT NULL DEFAULT '',
+			first_passed_at TIMESTAMPTZ NOT NULL,
+			summary TEXT NOT NULL,
+			PRIMARY KEY (environment_uid, checkpoint_id)
+		)`,
+		`CREATE INDEX checkpoint_pass_events_user_challenge ON checkpoint_pass_events(user_id, challenge_id, first_passed_at)`,
+	}},
 }

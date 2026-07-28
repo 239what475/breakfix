@@ -1,11 +1,12 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test } from "@playwright/test";
+import { parse } from "yaml";
 import { cleanupVerifyTask, waitForEnvironmentDeletion } from "../support/runtime-cleanup";
 
 const runtimeTest = process.env.RUN_RUNTIME_E2E === "1" ? test : test.skip;
@@ -16,6 +17,9 @@ const stageImage = "172.18.0.1:5000/break-fix/breakfix-base:latest";
 const serverDataPVC = "breakfix-server-data";
 
 type VerifyTask = {
+	metadata?: {
+		name?: string;
+	};
 	status?: {
 		phase?: string;
 		stage?: string;
@@ -51,6 +55,11 @@ type Fixture = {
 	checkpointIDs: string[];
 };
 
+type ChallengeManifest = {
+	runtime?: unknown;
+	checkpoints?: Array<{ id?: unknown }>;
+};
+
 async function kubectl(args: string[]) {
 	return execFile("kubectl", args, { cwd: projectRoot, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
 }
@@ -79,7 +88,7 @@ async function waitForTerminalTask(taskID: string, environmentKind: string, envi
 			expect(environmentObserved).toBe(true);
 			expect(task.status.image).toMatch(/@sha256:[a-f0-9]{64}$/);
 			await assertUntrustedBuilderJob(task.status.buildJobName);
-			return;
+			return task;
 		}
 		if (task.status?.phase === "Failed") {
 			const report = task.status.report;
@@ -91,6 +100,38 @@ async function waitForTerminalTask(taskID: string, environmentKind: string, envi
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 	}
 	throw new Error(`VerifyTask ${taskID} did not complete before timeout`);
+}
+
+async function fixtureForSourceSlug(name: string): Promise<Fixture> {
+	const normalized = name.trim();
+	if (!normalized || normalized.includes("/") || normalized.includes("\\") || normalized === "." || normalized === "..") {
+		throw new Error("VERIFY_CHALLENGE_NAME must be one challenge source directory name");
+	}
+	const candidates = [
+		join(projectRoot, "data", "challenges", normalized),
+		join(projectRoot, "test", "fixtures", "challenges", normalized),
+	];
+	let directory = "";
+	for (const candidate of candidates) {
+		try {
+			if ((await stat(candidate)).isDirectory()) {
+				directory = candidate;
+				break;
+			}
+		} catch {
+			// Check the next supported source root.
+		}
+	}
+	if (!directory) throw new Error(`challenge source ${normalized} was not found under data/challenges or test/fixtures/challenges`);
+	const manifest = parse(await readFile(join(directory, "challenge.yaml"), "utf8")) as ChallengeManifest;
+	if ((manifest.runtime !== "container" && manifest.runtime !== "vcluster") || !Array.isArray(manifest.checkpoints)) {
+		throw new Error(`challenge source ${normalized} does not provide a valid runtime/checkpoint execution snapshot`);
+	}
+	const checkpointIDs = manifest.checkpoints.map((checkpoint) => typeof checkpoint?.id === "string" ? checkpoint.id.trim() : "");
+	if (!checkpointIDs.length || checkpointIDs.some((id) => !id)) {
+		throw new Error(`challenge source ${normalized} has an invalid checkpoint execution snapshot`);
+	}
+	return { directory, runtime: manifest.runtime, checkpointIDs };
 }
 
 async function waitForFailedTask(taskID: string) {
@@ -269,7 +310,7 @@ async function verifyFixture(fixture: Fixture) {
 		await createStagingPod(pod, join(temp, "stage.yaml"));
 		await stageFixture(pod, submissionID, fixture, join(temp, "artifact.tar.gz"));
 		await createVerifyTask(taskID, submissionID, fixture, join(temp, "verifytask.yaml"));
-		await waitForTerminalTask(taskID, environmentKind, environmentName);
+		return await waitForTerminalTask(taskID, environmentKind, environmentName);
 	} finally {
 		await cleanup(taskID, pod, submissionID);
 		await rm(temp, { recursive: true, force: true });
@@ -306,8 +347,17 @@ runtimeTest("fixed container artifact completes a real VerifyTask", async () => 
 	test.setTimeout(25 * 60_000);
 	await verifyFixture({
 		runtime: "container",
-		directory: join(projectRoot, "data", "challenges", "cleanup-logs"),
-		checkpointIDs: ["cleanup-script-ready", "eligible-logs-archived", "protected-logs-preserved"],
+		directory: join(projectRoot, "test", "fixtures", "challenges", "container-runtime-init"),
+		checkpointIDs: ["runtime-marker-ready"],
+	});
+});
+
+runtimeTest("fixed dependent container artifact completes a real VerifyTask", async () => {
+	test.setTimeout(25 * 60_000);
+	await verifyFixture({
+		runtime: "container",
+		directory: join(projectRoot, "test", "fixtures", "challenges", "container-checkpoint-dependency"),
+		checkpointIDs: ["configuration-ready", "derived-state-ready"],
 	});
 });
 
@@ -366,4 +416,36 @@ runtimeTest("checkpoint failure deletes the published staging image", async () =
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
+});
+
+runtimeTest("answer failure is reported as an artifact failure after publishing", async () => {
+	test.setTimeout(20 * 60_000);
+	const directory = await mkdtemp(join(tmpdir(), "breakfix-runtime-answer-failure-"));
+	try {
+		await cp(join(projectRoot, "test", "fixtures", "challenges", "container-runtime-init"), directory, { recursive: true });
+		await writeFile(join(directory, "answer.sh"), "#!/bin/bash\nset -euo pipefail\necho answer failed >&2\nexit 23\n", "utf8");
+		await verifyFailedFixture({
+			runtime: "container",
+			directory,
+			checkpointIDs: ["runtime-marker-ready"],
+		}, async (task) => {
+			expect(task.status?.report?.class).toBe("artifact");
+			expect(task.status?.report?.buildPassed).toBe(true);
+			expect(task.status?.report?.answerPassed).toBeFalsy();
+			expect(task.status?.report?.issues).toContainEqual(expect.objectContaining({ code: "ANSWER_EXIT_NONZERO" }));
+			expect(await jobSucceeded(task.status?.buildJobName)).toBe(true);
+			expect(await jobSucceeded(task.status?.publisherJobName)).toBe(true);
+			expect(await waitForJobSucceeded(task.status?.verifierJobName)).toBe(true);
+		});
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+runtimeTest("developer-selected challenge completes through the real VerifyTask path", async () => {
+	const name = process.env.VERIFY_CHALLENGE_NAME;
+	test.skip(!name, "VERIFY_CHALLENGE_NAME is required for the developer acceptance command");
+	test.setTimeout(25 * 60_000);
+	const task = await verifyFixture(await fixtureForSourceSlug(name!));
+	console.log(JSON.stringify({ verify_task: task.metadata?.name, phase: task.status?.phase, report: task.status?.report }, null, 2));
 });
