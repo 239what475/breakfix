@@ -34,6 +34,13 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresAnExplicitConfigFile(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err == nil || !strings.Contains(err.Error(), "read config") {
+		t.Fatalf("Load() error = %v, want missing config failure", err)
+	}
+}
+
 func TestLoadExpandsRuntimeSecretEnvironment(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
 	t.Setenv("BREAKFIX_TEST_INTERNAL", "internal-from-environment")
@@ -101,8 +108,130 @@ func TestLoadRejectsInvalidRuntimeRegistryInsecureOverride(t *testing.T) {
 	}
 }
 
-func TestDefaultVClusterChartVersionIsPinned(t *testing.T) {
-	if got := defaults().VClusterChartVersion; got != "0.35.1" {
-		t.Fatalf("default vcluster chart version = %q, want 0.35.1", got)
+func TestValidateServerRejectsMissingUIOrigin(t *testing.T) {
+	cfg := validProcessConfig()
+	cfg.UIOrigin = ""
+	if err := cfg.ValidateServer(); err == nil || !strings.Contains(err.Error(), "ui_origin") {
+		t.Fatalf("ValidateServer() error = %v, want ui_origin validation", err)
+	}
+	cfg.UIOrigin = "https://app.breakfix.example"
+	if err := cfg.ValidateServer(); err != nil {
+		t.Fatalf("ValidateServer() = %v", err)
+	}
+}
+
+func TestLoadDoesNotInjectDevelopmentDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("port: 9090\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JWTSecret != "" || cfg.RegistryAddr != "" || cfg.Agent.Model != "" {
+		t.Fatalf("Load injected development defaults: %#v", cfg)
+	}
+	if err := cfg.ValidateServer(); err == nil {
+		t.Fatal("partial production config passed server validation")
+	}
+}
+
+func TestProcessValidationRejectsMissingProcessDependencies(t *testing.T) {
+	if err := validProcessConfig().ValidateServer(); err != nil {
+		t.Fatalf("valid server config: %v", err)
+	}
+	if err := validProcessConfig().ValidateController(); err != nil {
+		t.Fatalf("valid controller config: %v", err)
+	}
+	if err := validProcessConfig().ValidateAgentWorker(); err != nil {
+		t.Fatalf("valid agent worker config: %v", err)
+	}
+
+	server := validProcessConfig()
+	server.DatabaseURL = ""
+	if err := server.ValidateServer(); err == nil {
+		t.Fatal("server accepted missing database URL")
+	}
+	controller := validProcessConfig()
+	controller.ServerHost = ""
+	if err := controller.ValidateController(); err == nil {
+		t.Fatal("controller accepted missing server host")
+	}
+	worker := validProcessConfig()
+	worker.Agent.APIKey = ""
+	if err := worker.ValidateAgentWorker(); err == nil {
+		t.Fatal("agent worker accepted missing API key")
+	}
+}
+
+func TestParsedUIOriginRejectsNonOriginValues(t *testing.T) {
+	for _, value := range []string{"", "breakfix.example", "ftp://breakfix.example", "https://breakfix.example/path", "https://user@breakfix.example"} {
+		if _, err := (Config{UIOrigin: value}).ParsedUIOrigin(); err == nil {
+			t.Fatalf("ParsedUIOrigin accepted %q", value)
+		}
+	}
+}
+
+func TestLoadExpandsHomeKubeconfigPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "breakfix.yaml")
+	if err := os.WriteFile(path, []byte("kubeconfig: ~/.kube/config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Kubeconfig != filepath.Join(home, ".kube", "config") {
+		t.Fatalf("kubeconfig = %q", cfg.Kubeconfig)
+	}
+}
+
+func validProcessConfig() Config {
+	return Config{
+		Port:                 9090,
+		HealthPort:           8081,
+		DataDir:              "/var/lib/breakfix",
+		DatabaseURL:          "postgres://breakfix.example/breakfix",
+		AgentDatabaseURL:     "postgres://breakfix.example/breakfix_agent",
+		RegistryAddr:         "registry.breakfix.example/breakfix",
+		RegistryPullSecret:   "breakfix-registry-pull",
+		RegistryWriteSecret:  "breakfix-registry-write",
+		RegistryUsername:     "breakfix",
+		RegistryPassword:     "password",
+		BuilderImage:         "registry.breakfix.example/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		PublisherImage:       "registry.breakfix.example/publisher@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		VerifierImage:        "registry.breakfix.example/verifier@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		VClusterBinary:       "/usr/local/bin/vcluster",
+		VClusterChartRepo:    "https://charts.loft.sh",
+		VClusterChartVersion: "0.35.1",
+		ServerHost:           "breakfix-server",
+		UIOrigin:             "https://app.breakfix.example",
+		Namespace:            "breakfix",
+		CRDNamespace:         "breakfix-system",
+		CooldownMinutes:      5,
+		JWTSecret:            "jwt",
+		InternalAPIKey:       "internal",
+		VerificationGrantKey: "verification-grant",
+		Agent: AgentConfig{
+			BaseURL:        "https://api.example",
+			APIKeyEnv:      "BREAKFIX_TEST_AGENT_KEY",
+			APIKey:         "agent-key",
+			Model:          "test-model",
+			RequestTimeout: "1m",
+			ServerURL:      "http://breakfix-server:9090",
+		},
+		OpenSandbox: OpenSandboxConfig{
+			BaseURL:          "http://opensandbox.example",
+			APIKeyEnv:        "BREAKFIX_TEST_SANDBOX_KEY",
+			APIKey:           "sandbox-key",
+			Namespace:        "opensandbox",
+			WorkspaceImage:   "ubuntu:22.04",
+			WorkspaceStorage: "5Gi",
+		},
 	}
 }

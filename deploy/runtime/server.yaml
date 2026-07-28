@@ -107,6 +107,11 @@ spec:
               value: http://opensandbox-server.opensandbox.svc.cluster.local
             - name: BREAKFIX_OPENSANDBOX_NAMESPACE
               value: opensandbox
+            - name: BREAKFIX_UI_ORIGIN
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: ui_origin
           volumeMounts:
             - name: config
               mountPath: /etc/breakfix
@@ -117,13 +122,13 @@ spec:
               mountPath: /tmp
           readinessProbe:
             httpGet:
-              path: /api/openapi.json
+              path: /readyz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet:
-              path: /api/openapi.json
+              path: /healthz
               port: http
             initialDelaySeconds: 15
             periodSeconds: 10

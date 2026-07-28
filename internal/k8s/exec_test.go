@@ -1,11 +1,15 @@
 package k8s
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 func TestLimitedBufferRejectsOutputBeyondLimit(t *testing.T) {
@@ -27,6 +31,41 @@ func TestJoinExecOutputPreservesStdoutBeforeStderr(t *testing.T) {
 	}
 	if got := joinExecOutput("", "warning"); got != "warning" {
 		t.Fatalf("unexpected stderr-only output %q", got)
+	}
+}
+
+type blockingPTYExecutor struct {
+	contextSeen chan context.Context
+}
+
+func (e *blockingPTYExecutor) StreamWithContext(ctx context.Context, _ remotecommand.StreamOptions) error {
+	e.contextSeen <- ctx
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestStreamPTYPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	executor := &blockingPTYExecutor{contextSeen: make(chan context.Context, 1)}
+	done := make(chan error, 1)
+	go func() { done <- streamPTY(ctx, executor, remotecommand.StreamOptions{}) }()
+	select {
+	case seen := <-executor.contextSeen:
+		if seen != ctx {
+			t.Fatal("stream did not receive the caller context")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stream result = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream was not cancelled")
 	}
 }
 

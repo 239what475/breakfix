@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/assistant"
@@ -35,8 +36,9 @@ type Handler struct {
 	internalAPIKey       string
 	verificationGrantKey []byte
 	registryCredentials  registry.Credentials
-	serverHost           string
 	port                 int
+	uiOrigin             string
+	startupErr           error
 	terminals            *terminalConnectionTracker
 	serverInstance       string
 	generatorSandbox     *opensandbox.Client
@@ -63,8 +65,8 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		internalAPIKey:       cfg.InternalAPIKey,
 		verificationGrantKey: []byte(cfg.VerificationGrantKey),
 		registryCredentials:  registry.Credentials{Username: cfg.RegistryUsername, Password: cfg.RegistryPassword},
-		serverHost:           cfg.ServerHost,
 		port:                 cfg.Port,
+		uiOrigin:             cfg.UIOrigin,
 		terminals:            newTerminalConnectionTracker(time.Second),
 		serverInstance:       newServerInstanceID(),
 	}
@@ -72,15 +74,21 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 		handler.taxonomyWorkflow = taxonomy.NewService(database, taxonomyStore, cfg.ChallengesDir(), cfg.Agent)
 	}
 	if database != nil && client != nil && cfg.OpenSandbox.APIKey != "" {
-		if sandbox, err := opensandbox.New(cfg.OpenSandbox); err == nil {
-			if manager, managerErr := workspace.NewManager(database, client, sandbox, workspace.Config{
-				Namespace: cfg.OpenSandbox.Namespace,
-				Storage:   cfg.OpenSandbox.WorkspaceStorage,
-			}); managerErr == nil {
-				handler.generatorSandbox = sandbox
-				handler.generatorWorkspace = manager
-			}
+		sandbox, err := opensandbox.New(cfg.OpenSandbox)
+		if err != nil {
+			handler.startupErr = fmt.Errorf("initialize opensandbox client: %w", err)
+			return handler
 		}
+		manager, err := workspace.NewManager(database, client, sandbox, workspace.Config{
+			Namespace: cfg.OpenSandbox.Namespace,
+			Storage:   cfg.OpenSandbox.WorkspaceStorage,
+		})
+		if err != nil {
+			handler.startupErr = fmt.Errorf("initialize generator workspace manager: %w", err)
+			return handler
+		}
+		handler.generatorSandbox = sandbox
+		handler.generatorWorkspace = manager
 	}
 	return handler
 }

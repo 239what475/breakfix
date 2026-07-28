@@ -27,12 +27,17 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 		const response = await fetch("/api/challenges");
 		if (!response.ok) throw new Error(await response.text());
 		return response.json() as Promise<{
-			challenges: Array<{ id: string; tags: string[]; title: string; published_at: string }>;
+			challenges: Array<{
+				id: string;
+				tags: Array<{ id: string; title: string }>;
+				title: string;
+				published_at: string;
+			}>;
 		}>;
 	});
-	const challenge = catalog.challenges.find((entry) => entry.id === "chal-r7m4x2q9v6kp");
+	const challenge = catalog.challenges.find((entry) => entry.title === "批量压缩旧日志");
 	expect(challenge?.tags.length).toBeGreaterThan(0);
-	const taxonomyTag = challenge?.tags[0] ?? "";
+	const taxonomyTag = challenge?.tags[0]?.title ?? "";
 	await page.locator(".catalog-filters").getByLabel(taxonomyTag, { exact: true }).check();
 	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
 	await page.locator(".catalog-filters").getByLabel("VCluster", { exact: true }).check();

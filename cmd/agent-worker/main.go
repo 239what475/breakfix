@@ -29,8 +29,8 @@ func main() {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
-	if strings.TrimSpace(cfg.AgentDatabaseURL) == "" {
-		slog.Error("agent_database_url is required for agent worker")
+	if err := cfg.ValidateAgentWorker(); err != nil {
+		slog.Error("invalid agent worker configuration", "err", err)
 		os.Exit(1)
 	}
 	database, err := db.OpenAgentRuntime(cfg.AgentDatabaseURL)

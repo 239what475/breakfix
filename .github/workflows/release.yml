@@ -4,52 +4,47 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        run: |
-          npm ci --prefix frontend
-          npm run build --prefix frontend
-
-      - name: Lint
-        uses: golangci/golangci-lint-action@v6
+      - uses: azure/setup-kubectl@v4
         with:
-          version: latest
-
-      - name: Build
+          version: v1.35.0
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Verify generated deployment contracts
+        run: |
+          make verify-crd-generated
+          make verify-api-generated
+      - name: Publish OCI images and digest-pinned deployment manifest
         env:
           VERSION: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
-        run: |
-          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w \
-            -X 'github.com/breakfix/breakfix/internal/build.Version=${VERSION}' \
-            -X 'github.com/breakfix/breakfix/internal/build.BuildTime=${BUILD_TIME}' \
-            -X 'github.com/breakfix/breakfix/internal/build.Commit=${COMMIT}'"
-
-          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-server-linux-amd64      ./cmd/server
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-server-darwin-amd64     ./cmd/server
-          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-linux-amd64  ./cmd/controller
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/breakfix-controller-darwin-amd64 ./cmd/controller
-
-          ls -lh dist/
-
-      - name: Release
+          RUNTIME_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}
+          RUNTIME_IMAGE_TAG: ${{ github.ref_name }}
+        run: make release-manifest TARGETOS=linux TARGETARCH=amd64
+      - name: Release deployment artifact
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: dist/breakfix-${{ github.ref_name }}.yaml
           generate_release_notes: true

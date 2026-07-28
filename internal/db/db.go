@@ -589,4 +589,16 @@ var schemaMigrations = []schemaMigration{
 		`CREATE INDEX generator_workspaces_deleting ON generator_workspaces(updated_at)
 			WHERE state = 'deleting'`,
 	}},
+	{version: 11, statements: []string{
+		`CREATE TABLE terminal_tickets (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			environment_uid TEXT NOT NULL,
+			challenge_id TEXT NOT NULL,
+			window_name TEXT NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			used_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX terminal_tickets_expiry ON terminal_tickets(expires_at)`,
+	}},
 }

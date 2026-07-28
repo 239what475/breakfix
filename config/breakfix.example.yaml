@@ -1,12 +1,11 @@
 # Breakfix runtime configuration.
 # Copy this file to config/breakfix.yaml and adjust it for the target environment.
 
-# HTTP, proxy, and controller health endpoints.
+# HTTP and controller health endpoints.
 port: 9090
-proxy_port: 3128
 health_port: 8081
 
-# Persistent server state: CA material, artifacts, and the filesystem challenge catalog.
+# Persistent server state: artifacts and the filesystem challenge catalog.
 data_dir: ./data
 # PostgreSQL is the only relational database. The Server data directory is not
 # a database volume and must not be shared with the Controller or Agent Worker.
@@ -27,15 +26,16 @@ registry_write_secret: breakfix-registry-write
 builder_image: ghcr.io/breakfix/breakfix-builder:dev
 publisher_image: ghcr.io/breakfix/breakfix-publisher:dev
 verifier_image: ghcr.io/breakfix/breakfix-verifier:dev
-k8s_base_image: breakfix-k8s-base:latest
 
 # vcluster command and chart source.
 vcluster_binary: vcluster
 vcluster_chart_repo: https://charts.loft.sh
 vcluster_chart_version: "0.35.1"
 
-# Empty uses the default host reachable from cluster Jobs. Set an explicit host in remote deployments.
-server_host: ""
+# Server endpoint used by the Controller-created Builder and Publisher Jobs.
+server_host: 172.18.0.1
+# Exact public browser origin allowed to open terminal WebSockets.
+ui_origin: http://localhost:9090
 namespace: breakfix
 crd_namespace: breakfix-system
 cooldown_minutes: 5

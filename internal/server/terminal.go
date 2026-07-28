@@ -3,12 +3,16 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,12 +23,6 @@ import (
 	"log/slog"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
 type wsMsg struct {
 	Type string `json:"type"`
 	Data string `json:"data,omitempty"`
@@ -32,7 +30,10 @@ type wsMsg struct {
 	Rows uint32 `json:"rows,omitempty"`
 }
 
-const terminalHeartbeatInterval = time.Minute
+const (
+	terminalHeartbeatInterval = time.Minute
+	terminalTicketTTL         = time.Minute
+)
 
 type terminalSocketLifecycle struct {
 	open      func() error
@@ -40,13 +41,16 @@ type terminalSocketLifecycle struct {
 	close     func()
 }
 
-func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, lifecycle terminalSocketLifecycle) {
+func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, lifecycle terminalSocketLifecycle) {
+	upgrader := terminalUpgrader(uiOrigin)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade", "err", err)
 		return
 	}
 	defer conn.Close()
+	terminalCtx, cancelTerminal := context.WithCancel(r.Context())
+	defer cancelTerminal()
 	if lifecycle.open != nil {
 		if err := lifecycle.open(); err != nil {
 			slog.Error("open terminal activity", "err", err, "environment", env.Name)
@@ -66,7 +70,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 			lifecycle.heartbeat()
 			return nil
 		})
-		go keepTerminalConnectionAlive(r.Context(), conn, stopHeartbeat)
+		go keepTerminalConnectionAlive(terminalCtx, conn, stopHeartbeat)
 	}
 
 	resizeCh := make(chan remotecommand.TerminalSize, 4)
@@ -76,6 +80,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	// Read from WebSocket → pipe to PTY stdin
 	go func() {
 		defer stdinW.Close()
+		defer cancelTerminal()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -106,13 +111,32 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, env *activeEnvironment, k
 	defer close(stopLease)
 	idleTTL := environmentIdleTTL(env, time.Duration(cooldownMin)*time.Minute)
 	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
-		go keepEnvironmentLeaseAlive(r.Context(), runtime, env.Name, idleTTL, stopLease)
+		go keepEnvironmentLeaseAlive(terminalCtx, runtime, env.Name, idleTTL, stopLease)
 	}
-	err = k8sClient.ExecPTY(stdinR, output, output, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
+	err = k8sClient.ExecPTY(terminalCtx, stdinR, output, output, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
 
 	if err != nil {
 		slog.Debug("pty session ended", "err", err)
 	}
+}
+
+func terminalUpgrader(expectedOrigin string) websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return terminalOriginAllowed(r.Header.Get("Origin"), expectedOrigin)
+		},
+	}
+}
+
+func terminalOriginAllowed(actual, expected string) bool {
+	actualURL, actualErr := url.ParseRequestURI(strings.TrimSpace(actual))
+	expectedURL, expectedErr := url.ParseRequestURI(strings.TrimSpace(expected))
+	if actualErr != nil || expectedErr != nil || actualURL == nil || expectedURL == nil {
+		return false
+	}
+	return actualURL.Scheme == expectedURL.Scheme && actualURL.Host == expectedURL.Host && actualURL.User == nil && actualURL.RawQuery == "" && actualURL.Fragment == "" && (actualURL.Path == "" || actualURL.Path == "/")
 }
 
 func keepTerminalConnectionAlive(ctx context.Context, conn *websocket.Conn, stop <-chan struct{}) {
@@ -140,6 +164,19 @@ func newTerminalConnectionID() (string, error) {
 		return "", fmt.Errorf("read terminal connection id: %w", err)
 	}
 	return "term-" + hex.EncodeToString(raw[:]), nil
+}
+
+func newTerminalTicket() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("read terminal ticket: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func terminalTicketHash(ticket string) string {
+	sum := sha256.Sum256([]byte(ticket))
+	return hex.EncodeToString(sum[:])
 }
 
 // terminalConnectionTracker treats all terminal windows of one environment as

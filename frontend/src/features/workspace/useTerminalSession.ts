@@ -1,7 +1,7 @@
 import { onScopeDispose, ref, watch, type Ref } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { token } from "../../api/client";
+import { api } from "../../api/client";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalState = "idle" | "connecting" | "connected" | "disconnected";
@@ -44,9 +44,11 @@ export function useTerminalSession(
     fit = undefined;
   }
 
-  function connect() {
+  async function connect() {
     disconnect();
-    if (!host.value || !challengeId.value || !windowName.value) {
+    const challenge = challengeId.value;
+    const window = windowName.value;
+    if (!host.value || !challenge || !window) {
       state.value = "idle";
       return;
     }
@@ -78,13 +80,19 @@ export function useTerminalSession(
     terminal.loadAddon(fit);
     terminal.open(host.value);
     fit.fit();
+    let ticket: string;
+    try {
+      ticket = (await api.createTerminalTicket(challenge, window)).ticket;
+    } catch (error) {
+      if (currentEpoch !== epoch) return;
+      state.value = "disconnected";
+      stateMessage.value = error instanceof Error ? error.message : "Terminal connection failed.";
+      return;
+    }
+    if (currentEpoch !== epoch) return;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const auth = token();
-    const query = new URLSearchParams({ window: windowName.value });
-    if (auth) query.set("token", auth);
-    socket = new WebSocket(
-      `${protocol}//${location.host}/api/challenges/${challengeId.value}/terminal?${query.toString()}`,
-    );
+    const query = new URLSearchParams({ window, ticket });
+    socket = new WebSocket(`${protocol}//${location.host}/api/challenges/${challenge}/terminal?${query.toString()}`);
     socket.onopen = () => {
       if (currentEpoch !== epoch) return;
       stateMessage.value = "";
@@ -126,7 +134,7 @@ export function useTerminalSession(
     observer.observe(host.value);
   }
 
-  watch([host, challengeId, windowName], connect, { flush: "post" });
+  watch([host, challengeId, windowName], () => void connect(), { flush: "post" });
   onScopeDispose(disconnect);
   function refreshLayout() {
     requestAnimationFrame(() => {

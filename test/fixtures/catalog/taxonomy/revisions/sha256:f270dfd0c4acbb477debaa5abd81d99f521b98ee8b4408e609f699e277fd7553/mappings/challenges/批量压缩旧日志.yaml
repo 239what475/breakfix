@@ -1,0 +1,12 @@
+challenge:
+    id: chal-2c4a6e8b0d1f3a5c
+    title: 批量压缩旧日志
+    revision: sha256:8d53651e2fb25e4508d8526be219f7ee49e3e1e381e0a09f2a818805937bf28d
+tags:
+    - id: tag-1a3c5e7b9d0f2a4c
+      title: 日志
+entry_skills: []
+outcomes:
+    - id: skill-2b4d6f8a0c1e3a5b
+      title: 日志归档
+      primary: true

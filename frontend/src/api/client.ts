@@ -18,6 +18,7 @@ import type {
 	ResetResponse,
 	StartResponse,
 	StopResponse,
+	TerminalTicketResponse,
 } from "./generated";
 
 export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
@@ -192,6 +193,8 @@ export const api = {
 		request<ResetResponse>("POST", `/challenges/${id}/reset`),
   stopChallenge: (id: string) =>
 		request<StopResponse>("POST", `/challenges/${id}/stop`),
+	createTerminalTicket: (id: string, window: string) =>
+		request<TerminalTicketResponse>("POST", `/challenges/${id}/terminal-ticket`, { window }),
   closeTerminalWindow: (id: string, window: string) =>
 		request<CloseTerminalWindowResponse>(
       "DELETE",

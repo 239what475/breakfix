@@ -228,7 +228,7 @@ dd if="$1" iflag=skip_bytes,count_bytes skip="$2" count="$3" status=none | base6
 // ExecPTY opens a named tmux window through a PTY session. The tmux session
 // remains in the workspace Pod, so reconnecting a browser tab preserves shell
 // state and opening another tab never creates another user environment.
-func (c *Client) ExecPTY(stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName, sessionName, windowName string) error {
+func (c *Client) ExecPTY(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName, sessionName, windowName string) error {
 	command := fmt.Sprintf(`export TERM=xterm-256color
 if ! tmux has-session -t %[1]s 2>/dev/null; then
   tmux new-session -d -s %[1]s -n %[2]s
@@ -258,13 +258,27 @@ exec tmux attach-session -t %[3]s`, shellQuote(sessionName), shellQuote(windowNa
 		return fmt.Errorf("exec: %w", err)
 	}
 
-	return exec.StreamWithContext(context.Background(), remotecommand.StreamOptions{
+	return streamPTY(ctx, exec, remotecommand.StreamOptions{
 		Stdin:             stdin,
 		Stdout:            stdout,
 		Stderr:            stderr,
 		Tty:               true,
 		TerminalSizeQueue: &sizeQueue{ch: resize},
 	})
+}
+
+type ptyExecutor interface {
+	StreamWithContext(context.Context, remotecommand.StreamOptions) error
+}
+
+func streamPTY(ctx context.Context, executor ptyExecutor, options remotecommand.StreamOptions) error {
+	if ctx == nil {
+		return fmt.Errorf("pty context is required")
+	}
+	if executor == nil {
+		return fmt.Errorf("pty executor is required")
+	}
+	return executor.StreamWithContext(ctx, options)
 }
 
 // ClosePTYWindow closes one named tmux window without affecting the session or

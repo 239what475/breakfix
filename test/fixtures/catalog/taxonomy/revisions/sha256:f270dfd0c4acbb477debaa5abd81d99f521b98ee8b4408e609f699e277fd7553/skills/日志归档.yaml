@@ -1,0 +1,7 @@
+kind: Skill
+id: skill-2b4d6f8a0c1e3a5b
+title: 日志归档
+definition: 使用归档工具保存历史日志。
+mapping_guidance:
+    outcome_when:
+        - 题目要求将日志写入归档。

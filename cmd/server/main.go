@@ -29,6 +29,10 @@ func main() {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateServer(); err != nil {
+		slog.Error("invalid server configuration", "err", err)
+		os.Exit(1)
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		slog.Error("failed to create data directory", "err", err)
 		os.Exit(1)
@@ -54,7 +58,11 @@ func main() {
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
-	router := server.SetupRouter(runCtx, database, k8sClient, cfg, frontendFS)
+	router, err := server.SetupRouter(runCtx, database, k8sClient, cfg, frontendFS)
+	if err != nil {
+		slog.Error("failed to setup server", "err", err)
+		os.Exit(1)
+	}
 	srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Port), Handler: router}
 
 	go func() {

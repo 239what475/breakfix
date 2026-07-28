@@ -14,12 +14,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS) *gin.Engine {
+func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	h := NewHandler(database, k8sClient, cfg)
+	if h.startupErr != nil {
+		return nil, h.startupErr
+	}
+	if err := h.validateReadiness(); err != nil {
+		return nil, err
+	}
 	h.StartAuthoringReconciler(runCtx)
 	if h.taxonomyWorkflow != nil {
 		h.taxonomyWorkflow.Start(runCtx)
@@ -31,6 +37,16 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
+	router.GET("/healthz", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	router.GET("/readyz", func(c *gin.Context) {
+		if err := h.validateReadiness(); err != nil {
+			c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
@@ -127,6 +143,12 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.StopChallenge(c, c.Param("id"))
 		}
 	})
+	router.POST("/api/challenges/:id/terminal-ticket", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CreateTerminalTicket(c, c.Param("id"))
+		}
+	})
 	router.POST("/api/authoring/sessions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -184,15 +206,7 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	router.POST("/api/internal/agent-runs/:id/generator/submit", h.InternalGeneratorSubmitCandidate)
 
 	// Terminal WebSocket
-	router.GET("/api/challenges/:id/terminal", func(c *gin.Context) {
-		if tok := c.Query("token"); tok != "" {
-			c.Request.Header.Set("Authorization", "Bearer "+tok)
-		}
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.HandleTerminal(c)
-		}
-	})
+	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)
 	router.DELETE("/api/challenges/:id/terminals/:window", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -220,5 +234,5 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 		})
 	}
 
-	return router
+	return router, nil
 }

@@ -20,11 +20,11 @@ metadata:
   name: breakfix-server
 rules:
   - apiGroups: ["breakfix.dev"]
-    resources: ["containerenvironments", "vclusterenvironments", "verifytasks"]
+    resources: ["containerenvironments", "vclusterenvironments"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["breakfix.dev"]
-    resources: ["containerenvironments/status", "vclusterenvironments/status", "verifytasks/status"]
-    verbs: ["get", "update", "patch"]
+    resources: ["verifytasks"]
+    verbs: ["create", "get", "list", "watch", "delete"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

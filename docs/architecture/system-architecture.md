@@ -26,13 +26,20 @@ breakfix-controller ----> namespaces, Pods, vclusters, Build/Publisher/Verifier 
   +-----------------------------------------
 ```
 
-`breakfix-server` 负责 HTTP、内嵌 Web UI、WebSocket 终端、认证、作者会话、做题助手、文件系统题库、taxonomy snapshot 与 artifact 存储。它是领域数据的唯一写者，从 CRD status 幂等投影学习记录、尝试记录和终端使用记录；它只创建或更新 Environment `spec`，以及请求删除 CRD，绝不直接写 Environment `status`。
+`breakfix-server` 负责 HTTP、内嵌 Web UI、WebSocket 终端、认证、作者会话、做题助手、文件系统题库、taxonomy snapshot 与 artifact 存储。它是领域数据的唯一写者，从 CRD status 幂等投影学习记录、尝试记录和终端使用记录；它只创建或更新 Environment `spec`，以及请求删除 CRD，绝不直接写 Environment `status`。终端先由受 JWT 保护的 HTTP 接口签发一次性 ticket，再由严格 `ui_origin` 校验的 WebSocket 消费该 ticket；Server 从不接受 URL 中的 JWT。
 
 `breakfix-agent-worker` 从 PostgreSQL 领取有租约的 Agent Run，运行 Eino，并通过 Server 的受围栏保护内部 API 调用领域工具、读取工作区或提交候选。它只有 `agent_*` 表权限，没有 Kubernetes 凭据、Registry 凭据、OpenSandbox 生命周期密钥或领域表写权限。
 
-`breakfix-controller` 只运行 controller-runtime manager 和环境清理循环。它读取 CRD `spec`，创建和清理 Kubernetes 资源，运行检查点，并写回 CRD `status`。它不访问 PostgreSQL、题目目录或 Server 持有的 artifact 文件。
+`breakfix-controller` 只运行 controller-runtime manager 和环境清理循环。它读取 CRD `spec`，创建和清理 Kubernetes 资源，运行检查点，并写回 Environment `status`；它也拥有 VerifyTask 的 `Pending -> Running`、Build/Publisher 调度状态，以及 Build/Publisher 或 verifier 协议失败的终态。它不访问 PostgreSQL、题目目录或 Server 持有的 artifact 文件。
 
 Generator 是持久 Agent Session/Run：Server 创建 Run，Worker 在 Server 管理的 OpenSandbox 工作区中生成候选，随后由 Server 保存 artifact 并创建 `VerifyTask`。Controller 为一个 VerifyTask 调和独立的 Build、Publisher 和 Verifier Job；它不共享 Server 文件系统。
+
+VerifyTask 的 `Verifying -> Succeeded/Failed` 由专用 Verifier Job 写入，且仅用于
+`answer.sh`/checkpoint 的确定性验证结论。Controller 只在 Verifier Job 未写出结论就
+结束时将仍处于 `Running` 的任务标为 infrastructure failure；terminal phase 不可覆盖。
+Server 只读取 VerifyTask status 并投影领域状态，不具有任何 `*/status` 写权限。
+
+Server 启动和 `/readyz` 都以严格模式校验整个文件系统题库；任一发布目录不合法就拒绝 Ready，不会静默隐藏其他题目。`/healthz` 只表示进程存活，供 liveness probe 使用。
 
 ## 数据所有权
 

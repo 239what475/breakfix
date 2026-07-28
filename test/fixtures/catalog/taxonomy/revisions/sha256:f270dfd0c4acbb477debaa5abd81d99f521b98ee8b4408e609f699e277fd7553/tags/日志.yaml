@@ -1,0 +1,7 @@
+kind: Tag
+id: tag-1a3c5e7b9d0f2a4c
+title: 日志
+definition: 涉及日志文件维护和处理的题目。
+mapping_guidance:
+    include_when:
+        - 题目核心对象是日志文件。

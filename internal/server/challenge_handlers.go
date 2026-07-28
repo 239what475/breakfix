@@ -123,37 +123,89 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 	})
 }
 
-func (h *Handler) HandleTerminal(c *gin.Context) {
-	challengeID := c.Param("id")
+func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
 	}
-
+	if h.db == nil || h.k8s == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "terminal dependencies are not configured"})
+		return
+	}
+	var request api.TerminalTicketRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid terminal ticket request"})
+		return
+	}
+	windowName, err := parseTerminalWindow(request.Window)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
 	challengeEntry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
 	}
-
 	env, err := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
+	if err != nil || env.WorkspacePod == "" || env.UID == "" {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
+		return
+	}
+	ticket, err := newTerminalTicket()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	now := time.Now().UTC()
+	if err := h.db.CreateTerminalTicket(c.Request.Context(), db.TerminalTicket{
+		TokenHash:      terminalTicketHash(ticket),
+		UserID:         user.ID,
+		EnvironmentUID: env.UID,
+		ChallengeID:    challengeID,
+		WindowName:     windowName,
+		ExpiresAt:      now.Add(terminalTicketTTL),
+	}, now); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("create terminal ticket: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, api.TerminalTicketResponse{Ticket: ticket})
+}
+
+func (h *Handler) HandleTerminalTicket(c *gin.Context) {
+	challengeID := c.Param("id")
+	if h.db == nil || h.k8s == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "terminal dependencies are not configured"})
+		return
+	}
+	if !terminalOriginAllowed(c.GetHeader("Origin"), h.uiOrigin) {
+		c.JSON(http.StatusForbidden, api.ErrorResponse{Error: "terminal origin is not allowed"})
+		return
+	}
+	challengeEntry, err := h.publishedChallenge(challengeID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+		return
+	}
+	ticket, err := h.db.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), challengeID, c.Query("window"), time.Now().UTC())
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "terminal ticket is invalid or expired"})
+		return
+	}
+	env, err := h.findEnvironment(c.Request.Context(), ticket.UserID, challengeEntry)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
+		return
+	}
+	if env.UID != ticket.EnvironmentUID {
+		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
 		return
 	}
 	if env.WorkspacePod == "" {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "pod not ready"})
 		return
 	}
-	windowName, err := parseTerminalWindow(c.Query("window"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	if env.UID == "" {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "environment identity is not ready"})
-		return
-	}
+	windowName := ticket.WindowName
 	connectionID, err := newTerminalConnectionID()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
@@ -173,14 +225,14 @@ func (h *Handler) HandleTerminal(c *gin.Context) {
 		env.Phase = breakfixv1.EnvironmentReady
 	}
 
-	slog.Info("terminal session started", "challenge", challengeID, "user", user.ID)
+	slog.Info("terminal session started", "challenge", challengeID, "user", ticket.UserID)
 	key := env.Runtime + "/" + env.Name
-	wsUpgrade(c.Writer, c.Request, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName, terminalSocketLifecycle{
+	wsUpgrade(c.Writer, c.Request, h.uiOrigin, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName, terminalSocketLifecycle{
 		open: func() error {
 			if err := h.db.OpenTerminalConnection(c.Request.Context(), db.TerminalConnection{
 				ID:               connectionID,
 				EnvironmentUID:   env.UID,
-				UserID:           user.ID,
+				UserID:           ticket.UserID,
 				ChallengeID:      challengeID,
 				ServerInstanceID: h.serverInstance,
 				ConnectedAt:      time.Now().UTC(),

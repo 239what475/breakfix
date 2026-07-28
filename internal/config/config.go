@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,7 +16,6 @@ import (
 
 type Config struct {
 	Port                 int               `yaml:"port"`
-	ProxyPort            int               `yaml:"proxy_port"`
 	HealthPort           int               `yaml:"health_port"`
 	DataDir              string            `yaml:"data_dir"`
 	DatabaseURL          string            `yaml:"database_url"`
@@ -31,11 +31,11 @@ type Config struct {
 	VerifierImage        string            `yaml:"verifier_image"`
 	RegistryUsername     string            `yaml:"-"`
 	RegistryPassword     string            `yaml:"-"`
-	K8sBaseImage         string            `yaml:"k8s_base_image"`
 	VClusterBinary       string            `yaml:"vcluster_binary"`
 	VClusterChartRepo    string            `yaml:"vcluster_chart_repo"`
 	VClusterChartVersion string            `yaml:"vcluster_chart_version"`
 	ServerHost           string            `yaml:"server_host"`
+	UIOrigin             string            `yaml:"ui_origin"`
 	Namespace            string            `yaml:"namespace"`
 	CRDNamespace         string            `yaml:"crd_namespace"`
 	CooldownMinutes      int               `yaml:"cooldown_minutes"`
@@ -66,52 +66,6 @@ type OpenSandboxConfig struct {
 	APIKey           string `yaml:"-"`
 }
 
-func defaults() Config {
-	return Config{
-		Port:                 9090,
-		ProxyPort:            3128,
-		HealthPort:           8081,
-		DataDir:              "/var/lib/breakfix",
-		DatabaseURL:          "postgres://breakfix:breakfix@postgresql:5432/breakfix?sslmode=disable",
-		AgentDatabaseRole:    "breakfix_agent",
-		RegistryAddr:         "172.18.0.1:5000/break-fix",
-		RegistryInsecure:     true,
-		RegistryPullSecret:   "breakfix-registry-pull",
-		RegistryWriteSecret:  "breakfix-registry-write",
-		BuilderImage:         "breakfix-builder:latest",
-		PublisherImage:       "breakfix-publisher:latest",
-		VerifierImage:        "breakfix-verifier:latest",
-		K8sBaseImage:         "breakfix-k8s-base:latest",
-		VClusterBinary:       "vcluster",
-		VClusterChartRepo:    "https://charts.loft.sh",
-		VClusterChartVersion: "0.35.1",
-		Namespace:            "breakfix",
-		CRDNamespace:         "breakfix-system",
-		JWTSecret:            "breakfix-dev-secret-change-in-production",
-		InternalAPIKey:       "breakfix-dev-internal-key-change-in-production",
-		VerificationGrantKey: "breakfix-dev-verification-grant-key-change-in-production",
-		CooldownMinutes:      5,
-		Agent: AgentConfig{
-			BaseURL:        "https://api.deepseek.com",
-			APIKeyEnv:      "DEEPSEEK_API_KEY",
-			Model:          "deepseek-v4-pro",
-			RequestTimeout: "2m",
-			ServerURL:      "http://breakfix-server",
-		},
-		OpenSandbox: OpenSandboxConfig{
-			BaseURL:          "http://opensandbox-server.opensandbox.svc.cluster.local",
-			APIKeyEnv:        "OPEN_SANDBOX_API_KEY",
-			Namespace:        "opensandbox",
-			WorkspaceImage:   "ubuntu:22.04",
-			WorkspaceStorage: "5Gi",
-		},
-	}
-}
-
-func (c Config) CooldownDuration() string {
-	return fmt.Sprintf("%dm", c.CooldownMinutes)
-}
-
 func (c AgentConfig) Timeout() (time.Duration, error) {
 	value, err := time.ParseDuration(c.RequestTimeout)
 	if err != nil || value <= 0 {
@@ -130,33 +84,16 @@ func (c OpenSandboxConfig) Validate() error {
 	return nil
 }
 
-// ImageURL prepends registry to image name if not already a full URL.
-func (c Config) ImageURL(image string) string {
-	if c.RegistryAddr == "" || strings.Contains(image, "/") {
-		return image
-	}
-	return c.RegistryAddr + "/" + image
-}
-
 func Load(path string) (Config, error) {
-	cfg := defaults()
+	var cfg Config
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("parse config: %w", err)
-	}
-	if cfg.Agent.APIKeyEnv == "" {
-		return cfg, fmt.Errorf("agent api_key_env is required")
-	}
-	if _, err := cfg.Agent.Timeout(); err != nil {
-		return cfg, err
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.AgentDatabaseURL = os.ExpandEnv(cfg.AgentDatabaseURL)
@@ -168,6 +105,8 @@ func Load(path string) (Config, error) {
 	cfg.RegistryWriteSecret = os.ExpandEnv(cfg.RegistryWriteSecret)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
+	cfg.UIOrigin = os.ExpandEnv(cfg.UIOrigin)
+	cfg.Kubeconfig = expandKubeconfigPath(os.ExpandEnv(cfg.Kubeconfig))
 	if err := applyRuntimeEnvironment(&cfg); err != nil {
 		return cfg, err
 	}
@@ -178,9 +117,6 @@ func Load(path string) (Config, error) {
 	if (strings.TrimSpace(cfg.RegistryUsername) == "") != (strings.TrimSpace(cfg.RegistryPassword) == "") {
 		return cfg, fmt.Errorf("BREAKFIX_REGISTRY_USERNAME and BREAKFIX_REGISTRY_PASSWORD must be set together")
 	}
-	if strings.TrimSpace(cfg.RegistryAddr) != "" && (strings.TrimSpace(cfg.RegistryPullSecret) == "" || strings.TrimSpace(cfg.RegistryWriteSecret) == "") {
-		return cfg, fmt.Errorf("registry pull_secret and write_secret are required when registry_addr is set")
-	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
@@ -189,6 +125,111 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
 	return cfg, nil
+}
+
+func expandKubeconfigPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value != "~" && !strings.HasPrefix(value, "~/") {
+		return value
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return value
+	}
+	if value == "~" {
+		return home
+	}
+	return filepath.Join(home, strings.TrimPrefix(value, "~/"))
+}
+
+// ValidateServer checks the complete dependency contract of the Server
+// process. Other processes intentionally validate only the configuration they
+// consume, so an Agent Worker never needs a Kubernetes or OpenSandbox secret.
+func (c Config) ValidateServer() error {
+	if c.Port <= 0 || strings.TrimSpace(c.DataDir) == "" || strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("server port, data_dir, and database_url are required")
+	}
+	if strings.TrimSpace(c.JWTSecret) == "" || strings.TrimSpace(c.InternalAPIKey) == "" || strings.TrimSpace(c.VerificationGrantKey) == "" {
+		return fmt.Errorf("server jwt_secret, internal_api_key, and verification_grant_key are required")
+	}
+	if strings.TrimSpace(c.RegistryAddr) == "" || strings.TrimSpace(c.RegistryPullSecret) == "" || strings.TrimSpace(c.RegistryWriteSecret) == "" {
+		return fmt.Errorf("server registry_addr, registry_pull_secret, and registry_write_secret are required")
+	}
+	if strings.TrimSpace(c.RegistryUsername) == "" || strings.TrimSpace(c.RegistryPassword) == "" {
+		return fmt.Errorf("server registry credentials are required")
+	}
+	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
+		return fmt.Errorf("server namespace, crd_namespace, and positive cooldown_minutes are required")
+	}
+	if strings.TrimSpace(c.Agent.Model) == "" {
+		return fmt.Errorf("server agent model is required")
+	}
+	if err := c.OpenSandbox.Validate(); err != nil {
+		return fmt.Errorf("server opensandbox: %w", err)
+	}
+	if strings.TrimSpace(c.OpenSandbox.APIKey) == "" {
+		return fmt.Errorf("server opensandbox lifecycle API key is required")
+	}
+	if _, err := c.ParsedUIOrigin(); err != nil {
+		return fmt.Errorf("server ui_origin: %w", err)
+	}
+	return nil
+}
+
+func (c Config) ValidateController() error {
+	if c.HealthPort <= 0 || c.Port <= 0 || strings.TrimSpace(c.ServerHost) == "" {
+		return fmt.Errorf("controller health_port, server port, and server_host are required")
+	}
+	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
+		return fmt.Errorf("controller namespace, crd_namespace, and positive cooldown_minutes are required")
+	}
+	if strings.TrimSpace(c.RegistryAddr) == "" || strings.TrimSpace(c.RegistryPullSecret) == "" || strings.TrimSpace(c.RegistryWriteSecret) == "" {
+		return fmt.Errorf("controller registry_addr, registry_pull_secret, and registry_write_secret are required")
+	}
+	if strings.TrimSpace(c.RegistryUsername) == "" || strings.TrimSpace(c.RegistryPassword) == "" {
+		return fmt.Errorf("controller registry credentials are required")
+	}
+	if strings.TrimSpace(c.BuilderImage) == "" || strings.TrimSpace(c.PublisherImage) == "" || strings.TrimSpace(c.VerifierImage) == "" {
+		return fmt.Errorf("controller builder_image, publisher_image, and verifier_image are required")
+	}
+	if strings.TrimSpace(c.VerificationGrantKey) == "" || strings.TrimSpace(c.VClusterBinary) == "" || strings.TrimSpace(c.VClusterChartRepo) == "" || strings.TrimSpace(c.VClusterChartVersion) == "" {
+		return fmt.Errorf("controller verification grant and vcluster configuration are required")
+	}
+	return nil
+}
+
+func (c Config) ValidateAgentWorker() error {
+	if strings.TrimSpace(c.AgentDatabaseURL) == "" || strings.TrimSpace(c.InternalAPIKey) == "" {
+		return fmt.Errorf("agent worker agent_database_url and internal_api_key are required")
+	}
+	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" || strings.TrimSpace(c.Agent.ServerURL) == "" {
+		return fmt.Errorf("agent worker base_url, api_key_env, API key, model, and server_url are required")
+	}
+	if _, err := c.Agent.Timeout(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ParsedUIOrigin accepts exactly one browser origin. Terminal WebSockets use
+// it to reject every other Origin before the ticket is consumed.
+func (c Config) ParsedUIOrigin() (*url.URL, error) {
+	value := strings.TrimSpace(c.UIOrigin)
+	if value == "" {
+		return nil, fmt.Errorf("ui_origin is required")
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("must be an absolute http or https origin")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("must use http or https")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return nil, fmt.Errorf("must not include credentials, path, query, or fragment")
+	}
+	parsed.Path = ""
+	return parsed, nil
 }
 
 // applyRuntimeEnvironment contains deployment-time values that cannot be
@@ -209,6 +250,4 @@ func applyRuntimeEnvironment(cfg *Config) error {
 	return nil
 }
 
-func (c Config) CertFile() string      { return filepath.Join(c.DataDir, "ca-cert.pem") }
-func (c Config) KeyFile() string       { return filepath.Join(c.DataDir, "ca-key.pem") }
 func (c Config) ChallengesDir() string { return filepath.Join(c.DataDir, "challenges") }

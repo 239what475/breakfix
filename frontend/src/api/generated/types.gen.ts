@@ -248,6 +248,14 @@ export type TerminalWindowCloseResponse = {
     closed: boolean;
 };
 
+export type TerminalTicketRequest = {
+    window: string;
+};
+
+export type TerminalTicketResponse = {
+    ticket: string;
+};
+
 export type AuthoringMetadata = {
     title: string;
     difficulty: 'easy' | 'medium' | 'hard';
@@ -728,6 +736,33 @@ export type StopChallengeResponses = {
 };
 
 export type StopChallengeResponse = StopChallengeResponses[keyof StopChallengeResponses];
+
+export type CreateTerminalTicketData = {
+    body: TerminalTicketRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/challenges/{id}/terminal-ticket';
+};
+
+export type CreateTerminalTicketErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type CreateTerminalTicketError = CreateTerminalTicketErrors[keyof CreateTerminalTicketErrors];
+
+export type CreateTerminalTicketResponses = {
+    /**
+     * Short-lived one-time terminal ticket
+     */
+    200: TerminalTicketResponse;
+};
+
+export type CreateTerminalTicketResponse = CreateTerminalTicketResponses[keyof CreateTerminalTicketResponses];
 
 export type CloseTerminalWindowData = {
     body?: never;

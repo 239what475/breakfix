@@ -171,7 +171,10 @@ func run(ctx context.Context, options options) error {
 			RequestTimeout: "90s",
 		},
 	}
-	router := server.SetupRouter(ctx, database, nil, cfg, frontend)
+	router, err := server.SetupRouter(ctx, database, nil, cfg, frontend)
+	if err != nil {
+		return fmt.Errorf("setup taxonomy e2e server: %w", err)
+	}
 	reporter := statusReporter{database: database, store: store, challenge: *entry, initialSnapshotAbsent: true}
 	router.GET("/__taxonomy-e2e/status", func(c *gin.Context) { c.JSON(http.StatusOK, reporter.snapshot(c.Request.Context())) })
 	httpServer := httptest.NewServer(router)

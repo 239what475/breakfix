@@ -41,6 +41,12 @@ Registry 或 Kubernetes API 已被拒绝的证据。
 
 Playwright 只验证用户可见工作流，不负责生成题目：注册、登录、Catalog、筛选、My Space、固定 container/vcluster 题目的终端和检查点，以及作者工作台的会话与已验证资产展示。浏览器 E2E 不创建模型生成 Run，不等待自动修复，也不把 vcluster、模型 API 与 UI 组合成一条断言。
 
+CI 使用 PostgreSQL service 强制运行 `go test -count=1 ./...`，并校验 CRD/OpenAPI
+生成物、编译全部六个运行入口。另有一个固定、无模型的 browser smoke：它在 Kind 中安装
+CRD，启动真实 Server，并从 `test/fixtures/catalog/` 的完整 challenge/taxonomy snapshot
+读取 Catalog。该 fixture 只证明公开题库的筛选、排序和窄视口行为；运行时构建、终端和
+检查点仍由各自的真实组件验收负责。
+
 ### Agent Live 验收
 
 真实模型生成是发布前或人工触发的验收，不是日常 CI gate。它验证：作者题意、Server-owned OpenSandbox workspace 中的生成、Judge、真实 VerifyTask、artifact failure 的下一 Generator Run、成功后作者审核发布，以及浏览器中真实题目的检查点。

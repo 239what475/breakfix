@@ -5,15 +5,19 @@ This package installs the independent PostgreSQL, Server, Controller, Agent Work
 in the `opensandbox` namespace before applying this package. Breakfix creates and deletes its own BYO workspace PVCs;
 OpenSandbox only mounts those PVCs and must not be granted their lifecycle ownership.
 
+Every process requires an explicit configuration file. The in-cluster configuration is mounted from the generated `breakfix-config` ConfigMap, while runtime secrets come from `breakfix-runtime`. `ui_origin` is required in that Secret and must be the exact public browser origin; Server uses it to reject terminal WebSockets from every other Origin. Server startup and `/readyz` validate every catalog directory in strict mode, while `/healthz` only reports process liveness.
+
 Build the release binaries outside Docker, then package and publish the six runtime images. Each Docker build
 receives only its binary under `bin/release/<os>-<arch>/<component>/`; it does not receive source code, Node
-dependencies, Go modules, or host Go network configuration. Replace the development tags in `kustomization.yaml`
-(or an environment overlay):
+dependencies, Go modules, or host Go network configuration. The base manifests use development tags only for local
+development:
 
 ```bash
 make runtime-push TARGETOS=linux TARGETARCH=amd64 \
   RUNTIME_IMAGE_REPOSITORY=ghcr.io/breakfix RUNTIME_IMAGE_TAG=dev
 ```
+
+For a release, use `make release-manifest` with a non-`dev` tag. It pushes all six images, resolves the Registry digest for each, and writes `dist/breakfix-<tag>.yaml`. The release workflow uploads that digest-pinned rendered YAML; apply this artifact rather than editing the base manifests by hand.
 
 `builder_image`, `publisher_image`, and `verifier_image` are configured separately from `registry_addr`. Builder
 must be pullable by kubelets without placing a Registry credential in the Builder Pod. The example uses public GHCR

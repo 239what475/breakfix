@@ -66,6 +66,7 @@ func TestTerminalConnectionTrackerCancelsPendingDrainOnReconnect(t *testing.T) {
 
 func TestWSWriterSignalsReadyBeforeFirstTerminalData(t *testing.T) {
 	messages := make(chan wsMsg, 2)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -107,5 +108,26 @@ func TestWSWriterSignalsReadyBeforeFirstTerminalData(t *testing.T) {
 	}
 	if second.Type != "data" || second.Data != "shell prompt" {
 		t.Fatalf("second message = %#v, want terminal data", second)
+	}
+}
+
+func TestTerminalOriginAllowsOnlyConfiguredUI(t *testing.T) {
+	if !terminalOriginAllowed("https://app.breakfix.example", "https://app.breakfix.example") {
+		t.Fatal("configured origin was rejected")
+	}
+	for _, origin := range []string{"https://evil.example", "http://app.breakfix.example", "https://app.breakfix.example/path", ""} {
+		if terminalOriginAllowed(origin, "https://app.breakfix.example") {
+			t.Fatalf("unexpected accepted origin %q", origin)
+		}
+	}
+}
+
+func TestTerminalTicketIsOpaqueAndStableHashed(t *testing.T) {
+	ticket, err := newTerminalTicket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticket) < 40 || terminalTicketHash(ticket) != terminalTicketHash(ticket) {
+		t.Fatalf("invalid terminal ticket %q", ticket)
 	}
 }

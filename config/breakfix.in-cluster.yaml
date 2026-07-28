@@ -1,7 +1,6 @@
 # In-cluster configuration. The runtime Deployment mounts this as
 # /etc/breakfix/config.yaml; secret values are expanded from its environment.
 port: 9090
-proxy_port: 3128
 health_port: 8081
 
 data_dir: /var/lib/breakfix
@@ -17,13 +16,13 @@ registry_write_secret: breakfix-registry-write
 builder_image: ghcr.io/breakfix/breakfix-builder:dev
 publisher_image: ghcr.io/breakfix/breakfix-publisher:dev
 verifier_image: ghcr.io/breakfix/breakfix-verifier:dev
-k8s_base_image: registry.breakfix.internal/breakfix/breakfix-k8s-base:latest
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh
 vcluster_chart_version: "0.35.1"
 
 server_host: breakfix-server
+ui_origin: ${BREAKFIX_UI_ORIGIN}
 namespace: breakfix
 crd_namespace: breakfix-system
 cooldown_minutes: 5

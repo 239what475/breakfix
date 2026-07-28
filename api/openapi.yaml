@@ -327,6 +327,35 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /challenges/{id}/terminal-ticket:
+    post:
+      operationId: createTerminalTicket
+      summary: Create a one-time ticket for a terminal WebSocket
+      tags: [environments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalTicketRequest"
+      responses:
+        "200":
+          description: Short-lived one-time terminal ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalTicketResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /challenges/{id}/terminals/{window}:
     delete:
       operationId: closeTerminalWindow
@@ -1007,6 +1036,21 @@ components:
       properties:
         closed:
           type: boolean
+
+    TerminalTicketRequest:
+      type: object
+      required: [window]
+      properties:
+        window:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,31}$"
+
+    TerminalTicketResponse:
+      type: object
+      required: [ticket]
+      properties:
+        ticket:
+          type: string
 
     AuthoringMetadata:
       type: object

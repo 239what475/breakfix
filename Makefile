@@ -15,7 +15,7 @@
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated generate-api generate-api-go generate-api-frontend verify-api-generated \
-	build build-server build-controller build-agent-worker build-builder build-publisher build-verifier runtime-images runtime-push \
+	build build-server build-controller build-agent-worker build-builder build-publisher build-verifier runtime-images runtime-push release-manifest \
 	verification-images \
         lint proto clean
 
@@ -75,6 +75,8 @@ BUILDER_RELEASE_BIN := $(BUILDER_RELEASE_DIR)/breakfix-builder
 PUBLISHER_RELEASE_BIN := $(PUBLISHER_RELEASE_DIR)/breakfix-publisher
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
+RELEASE_SOURCE_IMAGE_REPOSITORY ?= ghcr.io/breakfix
+RELEASE_MANIFEST ?= dist/breakfix-$(RUNTIME_IMAGE_TAG).yaml
 TELEPRESENCE ?= ./dev/telepresence.sh
 
 # ═══════════════════════════════════════════════════════════════
@@ -321,8 +323,6 @@ dev: dev-config dev-registry dev-data dev-crd dev-rbac dev-images dev-build dev-
 	@echo "══════════════════════════════════════"
 
 dev-status:
-	@echo "  ✓ Proxy    :3128"
-	@echo ""
 	@echo "  Web UI:"
 	@echo "    http://localhost:9090"
 
@@ -396,6 +396,25 @@ runtime-push: runtime-images
 	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-publisher:$(RUNTIME_IMAGE_TAG)
 	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-verifier:$(RUNTIME_IMAGE_TAG)
 	@echo "  ✓ Runtime images pushed"
+
+# release-manifest renders the canonical deployment package after pushing all
+# six runtime images and replaces every mutable development reference with the
+# Registry-resolved immutable digest. The resulting YAML is the release's
+# deployable artifact, including Builder/Publisher/Verifier image settings
+# embedded in the in-cluster ConfigMap.
+release-manifest: runtime-push
+	@test "$(RUNTIME_IMAGE_TAG)" != "dev" || { echo "  ✗ RUNTIME_IMAGE_TAG must be an immutable release tag"; exit 1; }
+	@mkdir -p $(dir $(RELEASE_MANIFEST))
+	kubectl kustomize . > $(RELEASE_MANIFEST)
+	@set -eu; \
+	for component in server controller agent-worker builder publisher verifier; do \
+		ref="$(RUNTIME_IMAGE_REPOSITORY)/breakfix-$$component:$(RUNTIME_IMAGE_TAG)"; \
+		digest="$$(docker buildx imagetools inspect "$$ref" --format '{{.Manifest.Digest}}')"; \
+		[ -n "$$digest" ] || { echo "  ✗ resolve digest for $$ref"; exit 1; }; \
+		sed -i "s|$(RELEASE_SOURCE_IMAGE_REPOSITORY)/breakfix-$$component:dev|$(RUNTIME_IMAGE_REPOSITORY)/breakfix-$$component@$$digest|g" $(RELEASE_MANIFEST); \
+	done
+	@! rg -n '$(RELEASE_SOURCE_IMAGE_REPOSITORY)/breakfix-(server|controller|agent-worker|builder|publisher|verifier):dev' $(RELEASE_MANIFEST)
+	@echo "  ✓ $(RELEASE_MANIFEST)"
 
 # ═══════════════════════════════════════════════════════════════
 # Docker images (local dev)

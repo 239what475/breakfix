@@ -33,6 +33,10 @@ func main() {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateController(); err != nil {
+		slog.Error("invalid controller configuration", "err", err)
+		os.Exit(1)
+	}
 	k8sClient, err := k8s.New(cfg.Kubeconfig)
 	if err != nil {
 		slog.Error("failed to create K8s client", "err", err)

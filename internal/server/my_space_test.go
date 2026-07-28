@@ -27,7 +27,10 @@ import (
 
 func TestMySpaceRequiresJWT(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	router := SetupRouter(context.Background(), handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil)
+	router, err := SetupRouter(context.Background(), handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/me/space", nil))
