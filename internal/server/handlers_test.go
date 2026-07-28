@@ -135,14 +135,14 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
 	challengeDir := filepath.Join(challengesDir, "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\nRepair it this way.\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\nRepair it this way.\n")
+	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
+	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 	seedTestTaxonomy(t, root)
 
 	database := testpostgres.New(t)
@@ -190,14 +190,14 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
+	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
+	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 	seedTestTaxonomy(t, root)
 
 	cfg := config.Config{DataDir: root}
@@ -242,7 +242,7 @@ func TestListChallengesHidesPublishedChallengeBeforeTaxonomyMapping(t *testing.T
 	gin.SetMode(gin.TestMode)
 
 	root := t.TempDir()
-	writeGatewayChallenge(t, root)
+	writeTestChallenge(t, root)
 	handler := NewHandler(nil, nil, config.Config{DataDir: root})
 
 	recorder := httptest.NewRecorder()
@@ -400,7 +400,7 @@ func TestChallengeArtifactRevisionMismatchRemovesChallengeFromPublicEndpoints(t 
 	}
 }
 
-func writeGatewayTestFile(t *testing.T, path, content string) {
+func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
@@ -413,7 +413,7 @@ func writeGatewayTestFile(t *testing.T, path, content string) {
 func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnvironment) *Handler {
 	t.Helper()
 	root := t.TempDir()
-	writeGatewayChallenge(t, root)
+	writeTestChallenge(t, root)
 	seedTestTaxonomy(t, root)
 	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
@@ -450,7 +450,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 	}))
 	t.Cleanup(server.Close)
 	kubeconfig := filepath.Join(root, "kubeconfig")
-	writeGatewayTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
+	writeTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
 	client, err := k8s.New(kubeconfig)
 	if err != nil {
 		t.Fatal(err)
@@ -458,15 +458,15 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 	return NewHandler(database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
 }
 
-func writeGatewayChallenge(t *testing.T, root string) {
+func writeTestChallenge(t *testing.T, root string) {
 	t.Helper()
 	challengeDir := filepath.Join(root, "challenges", "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
+	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "solution\n")
+	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
+	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
 }

@@ -404,14 +404,14 @@ func testAuthoringPlan(title, overview string) authoring.Plan {
 
 func writeAuthoringArtifact(t *testing.T, root, title, description string) {
 	t.Helper()
-	writeGatewayTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\ntype: script\nruntime: container\ndifficulty: medium\ndescription: "+description+"\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n")
-	writeGatewayTestFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeGatewayTestFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(root, "problem.md"), "# Actual problem\n")
-	writeGatewayTestFile(t, filepath.Join(root, "solution.md"), "# Actual solution\n")
-	writeGatewayTestFile(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
-	writeGatewayTestFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeGatewayTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\ntype: script\nruntime: container\ndifficulty: medium\ndescription: "+description+"\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n")
+	writeTestFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-base:latest\n")
+	writeTestFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "problem.md"), "# Actual problem\n")
+	writeTestFile(t, filepath.Join(root, "solution.md"), "# Actual solution\n")
+	writeTestFile(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
+	writeTestFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")
 }
 
 func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID, image string) *k8s.Client {
@@ -433,7 +433,7 @@ func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID, image string
 	}))
 	t.Cleanup(server.Close)
 	kubeconfig := filepath.Join(root, "kubeconfig")
-	writeGatewayTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
+	writeTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
 	client, err := k8s.New(kubeconfig)
 	if err != nil {
 		t.Fatal(err)
