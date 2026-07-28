@@ -53,6 +53,12 @@ Playwright 只验证用户可见的工作流，不负责生成题目：
 
 这类验收必须使用明确、简短的题意，并单独记录每个阶段的 Run、VerifyTask 和日志。自动修复可以作为产品行为观察，但不能成为通过条件的一部分：模型修复轮次不受代码仓库控制，最多受一小时 Run deadline 约束。
 
+### 5. Taxonomy Live 验收
+
+taxonomy 有独立于题目生成和 VerifyTask 的真实模型闭环，因此不与上述 Agent Live 验收并发。该验收只能在显式命令下、使用隔离 data directory 执行：目录中只放入已验证的 `cleanup-logs` artifact，开始时不存在 `taxonomy/current`。Server scheduler 创建 Mapping WorkItem，真实 Agent Worker 依次执行 Mapper 与并行 reviewer pair，Publisher 写入不可变 snapshot；随后测试通过浏览器确认 Catalog 卡片中的结构化 Tag 与主要 outcome，并通过 Catalog API 确认完整 taxonomy 投影。
+
+整个流程只有一个总 deadline。达到 deadline、WorkItem 进入 Failed/Cancelled 或任一 Agent Run 失败时，测试必须立即输出 WorkItem、关联 Agent Runs 和当前 snapshot 状态，再清理临时 data directory、数据库 schema 和浏览器资源。它不作为日常 CI gate，也不重试第二次来掩盖模型或基础设施问题。
+
 ## 运行原则
 
 - 默认 `make e2e` 只能运行快速、可重复的浏览器测试；不会调用模型或创建真实验证资源。
@@ -68,6 +74,7 @@ Playwright 只验证用户可见的工作流，不负责生成题目：
 - `make e2e-server-recovery`：Server/Controller 恢复验收。
 - `make e2e-agent-assistant`、`make e2e-agent-container`、`make e2e-agent-vcluster`：分别运行显式 Agent Live 验收；它们不属于日常 CI。
 - `make e2e-agent-soak`：在一个真实 `cleanup-logs` 环境中串行完成 20 次 Assistant Run。首轮读取真实 scrollback、检查点和解答，后续轮验证同一持久会话的模型传输与完成消息；它是发布前的模型传输 soak，不属于日常 CI。
+- `make e2e-taxonomy`：显式运行一次隔离 taxonomy Live 验收；它不调用 generator 或 VerifyTask，也不与其他 Agent Live 套件并发。
 
 ## 当前迁移要求
 

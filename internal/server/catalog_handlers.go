@@ -7,6 +7,7 @@ import (
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/challenge"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/gin-gonic/gin"
 )
 
@@ -74,8 +75,8 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 				s.Progress = &progress
 			}
 		}
-		tags := mappingTagTitles(published.Mapping)
-		s.Tags = tags
+		s.Tags = toAPITaxonomyReferences(published.Taxonomy.Tags)
+		s.PrimaryOutcome = toAPITaxonomyReference(published.Taxonomy.PrimaryOutcome)
 		summaries = append(summaries, s)
 	}
 	c.JSON(http.StatusOK, api.ChallengeList{Challenges: summaries})
@@ -85,26 +86,61 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	if h.requireUser(c) == nil {
 		return
 	}
-	entry, err := h.publishedChallenge(id)
+	published, err := h.publishedChallengeWithTaxonomy(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
 	}
-	content, err := challenge.ReadContent(entry)
+	content, err := challenge.ReadContent(&published.Entry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	checkpoints := toAPICheckpoints(entry.Checkpoints)
+	checkpoints := toAPICheckpoints(published.Entry.Checkpoints)
 	hints := content.Hints
 	c.JSON(http.StatusOK, api.ChallengeContent{
-		Id:          entry.ID,
-		Title:       entry.Title,
+		Id:          published.Entry.ID,
+		Title:       published.Entry.Title,
 		Problem:     content.Problem,
 		Solution:    content.Solution,
 		Hints:       hints,
 		Checkpoints: checkpoints,
+		Taxonomy:    toAPIChallengeTaxonomy(published.Taxonomy),
 	})
+}
+
+func toAPITaxonomyReference(value taxonomy.Ref) api.TaxonomyReference {
+	return api.TaxonomyReference{Id: value.ID, Title: value.Title}
+}
+
+func toAPITaxonomyReferences(values []taxonomy.Ref) []api.TaxonomyReference {
+	result := make([]api.TaxonomyReference, 0, len(values))
+	for _, value := range values {
+		result = append(result, toAPITaxonomyReference(value))
+	}
+	return result
+}
+
+func toAPIChallengeTaxonomy(value challengeTaxonomy) api.ChallengeTaxonomy {
+	entrySkills := make([]api.ChallengeEntrySkill, 0, len(value.EntrySkills))
+	for _, entrySkill := range value.EntrySkills {
+		entrySkills = append(entrySkills, api.ChallengeEntrySkill{
+			Id:       entrySkill.Ref.ID,
+			Title:    entrySkill.Ref.Title,
+			Requires: toAPITaxonomyReferences(entrySkill.Requires),
+		})
+	}
+	outcomes := make([]api.ChallengeOutcome, 0, len(value.Outcomes))
+	for _, outcome := range value.Outcomes {
+		outcomes = append(outcomes, api.ChallengeOutcome{Id: outcome.ID, Title: outcome.Title, Primary: outcome.Primary})
+	}
+	return api.ChallengeTaxonomy{
+		Revision:       value.Revision,
+		Tags:           toAPITaxonomyReferences(value.Tags),
+		PrimaryOutcome: toAPITaxonomyReference(value.PrimaryOutcome),
+		Outcomes:       outcomes,
+		EntrySkills:    entrySkills,
+	}
 }
 
 func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {

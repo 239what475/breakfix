@@ -40,5 +40,5 @@ agentLiveTest("assistant uses real terminal context and renders Markdown", async
 	await expect(markdown.locator("table").first()).toBeVisible();
 	await expect(markdown.locator("pre code").first()).toBeVisible();
 
-	await stopChallenge(page, "cleanup-logs");
+	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });

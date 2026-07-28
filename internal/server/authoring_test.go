@@ -22,9 +22,12 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generator"
+	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/gin-gonic/gin"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
@@ -210,6 +213,73 @@ func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
 	if response.PublishChallengeId == nil || *response.PublishChallengeId != challengeID {
 		t.Fatalf("published session did not expose challenge ID: %#v", response)
 	}
+	published, err := challenge.Get(handler.challengesDir, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := database.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, challengeID, published.Revision)
+	if err != nil || work.State != taxonomy.WorkPending {
+		t.Fatalf("recovered publication did not enqueue taxonomy mapping: %#v, %v", work, err)
+	}
+}
+
+func TestPromoteVerifiedRevisionImmediatelyEnqueuesTaxonomy(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	database := testpostgres.New(t)
+	if _, err := database.CreateUserWithAuth("u-normal-publish", "normal-publish", "hash", "totp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "author-normal-publish", UserID: "u-normal-publish"}, authoring.Plan{}); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := database.ReplaceAuthoringPlan(ctx, "author-normal-publish", "u-normal-publish", 0, testAuthoringPlan("Normal publish", "normal publish overview"), authoring.StateIntentReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := startTestGeneratorRun(ctx, database, "author-normal-publish", "u-normal-publish", revision.Number, "generator-normal-publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactDir := authoring.ArtifactDirectory(root, "author-normal-publish", revision.Number)
+	writeAuthoringArtifact(t, artifactDir, "Normal verified publish", "normal verified description")
+	artifact := authoring.Artifact{
+		SubmissionID:   generator.SubmissionID(run.ID),
+		Directory:      authoring.ArtifactRelativePath("author-normal-publish", revision.Number),
+		GeneratorRunID: run.ID,
+	}
+	const verifyTaskID = "vt-normal-publish"
+	if err := completeTestGeneratorVerification(ctx, database, "author-normal-publish", run, artifact, verifyTaskID); err != nil {
+		t.Fatal(err)
+	}
+
+	kube := verifiedTaskKubernetesClient(t, root, verifyTaskID)
+	handler := NewHandler(database, kube, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
+	const challengeID = "chal-normal-publish"
+	stored, err := database.BeginPublish(ctx, "author-normal-publish", "u-normal-publish", revision.Number, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := database.GetAuthoringSession(ctx, "author-normal-publish", "u-normal-publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := database.GetUserByID("u-normal-publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.promoteVerifiedRevision(ctx, user, session, stored, challengeID); err != nil {
+		t.Fatal(err)
+	}
+
+	published, err := challenge.Get(handler.challengesDir, challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := database.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, challengeID, published.Revision)
+	if err != nil || work.State != taxonomy.WorkPending {
+		t.Fatalf("normal publication did not enqueue taxonomy mapping: %#v, %v", work, err)
+	}
 }
 
 func TestStoreVerifiedArtifactIsIdempotentAcrossConcurrentSyncs(t *testing.T) {
@@ -330,6 +400,33 @@ func writeAuthoringArtifact(t *testing.T, root, title, description string) {
 	writeGatewayTestFile(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
 	writeGatewayTestFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")
+}
+
+func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID string) *k8s.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		wantPath := "/apis/breakfix.dev/v1/namespaces/breakfix-system/verifytasks/" + verifyTaskID
+		if request.Method != http.MethodGet || request.URL.Path != wantPath {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(breakfixv1.VerifyTask{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"},
+			ObjectMeta: metav1.ObjectMeta{Name: verifyTaskID, Namespace: "breakfix-system"},
+			Status:     breakfixv1.VerifyTaskStatus{Phase: breakfixv1.VerifyTaskSucceeded, TempImage: "registry.example/verified:latest"},
+		}); err != nil {
+			t.Errorf("write verify task: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	kubeconfig := filepath.Join(root, "kubeconfig")
+	writeGatewayTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
+	client, err := k8s.New(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }
 
 func archiveAuthoringArtifact(t *testing.T, root string) []byte {

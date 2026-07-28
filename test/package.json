@@ -13,6 +13,7 @@
     "test:agent-live:soak": "RUN_AGENT_SOAK_E2E=1 playwright test -c playwright.agent-live.config.ts assistant.soak.live.spec.ts",
     "test:agent-live:container": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts authoring.container.live.spec.ts",
     "test:agent-live:vcluster": "RUN_AGENT_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts authoring.vcluster.live.spec.ts",
+    "test:taxonomy-live": "RUN_TAXONOMY_LIVE_E2E=1 playwright test -c playwright.agent-live.config.ts taxonomy.live.spec.ts",
     "test:recovery": "BREAKFIX_E2E_BASE_URL=http://localhost:9091 RUN_SERVER_RECOVERY_E2E=1 playwright test -c playwright.runtime.config.ts server-recovery.spec.ts"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { Challenge } from "../../api/types";
+import type { Challenge, TaxonomyReference } from "../../api/types";
 import CatalogFilters from "./CatalogFilters.vue";
 import ChallengeList from "./ChallengeList.vue";
 import { challengeStatus, toggleSelection, type CatalogSort } from "./catalog";
@@ -28,18 +28,20 @@ const sort = ref<CatalogSort>("newest");
 const filtersOpen = ref(false);
 const catalogPage = ref<HTMLElement>();
 
-const availableTags = computed(() =>
-	[...new Set(props.challenges.flatMap((challenge) => challenge.tags))].sort((a, b) =>
-		a.localeCompare(b),
-	),
-);
+const availableTags = computed(() => {
+	const tags = new Map<string, TaxonomyReference>();
+	for (const challenge of props.challenges) {
+		for (const tag of challenge.tags) tags.set(tag.id, tag);
+	}
+	return [...tags.values()].sort((left, right) => left.title.localeCompare(right.title));
+});
 
 const filteredChallenges = computed(() => {
 	const search = query.value.trim().toLowerCase();
 	const matches = props.challenges.filter((challenge) => {
 		if (
 			search &&
-			![challenge.title, challenge.description, ...challenge.tags]
+			![challenge.title, challenge.description, challenge.primary_outcome.title, ...challenge.tags.map((tag) => tag.title)]
 				.join(" ")
 				.toLowerCase()
 				.includes(search)
@@ -48,7 +50,7 @@ const filteredChallenges = computed(() => {
 		}
 		if (difficulties.value.length && !difficulties.value.includes(challenge.difficulty)) return false;
 		if (runtimes.value.length && !runtimes.value.includes(challenge.runtime)) return false;
-		if (tags.value.length && !tags.value.some((tag) => challenge.tags.includes(tag))) return false;
+		if (tags.value.length && !tags.value.some((tag) => challenge.tags.some((value) => value.id === tag))) return false;
 		if (props.loggedIn && statuses.value.length && !statuses.value.includes(challengeStatus(challenge))) return false;
 		return true;
 	});

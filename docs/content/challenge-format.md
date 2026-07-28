@@ -1,6 +1,6 @@
 # 题目内容格式
 
-已发布题目是 `data_dir/challenges/<id>/` 下的目录。题库不存入数据库，也不是 Kubernetes CRD；Server 读取该目录得到 catalog。目录、校验和发布行为以 [`internal/challenge/`](../../internal/challenge/) 为准。
+已发布题目是 `data_dir/challenges/<source_slug>/` 下的目录。题库不存入数据库，也不是 Kubernetes CRD；Server 读取该目录及当前 taxonomy snapshot 构造公开 Catalog。目录、校验和发布行为以 [`internal/challenge/`](../../internal/challenge/) 为准。
 
 ## 已发布目录
 
@@ -17,9 +17,11 @@ checks/checkpoints.sh
 answer.sh
 ```
 
-`challenge.yaml` 记录用户可见元数据、runtime、检查点，以及平台发布时写入的 `id`、`image`、`published_at`。发布目录必须有合法 ID、非空标题/描述/标签、`easy|medium|hard` 难度、`container|vcluster` runtime 和至少一个检查点。每个检查点都有唯一 ID、标题和描述；提示路径必须留在题目目录内，依赖只能引用其他检查点。
+`challenge.yaml` 记录用户可见元数据、runtime、检查点，以及平台发布时写入的 `id`、`source_slug`、`image`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是仅供仓库阅读的目录名，必须与发布目录同名，不能作为查找键。发布目录必须有这些合法发布字段、非空标题/描述、`easy|medium|hard` 难度、`container|vcluster` runtime 和至少一个检查点。每个检查点都有唯一 ID、标题和描述；提示路径必须留在题目目录内，依赖只能引用其他检查点。
 
-Generator 在验证前产出的 artifact 使用相同文件布局，但平台管理的 `id`、`image` 与 `published_at` 不属于 generator 输入。Server 只在 VerifyTask 成功且作者发布时写入这些字段。
+Generator 在验证前产出的 artifact 使用相同文件布局，但平台管理的 `id`、`source_slug`、`image` 与 `published_at` 不属于 generator 输入。Server 只在 VerifyTask 成功且作者发布时写入这些字段；它不会修改已验证 artifact 本身。
+
+题目通过 VerifyTask 和作者发布后仍不会立刻出现在公开 Catalog。Server 会为该 artifact revision 创建 taxonomy Mapping WorkItem；Mapper、Curriculum Reviewer、SRE Reviewer 和无模型 Publisher 发布一个不可变 taxonomy snapshot 后，只有 ID、title、artifact revision 都精确匹配的 Challenge mapping 才使该题公开。Tag、Skill、entry skill 与 outcome 不属于 `challenge.yaml`，而属于 `data_dir/taxonomy/current`。
 
 ## 运行时初始化
 

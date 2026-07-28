@@ -93,6 +93,7 @@ export type MySpaceAuthoringDraft = {
 export type MySpacePublishedChallenge = {
     challenge: MySpaceChallenge;
     published_at: string;
+    taxonomy_status: 'mapped' | 'mapping' | 'retrying' | 'blocked';
     attempted_users: number;
     completed_users: number;
     pass_rate?: number | null;
@@ -118,7 +119,8 @@ export type ChallengeSummary = {
     type: string;
     runtime: 'container' | 'vcluster';
     difficulty: 'easy' | 'medium' | 'hard';
-    tags: Array<string>;
+    tags: Array<TaxonomyReference>;
+    primary_outcome: TaxonomyReference;
     description: string;
     published_at: string;
     solved?: boolean;
@@ -133,6 +135,31 @@ export type CheckpointProgressSummary = {
 
 export type ChallengeList = {
     challenges: Array<ChallengeSummary>;
+};
+
+export type TaxonomyReference = {
+    id: string;
+    title: string;
+};
+
+export type ChallengeOutcome = {
+    id: string;
+    title: string;
+    primary: boolean;
+};
+
+export type ChallengeEntrySkill = {
+    id: string;
+    title: string;
+    requires: Array<TaxonomyReference>;
+};
+
+export type ChallengeTaxonomy = {
+    revision: string;
+    tags: Array<TaxonomyReference>;
+    primary_outcome: TaxonomyReference;
+    outcomes: Array<ChallengeOutcome>;
+    entry_skills: Array<ChallengeEntrySkill>;
 };
 
 export type ChallengeCheckpoint = {
@@ -159,6 +186,7 @@ export type ChallengeContent = {
         [key: string]: string;
     };
     checkpoints: Array<ChallengeCheckpoint>;
+    taxonomy: ChallengeTaxonomy;
 };
 
 export type ChallengeProgress = {

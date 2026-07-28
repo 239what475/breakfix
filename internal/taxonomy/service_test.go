@@ -206,7 +206,7 @@ func scheduleAndClaim(t *testing.T, service *Service, database interface {
 func writeWorkflowChallenge(t *testing.T, root string) challenge.Entry {
 	t.Helper()
 	dir := filepath.Join(root, "challenges", "cleanup-logs")
-	writeWorkflowFile(t, filepath.Join(dir, "challenge.yaml"), "id: challenge-test\ntitle: Repair cleanup logs\ntype: script\nruntime: container\ndifficulty: easy\ndescription: Repair a broken log cleanup task.\nimage: test:v1\npublished_at: 2026-07-25T00:00:00Z\ncheckpoints:\n  - id: cleanup-ready\n    title: Cleanup works\n    description: Cleanup works for old logs.\n    hint: hints/cleanup-ready.md\n")
+	writeWorkflowFile(t, filepath.Join(dir, "challenge.yaml"), "id: challenge-test\nsource_slug: cleanup-logs\ntitle: Repair cleanup logs\ntype: script\nruntime: container\ndifficulty: easy\ndescription: Repair a broken log cleanup task.\nimage: test:v1\npublished_at: 2026-07-25T00:00:00Z\ncheckpoints:\n  - id: cleanup-ready\n    title: Cleanup works\n    description: Cleanup works for old logs.\n    hint: hints/cleanup-ready.md\n")
 	writeWorkflowFile(t, filepath.Join(dir, "Dockerfile"), "FROM test\n")
 	writeWorkflowFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
 	writeWorkflowFile(t, filepath.Join(dir, "problem.md"), "Repair the failed cleanup task.\n")

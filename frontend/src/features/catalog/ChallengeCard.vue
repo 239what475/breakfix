@@ -24,7 +24,7 @@ const emit = defineEmits<{ start: [id: string] }>();
 			<p class="challenge-card-description">{{ challenge.description }}</p>
 			<div class="challenge-card-bottom">
 				<div class="challenge-tags" aria-label="Challenge tags">
-					<span v-for="tag in challenge.tags" :key="tag">{{ tag }}</span>
+					<span v-for="tag in challenge.tags" :key="tag.id">{{ tag.title }}</span>
 				</div>
 				<div v-if="loggedIn" class="challenge-state" :class="challengeStatus(challenge)">
 					<span v-if="challengeStatus(challenge) === 'in-progress'">
@@ -35,6 +35,7 @@ const emit = defineEmits<{ start: [id: string] }>();
 					<span v-if="challenge.active && challenge.solved" class="completion-history">Completed before</span>
 				</div>
 			</div>
+			<p class="challenge-primary-skill">Practice: {{ challenge.primary_outcome.title }}</p>
 		</div>
 		<div class="challenge-card-action">
 			<button class="primary-button" type="button" :disabled="starting" @click="emit('start', challenge.id)">

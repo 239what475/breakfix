@@ -1,4 +1,5 @@
-id: cleanup-logs
+id: chal-r7m4x2q9v6kp
+source_slug: cleanup-logs
 type: script
 runtime: container
 title: "批量压缩旧日志"

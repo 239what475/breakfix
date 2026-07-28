@@ -233,6 +233,32 @@ func (d *DB) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]ag
 	return runs, nil
 }
 
+// ListRunsForOwner returns the durable execution history for one domain owner.
+// It is used by operational diagnostics without exposing unrelated Agent Runs.
+func (d *DB) ListRunsForOwner(ctx context.Context, ownerKind, ownerRef string) ([]agentruntime.Run, error) {
+	if strings.TrimSpace(ownerKind) == "" || strings.TrimSpace(ownerRef) == "" {
+		return nil, fmt.Errorf("agent run owner kind and reference are required")
+	}
+	rows, err := d.conn.QueryContext(ctx, agentRunSelect+` WHERE owner_kind = ? AND owner_ref = ?
+		ORDER BY created_at, id`, ownerKind, ownerRef)
+	if err != nil {
+		return nil, fmt.Errorf("list agent runs for owner: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	runs := make([]agentruntime.Run, 0)
+	for rows.Next() {
+		run, err := scanAgentRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan owner agent run: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate owner agent runs: %w", err)
+	}
+	return runs, nil
+}
+
 func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duration, now time.Time) (*agentruntime.Claim, error) {
 	if strings.TrimSpace(worker) == "" || leaseTTL <= 0 || now.IsZero() {
 		return nil, fmt.Errorf("worker, positive lease ttl, and current time are required")

@@ -45,6 +45,6 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 			}
 		}
 	} finally {
-		await stopChallenge(page, "cleanup-logs");
+		await stopChallenge(page, "chal-r7m4x2q9v6kp");
 	}
 });

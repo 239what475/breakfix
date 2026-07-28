@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
@@ -133,7 +135,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
 	challengeDir := filepath.Join(challengesDir, "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
@@ -169,6 +171,13 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
+	if content.Taxonomy.PrimaryOutcome.Id != "skill-4444444444444444" || len(content.Taxonomy.EntrySkills) != 1 {
+		t.Fatalf("taxonomy projection = %#v", content.Taxonomy)
+	}
+	entry := content.Taxonomy.EntrySkills[0]
+	if entry.Id != "skill-5555555555555555" || len(entry.Requires) != 1 || entry.Requires[0].Id != "skill-6666666666666666" {
+		t.Fatalf("entry skill prerequisites = %#v", entry)
+	}
 }
 
 func TestListChallengesIncludesRuntime(t *testing.T) {
@@ -181,7 +190,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
@@ -221,9 +230,15 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
 	}
+	if len(got.Tags) != 1 || got.Tags[0].Id != "tag-4444444444444444" || got.Tags[0].Title != "Test" {
+		t.Fatalf("structured tags = %#v", got.Tags)
+	}
+	if got.PrimaryOutcome.Id != "skill-4444444444444444" || got.PrimaryOutcome.Title != "Repair a test service" {
+		t.Fatalf("primary outcome = %#v", got.PrimaryOutcome)
+	}
 }
 
-func TestListChallengesShowsPublishedChallengeBeforeTaxonomyMapping(t *testing.T) {
+func TestListChallengesHidesPublishedChallengeBeforeTaxonomyMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	root := t.TempDir()
@@ -242,11 +257,8 @@ func TestListChallengesShowsPublishedChallengeBeforeTaxonomyMapping(t *testing.T
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Challenges) != 1 {
-		t.Fatalf("unmapped published challenge was hidden: %#v", response.Challenges)
-	}
-	if response.Challenges[0].Tags == nil || len(response.Challenges[0].Tags) != 0 {
-		t.Fatalf("unmapped challenge tags = %#v, want empty array", response.Challenges[0].Tags)
+	if len(response.Challenges) != 0 {
+		t.Fatalf("unmapped published challenge entered public catalog: %#v", response.Challenges)
 	}
 }
 
@@ -347,7 +359,7 @@ func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	}
 }
 
-func TestChallengeArtifactRevisionMismatchRemovesTaxonomyTagsButKeepsChallengeAvailable(t *testing.T) {
+func TestChallengeArtifactRevisionMismatchRemovesChallengeFromPublicEndpoints(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
 	if _, err := handler.publishedChallenge("demo"); err != nil {
 		t.Fatalf("published challenge was unavailable before artifact change: %v", err)
@@ -367,14 +379,24 @@ func TestChallengeArtifactRevisionMismatchRemovesTaxonomyTagsButKeepsChallengeAv
 	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Challenges) != 1 {
-		t.Fatalf("published challenge was hidden after its taxonomy mapping became stale: %#v", list.Challenges)
+	if len(list.Challenges) != 0 {
+		t.Fatalf("stale taxonomy mapping left challenge public: %#v", list.Challenges)
 	}
-	if list.Challenges[0].Tags == nil || len(list.Challenges[0].Tags) != 0 {
-		t.Fatalf("stale mapping still supplied tags: %#v", list.Challenges[0].Tags)
+	if _, err := handler.publishedChallenge("demo"); !errors.Is(err, challenge.ErrNotFound) {
+		t.Fatalf("stale mapping challenge lookup error = %v, want not found", err)
 	}
-	if _, err := handler.publishedChallenge("demo"); err != nil {
-		t.Fatalf("published challenge was unavailable after its taxonomy mapping became stale: %v", err)
+	for name, handlerFunc := range map[string]func(*gin.Context, string){
+		"content": handler.GetChallengeContent,
+		"start":   handler.StartChallenge,
+	} {
+		recorder := httptest.NewRecorder()
+		requestContext, _ := gin.CreateTestContext(recorder)
+		requestContext.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/"+name, nil)
+		requestContext.Set("user_id", "u-demo")
+		handlerFunc(requestContext, "demo")
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s stale mapping status = %d: %s", name, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -439,7 +461,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 func writeGatewayChallenge(t *testing.T, root string) {
 	t.Helper()
 	challengeDir := filepath.Join(root, "challenges", "demo")
-	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeGatewayTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
 	writeGatewayTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")

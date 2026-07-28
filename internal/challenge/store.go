@@ -19,6 +19,7 @@ var ErrNotFound = errors.New("challenge not found")
 
 type Entry struct {
 	ID          string
+	SourceSlug  string
 	Title       string
 	Type        string
 	Runtime     string
@@ -33,6 +34,7 @@ type Entry struct {
 
 type Spec struct {
 	ID          string       `yaml:"id"`
+	SourceSlug  string       `yaml:"source_slug,omitempty"`
 	Title       string       `yaml:"title"`
 	Type        string       `yaml:"type"`
 	Runtime     string       `yaml:"runtime"`
@@ -68,9 +70,12 @@ func List(root string) ([]Entry, error) {
 			continue
 		}
 
-		challenge, err := LoadDir(filepath.Join(root, entry.Name()))
+		challenge, err := ValidateDir(filepath.Join(root, entry.Name()))
 		if err != nil {
 			return nil, err
+		}
+		if challenge.SourceSlug != entry.Name() {
+			return nil, fmt.Errorf("challenge source slug mismatch: directory %q has %q", entry.Name(), challenge.SourceSlug)
 		}
 		challenges = append(challenges, *challenge)
 	}
@@ -86,7 +91,10 @@ func Get(root, id string) (*Entry, error) {
 		return nil, ErrNotFound
 	}
 
-	if direct, err := LoadDir(filepath.Join(root, id)); err == nil {
+	if direct, err := ValidateDir(filepath.Join(root, id)); err == nil {
+		if direct.SourceSlug != id {
+			return nil, ErrNotFound
+		}
 		if direct.ID == id {
 			return direct, nil
 		}
@@ -197,6 +205,7 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 
 	return &Entry{
 		ID:          spec.ID,
+		SourceSlug:  spec.SourceSlug,
 		Title:       spec.Title,
 		Type:        spec.Type,
 		Runtime:     spec.Runtime,

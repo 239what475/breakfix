@@ -102,7 +102,7 @@ async function currentCleanupEnvironment(page: Page) {
     });
     if (!response.ok) throw new Error(await response.text());
     const body = (await response.json()) as { active_environments: ActiveEnvironment[] };
-    return body.active_environments.find((environment) => environment.challenge.id === "cleanup-logs") ?? null;
+    return body.active_environments.find((environment) => environment.challenge.id === "chal-r7m4x2q9v6kp") ?? null;
   });
 }
 
@@ -113,7 +113,7 @@ async function startCleanupEnvironment(page: Page) {
   await expectTerminalConnected(page);
   await expect.poll(() => currentCleanupEnvironment(page), { timeout: 30_000 }).not.toBeNull();
   const environment = await currentCleanupEnvironment(page);
-  if (environment === null) throw new Error("cleanup-logs environment was not created");
+  if (environment === null) throw new Error("cleanup logs environment was not created");
   return environment;
 }
 

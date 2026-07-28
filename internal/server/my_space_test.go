@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generator"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -95,6 +98,9 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	published := space.Authoring.Published[0]
 	if published.AttemptedUsers != 1 || published.CompletedUsers != 1 || published.PassRate == nil || *published.PassRate != 1 {
 		t.Fatalf("published authoring metrics = %#v", published)
+	}
+	if published.TaxonomyStatus != api.MySpacePublishedChallengeTaxonomyStatus("mapped") {
+		t.Fatalf("published authoring taxonomy status = %q", published.TaxonomyStatus)
 	}
 }
 
@@ -212,6 +218,105 @@ func TestMySpaceAuthoringReturnsOnlyAnonymousLearnerAggregates(t *testing.T) {
 	}
 	if strings.Contains(string(payload), "u-demo") || strings.Contains(string(payload), "learner-environment") {
 		t.Fatalf("authoring response leaked learner identity: %s", payload)
+	}
+}
+
+func TestMySpaceAuthoringProjectsTaxonomyStates(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		prepare func(t *testing.T, handler *Handler, entry challenge.Entry)
+		want    api.MySpacePublishedChallengeTaxonomyStatus
+	}{
+		{
+			name: "mapped",
+			want: api.MySpacePublishedChallengeTaxonomyStatus("mapped"),
+		},
+		{
+			name: "mapping without work item",
+			prepare: func(t *testing.T, handler *Handler, entry challenge.Entry) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(handler.dataDir, "taxonomy", "current")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: api.MySpacePublishedChallengeTaxonomyStatus("mapping"),
+		},
+		{
+			name: "retrying after technical failure budget",
+			prepare: func(t *testing.T, handler *Handler, entry challenge.Entry) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(handler.dataDir, "taxonomy", "current")); err != nil {
+					t.Fatal(err)
+				}
+				_, err := handler.db.EnqueueTaxonomyWork(context.Background(), taxonomy.WorkItem{
+					ID:                "taxonomy-retrying",
+					Kind:              taxonomy.WorkKindMapping,
+					ChallengeID:       entry.ID,
+					ChallengeRevision: entry.Revision,
+					State:             taxonomy.WorkPending,
+					NextRunAt:         time.Now().UTC().Add(time.Hour),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: api.MySpacePublishedChallengeTaxonomyStatus("retrying"),
+		},
+		{
+			name: "blocked after terminal work failure",
+			prepare: func(t *testing.T, handler *Handler, entry challenge.Entry) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(handler.dataDir, "taxonomy", "current")); err != nil {
+					t.Fatal(err)
+				}
+				work, err := handler.db.EnqueueTaxonomyWork(context.Background(), taxonomy.WorkItem{
+					ID:                "taxonomy-blocked",
+					Kind:              taxonomy.WorkKindMapping,
+					ChallengeID:       entry.ID,
+					ChallengeRevision: entry.Revision,
+					State:             taxonomy.WorkPending,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := handler.db.ClaimTaxonomyWork(context.Background(), "test-status", time.Minute)
+				if err != nil || claimed == nil || claimed.ID != work.ID {
+					t.Fatalf("claim taxonomy work = %#v, %v", claimed, err)
+				}
+				claimed.State = taxonomy.WorkFailed
+				claimed.LastError = "manual intervention required"
+				if err := handler.db.SaveClaimedTaxonomyWork(context.Background(), *claimed); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: api.MySpacePublishedChallengeTaxonomyStatus("blocked"),
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newProgressTestHandler(t, nil)
+			entry, err := challenge.Get(handler.challengesDir, "demo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.prepare != nil {
+				tt.prepare(t, handler, *entry)
+			}
+			createPublishedAuthoringSession(t, handler.db, "u-demo", entry.ID)
+			user, err := handler.db.GetUserByID("u-demo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			space, err := handler.mySpace(ctx, user, mySpaceInitialLearningLimit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(space.Authoring.Published) != 1 || space.Authoring.Published[0].TaxonomyStatus != tt.want {
+				t.Fatalf("taxonomy status = %#v, want %q", space.Authoring.Published, tt.want)
+			}
+		})
 	}
 }
 

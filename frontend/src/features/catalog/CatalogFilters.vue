@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
+import type { TaxonomyReference } from "../../api/types";
 
 const props = defineProps<{
 	query: string;
@@ -7,7 +8,7 @@ const props = defineProps<{
 	runtimes: string[];
 	tags: string[];
 	statuses: string[];
-	availableTags: string[];
+	availableTags: TaxonomyReference[];
 	resultCount: number;
 	loggedIn: boolean;
 	open: boolean;
@@ -76,9 +77,9 @@ function updateQuery(event: Event) {
 
 		<section class="filter-group tags-filter-group" aria-labelledby="tags-filter">
 			<h2 id="tags-filter">Tags</h2>
-			<label v-for="tag in availableTags" :key="tag" class="filter-option">
-				<input type="checkbox" :checked="tags.includes(tag)" @change="emit('toggle:tag', tag)" />
-				<span>{{ tag }}</span>
+			<label v-for="tag in availableTags" :key="tag.id" class="filter-option">
+				<input type="checkbox" :checked="tags.includes(tag.id)" @change="emit('toggle:tag', tag.id)" />
+				<span>{{ tag.title }}</span>
 			</label>
 		</section>
 	</aside>

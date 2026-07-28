@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/gin-gonic/gin"
 )
 
@@ -271,7 +273,12 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
 	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedChallenge, 0)}
-	published := make([]db.AuthoringSpaceSession, 0)
+	type authoredPublished struct {
+		session        db.AuthoringSpaceSession
+		entry          challenge.Entry
+		taxonomyStatus api.MySpacePublishedChallengeTaxonomyStatus
+	}
+	published := make([]authoredPublished, 0)
 	for _, session := range sessions {
 		if session.State != authoring.StatePublished {
 			view.Drafts = append(view.Drafts, api.MySpaceAuthoringDraft{
@@ -282,24 +289,28 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 			})
 			continue
 		}
-		if _, ok := catalog[session.PublishChallengeID]; ok && session.PublishChallengeID != "" {
-			published = append(published, session)
+		if entry, ok := catalog[session.PublishChallengeID]; ok && session.PublishChallengeID != "" {
+			status, err := h.authoringTaxonomyStatus(ctx, entry)
+			if err != nil {
+				return api.MySpaceAuthoring{}, 0, 0, err
+			}
+			published = append(published, authoredPublished{session: session, entry: entry, taxonomyStatus: status})
 		}
 	}
 	challengeIDs := make([]string, 0, len(published))
-	for _, session := range published {
-		challengeIDs = append(challengeIDs, session.PublishChallengeID)
+	for _, item := range published {
+		challengeIDs = append(challengeIDs, item.session.PublishChallengeID)
 	}
 	counts, err := h.db.ChallengeAudienceCounts(ctx, challengeIDs)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
-	for _, session := range published {
-		entry := catalog[session.PublishChallengeID]
-		count := counts[session.PublishChallengeID]
+	for _, item := range published {
+		count := counts[item.session.PublishChallengeID]
 		card := api.MySpacePublishedChallenge{
-			Challenge:      mySpaceChallenge(entry),
-			PublishedAt:    entry.PublishedAt,
+			Challenge:      mySpaceChallenge(item.entry),
+			PublishedAt:    item.entry.PublishedAt,
+			TaxonomyStatus: item.taxonomyStatus,
 			AttemptedUsers: count.AttemptedUsers,
 			CompletedUsers: count.CompletedUsers,
 		}
@@ -310,6 +321,41 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 		view.Published = append(view.Published, card)
 	}
 	return view, len(view.Drafts), len(view.Published), nil
+}
+
+func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.Entry) (api.MySpacePublishedChallengeTaxonomyStatus, error) {
+	if h.taxonomy != nil {
+		snapshot, err := h.taxonomy.LoadCurrent()
+		if err != nil && !errors.Is(err, taxonomy.ErrNoCurrentRevision) {
+			return "", fmt.Errorf("load current taxonomy for authoring status: %w", err)
+		}
+		if snapshot != nil {
+			index, err := taxonomy.NewCatalogIndex(*snapshot, []challenge.Entry{entry})
+			if err != nil {
+				return "", fmt.Errorf("build taxonomy index for authoring status: %w", err)
+			}
+			if _, mapped := index.Mapping(entry.ID); mapped {
+				return api.MySpacePublishedChallengeTaxonomyStatus("mapped"), nil
+			}
+		}
+	}
+
+	work, err := h.db.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, entry.ID, entry.Revision)
+	if errors.Is(err, db.ErrTaxonomyWorkNotFound) {
+		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read taxonomy work for authoring status: %w", err)
+	}
+	switch work.State {
+	case taxonomy.WorkFailed, taxonomy.WorkCancelled:
+		return api.MySpacePublishedChallengeTaxonomyStatus("blocked"), nil
+	case taxonomy.WorkPending:
+		if work.NextRunAt.After(time.Now().UTC()) {
+			return api.MySpacePublishedChallengeTaxonomyStatus("retrying"), nil
+		}
+	}
+	return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 }
 
 func mySpaceChallenge(entry challenge.Entry) api.MySpaceChallenge {

@@ -10,12 +10,13 @@ import (
 
 func TestListAndGet(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "demo-task")
+	dir := filepath.Join(root, "demo-task-source")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\nsource_slug: demo-task-source\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
+	writeFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
 	writeChallengeAssets(t, dir)
 
 	challenges, err := List(root)
@@ -46,8 +47,8 @@ func TestListAndGet(t *testing.T) {
 
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
-	_, err := Materialize(root, "fresh-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
+	_, err := MaterializeWithSlug(root, "fresh-task", "fresh-task-source", func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\nsource_slug: fresh-task-source\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
 		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
 		writeChallengeAssets(t, dst)
@@ -58,22 +59,22 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "fresh-task", "challenge.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "fresh-task-source", "challenge.yaml")); err != nil {
 		t.Fatalf("expected finalized challenge, stat failed: %v", err)
 	}
 }
 
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
-	_, err := Materialize(root, "broken-task", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
+	_, err := MaterializeWithSlug(root, "broken-task", "broken-task-source", func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nsource_slug: broken-task-source\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	if _, statErr := os.Stat(filepath.Join(root, "broken-task")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(root, "broken-task-source")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no promoted directory, got %v", statErr)
 	}
 }
@@ -92,7 +93,7 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 
 func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
 	root := t.TempDir()
-	manifest := validManifest("id: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\npublished_at: 2026-07-24T08:00:00Z\n")
+	manifest := validManifest("id: vcluster-demo\nsource_slug: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\npublished_at: 2026-07-24T08:00:00Z\n")
 	writeFile(t, filepath.Join(root, "challenge.yaml"), strings.Replace(manifest, "runtime: container", "runtime: vcluster", 1))
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
 	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
@@ -173,6 +174,9 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	if published.ID != "opaque-challenge" || published.Image != "registry.example/verify:latest" {
 		t.Fatalf("unexpected published entry: %#v", published)
 	}
+	if published.SourceSlug != "verified-source-opaque-c" || filepath.Base(published.Dir) != published.SourceSlug {
+		t.Fatalf("published source slug = %q at %q", published.SourceSlug, published.Dir)
+	}
 	if !published.PublishedAt.Equal(publishedAt) {
 		t.Fatalf("published time = %s, want %s", published.PublishedAt, publishedAt)
 	}
@@ -185,6 +189,43 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	}
 	if !sourceEntry.PublishedAt.IsZero() {
 		t.Fatalf("published timestamp leaked into immutable source artifact: %s", sourceEntry.PublishedAt)
+	}
+	if sourceEntry.SourceSlug != "" {
+		t.Fatalf("platform source slug leaked into immutable source artifact: %q", sourceEntry.SourceSlug)
+	}
+}
+
+func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T) {
+	root := t.TempDir()
+	entry, err := MaterializeWithSlug(root, "chal-4m6q8r2t9v3x", "批量压缩旧日志-4m6q8r2", func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 批量压缩旧日志-4m6q8r2\ntitle: 批量压缩旧日志\npublished_at: 2026-07-24T08:00:00Z\n"))
+		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
+		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
+		writeChallengeAssets(t, dst)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ID != "chal-4m6q8r2t9v3x" || filepath.Base(entry.Dir) != "批量压缩旧日志-4m6q8r2" {
+		t.Fatalf("opaque ID and source directory were not separated: %#v", entry)
+	}
+	loaded, err := Get(root, entry.ID)
+	if err != nil || loaded.Dir != entry.Dir {
+		t.Fatalf("lookup by opaque ID through source directory = %#v, %v", loaded, err)
+	}
+}
+
+func TestListRejectsPublishedChallengeWithoutMatchingSourceSlug(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "readable-directory")
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: chal-4m6q8r2t9v3x\nsource_slug: another-directory\ntitle: Mismatch\npublished_at: 2026-07-24T08:00:00Z\n"))
+	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
+	writeFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
+	writeChallengeAssets(t, dir)
+
+	if _, err := List(root); err == nil {
+		t.Fatal("expected published directory/source_slug mismatch to be rejected")
 	}
 }
 

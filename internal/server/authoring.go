@@ -261,20 +261,28 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 	if err := challenge.RemoveSubmission(h.dataDir, revision.Artifact.SubmissionID); err != nil {
 		slog.Warn("remove published authoring submission", "session", session.ID, "submission", revision.Artifact.SubmissionID, "err", err)
 	}
-	if h.taxonomyWorkflow != nil {
-		baseRevision := ""
-		if current, currentErr := h.taxonomy.LoadCurrent(); currentErr == nil {
-			baseRevision = current.Revision
-		} else if !errors.Is(currentErr, taxonomy.ErrNoCurrentRevision) {
-			slog.Warn("read taxonomy before enqueue", "challenge", challengeID, "err", currentErr)
-		}
-		if _, enqueueErr := h.taxonomyWorkflow.EnqueueChallenge(ctx, *published, baseRevision); enqueueErr != nil {
-			// Challenge publication is already durable. The periodic scanner will
-			// retry this operational enqueue path after a transient DB error.
-			slog.Warn("enqueue taxonomy mapping", "challenge", challengeID, "err", enqueueErr)
-		}
-	}
+	h.enqueuePublishedChallengeTaxonomy(ctx, *published)
 	return nil
+}
+
+// enqueuePublishedChallengeTaxonomy makes taxonomy classification prompt after
+// promotion. The scanner remains the convergence path if this best-effort
+// enqueue is interrupted after the filesystem rename.
+func (h *Handler) enqueuePublishedChallengeTaxonomy(ctx context.Context, published challenge.Entry) {
+	if h.taxonomyWorkflow == nil {
+		return
+	}
+	baseRevision := ""
+	if current, err := h.taxonomy.LoadCurrent(); err == nil {
+		baseRevision = current.Revision
+	} else if !errors.Is(err, taxonomy.ErrNoCurrentRevision) {
+		slog.Warn("read taxonomy before enqueue", "challenge", published.ID, "err", err)
+	}
+	if _, err := h.taxonomyWorkflow.EnqueueChallenge(ctx, published, baseRevision); err != nil {
+		// Challenge publication is already durable. The periodic scanner retries
+		// this operational enqueue path after a transient database failure.
+		slog.Warn("enqueue taxonomy mapping", "challenge", published.ID, "err", err)
+	}
 }
 
 // restartAuthoringGeneratorRun starts the next semantic Generator Run after a
@@ -546,8 +554,12 @@ func (h *Handler) syncAuthoringSession(ctx context.Context, sessionID string) er
 	if session.State == authoring.StatePublishing && session.PublishChallengeID != "" {
 		// A filesystem promote completed but its DB completion was interrupted.
 		// The catalog directory is already atomic, so finish the durable state.
-		if _, err := challenge.Get(h.challengesDir, session.PublishChallengeID); err == nil {
-			return h.db.CompletePublish(ctx, session.ID, session.UserID, session.VisibleRevision, session.PublishChallengeID)
+		if published, err := challenge.Get(h.challengesDir, session.PublishChallengeID); err == nil {
+			if err := h.db.CompletePublish(ctx, session.ID, session.UserID, session.VisibleRevision, session.PublishChallengeID); err != nil {
+				return err
+			}
+			h.enqueuePublishedChallengeTaxonomy(ctx, *published)
+			return nil
 		}
 	}
 	if h.k8s == nil {

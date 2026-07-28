@@ -28,7 +28,7 @@ runtimeTest("container workbench records progress and completion", async ({ page
 	await page.getByRole("button", { name: "Catalog", exact: true }).click();
 	await expect(card.getByText("Completed", { exact: true })).toBeVisible({ timeout: 30_000 });
 
-	await stopChallenge(page, "cleanup-logs");
+	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });
 
 runtimeTest("opening the authoring page does not end a container environment", async ({ page }) => {
@@ -44,7 +44,7 @@ runtimeTest("opening the authoring page does not end a container environment", a
 	await expect(challengeCard(page, "批量压缩旧日志").locator(".challenge-state.in-progress")).toContainText("In progress", {
 		timeout: 30_000,
 	});
-	await stopChallenge(page, "cleanup-logs");
+	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });
 
 runtimeTest("My space projects a real terminal and checkpoint lifecycle", async ({ page }) => {
@@ -63,5 +63,5 @@ runtimeTest("My space projects a real terminal and checkpoint lifecycle", async 
 	await page.getByRole("button", { name: "My space", exact: true }).click();
 	await expect(page.locator(".history-row", { hasText: "批量压缩旧日志" })).toContainText("Completed", { timeout: 30_000 });
 
-	await stopChallenge(page, "cleanup-logs");
+	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });

@@ -5,6 +5,7 @@ import type { Challenge, ChallengeContent } from "../../api/types";
 import MarkdownDocument from "./MarkdownDocument.vue";
 import AssistantChat from "./AssistantChat.vue";
 import TerminalPane from "./TerminalPane.vue";
+import TaxonomyPanel from "./TaxonomyPanel.vue";
 import WorkspaceHeader from "./WorkspaceHeader.vue";
 import WorkspaceSidebar from "./WorkspaceSidebar.vue";
 import { useChallengeProgress } from "./useChallengeProgress";
@@ -184,6 +185,7 @@ onUnmounted(() => {
             :open-windows="terminalWindows"
           />
           <template v-else>
+            <TaxonomyPanel v-if="view === 'problem' && content" :taxonomy="content.taxonomy" />
             <MarkdownDocument :source="documentSource" />
             <aside
               v-if="activeHint && content?.hints[activeHint]"

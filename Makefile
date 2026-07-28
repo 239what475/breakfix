@@ -10,6 +10,7 @@
 		e2e-agent-soak \
 		e2e-agent-container \
 		e2e-agent-vcluster \
+		e2e-taxonomy \
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated generate-api generate-api-go generate-api-frontend verify-api-generated \
@@ -204,6 +205,12 @@ e2e-agent-container:
 e2e-agent-vcluster:
 	npm ci --prefix test
 	npm run test:agent-live:vcluster --prefix test -- --workers=1
+
+e2e-taxonomy: frontend-build
+	@test -n "$$BREAKFIX_TAXONOMY_E2E_DATABASE_URL" || { echo "  ✗ BREAKFIX_TAXONOMY_E2E_DATABASE_URL is required"; exit 1; }
+	@test -n "$$DEEPSEEK_API_KEY" || { echo "  ✗ DEEPSEEK_API_KEY is required"; exit 1; }
+	npm ci --prefix test
+	npm run test:taxonomy-live --prefix test -- --workers=1
 
 e2e:
 	npm ci --prefix test

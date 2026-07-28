@@ -11,6 +11,9 @@ function date(value: string) {
 function rate(value?: number | null) {
 	return value == null ? "--" : `${Math.round(value * 100)}%`;
 }
+function taxonomyStatus(value: MySpaceAuthoring["published"][number]["taxonomy_status"]) {
+	return { mapped: "In catalog", mapping: "Classifying", retrying: "Classification retrying", blocked: "Classification blocked" }[value];
+}
 </script>
 
 <template>
@@ -23,9 +26,9 @@ function rate(value?: number | null) {
     <div class="published-heading"><h3>Published challenges</h3><span>{{ authoring.published.length }}</span></div>
     <div v-if="authoring.published.length" class="published-grid">
       <article v-for="published in authoring.published" :key="published.challenge.id" class="published-card">
-        <div><p class="eyebrow">{{ published.challenge.runtime }} · {{ date(published.published_at) }}</p><h3>{{ published.challenge.title }}</h3></div>
+        <div><p class="eyebrow">{{ published.challenge.runtime }} · {{ date(published.published_at) }}</p><h3>{{ published.challenge.title }}</h3><small>{{ taxonomyStatus(published.taxonomy_status) }}</small></div>
         <dl><div><dt><UsersRound :size="13" aria-hidden="true" />Attempts</dt><dd>{{ published.attempted_users }}</dd></div><div><dt>Completed</dt><dd>{{ published.completed_users }}</dd></div><div><dt>Pass rate</dt><dd>{{ rate(published.pass_rate) }}</dd></div></dl>
-        <button class="text-button" type="button" @click="emit('catalog', published.challenge.id)">View in catalog</button>
+        <button v-if="published.taxonomy_status === 'mapped'" class="text-button" type="button" @click="emit('catalog', published.challenge.id)">View in catalog</button>
       </article>
     </div>
     <p v-else class="space-empty">Published challenges with a current catalog entry will appear here.</p>

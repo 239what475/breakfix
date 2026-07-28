@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -54,18 +55,20 @@ func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image string, pub
 	if publishedAt.IsZero() {
 		return nil, fmt.Errorf("published time is required")
 	}
-	if _, err := ValidateSubmissionDir(sourceDir); err != nil {
+	source, err := ValidateSubmissionDir(sourceDir)
+	if err != nil {
 		return nil, fmt.Errorf("validate verified artifact: %w", err)
 	}
-	return Materialize(challengesDir, challengeID, func(staging string) error {
+	sourceSlug := sourceSlugFor(source.Title, challengeID)
+	return MaterializeWithSlug(challengesDir, challengeID, sourceSlug, func(staging string) error {
 		if err := CopyRegularFiles(sourceDir, staging); err != nil {
 			return err
 		}
-		return writePublishedManifest(staging, challengeID, image, publishedAt)
+		return writePublishedManifest(staging, challengeID, sourceSlug, image, publishedAt)
 	})
 }
 
-func writePublishedManifest(dir, challengeID, image string, publishedAt time.Time) error {
+func writePublishedManifest(dir, challengeID, sourceSlug, image string, publishedAt time.Time) error {
 	manifestPath := filepath.Join(dir, "challenge.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -76,6 +79,7 @@ func writePublishedManifest(dir, challengeID, image string, publishedAt time.Tim
 		return fmt.Errorf("parse challenge manifest: %w", err)
 	}
 	manifest.ID = challengeID
+	manifest.SourceSlug = sourceSlug
 	manifest.Image = image
 	manifest.PublishedAt = publishedAt.UTC()
 	if strings.TrimSpace(manifest.Type) == "" {
@@ -90,6 +94,31 @@ func writePublishedManifest(dir, challengeID, image string, publishedAt time.Tim
 	}
 
 	return nil
+}
+
+func sourceSlugFor(title, challengeID string) string {
+	var builder strings.Builder
+	separator := true
+	for _, r := range strings.ToLower(title) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			builder.WriteRune(r)
+			separator = false
+			continue
+		}
+		if !separator {
+			builder.WriteByte('-')
+			separator = true
+		}
+	}
+	base := strings.Trim(builder.String(), "-")
+	if base == "" {
+		base = "challenge"
+	}
+	suffix := strings.TrimPrefix(challengeID, "chal-")
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return base + "-" + suffix
 }
 
 // CopyRegularFiles copies an artifact without following symlinks. It is shared

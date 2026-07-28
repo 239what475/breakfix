@@ -21,6 +21,9 @@ export type {
 	AuthoringVerificationIssue,
 	AuthoringVerificationReport,
 	ChallengeContent,
+	ChallengeEntrySkill,
+	ChallengeOutcome,
+	ChallengeTaxonomy,
 	CheckpointProgressSummary,
 	CheckpointResult,
 	MySpace,
@@ -34,6 +37,7 @@ export type {
 	MySpaceProfile,
 	MySpacePublishedChallenge,
 	MySpaceSummary,
+	TaxonomyReference,
 	VerifiedChallenge,
 	VerifiedCheckpoint,
 } from "./generated";

@@ -6,11 +6,21 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var requiredFiles = []string{"challenge.yaml", "Dockerfile", "generate.sh", "problem.md", "solution.md", "checks/checkpoints.sh", "answer.sh"}
 
-func Materialize(root, id string, populate func(dst string) error) (*Entry, error) {
+// MaterializeWithSlug promotes a published challenge into a human-readable
+// source directory while keeping its opaque identity in challenge.yaml.
+func MaterializeWithSlug(root, id, sourceSlug string, populate func(dst string) error) (*Entry, error) {
+	if !ValidSourceSlug(sourceSlug) {
+		return nil, fmt.Errorf("invalid challenge source slug %q", sourceSlug)
+	}
+	return materialize(root, id, sourceSlug, populate)
+}
+
+func materialize(root, id, directoryName string, populate func(dst string) error) (*Entry, error) {
 	if !ValidID(id) {
 		return nil, fmt.Errorf("invalid challenge id %q", id)
 	}
@@ -18,7 +28,7 @@ func Materialize(root, id string, populate func(dst string) error) (*Entry, erro
 		return nil, fmt.Errorf("create challenges dir: %w", err)
 	}
 
-	staging := filepath.Join(root, ".tmp-"+id+"-"+randomSuffix())
+	staging := filepath.Join(root, ".tmp-"+directoryName+"-"+randomSuffix())
 	if err := os.MkdirAll(staging, 0755); err != nil {
 		return nil, fmt.Errorf("create staging dir: %w", err)
 	}
@@ -41,8 +51,11 @@ func Materialize(root, id string, populate func(dst string) error) (*Entry, erro
 	if challenge.ID != id {
 		return nil, fmt.Errorf("challenge id mismatch: expected %s got %s", id, challenge.ID)
 	}
+	if challenge.SourceSlug != directoryName {
+		return nil, fmt.Errorf("challenge source slug mismatch: expected %s got %s", directoryName, challenge.SourceSlug)
+	}
 
-	target := filepath.Join(root, id)
+	target := filepath.Join(root, directoryName)
 	if _, err := os.Stat(target); err == nil {
 		return nil, fmt.Errorf("challenge %s already exists", id)
 	} else if !os.IsNotExist(err) {
@@ -64,6 +77,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	}
 	if !ValidID(challenge.ID) {
 		return nil, fmt.Errorf("invalid challenge id %q", challenge.ID)
+	}
+	if !ValidSourceSlug(challenge.SourceSlug) {
+		return nil, fmt.Errorf("invalid challenge source slug %q", challenge.SourceSlug)
 	}
 	for _, name := range requiredFiles {
 		info, err := os.Stat(filepath.Join(dir, name))
@@ -199,6 +215,21 @@ func ValidID(id string) bool {
 			continue
 		}
 		if r == '-' && i > 0 && i < len(id)-1 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// ValidSourceSlug allows a readable Unicode directory name while rejecting
+// path syntax. It is not an identity and must never be used as a lookup key.
+func ValidSourceSlug(slug string) bool {
+	if slug == "" || strings.HasPrefix(slug, "-") || strings.HasSuffix(slug, "-") {
+		return false
+	}
+	for _, r := range slug {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '-' {
 			continue
 		}
 		return false

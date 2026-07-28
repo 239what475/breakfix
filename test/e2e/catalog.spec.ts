@@ -30,7 +30,7 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 			challenges: Array<{ id: string; tags: string[]; title: string; published_at: string }>;
 		}>;
 	});
-	const challenge = catalog.challenges.find((entry) => entry.id === "cleanup-logs");
+	const challenge = catalog.challenges.find((entry) => entry.id === "chal-r7m4x2q9v6kp");
 	expect(challenge?.tags.length).toBeGreaterThan(0);
 	const taxonomyTag = challenge?.tags[0] ?? "";
 	await page.locator(".catalog-filters").getByLabel(taxonomyTag, { exact: true }).check();
