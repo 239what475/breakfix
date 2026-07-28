@@ -4,18 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
-	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/verification"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,15 +18,10 @@ import (
 )
 
 type Config struct {
-	Kubeconfig          string
-	RegistryAddr        string
-	RegistryInsecure    bool
-	RegistryCredentials registry.Credentials
-	ServerURL           string
-	InternalAPIKey      string
-	VerifyTaskID        string
-	VerifyTaskNS        string
-	SubmissionID        string
+	Kubeconfig   string
+	VerifyTaskID string
+	VerifyTaskNS string
+	SubmissionID string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -52,58 +42,21 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	workDir, err := os.MkdirTemp("", "breakfix-verify-*")
-	if err != nil {
-		return fmt.Errorf("create temp workdir: %w", err)
+	if task.Status.Stage != breakfixv1.VerifyTaskVerifying || strings.TrimSpace(task.Status.Image) == "" {
+		return fmt.Errorf("verify task is not ready for deterministic verification")
 	}
-	defer os.RemoveAll(workDir) //nolint:errcheck
+	runtime := challenge.NormalizeRuntime(task.Spec.Execution.Runtime)
+	if runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster || len(task.Spec.Execution.CheckpointIDs) == 0 {
+		return fmt.Errorf("verify task has invalid execution snapshot")
+	}
+	checkpoints := make([]challenge.Checkpoint, 0, len(task.Spec.Execution.CheckpointIDs))
+	for _, id := range task.Spec.Execution.CheckpointIDs {
+		checkpoints = append(checkpoints, challenge.Checkpoint{ID: id})
+	}
 
-	downloadPath := filepath.Join(workDir, "artifact.tar.gz")
 	stageStart := time.Now()
-	slog.Info("verify stage start", "phase", "download_submission", "verifyTaskID", cfg.VerifyTaskID)
-	if err := downloadSubmission(ctx, cfg, downloadPath); err != nil {
-		return fmt.Errorf("download submission: %w", err)
-	}
-	slog.Info("verify stage done", "phase", "download_submission", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "path", downloadPath)
-
-	stageStart = time.Now()
-	slog.Info("verify stage start", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID)
-	f, err := os.Open(downloadPath)
-	if err != nil {
-		return fmt.Errorf("open downloaded submission: %w", err)
-	}
-	defer f.Close()
-
-	chalDir := filepath.Join(workDir, "challenge")
-	if err := os.MkdirAll(chalDir, 0755); err != nil {
-		return fmt.Errorf("create challenge workdir: %w", err)
-	}
-	if err := challenge.ExtractTarGz(chalDir, f); err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("ARTIFACT_EXTRACT_FAILED", err.Error()))
-	}
-	if _, err := challenge.ValidateSubmissionDir(chalDir); err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("STRUCTURE_INVALID", err.Error()))
-	}
-	challengeEntry, err := challenge.LoadSubmissionDir(chalDir)
-	if err != nil {
-		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHALLENGE_MANIFEST_INVALID", err.Error()))
-	}
-	slog.Info("verify stage done", "phase", "extract_artifact", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "runtime", challengeEntry.Runtime)
-
-	tempImage := verification.ImageName(cfg.RegistryAddr, cfg.VerifyTaskID)
-	stageStart = time.Now()
-	slog.Info("verify stage start", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "image", tempImage)
-	if err := BuildAndPush(ctx, tempImage, chalDir, verifyBaseImage(tempImage, challengeEntry.Runtime), cfg.RegistryInsecure, cfg.RegistryCredentials); err != nil {
-		if isArtifactBuildError(err) {
-			return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("BUILD_FAILED", err.Error()))
-		}
-		return fmt.Errorf("build and push verification image: %w", err)
-	}
-	slog.Info("verify stage done", "phase", "build_image", "verifyTaskID", cfg.VerifyTaskID, "duration", time.Since(stageStart), "image", tempImage)
-
-	stageStart = time.Now()
-	slog.Info("verify stage start", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "runtime", challengeEntry.Runtime)
-	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, challengeEntry, tempImage)
+	slog.Info("verify stage start", "phase", "create_environment", "verifyTaskID", cfg.VerifyTaskID, "runtime", runtime, "image", task.Status.Image)
+	envRef, err := createVerifyEnvironment(ctx, client, cfg.VerifyTaskNS, cfg.VerifyTaskID, cfg.SubmissionID, runtime, task.Spec.Execution.CheckpointIDs, task.Status.Image)
 	if err != nil {
 		return fmt.Errorf("create verification environment: %w", err)
 	}
@@ -144,7 +97,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if checkExit != 0 {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_PROTOCOL_FAILED", fmt.Sprintf("checkpoint runner exit=%d: %s", checkExit, truncateStr(checkOut, 4000))))
 	}
-	report, err := challenge.ParseCheckReport(checkOut, challengeEntry.Checkpoints)
+	report, err := challenge.ParseCheckReport(checkOut, checkpoints)
 	if err != nil {
 		return updateVerifyFailure(ctx, client, cfg.VerifyTaskNS, task, failureReport("CHECKPOINT_REPORT_INVALID", fmt.Sprintf("%v; output=%q", err, truncateStr(checkOut, 4000))))
 	}
@@ -195,23 +148,8 @@ type verifyEnvironmentState struct {
 	Message   string
 }
 
-func verifyBaseImage(targetImage, runtime string) string {
-	repoPrefix := ""
-	if idx := strings.LastIndex(targetImage, "/"); idx >= 0 {
-		repoPrefix = targetImage[:idx]
-	}
-	baseName := "breakfix-base:latest"
-	if challenge.NormalizeRuntime(runtime) == challenge.RuntimeVCluster {
-		baseName = "breakfix-k8s-base:latest"
-	}
-	if repoPrefix == "" {
-		return baseName
-	}
-	return repoPrefix + "/" + baseName
-}
-
-func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID string, entry *challenge.Entry, image string) (*verifyEnvironmentRef, error) {
-	ref := &verifyEnvironmentRef{Runtime: challenge.NormalizeRuntime(entry.Runtime), Name: verification.EnvironmentName(verifyTaskID)}
+func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verifyTaskID, submissionID, runtime string, checkpointIDs []string, image string) (*verifyEnvironmentRef, error) {
+	ref := &verifyEnvironmentRef{Runtime: challenge.NormalizeRuntime(runtime), Name: verification.EnvironmentName(verifyTaskID)}
 	if err := deleteVerifyEnvironment(ctx, client, ns, ref); err != nil {
 		return nil, fmt.Errorf("delete previous verification environment: %w", err)
 	}
@@ -219,16 +157,12 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 		return nil, err
 	}
 
-	checkpointIDs := make([]string, 0, len(entry.Checkpoints))
-	for _, checkpoint := range entry.Checkpoints {
-		checkpointIDs = append(checkpointIDs, checkpoint.ID)
-	}
 	activityAt := metav1.Now()
 	common := breakfixv1.CommonEnvironmentSpec{
 		ChallengeRef:      "verify-" + verifyTaskID,
 		ChallengeRevision: "submission:" + submissionID,
 		UserRef:           "verify-" + verifyTaskID,
-		Runtime:           challenge.NormalizeRuntime(entry.Runtime),
+		Runtime:           challenge.NormalizeRuntime(runtime),
 		Image:             image,
 		CheckpointIDs:     checkpointIDs,
 		ActivityAt:        &activityAt,
@@ -239,7 +173,7 @@ func createVerifyEnvironment(ctx context.Context, client *k8s.Client, ns, verify
 		"breakfix.dev/submission":  submissionID,
 	}
 
-	if challenge.NormalizeRuntime(entry.Runtime) == challenge.RuntimeVCluster {
+	if challenge.NormalizeRuntime(runtime) == challenge.RuntimeVCluster {
 		_, err := client.CreateVClusterEnvironment(ctx, ns, &breakfixv1.VClusterEnvironment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      ref.Name,
@@ -354,31 +288,6 @@ func waitVerifyEnvironmentDeleted(ctx context.Context, client *k8s.Client, ns st
 		}
 	}
 	return fmt.Errorf("timeout waiting for previous verification environment %s deletion", envRef.Name)
-}
-
-func downloadSubmission(ctx context.Context, cfg Config, dst string) error {
-	url := strings.TrimRight(cfg.ServerURL, "/") + "/api/internal/verify-submissions/" + cfg.SubmissionID + "/artifact"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("X-Breakfix-Internal-Key", cfg.InternalAPIKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("download submission: status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
 }
 
 func updateVerifyFailure(ctx context.Context, client *k8s.Client, ns string, task *breakfixv1.VerifyTask, report *breakfixv1.VerifyReport) error {

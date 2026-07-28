@@ -72,6 +72,6 @@ Run 提交 immutable candidate、失败、取消或 deadline 到期后，Server 
 - PostgreSQL 是 Agent Runtime 的唯一关系数据库；不支持 SQLite 回退。
 - Server 是唯一持有 OpenSandbox lifecycle key 和 Sandbox PVC 权限的组件。
 - Worker 只拥有 `agent_*` 数据库权限、模型密钥和 Server 内部密钥；不挂载业务卷，不自动挂载 ServiceAccount token。
-- verifier 的 BuildKit 权限属于真实镜像构建边界，不应扩散给 Worker 或学习者环境；若未来需要进一步硬化，应单独验证 rootless 或远程 BuildKit，而不是弱化现有验证流程。
+- VerifyTask 的不可信镜像构建运行在独立 rootless Builder Job；它没有 Kubernetes API token、Registry 凭据或 Server 全局内部密钥。Publisher 与 Kubernetes-enabled Verifier 分别处于独立的可信 Job 边界。
 
 测试分层与显式 Agent Live 验收入口见[测试与真实验收](../operations/testing.md)。

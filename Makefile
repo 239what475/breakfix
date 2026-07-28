@@ -5,6 +5,7 @@
 	telepresence-connect telepresence-server telepresence-controller telepresence-worker telepresence-down telepresence-status telepresence-disconnect \
         e2e \
 		e2e-runtime-verify \
+		e2e-builder-boundary \
 		e2e-runtime-browser \
 		e2e-agent-assistant \
 		e2e-agent-soak \
@@ -14,8 +15,8 @@
         e2e-server-recovery \
         dev-registry dev-data dev-crd dev-rbac dev-images docker-base \
         generate-crd verify-crd-generated generate-api generate-api-go generate-api-frontend verify-api-generated \
-	build build-server build-controller build-agent-worker build-verifier runtime-images runtime-push \
-	verifier-build \
+	build build-server build-controller build-agent-worker build-builder build-publisher build-verifier runtime-images runtime-push \
+	verification-images \
         lint proto clean
 
 # ── Build info ──
@@ -44,6 +45,9 @@ OPENAPI_TS_ARGS := -i $(CURDIR)/$(OPENAPI_SPEC) -p @hey-api/typescript --no-log-
 REGISTRY    ?= localhost:5000
 ACR_NS      ?= break-fix
 KIND_CLUSTER ?= breakfix-dev
+NETWORK_POLICY_KIND_CLUSTER ?= breakfix-network-policy-e2e
+NETWORK_POLICY_KUBECTL_CONTEXT ?= kind-$(NETWORK_POLICY_KIND_CLUSTER)
+CILIUM_CHART_VERSION ?= 1.19.6
 
 CONFIG_DIR ?= config
 CONFIG ?= $(CONFIG_DIR)/breakfix.yaml
@@ -61,17 +65,16 @@ SERVER_RELEASE_DIR := $(RELEASE_DIR)/server
 CONTROLLER_RELEASE_DIR := $(RELEASE_DIR)/controller
 AGENT_WORKER_RELEASE_DIR := $(RELEASE_DIR)/agent-worker
 VERIFIER_RELEASE_DIR := $(RELEASE_DIR)/verifier
+BUILDER_RELEASE_DIR := $(RELEASE_DIR)/builder
+PUBLISHER_RELEASE_DIR := $(RELEASE_DIR)/publisher
 SERVER_RELEASE_BIN := $(SERVER_RELEASE_DIR)/breakfix-server
 CONTROLLER_RELEASE_BIN := $(CONTROLLER_RELEASE_DIR)/breakfix-controller
 AGENT_WORKER_RELEASE_BIN := $(AGENT_WORKER_RELEASE_DIR)/breakfix-agent-worker
 VERIFIER_RELEASE_BIN := $(VERIFIER_RELEASE_DIR)/breakfix-verifier
+BUILDER_RELEASE_BIN := $(BUILDER_RELEASE_DIR)/breakfix-builder
+PUBLISHER_RELEASE_BIN := $(PUBLISHER_RELEASE_DIR)/breakfix-publisher
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
-# VerifyTask derives this image from registry_addr, so this repository must
-# match the configured registry_addr exactly. Runtime control-plane images may
-# live in a different registry.
-VERIFIER_IMAGE_REPOSITORY ?= $(RUNTIME_IMAGE_REPOSITORY)
-VERIFIER_IMAGE_TAG ?= latest
 TELEPRESENCE ?= ./dev/telepresence.sh
 
 # ═══════════════════════════════════════════════════════════════
@@ -186,6 +189,27 @@ e2e-runtime-verify:
 	npm ci --prefix test
 	npm run test:runtime:verify --prefix test -- --workers=1
 
+# This suite needs a CNI that actually enforces Kubernetes NetworkPolicy.
+# Kind's default kindnet does not, so the isolated cluster is created with its
+# CNI disabled and Cilium is installed exactly as documented by Cilium.
+e2e-builder-boundary:
+	@if ! kind get clusters | rg -qx '$(NETWORK_POLICY_KIND_CLUSTER)'; then \
+		kind create cluster --name $(NETWORK_POLICY_KIND_CLUSTER) --config test/kind/network-policy-kind.yaml; \
+	fi
+	helm upgrade --install cilium oci://quay.io/cilium/charts/cilium \
+		--version $(CILIUM_CHART_VERSION) \
+		--namespace kube-system \
+		--kube-context $(NETWORK_POLICY_KUBECTL_CONTEXT) \
+		--set image.pullPolicy=IfNotPresent \
+		--set operator.replicas=1 \
+		--set ipam.mode=kubernetes
+	kubectl --context $(NETWORK_POLICY_KUBECTL_CONTEXT) -n kube-system rollout status daemonset/cilium --timeout=5m
+	kubectl --context $(NETWORK_POLICY_KUBECTL_CONTEXT) -n kube-system rollout status deployment/cilium-operator --timeout=5m
+	@$(MAKE) --no-print-directory verification-images KIND_CLUSTER=$(NETWORK_POLICY_KIND_CLUSTER)
+	npm ci --prefix test
+	BREAKFIX_RUNTIME_KUBECTL_CONTEXT=$(NETWORK_POLICY_KUBECTL_CONTEXT) \
+		npm run test:runtime:builder-boundary --prefix test -- --workers=1
+
 e2e-runtime-browser:
 	npm ci --prefix test
 	npm run test:runtime:browser --prefix test -- --workers=1
@@ -273,7 +297,7 @@ dev-crd: generate-crd
 
 dev-rbac:
 	@kubectl create namespace breakfix-system --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-	@kubectl apply -f deploy/rbac/controller.yaml >/dev/null
+	@kubectl apply -f deploy/rbac/verifier.yaml >/dev/null
 	@kubectl -n breakfix-system create secret generic breakfix-registry-pull \
 		--type=kubernetes.io/dockerconfigjson \
 		--from-literal=.dockerconfigjson='{"auths":{}}' \
@@ -282,6 +306,7 @@ dev-rbac:
 
 dev-images:
 	@$(MAKE) --no-print-directory docker-base
+	@$(MAKE) --no-print-directory verification-images
 	@for d in data/challenges/*/; do \
 		name=$$(basename $$d); \
 		[ "$$name" = "base" ] && continue; \
@@ -341,21 +366,35 @@ build-verifier:
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(VERIFIER_RELEASE_BIN) ./cmd/verifier
 	@echo "  ✓ Verifier binary"
 
-build: build-server build-controller build-agent-worker build-verifier
+build-builder:
+	@mkdir -p $(BUILDER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BUILDER_RELEASE_BIN) ./cmd/builder
+	@echo "  ✓ Builder binary"
+
+build-publisher:
+	@mkdir -p $(PUBLISHER_RELEASE_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(PUBLISHER_RELEASE_BIN) ./cmd/publisher
+	@echo "  ✓ Publisher binary"
+
+build: build-server build-controller build-agent-worker build-builder build-publisher build-verifier
 	@echo "  ✓ Production binaries built"
 
-runtime-images: build-server build-controller build-agent-worker build-verifier
+runtime-images: build-server build-controller build-agent-worker build-builder build-publisher build-verifier
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG) -f deploy/images/server/Dockerfile $(SERVER_RELEASE_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG) -f deploy/images/controller/Dockerfile $(CONTROLLER_RELEASE_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-agent-worker:$(RUNTIME_IMAGE_TAG) -f deploy/images/agent-worker/Dockerfile $(AGENT_WORKER_RELEASE_DIR)
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(VERIFIER_IMAGE_REPOSITORY)/breakfix-verifier:$(VERIFIER_IMAGE_TAG) -f deploy/images/verifier/Dockerfile $(VERIFIER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-builder:$(RUNTIME_IMAGE_TAG) -f deploy/images/builder/Dockerfile $(BUILDER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-publisher:$(RUNTIME_IMAGE_TAG) -f deploy/images/publisher/Dockerfile $(PUBLISHER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-verifier:$(RUNTIME_IMAGE_TAG) -f deploy/images/verifier/Dockerfile $(VERIFIER_RELEASE_DIR)
 	@echo "  ✓ Runtime images built"
 
 runtime-push: runtime-images
 	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG)
 	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG)
 	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-agent-worker:$(RUNTIME_IMAGE_TAG)
-	docker push $(VERIFIER_IMAGE_REPOSITORY)/breakfix-verifier:$(VERIFIER_IMAGE_TAG)
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-builder:$(RUNTIME_IMAGE_TAG)
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-publisher:$(RUNTIME_IMAGE_TAG)
+	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-verifier:$(RUNTIME_IMAGE_TAG)
 	@echo "  ✓ Runtime images pushed"
 
 # ═══════════════════════════════════════════════════════════════
@@ -395,14 +434,15 @@ docker-push:
 	docker push $(REGISTRY)/$(ACR_NS)/$(NAME):v1
 	@echo "  ✓ $(NAME) → $(REGISTRY)"
 
-verifier-build:
-	@$(MAKE) --no-print-directory build-verifier
+verification-images:
+	@$(MAKE) --no-print-directory build-builder build-publisher build-verifier
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-builder:latest -f deploy/images/builder/Dockerfile $(BUILDER_RELEASE_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-publisher:latest -f deploy/images/publisher/Dockerfile $(PUBLISHER_RELEASE_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-verifier:latest -f deploy/images/verifier/Dockerfile $(VERIFIER_RELEASE_DIR)
-	docker tag breakfix-verifier:latest $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
-	docker push $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest
+	kind load docker-image breakfix-builder:latest --name $(KIND_CLUSTER)
+	kind load docker-image breakfix-publisher:latest --name $(KIND_CLUSTER)
 	kind load docker-image breakfix-verifier:latest --name $(KIND_CLUSTER)
-	kind load docker-image $(REGISTRY)/$(ACR_NS)/breakfix-verifier:latest --name $(KIND_CLUSTER)
-	@echo "  ✓ Verifier image built and loaded into Kind"
+	@echo "  ✓ Builder, Publisher, and Verifier images built and loaded into Kind"
 
 # ═══════════════════════════════════════════════════════════════
 # Ops

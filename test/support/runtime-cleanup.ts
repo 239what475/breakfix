@@ -47,7 +47,7 @@ async function waitForResourceDeletion(kind: string, name: string) {
 }
 
 async function verifiedImage(taskID: string) {
-	const { stdout } = await kubectl(["-n", namespace, "get", "verifytask", taskID, "-o", "jsonpath={.status.tempImage}"]);
+	const { stdout } = await kubectl(["-n", namespace, "get", "verifytask", taskID, "-o", "jsonpath={.status.image}"]);
 	return stdout.trim();
 }
 
@@ -107,12 +107,14 @@ async function removeDataFiles(challengeID?: string, submissionID?: string) {
 async function deletePublishedImage(reference: string) {
 	if (!reference) return;
 	const firstSlash = reference.indexOf("/");
+	const at = reference.lastIndexOf("@");
 	const lastColon = reference.lastIndexOf(":");
-	if (firstSlash <= 0 || lastColon <= firstSlash) throw new Error(`invalid published image reference ${reference}`);
+	if (firstSlash <= 0 || (at <= firstSlash && lastColon <= firstSlash)) throw new Error(`invalid published image reference ${reference}`);
 	const registry = reference.slice(0, firstSlash);
-	const repository = reference.slice(firstSlash + 1, lastColon);
-	const tag = reference.slice(lastColon + 1);
-	const manifestURL = `http://${registry}/v2/${repository}/manifests/${tag}`;
+	const separator = at > firstSlash ? at : lastColon;
+	const repository = reference.slice(firstSlash + 1, separator);
+	const manifestReference = reference.slice(separator + 1);
+	const manifestURL = `http://${registry}/v2/${repository}/manifests/${manifestReference}`;
 	const manifest = await fetch(manifestURL, {
 		headers: { Accept: "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" },
 	});

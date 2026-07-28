@@ -68,6 +68,11 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: internal_api_key
+            - name: BREAKFIX_VERIFICATION_GRANT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: verification_grant_key
             - name: BREAKFIX_REGISTRY_ADDR
               valueFrom:
                 secretKeyRef:
@@ -78,6 +83,16 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_insecure
+            - name: BREAKFIX_REGISTRY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_username
+            - name: BREAKFIX_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_password
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:

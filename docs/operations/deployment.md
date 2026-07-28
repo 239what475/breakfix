@@ -11,7 +11,7 @@ cp config/breakfix.example.yaml config/breakfix.yaml
 make dev
 ```
 
-在运行 `make dev` 前，为配置中的 `database_url` 和 `agent_database_url` 提供可访问的 PostgreSQL DSN。`make dev` 会准备本地匿名 Registry、空的 Docker pull Secret、数据目录、CRD、RBAC 和题目镜像，构建三个二进制并依次启动 Controller、Server 与 Agent Worker。Web UI 位于 `http://localhost:9090`；Controller 健康检查位于 `http://localhost:8081/healthz`。
+在运行 `make dev` 前，为配置中的 `database_url` 和 `agent_database_url` 提供可访问的 PostgreSQL DSN。`make dev` 会准备本地匿名 Registry、空的 Docker pull Secret、数据目录、CRD、RBAC、题目镜像和验证 Job 镜像，构建三个常驻二进制并依次启动 Controller、Server 与 Agent Worker。Web UI 位于 `http://localhost:9090`；Controller 健康检查位于 `http://localhost:8081/healthz`。
 
 常用迭代命令：
 
@@ -41,22 +41,23 @@ make dev-crd
 make dev-rbac
 ```
 
-生产环境应从 [`deploy/crd/`](../../deploy/crd/) 和 [`deploy/rbac/controller.yaml`](../../deploy/rbac/controller.yaml) 应用同样的资源。`deploy/crd/` 是由 Go 类型生成并受 CI 校验的部署契约，不能手改。
+生产环境应从 [`deploy/crd/`](../../deploy/crd/) 和 [`deploy/rbac/verifier.yaml`](../../deploy/rbac/verifier.yaml) 应用同样的资源。`deploy/crd/` 是由 Go 类型生成并受 CI 校验的部署契约，不能手改。
 
 ## 集群部署
 
 Server 需要自己的 RWO PVC，保存证书材料、发布题目、作者 artifact 和提交归档。PostgreSQL 保存账户、领域状态与 durable Agent Runtime 记录。Controller 没有 PostgreSQL 凭据；Agent Worker 只有 `agent_*` 数据库角色、模型 key 和 Server 内部密钥。Server 是唯一持有 OpenSandbox lifecycle key 的组件。
 
-完整安装步骤、Registry TLS/认证 Secret、OpenSandbox 前置条件和 Kustomize 入口见 [`deploy/runtime/README.md`](../../deploy/runtime/README.md)。构建镜像时，控制面镜像与 verifier 镜像可使用不同 Registry，但 verifier 仓库必须等于运行时 `registry_addr`：
+Builder 节点必须满足官方 rootless BuildKit 的 user namespace、`fuse-overlayfs`/overlayfs 和 AppArmor 前置条件。不能满足时，Build Job 应失败并报告基础设施错误；部署不提供 rootful 或 `privileged` 构建回退。
+
+完整安装步骤、Registry TLS/认证 Secret、OpenSandbox 前置条件和 Kustomize 入口见 [`deploy/runtime/README.md`](../../deploy/runtime/README.md)。控制面与验证 Job 镜像使用 `builder_image`、`publisher_image` 和 `verifier_image` 配置；Builder 镜像必须由 kubelet 无凭据拉取：
 
 ```bash
 make runtime-push TARGETOS=linux TARGETARCH=amd64 \
-  RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev \
-  VERIFIER_IMAGE_REPOSITORY=registry.breakfix.internal/breakfix
+  RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev
 kubectl apply -k .
 ```
 
-Controller 为每个 `VerifyTask` 从 `registry_addr` 拉取 `breakfix-verifier:latest`；基础镜像、k8s 基础镜像和 verifier 必须在创建第一个 `VerifyTask` 前推送到该 Registry。Server 对外暴露 HTTP/WebSocket；Controller 只暴露 health/ready 端口，不作为公网入口；Agent Worker 不暴露端口。
+Controller 为每个 `VerifyTask` 创建依次执行的 Build、Publisher 和 Verifier Job。Server 从 `registry_addr` 读取固定基础镜像并通过一次性 grant 交给无凭据 Builder；Publisher 才拥有 Registry 写 Secret，Controller 从其 staging tag 读取最终 digest 后启动 Verifier。作者确认发布时，Server 再将该 digest 复制到正式 challenge image 并重新解析 digest；Builder 从不直接访问 Registry。Server 对外暴露 HTTP/WebSocket；Controller 只暴露 health/ready 端口，不作为公网入口；Agent Worker 不暴露端口。
 
 ## 运行检查
 

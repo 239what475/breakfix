@@ -14,6 +14,9 @@ registry_addr: registry.breakfix.internal/breakfix
 registry_insecure: false
 registry_pull_secret: breakfix-registry-pull
 registry_write_secret: breakfix-registry-write
+builder_image: ghcr.io/breakfix/breakfix-builder:dev
+publisher_image: ghcr.io/breakfix/breakfix-publisher:dev
+verifier_image: ghcr.io/breakfix/breakfix-verifier:dev
 k8s_base_image: registry.breakfix.internal/breakfix/breakfix-k8s-base:latest
 
 vcluster_binary: /usr/local/bin/vcluster
@@ -27,6 +30,7 @@ cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
 internal_api_key: ${BREAKFIX_INTERNAL_API_KEY}
+verification_grant_key: ${BREAKFIX_VERIFICATION_GRANT_KEY}
 
 agent:
   base_url: https://api.deepseek.com

@@ -12,6 +12,8 @@ Breakfix 的测试必须能定位失败边界。不能将模型生成质量、Ag
 
 - Agent Run 的租约、围栏、取消、重试和状态转换。
 - Server 对 Authoring、Generator submission、VerifyTask status 的持久化与幂等交接。
+- 作者确认发布时，Server 将 Registry 确认的 staging digest 提升为 opaque challenge ID
+  派生的正式 image，并只把重新解析的正式 digest 写入 catalog。
 - Controller 对 CRD 的确定命名、状态投影和清理决策。
 - archive 格式、challenge 元数据、检查点协议和 API 输入输出校验。
 
@@ -21,10 +23,17 @@ Prompt 文案不是单元测试对象。测试验证结构化结果、工具参�
 
 这一层使用固定、已审阅的 challenge artifact，不调用模型，分别验证：
 
-- Registry 构建并推送镜像。
-- 独立 verifier Job 创建对应的 VerifyTask 和真实 Environment。
+- 无特权 Builder Job 通过一次性 Server grant 构建并上传 OCI archive。
+- 独立 Publisher Job 推送 staging image，Controller 读取实际 Registry digest。
+- 独立 Verifier Job 创建对应的 VerifyTask 和真实 Environment。
 - `runtime: container` 与 `runtime: vcluster` 都完成运行时初始化、`answer.sh` 和全部检查点。
+- `RUN exit 1` 的真实 BuildKit 失败在 Publisher 前以 artifact failure 结束。
+- `answer.sh` 成功但检查点失败时，Controller 删除临时 Environment 和已发布的 staging manifest。
 - VerifyTask 的成功、artifact 失败、infrastructure 失败及资源回收边界。
+
+Builder 的 egress 边界需要使用实际执行 Kubernetes `NetworkPolicy` 的 CNI
+单独验收。Kind 默认 `kindnet` 不执行这类策略，不能把“manifest 已创建”当作
+Registry 或 Kubernetes API 已被拒绝的证据。
 
 固定 artifact 不是伪造验证：它仍使用真实 Registry、Controller、Verifier、Kubernetes 和 vcluster，只是将不确定的模型产物从运行时能力验证中隔离。
 
@@ -54,7 +63,8 @@ taxonomy 有独立的真实模型闭环，不与其他 Agent Live 验收并发�
 | 命令 | 证明的边界 |
 | --- | --- |
 | `make e2e` | 默认浏览器页面测试。 |
-| `make e2e-runtime-verify` | 固定 container/vcluster artifact 的真实 VerifyTask。 |
+| `make e2e-runtime-verify` | container/vcluster 成功、构建失败与检查点失败的真实 VerifyTask。 |
+| `make e2e-builder-boundary` | 专用 Cilium Kind 集群中的 Builder egress、无 ServiceAccount token 和无 Registry 凭据。 |
 | `make e2e-runtime-browser` | 固定 `cleanup-logs` 的终端、检查点和学习进度。 |
 | `make e2e-server-recovery` | Server/Controller 恢复。 |
 | `make e2e-agent-assistant` | Assistant 的真实模型验收。 |
@@ -63,3 +73,8 @@ taxonomy 有独立的真实模型闭环，不与其他 Agent Live 验收并发�
 | `make e2e-taxonomy` | 隔离 taxonomy committee 的单次真实模型验收。 |
 
 运行时与 Agent Runtime 的边界见[系统架构](../architecture/system-architecture.md)、[Agent Runtime](../architecture/agent-runtime.md)和[Taxonomy 与 Catalog 发布](../architecture/taxonomy.md)。
+
+`make e2e-builder-boundary` 创建（或复用）`breakfix-network-policy-e2e`：它按
+[Cilium 官方 Kind 安装方式](https://docs.cilium.io/en/stable/installation/kind/)
+从创建时关闭默认 CNI，再安装固定版本的官方 Cilium chart。测试结束后保留该
+cluster 便于排查，可用 `kind delete cluster --name breakfix-network-policy-e2e` 删除。

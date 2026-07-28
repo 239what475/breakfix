@@ -5,7 +5,7 @@ resources:
   - deploy/crd/breakfix.dev_containerenvironments.yaml
   - deploy/crd/breakfix.dev_vclusterenvironments.yaml
   - deploy/crd/breakfix.dev_verifytasks.yaml
-  - deploy/rbac/controller.yaml
+  - deploy/rbac/verifier.yaml
   - deploy/runtime
 
 configMapGenerator:

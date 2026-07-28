@@ -12,18 +12,27 @@ import (
 )
 
 type CreateJobOpts struct {
-	Image                 string
-	Env                   map[string]string
-	EnvSecretName         string
-	ImagePullPolicy       corev1.PullPolicy
-	ActiveDeadlineSeconds *int64
-	BackoffLimit          *int32
-	ContainerName         string
-	ServiceAccountName    string
-	Privileged            *bool
-	Labels                map[string]string
-	OwnerReferences       []metav1.OwnerReference
-	ImagePullSecrets      []corev1.LocalObjectReference
+	Image                        string
+	Env                          map[string]string
+	EnvSecretName                string // Deprecated single-secret form kept for callers outside this package.
+	EnvSecretNames               []string
+	ImagePullPolicy              corev1.PullPolicy
+	ActiveDeadlineSeconds        *int64
+	BackoffLimit                 *int32
+	ContainerName                string
+	ServiceAccountName           string
+	AutomountServiceAccountToken *bool
+	Privileged                   *bool
+	PodSecurityContext           *corev1.PodSecurityContext
+	SecurityContext              *corev1.SecurityContext
+	Command                      []string
+	Args                         []string
+	VolumeMounts                 []corev1.VolumeMount
+	Volumes                      []corev1.Volume
+	Resources                    corev1.ResourceRequirements
+	Labels                       map[string]string
+	OwnerReferences              []metav1.OwnerReference
+	ImagePullSecrets             []corev1.LocalObjectReference
 }
 
 // CreateJob creates a K8s Job. Returns the created Job name.
@@ -70,11 +79,16 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 	for _, key := range keys {
 		envVars = append(envVars, corev1.EnvVar{Name: key, Value: opts.Env[key]})
 	}
-	envFrom := []corev1.EnvFromSource(nil)
+	secretNames := append([]string{}, opts.EnvSecretNames...)
 	if opts.EnvSecretName != "" {
+		secretNames = append(secretNames, opts.EnvSecretName)
+	}
+	sort.Strings(secretNames)
+	envFrom := make([]corev1.EnvFromSource, 0, len(secretNames))
+	for _, secretName := range secretNames {
 		envFrom = append(envFrom, corev1.EnvFromSource{
 			SecretRef: &corev1.SecretEnvSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: opts.EnvSecretName},
+				LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
 			},
 		})
 	}
@@ -102,6 +116,27 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 		privileged = *opts.Privileged
 	}
 
+	securityContext := opts.SecurityContext
+	if securityContext == nil {
+		securityContext = &corev1.SecurityContext{Privileged: &privileged}
+	} else if securityContext.Privileged == nil {
+		securityContext = securityContext.DeepCopy()
+		securityContext.Privileged = &privileged
+	}
+
+	container := corev1.Container{
+		Name:            containerName,
+		Image:           opts.Image,
+		ImagePullPolicy: pullPolicy,
+		SecurityContext: securityContext,
+		Env:             envVars,
+		EnvFrom:         envFrom,
+		Command:         append([]string{}, opts.Command...),
+		Args:            append([]string{}, opts.Args...),
+		VolumeMounts:    append([]corev1.VolumeMount{}, opts.VolumeMounts...),
+		Resources:       opts.Resources,
+	}
+
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            jobName,
@@ -115,17 +150,13 @@ func newJob(ns, jobName string, opts CreateJobOpts) *batchv1.Job {
 			TTLSecondsAfterFinished: &ttl,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{
-						Name:            containerName,
-						Image:           opts.Image,
-						ImagePullPolicy: pullPolicy,
-						SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
-						Env:             envVars,
-						EnvFrom:         envFrom,
-					}},
-					ServiceAccountName: opts.ServiceAccountName,
-					ImagePullSecrets:   append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
-					RestartPolicy:      corev1.RestartPolicyNever,
+					Containers:                   []corev1.Container{container},
+					ServiceAccountName:           opts.ServiceAccountName,
+					AutomountServiceAccountToken: opts.AutomountServiceAccountToken,
+					SecurityContext:              opts.PodSecurityContext,
+					Volumes:                      append([]corev1.Volume{}, opts.Volumes...),
+					ImagePullSecrets:             append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
+					RestartPolicy:                corev1.RestartPolicyNever,
 				},
 			},
 		},

@@ -37,6 +37,22 @@ spec:
             type: object
           spec:
             properties:
+              execution:
+                description: |-
+                  VerifyTaskExecution is the small immutable execution contract extracted by
+                  the Server from the candidate before it creates the task. The verifier must
+                  never re-read the untrusted submission archive to decide what to execute.
+                properties:
+                  checkpointIds:
+                    items:
+                      type: string
+                    type: array
+                  runtime:
+                    type: string
+                required:
+                - checkpointIds
+                - runtime
+                type: object
               source:
                 properties:
                   ref:
@@ -52,15 +68,18 @@ spec:
                 - id
                 type: object
             required:
+            - execution
             - source
             - submission
             type: object
           status:
             properties:
+              buildJobName:
+                type: string
               completedAt:
                 format: date-time
                 type: string
-              jobName:
+              image:
                 type: string
               message:
                 type: string
@@ -70,6 +89,8 @@ spec:
                 - Running
                 - Failed
                 - Succeeded
+                type: string
+              publisherJobName:
                 type: string
               report:
                 properties:
@@ -99,10 +120,18 @@ spec:
                   summary:
                     type: string
                 type: object
+              stage:
+                enum:
+                - Building
+                - Publishing
+                - Verifying
+                type: string
+              stagingImage:
+                type: string
               startedAt:
                 format: date-time
                 type: string
-              tempImage:
+              verifierJobName:
                 type: string
             type: object
         required:

@@ -5,20 +5,19 @@ This package installs the independent PostgreSQL, Server, Controller, Agent Work
 in the `opensandbox` namespace before applying this package. Breakfix creates and deletes its own BYO workspace PVCs;
 OpenSandbox only mounts those PVCs and must not be granted their lifecycle ownership.
 
-Build the release binaries outside Docker, then package and publish the four runtime images. Each Docker build
+Build the release binaries outside Docker, then package and publish the six runtime images. Each Docker build
 receives only its binary under `bin/release/<os>-<arch>/<component>/`; it does not receive source code, Node
 dependencies, Go modules, or host Go network configuration. Replace the development tags in `kustomization.yaml`
 (or an environment overlay):
 
 ```bash
 make runtime-push TARGETOS=linux TARGETARCH=amd64 \
-  RUNTIME_IMAGE_REPOSITORY=ghcr.io/breakfix RUNTIME_IMAGE_TAG=dev \
-  VERIFIER_IMAGE_REPOSITORY=registry.breakfix.internal/breakfix
+  RUNTIME_IMAGE_REPOSITORY=ghcr.io/breakfix RUNTIME_IMAGE_TAG=dev
 ```
 
-`VERIFIER_IMAGE_REPOSITORY` must exactly equal the configured `registry_addr`: the Controller derives every verifier
-Job image as `<registry_addr>/breakfix-verifier:latest`. The Server, Controller, and Agent Worker images may use a
-separate registry such as GHCR.
+`builder_image`, `publisher_image`, and `verifier_image` are configured separately from `registry_addr`. Builder
+must be pullable by kubelets without placing a Registry credential in the Builder Pod. The example uses public GHCR
+runtime images; local Kind development preloads these three images with `make verification-images`.
 
 The Controller image and the configured vcluster chart are pinned to `v0.35.1`. The Controller ClusterRole includes
 the corresponding rendered chart RBAC contract, because Kubernetes otherwise refuses Helm's role bindings as a
@@ -47,8 +46,10 @@ kubectl -n breakfix-system create secret generic breakfix-runtime \
 ```
 
 Create the Registry-specific Secrets in the same namespace. `breakfix-registry-auth` is mounted only by the Registry;
-`breakfix-registry-write` is injected only into verifier Jobs; the Controller copies only the Docker config data from
-`breakfix-registry-pull` into each short-lived challenge namespace and never mounts it into a challenge container.
+`breakfix-registry-write` is injected only into trusted Publisher Jobs. The Server uses the runtime Registry credential
+only to cache the two fixed base images as OCI archives for Builder. Builder receives neither Registry credentials nor
+a ServiceAccount token. The Controller copies only the Docker config data from `breakfix-registry-pull` into each
+short-lived challenge namespace and never mounts it into a challenge container.
 Use the registry host only, without the `/breakfix` repository prefix, in the Docker config Secret:
 
 ```bash
@@ -68,8 +69,12 @@ kubectl -n breakfix-system create secret generic breakfix-registry-write \
 ```
 
 Set the matching `registry_addr`, `registry_username`, and `registry_password` in `breakfix-runtime.env`. Bootstrap
-`breakfix-base`, `breakfix-k8s-base`, and `breakfix-verifier` in `registry_addr` before creating the first VerifyTask;
-the verifier Job and BuildKit both pull from this Registry.
+`breakfix-base` and `breakfix-k8s-base` in `registry_addr` before creating the first VerifyTask. Builder obtains these
+fixed bases through the Server's one-time task grant and therefore never contacts the Registry directly. Publisher
+pushes the candidate OCI archive to the task-derived staging name; Controller resolves the Registry digest before it
+creates the Kubernetes-enabled Verifier Job. After a successful VerifyTask and explicit author approval, Server copies
+that immutable digest to the opaque challenge ID-derived final image and resolves its digest again before writing the
+catalog directory.
 
 The repository root is the canonical Kustomize package. It keeps the in-cluster config in `config/` while using
 Kustomize's default file-loading restrictions. Apply it after the Secret exists:
@@ -81,4 +86,6 @@ kubectl apply -k .
 The Server owns the RWO `breakfix-server-data` PVC and therefore uses `Recreate`. PostgreSQL and Registry each own a
 separate RWO PVC. The Registry is intentionally a single replica until its filesystem backend is replaced with object
 storage. The Server alone receives the OpenSandbox lifecycle key and has PVC permission for the `opensandbox` namespace.
-The Agent Worker has no Kubernetes RBAC, no provider key, and disables ServiceAccount token mounting.
+The Agent Worker has no Kubernetes RBAC, no provider key, and disables ServiceAccount token mounting. Each VerifyTask
+is reconciled as `Building`, `Publishing`, and `Verifying` Jobs. The Builder's egress is limited by the bundled
+NetworkPolicy to the Server and cluster DNS; use a CNI that enforces NetworkPolicy in production.

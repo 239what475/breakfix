@@ -26,6 +26,9 @@ type Config struct {
 	RegistryInsecure     bool              `yaml:"registry_insecure"`
 	RegistryPullSecret   string            `yaml:"registry_pull_secret"`
 	RegistryWriteSecret  string            `yaml:"registry_write_secret"`
+	BuilderImage         string            `yaml:"builder_image"`
+	PublisherImage       string            `yaml:"publisher_image"`
+	VerifierImage        string            `yaml:"verifier_image"`
 	RegistryUsername     string            `yaml:"-"`
 	RegistryPassword     string            `yaml:"-"`
 	K8sBaseImage         string            `yaml:"k8s_base_image"`
@@ -38,6 +41,7 @@ type Config struct {
 	CooldownMinutes      int               `yaml:"cooldown_minutes"`
 	JWTSecret            string            `yaml:"jwt_secret"`
 	InternalAPIKey       string            `yaml:"internal_api_key"`
+	VerificationGrantKey string            `yaml:"verification_grant_key"`
 	Agent                AgentConfig       `yaml:"agent"`
 	OpenSandbox          OpenSandboxConfig `yaml:"opensandbox"`
 }
@@ -74,6 +78,9 @@ func defaults() Config {
 		RegistryInsecure:     true,
 		RegistryPullSecret:   "breakfix-registry-pull",
 		RegistryWriteSecret:  "breakfix-registry-write",
+		BuilderImage:         "breakfix-builder:latest",
+		PublisherImage:       "breakfix-publisher:latest",
+		VerifierImage:        "breakfix-verifier:latest",
 		K8sBaseImage:         "breakfix-k8s-base:latest",
 		VClusterBinary:       "vcluster",
 		VClusterChartRepo:    "https://charts.loft.sh",
@@ -82,6 +89,7 @@ func defaults() Config {
 		CRDNamespace:         "breakfix-system",
 		JWTSecret:            "breakfix-dev-secret-change-in-production",
 		InternalAPIKey:       "breakfix-dev-internal-key-change-in-production",
+		VerificationGrantKey: "breakfix-dev-verification-grant-key-change-in-production",
 		CooldownMinutes:      5,
 		Agent: AgentConfig{
 			BaseURL:        "https://api.deepseek.com",
@@ -154,6 +162,7 @@ func Load(path string) (Config, error) {
 	cfg.AgentDatabaseURL = os.ExpandEnv(cfg.AgentDatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
 	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
+	cfg.VerificationGrantKey = os.ExpandEnv(cfg.VerificationGrantKey)
 	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
 	cfg.RegistryPullSecret = os.ExpandEnv(cfg.RegistryPullSecret)
 	cfg.RegistryWriteSecret = os.ExpandEnv(cfg.RegistryWriteSecret)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -36,7 +37,8 @@ func (h *Handler) InternalGeneratorSubmitCandidate(c *gin.Context) {
 		h.writeInternalGeneratorError(c, fmt.Errorf("generator candidate archive is required"))
 		return
 	}
-	if err := validateGeneratorCandidateArchive(request.Archive); err != nil {
+	execution, err := verifyTaskExecutionFromArchive(request.Archive)
+	if err != nil {
 		h.writeInternalGeneratorError(c, err)
 		return
 	}
@@ -45,7 +47,7 @@ func (h *Handler) InternalGeneratorSubmitCandidate(c *gin.Context) {
 		h.writeInternalGeneratorError(c, fmt.Errorf("save generator candidate: %w", err))
 		return
 	}
-	task, err := h.createOrGetGeneratorVerifyTask(c.Request.Context(), submissionID, claim.Run.ID)
+	task, err := h.createOrGetGeneratorVerifyTask(c.Request.Context(), submissionID, claim.Run.ID, execution)
 	if err != nil {
 		h.writeInternalGeneratorError(c, err)
 		return
@@ -82,7 +84,33 @@ func validateGeneratorCandidateArchive(archive []byte) error {
 	return nil
 }
 
-func (h *Handler) createOrGetGeneratorVerifyTask(ctx context.Context, submissionID, runID string) (*breakfixv1.VerifyTask, error) {
+func verifyTaskExecutionFromArchive(archive []byte) (breakfixv1.VerifyTaskExecution, error) {
+	if err := validateGeneratorCandidateArchive(archive); err != nil {
+		return breakfixv1.VerifyTaskExecution{}, err
+	}
+	root, err := os.MkdirTemp("", "breakfix-verify-snapshot-*")
+	if err != nil {
+		return breakfixv1.VerifyTaskExecution{}, fmt.Errorf("create verification snapshot directory: %w", err)
+	}
+	defer os.RemoveAll(root) //nolint:errcheck
+	if err := challenge.ExtractTarGz(root, bytes.NewReader(archive)); err != nil {
+		return breakfixv1.VerifyTaskExecution{}, fmt.Errorf("extract verification candidate: %w", err)
+	}
+	entry, err := challenge.ValidateSubmissionDir(root)
+	if err != nil {
+		return breakfixv1.VerifyTaskExecution{}, fmt.Errorf("validate verification candidate: %w", err)
+	}
+	checkpointIDs := make([]string, 0, len(entry.Checkpoints))
+	for _, checkpoint := range entry.Checkpoints {
+		checkpointIDs = append(checkpointIDs, checkpoint.ID)
+	}
+	if len(checkpointIDs) == 0 {
+		return breakfixv1.VerifyTaskExecution{}, fmt.Errorf("verification candidate has no checkpoints")
+	}
+	return breakfixv1.VerifyTaskExecution{Runtime: entry.Runtime, CheckpointIDs: checkpointIDs}, nil
+}
+
+func (h *Handler) createOrGetGeneratorVerifyTask(ctx context.Context, submissionID, runID string, execution breakfixv1.VerifyTaskExecution) (*breakfixv1.VerifyTask, error) {
 	if h.k8s == nil {
 		return nil, fmt.Errorf("verify task runtime is unavailable")
 	}
@@ -92,6 +120,7 @@ func (h *Handler) createOrGetGeneratorVerifyTask(ctx context.Context, submission
 		Spec: breakfixv1.VerifyTaskSpec{
 			Source:     breakfixv1.VerifyTaskSource{Ref: runID},
 			Submission: breakfixv1.VerifyTaskSubmission{ID: submissionID},
+			Execution:  execution,
 		},
 	}
 	created, err := h.k8s.CreateVerifyTask(ctx, h.crdNamespace, task)
@@ -105,8 +134,20 @@ func (h *Handler) createOrGetGeneratorVerifyTask(ctx context.Context, submission
 	if err != nil {
 		return nil, fmt.Errorf("get existing generator verify task: %w", err)
 	}
-	if existing.Spec.Source.Ref != runID || existing.Spec.Submission.ID != submissionID {
+	if existing.Spec.Source.Ref != runID || existing.Spec.Submission.ID != submissionID || existing.Spec.Execution.Runtime != execution.Runtime || !sameStrings(existing.Spec.Execution.CheckpointIDs, execution.CheckpointIDs) {
 		return nil, fmt.Errorf("verify task %s does not match generator submission", name)
 	}
 	return existing, nil
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }

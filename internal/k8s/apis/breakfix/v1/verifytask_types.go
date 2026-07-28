@@ -19,6 +19,7 @@ type VerifyTask struct {
 type VerifyTaskSpec struct {
 	Source     VerifyTaskSource     `json:"source"`
 	Submission VerifyTaskSubmission `json:"submission"`
+	Execution  VerifyTaskExecution  `json:"execution"`
 }
 
 type VerifyTaskSource struct {
@@ -29,6 +30,14 @@ type VerifyTaskSubmission struct {
 	ID string `json:"id"`
 }
 
+// VerifyTaskExecution is the small immutable execution contract extracted by
+// the Server from the candidate before it creates the task. The verifier must
+// never re-read the untrusted submission archive to decide what to execute.
+type VerifyTaskExecution struct {
+	Runtime       string   `json:"runtime"`
+	CheckpointIDs []string `json:"checkpointIds"`
+}
+
 type VerifyTaskPhase string
 
 const (
@@ -36,6 +45,15 @@ const (
 	VerifyTaskRunning   VerifyTaskPhase = "Running"
 	VerifyTaskFailed    VerifyTaskPhase = "Failed"
 	VerifyTaskSucceeded VerifyTaskPhase = "Succeeded"
+)
+
+// +kubebuilder:validation:Enum=Building;Publishing;Verifying
+type VerifyTaskStage string
+
+const (
+	VerifyTaskBuilding   VerifyTaskStage = "Building"
+	VerifyTaskPublishing VerifyTaskStage = "Publishing"
+	VerifyTaskVerifying  VerifyTaskStage = "Verifying"
 )
 
 type VerifyIssue struct {
@@ -62,13 +80,17 @@ type VerifyReport struct {
 
 type VerifyTaskStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Running;Failed;Succeeded
-	Phase       VerifyTaskPhase `json:"phase,omitempty"`
-	Message     string          `json:"message,omitempty"`
-	JobName     string          `json:"jobName,omitempty"`
-	TempImage   string          `json:"tempImage,omitempty"`
-	StartedAt   *metav1.Time    `json:"startedAt,omitempty"`
-	CompletedAt *metav1.Time    `json:"completedAt,omitempty"`
-	Report      *VerifyReport   `json:"report,omitempty"`
+	Phase            VerifyTaskPhase `json:"phase,omitempty"`
+	Message          string          `json:"message,omitempty"`
+	Stage            VerifyTaskStage `json:"stage,omitempty"`
+	BuildJobName     string          `json:"buildJobName,omitempty"`
+	PublisherJobName string          `json:"publisherJobName,omitempty"`
+	VerifierJobName  string          `json:"verifierJobName,omitempty"`
+	StagingImage     string          `json:"stagingImage,omitempty"`
+	Image            string          `json:"image,omitempty"`
+	StartedAt        *metav1.Time    `json:"startedAt,omitempty"`
+	CompletedAt      *metav1.Time    `json:"completedAt,omitempty"`
+	Report           *VerifyReport   `json:"report,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -6,6 +6,7 @@ resources:
   - namespace.yaml
   - rbac.yaml
   - registry.yaml
+  - build-network-policy.yaml
   - postgresql.yaml
   - server.yaml
   - controller.yaml

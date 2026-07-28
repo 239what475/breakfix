@@ -1,21 +1,29 @@
 # Breakfix 代码审计
 
 审计时间：2026-07-28
-审计基线：`026620c docs: consolidate architecture and test documentation`
+审计基线：`026620c docs: consolidate architecture and test documentation`，以及当前
+工作区尚未提交的 P0 构建/发布/验证隔离改动。
 
 ## 结论
 
 当前仓库已经完成了最重要的一次架构收敛：Server、Controller、Agent
-Worker、Verifier 和 PostgreSQL 的职责已能在代码、CRD 和部署清单中辨认；
+Worker、Builder、Publisher、Verifier 和 PostgreSQL 的职责已能在代码、CRD 和
+部署清单中辨认；
 Eino Runtime、租约、围栏、OpenSandbox BYO PVC、文件系统题库和 taxonomy
 snapshot 也没有再保留 Claude Code 或 SQLite 的兼容路径。这里不需要为了
 “文件更小”再把 `internal/server`、`internal/controller`、`internal/db` 或 Vue
 feature 目录拆碎。
 
-但当前还不能把系统视为可安全开放给不受信任作者的生产部署。最主要的缺口
-不是业务功能，而是验证任务的特权执行边界、CI 对真实持久化行为的缺失、
-配置失败时的静默降级，以及终端认证传输。建议先处理 P0/P1，再进入技能图
-或题库规模化工作。
+此前阻止开放作者功能的 P0 已在当前工作区关闭：不可信候选只在 rootless、无
+ServiceAccount、无 Registry 凭据的 Builder Job 中构建；Publisher 和 Verifier
+被拆到独立的可信 Job；最终镜像只能由 Server 以已验证的 staging digest 提升。
+真实 Kind 验收已覆盖 container/vcluster 成功路径、构建失败、检查点失败后的
+清理，以及 Builder 的 NetworkPolicy 出站边界。
+
+这不代表仓库已经达到生产级保障。当前主要缺口转为 P1：CI/release 没有覆盖
+完整持久化与运行产物，生产配置仍可静默退回开发默认值，终端 bearer token 的
+传输和 Server RBAC/status 所有权仍需收敛。应先处理这些问题，再进入技能图或
+题库规模化工作。
 
 ## 审计范围与证据
 
@@ -25,67 +33,60 @@ RBAC、Dockerfile、Makefile、CI/release 和现有文档。
 
 在此工作区执行并通过：
 
-- `go test ./...`
-- `go vet ./...`
-- `make verify-crd-generated`
-- `make verify-api-generated`
-- `npm run build --prefix frontend`
-- `npm run test:e2e --prefix test -- --list`
-- `kubectl kustomize .`
+- 设置临时 PostgreSQL `BREAKFIX_TEST_DATABASE_URL` 后执行
+  `go test -count=1 ./...`。
+- `make verify-crd-generated` 与 `make verify-api-generated`。
+- `npm run test:runtime:builder-boundary --prefix test -- --workers=1`：专用
+  Kind+Cilium 集群确认 Builder 可访问 Server、不可访问 Registry 和
+  `kubernetes.default:443`，且没有 ServiceAccount token、image pull secret 或
+  Registry/internal API 凭据。
+- `npm run test:runtime:verify --prefix test -- --workers=1`：四个真实
+  VerifyTask 场景在 6.9 分钟内通过，包含固定 container/vcluster artifact、真实
+  BuildKit `RUN exit 1` 构建失败，以及 Publisher 后的 checkpoint 失败和 staging
+  manifest/Environment 清理。
+- `git diff --check`。
 
-上述 `go test` 不是完整的 PostgreSQL 证明：未设置
-`BREAKFIX_TEST_DATABASE_URL` 时，`internal/db/test_helpers_test.go:16` 和
-`internal/testpostgres/testpostgres.go:20` 会跳过依赖数据库的测试。单独运行
-`go test -count=1 -v ./internal/db -run TestPostgresSchemaAndBoundParameters`
-已确认该测试在当前环境显示 `SKIP`。
+本轮没有重新运行前端构建、浏览器 smoke、真实模型或 OpenSandbox 验收；不能把
+它们视为已由本次 P0 测试证明。Builder 边界测试为验证 NetworkPolicy 使用专用
+Cilium Kind 集群；Cilium 不是运行时捆绑依赖，但生产集群必须使用会实际执行
+NetworkPolicy 的 CNI。
 
-未运行真实模型、OpenSandbox、Registry、Kind/vcluster 验收；这些属于文档所
-定义的显式运行时或 Agent Live 层，不能用本次静态审计替代。
+## 已完成：P0 作者构建与验证隔离
 
-## P0：开放作者功能前必须处理
+此前单一 verifier Pod 同时运行候选 BuildKit、持有 Registry 写凭据并调用
+Kubernetes API。当前 `VerifyTask` 仍是唯一的业务 CRD，但 Controller 已将其拆为
+三个确定性 Job，职责和信任边界分别固定在
+`internal/controller/verifytask.go:26-305`：
 
-### 1. Verifier 将不可信候选放进特权 BuildKit 与带凭据的 Kubernetes Job
+- **不可信 Builder**：以非 root、非 privileged 方式运行，关闭
+  `automountServiceAccountToken`，不注入 Registry Secret、`imagePullSecrets` 或
+  Server internal key：`internal/controller/verifytask.go:121-165`。它仅用带
+  `taskID`、操作和过期时间的 HMAC grant 下载本次 submission/平台 base，并上传
+  OCI archive；grant 不能调用一般内部 API：`internal/verification/grant.go:13-74`。
+  Builder 通过任务限定的 OCI layout 取得 base，不访问 Registry：
+  `internal/builder/builder.go:110-148`。其 egress policy 只允许 Server 和 DNS：
+  `deploy/runtime/build-network-policy.yaml:1-29`。
+- **可信 Publisher**：独立于 Builder，才接收 Registry write Secret；它先校验
+  Builder 传来的 OCI archive，再只推送 Controller 派生的 staging image：
+  `internal/controller/verifytask.go:200-246`、`internal/publisher/publisher.go:35-57`。
+  Controller 使用自身 Registry 凭据重新解析该 tag 的 manifest digest，不信任
+  Publisher 自报内容：`internal/controller/verifytask.go:249-268`。
+- **可信 Verifier**：不再运行 BuildKit 或持有 Registry write Secret，而是拿到
+  已解析 digest 后创建真实 ContainerEnvironment/VClusterEnvironment；其专用
+  ServiceAccount 只有验证环境和 VerifyTask 所需最小权限：
+  `internal/controller/verifytask.go:271-305`、`deploy/rbac/verifier.yaml:1-46`。
+- **正式发布与失败清理**：失败任务会删除 staging image 与临时 Environment：
+  `internal/controller/verifytask.go:441-455`。作者审核发布时，Server 仅将成功
+  VerifyTask 的 immutable staging digest 提升到 opaque challenge ID 派生的正式
+  镜像，再落盘 challenge 目录：`internal/server/authoring.go:241-274`。
 
-**证据**
-
-- 作者入口只要求已登录用户，没有作者角色或可信发布者门槛：
-  `internal/server/authoring.go:55`。
-- 每个 VerifyTask 会创建 `Privileged: true` 的 verifier Job，并注入 registry
-  write Secret：`internal/controller/verifytask.go:127-145`。
-- Job 模板将该 Secret 作为整个容器的环境变量注入，并挂载 verifier
-  ServiceAccount：`internal/k8s/job.go:73-129`。该 Pod 没有关闭
-  `automountServiceAccountToken`。
-- verifier 执行候选的 Docker build、`answer.sh` 和 checkpoint 脚本：
-  `internal/verifier/verifytask.go:81-179`；其镜像是 rootful BuildKit：
-  `deploy/images/verifier/Dockerfile:1-11`。
-- verifier Role 可以读写 VerifyTask status、创建/删除验证 Environment 并执行
-  Pod：`deploy/rbac/controller.yaml:15-32`。
-
-用户目前不能直接上传 shell 脚本，但所有登录用户都可以通过题意影响 Agent
-生成 Dockerfile 和脚本。这样的候选不能被当作足以获得集群特权、Kubernetes
-token 和 registry 写凭据的可信输入。
-
-**影响**
-
-这是当前最大的安全边界问题。即使尚未证明某个具体 BuildKit escape，也不能
-把“特权构建器 + ServiceAccount + registry 凭据”作为面向不受信任作者的隔离
-保证。此边界被攻破时，影响不是单个 challenge，而是 control plane、镜像仓库
-和集群资源。
-
-**建议**
-
-1. 在边界重做前，将 Authoring 限制为受信任操作者，或明确产品只运行受信任
-   题目，不把当前流程描述为公共提交能力。
-2. 将不可信构建与验证控制权拆开：构建器不应带 Kubernetes API 权限或长期
-   registry 写凭据；Verifier 只接收受控的构建结果和最小化的短期权限。
-3. 在真实 Kubernetes POC 证明前，不要把 rootful privileged BuildKit 当作
-   最终实现。应评估 rootless/remote BuildKit、独立 build namespace/node pool、
-   最小权限 token 和按任务限定的 registry 凭据。
-4. 这个问题需要单独的 threat model 和真实攻击面验收，不能以普通单测关闭。
+这个 P0 已有单元、PostgreSQL 集成和真实 Kubernetes 验收，不再保留 rootful /
+privileged BuildKit 回退路径。后续变更必须保持此三段边界，不能为构建便利向
+Builder 注入 Kubernetes token、Registry 凭据或全局 Server key。
 
 ## P1：下一轮应处理
 
-### 2. CI、release 与真实运行时的保障链断裂
+### 1. CI、release 与真实运行时的保障链断裂
 
 **证据**
 
@@ -99,8 +100,8 @@ token 和 registry 写凭据的可信输入。
   `internal/agentworker/worker_integration_test.go`。
 - CI build job 只编译 Server 和 Controller：`.github/workflows/ci.yml:58-61`；
   tag release 也只发布这两个二进制：`.github/workflows/release.yml:44-47`。
-  但部署实际依赖 Agent Worker 和 Verifier，且 `make runtime-push` 会构建四个
-  镜像：`Makefile:347-358`。
+  但运行时还依赖 Agent Worker、Builder、Publisher 和 Verifier；本地生产构建也
+  已分别声明这些入口：`Makefile:349-370`。
 
 **影响**
 
@@ -116,16 +117,16 @@ Verifier 可用；发布 tag 也不能重现 `deploy/runtime/` 所声明的完�
 2. 保留当前分层 E2E 原则，不要恢复一条庞大的模型 E2E；新增一个固定题目、
    无模型的浏览器 smoke lane，真正启动 Server 并执行现有 Catalog/My Space
    断言。
-3. CI 至少编译四个运行二进制；release 应明确二选一：发布四个二进制，或只
-   发布 OCI 镜像并在 release 中构建、推送和记录四个 image digest。不能继续
-   一边部署四个组件，一边只发布两个。
+3. CI 至少编译全部六个运行入口；release 应明确二选一：发布全部二进制，或只
+   发布 OCI 镜像并在 release 中构建、推送和记录全部运行 image digest。不能继续
+   一边部署多个组件，一边只发布两个。
 
-### 3. 配置错误会退回开发默认值，Generator Sandbox 失败会静默失效
+### 2. 配置错误会退回开发默认值，Generator Sandbox 失败会静默失效
 
 **证据**
 
 - `config.Load` 找不到配置文件时直接返回 defaults：
-  `internal/config/config.go:133-140`。defaults 含有开发 JWT/internal key 和
+  `internal/config/config.go:141-148`。defaults 含有开发 JWT/internal key 和
   insecure registry：`internal/config/config.go:70-99`。
 - `NewHandler` 仅在条件满足时创建 OpenSandbox/Workspace manager，并吞掉
   `opensandbox.New` 与 `workspace.NewManager` 的错误：
@@ -151,7 +152,7 @@ PVC 权限、endpoint 或 storage 配置错误时，Server 能变为 Ready，但
 3. `NewHandler`/启动过程应返回并记录 Sandbox 初始化错误，或提供明确的
    degraded readiness；不能静默置空依赖。
 
-### 4. 终端 JWT 出现在 URL，WebSocket 接受任意 Origin
+### 3. 终端 JWT 出现在 URL，WebSocket 接受任意 Origin
 
 **证据**
 
@@ -174,7 +175,7 @@ cross-site WebSocket hijacking 风险。
 `CheckOrigin` 限制为明确配置的 UI origin。这样不需要把整个认证体系改成
 cookie，也不会给普通 HTTP API 增加额外复杂度。
 
-### 5. Server 的 RBAC 比声明的所有权更宽，VerifyTask status 写者也未被明确建模
+### 4. Server 的 RBAC 比声明的所有权更宽，VerifyTask status 写者也未被明确建模
 
 **证据**
 
@@ -183,9 +184,10 @@ cookie，也不会给普通 HTTP API 增加额外复杂度。
   `Status().Update/Patch` 调用。
 - 但 Server ClusterRole 仍可 update/patch 两种 Environment 和 VerifyTask 的
   status：`deploy/runtime/rbac.yaml:22-27`。
-- Controller 写 Pending/Running 和 infrastructure failure：
-  `internal/controller/verifytask.go:84-180`；verifier Job 写 Success 和 artifact
-  failure：`internal/verifier/verifytask.go:168-179`、`384-421`。
+- Controller 写调度阶段和 infrastructure failure：
+  `internal/controller/verifytask.go:47-76`、`169-179`、`379-405`；verifier Job
+  写 Success 和 artifact failure：`internal/verifier/verifytask.go:122-132`、
+  `299-330`。
 - 文档将 Controller 概括为 VerifyTask 的 status 写者：
   `docs/architecture/system-architecture.md:33-35`，没有描述这个双写协议。
 
@@ -208,35 +210,29 @@ transition”的契约和测试矩阵，后续增加 attempt/retry 时容易引�
 
 ## P2：应在下一次整理中处理
 
-### 6. 已删除的代理/CA 设计仍残留在代码、配置和开发输出中
+### 5. 已删除的代理/CA 设计仍残留在代码与配置中
 
 **证据**
 
 - `internal/proxy/proxy.go` 没有任何生产 import；`proxy_port` 只出现在
-  `internal/config/config.go` 和两份 YAML。`make dev-status` 仍显示不存在的
-  `Proxy :3128`：`Makefile:298-302`。
+  `internal/config/config.go` 和两份 YAML。
 - `internal/ca/ca.go` 没有生产 import；`Config.CertFile`、`KeyFile` 也没有调用：
   `internal/config/config.go:203-205`。
 - `k8s_base_image`、`Config.ImageURL`、`Config.CooldownDuration` 和 Handler 中的
   `serverHost` 字段都没有实际消费者；前两项仍出现在配置模板。
-- 旧 verifier Role 实际位于 `deploy/rbac/controller.yaml`，文件名与内容不符，
-  而根 Kustomization 再额外引用它：`deploy/rbac/controller.yaml:1-46`、
-  `kustomization.yaml:4-9`。
 
 **影响**
 
-配置和目录会继续暗示不存在的运行时行为，增加新成员理解成本，也保留无用的
-`goproxy`/`x/time` 依赖。RBAC 文件名则会让运维人员误以为它是 Controller
-权限而不是 verifier 运行权限。
+配置和目录会继续暗示不存在的运行时行为，增加新成员理解成本。此前 verifier
+RBAC 文件名与职责不符的问题已随 P0 迁移到 `deploy/rbac/verifier.yaml`，不再是
+本项开放问题。
 
 **建议**
 
-做一次小而完整的删除提交：移除 proxy、ca、无用 Config 字段/方法、模板键和
-开发状态输出；将 verifier Role 移到 `deploy/runtime/rbac.yaml` 或重命名为
-`deploy/rbac/verifier.yaml` 并更新 `dev-rbac`。不要保留“将来也许会用”的空
-实现。
+做一次小而完整的删除提交：移除 proxy、ca、无用 Config 字段/方法和模板键。
+不要保留“将来也许会用”的空实现。
 
-### 7. 终端关闭没有把请求取消显式传到 Kubernetes exec
+### 6. 终端关闭没有把请求取消显式传到 Kubernetes exec
 
 **证据**
 
@@ -257,7 +253,7 @@ transition”的契约和测试矩阵，后续增加 attempt/retry 时容易引�
 WebSocket close 时取消它，并补一项 fake executor 或真实 Pod 测试验证取消会
 结束 exec。tmux session 应继续保留，取消的只是代理 stream。
 
-### 8. 发布配置不是可追溯的 deployment artifact
+### 7. 发布配置不是可追溯的 deployment artifact
 
 **证据**
 
@@ -276,10 +272,10 @@ WebSocket close 时取消它，并补一项 fake executor 或真实 Pod 测试�
 **建议**
 
 定义一个最小 release overlay：使用不可变 digest 或发布版本 tag，通过
-`kustomize images`/CI 生成并保存。release pipeline 负责产生该 overlay 和
-四个 digest，部署只消费它，而不是让操作者编辑基础清单。
+`kustomize images`/CI 生成并保存。release pipeline 负责产生该 overlay 和所有
+运行镜像的 digest，部署只消费它，而不是让操作者编辑基础清单。
 
-### 9. 文件系统题库缺少“单个坏目录”时的可用性策略
+### 8. 文件系统题库缺少“单个坏目录”时的可用性策略
 
 **证据**
 
@@ -302,7 +298,7 @@ WebSocket close 时取消它，并补一项 fake executor 或真实 Pod 测试�
 
 ## P3：规模化前规划，不应现在过度重构
 
-### 10. 检查点轮询与控制面资源尚无并发容量模型
+### 9. 检查点轮询与控制面资源尚无并发容量模型
 
 Controller 对每个 Ready/Draining Environment 每 4 秒执行一次 Pod 内
 `/checks/checkpoints.sh --json`：`internal/controller/checkpoints.go:17-40`、
@@ -315,7 +311,7 @@ SPDY exec 和 Controller 工作队列变成主要负载。下一阶段只需先�
 例如活跃环境数、checkpoint exec 延迟/错误率、queue depth、Worker 领取延迟；
 达到目标前不需要提前引入复杂事件系统或分布式调度。
 
-### 11. 仓库入口与少量历史命名仍可改善
+### 10. 仓库入口与少量历史命名仍可改善
 
 根目录没有面向新贡献者的 `README.md`，而 `frontend/README.md` 已有局部说明；
 此外测试辅助函数仍使用 `writeGateway...` 命名，`todo.md` 中也保留用于历史
@@ -344,9 +340,8 @@ SPDY exec 和 Controller 工作队列变成主要负载。下一阶段只需先�
 
 ## 推荐执行顺序
 
-1. 决定公共 Authoring 的威胁模型；若要保留“所有登录用户可创作”，先处理 P0。
-2. 修复配置 fail-fast、终端 ticket/origin、Server status RBAC，并补对应测试。
-3. 给 CI 加 PostgreSQL 和真实 deterministic smoke，统一四个运行产物的 release。
-4. 清理 proxy/ca/失效配置及 verifier RBAC 文件命名。
-5. 在并发目标明确后，再处理 checkpoint 容量、resource requests/limits 和发布
+1. 修复配置 fail-fast、终端 ticket/origin、Server status RBAC，并补对应测试。
+2. 给 CI 加 PostgreSQL 和真实 deterministic smoke，统一全部运行产物的 release。
+3. 清理 proxy/ca 与失效配置。
+4. 在并发目标明确后，再处理 checkpoint 容量、resource requests/limits 和发布
    overlay。

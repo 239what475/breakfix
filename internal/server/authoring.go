@@ -18,7 +18,9 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generator"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/verification"
 	"github.com/gin-gonic/gin"
 )
 
@@ -244,15 +246,22 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 	if err != nil {
 		return fmt.Errorf("read verified task: %w", err)
 	}
-	if task.Status.Phase != breakfixv1.VerifyTaskSucceeded || strings.TrimSpace(task.Status.TempImage) == "" {
+	if task.Status.Phase != breakfixv1.VerifyTaskSucceeded || strings.TrimSpace(task.Status.Image) == "" {
 		return fmt.Errorf("verified task %s is not publishable", task.Name)
 	}
 	artifactDir, err := authoring.ArtifactPath(h.dataDir, revision.Artifact)
 	if err != nil {
 		return fmt.Errorf("resolve verified artifact: %w", err)
 	}
-	published, err := challenge.PromoteDirectory(h.challengesDir, artifactDir, challengeID, task.Status.TempImage)
+	publishedImage, err := h.promoteVerifiedImage(ctx, task.Status.Image, challengeID)
 	if err != nil {
+		return err
+	}
+	published, err := challenge.PromoteDirectory(h.challengesDir, artifactDir, challengeID, publishedImage)
+	if err != nil {
+		if cleanupErr := h.registryClient().DeleteImage(ctx, verification.PublishedImageName(h.registryAddr, challengeID)); cleanupErr != nil {
+			return fmt.Errorf("publish verified revision: %w (cleanup promoted image: %v)", err, cleanupErr)
+		}
 		return fmt.Errorf("publish verified revision: %w", err)
 	}
 	if err := h.db.CompletePublish(ctx, session.ID, user.ID, revision.Number, challengeID); err != nil {
@@ -263,6 +272,35 @@ func (h *Handler) promoteVerifiedRevision(ctx context.Context, user *db.User, se
 	}
 	h.enqueuePublishedChallengeTaxonomy(ctx, *published)
 	return nil
+}
+
+func (h *Handler) promoteVerifiedImage(ctx context.Context, verifiedImage, challengeID string) (string, error) {
+	if strings.TrimSpace(h.registryAddr) == "" {
+		return "", fmt.Errorf("registry address is required to publish a verified revision")
+	}
+	if !strings.Contains(verifiedImage, "@sha256:") {
+		return "", fmt.Errorf("verified image must be an immutable digest reference")
+	}
+	target := verification.PublishedImageName(h.registryAddr, challengeID)
+	client := h.registryClient()
+	if err := client.CopyImage(ctx, verifiedImage, target); err != nil {
+		if cleanupErr := client.DeleteImage(ctx, target); cleanupErr != nil {
+			return "", fmt.Errorf("promote verified image: %w (cleanup promoted image: %v)", err, cleanupErr)
+		}
+		return "", fmt.Errorf("promote verified image: %w", err)
+	}
+	publishedImage, err := client.ResolveImageDigest(ctx, target)
+	if err != nil {
+		if cleanupErr := client.DeleteImage(ctx, target); cleanupErr != nil {
+			return "", fmt.Errorf("resolve promoted image: %w (cleanup promoted image: %v)", err, cleanupErr)
+		}
+		return "", fmt.Errorf("resolve promoted image: %w", err)
+	}
+	return publishedImage, nil
+}
+
+func (h *Handler) registryClient() registry.Client {
+	return registry.Client{Insecure: h.registryInsecure, Credentials: h.registryCredentials}
 }
 
 // enqueuePublishedChallengeTaxonomy makes taxonomy classification prompt after

@@ -115,8 +115,15 @@ func sourceSlugFor(title, challengeID string) string {
 		base = "challenge"
 	}
 	suffix := strings.TrimPrefix(challengeID, "chal-")
+	suffix = strings.Trim(suffix, "-")
+	if suffix == "" {
+		suffix = "id"
+	}
 	if len(suffix) > 8 {
-		suffix = suffix[:8]
+		suffix = strings.TrimRight(suffix[:8], "-")
+		if suffix == "" {
+			suffix = "id"
+		}
 	}
 	return base + "-" + suffix
 }

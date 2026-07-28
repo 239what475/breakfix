@@ -163,7 +163,10 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/internal/verify-submissions/:id/artifact", h.DownloadVerifySubmissionArtifact)
+	router.GET("/api/internal/verify-builds/:taskID/submission", h.DownloadVerifyBuildSubmission)
+	router.GET("/api/internal/verify-builds/:taskID/base", h.DownloadVerifyBuildBase)
+	router.PUT("/api/internal/verify-builds/:taskID/image", h.UploadVerifyBuildImage)
+	router.GET("/api/internal/verify-builds/:taskID/image", h.DownloadVerifyBuildImage)
 	router.POST("/api/internal/agent-runs/:id/assistant/context", h.InternalAssistantContext)
 	router.POST("/api/internal/agent-runs/:id/assistant/tools/:tool", h.InternalAssistantTool)
 	router.POST("/api/internal/agent-runs/:id/assistant/events", h.InternalAssistantEvent)

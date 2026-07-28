@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/k8s"
@@ -18,10 +19,13 @@ type Options struct {
 	RegistryPassword     string
 	RegistryPullSecret   string
 	RegistryWriteSecret  string
+	BuilderImage         string
+	PublisherImage       string
+	VerifierImage        string
 	Namespace            string
 	CRDNamespace         string
 	CooldownMinutes      int
-	InternalAPIKey       string
+	VerificationGrantKey string
 	ServerHost           string
 	ServerPort           int
 	VClusterBinary       string
@@ -42,20 +46,29 @@ func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, opts Options) error {
 	if _, err := vclusterClient.Validate(context.Background()); err != nil {
 		return fmt.Errorf("validate vcluster cli: %w", err)
 	}
+	if strings.TrimSpace(opts.BuilderImage) == "" || strings.TrimSpace(opts.PublisherImage) == "" || strings.TrimSpace(opts.VerifierImage) == "" {
+		return fmt.Errorf("builder_image, publisher_image, and verifier_image are required")
+	}
+	if strings.TrimSpace(opts.VerificationGrantKey) == "" {
+		return fmt.Errorf("verification_grant_key is required")
+	}
 
 	if err := (&VerifyTaskReconciler{
-		Client:              mgr.GetClient(),
-		K8s:                 k8sClient,
-		RegistryAddr:        opts.RegistryAddr,
-		RegistryInsecure:    opts.RegistryInsecure,
-		RegistryUsername:    opts.RegistryUsername,
-		RegistryPassword:    opts.RegistryPassword,
-		RegistryPullSecret:  opts.RegistryPullSecret,
-		RegistryWriteSecret: opts.RegistryWriteSecret,
-		CRDNamespace:        opts.CRDNamespace,
-		InternalAPIKey:      opts.InternalAPIKey,
-		ServerHost:          opts.ServerHost,
-		ServerPort:          opts.ServerPort,
+		Client:               mgr.GetClient(),
+		K8s:                  k8sClient,
+		RegistryAddr:         opts.RegistryAddr,
+		RegistryInsecure:     opts.RegistryInsecure,
+		RegistryUsername:     opts.RegistryUsername,
+		RegistryPassword:     opts.RegistryPassword,
+		RegistryPullSecret:   opts.RegistryPullSecret,
+		RegistryWriteSecret:  opts.RegistryWriteSecret,
+		BuilderImage:         opts.BuilderImage,
+		PublisherImage:       opts.PublisherImage,
+		VerifierImage:        opts.VerifierImage,
+		CRDNamespace:         opts.CRDNamespace,
+		VerificationGrantKey: []byte(opts.VerificationGrantKey),
+		ServerHost:           opts.ServerHost,
+		ServerPort:           opts.ServerPort,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}

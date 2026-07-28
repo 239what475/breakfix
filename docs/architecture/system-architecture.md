@@ -20,7 +20,7 @@ Browser
 breakfix-server <----> PostgreSQL <----> breakfix-agent-worker
   | Kubernetes API                         | fenced internal HTTP
   v                                        v
-breakfix-controller ----> namespaces, Pods, vclusters, verifier Jobs, CRD status
+breakfix-controller ----> namespaces, Pods, vclusters, Build/Publisher/Verifier Jobs, CRD status
   ^
   | Environment / VerifyTask CRD
   +-----------------------------------------
@@ -32,7 +32,7 @@ breakfix-controller ----> namespaces, Pods, vclusters, verifier Jobs, CRD status
 
 `breakfix-controller` 只运行 controller-runtime manager 和环境清理循环。它读取 CRD `spec`，创建和清理 Kubernetes 资源，运行检查点，并写回 CRD `status`。它不访问 PostgreSQL、题目目录或 Server 持有的 artifact 文件。
 
-Generator 是持久 Agent Session/Run：Server 创建 Run，Worker 在 Server 管理的 OpenSandbox 工作区中生成候选，随后由 Server 保存 artifact 并创建 `VerifyTask`。Controller 只为 VerifyTask 创建独立 verifier Job；它不共享 Server 文件系统。
+Generator 是持久 Agent Session/Run：Server 创建 Run，Worker 在 Server 管理的 OpenSandbox 工作区中生成候选，随后由 Server 保存 artifact 并创建 `VerifyTask`。Controller 为一个 VerifyTask 调和独立的 Build、Publisher 和 Verifier Job；它不共享 Server 文件系统。
 
 ## 数据所有权
 

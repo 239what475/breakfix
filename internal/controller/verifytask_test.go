@@ -6,6 +6,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/verification"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,6 +19,7 @@ func TestValidateVerifyTaskSpec(t *testing.T) {
 		return &breakfixv1.VerifyTask{Spec: breakfixv1.VerifyTaskSpec{
 			Source:     breakfixv1.VerifyTaskSource{Ref: "run-abc123"},
 			Submission: breakfixv1.VerifyTaskSubmission{ID: "sub-abc123"},
+			Execution:  breakfixv1.VerifyTaskExecution{Runtime: "container", CheckpointIDs: []string{"service-ready"}},
 		}}
 	}
 
@@ -52,6 +54,20 @@ func TestVerifierJobNameIsDeterministicAndDNSLengthBounded(t *testing.T) {
 	}
 	if len(first) > 63 {
 		t.Fatalf("job name length = %d, want <= 63: %q", len(first), first)
+	}
+}
+
+func TestBuildResourcesBoundScratchStorage(t *testing.T) {
+	resources := buildResources()
+	if got := resources.Requests[corev1.ResourceEphemeralStorage]; got.String() != "1Gi" {
+		t.Fatalf("builder ephemeral storage request = %s, want 1Gi", got.String())
+	}
+	if got := resources.Limits[corev1.ResourceEphemeralStorage]; got.String() != "8Gi" {
+		t.Fatalf("builder ephemeral storage limit = %s, want 8Gi", got.String())
+	}
+	volume := buildScratchVolume()
+	if volume.EmptyDir == nil || volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.String() != "8Gi" {
+		t.Fatalf("builder scratch volume = %#v, want 8Gi emptyDir", volume)
 	}
 }
 

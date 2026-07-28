@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -253,9 +256,15 @@ func TestPromoteVerifiedRevisionImmediatelyEnqueuesTaxonomy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kube := verifiedTaskKubernetesClient(t, root, verifyTaskID)
-	handler := NewHandler(database, kube, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
 	const challengeID = "chal-normal-publish"
+	registryAddr, verifiedImage, publishedImage := publishingRegistry(t, challengeID)
+	kube := verifiedTaskKubernetesClient(t, root, verifyTaskID, verifiedImage)
+	handler := NewHandler(database, kube, config.Config{
+		DataDir:          root,
+		CRDNamespace:     "breakfix-system",
+		RegistryAddr:     registryAddr,
+		RegistryInsecure: true,
+	})
 	stored, err := database.BeginPublish(ctx, "author-normal-publish", "u-normal-publish", revision.Number, challengeID)
 	if err != nil {
 		t.Fatal(err)
@@ -275,6 +284,9 @@ func TestPromoteVerifiedRevisionImmediatelyEnqueuesTaxonomy(t *testing.T) {
 	published, err := challenge.Get(handler.challengesDir, challengeID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if published.Image != publishedImage {
+		t.Fatalf("published image = %q, want trusted promoted image %q", published.Image, publishedImage)
 	}
 	work, err := database.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, challengeID, published.Revision)
 	if err != nil || work.State != taxonomy.WorkPending {
@@ -402,7 +414,7 @@ func writeAuthoringArtifact(t *testing.T, root, title, description string) {
 	writeGatewayTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")
 }
 
-func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID string) *k8s.Client {
+func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID, image string) *k8s.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		wantPath := "/apis/breakfix.dev/v1/namespaces/breakfix-system/verifytasks/" + verifyTaskID
@@ -414,7 +426,7 @@ func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID string) *k8s.
 		if err := json.NewEncoder(writer).Encode(breakfixv1.VerifyTask{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"},
 			ObjectMeta: metav1.ObjectMeta{Name: verifyTaskID, Namespace: "breakfix-system"},
-			Status:     breakfixv1.VerifyTaskStatus{Phase: breakfixv1.VerifyTaskSucceeded, TempImage: "registry.example/verified:latest"},
+			Status:     breakfixv1.VerifyTaskStatus{Phase: breakfixv1.VerifyTaskSucceeded, Image: image},
 		}); err != nil {
 			t.Errorf("write verify task: %v", err)
 		}
@@ -427,6 +439,62 @@ func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID string) *k8s.
 		t.Fatal(err)
 	}
 	return client
+}
+
+func publishingRegistry(t *testing.T, challengeID string) (registryAddr, verifiedImage, publishedImage string) {
+	t.Helper()
+	configBlob := []byte(`{"architecture":"amd64","os":"linux"}`)
+	layerBlob := []byte("layer-data")
+	configDigest := testRegistryDigest(configBlob)
+	layerDigest := testRegistryDigest(layerBlob)
+	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"%s","size":%d},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar","digest":"%s","size":%d}]}`,
+		configDigest, len(configBlob), layerDigest, len(layerBlob)))
+	manifestDigest := testRegistryDigest(manifest)
+	targetPath := "/v2/team/challenge-" + challengeID + "/manifests/latest"
+	published := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/manifests/"+manifestDigest:
+			writer.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
+			writer.Header().Set("Docker-Content-Digest", manifestDigest)
+			_, _ = writer.Write(manifest)
+		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/blobs/"+configDigest:
+			_, _ = writer.Write(configBlob)
+		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/blobs/"+layerDigest:
+			_, _ = writer.Write(layerBlob)
+		case request.Method == http.MethodHead && strings.HasPrefix(request.URL.Path, "/v2/team/challenge-"+challengeID+"/blobs/"):
+			writer.WriteHeader(http.StatusOK)
+		case request.Method == http.MethodPut && request.URL.Path == targetPath:
+			body, err := io.ReadAll(request.Body)
+			if err != nil || !bytes.Equal(body, manifest) {
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			published = true
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodHead && request.URL.Path == targetPath:
+			if !published {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+			writer.Header().Set("Docker-Content-Digest", manifestDigest)
+			writer.WriteHeader(http.StatusOK)
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
+	registryAddr = address + "/team"
+	verifiedImage = registryAddr + "/verified@" + manifestDigest
+	publishedImage = registryAddr + "/challenge-" + challengeID + "@" + manifestDigest
+	return registryAddr, verifiedImage, publishedImage
+}
+
+func testRegistryDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
 func archiveAuthoringArtifact(t *testing.T, root string) []byte {

@@ -216,6 +216,12 @@ func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T)
 	}
 }
 
+func TestSourceSlugForDoesNotEndWithTruncatedIdentifierSeparator(t *testing.T) {
+	if got, want := sourceSlugFor("Verified publish title", "chal-publish-recovery"), "verified-publish-title-publish"; got != want {
+		t.Fatalf("sourceSlugFor() = %q, want %q", got, want)
+	}
+}
+
 func TestListRejectsPublishedChallengeWithoutMatchingSourceSlug(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "readable-directory")

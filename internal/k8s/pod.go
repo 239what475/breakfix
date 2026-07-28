@@ -82,10 +82,11 @@ func (c *Client) CreatePod(namespace, podName string, opts CreatePodOpts) error 
 			},
 		},
 		Spec: corev1.PodSpec{
-			Containers:       []corev1.Container{container},
-			RestartPolicy:    corev1.RestartPolicyNever,
-			Volumes:          append([]corev1.Volume{}, opts.Volumes...),
-			ImagePullSecrets: append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
+			Containers:                   []corev1.Container{container},
+			AutomountServiceAccountToken: ptr(false),
+			RestartPolicy:                corev1.RestartPolicyNever,
+			Volumes:                      append([]corev1.Volume{}, opts.Volumes...),
+			ImagePullSecrets:             append([]corev1.LocalObjectReference{}, opts.ImagePullSecrets...),
 		},
 	}
 

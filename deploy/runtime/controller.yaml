@@ -22,11 +22,11 @@ spec:
             - name: health
               containerPort: 8081
           env:
-            - name: BREAKFIX_INTERNAL_API_KEY
+            - name: BREAKFIX_VERIFICATION_GRANT_KEY
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
-                  key: internal_api_key
+                  key: verification_grant_key
             - name: BREAKFIX_REGISTRY_ADDR
               valueFrom:
                 secretKeyRef:

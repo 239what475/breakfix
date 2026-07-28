@@ -37,10 +37,11 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 func TestLoadExpandsRuntimeSecretEnvironment(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
 	t.Setenv("BREAKFIX_TEST_INTERNAL", "internal-from-environment")
+	t.Setenv("BREAKFIX_TEST_VERIFICATION_GRANT", "verification-grant-from-environment")
 	t.Setenv("BREAKFIX_TEST_SANDBOX_URL", "http://opensandbox.test.svc.cluster.local")
 	t.Setenv("BREAKFIX_TEST_SANDBOX_NAMESPACE", "opensandbox-test")
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
-	if err := os.WriteFile(path, []byte("jwt_secret: ${BREAKFIX_TEST_JWT}\ninternal_api_key: ${BREAKFIX_TEST_INTERNAL}\nopensandbox:\n  base_url: ${BREAKFIX_TEST_SANDBOX_URL}\n  namespace: ${BREAKFIX_TEST_SANDBOX_NAMESPACE}\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("jwt_secret: ${BREAKFIX_TEST_JWT}\ninternal_api_key: ${BREAKFIX_TEST_INTERNAL}\nverification_grant_key: ${BREAKFIX_TEST_VERIFICATION_GRANT}\nopensandbox:\n  base_url: ${BREAKFIX_TEST_SANDBOX_URL}\n  namespace: ${BREAKFIX_TEST_SANDBOX_NAMESPACE}\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -50,6 +51,9 @@ func TestLoadExpandsRuntimeSecretEnvironment(t *testing.T) {
 	}
 	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalAPIKey != "internal-from-environment" {
 		t.Fatalf("runtime secret expansion = jwt %q, internal %q", cfg.JWTSecret, cfg.InternalAPIKey)
+	}
+	if cfg.VerificationGrantKey != "verification-grant-from-environment" {
+		t.Fatalf("verification grant key = %q", cfg.VerificationGrantKey)
 	}
 	if cfg.OpenSandbox.BaseURL != "http://opensandbox.test.svc.cluster.local" || cfg.OpenSandbox.Namespace != "opensandbox-test" {
 		t.Fatalf("opensandbox runtime expansion = url %q, namespace %q", cfg.OpenSandbox.BaseURL, cfg.OpenSandbox.Namespace)
