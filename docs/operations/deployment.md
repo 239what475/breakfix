@@ -66,7 +66,7 @@ kubectl -n breakfix-system logs deploy/breakfix-server -f
 kubectl -n breakfix-system logs deploy/breakfix-controller -f
 ```
 
-部署后至少运行 `make e2e` 验证页面与认证流程。真实运行时、恢复和 Agent 验收分开显式执行：`make e2e-runtime-verify` 验证固定 container/vcluster artifact 的完整 VerifyTask，`make e2e-runtime-browser` 验证固定题目的终端和检查点，`make e2e-server-recovery` 验证恢复行为。模型相关的 `make e2e-agent-assistant`、`make e2e-agent-container` 和 `make e2e-agent-vcluster` 只用于人工或发布前验收，不是日常 CI。完整策略见 [`E2E.md`](../../E2E.md)。
+部署后至少运行 `make e2e` 验证页面与认证流程。真实运行时、恢复和 Agent 验收分开显式执行：`make e2e-runtime-verify` 验证固定 container/vcluster artifact 的完整 VerifyTask，`make e2e-runtime-browser` 验证固定题目的终端和检查点，`make e2e-server-recovery` 验证恢复行为。模型相关的 `make e2e-agent-assistant`、`make e2e-agent-container` 和 `make e2e-agent-vcluster` 只用于人工或发布前验收，不是日常 CI。完整策略见[测试与真实验收](testing.md)。
 
 ## 生成与发布前检查
 

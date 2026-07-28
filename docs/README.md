@@ -15,8 +15,10 @@
 ## 架构
 
 - [系统架构](architecture/system-architecture.md)：Server、Controller、Job 和数据所有权边界。
+- [Agent Runtime](architecture/agent-runtime.md)：Eino、PostgreSQL Run/lease、Worker 与 OpenSandbox 边界。
 - [运行环境](architecture/runtime-environments.md)：container/vcluster Environment、生命周期和检查点。
 - [作者生成与真实验证](architecture/authoring-workflow.md)：作者会话、Generator Run、VerifyTask 与发布。
+- [Taxonomy 与 Catalog 发布](architecture/taxonomy.md)：Skill、Tag、Mapping 委员会和公开题目准入。
 - [HTTP 与终端接口](architecture/http-api.md)：认证、接口分组、WebSocket/SSE 边界与契约生成。
 
 ## 产品与内容
@@ -28,6 +30,7 @@
 
 - [部署与运行](operations/deployment.md)：本地环境、集群准备、运行时镜像发布和验证。
 - [Telepresence 本地调试](operations/telepresence.md)：本地接管集群 Server、Controller 和 Agent Worker。
+- [测试与真实验收](operations/testing.md)：确定性测试、运行时、浏览器和模型验收边界。
 - [`assets/`](assets/)：产品设计草图与参考截图，仅用于设计沟通。
 
 根目录 [`NEXT.md`](../NEXT.md) 是下一阶段方向，[`todo.md`](../todo.md) 是当前执行清单；两者不是长期架构规范。

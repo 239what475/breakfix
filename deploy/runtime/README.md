@@ -1,7 +1,7 @@
 # Breakfix Runtime Deployment
 
 This package installs the independent PostgreSQL, Server, Controller, Agent Worker, and OCI Registry workloads described in
-`EINO-RESEARCH.md`. OpenSandbox is an explicit prerequisite: install its tested native Kubernetes workload provider
+[`docs/architecture/agent-runtime.md`](../../docs/architecture/agent-runtime.md). OpenSandbox is an explicit prerequisite: install its tested native Kubernetes workload provider
 in the `opensandbox` namespace before applying this package. Breakfix creates and deletes its own BYO workspace PVCs;
 OpenSandbox only mounts those PVCs and must not be granted their lifecycle ownership.
 

@@ -26,7 +26,7 @@ breakfix-controller ----> namespaces, Pods, vclusters, verifier Jobs, CRD status
   +-----------------------------------------
 ```
 
-`breakfix-server` 负责 HTTP、内嵌 Web UI、WebSocket 终端、认证、作者会话、做题助手、文件系统题库与 artifact 存储。它是领域数据的唯一写者，从 CRD status 幂等投影学习记录、尝试记录和终端使用记录；它只创建或更新 Environment `spec`，以及请求删除 CRD，绝不直接写 Environment `status`。
+`breakfix-server` 负责 HTTP、内嵌 Web UI、WebSocket 终端、认证、作者会话、做题助手、文件系统题库、taxonomy snapshot 与 artifact 存储。它是领域数据的唯一写者，从 CRD status 幂等投影学习记录、尝试记录和终端使用记录；它只创建或更新 Environment `spec`，以及请求删除 CRD，绝不直接写 Environment `status`。
 
 `breakfix-agent-worker` 从 PostgreSQL 领取有租约的 Agent Run，运行 Eino，并通过 Server 的受围栏保护内部 API 调用领域工具、读取工作区或提交候选。它只有 `agent_*` 表权限，没有 Kubernetes 凭据、Registry 凭据、OpenSandbox 生命周期密钥或领域表写权限。
 
@@ -39,6 +39,7 @@ Generator 是持久 Agent Session/Run：Server 创建 Run，Worker 在 Server �
 | 数据 | 权威所有者 | 访问原则 |
 | --- | --- | --- |
 | 已发布题目 | `data_dir/challenges/` | Server 读取并在发布时原子写入；不是数据库或 CRD 的副本。 |
+| Skill、Tag 与 mapping | `data_dir/taxonomy/current` 不可变快照 | Server 的 taxonomy workflow 发布；数据库只保存队列和审查运行状态。 |
 | 作者 artifact 与提交归档 | Server 数据目录 | Server 保存和提升；Generator、VerifyTask 通过内部 HTTP 交接。 |
 | 账户、作者会话、学习和终端记录 | PostgreSQL | Server 写领域数据；Worker 仅按独立权限读写 `agent_*` Runtime 数据。 |
 | Generator workspace | Server-owned PVC + PostgreSQL record | Server 创建、清理和围栏；OpenSandbox 只以 BYO 模式挂载。 |
@@ -51,10 +52,12 @@ Environment spec 在创建时包含不可变执行快照：题目引用、manife
 
 启动挑战时，Server 从发布题目目录读取题目，创建对应的 Environment CRD，并等待 Controller 将其调和到 Ready。终端通过 Server 代理到 workspace Pod；连接活动作为 Environment spec 的 `activityAt` 输入。Controller 基于该输入计算租约、Draining 与清理，最终通过 CRD status 表达完成、失败和销毁。
 
-Server 重启不会停止 Controller 调和。Controller 重启后会从已有 CRD 继续创建资源、检查检查点或清理。Server 恢复后会重新投影现有 CRD status 到 PostgreSQL，并删除已完成投影的 Destroyed/Failed CRD。真实恢复行为由 [`test/e2e/server-recovery.spec.ts`](../../test/e2e/server-recovery.spec.ts) 验证。
+Server 重启不会停止 Controller 调和。Controller 重启后会从已有 CRD 继续创建资源、检查检查点或清理。Server 恢复后会重新投影现有 CRD status 到 PostgreSQL，并删除已完成投影的 Destroyed/Failed CRD。真实恢复行为由 [`test/runtime/server-recovery.spec.ts`](../../test/runtime/server-recovery.spec.ts) 验证。
 
 ## 当前部署假设
 
 运行时包将 Server、Controller、Agent Worker 和 PostgreSQL 分别部署；Server 的 RWO data PVC 持有 catalog 与 artifact，因此 Server 使用 `Recreate` 策略。Controller 不共享该目录，Worker 不挂载任何业务卷。
 
 多 Server 实例仍需要可共享的题目/artifact 存储与可协调的文件提升协议；PostgreSQL 本身不解决该文件系统边界。
+
+Taxonomy 的发布、并发与 Catalog 准入规则见[Taxonomy 与 Catalog 发布](taxonomy.md)。
