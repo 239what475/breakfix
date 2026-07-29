@@ -68,19 +68,15 @@ type Run struct {
 	InputRevision string
 	// Input is immutable, run-scoped context needed to reconstruct an attempt.
 	// It is deliberately not conversation history or a provider checkpoint.
-	Input          json.RawMessage
-	Status         RunStatus
-	Model          string
-	PromptVersion  string
-	Attempt        int
-	NextAttemptAt  time.Time
-	LeaseOwner     string
-	LeaseExpiresAt *time.Time
-	DeadlineAt     time.Time
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	CompletedAt    *time.Time
+	Input         json.RawMessage
+	Status        RunStatus
+	Model         string
+	PromptVersion string
+	DeadlineAt    time.Time
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CompletedAt   *time.Time
 }
 
 // Claim is the attempt-scoped authority a Worker must present for every
@@ -88,11 +84,13 @@ type Run struct {
 // claims of a run.
 type Claim struct {
 	Run        Run
+	WorkItemID string
+	Attempt    int
 	LeaseOwner string
 }
 
 func (c Claim) Valid() bool {
-	return c.Run.ID != "" && c.Run.Attempt > 0 && strings.TrimSpace(c.LeaseOwner) != ""
+	return c.Run.ID != "" && strings.TrimSpace(c.WorkItemID) != "" && c.Attempt > 0 && strings.TrimSpace(c.LeaseOwner) != ""
 }
 
 type CreateRun struct {

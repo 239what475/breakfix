@@ -29,6 +29,7 @@ import (
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/server"
 	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/worklist"
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -249,7 +250,11 @@ func (s statusReporter) snapshot(ctx context.Context) statusView {
 			return status
 		}
 		for _, run := range runs {
-			status.Runs = append(status.Runs, runView{ID: run.ID, Purpose: run.Purpose, Status: string(run.Status), Attempt: run.Attempt, LastError: run.LastError})
+			attempt := 0
+			if work, workErr := s.database.GetWorkItemForSubject(ctx, worklist.KindAgent, worklist.SubjectAgentRun, run.ID); workErr == nil {
+				attempt = work.Attempt
+			}
+			status.Runs = append(status.Runs, runView{ID: run.ID, Purpose: run.Purpose, Status: string(run.Status), Attempt: attempt, LastError: run.LastError})
 		}
 	}
 	current, err := s.store.LoadCurrent()

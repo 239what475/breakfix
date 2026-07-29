@@ -202,7 +202,7 @@ func (w *Worker) fail(ctx context.Context, claim agentruntime.Claim, executionEr
 		message = "agent execution failed"
 	}
 	if err := w.store.Fail(ctx, claim, message, w.now()); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-		slog.Error("fail terminal agent run", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(executionErr))
+		slog.Error("fail terminal agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(executionErr))
 	}
 }
 
@@ -231,7 +231,7 @@ func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cance
 					return
 				default:
 				}
-				slog.Warn("agent run lease renewal failed", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(err))
+				slog.Warn("agent run lease renewal failed", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
 				leaseLost.Store(true)
 				cancel()
 				return
@@ -253,16 +253,16 @@ func (w *Worker) requeueOrFail(ctx context.Context, claim agentruntime.Claim, ex
 	now := w.now()
 	if !now.Before(claim.Run.DeadlineAt) {
 		if err := w.store.Fail(ctx, claim, message, now); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-			slog.Error("fail expired agent run", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(err))
+			slog.Error("fail expired agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
 		}
 		return
 	}
-	next := now.Add(retryDelay(claim.Run.Attempt))
+	next := now.Add(retryDelay(claim.Attempt))
 	if next.After(claim.Run.DeadlineAt) {
 		next = claim.Run.DeadlineAt
 	}
 	if err := w.store.Requeue(ctx, claim, next, message, now); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-		slog.Error("requeue agent run", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "error_class", errorClass(err))
+		slog.Error("requeue agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
 	}
 }
 

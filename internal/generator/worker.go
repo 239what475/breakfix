@@ -118,7 +118,7 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 }
 
 func logGeneratorStage(claim agentruntime.Claim, stage string) {
-	slog.Info("generator stage", "run_id", claim.Run.ID, "attempt", claim.Run.Attempt, "stage", stage)
+	slog.Info("generator stage", "run_id", claim.Run.ID, "attempt", claim.Attempt, "stage", stage)
 }
 
 func sameFeedback(left, right Feedback) bool {

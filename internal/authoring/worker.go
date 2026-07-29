@@ -48,7 +48,7 @@ func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
 
 func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
 	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/authoring/context", LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
+	err := c.post(ctx, claim.Run.ID, "/authoring/context", LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
 	return result, err
 }
 
@@ -59,7 +59,7 @@ func (c *InternalClient) UpdateStage(ctx context.Context, claim agentruntime.Cla
 		StageRevision int64  `json:"stage_revision"`
 		Plan          Plan   `json:"plan"`
 		Change        Change `json:"change"`
-	}{LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner}, revision, plan, change}, &result)
+	}{LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, revision, plan, change}, &result)
 	return result, err
 }
 
@@ -67,7 +67,7 @@ func (c *InternalClient) Finalize(ctx context.Context, claim agentruntime.Claim,
 	return c.post(ctx, claim.Run.ID, "/authoring/finalize", struct {
 		LeaseCredential
 		Content string `json:"content"`
-	}{LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner}, content}, nil)
+	}{LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, content}, nil)
 }
 
 func (c *InternalClient) post(ctx context.Context, runID, suffix string, body any, result any) error {

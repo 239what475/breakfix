@@ -120,7 +120,7 @@ func ReadVerifiedChallenge(dataDir string, artifact *Artifact) (*VerifiedChallen
 			Title:       checkpoint.Title,
 			Description: checkpoint.Description,
 			Hint:        checkpoint.Hint,
-			DependsOn:   append([]string{}, checkpoint.DependsOn...),
+			Node:        checkpoint.Node,
 		})
 	}
 	return result, nil

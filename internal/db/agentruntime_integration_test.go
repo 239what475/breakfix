@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T) {
@@ -73,7 +74,7 @@ func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T)
 		}
 		first = claim
 	}
-	if first == nil || first.Run.Attempt != 1 {
+	if first == nil || first.Attempt != 1 {
 		t.Fatalf("first claim = %#v, want attempt one", first)
 	}
 
@@ -84,7 +85,7 @@ func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T)
 	if err != nil {
 		t.Fatalf("claim requeued run: %v", err)
 	}
-	if second == nil || second.Run.Attempt != 2 {
+	if second == nil || second.Attempt != 2 {
 		t.Fatalf("second claim = %#v, want attempt two", second)
 	}
 	if err := database.CompleteWithMessage(ctx, *first, agentruntime.Message{
@@ -102,8 +103,12 @@ func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T)
 	if err != nil {
 		t.Fatalf("get completed run: %v", err)
 	}
-	if run.Status != agentruntime.RunSucceeded || run.Attempt != 2 || run.LeaseOwner != "" || run.CompletedAt == nil {
+	if run.Status != agentruntime.RunSucceeded || run.CompletedAt == nil {
 		t.Fatalf("completed run = %#v", run)
+	}
+	item, err := database.GetWorkItemForSubject(ctx, worklist.KindAgent, worklist.SubjectAgentRun, run.ID)
+	if err != nil || item.State != worklist.StateSucceeded || item.Attempt != 2 || item.LeaseOwner != "" {
+		t.Fatalf("completed work item = %#v, %v", item, err)
 	}
 	messages, err := database.ListMessages(ctx, session.ID)
 	if err != nil {
@@ -138,7 +143,7 @@ func TestAgentRunExpiredLeaseIsClaimedAsNewAttempt(t *testing.T) {
 	if err != nil || second == nil {
 		t.Fatalf("claim expired lease = %#v, %v", second, err)
 	}
-	if second.Run.ID != first.Run.ID || second.Run.Attempt != first.Run.Attempt+1 || second.LeaseOwner == first.LeaseOwner {
+	if second.Run.ID != first.Run.ID || second.Attempt != first.Attempt+1 || second.LeaseOwner == first.LeaseOwner {
 		t.Fatalf("expired lease did not create a fenced next attempt: first=%#v second=%#v", first, second)
 	}
 	if err := database.Fail(ctx, *first, "late worker", claimNow.Add(3*time.Second)); !errors.Is(err, agentruntime.ErrLeaseLost) {

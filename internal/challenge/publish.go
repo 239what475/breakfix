@@ -82,9 +82,6 @@ func writePublishedManifest(dir, challengeID, sourceSlug, image string, publishe
 	manifest.SourceSlug = sourceSlug
 	manifest.Image = image
 	manifest.PublishedAt = publishedAt.UTC()
-	if strings.TrimSpace(manifest.Type) == "" {
-		manifest.Type = TypeScript
-	}
 	normalized, err := yaml.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("marshal challenge manifest: %w", err)

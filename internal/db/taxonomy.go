@@ -11,6 +11,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 var ErrTaxonomyWorkNotFound = errors.New("taxonomy work item not found")
@@ -203,9 +204,16 @@ func (d *DB) CancelClaimedTaxonomyWork(ctx context.Context, item taxonomy.WorkIt
 	now := time.Now().UTC()
 	if activeRunID != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs
-			SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
+			SET status = ?, completed_at = ?, updated_at = ?
 			WHERE id = ? AND status IN (?, ?)`, agentruntime.RunCancelled, now, now, activeRunID, agentruntime.RunPending, agentruntime.RunRunning); err != nil {
 			return fmt.Errorf("cancel active taxonomy run: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+			error_code = 'taxonomy_mapping_cancelled', error_summary = ?, updated_at = ?
+			WHERE kind = ? AND subject_type = ? AND subject_id = ? AND state IN (?, ?)`,
+			worklist.StateCancelled, reason, now, worklist.KindAgent, worklist.SubjectAgentRun,
+			activeRunID, worklist.StatePending, worklist.StateRunning); err != nil {
+			return fmt.Errorf("cancel taxonomy agent work item: %w", err)
 		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items SET
@@ -343,28 +351,25 @@ func (d *DB) finalizeTaxonomyRun(ctx context.Context, claim agentruntime.Claim, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC()
-	var matched bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs
-		WHERE id = ? AND purpose = ? AND owner_kind = 'taxonomy-work' AND owner_ref = ? AND status = ? AND attempt = ? AND lease_owner = ? AND deadline_at > ?
-		FOR UPDATE)`, claim.Run.ID, purpose, workID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now).Scan(&matched)
-	if err != nil {
-		return fmt.Errorf("lock taxonomy agent run: %w", err)
+	if _, err := lockAgentClaim(ctx, tx, claim, now); err != nil {
+		return err
 	}
-	if !matched {
+	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-work" || claim.Run.OwnerRef != workID {
 		return agentruntime.ErrLeaseLost
 	}
 	if err := apply(tx, now); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,
-		agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner)
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
 	if err != nil {
 		return fmt.Errorf("complete taxonomy agent run: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return agentruntime.ErrLeaseLost
+	}
+	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit taxonomy agent finalization: %w", err)

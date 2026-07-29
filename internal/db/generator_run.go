@@ -13,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/generator"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 const generatorOwnerKind = "authoring-session"
@@ -242,14 +243,16 @@ func (d *DB) FinalizeGeneratorSubmission(ctx context.Context, claim agentruntime
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET verify_task_id = ?, updated_at = ? WHERE id = ? AND generator_run_id = ?`, verifyTaskID, nowText(now), session.ID, claim.Run.ID); err != nil {
 		return fmt.Errorf("link authoring verify task: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,
-		agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner)
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
 	if err != nil {
 		return fmt.Errorf("complete generator run: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return agentruntime.ErrLeaseLost
+	}
+	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

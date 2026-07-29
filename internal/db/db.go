@@ -614,4 +614,73 @@ var schemaMigrations = []schemaMigration{
 		)`,
 		`CREATE INDEX checkpoint_pass_events_user_challenge ON checkpoint_pass_events(user_id, challenge_id, first_passed_at)`,
 	}},
+	{version: 13, statements: []string{
+		`CREATE TABLE work_items (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL CHECK (kind IN ('agent', 'build', 'artifact_publish', 'verify', 'artifact_cleanup', 'challenge_publish')),
+			subject_type TEXT NOT NULL CHECK (subject_type IN ('agent_run', 'candidate_revision')),
+			subject_id TEXT NOT NULL,
+			state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+			attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_expires_at TIMESTAMPTZ,
+			next_run_at TIMESTAMPTZ NOT NULL,
+			deadline_at TIMESTAMPTZ,
+			error_code TEXT NOT NULL DEFAULT '',
+			error_summary TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			UNIQUE(kind, subject_type, subject_id),
+			CHECK ((kind = 'agent' AND subject_type = 'agent_run') OR (kind <> 'agent' AND subject_type = 'candidate_revision')),
+			CHECK ((kind = 'artifact_cleanup' AND deadline_at IS NULL) OR (kind <> 'artifact_cleanup' AND deadline_at IS NOT NULL))
+		)`,
+		`CREATE INDEX work_items_claim ON work_items(kind, state, next_run_at, lease_expires_at, created_at, id)`,
+		`CREATE INDEX work_items_subject ON work_items(subject_type, subject_id, created_at)`,
+		`CREATE TABLE candidate_revisions (
+			id TEXT PRIMARY KEY,
+			authoring_session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
+			authoring_revision BIGINT NOT NULL,
+			generator_session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
+			generator_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE RESTRICT,
+			judge_run_id TEXT NOT NULL DEFAULT '',
+			archive_path TEXT NOT NULL,
+			archive_sha256 TEXT NOT NULL,
+			execution_snapshot JSONB NOT NULL,
+			state TEXT NOT NULL,
+			build_output JSONB,
+			artifact_reference JSONB,
+			verification_report JSONB,
+			failure JSONB,
+			publication JSONB,
+			superseded_by TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			verified_at TIMESTAMPTZ,
+			published_at TIMESTAMPTZ,
+			UNIQUE(generator_run_id)
+		)`,
+		`CREATE INDEX candidate_revisions_authoring ON candidate_revisions(authoring_session_id, authoring_revision, created_at)`,
+		`CREATE INDEX candidate_revisions_state ON candidate_revisions(state, updated_at)`,
+	}},
+	{version: 14, statements: []string{
+		// Development migration: scheduling authority moves from agent_runs to
+		// the universal work_items table. Existing run identities and results
+		// remain, but attempt and lease state has exactly one owner.
+		`INSERT INTO work_items
+			(id, kind, subject_type, subject_id, state, attempt, lease_owner, lease_expires_at,
+			 next_run_at, deadline_at, error_code, error_summary, created_at, updated_at)
+		SELECT 'work-agent-' || id, 'agent', 'agent_run', id,
+			CASE status WHEN 'pending' THEN 'pending' WHEN 'running' THEN 'running'
+				WHEN 'succeeded' THEN 'succeeded' WHEN 'failed' THEN 'failed' ELSE 'cancelled' END,
+			attempt, lease_owner, lease_expires_at, next_attempt_at, deadline_at,
+			CASE WHEN last_error = '' THEN '' ELSE 'agent_execution' END, last_error, created_at, updated_at
+		FROM agent_runs
+		ON CONFLICT (kind, subject_type, subject_id) DO NOTHING`,
+		`DROP INDEX IF EXISTS agent_runs_claim`,
+		`ALTER TABLE agent_runs
+			DROP COLUMN attempt,
+			DROP COLUMN next_attempt_at,
+			DROP COLUMN lease_owner,
+			DROP COLUMN lease_expires_at`,
+	}},
 }

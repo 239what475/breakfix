@@ -21,13 +21,13 @@ type Entry struct {
 	ID          string
 	SourceSlug  string
 	Title       string
-	Type        string
 	Runtime     string
 	Difficulty  string
 	Description string
 	Image       string
 	Revision    string
 	PublishedAt time.Time
+	Nodes       []Node
 	Checkpoints []Checkpoint
 	Dir         string
 }
@@ -36,23 +36,28 @@ type Spec struct {
 	ID          string       `yaml:"id"`
 	SourceSlug  string       `yaml:"source_slug,omitempty"`
 	Title       string       `yaml:"title"`
-	Type        string       `yaml:"type"`
 	Runtime     string       `yaml:"runtime"`
 	Difficulty  string       `yaml:"difficulty"`
 	Description string       `yaml:"description"`
 	Image       string       `yaml:"image"`
 	PublishedAt time.Time    `yaml:"published_at,omitempty"`
+	Nodes       []Node       `yaml:"nodes,omitempty"`
 	Checkpoints []Checkpoint `yaml:"checkpoints"`
+}
+
+type Node struct {
+	Name  string `yaml:"name" json:"name"`
+	Title string `yaml:"title" json:"title"`
 }
 
 // Checkpoint is a user-visible, independently verifiable challenge outcome.
 // It describes a state of the environment, never a prescribed command sequence.
 type Checkpoint struct {
-	ID          string   `yaml:"id" json:"id"`
-	Title       string   `yaml:"title" json:"title"`
-	Description string   `yaml:"description" json:"description"`
-	Hint        string   `yaml:"hint,omitempty" json:"hint,omitempty"`
-	DependsOn   []string `yaml:"dependsOn,omitempty" json:"depends_on,omitempty"`
+	ID          string `yaml:"id" json:"id"`
+	Title       string `yaml:"title" json:"title"`
+	Description string `yaml:"description" json:"description"`
+	Hint        string `yaml:"hint,omitempty" json:"hint,omitempty"`
+	Node        string `yaml:"node,omitempty" json:"node,omitempty"`
 }
 
 func List(root string) ([]Entry, error) {
@@ -195,24 +200,18 @@ func artifactRevision(dir string) (string, error) {
 }
 
 func entryFromSpec(dir string, spec *Spec) *Entry {
-	if spec.Type == "" {
-		spec.Type = TypeScript
-	}
 	spec.Runtime = NormalizeRuntime(spec.Runtime)
-	if spec.Image == "" {
-		spec.Image = fmt.Sprintf("breakfix-%s:dev", spec.ID)
-	}
 
 	return &Entry{
 		ID:          spec.ID,
 		SourceSlug:  spec.SourceSlug,
 		Title:       spec.Title,
-		Type:        spec.Type,
 		Runtime:     spec.Runtime,
 		Difficulty:  spec.Difficulty,
 		Description: spec.Description,
 		Image:       spec.Image,
 		PublishedAt: spec.PublishedAt,
+		Nodes:       append([]Node{}, spec.Nodes...),
 		Checkpoints: append([]Checkpoint{}, spec.Checkpoints...),
 		Dir:         dir,
 	}

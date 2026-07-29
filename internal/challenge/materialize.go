@@ -9,7 +9,9 @@ import (
 	"unicode"
 )
 
-var requiredFiles = []string{"challenge.yaml", "Dockerfile", "generate.sh", "problem.md", "solution.md", "checks/checkpoints.sh", "answer.sh"}
+var commonRequiredFiles = []string{"challenge.yaml", "problem.md", "solution.md"}
+
+const MaxChallengeNodes = 4
 
 // MaterializeWithSlug promotes a published challenge into a human-readable
 // source directory while keeping its opaque identity in challenge.yaml.
@@ -81,29 +83,17 @@ func ValidateDir(dir string) (*Entry, error) {
 	if !ValidSourceSlug(challenge.SourceSlug) {
 		return nil, fmt.Errorf("invalid challenge source slug %q", challenge.SourceSlug)
 	}
-	for _, name := range requiredFiles {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			return nil, fmt.Errorf("missing %s: %w", name, err)
-		}
-		if info.IsDir() {
-			return nil, fmt.Errorf("%s must be a file", name)
-		}
+	if err := validateChallengeFiles(challenge, dir); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(challenge.Title) == "" {
 		return nil, fmt.Errorf("challenge title is required")
 	}
-	switch strings.TrimSpace(challenge.Type) {
-	case "", TypeScript:
-	default:
-		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
-	}
-	switch NormalizeRuntime(challenge.Runtime) {
-	case RuntimeContainer, RuntimeVCluster:
+	switch challenge.Runtime {
+	case RuntimeNode, RuntimeK8s:
 	default:
 		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
 	}
-	challenge.Runtime = NormalizeRuntime(challenge.Runtime)
 	switch strings.TrimSpace(challenge.Difficulty) {
 	case "easy", "medium", "hard":
 	default:
@@ -126,29 +116,17 @@ func ValidateSubmissionDir(dir string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range requiredFiles {
-		info, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			return nil, fmt.Errorf("missing %s: %w", name, err)
-		}
-		if info.IsDir() {
-			return nil, fmt.Errorf("%s must be a file", name)
-		}
+	if err := validateChallengeFiles(challenge, dir); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(challenge.Title) == "" {
 		return nil, fmt.Errorf("challenge title is required")
 	}
-	switch strings.TrimSpace(challenge.Type) {
-	case "", TypeScript:
-	default:
-		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
-	}
-	switch NormalizeRuntime(challenge.Runtime) {
-	case RuntimeContainer, RuntimeVCluster:
+	switch challenge.Runtime {
+	case RuntimeNode, RuntimeK8s:
 	default:
 		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
 	}
-	challenge.Runtime = NormalizeRuntime(challenge.Runtime)
 	switch strings.TrimSpace(challenge.Difficulty) {
 	case "easy", "medium", "hard":
 	default:
@@ -171,6 +149,10 @@ func validateCheckpoints(challenge *Entry, dir string) error {
 		return fmt.Errorf("challenge checkpoints are required")
 	}
 	known := make(map[string]struct{}, len(challenge.Checkpoints))
+	nodes := make(map[string]struct{}, len(challenge.Nodes))
+	for _, node := range challenge.Nodes {
+		nodes[node.Name] = struct{}{}
+	}
 	for _, checkpoint := range challenge.Checkpoints {
 		id := strings.TrimSpace(checkpoint.ID)
 		if id == "" || !ValidID(id) {
@@ -195,17 +177,119 @@ func validateCheckpoints(challenge *Entry, dir string) error {
 		if info, err := os.Stat(path); err != nil || info.IsDir() {
 			return fmt.Errorf("checkpoint %q hint is not a file", id)
 		}
+		if challenge.Runtime == RuntimeNode {
+			if _, ok := nodes[checkpoint.Node]; !ok {
+				return fmt.Errorf("checkpoint %q references unknown node %q", id, checkpoint.Node)
+			}
+		} else if strings.TrimSpace(checkpoint.Node) != "" {
+			return fmt.Errorf("k8s checkpoint %q must not declare a node", id)
+		}
 		known[id] = struct{}{}
 	}
-	for _, checkpoint := range challenge.Checkpoints {
-		for _, dependency := range checkpoint.DependsOn {
-			if _, ok := known[dependency]; !ok {
-				return fmt.Errorf("checkpoint %q depends on unknown checkpoint %q", checkpoint.ID, dependency)
+	return nil
+}
+
+func validateChallengeFiles(challenge *Entry, dir string) error {
+	for _, name := range commonRequiredFiles {
+		if err := requireRegularFile(dir, name); err != nil {
+			return err
+		}
+	}
+	for _, legacy := range []string{"Dockerfile", "generate.sh", "answer.sh", "checks"} {
+		if _, err := os.Lstat(filepath.Join(dir, legacy)); err == nil {
+			return fmt.Errorf("legacy challenge asset %s is not allowed", legacy)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect legacy challenge asset %s: %w", legacy, err)
+		}
+	}
+
+	switch challenge.Runtime {
+	case RuntimeNode:
+		if len(challenge.Nodes) == 0 {
+			return fmt.Errorf("node challenge requires at least one node")
+		}
+		if len(challenge.Nodes) > MaxChallengeNodes {
+			return fmt.Errorf("node challenge exceeds the %d node limit", MaxChallengeNodes)
+		}
+		declared := make(map[string]struct{}, len(challenge.Nodes))
+		checkpointNodes := make(map[string]struct{})
+		for _, checkpoint := range challenge.Checkpoints {
+			checkpointNodes[checkpoint.Node] = struct{}{}
+		}
+		for _, node := range challenge.Nodes {
+			name := strings.TrimSpace(node.Name)
+			if !ValidID(name) {
+				return fmt.Errorf("invalid node name %q", node.Name)
 			}
-			if dependency == checkpoint.ID {
-				return fmt.Errorf("checkpoint %q cannot depend on itself", checkpoint.ID)
+			if _, reserved := reservedNodeNames[name]; reserved {
+				return fmt.Errorf("node name %q is reserved", name)
+			}
+			if _, duplicate := declared[name]; duplicate {
+				return fmt.Errorf("duplicate node name %q", name)
+			}
+			if strings.TrimSpace(node.Title) == "" {
+				return fmt.Errorf("node %q title is required", name)
+			}
+			declared[name] = struct{}{}
+			for _, script := range []string{"generate.sh", "answer.sh"} {
+				if err := requireRegularFile(dir, filepath.Join("nodes", name, script)); err != nil {
+					return err
+				}
+			}
+			if _, hasChecks := checkpointNodes[name]; hasChecks {
+				if err := requireRegularFile(dir, filepath.Join("nodes", name, "checks.sh")); err != nil {
+					return err
+				}
 			}
 		}
+		entries, err := os.ReadDir(filepath.Join(dir, "nodes"))
+		if err != nil {
+			return fmt.Errorf("read nodes directory: %w", err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				return fmt.Errorf("nodes/%s must be a declared node directory", entry.Name())
+			}
+			if _, ok := declared[entry.Name()]; !ok {
+				return fmt.Errorf("nodes/%s is not declared in challenge.yaml", entry.Name())
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "k8s")); err == nil {
+			return fmt.Errorf("node challenge must not contain k8s assets")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect k8s assets: %w", err)
+		}
+	case RuntimeK8s:
+		if len(challenge.Nodes) != 0 {
+			return fmt.Errorf("k8s challenge must not declare nodes")
+		}
+		for _, script := range []string{"generate.sh", "answer.sh", "checks.sh"} {
+			if err := requireRegularFile(dir, filepath.Join("k8s", script)); err != nil {
+				return err
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "nodes")); err == nil {
+			return fmt.Errorf("k8s challenge must not contain node assets")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect node assets: %w", err)
+		}
+	}
+	return nil
+}
+
+var reservedNodeNames = map[string]struct{}{
+	"breakfix":  {},
+	"gateway":   {},
+	"localhost": {},
+}
+
+func requireRegularFile(root, relative string) error {
+	info, err := os.Lstat(filepath.Join(root, relative))
+	if err != nil {
+		return fmt.Errorf("missing %s: %w", filepath.ToSlash(relative), err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s must be a regular file", filepath.ToSlash(relative))
 	}
 	return nil
 }

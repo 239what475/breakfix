@@ -41,7 +41,7 @@ func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
 
 func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
 	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/taxonomy/context", LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
+	err := c.post(ctx, claim.Run.ID, "/taxonomy/context", LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
 	return result, err
 }
 
@@ -49,7 +49,7 @@ func (c *InternalClient) FinalizeMapper(ctx context.Context, claim agentruntime.
 	return c.post(ctx, claim.Run.ID, "/taxonomy/mapper/finalize", struct {
 		LeaseCredential
 		ChangeSet ChangeSet `json:"changeset"`
-	}{LeaseCredential: LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner}, ChangeSet: changes}, nil)
+	}{LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, ChangeSet: changes}, nil)
 }
 
 func (c *InternalClient) FinalizeReviewPair(ctx context.Context, claim agentruntime.Claim, curriculum, sre Review) error {
@@ -58,7 +58,7 @@ func (c *InternalClient) FinalizeReviewPair(ctx context.Context, claim agentrunt
 		Curriculum Review `json:"curriculum"`
 		SRE        Review `json:"sre"`
 	}{
-		LeaseCredential: LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner},
+		LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner},
 		Curriculum:      curriculum,
 		SRE:             sre,
 	}, nil)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
@@ -352,14 +353,16 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, claim agentruntime.Claim,
 	if err := insertAgentMessageTx(ctx, tx, &message); err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,
-		agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner)
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
 	if err != nil {
 		return nil, fmt.Errorf("complete finalized authoring run: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, agentruntime.ErrLeaseLost
+	}
+	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM authoring_stages WHERE run_id = ?`, stage.RunID); err != nil {
 		return nil, fmt.Errorf("delete finalized authoring stage: %w", err)
@@ -371,17 +374,8 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, claim agentruntime.Claim,
 }
 
 func validateLeaseTx(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time) error {
-	var valid bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ? AND lease_expires_at > ? AND deadline_at > ?)`,
-		claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now, now).Scan(&valid)
-	if err != nil {
-		return fmt.Errorf("validate authoring run lease: %w", err)
-	}
-	if !valid {
-		return agentruntime.ErrLeaseLost
-	}
-	return nil
+	_, err := lockAgentClaim(ctx, tx, claim, now)
+	return err
 }
 
 func readAuthoringStage(row agentRow) (*authoring.Stage, error) {

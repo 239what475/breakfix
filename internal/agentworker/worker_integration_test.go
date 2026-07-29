@@ -10,6 +10,7 @@ import (
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/agentworker"
 	"github.com/breakfix/breakfix/internal/testpostgres"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func TestWorkerCompletesReadOnlyRunAfterBestEffortDeltaFailure(t *testing.T) {
@@ -47,8 +48,12 @@ func TestWorkerCompletesReadOnlyRunAfterBestEffortDeltaFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != agentruntime.RunSucceeded || run.Attempt != 1 {
+	if run.Status != agentruntime.RunSucceeded {
 		t.Fatalf("run = %#v", run)
+	}
+	item, err := database.GetWorkItemForSubject(ctx, worklist.KindAgent, worklist.SubjectAgentRun, run.ID)
+	if err != nil || item.Attempt != 1 || item.State != worklist.StateSucceeded {
+		t.Fatalf("work item = %#v, %v", item, err)
 	}
 	messages, err := database.ListMessages(ctx, "assistant-session")
 	if err != nil {
@@ -84,8 +89,12 @@ func TestWorkerTerminatesDomainManagedFailureWithoutGenericRequeue(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != agentruntime.RunFailed || run.Attempt != 1 || run.NextAttemptAt.After(time.Now().UTC()) {
+	if run.Status != agentruntime.RunFailed {
 		t.Fatalf("terminal domain failure was requeued instead of failed: %#v", run)
+	}
+	item, err := database.GetWorkItemForSubject(ctx, worklist.KindAgent, worklist.SubjectAgentRun, run.ID)
+	if err != nil || item.Attempt != 1 || item.State != worklist.StateFailed {
+		t.Fatalf("terminal work item = %#v, %v", item, err)
 	}
 }
 

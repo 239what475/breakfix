@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func (d *DB) CreateSession(ctx context.Context, session agentruntime.Session) (*agentruntime.Session, error) {
@@ -268,27 +269,27 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 		return nil, fmt.Errorf("begin claim agent run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	// A deadline ends the logical Run, regardless of whether its last Worker
-	// attempt crashed, was waiting for a retry, or is still holding a lease.
-	// Expiring due Runs in the claim transaction keeps session admission from
-	// being blocked forever without introducing a separate scheduler.
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL,
-			last_error = ?, completed_at = ?, updated_at = ?
-		WHERE status IN (?, ?) AND deadline_at <= ?`,
-		agentruntime.RunFailed, "agent run deadline exceeded", now, now,
-		agentruntime.RunPending, agentruntime.RunRunning, now); err != nil {
+	now = now.UTC()
+	if _, err := tx.ExecContext(ctx, `WITH expired AS (
+		UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+			error_code = 'deadline_exceeded', error_summary = 'agent run deadline exceeded', updated_at = ?
+		WHERE kind = ? AND state IN (?, ?) AND deadline_at <= ?
+		RETURNING subject_id
+	) UPDATE agent_runs SET status = ?, last_error = 'agent run deadline exceeded', completed_at = ?, updated_at = ?
+	WHERE id IN (SELECT subject_id FROM expired) AND status IN (?, ?)`,
+		worklist.StateFailed, now, worklist.KindAgent, worklist.StatePending, worklist.StateRunning, now,
+		agentruntime.RunFailed, now, now, agentruntime.RunPending, agentruntime.RunRunning); err != nil {
 		return nil, fmt.Errorf("expire due agent runs: %w", err)
 	}
-	var id string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM agent_runs
-		WHERE (
-			(status = ? AND next_attempt_at <= ?)
-			OR (status = ? AND lease_expires_at <= ?)
+	var workItemID, runID string
+	err = tx.QueryRowContext(ctx, `SELECT id, subject_id FROM work_items
+		WHERE kind = ? AND (
+			(state = ? AND next_run_at <= ?)
+			OR (state = ? AND lease_expires_at <= ?)
 		) AND deadline_at > ?
-		ORDER BY next_attempt_at, created_at, id
+		ORDER BY next_run_at, created_at, id
 		FOR UPDATE SKIP LOCKED
-		LIMIT 1`, agentruntime.RunPending, now, agentruntime.RunRunning, now, now).Scan(&id)
+		LIMIT 1`, worklist.KindAgent, worklist.StatePending, now, worklist.StateRunning, now, now).Scan(&workItemID, &runID)
 	if errors.Is(err, sql.ErrNoRows) {
 		// The deadline update above is still meaningful even when no work can
 		// be claimed. Commit it so an expired Run cannot remain active forever.
@@ -300,31 +301,37 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 	if err != nil {
 		return nil, fmt.Errorf("select claimable agent run: %w", err)
 	}
-	leaseOwner := strings.TrimSpace(worker) + "-" + agentruntime.NewID("lease")
+	leaseOwner := strings.TrimSpace(worker) + "-" + worklist.NewID("lease")
 	leaseExpiresAt := now.Add(leaseTTL)
-	row := tx.QueryRowContext(ctx, `UPDATE agent_runs
-		SET status = ?, attempt = attempt + 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
-		WHERE id = ? AND status IN (?, ?)
-		RETURNING `+agentRunColumns,
-		agentruntime.RunRunning, leaseOwner, leaseExpiresAt, now, id, agentruntime.RunPending, agentruntime.RunRunning)
-	run, err := scanAgentRun(row)
+	var attempt int
+	if err := tx.QueryRowContext(ctx, `UPDATE work_items SET state = ?, attempt = attempt + 1,
+		lease_owner = ?, lease_expires_at = ?, updated_at = ?
+		WHERE id = ? AND state IN (?, ?) RETURNING attempt`,
+		worklist.StateRunning, leaseOwner, leaseExpiresAt, now, workItemID,
+		worklist.StatePending, worklist.StateRunning).Scan(&attempt); err != nil {
+		return nil, fmt.Errorf("claim agent work item: %w", err)
+	}
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs SET status = ?, updated_at = ?
+		WHERE id = ? AND status IN (?, ?) RETURNING `+agentRunColumns,
+		agentruntime.RunRunning, now, runID, agentruntime.RunPending, agentruntime.RunRunning))
 	if err != nil {
 		return nil, fmt.Errorf("claim agent run: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit agent run claim: %w", err)
 	}
-	return &agentruntime.Claim{Run: *run, LeaseOwner: leaseOwner}, nil
+	return &agentruntime.Claim{Run: *run, WorkItemID: workItemID, Attempt: attempt, LeaseOwner: leaseOwner}, nil
 }
 
 func (d *DB) RenewLease(ctx context.Context, claim agentruntime.Claim, leaseTTL time.Duration, now time.Time) error {
 	if !claim.Valid() || leaseTTL <= 0 || now.IsZero() {
 		return fmt.Errorf("valid claim, positive lease ttl, and current time are required")
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs
-		SET lease_expires_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ? AND deadline_at > ?`,
-		now.Add(leaseTTL), now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now)
+	result, err := d.conn.ExecContext(ctx, `UPDATE work_items SET lease_expires_at = ?, updated_at = ?
+		WHERE id = ? AND kind = ? AND subject_id = ? AND state = ? AND attempt = ?
+		AND lease_owner = ? AND lease_expires_at > ? AND deadline_at > ?`,
+		now.Add(leaseTTL), now, claim.WorkItemID, worklist.KindAgent, claim.Run.ID,
+		worklist.StateRunning, claim.Attempt, claim.LeaseOwner, now, now)
 	if err != nil {
 		return fmt.Errorf("renew agent lease: %w", err)
 	}
@@ -338,17 +345,24 @@ func (d *DB) Requeue(ctx context.Context, claim agentruntime.Claim, nextAttemptA
 	if !claim.Valid() || nextAttemptAt.IsZero() || now.IsZero() || strings.TrimSpace(lastError) == "" {
 		return fmt.Errorf("valid claim, next attempt, error, and current time are required")
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, next_attempt_at = ?, lease_owner = '', lease_expires_at = NULL, last_error = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ? AND deadline_at > ?`,
-		agentruntime.RunPending, nextAttemptAt, lastError, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now)
+	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin requeue agent run: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := lockAgentClaim(ctx, tx, claim, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+		agentruntime.RunPending, lastError, now, claim.Run.ID); err != nil {
 		return fmt.Errorf("requeue agent run: %w", err)
 	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return agentruntime.ErrLeaseLost
+	if _, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, next_run_at = ?, lease_owner = '',
+		lease_expires_at = NULL, error_code = 'agent_execution', error_summary = ?, updated_at = ? WHERE id = ?`,
+		worklist.StatePending, nextAttemptAt, lastError, now, claim.WorkItemID); err != nil {
+		return fmt.Errorf("requeue agent work item: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (d *DB) CompleteWithMessage(ctx context.Context, claim agentruntime.Claim, message agentruntime.Message, now time.Time) error {
@@ -364,14 +378,9 @@ func (d *DB) CompleteWithMessage(ctx context.Context, claim agentruntime.Claim, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	var sessionID sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT session_id FROM agent_runs
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ? AND deadline_at > ? FOR UPDATE`,
-		claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now).Scan(&sessionID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return agentruntime.ErrLeaseLost
-	}
+	sessionID, err = lockAgentClaim(ctx, tx, claim, now)
 	if err != nil {
-		return fmt.Errorf("lock completing agent run: %w", err)
+		return err
 	}
 	if !sessionID.Valid || sessionID.String == "" || message.SessionID != sessionID.String {
 		return fmt.Errorf("agent run does not own the assistant message session")
@@ -382,15 +391,16 @@ func (d *DB) CompleteWithMessage(ctx context.Context, claim agentruntime.Claim, 
 	if err := insertAgentMessageTx(ctx, tx, &message); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,
-		agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner)
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
 	if err != nil {
 		return fmt.Errorf("complete agent run: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return agentruntime.ErrLeaseLost
+	}
+	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit completed agent run: %w", err)
@@ -402,54 +412,95 @@ func (d *DB) Fail(ctx context.Context, claim agentruntime.Claim, lastError strin
 	if !claim.Valid() || strings.TrimSpace(lastError) == "" || now.IsZero() {
 		return fmt.Errorf("valid claim, error, and current time are required")
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL, last_error = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ?`,
-		agentruntime.RunFailed, lastError, now, now, claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner)
+	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin fail agent run: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := lockAgentClaim(ctx, tx, claim, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+		agentruntime.RunFailed, lastError, now, now, claim.Run.ID); err != nil {
 		return fmt.Errorf("fail agent run: %w", err)
 	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return agentruntime.ErrLeaseLost
+	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateFailed, "agent_execution", lastError, now); err != nil {
+		return err
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (d *DB) Cancel(ctx context.Context, runID string, now time.Time) error {
 	if strings.TrimSpace(runID) == "" || now.IsZero() {
 		return fmt.Errorf("run id and current time are required")
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status IN (?, ?)`,
-		agentruntime.RunCancelled, now, now, runID, agentruntime.RunPending, agentruntime.RunRunning)
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin cancel agent run: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status IN (?, ?)`, agentruntime.RunCancelled, now, now, runID, agentruntime.RunPending, agentruntime.RunRunning)
 	if err != nil {
 		return fmt.Errorf("cancel agent run: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return agentruntime.ErrNotFound
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+		error_code = 'cancelled', error_summary = 'agent run cancelled', updated_at = ?
+		WHERE kind = ? AND subject_type = ? AND subject_id = ? AND state IN (?, ?)`,
+		worklist.StateCancelled, now, worklist.KindAgent, worklist.SubjectAgentRun, runID,
+		worklist.StatePending, worklist.StateRunning); err != nil {
+		return fmt.Errorf("cancel agent work item: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (d *DB) CancelRunsForOwner(ctx context.Context, purpose, ownerKind, ownerRef string, now time.Time) (int64, error) {
 	if strings.TrimSpace(purpose) == "" || strings.TrimSpace(ownerKind) == "" || strings.TrimSpace(ownerRef) == "" || now.IsZero() {
 		return 0, fmt.Errorf("purpose, owner kind, owner ref, and current time are required")
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs
-		SET status = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE session_id IN (
-			SELECT id FROM agent_sessions WHERE purpose = ? AND owner_kind = ? AND owner_ref = ?
-		) AND status IN (?, ?)`,
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin cancel owner agent runs: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.raw.QueryContext(ctx, bind(`UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+		WHERE session_id IN (SELECT id FROM agent_sessions WHERE purpose = ? AND owner_kind = ? AND owner_ref = ?)
+		AND status IN (?, ?) RETURNING id`),
 		agentruntime.RunCancelled, now, now, purpose, ownerKind, ownerRef, agentruntime.RunPending, agentruntime.RunRunning)
 	if err != nil {
 		return 0, fmt.Errorf("cancel agent runs for owner: %w", err)
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("count cancelled agent runs: %w", err)
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, fmt.Errorf("scan cancelled agent run: %w", err)
+		}
+		ids = append(ids, id)
 	}
-	return count, nil
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate cancelled agent runs: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("close cancelled agent runs: %w", err)
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+			error_code = 'cancelled', error_summary = 'agent owner cancelled', updated_at = ?
+			WHERE kind = ? AND subject_type = ? AND subject_id = ? AND state IN (?, ?)`,
+			worklist.StateCancelled, now, worklist.KindAgent, worklist.SubjectAgentRun, id,
+			worklist.StatePending, worklist.StateRunning); err != nil {
+			return 0, fmt.Errorf("cancel owner agent work item: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit owner agent cancellation: %w", err)
+	}
+	return int64(len(ids)), nil
 }
 
 func (d *DB) ValidateLease(ctx context.Context, claim agentruntime.Claim, now time.Time) error {
@@ -457,13 +508,75 @@ func (d *DB) ValidateLease(ctx context.Context, claim agentruntime.Claim, now ti
 		return fmt.Errorf("valid claim and current time are required")
 	}
 	var valid bool
-	err := d.conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs
-		WHERE id = ? AND status = ? AND attempt = ? AND lease_owner = ? AND lease_expires_at > ? AND deadline_at > ?)`,
-		claim.Run.ID, agentruntime.RunRunning, claim.Run.Attempt, claim.LeaseOwner, now, now).Scan(&valid)
+	err := d.conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_items w
+		JOIN agent_runs r ON r.id = w.subject_id
+		WHERE w.id = ? AND w.kind = ? AND w.subject_type = ? AND w.subject_id = ?
+		AND w.state = ? AND w.attempt = ? AND w.lease_owner = ? AND w.lease_expires_at > ?
+		AND w.deadline_at > ? AND r.status = ?)`, claim.WorkItemID, worklist.KindAgent,
+		worklist.SubjectAgentRun, claim.Run.ID, worklist.StateRunning, claim.Attempt,
+		claim.LeaseOwner, now, now, agentruntime.RunRunning).Scan(&valid)
 	if err != nil {
 		return fmt.Errorf("validate agent lease: %w", err)
 	}
 	if !valid {
+		return agentruntime.ErrLeaseLost
+	}
+	return nil
+}
+
+func (d *DB) GetAgentClaim(ctx context.Context, runID string, attempt int, leaseOwner string, now time.Time) (*agentruntime.Claim, error) {
+	if strings.TrimSpace(runID) == "" || attempt < 1 || strings.TrimSpace(leaseOwner) == "" || now.IsZero() {
+		return nil, fmt.Errorf("agent claim credentials are required")
+	}
+	run, err := d.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	item, err := d.GetWorkItemForSubject(ctx, worklist.KindAgent, worklist.SubjectAgentRun, runID)
+	if errors.Is(err, worklist.ErrNotFound) {
+		return nil, agentruntime.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	claim := &agentruntime.Claim{Run: *run, WorkItemID: item.ID, Attempt: attempt, LeaseOwner: leaseOwner}
+	if item.Attempt != attempt || item.LeaseOwner != leaseOwner {
+		return nil, agentruntime.ErrLeaseLost
+	}
+	if err := d.ValidateLease(ctx, *claim, now); err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+func lockAgentClaim(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time) (sql.NullString, error) {
+	var sessionID sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT r.session_id FROM work_items w
+		JOIN agent_runs r ON r.id = w.subject_id
+		WHERE w.id = ? AND w.kind = ? AND w.subject_type = ? AND w.subject_id = ?
+		AND w.state = ? AND w.attempt = ? AND w.lease_owner = ? AND w.lease_expires_at > ?
+		AND w.deadline_at > ? AND r.status = ? FOR UPDATE OF w, r`,
+		claim.WorkItemID, worklist.KindAgent, worklist.SubjectAgentRun, claim.Run.ID,
+		worklist.StateRunning, claim.Attempt, claim.LeaseOwner, now, now, agentruntime.RunRunning).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sql.NullString{}, agentruntime.ErrLeaseLost
+	}
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("lock agent claim: %w", err)
+	}
+	return sessionID, nil
+}
+
+func completeAgentWorkItemTx(ctx context.Context, tx *Tx, claim agentruntime.Claim, state worklist.State, code, summary string, now time.Time) error {
+	result, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+		error_code = ?, error_summary = ?, updated_at = ?
+		WHERE id = ? AND kind = ? AND subject_id = ? AND state = ? AND attempt = ? AND lease_owner = ?`,
+		state, code, summary, now, claim.WorkItemID, worklist.KindAgent, claim.Run.ID,
+		worklist.StateRunning, claim.Attempt, claim.LeaseOwner)
+	if err != nil {
+		return fmt.Errorf("complete agent work item: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
 		return agentruntime.ErrLeaseLost
 	}
 	return nil
@@ -493,24 +606,31 @@ func createRunTx(ctx context.Context, tx *Tx, input agentruntime.CreateRun, now 
 		Status:        agentruntime.RunPending,
 		Model:         input.Model,
 		PromptVersion: input.PromptVersion,
-		NextAttemptAt: input.DeadlineAt,
 		DeadlineAt:    input.DeadlineAt,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	// A freshly created Run is immediately claimable, but the explicit value
-	// makes a caller-provided deadline independent from the scheduler clock.
-	run.NextAttemptAt = now
 	row := tx.QueryRowContext(ctx, `INSERT INTO agent_runs
-		(id, session_id, purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version, attempt,
-		next_attempt_at, deadline_at, created_at, updated_at)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, session_id, purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version,
+		deadline_at, created_at, updated_at)
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
 		RETURNING `+agentRunColumns,
 		run.ID, run.SessionID, run.Purpose, run.OwnerKind, run.OwnerRef, run.InputRevision, agentRunInput(run.Input), run.Status, run.Model, run.PromptVersion,
-		run.Attempt, run.NextAttemptAt, run.DeadlineAt, run.CreatedAt, run.UpdatedAt)
+		run.DeadlineAt, run.CreatedAt, run.UpdatedAt)
 	created, err := scanAgentRun(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert agent run: %w", err)
+	}
+	deadline := input.DeadlineAt.UTC()
+	if _, err := createWorkItemTx(ctx, tx, worklist.CreateItem{
+		ID:          worklist.NewID("work"),
+		Kind:        worklist.KindAgent,
+		SubjectType: worklist.SubjectAgentRun,
+		SubjectID:   run.ID,
+		NextRunAt:   now.UTC(),
+		DeadlineAt:  &deadline,
+	}, now); err != nil {
+		return nil, fmt.Errorf("enqueue agent run: %w", err)
 	}
 	return created, nil
 }
@@ -543,7 +663,7 @@ func agentMessageMetadata(value []byte) string {
 }
 
 const agentRunColumns = `id, COALESCE(session_id, ''), purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version,
-	attempt, next_attempt_at, lease_owner, lease_expires_at, deadline_at, last_error, created_at, updated_at, completed_at`
+	deadline_at, last_error, created_at, updated_at, completed_at`
 
 const agentRunSelect = `SELECT ` + agentRunColumns + ` FROM agent_runs`
 
@@ -553,15 +673,11 @@ type agentRow interface {
 
 func scanAgentRun(row agentRow) (*agentruntime.Run, error) {
 	var run agentruntime.Run
-	var leaseExpiresAt, completedAt sql.NullTime
+	var completedAt sql.NullTime
 	err := row.Scan(&run.ID, &run.SessionID, &run.Purpose, &run.OwnerKind, &run.OwnerRef, &run.InputRevision, &run.Input, &run.Status, &run.Model, &run.PromptVersion,
-		&run.Attempt, &run.NextAttemptAt, &run.LeaseOwner, &leaseExpiresAt, &run.DeadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
+		&run.DeadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
 	if err != nil {
 		return nil, err
-	}
-	if leaseExpiresAt.Valid {
-		value := leaseExpiresAt.Time.UTC()
-		run.LeaseExpiresAt = &value
 	}
 	if completedAt.Valid {
 		value := completedAt.Time.UTC()

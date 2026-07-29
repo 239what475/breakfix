@@ -90,10 +90,11 @@ func (h *Handler) internalTaxonomyClaim(ctx context.Context, runID string, crede
 	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
 		return nil, errors.New("taxonomy run lease credentials are required")
 	}
-	run, err := h.db.GetRun(ctx, runID)
+	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
+	run := &claim.Run
 	input, err := taxonomy.DecodeRunInput(run.Input)
 	if err != nil {
 		return nil, err
@@ -104,13 +105,6 @@ func (h *Handler) internalTaxonomyClaim(ctx context.Context, runID string, crede
 	}
 	if run.Purpose != purpose || run.OwnerKind != "taxonomy-work" || run.OwnerRef != input.WorkID || run.SessionID != "" {
 		return nil, errors.New("agent run is not a current taxonomy attempt")
-	}
-	if run.Attempt != credential.Attempt {
-		return nil, agentruntime.ErrLeaseLost
-	}
-	claim := &agentruntime.Claim{Run: *run, LeaseOwner: credential.LeaseOwner}
-	if err := h.db.ValidateLease(ctx, *claim, time.Now().UTC()); err != nil {
-		return nil, err
 	}
 	return claim, nil
 }

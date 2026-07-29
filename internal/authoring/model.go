@@ -66,11 +66,11 @@ type VerifiedChallenge struct {
 }
 
 type VerifiedCheckpoint struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Hint        string   `json:"hint,omitempty"`
-	DependsOn   []string `json:"depends_on,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Hint        string `json:"hint,omitempty"`
+	Node        string `json:"node,omitempty"`
 }
 
 func (p Plan) Clone() Plan {
@@ -91,8 +91,8 @@ func (p Plan) ValidateForGeneration() error {
 	default:
 		return errors.New("难度必须是 easy、medium 或 hard")
 	}
-	if runtime := challenge.NormalizeRuntime(metadata.Runtime); runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster {
-		return errors.New("运行时必须是 container 或 vcluster")
+	if runtime := challenge.NormalizeRuntime(metadata.Runtime); runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s {
+		return errors.New("运行时必须是 node 或 k8s")
 	}
 	if strings.TrimSpace(p.Overview) == "" {
 		return errors.New("题目概览不能为空")

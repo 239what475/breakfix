@@ -93,19 +93,13 @@ func (h *Handler) internalAuthoringClaim(ctx context.Context, runID string, cred
 	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
 		return nil, errors.New("authoring run lease credentials are required")
 	}
-	run, err := h.db.GetRun(ctx, runID)
+	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
+	run := &claim.Run
 	if run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || strings.TrimSpace(run.OwnerRef) == "" || strings.TrimSpace(run.SessionID) == "" {
 		return nil, errors.New("agent run is not a current authoring attempt")
-	}
-	if run.Attempt != credential.Attempt {
-		return nil, agentruntime.ErrLeaseLost
-	}
-	claim := &agentruntime.Claim{Run: *run, LeaseOwner: credential.LeaseOwner}
-	if err := h.db.ValidateLease(ctx, *claim, time.Now().UTC()); err != nil {
-		return nil, err
 	}
 	return claim, nil
 }

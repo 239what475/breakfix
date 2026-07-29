@@ -81,12 +81,9 @@ func ValidateCandidateDir(chalDir string) (*challenge.Entry, error) {
 			errs = append(errs, fmt.Sprintf("challenge.yaml 不得包含平台托管字段 %q", field))
 		}
 	}
-	if scalarString(spec["type"]) != challenge.TypeScript {
-		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须明确为 %s", challenge.TypeScript))
-	}
 	runtime := scalarString(spec["runtime"])
-	if runtime != challenge.RuntimeContainer && runtime != challenge.RuntimeVCluster {
-		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须明确为 container/vcluster，当前为 %q", runtime))
+	if runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s {
+		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须明确为 node 或 k8s，当前为 %q", runtime))
 	}
 	if scalarString(spec["title"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 title")
@@ -152,23 +149,13 @@ func candidateFiles(root string) ([]CandidateFile, error) {
 }
 
 func validateCandidateSemantics(chalDir string, entry *challenge.Entry) error {
-	dockerfileData, err := os.ReadFile(filepath.Join(chalDir, "Dockerfile"))
-	if err != nil {
-		return fmt.Errorf("read Dockerfile: %w", err)
-	}
-
-	checkpointPath := filepath.Join(chalDir, "checks", "checkpoints.sh")
-	checkpointData, err := os.ReadFile(checkpointPath)
-	if err != nil {
-		return fmt.Errorf("read checks/checkpoints.sh: %w", err)
-	}
-	checkpointText := string(checkpointData)
-
 	var errs []string
-	if err := validateDockerfileNoBuildNetwork(string(dockerfileData)); err != nil {
-		errs = append(errs, err.Error())
-	}
-	if challenge.NormalizeRuntime(entry.Runtime) == challenge.RuntimeVCluster {
+	if entry.Runtime == challenge.RuntimeK8s {
+		checkpointData, err := os.ReadFile(filepath.Join(chalDir, "k8s", "checks.sh"))
+		if err != nil {
+			return fmt.Errorf("read k8s/checks.sh: %w", err)
+		}
+		checkpointText := string(checkpointData)
 		if err := validateKubectlPodReadinessPattern(checkpointText); err != nil {
 			errs = append(errs, err.Error())
 		}
@@ -181,6 +168,22 @@ func validateCandidateSemantics(chalDir string, entry *challenge.Entry) error {
 		if err := validateVClusterCheckpointNoNaivePodGrepFilter(checkpointText); err != nil {
 			errs = append(errs, err.Error())
 		}
+	} else {
+		for _, node := range entry.Nodes {
+			for _, script := range []string{"generate.sh", "answer.sh", "checks.sh"} {
+				path := filepath.Join(chalDir, "nodes", node.Name, script)
+				data, err := os.ReadFile(path)
+				if os.IsNotExist(err) && script == "checks.sh" {
+					continue
+				}
+				if err != nil {
+					return fmt.Errorf("read nodes/%s/%s: %w", node.Name, script, err)
+				}
+				if err := validateNodeScriptBoundary(filepath.ToSlash(filepath.Join("nodes", node.Name, script)), string(data)); err != nil {
+					errs = append(errs, err.Error())
+				}
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
@@ -188,14 +191,11 @@ func validateCandidateSemantics(chalDir string, entry *challenge.Entry) error {
 	return nil
 }
 
-func validateDockerfileNoBuildNetwork(dockerfile string) error {
-	normalized := strings.ToLower(dockerfile)
-	for _, pattern := range []string{
-		"apt-get", "apt install", "apk add", "yum install", "dnf install",
-		"pip ", "npm install", "go install", "curl", "wget", "git clone", "add http",
-	} {
-		if strings.Contains(normalized, pattern) {
-			return fmt.Errorf("Dockerfile 不得在构建期使用 %q 联网安装或下载内容；VerifyTask 构建没有外网。请只使用基础镜像已有工具，并把题目文件随 artifact 提供", pattern)
+func validateNodeScriptBoundary(path, script string) error {
+	normalized := strings.ToLower(script)
+	for _, forbidden := range []string{"kubectl", "kubeconfig", "vcluster", "incus "} {
+		if strings.Contains(normalized, forbidden) {
+			return fmt.Errorf("%s 不得使用 Kubernetes、vcluster 或 Incus API（检测到 %q）", path, forbidden)
 		}
 	}
 	return nil
@@ -212,7 +212,7 @@ func validateKubectlPodReadinessPattern(verifyText string) error {
 	}
 	for _, pattern := range badPatterns {
 		if strings.Contains(normalized, strings.ReplaceAll(pattern, " ", "")) {
-			return fmt.Errorf("checks/checkpoints.sh 对 `kubectl get pods --no-headers` 的 READY/STATUS 列顺序判断错误：检测到 %q，这会把 `1/1   Running` 误判为失败；应按 `1/1` 在前、`Running` 在后设计匹配", pattern)
+			return fmt.Errorf("k8s/checks.sh 对 `kubectl get pods --no-headers` 的 READY/STATUS 列顺序判断错误：检测到 %q，这会把 `1/1   Running` 误判为失败；应按 `1/1` 在前、`Running` 在后设计匹配", pattern)
 		}
 	}
 	return nil
@@ -228,7 +228,7 @@ func validateVClusterCheckpointNoEphemeralProbePods(checkpointText string) error
 	}
 	for _, snippet := range badSnippets {
 		if strings.Contains(normalized, snippet) {
-			return fmt.Errorf("runtime=vcluster 的 checks/checkpoints.sh 不应依赖 `kubectl run` 拉外部探测镜像或临时 Pod；这会引入镜像可用性和时序不稳定，请改用现有工作负载、Service、endpoints 或 port-forward 等平台内可闭环的验证方式")
+			return fmt.Errorf("runtime=k8s 的 k8s/checks.sh 不应依赖 `kubectl run` 拉外部探测镜像或临时 Pod；这会引入镜像可用性和时序不稳定，请改用现有工作负载、Service、endpoints 或 port-forward 等平台内可闭环的验证方式")
 		}
 	}
 	return nil
@@ -252,7 +252,7 @@ func validateVClusterCheckpointNoNaivePodHealthLoop(checkpointText string) error
 	if strings.Contains(normalized, "deletiontimestamp") || strings.Contains(normalized, "ownerreferences") || strings.Contains(normalized, "rollout status") {
 		return nil
 	}
-	return fmt.Errorf("runtime=vcluster 的 checks/checkpoints.sh 不应通过遍历标签下的所有 Pod 并硬判 `Running 1/1` 来验收；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或只检查最终目标 Pod 集，并显式忽略 deletionTimestamp 不为空的旧 Pod")
+	return fmt.Errorf("runtime=k8s 的 k8s/checks.sh 不应通过遍历标签下的所有 Pod 并硬判 `Running 1/1` 来验收；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或只检查最终目标 Pod 集，并显式忽略 deletionTimestamp 不为空的旧 Pod")
 }
 
 func validateVClusterCheckpointNoNaivePodGrepFilter(checkpointText string) error {
@@ -269,7 +269,7 @@ func validateVClusterCheckpointNoNaivePodGrepFilter(checkpointText string) error
 	if strings.Contains(normalized, "deletiontimestamp") || strings.Contains(normalized, "ownerreferences") || strings.Contains(normalized, "rollout status") {
 		return nil
 	}
-	return fmt.Errorf("runtime=vcluster 的 checks/checkpoints.sh 不应通过 `kubectl get pods ... | grep -v ... 1/1 ... Running` 这类全量 Pod 过滤方式直接判失败；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或显式过滤 deletionTimestamp 不为空的旧 Pod")
+	return fmt.Errorf("runtime=k8s 的 k8s/checks.sh 不应通过 `kubectl get pods ... | grep -v ... 1/1 ... Running` 这类全量 Pod 过滤方式直接判失败；滚动更新期间旧 Pod 可能短暂处于 Terminating。请改为基于 workload 的 ready/available 条件，或显式过滤 deletionTimestamp 不为空的旧 Pod")
 }
 
 func scalarString(v any) string {

@@ -230,19 +230,13 @@ func (h *Handler) generatorWorkspaceForClaim(ctx context.Context, runID string, 
 	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
 		return nil, nil, errors.New("generator run lease credentials are required")
 	}
-	run, err := h.db.GetRun(ctx, runID)
+	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
 	if err != nil {
 		return nil, nil, err
 	}
+	run := &claim.Run
 	if run.Purpose != generator.RuntimePurpose || run.OwnerKind != "authoring-session" || strings.TrimSpace(run.OwnerRef) == "" || strings.TrimSpace(run.SessionID) == "" {
 		return nil, nil, errors.New("agent run is not a current generator attempt")
-	}
-	if run.Attempt != credential.Attempt {
-		return nil, nil, agentruntime.ErrLeaseLost
-	}
-	claim := &agentruntime.Claim{Run: *run, LeaseOwner: credential.LeaseOwner}
-	if err := h.db.ValidateLease(ctx, *claim, time.Now().UTC()); err != nil {
-		return nil, nil, err
 	}
 	generatorRun, err := h.db.GetGeneratorRun(ctx, run.ID)
 	if err != nil {
