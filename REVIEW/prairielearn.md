@@ -37,7 +37,7 @@ attempt；不同点是没有用户提交和随机 variant。Builder、Publisher�
   编辑/重新发布补文档和测试：新 revision 不改变旧 attempt；旧 revision 的 checkpoint
   通过事件仍可用于历史展示；Catalog 只显示 current mapping 精确匹配的新 revision。
 - **作者验收结果结构化**：单题真实验收输出应按 build、runtime init、answer、每个
-  checkpoint 组织，既给作者看，也可直接作为 VerifyTask report 的稳定 UI 投影。不得把
+  checkpoint 组织，既给作者看，也可直接作为 CandidateRevision report 的稳定 UI 投影。不得把
   verifier 的原始日志当作唯一反馈。
 
 ### 题库具备数据后再做
@@ -52,7 +52,7 @@ attempt；不同点是没有用户提交和随机 variant。Builder、Publisher�
 - 不采用用户提交驱动的 grading job、分数或 partial credit。每个公开 checkpoint 是完成
   条件，不是可通过反复提交刷出的分数。
 - 不复制 `gradedFiles` 抽取模型。Breakfix 验证的是整个真实环境的状态，白名单文件会漏掉
-  service、process、network 和 vcluster 状态。
+  service、process、network 和 k8s 状态。
 - 不因参考其 workspace 而将用户环境持久化为长期目录；Environment 的生命周期由 CRD
   和清理策略决定。
 

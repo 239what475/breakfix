@@ -302,6 +302,8 @@ spec:
                 type: object
               runtime:
                 properties:
+                  acl:
+                    type: string
                   imageFingerprint:
                     type: string
                   network:

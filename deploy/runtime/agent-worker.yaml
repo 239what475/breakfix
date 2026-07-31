@@ -4,6 +4,11 @@ metadata:
   name: breakfix-agent-worker
 spec:
   replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: breakfix-agent-worker
@@ -19,21 +24,19 @@ spec:
           image: ghcr.io/breakfix/breakfix-agent-worker:dev
           imagePullPolicy: IfNotPresent
           args: ["-config", "/etc/breakfix/config.yaml"]
+          ports:
+            - name: health
+              containerPort: 8081
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: BREAKFIX_AGENT_DATABASE_URL
+            - name: BREAKFIX_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-runtime
-                  key: agent_database_url
-            - name: BREAKFIX_INTERNAL_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: breakfix-runtime
-                  key: internal_api_key
+                  name: breakfix-agent-worker-identity
+                  key: worker_api_key
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -45,6 +48,24 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

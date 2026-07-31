@@ -17,9 +17,9 @@
 
 ## 与 Breakfix 的对照
 
-Breakfix 的发布目录已经与此一样可读，但它的资产更完整：Dockerfile、一次性
-`generate.sh`、`answer.sh`、`checks/checkpoints.sh`、题面、解答和按 checkpoint 的提示。
-Breakfix 的 `challenge.yaml` 有 opaque ID 与 revision 语义，且检查点必须覆盖全部声明 ID。
+Breakfix 的发布目录已经与此一样可读，但它的资产更完整：Node 题按逻辑节点保存
+`generate.sh`、`answer.sh`、`checks.sh`，K8s 题在 `k8s/` 下保存同类运行时初始化资产，另有题面、
+解答和按 checkpoint 的提示。Breakfix 的 `challenge.yaml` 有 opaque ID 与 revision 语义，且检查点必须覆盖全部声明 ID。
 这比 `index.json + 可选 verify.sh` 更适合长期可验证题库。
 
 ## 可以吸收
@@ -36,7 +36,7 @@ Breakfix 的 `challenge.yaml` 有 opaque ID 与 revision 语义，且检查点�
 
 ### 题库具备数据后再做
 
-- 为 `runtime: vcluster` 题提供受控的“打开文件/打开服务”展示动作。动作只产生 UI 导航
+- 为 `runtime: k8s` 题提供受控的“打开文件/打开服务”展示动作。动作只产生 UI 导航
   或安全 URL，不执行用户命令，也不增加第二个完成状态。
 
 ## 不采用

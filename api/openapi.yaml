@@ -98,7 +98,7 @@ paths:
           description: Filter attempts by environment runtime
           schema:
             type: string
-            enum: [container, vcluster]
+            enum: [node, k8s]
       responses:
         "200":
           description: One page of learning history
@@ -375,6 +375,12 @@ paths:
           schema:
             type: string
             pattern: "^[a-z][a-z0-9-]{0,31}$"
+        - name: node
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9-]{0,31}$"
       responses:
         "200":
           description: Terminal window closed
@@ -579,7 +585,7 @@ components:
           type: string
         runtime:
           type: string
-          enum: [container, vcluster]
+          enum: [node, k8s]
         difficulty:
           type: string
 
@@ -642,7 +648,7 @@ components:
           $ref: "#/components/schemas/MySpaceChallenge"
         runtime:
           type: string
-          enum: [container, vcluster]
+          enum: [node, k8s]
         phase:
           type: string
         checkpoint_progress:
@@ -698,7 +704,7 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, VerificationInfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, InfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
         updated_at:
           type: string
           format: date-time
@@ -763,17 +769,15 @@ components:
 
     ChallengeSummary:
       type: object
-      required: [id, title, type, runtime, difficulty, tags, primary_outcome, description, published_at]
+      required: [id, title, runtime, difficulty, tags, primary_outcome, description, published_at]
       properties:
         id:
           type: string
         title:
           type: string
-        type:
-          type: string
         runtime:
           type: string
-          enum: [container, vcluster]
+          enum: [node, k8s]
         difficulty:
           type: string
           enum: [easy, medium, hard]
@@ -881,10 +885,17 @@ components:
           type: string
         hint:
           type: string
-        depends_on:
-          type: array
-          items:
-            type: string
+        node:
+          type: string
+
+    ChallengeNode:
+      type: object
+      required: [name, title]
+      properties:
+        name:
+          type: string
+        title:
+          type: string
 
     CheckpointResult:
       type: object
@@ -917,12 +928,19 @@ components:
 
     ChallengeContent:
       type: object
-      required: [id, title, problem, solution, hints, checkpoints, taxonomy]
+      required: [id, title, runtime, nodes, problem, solution, hints, checkpoints, taxonomy]
       properties:
         id:
           type: string
         title:
           type: string
+        runtime:
+          type: string
+          enum: [node, k8s]
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChallengeNode"
         problem:
           type: string
         solution:
@@ -1015,18 +1033,35 @@ components:
         updated_at:
           type: string
 
-    AssistantMessageRequest:
+    AssistantTerminalContext:
       type: object
-      required: [content, current_window, open_windows]
+      required: [windows]
       properties:
-        content:
+        node:
           type: string
-        current_window:
-          type: string
-        open_windows:
+          pattern: "^[a-z][a-z0-9-]{0,31}$"
+        windows:
           type: array
           items:
             type: string
+            pattern: "^[a-z][a-z0-9-]{0,31}$"
+
+    AssistantMessageRequest:
+      type: object
+      required: [content, current_window, terminals]
+      properties:
+        content:
+          type: string
+        current_node:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,31}$"
+        current_window:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,31}$"
+        terminals:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantTerminalContext"
 
     StartResponse:
       type: object
@@ -1064,6 +1099,9 @@ components:
         window:
           type: string
           pattern: "^[a-z][a-z0-9-]{0,31}$"
+        node:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,31}$"
 
     TerminalTicketResponse:
       type: object
@@ -1089,7 +1127,7 @@ components:
           type: string
         runtime:
           type: string
-          enum: [container, vcluster]
+          enum: [node, k8s]
 
     AuthoringCheckpoint:
       type: object
@@ -1129,10 +1167,8 @@ components:
           type: string
         hint:
           type: string
-        depends_on:
-          type: array
-          items:
-            type: string
+        node:
+          type: string
 
     VerifiedChallenge:
       type: object
@@ -1145,59 +1181,61 @@ components:
           items:
             $ref: "#/components/schemas/VerifiedCheckpoint"
 
-    AuthoringArtifact:
+    AuthoringCandidate:
       type: object
-      required: [submission_id, directory, generator_run_id]
+      required: [id, generator_run_id, archive_sha256, state]
       properties:
-        submission_id:
-          type: string
-        directory:
+        id:
           type: string
         generator_run_id:
           type: string
-
-    AuthoringVerification:
-      type: object
-      required: [task_id, phase, message]
-      properties:
-        task_id:
+        archive_sha256:
           type: string
-        phase:
+        state:
           type: string
-        message:
-          type: string
-        report:
-          $ref: "#/components/schemas/AuthoringVerificationReport"
-        challenge_id:
-          type: string
+          enum: [Building, PublishingArtifact, Verifying, Verified, PublishingChallenge, Published, ArtifactFailed, InfrastructureFailed, Cancelled, Superseded]
 
     AuthoringVerificationReport:
       type: object
-      required: [build_passed, answer_passed, checkpoints_passed]
+      required: [passed, answers, checkpoints, summary]
       properties:
-        class:
-          type: string
-          enum: [artifact, infrastructure]
-        build_passed:
-          type: boolean
-        answer_passed:
-          type: boolean
-        checkpoints_passed:
+        passed:
           type: boolean
         summary:
           type: string
-        issues:
+        answers:
           type: array
           items:
-            $ref: "#/components/schemas/AuthoringVerificationIssue"
+            $ref: "#/components/schemas/AuthoringExecutionResult"
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringCheckpointResult"
 
-    AuthoringVerificationIssue:
+    AuthoringExecutionResult:
       type: object
-      required: [code, message]
+      required: [location, exit_code]
       properties:
-        code:
+        location:
           type: string
-        message:
+        exit_code:
+          type: integer
+        stdout:
+          type: string
+        stderr:
+          type: string
+
+    AuthoringCheckpointResult:
+      type: object
+      required: [id, passed, summary]
+      properties:
+        id:
+          type: string
+        passed:
+          type: boolean
+        summary:
+          type: string
+        details:
           type: string
 
     AuthoringChange:
@@ -1265,7 +1303,7 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, VerificationInfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, InfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
         authoring_turn_active:
           type: boolean
           description: Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
@@ -1275,21 +1313,24 @@ components:
           type: integer
         generator_run_id:
           type: string
-        verify_task_id:
-          type: string
         publish_challenge_id:
+          type: string
+        pipeline_state:
+          type: string
+          enum: [Building, PublishingArtifact, Verifying, Verified, PublishingChallenge, Published, ArtifactFailed, InfrastructureFailed, Cancelled, Superseded]
+        last_error:
           type: string
         updated_at:
           type: string
           format: date-time
         intent:
           $ref: "#/components/schemas/AuthoringPlan"
-        artifact:
-          $ref: "#/components/schemas/AuthoringArtifact"
+        candidate:
+          $ref: "#/components/schemas/AuthoringCandidate"
         verified:
           $ref: "#/components/schemas/VerifiedChallenge"
         verification:
-          $ref: "#/components/schemas/AuthoringVerification"
+          $ref: "#/components/schemas/AuthoringVerificationReport"
         messages:
           type: array
           items:

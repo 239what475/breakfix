@@ -9,9 +9,7 @@ import (
 	"strings"
 )
 
-const CheckpointCommand = "/checks/checkpoints.sh"
-
-// CheckResult is one current-state result emitted by checks/checkpoints.sh.
+// CheckResult is one current-state result emitted by a runtime checks.sh.
 type CheckResult struct {
 	ID      string `json:"id"`
 	Passed  bool   `json:"passed"`

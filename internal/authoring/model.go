@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 )
 
 var (
@@ -23,14 +22,14 @@ var (
 type SessionState string
 
 const (
-	StateDraftConversation                SessionState = "DraftConversation"
-	StateIntentReview                     SessionState = "IntentReview"
-	StateGeneratingAndVerifying           SessionState = "GeneratingAndVerifying"
-	StateVerificationInfrastructureFailed SessionState = "VerificationInfrastructureFailed"
-	StateAwaitingVerifiedReview           SessionState = "AwaitingVerifiedReview"
-	StateRevisingAndVerifying             SessionState = "RevisingAndVerifying"
-	StatePublishing                       SessionState = "Publishing"
-	StatePublished                        SessionState = "Published"
+	StateDraftConversation      SessionState = "DraftConversation"
+	StateIntentReview           SessionState = "IntentReview"
+	StateGeneratingAndVerifying SessionState = "GeneratingAndVerifying"
+	StateInfrastructureFailed   SessionState = "InfrastructureFailed"
+	StateAwaitingVerifiedReview SessionState = "AwaitingVerifiedReview"
+	StateRevisingAndVerifying   SessionState = "RevisingAndVerifying"
+	StatePublishing             SessionState = "Publishing"
+	StatePublished              SessionState = "Published"
 )
 
 type Metadata struct {
@@ -59,7 +58,7 @@ type Plan struct {
 // VerifiedChallenge is a read-only projection of the actual, verified
 // challenge.yaml. It is intentionally distinct from Plan: the latter is the
 // author's natural-language intent, while this value is what the generator
-// really produced and VerifyTask exercised.
+// really produced and the candidate pipeline verified.
 type VerifiedChallenge struct {
 	Metadata    Metadata             `json:"metadata"`
 	Checkpoints []VerifiedCheckpoint `json:"checkpoints"`
@@ -124,110 +123,11 @@ func (p Plan) SortedCheckpoints() []Checkpoint {
 	return checkpoints
 }
 
-// Artifact is immutable generator output that has already passed its linked
-// VerifyTask. No artifact is author-visible before that point.
-type Artifact struct {
-	SubmissionID   string `json:"submission_id"`
-	Directory      string `json:"directory"`
-	GeneratorRunID string `json:"generator_run_id"`
-}
-
-// VerificationIssue is an internal diagnosis returned by the real VerifyTask.
-// It deliberately contains no raw Pod logs, credentials, or other runtime data.
-type VerificationIssue struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type VerificationFailureClass string
-
-const (
-	VerificationFailureArtifact       VerificationFailureClass = "artifact"
-	VerificationFailureInfrastructure VerificationFailureClass = "infrastructure"
-)
-
-// VerificationReport carries the same result dimensions as VerifyTaskStatus,
-// but uses the public authoring API's snake_case representation.
-type VerificationReport struct {
-	Class             VerificationFailureClass `json:"class,omitempty"`
-	BuildPassed       bool                     `json:"build_passed"`
-	AnswerPassed      bool                     `json:"answer_passed"`
-	CheckpointsPassed bool                     `json:"checkpoints_passed"`
-	Summary           string                   `json:"summary,omitempty"`
-	Issues            []VerificationIssue      `json:"issues,omitempty"`
-}
-
-// FailureFeedback is the bounded, actionable context given to the next author
-// or generator turn after real verification fails.
-func (r *VerificationReport) FailureFeedback() string {
-	if r == nil {
-		return ""
-	}
-
-	lines := []string{
-		"真实验证未通过。",
-		fmt.Sprintf("- 镜像构建：%s", verificationResult(r.BuildPassed)),
-		fmt.Sprintf("- 标准解答：%s", verificationResult(r.AnswerPassed)),
-		fmt.Sprintf("- 检查点：%s", verificationResult(r.CheckpointsPassed)),
-	}
-	if summary := strings.TrimSpace(r.Summary); summary != "" {
-		lines = append(lines, "摘要："+summary)
-	}
-	for _, issue := range r.Issues {
-		code := strings.TrimSpace(issue.Code)
-		message := strings.TrimSpace(issue.Message)
-		if code == "" && message == "" {
-			continue
-		}
-		if code == "" {
-			lines = append(lines, "- "+message)
-			continue
-		}
-		if message == "" {
-			lines = append(lines, "- ["+code+"]")
-			continue
-		}
-		lines = append(lines, "- ["+code+"] "+message)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func verificationResult(passed bool) string {
-	if passed {
-		return "通过"
-	}
-	return "未通过"
-}
-
-type Verification struct {
-	TaskID      string              `json:"task_id"`
-	Phase       string              `json:"phase"`
-	Message     string              `json:"message"`
-	Report      *VerificationReport `json:"report,omitempty"`
-	ChallengeID string              `json:"challenge_id,omitempty"`
-}
-
-func (v Verification) Failed() bool {
-	return v.Phase == string(breakfixv1.VerifyTaskFailed)
-}
-
-func (v Verification) Terminal() bool {
-	return v.Phase == string(breakfixv1.VerifyTaskFailed) || v.Phase == string(breakfixv1.VerifyTaskSucceeded)
-}
-
-func (v Verification) ReportSummary() string {
-	if v.Report != nil {
-		return v.Report.Summary
-	}
-	return v.Message
-}
-
 type Revision struct {
-	Number       int64         `json:"number"`
-	Plan         Plan          `json:"plan"`
-	Artifact     *Artifact     `json:"artifact,omitempty"`
-	Verification *Verification `json:"verification,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
+	Number              int64     `json:"number"`
+	Plan                Plan      `json:"plan"`
+	CandidateRevisionID string    `json:"candidate_revision_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type Change struct {
@@ -253,16 +153,16 @@ type Session struct {
 	// and repair lineage. It is intentionally distinct from the authoring
 	// conversation Session: a confirmed revision gets a Generator Session, and
 	// an author-requested revision after verification starts a new lineage.
-	GeneratorSessionID string       `json:"-"`
-	GeneratorRunID     string       `json:"generator_run_id,omitempty"`
-	State              SessionState `json:"state"`
-	CurrentRevision    int64        `json:"current_revision"`
-	VisibleRevision    int64        `json:"visible_revision"`
-	VerifyTaskID       string       `json:"verify_task_id,omitempty"`
-	PublishChallengeID string       `json:"publish_challenge_id,omitempty"`
-	LastError          string       `json:"last_error,omitempty"`
-	CreatedAt          time.Time    `json:"created_at"`
-	UpdatedAt          time.Time    `json:"updated_at"`
+	GeneratorSessionID  string       `json:"-"`
+	GeneratorRunID      string       `json:"generator_run_id,omitempty"`
+	CandidateRevisionID string       `json:"candidate_revision_id,omitempty"`
+	State               SessionState `json:"state"`
+	CurrentRevision     int64        `json:"current_revision"`
+	VisibleRevision     int64        `json:"visible_revision"`
+	PublishChallengeID  string       `json:"publish_challenge_id,omitempty"`
+	LastError           string       `json:"last_error,omitempty"`
+	CreatedAt           time.Time    `json:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at"`
 }
 
 // Stage is a private, attempt-resumable Plan draft. It becomes a public

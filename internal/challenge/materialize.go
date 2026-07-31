@@ -4,12 +4,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
 
 var commonRequiredFiles = []string{"challenge.yaml", "problem.md", "solution.md"}
+
+var (
+	nodeImageFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	k8sImageDigestPattern       = regexp.MustCompile(`^[^@[:space:]]+@sha256:[0-9a-f]{64}$`)
+)
 
 const MaxChallengeNodes = 4
 
@@ -94,6 +100,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	default:
 		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
 	}
+	if err := validatePublishedImage(challenge); err != nil {
+		return nil, err
+	}
 	switch strings.TrimSpace(challenge.Difficulty) {
 	case "easy", "medium", "hard":
 	default:
@@ -111,8 +120,24 @@ func ValidateDir(dir string) (*Entry, error) {
 	return challenge, nil
 }
 
-func ValidateSubmissionDir(dir string) (*Entry, error) {
-	challenge, err := LoadSubmissionDir(dir)
+func validatePublishedImage(challenge *Entry) error {
+	switch challenge.Runtime {
+	case RuntimeNode:
+		if !nodeImageFingerprintPattern.MatchString(challenge.Image) {
+			return fmt.Errorf("node challenge image must be a full immutable Incus fingerprint")
+		}
+	case RuntimeK8s:
+		if !k8sImageDigestPattern.MatchString(challenge.Image) {
+			return fmt.Errorf("k8s challenge image must be an immutable OCI digest reference")
+		}
+	}
+	return nil
+}
+
+// ValidateCandidateDir validates an unpublished CandidateRevision directory.
+// It deliberately accepts no platform-owned publication identity or image.
+func ValidateCandidateDir(dir string) (*Entry, error) {
+	challenge, err := LoadCandidateDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -195,14 +220,6 @@ func validateChallengeFiles(challenge *Entry, dir string) error {
 			return err
 		}
 	}
-	for _, legacy := range []string{"Dockerfile", "generate.sh", "answer.sh", "checks"} {
-		if _, err := os.Lstat(filepath.Join(dir, legacy)); err == nil {
-			return fmt.Errorf("legacy challenge asset %s is not allowed", legacy)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect legacy challenge asset %s: %w", legacy, err)
-		}
-	}
-
 	switch challenge.Runtime {
 	case RuntimeNode:
 		if len(challenge.Nodes) == 0 {

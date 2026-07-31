@@ -1,37 +1,54 @@
 # 题目内容格式
 
-已发布题目是 `data_dir/challenges/<source_slug>/` 下的目录。题库不存入数据库，也不是 Kubernetes CRD；Server 读取该目录及当前 taxonomy snapshot 构造公开 Catalog。目录、校验和发布行为以 [`internal/challenge/`](../../internal/challenge/) 为准。
+已发布题目是 `data_dir/challenges/<source_slug>/` 下的目录。题库不存入数据库，也不是 Kubernetes CRD；Server 从该目录和当前 taxonomy snapshot 构造 Catalog。目录、校验和发布行为以 [`internal/challenge/`](../../internal/challenge/) 为准。
 
 ## 已发布目录
 
-每道发布题至少包含：
+所有题目都包含：
 
 ```text
 challenge.yaml
-Dockerfile
-generate.sh
 problem.md
 solution.md
 hints/<checkpoint-id>.md
-checks/checkpoints.sh
-answer.sh
 ```
 
-`challenge.yaml` 记录用户可见元数据、runtime、检查点，以及平台发布时写入的 `id`、`source_slug`、`image`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是仅供仓库阅读的目录名，必须与发布目录同名，不能作为查找键。发布目录必须有这些合法发布字段、非空标题/描述、`easy|medium|hard` 难度、`container|vcluster` runtime 和至少一个检查点。每个检查点都有唯一 ID、标题和描述；提示路径必须留在题目目录内，依赖只能引用其他检查点。
+运行时资产按 runtime 分开，不能混用：
 
-Generator 在验证前产出的 artifact 使用相同文件布局，但平台管理的 `id`、`source_slug`、`image` 与 `published_at` 不属于 generator 输入。Server 只在 VerifyTask 成功且作者发布时写入这些字段；它不会修改已验证 artifact 本身。
+```text
+# runtime: node
+nodes/<node>/generate.sh
+nodes/<node>/answer.sh
+nodes/<node>/checks.sh       # 仅有 checkpoint 的节点需要
 
-题目通过 VerifyTask 和作者发布后仍不会立刻出现在公开 Catalog。Server 会为该 artifact revision 创建 taxonomy Mapping WorkItem；Mapper、Curriculum Reviewer、SRE Reviewer 和无模型 Publisher 发布一个不可变 taxonomy snapshot 后，只有 ID、title、artifact revision 都精确匹配的 Challenge mapping 才使该题公开。Tag、Skill、entry skill 与 outcome 不属于 `challenge.yaml`，而属于 `data_dir/taxonomy/current`。
+# runtime: k8s
+k8s/generate.sh
+k8s/answer.sh
+k8s/checks.sh
+```
+
+`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`source_slug`、`image`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
+
+发布目录必须有合法的发布字段、非空标题/描述、`easy|medium|hard` 难度和至少一个 checkpoint。`runtime: node` 的 `image` 必须是完整的 64 位小写 Incus fingerprint；`runtime: k8s` 的 `image` 必须是完整的 `repository@sha256:<64 位小写摘要>` OCI 引用。Node manifest 还必须声明唯一逻辑节点；每个 checkpoint 必须声明执行节点，节点名称不能泄漏 Provider 实现。K8s checkpoint 没有节点字段。checkpoint 数组顺序只决定 UI 展示，不表达依赖或必须通过的先后顺序。
+
+Generator 产出的 CandidateRevision 使用相同布局，但不能生成平台托管的 `id`、`source_slug`、`image` 或 `published_at`。Server 只在验证成功、作者确认 ChallengePublish 后写入这些字段；它不会改写已验证 candidate archive。
+
+发布后，Server 为该 revision 创建 taxonomy mapping。Skill、Tag、entry skill、outcome 和关系不属于 `challenge.yaml`，而位于 `data_dir/taxonomy/current`；只有 exact mapping 发布后题目才进入公开 Catalog。
 
 ## 运行时初始化
 
-`generate.sh` 被打包进镜像，在 workspace Pod 首次启动时由基础镜像入口执行一次。它负责构造故障初始状态；不能依赖每次用户连接终端时再次执行。初始化完成后，用户进入常规 shell。
+所有题目在真实运行时初始化，而不是构建时。平台总是以 `/bin/bash <script>` 执行脚本，因此作者不应依赖可执行位或 shebang。
 
-`Dockerfile` 负责复制题目资产和声明基础镜像。生成工作流会拒绝构建期联网安装或下载，因为真实 VerifyTask 构建不假定外网可用。运行时差异只通过 `runtime` 和对应基础镜像表达，不通过另一个题目格式分叉。
+- Node 基础镜像只含 Ubuntu、systemd、tmux、APT 和常用诊断工具。每个 Node instance 首次启动时运行自己的 `nodes/<node>/generate.sh`，成功后写 sentinel。
+- K8s 管理终端首次启动时运行 `k8s/generate.sh`。
+
+`generate.sh` 可以安装题目专属软件并建立错误初态，例如 Node 题安装 Nginx 后创建错误 systemd 配置，或 K8s 题创建初始 workload。它不参与 Builder，也不能依赖构建期联网。基础镜像、runtime-init unit 和 entrypoint 由平台提供，不属于题目资产。
+
+`answer.sh` 是真实验证的参考解法。Node 的全部节点答案并行执行；K8s 在管理终端执行唯一答案。学习环境永远不会自动执行答案。
 
 ## 检查点协议
 
-`checks/checkpoints.sh --json` 是题目完成的唯一可执行判断。它返回 JSON：
+每个执行位置的 `checks.sh` stdout 只输出 JSON：
 
 ```json
 {
@@ -41,12 +58,12 @@ Generator 在验证前产出的 artifact 使用相同文件布局，但平台管
 }
 ```
 
-脚本必须以成功退出码返回，并且恰好报告 manifest 声明的每个 checkpoint ID 一次。`summary` 必须非空；`details` 用于诊断。Controller 将同一份协议的结果写入 Environment status，所有检查点通过即自动完成。
+脚本必须恰好报告该执行位置 manifest 声明的每个 checkpoint ID 一次。未通过是有效的检查结果：输出 `passed: false` 且退出 0；脚本、解析或协议错误才以非零退出。`summary` 必须非空，`details` 用于诊断。
 
-检查点验证环境的最终、可观察状态，不应规定用户必须输入的命令、固定编辑文件路径或工具链。检查器也不应修改环境；否则自动轮询会改变题目本身。
+Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 在验证环境的 answer 后单次执行它。检查器必须只观察环境，不能修改环境或依赖用户必须输入的命令、唯一编辑路径或底层平台资源。
 
 ## 教学资产
 
-`problem.md` 清楚描述症状、目标和边界。每个检查点可通过 `hints/` 提供渐进提示；`solution.md` 说明诊断和修复理由，而不只粘贴命令。`answer.sh` 是平台真实验证和作者自测用的参考解法，必须在运行时初始化后的环境中通过全部检查点。
+`problem.md` 应清楚描述症状、目标和边界。每个 checkpoint 可通过 `hints/` 提供渐进提示；`solution.md` 说明诊断与修复理由，而不只粘贴命令。`answer.sh` 必须在 generate 初始化后的真实环境通过全部 checkpoint。
 
-学习者工作台没有手动 Submit：进度来自 Controller 周期检查。题目作者在生成工作流中审核自然语言检查点，并在发布前看到经过 VerifyTask 验证的实际资产，见[作者生成与真实验证](../architecture/authoring-workflow.md)。
+学习者没有手动 Submit：进度来自 Controller 自动检查。作者在发布前看到经 `Build -> ArtifactPublish -> Verify` 真实验证的资产，详见[作者生成与真实验证](../architecture/authoring-workflow.md)。

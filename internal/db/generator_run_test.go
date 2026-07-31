@@ -7,12 +7,16 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/candidate"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
-func TestGeneratorRepairRunReusesSessionWithoutReusingVerifyTaskReference(t *testing.T) {
+func TestCandidateArtifactFailureAtomicallyStartsRepairAndCleanup(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	const sessionID = "author-generator"
 	const userID = "generator-user"
 	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
@@ -23,81 +27,117 @@ func TestGeneratorRepairRunReusesSessionWithoutReusingVerifyTaskReference(t *tes
 		t.Fatal(err)
 	}
 
-	firstSession, firstRun, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, generatorCreateRun("generator-run-one", sessionID), generator.RunInput{
-		AuthoringSessionID: sessionID,
-		Revision:           revision.Number,
-	})
-	if err != nil {
-		t.Fatalf("start first generator run: %v", err)
-	}
-	if firstSession.GeneratorSessionID == "" || firstSession.GeneratorRunID != firstRun.ID {
-		t.Fatalf("first generator session binding = %#v, run=%#v", firstSession, firstRun)
-	}
-	claim, err := database.ClaimNext(ctx, "worker-one", time.Minute, time.Now().UTC())
-	if err != nil || claim == nil || claim.Run.ID != firstRun.ID {
-		t.Fatalf("claim first generator run = %#v, %v", claim, err)
-	}
-	if err := database.FinalizeGeneratorSubmission(ctx, *claim, generator.SubmissionID(firstRun.ID), "verify-first"); err != nil {
-		t.Fatalf("finalize first generator submission: %v", err)
-	}
+	firstCandidate, firstRun := finalizeTestCandidate(t, database, sessionID, userID, revision.Number, "generator-run-one", generator.RunInput{
+		AuthoringSessionID: sessionID, Revision: revision.Number,
+	}, now)
 	firstRecord, err := database.GetGeneratorRun(ctx, firstRun.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if firstRecord.VerifyTaskID != "verify-first" {
-		t.Fatalf("first record VerifyTaskID = %q", firstRecord.VerifyTaskID)
+	if firstRecord.CandidateRevisionID != firstCandidate.ID {
+		t.Fatalf("first generator candidate = %q, want %q", firstRecord.CandidateRevisionID, firstCandidate.ID)
 	}
 
-	feedback := generator.Feedback{Summary: "answer.sh exits non-zero", Issues: []generator.Issue{{Code: "ANSWER_EXIT_NONZERO", Message: "fix the answer"}}}
-	secondSession, secondRun, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, generatorCreateRun("generator-run-two", sessionID), generator.RunInput{
-		AuthoringSessionID: sessionID,
-		Revision:           revision.Number,
-		SeedSubmissionID:   generator.SubmissionID(firstRun.ID),
-		VerifyTaskID:       "verify-first",
-		Feedback:           feedback,
-	})
-	if err != nil {
-		t.Fatalf("start repair generator run: %v", err)
+	buildClaim := claimCandidateStage(t, database, worklist.KindBuild, now.Add(3*time.Second))
+	build := candidate.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &candidate.IncusBuildReference{
+		Project: "breakfix-build", WorkItemID: buildClaim.Work.Item.ID, Attempt: int64(buildClaim.Work.Item.Attempt),
+		InstanceName: "repair-build", Alias: "repair-build", Fingerprint: fullHex('b'),
+	}}
+	if err := database.CompleteCandidateBuild(ctx, buildClaim.Work, build, now.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
 	}
-	if secondSession.GeneratorSessionID != firstSession.GeneratorSessionID || secondSession.GeneratorRunID != secondRun.ID {
-		t.Fatalf("repair generator session binding = %#v", secondSession)
+	publishClaim := claimCandidateStage(t, database, worklist.KindArtifactPublish, now.Add(5*time.Second))
+	artifact := candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "repair-artifact", IncusFingerprint: fullHex('c')}
+	if err := database.CompleteCandidateArtifactPublish(ctx, publishClaim.Work, artifact, now.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
 	}
-	secondRecord, err := database.GetGeneratorRun(ctx, secondRun.ID)
+	verifyClaim := claimCandidateStage(t, database, worklist.KindVerify, now.Add(7*time.Second))
+	report := candidate.VerificationReport{
+		Passed: false, Summary: "answer failed",
+		Answers:     []candidate.ExecutionResult{{Location: "proxy", ExitCode: 1, Stderr: "invalid nginx configuration"}},
+		Checkpoints: []candidate.CheckpointResult{{ID: "proxy-ready", Passed: false, Summary: "proxy unavailable"}},
+	}
+	failure := candidate.Failure{Class: candidate.FailureArtifact, Code: "ANSWER_FAILED", Summary: "answer failed"}
+	if err := database.FailCandidateArtifact(ctx, verifyClaim.Work, failure, &report, now.Add(8*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := database.GetCandidateRevision(ctx, firstCandidate.ID)
+	if err != nil || failed.State != candidate.StateArtifactFailed || failed.Failure == nil || failed.Failure.Code != failure.Code || failed.Verification == nil {
+		t.Fatalf("failed candidate = %#v, %v", failed, err)
+	}
+	cleanup, err := database.GetWorkItemForSubject(ctx, worklist.KindArtifactCleanup, worklist.SubjectCandidateRevision, firstCandidate.ID)
+	if err != nil || cleanup.State != worklist.StatePending || cleanup.DeadlineAt != nil {
+		t.Fatalf("cleanup item = %#v, %v", cleanup, err)
+	}
+	assertWorkState(t, database, verifyClaim.Work.Item.ID, worklist.StateFailed)
+
+	secondRun, err := database.GetActiveRunForSession(ctx, firstRun.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if secondRecord.VerifyTaskID != "" {
-		t.Fatalf("repair run reserved previous VerifyTaskID %q", secondRecord.VerifyTaskID)
+	if secondRun.ID == firstRun.ID || secondRun.SessionID != firstRun.SessionID {
+		t.Fatalf("repair run did not reuse the generator session: first=%#v repair=%#v", firstRun, secondRun)
 	}
 	input, err := generator.DecodeRunInput(secondRun.Input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.VerifyTaskID != "verify-first" || input.SeedSubmissionID != generator.SubmissionID(firstRun.ID) || !sameGeneratorFeedback(input.Feedback, feedback) {
+	if input.SeedCandidateRevisionID != firstCandidate.ID || input.Feedback.Summary != failure.Summary || len(input.Feedback.Issues) != 3 {
 		t.Fatalf("repair run immutable input = %#v", input)
+	}
+}
+
+func TestFailedGeneratorRunReleasesAuthoringSessionForRevision(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	const sessionID = "author-generator-failure"
+	const userID = "generator-failure-user"
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := database.ReplaceAuthoringPlan(ctx, sessionID, userID, 0, validAuthoringPlan("generator failure"), authoring.StateIntentReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, generatorCreateRun("generator-run-failure", sessionID), generator.RunInput{
+		AuthoringSessionID: sessionID,
+		Revision:           revision.Number,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimAt := time.Now().UTC().Add(time.Second).Truncate(time.Microsecond)
+	claim, err := database.ClaimNext(ctx, "generator-worker", time.Minute, claimAt)
+	if err != nil || claim == nil || claim.Run.ID != run.ID {
+		t.Fatalf("claim generator run = %#v, %v", claim, err)
+	}
+	if err := database.Fail(ctx, *claim, "model transport failed", claimAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := database.ReconcileFailedGeneratorRuns(ctx, claimAt.Add(2*time.Second))
+	if err != nil || changed != 1 {
+		t.Fatalf("reconcile failed generator = %d, %v", changed, err)
+	}
+	session, err := database.GetAuthoringSession(ctx, sessionID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.State != authoring.StateInfrastructureFailed || session.GeneratorRunID != "" || session.LastError != "model transport failed" {
+		t.Fatalf("failed generator authoring session = %#v", session)
+	}
+	if changed, err := database.ReconcileFailedGeneratorRuns(ctx, claimAt.Add(3*time.Second)); err != nil || changed != 0 {
+		t.Fatalf("repeat generator reconciliation = %d, %v", changed, err)
 	}
 }
 
 func generatorCreateRun(id, sessionID string) agentruntime.CreateRun {
 	return agentruntime.CreateRun{
-		ID:            id,
-		Purpose:       generator.RuntimePurpose,
-		OwnerKind:     "authoring-session",
-		OwnerRef:      sessionID,
-		Model:         "deepseek-v4-pro",
-		PromptVersion: generator.PromptVersion,
-		DeadlineAt:    time.Now().UTC().Add(time.Hour),
+		ID:               id,
+		Purpose:          generator.RuntimePurpose,
+		OwnerKind:        "authoring-session",
+		OwnerRef:         sessionID,
+		Model:            "deepseek-v4-pro",
+		PromptVersion:    generator.PromptVersion,
+		ExecutionTimeout: time.Hour,
 	}
-}
-
-func sameGeneratorFeedback(left, right generator.Feedback) bool {
-	if left.BuildPassed != right.BuildPassed || left.AnswerPassed != right.AnswerPassed || left.CheckpointsPassed != right.CheckpointsPassed || left.Summary != right.Summary || len(left.Issues) != len(right.Issues) {
-		return false
-	}
-	for index := range left.Issues {
-		if left.Issues[index] != right.Issues[index] {
-			return false
-		}
-	}
-	return true
 }

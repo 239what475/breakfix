@@ -2,15 +2,55 @@ package registry
 
 import (
 	"context"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func TestNewClientAppendsOperatorTrustBundle(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v2/" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	bundlePath := filepath.Join(t.TempDir(), "registry-ca.crt")
+	certificate := server.Certificate()
+	if certificate == nil {
+		t.Fatal("test Registry has no certificate")
+	}
+	if err := os.WriteFile(bundlePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewClient(ClientOptions{TrustBundleFile: bundlePath})
+	if err != nil {
+		t.Fatalf("create Registry client with internal CA: %v", err)
+	}
+	if err := client.Ping(context.Background(), testTLSRegistryAddress(t, server)+"/breakfix"); err != nil {
+		t.Fatalf("ping Registry with internal CA: %v", err)
+	}
+}
+
+func TestNewClientRejectsInvalidTrustBundle(t *testing.T) {
+	bundlePath := filepath.Join(t.TempDir(), "registry-ca.crt")
+	if err := os.WriteFile(bundlePath, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewClient(ClientOptions{TrustBundleFile: bundlePath}); err == nil {
+		t.Fatal("Registry client accepted an invalid trust bundle")
+	}
+}
+
 func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests = append(requests, request.Method+" "+request.URL.Path)
 		switch request.Method {
 		case http.MethodHead:
@@ -30,8 +70,8 @@ func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	registry := strings.TrimPrefix(server.URL, "http://")
-	if err := (Client{Insecure: true}).DeleteImage(context.Background(), registry+"/team/challenge:latest"); err != nil {
+	registry := testTLSRegistryAddress(t, server)
+	if err := testTLSRegistryClient(t, server, Credentials{}).DeleteImage(context.Background(), registry+"/team/challenge:latest"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := strings.Join(requests, ", "), "HEAD /v2/team/challenge/manifests/latest, DELETE /v2/team/challenge/manifests/sha256:verified"; got != want {
@@ -40,7 +80,7 @@ func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 }
 
 func TestDeleteImageUsesRegistryCredentials(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		username, password, ok := request.BasicAuth()
 		if !ok || username != "controller" || password != "secret" {
 			writer.WriteHeader(http.StatusUnauthorized)
@@ -55,9 +95,27 @@ func TestDeleteImageUsesRegistryCredentials(t *testing.T) {
 	}))
 	defer server.Close()
 
-	address := strings.TrimPrefix(server.URL, "http://")
-	client := Client{Insecure: true, Credentials: Credentials{Username: "controller", Password: "secret"}}
+	address := testTLSRegistryAddress(t, server)
+	client := testTLSRegistryClient(t, server, Credentials{Username: "controller", Password: "secret"})
 	if err := client.DeleteImage(context.Background(), address+"/team/challenge:latest"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPingChecksRegistryCredentials(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		username, password, ok := request.BasicAuth()
+		if request.URL.Path != "/v2/" || !ok || username != "publisher" || password != "secret" {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	address := testTLSRegistryAddress(t, server)
+	client := testTLSRegistryClient(t, server, Credentials{Username: "publisher", Password: "secret"})
+	if err := client.Ping(context.Background(), address+"/breakfix"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestInternalClientSendsAttemptFencedRequests(t *testing.T) {
-	claim := agentruntime.Claim{Run: agentruntime.Run{ID: "assistant-run", Attempt: 4}, LeaseOwner: "worker-lease"}
+	claim := agentruntime.Claim{Run: agentruntime.Run{ID: "assistant-run"}, WorkItemID: "work-agent-run", Attempt: 4, LeaseOwner: "worker-lease"}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/internal/agent-runs/assistant-run/assistant/context" {
 			t.Fatalf("path = %q", request.URL.Path)
@@ -23,11 +23,11 @@ func TestInternalClientSendsAttemptFencedRequests(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Attempt != 4 || body.LeaseOwner != "worker-lease" {
+		if body.WorkItemID != "work-agent-run" || body.Attempt != 4 || body.LeaseOwner != "worker-lease" {
 			t.Fatalf("lease credentials = %#v", body)
 		}
 		_ = json.NewEncoder(response).Encode(ExecutionContext{
-			UserID: "user-one", EnvironmentUID: "environment-one", ChallengeID: "cleanup-logs", CurrentWindow: "shell-1", OpenWindows: []string{"shell-1"},
+			UserID: "user-one", EnvironmentUID: "environment-one", ChallengeID: "cleanup-logs", Nodes: []string{"host"}, CurrentNode: "host", CurrentWindow: "shell-1", Terminals: []TerminalContext{{Node: "host", Windows: []string{"shell-1"}}},
 		})
 	}))
 	defer server.Close()

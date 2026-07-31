@@ -79,6 +79,76 @@ func TestManagerCleansPendingWorkspaceAfterUnknownSandboxCreate(t *testing.T) {
 	}
 }
 
+func TestManagerResumesPersistedSandboxAfterReadinessFailure(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	repo := &memoryRepository{}
+	pvcs := &memoryPVCs{}
+	sandboxes := &memorySandboxes{nextID: "sandbox-one", waitErrors: []error{errors.New("sandbox still pending")}}
+	manager, err := NewManager(repo, pvcs, sandboxes, Config{Namespace: "opensandbox", Storage: "1Gi", ProvisionTimeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return now }
+
+	if _, err := manager.Ensure(context.Background(), "generator-run-resume"); err == nil {
+		t.Fatal("first ensure unexpectedly succeeded")
+	}
+	record, err := repo.GetGeneratorWorkspace(context.Background(), "generator-run-resume")
+	if err != nil || record.State != StatePending || record.SandboxID != "sandbox-one" {
+		t.Fatalf("persisted pending workspace = %#v, err=%v", record, err)
+	}
+	if _, err := manager.Ensure(context.Background(), "generator-run-resume"); err != nil {
+		t.Fatalf("resume workspace: %v", err)
+	}
+	if sandboxes.created != 1 || sandboxes.waited != 2 {
+		t.Fatalf("created=%d waited=%d, want one create and two waits", sandboxes.created, sandboxes.waited)
+	}
+}
+
+func TestManagerRecoversUnknownCreatedSandboxFromMetadata(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	repo := &memoryRepository{}
+	pvcs := &memoryPVCs{}
+	sandboxes := &memorySandboxes{foundID: "sandbox-recovered"}
+	manager, err := NewManager(repo, pvcs, sandboxes, Config{Namespace: "opensandbox", Storage: "1Gi", ProvisionTimeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return now }
+
+	record, err := manager.Ensure(context.Background(), "generator-run-recovered")
+	if err != nil {
+		t.Fatalf("recover workspace: %v", err)
+	}
+	if record.SandboxID != "sandbox-recovered" || sandboxes.created != 0 || sandboxes.waited != 1 {
+		t.Fatalf("workspace=%#v created=%d waited=%d", record, sandboxes.created, sandboxes.waited)
+	}
+}
+
+func TestManagerCleanupFindsSandboxWhenCreateResponseWasLost(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	repo := &memoryRepository{records: map[string]Record{
+		"generator-run-lost-response": {
+			GeneratorRunID: "generator-run-lost-response", Namespace: "opensandbox", PVCName: NewPVCName("generator-run-lost-response"),
+			State: StatePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+		},
+	}}
+	pvcs := &memoryPVCs{}
+	sandboxes := &memorySandboxes{foundID: "sandbox-lost-response"}
+	manager, err := NewManager(repo, pvcs, sandboxes, Config{Namespace: "opensandbox", Storage: "1Gi", ProvisionTimeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return now }
+
+	if err := manager.Cleanup(context.Background(), "generator-run-lost-response"); err != nil {
+		t.Fatalf("cleanup workspace: %v", err)
+	}
+	if sandboxes.deleted != 1 || sandboxes.deletedIDs[0] != "sandbox-lost-response" || pvcs.deleted != 1 {
+		t.Fatalf("cleanup deleted=%v pvc=%d", sandboxes.deletedIDs, pvcs.deleted)
+	}
+}
+
 func TestManagerCleansTerminalRunWorkspace(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	repo := &memoryRepository{
@@ -168,6 +238,19 @@ func (r *memoryRepository) GetGeneratorWorkspace(_ context.Context, id string) (
 	return &copy, nil
 }
 
+func (r *memoryRepository) RecordGeneratorWorkspaceSandbox(_ context.Context, id, sandboxID string, now time.Time) error {
+	record, ok := r.records[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if record.State != StatePending || (record.SandboxID != "" && record.SandboxID != sandboxID) {
+		return errors.New("workspace sandbox cannot be recorded")
+	}
+	record.SandboxID, record.UpdatedAt = sandboxID, now
+	r.records[id] = record
+	return nil
+}
+
 func (r *memoryRepository) ActivateGeneratorWorkspace(_ context.Context, id, sandboxID string, now time.Time) error {
 	record, ok := r.records[id]
 	if !ok {
@@ -255,13 +338,25 @@ func (p *memoryPVCs) DeleteWorkspacePVC(_ context.Context, namespace, name strin
 }
 
 type memorySandboxes struct {
-	nextID    string
-	createErr error
-	created   int
-	deleted   int
+	nextID     string
+	foundID    string
+	createErr  error
+	findErr    error
+	waitErrors []error
+	created    int
+	waited     int
+	deleted    int
+	deletedIDs []string
 }
 
-func (s *memorySandboxes) CreateWorkspace(context.Context, string) (string, error) {
+func (s *memorySandboxes) FindWorkspace(context.Context, string) (string, bool, error) {
+	if s.findErr != nil {
+		return "", false, s.findErr
+	}
+	return s.foundID, s.foundID != "", nil
+}
+
+func (s *memorySandboxes) CreateWorkspace(context.Context, string, string) (string, error) {
 	s.created++
 	if s.createErr != nil {
 		return "", s.createErr
@@ -269,4 +364,18 @@ func (s *memorySandboxes) CreateWorkspace(context.Context, string) (string, erro
 	return s.nextID, nil
 }
 
-func (s *memorySandboxes) DeleteWorkspace(context.Context, string) error { s.deleted++; return nil }
+func (s *memorySandboxes) WaitWorkspace(context.Context, string) error {
+	s.waited++
+	if len(s.waitErrors) == 0 {
+		return nil
+	}
+	err := s.waitErrors[0]
+	s.waitErrors = s.waitErrors[1:]
+	return err
+}
+
+func (s *memorySandboxes) DeleteWorkspace(_ context.Context, id string) error {
+	s.deleted++
+	s.deletedIDs = append(s.deletedIDs, id)
+	return nil
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/api"
@@ -155,22 +156,22 @@ func (h *Handler) mySpace(ctx context.Context, user *db.User, learningLimit int)
 // namespace, Pod, or vcluster until the controller finalizer finishes.
 func (h *Handler) occupiedEnvironmentCount(ctx context.Context, userID string) (int, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s", userID)
-	containerEnvironments, err := h.k8s.ListContainerEnvironments(ctx, h.crdNamespace, selector)
+	nodeEnvironments, err := h.k8s.ListNodeEnvironments(ctx, h.crdNamespace, selector)
 	if err != nil {
 		return 0, err
 	}
-	vclusterEnvironments, err := h.k8s.ListVClusterEnvironments(ctx, h.crdNamespace, selector)
+	vk8sEnvironments, err := h.k8s.ListVK8sEnvironments(ctx, h.crdNamespace, selector)
 	if err != nil {
 		return 0, err
 	}
 	occupied := 0
-	for _, environment := range containerEnvironments.Items {
-		if environment.Status.Phase != breakfixv1.EnvironmentDestroyed {
+	for _, environment := range nodeEnvironments.Items {
+		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
 			occupied++
 		}
 	}
-	for _, environment := range vclusterEnvironments.Items {
-		if environment.Status.Phase != breakfixv1.EnvironmentDestroyed {
+	for _, environment := range vk8sEnvironments.Items {
+		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
 			occupied++
 		}
 	}
@@ -358,18 +359,18 @@ func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.E
 		}
 	}
 
-	work, err := h.db.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, entry.ID, entry.Revision)
-	if errors.Is(err, db.ErrTaxonomyWorkNotFound) {
+	mapping, err := h.db.GetTaxonomyMappingByChallenge(ctx, entry.ID, entry.Revision)
+	if errors.Is(err, db.ErrTaxonomyMappingNotFound) {
 		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("read taxonomy work for authoring status: %w", err)
 	}
-	switch work.State {
-	case taxonomy.WorkFailed, taxonomy.WorkCancelled:
+	switch mapping.State {
+	case taxonomy.MappingFailed, taxonomy.MappingCancelled:
 		return api.MySpacePublishedChallengeTaxonomyStatus("blocked"), nil
-	case taxonomy.WorkPending:
-		if work.NextRunAt.After(time.Now().UTC()) {
+	case taxonomy.MappingPending:
+		if strings.TrimSpace(mapping.LastError) != "" {
 			return api.MySpacePublishedChallengeTaxonomyStatus("retrying"), nil
 		}
 	}

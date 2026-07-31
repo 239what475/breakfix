@@ -1,0 +1,22 @@
+runtime: node
+title: Repair a multi-node reverse proxy
+difficulty: medium
+description: Restore the systemd-managed proxy path from a client node to an application node.
+nodes:
+  - name: client
+    title: Client
+  - name: proxy
+    title: Reverse proxy
+  - name: app
+    title: Application server
+checkpoints:
+  - id: proxy-service-ready
+    title: Proxy service is healthy
+    description: The systemd proxy service is active and forwards to the application port.
+    hint: hints/proxy-service-ready.md
+    node: proxy
+  - id: application-reachable
+    title: Application is reachable
+    description: The client receives the expected response through the proxy node.
+    hint: hints/application-reachable.md
+    node: client

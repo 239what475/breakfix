@@ -34,15 +34,15 @@ func TestTerminalConnectionTrackerWaitsForLastConnection(t *testing.T) {
 	var drained atomic.Int32
 	drain := func() { drained.Add(1) }
 
-	tracker.open("container/demo")
-	tracker.open("container/demo")
-	tracker.close("container/demo", drain)
+	tracker.open("node/demo")
+	tracker.open("node/demo")
+	tracker.close("node/demo", drain)
 	time.Sleep(40 * time.Millisecond)
 	if drained.Load() != 0 {
 		t.Fatal("closing one of two terminal windows must not drain the environment")
 	}
 
-	tracker.close("container/demo", drain)
+	tracker.close("node/demo", drain)
 	time.Sleep(40 * time.Millisecond)
 	if drained.Load() != 1 {
 		t.Fatalf("expected one drain after the final terminal closed, got %d", drained.Load())
@@ -54,10 +54,10 @@ func TestTerminalConnectionTrackerCancelsPendingDrainOnReconnect(t *testing.T) {
 	var drained atomic.Int32
 	drain := func() { drained.Add(1) }
 
-	tracker.open("container/demo")
-	tracker.close("container/demo", drain)
+	tracker.open("node/demo")
+	tracker.close("node/demo", drain)
 	time.Sleep(10 * time.Millisecond)
-	tracker.open("container/demo")
+	tracker.open("node/demo")
 	time.Sleep(60 * time.Millisecond)
 	if drained.Load() != 0 {
 		t.Fatal("reconnecting before the settle delay must cancel draining")
@@ -73,7 +73,7 @@ func TestWSWriterSignalsReadyBeforeFirstTerminalData(t *testing.T) {
 			t.Errorf("upgrade websocket: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		for range 2 {
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
@@ -95,7 +95,7 @@ func TestWSWriterSignalsReadyBeforeFirstTerminalData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	writer := &wsWriter{conn: conn}
 	if _, err := writer.Write([]byte("shell prompt")); err != nil {
@@ -127,7 +127,7 @@ func TestTerminalTicketIsOpaqueAndStableHashed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ticket) < 40 || terminalTicketHash(ticket) != terminalTicketHash(ticket) {
+	if len(ticket) < 40 || terminalTicketHash(ticket) == ticket {
 		t.Fatalf("invalid terminal ticket %q", ticket)
 	}
 }

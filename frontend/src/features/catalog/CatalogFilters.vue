@@ -61,9 +61,9 @@ function updateQuery(event: Event) {
 
 		<section class="filter-group" aria-labelledby="runtime-filter">
 			<h2 id="runtime-filter">Runtime</h2>
-			<label v-for="runtime in ['container', 'vcluster']" :key="runtime" class="filter-option">
+			<label v-for="runtime in ['node', 'k8s']" :key="runtime" class="filter-option">
 				<input type="checkbox" :checked="runtimes.includes(runtime)" @change="emit('toggle:runtime', runtime)" />
-				<span>{{ runtime === 'vcluster' ? 'VCluster' : 'Container' }}</span>
+				<span>{{ runtime === 'k8s' ? 'Kubernetes' : 'Linux nodes' }}</span>
 			</label>
 		</section>
 

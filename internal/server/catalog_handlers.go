@@ -57,7 +57,6 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 		s := api.ChallengeSummary{
 			Id:          ch.ID,
 			Title:       ch.Title,
-			Type:        ch.Type,
 			Runtime:     challengeSummaryRuntime(ch.Runtime),
 			Difficulty:  api.ChallengeSummaryDifficulty(ch.Difficulty),
 			Description: ch.Description,
@@ -102,6 +101,8 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	c.JSON(http.StatusOK, api.ChallengeContent{
 		Id:          published.Entry.ID,
 		Title:       published.Entry.Title,
+		Runtime:     api.ChallengeContentRuntime(published.Entry.Runtime),
+		Nodes:       toAPIChallengeNodes(published.Entry.Nodes),
 		Problem:     content.Problem,
 		Solution:    content.Solution,
 		Hints:       hints,
@@ -205,28 +206,22 @@ func toAPICheckpoints(checkpoints []challenge.Checkpoint) []api.ChallengeCheckpo
 	result := make([]api.ChallengeCheckpoint, 0, len(checkpoints))
 	for _, checkpoint := range checkpoints {
 		hint := checkpoint.Hint
-		dependsOn := append([]string{}, checkpoint.DependsOn...)
+		node := checkpoint.Node
 		result = append(result, api.ChallengeCheckpoint{
 			Id:          checkpoint.ID,
 			Title:       checkpoint.Title,
 			Description: checkpoint.Description,
 			Hint:        &hint,
-			DependsOn:   &dependsOn,
+			Node:        &node,
 		})
 	}
 	return result
 }
 
-func toAPICheckResults(checks []challenge.CheckResult) []api.CheckpointResult {
-	result := make([]api.CheckpointResult, 0, len(checks))
-	for _, check := range checks {
-		details := check.Details
-		result = append(result, api.CheckpointResult{
-			Id:      check.ID,
-			Passed:  check.Passed,
-			Summary: check.Summary,
-			Details: &details,
-		})
+func toAPIChallengeNodes(nodes []challenge.Node) []api.ChallengeNode {
+	result := make([]api.ChallengeNode, len(nodes))
+	for index, node := range nodes {
+		result[index] = api.ChallengeNode{Name: node.Name, Title: node.Title}
 	}
 	return result
 }

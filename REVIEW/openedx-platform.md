@@ -29,7 +29,7 @@ Open edX 的核心对象是课程、章节、单元和可插拔教学组件；Br
 
 - **内容发布与学习事实分离**：继续把 challenge revision 视为不可变发布物，把用户 attempt
   和 checkpoint event 存 PostgreSQL。题目修订不能重写历史学习数据；新 revision 必须有
-  新 VerifyTask 和新 taxonomy mapping。这是 Open edX 内容版本/学习记录分离给出的正确
+  新 CandidateRevision 验证记录和新 taxonomy mapping。这是 Open edX 内容版本/学习记录分离给出的正确
   原则，且与现有 Breakfix 权威来源一致。
 - **最小领域事件字典**：围绕已验证的学习行为定义稳定事件，而不是让前端分析日志成为事实。
   起点是 attempt、checkpoint first passed、completed、hint opened、solution opened、

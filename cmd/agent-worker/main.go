@@ -13,9 +13,9 @@ import (
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/workerhealth"
 )
 
 func main() {
@@ -33,34 +33,33 @@ func main() {
 		slog.Error("invalid agent worker configuration", "err", err)
 		os.Exit(1)
 	}
-	database, err := db.OpenAgentRuntime(cfg.AgentDatabaseURL)
+	runtimeClient, err := agentworker.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
-		slog.Error("failed to open agent runtime database", "err", err)
+		slog.Error("failed to create agent worklist client", "err", err)
 		os.Exit(1)
 	}
-	defer func() { _ = database.Close() }()
 
-	serverClient, err := assistant.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	serverClient, err := assistant.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		slog.Error("failed to create server internal client", "err", err)
 		os.Exit(1)
 	}
-	assistantExecutor, err := assistant.NewWorkerExecutor(database, cfg.Agent, serverClient)
+	assistantExecutor, err := assistant.NewWorkerExecutor(cfg.Agent, serverClient)
 	if err != nil {
 		slog.Error("failed to create assistant executor", "err", err)
 		os.Exit(1)
 	}
-	authoringClient, err := authoring.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	authoringClient, err := authoring.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		slog.Error("failed to create authoring internal client", "err", err)
 		os.Exit(1)
 	}
-	authoringExecutor, err := authoring.NewWorkerExecutor(database, cfg.Agent, authoringClient)
+	authoringExecutor, err := authoring.NewWorkerExecutor(cfg.Agent, authoringClient)
 	if err != nil {
 		slog.Error("failed to create authoring executor", "err", err)
 		os.Exit(1)
 	}
-	taxonomyClient, err := taxonomy.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	taxonomyClient, err := taxonomy.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		slog.Error("failed to create taxonomy internal client", "err", err)
 		os.Exit(1)
@@ -70,7 +69,7 @@ func main() {
 		slog.Error("failed to create taxonomy executor", "err", err)
 		os.Exit(1)
 	}
-	generatorClient, err := generator.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	generatorClient, err := generator.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		slog.Error("failed to create generator internal client", "err", err)
 		os.Exit(1)
@@ -80,7 +79,7 @@ func main() {
 		slog.Error("failed to create generator executor", "err", err)
 		os.Exit(1)
 	}
-	worker, err := agentworker.New(database, map[string]agentworker.Executor{
+	worker, err := agentworker.New(runtimeClient, map[string]agentworker.Executor{
 		"assistant":                   assistantExecutor,
 		"authoring":                   authoringExecutor,
 		generator.RuntimePurpose:      generatorExecutor,
@@ -93,7 +92,7 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	if err := worker.Run(ctx); err != nil {
+	if err := workerhealth.Run(ctx, workerhealth.Config{Port: cfg.HealthPort, Component: "agent"}, worker.Run); err != nil {
 		slog.Error("agent worker stopped", "err", err)
 		os.Exit(1)
 	}

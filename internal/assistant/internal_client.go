@@ -35,7 +35,7 @@ func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
 
 func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
 	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/assistant/context", LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
+	err := c.post(ctx, claim.Run.ID, "/assistant/context", claim.Credential(), &result)
 	return result, err
 }
 
@@ -45,7 +45,7 @@ func (c *InternalClient) InvokeTool(ctx context.Context, claim agentruntime.Clai
 		return fmt.Errorf("encode assistant tool arguments: %w", err)
 	}
 	return c.post(ctx, claim.Run.ID, "/assistant/tools/"+url.PathEscape(name), InternalToolRequest{
-		LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner},
+		LeaseCredential: claim.Credential(),
 		Arguments:       data,
 	}, result)
 }
@@ -55,7 +55,7 @@ func (c *InternalClient) PublishEvent(ctx context.Context, claim agentruntime.Cl
 		return fmt.Errorf("unsupported assistant event type %q", event.Type)
 	}
 	return c.post(ctx, claim.Run.ID, "/assistant/events", InternalEventRequest{
-		LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner},
+		LeaseCredential: claim.Credential(),
 		Type:            event.Type,
 		Content:         event.Content,
 		Tool:            event.Tool,

@@ -18,7 +18,3 @@ func fromUnstructured[T any](obj *unstructured.Unstructured) (T, error) {
 	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &out)
 	return out, err
 }
-
-func ptr[T any](v T) *T {
-	return &v
-}

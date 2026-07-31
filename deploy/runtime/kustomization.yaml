@@ -1,13 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: breakfix-system
-
 resources:
   - namespace.yaml
   - rbac.yaml
-  - registry.yaml
-  - build-network-policy.yaml
+  - worker-rbac.yaml
+  - worker-network-policy.yaml
   - postgresql.yaml
   - server.yaml
   - controller.yaml
   - agent-worker.yaml
+  - builder.yaml
+  - publisher.yaml
+  - verifier.yaml

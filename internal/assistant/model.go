@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/agentruntime"
 )
 
 var ErrNotFound = errors.New("assistant session not found")
@@ -78,6 +80,7 @@ type CheckpointSnapshot struct {
 }
 
 type Scrollback struct {
+	Node       string   `json:"node,omitempty"`
 	Window     string   `json:"window"`
 	Offset     int      `json:"offset"`
 	Lines      []string `json:"lines"`
@@ -86,6 +89,7 @@ type Scrollback struct {
 }
 
 type EnvironmentFile struct {
+	Node       string `json:"node,omitempty"`
 	Path       string `json:"path"`
 	Offset     int64  `json:"offset"`
 	Content    string `json:"content"`
@@ -95,6 +99,7 @@ type EnvironmentFile struct {
 }
 
 type EnvironmentFiles struct {
+	Node    string   `json:"node,omitempty"`
 	Path    string   `json:"path"`
 	Offset  int      `json:"offset"`
 	Entries []string `json:"entries"`
@@ -102,13 +107,18 @@ type EnvironmentFiles struct {
 	HasMore bool     `json:"has_more"`
 }
 
+type TerminalContext struct {
+	Node    string   `json:"node,omitempty"`
+	Windows []string `json:"windows"`
+}
+
 // Reader is the assistant's complete view of the current environment. Each
-// method is implemented by Server with a fixed, read-only Kubernetes action.
+// method is implemented by Server with a fixed, read-only provider action.
 type Reader interface {
-	TerminalScrollback(context.Context, string, int, int) (Scrollback, error)
+	TerminalScrollback(context.Context, string, string, int, int) (Scrollback, error)
 	CheckpointStatus(context.Context) (CheckpointSnapshot, error)
-	ListEnvironmentFiles(context.Context, string, int, int) (EnvironmentFiles, error)
-	ReadEnvironmentFile(context.Context, string, int64, int) (EnvironmentFile, error)
+	ListEnvironmentFiles(context.Context, string, string, int, int) (EnvironmentFiles, error)
+	ReadEnvironmentFile(context.Context, string, string, int64, int) (EnvironmentFile, error)
 	Solution(context.Context) (string, error)
 }
 
@@ -120,8 +130,10 @@ type Request struct {
 	ChallengeID      string
 	ChallengeTitle   string
 	Problem          string
+	Nodes            []string
+	CurrentNode      string
 	CurrentWindow    string
-	OpenWindows      []string
+	Terminals        []TerminalContext
 	EnvironmentPhase string
 	IdleTTL          time.Duration
 	Checkpoints      CheckpointSnapshot
@@ -132,24 +144,28 @@ type Request struct {
 // message. It lets a replacement Worker rebuild the same tool boundary rather
 // than silently substituting a default terminal window after a restart.
 type RunInput struct {
-	CurrentWindow string   `json:"current_window"`
-	OpenWindows   []string `json:"open_windows"`
+	CurrentNode   string            `json:"current_node,omitempty"`
+	CurrentWindow string            `json:"current_window"`
+	Terminals     []TerminalContext `json:"terminals"`
 }
 
 // ExecutionContext is the serializable Server-owned snapshot needed to run an
 // Assistant attempt. Kubernetes access remains behind Reader on the Server.
 type ExecutionContext struct {
-	UserID           string             `json:"user_id"`
-	EnvironmentUID   string             `json:"environment_uid"`
-	EnvironmentName  string             `json:"environment_name"`
-	Runtime          string             `json:"runtime"`
-	ChallengeID      string             `json:"challenge_id"`
-	ChallengeTitle   string             `json:"challenge_title"`
-	Problem          string             `json:"problem"`
-	CurrentWindow    string             `json:"current_window"`
-	OpenWindows      []string           `json:"open_windows"`
-	EnvironmentPhase string             `json:"environment_phase"`
-	Checkpoints      CheckpointSnapshot `json:"checkpoints"`
+	UserID           string                 `json:"user_id"`
+	EnvironmentUID   string                 `json:"environment_uid"`
+	EnvironmentName  string                 `json:"environment_name"`
+	Runtime          string                 `json:"runtime"`
+	ChallengeID      string                 `json:"challenge_id"`
+	ChallengeTitle   string                 `json:"challenge_title"`
+	Problem          string                 `json:"problem"`
+	Nodes            []string               `json:"nodes"`
+	CurrentNode      string                 `json:"current_node,omitempty"`
+	CurrentWindow    string                 `json:"current_window"`
+	Terminals        []TerminalContext      `json:"terminals"`
+	EnvironmentPhase string                 `json:"environment_phase"`
+	Checkpoints      CheckpointSnapshot     `json:"checkpoints"`
+	History          []agentruntime.Message `json:"history"`
 }
 
 func (value ExecutionContext) Request(reader Reader) Request {
@@ -161,21 +177,28 @@ func (value ExecutionContext) Request(reader Reader) Request {
 		ChallengeID:      value.ChallengeID,
 		ChallengeTitle:   value.ChallengeTitle,
 		Problem:          value.Problem,
+		Nodes:            append([]string(nil), value.Nodes...),
+		CurrentNode:      value.CurrentNode,
 		CurrentWindow:    value.CurrentWindow,
-		OpenWindows:      append([]string(nil), value.OpenWindows...),
+		Terminals:        cloneTerminalContexts(value.Terminals),
 		EnvironmentPhase: value.EnvironmentPhase,
 		Checkpoints:      value.Checkpoints,
 		Reader:           reader,
 	}
 }
 
+func cloneTerminalContexts(values []TerminalContext) []TerminalContext {
+	result := make([]TerminalContext, len(values))
+	for index := range values {
+		result[index] = TerminalContext{Node: values[index].Node, Windows: append([]string(nil), values[index].Windows...)}
+	}
+	return result
+}
+
 // LeaseCredential is the minimum attempt-scoped authority exposed on the
 // internal HTTP boundary. The Server resolves the remaining Run fields and
 // validates this credential before every environment access or delta publish.
-type LeaseCredential struct {
-	Attempt    int    `json:"attempt"`
-	LeaseOwner string `json:"lease_owner"`
-}
+type LeaseCredential = agentruntime.LeaseCredential
 
 type InternalToolRequest struct {
 	LeaseCredential

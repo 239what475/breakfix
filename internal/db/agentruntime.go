@@ -210,6 +210,27 @@ func (d *DB) GetActiveRunForSession(ctx context.Context, sessionID string) (*age
 	return run, nil
 }
 
+// ExpireDueAgentRuns is the Server-owned deadline reconciler for AgentRuns.
+// It is intentionally independent of ClaimNext so a quiet queue still
+// terminalizes a run after its execution deadline.
+func (d *DB) ExpireDueAgentRuns(ctx context.Context, now time.Time) error {
+	if now.IsZero() {
+		return errors.New("agent deadline recovery requires current time")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin agent deadline recovery: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := expireDueAgentRunsTx(ctx, tx, now.UTC()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit agent deadline recovery: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]agentruntime.Run, error) {
 	if strings.TrimSpace(purpose) == "" {
 		return nil, fmt.Errorf("agent run purpose is required")
@@ -270,26 +291,20 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 	}
 	defer func() { _ = tx.Rollback() }()
 	now = now.UTC()
-	if _, err := tx.ExecContext(ctx, `WITH expired AS (
-		UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
-			error_code = 'deadline_exceeded', error_summary = 'agent run deadline exceeded', updated_at = ?
-		WHERE kind = ? AND state IN (?, ?) AND deadline_at <= ?
-		RETURNING subject_id
-	) UPDATE agent_runs SET status = ?, last_error = 'agent run deadline exceeded', completed_at = ?, updated_at = ?
-	WHERE id IN (SELECT subject_id FROM expired) AND status IN (?, ?)`,
-		worklist.StateFailed, now, worklist.KindAgent, worklist.StatePending, worklist.StateRunning, now,
-		agentruntime.RunFailed, now, now, agentruntime.RunPending, agentruntime.RunRunning); err != nil {
-		return nil, fmt.Errorf("expire due agent runs: %w", err)
+	if err := expireDueAgentRunsTx(ctx, tx, now); err != nil {
+		return nil, err
 	}
 	var workItemID, runID string
-	err = tx.QueryRowContext(ctx, `SELECT id, subject_id FROM work_items
+	var timeoutMillis int64
+	var deadlineAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT id, subject_id, execution_timeout_millis, deadline_at FROM work_items
 		WHERE kind = ? AND (
 			(state = ? AND next_run_at <= ?)
 			OR (state = ? AND lease_expires_at <= ?)
-		) AND deadline_at > ?
+		) AND (deadline_at IS NULL OR deadline_at > ?)
 		ORDER BY next_run_at, created_at, id
 		FOR UPDATE SKIP LOCKED
-		LIMIT 1`, worklist.KindAgent, worklist.StatePending, now, worklist.StateRunning, now, now).Scan(&workItemID, &runID)
+		LIMIT 1`, worklist.KindAgent, worklist.StatePending, now, worklist.StateRunning, now, now).Scan(&workItemID, &runID, &timeoutMillis, &deadlineAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		// The deadline update above is still meaningful even when no work can
 		// be claimed. Commit it so an expired Run cannot remain active forever.
@@ -301,19 +316,27 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 	if err != nil {
 		return nil, fmt.Errorf("select claimable agent run: %w", err)
 	}
+	if timeoutMillis <= 0 {
+		return nil, errors.New("agent work item has no execution timeout")
+	}
+	deadline := now.Add(time.Duration(timeoutMillis) * time.Millisecond)
+	if deadlineAt.Valid {
+		deadline = deadlineAt.Time.UTC()
+	}
+
 	leaseOwner := strings.TrimSpace(worker) + "-" + worklist.NewID("lease")
 	leaseExpiresAt := now.Add(leaseTTL)
 	var attempt int
 	if err := tx.QueryRowContext(ctx, `UPDATE work_items SET state = ?, attempt = attempt + 1,
-		lease_owner = ?, lease_expires_at = ?, updated_at = ?
-		WHERE id = ? AND state IN (?, ?) RETURNING attempt`,
-		worklist.StateRunning, leaseOwner, leaseExpiresAt, now, workItemID,
-		worklist.StatePending, worklist.StateRunning).Scan(&attempt); err != nil {
+		lease_owner = ?, lease_expires_at = ?, deadline_at = COALESCE(deadline_at, ?), updated_at = ?
+		WHERE id = ? AND state IN (?, ?) RETURNING attempt, deadline_at`,
+		worklist.StateRunning, leaseOwner, leaseExpiresAt, deadline, now, workItemID,
+		worklist.StatePending, worklist.StateRunning).Scan(&attempt, &deadline); err != nil {
 		return nil, fmt.Errorf("claim agent work item: %w", err)
 	}
-	run, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs SET status = ?, updated_at = ?
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs SET status = ?, deadline_at = ?, updated_at = ?
 		WHERE id = ? AND status IN (?, ?) RETURNING `+agentRunColumns,
-		agentruntime.RunRunning, now, runID, agentruntime.RunPending, agentruntime.RunRunning))
+		agentruntime.RunRunning, deadline, now, runID, agentruntime.RunPending, agentruntime.RunRunning))
 	if err != nil {
 		return nil, fmt.Errorf("claim agent run: %w", err)
 	}
@@ -321,6 +344,24 @@ func (d *DB) ClaimNext(ctx context.Context, worker string, leaseTTL time.Duratio
 		return nil, fmt.Errorf("commit agent run claim: %w", err)
 	}
 	return &agentruntime.Claim{Run: *run, WorkItemID: workItemID, Attempt: attempt, LeaseOwner: leaseOwner}, nil
+}
+
+func expireDueAgentRunsTx(ctx context.Context, tx *Tx, now time.Time) error {
+	if tx == nil || now.IsZero() {
+		return errors.New("agent deadline transaction requires current time")
+	}
+	if _, err := tx.ExecContext(ctx, `WITH expired AS (
+		UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
+			error_code = 'deadline_exceeded', error_summary = 'agent run deadline exceeded', updated_at = ?
+			WHERE kind = ? AND state IN (?, ?) AND deadline_at IS NOT NULL AND deadline_at <= ?
+			RETURNING subject_id
+		) UPDATE agent_runs SET status = ?, last_error = 'agent run deadline exceeded', completed_at = ?, updated_at = ?
+		WHERE id IN (SELECT subject_id FROM expired) AND status IN (?, ?)`,
+		worklist.StateFailed, now.UTC(), worklist.KindAgent, worklist.StatePending, worklist.StateRunning, now.UTC(),
+		agentruntime.RunFailed, now.UTC(), now.UTC(), agentruntime.RunPending, agentruntime.RunRunning); err != nil {
+		return fmt.Errorf("expire due agent runs: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) RenewLease(ctx context.Context, claim agentruntime.Claim, leaseTTL time.Duration, now time.Time) error {
@@ -417,7 +458,11 @@ func (d *DB) Fail(ctx context.Context, claim agentruntime.Claim, lastError strin
 		return fmt.Errorf("begin fail agent run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := lockAgentClaim(ctx, tx, claim, now); err != nil {
+	// A worker is still the owner of its lease when its execution deadline
+	// expires. It must be able to record that terminal outcome; requiring the
+	// deadline to remain in the future would leave the Run running until another
+	// worker happens to claim work again.
+	if _, err := lockAgentClaimAllowExpiredDeadline(ctx, tx, claim, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
@@ -473,7 +518,7 @@ func (d *DB) CancelRunsForOwner(ctx context.Context, purpose, ownerKind, ownerRe
 	if err != nil {
 		return 0, fmt.Errorf("cancel agent runs for owner: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
@@ -550,14 +595,31 @@ func (d *DB) GetAgentClaim(ctx context.Context, runID string, attempt int, lease
 }
 
 func lockAgentClaim(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time) (sql.NullString, error) {
+	return lockAgentClaimWithDeadline(ctx, tx, claim, now, true)
+}
+
+func lockAgentClaimAllowExpiredDeadline(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time) (sql.NullString, error) {
+	return lockAgentClaimWithDeadline(ctx, tx, claim, now, false)
+}
+
+func lockAgentClaimWithDeadline(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time, requireLiveDeadline bool) (sql.NullString, error) {
 	var sessionID sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT r.session_id FROM work_items w
+	query := `SELECT r.session_id FROM work_items w
 		JOIN agent_runs r ON r.id = w.subject_id
 		WHERE w.id = ? AND w.kind = ? AND w.subject_type = ? AND w.subject_id = ?
 		AND w.state = ? AND w.attempt = ? AND w.lease_owner = ? AND w.lease_expires_at > ?
-		AND w.deadline_at > ? AND r.status = ? FOR UPDATE OF w, r`,
+	`
+	arguments := []any{
 		claim.WorkItemID, worklist.KindAgent, worklist.SubjectAgentRun, claim.Run.ID,
-		worklist.StateRunning, claim.Attempt, claim.LeaseOwner, now, now, agentruntime.RunRunning).Scan(&sessionID)
+		worklist.StateRunning, claim.Attempt, claim.LeaseOwner, now,
+	}
+	if requireLiveDeadline {
+		query += " AND w.deadline_at > ?"
+		arguments = append(arguments, now)
+	}
+	query += " AND r.status = ? FOR UPDATE OF w, r"
+	arguments = append(arguments, agentruntime.RunRunning)
+	err := tx.QueryRowContext(ctx, query, arguments...).Scan(&sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sql.NullString{}, agentruntime.ErrLeaseLost
 	}
@@ -606,7 +668,7 @@ func createRunTx(ctx context.Context, tx *Tx, input agentruntime.CreateRun, now 
 		Status:        agentruntime.RunPending,
 		Model:         input.Model,
 		PromptVersion: input.PromptVersion,
-		DeadlineAt:    input.DeadlineAt,
+		DeadlineAt:    nil,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -616,19 +678,18 @@ func createRunTx(ctx context.Context, tx *Tx, input agentruntime.CreateRun, now 
 		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
 		RETURNING `+agentRunColumns,
 		run.ID, run.SessionID, run.Purpose, run.OwnerKind, run.OwnerRef, run.InputRevision, agentRunInput(run.Input), run.Status, run.Model, run.PromptVersion,
-		run.DeadlineAt, run.CreatedAt, run.UpdatedAt)
+		nil, run.CreatedAt, run.UpdatedAt)
 	created, err := scanAgentRun(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert agent run: %w", err)
 	}
-	deadline := input.DeadlineAt.UTC()
 	if _, err := createWorkItemTx(ctx, tx, worklist.CreateItem{
-		ID:          worklist.NewID("work"),
-		Kind:        worklist.KindAgent,
-		SubjectType: worklist.SubjectAgentRun,
-		SubjectID:   run.ID,
-		NextRunAt:   now.UTC(),
-		DeadlineAt:  &deadline,
+		ID:               worklist.NewID("work"),
+		Kind:             worklist.KindAgent,
+		SubjectType:      worklist.SubjectAgentRun,
+		SubjectID:        run.ID,
+		NextRunAt:        now.UTC(),
+		ExecutionTimeout: input.ExecutionTimeout,
 	}, now); err != nil {
 		return nil, fmt.Errorf("enqueue agent run: %w", err)
 	}
@@ -674,14 +735,19 @@ type agentRow interface {
 func scanAgentRun(row agentRow) (*agentruntime.Run, error) {
 	var run agentruntime.Run
 	var completedAt sql.NullTime
+	var deadlineAt sql.NullTime
 	err := row.Scan(&run.ID, &run.SessionID, &run.Purpose, &run.OwnerKind, &run.OwnerRef, &run.InputRevision, &run.Input, &run.Status, &run.Model, &run.PromptVersion,
-		&run.DeadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
+		&deadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
 	if err != nil {
 		return nil, err
 	}
 	if completedAt.Valid {
 		value := completedAt.Time.UTC()
 		run.CompletedAt = &value
+	}
+	if deadlineAt.Valid {
+		value := deadlineAt.Time.UTC()
+		run.DeadlineAt = &value
 	}
 	return &run, nil
 }

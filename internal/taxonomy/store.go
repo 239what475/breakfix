@@ -288,7 +288,7 @@ func writeDefinitions[T any](dir string, values []T, name func(T) (string, strin
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, stem+".yaml"), data, 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, stem+".yaml"), data, 0600); err != nil {
 			return err
 		}
 	}

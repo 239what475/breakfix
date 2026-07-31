@@ -1,12 +1,10 @@
 id: chal-r7m4x2q9v6kp
 source_slug: cleanup-logs
-type: script
-runtime: container
+runtime: node
 title: "批量压缩旧日志"
 difficulty: easy
-image: cleanup-logs:v1
+image: 0cf2f68424ef6c0cf46dbf01457fadf69f21b5d7d094b13231eebc6ab01b0401
 published_at: 2026-07-23T07:33:11Z
-
 description: |
   服务器磁盘空间不足，/var/log 下有大量历史日志文件。
 
@@ -16,19 +14,22 @@ description: |
   3. 原文件可以不保留
 
   完成后运行脚本，检查点会显示当前修复进度。
-
+nodes:
+  - name: host
+    title: 日志服务器
 checkpoints:
   - id: cleanup-script-ready
     title: 创建清理脚本
     description: /usr/local/bin/cleanup.sh 存在且可执行。
     hint: hints/cleanup-script-ready.md
+    node: host
   - id: eligible-logs-archived
     title: 归档目标日志
     description: 所有超过 7 天且大于 100MB 的日志均已生成有效归档。
     hint: hints/eligible-logs-archived.md
-    dependsOn: [cleanup-script-ready]
+    node: host
   - id: protected-logs-preserved
     title: 保留不应处理的日志
     description: 新日志和小日志没有被错误归档。
     hint: hints/protected-logs-preserved.md
-    dependsOn: [eligible-logs-archived]
+    node: host

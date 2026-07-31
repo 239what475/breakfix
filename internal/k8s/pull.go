@@ -95,7 +95,7 @@ func untarInto(root string, stream io.Reader) error {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("create dir %s: %w", target, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return fmt.Errorf("create parent dir: %w", err)
 			}
@@ -103,6 +103,7 @@ func untarInto(root string, stream io.Reader) error {
 			if err != nil {
 				return fmt.Errorf("create file %s: %w", target, err)
 			}
+			//nolint:gosec // The platform does not impose an additional OCI archive size limit here.
 			if _, err := io.Copy(f, tr); err != nil {
 				_ = f.Close()
 				return fmt.Errorf("write file %s: %w", target, err)

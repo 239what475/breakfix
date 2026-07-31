@@ -1,6 +1,6 @@
 # 作者生成与真实验证
 
-作者工作流将自然语言题意、agent 生成和真实运行时验证分开。作者不直接编辑题目源码，也不能上传任意 artifact；他们只通过对话形成题意、确认生成并审核已经验证的 revision。
+作者工作流把题意讨论、模型生成、真实验证和公开发布分开。作者不编辑题目源码，也不能上传 artifact；他们通过对话形成题意，确认后等待系统完成真实验证，只审核已经验证过的 revision。
 
 ## 生命周期
 
@@ -19,49 +19,59 @@ AwaitingVerifiedReview + author feedback
   -> AwaitingVerifiedReview
 ```
 
-在生成或修订验证期间，真实验证失败会留在同一内部循环中：artifact 类失败会创建同一 Generator Session 的下一 Run，并将结构化反馈提供给它修复。基础设施失败不会要求 Agent 修改题目。作者只继续看到上一个已验证 revision，或在首次生成时看到已确认的题意；未通过验证的 artifact 不进入作者审核界面。
+`CandidateRevision` 是 Judge 已通过后保存的一份不可变候选归档。它有自己的业务状态：
 
-## 题意讨论
+```text
+Building -> PublishingArtifact -> Verifying -> Verified -> PublishingChallenge -> Published
+    |              |                  |
+    +--------------+------------------+-> ArtifactFailed
+    +--------------+------------------+-> InfrastructureFailed
+```
 
-作者创建会话后与 review agent 多轮讨论。agent 只能通过受 Server 校验的领域操作修改题意约定，形成带元数据、概览和自然语言检查点的 revision。题意约定必须包含有效 runtime、难度、概览和至少一个检查点，才能进入 `IntentReview` 并允许作者点击“生成并验证题目”。
+作者始终只看到已确认的题意或上一份 `Verified` revision。未验证的源文件、失败候选和内部修复意见不会进入作者审核界面。
 
-检查点在此阶段是作者可读的学习目标，不是固定的 `expected_user_edits` 模板。生成 agent 负责把它们落为实际题目资产和可执行检查。
+## 题意讨论与 Generator
 
-## 生成与 judge
+作者先与 authoring agent 多轮讨论。agent 只通过受 Server 校验的领域操作修改题意约定，形成元数据、概览和自然语言检查点；它不生成源码，也不启动验证。题意必须包含合法 runtime、难度、简介、概览和至少一个检查点，作者才可以点击“生成并验证题目”。
 
-确认生成后，Server 创建持久 Generator Agent Run。Agent Worker 以数据库租约领取该 Run，在 Server 管理并围栏的 OpenSandbox 工作区中写入 challenge 文件。Worker 没有 Kubernetes、Registry 或 OpenSandbox 生命周期凭据；它只能经内部 API 对当前租约的工作区读写、执行命令、归档和提交候选。
+确认后，Server 创建持久的 Generator AgentRun。Agent Worker 在 Server 管理、围栏的 OpenSandbox workspace 中生成候选，并调用 Judge。Generator 和 Judge 都使用严格 typed result；缺失、未知或非法字段不能用近似文本或默认值放行。Judge 通过且确定性 archive 校验成功时，Server 原子保存 CandidateRevision 与其执行快照，并创建 `build` WorkItem。
 
-Generator 先进行确定性候选校验，judge agent 再以严格 typed result 审核题意、元数据、题面、解答和检查点是否自洽。任何缺失、未知或非法字段都会使当前 Run 失败，不能按近似文本放行。生成资产的规范与静态约束在 [`internal/generator/`](../../internal/generator/) 中实现。
+## 固定 Worker 流水线
 
-## VerifyTask
+真实流水线由 Server/PostgreSQL 中的通用 WorkItem 调度：
 
-Generator 通过内部 HTTP 向 Server 提交归档。Server 保存归档、从它提取不可变的 `runtime` 与 checkpoint ID snapshot，并创建唯一的 `VerifyTask`。Controller 依次调和三个确定名称的 Job：
+```text
+CandidateRevision
+  -> Build
+  -> ArtifactPublish
+  -> Verify
+  -> 作者审核
+  -> ChallengePublish
+```
 
-1. **Builder** 是不可信 rootless BuildKit Job。它没有 `privileged`、Kubernetes ServiceAccount token、Registry 凭据或 Server 全局 internal key；只能用三枚一次性、任务绑定 grant 从 Server 下载本次 artifact 和固定 base OCI archive，再上传本次 OCI archive。它以 1 小时 deadline 运行，CPU、内存和 BuildKit `emptyDir` scratch 都有明确上限。
-2. **Publisher** 是独立可信 Job。它没有 Kubernetes API 权限，只能下载这份 OCI archive，并用 Registry 写 Secret 推到 Controller 派生的 staging tag。
-3. Controller 从该 staging tag 向 Registry 读取实际 manifest digest，写入 VerifyTask status，再创建 Kubernetes-enabled **Verifier** Job。
-4. Verifier 只读取 snapshot 和不可变 image digest，创建与题目 runtime 相同的临时 Environment，等待 `generate.sh` 初始化、执行 `answer.sh` 和全部公开检查点。
+- **Builder Worker** 只从受信任基础产物添加 challenge bundle。K8s 产出 OCI archive；Node 从固定 `node-systemd-base` 创建停止状态的 Incus image。Builder 不执行候选脚本、不联网安装软件，也没有 Registry 写权限。
+- **Publisher Worker** 将 build 输出放进真实环境可访问的 candidate staging store，并向 Server 返回不可变 OCI digest 或 Incus fingerprint。`artifact_publish` 不等于公开发布。
+- **Verifier Worker** 从不可变 CandidateRevision snapshot 创建 `purpose=verification` Environment，等待 runtime-init，执行全部 `answer.sh`，再执行所有 `checks.sh`。它向 Server 提交结构化报告并删除 Environment。
+- **ChallengePublish** 只在作者确认后发生。Publisher 建立正式镜像引用，Server 从已验证归档原子提升 `data_dir/challenges/<source_slug>/`，写入平台托管的 `id`、`source_slug`、`image`、`published_at`，随后创建 taxonomy mapping。
 
-成功时，VerifyTask status 保存构建、答案和检查点维度的报告，以及 Registry 确认的不可变镜像引用。失败时，Server 的作者会话调和器按 `report.class` 区分 artifact 与基础设施错误；只有前者会启动下一 Generator Run。它不会把失败 artifact 暴露给作者。
+所有 Worker 经 Server 内部 API 领取、续租和提交结果；Server 是 PostgreSQL 的唯一写者。每个操作都带 `work_item_id`、attempt 和 lease owner，失去租约的旧 Worker 不能提交 artifact、报告或推进下一阶段。
 
-## Job 与终态边界
+## 失败与恢复
 
-每个 VerifyTask 分别对应由 VerifyTask 名称派生的确定 Builder、Publisher 和 Verifier Job。Controller 重复 reconcile 只能 create-or-get 同一阶段 Job，不建立随机重复 Job。`status.stage` 只能从 `Building` 推进到 `Publishing`、`Verifying`；`status.image` 只能由 Controller 在 Publisher 成功后以 Registry 返回的 digest 写入。
+失败只有三类：
 
-Builder 或 Publisher 以特定 artifact exit code 结束时，Controller 写入 `Failed` 与 `report.class=artifact`；其他 Job 失败、Registry、Server 或 Kubernetes 故障写入 `report.class=infrastructure`。Verifier 对可判断题目错误直接写入 artifact 终态并以 0 退出。terminal status 不得被后续 Job 或 reconcile 覆盖。
+- **artifact**：候选静态校验、固定封装、runtime-init、answer 或 checkpoint 失败。当前 CandidateRevision 进入 `ArtifactFailed`，Server 用同一 Generator session 创建下一修复 Run；修复产物一定是新的 CandidateRevision。
+- **infrastructure**：Server、Registry、Kubernetes、Incus、vcluster、Provider 或 Worker 故障。当前 WorkItem 在其一小时 deadline 内退避重试，不要求 Generator 修改题目；Server 在启动和固定周期中回收过期阶段，因此不依赖下一次 Worker 领取；deadline 用尽才进入 `InfrastructureFailed`。
+- **cancelled**：作者取消、会话替代或输入 revision 失效。清理外部资源，但不创建修复 Run。
 
-Controller 在 terminal 路径清理临时 Environment 和失败 staging 镜像；Job 由 TTL controller 延迟删除以保留日志。Server watcher 只同步 CRD 终态到作者 workflow：成功进入作者审核，artifact failure 创建下一 Generator Run，infrastructure failure 保留报告并停止自动修订。它不创建或重试验证 Job。
+`artifact_cleanup` 是唯一无业务 deadline 的 WorkItem。它只回收 candidate 专属 staging 引用和临时 build 资源；正式 image 引用不会被 cleanup 删除。Server 在一个 PostgreSQL 事务内完成当前 WorkItem、保存领域结果和创建下一阶段，避免“阶段成功但下一步丢失”。
+
+Generator AgentRun 的技术失败同样由 Server 投影到当前 AuthoringSession：会话进入 `InfrastructureFailed`、失效的 `generator_run_id` 被清除，作者可以继续通过自然语言修改方案后发起新的 revision；旧 Run 的迟到结果仍会被 lease 围栏拒绝。
 
 ## 审核与发布
 
-只有已通过 VerifyTask 的 artifact 才进入 `AwaitingVerifiedReview`。作者可以查看题目元数据、检查点、只读资产、diff 和成功验证摘要；对已验证 revision 的自然语言修改会自动启动新一轮生成与验证，旧 revision 保持可见。
+只有 `Verified` revision 会进入 `AwaitingVerifiedReview`。作者可以查看只读资产、实际 metadata、检查点、diff 和验证报告；自然语言反馈会启动新的生成和验证，不会改写旧 revision。
 
-作者显式点击发布后，Server 从 VerifyTask 读取已验证 staging digest，以自身可信 Registry 凭据复制到由 opaque challenge ID 派生的正式 tag，再从 Registry 解析正式不可变 digest。只有该复制和解析成功，Server 才将 artifact 原子提升为 `data_dir/challenges/<source_slug>/`，写入平台管理的 `id`、`source_slug`、`image` 与 `published_at`，再记录发布完成。发布不重新生成也不重新验证；随后 Server 为该 artifact revision 入队独立 taxonomy mapping，题目在 exact mapping 发布前不会进入公开 Catalog。
+作者确认发布后，Server 先持久化发布意图，Publisher 幂等建立由 opaque challenge ID 派生的正式 OCI/Incus 引用，Server 再从已验证归档临时生成目录并 atomic rename。文件系统与 PostgreSQL 不是伪装的单一事务：Server 启动恢复器只扫描 `PublishingChallenge` 的明确意图，目录和记录精确一致才完成数据库提交；不一致是 invariant breach。
 
-## 安全与边界
-
-- Generator 到 Server 使用内部 API key；Builder/Publisher 到 Server 使用短期、一次性、任务绑定 grant。没有公开 artifact 上传入口，也不能用全局 internal key 调用 build handoff。
-- 题目目录是已发布 catalog 的唯一权威来源；作者会话和临时归档不是 catalog。
-- VerifyTask 只验证，不修改 artifact 或发布目录。
-- 运行环境和检查点使用与学习者一致的 runtime，详见[运行环境](runtime-environments.md)。
-- Skill、Tag 与公开 Catalog 准入由独立 workflow 管理，详见[Taxonomy 与 Catalog 发布](taxonomy.md)。
+发布题目仍需通过 taxonomy mapping 才进入公开 Catalog。taxonomy 不参与生成、构建或验证，详见[Taxonomy 与 Catalog 发布](taxonomy.md)。

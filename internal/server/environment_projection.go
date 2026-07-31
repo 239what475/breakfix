@@ -15,17 +15,16 @@ import (
 const environmentProjectionInterval = 2 * time.Second
 
 type environmentProjection struct {
-	UID          string
-	Name         string
-	Runtime      string
-	Verification bool
-	Spec         *breakfixv1.CommonEnvironmentSpec
-	Status       *breakfixv1.CommonEnvironmentStatus
+	UID     string
+	Name    string
+	Runtime string
+	Spec    *breakfixv1.EnvironmentSpec
+	Status  *breakfixv1.EnvironmentStatus
 }
 
-// StartEnvironmentStatusProjector makes the Server the sole database writer
-// for Environment lifecycle facts. Each operation is idempotent so a restart
-// simply replays current CRD status.
+// StartEnvironmentStatusProjector makes Server the sole database writer for
+// learning history. Verification environments are owned by the verifier and
+// are deliberately excluded by their purpose.
 func (h *Handler) StartEnvironmentStatusProjector(ctx context.Context) {
 	if h == nil || h.db == nil || h.k8s == nil {
 		return
@@ -51,27 +50,29 @@ func (h *Handler) StartEnvironmentStatusProjector(ctx context.Context) {
 }
 
 func (h *Handler) projectEnvironmentStatuses(ctx context.Context) error {
-	containers, err := h.k8s.ListContainerEnvironments(ctx, h.crdNamespace, "")
+	nodes, err := h.k8s.ListNodeEnvironments(ctx, h.crdNamespace, "")
 	if err != nil {
 		return err
 	}
-	for i := range containers.Items {
-		env := &containers.Items[i]
+	for index := range nodes.Items {
+		environment := &nodes.Items[index]
 		if err := h.projectEnvironment(ctx, environmentProjection{
-			UID: string(env.UID), Name: env.Name, Runtime: "container", Verification: env.Labels["breakfix.dev/verify-task"] != "", Spec: &env.Spec, Status: &env.Status,
+			UID: string(environment.UID), Name: environment.Name, Runtime: "node",
+			Spec: &environment.Spec.Environment, Status: &environment.Status.Environment,
 		}); err != nil {
 			return err
 		}
 	}
 
-	vclusters, err := h.k8s.ListVClusterEnvironments(ctx, h.crdNamespace, "")
+	vk8s, err := h.k8s.ListVK8sEnvironments(ctx, h.crdNamespace, "")
 	if err != nil {
 		return err
 	}
-	for i := range vclusters.Items {
-		env := &vclusters.Items[i]
+	for index := range vk8s.Items {
+		environment := &vk8s.Items[index]
 		if err := h.projectEnvironment(ctx, environmentProjection{
-			UID: string(env.UID), Name: env.Name, Runtime: "vcluster", Verification: env.Labels["breakfix.dev/verify-task"] != "", Spec: &env.Spec.CommonEnvironmentSpec, Status: &env.Status.CommonEnvironmentStatus,
+			UID: string(environment.UID), Name: environment.Name, Runtime: "k8s",
+			Spec: &environment.Spec.Environment, Status: &environment.Status.Environment,
 		}); err != nil {
 			return err
 		}
@@ -98,21 +99,14 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 	if h == nil || h.db == nil || projection.Spec == nil || projection.Status == nil {
 		return false, nil
 	}
-	if projection.Verification {
+	if projection.Spec.Purpose != breakfixv1.EnvironmentPurposeLearning {
 		return false, nil
 	}
 	if strings.TrimSpace(projection.UID) == "" {
 		return false, fmt.Errorf("environment %q has no uid", projection.Name)
 	}
 	if projection.Status.ReadyAt != nil && !projection.Status.ReadyAt.IsZero() {
-		if err := h.db.RecordChallengeAttempt(
-			ctx,
-			projection.Spec.UserRef,
-			projection.Spec.ChallengeRef,
-			projection.UID,
-			projection.Runtime,
-			projection.Status.ReadyAt.UTC(),
-		); err != nil {
+		if err := h.db.RecordChallengeAttempt(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.UID, projection.Runtime, projection.Status.ReadyAt.UTC()); err != nil {
 			return false, fmt.Errorf("record environment attempt: %w", err)
 		}
 	}
@@ -122,13 +116,9 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 				continue
 			}
 			if err := h.db.RecordCheckpointFirstPass(ctx, db.CheckpointFirstPassEvent{
-				EnvironmentUID:    projection.UID,
-				UserID:            projection.Spec.UserRef,
-				ChallengeID:       projection.Spec.ChallengeRef,
-				ChallengeRevision: projection.Spec.ChallengeRevision,
-				CheckpointID:      checkpoint.ID,
-				FirstPassedAt:     checkpoint.FirstPassedAt.UTC(),
-				Summary:           checkpoint.Summary,
+				EnvironmentUID: projection.UID, UserID: projection.Spec.UserRef,
+				ChallengeID: projection.Spec.Source.Ref, ChallengeRevision: projection.Spec.Source.Revision,
+				CheckpointID: checkpoint.ID, FirstPassedAt: checkpoint.FirstPassedAt.UTC(), Summary: checkpoint.Summary,
 			}); err != nil {
 				return false, fmt.Errorf("record checkpoint first pass %q: %w", checkpoint.ID, err)
 			}
@@ -137,8 +127,7 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 
 	switch projection.Status.Phase {
 	case breakfixv1.EnvironmentCompleted:
-		completedAt := lifecycleTime(projection.Status.CompletedAt)
-		if err := h.db.RecordChallengeCompletion(ctx, projection.Spec.UserRef, projection.Spec.ChallengeRef, projection.UID, completedAt); err != nil {
+		if err := h.db.RecordChallengeCompletion(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.UID, lifecycleTime(projection.Status.CompletedAt)); err != nil {
 			return false, fmt.Errorf("record environment completion: %w", err)
 		}
 	case breakfixv1.EnvironmentDestroyed, breakfixv1.EnvironmentFailed:

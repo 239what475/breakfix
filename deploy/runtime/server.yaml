@@ -53,51 +53,51 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: database_url
-            - name: BREAKFIX_AGENT_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: breakfix-runtime
-                  key: agent_database_url
             - name: BREAKFIX_JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: jwt_secret
-            - name: BREAKFIX_INTERNAL_API_KEY
+            - name: BREAKFIX_AGENT_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-runtime
-                  key: internal_api_key
-            - name: BREAKFIX_VERIFICATION_GRANT_KEY
+                  name: breakfix-agent-worker-identity
+                  key: worker_api_key
+            - name: BREAKFIX_BUILDER_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-runtime
-                  key: verification_grant_key
-            - name: BREAKFIX_REGISTRY_ADDR
+                  name: breakfix-builder-identity
+                  key: worker_api_key
+            - name: BREAKFIX_PUBLISHER_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-runtime
-                  key: registry_addr
-            - name: BREAKFIX_REGISTRY_INSECURE
+                  name: breakfix-publisher-identity
+                  key: worker_api_key
+            - name: BREAKFIX_VERIFIER_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-runtime
-                  key: registry_insecure
+                  name: breakfix-verifier-identity
+                  key: worker_api_key
             - name: BREAKFIX_REGISTRY_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_username
+            - name: BREAKFIX_REGISTRY_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_addr
             - name: BREAKFIX_REGISTRY_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_password
-            - name: DEEPSEEK_API_KEY
+            - name: BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
-                  key: deepseek_api_key
+                  key: registry_trust_bundle_file
             - name: OPEN_SANDBOX_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -112,12 +112,33 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: ui_origin
+            - name: BREAKFIX_INCUS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_endpoint
+            - name: BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_base_image_fingerprint
+            - name: BREAKFIX_K8S_BASE_IMAGE_DIGEST
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: k8s_base_image_digest
           volumeMounts:
             - name: config
               mountPath: /etc/breakfix
               readOnly: true
             - name: data
               mountPath: /var/lib/breakfix
+            - name: incus-tls
+              mountPath: /var/run/secrets/breakfix-incus
+              readOnly: true
+            - name: registry-ca
+              mountPath: /var/run/config/breakfix-registry-ca
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           readinessProbe:
@@ -144,5 +165,13 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: breakfix-server-data
+        - name: incus-tls
+          secret:
+            secretName: breakfix-incus-server
+            defaultMode: 0440
+        - name: registry-ca
+          configMap:
+            name: breakfix-registry-ca
+            optional: true
         - name: tmp
           emptyDir: {}

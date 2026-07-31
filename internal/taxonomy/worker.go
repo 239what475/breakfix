@@ -18,10 +18,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type LeaseCredential struct {
-	Attempt    int    `json:"attempt"`
-	LeaseOwner string `json:"lease_owner"`
-}
+type LeaseCredential = agentruntime.LeaseCredential
 
 type RuntimeClient interface {
 	LoadContext(context.Context, agentruntime.Claim) (ExecutionContext, error)
@@ -41,7 +38,7 @@ func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
 
 func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
 	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/taxonomy/context", LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
+	err := c.post(ctx, claim.Run.ID, "/taxonomy/context", claim.Credential(), &result)
 	return result, err
 }
 
@@ -49,7 +46,7 @@ func (c *InternalClient) FinalizeMapper(ctx context.Context, claim agentruntime.
 	return c.post(ctx, claim.Run.ID, "/taxonomy/mapper/finalize", struct {
 		LeaseCredential
 		ChangeSet ChangeSet `json:"changeset"`
-	}{LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, ChangeSet: changes}, nil)
+	}{LeaseCredential: claim.Credential(), ChangeSet: changes}, nil)
 }
 
 func (c *InternalClient) FinalizeReviewPair(ctx context.Context, claim agentruntime.Claim, curriculum, sre Review) error {
@@ -58,7 +55,7 @@ func (c *InternalClient) FinalizeReviewPair(ctx context.Context, claim agentrunt
 		Curriculum Review `json:"curriculum"`
 		SRE        Review `json:"sre"`
 	}{
-		LeaseCredential: LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner},
+		LeaseCredential: claim.Credential(),
 		Curriculum:      curriculum,
 		SRE:             sre,
 	}, nil)
@@ -137,7 +134,7 @@ type mapperResult struct {
 }
 
 func (r mapperResult) ChangeSet() ChangeSet {
-	return ChangeSet{Skills: r.Skills, Tags: r.Tags, ChallengeMappings: r.ChallengeMappings, SkillMappings: r.SkillMappings}
+	return ChangeSet(r)
 }
 
 type reviewerResult struct {
@@ -146,7 +143,7 @@ type reviewerResult struct {
 }
 
 func (r reviewerResult) Review() Review {
-	return Review{Decision: r.Decision, Feedback: r.Feedback}
+	return Review(r)
 }
 
 func runMapperWithEino(ctx context.Context, cfg config.AgentConfig, input ExecutionContext) (ChangeSet, error) {

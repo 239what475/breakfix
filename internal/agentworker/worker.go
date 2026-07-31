@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 type DeltaSink interface {
@@ -71,8 +72,20 @@ func (f ExecutorFunc) Execute(ctx context.Context, claim agentruntime.Claim, sin
 	return f(ctx, claim, sink)
 }
 
+// Store is the narrow scheduling boundary consumed by a Worker. Production
+// Workers implement it with the Server internal API; DB implements it only so
+// repository integration tests can exercise the same state transitions.
+type Store interface {
+	ClaimNext(context.Context, string, time.Duration, time.Time) (*agentruntime.Claim, error)
+	RenewLease(context.Context, agentruntime.Claim, time.Duration, time.Time) error
+	Requeue(context.Context, agentruntime.Claim, time.Time, string, time.Time) error
+	CompleteWithMessage(context.Context, agentruntime.Claim, agentruntime.Message, time.Time) error
+	Fail(context.Context, agentruntime.Claim, string, time.Time) error
+	GetRun(context.Context, string) (*agentruntime.Run, error)
+}
+
 type Worker struct {
-	store     agentruntime.Repository
+	store     Store
 	executors map[string]Executor
 	sink      DeltaSink
 	workerID  string
@@ -88,7 +101,7 @@ type Config struct {
 	PollEvery time.Duration
 }
 
-func New(store agentruntime.Repository, executors map[string]Executor, sink DeltaSink, config Config) (*Worker, error) {
+func New(store Store, executors map[string]Executor, sink DeltaSink, config Config) (*Worker, error) {
 	if store == nil || strings.TrimSpace(config.WorkerID) == "" {
 		return nil, errors.New("agent worker requires runtime store and worker id")
 	}
@@ -114,14 +127,31 @@ func New(store agentruntime.Repository, executors map[string]Executor, sink Delt
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	claimFailures := 0
 	for {
-		if err := ctx.Err(); err != nil {
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
 		claimed, err := w.ProcessOne(ctx)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return nil
+			}
+			claimFailures++
+			delay := worklist.ClaimRetryDelay(w.pollEvery, claimFailures)
+			slog.Warn("agent work claim failed; retrying", "worker_id", w.workerID,
+				"failure_class", "infrastructure", "retry_in", delay, "error", err)
+			if err := w.sleep(ctx, delay); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil
+				}
+				return err
+			}
+			continue
 		}
+		claimFailures = 0
 		if claimed {
 			continue
 		}
@@ -135,8 +165,9 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 // ProcessOne claims and executes at most one Run. A returned error means the
-// worker loop could not continue; ordinary model, tool, and protocol failures
-// are persisted as a scheduled retry and do not crash the process.
+// claim transport failed; Run keeps the fixed Worker alive and retries it with
+// a bounded backoff. Ordinary model, tool, and protocol failures are persisted
+// as a scheduled retry and do not crash the process.
 func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 	now := w.now()
 	claim, err := w.store.ClaimNext(ctx, w.workerID, w.leaseTTL, now)
@@ -151,12 +182,22 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 }
 
 func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) {
+	started := time.Now()
+	slog.Info("agent work started", w.logFields(claim)...)
 	executor := w.executors[claim.Run.Purpose]
 	if executor == nil {
-		w.requeueOrFail(parent, claim, fmt.Errorf("no executor registered for agent run purpose %q", claim.Run.Purpose))
+		err := fmt.Errorf("no executor registered for agent run purpose %q", claim.Run.Purpose)
+		w.logFailure(claim, started, err)
+		w.requeueOrFail(parent, claim, err)
 		return
 	}
-	execCtx, cancel := context.WithDeadline(parent, claim.Run.DeadlineAt)
+	if claim.Run.DeadlineAt == nil {
+		err := errors.New("claimed agent run has no execution deadline")
+		w.logFailure(claim, started, err)
+		w.fail(parent, claim, err)
+		return
+	}
+	execCtx, cancel := context.WithDeadline(parent, *claim.Run.DeadlineAt)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -166,7 +207,15 @@ func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) 
 	close(done)
 	cancel()
 	if err != nil {
+		w.logFailure(claim, started, err)
 		if leaseLost.Load() || parent.Err() != nil {
+			return
+		}
+		// A Run deadline ends the current logical run. Do not requeue it just
+		// because the runtime timer fires a few microseconds before the wall-clock
+		// value stored by PostgreSQL.
+		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			w.fail(parent, claim, execCtx.Err())
 			return
 		}
 		if isTerminal(err) {
@@ -178,22 +227,40 @@ func (w *Worker) processClaim(parent context.Context, claim agentruntime.Claim) 
 	}
 	if result.Finalized {
 		if result.Message != nil {
-			w.requeueOrFail(parent, claim, errors.New("finalized execution also returned a message"))
+			err := errors.New("finalized execution also returned a message")
+			w.logFailure(claim, started, err)
+			w.requeueOrFail(parent, claim, err)
 			return
 		}
 		run, err := w.store.GetRun(parent, claim.Run.ID)
 		if err != nil || run.Status != agentruntime.RunSucceeded {
-			w.requeueOrFail(parent, claim, fmt.Errorf("domain finalize did not complete agent run: %w", err))
+			finalizeErr := err
+			if finalizeErr == nil {
+				finalizeErr = fmt.Errorf("domain finalize left agent run in state %s", run.Status)
+			} else {
+				finalizeErr = fmt.Errorf("read domain-finalized agent run: %w", finalizeErr)
+			}
+			w.logFailure(claim, started, finalizeErr)
+			w.requeueOrFail(parent, claim, finalizeErr)
+			return
 		}
+		w.logSuccess(claim, started)
 		return
 	}
 	if result.Message == nil {
-		w.requeueOrFail(parent, claim, errors.New("executor returned no final message"))
+		err := errors.New("executor returned no final message")
+		w.logFailure(claim, started, err)
+		w.requeueOrFail(parent, claim, err)
 		return
 	}
-	if err := w.store.CompleteWithMessage(parent, claim, *result.Message, w.now()); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-		w.requeueOrFail(parent, claim, fmt.Errorf("persist final message: %w", err))
+	if err := w.store.CompleteWithMessage(parent, claim, *result.Message, w.now()); err != nil {
+		w.logFailure(claim, started, err)
+		if !errors.Is(err, agentruntime.ErrLeaseLost) {
+			w.requeueOrFail(parent, claim, fmt.Errorf("persist final message: %w", err))
+		}
+		return
 	}
+	w.logSuccess(claim, started)
 }
 
 func (w *Worker) fail(ctx context.Context, claim agentruntime.Claim, executionErr error) {
@@ -202,15 +269,12 @@ func (w *Worker) fail(ctx context.Context, claim agentruntime.Claim, executionEr
 		message = "agent execution failed"
 	}
 	if err := w.store.Fail(ctx, claim, message, w.now()); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-		slog.Error("fail terminal agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(executionErr))
+		slog.Error("fail terminal agent run", w.logFields(claim, "failure_class", errorClass(executionErr), "error", err)...)
 	}
 }
 
 func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cancel context.CancelFunc, done <-chan struct{}, leaseLost *atomic.Bool) {
-	interval := w.leaseTTL / 3
-	if interval <= 0 {
-		interval = time.Second
-	}
+	interval := worklist.LeaseRenewalInterval(w.leaseTTL)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -220,18 +284,23 @@ func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cance
 		case <-done:
 			return
 		case <-ticker.C:
-			if err := w.store.RenewLease(context.Background(), claim, w.leaseTTL, w.now()); err != nil {
-				if errors.Is(err, agentruntime.ErrLeaseLost) && w.completedByDomain(claim) {
+			requestCtx, requestCancel := context.WithTimeout(ctx, worklist.LeaseRenewalRequestTimeout(w.leaseTTL))
+			err := w.store.RenewLease(requestCtx, claim, w.leaseTTL, w.now())
+			requestCancel()
+			if err != nil {
+				// A domain finalize may complete the Run while a renewal request is
+				// in flight. Its response can be a lease conflict or a transport
+				// timeout, so the durable Run state decides whether cancellation is
+				// still appropriate.
+				if w.completedByDomain(claim) {
 					return
 				}
-				// A domain finalize can complete the Run while a ticker event is
-				// already selectable. Completion wins over this stale renewal.
 				select {
 				case <-done:
 					return
 				default:
 				}
-				slog.Warn("agent run lease renewal failed", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
+				slog.Warn("agent run lease renewal failed", w.logFields(claim, "failure_class", errorClass(err), "error", err)...)
 				leaseLost.Store(true)
 				cancel()
 				return
@@ -241,7 +310,9 @@ func (w *Worker) renewLease(ctx context.Context, claim agentruntime.Claim, cance
 }
 
 func (w *Worker) completedByDomain(claim agentruntime.Claim) bool {
-	run, err := w.store.GetRun(context.Background(), claim.Run.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), worklist.LeaseRenewalRequestTimeout(w.leaseTTL))
+	defer cancel()
+	run, err := w.store.GetRun(ctx, claim.Run.ID)
 	return err == nil && run.Status == agentruntime.RunSucceeded
 }
 
@@ -251,19 +322,36 @@ func (w *Worker) requeueOrFail(ctx context.Context, claim agentruntime.Claim, ex
 		message = "agent execution failed"
 	}
 	now := w.now()
-	if !now.Before(claim.Run.DeadlineAt) {
+	if claim.Run.DeadlineAt == nil || !now.Before(*claim.Run.DeadlineAt) {
 		if err := w.store.Fail(ctx, claim, message, now); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-			slog.Error("fail expired agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
+			slog.Error("fail expired agent run", w.logFields(claim, "failure_class", errorClass(err), "error", err)...)
 		}
 		return
 	}
 	next := now.Add(retryDelay(claim.Attempt))
-	if next.After(claim.Run.DeadlineAt) {
-		next = claim.Run.DeadlineAt
+	if next.After(*claim.Run.DeadlineAt) {
+		next = *claim.Run.DeadlineAt
 	}
 	if err := w.store.Requeue(ctx, claim, next, message, now); err != nil && !errors.Is(err, agentruntime.ErrLeaseLost) {
-		slog.Error("requeue agent run", "run_id", claim.Run.ID, "attempt", claim.Attempt, "error_class", errorClass(err))
+		slog.Error("requeue agent run", w.logFields(claim, "failure_class", errorClass(err), "error", err)...)
 	}
+}
+
+func (w *Worker) logSuccess(claim agentruntime.Claim, started time.Time) {
+	slog.Info("agent work succeeded", w.logFields(claim, "duration_seconds", time.Since(started).Seconds())...)
+}
+
+func (w *Worker) logFailure(claim agentruntime.Claim, started time.Time, err error) {
+	slog.Warn("agent work failed", w.logFields(claim,
+		"duration_seconds", time.Since(started).Seconds(), "failure_class", errorClass(err), "error", err)...)
+}
+
+func (w *Worker) logFields(claim agentruntime.Claim, extra ...any) []any {
+	fields := []any{
+		"work_item_id", claim.WorkItemID, "kind", "agent", "subject_id", claim.Run.ID,
+		"attempt", claim.Attempt, "worker_id", w.workerID,
+	}
+	return append(fields, extra...)
 }
 
 func retryDelay(attempt int) time.Duration {

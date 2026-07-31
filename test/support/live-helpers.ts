@@ -128,7 +128,7 @@ export async function runTerminalCommand(page: Page, command: string) {
 }
 
 export async function runAnswer(page: Page) {
-	await runTerminalCommand(page, "/answer.sh");
+	await runTerminalCommand(page, "/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
 }
 
 export async function stopChallenge(page: Page, challengeID: string) {

@@ -94,7 +94,6 @@ jobs:
           - 5432:5432
     env:
       BREAKFIX_DATABASE_URL: postgres://breakfix:breakfix@localhost:5432/breakfix?sslmode=disable
-      BREAKFIX_AGENT_DATABASE_URL: postgres://breakfix:breakfix@localhost:5432/breakfix?sslmode=disable
       BREAKFIX_REGISTRY_USERNAME: smoke
       BREAKFIX_REGISTRY_PASSWORD: smoke
       OPEN_SANDBOX_API_KEY: smoke-only-no-network-call

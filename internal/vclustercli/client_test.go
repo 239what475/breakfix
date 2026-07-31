@@ -155,6 +155,7 @@ func writeFakeVCluster(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vcluster")
+	//nolint:gosec // The fake CLI must be executable by the test process.
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake vcluster: %v", err)
 	}

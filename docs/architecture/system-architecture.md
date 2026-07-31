@@ -1,15 +1,15 @@
 # 系统架构
 
-Breakfix 是一个以真实 Kubernetes 运行环境为基础的运维练习平台。题目是文件系统中的发布内容；用户环境和真实验证任务是 Kubernetes CRD。系统将面向用户的 Server、Kubernetes Controller 与模型调用的 Agent Worker 分为独立进程。
+Breakfix 是一个用真实运行环境练习运维问题的平台。已发布题目是文件系统内容；用户和验证环境是 Kubernetes CRD；生成、构建、发布和验证是 Server/PostgreSQL 持久 worklist 上的固定 Worker 流水线。
 
 ## 权威来源
 
 - HTTP 路由、请求和响应：[`api/openapi.yaml`](../../api/openapi.yaml)
-- Environment、VerifyTask 的 CRD 契约：[`internal/k8s/apis/breakfix/v1/`](../../internal/k8s/apis/breakfix/v1/)
-- 题目目录和发布规则：[`internal/challenge/`](../../internal/challenge/)
-- 运行时配置：[`config/breakfix.example.yaml`](../../config/breakfix.example.yaml)
+- Environment CRD 契约：[`internal/k8s/apis/breakfix/v1/`](../../internal/k8s/apis/breakfix/v1/)
+- challenge 目录、归档和发布校验：[`internal/challenge/`](../../internal/challenge/)
+- 运行时与 Provider 配置：[`config/breakfix.example.yaml`](../../config/breakfix.example.yaml)
 
-本文件记录所有权和流程，不重复维护上述来源中的完整字段清单。
+本文件记录所有权和流程，不复制这些来源的完整字段清单。
 
 ## 进程边界
 
@@ -17,54 +17,48 @@ Breakfix 是一个以真实 Kubernetes 运行环境为基础的运维练习平�
 Browser
   | HTTP / WebSocket
   v
-breakfix-server <----> PostgreSQL <----> breakfix-agent-worker
+breakfix-server <----> PostgreSQL <----> agent / builder / publisher / verifier Workers
   | Kubernetes API                         | fenced internal HTTP
+  | Incus SDK                              |
   v                                        v
-breakfix-controller ----> namespaces, Pods, vclusters, Build/Publisher/Verifier Jobs, CRD status
-  ^
-  | Environment / VerifyTask CRD
-  +-----------------------------------------
+breakfix-controller ----> NodeEnvironment / VK8sEnvironment status and finalizers
+  |                         |
+  v                         v
+Incus system containers     namespaces, vclusters and management terminals
 ```
 
-`breakfix-server` 负责 HTTP、内嵌 Web UI、WebSocket 终端、认证、作者会话、做题助手、文件系统题库、taxonomy snapshot 与 artifact 存储。它是领域数据的唯一写者，从 CRD status 幂等投影学习记录、尝试记录和终端使用记录；它只创建或更新 Environment `spec`，以及请求删除 CRD，绝不直接写 Environment `status`。终端先由受 JWT 保护的 HTTP 接口签发一次性 ticket，再由严格 `ui_origin` 校验的 WebSocket 消费该 ticket；Server 从不接受 URL 中的 JWT。
+`breakfix-server` 负责 HTTP、内嵌 Web UI、认证、WebSocket 终端、作者会话、学习助手、文件系统题库、taxonomy snapshot、CandidateRevision 和 WorkItem。它是领域数据的唯一写者：只创建或更新 Environment `spec`、读取 status 并投影学习事实，绝不写 `status`。终端先由 JWT 保护的 HTTP 接口签发一次性 ticket，再由严格 `ui_origin` 校验的 WebSocket 消费；Server 从不接受 URL 中的 JWT。
 
-`breakfix-agent-worker` 从 PostgreSQL 领取有租约的 Agent Run，运行 Eino，并通过 Server 的受围栏保护内部 API 调用领域工具、读取工作区或提交候选。它只有 `agent_*` 表权限，没有 Kubernetes 凭据、Registry 凭据、OpenSandbox 生命周期密钥或领域表写权限。
+`breakfix-controller` 只运行 controller-runtime manager。它读取 `NodeEnvironment`/`VK8sEnvironment` spec，供应和回收 Incus 或 Kubernetes/vcluster 资源，运行学习环境的检查点并写回 status。它不访问 PostgreSQL、题目目录、候选归档或 Worker 队列。
 
-`breakfix-controller` 只运行 controller-runtime manager 和环境清理循环。它读取 CRD `spec`，创建和清理 Kubernetes 资源，运行检查点，并写回 Environment `status`；它也拥有 VerifyTask 的 `Pending -> Running`、Build/Publisher 调度状态，以及 Build/Publisher 或 verifier 协议失败的终态。它不访问 PostgreSQL、题目目录或 Server 持有的 artifact 文件。
-
-Generator 是持久 Agent Session/Run：Server 创建 Run，Worker 在 Server 管理的 OpenSandbox 工作区中生成候选，随后由 Server 保存 artifact 并创建 `VerifyTask`。Controller 为一个 VerifyTask 调和独立的 Build、Publisher 和 Verifier Job；它不共享 Server 文件系统。
-
-VerifyTask 的 `Verifying -> Succeeded/Failed` 由专用 Verifier Job 写入，且仅用于
-`answer.sh`/checkpoint 的确定性验证结论。Controller 只在 Verifier Job 未写出结论就
-结束时将仍处于 `Running` 的任务标为 infrastructure failure；terminal phase 不可覆盖。
-Server 只读取 VerifyTask status 并投影领域状态，不具有任何 `*/status` 写权限。
-
-Server 启动和 `/readyz` 都以严格模式校验整个文件系统题库；任一发布目录不合法就拒绝 Ready，不会静默隐藏其他题目。`/healthz` 只表示进程存活，供 liveness probe 使用。
+四类 Worker 是常驻 Deployment：Agent Worker 执行模型 Run；Builder Worker 构造不可变运行时产物；Publisher Worker 管理 staging、正式引用和 cleanup；Verifier Worker 创建验证 Environment 并执行答案与检查点。所有 Worker 只通过 Server 内部 API 领取、续租和提交；它们不直接写 PostgreSQL，也不会自行推进下一阶段。
 
 ## 数据所有权
 
 | 数据 | 权威所有者 | 访问原则 |
 | --- | --- | --- |
-| 已发布题目 | `data_dir/challenges/` | Server 读取并在发布时原子写入；不是数据库或 CRD 的副本。 |
-| Skill、Tag 与 mapping | `data_dir/taxonomy/current` 不可变快照 | Server 的 taxonomy workflow 发布；数据库只保存队列和审查运行状态。 |
-| 作者 artifact 与提交归档 | Server 数据目录 | Server 保存和提升；Generator、VerifyTask 通过内部 HTTP 交接。 |
-| 账户、作者会话、学习和终端记录 | PostgreSQL | Server 写领域数据；Worker 仅按独立权限读写 `agent_*` Runtime 数据。 |
+| 已发布题目 | `data_dir/challenges/` | Server 在 ChallengePublish 时原子写入；不是数据库或 CRD 副本。 |
+| Skill、Tag 与 mapping | `data_dir/taxonomy/current` 不可变快照 | Server taxonomy workflow 发布；数据库只保存 Mapping 和 AgentRun 状态。 |
+| 未发布 CandidateRevision 与归档 | Server data volume | Server 保存不可变归档；Worker 只走 task-bound 下载/上传 API。 |
+| 账户、作者会话、学习记录、AgentRun、WorkItem | PostgreSQL | Server 是唯一写者。 |
 | Generator workspace | Server-owned PVC + PostgreSQL record | Server 创建、清理和围栏；OpenSandbox 只以 BYO 模式挂载。 |
-| 用户运行环境 | ContainerEnvironment / VClusterEnvironment CRD | Server 提供期望 spec，Controller 管理资源和 status。 |
-| 生成与真实验证 | Agent Run / VerifyTask CRD | Worker 生成候选；Controller 调和 VerifyTask，Server 将成功结果关联到作者会话。 |
+| 用户和验证环境 | NodeEnvironment / VK8sEnvironment CRD | Server 提供不可变 spec，Controller 管理资源和 status。 |
+| staging 与正式运行时产物 | Registry 或 Incus image Project | Publisher 建立精确引用；Verifier 只使用不可变 digest/fingerprint。 |
 
-Environment spec 在创建时包含不可变执行快照：题目引用、manifest revision、镜像、runtime 和预期 checkpoint ID。这样 Controller 无须读取题目目录，也不会因为发布后的题目文件改变而改变已启动环境的执行语义。
+Environment spec 在创建时包含不可变执行快照，因此 Controller 无须重读题目目录，验证环境也不会因作者之后的修订改变执行语义。
 
-## 请求与恢复
+## 请求、阶段与恢复
 
-启动挑战时，Server 从发布题目目录读取题目，创建对应的 Environment CRD，并等待 Controller 将其调和到 Ready。终端通过 Server 代理到 workspace Pod；连接活动作为 Environment spec 的 `activityAt` 输入。Controller 基于该输入计算租约、Draining 与清理，最终通过 CRD status 表达完成、失败和销毁。
+用户开始挑战时，Server 从已发布题目目录读取 manifest，创建 learning Environment CRD，并等待 Controller 调和到 Ready。Node terminal 经 Server 代理到 Incus tmux；VK8s terminal 经 Server 代理到管理 Pod。终端活动是 Environment spec 输入，Controller 计算 idle lease、Draining 和回收；完成、失败和检查点结果都由 CRD status 表达。
 
-Server 重启不会停止 Controller 调和。Controller 重启后会从已有 CRD 继续创建资源、检查检查点或清理。Server 恢复后会重新投影现有 CRD status 到 PostgreSQL，并删除已完成投影的 Destroyed/Failed CRD。真实恢复行为由 [`test/runtime/server-recovery.spec.ts`](../../test/runtime/server-recovery.spec.ts) 验证。
+作者确认题意后，Server 创建 Generator AgentRun。Judge 通过后，Server 在同一数据库事务中保存 CandidateRevision 并创建 `build` WorkItem；阶段顺序固定为 `build -> artifact_publish -> verify -> author review -> challenge_publish`。每个 WorkItem 的 lease owner、attempt 和 deadline 围栏所有外部副作用。详细流程见[作者生成与真实验证](authoring-workflow.md)。
+
+Server 重启不停止 Controller reconcile。Controller 重启后从现有 CRD 继续供应、检查或清理；Server 恢复后重新投影现有 Environment status，并恢复 `PublishingChallenge` 的明确发布意图。Worker 崩溃后租约过期，由同类型固定副本接管；旧 attempt 的结果被 Server 拒绝。
 
 ## 当前部署假设
 
-运行时包将 Server、Controller、Agent Worker 和 PostgreSQL 分别部署；Server 的 RWO data PVC 持有 catalog 与 artifact，因此 Server 使用 `Recreate` 策略。Controller 不共享该目录，Worker 不挂载任何业务卷。
+运行时包含 Server、Controller、Agent Worker、Builder Worker、Publisher Worker、Verifier Worker 和 PostgreSQL；根部署包默认附带 OCI Registry，也可用外部 Registry 替换。Server 的 RWO data PVC 保存 catalog 与 candidate artifact，因此当前 Server 使用单副本 `Recreate` 策略。Node provider 是集群外、mTLS 访问的 Incus cluster；VK8s 保留在 Kubernetes 集群内。
 
-多 Server 实例仍需要可共享的题目/artifact 存储与可协调的文件提升协议；PostgreSQL 本身不解决该文件系统边界。
+K8s OCI Registry 是私有平台基础设施，不是 `*.svc` 形式的 Pod 内部服务。内置模式使用管理员提供 TLS Secret 的私有 LoadBalancer，且所有节点用正常 DNS 解析稳定内网名称，例如 `registry.breakfix.internal`。内部 CA 根证书由管理员在节点镜像运行时中预装；Server 和 Publisher 通过可选的 `breakfix-registry-ca` ConfigMap 信任同一根 CA。外部模式不部署 Registry，直接使用配置的 HTTPS OCI endpoint。每个 VK8s 环境 namespace 在配置了 Docker pull Secret 时获得其副本，并将其绑定到禁用 token 自动挂载的 `breakfix-runtime` ServiceAccount；无认证 Registry 则只创建该 ServiceAccount。terminal Pod 使用该 ServiceAccount，Kubernetes admission 可将 image-pull Secret 引用写入持久化的 Pod spec，但不会将 Secret 或 Kubernetes API token 挂载进挑战容器。
 
-Taxonomy 的发布、并发与 Catalog 准入规则见[Taxonomy 与 Catalog 发布](taxonomy.md)。
+多 Server 副本需要共享 artifact/catalog storage 和可协调的文件提升协议；PostgreSQL 本身不解决文件系统边界。Taxonomy 的发布、并发和 Catalog 准入见[Taxonomy 与 Catalog 发布](taxonomy.md)。

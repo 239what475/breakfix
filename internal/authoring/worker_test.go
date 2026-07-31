@@ -12,12 +12,12 @@ import (
 func TestAuthoringToolsOwnStageRevisionAndRejectRetiredIntentVersion(t *testing.T) {
 	client := &stageRuntimeClient{stage: Stage{StageRevision: 4}}
 	conversation := &runtimeConversation{
-		claim:  agentruntime.Claim{Run: agentruntime.Run{ID: "authoring-run", Purpose: "authoring", Attempt: 1}, LeaseOwner: "lease"},
+		claim:  agentruntime.Claim{Run: agentruntime.Run{ID: "authoring-run", Purpose: "authoring"}, WorkItemID: "work-authoring-run", Attempt: 1, LeaseOwner: "lease"},
 		client: client,
 		stage:  client.stage,
 	}
 
-	if _, err := conversation.setMetadata(context.Background(), `{"title":"清理日志","description":"处理过期日志","difficulty":"easy","runtime":"container","reason":"明确题意","difficulty_impact":"难度不变"}`); err != nil {
+	if _, err := conversation.setMetadata(context.Background(), `{"title":"清理日志","description":"处理过期日志","difficulty":"easy","runtime":"node","reason":"明确题意","difficulty_impact":"难度不变"}`); err != nil {
 		t.Fatalf("set metadata: %v", err)
 	}
 	if _, err := conversation.replaceOverview(context.Background(), `{"markdown":"清理过期日志。","reason":"补充说明","difficulty_impact":"难度不变"}`); err != nil {
@@ -26,7 +26,7 @@ func TestAuthoringToolsOwnStageRevisionAndRejectRetiredIntentVersion(t *testing.
 	if got, want := client.revisions, []int64{4, 5}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("stage revisions = %#v, want %#v", got, want)
 	}
-	if _, err := conversation.setMetadata(context.Background(), `{"intent_version":6,"title":"清理日志","description":"处理过期日志","difficulty":"easy","runtime":"container","reason":"明确题意","difficulty_impact":"难度不变"}`); err == nil || !strings.Contains(err.Error(), "unknown field") {
+	if _, err := conversation.setMetadata(context.Background(), `{"intent_version":6,"title":"清理日志","description":"处理过期日志","difficulty":"easy","runtime":"node","reason":"明确题意","difficulty_impact":"难度不变"}`); err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("retired intent_version error = %v, want strict unknown field rejection", err)
 	}
 }

@@ -16,7 +16,7 @@ import (
 
 const (
 	maxAssistantTurns    = 12
-	assistantRunDeadline = 15 * time.Minute
+	assistantRunDeadline = agentruntime.ExecutionDeadline
 	promptVersion        = "assistant-v1"
 )
 
@@ -81,7 +81,7 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 		return nil, Turn{}, err
 	}
 	now := time.Now().UTC()
-	input, err := json.Marshal(RunInput{CurrentWindow: request.CurrentWindow, OpenWindows: request.OpenWindows})
+	input, err := json.Marshal(RunInput{CurrentNode: request.CurrentNode, CurrentWindow: request.CurrentWindow, Terminals: cloneTerminalContexts(request.Terminals)})
 	if err != nil {
 		return nil, Turn{}, fmt.Errorf("encode assistant run input: %w", err)
 	}
@@ -92,16 +92,16 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 		Content:   content,
 		CreatedAt: now,
 	}, agentruntime.CreateRun{
-		ID:            NewID("assistant-run"),
-		SessionID:     session.ID,
-		Purpose:       "assistant",
-		OwnerKind:     "environment",
-		OwnerRef:      request.EnvironmentUID,
-		InputRevision: request.EnvironmentUID,
-		Input:         input,
-		Model:         s.model,
-		PromptVersion: promptVersion,
-		DeadlineAt:    now.Add(assistantRunDeadline),
+		ID:               NewID("assistant-run"),
+		SessionID:        session.ID,
+		Purpose:          "assistant",
+		OwnerKind:        "environment",
+		OwnerRef:         request.EnvironmentUID,
+		InputRevision:    request.EnvironmentUID,
+		Input:            input,
+		Model:            s.model,
+		PromptVersion:    promptVersion,
+		ExecutionTimeout: assistantRunDeadline,
 	})
 	if errors.Is(err, agentruntime.ErrRunActive) {
 		return nil, Turn{}, ErrTurnRunning
@@ -138,7 +138,10 @@ func (s *Service) Subscribe(ctx context.Context, sessionID, runID string) (*Subs
 			closeHub()
 		})
 	}
-	go s.watchRun(sessionID, runID, channel, cancelWatch)
+	// The subscription owns the watcher lifetime. Its request context may be
+	// cancelled when the HTTP handler upgrades to WebSocket, so retain values
+	// without inheriting that cancellation.
+	go s.watchRun(context.WithoutCancel(ctx), sessionID, runID, channel, cancelWatch)
 	s.emitCurrentRunState(ctx, sessionID, run, channel)
 	return &Subscription{Events: channel, close: closeSubscription}, nil
 }
@@ -161,7 +164,7 @@ func (s *Service) DeleteEnvironment(ctx context.Context, environmentUID string) 
 	return err
 }
 
-func (s *Service) watchRun(sessionID, runID string, channel chan<- Event, stop <-chan struct{}) {
+func (s *Service) watchRun(ctx context.Context, sessionID, runID string, channel chan<- Event, stop <-chan struct{}) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -169,13 +172,13 @@ func (s *Service) watchRun(sessionID, runID string, channel chan<- Event, stop <
 		case <-stop:
 			return
 		case <-ticker.C:
-			run, err := s.repo.GetRun(context.Background(), runID)
+			run, err := s.repo.GetRun(ctx, runID)
 			if err != nil {
 				nonBlockingSend(channel, Event{Type: "error", TurnID: runID, Error: "assistant run is unavailable"})
 				return
 			}
 			if isTerminal(run.Status) {
-				s.emitCurrentRunState(context.Background(), sessionID, run, channel)
+				s.emitCurrentRunState(ctx, sessionID, run, channel)
 				return
 			}
 		}

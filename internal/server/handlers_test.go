@@ -19,6 +19,7 @@ import (
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestGetChallengeProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
@@ -49,10 +50,9 @@ func TestAssistantWindowsIncludeOnlyValidatedWorkspaceTabs(t *testing.T) {
 }
 
 func TestGetChallengeProgressRejectsNonReadyEnvironment(t *testing.T) {
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		Spec:   breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{Phase: breakfixv1.EnvironmentProvisioning},
-	}})
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
+		testNodeEnvironment("environment-provisioning", breakfixv1.EnvironmentProvisioning, nil),
+	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
@@ -66,15 +66,9 @@ func TestGetChallengeProgressRejectsNonReadyEnvironment(t *testing.T) {
 }
 
 func TestGetChallengeProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentReady,
-			Checkpoints: &breakfixv1.CheckpointStatus{
-				Error: "checkpoint runner exited with 1",
-			},
-		},
-	}})
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
+		testNodeEnvironment("environment-check-failed", breakfixv1.EnvironmentReady, &breakfixv1.CheckpointStatus{Error: "checkpoint runner exited with 1"}),
+	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
@@ -89,15 +83,11 @@ func TestGetChallengeProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
 
 func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	firstPassedAt := metav1.NewTime(time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC))
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentCompleted,
-			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
-				ID: "complete", Summary: "done", Passed: true, FirstPassedAt: &firstPassedAt,
-			}}},
-		},
-	}})
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
+		testNodeEnvironment("environment-completed", breakfixv1.EnvironmentCompleted, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+			ID: "complete", Summary: "done", Passed: true, FirstPassedAt: &firstPassedAt,
+		}}}),
+	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
@@ -136,14 +126,13 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
 	challengeDir := filepath.Join(challengesDir, "demo")
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
-	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	seedTestTaxonomy(t, root)
 
 	database := testpostgres.New(t)
@@ -191,14 +180,13 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: vcluster\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
-	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "k8s", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "k8s", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	seedTestTaxonomy(t, root)
 
 	cfg := config.Config{DataDir: root}
@@ -222,8 +210,8 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatalf("expected 1 challenge, got %#v", resp.Challenges)
 	}
 	got := resp.Challenges[0]
-	if got.Runtime != api.ChallengeSummaryRuntimeVcluster {
-		t.Fatalf("expected runtime vcluster, got %#v", got.Runtime)
+	if got.Runtime != api.ChallengeSummaryRuntimeK8s {
+		t.Fatalf("expected runtime k8s, got %#v", got.Runtime)
 	}
 	if !got.PublishedAt.Equal(time.Date(2026, time.July, 24, 9, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected published time: %#v", got.PublishedAt)
@@ -264,15 +252,11 @@ func TestListChallengesHidesPublishedChallengeBeforeTaxonomyMapping(t *testing.T
 }
 
 func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) {
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentReady,
-			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
-				ID: "complete", Passed: true, Summary: "done",
-			}}},
-		},
-	}})
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
+		testNodeEnvironment("environment-active", breakfixv1.EnvironmentReady, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+			ID: "complete", Passed: true, Summary: "done",
+		}}}),
+	})
 	if err := handler.db.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
@@ -303,15 +287,11 @@ func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) 
 }
 
 func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T) {
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		Spec: breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase: breakfixv1.EnvironmentCompleted,
-			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
-				ID: "complete", Passed: true, Summary: "done",
-			}}},
-		},
-	}})
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
+		testNodeEnvironment("environment-completed", breakfixv1.EnvironmentCompleted, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+			ID: "complete", Passed: true, Summary: "done",
+		}}}),
+	})
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -365,7 +345,7 @@ func TestChallengeArtifactRevisionMismatchRemovesChallengeFromPublicEndpoints(t 
 	if _, err := handler.publishedChallenge("demo"); err != nil {
 		t.Fatalf("published challenge was unavailable before artifact change: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(handler.challengesDir, "demo", "problem.md"), []byte("changed problem\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(handler.challengesDir, "demo", "problem.md"), []byte("changed problem\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -406,12 +386,12 @@ func writeTestFile(t *testing.T, path, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnvironment) *Handler {
+func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironment) *Handler {
 	t.Helper()
 	root := t.TempDir()
 	writeTestChallenge(t, root)
@@ -432,20 +412,20 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 			})
 			return
 		}
-		if r.URL.Path == "/apis/breakfix.dev/v1/namespaces/breakfix-system/vclusterenvironments" {
+		if r.URL.Path == "/apis/breakfix.dev/v1/namespaces/breakfix-system/vk8senvironments" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(breakfixv1.VClusterEnvironmentList{
-				TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VClusterEnvironmentList"},
+			_ = json.NewEncoder(w).Encode(breakfixv1.VK8sEnvironmentList{
+				TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VK8sEnvironmentList"},
 			})
 			return
 		}
-		if r.URL.Path != "/apis/breakfix.dev/v1/namespaces/breakfix-system/containerenvironments" {
+		if r.URL.Path != "/apis/breakfix.dev/v1/namespaces/breakfix-system/nodeenvironments" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(breakfixv1.ContainerEnvironmentList{
-			TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "ContainerEnvironmentList"},
+		_ = json.NewEncoder(w).Encode(breakfixv1.NodeEnvironmentList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "NodeEnvironmentList"},
 			Items:    environments,
 		})
 	}))
@@ -462,12 +442,27 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.ContainerEnv
 func writeTestChallenge(t *testing.T, root string) {
 	t.Helper()
 	challengeDir := filepath.Join(root, "challenges", "demo")
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\ntype: script\nruntime: container\ndifficulty: easy\ndescription: demo\nimage: demo:v1\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeTestFile(t, filepath.Join(challengeDir, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeTestFile(t, filepath.Join(challengeDir, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(challengeDir, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+}
+
+func nodeTestManifest(title string) string {
+	return "id: demo\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+}
+
+func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {
+	return breakfixv1.NodeEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{"breakfix.dev/user": "u-demo", "breakfix.dev/challenge": "demo"}},
+		Spec: breakfixv1.NodeEnvironmentSpec{Environment: breakfixv1.EnvironmentSpec{
+			Purpose: breakfixv1.EnvironmentPurposeLearning,
+			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "demo", Revision: "sha256:test"},
+			UserRef: "u-demo",
+		}},
+		Status: breakfixv1.NodeEnvironmentStatus{Environment: breakfixv1.EnvironmentStatus{Phase: phase, Checkpoints: checkpoints}},
+	}
 }

@@ -36,7 +36,7 @@ export type LoginResponse = {
 export type MySpaceChallenge = {
     id: string;
     title: string;
-    runtime: 'container' | 'vcluster';
+    runtime: 'node' | 'k8s';
     difficulty: string;
 };
 
@@ -64,7 +64,7 @@ export type MySpaceSummary = {
 export type MySpaceActiveEnvironment = {
     environment_id: string;
     challenge: MySpaceChallenge;
-    runtime: 'container' | 'vcluster';
+    runtime: 'node' | 'k8s';
     phase: string;
     checkpoint_progress: CheckpointProgressSummary;
     expires_at?: string | null;
@@ -87,7 +87,7 @@ export type MySpaceLearningPage = {
 export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'InfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
     updated_at: string;
 };
 
@@ -117,8 +117,7 @@ export type MySpace = {
 export type ChallengeSummary = {
     id: string;
     title: string;
-    type: string;
-    runtime: 'container' | 'vcluster';
+    runtime: 'node' | 'k8s';
     difficulty: 'easy' | 'medium' | 'hard';
     tags: Array<TaxonomyReference>;
     primary_outcome: TaxonomyReference;
@@ -168,7 +167,12 @@ export type ChallengeCheckpoint = {
     title: string;
     description: string;
     hint?: string;
-    depends_on?: Array<string>;
+    node?: string;
+};
+
+export type ChallengeNode = {
+    name: string;
+    title: string;
 };
 
 export type CheckpointResult = {
@@ -188,6 +192,8 @@ export type CheckpointFirstPass = {
 export type ChallengeContent = {
     id: string;
     title: string;
+    runtime: 'node' | 'k8s';
+    nodes: Array<ChallengeNode>;
     problem: string;
     solution: string;
     hints: {
@@ -233,10 +239,16 @@ export type AssistantTurn = {
     updated_at: string;
 };
 
+export type AssistantTerminalContext = {
+    node?: string;
+    windows: Array<string>;
+};
+
 export type AssistantMessageRequest = {
     content: string;
+    current_node?: string;
     current_window: string;
-    open_windows: Array<string>;
+    terminals: Array<AssistantTerminalContext>;
 };
 
 export type StartResponse = {
@@ -258,6 +270,7 @@ export type TerminalWindowCloseResponse = {
 
 export type TerminalTicketRequest = {
     window: string;
+    node?: string;
 };
 
 export type TerminalTicketResponse = {
@@ -268,7 +281,7 @@ export type AuthoringMetadata = {
     title: string;
     difficulty: 'easy' | 'medium' | 'hard';
     description: string;
-    runtime: 'container' | 'vcluster';
+    runtime: 'node' | 'k8s';
 };
 
 export type AuthoringCheckpoint = {
@@ -289,7 +302,7 @@ export type VerifiedCheckpoint = {
     title: string;
     description: string;
     hint?: string;
-    depends_on?: Array<string>;
+    node?: string;
 };
 
 export type VerifiedChallenge = {
@@ -297,32 +310,32 @@ export type VerifiedChallenge = {
     checkpoints: Array<VerifiedCheckpoint>;
 };
 
-export type AuthoringArtifact = {
-    submission_id: string;
-    directory: string;
+export type AuthoringCandidate = {
+    id: string;
     generator_run_id: string;
-};
-
-export type AuthoringVerification = {
-    task_id: string;
-    phase: string;
-    message: string;
-    report?: AuthoringVerificationReport;
-    challenge_id?: string;
+    archive_sha256: string;
+    state: 'Building' | 'PublishingArtifact' | 'Verifying' | 'Verified' | 'PublishingChallenge' | 'Published' | 'ArtifactFailed' | 'InfrastructureFailed' | 'Cancelled' | 'Superseded';
 };
 
 export type AuthoringVerificationReport = {
-    class?: 'artifact' | 'infrastructure';
-    build_passed: boolean;
-    answer_passed: boolean;
-    checkpoints_passed: boolean;
-    summary?: string;
-    issues?: Array<AuthoringVerificationIssue>;
+    passed: boolean;
+    summary: string;
+    answers: Array<AuthoringExecutionResult>;
+    checkpoints: Array<AuthoringCheckpointResult>;
 };
 
-export type AuthoringVerificationIssue = {
-    code: string;
-    message: string;
+export type AuthoringExecutionResult = {
+    location: string;
+    exit_code: number;
+    stdout?: string;
+    stderr?: string;
+};
+
+export type AuthoringCheckpointResult = {
+    id: string;
+    passed: boolean;
+    summary: string;
+    details?: string;
 };
 
 export type AuthoringChange = {
@@ -356,7 +369,7 @@ export type AuthoringMessageRequest = {
 
 export type AuthoringSession = {
     id: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'VerificationInfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'InfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
     /**
      * Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
      */
@@ -364,13 +377,14 @@ export type AuthoringSession = {
     intent_revision: number;
     visible_revision: number;
     generator_run_id?: string;
-    verify_task_id?: string;
     publish_challenge_id?: string;
+    pipeline_state?: 'Building' | 'PublishingArtifact' | 'Verifying' | 'Verified' | 'PublishingChallenge' | 'Published' | 'ArtifactFailed' | 'InfrastructureFailed' | 'Cancelled' | 'Superseded';
+    last_error?: string;
     updated_at: string;
     intent: AuthoringPlan;
-    artifact?: AuthoringArtifact;
+    candidate?: AuthoringCandidate;
     verified?: VerifiedChallenge;
-    verification?: AuthoringVerification;
+    verification?: AuthoringVerificationReport;
     messages: Array<AuthoringMessage>;
     assets: Array<AuthoringAsset>;
     diff: Array<AuthoringFileDiff>;
@@ -469,7 +483,7 @@ export type GetMySpaceLearningData = {
         /**
          * Filter attempts by environment runtime
          */
-        runtime?: 'container' | 'vcluster';
+        runtime?: 'node' | 'k8s';
     };
     url: '/me/space/learning';
 };
@@ -778,7 +792,9 @@ export type CloseTerminalWindowData = {
         id: string;
         window: string;
     };
-    query?: never;
+    query?: {
+        node?: string;
+    };
     url: '/challenges/{id}/terminals/{window}';
 };
 

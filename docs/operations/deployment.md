@@ -1,57 +1,77 @@
 # 部署与运行
 
-本项目运行 Server、Controller、Agent Worker、PostgreSQL 与 OCI Registry 五个核心组件。前三者是独立 Deployment，PostgreSQL 使用 `StatefulSet`，Registry 使用单副本 `Deployment` 和独立 PVC；运行时使用 PostgreSQL，不支持 SQLite 回退。配置键以 [`config/breakfix.example.yaml`](../../config/breakfix.example.yaml) 为准；构建、开发和集群部署命令以 [`Makefile`](../../Makefile) 为准。
+Breakfix 的控制面由 Server、Controller、Agent Worker、Builder Worker、Publisher Worker、Verifier Worker 和 PostgreSQL 组成。前六者都是固定容量 Deployment；PostgreSQL 是 StatefulSet。根部署包默认额外部署单副本 OCI Registry 与独立 PVC，也可改用运营方已有的 Registry。PostgreSQL 是唯一关系数据库，不支持 SQLite 回退。
+
+Server 是 CandidateRevision、WorkItem 和领域状态的唯一写者。所有 Worker 都通过 Server 内部 API 领取和提交带 lease fence 的 WorkItem，不持有 PostgreSQL 凭据。Controller 只调和 `NodeEnvironment` 和 `VK8sEnvironment` CRD，不参与候选工作流状态机。
+
+配置键以 [`config/breakfix.example.yaml`](../../config/breakfix.example.yaml) 为准；构建、开发和集群部署命令以 [`Makefile`](../../Makefile) 为准。
 
 ## 本地开发
 
-前置条件：Docker、Kind、kubectl、Go、Node.js、PostgreSQL，以及可用的 `vcluster` CLI。需要生成题目时，还需要已安装的 OpenSandbox native Kubernetes provider 和其 lifecycle key。Breakfix 使用 OpenSandbox 的 `ManualCleanup` Sandbox：每个 Generator Run 由 Server 显式删除 Sandbox 及其 BYO PVC，不依赖 provider 的工作区超时。验证 Registry 必须支持 Docker Registry V2 的 manifest DELETE；失败的 `VerifyTask` 必须删除临时镜像，不能将该清理错误忽略为成功。默认 Kind 集群名为 `breakfix-dev`。
+前置条件：Docker、Kind、kubectl、Go、Node.js、PostgreSQL 和 `vcluster` CLI。生成题目还需要 OpenSandbox native Kubernetes provider 及其 lifecycle key、模型 API key。默认 Kind cluster 名是 `breakfix-dev`。
 
 ```bash
 cp config/breakfix.example.yaml config/breakfix.yaml
+# 填写 PostgreSQL、模型、OpenSandbox 与 Registry 连接信息。
 make dev
 ```
 
-每个进程都必须显式读取一个配置文件；缺失配置文件或缺失该进程需要的配置会直接退出，绝不会补入开发默认值。复制示例后，为 `database_url` 和 `agent_database_url` 提供可访问的 PostgreSQL DSN，并设置模型和 OpenSandbox 所需密钥。`ui_origin` 必须是浏览器实际访问 UI 的单个完整 `http`/`https` origin，例如 `http://localhost:9090`；终端 WebSocket 只接受这个 Origin。
+`make dev` 会准备题库目录、CRD/RBAC 和 K8s base image，然后构建并启动 Server、Controller 和四类固定 Worker。运行 VK8s 前，先准备配置的 HTTPS OCI Registry；若它使用内部 CA，集群节点必须已经信任该 CA。Web UI 位于 `http://localhost:9090`；`/readyz` 只反映进程的核心可服务状态，`/healthz` 只反映进程存活。运行时依赖通过 capability endpoint 单独观察，避免一个可选 provider 让无关运行时失去服务。
 
-`make dev` 会准备本地匿名 Registry、空的 Docker pull Secret、数据目录、CRD、RBAC、题目镜像和验证 Job 镜像，构建三个常驻二进制并依次启动 Controller、Server 与 Agent Worker。Web UI 位于 `http://localhost:9090`；Server 的 `/readyz` 同时校验整个题库，`/healthz` 只用于存活探测；Controller 健康检查位于 `http://localhost:8081/healthz`。
+Node runtime 依赖独立的 Incus provider，不会由 `make dev` 隐式创建或修改。先按 [运行环境](../architecture/runtime-environments.md) 准备 Incus 7.0.1，然后显式执行：
+
+```bash
+make dev-incus
+make dev-incus-catalog
+make dev-incus-secrets
+```
+
+这会创建平台固定 build/image Project、受信任且不带过期时间的 `node-systemd-base`、各角色的 mTLS Secret，并把提交的 `cleanup-logs` 以候选 bundle 的正式 Build/ArtifactPublish/ChallengePublish 语义发布为 immutable Incus image。`make dev-kind-catalog` 依赖这一步，因而不会只复制题目目录而遗漏镜像。运行时二进制不会读取开发机的 Incus CLI remote 或 `~/.config/incus`。Incus 不可用时，K8s 路径与不需要 Incus 的固定 Worker 仍可运行；新的 NodeEnvironment 会报告可重试的 Provider 基础设施失败。Server 与 Node-capable Worker 的 `/capabilities/node-provider` 可用于直接检查角色 mTLS 与 Incus 预检；Publisher 还提供 `/capabilities/registry`，Verifier 提供 `/capabilities/kubernetes-api`。
+
+Bootstrap 的固定 Builder bridge 默认使用 `10.248.25.1/24`，可通过 `BREAKFIX_INCUS_BUILD_NETWORK_CIDR` 变更；它必须与 `incus.node_network_pool` 分离。脚本不会再让 Incus 自动选择子网，并会拒绝接管地址、NAT 或 IPv6 配置不同的同名 bridge。
+
+当前重构不迁移旧开发状态。若 Kind 的 PostgreSQL 或 Server data PVC 来自旧 schema/layout，先执行 `make dev-kind-reset-state`，再执行 `make dev-kind-runtime` 和 `make dev-kind-catalog`。该命令默认只允许 `kind-*` context，避免误清理非开发集群。
 
 常用迭代命令：
 
 ```bash
-make dev-server       # 构建并重启 Server
-make dev-controller   # 构建并重启 Controller
-make dev-agent-worker # 构建并重启 Agent Worker
-make dev-down         # 停止三个进程和本地 registry
-make dev-reset        # 清理本地运行数据，保留受版本控制题目
-make docker-challenge NAME=<directory>
+make dev-server
+make dev-controller
+make dev-agent-worker
+make dev-builder
+make dev-publisher
+make dev-verifier
+make dev-down
+make dev-reset
 ```
 
-`make dev-registry` 创建的本地 `registry:2` 会设置 `REGISTRY_STORAGE_DELETE_ENABLED=true`。若已有旧 registry 未启用该选项，命令会保留其数据卷并重建容器；不要以关闭 manifest DELETE 的 registry 运行 verifier。
+不要提交 `config/breakfix.yaml`、`config/breakfix.local.yaml`、`.local/` 或任何 Secret。它们包含环境地址、密钥、证书或本地路径；仓库只跟踪安全示例。
 
-不要提交 `config/breakfix.yaml` 或 `config/breakfix.local.yaml`。它们包含环境地址、密钥和本地路径；仓库只跟踪示例配置。
-
-需要以本地代码接管已部署集群的 Server、Controller 或 Agent Worker 时，使用
-[Telepresence 本地调试](telepresence.md)，不要混用 `make dev-*` 与同一集群运行时。
+需要以本地代码接管已部署集群中的 Server、Controller 或任一 Worker 时，使用[Telepresence 本地调试](telepresence.md)。同一个角色不能同时运行本地开发进程和 Telepresence replacement。
 
 ## 集群准备
 
-Controller 需要 CRD、RBAC 和能够创建 namespace、Pod、Job、Secret 与 vcluster 资源的 Kubernetes 凭据。开发环境可运行：
+应用 CRD 与 RBAC 前先验证生成物：
 
 ```bash
-make generate-crd
-make dev-crd
-make dev-rbac
+make verify-crd-generated
+make verify-api-generated
+kubectl kustomize .
 ```
 
-生产环境应从 [`deploy/crd/`](../../deploy/crd/) 和 [`deploy/rbac/verifier.yaml`](../../deploy/rbac/verifier.yaml) 应用同样的资源。`deploy/crd/` 是由 Go 类型生成并受 CI 校验的部署契约，不能手改。
+根目录 [`kustomization.yaml`](../../kustomization.yaml) 是集群安装入口，CRD 来自 `deploy/crd/`，不能手改。Controller 需要管理 Environment CRD、vcluster 所需的 Kubernetes 资源及 status/finalizer；Verifier 只拥有创建/读取/删除 Environment 和必要 exec 的最小 RBAC。Builder、Publisher 和 Agent Worker 不自动挂载 ServiceAccount token。
+
+根目录 [`kustomization.yaml`](../../kustomization.yaml) 默认部署内置 Registry。运营方为它选择仅内网可解析的稳定名称，例如 `registry.breakfix.internal`，并将该名称解析到私有 LoadBalancer。所有 Kubernetes node 必须能解析并访问该地址；不能把 `*.svc` 或 ClusterIP 作为最终镜像引用，因为 kubelet/containerd 运行在节点上，不使用 Pod 的 CoreDNS。
+
+内置 Registry 使用管理员提供的 `breakfix-registry-tls` TLS Secret 和 `breakfix-registry-auth` 认证 Secret。证书由管理员持有的内部 CA 签发，根 CA 必须在所有 Kubernetes node 的镜像运行时信任库中预装。若 `registry.trust_bundle_file` 非空，管理员还需创建包含 `ca.crt` 的 `breakfix-registry-ca` ConfigMap，Server 和 Publisher 会将它追加到自身系统信任链。Breakfix 不生成或轮换根 CA，不安装 cert-manager，不申请公网证书，也不会修改节点 DNS、`/etc/hosts` 或 containerd 配置。
+
+也可以使用 [`deploy/overlays/external-registry`](../../deploy/overlays/external-registry/) 接入 Harbor、云厂商 Registry 或其他 HTTPS OCI Registry；该 overlay 不创建 Registry、Service 或 PVC。配置 `registry.address`、可选 `registry.pull_secret`、可选内部 CA bundle 和 Publisher 凭据即可。无论使用哪种模式，Registry 必须允许 Docker Registry V2 manifest DELETE，以便 `artifact_cleanup` 回收 candidate staging 引用；blob garbage collection 只应在 Registry 离线维护窗口运行。
+
+Node runtime 需要独立的 Incus cluster。应用与 Incus API 位于同一私网，API 使用 mTLS；Server、Controller、Builder、Publisher 和 Verifier 分别挂载自己的证书，证书不进入候选 archive、OpenSandbox Sandbox 或用户/验证 Environment。初始实现只支持单成员 bridge 网络；多成员与 OVN 是后续单独验收的扩展。
 
 ## 集群部署
 
-Server 需要自己的 RWO PVC，保存发布题目、作者 artifact 和提交归档。PostgreSQL 保存账户、领域状态与 durable Agent Runtime 记录。Controller 没有 PostgreSQL 凭据；Agent Worker 只有 `agent_*` 数据库角色、模型 key 和 Server 内部密钥。Server 是唯一持有 OpenSandbox lifecycle key 的组件。
-
-Builder 节点必须满足官方 rootless BuildKit 的 user namespace、`fuse-overlayfs`/overlayfs 和 AppArmor 前置条件。不能满足时，Build Job 应失败并报告基础设施错误；部署不提供 rootful 或 `privileged` 构建回退。
-
-完整安装步骤、Registry TLS/认证 Secret、OpenSandbox 前置条件和 Kustomize 入口见 [`deploy/runtime/README.md`](../../deploy/runtime/README.md)。控制面与验证 Job 镜像使用 `builder_image`、`publisher_image` 和 `verifier_image` 配置；Builder 镜像必须由 kubelet 无凭据拉取。开发镜像可以使用 `:dev`：
+完整 Secret、Registry TLS/认证、Incus bootstrap、固定 Worker identity 和 Kustomize 步骤见 [`deploy/runtime/README.md`](../../deploy/runtime/README.md)。构建和发布运行时镜像：
 
 ```bash
 make runtime-push TARGETOS=linux TARGETARCH=amd64 \
@@ -59,32 +79,26 @@ make runtime-push TARGETOS=linux TARGETARCH=amd64 \
 kubectl apply -k .
 ```
 
-发布时不要手改基础 Kustomize 清单。release workflow 会构建并推送 Server、Controller、Agent Worker、Builder、Publisher 和 Verifier 六个 OCI image，解析每个 digest，并上传 `breakfix-<version>.yaml`。该 artifact 已将 Deployment 和 ConfigMap 中的所有运行镜像固定为 digest；部署发布版本时直接应用它：
+发布版本不要手改基础清单。`make release-manifest` 推送六个运行时 image、解析 digest，并生成可部署的 `breakfix-<version>.yaml`：
 
 ```bash
-kubectl apply -f breakfix-vX.Y.Z.yaml
+make release-manifest TARGETOS=linux TARGETARCH=amd64 \
+  RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=vX.Y.Z
+kubectl apply -f dist/breakfix-vX.Y.Z.yaml
 ```
 
-Controller 为每个 `VerifyTask` 创建依次执行的 Build、Publisher 和 Verifier Job。Server 从 `registry_addr` 读取固定基础镜像并通过一次性 grant 交给无凭据 Builder；Publisher 才拥有 Registry 写 Secret，Controller 从其 staging tag 读取最终 digest 后启动 Verifier。作者确认发布时，Server 再将该 digest 复制到正式 challenge image 并重新解析 digest；Builder 从不直接访问 Registry。Server 对外暴露 HTTP/WebSocket；Controller 只暴露 health/ready 端口，不作为公网入口；Agent Worker 不暴露端口。
+Server data PVC 保存未发布 CandidateRevision archive、已发布 challenge 目录和 taxonomy snapshot；它不是队列或数据库。PostgreSQL 保存领域记录与 WorkItem。内置 Registry PVC 保存 K8s candidate/正式 OCI image；使用外部 Registry 时其存储由运营方管理。Incus image project 保存 Node candidate/正式 image。当前 Server data PVC 是 RWO，因此 Server 仍是单副本；这不改变 PostgreSQL worklist 的跨 Worker 接管语义。
 
-## 运行检查
+## 验收
 
-```bash
-kubectl -n breakfix-system get deploy,statefulset,pods
-kubectl -n breakfix-system logs deploy/breakfix-server -f
-kubectl -n breakfix-system logs deploy/breakfix-controller -f
-```
-
-部署后至少运行 `make e2e` 验证页面与认证流程。真实运行时、恢复和 Agent 验收分开显式执行：`make e2e-runtime-verify` 验证固定 container/vcluster artifact 的完整 VerifyTask，`make e2e-runtime-browser` 验证固定题目的终端和检查点，`make e2e-server-recovery` 验证恢复行为。模型相关的 `make e2e-agent-assistant`、`make e2e-agent-container` 和 `make e2e-agent-vcluster` 只用于人工或发布前验收，不是日常 CI。完整策略见[测试与真实验收](testing.md)。
-
-## 生成与发布前检查
+日常测试与真实运行时验收分层，不能用浏览器 stub 或 fake provider 代替真实 Node/VK8s 验证：
 
 ```bash
-make verify-crd-generated
-make verify-api-generated
 go test ./...
-npm run build --prefix frontend
-npm run test:e2e --prefix test -- --list
+make e2e
+make e2e-runtime-browser
+make e2e-runtime-workflow
+make e2e-server-recovery
 ```
 
-这些检查分别覆盖 CRD 生成物、OpenAPI 的 Go/前端生成物、Go 包、前端构建和 Playwright 发现。真实环境 E2E 需要显式环境变量，避免普通浏览器套件意外创建集群资源。
+模型驱动的作者验收显式、串行运行：`make e2e-agent-node`、`make e2e-agent-k8s` 和 `make e2e-taxonomy`。失败时按 WorkItem ID、kind、attempt 和 Environment UID 查看固定 Worker Deployment 日志；不要自动重跑掩盖问题。完整边界见[测试与真实验收](testing.md)。

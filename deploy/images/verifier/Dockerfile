@@ -1,5 +1,5 @@
 # Verifier contains only the deterministic Kubernetes verification binary. It
-# intentionally has no BuildKit, Registry write credential, Node.js, or model
+# intentionally has no Registry write credential, Node.js, or model
 # agent CLI.
 FROM gcr.io/distroless/static-debian12:nonroot
 

@@ -1,12 +1,11 @@
 package authoring
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -25,113 +24,91 @@ type FileDiff struct {
 	Diff string `json:"diff"`
 }
 
-func ArtifactDirectory(dataDir, sessionID string, revision int64) string {
-	return filepath.Join(dataDir, "authoring", sessionID, "revisions", strconv.FormatInt(revision, 10), "artifact")
-}
-
-func ArtifactRelativePath(sessionID string, revision int64) string {
-	return filepath.ToSlash(filepath.Join("authoring", sessionID, "revisions", strconv.FormatInt(revision, 10), "artifact"))
-}
-
-func ReadAssets(dataDir string, artifact *Artifact) ([]Asset, error) {
-	if artifact == nil || strings.TrimSpace(artifact.Directory) == "" {
+// ReadAssets projects an immutable CandidateRevision archive for author
+// review. The archive remains the sole content copy; extraction is temporary.
+func ReadAssets(archive []byte) ([]Asset, error) {
+	if len(archive) == 0 {
 		return []Asset{}, nil
 	}
-	root, err := ArtifactPath(dataDir, artifact)
-	if err != nil {
-		return nil, err
-	}
-	assets := make([]Asset, 0)
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	var assets []Asset
+	err := withCandidateArchive(archive, func(root string, _ *challenge.Entry) error {
+		rootFS, err := os.OpenRoot(root)
+		if err != nil {
+			return err
 		}
-		if entry.IsDir() {
+		defer func() { _ = rootFS.Close() }()
+		assets = make([]Asset, 0)
+		return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("candidate asset cannot be a symlink: %s", path)
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("candidate asset is not a regular file: %s", path)
+			}
+			if info.Size() > maxAssetBytes {
+				return fmt.Errorf("candidate asset exceeds %d bytes: %s", maxAssetBytes, path)
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			content, err := rootFS.ReadFile(relative)
+			if err != nil {
+				return err
+			}
+			assets = append(assets, Asset{Path: filepath.ToSlash(relative), Content: string(content)})
 			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("authoring artifact cannot be a symlink: %s", path)
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("authoring artifact is not a regular file: %s", path)
-		}
-		if info.Size() > maxAssetBytes {
-			return fmt.Errorf("authoring artifact exceeds %d bytes: %s", maxAssetBytes, path)
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		assets = append(assets, Asset{Path: filepath.ToSlash(rel), Content: string(content)})
-		return nil
+		})
 	})
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
 	if err != nil {
-		return nil, fmt.Errorf("read authoring artifact: %w", err)
+		return nil, fmt.Errorf("read candidate assets: %w", err)
 	}
 	slices.SortFunc(assets, func(left, right Asset) int { return strings.Compare(left.Path, right.Path) })
 	return assets, nil
 }
 
-// ArtifactPath resolves an artifact reference stored by the authoring
-// repository and rejects paths outside data/authoring.
-func ArtifactPath(dataDir string, artifact *Artifact) (string, error) {
-	if artifact == nil || strings.TrimSpace(artifact.Directory) == "" {
-		return "", errors.New("authoring artifact directory is empty")
+func ReadVerifiedChallenge(archive []byte) (*VerifiedChallenge, error) {
+	if len(archive) == 0 {
+		return nil, nil
 	}
-	return artifactPath(dataDir, artifact.Directory)
-}
-
-// ReadVerifiedChallenge returns the metadata and public checkpoints from the
-// exact manifest that passed VerifyTask. The authoring intent remains separate
-// so a generator correction cannot be accidentally hidden by stale planning
-// metadata.
-func ReadVerifiedChallenge(dataDir string, artifact *Artifact) (*VerifiedChallenge, error) {
-	root, err := ArtifactPath(dataDir, artifact)
-	if err != nil {
-		return nil, err
-	}
-	entry, err := challenge.ValidateSubmissionDir(root)
+	var result *VerifiedChallenge
+	err := withCandidateArchive(archive, func(_ string, entry *challenge.Entry) error {
+		result = &VerifiedChallenge{
+			Metadata: Metadata{
+				Title: entry.Title, Difficulty: entry.Difficulty, Description: entry.Description, Runtime: entry.Runtime,
+			},
+			Checkpoints: make([]VerifiedCheckpoint, 0, len(entry.Checkpoints)),
+		}
+		for _, checkpoint := range entry.Checkpoints {
+			result.Checkpoints = append(result.Checkpoints, VerifiedCheckpoint{
+				ID: checkpoint.ID, Title: checkpoint.Title, Description: checkpoint.Description,
+				Hint: checkpoint.Hint, Node: checkpoint.Node,
+			})
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("read verified challenge manifest: %w", err)
-	}
-	result := &VerifiedChallenge{
-		Metadata: Metadata{
-			Title:       entry.Title,
-			Difficulty:  entry.Difficulty,
-			Description: entry.Description,
-			Runtime:     entry.Runtime,
-		},
-		Checkpoints: make([]VerifiedCheckpoint, 0, len(entry.Checkpoints)),
-	}
-	for _, checkpoint := range entry.Checkpoints {
-		result.Checkpoints = append(result.Checkpoints, VerifiedCheckpoint{
-			ID:          checkpoint.ID,
-			Title:       checkpoint.Title,
-			Description: checkpoint.Description,
-			Hint:        checkpoint.Hint,
-			Node:        checkpoint.Node,
-		})
 	}
 	return result, nil
 }
 
-func DiffAssets(dataDir string, current, previous *Artifact) ([]FileDiff, error) {
-	currentAssets, err := ReadAssets(dataDir, current)
+func DiffAssets(currentArchive, previousArchive []byte) ([]FileDiff, error) {
+	currentAssets, err := ReadAssets(currentArchive)
 	if err != nil {
 		return nil, err
 	}
-	previousAssets, err := ReadAssets(dataDir, previous)
+	previousAssets, err := ReadAssets(previousArchive)
 	if err != nil {
 		return nil, err
 	}
@@ -161,26 +138,29 @@ func DiffAssets(dataDir string, current, previous *Artifact) ([]FileDiff, error)
 			continue
 		}
 		diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
-			A:        difflib.SplitLines(before),
-			B:        difflib.SplitLines(after),
-			FromFile: "previous/" + path,
-			ToFile:   "current/" + path,
-			Context:  3,
+			A: difflib.SplitLines(before), B: difflib.SplitLines(after),
+			FromFile: "previous/" + path, ToFile: "current/" + path, Context: 3,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("diff authoring artifact %s: %w", path, err)
+			return nil, fmt.Errorf("diff candidate asset %s: %w", path, err)
 		}
 		diffs = append(diffs, FileDiff{Path: path, Diff: diff})
 	}
 	return diffs, nil
 }
 
-func artifactPath(dataDir, relative string) (string, error) {
-	base := filepath.Clean(filepath.Join(dataDir, "authoring"))
-	path := filepath.Clean(filepath.Join(dataDir, filepath.FromSlash(relative)))
-	prefix := base + string(os.PathSeparator)
-	if path != base && !strings.HasPrefix(path, prefix) {
-		return "", fmt.Errorf("invalid authoring artifact path")
+func withCandidateArchive(archive []byte, consume func(string, *challenge.Entry) error) error {
+	root, err := os.MkdirTemp("", "breakfix-author-review-")
+	if err != nil {
+		return err
 	}
-	return path, nil
+	defer os.RemoveAll(root) //nolint:errcheck
+	if err := challenge.ExtractTarGz(root, bytes.NewReader(archive)); err != nil {
+		return err
+	}
+	entry, err := challenge.ValidateCandidateDir(root)
+	if err != nil {
+		return err
+	}
+	return consume(root, entry)
 }

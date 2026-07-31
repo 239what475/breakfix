@@ -15,7 +15,7 @@ func ExtractTarGz(dst string, r io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("open gzip stream: %w", err)
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 	for {
@@ -41,7 +41,7 @@ func ExtractTarGz(dst string, r io.Reader) error {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return fmt.Errorf("create dir %s: %w", target, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return fmt.Errorf("create parent dir for %s: %w", target, err)
 			}
@@ -49,8 +49,8 @@ func ExtractTarGz(dst string, r io.Reader) error {
 			if err != nil {
 				return fmt.Errorf("create file %s: %w", target, err)
 			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close() //nolint:errcheck
+			if _, err := io.Copy(f, tr); err != nil { //nolint:gosec // Candidate archive capacity is intentionally not limited by this design.
+				_ = f.Close()
 				return fmt.Errorf("write file %s: %w", target, err)
 			}
 			if err := f.Close(); err != nil {

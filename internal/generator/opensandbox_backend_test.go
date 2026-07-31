@@ -13,7 +13,7 @@ func TestBackendPathMapsOnlyWorkspaceVirtualRoot(t *testing.T) {
 		{path: "/workspace", directory: true, want: "."},
 		{path: "/workspace/", directory: true, want: "."},
 		{path: "/workspace/challenge.yaml", want: "./challenge.yaml"},
-		{path: "/workspace/checks/checkpoints.sh", want: "./checks/checkpoints.sh"},
+		{path: "/workspace/nodes/host/checks.sh", want: "./nodes/host/checks.sh"},
 		{path: "challenge.yaml", want: "./challenge.yaml"},
 		{path: "/etc/passwd", wantErr: true},
 		{path: "/workspace/../etc/passwd", wantErr: true},

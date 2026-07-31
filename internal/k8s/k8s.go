@@ -1,4 +1,4 @@
-// Package k8s provides a thin client-go wrapper for Pod, Exec, Job, and Namespace operations.
+// Package k8s provides a thin client-go wrapper for environment, exec, and namespace operations.
 package k8s
 
 import (

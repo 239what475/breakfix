@@ -5,11 +5,12 @@ import (
 	"net/http"
 	"time"
 
+	"log/slog"
+
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/auth"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/gin-gonic/gin"
-	"log/slog"
 )
 
 func (h *Handler) Register(c *gin.Context) {

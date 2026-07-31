@@ -2,11 +2,12 @@ package registry
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"time"
 )
 
 // Credentials are the Registry V2 basic-auth credentials held only by
@@ -29,9 +30,68 @@ func (c Credentials) apply(request *http.Request) {
 	}
 }
 
+// ClientOptions configures one HTTPS-only Registry client. TrustBundleFile is
+// optional: public CAs use the normal system trust store, while an internal
+// Registry can append an operator-provided CA bundle without disabling TLS
+// verification.
+type ClientOptions struct {
+	Credentials     Credentials
+	TrustBundleFile string
+}
+
 type Client struct {
-	Insecure    bool
-	Credentials Credentials
+	Credentials        Credentials
+	rootCAs            *x509.CertPool
+	httpClientOverride *http.Client
+}
+
+// NewClient constructs an HTTPS-only Registry client. It always verifies the
+// server certificate through the system trust store, optionally augmented by
+// an operator-provided internal CA bundle.
+func NewClient(options ClientOptions) (Client, error) {
+	if err := options.Credentials.Validate(); err != nil {
+		return Client{}, err
+	}
+	var roots *x509.CertPool
+	if path := strings.TrimSpace(options.TrustBundleFile); path != "" {
+		bundle, err := os.ReadFile(path)
+		if err != nil {
+			return Client{}, fmt.Errorf("read registry trust bundle: %w", err)
+		}
+		roots, err = x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(bundle) {
+			return Client{}, fmt.Errorf("registry trust bundle contains no certificates")
+		}
+	}
+	return Client{Credentials: options.Credentials, rootCAs: roots}, nil
+}
+
+// Ping verifies Registry V2 availability and the configured credentials.
+func (c Client) Ping(ctx context.Context, registryAddress string) error {
+	if err := c.Credentials.Validate(); err != nil {
+		return err
+	}
+	host := strings.SplitN(strings.TrimSpace(registryAddress), "/", 2)[0]
+	if host == "" {
+		return fmt.Errorf("registry address is required")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registryURL(host, "/v2/"), nil)
+	if err != nil {
+		return err
+	}
+	c.Credentials.apply(request)
+	response, err := c.httpClient().Do(request)
+	if err != nil {
+		return fmt.Errorf("ping registry: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("ping registry: status %d", response.StatusCode)
+	}
+	return nil
 }
 
 // DeleteImage removes an image by digest. Registry V2 does not reliably
@@ -44,12 +104,8 @@ func (c Client) DeleteImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return err
 	}
-	scheme := "https"
-	if c.Insecure {
-		scheme = "http"
-	}
-	manifestURL := scheme + "://" + registry + "/v2/" + repositoryPath(repository) + "/manifests/" + url.PathEscape(reference)
-	client := &http.Client{Timeout: 20 * time.Second}
+	manifestURL := c.registryURL(registry, "/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference))
+	client := c.httpClient()
 
 	head, err := http.NewRequestWithContext(ctx, http.MethodHead, manifestURL, nil)
 	if err != nil {
@@ -61,7 +117,7 @@ func (c Client) DeleteImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return fmt.Errorf("resolve image manifest: %w", err)
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
 		return nil
 	}
@@ -73,7 +129,7 @@ func (c Client) DeleteImage(ctx context.Context, imageName string) error {
 		return fmt.Errorf("resolve image manifest: registry did not return Docker-Content-Digest")
 	}
 
-	remove, err := http.NewRequestWithContext(ctx, http.MethodDelete, scheme+"://"+registry+"/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(digest), nil)
+	remove, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.registryURL(registry, "/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(digest)), nil)
 	if err != nil {
 		return fmt.Errorf("create image delete request: %w", err)
 	}
@@ -82,7 +138,7 @@ func (c Client) DeleteImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return fmt.Errorf("delete image manifest: %w", err)
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode == http.StatusAccepted || response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotFound {
 		return nil
 	}

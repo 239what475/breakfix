@@ -19,7 +19,7 @@
 
 Breakfix 的公开 checkpoints 本来就是 SRE 题的“测试级结果”，并且比代码测试更接近用户
 可观察的最终状态。当前缺少的是这些状态随 attempt 的持久学习历史；只保存最近 CRD status
-会使个人复盘和作者分析失去“哪一步首先完成”的信息。Breakfix 的 VerifyTask 已承担可信
+会使个人复盘和作者分析失去“哪一步首先完成”的信息。Breakfix 的 CandidateRevision 流水线已承担可信
 构建与验证，不能引入 Artemis 的 Git/CI 作业作为第二条题目执行路径。
 
 ## 可以吸收
@@ -30,7 +30,7 @@ Breakfix 的公开 checkpoints 本来就是 SRE 题的“测试级结果”，�
   可选 details、提示和首次通过时间；完成页按相同顺序复盘，而不是只显示“挑战完成”。这
   直接建立在 PrairieLearn 文档建议的 checkpoint 事件投影上。
 - **作者看到的可解释验证摘要**：发布前展示 build、初始化、answer 和每个 checkpoint 的
-  结果，而不是只给 VerifyTask 成功/失败。失败信息应按受信任的结构化 report 呈现，不暴露
+  结果，而不是只给 CandidateRevision 成功/失败。失败信息应按受信任的结构化 report 呈现，不暴露
   可能含敏感内容的任意 job log。
 - **题目质量分析的事件字典**：为未来预留稳定事件名：attempt started、checkpoint first
   passed、completed、hint opened、solution opened、assistant asked、reset。现在只采集

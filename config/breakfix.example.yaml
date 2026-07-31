@@ -10,30 +10,24 @@ data_dir: ./data
 # PostgreSQL is the only relational database. The Server data directory is not
 # a database volume and must not be shared with the Controller or Agent Worker.
 database_url: ${BREAKFIX_DATABASE_URL}
-# Agent Worker uses a separate credential restricted to agent_* tables.
-agent_database_url: ${BREAKFIX_AGENT_DATABASE_URL}
-agent_database_role: breakfix_agent
 kubeconfig: ~/.kube/config
 
 # Registry address includes the repository namespace used for challenge images.
-registry_addr: localhost:5000/break-fix
-registry_insecure: true
-# The Docker config Secret is copied into every transient challenge namespace
-# for kubelet image pulls. The separate verifier write Secret stays in the
-# control-plane namespace.
-registry_pull_secret: breakfix-registry-pull
-registry_write_secret: breakfix-registry-write
-builder_image: ghcr.io/breakfix/breakfix-builder:dev
-publisher_image: ghcr.io/breakfix/breakfix-publisher:dev
-verifier_image: ghcr.io/breakfix/breakfix-verifier:dev
+# It can point to the bundled private Registry or an operator-provided OCI
+# Registry such as Harbor. An internal CA bundle is mounted only by Server and
+# Publisher; Kubernetes nodes must independently trust that CA before pulling.
+registry:
+  address: registry.breakfix.internal/breakfix
+  # Optional for registries that allow anonymous pulls.
+  pull_secret: breakfix-registry-pull
+  # Leave empty for a publicly trusted Registry certificate.
+  trust_bundle_file: ""
 
 # vcluster command and chart source.
 vcluster_binary: vcluster
 vcluster_chart_repo: https://charts.loft.sh
 vcluster_chart_version: "0.35.1"
 
-# Server endpoint used by the Controller-created Builder and Publisher Jobs.
-server_host: 172.18.0.1
 # Exact public browser origin allowed to open terminal WebSockets.
 ui_origin: http://localhost:9090
 namespace: breakfix
@@ -42,10 +36,16 @@ cooldown_minutes: 5
 
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
-internal_api_key: breakfix-dev-internal-key-change-in-production
-# Only the Server and Controller receive this key. It signs short-lived,
-# task-bound Build/Publisher grants and is never injected into those Jobs.
-verification_grant_key: breakfix-dev-verification-grant-key-change-in-production
+internal_workers:
+  agent: ${BREAKFIX_AGENT_WORKER_API_KEY}
+  builder: ${BREAKFIX_BUILDER_WORKER_API_KEY}
+  publisher: ${BREAKFIX_PUBLISHER_WORKER_API_KEY}
+  verifier: ${BREAKFIX_VERIFIER_WORKER_API_KEY}
+# Internal endpoint and identity environment used by fixed workers. Production
+# workers receive only BREAKFIX_WORKER_API_KEY from their role-specific Secret.
+worker:
+  server_url: http://breakfix-server
+  api_key_env: BREAKFIX_WORKER_API_KEY
 
 # Agent workflow (DeepSeek Chat Completions API).
 agent:
@@ -53,8 +53,6 @@ agent:
   api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
   request_timeout: 2m
-  # Agent Worker reaches the Server through its in-cluster ClusterIP Service.
-  server_url: http://breakfix-server
 
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
 # lifecycle API key is only present in the Server process, never Agent Worker.
@@ -66,3 +64,60 @@ opensandbox:
   namespace: opensandbox
   workspace_image: ubuntu:22.04
   workspace_storage: 5Gi
+  workspace_cpu: 500m
+  workspace_memory: 512Mi
+  workspace_provision_timeout: 5m
+
+# Immutable platform runtime profiles. Published challenge images replace the
+# base artifact reference, while all other values are copied into each
+# Environment and CandidateRevision so later configuration changes cannot
+# alter an in-flight execution.
+runtime:
+  node:
+    profile_revision: node-profile-v1
+    network_policy_revision: node-network-v1
+  k8s:
+    base_image_digest: registry.breakfix.internal/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    profile_revision: vk8s-profile-v1
+    version: v1.36.2
+    management_terminal_image: registry.breakfix.internal/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      control_plane_cpu: 500m
+      control_plane_memory: 512Mi
+      control_plane_ephemeral_storage: 10Gi
+      workload_cpu: 500m
+      workload_memory: 512Mi
+      workload_ephemeral_storage: 3Gi
+      quota_cpu: "3"
+      quota_memory: 3Gi
+      quota_ephemeral_storage: 30Gi
+
+# Incus system-container provider. Applications use these explicit mTLS files;
+# they never read the developer's Incus CLI remote or ~/.config/incus.
+incus:
+  endpoint: https://incus.internal.example:8443
+  tls:
+    server_certificate_file: /var/run/secrets/breakfix-incus/server.crt
+    client_certificate_file: /var/run/secrets/breakfix-incus/client.crt
+    client_key_file: /var/run/secrets/breakfix-incus/client.key
+  storage_pool: local
+  network_driver: bridge
+  build_project: breakfix-build
+  image_project: breakfix-images
+  base_image_alias: node-systemd-base-v1
+  base_image_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  name_prefix: bf
+  max_nodes_per_environment: 4
+  node_cpu: "1"
+  node_memory: 512MiB
+  node_processes: 512
+  node_root_disk: 5GiB
+  # Dedicated, unallocated RFC1918 range for one bridge per NodeEnvironment.
+  node_network_pool: 10.240.0.0/16
+  node_network_prefix: 24
+  blocked_egress_cidrs:
+    - 10.0.0.0/8
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.168.0.0/16

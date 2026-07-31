@@ -14,19 +14,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS) (*gin.Engine, error) {
+func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS, dependencies Dependencies) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	h := NewHandler(database, k8sClient, cfg)
+	h := NewHandlerWithDependencies(database, k8sClient, cfg, dependencies)
 	if h.startupErr != nil {
 		return nil, h.startupErr
 	}
-	if err := h.validateReadiness(); err != nil {
+	if err := h.RecoverCandidatePublications(runCtx); err != nil {
 		return nil, err
 	}
-	h.StartAuthoringReconciler(runCtx)
+	if err := h.RecoverExpiredWork(runCtx); err != nil {
+		return nil, err
+	}
+	if err := h.validateStartup(); err != nil {
+		return nil, err
+	}
 	if h.taxonomyWorkflow != nil {
 		h.taxonomyWorkflow.Start(runCtx)
 	}
@@ -34,6 +39,8 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	h.StartEnvironmentStatusProjector(runCtx)
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	h.StartGeneratorWorkspaceCleanup(runCtx)
+	h.StartCandidatePublicationRecovery(runCtx)
+	h.StartWorkDeadlineRecovery(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
@@ -41,12 +48,20 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 		c.Status(http.StatusOK)
 	})
 	router.GET("/readyz", func(c *gin.Context) {
-		if err := h.validateReadiness(); err != nil {
+		if err := h.validateReadiness(c.Request.Context()); err != nil {
 			c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.Status(http.StatusOK)
 	})
+	router.GET("/capabilities/node-provider", func(c *gin.Context) {
+		if err := h.validateNodeProviderCapability(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+	router.GET("/metrics", h.WorklistMetrics)
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
@@ -185,10 +200,6 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/internal/verify-builds/:taskID/submission", h.DownloadVerifyBuildSubmission)
-	router.GET("/api/internal/verify-builds/:taskID/base", h.DownloadVerifyBuildBase)
-	router.PUT("/api/internal/verify-builds/:taskID/image", h.UploadVerifyBuildImage)
-	router.GET("/api/internal/verify-builds/:taskID/image", h.DownloadVerifyBuildImage)
 	router.POST("/api/internal/agent-runs/:id/assistant/context", h.InternalAssistantContext)
 	router.POST("/api/internal/agent-runs/:id/assistant/tools/:tool", h.InternalAssistantTool)
 	router.POST("/api/internal/agent-runs/:id/assistant/events", h.InternalAssistantEvent)
@@ -203,7 +214,27 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	router.POST("/api/internal/agent-runs/:id/generator/files/write", h.InternalGeneratorWriteFile)
 	router.POST("/api/internal/agent-runs/:id/generator/execute", h.InternalGeneratorExecute)
 	router.POST("/api/internal/agent-runs/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
-	router.POST("/api/internal/agent-runs/:id/generator/submit", h.InternalGeneratorSubmitCandidate)
+	router.POST("/api/internal/agent-runs/:id/generator/finalize", h.InternalGeneratorFinalizeCandidate)
+	router.POST("/api/internal/work-items/agent/claim", h.InternalClaimAgentWork)
+	router.POST("/api/internal/work-items/inspect", h.InternalInspectWorkItems)
+	router.POST("/api/internal/work-items/:kind/claim", h.InternalClaimCandidateWork)
+	router.POST("/api/internal/work-items/:kind/:id/renew", h.InternalRenewCandidateWork)
+	router.POST("/api/internal/work-items/:kind/:id/requeue", h.InternalRequeueCandidateWork)
+	router.POST("/api/internal/work-items/:kind/:id/candidate/archive", h.InternalDownloadCandidateArchive)
+	router.POST("/api/internal/work-items/:kind/:id/k8s/base", h.InternalDownloadCandidateK8sBase)
+	router.POST("/api/internal/work-items/:kind/:id/build/archive", h.InternalDownloadCandidateBuildArchive)
+	router.POST("/api/internal/work-items/:kind/:id/complete/build", h.InternalCompleteCandidateBuild)
+	router.POST("/api/internal/work-items/:kind/:id/complete/artifact-publish", h.InternalCompleteCandidateArtifactPublish)
+	router.POST("/api/internal/work-items/:kind/:id/verify/environment", h.InternalRecordCandidateVerificationEnvironment)
+	router.POST("/api/internal/work-items/:kind/:id/complete/verify", h.InternalCompleteCandidateVerification)
+	router.POST("/api/internal/work-items/:kind/:id/fail/artifact", h.InternalFailCandidateArtifact)
+	router.POST("/api/internal/work-items/:kind/:id/complete/cleanup", h.InternalCompleteCandidateCleanup)
+	router.POST("/api/internal/work-items/:kind/:id/complete/challenge-publish", h.InternalCompleteCandidateChallengePublish)
+	router.POST("/api/internal/agent-runs/:id/status", h.InternalAgentRunStatus)
+	router.POST("/api/internal/agent-runs/:id/renew", h.InternalRenewAgentWork)
+	router.POST("/api/internal/agent-runs/:id/requeue", h.InternalRequeueAgentWork)
+	router.POST("/api/internal/agent-runs/:id/complete", h.InternalCompleteAgentWork)
+	router.POST("/api/internal/agent-runs/:id/fail", h.InternalFailAgentWork)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)
@@ -229,7 +260,7 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 				http.ServeFileFS(c.Writer, c.Request, frontendFS, "index.html")
 				return
 			}
-			f.Close()
+			_ = f.Close()
 			http.FileServerFS(frontendFS).ServeHTTP(c.Writer, c.Request)
 		})
 	}

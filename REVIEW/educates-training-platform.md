@@ -22,7 +22,7 @@
 
 | 维度 | Educates | Breakfix | 判断 |
 | --- | --- | --- | --- |
-| 环境单位 | Workshop session | Challenge revision 的 ContainerEnvironment/VClusterEnvironment | Breakfix 的不可变题目快照和 vcluster 语义更贴合做题。 |
+| 环境单位 | Workshop session | Challenge revision 的 NodeEnvironment/VK8sEnvironment | Breakfix 的不可变题目快照和两类运行时语义更贴合做题。 |
 | 内容 | Markdown 页面和可点击动作 | `problem.md`、`solution.md`、checkpoint hint 与运行时脚本 | Breakfix 更强调故障修复的自由操作路径。 |
 | 完成判断 | 可由页面动作触发 examiner 测试 | Controller 每 4 秒运行同一组检查点，状态写入 CRD | 自动轮询更符合无需 Submit 的产品设计。 |
 | 状态所有权 | Portal/Operator 管理 session | Server 只写 spec，Controller 唯一写 status | Breakfix 的边界更明确，不能倒退。 |
@@ -33,12 +33,12 @@
 
 - **内容能力的 fixture 套件**：Educates 将 terminal、editor、section 和 Markdown 动作放进
   可运行 sample workshop。Breakfix 应为题目格式建立同类的固定 fixture：单检查点、多
-  检查点、依赖检查点、container、vcluster、提示、解答 Markdown 和初始化失败。目标是
+  检查点、依赖检查点、node、k8s、提示、解答 Markdown 和初始化失败。目标是
   让 UI/内容格式的变更有稳定的真实样本，而不是拿唯一的 `cleanup-logs` 覆盖一切。
 - **内容作者验收入口**：Educates 的 workshop 定义和 sample 可被单独部署验证。Breakfix
-  已有完整 VerifyTask，但 `make docker-challenge` 只做 build。题库生产前应提供一个
-  单题命令，使用真实 runtime 初始化，执行 `answer.sh` 和 checkpoint 协议，并输出各
-  checkpoint 结果。它必须复用 VerifyTask 的语义，不能另造一套本地 verifier。
+  当前固定 CandidateRevision 流水线已覆盖真实 build、runtime 初始化、`answer.sh` 和
+  checkpoint 协议。题库生产前应提供一个受控的单题验收入口，复用该流水线语义，不能另造
+  一套本地 verifier。
 - **基础镜像与内容依赖清单**：生产指南对每个外部镜像/下载的可用性有显式约束。Breakfix
   已禁止 build-time 联网；应把题目运行时允许依赖的预置镜像、二进制和网络假设也写成
   内容审查清单，避免量产后才发现某题依赖偶然的外网或 node cache。
@@ -58,7 +58,7 @@
 - 不采用每 session Registry。它会增加 PVC、凭据、垃圾回收和镜像地址复杂度；当前
   challenge 镜像由可信 Publisher/Server 管理，用户环境不应拥有发布能力。
 - 不以 Educates 的 Portal/Operator 替换 Server、Controller 或 Environment CRD。它的
-  通用 workshop 模型无法表达 Breakfix 的 VerifyTask、vcluster 与作者发布流程。
+  通用 workshop 模型无法表达 Breakfix 的 CandidateRevision、两类运行时与作者发布流程。
 
 ## 结论
 

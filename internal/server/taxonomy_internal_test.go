@@ -19,23 +19,19 @@ import (
 func TestInternalTaxonomyContextRejectsStaleLease(t *testing.T) {
 	database := testpostgres.New(t)
 	ctx := context.Background()
-	item, err := database.EnqueueTaxonomyWork(ctx, taxonomy.WorkItem{
-		ID: "taxonomy-work", Kind: taxonomy.WorkKindMapping, ChallengeID: "challenge-one", ChallengeRevision: "sha256:test", State: taxonomy.WorkPending,
+	item, _, err := database.EnqueueTaxonomyMapping(ctx, taxonomy.TaxonomyMapping{
+		ID: "taxonomy-work", ChallengeID: "challenge-one", ChallengeRevision: "sha256:test", State: taxonomy.MappingPending,
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	claimedWork, err := database.ClaimTaxonomyWork(ctx, "server", time.Minute)
-	if err != nil || claimedWork == nil {
-		t.Fatalf("claim taxonomy work = %#v, %v", claimedWork, err)
 	}
 	input, err := json.Marshal(taxonomy.RunInput{WorkID: item.ID, Stage: taxonomy.WorkStageMapper, Round: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := database.ScheduleTaxonomyRun(ctx, *claimedWork, agentruntime.CreateRun{
-		ID: "taxonomy-run", Purpose: taxonomy.RuntimePurposeMapper, OwnerKind: "taxonomy-work", OwnerRef: item.ID,
-		Input: input, Model: "test-model", PromptVersion: "test", DeadlineAt: time.Now().UTC().Add(time.Minute),
+	run, err := database.ScheduleTaxonomyRun(ctx, *item, agentruntime.CreateRun{
+		ID: "taxonomy-run", Purpose: taxonomy.RuntimePurposeMapper, OwnerKind: "taxonomy-mapping", OwnerRef: item.ID,
+		Input: input, Model: "test-model", PromptVersion: "test", ExecutionTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -49,24 +45,24 @@ func TestInternalTaxonomyContextRejectsStaleLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := database.ClaimNext(ctx, "worker-two", time.Minute, now.Add(time.Millisecond))
-	if err != nil || second == nil || second.Run.Attempt != 2 {
+	if err != nil || second == nil || second.Attempt != 2 {
 		t.Fatalf("claim replacement taxonomy attempt = %#v, %v", second, err)
 	}
 
 	handler := NewHandler(database, nil, config.Config{
-		DataDir:        t.TempDir(),
-		InternalAPIKey: "internal-test-key",
-		Agent:          config.AgentConfig{Model: "test-model"},
+		DataDir:         t.TempDir(),
+		InternalWorkers: testInternalWorkerKeys(),
+		Agent:           config.AgentConfig{Model: "test-model"},
 	})
 	router := gin.New()
 	router.POST("/api/internal/agent-runs/:id/taxonomy/context", handler.InternalTaxonomyContext)
-	body, err := json.Marshal(taxonomy.LeaseCredential{Attempt: first.Run.Attempt, LeaseOwner: first.LeaseOwner})
+	body, err := json.Marshal(first.Credential())
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, "/api/internal/agent-runs/"+run.ID+"/taxonomy/context", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Breakfix-Internal-Key", "internal-test-key")
+	request.Header.Set("X-Breakfix-Internal-Key", "agent-test-key")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict {

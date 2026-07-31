@@ -1,0 +1,15 @@
+[Unit]
+Description=Initialize the Breakfix node challenge
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/var/lib/breakfix/runtime-init/succeeded
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/breakfix-runtime-init
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/controller"
+	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/go-logr/logr"
@@ -27,6 +28,8 @@ func main() {
 
 	configPath := flag.String("config", "config/breakfix.yaml", "Config file path")
 	flag.Parse()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -42,6 +45,12 @@ func main() {
 		slog.Error("failed to create K8s client", "err", err)
 		os.Exit(1)
 	}
+	incusClient, err := incusprovider.NewReconnectableClient(cfg.Incus, incusprovider.RoleController)
+	if err != nil {
+		slog.Error("invalid Incus provider configuration", "err", err)
+		os.Exit(1)
+	}
+	defer incusClient.Close()
 
 	scheme := runtime.NewScheme()
 	if err := breakfixv1.AddToScheme(scheme); err != nil {
@@ -72,31 +81,17 @@ func main() {
 		os.Exit(1)
 	}
 	if err := controller.Setup(mgr, k8sClient, controller.Options{
-		RegistryAddr:         cfg.RegistryAddr,
-		RegistryInsecure:     cfg.RegistryInsecure,
-		RegistryUsername:     cfg.RegistryUsername,
-		RegistryPassword:     cfg.RegistryPassword,
-		RegistryPullSecret:   cfg.RegistryPullSecret,
-		RegistryWriteSecret:  cfg.RegistryWriteSecret,
-		BuilderImage:         cfg.BuilderImage,
-		PublisherImage:       cfg.PublisherImage,
-		VerifierImage:        cfg.VerifierImage,
+		RegistryPullSecret:   cfg.Registry.PullSecret,
 		Namespace:            cfg.Namespace,
 		CRDNamespace:         cfg.CRDNamespace,
-		CooldownMinutes:      cfg.CooldownMinutes,
-		VerificationGrantKey: cfg.VerificationGrantKey,
-		ServerHost:           cfg.ServerHost,
-		ServerPort:           cfg.Port,
 		VClusterBinary:       cfg.VClusterBinary,
 		VClusterChartRepo:    cfg.VClusterChartRepo,
 		VClusterChartVersion: cfg.VClusterChartVersion,
-	}); err != nil {
+	}, controller.Dependencies{NodeProvider: incusClient}); err != nil {
 		slog.Error("failed to setup controllers", "err", err)
 		os.Exit(1)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 	slog.Info("Breakfix Controller starting", "namespace", cfg.Namespace, "crd_namespace", cfg.CRDNamespace)
 	if err := mgr.Start(ctx); err != nil {
 		slog.Error("controller manager stopped", "err", err)

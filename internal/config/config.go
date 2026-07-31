@@ -7,43 +7,105 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/runtimeprofile"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type Config struct {
-	Port                 int               `yaml:"port"`
-	HealthPort           int               `yaml:"health_port"`
-	DataDir              string            `yaml:"data_dir"`
-	DatabaseURL          string            `yaml:"database_url"`
-	AgentDatabaseURL     string            `yaml:"agent_database_url"`
-	AgentDatabaseRole    string            `yaml:"agent_database_role"`
-	Kubeconfig           string            `yaml:"kubeconfig"`
-	RegistryAddr         string            `yaml:"registry_addr"`
-	RegistryInsecure     bool              `yaml:"registry_insecure"`
-	RegistryPullSecret   string            `yaml:"registry_pull_secret"`
-	RegistryWriteSecret  string            `yaml:"registry_write_secret"`
-	BuilderImage         string            `yaml:"builder_image"`
-	PublisherImage       string            `yaml:"publisher_image"`
-	VerifierImage        string            `yaml:"verifier_image"`
-	RegistryUsername     string            `yaml:"-"`
-	RegistryPassword     string            `yaml:"-"`
-	VClusterBinary       string            `yaml:"vcluster_binary"`
-	VClusterChartRepo    string            `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion string            `yaml:"vcluster_chart_version"`
-	ServerHost           string            `yaml:"server_host"`
-	UIOrigin             string            `yaml:"ui_origin"`
-	Namespace            string            `yaml:"namespace"`
-	CRDNamespace         string            `yaml:"crd_namespace"`
-	CooldownMinutes      int               `yaml:"cooldown_minutes"`
-	JWTSecret            string            `yaml:"jwt_secret"`
-	InternalAPIKey       string            `yaml:"internal_api_key"`
-	VerificationGrantKey string            `yaml:"verification_grant_key"`
-	Agent                AgentConfig       `yaml:"agent"`
-	OpenSandbox          OpenSandboxConfig `yaml:"opensandbox"`
+	Port                 int                  `yaml:"port"`
+	HealthPort           int                  `yaml:"health_port"`
+	DataDir              string               `yaml:"data_dir"`
+	DatabaseURL          string               `yaml:"database_url"`
+	Kubeconfig           string               `yaml:"kubeconfig"`
+	Registry             RegistryConfig       `yaml:"registry"`
+	VClusterBinary       string               `yaml:"vcluster_binary"`
+	VClusterChartRepo    string               `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion string               `yaml:"vcluster_chart_version"`
+	UIOrigin             string               `yaml:"ui_origin"`
+	Namespace            string               `yaml:"namespace"`
+	CRDNamespace         string               `yaml:"crd_namespace"`
+	CooldownMinutes      int                  `yaml:"cooldown_minutes"`
+	JWTSecret            string               `yaml:"jwt_secret"`
+	InternalWorkers      InternalWorkerKeys   `yaml:"internal_workers"`
+	Worker               WorkerConfig         `yaml:"worker"`
+	Agent                AgentConfig          `yaml:"agent"`
+	OpenSandbox          OpenSandboxConfig    `yaml:"opensandbox"`
+	Incus                incusprovider.Config `yaml:"incus"`
+	Runtime              RuntimeConfig        `yaml:"runtime"`
+}
+
+// RegistryConfig identifies the OCI repository namespace used for K8s
+// artifacts. The deployment decides whether that endpoint is the bundled
+// Registry or an operator-provided external Registry; application code uses
+// the same HTTPS OCI contract for both.
+type RegistryConfig struct {
+	Address         string `yaml:"address"`
+	PullSecret      string `yaml:"pull_secret"`
+	TrustBundleFile string `yaml:"trust_bundle_file"`
+	Username        string `yaml:"-"`
+	Password        string `yaml:"-"`
+}
+
+func (c RegistryConfig) ValidateAddress() error {
+	address := strings.TrimRight(strings.TrimSpace(c.Address), "/")
+	if address == "" || strings.Contains(address, "://") || strings.ContainsAny(address, " \t\r\n@") {
+		return fmt.Errorf("registry address must be an OCI repository root")
+	}
+	parts := strings.Split(address, "/")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" {
+		return fmt.Errorf("registry address must include a hostname and repository namespace")
+	}
+	for _, part := range parts[1:] {
+		if strings.TrimSpace(part) == "" {
+			return fmt.Errorf("registry address contains an empty repository component")
+		}
+	}
+	if strings.LastIndex(address, ":") > strings.LastIndex(address, "/") {
+		return fmt.Errorf("registry address must not contain an image tag")
+	}
+	if (strings.TrimSpace(c.Username) == "") != (strings.TrimSpace(c.Password) == "") {
+		return fmt.Errorf("registry username and password must be set together")
+	}
+	return nil
+}
+
+// RuntimeConfig contains the immutable platform profile used when Server
+// creates learning environments and CandidateRevision execution snapshots.
+// Artifact references come from the published challenge or candidate; these
+// values describe only the platform-owned runtime around that artifact.
+type RuntimeConfig struct {
+	Node NodeRuntimeConfig `yaml:"node"`
+	K8s  K8sRuntimeConfig  `yaml:"k8s"`
+}
+
+type NodeRuntimeConfig struct {
+	ProfileRevision       string `yaml:"profile_revision"`
+	NetworkPolicyRevision string `yaml:"network_policy_revision"`
+}
+
+type K8sRuntimeConfig struct {
+	BaseImageDigest         string            `yaml:"base_image_digest"`
+	ProfileRevision         string            `yaml:"profile_revision"`
+	Version                 string            `yaml:"version"`
+	ManagementTerminalImage string            `yaml:"management_terminal_image"`
+	Resources               K8sResourceConfig `yaml:"resources"`
+}
+
+type K8sResourceConfig struct {
+	ControlPlaneCPU              string `yaml:"control_plane_cpu"`
+	ControlPlaneMemory           string `yaml:"control_plane_memory"`
+	ControlPlaneEphemeralStorage string `yaml:"control_plane_ephemeral_storage"`
+	WorkloadCPU                  string `yaml:"workload_cpu"`
+	WorkloadMemory               string `yaml:"workload_memory"`
+	WorkloadEphemeralStorage     string `yaml:"workload_ephemeral_storage"`
+	QuotaCPU                     string `yaml:"quota_cpu"`
+	QuotaMemory                  string `yaml:"quota_memory"`
+	QuotaEphemeralStorage        string `yaml:"quota_ephemeral_storage"`
 }
 
 type AgentConfig struct {
@@ -51,19 +113,87 @@ type AgentConfig struct {
 	APIKeyEnv      string `yaml:"api_key_env"`
 	Model          string `yaml:"model"`
 	RequestTimeout string `yaml:"request_timeout"`
-	ServerURL      string `yaml:"server_url"`
 	APIKey         string `yaml:"-"`
+}
+
+type WorkerConfig struct {
+	ServerURL string `yaml:"server_url"`
+	APIKeyEnv string `yaml:"api_key_env"`
+	APIKey    string `yaml:"-"`
+}
+
+// InternalWorkerRole identifies one fixed worker pool. These identities are
+// intentionally independent: compromising one worker must not grant access to
+// another worker's Server endpoints.
+type InternalWorkerRole string
+
+const (
+	InternalWorkerAgent     InternalWorkerRole = "agent"
+	InternalWorkerBuilder   InternalWorkerRole = "builder"
+	InternalWorkerPublisher InternalWorkerRole = "publisher"
+	InternalWorkerVerifier  InternalWorkerRole = "verifier"
+)
+
+// InternalWorkerKeys are read only by Server. Every fixed worker receives its
+// own API key through WorkerConfig.APIKeyEnv instead of this complete set.
+type InternalWorkerKeys struct {
+	Agent     string `yaml:"agent"`
+	Builder   string `yaml:"builder"`
+	Publisher string `yaml:"publisher"`
+	Verifier  string `yaml:"verifier"`
+}
+
+func (k InternalWorkerKeys) Key(role InternalWorkerRole) string {
+	switch role {
+	case InternalWorkerAgent:
+		return k.Agent
+	case InternalWorkerBuilder:
+		return k.Builder
+	case InternalWorkerPublisher:
+		return k.Publisher
+	case InternalWorkerVerifier:
+		return k.Verifier
+	default:
+		return ""
+	}
+}
+
+func (k InternalWorkerKeys) Validate() error {
+	keys := []struct {
+		role InternalWorkerRole
+		key  string
+	}{
+		{InternalWorkerAgent, k.Agent},
+		{InternalWorkerBuilder, k.Builder},
+		{InternalWorkerPublisher, k.Publisher},
+		{InternalWorkerVerifier, k.Verifier},
+	}
+	seen := make(map[string]InternalWorkerRole, len(keys))
+	for _, item := range keys {
+		value := strings.TrimSpace(item.key)
+		if value == "" {
+			return fmt.Errorf("internal_workers.%s is required", item.role)
+		}
+		if previous, duplicate := seen[value]; duplicate {
+			return fmt.Errorf("internal_workers.%s and internal_workers.%s must use different keys", previous, item.role)
+		}
+		seen[value] = item.role
+	}
+	return nil
 }
 
 // OpenSandboxConfig describes the Server-owned Generator workspace plane.
 // Its lifecycle key intentionally never appears in the Agent Worker config.
 type OpenSandboxConfig struct {
-	BaseURL          string `yaml:"base_url"`
-	APIKeyEnv        string `yaml:"api_key_env"`
-	Namespace        string `yaml:"namespace"`
-	WorkspaceImage   string `yaml:"workspace_image"`
-	WorkspaceStorage string `yaml:"workspace_storage"`
-	APIKey           string `yaml:"-"`
+	BaseURL                   string `yaml:"base_url"`
+	APIKeyEnv                 string `yaml:"api_key_env"`
+	Namespace                 string `yaml:"namespace"`
+	WorkspaceImage            string `yaml:"workspace_image"`
+	WorkspaceStorage          string `yaml:"workspace_storage"`
+	WorkspaceCPU              string `yaml:"workspace_cpu"`
+	WorkspaceMemory           string `yaml:"workspace_memory"`
+	WorkspaceProvisionTimeout string `yaml:"workspace_provision_timeout"`
+	APIKey                    string `yaml:"-"`
 }
 
 func (c AgentConfig) Timeout() (time.Duration, error) {
@@ -78,10 +208,73 @@ func (c OpenSandboxConfig) Validate() error {
 	if strings.TrimSpace(c.BaseURL) == "" || strings.TrimSpace(c.APIKeyEnv) == "" || strings.TrimSpace(c.Namespace) == "" {
 		return fmt.Errorf("opensandbox base_url, api_key_env, and namespace are required")
 	}
-	if strings.TrimSpace(c.WorkspaceImage) == "" || strings.TrimSpace(c.WorkspaceStorage) == "" {
-		return fmt.Errorf("opensandbox workspace_image and workspace_storage are required")
+	if strings.TrimSpace(c.WorkspaceImage) == "" || strings.TrimSpace(c.WorkspaceStorage) == "" || strings.TrimSpace(c.WorkspaceCPU) == "" || strings.TrimSpace(c.WorkspaceMemory) == "" {
+		return fmt.Errorf("opensandbox workspace_image, workspace_storage, workspace_cpu, and workspace_memory are required")
+	}
+	for name, value := range map[string]string{"workspace_storage": c.WorkspaceStorage, "workspace_cpu": c.WorkspaceCPU, "workspace_memory": c.WorkspaceMemory} {
+		quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
+		if err != nil || quantity.Sign() <= 0 {
+			return fmt.Errorf("opensandbox %s must be a positive resource quantity", name)
+		}
+	}
+	if _, err := c.ProvisionTimeout(); err != nil {
+		return err
 	}
 	return nil
+}
+
+// ProvisionTimeout is the maximum time Server waits for a newly created
+// Generator Sandbox to become usable. The Agent Run deadline remains the
+// outer bound for retries and model execution.
+func (c OpenSandboxConfig) ProvisionTimeout() (time.Duration, error) {
+	timeout, err := time.ParseDuration(strings.TrimSpace(c.WorkspaceProvisionTimeout))
+	if err != nil || timeout <= 0 {
+		return 0, fmt.Errorf("opensandbox workspace_provision_timeout must be a positive duration")
+	}
+	return timeout, nil
+}
+
+func (c RuntimeConfig) Validate() error {
+	if strings.TrimSpace(c.Node.ProfileRevision) == "" || strings.TrimSpace(c.Node.NetworkPolicyRevision) == "" {
+		return fmt.Errorf("runtime node profile_revision and network_policy_revision are required")
+	}
+	for name, value := range map[string]string{
+		"base_image_digest":         c.K8s.BaseImageDigest,
+		"profile_revision":          c.K8s.ProfileRevision,
+		"version":                   c.K8s.Version,
+		"management_terminal_image": c.K8s.ManagementTerminalImage,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("runtime k8s %s is required", name)
+		}
+	}
+	if !immutableOCIReference(c.K8s.BaseImageDigest) || !immutableOCIReference(c.K8s.ManagementTerminalImage) {
+		return fmt.Errorf("runtime k8s base_image_digest and management_terminal_image must be immutable OCI digest references")
+	}
+	if err := (runtimeprofile.VK8sResources{
+		ControlPlaneCPU: c.K8s.Resources.ControlPlaneCPU, ControlPlaneMemory: c.K8s.Resources.ControlPlaneMemory,
+		ControlPlaneEphemeralStorage: c.K8s.Resources.ControlPlaneEphemeralStorage,
+		WorkloadCPU:                  c.K8s.Resources.WorkloadCPU, WorkloadMemory: c.K8s.Resources.WorkloadMemory,
+		WorkloadEphemeralStorage: c.K8s.Resources.WorkloadEphemeralStorage,
+		QuotaCPU:                 c.K8s.Resources.QuotaCPU, QuotaMemory: c.K8s.Resources.QuotaMemory,
+		QuotaEphemeralStorage: c.K8s.Resources.QuotaEphemeralStorage,
+	}).Validate(); err != nil {
+		return fmt.Errorf("runtime k8s resources: %w", err)
+	}
+	return nil
+}
+
+func immutableOCIReference(value string) bool {
+	parts := strings.Split(strings.TrimSpace(value), "@sha256:")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || len(parts[1]) != 64 {
+		return false
+	}
+	for _, character := range parts[1] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func Load(path string) (Config, error) {
@@ -96,25 +289,32 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("parse config: %w", err)
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
-	cfg.AgentDatabaseURL = os.ExpandEnv(cfg.AgentDatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
-	cfg.InternalAPIKey = os.ExpandEnv(cfg.InternalAPIKey)
-	cfg.VerificationGrantKey = os.ExpandEnv(cfg.VerificationGrantKey)
-	cfg.Agent.ServerURL = os.ExpandEnv(cfg.Agent.ServerURL)
-	cfg.RegistryPullSecret = os.ExpandEnv(cfg.RegistryPullSecret)
-	cfg.RegistryWriteSecret = os.ExpandEnv(cfg.RegistryWriteSecret)
+	cfg.InternalWorkers.Agent = os.ExpandEnv(cfg.InternalWorkers.Agent)
+	cfg.InternalWorkers.Builder = os.ExpandEnv(cfg.InternalWorkers.Builder)
+	cfg.InternalWorkers.Publisher = os.ExpandEnv(cfg.InternalWorkers.Publisher)
+	cfg.InternalWorkers.Verifier = os.ExpandEnv(cfg.InternalWorkers.Verifier)
+	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
+	cfg.Registry.Address = os.ExpandEnv(cfg.Registry.Address)
+	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
+	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	cfg.UIOrigin = os.ExpandEnv(cfg.UIOrigin)
+	cfg.Incus.Endpoint = os.ExpandEnv(cfg.Incus.Endpoint)
+	cfg.Incus.BaseImageFingerprint = os.ExpandEnv(cfg.Incus.BaseImageFingerprint)
+	cfg.Incus.TLS.ServerCertificateFile = os.ExpandEnv(cfg.Incus.TLS.ServerCertificateFile)
+	cfg.Incus.TLS.ClientCertificateFile = os.ExpandEnv(cfg.Incus.TLS.ClientCertificateFile)
+	cfg.Incus.TLS.ClientKeyFile = os.ExpandEnv(cfg.Incus.TLS.ClientKeyFile)
+	cfg.Runtime.K8s.BaseImageDigest = os.ExpandEnv(cfg.Runtime.K8s.BaseImageDigest)
+	cfg.Runtime.K8s.ManagementTerminalImage = os.ExpandEnv(cfg.Runtime.K8s.ManagementTerminalImage)
 	cfg.Kubeconfig = expandKubeconfigPath(os.ExpandEnv(cfg.Kubeconfig))
-	if err := applyRuntimeEnvironment(&cfg); err != nil {
-		return cfg, err
-	}
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
 	cfg.OpenSandbox.APIKey = os.Getenv(cfg.OpenSandbox.APIKeyEnv)
-	cfg.RegistryUsername = os.Getenv("BREAKFIX_REGISTRY_USERNAME")
-	cfg.RegistryPassword = os.Getenv("BREAKFIX_REGISTRY_PASSWORD")
-	if (strings.TrimSpace(cfg.RegistryUsername) == "") != (strings.TrimSpace(cfg.RegistryPassword) == "") {
+	cfg.Worker.APIKey = os.Getenv(cfg.Worker.APIKeyEnv)
+	cfg.Registry.Username = os.Getenv("BREAKFIX_REGISTRY_USERNAME")
+	cfg.Registry.Password = os.Getenv("BREAKFIX_REGISTRY_PASSWORD")
+	if (strings.TrimSpace(cfg.Registry.Username) == "") != (strings.TrimSpace(cfg.Registry.Password) == "") {
 		return cfg, fmt.Errorf("BREAKFIX_REGISTRY_USERNAME and BREAKFIX_REGISTRY_PASSWORD must be set together")
 	}
 	var extra any
@@ -149,14 +349,14 @@ func (c Config) ValidateServer() error {
 	if c.Port <= 0 || strings.TrimSpace(c.DataDir) == "" || strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("server port, data_dir, and database_url are required")
 	}
-	if strings.TrimSpace(c.JWTSecret) == "" || strings.TrimSpace(c.InternalAPIKey) == "" || strings.TrimSpace(c.VerificationGrantKey) == "" {
-		return fmt.Errorf("server jwt_secret, internal_api_key, and verification_grant_key are required")
+	if strings.TrimSpace(c.JWTSecret) == "" {
+		return fmt.Errorf("server jwt_secret is required")
 	}
-	if strings.TrimSpace(c.RegistryAddr) == "" || strings.TrimSpace(c.RegistryPullSecret) == "" || strings.TrimSpace(c.RegistryWriteSecret) == "" {
-		return fmt.Errorf("server registry_addr, registry_pull_secret, and registry_write_secret are required")
+	if err := c.InternalWorkers.Validate(); err != nil {
+		return fmt.Errorf("server %w", err)
 	}
-	if strings.TrimSpace(c.RegistryUsername) == "" || strings.TrimSpace(c.RegistryPassword) == "" {
-		return fmt.Errorf("server registry credentials are required")
+	if err := c.Registry.ValidateAddress(); err != nil {
+		return fmt.Errorf("server registry: %w", err)
 	}
 	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
 		return fmt.Errorf("server namespace, crd_namespace, and positive cooldown_minutes are required")
@@ -173,40 +373,90 @@ func (c Config) ValidateServer() error {
 	if _, err := c.ParsedUIOrigin(); err != nil {
 		return fmt.Errorf("server ui_origin: %w", err)
 	}
+	if err := c.Incus.Validate(); err != nil {
+		return fmt.Errorf("server incus: %w", err)
+	}
+	if err := c.Runtime.Validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (c Config) ValidateController() error {
-	if c.HealthPort <= 0 || c.Port <= 0 || strings.TrimSpace(c.ServerHost) == "" {
-		return fmt.Errorf("controller health_port, server port, and server_host are required")
+	if c.HealthPort <= 0 {
+		return fmt.Errorf("controller health_port is required")
 	}
 	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
 		return fmt.Errorf("controller namespace, crd_namespace, and positive cooldown_minutes are required")
 	}
-	if strings.TrimSpace(c.RegistryAddr) == "" || strings.TrimSpace(c.RegistryPullSecret) == "" || strings.TrimSpace(c.RegistryWriteSecret) == "" {
-		return fmt.Errorf("controller registry_addr, registry_pull_secret, and registry_write_secret are required")
+	if strings.TrimSpace(c.VClusterBinary) == "" || strings.TrimSpace(c.VClusterChartRepo) == "" || strings.TrimSpace(c.VClusterChartVersion) == "" {
+		return fmt.Errorf("controller vcluster configuration is required")
 	}
-	if strings.TrimSpace(c.RegistryUsername) == "" || strings.TrimSpace(c.RegistryPassword) == "" {
-		return fmt.Errorf("controller registry credentials are required")
+	if err := c.Incus.Validate(); err != nil {
+		return fmt.Errorf("controller incus: %w", err)
 	}
-	if strings.TrimSpace(c.BuilderImage) == "" || strings.TrimSpace(c.PublisherImage) == "" || strings.TrimSpace(c.VerifierImage) == "" {
-		return fmt.Errorf("controller builder_image, publisher_image, and verifier_image are required")
-	}
-	if strings.TrimSpace(c.VerificationGrantKey) == "" || strings.TrimSpace(c.VClusterBinary) == "" || strings.TrimSpace(c.VClusterChartRepo) == "" || strings.TrimSpace(c.VClusterChartVersion) == "" {
-		return fmt.Errorf("controller verification grant and vcluster configuration are required")
+	if err := c.Runtime.Validate(); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (c Config) ValidateAgentWorker() error {
-	if strings.TrimSpace(c.AgentDatabaseURL) == "" || strings.TrimSpace(c.InternalAPIKey) == "" {
-		return fmt.Errorf("agent worker agent_database_url and internal_api_key are required")
+	if err := c.validateWorker(); err != nil {
+		return fmt.Errorf("agent worker: %w", err)
 	}
-	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" || strings.TrimSpace(c.Agent.ServerURL) == "" {
-		return fmt.Errorf("agent worker base_url, api_key_env, API key, model, and server_url are required")
+	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" {
+		return fmt.Errorf("agent worker base_url, api_key_env, API key, and model are required")
 	}
 	if _, err := c.Agent.Timeout(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c Config) ValidateBuilderWorker() error {
+	if err := c.validateWorker(); err != nil {
+		return fmt.Errorf("builder worker: %w", err)
+	}
+	if err := c.Incus.Validate(); err != nil {
+		return fmt.Errorf("builder worker incus: %w", err)
+	}
+	return nil
+}
+
+func (c Config) ValidatePublisherWorker() error {
+	if err := c.validateWorker(); err != nil {
+		return fmt.Errorf("publisher worker: %w", err)
+	}
+	if err := c.Registry.ValidateAddress(); err != nil {
+		return fmt.Errorf("publisher worker registry: %w", err)
+	}
+	if err := c.Incus.Validate(); err != nil {
+		return fmt.Errorf("publisher worker incus: %w", err)
+	}
+	return nil
+}
+
+func (c Config) ValidateVerifierWorker() error {
+	if err := c.validateWorker(); err != nil {
+		return fmt.Errorf("verifier worker: %w", err)
+	}
+	if strings.TrimSpace(c.CRDNamespace) == "" {
+		return fmt.Errorf("verifier worker crd_namespace is required")
+	}
+	if err := c.Incus.Validate(); err != nil {
+		return fmt.Errorf("verifier worker incus: %w", err)
+	}
+	return nil
+}
+
+func (c Config) validateWorker() error {
+	if c.HealthPort <= 0 || strings.TrimSpace(c.Worker.ServerURL) == "" || strings.TrimSpace(c.Worker.APIKeyEnv) == "" || strings.TrimSpace(c.Worker.APIKey) == "" {
+		return fmt.Errorf("health_port, worker.server_url, worker.api_key_env, and worker API key are required")
+	}
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(c.Worker.ServerURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("worker.server_url must be an absolute HTTP(S) URL")
 	}
 	return nil
 }
@@ -230,24 +480,6 @@ func (c Config) ParsedUIOrigin() (*url.URL, error) {
 	}
 	parsed.Path = ""
 	return parsed, nil
-}
-
-// applyRuntimeEnvironment contains deployment-time values that cannot be
-// safely committed into the shared in-cluster configuration. Empty variables
-// deliberately leave the YAML value intact so local configuration stays
-// self-contained.
-func applyRuntimeEnvironment(cfg *Config) error {
-	if value := strings.TrimSpace(os.Getenv("BREAKFIX_REGISTRY_ADDR")); value != "" {
-		cfg.RegistryAddr = value
-	}
-	if value, exists := os.LookupEnv("BREAKFIX_REGISTRY_INSECURE"); exists && strings.TrimSpace(value) != "" {
-		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
-		if err != nil {
-			return fmt.Errorf("parse BREAKFIX_REGISTRY_INSECURE: %w", err)
-		}
-		cfg.RegistryInsecure = parsed
-	}
-	return nil
 }
 
 func (c Config) ChallengesDir() string { return filepath.Join(c.DataDir, "challenges") }

@@ -25,7 +25,7 @@ func TestWorkerCompletesReadOnlyRunAfterBestEffortDeltaFailure(t *testing.T) {
 		ID: "user-message", SessionID: "assistant-session", Role: "user", Content: "what should I do",
 	}, agentruntime.CreateRun{
 		ID: "assistant-run", SessionID: "assistant-session", Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one",
-		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestWorkerTerminatesDomainManagedFailureWithoutGenericRequeue(t *testing.T)
 	ctx := context.Background()
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "taxonomy-run", Purpose: "taxonomy-mapper", OwnerKind: "taxonomy-work", OwnerRef: "work-one",
-		Model: "deepseek-v4-pro", PromptVersion: "taxonomy-v2", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Model: "deepseek-v4-pro", PromptVersion: "taxonomy-v2", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,10 +101,9 @@ func TestWorkerTerminatesDomainManagedFailureWithoutGenericRequeue(t *testing.T)
 func TestWorkerCancelsExecutionAtRunDeadline(t *testing.T) {
 	database := testpostgres.New(t)
 	ctx := context.Background()
-	deadline := time.Now().UTC().Add(200 * time.Millisecond)
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "deadline-run", Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one",
-		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", DeadlineAt: deadline,
+		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", ExecutionTimeout: 200 * time.Millisecond,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +141,7 @@ func TestWorkerDoesNotCancelACompletedDomainRunDuringLeaseRenewal(t *testing.T) 
 		ID: "generator-message", SessionID: "generator-session", Role: "user", Content: "generate",
 	}, agentruntime.CreateRun{
 		ID: "generator-run", SessionID: "generator-session", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
-		Model: "deepseek-v4-pro", PromptVersion: "generator-v1", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Model: "deepseek-v4-pro", PromptVersion: "generator-v1", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +181,76 @@ func TestWorkerDoesNotCancelACompletedDomainRunDuringLeaseRenewal(t *testing.T) 
 	if run.Status != agentruntime.RunSucceeded {
 		t.Fatalf("run status = %q, want succeeded", run.Status)
 	}
+}
+
+func TestWorkerCancelsExecutionWhenLeaseRenewalRequestTimesOut(t *testing.T) {
+	deadline := time.Now().UTC().Add(time.Minute)
+	claim := agentruntime.Claim{
+		WorkItemID: "work-renewal-timeout", Attempt: 1, LeaseOwner: "worker-one",
+		Run: agentruntime.Run{
+			ID: "run-renewal-timeout", Purpose: "assistant", DeadlineAt: &deadline,
+		},
+	}
+	store := &blockingRenewalStore{claim: claim}
+	leaseTTL := 150 * time.Millisecond
+	worker, err := agentworker.New(store, map[string]agentworker.Executor{
+		"assistant": agentworker.ExecutorFunc(func(ctx context.Context, _ agentruntime.Claim, _ agentworker.Emitter) (agentworker.ExecutionResult, error) {
+			<-ctx.Done()
+			return agentworker.ExecutionResult{}, ctx.Err()
+		}),
+	}, nil, agentworker.Config{WorkerID: "worker-one", LeaseTTL: leaseTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	processed, err := worker.ProcessOne(context.Background())
+	if err != nil || !processed {
+		t.Fatalf("process run = %v, %v", processed, err)
+	}
+	if !store.renewedWithDeadline.Load() {
+		t.Fatal("lease renewal was not issued with a bounded context")
+	}
+}
+
+type blockingRenewalStore struct {
+	claim               agentruntime.Claim
+	claimed             atomic.Bool
+	renewedWithDeadline atomic.Bool
+}
+
+func (s *blockingRenewalStore) ClaimNext(context.Context, string, time.Duration, time.Time) (*agentruntime.Claim, error) {
+	if s.claimed.Swap(true) {
+		return nil, nil
+	}
+	claim := s.claim
+	return &claim, nil
+}
+
+func (s *blockingRenewalStore) RenewLease(ctx context.Context, _ agentruntime.Claim, leaseTTL time.Duration, _ time.Time) error {
+	_, hasDeadline := ctx.Deadline()
+	s.renewedWithDeadline.Store(hasDeadline)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * leaseTTL):
+		return errors.New("lease renewal request had no deadline")
+	}
+}
+
+func (*blockingRenewalStore) Requeue(context.Context, agentruntime.Claim, time.Time, string, time.Time) error {
+	return errors.New("lease-lost execution must not be requeued")
+}
+
+func (*blockingRenewalStore) CompleteWithMessage(context.Context, agentruntime.Claim, agentruntime.Message, time.Time) error {
+	return errors.New("lease-lost execution must not be completed")
+}
+
+func (*blockingRenewalStore) Fail(context.Context, agentruntime.Claim, string, time.Time) error {
+	return errors.New("lease-lost execution must not be failed")
+}
+
+func (*blockingRenewalStore) GetRun(context.Context, string) (*agentruntime.Run, error) {
+	return nil, errors.New("not called for a timed out lease renewal")
 }
 
 type failingDeltaSink struct{}

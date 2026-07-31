@@ -9,113 +9,97 @@ import (
 
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/incusprovider"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type activeEnvironment struct {
-	UID                 string
-	Runtime             string
-	Name                string
-	ChallengeRef        string
-	Namespace           string
-	WorkspacePod        string
-	Phase               breakfixv1.EnvironmentPhase
-	ExpiresAt           *metav1.Time
-	Checkpoints         *breakfixv1.CheckpointStatus
-	Message             string
-	Reason              string
-	LastError           *breakfixv1.EnvironmentErrorStatus
-	ReadyTimeoutSeconds *int64
-	IdleTTLSeconds      *int64
-	DrainGraceSeconds   *int64
+	UID            string
+	Runtime        string
+	Name           string
+	ChallengeRef   string
+	SourceRevision string
+	Purpose        breakfixv1.EnvironmentPurpose
+	Namespace      string
+	WorkspacePod   string
+	NodeIdentity   incusprovider.NodeEnvironmentIdentity
+	Nodes          []breakfixv1.NodeRuntimeNodeSpec
+	Phase          breakfixv1.EnvironmentPhase
+	ExpiresAt      *metav1.Time
+	Checkpoints    *breakfixv1.CheckpointStatus
+	Failure        *breakfixv1.EnvironmentFailureStatus
+	Lifecycle      breakfixv1.EnvironmentLifecycleSpec
 }
 
-func environmentFromContainer(env *breakfixv1.ContainerEnvironment) *activeEnvironment {
-	if env == nil {
+func environmentFromNode(environment *breakfixv1.NodeEnvironment) *activeEnvironment {
+	if environment == nil {
 		return nil
 	}
-	runtime := challenge.NormalizeRuntime(env.Spec.Runtime)
-	if strings.TrimSpace(env.Spec.Runtime) == "" {
-		runtime = challenge.RuntimeContainer
+	identity := incusprovider.NodeEnvironmentIdentity{
+		Project: environment.Status.Runtime.Project, Network: environment.Status.Runtime.Network,
+		ACL: environment.Status.Runtime.ACL, Profile: environment.Status.Runtime.Profile,
+		Nodes: make([]incusprovider.NodeIdentity, len(environment.Status.Runtime.Nodes)),
+	}
+	for index, node := range environment.Status.Runtime.Nodes {
+		identity.Nodes[index] = incusprovider.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
 	}
 	return &activeEnvironment{
-		UID:                 string(env.UID),
-		Runtime:             runtime,
-		Name:                env.Name,
-		ChallengeRef:        env.Spec.ChallengeRef,
-		Namespace:           env.Status.Namespace,
-		WorkspacePod:        env.Status.WorkspacePodName,
-		Phase:               env.Status.Phase,
-		ExpiresAt:           env.Status.ExpiresAt,
-		Checkpoints:         env.Status.Checkpoints,
-		Message:             env.Status.Message,
-		Reason:              env.Status.Reason,
-		LastError:           env.Status.LastError,
-		ReadyTimeoutSeconds: env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:      env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:   env.Spec.Timeouts.DrainGracePeriodSeconds,
+		UID: string(environment.UID), Runtime: challenge.RuntimeNode, Name: environment.Name,
+		ChallengeRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
+		Purpose: environment.Spec.Environment.Purpose, NodeIdentity: identity,
+		Nodes: append([]breakfixv1.NodeRuntimeNodeSpec(nil), environment.Spec.Runtime.Nodes...),
+		Phase: environment.Status.Environment.Phase, ExpiresAt: environment.Status.Environment.ExpiresAt,
+		Checkpoints: environment.Status.Environment.Checkpoints, Failure: environment.Status.Environment.Failure,
+		Lifecycle: environment.Spec.Environment.Lifecycle,
 	}
 }
 
-func environmentFromVCluster(env *breakfixv1.VClusterEnvironment) *activeEnvironment {
-	if env == nil {
+func environmentFromVK8s(environment *breakfixv1.VK8sEnvironment) *activeEnvironment {
+	if environment == nil {
 		return nil
 	}
-	runtime := challenge.NormalizeRuntime(env.Spec.Runtime)
-	if strings.TrimSpace(env.Spec.Runtime) == "" {
-		runtime = challenge.RuntimeVCluster
-	}
 	return &activeEnvironment{
-		UID:                 string(env.UID),
-		Runtime:             runtime,
-		Name:                env.Name,
-		ChallengeRef:        env.Spec.ChallengeRef,
-		Namespace:           env.Status.Namespace,
-		WorkspacePod:        env.Status.WorkspacePodName,
-		Phase:               env.Status.Phase,
-		ExpiresAt:           env.Status.ExpiresAt,
-		Checkpoints:         env.Status.Checkpoints,
-		Message:             env.Status.Message,
-		Reason:              env.Status.Reason,
-		LastError:           env.Status.LastError,
-		ReadyTimeoutSeconds: env.Spec.Timeouts.ReadyTimeoutSeconds,
-		IdleTTLSeconds:      env.Spec.Timeouts.IdleTTLSeconds,
-		DrainGraceSeconds:   env.Spec.Timeouts.DrainGracePeriodSeconds,
+		UID: string(environment.UID), Runtime: challenge.RuntimeK8s, Name: environment.Name,
+		ChallengeRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
+		Purpose:   environment.Spec.Environment.Purpose,
+		Namespace: environment.Status.Runtime.Namespace, WorkspacePod: environment.Status.Runtime.TerminalPodName,
+		Phase: environment.Status.Environment.Phase, ExpiresAt: environment.Status.Environment.ExpiresAt,
+		Checkpoints: environment.Status.Environment.Checkpoints, Failure: environment.Status.Environment.Failure,
+		Lifecycle: environment.Spec.Environment.Lifecycle,
 	}
 }
 
 func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]activeEnvironment, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s", userID)
 	result := make([]activeEnvironment, 0, 4)
-	for _, runtime := range []string{challenge.RuntimeContainer, challenge.RuntimeVCluster} {
+	for _, runtime := range []string{challenge.RuntimeNode, challenge.RuntimeK8s} {
 		adapter, err := h.environmentRuntimeAdapter(runtime)
 		if err != nil {
 			return nil, err
 		}
-		envs, err := adapter.list(ctx, selector)
+		environments, err := adapter.list(ctx, selector)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, envs...)
+		result = append(result, environments...)
 	}
 	return result, nil
 }
 
-func (h *Handler) findEnvironment(ctx context.Context, userID string, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, challengeEntry.ID)
-	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
+func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
+	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err
 	}
-	envs, err := adapter.list(ctx, selector)
+	environments, err := adapter.list(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
-	for i := range envs {
-		env := envs[i]
-		if isLiveEnvironmentPhase(env.Phase) {
-			return &env, nil
+	for index := range environments {
+		if isLiveEnvironmentPhase(environments[index].Phase) {
+			return &environments[index], nil
 		}
 	}
 	return nil, errors.New("no active environment")
@@ -127,91 +111,88 @@ func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, enviro
 		return nil, err
 	}
 	for index := range environments {
-		environment := environments[index]
-		if environment.UID == environmentUID && isLiveEnvironmentPhase(environment.Phase) {
-			return &environment, nil
+		if environments[index].UID == environmentUID && isLiveEnvironmentPhase(environments[index].Phase) {
+			return &environments[index], nil
 		}
 	}
 	return nil, errors.New("no active environment for assistant run")
 }
 
-func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, challengeEntry.ID)
-	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
+func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
+	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err
 	}
-	envs, err := adapter.list(ctx, selector)
+	environments, err := adapter.list(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
-	for i := range envs {
-		env := envs[i]
-		if isLiveEnvironmentPhase(env.Phase) {
-			return &env, nil
+	for index := range environments {
+		if isLiveEnvironmentPhase(environments[index].Phase) {
+			return &environments[index], nil
 		}
 	}
-	for i := range envs {
-		env := envs[i]
-		if env.Phase == breakfixv1.EnvironmentCompleted {
-			return &env, nil
+	for index := range environments {
+		if environments[index].Phase == breakfixv1.EnvironmentCompleted {
+			return &environments[index], nil
 		}
 	}
 	return nil, errors.New("no environment with checkpoint status")
 }
 
-func (h *Handler) createEnvironment(ctx context.Context, user *db.User, challengeEntry *challenge.Entry) (*activeEnvironment, error) {
-	adapter, err := h.environmentRuntimeAdapter(challengeEntry.Runtime)
+func (h *Handler) createEnvironment(ctx context.Context, user *db.User, entry *challenge.Entry) (*activeEnvironment, error) {
+	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err
 	}
-	name, err := adapter.create(ctx, user, challengeEntry)
+	name, err := adapter.create(ctx, user, entry)
 	if err != nil {
 		return nil, err
 	}
-	return h.waitEnvironmentReady(ctx, adapter.runtime, name, time.Duration(adapter.readyTimeoutDuration())*time.Second)
+	return h.waitEnvironmentReady(ctx, adapter.runtime, name, adapter.readyTimeout)
 }
 
-func (h *Handler) resumeEnvironment(ctx context.Context, env *activeEnvironment) error {
-	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
+func (h *Handler) resumeEnvironment(ctx context.Context, environment *activeEnvironment) error {
+	adapter, err := h.environmentRuntimeAdapter(environment.Runtime)
 	if err != nil {
 		return err
 	}
-	return adapter.renewActivity(ctx, env.Name, nowActivity())
+	return adapter.renewActivity(ctx, environment.Name, nowActivity())
 }
 
-func (h *Handler) destroyEnvironment(ctx context.Context, env *activeEnvironment) error {
-	adapter, err := h.environmentRuntimeAdapter(env.Runtime)
+func (h *Handler) destroyEnvironment(ctx context.Context, environment *activeEnvironment) error {
+	adapter, err := h.environmentRuntimeAdapter(environment.Runtime)
 	if err != nil {
 		return err
 	}
-	if adapter.requestDeletion == nil {
-		return fmt.Errorf("runtime %q does not support deletion", env.Runtime)
-	}
-	return adapter.requestDeletion(ctx, env.Name)
+	return adapter.requestDeletion(ctx, environment.Name)
 }
 
 func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string, timeout time.Duration) (*activeEnvironment, error) {
-	effectiveTimeout := timeout
-	deadline := time.Now().Add(effectiveTimeout)
-	for time.Now().Before(deadline) {
-		env, err := h.getEnvironment(ctx, runtime, name)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		environment, err := h.getEnvironment(ctx, runtime, name)
 		if err != nil {
 			return nil, err
 		}
-		if readyTimeout := environmentReadyTimeout(env, effectiveTimeout); readyTimeout > 0 && readyTimeout != effectiveTimeout {
-			effectiveTimeout = readyTimeout
-			deadline = time.Now().Add(effectiveTimeout)
+		if environment.Phase == breakfixv1.EnvironmentReady {
+			return environment, nil
 		}
-		if env.Phase == breakfixv1.EnvironmentReady {
-			return env, nil
+		if environment.Phase == breakfixv1.EnvironmentDestroyed || environment.Phase == breakfixv1.EnvironmentFailed {
+			return nil, environmentUnavailableError(environment)
 		}
-		if env.Phase == breakfixv1.EnvironmentDestroyed || env.Phase == breakfixv1.EnvironmentFailed {
-			return nil, environmentUnavailableError(env)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline.C:
+			return nil, fmt.Errorf("timeout waiting for %s environment %q to become ready", runtime, name)
+		case <-ticker.C:
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
-	return nil, fmt.Errorf("timeout waiting for environment ready")
 }
 
 func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*activeEnvironment, error) {
@@ -223,46 +204,33 @@ func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*ac
 }
 
 func isLiveEnvironmentPhase(phase breakfixv1.EnvironmentPhase) bool {
-	return phase == "" ||
-		phase == breakfixv1.EnvironmentPending ||
-		phase == breakfixv1.EnvironmentProvisioning ||
-		phase == breakfixv1.EnvironmentReady ||
-		phase == breakfixv1.EnvironmentDraining
+	return phase == "" || phase == breakfixv1.EnvironmentPending || phase == breakfixv1.EnvironmentProvisioning || phase == breakfixv1.EnvironmentReady || phase == breakfixv1.EnvironmentDraining
 }
 
-func environmentReadyTimeout(env *activeEnvironment, fallback time.Duration) time.Duration {
-	if env == nil || env.ReadyTimeoutSeconds == nil || *env.ReadyTimeoutSeconds <= 0 {
+func environmentIdleTTL(environment *activeEnvironment, fallback time.Duration) time.Duration {
+	if environment == nil || environment.Lifecycle.IdleTTLSeconds == nil || *environment.Lifecycle.IdleTTLSeconds <= 0 {
 		return fallback
 	}
-	return time.Duration(*env.ReadyTimeoutSeconds) * time.Second
+	return time.Duration(*environment.Lifecycle.IdleTTLSeconds) * time.Second
 }
 
-func environmentIdleTTL(env *activeEnvironment, fallback time.Duration) time.Duration {
-	if env == nil || env.IdleTTLSeconds == nil || *env.IdleTTLSeconds <= 0 {
-		return fallback
-	}
-	return time.Duration(*env.IdleTTLSeconds) * time.Second
-}
-
-func environmentDrainGracePeriod(env *activeEnvironment, fallback time.Duration) time.Duration {
-	if env == nil || env.DrainGraceSeconds == nil || *env.DrainGraceSeconds <= 0 {
-		return fallback
-	}
-	return time.Duration(*env.DrainGraceSeconds) * time.Second
-}
-
-func environmentUnavailableError(env *activeEnvironment) error {
-	if env == nil {
+func environmentUnavailableError(environment *activeEnvironment) error {
+	if environment == nil {
 		return errors.New("environment became unavailable before ready")
 	}
-	if env.LastError != nil && strings.TrimSpace(env.LastError.Message) != "" {
-		return errors.New(env.LastError.Message)
-	}
-	if strings.TrimSpace(env.Message) != "" {
-		return errors.New(env.Message)
-	}
-	if strings.TrimSpace(env.Reason) != "" {
-		return fmt.Errorf("environment became unavailable before ready: %s", env.Reason)
+	if environment.Failure != nil {
+		// Provider diagnostics stay on the controller-facing CRD status. The
+		// browser only receives stable runtime-level failures, never transport
+		// details or implementation names.
+		if environment.Failure.Class == breakfixv1.EnvironmentFailureInfrastructure {
+			return errors.New("learning environment is temporarily unavailable; please try again")
+		}
+		if message := strings.TrimSpace(environment.Failure.Message); message != "" {
+			return errors.New(message)
+		}
+		if reason := strings.TrimSpace(environment.Failure.Reason); reason != "" {
+			return fmt.Errorf("environment became unavailable before ready: %s", reason)
+		}
 	}
 	return errors.New("environment became unavailable before ready")
 }

@@ -24,7 +24,7 @@ const generatorMaxIterations = 40
 
 // WorkerExecutor owns the model-side half of challenge generation. It only
 // accesses generic Agent Runtime data directly; all workspace, artifact, and
-// VerifyTask mutations use the Server's fenced internal API.
+// candidate mutations use the Server's fenced internal API.
 type WorkerExecutor struct {
 	config config.AgentConfig
 	client RuntimeClient
@@ -41,10 +41,10 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 	if !claim.Valid() || claim.Run.Purpose != RuntimePurpose {
 		return agentworker.ExecutionResult{}, errors.New("invalid generator agent run claim")
 	}
-	if !claim.Run.DeadlineAt.After(time.Now().UTC()) {
+	if claim.Run.DeadlineAt == nil || !claim.Run.DeadlineAt.After(time.Now().UTC()) {
 		return agentworker.ExecutionResult{}, context.DeadlineExceeded
 	}
-	ctx, cancel := context.WithDeadline(parent, claim.Run.DeadlineAt)
+	ctx, cancel := context.WithDeadline(parent, *claim.Run.DeadlineAt)
 	defer cancel()
 
 	input, err := DecodeRunInput(claim.Run.Input)
@@ -57,9 +57,6 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 	}
 	if err := workspace.Plan.ValidateForGeneration(); err != nil {
 		return agentworker.ExecutionResult{}, fmt.Errorf("validate generator plan: %w", err)
-	}
-	if strings.TrimSpace(workspace.BaseImage) == "" {
-		return agentworker.ExecutionResult{}, errors.New("generator workspace base image is required")
 	}
 	feedback := workspace.Feedback
 	if !sameFeedback(input.Feedback, workspace.Feedback) {
@@ -75,7 +72,7 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 			return agentworker.ExecutionResult{}, err
 		}
 		logGeneratorStage(claim, "deep_agent_started")
-		if err := runDeepAgent(ctx, e.config, backend, workspace.Plan, workspace.BaseImage, feedback, emit); err != nil {
+		if err := runDeepAgent(ctx, e.config, backend, workspace.Plan, feedback, emit); err != nil {
 			return agentworker.ExecutionResult{}, err
 		}
 		logGeneratorStage(claim, "deep_agent_completed")
@@ -108,11 +105,11 @@ func (e *WorkerExecutor) Execute(parent context.Context, claim agentruntime.Clai
 			continue
 		}
 		logGeneratorStage(claim, "judge_passed")
-		logGeneratorStage(claim, "submission_started")
-		if _, err := e.client.SubmitCandidate(ctx, claim, candidate.Archive); err != nil {
-			return agentworker.ExecutionResult{}, fmt.Errorf("submit generator candidate: %w", err)
+		logGeneratorStage(claim, "candidate_finalization_started")
+		if _, err := e.client.FinalizeCandidate(ctx, claim, candidate.Archive); err != nil {
+			return agentworker.ExecutionResult{}, fmt.Errorf("finalize generator candidate: %w", err)
 		}
-		logGeneratorStage(claim, "submission_completed")
+		logGeneratorStage(claim, "candidate_finalized")
 		return agentworker.ExecutionResult{Finalized: true}, nil
 	}
 }
@@ -122,8 +119,7 @@ func logGeneratorStage(claim agentruntime.Claim, stage string) {
 }
 
 func sameFeedback(left, right Feedback) bool {
-	if left.BuildPassed != right.BuildPassed || left.AnswerPassed != right.AnswerPassed ||
-		left.CheckpointsPassed != right.CheckpointsPassed || left.Summary != right.Summary || len(left.Issues) != len(right.Issues) {
+	if left.Summary != right.Summary || len(left.Issues) != len(right.Issues) {
 		return false
 	}
 	for index := range left.Issues {
@@ -134,7 +130,7 @@ func sameFeedback(left, right Feedback) bool {
 	return true
 }
 
-func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSandboxBackend, plan authoring.Plan, baseImage string, feedback Feedback, emit agentworker.Emitter) error {
+func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSandboxBackend, plan authoring.Plan, feedback Feedback, emit agentworker.Emitter) error {
 	chat, err := agentmodel.NewChatModel(ctx, cfg)
 	if err != nil {
 		return err
@@ -160,7 +156,7 @@ func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSand
 		return fmt.Errorf("create generator DeepAgent: %w", err)
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
-	events := runner.Run(ctx, []adk.Message{schema.UserMessage(generatorTurnPrompt(plan, baseImage, feedback))})
+	events := runner.Run(ctx, []adk.Message{schema.UserMessage(generatorTurnPrompt(plan, feedback))})
 	for {
 		event, ok := events.Next()
 		if !ok {

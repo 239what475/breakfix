@@ -56,6 +56,33 @@ func (d *DB) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (
 	return record, nil
 }
 
+// RecordGeneratorWorkspaceSandbox persists the ID returned by the lifecycle
+// API before Server waits for readiness. A retry therefore reconnects to this
+// exact Sandbox rather than issuing another create request.
+func (d *DB) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
+	if strings.TrimSpace(generatorRunID) == "" || strings.TrimSpace(sandboxID) == "" || now.IsZero() {
+		return errors.New("generator workspace run, sandbox id, and current time are required")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE generator_workspaces
+		SET sandbox_id = ?, updated_at = ?
+		WHERE generator_run_id = ? AND state = ? AND (sandbox_id = '' OR sandbox_id = ?)`,
+		sandboxID, now, generatorRunID, workspace.StatePending, sandboxID)
+	if err != nil {
+		return fmt.Errorf("record generator workspace sandbox: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed == 1 {
+		return nil
+	}
+	record, err := d.GetGeneratorWorkspace(ctx, generatorRunID)
+	if err != nil {
+		return err
+	}
+	if record.State == workspace.StatePending && record.SandboxID == sandboxID {
+		return nil
+	}
+	return fmt.Errorf("generator workspace cannot record sandbox from state %q", record.State)
+}
+
 func (d *DB) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
 	if strings.TrimSpace(generatorRunID) == "" || strings.TrimSpace(sandboxID) == "" || now.IsZero() {
 		return errors.New("generator workspace run, sandbox id, and current time are required")

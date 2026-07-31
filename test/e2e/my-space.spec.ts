@@ -31,11 +31,11 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await expect(page.getByLabel("Filter learning state")).toHaveValue("completed");
 	const runtimeRequest = page.waitForRequest((request) => {
 		const url = new URL(request.url());
-		return url.pathname === "/api/me/space/learning" && url.searchParams.get("runtime") === "container";
+		return url.pathname === "/api/me/space/learning" && url.searchParams.get("runtime") === "node";
 	});
-	await page.getByLabel("Filter learning runtime").selectOption("container");
+	await page.getByLabel("Filter learning runtime").selectOption("node");
 	await runtimeRequest;
-	await expect(page.getByLabel("Filter learning runtime")).toHaveValue("container");
+	await expect(page.getByLabel("Filter learning runtime")).toHaveValue("node");
 	await page.getByRole("button", { name: "Authoring", exact: true }).first().click();
 	await expect(page.getByRole("heading", { name: "Challenge authoring", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Open studio", exact: true }).click();

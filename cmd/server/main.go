@@ -14,6 +14,7 @@ import (
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/server"
 )
@@ -43,7 +44,7 @@ func main() {
 	}
 
 	slog.Info("Breakfix Server starting", "version", build.Version, "data_dir", cfg.DataDir)
-	database, err := db.NewWithAgentRole(cfg.DatabaseURL, cfg.AgentDatabaseRole)
+	database, err := db.New(cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to open database", "err", err)
 		os.Exit(1)
@@ -55,15 +56,25 @@ func main() {
 		slog.Error("failed to create K8s client", "err", err)
 		os.Exit(1)
 	}
+	incusClient, err := incusprovider.NewReconnectableClient(cfg.Incus, incusprovider.RoleServer)
+	if err != nil {
+		slog.Error("invalid Incus provider configuration", "err", err)
+		os.Exit(1)
+	}
+	defer incusClient.Close()
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
-	router, err := server.SetupRouter(runCtx, database, k8sClient, cfg, frontendFS)
+	router, err := server.SetupRouter(runCtx, database, k8sClient, cfg, frontendFS, server.Dependencies{NodeTerminal: incusClient})
 	if err != nil {
 		slog.Error("failed to setup server", "err", err)
 		os.Exit(1)
 	}
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Port), Handler: router}
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go func() {
 		sig := make(chan os.Signal, 1)

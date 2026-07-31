@@ -19,7 +19,7 @@ func TestProviderFileModeUsesOpenSandboxOctalNotation(t *testing.T) {
 }
 
 func TestWorkspacePathAcceptsEinoRelativePrefix(t *testing.T) {
-	for _, value := range []string{"challenge.yaml", "./challenge.yaml", "checks/checkpoints.sh", "./checks/checkpoints.sh"} {
+	for _, value := range []string{"challenge.yaml", "./challenge.yaml", "nodes/host/checks.sh", "./nodes/host/checks.sh"} {
 		if err := ValidateWorkspacePath(value); err != nil {
 			t.Fatalf("ValidateWorkspacePath(%q): %v", value, err)
 		}

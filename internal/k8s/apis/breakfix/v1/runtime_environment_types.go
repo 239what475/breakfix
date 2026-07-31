@@ -2,6 +2,44 @@ package v1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+type CheckpointResultStatus struct {
+	ID            string       `json:"id"`
+	Passed        bool         `json:"passed"`
+	FirstPassedAt *metav1.Time `json:"firstPassedAt,omitempty"`
+	Summary       string       `json:"summary"`
+	Details       string       `json:"details,omitempty"`
+}
+
+// CheckpointStatus is controller-owned state from the most recent checkpoint run.
+type CheckpointStatus struct {
+	Results   []CheckpointResultStatus `json:"results,omitempty"`
+	CheckedAt *metav1.Time             `json:"checkedAt,omitempty"`
+	Error     string                   `json:"error,omitempty"`
+}
+
+type EnvironmentPhase string
+
+const (
+	EnvironmentPending      EnvironmentPhase = "Pending"
+	EnvironmentProvisioning EnvironmentPhase = "Provisioning"
+	EnvironmentReady        EnvironmentPhase = "Ready"
+	EnvironmentDraining     EnvironmentPhase = "Draining"
+	EnvironmentCompleted    EnvironmentPhase = "Completed"
+	EnvironmentDestroyed    EnvironmentPhase = "Destroyed"
+	EnvironmentFailed       EnvironmentPhase = "Failed"
+)
+
+const (
+	ConditionProvisioned     = "Provisioned"
+	ConditionWorkspaceReady  = "WorkspaceReady"
+	ConditionKubeconfigReady = "KubeconfigReady"
+	ConditionReady           = "Ready"
+	ConditionDraining        = "Draining"
+	ConditionCompleted       = "Completed"
+	ConditionCleanedUp       = "CleanedUp"
+	ConditionFailed          = "Failed"
+)
+
 type EnvironmentPurpose string
 
 const (
@@ -112,6 +150,7 @@ type NodeInstanceStatus struct {
 type NodeRuntimeStatus struct {
 	Project          string               `json:"project,omitempty"`
 	Network          string               `json:"network,omitempty"`
+	ACL              string               `json:"acl,omitempty"`
 	Profile          string               `json:"profile,omitempty"`
 	ImageFingerprint string               `json:"imageFingerprint,omitempty"`
 	Nodes            []NodeInstanceStatus `json:"nodes,omitempty"`
@@ -144,13 +183,15 @@ type NodeEnvironmentList struct {
 }
 
 type VK8sResourceSnapshot struct {
-	ControlPlaneCPU       string `json:"controlPlaneCpu"`
-	ControlPlaneMemory    string `json:"controlPlaneMemory"`
-	QuotaCPU              string `json:"quotaCpu"`
-	QuotaMemory           string `json:"quotaMemory"`
-	QuotaEphemeralStorage string `json:"quotaEphemeralStorage"`
-	TerminalCPU           string `json:"terminalCpu"`
-	TerminalMemory        string `json:"terminalMemory"`
+	ControlPlaneCPU              string `json:"controlPlaneCpu"`
+	ControlPlaneMemory           string `json:"controlPlaneMemory"`
+	ControlPlaneEphemeralStorage string `json:"controlPlaneEphemeralStorage"`
+	WorkloadCPU                  string `json:"workloadCpu"`
+	WorkloadMemory               string `json:"workloadMemory"`
+	WorkloadEphemeralStorage     string `json:"workloadEphemeralStorage"`
+	QuotaCPU                     string `json:"quotaCpu"`
+	QuotaMemory                  string `json:"quotaMemory"`
+	QuotaEphemeralStorage        string `json:"quotaEphemeralStorage"`
 }
 
 type VK8sRuntimeSnapshot struct {

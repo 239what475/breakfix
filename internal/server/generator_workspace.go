@@ -6,14 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/opensandbox"
 	"github.com/breakfix/breakfix/internal/workspace"
@@ -38,7 +37,7 @@ type internalGeneratorExecuteRequest struct {
 	Command string `json:"command"`
 }
 
-type internalGeneratorSubmitRequest struct {
+type internalGeneratorFinalizeRequest struct {
 	generator.LeaseCredential
 	Archive []byte `json:"archive"`
 }
@@ -62,7 +61,7 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		return
 	}
 	input, err := generator.DecodeRunInput(claim.Run.Input)
-	if err != nil || input.AuthoringSessionID != runRecord.AuthoringSessionID || input.Revision != runRecord.AuthoringRevision || input.SeedSubmissionID != runRecord.SeedSubmissionID {
+	if err != nil || input.AuthoringSessionID != runRecord.AuthoringSessionID || input.Revision != runRecord.AuthoringRevision || input.SeedCandidateRevisionID != runRecord.SeedCandidateRevisionID {
 		h.writeInternalGeneratorError(c, errors.New("generator run input does not match its durable record"))
 		return
 	}
@@ -82,21 +81,9 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, generator.WorkspaceContext{
-		Plan:      revision.Plan,
-		Feedback:  input.Feedback,
-		BaseImage: h.generatorWorkspaceBaseImage(revision.Plan.Metadata.Runtime),
+		Plan:     revision.Plan,
+		Feedback: input.Feedback,
 	})
-}
-
-func (h *Handler) generatorWorkspaceBaseImage(runtime string) string {
-	name := "breakfix-base:latest"
-	if challenge.NormalizeRuntime(runtime) == challenge.RuntimeVCluster {
-		name = "breakfix-k8s-base:latest"
-	}
-	if strings.TrimSpace(h.registryAddr) == "" {
-		return name
-	}
-	return strings.TrimRight(h.registryAddr, "/") + "/" + name
 }
 
 func (h *Handler) InternalGeneratorReadFile(c *gin.Context) {
@@ -227,10 +214,10 @@ func (h *Handler) generatorWorkspaceForClaim(ctx context.Context, runID string, 
 	if h.db == nil || h.generatorSandbox == nil || h.generatorWorkspace == nil {
 		return nil, nil, errors.New("generator workspace runtime is unavailable")
 	}
-	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
+	if strings.TrimSpace(runID) == "" || !credential.Valid() {
 		return nil, nil, errors.New("generator run lease credentials are required")
 	}
-	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
+	claim, err := h.getAgentClaim(ctx, runID, credential)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,11 +252,20 @@ func (h *Handler) materializeGeneratorWorkspace(ctx context.Context, workspaceRe
 		return errors.New("generator workspace record is incomplete")
 	}
 	var archive []byte
-	if submissionID := strings.TrimSpace(run.SeedSubmissionID); submissionID != "" {
-		var err error
-		archive, err = os.ReadFile(challenge.SubmissionPath(h.dataDir, submissionID))
+	if candidateID := strings.TrimSpace(run.SeedCandidateRevisionID); candidateID != "" {
+		revision, err := h.db.GetCandidateRevision(ctx, candidateID)
 		if err != nil {
-			return fmt.Errorf("read generator seed artifact: %w", err)
+			return fmt.Errorf("read generator seed candidate: %w", err)
+		}
+		if revision.AuthoringSessionID != run.AuthoringSessionID || revision.AuthoringRevision > run.AuthoringRevision {
+			return errors.New("generator seed candidate does not belong to the authoring lineage")
+		}
+		if revision.AuthoringRevision == run.AuthoringRevision && revision.GeneratorSessionID != run.GeneratorSessionID {
+			return errors.New("generator repair seed does not belong to the generator session")
+		}
+		archive, err = candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+		if err != nil {
+			return fmt.Errorf("read generator seed candidate archive: %w", err)
 		}
 	}
 	if err := h.generatorSandbox.ResetWorkspace(ctx, workspaceRecord.SandboxID, archive); err != nil {

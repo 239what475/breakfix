@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
@@ -43,7 +42,12 @@ func (h *Handler) InternalAuthoringContext(c *gin.Context) {
 		h.writeInternalAuthoringError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, authoring.ExecutionContext{Stage: *stage})
+	history, err := h.db.ListMessages(c.Request.Context(), claim.Run.SessionID)
+	if err != nil {
+		h.writeInternalAuthoringError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, authoring.ExecutionContext{Stage: *stage, History: history})
 }
 
 // InternalAuthoringStage applies one model tool mutation to the private
@@ -90,10 +94,10 @@ func (h *Handler) internalAuthoringClaim(ctx context.Context, runID string, cred
 	if h.db == nil {
 		return nil, errors.New("authoring runtime is unavailable")
 	}
-	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
+	if strings.TrimSpace(runID) == "" || !credential.Valid() {
 		return nil, errors.New("authoring run lease credentials are required")
 	}
-	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
+	claim, err := h.getAgentClaim(ctx, runID, credential)
 	if err != nil {
 		return nil, err
 	}

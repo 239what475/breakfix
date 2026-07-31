@@ -50,7 +50,7 @@ function updateRuntime(event: Event) {
       <div><p class="eyebrow">Learning record</p><h2 id="learning-history-title">Recent activity</h2></div>
       <div v-if="showFilters" class="history-filters">
         <label><span>State</span><select :value="stateFilter" aria-label="Filter learning state" @change="updateState"><option value="all">All activity</option><option value="active">In progress</option><option value="completed">Completed</option><option value="ended">Ended attempts</option></select></label>
-        <label><span>Runtime</span><select :value="runtimeFilter" aria-label="Filter learning runtime" @change="updateRuntime"><option value="all">All runtimes</option><option value="container">Container</option><option value="vcluster">VCluster</option></select></label>
+        <label><span>Runtime</span><select :value="runtimeFilter" aria-label="Filter learning runtime" @change="updateRuntime"><option value="all">All runtimes</option><option value="node">Linux nodes</option><option value="k8s">Kubernetes</option></select></label>
       </div>
     </div>
     <p v-if="loading" class="space-empty">Loading learning history...</p>

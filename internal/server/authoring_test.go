@@ -5,35 +5,31 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/k8s"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/testpostgres"
+	"github.com/breakfix/breakfix/internal/worklist"
 	"github.com/gin-gonic/gin"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
+func TestAuthoringAPIOnlyShowsVerifiedCandidate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	root := t.TempDir()
@@ -49,17 +45,7 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstRun, err := startTestGeneratorRun(ctx, database, "author-visible", "u-author", first.Number, "generator-one")
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifactDir := authoring.ArtifactDirectory(root, "author-visible", first.Number)
-	writeAuthoringArtifact(t, artifactDir, "Actual verified title", "actual verified description")
-	if err := completeTestGeneratorVerification(ctx, database, "author-visible", firstRun, authoring.Artifact{
-		SubmissionID: generator.SubmissionID(firstRun.ID), Directory: authoring.ArtifactRelativePath("author-visible", first.Number), GeneratorRunID: firstRun.ID,
-	}, "verify-one"); err != nil {
-		t.Fatal(err)
-	}
+	verifiedCandidate, _ := seedVerifiedAuthoringCandidate(t, database, root, "author-visible", "u-author", first.Number, "generator-one", "Actual verified title")
 
 	handler := NewHandler(database, nil, config.Config{DataDir: root})
 	response := getAuthoringSessionResponse(t, handler, "author-visible")
@@ -67,10 +53,10 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 		t.Fatalf("unexpected verified revisions: %#v", response)
 	}
 	if response.Verified == nil || response.Verified.Metadata.Title != "Actual verified title" || response.Intent.Metadata.Title != "Intent title" {
-		t.Fatalf("API did not separate intent from verified artifact: %#v", response)
+		t.Fatalf("API did not separate intent from verified candidate: %#v", response)
 	}
-	if len(response.Assets) == 0 || response.Artifact == nil {
-		t.Fatalf("verified artifact was not exposed: %#v", response)
+	if len(response.Assets) == 0 || response.Candidate == nil || response.Candidate.Id != verifiedCandidate.ID || response.Verification == nil || !response.Verification.Passed {
+		t.Fatalf("verified candidate was not exposed: %#v", response)
 	}
 	if response.AuthoringTurnActive {
 		t.Fatalf("completed authoring session reported an active authoring turn: %#v", response)
@@ -80,15 +66,17 @@ func TestAuthoringAPIOnlyShowsVerifiedRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startTestGeneratorRun(ctx, database, "author-visible", "u-author", second.Number, "generator-two"); err != nil {
+	if _, _, err := database.StartGeneratorRun(ctx, "author-visible", "u-author", second.Number, generatorRun("generator-two", "author-visible"), generator.RunInput{
+		AuthoringSessionID: "author-visible", Revision: second.Number, SeedCandidateRevisionID: verifiedCandidate.ID,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	response = getAuthoringSessionResponse(t, handler, "author-visible")
 	if int64(response.IntentRevision) != second.Number || int64(response.VisibleRevision) != first.Number {
 		t.Fatalf("revision boundaries leaked: %#v", response)
 	}
-	if response.Verified == nil || response.Verified.Metadata.Title != "Actual verified title" {
-		t.Fatalf("unverified revision replaced visible artifact: %#v", response.Verified)
+	if response.Candidate == nil || response.Candidate.Id != verifiedCandidate.ID || response.Verified == nil || response.Verified.Metadata.Title != "Actual verified title" {
+		t.Fatalf("unverified revision replaced visible candidate: %#v", response)
 	}
 	if response.Intent.Metadata.Title != "Intent title" {
 		t.Fatalf("unverified intent leaked into visible content: %#v", response.Intent)
@@ -107,10 +95,10 @@ func TestAuthoringAPIDisablesActionsWhileAuthoringTurnIsActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := database.StartAuthoringRun(ctx, session.ID, session.UserID, agentruntime.Message{
-		ID: "active-author-message", Role: "user", Content: "创建一题容器排障题",
+		ID: "active-author-message", Role: "user", Content: "创建一题节点排障题",
 	}, agentruntime.CreateRun{
 		ID: "active-author-run", SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
-		Input: json.RawMessage(`{"base_revision":0}`), Model: "test-model", PromptVersion: "authoring-v1", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Input: json.RawMessage(`{"base_revision":0}`), Model: "test-model", PromptVersion: "authoring-v1", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +113,6 @@ func TestAuthoringAPIDisablesActionsWhileAuthoringTurnIsActive(t *testing.T) {
 func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
-	root := t.TempDir()
 	database := testpostgres.New(t)
 	if _, err := database.CreateUserWithAuth("u-current", "current", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -137,7 +124,7 @@ func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := NewHandler(database, nil, config.Config{DataDir: root})
+	handler := NewHandler(database, nil, config.Config{DataDir: t.TempDir()})
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/authoring/sessions/current", nil)
@@ -155,7 +142,8 @@ func TestCurrentAuthoringSessionResumesOnlyUnpublishedWork(t *testing.T) {
 	}
 }
 
-func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
+func TestAuthoringPublishIsCompletedByFencedPublisherWork(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	root := t.TempDir()
 	database := testpostgres.New(t)
@@ -169,206 +157,258 @@ func TestAuthoringPublishRecoversAfterFilesystemPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := startTestGeneratorRun(ctx, database, "author-publish", "u-publish", revision.Number, "generator-publish")
+	verifiedCandidate, artifact := seedVerifiedAuthoringCandidate(t, database, root, "author-publish", "u-publish", revision.Number, "generator-publish", "Verified publish title")
+	handler := NewHandler(database, nil, config.Config{DataDir: root, InternalWorkers: testInternalWorkerKeys(), Incus: incusprovider.Config{NamePrefix: "bf"}})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/authoring/sessions/author-publish/publish", nil)
+	c.Set("user_id", "u-publish")
+	handler.PublishAuthoringRevision(c, "author-publish")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("publish confirmation = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	stored, err := database.GetCandidateRevision(ctx, verifiedCandidate.ID)
+	if err != nil || stored.State != candidate.StatePublishingChallenge || stored.Publication == nil {
+		t.Fatalf("publication intent = %#v, %v", stored, err)
+	}
+	work, err := database.GetWorkItemForSubject(ctx, worklist.KindChallengePublish, worklist.SubjectCandidateRevision, stored.ID)
+	if err != nil || work.State != worklist.StatePending {
+		t.Fatalf("challenge publish work = %#v, %v", work, err)
+	}
+	if _, err := challenge.Get(handler.challengesDir, stored.Publication.ChallengeID); err != challenge.ErrNotFound {
+		t.Fatalf("challenge became visible before publisher completion: %v", err)
+	}
+
+	claim, err := database.ClaimCandidateWork(ctx, worklist.KindChallengePublish, "publisher-one", time.Minute, time.Now().UTC())
+	if err != nil || claim == nil {
+		t.Fatalf("claim challenge publication = %#v, %v", claim, err)
+	}
+	finalArtifact := challengeNodeArtifact(t, stored.Publication.ChallengeID, artifact.IncusFingerprint)
+	payload, err := json.Marshal(struct {
+		worklist.Credential
+		Artifact candidate.ArtifactReference `json:"artifact"`
+	}{Credential: claim.Work.Credential(), Artifact: finalArtifact})
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifactDir := authoring.ArtifactDirectory(root, "author-publish", revision.Number)
-	writeAuthoringArtifact(t, artifactDir, "Verified publish title", "verified publish description")
-	artifact := authoring.Artifact{
-		SubmissionID:   generator.SubmissionID(run.ID),
-		Directory:      authoring.ArtifactRelativePath("author-publish", revision.Number),
-		GeneratorRunID: run.ID,
-	}
-	if err := completeTestGeneratorVerification(ctx, database, "author-publish", run, artifact, "vt-publish"); err != nil {
-		t.Fatal(err)
-	}
-
-	handler := NewHandler(database, nil, config.Config{DataDir: root})
-	const challengeID = "chal-publish-recovery"
-	if _, err := database.BeginPublish(ctx, "author-publish", "u-publish", revision.Number, challengeID); err != nil {
-		t.Fatal(err)
-	}
-	// This is the exact crash window: the catalog rename finished before the
-	// database could record the published session state.
-	if _, err := challenge.PromoteDirectory(handler.challengesDir, artifactDir, challengeID, "registry.example/verify:latest"); err != nil {
-		t.Fatal(err)
-	}
-	if err := handler.syncAuthoringSession(ctx, "author-publish"); err != nil {
-		t.Fatal(err)
+	request := httptest.NewRequest(http.MethodPost, "/api/internal/work-items/challenge_publish/"+claim.Work.Item.ID+"/complete/challenge-publish", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Breakfix-Internal-Key", "publisher-test-key")
+	response := httptest.NewRecorder()
+	router := gin.New()
+	router.POST("/api/internal/work-items/:kind/:id/complete/challenge-publish", handler.InternalCompleteCandidateChallengePublish)
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("publisher completion = %d: %s", response.Code, response.Body.String())
 	}
 
+	published, err := challenge.Get(handler.challengesDir, stored.Publication.ChallengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Image != finalArtifact.IncusFingerprint || published.SourceSlug != stored.Publication.SourceSlug {
+		t.Fatalf("published challenge = %#v", published)
+	}
 	session, err := database.GetAuthoringSession(ctx, "author-publish", "u-publish")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || session.State != authoring.StatePublished || session.PublishChallengeID != published.ID {
+		t.Fatalf("published authoring session = %#v, %v", session, err)
 	}
-	if session.State != authoring.StatePublished {
-		t.Fatalf("filesystem-promoted revision was not recovered: %#v", session)
+	mapping, err := database.GetTaxonomyMappingByChallenge(ctx, published.ID, published.Revision)
+	if err != nil || mapping.State != taxonomy.MappingPending {
+		t.Fatalf("published challenge taxonomy mapping = %#v, %v", mapping, err)
 	}
-	stored, err := database.GetAuthoringRevision(ctx, session.ID, revision.Number)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.Verification == nil || stored.Verification.ChallengeID != challengeID {
-		t.Fatalf("recovered publication did not persist challenge ID: %#v", stored)
-	}
-	response := getAuthoringSessionResponseForUser(t, handler, session.ID, session.UserID)
-	if response.PublishChallengeId == nil || *response.PublishChallengeId != challengeID {
-		t.Fatalf("published session did not expose challenge ID: %#v", response)
-	}
-	published, err := challenge.Get(handler.challengesDir, challengeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	work, err := database.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, challengeID, published.Revision)
-	if err != nil || work.State != taxonomy.WorkPending {
-		t.Fatalf("recovered publication did not enqueue taxonomy mapping: %#v, %v", work, err)
+	cleanup, err := database.GetWorkItemForSubject(ctx, worklist.KindArtifactCleanup, worklist.SubjectCandidateRevision, stored.ID)
+	if err != nil || cleanup.State != worklist.StatePending {
+		t.Fatalf("published candidate cleanup = %#v, %v", cleanup, err)
 	}
 }
 
-func TestPromoteVerifiedRevisionImmediatelyEnqueuesTaxonomy(t *testing.T) {
+func TestAuthoringPublishRecoversAfterFinalArtifactWasRecorded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
 	root := t.TempDir()
 	database := testpostgres.New(t)
-	if _, err := database.CreateUserWithAuth("u-normal-publish", "normal-publish", "hash", "totp"); err != nil {
+	if _, err := database.CreateUserWithAuth("u-recover-publish", "recover-publish", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "author-normal-publish", UserID: "u-normal-publish"}, authoring.Plan{}); err != nil {
+	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: "author-recover-publish", UserID: "u-recover-publish"}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
-	revision, err := database.ReplaceAuthoringPlan(ctx, "author-normal-publish", "u-normal-publish", 0, testAuthoringPlan("Normal publish", "normal publish overview"), authoring.StateIntentReview)
+	revision, err := database.ReplaceAuthoringPlan(ctx, "author-recover-publish", "u-recover-publish", 0,
+		testAuthoringPlan("Recover publication", "recover publication overview"), authoring.StateIntentReview)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := startTestGeneratorRun(ctx, database, "author-normal-publish", "u-normal-publish", revision.Number, "generator-normal-publish")
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifactDir := authoring.ArtifactDirectory(root, "author-normal-publish", revision.Number)
-	writeAuthoringArtifact(t, artifactDir, "Normal verified publish", "normal verified description")
-	artifact := authoring.Artifact{
-		SubmissionID:   generator.SubmissionID(run.ID),
-		Directory:      authoring.ArtifactRelativePath("author-normal-publish", revision.Number),
-		GeneratorRunID: run.ID,
-	}
-	const verifyTaskID = "vt-normal-publish"
-	if err := completeTestGeneratorVerification(ctx, database, "author-normal-publish", run, artifact, verifyTaskID); err != nil {
-		t.Fatal(err)
+	verified, artifact := seedVerifiedAuthoringCandidate(t, database, root, "author-recover-publish", "u-recover-publish",
+		revision.Number, "generator-recover-publish", "Recovered publish title")
+	handler := NewHandler(database, nil, config.Config{DataDir: root, Incus: incusprovider.Config{NamePrefix: "bf"}})
+
+	publishRecorder := httptest.NewRecorder()
+	publishContext, _ := gin.CreateTestContext(publishRecorder)
+	publishContext.Request = httptest.NewRequest(http.MethodPost, "/api/authoring/sessions/author-recover-publish/publish", nil)
+	publishContext.Set("user_id", "u-recover-publish")
+	handler.PublishAuthoringRevision(publishContext, "author-recover-publish")
+	if publishRecorder.Code != http.StatusOK {
+		t.Fatalf("publish confirmation = %d: %s", publishRecorder.Code, publishRecorder.Body.String())
 	}
 
-	const challengeID = "chal-normal-publish"
-	registryAddr, verifiedImage, publishedImage := publishingRegistry(t, challengeID)
-	kube := verifiedTaskKubernetesClient(t, root, verifyTaskID, verifiedImage)
-	handler := NewHandler(database, kube, config.Config{
-		DataDir:          root,
-		CRDNamespace:     "breakfix-system",
-		RegistryAddr:     registryAddr,
-		RegistryInsecure: true,
-	})
-	stored, err := database.BeginPublish(ctx, "author-normal-publish", "u-normal-publish", revision.Number, challengeID)
-	if err != nil {
+	claim, err := database.ClaimCandidateWork(ctx, worklist.KindChallengePublish, "publisher-crashed", time.Minute, time.Now().UTC())
+	if err != nil || claim == nil {
+		t.Fatalf("claim challenge publication = %#v, %v", claim, err)
+	}
+	finalArtifact := challengeNodeArtifact(t, mustCandidatePublication(t, database, verified.ID).ChallengeID, artifact.IncusFingerprint)
+	if err := database.RecordCandidateChallengeArtifact(ctx, claim.Work, finalArtifact, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	session, err := database.GetAuthoringSession(ctx, "author-normal-publish", "u-normal-publish")
-	if err != nil {
-		t.Fatal(err)
+	recoverable, err := database.ListRecoverableCandidatePublications(ctx, 10)
+	if err != nil || len(recoverable) != 1 || recoverable[0].ID != verified.ID {
+		t.Fatalf("recoverable publications = %#v, %v", recoverable, err)
 	}
-	user, err := database.GetUserByID("u-normal-publish")
-	if err != nil {
-		t.Fatal(err)
+	if recoverable[0].Publication == nil || recoverable[0].Publication.Artifact == nil || *recoverable[0].Publication.Artifact != finalArtifact {
+		t.Fatalf("recorded final artifact = %#v", recoverable[0].Publication)
 	}
-	if err := handler.promoteVerifiedRevision(ctx, user, session, stored, challengeID); err != nil {
-		t.Fatal(err)
+	if _, err := challenge.Get(handler.challengesDir, recoverable[0].Publication.ChallengeID); err != challenge.ErrNotFound {
+		t.Fatalf("challenge exists before recovery: %v", err)
 	}
 
-	published, err := challenge.Get(handler.challengesDir, challengeID)
-	if err != nil {
+	if err := handler.RecoverCandidatePublications(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if published.Image != publishedImage {
-		t.Fatalf("published image = %q, want trusted promoted image %q", published.Image, publishedImage)
+	stored, err := database.GetCandidateRevision(ctx, verified.ID)
+	if err != nil || stored.State != candidate.StatePublished || stored.Publication == nil || stored.Publication.Artifact == nil {
+		t.Fatalf("recovered candidate = %#v, %v", stored, err)
 	}
-	work, err := database.GetTaxonomyWorkByChallenge(ctx, taxonomy.WorkKindMapping, challengeID, published.Revision)
-	if err != nil || work.State != taxonomy.WorkPending {
-		t.Fatalf("normal publication did not enqueue taxonomy mapping: %#v, %v", work, err)
+	published, err := challenge.Get(handler.challengesDir, stored.Publication.ChallengeID)
+	if err != nil || published.Image != finalArtifact.IncusFingerprint {
+		t.Fatalf("recovered challenge = %#v, %v", published, err)
+	}
+	work, err := database.GetWorkItemForSubject(ctx, worklist.KindChallengePublish, worklist.SubjectCandidateRevision, verified.ID)
+	if err != nil || work.State != worklist.StateSucceeded || work.LeaseOwner != "" {
+		t.Fatalf("recovered publication work = %#v, %v", work, err)
+	}
+	session, err := database.GetAuthoringSession(ctx, "author-recover-publish", "u-recover-publish")
+	if err != nil || session.State != authoring.StatePublished {
+		t.Fatalf("recovered authoring session = %#v, %v", session, err)
+	}
+	if _, err := database.GetTaxonomyMappingByChallenge(ctx, published.ID, published.Revision); err != nil {
+		t.Fatalf("recovered taxonomy mapping: %v", err)
+	}
+	cleanup, err := database.GetWorkItemForSubject(ctx, worklist.KindArtifactCleanup, worklist.SubjectCandidateRevision, verified.ID)
+	if err != nil || cleanup.State != worklist.StatePending {
+		t.Fatalf("recovered cleanup work = %#v, %v", cleanup, err)
 	}
 }
 
-func TestStoreVerifiedArtifactIsIdempotentAcrossConcurrentSyncs(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "source")
-	writeAuthoringArtifact(t, source, "Concurrent verified title", "concurrent verified description")
-	archive := archiveAuthoringArtifact(t, source)
-	const submissionID = "sub-concurrent-artifact"
-	if _, err := challenge.SaveSubmission(root, submissionID, bytes.NewReader(archive)); err != nil {
+func seedVerifiedAuthoringCandidate(t *testing.T, database *db.DB, root, sessionID, userID string, revision int64, runID, title string) (*candidate.Revision, candidate.ArtifactReference) {
+	t.Helper()
+	ctx := context.Background()
+	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision, generatorRun(runID, sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: revision})
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	handler := NewHandler(nil, nil, config.Config{DataDir: root})
-	session := &authoring.Session{ID: "author-concurrent", CurrentRevision: 1, GeneratorRunID: "generator-concurrent"}
-	task := &breakfixv1.VerifyTask{Spec: breakfixv1.VerifyTaskSpec{Submission: breakfixv1.VerifyTaskSubmission{ID: submissionID}}}
-
-	const callers = 8
-	start := make(chan struct{})
-	errs := make(chan error, callers)
-	artifacts := make(chan authoring.Artifact, callers)
-	var callersWG sync.WaitGroup
-	for range callers {
-		callersWG.Add(1)
-		go func() {
-			defer callersWG.Done()
-			<-start
-			artifact, err := handler.storeVerifiedArtifact(context.Background(), session, task)
-			if err != nil {
-				errs <- err
-				return
-			}
-			artifacts <- artifact
-		}()
+	now := time.Now().UTC()
+	agentClaim, err := database.ClaimNext(ctx, "generator-"+runID, time.Minute, now)
+	if err != nil || agentClaim == nil || agentClaim.Run.ID != run.ID {
+		t.Fatalf("claim generator run = %#v, %v", agentClaim, err)
 	}
-	close(start)
-	callersWG.Wait()
-	close(errs)
-	close(artifacts)
-
-	for err := range errs {
-		t.Fatalf("concurrent verified artifact sync: %v", err)
-	}
-	for artifact := range artifacts {
-		if artifact.SubmissionID != submissionID || artifact.Directory != authoring.ArtifactRelativePath(session.ID, session.CurrentRevision) {
-			t.Fatalf("artifact = %#v", artifact)
-		}
-	}
-	if _, err := authoring.ReadVerifiedChallenge(root, &authoring.Artifact{
-		SubmissionID: submissionID,
-		Directory:    authoring.ArtifactRelativePath(session.ID, session.CurrentRevision),
-	}); err != nil {
-		t.Fatalf("read concurrent verified artifact: %v", err)
-	}
-}
-
-func startTestGeneratorRun(ctx context.Context, database *db.DB, sessionID, userID string, revision int64, runID string) (*agentruntime.Run, error) {
-	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision, agentruntime.CreateRun{
-		ID: runID, Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: sessionID,
-		Model: "test-model", PromptVersion: generator.PromptVersion, DeadlineAt: time.Now().UTC().Add(time.Hour),
-	}, generator.RunInput{AuthoringSessionID: sessionID, Revision: revision})
-	return run, err
-}
-
-func completeTestGeneratorVerification(ctx context.Context, database *db.DB, sessionID string, run *agentruntime.Run, artifact authoring.Artifact, taskID string) error {
-	claim, err := database.ClaimNext(ctx, "test-generator-worker", time.Minute, time.Now().UTC())
+	source := filepath.Join(t.TempDir(), "candidate")
+	writeAuthoringCandidate(t, source, title)
+	archive := archiveAuthoringCandidate(t, source)
+	id := candidate.IDForGeneratorRun(run.ID)
+	archivePath, archiveDigest, err := candidate.SaveArchiveAtomic(root, id, archive)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if claim == nil || claim.Run.ID != run.ID {
-		return fmt.Errorf("claim generator run %q", run.ID)
+	revisionCandidate := candidate.Revision{
+		ID: id, AuthoringSessionID: sessionID, AuthoringRevision: revision,
+		GeneratorSessionID: run.SessionID, GeneratorRunID: run.ID, JudgeRunID: run.ID,
+		ArchivePath: archivePath, ArchiveSHA256: archiveDigest, Snapshot: serverNodeSnapshot(), State: candidate.StateBuilding,
 	}
-	if err := database.FinalizeGeneratorSubmission(ctx, *claim, artifact.SubmissionID, taskID); err != nil {
-		return err
+	if err := database.FinalizeGeneratorCandidate(ctx, *agentClaim, revisionCandidate, time.Now().UTC()); err != nil {
+		t.Fatal(err)
 	}
-	return database.CompleteGeneratorVerification(ctx, sessionID, run.ID, artifact, authoring.Verification{
-		TaskID: taskID, Phase: "Succeeded", Report: &authoring.VerificationReport{BuildPassed: true, AnswerPassed: true, CheckpointsPassed: true},
-	})
+	buildClaim := claimServerCandidateWork(t, database, worklist.KindBuild)
+	build := candidate.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &candidate.IncusBuildReference{
+		Project: "breakfix-build", WorkItemID: buildClaim.Work.Item.ID, Attempt: int64(buildClaim.Work.Item.Attempt),
+		InstanceName: "build-" + runID, Alias: "build-" + runID, Fingerprint: testFingerprint('b'),
+	}}
+	if err := database.CompleteCandidateBuild(ctx, buildClaim.Work, build, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	publishClaim := claimServerCandidateWork(t, database, worklist.KindArtifactPublish)
+	artifact := candidateNodeArtifact(t, id, testFingerprint('b'))
+	if err := database.CompleteCandidateArtifactPublish(ctx, publishClaim.Work, artifact, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	verifyClaim := claimServerCandidateWork(t, database, worklist.KindVerify)
+	report := candidate.VerificationReport{
+		Passed: true, Summary: "all checks passed",
+		Answers:     []candidate.ExecutionResult{{Location: "host", ExitCode: 0}},
+		Checkpoints: []candidate.CheckpointResult{{ID: "service-ready", Passed: true, Summary: "service is ready"}},
+	}
+	if err := database.CompleteCandidateVerification(ctx, verifyClaim.Work, report, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetCandidateRevision(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored, artifact
+}
+
+func candidateNodeArtifact(t *testing.T, candidateID, fingerprint string) candidate.ArtifactReference {
+	t.Helper()
+	alias, err := incusprovider.AliasForCandidate("bf", candidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: alias, IncusFingerprint: fingerprint}
+}
+
+func challengeNodeArtifact(t *testing.T, challengeID, fingerprint string) candidate.ArtifactReference {
+	t.Helper()
+	alias, err := incusprovider.AliasForChallenge("bf", challengeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: alias, IncusFingerprint: fingerprint}
+}
+
+func mustCandidatePublication(t *testing.T, database *db.DB, candidateID string) candidate.Publication {
+	t.Helper()
+	revision, err := database.GetCandidateRevision(context.Background(), candidateID)
+	if err != nil || revision.Publication == nil {
+		t.Fatalf("candidate publication = %#v, %v", revision, err)
+	}
+	return *revision.Publication
+}
+
+func claimServerCandidateWork(t *testing.T, database *db.DB, kind worklist.Kind) *db.CandidateWorkClaim {
+	t.Helper()
+	claim, err := database.ClaimCandidateWork(context.Background(), kind, "worker-"+string(kind), time.Minute, time.Now().UTC())
+	if err != nil || claim == nil {
+		t.Fatalf("claim %s = %#v, %v", kind, claim, err)
+	}
+	return claim
+}
+
+func generatorRun(id, sessionID string) agentruntime.CreateRun {
+	return agentruntime.CreateRun{
+		ID: id, Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: sessionID,
+		Model: "test-model", PromptVersion: generator.PromptVersion, ExecutionTimeout: time.Hour,
+	}
+}
+
+func serverNodeSnapshot() candidate.ExecutionSnapshot {
+	return candidate.ExecutionSnapshot{
+		Runtime: challenge.RuntimeNode, Checkpoints: []candidate.CheckpointSnapshot{{ID: "service-ready", Node: "host"}},
+		Node: &candidate.NodeRuntimeSnapshot{
+			BaseImageFingerprint: testFingerprint('a'), ProfileRevision: "node-profile-v1", NetworkPolicyRevision: "node-network-v1",
+			Nodes:     []candidate.NodeSnapshot{{Name: "host", Title: "Host"}},
+			Resources: candidate.NodeResources{CPU: "1", Memory: "512MiB", Processes: 512, RootDisk: "5GiB"},
+		},
+	}
 }
 
 func getAuthoringSessionResponse(t *testing.T, handler *Handler, sessionID string) api.AuthoringSession {
@@ -394,131 +434,55 @@ func getAuthoringSessionResponseForUser(t *testing.T, handler *Handler, sessionI
 
 func testAuthoringPlan(title, overview string) authoring.Plan {
 	return authoring.Plan{
-		Metadata: authoring.Metadata{Title: title, Description: "intent description", Difficulty: "easy", Runtime: "container"},
-		Overview: overview,
-		Checkpoints: []authoring.Checkpoint{{
-			ID: "service-ready", Title: "Service ready", Markdown: "The service is ready.", Position: 1,
-		}},
+		Metadata:    authoring.Metadata{Title: title, Description: "intent description", Difficulty: "easy", Runtime: "node"},
+		Overview:    overview,
+		Checkpoints: []authoring.Checkpoint{{ID: "service-ready", Title: "Service ready", Markdown: "The service is ready.", Position: 1}},
 	}
 }
 
-func writeAuthoringArtifact(t *testing.T, root, title, description string) {
+func writeAuthoringCandidate(t *testing.T, root, title string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\ntype: script\nruntime: container\ndifficulty: medium\ndescription: "+description+"\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n")
-	writeTestFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeTestFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\nruntime: node\ndifficulty: medium\ndescription: actual verified description\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
 	writeTestFile(t, filepath.Join(root, "problem.md"), "# Actual problem\n")
 	writeTestFile(t, filepath.Join(root, "solution.md"), "# Actual solution\n<!-- checkpoint: service-ready -->\n")
 	writeTestFile(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
-	writeTestFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\n")
 }
 
-func verifiedTaskKubernetesClient(t *testing.T, root, verifyTaskID, image string) *k8s.Client {
+func archiveAuthoringCandidate(t *testing.T, root string) []byte {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		wantPath := "/apis/breakfix.dev/v1/namespaces/breakfix-system/verifytasks/" + verifyTaskID
-		if request.Method != http.MethodGet || request.URL.Path != wantPath {
-			http.NotFound(writer, request)
-			return
-		}
-		writer.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(writer).Encode(breakfixv1.VerifyTask{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VerifyTask"},
-			ObjectMeta: metav1.ObjectMeta{Name: verifyTaskID, Namespace: "breakfix-system"},
-			Status:     breakfixv1.VerifyTaskStatus{Phase: breakfixv1.VerifyTaskSucceeded, Image: image},
-		}); err != nil {
-			t.Errorf("write verify task: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-	kubeconfig := filepath.Join(root, "kubeconfig")
-	writeTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
-	client, err := k8s.New(kubeconfig)
+	rootFS, err := os.OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return client
-}
-
-func publishingRegistry(t *testing.T, challengeID string) (registryAddr, verifiedImage, publishedImage string) {
-	t.Helper()
-	configBlob := []byte(`{"architecture":"amd64","os":"linux"}`)
-	layerBlob := []byte("layer-data")
-	configDigest := testRegistryDigest(configBlob)
-	layerDigest := testRegistryDigest(layerBlob)
-	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"%s","size":%d},"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar","digest":"%s","size":%d}]}`,
-		configDigest, len(configBlob), layerDigest, len(layerBlob)))
-	manifestDigest := testRegistryDigest(manifest)
-	targetPath := "/v2/team/challenge-" + challengeID + "/manifests/latest"
-	published := false
-
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/manifests/"+manifestDigest:
-			writer.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
-			writer.Header().Set("Docker-Content-Digest", manifestDigest)
-			_, _ = writer.Write(manifest)
-		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/blobs/"+configDigest:
-			_, _ = writer.Write(configBlob)
-		case request.Method == http.MethodGet && request.URL.Path == "/v2/team/verified/blobs/"+layerDigest:
-			_, _ = writer.Write(layerBlob)
-		case request.Method == http.MethodHead && strings.HasPrefix(request.URL.Path, "/v2/team/challenge-"+challengeID+"/blobs/"):
-			writer.WriteHeader(http.StatusOK)
-		case request.Method == http.MethodPut && request.URL.Path == targetPath:
-			body, err := io.ReadAll(request.Body)
-			if err != nil || !bytes.Equal(body, manifest) {
-				writer.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			published = true
-			writer.WriteHeader(http.StatusCreated)
-		case request.Method == http.MethodHead && request.URL.Path == targetPath:
-			if !published {
-				writer.WriteHeader(http.StatusNotFound)
-				return
-			}
-			writer.Header().Set("Docker-Content-Digest", manifestDigest)
-			writer.WriteHeader(http.StatusOK)
-		default:
-			writer.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	address := strings.TrimPrefix(server.URL, "http://")
-	registryAddr = address + "/team"
-	verifiedImage = registryAddr + "/verified@" + manifestDigest
-	publishedImage = registryAddr + "/challenge-" + challengeID + "@" + manifestDigest
-	return registryAddr, verifiedImage, publishedImage
-}
-
-func testRegistryDigest(data []byte) string {
-	sum := sha256.Sum256(data)
-	return fmt.Sprintf("sha256:%x", sum[:])
-}
-
-func archiveAuthoringArtifact(t *testing.T, root string) []byte {
-	t.Helper()
+	defer rootFS.Close() //nolint:errcheck
 
 	var archive bytes.Buffer
 	gzipWriter := gzip.NewWriter(&archive)
 	tarWriter := tar.NewWriter(gzipWriter)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
 			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
 		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		if err := tarWriter.WriteHeader(&tar.Header{Name: filepath.ToSlash(relative), Mode: 0644, Size: int64(len(content)), Typeflag: tar.TypeReg}); err != nil {
+		file, err := rootFS.Open(relative)
+		if err != nil {
+			return err
+		}
+		content, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if err := tarWriter.WriteHeader(&tar.Header{Name: filepath.ToSlash(relative), Mode: 0o644, Size: int64(len(content)), Typeflag: tar.TypeReg}); err != nil {
 			return err
 		}
 		_, err = tarWriter.Write(content)
@@ -534,4 +498,12 @@ func archiveAuthoringArtifact(t *testing.T, root string) []byte {
 		t.Fatal(err)
 	}
 	return archive.Bytes()
+}
+
+func testFingerprint(character byte) string {
+	value := make([]byte, 64)
+	for index := range value {
+		value[index] = character
+	}
+	return string(value)
 }

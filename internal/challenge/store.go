@@ -138,7 +138,9 @@ func LoadDir(dir string) (*Entry, error) {
 	return entry, nil
 }
 
-func LoadSubmissionDir(dir string) (*Entry, error) {
+// LoadCandidateDir reads an unpublished CandidateRevision directory. Platform
+// fields are intentionally absent until ChallengePublish materializes a copy.
+func LoadCandidateDir(dir string) (*Entry, error) {
 	spec, err := loadSpec(dir)
 	if err != nil {
 		return nil, err

@@ -13,7 +13,6 @@ import (
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 const generatorOwnerKind = "authoring-session"
@@ -29,7 +28,7 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 	if input.AuthoringSessionID != sessionID || input.Revision != expectedRevision {
 		return nil, nil, errors.New("generator run input does not match authoring revision")
 	}
-	if run.ID == "" || run.Purpose != generator.RuntimePurpose || run.OwnerKind != generatorOwnerKind || run.OwnerRef != sessionID || run.Model == "" || run.PromptVersion == "" || run.DeadlineAt.IsZero() {
+	if run.ID == "" || run.Purpose != generator.RuntimePurpose || run.OwnerKind != generatorOwnerKind || run.OwnerRef != sessionID || run.Model == "" || run.PromptVersion == "" || run.ExecutionTimeout <= 0 {
 		return nil, nil, errors.New("generator run ownership or runtime metadata is invalid")
 	}
 	inputJSON, err := json.Marshal(input)
@@ -78,11 +77,12 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 		return session, existing, nil
 	}
 	if session.State == authoring.StateGeneratingAndVerifying {
-		if strings.TrimSpace(input.SeedSubmissionID) == "" || strings.TrimSpace(input.VerifyTaskID) == "" ||
-			input.VerifyTaskID != session.VerifyTaskID || input.Feedback.Empty() {
+		if strings.TrimSpace(input.SeedCandidateRevisionID) == "" || input.Feedback.Empty() {
 			return nil, nil, authoring.ErrInvalidState
 		}
-	} else if !input.Feedback.Empty() || strings.TrimSpace(input.VerifyTaskID) != "" {
+	} else if session.State == authoring.StateIntentReview && (!input.Feedback.Empty() || strings.TrimSpace(input.SeedCandidateRevisionID) != "") {
+		return nil, nil, authoring.ErrInvalidState
+	} else if session.State == authoring.StateRevisingAndVerifying && strings.TrimSpace(input.SeedCandidateRevisionID) == "" {
 		return nil, nil, authoring.ErrInvalidState
 	}
 
@@ -137,9 +137,9 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 		return nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generator_runs
-		(run_id, generator_session_id, authoring_session_id, authoring_revision, seed_submission_id, verify_task_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		created.ID, generatorSessionID, session.ID, expectedRevision, input.SeedSubmissionID, "", now, now); err != nil {
+		(run_id, generator_session_id, authoring_session_id, authoring_revision, seed_candidate_revision_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		created.ID, generatorSessionID, session.ID, expectedRevision, input.SeedCandidateRevisionID, now, now); err != nil {
 		return nil, nil, fmt.Errorf("insert generator run record: %w", err)
 	}
 	state := authoring.StateGeneratingAndVerifying
@@ -147,7 +147,7 @@ func (d *DB) StartGeneratorRun(ctx context.Context, sessionID, userID string, ex
 		state = authoring.StateRevisingAndVerifying
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-		SET state = ?, generator_session_id = ?, generator_run_id = ?, verify_task_id = '', last_error = '', updated_at = ?
+		SET state = ?, generator_session_id = ?, generator_run_id = ?, candidate_revision_id = '', last_error = '', updated_at = ?
 		WHERE id = ?`, state, generatorSessionID, created.ID, nowText(now), session.ID); err != nil {
 		return nil, nil, fmt.Errorf("mark generator run active: %w", err)
 	}
@@ -165,8 +165,33 @@ func (d *DB) GetGeneratorRun(ctx context.Context, runID string) (*generator.Reco
 	return readGeneratorRun(d.conn.QueryRowContext(ctx, generatorRunColumns+` WHERE run_id = ?`, runID))
 }
 
-func (d *DB) GetGeneratorRunByVerifyTask(ctx context.Context, verifyTaskID string) (*generator.Record, error) {
-	return readGeneratorRun(d.conn.QueryRowContext(ctx, generatorRunColumns+` WHERE verify_task_id = ?`, verifyTaskID))
+// ReconcileFailedGeneratorRuns releases AuthoringSessions whose current
+// Generator Run reached a terminal technical failure. The update is
+// intentionally idempotent: a newer authoring revision no longer points at the
+// failed run and is never overwritten by delayed recovery.
+func (d *DB) ReconcileFailedGeneratorRuns(ctx context.Context, now time.Time) (int64, error) {
+	if now.IsZero() {
+		return 0, errors.New("failed generator reconciliation requires current time")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions AS session SET
+		state = ?, generator_run_id = '', last_error = run.last_error, updated_at = ?
+		FROM generator_runs AS generator_run
+		JOIN agent_runs AS run ON run.id = generator_run.run_id
+		WHERE session.id = generator_run.authoring_session_id
+		AND session.current_revision = generator_run.authoring_revision
+		AND session.generator_run_id = run.id
+		AND session.state IN (?, ?)
+		AND run.purpose = ? AND run.status = ?`,
+		authoring.StateInfrastructureFailed, nowText(now), authoring.StateGeneratingAndVerifying,
+		authoring.StateRevisingAndVerifying, generator.RuntimePurpose, agentruntime.RunFailed)
+	if err != nil {
+		return 0, fmt.Errorf("project failed generator runs: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count projected failed generator runs: %w", err)
+	}
+	return changed, nil
 }
 
 // MarkGeneratorWorkspaceInitialized makes materialization idempotent across
@@ -196,74 +221,13 @@ func (d *DB) MarkGeneratorWorkspaceInitialized(ctx context.Context, claim agentr
 	return tx.Commit()
 }
 
-// FinalizeGeneratorSubmission commits the only state transition that follows
-// a Judge pass: the immutable candidate is linked to one deterministic
-// VerifyTask and the Generator Run is complete. Kubernetes object creation is
-// intentionally performed before this transaction; both identifiers are
-// deterministic, so a crash in either direction is recovered by re-submitting
-// the same Run rather than by creating another candidate.
-func (d *DB) FinalizeGeneratorSubmission(ctx context.Context, claim agentruntime.Claim, submissionID, verifyTaskID string) error {
-	if !claim.Valid() || strings.TrimSpace(submissionID) == "" || strings.TrimSpace(verifyTaskID) == "" {
-		return errors.New("generator submission requires lease, submission, and verify task")
-	}
-	now := time.Now().UTC()
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin generator submission: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := validateLeaseTx(ctx, tx, claim, now); err != nil {
-		return err
-	}
-	record, err := readGeneratorRun(tx.QueryRowContext(ctx, generatorRunColumns+` WHERE run_id = ? FOR UPDATE`, claim.Run.ID))
-	if err != nil {
-		return err
-	}
-	if record.GeneratorSessionID != claim.Run.SessionID {
-		return authoring.ErrInvalidState
-	}
-	if record.SubmissionID != "" && (record.SubmissionID != submissionID || record.VerifyTaskID != verifyTaskID) {
-		return authoring.ErrInvalidState
-	}
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM authoring_sessions WHERE id = ? FOR UPDATE`, record.AuthoringSessionID); err != nil {
-		return fmt.Errorf("lock generator authoring session: %w", err)
-	}
-	session, err := readAuthoringSessionTx(ctx, tx, record.AuthoringSessionID, "")
-	if err != nil {
-		return err
-	}
-	if session.GeneratorRunID != claim.Run.ID || session.CurrentRevision != record.AuthoringRevision ||
-		(session.State != authoring.StateGeneratingAndVerifying && session.State != authoring.StateRevisingAndVerifying) {
-		return authoring.ErrInvalidState
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generator_runs SET submission_id = ?, verify_task_id = ?, updated_at = ?
-		WHERE run_id = ?`, submissionID, verifyTaskID, now, record.RunID); err != nil {
-		return fmt.Errorf("link generator submission: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET verify_task_id = ?, updated_at = ? WHERE id = ? AND generator_run_id = ?`, verifyTaskID, nowText(now), session.ID, claim.Run.ID); err != nil {
-		return fmt.Errorf("link authoring verify task: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
-	if err != nil {
-		return fmt.Errorf("complete generator run: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return agentruntime.ErrLeaseLost
-	}
-	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-const generatorRunColumns = `SELECT run_id, generator_session_id, authoring_session_id, authoring_revision, seed_submission_id,
-	verify_task_id, workspace_initialized_at IS NOT NULL, submission_id, created_at, updated_at FROM generator_runs`
+const generatorRunColumns = `SELECT run_id, generator_session_id, authoring_session_id, authoring_revision,
+	seed_candidate_revision_id, workspace_initialized_at IS NOT NULL, candidate_revision_id, created_at, updated_at FROM generator_runs`
 
 func readGeneratorRun(row agentRow) (*generator.Record, error) {
 	var record generator.Record
 	if err := row.Scan(&record.RunID, &record.GeneratorSessionID, &record.AuthoringSessionID, &record.AuthoringRevision,
-		&record.SeedSubmissionID, &record.VerifyTaskID, &record.WorkspaceInitialized, &record.SubmissionID, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		&record.SeedCandidateRevisionID, &record.WorkspaceInitialized, &record.CandidateRevisionID, &record.CreatedAt, &record.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, generator.ErrNotFound
 		}

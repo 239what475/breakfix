@@ -18,6 +18,7 @@ type TerminalTicket struct {
 	UserID         string
 	EnvironmentUID string
 	ChallengeID    string
+	NodeName       string
 	WindowName     string
 	ExpiresAt      time.Time
 }
@@ -39,9 +40,9 @@ func (d *DB) CreateTerminalTicket(ctx context.Context, ticket TerminalTicket, no
 	}
 	if _, err := d.conn.ExecContext(ctx, `
 		INSERT INTO terminal_tickets
-			(token_hash, user_id, environment_uid, challenge_id, window_name, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, ticket.TokenHash, ticket.UserID, ticket.EnvironmentUID, ticket.ChallengeID, ticket.WindowName, ticket.ExpiresAt.UTC()); err != nil {
+			(token_hash, user_id, environment_uid, challenge_id, node_name, window_name, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, ticket.TokenHash, ticket.UserID, ticket.EnvironmentUID, ticket.ChallengeID, ticket.NodeName, ticket.WindowName, ticket.ExpiresAt.UTC()); err != nil {
 		return fmt.Errorf("create terminal ticket: %w", err)
 	}
 	return nil
@@ -63,9 +64,9 @@ func (d *DB) ClaimTerminalTicket(ctx context.Context, tokenHash, challengeID, wi
 		  AND window_name = ?
 		  AND used_at IS NULL
 		  AND expires_at > ?
-		RETURNING token_hash, user_id, environment_uid, challenge_id, window_name, expires_at
+		RETURNING token_hash, user_id, environment_uid, challenge_id, node_name, window_name, expires_at
 	`, now.UTC(), tokenHash, challengeID, windowName, now.UTC()).Scan(
-		&ticket.TokenHash, &ticket.UserID, &ticket.EnvironmentUID, &ticket.ChallengeID, &ticket.WindowName, &ticket.ExpiresAt,
+		&ticket.TokenHash, &ticket.UserID, &ticket.EnvironmentUID, &ticket.ChallengeID, &ticket.NodeName, &ticket.WindowName, &ticket.ExpiresAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TerminalTicket{}, ErrTerminalTicketInvalid

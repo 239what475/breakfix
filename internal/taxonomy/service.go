@@ -12,42 +12,47 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"log/slog"
 )
 
 const (
-	defaultReconcilerCount = 3
-	workLeaseTTL           = 3 * time.Minute
-	agentCallTimeout       = 10 * time.Minute
-	publisherLeaseTTL      = 2 * time.Minute
-	publisherLeaseName     = "taxonomy-publisher"
-
-	maxTechnicalFailures = 10
-	retryInitialDelay    = time.Minute
-	retryMaximumDelay    = time.Hour
+	agentCallTimeout     = agentruntime.ExecutionDeadline
+	failedReconcileDelay = 5 * time.Second
 
 	mapperPromptVersion = "taxonomy-mapper-v3"
 	reviewPromptVersion = "taxonomy-review-v2"
 )
 
+// recordedFailure means the domain failure has already been durably stored
+// and logged. The reconcile loop must still back off, but must not emit a
+// second indistinguishable warning for the same failure.
+type recordedFailure struct{ cause error }
+
+func (e *recordedFailure) Error() string { return e.cause.Error() }
+func (e *recordedFailure) Unwrap() error { return e.cause }
+
+func isRecordedFailure(err error) bool {
+	var recorded *recordedFailure
+	return errors.As(err, &recorded)
+}
+
 // WorkRepository contains Server-owned taxonomy state. Agent Workers only use
 // agentruntime.Repository and the authenticated internal API; they never hold
 // this repository or the taxonomy filesystem.
 type WorkRepository interface {
-	EnqueueTaxonomyWork(context.Context, WorkItem) (*WorkItem, error)
-	GetTaxonomyWork(context.Context, string) (*WorkItem, error)
-	ClaimTaxonomyWork(context.Context, string, time.Duration) (*WorkItem, error)
-	ExtendTaxonomyWorkLease(context.Context, string, string, time.Duration) error
-	SaveClaimedTaxonomyWork(context.Context, WorkItem) error
-	CancelClaimedTaxonomyWork(context.Context, WorkItem, string) error
-	ScheduleTaxonomyRun(context.Context, WorkItem, agentruntime.CreateRun) (*agentruntime.Run, error)
+	EnqueueTaxonomyMapping(context.Context, TaxonomyMapping) (*TaxonomyMapping, bool, error)
+	GetTaxonomyMapping(context.Context, string) (*TaxonomyMapping, error)
+	ListUnpublishedTaxonomyMappings(context.Context) ([]TaxonomyMapping, error)
+	NextTaxonomyMapping(context.Context) (*TaxonomyMapping, error)
+	SaveTaxonomyMapping(context.Context, TaxonomyMapping) error
+	CancelTaxonomyMapping(context.Context, string, string) error
+	ScheduleTaxonomyRun(context.Context, TaxonomyMapping, agentruntime.CreateRun) (*agentruntime.Run, error)
 	FinalizeTaxonomyMapperRun(context.Context, agentruntime.Claim, string, string, ChangeSet) error
 	FinalizeTaxonomyReviewRun(context.Context, agentruntime.Claim, string, Review, Review) error
-	AcquireTaxonomyLease(context.Context, string, string, time.Duration) (bool, error)
-	ReleaseTaxonomyLease(context.Context, string, string) error
 	GetRun(context.Context, string) (*agentruntime.Run, error)
 }
 
@@ -56,7 +61,6 @@ type Service struct {
 	store         *Store
 	challengesDir string
 	model         string
-	instanceID    string
 }
 
 func NewService(repo WorkRepository, store *Store, challengesDir string, llm config.AgentConfig) *Service {
@@ -65,7 +69,6 @@ func NewService(repo WorkRepository, store *Store, challengesDir string, llm con
 		store:         store,
 		challengesDir: strings.TrimSpace(challengesDir),
 		model:         strings.TrimSpace(llm.Model),
-		instanceID:    agentruntime.NewID("taxonomy-server"),
 	}
 }
 
@@ -76,9 +79,7 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	go s.scanLoop(ctx)
-	for index := 0; index < defaultReconcilerCount; index++ {
-		go s.reconcileLoop(ctx, index)
-	}
+	go s.reconcileLoop(ctx)
 }
 
 func (s *Service) scanLoop(ctx context.Context) {
@@ -96,16 +97,13 @@ func (s *Service) scanLoop(ctx context.Context) {
 	}
 }
 
-func (s *Service) reconcileLoop(ctx context.Context, index int) {
+func (s *Service) reconcileLoop(ctx context.Context) {
 	for {
-		processed, err := s.ProcessOne(ctx, fmt.Sprintf("%s-%d", s.instanceID, index))
-		if err != nil {
-			slog.Warn("reconcile taxonomy work", "worker", index, "error_class", taxonomyErrorClass(err))
+		processed, err := s.ProcessOne(ctx)
+		if err != nil && !isRecordedFailure(err) {
+			slog.Warn("reconcile taxonomy mapping", "error_class", taxonomyErrorClass(err))
 		}
-		wait := time.Second
-		if processed {
-			wait = 10 * time.Millisecond
-		}
+		wait := reconcileDelay(processed, err)
 		select {
 		case <-ctx.Done():
 			return
@@ -114,12 +112,25 @@ func (s *Service) reconcileLoop(ctx context.Context, index int) {
 	}
 }
 
+func reconcileDelay(processed bool, err error) time.Duration {
+	if err != nil {
+		return failedReconcileDelay
+	}
+	if processed {
+		return 10 * time.Millisecond
+	}
+	return time.Second
+}
+
 // EnqueueUnmapped discovers verified challenge artifacts that cannot yet be
 // found in the current taxonomy index. It never writes taxonomy itself.
 func (s *Service) EnqueueUnmapped(ctx context.Context) error {
 	entries, err := challenge.List(s.challengesDir)
 	if err != nil {
 		return fmt.Errorf("list challenges for taxonomy: %w", err)
+	}
+	if err := s.cancelStaleMappings(ctx, entries); err != nil {
+		return err
 	}
 	current, err := s.store.LoadCurrent()
 	if err != nil && !errors.Is(err, ErrNoCurrentRevision) {
@@ -151,64 +162,80 @@ func (s *Service) EnqueueUnmapped(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) EnqueueChallenge(ctx context.Context, entry challenge.Entry, baseRevision string) (*WorkItem, error) {
+// cancelStaleMappings keeps unfinished committee work aligned with the
+// filesystem-backed challenge authority. In particular, an active Agent Run
+// must not continue classifying an artifact that has been deleted or replaced.
+func (s *Service) cancelStaleMappings(ctx context.Context, entries []challenge.Entry) error {
+	mappings, err := s.repo.ListUnpublishedTaxonomyMappings(ctx)
+	if err != nil {
+		return fmt.Errorf("list unfinished taxonomy mappings: %w", err)
+	}
+	byID := make(map[string]challenge.Entry, len(entries))
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+	}
+	for _, mapping := range mappings {
+		entry, exists := byID[mapping.ChallengeID]
+		if exists && entry.Revision == mapping.ChallengeRevision {
+			continue
+		}
+		if err := s.repo.CancelTaxonomyMapping(ctx, mapping.ID, "目标 challenge artifact 已不存在或 revision 已变化"); err != nil {
+			return fmt.Errorf("cancel stale taxonomy mapping %s: %w", mapping.ID, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) EnqueueChallenge(ctx context.Context, entry challenge.Entry, baseRevision string) (*TaxonomyMapping, error) {
 	if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Revision) == "" {
 		return nil, errors.New("taxonomy mapping requires a published challenge revision")
 	}
-	item, err := s.repo.EnqueueTaxonomyWork(ctx, WorkItem{
-		ID:                agentruntime.NewID("taxonomy-work"),
-		Kind:              WorkKindMapping,
+	item, created, err := s.repo.EnqueueTaxonomyMapping(ctx, TaxonomyMapping{
+		ID:                agentruntime.NewID("taxonomy-mapping"),
 		ChallengeID:       entry.ID,
 		ChallengeRevision: entry.Revision,
 		BaseRevision:      baseRevision,
-		State:             WorkPending,
+		State:             MappingPending,
 	})
-	if err == nil {
+	if err == nil && created {
 		slog.Info("taxonomy mapping enqueued", "work", item.ID, "challenge", item.ChallengeID, "revision", item.ChallengeRevision)
 	}
 	return item, err
 }
 
-// ProcessOne advances one Server-side scheduling or publishing step. It never
-// waits for a model response while holding a WorkItem lease.
-func (s *Service) ProcessOne(ctx context.Context, workerID string) (bool, error) {
-	item, err := s.repo.ClaimTaxonomyWork(ctx, workerID, workLeaseTTL)
+// ProcessOne advances one short Server-owned domain step. Agent execution and
+// technical retries remain exclusively in the generic WorkItem.
+func (s *Service) ProcessOne(ctx context.Context) (bool, error) {
+	item, err := s.repo.NextTaxonomyMapping(ctx)
 	if err != nil {
 		return false, err
 	}
 	if item == nil {
 		return false, nil
 	}
-	stopHeartbeat := s.keepWorkLeaseAlive(ctx, item.ID, item.LeaseOwner)
-	defer stopHeartbeat()
-	if item.Kind != WorkKindMapping {
-		item.State = WorkFailed
-		item.LastError = fmt.Sprintf("unsupported taxonomy work kind %q", item.Kind)
-		return true, s.repo.SaveClaimedTaxonomyWork(ctx, *item)
-	}
 	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
 	if err != nil || entry.Revision != item.ChallengeRevision {
-		return true, s.repo.CancelClaimedTaxonomyWork(ctx, *item, "目标 challenge artifact 已不存在或 revision 已变化")
+		return true, s.repo.CancelTaxonomyMapping(ctx, item.ID, "目标 challenge artifact 已不存在或 revision 已变化")
 	}
 	if item.ActiveRunID != "" {
 		return true, s.observeRun(ctx, item)
 	}
-	if item.State == WorkReadyPublish {
-		return true, s.publish(ctx, item, workerID)
+	if item.State == MappingReadyPublish {
+		return true, s.publish(ctx, item)
 	}
 	return true, s.scheduleNextStage(ctx, item)
 }
 
-func (s *Service) observeRun(ctx context.Context, item *WorkItem) error {
+func (s *Service) observeRun(ctx context.Context, item *TaxonomyMapping) error {
 	run, err := s.repo.GetRun(ctx, item.ActiveRunID)
 	if err != nil {
 		item.ActiveStage = ""
 		item.ActiveRunID = ""
-		return s.retryTechnical(ctx, item, fmt.Errorf("load active taxonomy run: %w", err))
+		return s.recordFailure(ctx, item, fmt.Errorf("load active taxonomy run: %w", err))
 	}
 	switch run.Status {
 	case agentruntime.RunPending, agentruntime.RunRunning:
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+		return nil
 	case agentruntime.RunFailed, agentruntime.RunCancelled:
 		item.ActiveStage = ""
 		item.ActiveRunID = ""
@@ -216,45 +243,45 @@ func (s *Service) observeRun(ctx context.Context, item *WorkItem) error {
 		if message == "" {
 			message = "taxonomy agent run ended without a result"
 		}
-		return s.retryTechnical(ctx, item, errors.New(message))
+		return s.recordFailure(ctx, item, errors.New(message))
 	case agentruntime.RunSucceeded:
 		// Server finalization clears active_run_id atomically with completion. A
 		// completed Run still referenced by a WorkItem is an invariant breach.
 		item.ActiveStage = ""
 		item.ActiveRunID = ""
-		return s.retryTechnical(ctx, item, errors.New("taxonomy run succeeded without finalizing its domain stage"))
+		return s.recordFailure(ctx, item, errors.New("taxonomy run succeeded without finalizing its domain stage"))
 	default:
 		item.ActiveStage = ""
 		item.ActiveRunID = ""
-		return s.retryTechnical(ctx, item, fmt.Errorf("taxonomy run has unknown status %q", run.Status))
+		return s.recordFailure(ctx, item, fmt.Errorf("taxonomy run has unknown status %q", run.Status))
 	}
 }
 
-func (s *Service) scheduleNextStage(ctx context.Context, item *WorkItem) error {
+func (s *Service) scheduleNextStage(ctx context.Context, item *TaxonomyMapping) error {
 	if item.hasPartialReviews() {
 		// This cannot be created by the new finalizer. Clear old/incomplete
 		// state before the pair is rerun instead of treating one conclusion as
 		// an official committee result.
 		item.CurriculumReview = nil
 		item.SREReview = nil
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+		return s.repo.SaveTaxonomyMapping(ctx, *item)
 	}
 	stage := WorkStageReview
 	baseRevision := item.BaseRevision
 	if item.needsMapper() {
 		current, err := s.currentSnapshot()
 		if err != nil {
-			return s.retryTechnical(ctx, item, fmt.Errorf("load current taxonomy: %w", err))
+			return s.recordFailure(ctx, item, fmt.Errorf("load current taxonomy: %w", err))
 		}
 		stage = WorkStageMapper
 		baseRevision = current.Revision
 	}
 	if stage == WorkStageReview {
 		if item.Candidate == nil {
-			return s.retryTechnical(ctx, item, errors.New("taxonomy review stage has no mapper candidate"))
+			return s.recordFailure(ctx, item, errors.New("taxonomy review stage has no mapper candidate"))
 		}
 		if _, err := s.snapshotForRevision(baseRevision); err != nil {
-			return s.retryTechnical(ctx, item, fmt.Errorf("load candidate taxonomy revision: %w", err))
+			return s.recordFailure(ctx, item, fmt.Errorf("load candidate taxonomy revision: %w", err))
 		}
 	}
 	item.BaseRevision = baseRevision
@@ -271,15 +298,15 @@ func (s *Service) scheduleNextStage(ctx context.Context, item *WorkItem) error {
 		return fmt.Errorf("encode taxonomy run input: %w", err)
 	}
 	run, err := s.repo.ScheduleTaxonomyRun(ctx, *item, agentruntime.CreateRun{
-		ID:            agentruntime.NewID("taxonomy-run"),
-		Purpose:       purpose,
-		OwnerKind:     "taxonomy-work",
-		OwnerRef:      item.ID,
-		InputRevision: baseRevision,
-		Input:         input,
-		Model:         s.model,
-		PromptVersion: promptVersion,
-		DeadlineAt:    time.Now().UTC().Add(agentCallTimeout),
+		ID:               agentruntime.NewID("taxonomy-run"),
+		Purpose:          purpose,
+		OwnerKind:        "taxonomy-mapping",
+		OwnerRef:         item.ID,
+		InputRevision:    baseRevision,
+		Input:            input,
+		Model:            s.model,
+		PromptVersion:    promptVersion,
+		ExecutionTimeout: agentCallTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("schedule taxonomy %s run: %w", stage, err)
@@ -288,42 +315,30 @@ func (s *Service) scheduleNextStage(ctx context.Context, item *WorkItem) error {
 	return nil
 }
 
-func (item WorkItem) needsMapper() bool {
+func (item TaxonomyMapping) needsMapper() bool {
 	return item.Candidate == nil || (item.CurriculumReview != nil && item.SREReview != nil)
 }
 
-func (item WorkItem) hasPartialReviews() bool {
+func (item TaxonomyMapping) hasPartialReviews() bool {
 	return item.Candidate != nil && (item.CurriculumReview == nil) != (item.SREReview == nil)
 }
 
-func (s *Service) publish(ctx context.Context, item *WorkItem, workerID string) error {
+func (s *Service) publish(ctx context.Context, item *TaxonomyMapping) error {
 	if item.Candidate == nil {
-		item.State = WorkPending
+		item.State = MappingPending
 		item.CurriculumReview = nil
 		item.SREReview = nil
 		item.LastError = "已批准的 taxonomy work 缺少候选 ChangeSet，重新执行 Mapper"
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+		return s.repo.SaveTaxonomyMapping(ctx, *item)
 	}
-	acquired, err := s.repo.AcquireTaxonomyLease(ctx, publisherLeaseName, workerID, publisherLeaseTTL)
-	if err != nil {
-		return err
-	}
-	if !acquired {
-		return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
-	}
-	defer func() {
-		if err := s.repo.ReleaseTaxonomyLease(context.Background(), publisherLeaseName, workerID); err != nil {
-			slog.Warn("release taxonomy publisher lease", "error_class", taxonomyErrorClass(err))
-		}
-	}()
 
 	entry, err := challenge.Get(s.challengesDir, item.ChallengeID)
 	if err != nil || entry.Revision != item.ChallengeRevision {
-		return s.repo.CancelClaimedTaxonomyWork(ctx, *item, "目标 challenge artifact 已不存在或 revision 已变化")
+		return s.repo.CancelTaxonomyMapping(ctx, item.ID, "目标 challenge artifact 已不存在或 revision 已变化")
 	}
 	current, err := s.currentSnapshot()
 	if err != nil {
-		return s.retryTechnical(ctx, item, fmt.Errorf("load current taxonomy: %w", err))
+		return s.recordFailure(ctx, item, fmt.Errorf("load current taxonomy: %w", err))
 	}
 	base, err := s.snapshotForRevision(item.BaseRevision)
 	if err != nil {
@@ -340,95 +355,44 @@ func (s *Service) publish(ctx context.Context, item *WorkItem, workerID string) 
 	}
 	published, err := s.store.Publish(next)
 	if err != nil {
-		return s.retryTechnical(ctx, item, fmt.Errorf("publish taxonomy snapshot: %w", err))
+		return s.recordFailure(ctx, item, fmt.Errorf("publish taxonomy snapshot: %w", err))
 	}
 	item.BaseRevision = current.Revision
 	item.PublishedRevision = published.Revision
-	item.State = WorkPublished
+	item.State = MappingPublished
 	item.LastError = ""
-	item.TechnicalFailures = 0
-	item.ExecutionFailures = 0
-	item.NextRunAt = time.Time{}
 	slog.Info("taxonomy revision published", "work", item.ID, "challenge", item.ChallengeID, "taxonomy_revision", published.Revision)
-	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+	return s.repo.SaveTaxonomyMapping(ctx, *item)
 }
 
-func (s *Service) resetForLatest(ctx context.Context, item *WorkItem, revision, reason string) error {
+func (s *Service) resetForLatest(ctx context.Context, item *TaxonomyMapping, revision, reason string) error {
 	item.BaseRevision = revision
 	item.Candidate = nil
 	item.CurriculumReview = nil
 	item.SREReview = nil
 	item.ActiveStage = ""
 	item.ActiveRunID = ""
-	item.State = WorkPending
+	item.State = MappingPending
 	item.LastError = reason
-	item.TechnicalFailures = 0
-	item.ExecutionFailures = 0
-	item.NextRunAt = time.Time{}
-	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
+	return s.repo.SaveTaxonomyMapping(ctx, *item)
 }
 
-func (s *Service) retryTechnical(ctx context.Context, item *WorkItem, err error) error {
-	item.TechnicalFailures++
+func (s *Service) recordFailure(ctx context.Context, item *TaxonomyMapping, err error) error {
 	item.LastError = strings.TrimSpace(err.Error())
 	if item.LastError == "" {
 		item.LastError = "taxonomy work encountered an unspecified technical failure"
 	}
 	item.ActiveStage = ""
 	item.ActiveRunID = ""
-	if item.State != WorkReadyPublish {
-		item.State = WorkPending
+	// Publication failures are candidate failures too. Returning to Pending
+	// preserves the candidate and reviews so the next Mapper round receives
+	// the concrete store error as feedback instead of hot-looping publish.
+	item.State = MappingPending
+	slog.Warn("taxonomy mapping step failed", "mapping", item.ID, "challenge", item.ChallengeID, "round", item.Round, "error_class", taxonomyErrorClass(err))
+	if saveErr := s.repo.SaveTaxonomyMapping(ctx, *item); saveErr != nil {
+		return saveErr
 	}
-	item.NextRunAt = time.Time{}
-	if item.TechnicalFailures >= maxTechnicalFailures {
-		item.TechnicalFailures = 0
-		item.ExecutionFailures++
-		item.NextRunAt = time.Now().UTC().Add(retryDelay(item.ExecutionFailures))
-		slog.Warn("taxonomy execution failure budget exhausted", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "execution_failures", item.ExecutionFailures, "error_class", taxonomyErrorClass(err))
-	} else {
-		slog.Warn("taxonomy technical failure", "work", item.ID, "challenge", item.ChallengeID, "round", item.Round, "technical_failures", item.TechnicalFailures, "error_class", taxonomyErrorClass(err))
-	}
-	return s.repo.SaveClaimedTaxonomyWork(ctx, *item)
-}
-
-func retryDelay(executionFailures int) time.Duration {
-	if executionFailures <= 1 {
-		return retryInitialDelay
-	}
-	delay := retryInitialDelay
-	for attempt := 1; attempt < executionFailures && delay < retryMaximumDelay; attempt++ {
-		delay *= 2
-		if delay >= retryMaximumDelay {
-			return retryMaximumDelay
-		}
-	}
-	return delay
-}
-
-func (s *Service) keepWorkLeaseAlive(ctx context.Context, workID, owner string) func() {
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(workLeaseTTL / 3)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := s.repo.ExtendTaxonomyWorkLease(context.Background(), workID, owner, workLeaseTTL); err != nil {
-					slog.Warn("extend taxonomy work lease", "work", workID, "error_class", taxonomyErrorClass(err))
-				}
-			}
-		}
-	}()
-	return func() {
-		close(stop)
-		<-done
-	}
+	return &recordedFailure{cause: err}
 }
 
 func (s *Service) currentSnapshot() (Snapshot, error) {
@@ -548,7 +512,7 @@ func (s *Service) FinalizeReviewPair(ctx context.Context, claim agentruntime.Cla
 	return s.repo.FinalizeTaxonomyReviewRun(ctx, claim, item.ID, curriculum, sre)
 }
 
-func (s *Service) contextForClaim(ctx context.Context, claim agentruntime.Claim) (*WorkItem, RunInput, challenge.Entry, Snapshot, string, error) {
+func (s *Service) contextForClaim(ctx context.Context, claim agentruntime.Claim) (*TaxonomyMapping, RunInput, challenge.Entry, Snapshot, string, error) {
 	if !claim.Valid() {
 		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("taxonomy execution requires a valid run claim")
 	}
@@ -560,10 +524,10 @@ func (s *Service) contextForClaim(ctx context.Context, claim agentruntime.Claim)
 	if err != nil {
 		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", err
 	}
-	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-work" || claim.Run.OwnerRef != input.WorkID {
+	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-mapping" || claim.Run.OwnerRef != input.WorkID {
 		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", errors.New("taxonomy run does not own its work item")
 	}
-	item, err := s.repo.GetTaxonomyWork(ctx, input.WorkID)
+	item, err := s.repo.GetTaxonomyMapping(ctx, input.WorkID)
 	if err != nil {
 		return nil, RunInput{}, challenge.Entry{}, Snapshot{}, "", err
 	}
@@ -585,7 +549,7 @@ func (s *Service) contextForClaim(ctx context.Context, claim agentruntime.Claim)
 	return item, input, *entry, base, artifact, nil
 }
 
-func mapperPriorContext(item *WorkItem) (string, error) {
+func mapperPriorContext(item *TaxonomyMapping) (string, error) {
 	if item.Candidate == nil {
 		return "", nil
 	}

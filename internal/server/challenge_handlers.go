@@ -3,14 +3,20 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/api"
-	"github.com/breakfix/breakfix/internal/db"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
-	"github.com/gin-gonic/gin"
 	"log/slog"
+
+	"github.com/breakfix/breakfix/internal/api"
+	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/incusprovider"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) StartChallenge(c *gin.Context, id string) {
@@ -148,8 +154,13 @@ func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 		return
 	}
 	env, err := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
-	if err != nil || env.WorkspacePod == "" || env.UID == "" {
+	if err != nil || env.UID == "" || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
+		return
+	}
+	nodeName, err := terminalNodeName(env, request.Node)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
 	ticket, err := newTerminalTicket()
@@ -163,6 +174,7 @@ func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 		UserID:         user.ID,
 		EnvironmentUID: env.UID,
 		ChallengeID:    challengeID,
+		NodeName:       nodeName,
 		WindowName:     windowName,
 		ExpiresAt:      now.Add(terminalTicketTTL),
 	}, now); err != nil {
@@ -201,8 +213,8 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
 		return
 	}
-	if env.WorkspacePod == "" {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "pod not ready"})
+	if !terminalEnvironmentReady(env, h.nodeTerminal) {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "terminal runtime is not ready"})
 		return
 	}
 	windowName := ticket.WindowName
@@ -224,10 +236,15 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		}
 		env.Phase = breakfixv1.EnvironmentReady
 	}
+	stream, err := h.terminalStream(env, ticket.NodeName, windowName)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
+		return
+	}
 
 	slog.Info("terminal session started", "challenge", challengeID, "user", ticket.UserID)
 	key := env.Runtime + "/" + env.Name
-	wsUpgrade(c.Writer, c.Request, h.uiOrigin, env, h.k8s, runtimeAdapter, h.cooldownMin, windowName, terminalSocketLifecycle{
+	wsUpgrade(c.Writer, c.Request, h.uiOrigin, env, runtimeAdapter, h.cooldownMin, stream, terminalSocketLifecycle{
 		open: func() error {
 			if err := h.db.OpenTerminalConnection(c.Request.Context(), db.TerminalConnection{
 				ID:               connectionID,
@@ -289,14 +306,95 @@ func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName st
 		return
 	}
 	env, err := h.findEnvironment(c.Request.Context(), user.ID, entry)
-	if err != nil || env.WorkspacePod == "" {
+	if err != nil || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}
-	sessionName := fmt.Sprintf("breakfix-%s", env.Name)
-	if err := h.k8s.ClosePTYWindow(env.Namespace, env.WorkspacePod, sessionName, windowName); err != nil {
+	var requestedNode *string
+	if raw := strings.TrimSpace(c.Query("node")); raw != "" {
+		requestedNode = &raw
+	}
+	nodeName, err := terminalNodeName(env, requestedNode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if err := h.closeTerminalWindow(c.Request.Context(), env, nodeName, windowName); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("close terminal window: %v", err)})
 		return
 	}
 	c.JSON(http.StatusOK, api.TerminalWindowCloseResponse{Closed: true})
+}
+
+func terminalEnvironmentReady(environment *activeEnvironment, nodeProvider NodeTerminalProvider) bool {
+	if environment == nil || environment.UID == "" {
+		return false
+	}
+	switch environment.Runtime {
+	case challenge.RuntimeNode:
+		return nodeProvider != nil && environment.NodeIdentity.Project != "" && len(environment.NodeIdentity.Nodes) == len(environment.Nodes)
+	case challenge.RuntimeK8s:
+		return environment.Namespace != "" && environment.WorkspacePod != ""
+	default:
+		return false
+	}
+}
+
+func terminalNodeName(environment *activeEnvironment, requested *string) (string, error) {
+	raw := ""
+	if requested != nil {
+		raw = strings.TrimSpace(*requested)
+	}
+	if environment.Runtime == challenge.RuntimeK8s {
+		if raw != "" {
+			return "", fmt.Errorf("k8s environments have a single management terminal")
+		}
+		return "", nil
+	}
+	if environment.Runtime != challenge.RuntimeNode {
+		return "", fmt.Errorf("unsupported environment runtime %q", environment.Runtime)
+	}
+	if raw == "" {
+		return "", fmt.Errorf("node is required for a node environment terminal")
+	}
+	for _, node := range environment.Nodes {
+		if node.Name == raw {
+			return raw, nil
+		}
+	}
+	return "", fmt.Errorf("environment has no node %q", raw)
+}
+
+func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windowName string) (terminalStream, error) {
+	sessionName := terminalSessionName(environment.UID)
+	switch environment.Runtime {
+	case challenge.RuntimeNode:
+		if h.nodeTerminal == nil {
+			return nil, fmt.Errorf("node terminal provider is unavailable")
+		}
+		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan terminal.Size) error {
+			return h.nodeTerminal.ExecNodePTY(ctx, incusprovider.ExecNodePTYRequest{
+				EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
+				LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
+				Stdin: stdin, Stdout: stdout, Resize: resize,
+			})
+		}, nil
+	case challenge.RuntimeK8s:
+		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan terminal.Size) error {
+			return h.k8s.ExecPTY(ctx, stdin, stdout, stdout, resize, environment.Namespace, environment.WorkspacePod, sessionName, windowName)
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported environment runtime %q", environment.Runtime)
+	}
+}
+
+func (h *Handler) closeTerminalWindow(ctx context.Context, environment *activeEnvironment, nodeName, windowName string) error {
+	sessionName := terminalSessionName(environment.UID)
+	if environment.Runtime == challenge.RuntimeNode {
+		return h.nodeTerminal.CloseNodePTYWindow(ctx, incusprovider.CloseNodePTYWindowRequest{
+			EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
+			LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
+		})
+	}
+	return h.k8s.ClosePTYWindow(environment.Namespace, environment.WorkspacePod, sessionName, windowName)
 }

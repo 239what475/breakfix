@@ -48,7 +48,7 @@ func TestLiveReviewPairUsesTypedTools(t *testing.T) {
 challenge artifact：
 --- problem.md ---
 Repair a broken log cleanup task.
---- checks/checkpoints.sh ---
+--- nodes/operator/checks.sh ---
 The checkpoint verifies that eligible logs are archived while protected logs remain.
 `,
 	})

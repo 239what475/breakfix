@@ -15,7 +15,7 @@ import (
 
 const (
 	authoringPromptVersion = "authoring-v1"
-	authoringRunDeadline   = time.Hour
+	authoringRunDeadline   = agentruntime.ExecutionDeadline
 )
 
 // RuntimeRepository is the Server-owned Authoring boundary. Agent Workers only
@@ -121,16 +121,16 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		Content:   content,
 		CreatedAt: now,
 	}, agentruntime.CreateRun{
-		ID:            agentruntime.NewID("authoring-run"),
-		SessionID:     session.RuntimeSessionID,
-		Purpose:       "authoring",
-		OwnerKind:     "authoring-session",
-		OwnerRef:      session.ID,
-		InputRevision: fmt.Sprintf("%d", session.CurrentRevision),
-		Input:         input,
-		Model:         s.model,
-		PromptVersion: authoringPromptVersion,
-		DeadlineAt:    now.Add(authoringRunDeadline),
+		ID:               agentruntime.NewID("authoring-run"),
+		SessionID:        session.RuntimeSessionID,
+		Purpose:          "authoring",
+		OwnerKind:        "authoring-session",
+		OwnerRef:         session.ID,
+		InputRevision:    fmt.Sprintf("%d", session.CurrentRevision),
+		Input:            input,
+		Model:            s.model,
+		PromptVersion:    authoringPromptVersion,
+		ExecutionTimeout: authoringRunDeadline,
 	})
 	if err != nil {
 		return nil, nil, err

@@ -119,6 +119,8 @@ spec:
                     properties:
                       controlPlaneCpu:
                         type: string
+                      controlPlaneEphemeralStorage:
+                        type: string
                       controlPlaneMemory:
                         type: string
                       quotaCpu:
@@ -127,18 +129,22 @@ spec:
                         type: string
                       quotaMemory:
                         type: string
-                      terminalCpu:
+                      workloadCpu:
                         type: string
-                      terminalMemory:
+                      workloadEphemeralStorage:
+                        type: string
+                      workloadMemory:
                         type: string
                     required:
                     - controlPlaneCpu
+                    - controlPlaneEphemeralStorage
                     - controlPlaneMemory
                     - quotaCpu
                     - quotaEphemeralStorage
                     - quotaMemory
-                    - terminalCpu
-                    - terminalMemory
+                    - workloadCpu
+                    - workloadEphemeralStorage
+                    - workloadMemory
                     type: object
                   version:
                     type: string

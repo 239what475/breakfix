@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: breakfix-verifier
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: breakfix-verifier
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: breakfix-verifier
+        breakfix.dev/worker-kind: verify
+    spec:
+      serviceAccountName: breakfix-verifier
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: verifier
+          image: ghcr.io/breakfix/breakfix-verifier:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/etc/breakfix/config.yaml"]
+          ports:
+            - name: health
+              containerPort: 8081
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: BREAKFIX_WORKER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-verifier-identity
+                  key: worker_api_key
+            - name: BREAKFIX_INCUS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_endpoint
+            - name: BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_base_image_fingerprint
+          volumeMounts:
+            - name: config
+              mountPath: /etc/breakfix
+              readOnly: true
+            - name: incus-tls
+              mountPath: /var/run/secrets/breakfix-incus
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: breakfix-config
+        - name: incus-tls
+          secret:
+            secretName: breakfix-incus-verifier
+            defaultMode: 0440

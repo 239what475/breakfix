@@ -40,7 +40,7 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 	const taxonomyTag = challenge?.tags[0]?.title ?? "";
 	await page.locator(".catalog-filters").getByLabel(taxonomyTag, { exact: true }).check();
 	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
-	await page.locator(".catalog-filters").getByLabel("VCluster", { exact: true }).check();
+	await page.locator(".catalog-filters").getByLabel("Kubernetes", { exact: true }).check();
 	await expect(page.getByText("No challenges match these filters.", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Reset filters", exact: true }).click();
 

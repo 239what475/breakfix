@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/k8s"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
@@ -13,92 +12,52 @@ import (
 )
 
 type Options struct {
-	RegistryAddr         string
-	RegistryInsecure     bool
-	RegistryUsername     string
-	RegistryPassword     string
-	RegistryPullSecret   string
-	RegistryWriteSecret  string
-	BuilderImage         string
-	PublisherImage       string
-	VerifierImage        string
 	Namespace            string
 	CRDNamespace         string
-	CooldownMinutes      int
-	VerificationGrantKey string
-	ServerHost           string
-	ServerPort           int
+	RegistryPullSecret   string
 	VClusterBinary       string
 	VClusterChartRepo    string
 	VClusterChartVersion string
 }
 
-// Setup registers all reconcilers with the controller-runtime manager. Its
-// inputs are intentionally limited to Kubernetes and controller configuration;
-// filesystem challenge data and the Server database belong to the Server.
-func Setup(mgr ctrl.Manager, k8sClient *k8s.Client, opts Options) error {
-	if err := breakfixv1.AddToScheme(mgr.GetScheme()); err != nil {
+type Dependencies struct {
+	NodeProvider NodeEnvironmentProvider
+	VK8sProvider VK8sEnvironmentProvider
+}
+
+// Setup registers only the two final Environment reconcilers. Workflow state
+// belongs to Server/PostgreSQL and is never reconciled by this process.
+func Setup(manager ctrl.Manager, k8sClient *k8s.Client, options Options, dependencies Dependencies) error {
+	if err := breakfixv1.AddToScheme(manager.GetScheme()); err != nil {
 		return err
 	}
-
-	cooldown := time.Duration(opts.CooldownMinutes) * time.Minute
-	vclusterClient := &vclustercli.Client{BinaryPath: opts.VClusterBinary}
-	if _, err := vclusterClient.Validate(context.Background()); err != nil {
-		return fmt.Errorf("validate vcluster cli: %w", err)
-	}
-	if strings.TrimSpace(opts.BuilderImage) == "" || strings.TrimSpace(opts.PublisherImage) == "" || strings.TrimSpace(opts.VerifierImage) == "" {
-		return fmt.Errorf("builder_image, publisher_image, and verifier_image are required")
-	}
-	if strings.TrimSpace(opts.VerificationGrantKey) == "" {
-		return fmt.Errorf("verification_grant_key is required")
+	if strings.TrimSpace(options.Namespace) == "" || strings.TrimSpace(options.CRDNamespace) == "" {
+		return fmt.Errorf("runtime namespace and CRD namespace are required")
 	}
 
-	if err := (&VerifyTaskReconciler{
-		Client:               mgr.GetClient(),
-		K8s:                  k8sClient,
-		RegistryAddr:         opts.RegistryAddr,
-		RegistryInsecure:     opts.RegistryInsecure,
-		RegistryUsername:     opts.RegistryUsername,
-		RegistryPassword:     opts.RegistryPassword,
-		RegistryPullSecret:   opts.RegistryPullSecret,
-		RegistryWriteSecret:  opts.RegistryWriteSecret,
-		BuilderImage:         opts.BuilderImage,
-		PublisherImage:       opts.PublisherImage,
-		VerifierImage:        opts.VerifierImage,
-		CRDNamespace:         opts.CRDNamespace,
-		VerificationGrantKey: []byte(opts.VerificationGrantKey),
-		ServerHost:           opts.ServerHost,
-		ServerPort:           opts.ServerPort,
-	}).SetupWithManager(mgr); err != nil {
+	vk8sProvider := dependencies.VK8sProvider
+	if vk8sProvider == nil {
+		vclusterClient := &vclustercli.Client{BinaryPath: options.VClusterBinary}
+		if _, err := vclusterClient.Validate(context.Background()); err != nil {
+			return fmt.Errorf("validate vcluster CLI: %w", err)
+		}
+		if strings.TrimSpace(options.VClusterChartRepo) == "" || strings.TrimSpace(options.VClusterChartVersion) == "" {
+			return fmt.Errorf("vcluster chart repository and version are required")
+		}
+		vk8sProvider = &kubernetesVK8sProvider{
+			k8s: k8sClient, vcluster: vclusterClient,
+			namespacePrefix: options.Namespace, controlNamespace: options.CRDNamespace,
+			registryPullSecret: options.RegistryPullSecret, verifierServiceAccount: "breakfix-verifier",
+			chartRepo: options.VClusterChartRepo, chartVersion: options.VClusterChartVersion,
+		}
+	}
+
+	nodeProvider := dependencies.NodeProvider
+	if nodeProvider == nil {
+		nodeProvider = UnavailableNodeProvider(nil)
+	}
+	if err := (&NodeEnvironmentReconciler{Client: manager.GetClient(), Provider: nodeProvider}).SetupWithManager(manager); err != nil {
 		return err
 	}
-
-	if err := (&ContainerEnvironmentReconciler{
-		Client:             mgr.GetClient(),
-		K8s:                k8sClient,
-		RegistryAddr:       opts.RegistryAddr,
-		RegistryPullSecret: opts.RegistryPullSecret,
-		NS:                 opts.Namespace,
-		CRDNamespace:       opts.CRDNamespace,
-		Cooldown:           cooldown,
-	}).SetupWithManager(mgr); err != nil {
-		return err
-	}
-
-	if err := (&VClusterEnvironmentReconciler{
-		Client:             mgr.GetClient(),
-		K8s:                k8sClient,
-		VCluster:           vclusterClient,
-		ChartRepo:          opts.VClusterChartRepo,
-		ChartVersion:       opts.VClusterChartVersion,
-		RegistryAddr:       opts.RegistryAddr,
-		RegistryPullSecret: opts.RegistryPullSecret,
-		NS:                 opts.Namespace,
-		CRDNamespace:       opts.CRDNamespace,
-		Cooldown:           cooldown,
-	}).SetupWithManager(mgr); err != nil {
-		return err
-	}
-
-	return startEnvironmentCleanupLoop(mgr, k8sClient, opts.Namespace, opts.CRDNamespace)
+	return (&VK8sEnvironmentReconciler{Client: manager.GetClient(), Provider: vk8sProvider}).SetupWithManager(manager)
 }

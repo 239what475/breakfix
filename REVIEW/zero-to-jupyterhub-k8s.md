@@ -30,7 +30,7 @@ Controller 依据 `activityAt` 执行 Draining/Destroy。它没有把通用 work
   runtime profile 的默认值集中放入配置并启动校验，避免散落在 Controller 常量和 manifest。
   不增加新 CRD 概念，只让已有字段的默认值、上限和来源可审计。
 - **NetworkPolicy 验收矩阵**：当前已有 Builder 的真实 Cilium 边界测试。为 workspace
-  container/vcluster 增加同样的断言：允许 DNS、终端代理、vcluster 必需流量；禁止 host
+  node/k8s 增加同样的断言：允许 DNS、终端代理、VK8s 必需流量；禁止 host
   Kubernetes API 和不属于题目的控制面访问。实施前必须列出 vcluster 实际依赖，不能机械
   复制 JupyterHub 的 private-IP deny。
 

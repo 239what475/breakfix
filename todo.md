@@ -41,6 +41,26 @@ Incus，Server 代理 Incus exec WebSocket；Incus API 仅监听私网并使用 
 和 Verifier 按各自职责挂载不同的客户端证书，不能共享一枚全能证书；凭据只供受信任平台二进制使用，不会进入候选
 脚本、Generator Sandbox 或用户/验证环境。
 
+### K8s OCI Registry
+
+K8s candidate 和正式 challenge image 使用正常的 HTTPS OCI Registry 路径，而不是节点预加载或 Controller 代理。根部署包默认
+提供内置 Registry：运营方选择仅内网可解析的稳定名称，例如 `registry.breakfix.internal`，将它解析到私有 LoadBalancer，并提供
+由运营方内部 CA 签发的 `breakfix-registry-tls` Secret。CA 根证书由集群管理员预装到所有会拉取镜像的节点；Server 与 Publisher
+通过可选 `breakfix-registry-ca` ConfigMap 追加同一公开根证书。Breakfix 不生成或轮换根 CA，不安装 cert-manager，不依赖公网 DNS，
+也不修改 `/etc/hosts`、CoreDNS、containerd `config.toml` 或 `hosts.toml`，更不会重启 containerd。不能用 `*.svc`/ClusterIP
+作为镜像引用。
+
+外部 Registry 是一等部署模式：`deploy/overlays/external-registry` 删除内置 Registry Deployment、Service 和 PVC，使用
+`registry.address` 指向 Harbor、云厂商 Registry 或其他 HTTPS OCI endpoint。两种模式共享相同的 Build、ArtifactPublish、Verify
+和 immutable digest 语义；不同之处只有 endpoint、认证和 CA bootstrap，不产生另一套工作流。
+
+Registry 是否需要凭据由其授权策略决定；私有 project 的 Kubernetes 标准做法是 Docker pull Secret。`registry.pull_secret`
+非空时，Controller 将控制 namespace 中的 pull Secret 复制到每个 VK8s Environment namespace，并创建禁用 API token 自动
+挂载的 `breakfix-runtime` ServiceAccount 绑定它；为空时只创建同一个无 token、无 pull Secret 的 ServiceAccount。terminal Pod
+只设置 `serviceAccountName: breakfix-runtime`，不显式携带 `imagePullSecrets`，也不挂载 Secret。Publisher/Server 的 Registry
+客户端凭据不进入 Builder、Verifier、用户环境或 challenge image。需要 repository-scoped pull/push 权限时由 Registry 授权后端实现，
+例如 Harbor robot account；Breakfix 不伪造一套镜像授权协议。
+
 Incus 7.0 的 restricted certificate 只能配置精确 Project 列表，不能按动态 Project 名前缀授权。初始实现不在每次
 Environment 创建/删除时修改 trust store：Builder 可限制到固定 build Project，Publisher 可限制到固定 build 与
 image Project；Controller、Server 和 Verifier 因为需要访问动态 Environment Project，使用彼此独立、可单独轮换和
@@ -109,6 +129,10 @@ incus:
   node_memory: 512MiB
   node_processes: 512
   node_root_disk: 5GiB
+  # Dedicated, unallocated RFC1918 range. The Controller deterministically
+  # assigns one unused /24 bridge subnet to each NodeEnvironment.
+  node_network_pool: 10.240.0.0/16
+  node_network_prefix: 24
   blocked_egress_cidrs:
     - 10.0.0.0/8
     - 100.64.0.0/10
@@ -123,19 +147,25 @@ certificate 只允许 build Project，Publisher 只允许 build 与 image Projec
 删除 `agent_database_url`、`agent_database_role`、`verification_grant_key`，以及旧 Controller 用来创建临时 Job 的
 `builder_image`、`publisher_image`、`verifier_image`；固定 Worker Deployment 自己声明镜像。
 
-每个需要 Incus 的进程在 readiness 中执行角色相关预检：API 与 mTLS 可用；Server version/API extension 满足项目、
-限制、独立网络、network ACL、跨 Project image source、instance exec/file 和 operation wait；bridge 模式下恰有一个
-Online member；`local` storage pool 存在且可用；固定 build/image Project 的配置符合预期；配置的 base alias 与完整
-fingerprint 指向同一 container image。预检只读，不偷偷修复全局资源；失败时 readiness 为 false，并返回稳定 reason。
-Controller 创建动态 Project 前再次做轻量 provider check，避免留下半成品。
+Node provider 预检按角色验证：API 与 mTLS 可用；Server version/API extension 满足项目、限制、独占网络授权、network
+ACL、跨 Project image source、instance exec/file 和 operation wait；bridge 模式下恰有一个 Online member；`local` storage
+pool 存在且可用；固定 build/image Project 的配置符合预期；配置的 base alias 与完整 fingerprint 指向同一 container
+image。预检只读，不偷偷修复全局资源。它不是 Kubernetes `/readyz` 的全局门槛：Incus 不可用时，Server、Controller 和
+固定 Worker 必须继续处理 VK8s 及不依赖 Incus 的工作。Server 与 Worker 在 `/capabilities/node-provider` 暴露 live
+preflight；Controller 在每个 Node reconcile 前经 provider 预检，并将失败写入该 NodeEnvironment 的
+`ProviderUnavailable` condition。Controller 创建动态 Project 前再次做轻量 provider check，避免留下半成品。
 
-固定 Project、证书和 `node-systemd-base` 由显式、幂等的运维 bootstrap 建立，不由 Controller 启动时隐式创建。基础镜像
+固定 Project、证书和不带过期时间的 `node-systemd-base` 由显式、幂等的运维 bootstrap 建立，不由 Controller 启动时隐式创建。提交题库中的 Node challenge 则由显式 catalog seed 工具先规范化为与 Generator 相同的候选 bundle，再复用 Incus Build、ArtifactPublish 与 ChallengePublish 原语发布为正式 image；题目目录同步依赖这一步，不能靠人工预置或只复制 manifest。基础镜像
 从 Incus 默认 `images:` 服务的 `ubuntu/24.04` x86_64 container image 开始，bootstrap 先把解析出的上游 fingerprint
 锁定，再运行仓库内受信任的基础镜像脚本，安装 tmux 与平台 runtime-init unit，验证 systemd/cgroup/exec 后停止并发布
 版本化 alias，最后输出完整 fingerprint 供配置更新。任务执行不依赖外部 image server；候选 `generate.sh` 也不会参与
-基础镜像构建。bootstrap 为 build Project 创建独立 profile、root disk 和仅供基础镜像构建使用的 NAT bridge；image
-Project 只保存 `public=false` 的 candidate/正式 images 与 aliases。两者都启用独立 image/profile/network feature，不继承
-或修改 `default` Project。bootstrap 可以使用本机 CLI，但应用运行时和测试主体必须经过 Go provider。
+基础镜像构建。bootstrap 为 build Project 创建独立 profile、root disk，并在 `default` Project 创建仅供基础镜像构建
+使用显式、运维配置的固定 CIDR NAT bridge；build Project 通过 `restricted.networks.access` 只获得该 bridge。这个 CIDR 与
+`node_network_pool` 分离，bootstrap 拒绝接管配置不同的同名 bridge。image Project 只保存
+`public=false` 的 candidate/正式 images 与 aliases。两者启用独立 image/profile/storage feature，并设置
+`features.networks=false`，因为 Incus 7.0 明确只允许 OVN network 存在于非 default Project。bootstrap 不修改
+`default` profile 或物理网络，但 bridge 模式必须在 `default` Project 保存平台拥有的 opaque bridge/ACL。bootstrap
+可以使用本机 CLI，但应用运行时和测试主体必须经过 Go provider。
 
 截至 2026-07-29，本机已经具备真实集成测试基线：默认 CLI remote 为 `incus-cluster`，Client/Server 均为 `7.0.1`；
 cluster 只有一个 x86_64 member `server1`，状态为 Online/Fully operational；存储池为 Btrfs `local`。集群当前没有实例、
@@ -144,19 +174,22 @@ managed network 或本地 image，因此首次验收前必须先执行上述 boo
 
 ### NodeEnvironment 的隔离、网络与节点名称
 
-Incus Project 是一个 NodeEnvironment 的租户边界。Controller 为每个 Environment 建立由 UID 派生的 Project、
-network 和 runtime profile；用户、题目脚本和浏览器没有 Incus API 凭据。
+Incus Project 是一个 NodeEnvironment 的租户边界。Controller 为每个 Environment 建立由 UID 派生的 Project 和
+runtime profile，并在 `default` Project 建立该 Environment 独占的 network/ACL；用户、题目脚本和浏览器没有 Incus API 凭据。
 
-- Project 使用 `restricted=true`，并启用独立的 `features.images`、`features.networks`、`features.profiles` 与
-  `features.storage.volumes`。Controller-owned profile 设置 `security.privileged=false`、`security.idmap.isolated=true`
+- Project 使用 `restricted=true`，启用独立的 `features.images`、`features.profiles` 与 `features.storage.volumes`，并设置
+  `features.networks=false`。Incus bridge 不支持非 default Project；Controller 在 `default` Project 创建每个 Environment
+  独占的 opaque bridge/ACL，再通过 `restricted.networks.access=<exact network>` 只授权该 Environment Project。
+  Controller-owned profile 设置 `security.privileged=false`、`security.idmap.isolated=true`
   和 root disk，禁止 raw LXC、nesting、host path/device、proxy device、snapshot 与 backup；Project/profile 同时设置
   CPU、内存、进程、磁盘和实例总量限制。
 - Controller 先从固定 image Project 按完整 fingerprint 复制且只复制当前 revision 的 image 到 Environment Project，
-  再从 Project-local fingerprint 创建实例；Environment 不连接外部 image server。独占 managed bridge 也直接创建在
-  Environment Project 中，不修改 `default` Project。删除时按 instance、image、ACL、network、profile、Project 的明确
-  顺序收敛，不使用 `DeleteProjectForce` 掩盖残留资源。
-- 每个 Environment 获得独占 managed bridge，使用 `ipv4.address=auto`、IPv4 NAT 并关闭 IPv6。Controller 创建并绑定
-  Project-local network ACL：同一 bridge 内节点互通不经过该边界；出站先拒绝平台配置的私网、宿主网络、CGNAT 和
+  再从 Project-local fingerprint 创建实例；Environment 不连接外部 image server。删除时按 instance、image、profile、
+  Project、default Project 中的 ACL 与 network 的明确顺序收敛，不使用 `DeleteProjectForce` 掩盖残留资源。
+- 每个 Environment 获得独占 managed bridge。Controller 从配置的专用 RFC1918 地址池中按 Environment UID 的稳定哈希起点选择未与任何已有
+  Incus IPv4 bridge 重叠的固定子网，例如 `10.240.37.1/24`；创建竞争时重新观察所有 bridge 并继续探测。已创建 bridge 的网关地址是重调和时
+  的唯一事实来源，必须仍落在配置池和指定 prefix 内。bridge 启用 IPv4 NAT 并关闭 IPv6，位于 `default` Project，但名称和 owner metadata 都由
+  Environment UID 派生，且只授权给该 Environment Project；它们不是多租户共享网络。Controller 创建并绑定 network ACL：同一 bridge 内节点互通不经过该边界；出站先拒绝平台配置的私网、宿主网络、CGNAT 和
   link-local/metadata CIDR，再允许公网与已建立连接；入站默认拒绝。节点 NIC 开启 IPv4 source filtering，防止地址欺骗。
   不创建 network forward、proxy device 或其他入站暴露；不同 Environment 必须双向不可达。
 - Project 不是 Linux network namespace，多个 bridge 不能复用同一 gateway CIDR。Controller 为节点 NIC 固定分配
@@ -472,7 +505,7 @@ context，不再产生新的外部副作用。旧 attempt 即使稍后恢复，�
 
 技术失败将同一个 WorkItem 放回 Pending 并记录退避时间；lease 过期可直接由另一副本以新 attempt 领取。重试次数不是
 语义 round，也不会在达到某个次数时中断仍在执行的调用。Agent、Build、ArtifactPublish、Verify 与 ChallengePublish
-各自有从首次领取开始计算的一小时 deadline；deadline 到期会取消执行并终结当前阶段。作者取消、会话被替代或输入
+各自有从首次领取开始计算的一小时 deadline；Server 在启动和固定周期中回收过期项，因此不依赖下一次 Worker 领取；deadline 到期会取消执行并终结当前阶段。作者取消、会话被替代或输入
 revision 改变时，Server 将 subject 和 WorkItem 一起 Cancelled，后续迟到结果全部拒绝。
 
 `artifact_cleanup` 是唯一例外：它不改变 CandidateRevision 的业务结果，也没有一小时 deadline。Registry 或 Incus

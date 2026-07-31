@@ -3,7 +3,7 @@ import { api, type MySpaceLearningQuery } from "../../api/client";
 import type { MySpace, MySpaceLearningHistory } from "../../api/types";
 
 export type LearningStateFilter = "all" | "active" | "completed" | "ended";
-export type LearningRuntimeFilter = "all" | "container" | "vcluster";
+export type LearningRuntimeFilter = "all" | "node" | "k8s";
 
 const activeEnvironmentRefreshInterval = 3_000;
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run one Breakfix runtime component locally while it keeps its in-cluster
-# identity, Service DNS, and (for Server) persistent data volume.
+# Run one Breakfix component locally while retaining its in-cluster identity,
+# Service DNS, and mounted role credentials.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${BREAKFIX_TELEPRESENCE_STATE_DIR:-$ROOT_DIR/.local/telepresence}"
@@ -14,29 +14,26 @@ TP_RUNTIME_SECRET="${BREAKFIX_TELEPRESENCE_RUNTIME_SECRET:-breakfix-runtime}"
 TP_SERVER_PORT="${BREAKFIX_TELEPRESENCE_SERVER_PORT:-19091}"
 TP_CONTROLLER_HEALTH_PORT="${BREAKFIX_TELEPRESENCE_CONTROLLER_HEALTH_PORT:-18081}"
 
-SERVER_WORKLOAD="breakfix-server"
-CONTROLLER_WORKLOAD="breakfix-controller"
-WORKER_WORKLOAD="breakfix-agent-worker"
-
 usage() {
   cat <<'EOF'
 Usage: dev/telepresence.sh <command>
 
 Commands:
-  connect       Install/connect the Traffic Manager for the current cluster.
-  server        Replace the in-cluster Server with a local foreground process.
-  controller    Replace the in-cluster Controller with a local foreground process.
-  worker        Replace the Agent Worker locally after explicitly authorizing its scale-down.
-  down [name]   Restore one component (server|controller|worker) or all components.
-  status        Show Telepresence and Breakfix runtime status.
-  disconnect    Restore all components and stop local Telepresence daemons.
+  connect         Install/connect the Traffic Manager for the current cluster.
+  server          Replace Server with a local foreground process.
+  controller      Replace Controller with a local foreground process.
+  agent-worker    Replace the Agent Worker pool locally.
+  builder         Replace the Builder Worker pool locally.
+  publisher       Replace the Publisher Worker pool locally.
+  verifier        Replace the Verifier Worker pool locally.
+  down [name]     Restore one component or all components.
+  status          Show Telepresence and Breakfix runtime status.
+  disconnect      Restore all components and stop local Telepresence daemons.
 
-The server, controller, and worker commands remain in the foreground so their
-logs are directly visible while Playwright or another E2E command runs.
-
-Worker replacement requires BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1. It
-records the current replica count, scales the remote Deployment to one, and
-restores the recorded count when the local replacement exits or `down` runs.
+Replacement commands remain in the foreground so their logs are visible during
+E2E runs. Worker replacement requires
+BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1. The script records and restores
+the original Deployment replica count.
 EOF
 }
 
@@ -64,9 +61,9 @@ ensure_connected() {
   current_context="$(kubectl config current-context)"
   if printf '%s\n' "$status" | grep -q 'Traffic Manager: Connected'; then
     printf '%s\n' "$status" | grep -Fq "Kubernetes context: $current_context" || \
-      fail "Telepresence is connected to another Kubernetes context; run make telepresence-disconnect first"
+      fail "Telepresence is connected to another Kubernetes context"
     printf '%s\n' "$status" | grep -Fq "$TP_NAMESPACE" || \
-      fail "Telepresence is not mapped to namespace $TP_NAMESPACE; run make telepresence-disconnect first"
+      fail "Telepresence is not mapped to namespace $TP_NAMESPACE"
     return
   fi
 
@@ -74,20 +71,49 @@ ensure_connected() {
   telepresence connect --manager-namespace "$TP_MANAGER_NAMESPACE" --namespace "$TP_NAMESPACE"
 }
 
+all_components() {
+  printf '%s\n' server controller agent-worker builder publisher verifier
+}
+
+is_worker() {
+  case "$1" in
+    agent-worker|builder|publisher|verifier) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 workload_for() {
   case "$1" in
-    server) printf '%s\n' "$SERVER_WORKLOAD" ;;
-    controller) printf '%s\n' "$CONTROLLER_WORKLOAD" ;;
-    worker) printf '%s\n' "$WORKER_WORKLOAD" ;;
+    server) printf '%s\n' breakfix-server ;;
+    controller) printf '%s\n' breakfix-controller ;;
+    agent-worker) printf '%s\n' breakfix-agent-worker ;;
+    builder) printf '%s\n' breakfix-builder ;;
+    publisher) printf '%s\n' breakfix-publisher ;;
+    verifier) printf '%s\n' breakfix-verifier ;;
+    *) fail "unknown component: $1" ;;
+  esac
+}
+
+container_for() {
+  case "$1" in
+    server|controller|builder|publisher|verifier) printf '%s\n' "$1" ;;
+    agent-worker) printf '%s\n' agent-worker ;;
     *) fail "unknown component: $1" ;;
   esac
 }
 
 binary_for() {
+  printf '%s/bin/breakfix-%s\n' "$ROOT_DIR" "$1"
+}
+
+health_port_for() {
   case "$1" in
-    server) printf '%s/bin/breakfix-server\n' "$ROOT_DIR" ;;
-    controller) printf '%s/bin/breakfix-controller\n' "$ROOT_DIR" ;;
-    worker) printf '%s/bin/breakfix-agent-worker\n' "$ROOT_DIR" ;;
+    controller) printf '%s\n' "$TP_CONTROLLER_HEALTH_PORT" ;;
+    agent-worker) printf '%s\n' 18082 ;;
+    builder) printf '%s\n' 18083 ;;
+    publisher) printf '%s\n' 18084 ;;
+    verifier) printf '%s\n' 18085 ;;
+    server) printf '%s\n' 18086 ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -96,8 +122,11 @@ build_component() {
   local component="$1"
   case "$component" in
     server) (cd "$ROOT_DIR" && make --no-print-directory dev-build-server) ;;
-    controller) (cd "$ROOT_DIR" && go build -o "$ROOT_DIR/bin/breakfix-controller" ./cmd/controller) ;;
-    worker) (cd "$ROOT_DIR" && go build -o "$ROOT_DIR/bin/breakfix-agent-worker" ./cmd/agent-worker) ;;
+    controller) (cd "$ROOT_DIR" && make --no-print-directory dev-build-controller) ;;
+    agent-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-agent-worker) ;;
+    builder) (cd "$ROOT_DIR" && make --no-print-directory dev-build-builder) ;;
+    publisher) (cd "$ROOT_DIR" && make --no-print-directory dev-build-publisher) ;;
+    verifier) (cd "$ROOT_DIR" && make --no-print-directory dev-build-verifier) ;;
     *) fail "unknown component: $component" ;;
   esac
 }
@@ -106,6 +135,23 @@ secret_value() {
   local key="$1"
   kubectl -n "$TP_NAMESPACE" get secret "$TP_RUNTIME_SECRET" \
     -o "go-template={{index .data \"$key\"}}" | base64 --decode
+}
+
+worker_identity_secret() {
+  case "$1" in
+    agent-worker) printf '%s\n' breakfix-agent-worker-identity ;;
+    builder) printf '%s\n' breakfix-builder-identity ;;
+    publisher) printf '%s\n' breakfix-publisher-identity ;;
+    verifier) printf '%s\n' breakfix-verifier-identity ;;
+    *) fail "unknown worker identity: $1" ;;
+  esac
+}
+
+worker_identity_key() {
+  local secret
+  secret="$(worker_identity_secret "$1")"
+  kubectl -n "$TP_NAMESPACE" get secret "$secret" \
+    -o 'go-template={{index .data "worker_api_key"}}' | base64 --decode
 }
 
 deployment_env_value() {
@@ -125,7 +171,8 @@ create_service_account_kubeconfig() {
   source_context="$(kubectl config current-context)"
   source_cluster="$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')"
   source_user="$(kubectl config view --minify -o jsonpath='{.contexts[0].context.user}')"
-  test -n "$source_context" && test -n "$source_cluster" && test -n "$source_user" || fail "current kubeconfig is incomplete"
+  test -n "$source_context" && test -n "$source_cluster" && test -n "$source_user" || \
+    fail "current kubeconfig is incomplete"
 
   token="$(kubectl -n "$TP_NAMESPACE" create token "$service_account" --duration=1h)"
   local_identity="telepresence-$service_account"
@@ -142,195 +189,258 @@ create_service_account_kubeconfig() {
 
 prepare_config() {
   local component="$1"
-  local kubeconfig="$2"
+  local kubeconfig="${2:-}"
+  local mount_root="${3:-}"
   local output="$STATE_DIR/$component.yaml"
-  local data_dir="$STATE_DIR/mount-server/var/lib/breakfix"
-  local vcluster_binary
+  local health_port data_dir
 
-  case "$component" in
-    server)
-      sed \
-        -e "s|^port:.*|port: $TP_SERVER_PORT|" \
-        -e "s|^data_dir:.*|data_dir: $data_dir|" \
-        -e "s|^kubeconfig:.*|kubeconfig: $kubeconfig|" \
-        -e 's|^registry_insecure:.*|registry_insecure: false|' \
-        "$CONFIG_SOURCE" > "$output"
-      ;;
-    controller)
-      vcluster_binary="$(command -v vcluster || true)"
-      test -n "$vcluster_binary" || fail "controller replacement requires vcluster on PATH"
-      sed \
-        -e "s|^health_port:.*|health_port: $TP_CONTROLLER_HEALTH_PORT|" \
-        -e "s|^data_dir:.*|data_dir: $STATE_DIR/controller-data|" \
-        -e "s|^kubeconfig:.*|kubeconfig: $kubeconfig|" \
-        -e "s|^vcluster_binary:.*|vcluster_binary: $vcluster_binary|" \
-        -e 's|^registry_insecure:.*|registry_insecure: false|' \
-        "$CONFIG_SOURCE" > "$output"
-      ;;
-    worker)
-      sed \
-        -e "s|^data_dir:.*|data_dir: $STATE_DIR/worker-data|" \
-        -e 's|^registry_insecure:.*|registry_insecure: false|' \
-        "$CONFIG_SOURCE" > "$output"
-      ;;
-    *) fail "unknown component: $component" ;;
-  esac
+  health_port="$(health_port_for "$component")"
+  data_dir="$STATE_DIR/$component-data"
+  if test "$component" = server; then
+    data_dir="$mount_root/var/lib/breakfix"
+  fi
+
+  sed \
+    -e "s|^port:.*|port: $TP_SERVER_PORT|" \
+    -e "s|^health_port:.*|health_port: $health_port|" \
+    -e "s|^data_dir:.*|data_dir: $data_dir|" \
+    -e "s|^kubeconfig:.*|kubeconfig: $kubeconfig|" \
+    -e "s|^    server_certificate_file:.*|    server_certificate_file: $mount_root/var/run/secrets/breakfix-incus/server.crt|" \
+    -e "s|^    client_certificate_file:.*|    client_certificate_file: $mount_root/var/run/secrets/breakfix-incus/client.crt|" \
+    -e "s|^    client_key_file:.*|    client_key_file: $mount_root/var/run/secrets/breakfix-incus/client.key|" \
+    "$CONFIG_SOURCE" > "$output"
+
+  if test "$component" = controller; then
+    local vcluster_binary
+    vcluster_binary="$(command -v vcluster || true)"
+    test -n "$vcluster_binary" || fail "controller replacement requires vcluster on PATH"
+    sed -i "s|^vcluster_binary:.*|vcluster_binary: $vcluster_binary|" "$output"
+  fi
 
   printf '%s\n' "$output"
 }
 
 ensure_server_fuse() {
-  test -r /etc/fuse.conf || fail "Server replacement requires /etc/fuse.conf with user_allow_other enabled"
+  test -r /etc/fuse.conf || fail "Server replacement requires /etc/fuse.conf"
   grep -Eq '^[[:space:]]*user_allow_other[[:space:]]*$' /etc/fuse.conf || \
     fail "enable user_allow_other in /etc/fuse.conf before replacing Server"
 }
 
-worker_replicas_file() {
-  printf '%s/worker.replicas\n' "$STATE_DIR"
+replicas_file() {
+  printf '%s/%s.replicas\n' "$STATE_DIR" "$1"
 }
 
 prepare_worker_replacement() {
-  local replicas file
-  file="$(worker_replicas_file)"
-  if test -f "$file"; then
-    return
-  fi
-  test "${BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE:-}" = '1' || \
-    fail 'set BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 to replace the Agent Worker'
+  local component="$1"
+  local workload file replicas
+  workload="$(workload_for "$component")"
+  file="$(replicas_file "$component")"
+  test -f "$file" && return
+  test "${BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE:-}" = 1 || \
+    fail "set BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 to replace $component"
 
-  replicas="$(kubectl -n "$TP_NAMESPACE" get deployment "$WORKER_WORKLOAD" -o jsonpath='{.spec.replicas}')"
+  replicas="$(kubectl -n "$TP_NAMESPACE" get deployment "$workload" -o jsonpath='{.spec.replicas}')"
   case "$replicas" in
-    ''|*[!0-9]*) fail "invalid Agent Worker replica count: $replicas" ;;
+    ''|*[!0-9]*) fail "invalid $component replica count: $replicas" ;;
   esac
-
   printf '%s\n' "$replicas" > "$file"
-  kubectl -n "$TP_NAMESPACE" scale deployment "$WORKER_WORKLOAD" --replicas=1
-  kubectl -n "$TP_NAMESPACE" rollout status "deployment/$WORKER_WORKLOAD" --timeout=90s
+  kubectl -n "$TP_NAMESPACE" scale deployment "$workload" --replicas=1
+  kubectl -n "$TP_NAMESPACE" rollout status "deployment/$workload" --timeout=90s
 }
 
 restore_worker_replicas() {
-  local file replicas
-  file="$(worker_replicas_file)"
+  local component="$1"
+  local workload file replicas
+  workload="$(workload_for "$component")"
+  file="$(replicas_file "$component")"
   test -f "$file" || return
   replicas="$(<"$file")"
   case "$replicas" in
-    ''|*[!0-9]*) fail "invalid recorded Agent Worker replica count: $replicas" ;;
+    ''|*[!0-9]*) fail "invalid recorded $component replica count: $replicas" ;;
   esac
-
-  kubectl -n "$TP_NAMESPACE" scale deployment "$WORKER_WORKLOAD" --replicas="$replicas"
-  kubectl -n "$TP_NAMESPACE" rollout status "deployment/$WORKER_WORKLOAD" --timeout=90s
+  kubectl -n "$TP_NAMESPACE" scale deployment "$workload" --replicas="$replicas"
+  kubectl -n "$TP_NAMESPACE" rollout status "deployment/$workload" --timeout=90s
   find "$file" -maxdepth 0 -delete
 }
 
 cleanup_local_files() {
   local component="$1"
   find "$STATE_DIR" -maxdepth 1 -type f -name "$component.*" -delete 2>/dev/null || true
-  case "$component" in
-    server)
-      rmdir "$STATE_DIR/mount-server" 2>/dev/null || true
-      ;;
-    controller)
-      find "$STATE_DIR/mount-controller" -depth -delete 2>/dev/null || true
-      find "$STATE_DIR/controller-data" -depth -delete 2>/dev/null || true
-      find "$STATE_DIR/controller-home" -depth -delete 2>/dev/null || true
-      ;;
-    worker)
-      find "$STATE_DIR/worker-data" -depth -delete 2>/dev/null || true
-      ;;
-  esac
+  find "$STATE_DIR/mount-$component" -depth -delete 2>/dev/null || true
+  find "$STATE_DIR/$component-data" -depth -delete 2>/dev/null || true
 }
 
 detach_component() {
   local component="$1"
   local workload
   workload="$(workload_for "$component")"
-
   telepresence detach "$workload" --namespace "$TP_NAMESPACE" >/dev/null 2>&1 || true
   telepresence uninstall "$workload" >/dev/null 2>&1 || true
   kubectl -n "$TP_NAMESPACE" rollout status "deployment/$workload" --timeout=90s >/dev/null || true
-  if test "$component" = 'worker'; then
-    restore_worker_replicas || true
+  if is_worker "$component"; then
+    restore_worker_replicas "$component" || true
   fi
   cleanup_local_files "$component"
 }
 
-run_server() {
-  local kubeconfig config base_url sandbox_namespace
-  ensure_server_fuse
-  kubeconfig="$(create_service_account_kubeconfig server)"
-  config="$(prepare_config server "$kubeconfig")"
-  base_url="$(deployment_env_value "$SERVER_WORKLOAD" server BREAKFIX_OPENSANDBOX_BASE_URL)"
-  sandbox_namespace="$(deployment_env_value "$SERVER_WORKLOAD" server BREAKFIX_OPENSANDBOX_NAMESPACE)"
-  test -n "$base_url" && test -n "$sandbox_namespace" || fail "Server Deployment is missing OpenSandbox environment values"
+replace_command() {
+  local component="$1"
+  local config="$2"
+  local mount_root="${3:-}"
+  local workload container
+  workload="$(workload_for "$component")"
+  container="$(container_for "$component")"
+  shift 3
 
-  printf 'Replacing Server locally. Logs remain in this terminal; HTTP is available on http://127.0.0.1:%s.\n' "$TP_SERVER_PORT"
+  if test -n "$mount_root"; then
+    telepresence replace --namespace "$TP_NAMESPACE" --container "$container" \
+      --mount="$mount_root" "$workload" -- "$@" "$(binary_for "$component")" -config "$config"
+  else
+    telepresence replace --namespace "$TP_NAMESPACE" --container "$container" \
+      --mount=false "$workload" -- "$@" "$(binary_for "$component")" -config "$config"
+  fi
+}
+
+run_server() {
+  local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file
+  ensure_server_fuse
+  mount_root="$STATE_DIR/mount-server"
+  kubeconfig="$(create_service_account_kubeconfig server)"
+  config="$(prepare_config server "$kubeconfig" "$mount_root")"
+  base_url="$(deployment_env_value breakfix-server server BREAKFIX_OPENSANDBOX_BASE_URL)"
+  sandbox_namespace="$(deployment_env_value breakfix-server server BREAKFIX_OPENSANDBOX_NAMESPACE)"
+  test -n "$base_url" && test -n "$sandbox_namespace" || \
+    fail "Server Deployment is missing OpenSandbox environment values"
+  registry_trust_bundle_file="$(secret_value registry_trust_bundle_file)"
+  if test -n "$registry_trust_bundle_file"; then
+    registry_trust_bundle_file="$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
+  fi
+
+  printf 'Replacing Server locally at http://127.0.0.1:%s.\n' "$TP_SERVER_PORT"
   env \
     BREAKFIX_DATABASE_URL="$(secret_value database_url)" \
-    BREAKFIX_AGENT_DATABASE_URL="$(secret_value agent_database_url)" \
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
-    BREAKFIX_INTERNAL_API_KEY="$(secret_value internal_api_key)" \
+    BREAKFIX_AGENT_WORKER_API_KEY="$(worker_identity_key agent-worker)" \
+    BREAKFIX_BUILDER_WORKER_API_KEY="$(worker_identity_key builder)" \
+    BREAKFIX_PUBLISHER_WORKER_API_KEY="$(worker_identity_key publisher)" \
+    BREAKFIX_VERIFIER_WORKER_API_KEY="$(worker_identity_key verifier)" \
     BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)" \
-    BREAKFIX_REGISTRY_INSECURE="$(secret_value registry_insecure)" \
-    DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)" \
+    BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
+    BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
+    BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file" \
+    BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)" \
+    BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)" \
+    BREAKFIX_K8S_BASE_IMAGE_DIGEST="$(secret_value k8s_base_image_digest)" \
     OPEN_SANDBOX_API_KEY="$(secret_value opensandbox_api_key)" \
     BREAKFIX_OPENSANDBOX_BASE_URL="$base_url" \
     BREAKFIX_OPENSANDBOX_NAMESPACE="$sandbox_namespace" \
     telepresence replace --namespace "$TP_NAMESPACE" --container server \
-      --mount="$STATE_DIR/mount-server" --port "$TP_SERVER_PORT:9090" "$SERVER_WORKLOAD" -- \
+      --mount="$mount_root" --port "$TP_SERVER_PORT:9090" breakfix-server -- \
       "$(binary_for server)" -config "$config"
 }
 
 run_controller() {
-  local kubeconfig config
+  local kubeconfig config mount_root
+  mount_root="$STATE_DIR/mount-controller"
   kubeconfig="$(create_service_account_kubeconfig controller)"
-  config="$(prepare_config controller "$kubeconfig")"
-
-  printf 'Replacing Controller locally. Logs remain in this terminal; health is available on http://127.0.0.1:%s/readyz.\n' "$TP_CONTROLLER_HEALTH_PORT"
-  env \
-    BREAKFIX_INTERNAL_API_KEY="$(secret_value internal_api_key)" \
-    BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)" \
-    BREAKFIX_REGISTRY_INSECURE="$(secret_value registry_insecure)" \
-    telepresence replace --namespace "$TP_NAMESPACE" --container controller \
-      --mount="$STATE_DIR/mount-controller" "$CONTROLLER_WORKLOAD" -- \
-      env HOME="$STATE_DIR/controller-home" "$(binary_for controller)" -config "$config"
+  config="$(prepare_config controller "$kubeconfig" "$mount_root")"
+  printf 'Replacing Controller locally; readiness is at http://127.0.0.1:%s/readyz.\n' "$TP_CONTROLLER_HEALTH_PORT"
+  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
+  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  export BREAKFIX_K8S_BASE_IMAGE_DIGEST="$(secret_value k8s_base_image_digest)"
+  export BREAKFIX_REGISTRY_PULL_SECRET="$(secret_value registry_pull_secret)"
+  replace_command controller "$config" "$mount_root" env HOME="$STATE_DIR/controller-data"
 }
 
-run_worker() {
+run_agent_worker() {
   local config
-  prepare_worker_replacement
-  config="$(prepare_config worker '')"
+  prepare_worker_replacement agent-worker
+  config="$(prepare_config agent-worker "" "")"
+  printf 'Replacing Agent Worker locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key agent-worker)"
+  export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
+  replace_command agent-worker "$config" "" env POD_NAME=telepresence-agent-worker
+}
 
-  printf 'Replacing Agent Worker locally. Logs remain in this terminal.\n'
-  env \
-    BREAKFIX_AGENT_DATABASE_URL="$(secret_value agent_database_url)" \
-    BREAKFIX_INTERNAL_API_KEY="$(secret_value internal_api_key)" \
-    DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)" \
-    telepresence replace --namespace "$TP_NAMESPACE" --container agent-worker --mount=false "$WORKER_WORKLOAD" -- \
-      env POD_NAME=telepresence-local-worker "$(binary_for worker)" -config "$config"
+run_builder() {
+  local config mount_root
+  prepare_worker_replacement builder
+  mount_root="$STATE_DIR/mount-builder"
+  config="$(prepare_config builder "" "$mount_root")"
+  printf 'Replacing Builder locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key builder)"
+  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
+  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  replace_command builder "$config" "$mount_root" env POD_NAME=telepresence-builder
+}
+
+run_publisher() {
+  local config mount_root registry_trust_bundle_file
+  prepare_worker_replacement publisher
+  mount_root="$STATE_DIR/mount-publisher"
+  config="$(prepare_config publisher "" "$mount_root")"
+  printf 'Replacing Publisher locally.\n'
+  registry_trust_bundle_file="$(secret_value registry_trust_bundle_file)"
+  if test -n "$registry_trust_bundle_file"; then
+    registry_trust_bundle_file="$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
+  fi
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key publisher)"
+  export BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)"
+  export BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)"
+  export BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)"
+  export BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file"
+  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
+  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  replace_command publisher "$config" "$mount_root" env POD_NAME=telepresence-publisher
+}
+
+run_verifier() {
+  local kubeconfig config mount_root
+  prepare_worker_replacement verifier
+  mount_root="$STATE_DIR/mount-verifier"
+  kubeconfig="$(create_service_account_kubeconfig verifier)"
+  config="$(prepare_config verifier "$kubeconfig" "$mount_root")"
+  printf 'Replacing Verifier locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key verifier)"
+  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
+  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  replace_command verifier "$config" "$mount_root" env POD_NAME=telepresence-verifier
 }
 
 run_component() {
-  local component="$1" status
+  local component="$1"
+  local status
   ensure_prerequisites
   ensure_connected
   mkdir -p "$STATE_DIR"
   build_component "$component"
   trap "detach_component '$component'" EXIT
-
   set +e
-  "run_$component"
+  "run_${component//-/_}"
   status=$?
   set -e
   exit "$status"
 }
 
 show_status() {
+  local workloads=()
+  local component
   telepresence status || true
-  kubectl -n "$TP_NAMESPACE" get deployment "$SERVER_WORKLOAD" "$CONTROLLER_WORKLOAD" "$WORKER_WORKLOAD" \
+  while IFS= read -r component; do
+    workloads+=("$(workload_for "$component")")
+  done < <(all_components)
+  kubectl -n "$TP_NAMESPACE" get deployment "${workloads[@]}" \
     -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas
   if telepresence status 2>/dev/null | grep -q 'Traffic Manager: Connected'; then
     telepresence list --namespace "$TP_NAMESPACE"
   fi
+}
+
+restore_all() {
+  local component
+  while IFS= read -r component; do
+    detach_component "$component"
+  done < <(all_components)
 }
 
 main() {
@@ -340,27 +450,22 @@ main() {
       ensure_prerequisites
       ensure_connected
       ;;
-    server|controller|worker)
+    server|controller|agent-worker|builder|publisher|verifier)
       run_component "$command"
       ;;
     down)
-      case "${2:-all}" in
-        all)
-          detach_component server
-          detach_component controller
-          detach_component worker
-          ;;
-        server|controller|worker) detach_component "$2" ;;
-        *) fail "unknown component: ${2:-}" ;;
-      esac
+      if test "${2:-all}" = all; then
+        restore_all
+      else
+        case "$2" in
+          server|controller|agent-worker|builder|publisher|verifier) detach_component "$2" ;;
+          *) fail "unknown component: $2" ;;
+        esac
+      fi
       ;;
-    status)
-      show_status
-      ;;
+    status) show_status ;;
     disconnect)
-      detach_component server
-      detach_component controller
-      detach_component worker
+      restore_all
       telepresence quit --stop-daemons
       ;;
     -h|--help|help|'') usage ;;

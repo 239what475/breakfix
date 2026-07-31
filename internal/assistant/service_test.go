@@ -47,7 +47,7 @@ func TestRuntimeServiceScopesSessionAndPersistsPendingTurn(t *testing.T) {
 	if err := json.Unmarshal(run.Input, &input); err != nil {
 		t.Fatalf("decode persisted assistant input: %v", err)
 	}
-	if input.CurrentWindow != "shell-1" || len(input.OpenWindows) != 1 || input.OpenWindows[0] != "shell-1" {
+	if input.CurrentNode != "host" || input.CurrentWindow != "shell-1" || len(input.Terminals) != 1 || input.Terminals[0].Node != "host" || len(input.Terminals[0].Windows) != 1 || input.Terminals[0].Windows[0] != "shell-1" {
 		t.Fatalf("persisted assistant input = %#v", input)
 	}
 	if _, _, err := service.StartTurn(context.Background(), request, "another message"); err != ErrTurnRunning {

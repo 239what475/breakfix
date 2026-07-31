@@ -12,8 +12,11 @@ const execFile = promisify(execFileCallback);
 const namespace = "breakfix-system";
 const serverDeployment = "breakfix-server";
 const controllerDeployment = "breakfix-controller";
-const serverURL = process.env.BREAKFIX_E2E_BASE_URL ?? "http://localhost:9091";
-const serverPort = new URL(serverURL).port || "9091";
+const workerDeployments = ["agent-worker", "builder", "publisher", "verifier"] as const;
+// The browser origin must match Server's configured UI origin so its terminal
+// WebSocket upgrade passes the same-origin check.
+const serverURL = process.env.BREAKFIX_E2E_BASE_URL ?? "http://localhost:9090";
+const serverPort = new URL(serverURL).port || "9090";
 let portForward: ChildProcess | undefined;
 
 type ActiveEnvironment = {
@@ -39,7 +42,7 @@ async function kubectlExists(kind: string, name: string, resourceNamespace?: str
 
 async function kubectlValue(name: string, jsonPath: string) {
   const { stdout } = await kubectl([
-    "get", "containerenvironment", name, "-n", namespace, "-o", `jsonpath=${jsonPath}`,
+    "get", "nodeenvironment", name, "-n", namespace, "-o", `jsonpath=${jsonPath}`,
   ]);
   return stdout.trim();
 }
@@ -78,6 +81,33 @@ async function restartDeployment(name: string) {
   await kubectl(["rollout", "status", "deployment", name, "-n", namespace, "--timeout=3m"]);
 }
 
+async function stopServer() {
+  await kubectl(["scale", "deployment", serverDeployment, "-n", namespace, "--replicas=0"]);
+}
+
+async function startServer() {
+  await kubectl(["scale", "deployment", serverDeployment, "-n", namespace, "--replicas=1"]);
+  await kubectl(["rollout", "status", "deployment", serverDeployment, "-n", namespace, "--timeout=3m"]);
+}
+
+async function workerRestartCounts() {
+  const counts = await Promise.all(workerDeployments.map(async (worker) => {
+    const { stdout } = await kubectl([
+      "get", "pods", "-n", namespace,
+      "-l", `app.kubernetes.io/name=breakfix-${worker}`,
+      "-o", "json",
+    ]);
+    const pods = JSON.parse(stdout) as {
+      items: Array<{ status?: { containerStatuses?: Array<{ restartCount?: number }> } }>;
+    };
+    return pods.items.reduce(
+      (total, pod) => total + (pod.status?.containerStatuses?.[0]?.restartCount ?? 0),
+      0,
+    );
+  }));
+  return Object.fromEntries(workerDeployments.map((worker, index) => [worker, counts[index]]));
+}
+
 async function setShortIdleLease(name: string) {
   // The environment is initially created with the normal product idle TTL.
   // Pair the test-only TTL override with a newer activity event so Controller
@@ -85,14 +115,16 @@ async function setShortIdleLease(name: string) {
   const activityAt = new Date(Date.now() + 5_000).toISOString();
   const patch = JSON.stringify({
     spec: {
-      activityAt,
-      timeouts: {
-        idleTtlSeconds: 10,
-        drainGracePeriodSeconds: 10,
+      environment: {
+        lifecycle: {
+          activityAt,
+          idleTtlSeconds: 10,
+          drainGracePeriodSeconds: 10,
+        },
       },
     },
   });
-  await kubectl(["patch", "containerenvironment", name, "-n", namespace, "--type=merge", "-p", patch]);
+  await kubectl(["patch", "nodeenvironment", name, "-n", namespace, "--type=merge", "-p", patch]);
 }
 
 async function currentCleanupEnvironment(page: Page) {
@@ -119,7 +151,7 @@ async function startCleanupEnvironment(page: Page) {
 
 async function deleteEnvironment(name: string) {
   if (!name) return;
-  await kubectl(["delete", "containerenvironment", name, "-n", namespace, "--ignore-not-found", "--wait=false"])
+  await kubectl(["delete", "nodeenvironment", name, "-n", namespace, "--ignore-not-found", "--wait=false"])
     .catch(() => undefined);
 }
 
@@ -132,40 +164,43 @@ test.afterAll(() => {
 });
 
 recoveryTest("server restart leaves controller reconciliation active", async ({ page }) => {
-  test.setTimeout(8 * 60_000);
+  test.setTimeout(9 * 60_000);
   let environmentName = "";
-  let environmentNamespace = "";
+  let serverStopped = false;
   try {
     const environment = await startCleanupEnvironment(page);
     environmentName = environment.environment_id;
-    environmentNamespace = await kubectlValue(environmentName, "{.status.namespace}");
-    expect(environmentNamespace).not.toBe("");
+    const workerRestartsBefore = await workerRestartCounts();
 
     await setShortIdleLease(environmentName);
-    await restartDeployment(serverDeployment);
-    await startPortForward();
-
-    await expect.poll(() => kubectlValue(environmentName, "{.status.phase}"), {
+    await stopServer();
+    serverStopped = true;
+    await expect.poll(serverOnline, { timeout: 30_000 }).toBe(false);
+    await expect.poll(() => kubectlValue(environmentName, "{.status.environment.phase}"), {
       timeout: 90_000,
       intervals: [1_000, 2_000, 5_000],
     }).toBe("Draining");
-    await expect.poll(() => kubectlValue(environmentName, "{.status.phase}"), {
-      timeout: 90_000,
-      intervals: [1_000, 2_000, 5_000],
-    }).toBe("Destroyed");
+    // A Server outage makes outstanding claim requests fail. Fixed Workers
+    // must retry in-process rather than rely on a Deployment crash restart.
+    await new Promise<void>((resolve) => setTimeout(resolve, 35_000));
+    expect(await workerRestartCounts()).toEqual(workerRestartsBefore);
+
+    await startServer();
+    serverStopped = false;
+    await startPortForward();
+
     await expect.poll(() => environmentDeletionRequested(environmentName), {
       timeout: 30_000,
       intervals: [1_000, 2_000, 5_000],
     }).toBe(true);
     await expect.poll(
-      () => kubectlExists("containerenvironment", environmentName, namespace),
-      { timeout: 90_000, intervals: [1_000, 2_000, 5_000] },
-    ).toBe(false);
-    await expect.poll(
-      () => kubectlExists("namespace", environmentNamespace),
+      () => kubectlExists("nodeenvironment", environmentName, namespace),
       { timeout: 90_000, intervals: [1_000, 2_000, 5_000] },
     ).toBe(false);
   } finally {
+    if (serverStopped) {
+      await startServer();
+    }
     await deleteEnvironment(environmentName);
   }
 });
@@ -179,10 +214,10 @@ recoveryTest("controller restart reconciles an existing environment", async ({ p
 
     await restartDeployment(controllerDeployment);
     await page.getByRole("textbox", { name: "Terminal input" }).focus();
-    await page.keyboard.type("/answer.sh");
+    await page.keyboard.type("/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
     await page.keyboard.press("Enter");
     await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expect.poll(() => kubectlValue(environmentName, "{.status.phase}"), { timeout: 30_000 }).toBe("Completed");
+    await expect.poll(() => kubectlValue(environmentName, "{.status.environment.phase}"), { timeout: 30_000 }).toBe("Completed");
   } finally {
     await deleteEnvironment(environmentName);
   }

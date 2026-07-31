@@ -16,9 +16,10 @@ import (
 )
 
 type assistantMessageRequest struct {
-	Content       string   `json:"content"`
-	CurrentWindow string   `json:"current_window"`
-	OpenWindows   []string `json:"open_windows"`
+	Content       string                      `json:"content"`
+	CurrentNode   string                      `json:"current_node"`
+	CurrentWindow string                      `json:"current_window"`
+	Terminals     []assistant.TerminalContext `json:"terminals"`
 }
 
 type assistantConversationResponse struct {
@@ -33,7 +34,7 @@ func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
 	if user == nil {
 		return
 	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, "shell-1", []string{"shell-1"})
+	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{CurrentWindow: "shell-1"})
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
@@ -61,7 +62,9 @@ func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID stri
 		c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, body.CurrentWindow, body.OpenWindows)
+	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{
+		CurrentNode: body.CurrentNode, CurrentWindow: body.CurrentWindow, Terminals: body.Terminals,
+	})
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
@@ -85,7 +88,7 @@ func (h *Handler) StreamChallengeAssistantTurn(c *gin.Context, challengeID, turn
 	if user == nil {
 		return
 	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, "shell-1", []string{"shell-1"})
+	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{CurrentWindow: "shell-1"})
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
@@ -129,7 +132,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, subscription *assistant.Su
 	}
 }
 
-func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challengeID, currentWindow string, openWindows []string) (assistant.Request, error) {
+func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
 	entry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		return assistant.Request{}, err
@@ -147,10 +150,10 @@ func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challenge
 			return assistant.Request{}, err
 		}
 	}
-	if env.Phase != breakfixv1.EnvironmentReady || env.WorkspacePod == "" {
+	if env.Phase != breakfixv1.EnvironmentReady || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		return assistant.Request{}, fmt.Errorf("environment is not ready for assistant context")
 	}
-	windows, current, err := assistantWindows(currentWindow, openWindows)
+	input, nodes, err := normalizeAssistantWorkspace(env, input)
 	if err != nil {
 		return assistant.Request{}, err
 	}
@@ -166,13 +169,16 @@ func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challenge
 		ChallengeID:      entry.ID,
 		ChallengeTitle:   entry.Title,
 		Problem:          content.Problem,
-		CurrentWindow:    current,
-		OpenWindows:      windows,
+		Nodes:            nodes,
+		CurrentNode:      input.CurrentNode,
+		CurrentWindow:    input.CurrentWindow,
+		Terminals:        input.Terminals,
 		EnvironmentPhase: string(env.Phase),
 		IdleTTL:          environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute),
 		Checkpoints:      assistantCheckpointSnapshot(entry, env),
 		Reader: &environmentAssistantReader{
-			client:         h.k8s,
+			k8s:            h.k8s,
+			node:           h.nodeTerminal,
 			getEnvironment: h.getEnvironment,
 			env:            env,
 			entry:          entry,
@@ -181,17 +187,88 @@ func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challenge
 	}, nil
 }
 
-func assistantWindows(currentWindow string, openWindows []string) ([]string, string, error) {
-	if strings.TrimSpace(currentWindow) == "" {
-		currentWindow = "shell-1"
+func normalizeAssistantWorkspace(env *activeEnvironment, input assistant.RunInput) (assistant.RunInput, []string, error) {
+	if env == nil {
+		return input, nil, fmt.Errorf("assistant environment is required")
 	}
-	if _, err := parseTerminalWindow(currentWindow); err != nil {
-		return nil, "", err
+	nodes := make([]string, len(env.Nodes))
+	for index, node := range env.Nodes {
+		nodes[index] = node.Name
+	}
+	currentNode := strings.TrimSpace(input.CurrentNode)
+	if env.Runtime == challenge.RuntimeNode {
+		if currentNode == "" && len(nodes) > 0 {
+			currentNode = nodes[0]
+		}
+		if _, err := terminalNodeName(env, &currentNode); err != nil {
+			return input, nil, err
+		}
+	} else if _, err := terminalNodeName(env, nilIfEmpty(currentNode)); err != nil {
+		return input, nil, err
+	}
+
+	currentWindow, err := parseTerminalWindow(input.CurrentWindow)
+	if err != nil {
+		return input, nil, err
+	}
+	terminals := make([]assistant.TerminalContext, 0, len(input.Terminals)+1)
+	seenNodes := make(map[string]struct{}, len(input.Terminals)+1)
+	for _, terminalContext := range input.Terminals {
+		node := strings.TrimSpace(terminalContext.Node)
+		if _, err := terminalNodeName(env, nilIfEmpty(node)); err != nil {
+			return input, nil, err
+		}
+		if _, duplicate := seenNodes[node]; duplicate {
+			return input, nil, fmt.Errorf("duplicate terminal context for node %q", node)
+		}
+		windows, _, err := assistantWindows("", terminalContext.Windows)
+		if err != nil {
+			return input, nil, err
+		}
+		seenNodes[node] = struct{}{}
+		terminals = append(terminals, assistant.TerminalContext{Node: node, Windows: windows})
+	}
+	currentIndex := -1
+	for index := range terminals {
+		if terminals[index].Node == currentNode {
+			currentIndex = index
+			break
+		}
+	}
+	if currentIndex < 0 {
+		terminals = append(terminals, assistant.TerminalContext{Node: currentNode, Windows: []string{currentWindow}})
+	} else if !assistantWindowOpen(terminals[currentIndex].Windows, currentWindow) {
+		terminals[currentIndex].Windows = append(terminals[currentIndex].Windows, currentWindow)
+	}
+	input.CurrentNode = currentNode
+	input.CurrentWindow = currentWindow
+	input.Terminals = terminals
+	return input, nodes, nil
+}
+
+func nilIfEmpty(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func assistantWindows(currentWindow string, openWindows []string) ([]string, string, error) {
+	currentWindow = strings.TrimSpace(currentWindow)
+	if currentWindow != "" {
+		if _, err := parseTerminalWindow(currentWindow); err != nil {
+			return nil, "", err
+		}
 	}
 	windows := make([]string, 0, len(openWindows)+1)
 	seen := make(map[string]struct{}, len(openWindows)+1)
-	for _, window := range append(openWindows, currentWindow) {
-		if _, err := parseTerminalWindow(window); err != nil {
+	values := append([]string(nil), openWindows...)
+	if currentWindow != "" {
+		values = append(values, currentWindow)
+	}
+	for _, rawWindow := range values {
+		window, err := parseTerminalWindow(strings.TrimSpace(rawWindow))
+		if err != nil {
 			return nil, "", err
 		}
 		if _, ok := seen[window]; ok {
@@ -199,6 +276,12 @@ func assistantWindows(currentWindow string, openWindows []string) ([]string, str
 		}
 		seen[window] = struct{}{}
 		windows = append(windows, window)
+	}
+	if len(windows) == 0 {
+		windows = append(windows, "shell-1")
+	}
+	if currentWindow == "" {
+		currentWindow = windows[0]
 	}
 	return windows, currentWindow, nil
 }
@@ -244,56 +327,4 @@ func writeAssistantSSE(c *gin.Context, event string, payload any) {
 	}
 	_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
 	c.Writer.Flush()
-}
-
-type environmentAssistantReader struct {
-	client interface {
-		CaptureTMUXPane(context.Context, string, string, string, string, int, int) ([]string, int, error)
-		ListPodFiles(context.Context, string, string, string, int, int) ([]string, int, error)
-		ReadPodFile(context.Context, string, string, string, int64, int) (string, int64, error)
-	}
-	getEnvironment func(context.Context, string, string) (*activeEnvironment, error)
-	env            *activeEnvironment
-	entry          *challenge.Entry
-	content        *challenge.Content
-}
-
-func (r *environmentAssistantReader) TerminalScrollback(ctx context.Context, window string, offset, lines int) (assistant.Scrollback, error) {
-	values, total, err := r.client.CaptureTMUXPane(ctx, r.env.Namespace, r.env.WorkspacePod, "breakfix-"+r.env.Name, window, offset, lines)
-	if err != nil {
-		return assistant.Scrollback{}, err
-	}
-	return assistant.Scrollback{Window: window, Offset: offset, Lines: values, TotalLines: total, HasMore: offset+len(values) < total}, nil
-}
-
-func (r *environmentAssistantReader) CheckpointStatus(ctx context.Context) (assistant.CheckpointSnapshot, error) {
-	env, err := r.getEnvironment(ctx, r.env.Runtime, r.env.Name)
-	if err != nil {
-		return assistant.CheckpointSnapshot{}, err
-	}
-	if env.UID != r.env.UID {
-		return assistant.CheckpointSnapshot{}, fmt.Errorf("assistant environment changed")
-	}
-	return assistantCheckpointSnapshot(r.entry, env), nil
-}
-
-func (r *environmentAssistantReader) ListEnvironmentFiles(ctx context.Context, path string, offset, limit int) (assistant.EnvironmentFiles, error) {
-	entries, total, err := r.client.ListPodFiles(ctx, r.env.Namespace, r.env.WorkspacePod, path, offset, limit)
-	if err != nil {
-		return assistant.EnvironmentFiles{}, err
-	}
-	return assistant.EnvironmentFiles{Path: path, Offset: offset, Entries: entries, Total: total, HasMore: offset+len(entries) < total}, nil
-}
-
-func (r *environmentAssistantReader) ReadEnvironmentFile(ctx context.Context, path string, offset int64, maxBytes int) (assistant.EnvironmentFile, error) {
-	content, size, err := r.client.ReadPodFile(ctx, r.env.Namespace, r.env.WorkspacePod, path, offset, maxBytes)
-	if err != nil {
-		return assistant.EnvironmentFile{}, err
-	}
-	nextOffset := offset + int64(len([]byte(content)))
-	return assistant.EnvironmentFile{Path: path, Offset: offset, Content: content, Size: size, NextOffset: nextOffset, HasMore: nextOffset < size}, nil
-}
-
-func (r *environmentAssistantReader) Solution(context.Context) (string, error) {
-	return r.content.Solution, nil
 }

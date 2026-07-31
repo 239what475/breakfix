@@ -5,38 +5,38 @@ health_port: 8081
 
 data_dir: /var/lib/breakfix
 database_url: ${BREAKFIX_DATABASE_URL}
-agent_database_url: ${BREAKFIX_AGENT_DATABASE_URL}
-agent_database_role: breakfix_agent
 kubeconfig: ""
 
-registry_addr: registry.breakfix.internal/breakfix
-registry_insecure: false
-registry_pull_secret: breakfix-registry-pull
-registry_write_secret: breakfix-registry-write
-builder_image: ghcr.io/breakfix/breakfix-builder:dev
-publisher_image: ghcr.io/breakfix/breakfix-publisher:dev
-verifier_image: ghcr.io/breakfix/breakfix-verifier:dev
+registry:
+  address: ${BREAKFIX_REGISTRY_ADDR}
+  pull_secret: ${BREAKFIX_REGISTRY_PULL_SECRET}
+  trust_bundle_file: ${BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE}
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh
 vcluster_chart_version: "0.35.1"
 
-server_host: breakfix-server
 ui_origin: ${BREAKFIX_UI_ORIGIN}
 namespace: breakfix
 crd_namespace: breakfix-system
 cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
-internal_api_key: ${BREAKFIX_INTERNAL_API_KEY}
-verification_grant_key: ${BREAKFIX_VERIFICATION_GRANT_KEY}
+internal_workers:
+  agent: ${BREAKFIX_AGENT_WORKER_API_KEY}
+  builder: ${BREAKFIX_BUILDER_WORKER_API_KEY}
+  publisher: ${BREAKFIX_PUBLISHER_WORKER_API_KEY}
+  verifier: ${BREAKFIX_VERIFIER_WORKER_API_KEY}
+
+worker:
+  server_url: http://breakfix-server:9090
+  api_key_env: BREAKFIX_WORKER_API_KEY
 
 agent:
   base_url: https://api.deepseek.com
   api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
   request_timeout: 2m
-  server_url: http://breakfix-server:9090
 
 opensandbox:
   base_url: ${BREAKFIX_OPENSANDBOX_BASE_URL}
@@ -44,3 +44,55 @@ opensandbox:
   namespace: ${BREAKFIX_OPENSANDBOX_NAMESPACE}
   workspace_image: ubuntu:22.04
   workspace_storage: 5Gi
+  workspace_cpu: 250m
+  workspace_memory: 256Mi
+  workspace_provision_timeout: 5m
+
+runtime:
+  node:
+    profile_revision: node-profile-v1
+    network_policy_revision: node-network-v1
+  k8s:
+    base_image_digest: ${BREAKFIX_K8S_BASE_IMAGE_DIGEST}
+    profile_revision: vk8s-profile-v1
+    version: v1.36.2
+    management_terminal_image: ${BREAKFIX_K8S_BASE_IMAGE_DIGEST}
+    resources:
+      control_plane_cpu: 500m
+      control_plane_memory: 512Mi
+      control_plane_ephemeral_storage: 10Gi
+      # The single-node Kind profile must leave room for the platform Pods,
+      # vcluster control plane, management terminal, and two test workloads.
+      workload_cpu: 250m
+      workload_memory: 512Mi
+      workload_ephemeral_storage: 3Gi
+      quota_cpu: "3"
+      quota_memory: 3Gi
+      quota_ephemeral_storage: 30Gi
+
+incus:
+  endpoint: ${BREAKFIX_INCUS_ENDPOINT}
+  tls:
+    server_certificate_file: /var/run/secrets/breakfix-incus/server.crt
+    client_certificate_file: /var/run/secrets/breakfix-incus/client.crt
+    client_key_file: /var/run/secrets/breakfix-incus/client.key
+  storage_pool: local
+  network_driver: bridge
+  build_project: breakfix-build
+  image_project: breakfix-images
+  base_image_alias: node-systemd-base-v1
+  base_image_fingerprint: ${BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT}
+  name_prefix: bf
+  max_nodes_per_environment: 4
+  node_cpu: "1"
+  node_memory: 512MiB
+  node_processes: 512
+  node_root_disk: 5GiB
+  node_network_pool: 10.240.0.0/16
+  node_network_prefix: 24
+  blocked_egress_cidrs:
+    - 10.0.0.0/8
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.168.0.0/16

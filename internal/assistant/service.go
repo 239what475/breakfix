@@ -47,10 +47,15 @@ func (c *conversation) prompt(userMessage string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	terminals, err := json.Marshal(c.request.Terminals)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(`当前挑战：%s（%s）
 运行时：%s；环境状态：%s
-当前终端窗口：%s
-打开的终端窗口：%s
+可用逻辑节点：%s
+当前终端：节点=%s，窗口=%s
+打开的终端：%s
 
 题目：
 %s
@@ -60,7 +65,7 @@ func (c *conversation) prompt(userMessage string) (string, error) {
 
 用户本次问题：
 %s`, c.request.ChallengeTitle, c.request.ChallengeID, c.request.Runtime, c.request.EnvironmentPhase,
-		c.request.CurrentWindow, strings.Join(c.request.OpenWindows, ", "), c.request.Problem, string(checkpoints), userMessage), nil
+		strings.Join(c.request.Nodes, ", "), c.request.CurrentNode, c.request.CurrentWindow, string(terminals), c.request.Problem, string(checkpoints), userMessage), nil
 }
 
 func (c *conversation) notify(event Event) {
@@ -88,19 +93,22 @@ func (c *conversation) evidence() []Evidence {
 
 func (c *conversation) tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
-		&assistantTool{name: "get_terminal_scrollback", desc: "读取当前用户指定 tmux 终端窗口的近期历史屏幕内容。只能观察命令、输出和报错，不能把某段输出断言为某条命令的完整结果。", params: map[string]*schema.ParameterInfo{
+		&assistantTool{name: "get_terminal_scrollback", desc: "读取当前用户指定逻辑节点和 tmux 终端窗口的近期历史屏幕内容。只能观察命令、输出和报错，不能把某段输出断言为某条命令的完整结果。", params: map[string]*schema.ParameterInfo{
+			"node":   {Type: schema.String, Desc: "Node 题的逻辑节点名；留空时使用当前节点。K8s 题不填写", Required: false},
 			"window": {Type: schema.String, Desc: "终端窗口名；留空时使用当前活动窗口", Required: false},
 			"offset": {Type: schema.Integer, Desc: "从窗口末尾跳过的行数，从 0 开始", Required: false},
 			"lines":  {Type: schema.Integer, Desc: "读取的行数", Required: false},
 		}, run: c.getTerminalScrollback},
 		&assistantTool{name: "get_checkpoint_status", desc: "读取 controller 最近保存的检查点快照。不会运行或重跑检查点。", params: map[string]*schema.ParameterInfo{}, run: c.getCheckpointStatus},
-		&assistantTool{name: "list_environment_files", desc: "列出当前用户 Pod 内某个目录的文件条目。只读，不修改环境。", params: map[string]*schema.ParameterInfo{
-			"path":   {Type: schema.String, Desc: "Pod 内目录路径；留空时使用根目录", Required: false},
+		&assistantTool{name: "list_environment_files", desc: "列出当前挑战环境中指定逻辑节点的目录条目。只读，不修改环境。", params: map[string]*schema.ParameterInfo{
+			"node":   {Type: schema.String, Desc: "Node 题的逻辑节点名；留空时使用当前节点。K8s 题不填写", Required: false},
+			"path":   {Type: schema.String, Desc: "环境内目录路径；留空时使用根目录", Required: false},
 			"offset": {Type: schema.Integer, Desc: "跳过的条目数，从 0 开始", Required: false},
 			"limit":  {Type: schema.Integer, Desc: "返回的最大条目数", Required: false},
 		}, run: c.listEnvironmentFiles},
-		&assistantTool{name: "read_environment_file", desc: "读取当前用户 Pod 内任意常规文件的一段内容。只读，不修改环境。", params: map[string]*schema.ParameterInfo{
-			"path":      {Type: schema.String, Desc: "Pod 内文件路径", Required: true},
+		&assistantTool{name: "read_environment_file", desc: "读取当前挑战环境中指定逻辑节点的任意常规文件片段。只读，不修改环境。", params: map[string]*schema.ParameterInfo{
+			"node":      {Type: schema.String, Desc: "Node 题的逻辑节点名；留空时使用当前节点。K8s 题不填写", Required: false},
+			"path":      {Type: schema.String, Desc: "环境内文件路径", Required: true},
 			"offset":    {Type: schema.Integer, Desc: "从文件开头跳过的字节数，从 0 开始", Required: false},
 			"max_bytes": {Type: schema.Integer, Desc: "读取的最大字节数", Required: false},
 		}, run: c.readEnvironmentFile},
@@ -110,6 +118,7 @@ func (c *conversation) tools() []tool.InvokableTool {
 
 func (c *conversation) getTerminalScrollback(ctx context.Context, raw string) (string, error) {
 	var args struct {
+		Node   string `json:"node"`
 		Window string `json:"window"`
 		Offset int    `json:"offset"`
 		Lines  int    `json:"lines"`
@@ -120,16 +129,20 @@ func (c *conversation) getTerminalScrollback(ctx context.Context, raw string) (s
 	if args.Window == "" {
 		args.Window = c.request.CurrentWindow
 	}
-	if !contains(c.request.OpenWindows, args.Window) {
-		return "", fmt.Errorf("terminal window %q is not open in this workspace", args.Window)
-	}
-	args.Offset = bounded(args.Offset, 0, 10000)
-	args.Lines = bounded(defaultInt(args.Lines, 120), 1, 250)
-	value, err := c.request.Reader.TerminalScrollback(ctx, args.Window, args.Offset, args.Lines)
+	node, err := c.resolveNode(args.Node)
 	if err != nil {
 		return "", err
 	}
-	c.record("terminal", "终端 "+args.Window+" 的近期输出")
+	if !terminalWindowOpen(c.request.Terminals, node, args.Window) {
+		return "", fmt.Errorf("terminal window %q is not open on node %q in this workspace", args.Window, node)
+	}
+	args.Offset = bounded(args.Offset, 0, 10000)
+	args.Lines = bounded(defaultInt(args.Lines, 120), 1, 250)
+	value, err := c.request.Reader.TerminalScrollback(ctx, node, args.Window, args.Offset, args.Lines)
+	if err != nil {
+		return "", err
+	}
+	c.record("terminal", terminalLabel(node, args.Window)+" 的近期输出")
 	return marshalToolResult(value)
 }
 
@@ -144,6 +157,7 @@ func (c *conversation) getCheckpointStatus(ctx context.Context, _ string) (strin
 
 func (c *conversation) listEnvironmentFiles(ctx context.Context, raw string) (string, error) {
 	var args struct {
+		Node   string `json:"node"`
 		Path   string `json:"path"`
 		Offset int    `json:"offset"`
 		Limit  int    `json:"limit"`
@@ -154,18 +168,23 @@ func (c *conversation) listEnvironmentFiles(ctx context.Context, raw string) (st
 	if args.Path == "" {
 		args.Path = "/"
 	}
-	args.Offset = bounded(args.Offset, 0, 10000)
-	args.Limit = bounded(defaultInt(args.Limit, 100), 1, 200)
-	value, err := c.request.Reader.ListEnvironmentFiles(ctx, args.Path, args.Offset, args.Limit)
+	node, err := c.resolveNode(args.Node)
 	if err != nil {
 		return "", err
 	}
-	c.record("file", "查看环境目录 "+args.Path)
+	args.Offset = bounded(args.Offset, 0, 10000)
+	args.Limit = bounded(defaultInt(args.Limit, 100), 1, 200)
+	value, err := c.request.Reader.ListEnvironmentFiles(ctx, node, args.Path, args.Offset, args.Limit)
+	if err != nil {
+		return "", err
+	}
+	c.record("file", nodeLabel(node)+"查看环境目录 "+args.Path)
 	return marshalToolResult(value)
 }
 
 func (c *conversation) readEnvironmentFile(ctx context.Context, raw string) (string, error) {
 	var args struct {
+		Node     string `json:"node"`
 		Path     string `json:"path"`
 		Offset   int64  `json:"offset"`
 		MaxBytes int    `json:"max_bytes"`
@@ -176,15 +195,19 @@ func (c *conversation) readEnvironmentFile(ctx context.Context, raw string) (str
 	if strings.TrimSpace(args.Path) == "" {
 		return "", errors.New("path is required")
 	}
+	node, err := c.resolveNode(args.Node)
+	if err != nil {
+		return "", err
+	}
 	if args.Offset < 0 {
 		args.Offset = 0
 	}
 	args.MaxBytes = bounded(defaultInt(args.MaxBytes, 16384), 1, 32768)
-	value, err := c.request.Reader.ReadEnvironmentFile(ctx, args.Path, args.Offset, args.MaxBytes)
+	value, err := c.request.Reader.ReadEnvironmentFile(ctx, node, args.Path, args.Offset, args.MaxBytes)
 	if err != nil {
 		return "", err
 	}
-	c.record("file", "读取环境文件 "+args.Path)
+	c.record("file", nodeLabel(node)+"读取环境文件 "+args.Path)
 	return marshalToolResult(value)
 }
 
@@ -214,6 +237,49 @@ func contains(values []string, target string) bool {
 	return false
 }
 
+func (c *conversation) resolveNode(raw string) (string, error) {
+	node := strings.TrimSpace(raw)
+	if c.request.Runtime == "k8s" {
+		if node != "" {
+			return "", errors.New("k8s environment has no logical node selector")
+		}
+		return "", nil
+	}
+	if c.request.Runtime != "node" {
+		return "", fmt.Errorf("unsupported environment runtime %q", c.request.Runtime)
+	}
+	if node == "" {
+		node = c.request.CurrentNode
+	}
+	if !contains(c.request.Nodes, node) {
+		return "", fmt.Errorf("environment has no logical node %q", node)
+	}
+	return node, nil
+}
+
+func terminalWindowOpen(terminals []TerminalContext, node, window string) bool {
+	for _, terminal := range terminals {
+		if terminal.Node == node && contains(terminal.Windows, window) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeLabel(node string) string {
+	if node == "" {
+		return ""
+	}
+	return "节点 " + node + "："
+}
+
+func terminalLabel(node, window string) string {
+	if node == "" {
+		return "终端 " + window
+	}
+	return "节点 " + node + " 的终端 " + window
+}
+
 func defaultInt(value, fallback int) int {
 	if value == 0 {
 		return fallback
@@ -229,10 +295,6 @@ func bounded(value, min, max int) int {
 		return max
 	}
 	return value
-}
-
-func toolName(name string) string {
-	return strings.TrimPrefix(name, "mcp__eino-tools__")
 }
 
 type assistantTool struct {

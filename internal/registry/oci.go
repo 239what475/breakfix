@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,7 +62,7 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 	if err := os.MkdirAll(filepath.Join(layout, "blobs", "sha256"), 0755); err != nil {
 		return fmt.Errorf("create OCI blob directory: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout, "oci-layout"), []byte("{\"imageLayoutVersion\":\"1.0.0\"}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout, "oci-layout"), []byte("{\"imageLayoutVersion\":\"1.0.0\"}\n"), 0o600); err != nil {
 		return err
 	}
 
@@ -74,7 +75,7 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(layout, "index.json"), index, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout, "index.json"), index, 0o600); err != nil {
 		return err
 	}
 	if err := writeOCITar(layout, destination); err != nil {
@@ -133,7 +134,7 @@ func (c Client) pullBlob(ctx context.Context, registryAddress, repository string
 	if err != nil {
 		return fmt.Errorf("download registry blob %s: %w", descriptor.Digest, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("download registry blob %s: status %d", descriptor.Digest, response.StatusCode)
 	}
@@ -176,7 +177,7 @@ func (c Client) getManifest(ctx context.Context, registryAddress, repository, re
 	if err != nil {
 		return nil, "", "", fmt.Errorf("download registry manifest %s: %w", reference, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return nil, "", "", fmt.Errorf("download registry manifest %s: status %d", reference, response.StatusCode)
 	}
@@ -250,7 +251,7 @@ func (c Client) PushOCIArchive(ctx context.Context, imageName, archivePath strin
 	if err != nil {
 		return fmt.Errorf("publish registry manifest: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("publish registry manifest: status %d", response.StatusCode)
 	}
@@ -329,7 +330,7 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	if err != nil {
 		return fmt.Errorf("check registry blob %s: %w", digest, err)
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode == http.StatusOK {
 		return nil
 	}
@@ -347,7 +348,7 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	}
 	location := strings.TrimSpace(response.Header.Get("Location"))
 	status := response.StatusCode
-	response.Body.Close()
+	_ = response.Body.Close()
 	if status != http.StatusAccepted || location == "" {
 		return fmt.Errorf("start registry blob upload: status %d", status)
 	}
@@ -366,7 +367,7 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	finish, err := http.NewRequestWithContext(ctx, http.MethodPut, parsed.String(), file)
 	if err != nil {
 		return err
@@ -376,15 +377,17 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	if err != nil {
 		return fmt.Errorf("finish registry blob upload: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusCreated {
 		return fmt.Errorf("finish registry blob upload: status %d", response.StatusCode)
 	}
 	return nil
 }
 
-// ResolveImageDigest returns the Registry-authenticated immutable reference.
-func (c Client) ResolveImageDigest(ctx context.Context, imageName string) (string, error) {
+// ResolveImmutableReference returns the Registry-authenticated immutable OCI
+// reference for imageName. The result retains imageName's registry and
+// repository and replaces its tag (or digest) with the resolved digest.
+func (c Client) ResolveImmutableReference(ctx context.Context, imageName string) (string, error) {
 	if err := c.Credentials.Validate(); err != nil {
 		return "", err
 	}
@@ -402,7 +405,7 @@ func (c Client) ResolveImageDigest(ctx context.Context, imageName string) (strin
 	if err != nil {
 		return "", fmt.Errorf("resolve image manifest: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("resolve image manifest: status %d", response.StatusCode)
 	}
@@ -414,11 +417,7 @@ func (c Client) ResolveImageDigest(ctx context.Context, imageName string) (strin
 }
 
 func (c Client) registryURL(registryAddress, path string) string {
-	scheme := "https"
-	if c.Insecure {
-		scheme = "http"
-	}
-	return scheme + "://" + registryAddress + path
+	return "https://" + registryAddress + path
 }
 
 func (c Client) resolveLocation(registryAddress, location string) (string, error) {
@@ -427,13 +426,33 @@ func (c Client) resolveLocation(registryAddress, location string) (string, error
 		return "", err
 	}
 	if parsed.IsAbs() {
+		if parsed.Scheme != "https" {
+			return "", fmt.Errorf("registry upload location must use HTTPS")
+		}
 		return parsed.String(), nil
+	}
+	if parsed.Host != "" {
+		return "", fmt.Errorf("registry upload location must use HTTPS")
 	}
 	return c.registryURL(registryAddress, location), nil
 }
 
 func (c Client) httpClient() *http.Client {
-	return &http.Client{Timeout: 2 * time.Minute}
+	if c.httpClientOverride != nil {
+		return c.httpClientOverride
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.rootCAs}
+	return &http.Client{
+		Timeout:   2 * time.Minute,
+		Transport: transport,
+		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+			if request.URL.Scheme != "https" {
+				return fmt.Errorf("registry redirect must use HTTPS")
+			}
+			return nil
+		},
+	}
 }
 
 func writeOCIBlob(layout, digest string, data []byte) error {
@@ -443,7 +462,7 @@ func writeOCIBlob(layout, digest string, data []byte) error {
 	if digest != "sha256:"+sha256Hex(data) {
 		return fmt.Errorf("OCI blob %s digest mismatch", digest)
 	}
-	return os.WriteFile(ociBlobPath(layout, digest), data, 0644)
+	return os.WriteFile(ociBlobPath(layout, digest), data, 0o600)
 }
 
 func ociBlobPath(root, digest string) string {
@@ -466,14 +485,20 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func writeOCITar(root, destination string) error {
-	target, err := os.Create(destination)
+func writeOCITar(root, destination string) (result error) {
+	target, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer target.Close()
 	writer := tar.NewWriter(target)
-	defer writer.Close()
+	defer func() {
+		if err := writer.Close(); err != nil && result == nil {
+			result = fmt.Errorf("close OCI tar writer: %w", err)
+		}
+		if err := target.Close(); err != nil && result == nil {
+			result = fmt.Errorf("close OCI tar destination: %w", err)
+		}
+	}()
 	paths := make([]string, 0)
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -518,14 +543,14 @@ func writeOCITar(root, destination string) error {
 }
 
 // ExtractOCIArchive extracts a single-platform OCI archive into root. It is
-// intentionally strict because Publisher receives bytes produced after
-// untrusted Dockerfile execution.
+// intentionally strict because Publisher receives an immutable archive from a
+// separate Builder process.
 func ExtractOCIArchive(archivePath, root string) error {
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	reader := tar.NewReader(file)
 	for {
 		header, err := reader.Next()
@@ -546,16 +571,17 @@ func ExtractOCIArchive(archivePath, root string) error {
 			}
 			continue
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return fmt.Errorf("OCI archive contains unsupported entry %q", header.Name)
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
-		output, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		output, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return err
 		}
+		//nolint:gosec // Archive size is governed by the Server artifact upload contract.
 		_, copyErr := io.Copy(output, reader)
 		closeErr := output.Close()
 		if copyErr != nil {
@@ -584,25 +610,6 @@ func ValidateOCIArchive(archivePath string) error {
 	}
 	_, err = listOCIBlobs(root)
 	return err
-}
-
-// OCILayoutRootDigest returns the root descriptor digest from an extracted OCI
-// image layout. The descriptor must refer to a present blob with matching
-// content, so callers can safely pass the result to BuildKit's oci-layout
-// named-context syntax.
-func OCILayoutRootDigest(root string) (string, error) {
-	descriptor, err := loadOCIRootDescriptor(root)
-	if err != nil {
-		return "", err
-	}
-	manifest, err := os.ReadFile(ociBlobPath(root, descriptor.Digest))
-	if err != nil {
-		return "", fmt.Errorf("read OCI root manifest: %w", err)
-	}
-	if descriptor.Digest != "sha256:"+sha256Hex(manifest) {
-		return "", fmt.Errorf("OCI root manifest digest mismatch")
-	}
-	return descriptor.Digest, nil
 }
 
 func loadOCIRootDescriptor(root string) (ociDescriptor, error) {

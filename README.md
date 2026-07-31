@@ -1,23 +1,24 @@
 # Breakfix
 
-Breakfix 是一个在真实 Kubernetes 环境中进行运维练习的平台。用户在隔离的
-container 或 vcluster 环境中完成题目；检查点自动评估进度。作者通过 Agent
-工作流生成题目，再由真实 `VerifyTask` 构建、启动和验证后发布。
+Breakfix 是一个提供真实、可回收运维实验环境的练习平台。用户在隔离的
+`node` 或 `k8s` 环境中完成题目，检查点自动评估进度。作者通过 Agent
+工作流生成题目；候选会经过固定 Worker 的真实构建、产物发布和验证后，才可以发布。
 
 ## 架构
 
-- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录与作者工作流。
-- **Controller**：调和 Environment 和 VerifyTask CRD，管理 Pod、vcluster、构建和验证 Job。
-- **Agent Worker**：从 PostgreSQL 领取带租约的 Eino Agent Run，并通过受限内部 API 工作。
-- **PostgreSQL**：账户、学习记录、作者会话和 Agent Runtime 的权威存储。
-- **Registry**：保存验证阶段与已发布的 challenge image。
+- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、CandidateRevision 与 PostgreSQL worklist 的唯一写者。
+- **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和清理真实环境。
+- **固定 Worker**：Agent、Builder、Publisher、Verifier 各自从 Server 内部 API 领取带租约的 WorkItem。
+- **PostgreSQL**：账户、学习记录、作者会话、CandidateRevision 与 WorkItem 的权威存储。
+- **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是浏览器 API 的一部分。
 
 架构边界、数据所有权和恢复行为见 [系统架构](docs/architecture/system-architecture.md)。
 
 ## 本地开始
 
 前置条件：Docker、Kind、kubectl、Go、Node.js、PostgreSQL、`vcluster` CLI；生成题目时还需要
-OpenSandbox native Kubernetes provider 和模型/API 凭据。
+OpenSandbox native Kubernetes provider 和模型/API 凭据。运行 `node` 题还需要单独准备的 Incus provider，
+并通过 `make dev-incus` 建立平台基础镜像和角色证书。
 
 ```bash
 cp config/breakfix.example.yaml config/breakfix.yaml
@@ -25,8 +26,7 @@ cp config/breakfix.example.yaml config/breakfix.yaml
 make dev
 ```
 
-`make dev` 会构建本地镜像、安装 CRD/RBAC，并启动 Server、Controller 和 Agent Worker。
-界面默认位于 `http://localhost:9090`。本地配置含环境专属地址和密钥，不应提交。
+`make dev` 会构建本地二进制、安装 CRD/RBAC，并启动 Server、Controller 和四类固定 Worker。VK8s 需要一个正常 HTTPS 拉取的 OCI Registry：根部署包默认使用管理员提供内部 CA 的内置 Registry，也可使用 Harbor、云厂商 Registry 或其他外部服务。界面默认位于 `http://localhost:9090`。本地配置含环境专属地址和密钥，不应提交。
 
 接管已部署集群中的某个进程时，使用 [Telepresence 本地调试](docs/operations/telepresence.md)，
 不要同时运行同一组件的本地开发进程。

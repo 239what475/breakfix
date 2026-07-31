@@ -355,6 +355,23 @@
   min-width: 0;
   border-bottom: 1px solid var(--terminal-line);
 }
+.terminal-node-selector {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 38px;
+  gap: 7px;
+  padding: 0 9px;
+  border-right: 1px solid var(--terminal-line);
+  color: #aebbb6;
+}
+.terminal-node-selector select {
+  max-width: 150px;
+  border: 0;
+  color: #eff6f1;
+  background: #101719;
+  font: 11px "DM Mono", monospace;
+}
 .terminal-tab-list {
   display: flex;
   min-width: 0;

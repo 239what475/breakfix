@@ -2,22 +2,4 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - deploy/crd/breakfix.dev_containerenvironments.yaml
-  - deploy/crd/breakfix.dev_vclusterenvironments.yaml
-  - deploy/crd/breakfix.dev_verifytasks.yaml
-  - deploy/rbac/verifier.yaml
-  - deploy/runtime
-
-configMapGenerator:
-  - name: breakfix-config
-    files:
-      - config.yaml=config/breakfix.in-cluster.yaml
-
-patches:
-  - target:
-      kind: ConfigMap
-      name: breakfix-config
-    patch: |-
-      - op: add
-        path: /metadata/namespace
-        value: breakfix-system
+  - deploy/overlays/managed-registry

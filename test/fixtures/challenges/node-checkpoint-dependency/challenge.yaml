@@ -1,0 +1,18 @@
+runtime: node
+title: Restore dependent configuration
+difficulty: easy
+description: Recreate a configuration file and the result derived from it.
+nodes:
+  - name: host
+    title: Configuration host
+checkpoints:
+  - id: configuration-ready
+    title: Configuration is present
+    description: The configuration enables the service.
+    hint: hints/configuration-ready.md
+    node: host
+  - id: derived-state-ready
+    title: Derived state is present
+    description: The generated state reflects the enabled configuration.
+    hint: hints/derived-state-ready.md
+    node: host

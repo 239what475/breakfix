@@ -21,6 +21,20 @@ type Client struct {
 	http    *http.Client
 }
 
+type ResponseError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("server internal API: %s", e.Message)
+}
+
+func IsStatus(err error, status int) bool {
+	var responseErr *ResponseError
+	return errors.As(err, &responseErr) && responseErr.StatusCode == status
+}
+
 func New(serverURL, apiKey string) (*Client, error) {
 	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	if serverURL == "" {
@@ -40,14 +54,33 @@ func (c *Client) Post(ctx context.Context, path string, body any, output any) er
 	if c == nil || c.http == nil {
 		return errors.New("server internal client is not configured")
 	}
+	return c.postJSON(ctx, path, body, output, c.http)
+}
+
+// PostLong uses the request context as the sole deadline. Candidate archives
+// and base OCI images can legitimately take longer than the ordinary internal
+// API timeout, while the WorkItem deadline still bounds the operation.
+func (c *Client) PostLong(ctx context.Context, path string, body any, output any) error {
+	if c == nil || c.http == nil {
+		return errors.New("server internal client is not configured")
+	}
+	longHTTP := *c.http
+	longHTTP.Timeout = 0
+	return c.postJSON(ctx, path, body, output, &longHTTP)
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, body any, output any, httpClient *http.Client) error {
+	if c == nil || c.http == nil {
+		return errors.New("server internal client is not configured")
+	}
 	if !strings.HasPrefix(path, "/") {
 		return errors.New("internal API path must be absolute")
 	}
-	response, err := c.post(ctx, path, body, c.http)
+	response, err := c.post(ctx, path, body, httpClient)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if output == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
@@ -61,6 +94,9 @@ func (c *Client) Post(ctx context.Context, path string, body any, output any) er
 // separate from Post because long-running sandbox commands must not inherit
 // the Client's ordinary 30-second request timeout.
 func (c *Client) PostStream(ctx context.Context, path string, body any, consume func(json.RawMessage) error) error {
+	if c == nil || c.http == nil {
+		return errors.New("server internal client is not configured")
+	}
 	if consume == nil {
 		return errors.New("internal stream consumer is required")
 	}
@@ -70,7 +106,7 @@ func (c *Client) PostStream(ctx context.Context, path string, body any, consume 
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	decoder := json.NewDecoder(response.Body)
 	for {
 		var event json.RawMessage
@@ -116,7 +152,7 @@ func (c *Client) post(ctx context.Context, path string, body any, httpClient *ht
 		if failure.Error == "" {
 			failure.Error = response.Status
 		}
-		return nil, fmt.Errorf("server internal API: %s", failure.Error)
+		return nil, &ResponseError{StatusCode: response.StatusCode, Message: failure.Error}
 	}
 	return response, nil
 }

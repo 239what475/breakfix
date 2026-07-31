@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./runtime",
+  globalSetup: "./global-setup.ts",
   timeout: 30_000,
   workers: 1,
   outputDir: "./results/runtime",

@@ -14,7 +14,9 @@ type PVCManager interface {
 }
 
 type SandboxManager interface {
-	CreateWorkspace(context.Context, string) (string, error)
+	FindWorkspace(context.Context, string) (string, bool, error)
+	CreateWorkspace(context.Context, string, string) (string, error)
+	WaitWorkspace(context.Context, string) error
 	DeleteWorkspace(context.Context, string) error
 }
 
@@ -81,18 +83,39 @@ func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, e
 	if record.State == StateDeleted || record.State == StateDeleting {
 		return nil, fmt.Errorf("generator workspace is %s", record.State)
 	}
-	if err := m.pvcs.EnsureWorkspacePVC(ctx, record.Namespace, record.PVCName, record.GeneratorRunID, m.storage); err != nil {
+	provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
+	defer cancel()
+	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.GeneratorRunID, m.storage); err != nil {
 		return nil, fmt.Errorf("ensure generator workspace pvc: %w", err)
 	}
 	if record.State == StateActive && strings.TrimSpace(record.SandboxID) != "" {
 		return record, nil
 	}
-	sandboxID, err := m.sandboxes.CreateWorkspace(ctx, record.PVCName)
-	if err != nil {
-		return nil, fmt.Errorf("create generator sandbox: %w", err)
+	if strings.TrimSpace(record.SandboxID) == "" {
+		sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.GeneratorRunID)
+		if err != nil {
+			return nil, fmt.Errorf("find generator sandbox: %w", err)
+		}
+		if !found {
+			sandboxID, err = m.sandboxes.CreateWorkspace(provisionCtx, record.PVCName, record.GeneratorRunID)
+			if err != nil {
+				return nil, fmt.Errorf("create generator sandbox: %w", err)
+			}
+		}
+		if err := m.repo.RecordGeneratorWorkspaceSandbox(provisionCtx, record.GeneratorRunID, sandboxID, m.now()); err != nil {
+			_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
+			return nil, fmt.Errorf("record generator sandbox: %w", err)
+		}
+		record, err = m.repo.GetGeneratorWorkspace(provisionCtx, record.GeneratorRunID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err := m.repo.ActivateGeneratorWorkspace(ctx, record.GeneratorRunID, sandboxID, m.now()); err != nil {
-		_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
+	if err := m.sandboxes.WaitWorkspace(provisionCtx, record.SandboxID); err != nil {
+		return nil, fmt.Errorf("wait for generator sandbox: %w", err)
+	}
+	if err := m.repo.ActivateGeneratorWorkspace(provisionCtx, record.GeneratorRunID, record.SandboxID, m.now()); err != nil {
+		_ = m.sandboxes.DeleteWorkspace(context.Background(), record.SandboxID)
 		return nil, fmt.Errorf("record generator sandbox: %w", err)
 	}
 	return m.repo.GetGeneratorWorkspace(ctx, record.GeneratorRunID)
@@ -109,8 +132,19 @@ func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(record.SandboxID) != "" {
-		if err := m.sandboxes.DeleteWorkspace(ctx, record.SandboxID); err != nil {
+	sandboxID := strings.TrimSpace(record.SandboxID)
+	if sandboxID == "" {
+		var found bool
+		sandboxID, found, err = m.sandboxes.FindWorkspace(ctx, record.GeneratorRunID)
+		if err != nil {
+			return fmt.Errorf("find generator sandbox for cleanup: %w", err)
+		}
+		if !found {
+			sandboxID = ""
+		}
+	}
+	if sandboxID != "" {
+		if err := m.sandboxes.DeleteWorkspace(ctx, sandboxID); err != nil {
 			return fmt.Errorf("delete generator sandbox: %w", err)
 		}
 	}
@@ -142,4 +176,14 @@ func (m *Manager) CleanupDue(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) provisionContext(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+	remaining := deadline.Sub(m.now())
+	if remaining <= 0 {
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		return cancelled, func() {}
+	}
+	return context.WithTimeout(ctx, remaining)
 }

@@ -40,9 +40,9 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 		return nil, fmt.Errorf("insert authoring agent session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
-		(id, user_id, runtime_session_id, generator_session_id, generator_run_id, state, current_revision, visible_revision, verify_task_id, publish_challenge_id, last_error, created_at, updated_at)
+		(id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision, publish_challenge_id, last_error, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.RuntimeSessionID, "", "", session.State, session.CurrentRevision, session.VisibleRevision, "", "", "", nowText(now), nowText(now)); err != nil {
+		session.ID, session.UserID, session.RuntimeSessionID, "", "", "", session.State, session.CurrentRevision, session.VisibleRevision, "", "", nowText(now), nowText(now)); err != nil {
 		return nil, fmt.Errorf("insert authoring session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, created_at)
@@ -56,20 +56,20 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 }
 
 func (d *DB) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, state, current_revision, visible_revision,
-		verify_task_id, publish_challenge_id, last_error, created_at, updated_at
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
 }
 
 func (d *DB) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, state, current_revision, visible_revision,
-		verify_task_id, publish_challenge_id, last_error, created_at, updated_at
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE user_id = ? AND state != ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
 }
 
 func (d *DB) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, state, current_revision, visible_revision,
-		verify_task_id, publish_challenge_id, last_error, created_at, updated_at
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at
 		FROM authoring_sessions WHERE id = ?`, id)
 }
 
@@ -78,8 +78,8 @@ func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any
 	var state string
 	var createdAt, updatedAt string
 	err := d.conn.QueryRowContext(ctx, query, args...).Scan(
-		&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID, &session.GeneratorRunID, &state, &session.CurrentRevision, &session.VisibleRevision,
-		&session.VerifyTaskID, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt,
+		&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID, &session.GeneratorRunID, &session.CandidateRevisionID,
+		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
@@ -94,12 +94,11 @@ func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any
 }
 
 func (d *DB) GetAuthoringRevision(ctx context.Context, sessionID string, revision int64) (*authoring.Revision, error) {
-	var planJSON, artifactID, artifactDir, artifactGeneratorRun, verificationJSON, createdAt string
+	var planJSON, candidateRevisionID, createdAt string
 	var number int64
-	err := d.conn.QueryRowContext(ctx, `SELECT revision, plan_json, artifact_submission_id, artifact_dir,
-		artifact_generator_run_id, verification_json, created_at FROM authoring_revisions
+	err := d.conn.QueryRowContext(ctx, `SELECT revision, plan_json, candidate_revision_id, created_at FROM authoring_revisions
 		WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(
-		&number, &planJSON, &artifactID, &artifactDir, &artifactGeneratorRun, &verificationJSON, &createdAt,
+		&number, &planJSON, &candidateRevisionID, &createdAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
@@ -107,26 +106,15 @@ func (d *DB) GetAuthoringRevision(ctx context.Context, sessionID string, revisio
 	if err != nil {
 		return nil, fmt.Errorf("read authoring revision: %w", err)
 	}
-	return decodeAuthoringRevision(number, planJSON, artifactID, artifactDir, artifactGeneratorRun, verificationJSON, createdAt)
+	return decodeAuthoringRevision(number, planJSON, candidateRevisionID, createdAt)
 }
 
-func decodeAuthoringRevision(number int64, planJSON, artifactID, artifactDir, artifactGeneratorRun, verificationJSON, createdAt string) (*authoring.Revision, error) {
+func decodeAuthoringRevision(number int64, planJSON, candidateRevisionID, createdAt string) (*authoring.Revision, error) {
 	var plan authoring.Plan
 	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
 		return nil, fmt.Errorf("decode authoring plan: %w", err)
 	}
-	revision := &authoring.Revision{Number: number, Plan: plan, CreatedAt: parseAuthoringTime(createdAt)}
-	if artifactID != "" {
-		revision.Artifact = &authoring.Artifact{SubmissionID: artifactID, Directory: artifactDir, GeneratorRunID: artifactGeneratorRun}
-	}
-	if verificationJSON != "" {
-		var verification authoring.Verification
-		if err := json.Unmarshal([]byte(verificationJSON), &verification); err != nil {
-			return nil, fmt.Errorf("decode authoring verification: %w", err)
-		}
-		revision.Verification = &verification
-	}
-	return revision, nil
+	return &authoring.Revision{Number: number, Plan: plan, CandidateRevisionID: candidateRevisionID, CreatedAt: parseAuthoringTime(createdAt)}, nil
 }
 
 // StartAuthoringRun atomically records a user message, creates its durable
@@ -328,7 +316,7 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, claim agentruntime.Claim,
 		}
 		nextState := authoring.NextPlanRevisionState(session.State)
 		if nextState == authoring.StateRevisingAndVerifying {
-			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, generator_run_id = '', verify_task_id = '', last_error = '', updated_at = ? WHERE id = ?`,
+			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, generator_run_id = '', candidate_revision_id = '', last_error = '', updated_at = ? WHERE id = ?`,
 				next, nextState, nowText(now), session.ID); err != nil {
 				return nil, fmt.Errorf("update finalized authoring session: %w", err)
 			}
@@ -420,13 +408,11 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 		VALUES (?, ?, ?, ?)`, sessionID, next, string(planJSON), nowText(now)); err != nil {
 		return nil, fmt.Errorf("insert authoring revision: %w", err)
 	}
-	// A revision derived from an already verified artifact must detach the old
-	// verification before it becomes visible to the reconciler. Otherwise a
-	// concurrent sync can apply the previous VerifyTask success to this new,
-	// unverified revision.
+	// A changed intent starts a new candidate lineage while the previous
+	// verified revision remains author-visible until its replacement passes.
 	if state == authoring.StateRevisingAndVerifying {
 		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-			SET current_revision = ?, state = ?, generator_run_id = '', verify_task_id = '', last_error = '', updated_at = ?
+				SET current_revision = ?, state = ?, generator_run_id = '', candidate_revision_id = '', last_error = '', updated_at = ?
 			WHERE id = ? AND user_id = ?`, next, state, nowText(now), sessionID, userID); err != nil {
 			return nil, fmt.Errorf("update authoring session revision: %w", err)
 		}
@@ -440,215 +426,9 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 	return &authoring.Revision{Number: next, Plan: plan, CreatedAt: now}, nil
 }
 
-// RecordGeneratorVerificationInfrastructureFailure preserves the immutable
-// candidate and report. Infrastructure failure cannot be repaired by asking
-// the Generator to change challenge files.
-func (d *DB) RecordGeneratorVerificationInfrastructureFailure(ctx context.Context, sessionID, generatorRunID string, verification authoring.Verification) error {
-	if verification.TaskID == "" || verification.Phase != "Failed" || verification.Report == nil || verification.Report.Class != authoring.VerificationFailureInfrastructure {
-		return authoring.ErrInvalidState
-	}
-	verificationJSON, err := json.Marshal(verification)
-	if err != nil {
-		return fmt.Errorf("marshal infrastructure verification: %w", err)
-	}
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	session, err := readAuthoringSessionTx(ctx, tx, sessionID, "")
-	if err != nil {
-		return err
-	}
-	if session.State == authoring.StateVerificationInfrastructureFailed && session.GeneratorRunID == generatorRunID && session.VerifyTaskID == verification.TaskID {
-		return tx.Commit()
-	}
-	if session.GeneratorRunID != generatorRunID || session.VerifyTaskID != verification.TaskID ||
-		(session.State != authoring.StateGeneratingAndVerifying && session.State != authoring.StateRevisingAndVerifying) {
-		return authoring.ErrInvalidState
-	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET verification_json = ?
-		WHERE session_id = ? AND revision = ?`, string(verificationJSON), sessionID, session.CurrentRevision); err != nil {
-		return fmt.Errorf("store infrastructure verification report: %w", err)
-	}
-	lastError := verification.ReportSummary()
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`,
-		authoring.StateVerificationInfrastructureFailed, lastError, nowText(now), sessionID); err != nil {
-		return fmt.Errorf("mark infrastructure verification failure: %w", err)
-	}
-	return tx.Commit()
-}
-
-func (d *DB) CompleteGeneratorVerification(ctx context.Context, sessionID, generatorRunID string, artifact authoring.Artifact, verification authoring.Verification) error {
-	if artifact.SubmissionID == "" || artifact.Directory == "" || verification.TaskID == "" || verification.Phase != "Succeeded" {
-		return authoring.ErrInvalidState
-	}
-	verificationJSON, err := json.Marshal(verification)
-	if err != nil {
-		return err
-	}
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	session, err := readAuthoringSessionTx(ctx, tx, sessionID, "")
-	if err != nil {
-		return err
-	}
-	if session.State == authoring.StateAwaitingVerifiedReview && session.VisibleRevision == session.CurrentRevision && session.VerifyTaskID == verification.TaskID {
-		return tx.Commit()
-	}
-	if session.GeneratorRunID != generatorRunID || session.VerifyTaskID != verification.TaskID ||
-		(session.State != authoring.StateGeneratingAndVerifying && session.State != authoring.StateRevisingAndVerifying) {
-		return authoring.ErrInvalidState
-	}
-	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET artifact_submission_id = ?, artifact_dir = ?, artifact_generator_run_id = ?, verification_json = ?
-		WHERE session_id = ? AND revision = ? AND artifact_submission_id = ''`,
-		artifact.SubmissionID, artifact.Directory, artifact.GeneratorRunID, string(verificationJSON), sessionID, session.CurrentRevision)
-	if err != nil {
-		return fmt.Errorf("store verified authoring artifact: %w", err)
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return authoring.ErrInvalidState
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, visible_revision = ?, last_error = '', updated_at = ? WHERE id = ?`,
-		authoring.StateAwaitingVerifiedReview, session.CurrentRevision, nowText(now), sessionID); err != nil {
-		return fmt.Errorf("mark verified authoring revision: %w", err)
-	}
-	return tx.Commit()
-}
-
-func (d *DB) BeginPublish(ctx context.Context, sessionID, userID string, revision int64, challengeID string) (*authoring.Revision, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	session, err := readAuthoringSessionTx(ctx, tx, sessionID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if session.State != authoring.StateAwaitingVerifiedReview || session.CurrentRevision != revision || session.VisibleRevision != revision || challengeID == "" {
-		return nil, authoring.ErrInvalidState
-	}
-	stored, err := readAuthoringRevisionTx(ctx, tx, sessionID, revision)
-	if err != nil {
-		return nil, err
-	}
-	if stored.Artifact == nil || stored.Verification == nil || stored.Verification.Phase != "Succeeded" {
-		return nil, authoring.ErrInvalidState
-	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, publish_challenge_id = ?, last_error = '', updated_at = ? WHERE id = ?`, authoring.StatePublishing, challengeID, nowText(now), sessionID); err != nil {
-		return nil, fmt.Errorf("begin authoring publish: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return stored, nil
-}
-
-func (d *DB) CompletePublish(ctx context.Context, sessionID, userID string, revision int64, challengeID string) error {
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	session, err := readAuthoringSessionTx(ctx, tx, sessionID, userID)
-	if err != nil {
-		return err
-	}
-	if session.State != authoring.StatePublishing || session.CurrentRevision != revision || session.VisibleRevision != revision {
-		return authoring.ErrInvalidState
-	}
-	stored, err := readAuthoringRevisionTx(ctx, tx, sessionID, revision)
-	if err != nil {
-		return err
-	}
-	if stored.Verification == nil || stored.Artifact == nil {
-		return authoring.ErrInvalidState
-	}
-	stored.Verification.ChallengeID = challengeID
-	verificationJSON, err := json.Marshal(stored.Verification)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET verification_json = ? WHERE session_id = ? AND revision = ?`, string(verificationJSON), sessionID, revision); err != nil {
-		return fmt.Errorf("store published challenge reference: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, updated_at = ? WHERE id = ?`, authoring.StatePublished, nowText(now), sessionID); err != nil {
-		return fmt.Errorf("complete authoring publish: %w", err)
-	}
-	return tx.Commit()
-}
-
-func (d *DB) AbortPublish(ctx context.Context, sessionID, userID, message string) error {
-	result, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, last_error = ?, updated_at = ?
-		WHERE id = ? AND user_id = ? AND state = ?`, authoring.StateAwaitingVerifiedReview, message, nowText(time.Now().UTC()), sessionID, userID, authoring.StatePublishing)
-	if err != nil {
-		return fmt.Errorf("abort authoring publish: %w", err)
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return authoring.ErrInvalidState
-	}
-	return nil
-}
-
-func (d *DB) FindLatestAuthoringArtifact(ctx context.Context, sessionID string, revision int64) (*authoring.Artifact, error) {
-	var artifact authoring.Artifact
-	err := d.conn.QueryRowContext(ctx, `SELECT artifact_submission_id, artifact_dir, artifact_generator_run_id
-		FROM authoring_revisions WHERE session_id = ? AND revision <= ? AND artifact_submission_id != ''
-		ORDER BY revision DESC LIMIT 1`, sessionID, revision).Scan(&artifact.SubmissionID, &artifact.Directory, &artifact.GeneratorRunID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find latest authoring artifact: %w", err)
-	}
-	return &artifact, nil
-}
-
-func (d *DB) SetAuthoringState(ctx context.Context, sessionID string, state authoring.SessionState, lastError string) error {
-	result, err := d.conn.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`,
-		state, lastError, nowText(time.Now().UTC()), sessionID)
-	if err != nil {
-		return err
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return authoring.ErrNotFound
-	}
-	return nil
-}
-
-func (d *DB) ListAuthoringSessionsNeedingSync(ctx context.Context) ([]string, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT id FROM authoring_sessions
-		WHERE state IN (?, ?, ?)
-		ORDER BY updated_at`,
-		authoring.StateGeneratingAndVerifying,
-		authoring.StateRevisingAndVerifying,
-		authoring.StatePublishing)
-	if err != nil {
-		return nil, fmt.Errorf("list authoring sessions needing sync: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	ids := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {
-	query := `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, state, current_revision, visible_revision,
-		verify_task_id, publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
+	query := `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
 	args := []any{id}
 	if userID != "" {
 		query += " AND user_id = ?"
@@ -656,8 +436,9 @@ func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*au
 	}
 	var session authoring.Session
 	var state, createdAt, updatedAt string
-	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID, &session.GeneratorRunID, &state,
-		&session.CurrentRevision, &session.VisibleRevision, &session.VerifyTaskID, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID,
+		&session.GeneratorRunID, &session.CandidateRevisionID, &state, &session.CurrentRevision, &session.VisibleRevision,
+		&session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
@@ -671,16 +452,16 @@ func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*au
 }
 
 func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, revision int64) (*authoring.Revision, error) {
-	var planJSON, artifactID, artifactDir, artifactGeneratorRun, verificationJSON, createdAt string
-	err := tx.QueryRowContext(ctx, `SELECT plan_json, artifact_submission_id, artifact_dir, artifact_generator_run_id, verification_json, created_at
-		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(&planJSON, &artifactID, &artifactDir, &artifactGeneratorRun, &verificationJSON, &createdAt)
+	var planJSON, candidateRevisionID, createdAt string
+	err := tx.QueryRowContext(ctx, `SELECT plan_json, candidate_revision_id, created_at
+		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(&planJSON, &candidateRevisionID, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeAuthoringRevision(revision, planJSON, artifactID, artifactDir, artifactGeneratorRun, verificationJSON, createdAt)
+	return decodeAuthoringRevision(revision, planJSON, candidateRevisionID, createdAt)
 }
 
 func nowText(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }

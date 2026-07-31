@@ -15,8 +15,12 @@ if [ -n "${KUBECONFIG:-}" ]; then
   done
 fi
 
-if [ ! -f "$sentinel" ] && [ -x "$generate_script" ]; then
-  "$generate_script"
+if [ ! -f "$sentinel" ]; then
+  if [ ! -f "$generate_script" ]; then
+    printf 'missing Kubernetes generator %s\n' "$generate_script" >&2
+    exit 1
+  fi
+  /bin/bash "$generate_script"
   touch "$sentinel"
 fi
 

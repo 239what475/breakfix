@@ -39,7 +39,7 @@ Catalog 公开展示已经通过 exact taxonomy mapping 的题目摘要，并按
 
 作者在同一页面完成自然语言讨论、题意约定和已验证 revision 审核。左侧内容面板只读，右侧是对话；修改题意或检查点只能通过 agent 的受控领域操作，不能直接编辑题目文件。
 
-作者明确确认后，系统生成题目并进行真实 VerifyTask 验证。验证失败由内部 generator/judge 循环修复，作者不会看到未经验证的代码产物。验证成功后，作者可以查看题目资产、检查点、diff 和验证摘要，再显式发布。
+作者明确确认后，系统生成题目，并通过 `Build -> ArtifactPublish -> Verify` 在真实环境中验证。候选 artifact 失败会由内部 generator/judge 循环修复，作者不会看到未经验证的代码产物。验证成功后，作者可以查看题目资产、检查点、diff 和验证摘要，再显式发布。
 
 <img src="../assets/authoring-workspace-sketch.png" alt="作者工作台信息架构草图" width="100%">
 

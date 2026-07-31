@@ -16,11 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/k8s"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
-	"github.com/gorilla/websocket"
-	"k8s.io/client-go/tools/remotecommand"
 	"log/slog"
+
+	"github.com/breakfix/breakfix/internal/incusprovider"
+	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/gorilla/websocket"
 )
 
 type wsMsg struct {
@@ -41,14 +42,29 @@ type terminalSocketLifecycle struct {
 	close     func()
 }
 
-func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *activeEnvironment, k8sClient *k8s.Client, runtime *environmentRuntimeAdapter, cooldownMin int, windowName string, lifecycle terminalSocketLifecycle) {
+type NodeTerminalProvider interface {
+	ExecNodePTY(context.Context, incusprovider.ExecNodePTYRequest) error
+	CloseNodePTYWindow(context.Context, incusprovider.CloseNodePTYWindowRequest) error
+	ExecNode(context.Context, incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error)
+}
+
+// NodeProviderReadiness is intentionally separate from terminal operations.
+// The concrete Incus client exposes this so Server can report whether the
+// Node runtime is currently usable without broadening the terminal contract.
+type NodeProviderReadiness interface {
+	Preflight(context.Context) (incusprovider.PreflightResult, error)
+}
+
+type terminalStream func(context.Context, io.Reader, io.Writer, <-chan terminal.Size) error
+
+func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *activeEnvironment, runtime *environmentRuntimeAdapter, cooldownMin int, stream terminalStream, lifecycle terminalSocketLifecycle) {
 	upgrader := terminalUpgrader(uiOrigin)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade", "err", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	terminalCtx, cancelTerminal := context.WithCancel(r.Context())
 	defer cancelTerminal()
 	if lifecycle.open != nil {
@@ -73,13 +89,13 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 		go keepTerminalConnectionAlive(terminalCtx, conn, stopHeartbeat)
 	}
 
-	resizeCh := make(chan remotecommand.TerminalSize, 4)
+	resizeCh := make(chan terminal.Size, 4)
 	stdinR, stdinW := io.Pipe()
 	output := &wsWriter{conn: conn}
 
 	// Read from WebSocket → pipe to PTY stdin
 	go func() {
-		defer stdinW.Close()
+		defer func() { _ = stdinW.Close() }()
 		defer cancelTerminal()
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -88,12 +104,14 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 			}
 			var m wsMsg
 			if err := json.Unmarshal(msg, &m); err != nil {
-				stdinW.Write(msg)
+				if _, writeErr := stdinW.Write(msg); writeErr != nil {
+					return
+				}
 				continue
 			}
 			if m.Type == "resize" {
 				select {
-				case resizeCh <- remotecommand.TerminalSize{Width: uint16(m.Cols), Height: uint16(m.Rows)}:
+				case resizeCh <- terminal.Size{Width: uint16(m.Cols), Height: uint16(m.Rows)}:
 				default:
 				}
 				continue
@@ -106,14 +124,17 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 		}
 	}()
 
-	sessionName := fmt.Sprintf("breakfix-%s", env.Name)
 	stopLease := make(chan struct{})
 	defer close(stopLease)
 	idleTTL := environmentIdleTTL(env, time.Duration(cooldownMin)*time.Minute)
 	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
 		go keepEnvironmentLeaseAlive(terminalCtx, runtime, env.Name, idleTTL, stopLease)
 	}
-	err = k8sClient.ExecPTY(terminalCtx, stdinR, output, output, resizeCh, env.Namespace, env.WorkspacePod, sessionName, windowName)
+	if stream == nil {
+		err = fmt.Errorf("terminal stream is not configured")
+	} else {
+		err = stream(terminalCtx, stdinR, output, resizeCh)
+	}
 
 	if err != nil {
 		slog.Debug("pty session ended", "err", err)
@@ -241,6 +262,11 @@ func parseTerminalWindow(raw string) (string, error) {
 		return "", fmt.Errorf("invalid terminal window")
 	}
 	return raw, nil
+}
+
+func terminalSessionName(environmentUID string) string {
+	sum := sha256.Sum256([]byte(environmentUID))
+	return "bf-" + hex.EncodeToString(sum[:10])
 }
 
 func keepEnvironmentLeaseAlive(ctx context.Context, runtime *environmentRuntimeAdapter, environmentName string, idleTTL time.Duration, stop <-chan struct{}) {

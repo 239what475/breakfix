@@ -19,11 +19,8 @@ var (
 
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&ContainerEnvironment{}, &ContainerEnvironmentList{},
-		&VClusterEnvironment{}, &VClusterEnvironmentList{},
 		&NodeEnvironment{}, &NodeEnvironmentList{},
 		&VK8sEnvironment{}, &VK8sEnvironmentList{},
-		&VerifyTask{}, &VerifyTaskList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

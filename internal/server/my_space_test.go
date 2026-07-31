@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/generator"
 	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/worklist"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,7 +27,9 @@ import (
 
 func TestMySpaceRequiresJWT(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	router, err := SetupRouter(context.Background(), handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil)
+	runCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	router, err := SetupRouter(runCtx, handler.db, handler.k8s, config.Config{DataDir: handler.dataDir, CRDNamespace: "breakfix-system", JWTSecret: "test-secret"}, nil, Dependencies{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,20 +43,15 @@ func TestMySpaceRequiresJWT(t *testing.T) {
 
 func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	readyAt := time.Date(2026, time.July, 24, 10, 0, 0, 0, time.UTC)
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		ObjectMeta: metav1.ObjectMeta{Name: "environment-demo", UID: types.UID("environment-demo-uid")},
-		Spec:       breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status: breakfixv1.CommonEnvironmentStatus{
-			Phase:     breakfixv1.EnvironmentReady,
-			ReadyAt:   &metav1.Time{Time: readyAt},
-			ExpiresAt: &metav1.Time{Time: readyAt.Add(10 * time.Minute)},
-			Checkpoints: &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
-				ID: "complete", Passed: true, Summary: "done",
-			}}},
-		},
-	}})
+	environment := testNodeEnvironment("environment-demo", breakfixv1.EnvironmentReady, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
+		ID: "complete", Passed: true, Summary: "done",
+	}}})
+	environment.UID = types.UID("environment-demo-uid")
+	environment.Status.Environment.ReadyAt = &metav1.Time{Time: readyAt}
+	environment.Status.Environment.ExpiresAt = &metav1.Time{Time: readyAt.Add(10 * time.Minute)}
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{environment})
 	ctx := context.Background()
-	if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", "demo", "environment-demo-uid", "container", readyAt); err != nil {
+	if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", "demo", "environment-demo-uid", "node", readyAt); err != nil {
 		t.Fatal(err)
 	}
 	if err := handler.db.OpenTerminalConnection(ctx, db.TerminalConnection{ID: "terminal-demo", EnvironmentUID: "environment-demo-uid", UserID: "u-demo", ChallengeID: "demo", ServerInstanceID: "server-test", ConnectedAt: readyAt}); err != nil {
@@ -72,7 +69,7 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 	if err := handler.db.RecordCheckpointFirstPass(ctx, db.CheckpointFirstPassEvent{EnvironmentUID: "environment-demo-uid", UserID: "u-demo", ChallengeID: "demo", ChallengeRevision: "revision-demo", CheckpointID: "complete", FirstPassedAt: readyAt.Add(time.Minute), Summary: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	createPublishedAuthoringSession(t, handler.db, "u-demo", "demo")
+	createPublishedAuthoringSession(t, handler, "u-demo", "demo")
 
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
@@ -112,11 +109,10 @@ func TestMySpaceCombinesDurableFactsCRDsAndFilesystemMetadata(t *testing.T) {
 
 func TestMySpaceQuotaCountsDeletingEnvironmentWithoutListingItAsActive(t *testing.T) {
 	deletingAt := metav1.NewTime(time.Date(2026, time.July, 24, 11, 0, 0, 0, time.UTC))
-	handler := newProgressTestHandler(t, []breakfixv1.ContainerEnvironment{{
-		ObjectMeta: metav1.ObjectMeta{Name: "deleting-environment", UID: types.UID("deleting-uid"), DeletionTimestamp: &deletingAt},
-		Spec:       breakfixv1.CommonEnvironmentSpec{ChallengeRef: "demo", UserRef: "u-demo"},
-		Status:     breakfixv1.CommonEnvironmentStatus{Phase: breakfixv1.EnvironmentReady},
-	}})
+	environment := testNodeEnvironment("deleting-environment", breakfixv1.EnvironmentReady, nil)
+	environment.UID = types.UID("deleting-uid")
+	environment.DeletionTimestamp = &deletingAt
+	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{environment})
 	response := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(response)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/me/space", nil)
@@ -143,9 +139,9 @@ func TestMySpaceLearningFiltersCatalogAndUsesStableCursor(t *testing.T) {
 		challengeID    string
 		runtime        string
 	}{
-		{"environment-c", "container-challenge", "container"},
-		{"environment-b", "vcluster-challenge", "vcluster"},
-		{"environment-a", "removed-challenge", "container"},
+		{"environment-c", "node-challenge", "node"},
+		{"environment-b", "k8s-challenge", "k8s"},
+		{"environment-a", "removed-challenge", "node"},
 	} {
 		if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", attempt.challengeID, attempt.environmentUID, attempt.runtime, readyAt); err != nil {
 			t.Fatal(err)
@@ -153,14 +149,14 @@ func TestMySpaceLearningFiltersCatalogAndUsesStableCursor(t *testing.T) {
 	}
 
 	catalog := map[string]challenge.Entry{
-		"container-challenge": {ID: "container-challenge", Title: "Container", Runtime: "container", Difficulty: "easy"},
-		"vcluster-challenge":  {ID: "vcluster-challenge", Title: "VCluster", Runtime: "vcluster", Difficulty: "medium"},
+		"node-challenge": {ID: "node-challenge", Title: "Linux node", Runtime: "node", Difficulty: "easy"},
+		"k8s-challenge":  {ID: "k8s-challenge", Title: "Kubernetes", Runtime: "k8s", Difficulty: "medium"},
 	}
 	first, err := handler.mySpaceLearningFromCatalog(ctx, "u-demo", nil, db.LearningHistoryFilter{}, 1, readyAt.Add(time.Minute), catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.Items) != 1 || first.Items[0].Challenge.Id != "container-challenge" || first.NextCursor == nil {
+	if len(first.Items) != 1 || first.Items[0].Challenge.Id != "node-challenge" || first.NextCursor == nil {
 		t.Fatalf("first page = %#v", first)
 	}
 	cursor, err := parseMySpaceLearningCursor(first.NextCursor)
@@ -171,11 +167,11 @@ func TestMySpaceLearningFiltersCatalogAndUsesStableCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(second.Items) != 1 || second.Items[0].Challenge.Id != "vcluster-challenge" || second.NextCursor != nil {
+	if len(second.Items) != 1 || second.Items[0].Challenge.Id != "k8s-challenge" || second.NextCursor != nil {
 		t.Fatalf("second page = %#v", second)
 	}
 
-	runtime := api.Vcluster
+	runtime := api.GetMySpaceLearningParamsRuntimeK8s
 	filter, err := mySpaceLearningFilter(api.GetMySpaceLearningParams{Runtime: &runtime})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +180,7 @@ func TestMySpaceLearningFiltersCatalogAndUsesStableCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(filtered.Items) != 1 || filtered.Items[0].Challenge.Id != "vcluster-challenge" {
+	if len(filtered.Items) != 1 || filtered.Items[0].Challenge.Id != "k8s-challenge" {
 		t.Fatalf("runtime filtered history = %#v", filtered)
 	}
 }
@@ -196,13 +192,13 @@ func TestMySpaceAuthoringReturnsOnlyAnonymousLearnerAggregates(t *testing.T) {
 		t.Fatal(err)
 	}
 	startedAt := time.Date(2026, time.July, 24, 13, 0, 0, 0, time.UTC)
-	if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", "demo", "learner-environment", "container", startedAt); err != nil {
+	if err := handler.db.RecordChallengeAttempt(ctx, "u-demo", "demo", "learner-environment", "node", startedAt); err != nil {
 		t.Fatal(err)
 	}
 	if err := handler.db.RecordChallengeCompletion(ctx, "u-demo", "demo", "learner-environment", startedAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	createPublishedAuthoringSession(t, handler.db, "u-author", "demo")
+	createPublishedAuthoringSession(t, handler, "u-author", "demo")
 	author, err := handler.db.GetUserByID("u-author")
 	if err != nil {
 		t.Fatal(err)
@@ -255,15 +251,17 @@ func TestMySpaceAuthoringProjectsTaxonomyStates(t *testing.T) {
 				if err := os.Remove(filepath.Join(handler.dataDir, "taxonomy", "current")); err != nil {
 					t.Fatal(err)
 				}
-				_, err := handler.db.EnqueueTaxonomyWork(context.Background(), taxonomy.WorkItem{
+				mapping, _, err := handler.db.EnqueueTaxonomyMapping(context.Background(), taxonomy.TaxonomyMapping{
 					ID:                "taxonomy-retrying",
-					Kind:              taxonomy.WorkKindMapping,
 					ChallengeID:       entry.ID,
 					ChallengeRevision: entry.Revision,
-					State:             taxonomy.WorkPending,
-					NextRunAt:         time.Now().UTC().Add(time.Hour),
+					State:             taxonomy.MappingPending,
 				})
 				if err != nil {
+					t.Fatal(err)
+				}
+				mapping.LastError = "temporary model failure"
+				if err := handler.db.SaveTaxonomyMapping(context.Background(), *mapping); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -276,23 +274,18 @@ func TestMySpaceAuthoringProjectsTaxonomyStates(t *testing.T) {
 				if err := os.Remove(filepath.Join(handler.dataDir, "taxonomy", "current")); err != nil {
 					t.Fatal(err)
 				}
-				work, err := handler.db.EnqueueTaxonomyWork(context.Background(), taxonomy.WorkItem{
+				mapping, _, err := handler.db.EnqueueTaxonomyMapping(context.Background(), taxonomy.TaxonomyMapping{
 					ID:                "taxonomy-blocked",
-					Kind:              taxonomy.WorkKindMapping,
 					ChallengeID:       entry.ID,
 					ChallengeRevision: entry.Revision,
-					State:             taxonomy.WorkPending,
+					State:             taxonomy.MappingPending,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				claimed, err := handler.db.ClaimTaxonomyWork(context.Background(), "test-status", time.Minute)
-				if err != nil || claimed == nil || claimed.ID != work.ID {
-					t.Fatalf("claim taxonomy work = %#v, %v", claimed, err)
-				}
-				claimed.State = taxonomy.WorkFailed
-				claimed.LastError = "manual intervention required"
-				if err := handler.db.SaveClaimedTaxonomyWork(context.Background(), *claimed); err != nil {
+				mapping.State = taxonomy.MappingFailed
+				mapping.LastError = "manual intervention required"
+				if err := handler.db.SaveTaxonomyMapping(context.Background(), *mapping); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -310,7 +303,7 @@ func TestMySpaceAuthoringProjectsTaxonomyStates(t *testing.T) {
 			if tt.prepare != nil {
 				tt.prepare(t, handler, *entry)
 			}
-			createPublishedAuthoringSession(t, handler.db, "u-demo", entry.ID)
+			createPublishedAuthoringSession(t, handler, "u-demo", entry.ID)
 			user, err := handler.db.GetUserByID("u-demo")
 			if err != nil {
 				t.Fatal(err)
@@ -326,15 +319,16 @@ func TestMySpaceAuthoringProjectsTaxonomyStates(t *testing.T) {
 	}
 }
 
-func createPublishedAuthoringSession(t *testing.T, database *db.DB, userID, challengeID string) {
+func createPublishedAuthoringSession(t *testing.T, handler *Handler, userID, challengeID string) {
 	t.Helper()
 	ctx := context.Background()
+	database := handler.db
 	const sessionID = "authoring-demo"
 	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
 		t.Fatal(err)
 	}
 	plan := authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Demo", Description: "demo", Difficulty: "easy", Runtime: "container"},
+		Metadata:    authoring.Metadata{Title: "Demo", Description: "demo", Difficulty: "easy", Runtime: "node"},
 		Overview:    "demo overview",
 		Checkpoints: []authoring.Checkpoint{{ID: "complete", Title: "Complete", Markdown: "complete", Position: 1}},
 	}
@@ -342,28 +336,25 @@ func createPublishedAuthoringSession(t *testing.T, database *db.DB, userID, chal
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, agentruntime.CreateRun{
-		ID: "generator-demo", Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: sessionID,
-		Model: "test-model", PromptVersion: generator.PromptVersion, DeadlineAt: time.Now().UTC().Add(time.Hour),
-	}, generator.RunInput{AuthoringSessionID: sessionID, Revision: revision.Number})
+	verifiedCandidate, artifact := seedVerifiedAuthoringCandidate(t, database, handler.dataDir, sessionID, userID, revision.Number, "generator-demo", "Demo")
+	entry, err := challenge.Get(handler.challengesDir, challengeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := database.ClaimNext(ctx, "test-generator-worker", time.Minute, time.Now().UTC())
-	if err != nil || claim == nil || claim.Run.ID != run.ID {
-		t.Fatalf("claim generator run = %#v, %v", claim, err)
-	}
-	artifact := authoring.Artifact{SubmissionID: generator.SubmissionID(run.ID), Directory: "authoring/demo", GeneratorRunID: run.ID}
-	if err := database.FinalizeGeneratorSubmission(ctx, *claim, artifact.SubmissionID, "verify-demo"); err != nil {
+	now := time.Now().UTC()
+	if err := database.BeginAuthoringCandidatePublish(ctx, sessionID, userID, verifiedCandidate.ID, candidate.Publication{
+		ChallengeID: challengeID, SourceSlug: entry.SourceSlug, TargetPath: entry.SourceSlug, RequestedAt: now,
+	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.CompleteGeneratorVerification(ctx, sessionID, run.ID, artifact, authoring.Verification{TaskID: "verify-demo", Phase: "Succeeded", Report: &authoring.VerificationReport{BuildPassed: true, AnswerPassed: true, CheckpointsPassed: true}}); err != nil {
+	claim, err := database.ClaimCandidateWork(ctx, worklist.KindChallengePublish, "my-space-publisher", time.Minute, time.Now().UTC())
+	if err != nil || claim == nil {
+		t.Fatalf("claim challenge publication = %#v, %v", claim, err)
+	}
+	if err := database.RecordCandidateChallengeArtifact(ctx, claim.Work, artifact, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.BeginPublish(ctx, sessionID, userID, revision.Number, challengeID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.CompletePublish(ctx, sessionID, userID, revision.Number, challengeID); err != nil {
+	if err := database.CompleteCandidateChallengePublish(ctx, claim.Work, artifact, entry.Revision, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 }

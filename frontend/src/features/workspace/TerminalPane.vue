@@ -1,37 +1,81 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
-import { Plus, X } from "lucide-vue-next";
+import { computed, nextTick, reactive, ref, watch } from "vue";
+import { Monitor, Plus, X } from "lucide-vue-next";
 import { api } from "../../api/client";
+import type { AssistantTerminalContext, ChallengeNode } from "../../api/types";
 import { useTerminalSession } from "./useTerminalSession";
 
 const props = defineProps<{
   challengeId: string;
+  runtime: "node" | "k8s";
+  nodes: ChallengeNode[];
   visible: boolean;
 }>();
 const emit = defineEmits<{
   connected: [connected: boolean];
-  context: [currentWindow: string, openWindows: string[]];
+  context: [currentNode: string, currentWindow: string, terminals: AssistantTerminalContext[]];
 }>();
 const host = ref<HTMLDivElement>();
-const tabs = ref(["shell-1"]);
-const active = ref<string | null>("shell-1");
+const selectedNode = ref("");
+const tabsByNode = reactive<Record<string, string[]>>({});
+const activeByNode = reactive<Record<string, string | null>>({});
 const challenge = computed(() => props.challengeId);
+const node = computed(() => props.runtime === "node" ? selectedNode.value || null : null);
+const terminalKey = computed(() => node.value || "management");
+const tabs = computed(() => tabsByNode[terminalKey.value] ?? []);
+const active = computed<string | null>({
+  get: () => activeByNode[terminalKey.value] ?? null,
+  set: (value) => { activeByNode[terminalKey.value] = value; },
+});
 const { state, stateMessage, connect, focus, refreshLayout } =
-  useTerminalSession(host, challenge, active);
+  useTerminalSession(host, challenge, node, active);
 const connected = computed(() => state.value === "connected");
 watch(connected, (value) => emit("connected", value), { immediate: true });
+
+function contexts(): AssistantTerminalContext[] {
+  return Object.entries(tabsByNode)
+    .filter(([, windows]) => windows.length > 0)
+    .map(([key, windows]) => ({
+      ...(props.runtime === "node" ? { node: key } : {}),
+      windows: [...windows],
+    }));
+}
+
+function emitContext() {
+  emit("context", node.value ?? "", active.value ?? "shell-1", contexts());
+}
+
 watch(
-  [active, tabs],
-  () => emit("context", active.value ?? "shell-1", [...tabs.value]),
+  [node, active, () => contexts()],
+  emitContext,
   { deep: true, immediate: true },
 );
+
+function ensureNode(key: string) {
+  if (tabsByNode[key]) return;
+  tabsByNode[key] = ["shell-1"];
+  activeByNode[key] = "shell-1";
+}
+
+function resetTerminals() {
+  for (const key of Object.keys(tabsByNode)) delete tabsByNode[key];
+  for (const key of Object.keys(activeByNode)) delete activeByNode[key];
+  selectedNode.value = props.runtime === "node" ? (props.nodes[0]?.name ?? "") : "";
+  if (props.runtime === "k8s") ensureNode("management");
+  else if (selectedNode.value) ensureNode(selectedNode.value);
+  emitContext();
+}
+
 watch(
-  () => props.challengeId,
-  () => {
-    tabs.value = ["shell-1"];
-    active.value = "shell-1";
-  },
+  [() => props.challengeId, () => props.runtime, () => props.nodes.map((item) => item.name).join("\0")],
+  resetTerminals,
+  { immediate: true },
 );
+
+watch(selectedNode, (value) => {
+  if (props.runtime === "node" && value) ensureNode(value);
+  emitContext();
+});
 watch(
   () => props.visible,
   async (visible) => {
@@ -41,30 +85,44 @@ watch(
   },
 );
 function addTab() {
+  const key = terminalKey.value;
+  ensureNode(key);
   let number = 1;
   while (tabs.value.includes(`shell-${number}`)) number += 1;
   const name = `shell-${number}`;
-  tabs.value.push(name);
+  tabsByNode[key].push(name);
   active.value = name;
   void nextTick(connect);
 }
 
 async function closeTab(name: string) {
+  const key = terminalKey.value;
+  const targetNode = node.value;
   if (name === active.value) active.value = null;
-  tabs.value = tabs.value.filter((tab) => tab !== name);
+  tabsByNode[key] = tabs.value.filter((tab) => tab !== name);
   try {
-    await api.closeTerminalWindow(props.challengeId, name);
+    await api.closeTerminalWindow(props.challengeId, name, targetNode || undefined);
   } catch {
     /* the local tab is already gone */
   }
-  if (!active.value && tabs.value.length)
-    active.value = tabs.value[tabs.value.length - 1];
+  if (!active.value && tabsByNode[key].length)
+    active.value = tabsByNode[key][tabsByNode[key].length - 1];
+  emitContext();
 }
 </script>
 
 <template>
   <section class="terminal-pane" @pointerdown="focus">
     <div class="terminal-tabs">
+      <label v-if="runtime === 'node'" class="terminal-node-selector">
+        <Monitor :size="14" aria-hidden="true" />
+        <span class="sr-only">Terminal node</span>
+        <select v-model="selectedNode" aria-label="Terminal node">
+          <option v-for="item in nodes" :key="item.name" :value="item.name">
+            {{ item.title }}
+          </option>
+        </select>
+      </label>
       <div class="terminal-tab-list">
         <div
           v-for="tab in tabs"

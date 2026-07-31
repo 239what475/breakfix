@@ -1,9 +1,9 @@
 # 参考项目对照审查
 
 本目录逐个审查 `/home/what/myproject/breakfix-similar-projects/` 中下载的仓库。审查
-基线是当前 Breakfix 的文件化 challenge、Environment/VerifyTask CRD、Controller 自动
-检查点、作者验证发布、taxonomy snapshot 和 PostgreSQL 学习记录，而不是假设平台尚未
-实现这些能力。
+基线是当前 Breakfix 的文件化 challenge、NodeEnvironment/VK8sEnvironment CRD、Controller
+自动检查点、CandidateRevision 固定流水线、taxonomy snapshot 和 PostgreSQL 学习记录，而不是
+假设平台尚未实现这些能力。
 
 每份文档都区分三类结论：
 
@@ -30,8 +30,8 @@ challenge、CRD 和端到端验收证明改动必要。
 
 ## 跨项目结论
 
-多个项目的共同经验不要求重写 Breakfix。现有的 Environment/VerifyTask CRD、自动
-checkpoint、真实 VerifyTask、文件系统 artifact 和独立可信 Job 已经是正确的平台骨架。
+多个项目的共同经验不要求重写 Breakfix。现有的 Environment CRD、自动 checkpoint、真实
+CandidateRevision 流水线、文件系统 artifact 和独立可信固定 worker 已经是正确的平台骨架。
 近期只应评估以下四项，按顺序实施并用真实题目验证：
 
 1. **单题作者验收与内容 fixture**：提供复用真实 runtime 初始化、`answer.sh` 和全部
@@ -40,8 +40,8 @@ checkpoint、真实 VerifyTask、文件系统 artifact 和独立可信 Job 已�
    首次通过；继续把最近检查结果留在 CRD，避免将四秒轮询日志写入数据库。
 3. **教学资产 lint 与结构**：保证每个 checkpoint 的题面术语、hint、solution 章节和
    静态资源引用一致；不向用户自动执行命令。
-4. **VerifyTask 报告可读性与运行时边界测试**：保留 immutable attempt/report，按 build、
-   init、answer、checkpoint 展示；扩大 container/vcluster 的恢复和 NetworkPolicy 测试。
+4. **CandidateRevision 报告可读性与运行时边界测试**：保留 immutable attempt/report，按 build、
+   init、answer、checkpoint 展示；扩大 node/k8s 的恢复和 NetworkPolicy 测试。
 
 学习路径、质量看板、受控服务预览、再验证 campaign 和容量调度均需要多题或并发数据，
 不应抢在上述四项和首批真实题目之前实现。Hub/Proxy、LMS、竞赛积分、长期用户 workspace、

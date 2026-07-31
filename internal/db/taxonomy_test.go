@@ -2,120 +2,128 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
-func TestTaxonomyWorkDeduplicatesAndUsesExpiringLeases(t *testing.T) {
+func TestTaxonomyMappingDeduplicatesAndPersistsDomainState(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	item := testTaxonomyWork("mapping-one", "challenge-a", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	first, err := database.EnqueueTaxonomyWork(ctx, item)
+	mapping := testTaxonomyMapping("mapping-one", "challenge-a", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	first, created, err := database.EnqueueTaxonomyMapping(ctx, mapping)
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate := item
+	if !created {
+		t.Fatal("first taxonomy mapping was not created")
+	}
+	duplicate := mapping
 	duplicate.ID = "mapping-duplicate"
-	second, err := database.EnqueueTaxonomyWork(ctx, duplicate)
+	second, created, err := database.EnqueueTaxonomyMapping(ctx, duplicate)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("duplicate taxonomy mapping was reported as newly created")
 	}
 	if second.ID != first.ID {
 		t.Fatalf("same challenge revision was not deduplicated: %q != %q", second.ID, first.ID)
 	}
 
-	claimed, err := database.ClaimTaxonomyWork(ctx, "worker-a", time.Minute)
+	first.Round = 1
+	first.Candidate = &taxonomy.ChangeSet{}
+	first.LastError = "review requested a semantic revision"
+	if err := database.SaveTaxonomyMapping(ctx, *first); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := database.GetTaxonomyMappingByChallenge(ctx, first.ChallengeID, first.ChallengeRevision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claimed == nil || claimed.ID != first.ID || claimed.LeaseOwner != "worker-a" {
-		t.Fatalf("unexpected claimed work: %#v", claimed)
-	}
-	next, err := database.ClaimTaxonomyWork(ctx, "worker-b", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if next != nil {
-		t.Fatalf("active lease was stolen: %#v", next)
-	}
-	claimed.State = taxonomy.WorkPending
-	claimed.Round = 1
-	claimed.Candidate = &taxonomy.ChangeSet{}
-	if err := database.SaveClaimedTaxonomyWork(ctx, *claimed); err != nil {
-		t.Fatal(err)
-	}
-	reclaimed, err := database.ClaimTaxonomyWork(ctx, "worker-b", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reclaimed == nil || reclaimed.LeaseOwner != "worker-b" || reclaimed.Round != 1 || reclaimed.Candidate == nil {
-		t.Fatalf("released work was not durably requeued: %#v", reclaimed)
+	if persisted.Round != 1 || persisted.Candidate == nil || persisted.LastError != first.LastError {
+		t.Fatalf("mapping domain state was not persisted: %#v", persisted)
 	}
 }
 
-func TestTaxonomyWorkPersistsDelayedRetryBeforeItCanBeClaimed(t *testing.T) {
+func TestTaxonomyMappingIsActionableOnlyAfterAgentRunTerminates(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	item, err := database.EnqueueTaxonomyWork(ctx, testTaxonomyWork("mapping-delayed", "challenge-delayed", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+	mapping, _, err := database.EnqueueTaxonomyMapping(ctx, testTaxonomyMapping("mapping-active", "challenge-active", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := database.ClaimTaxonomyWork(ctx, "worker-a", time.Minute)
+	run, err := database.ScheduleTaxonomyRun(ctx, *mapping, testTaxonomyRun(t, *mapping, "taxonomy-run-active"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claimed == nil || claimed.ID != item.ID {
-		t.Fatalf("unexpected claimed work: %#v", claimed)
+	if next, err := database.NextTaxonomyMapping(ctx); err != nil || next != nil {
+		t.Fatalf("mapping with pending AgentRun is actionable: %#v, %v", next, err)
 	}
-	delayedUntil := time.Now().UTC().Add(time.Minute)
-	claimed.TechnicalFailures = 0
-	claimed.ExecutionFailures = 2
-	claimed.NextRunAt = delayedUntil
-	claimed.LastError = "taxonomy agent temporarily unavailable"
-	if err := database.SaveClaimedTaxonomyWork(ctx, *claimed); err != nil {
+	claim, err := database.ClaimNext(ctx, "agent-worker", time.Minute, time.Now().UTC())
+	if err != nil || claim == nil || claim.Run.ID != run.ID {
+		t.Fatalf("claim taxonomy AgentRun = %#v, %v", claim, err)
+	}
+	if err := database.Fail(ctx, *claim, "typed result protocol failure", time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := database.GetTaxonomyWorkByChallenge(ctx, claimed.Kind, claimed.ChallengeID, claimed.ChallengeRevision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.ExecutionFailures != 2 || persisted.NextRunAt.IsZero() || persisted.NextRunAt.Before(delayedUntil.Add(-time.Second)) || persisted.LastError != claimed.LastError {
-		t.Fatalf("delayed retry state was not persisted: %#v", persisted)
-	}
-	next, err := database.ClaimTaxonomyWork(ctx, "worker-b", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if next != nil {
-		t.Fatalf("work with a future next_run_at was claimed: %#v", next)
+	next, err := database.NextTaxonomyMapping(ctx)
+	if err != nil || next == nil || next.ID != mapping.ID {
+		t.Fatalf("mapping with terminal AgentRun was not actionable: %#v, %v", next, err)
 	}
 }
 
-func TestTaxonomyPublisherLeaseIsExclusive(t *testing.T) {
+func TestTaxonomyMappingSchedulesOnlyOneActiveAgentRun(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	first, err := database.AcquireTaxonomyLease(ctx, "publisher", "server-a", time.Minute)
-	if err != nil || !first {
-		t.Fatalf("first acquire = %v, %v", first, err)
-	}
-	second, err := database.AcquireTaxonomyLease(ctx, "publisher", "server-b", time.Minute)
-	if err != nil || second {
-		t.Fatalf("second acquire = %v, %v", second, err)
-	}
-	if err := database.ReleaseTaxonomyLease(ctx, "publisher", "server-a"); err != nil {
+	mapping, _, err := database.EnqueueTaxonomyMapping(ctx, testTaxonomyMapping("mapping-race", "challenge-race", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	third, err := database.AcquireTaxonomyLease(ctx, "publisher", "server-b", time.Minute)
-	if err != nil || !third {
-		t.Fatalf("acquire after release = %v, %v", third, err)
+
+	var wait sync.WaitGroup
+	results := make(chan error, 2)
+	for _, id := range []string{"taxonomy-run-a", "taxonomy-run-b"} {
+		wait.Add(1)
+		go func(runID string) {
+			defer wait.Done()
+			_, err := database.ScheduleTaxonomyRun(ctx, *mapping, testTaxonomyRun(t, *mapping, runID))
+			results <- err
+		}(id)
+	}
+	wait.Wait()
+	close(results)
+	succeeded := 0
+	for err := range results {
+		if err == nil {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("successful schedules = %d, want 1", succeeded)
+	}
+	runs, err := database.ListRunsForOwner(ctx, "taxonomy-mapping", mapping.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("scheduled runs = %#v, %v", runs, err)
 	}
 }
 
-func testTaxonomyWork(id, challengeID, revision string) taxonomy.WorkItem {
-	return taxonomy.WorkItem{
-		ID: id, Kind: taxonomy.WorkKindMapping, ChallengeID: challengeID, ChallengeRevision: revision,
-		State: taxonomy.WorkPending,
+func testTaxonomyMapping(id, challengeID, revision string) taxonomy.TaxonomyMapping {
+	return taxonomy.TaxonomyMapping{ID: id, ChallengeID: challengeID, ChallengeRevision: revision, State: taxonomy.MappingPending}
+}
+
+func testTaxonomyRun(t *testing.T, mapping taxonomy.TaxonomyMapping, id string) agentruntime.CreateRun {
+	t.Helper()
+	input, err := json.Marshal(taxonomy.RunInput{WorkID: mapping.ID, Stage: taxonomy.WorkStageMapper, Round: mapping.Round})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agentruntime.CreateRun{
+		ID: id, Purpose: taxonomy.RuntimePurposeMapper, OwnerKind: "taxonomy-mapping", OwnerRef: mapping.ID,
+		Input: input, Model: "test-model", PromptVersion: "test-v1", ExecutionTimeout: time.Hour,
 	}
 }

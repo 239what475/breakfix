@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: breakfix-system
+
+# The repository root selects this default: Breakfix owns Registry storage and
+# process lifecycle, while the operator supplies TLS, authentication, private
+# DNS, and the internal CA trust bootstrap.
+resources:
+  - ../../base
+  - ../../registry-managed

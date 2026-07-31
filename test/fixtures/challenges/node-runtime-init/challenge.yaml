@@ -1,0 +1,13 @@
+runtime: node
+title: Complete runtime initialization
+difficulty: easy
+description: Repair the missing runtime initialization marker.
+nodes:
+  - name: host
+    title: Runtime host
+checkpoints:
+  - id: runtime-marker-ready
+    title: Runtime marker exists
+    description: The initialization marker exists with its expected content.
+    hint: hints/runtime-marker-ready.md
+    node: host

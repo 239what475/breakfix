@@ -25,6 +25,19 @@ export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
 
 const base = "/api";
 
+export class APIError extends Error {
+  readonly status: number;
+
+  constructor(
+    status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "APIError";
+    this.status = status;
+  }
+}
+
 export function token(): string | null {
   return localStorage.getItem("token");
 }
@@ -71,7 +84,10 @@ async function request<T>(
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(data.error || `Request failed (${response.status})`);
+    throw new APIError(
+      response.status,
+      data.error || `Request failed (${response.status})`,
+    );
   return data as T;
 }
 
@@ -193,13 +209,17 @@ export const api = {
 		request<ResetResponse>("POST", `/challenges/${id}/reset`),
   stopChallenge: (id: string) =>
 		request<StopResponse>("POST", `/challenges/${id}/stop`),
-	createTerminalTicket: (id: string, window: string) =>
-		request<TerminalTicketResponse>("POST", `/challenges/${id}/terminal-ticket`, { window }),
-  closeTerminalWindow: (id: string, window: string) =>
-		request<CloseTerminalWindowResponse>(
-      "DELETE",
-      `/challenges/${id}/terminals/${window}`,
-    ),
+	createTerminalTicket: (id: string, window: string, node?: string) =>
+		request<TerminalTicketResponse>("POST", `/challenges/${id}/terminal-ticket`, { window, node }),
+  closeTerminalWindow: (id: string, window: string, node?: string) => {
+		const query = new URLSearchParams();
+		if (node) query.set("node", node);
+		const suffix = query.size ? `?${query.toString()}` : "";
+		return request<CloseTerminalWindowResponse>(
+			"DELETE",
+			`/challenges/${id}/terminals/${window}${suffix}`,
+		);
+	},
   createAuthoringSession: () =>
     request<AuthoringSession>("POST", "/authoring/sessions"),
   getCurrentAuthoringSession: () =>

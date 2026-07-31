@@ -17,8 +17,8 @@
 
 ## 与 Breakfix 的对照
 
-Breakfix 的 Controller 已是 Kubernetes 专用 Spawner：Server 写不可变 Environment spec，
-Controller 调和 namespace、workspace Pod、vcluster 与 cleanup，CRD status 是可恢复状态。
+Breakfix 的 Controller 已是运行时专用 Spawner：Server 写不可变 Environment spec，
+Controller 调和 NodeEnvironment 的 Incus 资源或 VK8sEnvironment 的 namespace、管理终端与 cleanup，CRD status 是可恢复状态。
 它还区分 challenge revision 和用户 attempt；这比“一用户一个长期 notebook server”更准确。
 终端 ticket 也已经短期、一次性且绑定 Environment/window。
 
@@ -29,7 +29,7 @@ Controller 调和 namespace、workspace Pod、vcluster 与 cleanup，CRD status 
 - **恢复契约作为接口测试**：将 JupyterHub 的 `start/poll/stop/load_state` 思路映射到
   Environment 生命周期，维护一个固定测试矩阵：Server 重启、Controller 重启、终端断开、
   已完成等待清理、失败清理。现有 `server-recovery` 真实验收是基础，题库扩展时要使其覆盖
-  container 与 vcluster 的所有终态，而非只验证浏览器重新连上。
+  node 与 k8s 的所有终态，而非只验证浏览器重新连上。
 - **明确的权限面**：继续坚持 terminal ticket 只绑定 user/environment/challenge/window，
   不将通用 Kubernetes bearer token 放进 workspace 或 WebSocket URL。JupyterHub 的 scoped
   token 设计证明这不是实现细节，而是多用户 runtime 的核心边界。
@@ -41,7 +41,7 @@ Controller 调和 namespace、workspace Pod、vcluster 与 cleanup，CRD status 
 
 ## 不采用
 
-- 不以 Hub/Proxy/Spawner 替换 Server、Controller 和 CRD。那会失去 VerifyTask、vcluster
+- 不以 Hub/Proxy/Spawner 替换 Server、Controller 和 CRD。那会失去 CandidateRevision、VK8s
   和 Controller-only status 写入的领域约束。
 - 不把用户工作目录做成长久 home directory。Breakfix 的用户环境是可回收的题目 attempt；
   学习事实和作者 artifact 分别已有 PostgreSQL 与 Server PVC 权威来源。

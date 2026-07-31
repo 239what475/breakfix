@@ -29,7 +29,7 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 	blobs := map[string][]byte{configDigest: config, layerDigest: layer}
 	uploaded := map[string][]byte{}
 	var publishedManifest []byte
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if username, password, ok := request.BasicAuth(); !ok || username != "registry" || password != "secret" {
 			writer.WriteHeader(http.StatusUnauthorized)
 			return
@@ -86,8 +86,8 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	address := strings.TrimPrefix(server.URL, "http://")
-	client := Client{Insecure: true, Credentials: Credentials{Username: "registry", Password: "secret"}}
+	address := testTLSRegistryAddress(t, server)
+	client := testTLSRegistryClient(t, server, Credentials{Username: "registry", Password: "secret"})
 	if err := client.CopyImage(context.Background(), address+"/team/base@"+manifestDigest, address+"/team/published:verified"); err != nil {
 		t.Fatalf("copy OCI image: %v", err)
 	}
@@ -99,45 +99,12 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 			t.Fatalf("registry did not receive blob %s", digest)
 		}
 	}
-	got, err := client.ResolveImageDigest(context.Background(), address+"/team/published:verified")
+	got, err := client.ResolveImmutableReference(context.Background(), address+"/team/published:verified")
 	if err != nil {
 		t.Fatalf("resolve copied image: %v", err)
 	}
 	if want := address + "/team/published@" + manifestDigest; got != want {
 		t.Fatalf("resolved copied image = %q, want %q", got, want)
-	}
-}
-
-func TestOCILayoutRootDigestRequiresMatchingRootBlob(t *testing.T) {
-	root := t.TempDir()
-	manifest := []byte(`{"schemaVersion":2,"config":{},"layers":[]}`)
-	digest := "sha256:" + sha256Hex(manifest)
-	if err := os.MkdirAll(root+"/blobs/sha256", 0755); err != nil {
-		t.Fatal(err)
-	}
-	index, err := json.Marshal(ociIndex{SchemaVersion: 2, Manifests: []ociDescriptor{{MediaType: ociManifestMediaType, Digest: digest, Size: int64(len(manifest))}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(root+"/index.json", index, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ociBlobPath(root, digest), manifest, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := OCILayoutRootDigest(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != digest {
-		t.Fatalf("root digest = %q, want %q", got, digest)
-	}
-	if err := os.WriteFile(ociBlobPath(root, digest), []byte("tampered"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := OCILayoutRootDigest(root); err == nil {
-		t.Fatal("expected tampered root manifest to be rejected")
 	}
 }
 
@@ -162,7 +129,7 @@ func TestExtractOCIArchiveAllowsDirectoriesAndRejectsLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := t.TempDir() + "/layout.tar"
-	if err := os.WriteFile(path, archive.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(path, archive.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
 	destination := t.TempDir()
@@ -182,7 +149,7 @@ func TestExtractOCIArchiveAllowsDirectoriesAndRejectsLinks(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, archive.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(path, archive.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := ExtractOCIArchive(path, t.TempDir()); err == nil {

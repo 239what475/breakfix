@@ -8,12 +8,13 @@ import {
   subscribeAssistantTurn,
   type AssistantStreamHandlers,
 } from "../../api/client";
-import type { AssistantMessage, AssistantTurn } from "../../api/types";
+import type { AssistantMessage, AssistantTerminalContext, AssistantTurn } from "../../api/types";
 
 const props = defineProps<{
   challengeId: string;
+  currentNode: string;
   currentWindow: string;
-  openWindows: string[];
+  terminals: AssistantTerminalContext[];
 }>();
 const loading = ref(false);
 const sending = ref(false);
@@ -232,8 +233,9 @@ async function send() {
       props.challengeId,
       {
         content,
+        current_node: props.currentNode || undefined,
         current_window: props.currentWindow,
-        open_windows: props.openWindows,
+        terminals: props.terminals,
       },
       streamHandlers(),
       controller.signal,

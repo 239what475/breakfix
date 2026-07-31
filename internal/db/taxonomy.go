@@ -14,199 +14,179 @@ import (
 	"github.com/breakfix/breakfix/internal/worklist"
 )
 
-var ErrTaxonomyWorkNotFound = errors.New("taxonomy work item not found")
+var ErrTaxonomyMappingNotFound = errors.New("taxonomy mapping not found")
 
-func (d *DB) EnqueueTaxonomyWork(ctx context.Context, item taxonomy.WorkItem) (*taxonomy.WorkItem, error) {
-	if item.Kind != taxonomy.WorkKindMapping || strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.ChallengeID) == "" || strings.TrimSpace(item.ChallengeRevision) == "" {
-		return nil, fmt.Errorf("invalid taxonomy work item")
+func (d *DB) EnqueueTaxonomyMapping(ctx context.Context, mapping taxonomy.TaxonomyMapping) (*taxonomy.TaxonomyMapping, bool, error) {
+	if strings.TrimSpace(mapping.ID) == "" || strings.TrimSpace(mapping.ChallengeID) == "" || strings.TrimSpace(mapping.ChallengeRevision) == "" {
+		return nil, false, errors.New("taxonomy mapping requires id and challenge revision")
 	}
-	if item.TechnicalFailures < 0 || item.ExecutionFailures < 0 {
-		return nil, fmt.Errorf("taxonomy work failure counts cannot be negative")
+	if mapping.State == "" {
+		mapping.State = taxonomy.MappingPending
 	}
-	if item.State == "" {
-		item.State = taxonomy.WorkPending
-	}
-	if item.State != taxonomy.WorkPending || item.ActiveStage != "" || item.ActiveRunID != "" {
-		return nil, fmt.Errorf("new taxonomy work item must be an inactive Pending item")
+	if mapping.State != taxonomy.MappingPending || mapping.ActiveStage != "" || mapping.ActiveRunID != "" || mapping.Round < 0 {
+		return nil, false, errors.New("new taxonomy mapping must be inactive and pending")
 	}
 	now := time.Now().UTC()
-	if item.CreatedAt.IsZero() {
-		item.CreatedAt = now
+	if mapping.CreatedAt.IsZero() {
+		mapping.CreatedAt = now
 	}
-	item.UpdatedAt = now
-	_, err := d.conn.ExecContext(ctx, `INSERT INTO taxonomy_work_items
-		(id, kind, challenge_id, challenge_revision, base_revision, technical_failures, execution_failures, next_run_at, state, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, '0001-01-01T00:00:00Z')::timestamptz, ?, ?, ?)
-		ON CONFLICT(kind, challenge_id, challenge_revision) DO NOTHING`,
-		item.ID, item.Kind, item.ChallengeID, item.ChallengeRevision, item.BaseRevision, item.TechnicalFailures, item.ExecutionFailures, taxonomyTime(item.NextRunAt), item.State, item.CreatedAt, item.UpdatedAt)
+	mapping.UpdatedAt = now
+	result, err := d.conn.ExecContext(ctx, `INSERT INTO taxonomy_mappings
+		(id, challenge_id, challenge_revision, base_revision, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(challenge_id, challenge_revision) DO NOTHING`,
+		mapping.ID, mapping.ChallengeID, mapping.ChallengeRevision, mapping.BaseRevision,
+		mapping.State, mapping.CreatedAt, mapping.UpdatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("enqueue taxonomy work: %w", err)
+		return nil, false, fmt.Errorf("enqueue taxonomy mapping: %w", err)
 	}
-	return d.GetTaxonomyWorkByChallenge(ctx, item.Kind, item.ChallengeID, item.ChallengeRevision)
+	item, err := d.GetTaxonomyMappingByChallenge(ctx, mapping.ChallengeID, mapping.ChallengeRevision)
+	if err != nil {
+		return nil, false, err
+	}
+	created, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("read taxonomy mapping insert result: %w", err)
+	}
+	return item, created == 1, nil
 }
 
-func (d *DB) GetTaxonomyWork(ctx context.Context, id string) (*taxonomy.WorkItem, error) {
+func (d *DB) GetTaxonomyMapping(ctx context.Context, id string) (*taxonomy.TaxonomyMapping, error) {
 	if strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("taxonomy work id is required")
+		return nil, errors.New("taxonomy mapping id is required")
 	}
-	return d.readTaxonomyWork(ctx, `SELECT `+taxonomyWorkColumns+` FROM taxonomy_work_items WHERE id = ?`, id)
+	return d.readTaxonomyMapping(ctx, `SELECT `+taxonomyMappingColumns+` FROM taxonomy_mappings WHERE id = ?`, id)
 }
 
-func (d *DB) GetTaxonomyWorkByChallenge(ctx context.Context, kind taxonomy.WorkKind, challengeID, revision string) (*taxonomy.WorkItem, error) {
-	return d.readTaxonomyWork(ctx, `SELECT `+taxonomyWorkColumns+` FROM taxonomy_work_items WHERE kind = ? AND challenge_id = ? AND challenge_revision = ?`, kind, challengeID, revision)
+func (d *DB) GetTaxonomyMappingByChallenge(ctx context.Context, challengeID, revision string) (*taxonomy.TaxonomyMapping, error) {
+	return d.readTaxonomyMapping(ctx, `SELECT `+taxonomyMappingColumns+`
+		FROM taxonomy_mappings WHERE challenge_id = ? AND challenge_revision = ?`, challengeID, revision)
 }
 
-func (d *DB) ListTaxonomyWork(ctx context.Context) ([]taxonomy.WorkItem, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT `+taxonomyWorkColumns+` FROM taxonomy_work_items ORDER BY created_at, id`)
+func (d *DB) ListTaxonomyMappings(ctx context.Context) ([]taxonomy.TaxonomyMapping, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT `+taxonomyMappingColumns+` FROM taxonomy_mappings ORDER BY created_at, id`)
 	if err != nil {
-		return nil, fmt.Errorf("list taxonomy work: %w", err)
+		return nil, fmt.Errorf("list taxonomy mappings: %w", err)
 	}
-	defer rows.Close()
-	items := make([]taxonomy.WorkItem, 0)
+	defer func() { _ = rows.Close() }()
+	items := make([]taxonomy.TaxonomyMapping, 0)
 	for rows.Next() {
-		item, err := scanTaxonomyWork(rows)
+		item, err := scanTaxonomyMapping(rows)
 		if err != nil {
 			return nil, err
 		}
 		items = append(items, *item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate taxonomy work: %w", err)
+		return nil, fmt.Errorf("iterate taxonomy mappings: %w", err)
 	}
 	return items, nil
 }
 
-// ClaimTaxonomyWork leases one fair Server-side reconciliation item. It never
-// executes a model call; model work is represented by agent_runs instead.
-func (d *DB) ClaimTaxonomyWork(ctx context.Context, owner string, ttl time.Duration) (*taxonomy.WorkItem, error) {
-	if strings.TrimSpace(owner) == "" || ttl <= 0 {
-		return nil, fmt.Errorf("taxonomy work lease owner and ttl are required")
-	}
-	tx, err := d.conn.BeginTx(ctx, nil)
+// ListUnpublishedTaxonomyMappings returns unfinished mappings so the catalog
+// scanner can cancel work whose filesystem-backed challenge revision vanished.
+func (d *DB) ListUnpublishedTaxonomyMappings(ctx context.Context) ([]taxonomy.TaxonomyMapping, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT `+taxonomyMappingColumns+` FROM taxonomy_mappings
+		WHERE state IN (?, ?, ?) ORDER BY created_at, id`,
+		taxonomy.MappingPending, taxonomy.MappingReadyPublish, taxonomy.MappingFailed)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list unpublished taxonomy mappings: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UTC()
-	row := tx.QueryRowContext(ctx, `SELECT `+taxonomyWorkColumns+` FROM taxonomy_work_items
-		WHERE state IN (?, ?) AND (next_run_at IS NULL OR next_run_at <= ?) AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-		ORDER BY next_run_at NULLS FIRST, updated_at, created_at, id
-		FOR UPDATE SKIP LOCKED
-		LIMIT 1`, taxonomy.WorkPending, taxonomy.WorkReadyPublish, now, now)
-	item, err := scanTaxonomyWork(row)
+	defer func() { _ = rows.Close() }()
+	mappings := make([]taxonomy.TaxonomyMapping, 0)
+	for rows.Next() {
+		mapping, err := scanTaxonomyMapping(rows)
+		if err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, *mapping)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unpublished taxonomy mappings: %w", err)
+	}
+	return mappings, nil
+}
+
+// NextTaxonomyMapping returns only a mapping for which Server can take an
+// immediate domain step. Running AgentRuns remain owned by their WorkItems and
+// are excluded until they become terminal.
+func (d *DB) NextTaxonomyMapping(ctx context.Context) (*taxonomy.TaxonomyMapping, error) {
+	item, err := scanTaxonomyMapping(d.conn.QueryRowContext(ctx, `SELECT `+taxonomyMappingColumns+`
+		FROM taxonomy_mappings m
+		WHERE m.state = ? OR (
+			m.state = ? AND (
+				m.active_run_id = '' OR EXISTS (
+					SELECT 1 FROM agent_runs r WHERE r.id = m.active_run_id AND r.status IN (?, ?, ?)
+				)
+			)
+		)
+		ORDER BY m.updated_at, m.created_at, m.id LIMIT 1`,
+		taxonomy.MappingReadyPublish, taxonomy.MappingPending,
+		agentruntime.RunSucceeded, agentruntime.RunFailed, agentruntime.RunCancelled))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, tx.Commit()
+		return nil, nil
 	}
 	if err != nil {
-		return nil, err
-	}
-	expiresAt := now.Add(ttl)
-	result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
-		WHERE id = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`, owner, expiresAt, now, item.ID, now)
-	if err != nil {
-		return nil, fmt.Errorf("claim taxonomy work: %w", err)
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return nil, tx.Commit()
-	}
-	item.LeaseOwner = owner
-	item.LeaseExpiresAt = expiresAt
-	item.UpdatedAt = now
-	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select actionable taxonomy mapping: %w", err)
 	}
 	return item, nil
 }
 
-// SaveClaimedTaxonomyWork persists Server-owned work state and releases its
-// reconciliation lease. The Worker never invokes this method.
-func (d *DB) SaveClaimedTaxonomyWork(ctx context.Context, item taxonomy.WorkItem) error {
-	if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.LeaseOwner) == "" {
-		return fmt.Errorf("taxonomy work id and lease owner are required")
+func (d *DB) SaveTaxonomyMapping(ctx context.Context, mapping taxonomy.TaxonomyMapping) error {
+	if strings.TrimSpace(mapping.ID) == "" || !validTaxonomyMappingState(mapping.State) || mapping.Round < 0 {
+		return errors.New("valid taxonomy mapping is required")
 	}
-	if !validTaxonomyWorkState(item.State) {
-		return fmt.Errorf("invalid persisted taxonomy work state %q", item.State)
+	if (mapping.ActiveStage == "") != (mapping.ActiveRunID == "") {
+		return errors.New("taxonomy active stage and run id must be set together")
 	}
-	if item.TechnicalFailures < 0 || item.ExecutionFailures < 0 {
-		return fmt.Errorf("taxonomy work failure counts cannot be negative")
-	}
-	if (item.ActiveStage == "") != (item.ActiveRunID == "") {
-		return fmt.Errorf("taxonomy active stage and run id must be set together")
-	}
-	if item.ActiveStage != "" {
-		if _, err := taxonomy.PurposeForStage(item.ActiveStage); err != nil {
+	if mapping.ActiveStage != "" {
+		if _, err := taxonomy.PurposeForStage(mapping.ActiveStage); err != nil {
 			return err
 		}
 	}
-	candidate, err := marshalOptional(item.Candidate)
-	if err != nil {
-		return err
-	}
-	curriculum, err := marshalOptional(item.CurriculumReview)
-	if err != nil {
-		return err
-	}
-	sre, err := marshalOptional(item.SREReview)
+	candidate, curriculum, sre, err := encodeTaxonomyMapping(mapping)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	result, err := d.conn.ExecContext(ctx, `UPDATE taxonomy_work_items SET
-		base_revision = ?, active_stage = ?, active_run_id = ?, candidate_json = ?::jsonb, curriculum_review_json = ?::jsonb, sre_review_json = ?::jsonb,
-		round = ?, technical_failures = ?, execution_failures = ?, next_run_at = NULLIF(?, '0001-01-01T00:00:00Z')::timestamptz,
-		state = ?, published_revision = ?, last_error = ?, lease_owner = '', lease_expires_at = NULL, updated_at = ?
-		WHERE id = ? AND lease_owner = ?`,
-		item.BaseRevision, item.ActiveStage, item.ActiveRunID, candidate, curriculum, sre, item.Round, item.TechnicalFailures, item.ExecutionFailures,
-		taxonomyTime(item.NextRunAt), item.State, item.PublishedRevision, item.LastError, now, item.ID, item.LeaseOwner)
+	result, err := d.conn.ExecContext(ctx, `UPDATE taxonomy_mappings SET
+		base_revision = ?, active_stage = ?, active_run_id = ?, candidate_json = ?::jsonb,
+		curriculum_review_json = ?::jsonb, sre_review_json = ?::jsonb, round = ?, state = ?,
+		published_revision = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+		mapping.BaseRevision, mapping.ActiveStage, mapping.ActiveRunID, candidate, curriculum, sre,
+		mapping.Round, mapping.State, mapping.PublishedRevision, mapping.LastError, now, mapping.ID)
 	if err != nil {
-		return fmt.Errorf("save taxonomy work: %w", err)
+		return fmt.Errorf("save taxonomy mapping: %w", err)
 	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return ErrTaxonomyWorkNotFound
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return ErrTaxonomyMappingNotFound
 	}
 	return nil
 }
 
-func (d *DB) ExtendTaxonomyWorkLease(ctx context.Context, id, owner string, ttl time.Duration) error {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(owner) == "" || ttl <= 0 {
-		return fmt.Errorf("taxonomy work lease id, owner, and ttl are required")
-	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE taxonomy_work_items SET lease_expires_at = ? WHERE id = ? AND lease_owner = ?`, time.Now().UTC().Add(ttl), id, owner)
-	if err != nil {
-		return fmt.Errorf("extend taxonomy work lease: %w", err)
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return ErrTaxonomyWorkNotFound
-	}
-	return nil
-}
-
-// CancelClaimedTaxonomyWork terminates a stale WorkItem and its active generic
-// Run together. It is used only when the immutable challenge artifact no
-// longer matches the WorkItem; ordinary model failures remain retryable.
-func (d *DB) CancelClaimedTaxonomyWork(ctx context.Context, item taxonomy.WorkItem, reason string) error {
-	if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.LeaseOwner) == "" || strings.TrimSpace(reason) == "" {
-		return fmt.Errorf("claimed taxonomy work and cancellation reason are required")
+func (d *DB) CancelTaxonomyMapping(ctx context.Context, mappingID, reason string) error {
+	if strings.TrimSpace(mappingID) == "" || strings.TrimSpace(reason) == "" {
+		return errors.New("taxonomy mapping and cancellation reason are required")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin cancel taxonomy work: %w", err)
+		return fmt.Errorf("begin cancel taxonomy mapping: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	var activeRunID string
-	err = tx.QueryRowContext(ctx, `SELECT active_run_id FROM taxonomy_work_items WHERE id = ? AND lease_owner = ? FOR UPDATE`, item.ID, item.LeaseOwner).Scan(&activeRunID)
+	err = tx.QueryRowContext(ctx, `SELECT active_run_id FROM taxonomy_mappings WHERE id = ? FOR UPDATE`, mappingID).Scan(&activeRunID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrTaxonomyWorkNotFound
+		return ErrTaxonomyMappingNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("lock taxonomy work for cancellation: %w", err)
+		return fmt.Errorf("lock taxonomy mapping for cancellation: %w", err)
 	}
 	now := time.Now().UTC()
 	if activeRunID != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs
-			SET status = ?, completed_at = ?, updated_at = ?
-			WHERE id = ? AND status IN (?, ?)`, agentruntime.RunCancelled, now, now, activeRunID, agentruntime.RunPending, agentruntime.RunRunning); err != nil {
-			return fmt.Errorf("cancel active taxonomy run: %w", err)
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
+			WHERE id = ? AND status IN (?, ?)`, agentruntime.RunCancelled, now, now, activeRunID,
+			agentruntime.RunPending, agentruntime.RunRunning); err != nil {
+			return fmt.Errorf("cancel taxonomy agent run: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE work_items SET state = ?, lease_owner = '', lease_expires_at = NULL,
 			error_code = 'taxonomy_mapping_cancelled', error_summary = ?, updated_at = ?
@@ -216,27 +196,19 @@ func (d *DB) CancelClaimedTaxonomyWork(ctx context.Context, item taxonomy.WorkIt
 			return fmt.Errorf("cancel taxonomy agent work item: %w", err)
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items SET
-		state = ?, active_stage = '', active_run_id = '', last_error = ?, next_run_at = NULL,
-		lease_owner = '', lease_expires_at = NULL, updated_at = ?
-		WHERE id = ? AND lease_owner = ?`, taxonomy.WorkCancelled, reason, now, item.ID, item.LeaseOwner)
-	if err != nil {
-		return fmt.Errorf("cancel taxonomy work: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrTaxonomyWorkNotFound
+	if _, err := tx.ExecContext(ctx, `UPDATE taxonomy_mappings SET state = ?, active_stage = '', active_run_id = '',
+		last_error = ?, updated_at = ? WHERE id = ?`, taxonomy.MappingCancelled, reason, now, mappingID); err != nil {
+		return fmt.Errorf("cancel taxonomy mapping: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit taxonomy work cancellation: %w", err)
+		return fmt.Errorf("commit taxonomy mapping cancellation: %w", err)
 	}
 	return nil
 }
 
-// ScheduleTaxonomyRun atomically binds an inactive WorkItem stage to the
-// generic runtime queue, then releases the short Server reconciliation lease.
-func (d *DB) ScheduleTaxonomyRun(ctx context.Context, item taxonomy.WorkItem, run agentruntime.CreateRun) (*agentruntime.Run, error) {
-	if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.LeaseOwner) == "" || item.ActiveStage != "" || item.ActiveRunID != "" {
-		return nil, fmt.Errorf("inactive claimed taxonomy work is required to schedule a run")
+func (d *DB) ScheduleTaxonomyRun(ctx context.Context, mapping taxonomy.TaxonomyMapping, run agentruntime.CreateRun) (*agentruntime.Run, error) {
+	if strings.TrimSpace(mapping.ID) == "" || mapping.ActiveStage != "" || mapping.ActiveRunID != "" {
+		return nil, errors.New("inactive taxonomy mapping is required to schedule a run")
 	}
 	if err := agentruntime.ValidateCreateRun(run); err != nil {
 		return nil, err
@@ -249,27 +221,36 @@ func (d *DB) ScheduleTaxonomyRun(ctx context.Context, item taxonomy.WorkItem, ru
 	if err != nil {
 		return nil, err
 	}
-	if input.WorkID != item.ID || input.Round != item.Round || run.SessionID != "" || run.Purpose != purpose || run.OwnerKind != "taxonomy-work" || run.OwnerRef != item.ID {
-		return nil, fmt.Errorf("taxonomy agent run does not match its work item")
+	if input.WorkID != mapping.ID || input.Round != mapping.Round || run.SessionID != "" || run.Purpose != purpose || run.OwnerKind != "taxonomy-mapping" || run.OwnerRef != mapping.ID {
+		return nil, errors.New("taxonomy agent run does not match its mapping")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin schedule taxonomy run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var activeStage taxonomy.WorkStage
+	var activeRunID string
+	var round int
+	var state taxonomy.MappingState
+	if err := tx.QueryRowContext(ctx, `SELECT active_stage, active_run_id, round, state FROM taxonomy_mappings WHERE id = ? FOR UPDATE`, mapping.ID).
+		Scan(&activeStage, &activeRunID, &round, &state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTaxonomyMappingNotFound
+		}
+		return nil, fmt.Errorf("lock taxonomy mapping: %w", err)
+	}
+	if activeStage != "" || activeRunID != "" || round != mapping.Round || state != taxonomy.MappingPending {
+		return nil, ErrTaxonomyMappingNotFound
+	}
 	now := time.Now().UTC()
 	created, err := createRunTx(ctx, tx, run, now)
 	if err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items
-		SET base_revision = ?, active_stage = ?, active_run_id = ?, lease_owner = '', lease_expires_at = NULL, updated_at = ?
-		WHERE id = ? AND lease_owner = ? AND active_stage = '' AND active_run_id = ''`, item.BaseRevision, input.Stage, created.ID, now, item.ID, item.LeaseOwner)
-	if err != nil {
-		return nil, fmt.Errorf("bind taxonomy work to agent run: %w", err)
-	}
-	if count, _ := result.RowsAffected(); count != 1 {
-		return nil, ErrTaxonomyWorkNotFound
+	if _, err := tx.ExecContext(ctx, `UPDATE taxonomy_mappings SET base_revision = ?, active_stage = ?,
+		active_run_id = ?, updated_at = ? WHERE id = ?`, mapping.BaseRevision, input.Stage, created.ID, now, mapping.ID); err != nil {
+		return nil, fmt.Errorf("bind taxonomy mapping to agent run: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit taxonomy run scheduling: %w", err)
@@ -277,10 +258,7 @@ func (d *DB) ScheduleTaxonomyRun(ctx context.Context, item taxonomy.WorkItem, ru
 	return created, nil
 }
 
-// FinalizeTaxonomyMapperRun commits a valid candidate and completes its
-// attempt in one transaction. Validation of the candidate against Server-owned
-// artifact and snapshot data happens before this method is called.
-func (d *DB) FinalizeTaxonomyMapperRun(ctx context.Context, claim agentruntime.Claim, workID, baseRevision string, candidate taxonomy.ChangeSet) error {
+func (d *DB) FinalizeTaxonomyMapperRun(ctx context.Context, claim agentruntime.Claim, mappingID, baseRevision string, candidate taxonomy.ChangeSet) error {
 	encoded, err := marshalOptional(&candidate)
 	if err != nil {
 		return err
@@ -288,26 +266,22 @@ func (d *DB) FinalizeTaxonomyMapperRun(ctx context.Context, claim agentruntime.C
 	if strings.TrimSpace(baseRevision) == "" && candidate.Empty() {
 		return errors.New("taxonomy mapper candidate is empty")
 	}
-	return d.finalizeTaxonomyRun(ctx, claim, workID, taxonomy.WorkStageMapper, func(tx *Tx, now time.Time) error {
-		result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items SET
-			base_revision = ?, candidate_json = ?::jsonb, curriculum_review_json = NULL, sre_review_json = NULL,
-			active_stage = '', active_run_id = '', technical_failures = 0, execution_failures = 0, next_run_at = NULL,
-			state = ?, last_error = '', lease_owner = '', lease_expires_at = NULL, updated_at = ?
-			WHERE id = ? AND active_stage = ? AND active_run_id = ?`,
-			baseRevision, encoded, taxonomy.WorkPending, now, workID, taxonomy.WorkStageMapper, claim.Run.ID)
+	return d.finalizeTaxonomyRun(ctx, claim, mappingID, taxonomy.WorkStageMapper, func(tx *Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, `UPDATE taxonomy_mappings SET base_revision = ?, candidate_json = ?::jsonb,
+			curriculum_review_json = NULL, sre_review_json = NULL, active_stage = '', active_run_id = '',
+			state = ?, last_error = '', updated_at = ? WHERE id = ? AND active_stage = ? AND active_run_id = ?`,
+			baseRevision, encoded, taxonomy.MappingPending, now, mappingID, taxonomy.WorkStageMapper, claim.Run.ID)
 		if err != nil {
 			return fmt.Errorf("persist taxonomy mapper candidate: %w", err)
 		}
 		if changed, _ := result.RowsAffected(); changed != 1 {
-			return ErrTaxonomyWorkNotFound
+			return ErrTaxonomyMappingNotFound
 		}
 		return nil
 	})
 }
 
-// FinalizeTaxonomyReviewRun promotes a review pair as one durable committee
-// result. No individual reviewer conclusion is ever written to the WorkItem.
-func (d *DB) FinalizeTaxonomyReviewRun(ctx context.Context, claim agentruntime.Claim, workID string, curriculum, sre taxonomy.Review) error {
+func (d *DB) FinalizeTaxonomyReviewRun(ctx context.Context, claim agentruntime.Claim, mappingID string, curriculum, sre taxonomy.Review) error {
 	curriculumJSON, err := marshalOptional(&curriculum)
 	if err != nil {
 		return err
@@ -316,30 +290,28 @@ func (d *DB) FinalizeTaxonomyReviewRun(ctx context.Context, claim agentruntime.C
 	if err != nil {
 		return err
 	}
-	state := taxonomy.WorkPending
+	state := taxonomy.MappingPending
 	if curriculum.Decision == taxonomy.ReviewApprove && sre.Decision == taxonomy.ReviewApprove {
-		state = taxonomy.WorkReadyPublish
+		state = taxonomy.MappingReadyPublish
 	}
-	return d.finalizeTaxonomyRun(ctx, claim, workID, taxonomy.WorkStageReview, func(tx *Tx, now time.Time) error {
-		result, err := tx.ExecContext(ctx, `UPDATE taxonomy_work_items SET
-			curriculum_review_json = ?::jsonb, sre_review_json = ?::jsonb, round = round + 1,
-			active_stage = '', active_run_id = '', technical_failures = 0, execution_failures = 0, next_run_at = NULL,
-			state = ?, last_error = '', lease_owner = '', lease_expires_at = NULL, updated_at = ?
-			WHERE id = ? AND active_stage = ? AND active_run_id = ?`,
-			curriculumJSON, sreJSON, state, now, workID, taxonomy.WorkStageReview, claim.Run.ID)
+	return d.finalizeTaxonomyRun(ctx, claim, mappingID, taxonomy.WorkStageReview, func(tx *Tx, now time.Time) error {
+		result, err := tx.ExecContext(ctx, `UPDATE taxonomy_mappings SET curriculum_review_json = ?::jsonb,
+			sre_review_json = ?::jsonb, round = round + 1, active_stage = '', active_run_id = '',
+			state = ?, last_error = '', updated_at = ? WHERE id = ? AND active_stage = ? AND active_run_id = ?`,
+			curriculumJSON, sreJSON, state, now, mappingID, taxonomy.WorkStageReview, claim.Run.ID)
 		if err != nil {
 			return fmt.Errorf("persist taxonomy reviewer pair: %w", err)
 		}
 		if changed, _ := result.RowsAffected(); changed != 1 {
-			return ErrTaxonomyWorkNotFound
+			return ErrTaxonomyMappingNotFound
 		}
 		return nil
 	})
 }
 
-func (d *DB) finalizeTaxonomyRun(ctx context.Context, claim agentruntime.Claim, workID string, stage taxonomy.WorkStage, apply func(*Tx, time.Time) error) error {
-	if !claim.Valid() || strings.TrimSpace(workID) == "" {
-		return fmt.Errorf("valid taxonomy claim and work id are required")
+func (d *DB) finalizeTaxonomyRun(ctx context.Context, claim agentruntime.Claim, mappingID string, stage taxonomy.WorkStage, apply func(*Tx, time.Time) error) error {
+	if !claim.Valid() || strings.TrimSpace(mappingID) == "" {
+		return errors.New("valid taxonomy claim and mapping id are required")
 	}
 	purpose, err := taxonomy.PurposeForStage(stage)
 	if err != nil {
@@ -354,7 +326,7 @@ func (d *DB) finalizeTaxonomyRun(ctx context.Context, claim agentruntime.Claim, 
 	if _, err := lockAgentClaim(ctx, tx, claim, now); err != nil {
 		return err
 	}
-	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-work" || claim.Run.OwnerRef != workID {
+	if claim.Run.Purpose != purpose || claim.Run.OwnerKind != "taxonomy-mapping" || claim.Run.OwnerRef != mappingID {
 		return agentruntime.ErrLeaseLost
 	}
 	if err := apply(tx, now); err != nil {
@@ -377,60 +349,28 @@ func (d *DB) finalizeTaxonomyRun(ctx context.Context, claim agentruntime.Claim, 
 	return nil
 }
 
-// AcquireTaxonomyLease serializes the model-free filesystem Publisher across
-// Server processes sharing the same database and data volume.
-func (d *DB) AcquireTaxonomyLease(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
-	if strings.TrimSpace(name) == "" || strings.TrimSpace(owner) == "" || ttl <= 0 {
-		return false, fmt.Errorf("taxonomy lease name, owner, and ttl are required")
-	}
-	now := time.Now().UTC()
-	nowValue := nowText(now)
-	result, err := d.conn.ExecContext(ctx, `INSERT INTO taxonomy_leases (name, owner, expires_at, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, expires_at = excluded.expires_at, updated_at = excluded.updated_at
-		WHERE taxonomy_leases.expires_at <= ? OR taxonomy_leases.owner = excluded.owner`,
-		name, owner, nowText(now.Add(ttl)), nowValue, nowValue)
-	if err != nil {
-		return false, fmt.Errorf("acquire taxonomy lease: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return count == 1, nil
-}
-
-func (d *DB) ReleaseTaxonomyLease(ctx context.Context, name, owner string) error {
-	_, err := d.conn.ExecContext(ctx, `DELETE FROM taxonomy_leases WHERE name = ? AND owner = ?`, name, owner)
-	if err != nil {
-		return fmt.Errorf("release taxonomy lease: %w", err)
-	}
-	return nil
-}
-
-const taxonomyWorkColumns = `id, kind, challenge_id, challenge_revision, base_revision, active_stage, active_run_id,
+const taxonomyMappingColumns = `id, challenge_id, challenge_revision, base_revision, active_stage, active_run_id,
 	COALESCE(candidate_json::text, ''), COALESCE(curriculum_review_json::text, ''), COALESCE(sre_review_json::text, ''),
-	round, technical_failures, execution_failures, next_run_at, state, published_revision, last_error, lease_owner, lease_expires_at, created_at, updated_at`
+	round, state, published_revision, last_error, created_at, updated_at`
 
-type taxonomyWorkScanner interface {
-	Scan(dest ...any) error
+type taxonomyMappingScanner interface {
+	Scan(...any) error
 }
 
-func (d *DB) readTaxonomyWork(ctx context.Context, query string, args ...any) (*taxonomy.WorkItem, error) {
-	item, err := scanTaxonomyWork(d.conn.QueryRowContext(ctx, query, args...))
+func (d *DB) readTaxonomyMapping(ctx context.Context, query string, args ...any) (*taxonomy.TaxonomyMapping, error) {
+	item, err := scanTaxonomyMapping(d.conn.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrTaxonomyWorkNotFound
+		return nil, ErrTaxonomyMappingNotFound
 	}
 	return item, err
 }
 
-func scanTaxonomyWork(scanner taxonomyWorkScanner) (*taxonomy.WorkItem, error) {
-	var item taxonomy.WorkItem
+func scanTaxonomyMapping(scanner taxonomyMappingScanner) (*taxonomy.TaxonomyMapping, error) {
+	var item taxonomy.TaxonomyMapping
 	var candidate, curriculum, sre string
-	var nextRunAt, leaseExpires sql.NullTime
-	if err := scanner.Scan(&item.ID, &item.Kind, &item.ChallengeID, &item.ChallengeRevision, &item.BaseRevision, &item.ActiveStage, &item.ActiveRunID,
-		&candidate, &curriculum, &sre, &item.Round, &item.TechnicalFailures, &item.ExecutionFailures, &nextRunAt, &item.State, &item.PublishedRevision,
-		&item.LastError, &item.LeaseOwner, &leaseExpires, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := scanner.Scan(&item.ID, &item.ChallengeID, &item.ChallengeRevision, &item.BaseRevision,
+		&item.ActiveStage, &item.ActiveRunID, &candidate, &curriculum, &sre, &item.Round,
+		&item.State, &item.PublishedRevision, &item.LastError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if err := unmarshalOptional(candidate, &item.Candidate); err != nil {
@@ -442,31 +382,35 @@ func scanTaxonomyWork(scanner taxonomyWorkScanner) (*taxonomy.WorkItem, error) {
 	if err := unmarshalOptional(sre, &item.SREReview); err != nil {
 		return nil, fmt.Errorf("decode SRE review for %q: %w", item.ID, err)
 	}
-	if nextRunAt.Valid {
-		item.NextRunAt = nextRunAt.Time.UTC()
-	}
-	if leaseExpires.Valid {
-		item.LeaseExpiresAt = leaseExpires.Time.UTC()
-	}
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()
 	return &item, nil
 }
 
-func validTaxonomyWorkState(value taxonomy.WorkState) bool {
+func validTaxonomyMappingState(value taxonomy.MappingState) bool {
 	switch value {
-	case taxonomy.WorkPending, taxonomy.WorkReadyPublish, taxonomy.WorkPublished, taxonomy.WorkFailed, taxonomy.WorkCancelled:
+	case taxonomy.MappingPending, taxonomy.MappingReadyPublish, taxonomy.MappingPublished,
+		taxonomy.MappingFailed, taxonomy.MappingCancelled:
 		return true
 	default:
 		return false
 	}
 }
 
-func taxonomyTime(value time.Time) string {
-	if value.IsZero() {
-		return "0001-01-01T00:00:00Z"
+func encodeTaxonomyMapping(mapping taxonomy.TaxonomyMapping) (string, string, string, error) {
+	candidate, err := marshalOptional(mapping.Candidate)
+	if err != nil {
+		return "", "", "", err
 	}
-	return value.UTC().Format(time.RFC3339Nano)
+	curriculum, err := marshalOptional(mapping.CurriculumReview)
+	if err != nil {
+		return "", "", "", err
+	}
+	sre, err := marshalOptional(mapping.SREReview)
+	if err != nil {
+		return "", "", "", err
+	}
+	return candidate, curriculum, sre, nil
 }
 
 func marshalOptional(value any) (string, error) {

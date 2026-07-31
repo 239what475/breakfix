@@ -27,15 +27,15 @@ func TestInternalAssistantEventsRequireTheCurrentLease(t *testing.T) {
 	if _, err := database.CreateMessageAndRun(ctx, agentruntime.Message{
 		ID: "assistant-user", SessionID: "assistant-session", Role: "user", Content: "help",
 	}, agentruntime.CreateRun{
-		ID:            "assistant-run",
-		SessionID:     "assistant-session",
-		Purpose:       "assistant",
-		OwnerKind:     "environment",
-		OwnerRef:      "environment-one",
-		Input:         json.RawMessage(`{"current_window":"shell-1","open_windows":["shell-1"]}`),
-		Model:         "deepseek-v4-pro",
-		PromptVersion: "assistant-v1",
-		DeadlineAt:    time.Now().UTC().Add(time.Hour),
+		ID:               "assistant-run",
+		SessionID:        "assistant-session",
+		Purpose:          "assistant",
+		OwnerKind:        "environment",
+		OwnerRef:         "environment-one",
+		Input:            json.RawMessage(`{"current_window":"shell-1","open_windows":["shell-1"]}`),
+		Model:            "deepseek-v4-pro",
+		PromptVersion:    "assistant-v1",
+		ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestInternalAssistantEventsRequireTheCurrentLease(t *testing.T) {
 		t.Fatalf("claim assistant run = %#v, %v", first, err)
 	}
 
-	handler := NewHandler(database, nil, config.Config{InternalAPIKey: "internal-test-key"})
+	handler := NewHandler(database, nil, config.Config{InternalWorkers: testInternalWorkerKeys()})
 	subscription, err := handler.assistant.Subscribe(ctx, "assistant-session", "assistant-run")
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestInternalAssistantEventsRequireTheCurrentLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := database.ClaimNext(ctx, "worker-two", time.Minute, now.Add(time.Millisecond))
-	if err != nil || second == nil || second.Run.Attempt != 2 {
+	if err != nil || second == nil || second.Attempt != 2 {
 		t.Fatalf("claim replacement attempt = %#v, %v", second, err)
 	}
 	postAssistantInternalEvent(t, router, *first, http.StatusConflict)
@@ -85,7 +85,7 @@ func TestInternalAssistantEventsRequireTheCurrentLease(t *testing.T) {
 func postAssistantInternalEvent(t *testing.T, router *gin.Engine, claim agentruntime.Claim, expectedStatus int) {
 	t.Helper()
 	body, err := json.Marshal(assistant.InternalEventRequest{
-		LeaseCredential: assistant.LeaseCredential{Attempt: claim.Run.Attempt, LeaseOwner: claim.LeaseOwner},
+		LeaseCredential: claim.Credential(),
 		Type:            "delta",
 		Content:         "draft",
 	})
@@ -94,7 +94,7 @@ func postAssistantInternalEvent(t *testing.T, router *gin.Engine, claim agentrun
 	}
 	request := httptest.NewRequest(http.MethodPost, "/api/internal/agent-runs/"+claim.Run.ID+"/assistant/events", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Breakfix-Internal-Key", "internal-test-key")
+	request.Header.Set("X-Breakfix-Internal-Key", "agent-test-key")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != expectedStatus {

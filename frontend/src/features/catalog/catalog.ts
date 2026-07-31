@@ -10,7 +10,7 @@ export function challengeStatus(challenge: Challenge): ChallengeStatus {
 }
 
 export function formatRuntime(runtime: Challenge["runtime"]) {
-	return runtime === "vcluster" ? "VCluster" : "Container";
+	return runtime === "k8s" ? "Kubernetes" : "Linux nodes";
 }
 
 export function formatDifficulty(difficulty: Challenge["difficulty"]) {

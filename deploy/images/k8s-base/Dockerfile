@@ -35,4 +35,5 @@ COPY runtime-init.sh /breakfix/runtime-init.sh
 RUN chmod +x /breakfix/runtime-init.sh && mkdir -p /breakfix /var/lib/breakfix /root/.kube
 
 SHELL ["/bin/bash", "-c"]
+ENTRYPOINT ["/breakfix/runtime-init.sh"]
 CMD ["sleep", "infinity"]

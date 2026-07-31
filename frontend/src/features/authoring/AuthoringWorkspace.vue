@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from "vue";
 import { FileCode2, MessageSquareText, Send } from "lucide-vue-next";
-import { api } from "../../api/client";
+import { APIError, api } from "../../api/client";
 import type {
   AuthoringAsset,
   AuthoringFileDiff,
@@ -26,7 +26,7 @@ const stateLabel: Record<string, string> = {
   DraftConversation: "等待题意",
   IntentReview: "题意约定待确认",
   GeneratingAndVerifying: "正在生成并验证",
-  VerificationInfrastructureFailed: "验证基础设施故障",
+  InfrastructureFailed: "基础设施故障",
   AwaitingVerifiedReview: "等待已验证题目审核",
   RevisingAndVerifying: "正在生成并验证修订题目",
   Publishing: "正在发布",
@@ -42,7 +42,7 @@ const checkpoints = computed(() => {
     return session.value.verified.checkpoints.map((checkpoint, index) => ({
       id: checkpoint.id,
       title: checkpoint.title,
-      markdown: `${checkpoint.description}${checkpoint.hint ? `\n\n提示文件：\`${checkpoint.hint}\`` : ""}${checkpoint.depends_on?.length ? `\n\n依赖：${checkpoint.depends_on.join("、")}` : ""}`,
+      markdown: `${checkpoint.description}${checkpoint.hint ? `\n\n提示文件：\`${checkpoint.hint}\`` : ""}${checkpoint.node ? `\n\n执行节点：\`${checkpoint.node}\`` : ""}`,
       position: index + 1,
     }));
   }
@@ -58,7 +58,7 @@ const tabs = computed(() => {
       label: `检查点 ${index + 1}`,
     })),
   ];
-  if (session.value?.artifact) {
+  if (session.value?.candidate) {
     entries.push({ id: "assets", label: "Assets" });
     entries.push({ id: "diff", label: "Diff" });
   }
@@ -105,19 +105,22 @@ const canSend = computed(
 const canGenerate = computed(
   () =>
     !session.value?.authoring_turn_active &&
-    session.value?.state === "IntentReview" &&
+    (session.value?.state === "IntentReview" ||
+      (session.value?.state === "RevisingAndVerifying" &&
+        !session.value.generator_run_id)) &&
     checkpoints.value.length > 0,
 );
 const canPublish = computed(
   () =>
     !session.value?.authoring_turn_active &&
     session.value?.state === "AwaitingVerifiedReview" &&
-    !!session.value.artifact,
+    session.value.candidate?.state === "Verified" &&
+    session.value.verification?.passed === true,
 );
 const canOpenPublished = computed(
   () =>
     session.value?.state === "Published" &&
-    !!session.value.verification?.challenge_id,
+    !!session.value.publish_challenge_id,
 );
 const actionLabel = computed(() => {
   if (canGenerate.value) return "生成并验证题目";
@@ -174,7 +177,7 @@ async function createOrResume() {
       try {
         session.value = await api.getCurrentAuthoringSession();
       } catch (err) {
-        if (!(err instanceof Error) || err.message !== "authoring session not found") {
+        if (!(err instanceof APIError) || err.status !== 404) {
           throw err;
         }
         session.value = await api.createAuthoringSession();
@@ -210,8 +213,8 @@ async function confirmAction() {
   busy.value = true;
   error.value = "";
   try {
-    if (canOpenPublished.value && session.value.verification?.challenge_id) {
-      emit("published", session.value.verification.challenge_id);
+    if (canOpenPublished.value && session.value.publish_challenge_id) {
+      emit("published", session.value.publish_challenge_id);
       return;
     }
     session.value = canGenerate.value
@@ -227,7 +230,7 @@ async function confirmAction() {
 }
 function focusChange(revision: number) {
   activeTab.value =
-    revision === session.value?.visible_revision && session.value?.artifact
+    revision === session.value?.visible_revision && session.value?.candidate
       ? "diff"
       : "overview";
 }
@@ -257,9 +260,9 @@ onScopeDispose(clearPoll);
     <div class="authoring-body">
       <section class="authoring-plan-pane" :class="{ 'narrow-hidden': narrowPane !== 'plan' }">
         <header class="authoring-plan-heading">
-          <div><p class="eyebrow">{{ session?.artifact ? "Verified revision" : "Intent revision" }}</p><h1>{{ session?.artifact ? "已验证题目" : "题意约定" }}</h1></div>
+          <div><p class="eyebrow">{{ session?.candidate ? "Verified revision" : "Intent revision" }}</p><h1>{{ session?.candidate ? "已验证题目" : "题意约定" }}</h1></div>
           <div class="authoring-plan-actions">
-            <div v-if="session" class="authoring-status" :data-state="session.state"><i></i><span>{{ stateLabel[session.state] }}</span><span>{{ session.artifact ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
+            <div v-if="session" class="authoring-status" :data-state="session.state"><i></i><span>{{ stateLabel[session.state] }}</span><span>{{ session.candidate ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.pipeline_state">{{ session.pipeline_state }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
             <div v-if="session" class="authoring-meta"><span>{{ displayMetadata?.runtime || "runtime 待定" }}</span><span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span></div>
             <button v-if="actionLabel" class="primary-button authoring-primary-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
           </div>
@@ -288,12 +291,12 @@ onScopeDispose(clearPoll);
             <pre v-if="selectedDiff"><code>{{ selectedDiff.diff }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'verification'" class="authoring-verification">
-            <strong>{{ session.verification?.phase === "Succeeded" ? "真实验证已通过" : session.verification?.report?.class === "infrastructure" ? "真实验证因基础设施故障未完成" : "真实验证未通过" }}</strong>
-            <p>{{ session.verification?.report?.summary || session.verification?.message || "全部检查点通过" }}</p>
+            <strong>{{ session.verification?.passed ? "真实验证已通过" : "真实验证未通过" }}</strong>
+            <p>{{ session.verification?.summary || session.last_error || "验证没有返回摘要" }}</p>
             <dl>
-              <div><dt>镜像构建</dt><dd>{{ session.verification?.report?.build_passed ? "通过" : "-" }}</dd></div>
-              <div><dt>标准解答</dt><dd>{{ session.verification?.report?.answer_passed ? "通过" : "-" }}</dd></div>
-              <div><dt>全部检查点</dt><dd>{{ session.verification?.report?.checkpoints_passed ? "通过" : "-" }}</dd></div>
+              <div><dt>候选流水线</dt><dd>{{ session.candidate?.state || session.pipeline_state || "-" }}</dd></div>
+              <div><dt>标准解答</dt><dd>{{ session.verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ session.verification?.answers.length || 0 }}</dd></div>
+              <div><dt>检查点</dt><dd>{{ session.verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ session.verification?.checkpoints.length || 0 }}</dd></div>
             </dl>
           </div>
         </div>

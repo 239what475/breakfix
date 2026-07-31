@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-type WorkKind string
-
-const WorkKindMapping WorkKind = "mapping"
-
 type WorkStage string
 
 const (
@@ -22,14 +18,14 @@ const (
 	RuntimePurposeReview = "taxonomy-review"
 )
 
-type WorkState string
+type MappingState string
 
 const (
-	WorkPending      WorkState = "Pending"
-	WorkReadyPublish WorkState = "ReadyToPublish"
-	WorkPublished    WorkState = "Published"
-	WorkFailed       WorkState = "Failed"
-	WorkCancelled    WorkState = "Cancelled"
+	MappingPending      MappingState = "Pending"
+	MappingReadyPublish MappingState = "ReadyToPublish"
+	MappingPublished    MappingState = "Published"
+	MappingFailed       MappingState = "Failed"
+	MappingCancelled    MappingState = "Cancelled"
 )
 
 type ReviewDecision string
@@ -44,9 +40,8 @@ type Review struct {
 	Feedback string         `json:"feedback,omitempty"`
 }
 
-type WorkItem struct {
+type TaxonomyMapping struct {
 	ID                string
-	Kind              WorkKind
 	ChallengeID       string
 	ChallengeRevision string
 	BaseRevision      string
@@ -56,14 +51,9 @@ type WorkItem struct {
 	CurriculumReview  *Review
 	SREReview         *Review
 	Round             int
-	TechnicalFailures int
-	ExecutionFailures int
-	NextRunAt         time.Time
-	State             WorkState
+	State             MappingState
 	PublishedRevision string
 	LastError         string
-	LeaseOwner        string
-	LeaseExpiresAt    time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

@@ -1,26 +1,39 @@
 package builder
 
 import (
-	"reflect"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
-func TestBuildArgsUseTaskScopedOCILayoutNamedContexts(t *testing.T) {
-	digest := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	got := buildArgs("/work/challenge", "/work/base", "breakfix-base", digest, "/work/image.oci.tar")
-	want := []string{
-		"build",
-		"--frontend", "dockerfile.v0",
-		"--local", "context=/work/challenge",
-		"--local", "dockerfile=/work/challenge",
-		"--oci-layout", "trusted-base=/work/base",
-		"--opt", "build-arg:BREAKFIX_BASE_IMAGE=breakfix-base",
-		"--output", "type=oci,dest=/work/image.oci.tar",
-		"--progress", "plain",
-		"--opt", "context:breakfix-base=oci-layout://trusted-base@" + digest,
-		"--opt", "context:breakfix-base:latest=oci-layout://trusted-base@" + digest,
+func TestNodeImageFilesPreserveBundlePathsAndModes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nodes", "proxy"), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("build args = %#v, want %#v", got, want)
+	path := filepath.Join(root, "nodes", "proxy", "generate.sh")
+	//nolint:gosec // This fixture verifies that executable script modes are preserved in Node bundles.
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := incusprovider.ImageFilesFromDirectory(root)
+	if err != nil {
+		t.Fatalf("collect node image files: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "nodes/proxy/generate.sh" || files[0].Mode != 0o750 || string(files[0].Content) != "#!/bin/sh\n" {
+		t.Fatalf("node image files = %#v", files)
+	}
+}
+
+func TestNodeImageFilesRejectSymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink("/etc/passwd", filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := incusprovider.ImageFilesFromDirectory(root); err == nil {
+		t.Fatal("symlink unexpectedly accepted in node image bundle")
 	}
 }

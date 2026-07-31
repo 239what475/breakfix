@@ -11,7 +11,7 @@ import (
 )
 
 func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
-	router, err := SetupRouter(context.Background(), nil, nil, config.Config{}, nil)
+	router, err := SetupRouter(context.Background(), nil, nil, config.Config{}, nil, Dependencies{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +33,7 @@ func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
 		"POST /api/internal/agent-runs/:id/authoring/stage",
 		"POST /api/internal/agent-runs/:id/authoring/finalize",
 		"GET /readyz",
+		"GET /capabilities/node-provider",
 	} {
 		if !routes[expected] {
 			t.Fatalf("route not registered: %s", expected)
@@ -52,10 +53,10 @@ func TestSetupRouterRefusesMalformedChallengeCatalog(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "challenges", "broken"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "challenges", "broken", "challenge.yaml"), []byte("id: broken\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "challenges", "broken", "challenge.yaml"), []byte("id: broken\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SetupRouter(context.Background(), nil, nil, config.Config{DataDir: root}, nil); err == nil {
+	if _, err := SetupRouter(context.Background(), nil, nil, config.Config{DataDir: root}, nil, Dependencies{}); err == nil {
 		t.Fatal("SetupRouter accepted a malformed challenge catalog")
 	}
 }

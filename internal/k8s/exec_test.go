@@ -69,7 +69,7 @@ func TestStreamPTYPropagatesCancellation(t *testing.T) {
 	}
 }
 
-func TestLiveExecInPodStreamsCheckpointJSON(t *testing.T) {
+func TestLiveExecInPodStreamsK8sChecksJSON(t *testing.T) {
 	if os.Getenv("RUN_LIVE_K8S_EXEC") != "1" {
 		t.Skip("set RUN_LIVE_K8S_EXEC=1 to run against a real Kubernetes pod")
 	}
@@ -92,7 +92,7 @@ func TestLiveExecInPodStreamsCheckpointJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new Kubernetes client: %v", err)
 	}
-	exitCode, output, err := client.ExecInPod(namespace, pod, "/checks/checkpoints.sh", "--json")
+	exitCode, output, err := client.ExecInPod(namespace, pod, "/bin/bash", "/opt/breakfix/challenge/k8s/checks.sh")
 	if err != nil {
 		t.Fatalf("exec checkpoints: %v", err)
 	}

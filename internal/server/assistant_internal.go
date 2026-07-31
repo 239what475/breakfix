@@ -3,18 +3,19 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -30,7 +31,11 @@ func (h *Handler) InternalAssistantContext(c *gin.Context) {
 		h.writeInternalAssistantError(c, err)
 		return
 	}
-	_ = claim
+	history, err := h.db.ListMessages(c.Request.Context(), claim.Run.SessionID)
+	if err != nil {
+		h.writeInternalAssistantError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, assistant.ExecutionContext{
 		UserID:           request.UserID,
 		EnvironmentUID:   request.EnvironmentUID,
@@ -39,10 +44,13 @@ func (h *Handler) InternalAssistantContext(c *gin.Context) {
 		ChallengeID:      request.ChallengeID,
 		ChallengeTitle:   request.ChallengeTitle,
 		Problem:          request.Problem,
+		Nodes:            request.Nodes,
+		CurrentNode:      request.CurrentNode,
 		CurrentWindow:    request.CurrentWindow,
-		OpenWindows:      request.OpenWindows,
+		Terminals:        request.Terminals,
 		EnvironmentPhase: request.EnvironmentPhase,
 		Checkpoints:      request.Checkpoints,
+		History:          history,
 	})
 }
 
@@ -92,12 +100,11 @@ func (h *Handler) InternalAssistantEvent(c *gin.Context) {
 }
 
 func (h *Handler) decodeInternalAgentRequest(c *gin.Context, value any) bool {
-	if h.internalAPIKey == "" {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal agent API is disabled"})
-		return false
-	}
-	if c.GetHeader("X-Breakfix-Internal-Key") != h.internalAPIKey {
-		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid internal key"})
+	return h.decodeInternalWorkerRequest(c, config.InternalWorkerAgent, value)
+}
+
+func (h *Handler) decodeInternalWorkerRequest(c *gin.Context, expected config.InternalWorkerRole, value any) bool {
+	if !h.authorizeInternalWorker(c, expected) {
 		return false
 	}
 	decoder := json.NewDecoder(c.Request.Body)
@@ -113,14 +120,53 @@ func (h *Handler) decodeInternalAgentRequest(c *gin.Context, value any) bool {
 	return true
 }
 
+func (h *Handler) authorizeInternalWorker(c *gin.Context, expected config.InternalWorkerRole) bool {
+	if strings.TrimSpace(h.internalWorkers.Key(expected)) == "" {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "internal worker API is disabled"})
+		return false
+	}
+	role, ok := h.internalWorkerRole(c.GetHeader("X-Breakfix-Internal-Key"))
+	if !ok {
+		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid internal key"})
+		return false
+	}
+	if role != expected {
+		c.JSON(http.StatusForbidden, api.ErrorResponse{Error: "internal worker is not authorized for this endpoint"})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) internalWorkerRole(value string) (config.InternalWorkerRole, bool) {
+	if strings.TrimSpace(value) == "" {
+		return "", false
+	}
+	matches := make([]config.InternalWorkerRole, 0, 1)
+	for _, role := range []config.InternalWorkerRole{
+		config.InternalWorkerAgent,
+		config.InternalWorkerBuilder,
+		config.InternalWorkerPublisher,
+		config.InternalWorkerVerifier,
+	} {
+		key := h.internalWorkers.Key(role)
+		if key != "" && subtle.ConstantTimeCompare([]byte(value), []byte(key)) == 1 {
+			matches = append(matches, role)
+		}
+	}
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
+}
+
 func (h *Handler) internalAssistantClaim(ctx context.Context, runID string, credential assistant.LeaseCredential) (*agentruntime.Claim, error) {
 	if h.db == nil || h.assistant == nil {
 		return nil, errors.New("assistant runtime is unavailable")
 	}
-	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
+	if strings.TrimSpace(runID) == "" || !credential.Valid() {
 		return nil, errors.New("assistant run lease credentials are required")
 	}
-	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
+	claim, err := h.getAgentClaim(ctx, runID, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +197,7 @@ func (h *Handler) assistantRequestForClaim(ctx context.Context, runID string, cr
 	if err != nil {
 		return nil, assistant.Request{}, err
 	}
-	if env.Phase != "Ready" || strings.TrimSpace(env.WorkspacePod) == "" {
+	if env.Phase != "Ready" || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		return nil, assistant.Request{}, errors.New("assistant environment is not ready")
 	}
 	entry, err := h.publishedChallenge(env.ChallengeRef)
@@ -159,6 +205,10 @@ func (h *Handler) assistantRequestForClaim(ctx context.Context, runID string, cr
 		return nil, assistant.Request{}, err
 	}
 	content, err := challenge.ReadContent(entry)
+	if err != nil {
+		return nil, assistant.Request{}, err
+	}
+	input, nodes, err := normalizeAssistantWorkspace(env, input)
 	if err != nil {
 		return nil, assistant.Request{}, err
 	}
@@ -170,12 +220,15 @@ func (h *Handler) assistantRequestForClaim(ctx context.Context, runID string, cr
 		ChallengeID:      entry.ID,
 		ChallengeTitle:   entry.Title,
 		Problem:          content.Problem,
+		Nodes:            nodes,
+		CurrentNode:      input.CurrentNode,
 		CurrentWindow:    input.CurrentWindow,
-		OpenWindows:      input.OpenWindows,
+		Terminals:        input.Terminals,
 		EnvironmentPhase: string(env.Phase),
 		Checkpoints:      assistantCheckpointSnapshot(entry, env),
 		Reader: &environmentAssistantReader{
-			client:         h.k8s,
+			k8s:            h.k8s,
+			node:           h.nodeTerminal,
 			getEnvironment: h.getEnvironment,
 			env:            env,
 			entry:          entry,
@@ -198,12 +251,6 @@ func decodeAssistantRunInput(raw []byte) (assistant.RunInput, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return input, err
 	}
-	windows, current, err := assistantWindows(input.CurrentWindow, input.OpenWindows)
-	if err != nil {
-		return input, err
-	}
-	input.CurrentWindow = current
-	input.OpenWindows = windows
 	return input, nil
 }
 
@@ -214,6 +261,7 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 	switch name {
 	case "get_terminal_scrollback":
 		var input struct {
+			Node   string `json:"node"`
 			Window string `json:"window"`
 			Offset int    `json:"offset"`
 			Lines  int    `json:"lines"`
@@ -224,12 +272,16 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 		if input.Window == "" {
 			input.Window = request.CurrentWindow
 		}
-		if !assistantWindowOpen(request.OpenWindows, input.Window) {
-			return fmt.Errorf("terminal window %q is not open in this workspace", input.Window)
+		node, err := resolveAssistantNode(request, input.Node)
+		if err != nil {
+			return err
+		}
+		if !assistantTerminalWindowOpen(request.Terminals, node, input.Window) {
+			return fmt.Errorf("terminal window %q is not open on node %q in this workspace", input.Window, node)
 		}
 		input.Offset = clampAssistantInt(input.Offset, 0, 10000, 0)
 		input.Lines = clampAssistantInt(input.Lines, 1, 250, 120)
-		value, err := request.Reader.TerminalScrollback(c.Request.Context(), input.Window, input.Offset, input.Lines)
+		value, err := request.Reader.TerminalScrollback(c.Request.Context(), node, input.Window, input.Offset, input.Lines)
 		if err != nil {
 			return err
 		}
@@ -247,6 +299,7 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 		return nil
 	case "list_environment_files":
 		var input struct {
+			Node   string `json:"node"`
 			Path   string `json:"path"`
 			Offset int    `json:"offset"`
 			Limit  int    `json:"limit"`
@@ -257,9 +310,13 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 		if input.Path == "" {
 			input.Path = "/"
 		}
+		node, err := resolveAssistantNode(request, input.Node)
+		if err != nil {
+			return err
+		}
 		input.Offset = clampAssistantInt(input.Offset, 0, 10000, 0)
 		input.Limit = clampAssistantInt(input.Limit, 1, 200, 100)
-		value, err := request.Reader.ListEnvironmentFiles(c.Request.Context(), input.Path, input.Offset, input.Limit)
+		value, err := request.Reader.ListEnvironmentFiles(c.Request.Context(), node, input.Path, input.Offset, input.Limit)
 		if err != nil {
 			return err
 		}
@@ -267,6 +324,7 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 		return nil
 	case "read_environment_file":
 		var input struct {
+			Node     string `json:"node"`
 			Path     string `json:"path"`
 			Offset   int64  `json:"offset"`
 			MaxBytes int    `json:"max_bytes"`
@@ -277,11 +335,15 @@ func (h *Handler) runInternalAssistantTool(c *gin.Context, request assistant.Req
 		if strings.TrimSpace(input.Path) == "" {
 			return errors.New("path is required")
 		}
+		node, err := resolveAssistantNode(request, input.Node)
+		if err != nil {
+			return err
+		}
 		if input.Offset < 0 {
 			input.Offset = 0
 		}
 		input.MaxBytes = clampAssistantInt(input.MaxBytes, 1, 32768, 16384)
-		value, err := request.Reader.ReadEnvironmentFile(c.Request.Context(), input.Path, input.Offset, input.MaxBytes)
+		value, err := request.Reader.ReadEnvironmentFile(c.Request.Context(), node, input.Path, input.Offset, input.MaxBytes)
 		if err != nil {
 			return err
 		}
@@ -325,6 +387,37 @@ func requireJSONEOF(decoder *json.Decoder) error {
 func assistantWindowOpen(windows []string, target string) bool {
 	for _, window := range windows {
 		if window == target {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveAssistantNode(request assistant.Request, raw string) (string, error) {
+	node := strings.TrimSpace(raw)
+	if request.Runtime == challenge.RuntimeK8s {
+		if node != "" {
+			return "", errors.New("k8s environment has no logical node selector")
+		}
+		return "", nil
+	}
+	if request.Runtime != challenge.RuntimeNode {
+		return "", fmt.Errorf("unsupported environment runtime %q", request.Runtime)
+	}
+	if node == "" {
+		node = request.CurrentNode
+	}
+	for _, candidate := range request.Nodes {
+		if candidate == node {
+			return node, nil
+		}
+	}
+	return "", fmt.Errorf("environment has no logical node %q", node)
+}
+
+func assistantTerminalWindowOpen(terminals []assistant.TerminalContext, node, window string) bool {
+	for _, terminal := range terminals {
+		if terminal.Node == node && assistantWindowOpen(terminal.Windows, window) {
 			return true
 		}
 	}

@@ -3,9 +3,13 @@ package challenge
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+)
+
+const (
+	testNodeImageFingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testK8sImageDigest       = "registry.example/breakfix/k8s@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func TestListAndGet(t *testing.T) {
@@ -14,9 +18,7 @@ func TestListAndGet(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: demo-task\nsource_slug: demo-task-source\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
-	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: demo-task\nsource_slug: demo-task-source\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
 	writeChallengeAssets(t, dir)
 
 	challenges, err := List(root)
@@ -40,7 +42,7 @@ func TestListAndGet(t *testing.T) {
 	if challenge.Title != "Demo" {
 		t.Fatalf("unexpected title %q", challenge.Title)
 	}
-	if challenge.Runtime != "container" {
+	if challenge.Runtime != RuntimeNode {
 		t.Fatalf("unexpected runtime %q", challenge.Runtime)
 	}
 }
@@ -48,9 +50,7 @@ func TestListAndGet(t *testing.T) {
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
 	_, err := MaterializeWithSlug(root, "fresh-task", "fresh-task-source", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: fresh-task\nsource_slug: fresh-task-source\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
-		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
-		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: fresh-task\nsource_slug: fresh-task-source\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeChallengeAssets(t, dst)
 		writeFile(t, filepath.Join(dst, "notes.txt"), "hello\n")
 		return nil
@@ -67,7 +67,7 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
 	_, err := MaterializeWithSlug(root, "broken-task", "broken-task-source", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nsource_slug: broken-task-source\ntitle: Broken\ntype: script\nruntime: container\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nsource_slug: broken-task-source\ntitle: Broken\nruntime: node\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
@@ -81,9 +81,7 @@ func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 
 func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\ntitle: Invalid\ntype: script\nruntime: container\ndifficulty: \ndescription: \"\"\ncheckpoints: []\n")
-	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\nsource_slug: invalid\ntitle: Invalid\nruntime: node\ndifficulty: \ndescription: \"\"\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\npublished_at: 2026-07-24T08:00:00Z\n")
 	writeChallengeAssets(t, root)
 
 	if _, err := ValidateDir(root); err == nil {
@@ -91,19 +89,16 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	}
 }
 
-func TestValidateDirAcceptsVClusterRuntime(t *testing.T) {
+func TestValidateDirAcceptsK8sRuntime(t *testing.T) {
 	root := t.TempDir()
-	manifest := validManifest("id: vcluster-demo\nsource_slug: vcluster-demo\ntitle: VCluster Demo\nimage: vcluster-demo:v1\npublished_at: 2026-07-24T08:00:00Z\n")
-	writeFile(t, filepath.Join(root, "challenge.yaml"), strings.Replace(manifest, "runtime: container", "runtime: vcluster", 1))
-	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM breakfix-k8s-base:latest\n")
-	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
-	writeChallengeAssets(t, root)
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validPublishedK8sManifest("id: k8s-demo\nsource_slug: k8s-demo\ntitle: Kubernetes Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
+	writeK8sChallengeAssets(t, root)
 
 	entry, err := ValidateDir(root)
 	if err != nil {
-		t.Fatalf("expected vcluster runtime to validate, got %v", err)
+		t.Fatalf("expected k8s runtime to validate, got %v", err)
 	}
-	if entry.Runtime != "vcluster" {
+	if entry.Runtime != RuntimeK8s {
 		t.Fatalf("unexpected runtime %q", entry.Runtime)
 	}
 }
@@ -120,8 +115,6 @@ func TestLoadDirRejectsMissingPublishedTime(t *testing.T) {
 func TestChallengeRevisionCoversAllArtifactFiles(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("id: revision-demo\ntitle: Revision Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
-	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
 	writeChallengeAssets(t, root)
 
 	first, err := LoadDir(root)
@@ -138,19 +131,17 @@ func TestChallengeRevisionCoversAllArtifactFiles(t *testing.T) {
 	}
 }
 
-func TestValidateSubmissionDirAllowsMissingID(t *testing.T) {
+func TestValidateCandidateDirAllowsMissingPlatformFields(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("title: Draft Demo\nimage: demo:v1\n"))
-	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(root, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("title: Draft Demo\n"))
 	writeChallengeAssets(t, root)
 
-	entry, err := ValidateSubmissionDir(root)
+	entry, err := ValidateCandidateDir(root)
 	if err != nil {
-		t.Fatalf("expected submission dir to validate, got %v", err)
+		t.Fatalf("expected candidate dir to validate, got %v", err)
 	}
 	if entry.ID != "" {
-		t.Fatalf("expected empty submission id, got %q", entry.ID)
+		t.Fatalf("expected empty candidate id, got %q", entry.ID)
 	}
 }
 
@@ -158,20 +149,18 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "authoring", "revision")
 	writeFile(t, filepath.Join(source, "challenge.yaml"), validManifest("title: Verified source\n"))
-	writeFile(t, filepath.Join(source, "Dockerfile"), "FROM breakfix-base:latest\n")
-	writeFile(t, filepath.Join(source, "generate.sh"), "#!/bin/sh\n")
 	writeChallengeAssets(t, source)
-	sourceBefore, err := LoadSubmissionDir(source)
+	sourceBefore, err := LoadCandidateDir(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	publishedAt := time.Date(2026, time.July, 24, 8, 15, 0, 0, time.UTC)
-	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", "registry.example/verify:latest", publishedAt)
+	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", testNodeImageFingerprint, publishedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if published.ID != "opaque-challenge" || published.Image != "registry.example/verify:latest" {
+	if published.ID != "opaque-challenge" || published.Image != testNodeImageFingerprint {
 		t.Fatalf("unexpected published entry: %#v", published)
 	}
 	if published.SourceSlug != "verified-source-opaque-c" || filepath.Base(published.Dir) != published.SourceSlug {
@@ -180,7 +169,7 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	if !published.PublishedAt.Equal(publishedAt) {
 		t.Fatalf("published time = %s, want %s", published.PublishedAt, publishedAt)
 	}
-	sourceEntry, err := LoadSubmissionDir(source)
+	sourceEntry, err := LoadCandidateDir(source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +187,7 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T) {
 	root := t.TempDir()
 	entry, err := MaterializeWithSlug(root, "chal-4m6q8r2t9v3x", "批量压缩旧日志-4m6q8r2", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 批量压缩旧日志-4m6q8r2\ntitle: 批量压缩旧日志\npublished_at: 2026-07-24T08:00:00Z\n"))
-		writeFile(t, filepath.Join(dst, "Dockerfile"), "FROM alpine:3.20\n")
-		writeFile(t, filepath.Join(dst, "generate.sh"), "#!/bin/sh\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 批量压缩旧日志-4m6q8r2\ntitle: 批量压缩旧日志\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeChallengeAssets(t, dst)
 		return nil
 	})
@@ -217,17 +204,15 @@ func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T)
 }
 
 func TestSourceSlugForDoesNotEndWithTruncatedIdentifierSeparator(t *testing.T) {
-	if got, want := sourceSlugFor("Verified publish title", "chal-publish-recovery"), "verified-publish-title-publish"; got != want {
-		t.Fatalf("sourceSlugFor() = %q, want %q", got, want)
+	if got, want := SourceSlugFor("Verified publish title", "chal-publish-recovery"), "verified-publish-title-publish"; got != want {
+		t.Fatalf("SourceSlugFor() = %q, want %q", got, want)
 	}
 }
 
 func TestListRejectsPublishedChallengeWithoutMatchingSourceSlug(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "readable-directory")
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validManifest("id: chal-4m6q8r2t9v3x\nsource_slug: another-directory\ntitle: Mismatch\npublished_at: 2026-07-24T08:00:00Z\n"))
-	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.20\n")
-	writeFile(t, filepath.Join(dir, "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: another-directory\ntitle: Mismatch\npublished_at: 2026-07-24T08:00:00Z\n"))
 	writeChallengeAssets(t, dir)
 
 	if _, err := List(root); err == nil {
@@ -240,13 +225,25 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func validManifest(prefix string) string {
-	return prefix + "type: script\nruntime: container\ndifficulty: easy\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+	return prefix + "runtime: node\ndifficulty: easy\ndescription: demo\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+}
+
+func validPublishedNodeManifest(prefix string) string {
+	return prefix + "image: " + testNodeImageFingerprint + "\n" + validManifest("")
+}
+
+func validK8sManifest(prefix string) string {
+	return prefix + "runtime: k8s\ndifficulty: easy\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+}
+
+func validPublishedK8sManifest(prefix string) string {
+	return prefix + "image: " + testK8sImageDigest + "\n" + validK8sManifest("")
 }
 
 func writeChallengeAssets(t *testing.T, root string) {
@@ -254,6 +251,17 @@ func writeChallengeAssets(t *testing.T, root string) {
 	writeFile(t, filepath.Join(root, "problem.md"), "problem\n")
 	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
-	writeFile(t, filepath.Join(root, "checks", "checkpoints.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
-	writeFile(t, filepath.Join(root, "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "checks.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+}
+
+func writeK8sChallengeAssets(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "problem.md"), "problem\n")
+	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
+	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
+	writeFile(t, filepath.Join(root, "k8s", "generate.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "k8s", "checks.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
+	writeFile(t, filepath.Join(root, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }

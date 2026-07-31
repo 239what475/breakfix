@@ -9,7 +9,10 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/candidate"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
+	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func TestAuthoringRunStagesThenAtomicallyFinalizesOneRevision(t *testing.T) {
@@ -26,7 +29,7 @@ func TestAuthoringRunStagesThenAtomicallyFinalizesOneRevision(t *testing.T) {
 		ID: "author-user", Role: "user", Content: "设计一个明确的服务修复题",
 	}, agentruntime.CreateRun{
 		ID: "author-run", SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
-		Input: json.RawMessage(`{"base_revision":0}`), Model: "deepseek-v4-pro", PromptVersion: "authoring-v1", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Input: json.RawMessage(`{"base_revision":0}`), Model: "deepseek-v4-pro", PromptVersion: "authoring-v1", ExecutionTimeout: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,9 +62,10 @@ func TestAuthoringRunStagesThenAtomicallyFinalizesOneRevision(t *testing.T) {
 	}
 }
 
-func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
+func TestCandidateVerificationOnlyPublishesCurrentAuthoringRevision(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	const sessionID = "author-generator"
 	const userID = "generator-user"
 	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
@@ -71,22 +75,8 @@ func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, firstRun, err := database.StartGeneratorRun(ctx, sessionID, userID, first.Number, generatorCreateRun("generator-first", sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: first.Number})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claim, err := database.ClaimNext(ctx, "generator-worker", time.Minute, time.Now().UTC())
-	if err != nil || claim == nil {
-		t.Fatalf("claim first generator run: %#v, %v", claim, err)
-	}
-	if err := database.FinalizeGeneratorSubmission(ctx, *claim, generator.SubmissionID(firstRun.ID), "verify-first"); err != nil {
-		t.Fatal(err)
-	}
-	verification := authoring.Verification{TaskID: "verify-first", Phase: "Succeeded", Report: &authoring.VerificationReport{BuildPassed: true, AnswerPassed: true, CheckpointsPassed: true}}
-	artifact := authoring.Artifact{SubmissionID: generator.SubmissionID(firstRun.ID), Directory: "authoring/author-generator/revisions/1/artifact", GeneratorRunID: firstRun.ID}
-	if err := database.CompleteGeneratorVerification(ctx, sessionID, firstRun.ID, artifact, verification); err != nil {
-		t.Fatal(err)
-	}
+	firstCandidate, _ := finalizeTestCandidate(t, database, sessionID, userID, first.Number, "generator-first", generator.RunInput{AuthoringSessionID: sessionID, Revision: first.Number}, now)
+	completeTestCandidatePipeline(t, database, firstCandidate.ID, now.Add(3*time.Second))
 
 	second, err := database.ReplaceAuthoringPlan(ctx, sessionID, userID, first.Number, validAuthoringPlan("revised overview"), authoring.StateRevisingAndVerifying)
 	if err != nil {
@@ -96,13 +86,15 @@ func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.State != authoring.StateRevisingAndVerifying || session.GeneratorRunID != "" || session.VerifyTaskID != "" || session.VisibleRevision != first.Number {
+	if session.State != authoring.StateRevisingAndVerifying || session.GeneratorRunID != "" || session.CandidateRevisionID != "" || session.VisibleRevision != first.Number {
 		t.Fatalf("revised session did not detach old verification: %#v", session)
 	}
-	if err := database.CompleteGeneratorVerification(ctx, sessionID, firstRun.ID, artifact, verification); !errors.Is(err, authoring.ErrInvalidState) {
-		t.Fatalf("old verify task accepted a new revision: %v", err)
+	storedFirst, err := database.GetCandidateRevision(ctx, firstCandidate.ID)
+	if err != nil || storedFirst.State != candidate.StateVerified {
+		t.Fatalf("previous verified candidate changed while revising: %#v, %v", storedFirst, err)
 	}
-	updated, secondRun, err := database.StartGeneratorRun(ctx, sessionID, userID, second.Number, generatorCreateRun("generator-second", sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: second.Number, SeedSubmissionID: artifact.SubmissionID})
+	input := generator.RunInput{AuthoringSessionID: sessionID, Revision: second.Number, SeedCandidateRevisionID: firstCandidate.ID}
+	updated, secondRun, err := database.StartGeneratorRun(ctx, sessionID, userID, second.Number, generatorCreateRun("generator-second", sessionID), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +104,7 @@ func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
 	if secondRun.SessionID != updated.GeneratorSessionID {
 		t.Fatalf("second run session = %q, want %q", secondRun.SessionID, updated.GeneratorSessionID)
 	}
-	replayed, replayedRun, err := database.StartGeneratorRun(ctx, sessionID, userID, second.Number, generatorCreateRun("generator-second-replayed", sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: second.Number, SeedSubmissionID: artifact.SubmissionID})
+	replayed, replayedRun, err := database.StartGeneratorRun(ctx, sessionID, userID, second.Number, generatorCreateRun("generator-second-replayed", sessionID), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +113,10 @@ func TestGeneratorVerificationOnlyPublishesCurrentGeneratorRun(t *testing.T) {
 	}
 }
 
-func TestGeneratorInfrastructureFailureDoesNotStartRepairRun(t *testing.T) {
+func TestCandidateInfrastructureFailureDoesNotStartRepairRun(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	const sessionID = "author-infrastructure"
 	const userID = "infrastructure-user"
 	if _, err := database.CreateAuthoringSession(ctx, authoring.Session{ID: sessionID, UserID: userID}, authoring.Plan{}); err != nil {
@@ -133,33 +126,77 @@ func TestGeneratorInfrastructureFailureDoesNotStartRepairRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := database.StartGeneratorRun(ctx, sessionID, userID, revision.Number, generatorCreateRun("generator-infrastructure", sessionID), generator.RunInput{AuthoringSessionID: sessionID, Revision: revision.Number})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claim, err := database.ClaimNext(ctx, "generator-worker", time.Minute, time.Now().UTC())
-	if err != nil || claim == nil {
-		t.Fatalf("claim generator run: %#v, %v", claim, err)
-	}
-	if err := database.FinalizeGeneratorSubmission(ctx, *claim, generator.SubmissionID(run.ID), "verify-infrastructure"); err != nil {
-		t.Fatal(err)
-	}
-	verification := authoring.Verification{TaskID: "verify-infrastructure", Phase: "Failed", Report: &authoring.VerificationReport{Class: authoring.VerificationFailureInfrastructure, Summary: "registry unavailable"}}
-	if err := database.RecordGeneratorVerificationInfrastructureFailure(ctx, sessionID, run.ID, verification); err != nil {
+	revisionCandidate, run := finalizeTestCandidate(t, database, sessionID, userID, revision.Number, "generator-infrastructure", generator.RunInput{AuthoringSessionID: sessionID, Revision: revision.Number}, now)
+	claim := claimCandidateStage(t, database, worklist.KindBuild, now.Add(3*time.Second))
+	failure := candidate.Failure{Class: candidate.FailureInfrastructure, Code: "INCUS_UNAVAILABLE", Summary: "Incus provider unavailable"}
+	if err := database.FailCandidateInfrastructure(ctx, claim.Work, failure, now.Add(4*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	session, err := database.GetAuthoringSession(ctx, sessionID, userID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.State != authoring.StateVerificationInfrastructureFailed || session.GeneratorRunID != run.ID || session.VerifyTaskID != verification.TaskID {
+	if session.State != authoring.StateInfrastructureFailed || session.GeneratorRunID != run.ID || session.CandidateRevisionID != revisionCandidate.ID || session.LastError != failure.Summary {
 		t.Fatalf("infrastructure failure state = %#v", session)
+	}
+	if active, err := database.GetActiveRunForSession(ctx, run.SessionID); !errors.Is(err, agentruntime.ErrNotFound) || active != nil {
+		t.Fatalf("infrastructure failure unexpectedly created a repair run: %#v, %v", active, err)
+	}
+	cleanup, err := database.GetWorkItemForSubject(ctx, worklist.KindArtifactCleanup, worklist.SubjectCandidateRevision, revisionCandidate.ID)
+	if err != nil || cleanup.State != worklist.StatePending {
+		t.Fatalf("infrastructure cleanup = %#v, %v", cleanup, err)
+	}
+}
+
+func finalizeTestCandidate(t *testing.T, database *DB, sessionID, userID string, revision int64, runID string, input generator.RunInput, now time.Time) (*candidate.Revision, *agentruntime.Run) {
+	t.Helper()
+	_, run, err := database.StartGeneratorRun(context.Background(), sessionID, userID, revision, generatorCreateRun(runID, sessionID), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := database.ClaimNext(context.Background(), "generator-worker", time.Minute, now.Add(time.Second))
+	if err != nil || claim == nil || claim.Run.ID != run.ID {
+		t.Fatalf("claim generator run = %#v, %v", claim, err)
+	}
+	revisionCandidate := &candidate.Revision{
+		ID: candidate.IDForGeneratorRun(run.ID), AuthoringSessionID: sessionID, AuthoringRevision: revision,
+		GeneratorSessionID: run.SessionID, GeneratorRunID: run.ID, JudgeRunID: run.ID,
+		ArchivePath:   "/server/candidates/" + candidate.IDForGeneratorRun(run.ID) + "/candidate.tar.gz",
+		ArchiveSHA256: "sha256:" + fullHex('a'), Snapshot: nodeSnapshot(), State: candidate.StateBuilding,
+	}
+	if err := database.FinalizeGeneratorCandidate(context.Background(), *claim, *revisionCandidate, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	return revisionCandidate, run
+}
+
+func completeTestCandidatePipeline(t *testing.T, database *DB, candidateID string, now time.Time) {
+	t.Helper()
+	buildClaim := claimCandidateStage(t, database, worklist.KindBuild, now)
+	build := candidate.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &candidate.IncusBuildReference{
+		Project: "breakfix-build", WorkItemID: buildClaim.Work.Item.ID, Attempt: int64(buildClaim.Work.Item.Attempt),
+		InstanceName: "build-instance", Alias: "candidate-build", Fingerprint: fullHex('b'),
+	}}
+	if err := database.CompleteCandidateBuild(context.Background(), buildClaim.Work, build, now.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	publishClaim := claimCandidateStage(t, database, worklist.KindArtifactPublish, now.Add(2*time.Millisecond))
+	artifact := candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "candidate-published", IncusFingerprint: fullHex('c')}
+	if err := database.CompleteCandidateArtifactPublish(context.Background(), publishClaim.Work, artifact, now.Add(3*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	verifyClaim := claimCandidateStage(t, database, worklist.KindVerify, now.Add(4*time.Millisecond))
+	if verifyClaim.Candidate.ID != candidateID {
+		t.Fatalf("claimed candidate = %q, want %q", verifyClaim.Candidate.ID, candidateID)
+	}
+	if err := database.CompleteCandidateVerification(context.Background(), verifyClaim.Work, passedNodeReport(), now.Add(5*time.Millisecond)); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func validAuthoringPlan(overview string) authoring.Plan {
 	return authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Fix service", Description: "Repair a broken service", Difficulty: "medium", Runtime: "container"},
+		Metadata:    authoring.Metadata{Title: "Fix service", Description: "Repair a broken service", Difficulty: "medium", Runtime: "node"},
 		Overview:    overview,
 		Checkpoints: []authoring.Checkpoint{{ID: "service-ready", Title: "Service ready", Markdown: "The service responds successfully.", Position: 1}},
 	}

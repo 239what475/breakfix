@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/api"
@@ -87,10 +86,10 @@ func (h *Handler) internalTaxonomyClaim(ctx context.Context, runID string, crede
 	if h.db == nil || h.taxonomyWorkflow == nil {
 		return nil, errors.New("taxonomy runtime is unavailable")
 	}
-	if strings.TrimSpace(runID) == "" || credential.Attempt < 1 || strings.TrimSpace(credential.LeaseOwner) == "" {
+	if strings.TrimSpace(runID) == "" || !credential.Valid() {
 		return nil, errors.New("taxonomy run lease credentials are required")
 	}
-	claim, err := h.db.GetAgentClaim(ctx, runID, credential.Attempt, credential.LeaseOwner, time.Now().UTC())
+	claim, err := h.getAgentClaim(ctx, runID, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +102,7 @@ func (h *Handler) internalTaxonomyClaim(ctx context.Context, runID string, crede
 	if err != nil {
 		return nil, err
 	}
-	if run.Purpose != purpose || run.OwnerKind != "taxonomy-work" || run.OwnerRef != input.WorkID || run.SessionID != "" {
+	if run.Purpose != purpose || run.OwnerKind != "taxonomy-mapping" || run.OwnerRef != input.WorkID || run.SessionID != "" {
 		return nil, errors.New("agent run is not a current taxonomy attempt")
 	}
 	return claim, nil

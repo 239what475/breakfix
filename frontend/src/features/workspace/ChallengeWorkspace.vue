@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { api } from "../../api/client";
-import type { Challenge, ChallengeContent } from "../../api/types";
+import type { AssistantTerminalContext, Challenge, ChallengeContent } from "../../api/types";
 import MarkdownDocument from "./MarkdownDocument.vue";
 import AssistantChat from "./AssistantChat.vue";
 import TerminalPane from "./TerminalPane.vue";
@@ -26,8 +26,9 @@ const mobileView = ref<"document" | "terminal">("document");
 const isNarrow = ref(false);
 const activeHint = ref<string | null>(null);
 const terminalConnected = ref(false);
+const currentTerminalNode = ref("");
 const currentTerminalWindow = ref("shell-1");
-const terminalWindows = ref(["shell-1"]);
+const terminalContexts = ref<AssistantTerminalContext[]>([{ windows: ["shell-1"] }]);
 const resetting = ref(false);
 const sessionStartedAt = ref(Date.now());
 const elapsedSeconds = ref(0);
@@ -110,8 +111,9 @@ watch(
     content.value = undefined;
     checks.value = [];
     activeHint.value = null;
+    currentTerminalNode.value = "";
     currentTerminalWindow.value = "shell-1";
-    terminalWindows.value = ["shell-1"];
+    terminalContexts.value = [{ windows: ["shell-1"] }];
     view.value = "problem";
     resetElapsed();
     void loadContent();
@@ -181,8 +183,9 @@ onUnmounted(() => {
           <AssistantChat
             v-if="view === 'assistant'"
             :challenge-id="challenge.id"
+            :current-node="currentTerminalNode"
             :current-window="currentTerminalWindow"
-            :open-windows="terminalWindows"
+            :terminals="terminalContexts"
           />
           <template v-else>
             <TaxonomyPanel v-if="view === 'problem' && content" :taxonomy="content.taxonomy" />
@@ -208,9 +211,11 @@ onUnmounted(() => {
       </section>
       <TerminalPane
         :challenge-id="challenge.id"
+        :runtime="content?.runtime ?? challenge.runtime"
+        :nodes="content?.nodes ?? []"
         :visible="terminalVisible"
         @connected="terminalConnected = $event"
-        @context="(current, windows) => { currentTerminalWindow = current; terminalWindows = windows; }"
+        @context="(node, current, terminals) => { currentTerminalNode = node; currentTerminalWindow = current; terminalContexts = terminals; }"
       />
     </div>
   </main>

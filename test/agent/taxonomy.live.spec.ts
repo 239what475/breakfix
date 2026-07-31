@@ -12,7 +12,7 @@ type TaxonomyStatus = {
 	initial_snapshot_absent: boolean;
 	catalog_mapped: boolean;
 	current_revision?: string;
-	work_items: Array<{ id: string; state: string; active_run_id?: string; last_error?: string }>;
+	mappings: Array<{ id: string; state: string; active_run_id?: string; last_error?: string }>;
 	runs: Array<{ id: string; purpose: string; status: string; attempt: number; last_error?: string }>;
 	snapshot_error?: string;
 };
@@ -126,7 +126,7 @@ function diagnostics(snapshot: TaxonomyStatus | undefined, logs: string[]) {
 
 function terminalFailure(snapshot: TaxonomyStatus) {
 	if (snapshot.snapshot_error) return snapshot.snapshot_error;
-	const work = snapshot.work_items.find((item) => item.state === "Failed" || item.state === "Cancelled");
+	const work = snapshot.mappings.find((item) => item.state === "Failed" || item.state === "Cancelled");
 	if (work) return `taxonomy work ${work.id} entered ${work.state}: ${work.last_error ?? "no error"}`;
 	const run = snapshot.runs.find((item) => item.status === "failed" || item.status === "cancelled");
 	if (run) return `taxonomy agent run ${run.id} (${run.purpose}) entered ${run.status}: ${run.last_error ?? "no error"}`;
@@ -149,7 +149,7 @@ taxonomyLiveTest("real taxonomy committee publishes cleanup-logs and projects it
 			return latest.catalog_mapped;
 		}, { timeout: 10 * 60_000, intervals: [500, 1_000, 2_000, 5_000] }).toBe(true);
 		expect(latest.current_revision).toBeTruthy();
-		expect(latest.work_items.some((item) => item.state === "Published")).toBe(true);
+		expect(latest.mappings.some((item) => item.state === "Published")).toBe(true);
 		expect(latest.runs.some((run) => run.purpose === "taxonomy-mapper" && run.status === "succeeded")).toBe(true);
 		expect(latest.runs.some((run) => run.purpose === "taxonomy-review" && run.status === "succeeded")).toBe(true);
 

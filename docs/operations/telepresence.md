@@ -1,24 +1,12 @@
 # Telepresence 本地调试
 
-当需要对真实 Kind 或 Kubernetes 运行时调试 Server、Controller、Agent Worker 时，使用仓库内
-[`dev/telepresence.sh`](../../dev/telepresence.sh)。它以 `telepresence replace` 暂停对应 Pod 中的业务容器，
-由本地二进制接管同一 Kubernetes Service、集群 DNS 与运行时环境，避免本地和集群同时运行两个
-Server、Controller 或 Worker。
+需要调试部署在真实 Kind 或 Kubernetes 集群中的组件时，使用仓库内 [`dev/telepresence.sh`](../../dev/telepresence.sh)。它通过 `telepresence replace` 以本地前台进程接管一个 Deployment，保留该角色的集群 DNS、Service identity、挂载凭据和 Kubernetes ServiceAccount，不会让本地与集群同时消费同一份工作。
 
-该入口只用于开发集群。它从当前 Kubernetes context 读取 `breakfix-system` 中已部署的配置：
-
-- 临时生成一小时有效的 `breakfix-server` 或 `breakfix-controller` ServiceAccount kubeconfig。
-- 从 `breakfix-runtime` Secret 仅向本地子进程注入所需的运行时变量，不把 Secret 写入文件。
-- Server 挂载生产 Server 正在使用的 PVC，因此本地读取和写入的是同一份题目与 artifact 数据。
-- Controller 使用真实 ServiceAccount、Leader Lease 与 CRD watch；Agent Worker 使用真实 Agent Runtime
-  PostgreSQL 连接和 Server 内部 API。
-
-临时配置、kubeconfig 和挂载路径位于已忽略的 `.local/telepresence/`，组件退出或执行清理命令后删除。
+支持的角色是 Server、Controller、Agent Worker、Builder Worker、Publisher Worker 和 Verifier Worker。固定 Worker 的日志会直接显示在本地终端，可与 Playwright 或真实运行时验收并排观察。
 
 ## 前置条件
 
-本机需要 `kubectl`、`telepresence`、Go 和可用的当前 Kubernetes context。Controller 还需要 `vcluster`
-CLI。Server 会以 SSHFS 挂载其 PVC，因此 FUSE 配置必须允许 `allow_other`：
+本机需要 `kubectl`、`telepresence`、Go、Make 和可用的当前 Kubernetes context。Controller replacement 还需要 `vcluster` 在 `PATH`。Server replacement 通过 SSHFS 挂载 Server data PVC，因此 FUSE 必须允许 `allow_other`：
 
 ```bash
 sudo sed -i 's/^#user_allow_other$/user_allow_other/' /etc/fuse.conf
@@ -30,7 +18,26 @@ sudo sed -i 's/^#user_allow_other$/user_allow_other/' /etc/fuse.conf
 make telepresence-connect
 ```
 
-可通过环境变量调整 namespace、Traffic Manager namespace、本地端口或临时目录：
+临时 kubeconfig、渲染配置、挂载路径和恢复状态保存在已忽略的 `.local/telepresence/`。脚本只从 `breakfix-system` 当前部署的 ConfigMap 和 Secret 读取本角色需要的值；若配置了内部 Registry CA，Server 和 Publisher replacement 会从只读 `breakfix-registry-ca` ConfigMap 挂载该公开根证书，绝不会导出 Registry TLS 私钥。
+
+## 接管一个角色
+
+每个命令以前台方式执行，标准输出就是实时日志：
+
+```bash
+make telepresence-server
+make telepresence-controller
+BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 make telepresence-agent-worker
+BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 make telepresence-builder
+BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 make telepresence-publisher
+BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 make telepresence-verifier
+```
+
+Server 默认监听 `http://127.0.0.1:19091`；Controller health 默认在 `http://127.0.0.1:18081/readyz`。集群内访问 `breakfix-server` Service 时仍会路由到被接管的本地 Server，因此可以在另一个终端运行浏览器或运行时验收。
+
+Worker replacement 需要显式的 `BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1`。脚本记录原 Deployment replica 数，将其缩为一后再替换最后一个 Pod，退出时恢复原副本数。只在确认该类 WorkItem 没有正在进行的外部副作用时接管；WorkItem lease 会围栏迟到的结果，但不会替代运维判断。
+
+可通过环境变量调整 namespace、Traffic Manager namespace、本地 Server port 或状态目录：
 
 ```bash
 BREAKFIX_TELEPRESENCE_NAMESPACE=breakfix-system \
@@ -38,39 +45,15 @@ BREAKFIX_TELEPRESENCE_SERVER_PORT=19091 \
 make telepresence-server
 ```
 
-## 前台接管与 E2E
-
-在三个独立终端中前台运行需要调试的组件。每个命令会先构建对应本地二进制；标准输出就是实时的
-Server、Controller 或 Worker 日志。
-
-```bash
-make telepresence-server
-make telepresence-controller
-BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1 make telepresence-worker
-```
-
-Server 监听 `http://127.0.0.1:19091`，Controller health 为
-`http://127.0.0.1:18081/readyz`。从集群内部访问 `breakfix-server` Service 仍会到达本地 Server，
-因此现有的 Service port-forward 或 Playwright E2E 可继续使用。随后在第四个终端运行 E2E，即可将
-运行时日志与 Playwright 输出并排观察。
-
-Worker 会先记录远端 Deployment 的副本数并缩容到一，再替换最后一个远端 Worker；这防止本地 Worker
-与远端副本竞争同一个 Agent Run。该操作需要显式设置
-`BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1`，并只应在确认没有正在执行的 Agent Run 后进行。
-本地 Worker 退出后脚本自动恢复原副本数；进程异常终止时使用下方清理命令恢复。
-
-Controller 没有对外服务流量，故不会配置 Telepresence 端口转发；本机 health endpoint 仅用于观察。
-
-## 状态与清理
+## 清理与定位
 
 ```bash
 make telepresence-status
-make telepresence-down        # 恢复三个 Deployment，移除本项目的 traffic-agent
-make telepresence-disconnect  # 清理后关闭本地 Telepresence daemon
+make telepresence-down
+make telepresence-disconnect
 ```
 
-`telepresence-down` 不会卸载共享的 Traffic Manager 或删除 `ambassador` namespace。若当前开发集群不再
-需要 Telepresence，应由安装者显式执行：
+`telepresence-down` 恢复本项目被接管的 Deployment 和 Worker 副本数，但不会卸载共享的 Traffic Manager。确实不再需要开发调试组件时，安装者可以显式执行：
 
 ```bash
 telepresence helm uninstall --namespace ambassador
@@ -78,5 +61,4 @@ kubectl delete namespace ambassador
 telepresence quit --stop-daemons
 ```
 
-Telepresence 不会汇总集群内其他工作负载的日志。Verify Job、挑战环境 Pod、PostgreSQL 与 Registry 仍需
-通过 `kubectl logs` 或其原有观测入口查看。
+Telepresence 不会汇总其他集群工作负载的日志。使用 WorkItem ID、kind、attempt 和 Environment UID 关联 Server、Controller、固定 Worker、Registry 和环境日志。

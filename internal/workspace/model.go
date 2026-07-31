@@ -63,6 +63,7 @@ func Validate(record Record) error {
 type Repository interface {
 	CreateGeneratorWorkspace(context.Context, Record) (*Record, error)
 	GetGeneratorWorkspace(context.Context, string) (*Record, error)
+	RecordGeneratorWorkspaceSandbox(context.Context, string, string, time.Time) error
 	ActivateGeneratorWorkspace(context.Context, string, string, time.Time) error
 	BeginGeneratorWorkspaceCleanup(context.Context, string, time.Time) (*Record, error)
 	MarkGeneratorWorkspaceDeleted(context.Context, string, time.Time) error

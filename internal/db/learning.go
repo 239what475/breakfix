@@ -479,7 +479,7 @@ func validateLearningHistoryFilter(filter LearningHistoryFilter) error {
 		return fmt.Errorf("learning history state %q is invalid", filter.State)
 	}
 	switch filter.Runtime {
-	case "", "container", "vcluster":
+	case "", "node", "k8s":
 	default:
 		return fmt.Errorf("learning history runtime %q is invalid", filter.Runtime)
 	}

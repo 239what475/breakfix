@@ -4,7 +4,7 @@
 
 Skill、Tag、Mapping、不可变 taxonomy snapshot 和 Catalog 准入已经具备稳定契约。
 下一阶段不再改造 taxonomy 基础设施，而是以它为前提生产高质量题库。所有新题仍必须
-经过既有的作者审核、真实 `VerifyTask`、作者确认发布和 taxonomy mapping；题目生成
+经过既有的作者审核、真实 `Build -> ArtifactPublish -> Verify`、作者确认发布和 taxonomy mapping；题目生成
 不能直接创建或修改 Skill、Tag、`requires` 或 mapping。
 
 先选择一个边界清晰的领域，例如网络与 SSH，按技能覆盖蓝图完成 12 到 20 道真实题。
@@ -18,12 +18,13 @@ Skill、Tag、Mapping、不可变 taxonomy snapshot 和 Catalog 准入已经具�
 2. 检查点验证用户可观察的最终状态，不规定唯一命令或操作路径。
 3. 提示按检查点渐进提供；`solution.md` 解释诊断与修复理由。
 4. `answer.sh` 在真实运行时初始化后的环境中通过所有检查点。
-5. VerifyTask、作者确认和合法 taxonomy mapping 都完成后，题目才进入公开 Catalog。
+5. `Build -> ArtifactPublish -> Verify`、作者确认和合法 taxonomy mapping 都完成后，题目才进入公开 Catalog。
 
 ## 检查点执行通道
 
-当前 Controller 对每个 Ready/Draining Environment 周期性通过 Kubernetes
-`pods/exec` 执行 `/checks/checkpoints.sh --json`。这在当前规模下保持不变；只有活跃
+当前 Controller 对每个 Ready/Draining Environment 在真实执行位置周期执行对应的 `checks.sh`。
+`VK8sEnvironment` 通过 Kubernetes `pods/exec` 进入管理终端；`NodeEnvironment` 通过 Incus exec 进入指定节点。
+这在当前规模下保持不变；只有活跃
 环境数、checkpoint exec 延迟/错误率或 Controller 队列指标证明 API Server/SPDY 已成为
 瓶颈时，才实施以下迁移。
 
@@ -31,18 +32,18 @@ Skill、Tag、Mapping、不可变 taxonomy snapshot 和 Catalog 准入已经具�
 容器的传输从 Kubernetes `exec` 换成集群内 HTTP：
 
 ```text
-Controller -- HTTP --> workspace container checkpointd -- checkpoints.sh -- JSON
+Controller -- HTTP --> runtime checkpointd -- checks.sh -- JSON
 ```
 
-- 基础镜像提供 `breakfix-checkpointd`。运行时初始化完成 `generate.sh` 后，直接以它
-  作为 PID 1；它处理信号、子进程回收、脚本超时和串行执行，不需要 systemd。
-- `checkpointd` 仅暴露固定的检查接口，只能执行
-  `/checks/checkpoints.sh --json`，并保持现有 15 秒超时、输出大小限制和 JSON 协议。
-- 每个 Environment namespace 有一个仅集群内部可见的 checkpoint Service；NetworkPolicy
-  只允许 Controller 访问。Controller 仍是唯一的 Environment status 写者，继续校验
+- K8s 管理终端镜像或 Node system-container base image 提供 `breakfix-checkpointd`。它必须和
+  运行时初始化、systemd 和 tmux 的边界共存，不能取代 Node 的 systemd PID 1。
+- `checkpointd` 仅暴露固定的检查接口，只能无参数执行运行时提供的 `checks.sh`，并保持现有
+  15 秒超时、输出大小限制和 JSON 协议。
+- 每个 VK8s Environment namespace 有一个仅集群内部可见的 checkpoint Service；NodeEnvironment
+  需要同等的、由 Server/Controller 安全代理的访问通道。Controller 仍是唯一的 Environment status 写者，继续校验
   checkpoint ID、写入结果并判定 Completed。
-- `checkpointd` 不持有 Kubernetes ServiceAccount、CRD 写权限或平台凭据。VerifyTask
-  仍可保留一次性的可信 `exec` 检查，因为它不是高频用户环境的规模瓶颈。
+- `checkpointd` 不持有 Kubernetes ServiceAccount、CRD 写权限或平台凭据。Verifier 仍可保留一次性的可信
+  exec 检查，因为它不是高频学习环境的规模瓶颈。
 - 该迁移消除高频 API `exec`/SPDY 开销，但不消除检查脚本本身的 CPU 成本。迁移后仍
   先保留 Controller 拉取模型；不要提前改为 daemon 主动回调，因为回调需要额外的认证、
   重试、去重和 Controller HTTP 生命周期设计。
@@ -57,8 +58,8 @@ Controller -- HTTP --> workspace container checkpointd -- checkpoints.sh -- JSON
 - **Kubernetes liveness/readiness probe**：kubelet probe 可避免 API exec，但只有健康
   布尔语义；失败会重启容器或将 Pod 标为 NotReady，不能表达多个检查点及其诊断结果。
 
-若迁移触发，必须用真实 container 和 vcluster Environment 验证：初始化、连续检查、终端
-重连、Controller 重启、网络失败、环境清理、所有检查点完成和 VerifyTask 语义一致性。
+若迁移触发，必须用真实 Node 和 VK8s Environment 验证：初始化、连续检查、终端重连、
+Controller 重启、网络失败、环境清理、所有检查点完成和 Verifier 语义一致性。
 
 ## 内容规模具备后的产品方向
 

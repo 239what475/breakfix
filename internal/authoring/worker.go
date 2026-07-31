@@ -21,13 +21,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type LeaseCredential struct {
-	Attempt    int    `json:"attempt"`
-	LeaseOwner string `json:"lease_owner"`
-}
+type LeaseCredential = agentruntime.LeaseCredential
 
 type ExecutionContext struct {
-	Stage Stage `json:"stage"`
+	Stage   Stage                  `json:"stage"`
+	History []agentruntime.Message `json:"history"`
 }
 
 type RuntimeClient interface {
@@ -48,7 +46,7 @@ func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
 
 func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
 	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/authoring/context", LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, &result)
+	err := c.post(ctx, claim.Run.ID, "/authoring/context", claim.Credential(), &result)
 	return result, err
 }
 
@@ -59,7 +57,7 @@ func (c *InternalClient) UpdateStage(ctx context.Context, claim agentruntime.Cla
 		StageRevision int64  `json:"stage_revision"`
 		Plan          Plan   `json:"plan"`
 		Change        Change `json:"change"`
-	}{LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, revision, plan, change}, &result)
+	}{claim.Credential(), revision, plan, change}, &result)
 	return result, err
 }
 
@@ -67,7 +65,7 @@ func (c *InternalClient) Finalize(ctx context.Context, claim agentruntime.Claim,
 	return c.post(ctx, claim.Run.ID, "/authoring/finalize", struct {
 		LeaseCredential
 		Content string `json:"content"`
-	}{LeaseCredential{Attempt: claim.Attempt, LeaseOwner: claim.LeaseOwner}, content}, nil)
+	}{claim.Credential(), content}, nil)
 }
 
 func (c *InternalClient) post(ctx context.Context, runID, suffix string, body any, result any) error {
@@ -78,16 +76,15 @@ func (c *InternalClient) post(ctx context.Context, runID, suffix string, body an
 }
 
 type WorkerExecutor struct {
-	repo   agentruntime.Repository
 	config config.AgentConfig
 	client RuntimeClient
 }
 
-func NewWorkerExecutor(repo agentruntime.Repository, cfg config.AgentConfig, client RuntimeClient) (*WorkerExecutor, error) {
-	if repo == nil || client == nil {
-		return nil, errors.New("authoring worker executor requires runtime repository and server client")
+func NewWorkerExecutor(cfg config.AgentConfig, client RuntimeClient) (*WorkerExecutor, error) {
+	if client == nil {
+		return nil, errors.New("authoring worker executor requires server client")
 	}
-	return &WorkerExecutor{repo: repo, config: cfg, client: client}, nil
+	return &WorkerExecutor{config: cfg, client: client}, nil
 }
 
 func (e *WorkerExecutor) Execute(ctx context.Context, claim agentruntime.Claim, _ agentworker.Emitter) (agentworker.ExecutionResult, error) {
@@ -98,11 +95,7 @@ func (e *WorkerExecutor) Execute(ctx context.Context, claim agentruntime.Claim, 
 	if err != nil {
 		return agentworker.ExecutionResult{}, fmt.Errorf("load authoring context: %w", err)
 	}
-	history, err := e.repo.ListMessages(ctx, claim.Run.SessionID)
-	if err != nil {
-		return agentworker.ExecutionResult{}, fmt.Errorf("load authoring history: %w", err)
-	}
-	response, err := RunWithEino(ctx, e.config, claim, contextSnapshot.Stage, history, e.client)
+	response, err := RunWithEino(ctx, e.config, claim, contextSnapshot.Stage, contextSnapshot.History, e.client)
 	if err != nil {
 		return agentworker.ExecutionResult{}, err
 	}
@@ -229,7 +222,7 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介、难度和运行时。", params: map[string]*schema.ParameterInfo{
 			"title": {Type: schema.String, Desc: "题目标题", Required: true}, "description": {Type: schema.String, Desc: "题目简介", Required: true},
 			"difficulty": {Type: schema.String, Enum: []string{"easy", "medium", "hard"}, Required: true},
-			"runtime":    {Type: schema.String, Enum: []string{"container", "vcluster"}, Required: true},
+			"runtime":    {Type: schema.String, Enum: []string{"node", "k8s"}, Required: true},
 			"reason":     {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.setMetadata},
 		&authoringTool{name: "replace_overview", desc: "替换题意约定概览。", params: map[string]*schema.ParameterInfo{
@@ -287,8 +280,8 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 		if args.Difficulty != "easy" && args.Difficulty != "medium" && args.Difficulty != "hard" {
 			return errors.New("difficulty 必须是 easy、medium 或 hard")
 		}
-		if args.Runtime != "container" && args.Runtime != "vcluster" {
-			return errors.New("runtime 必须是 container 或 vcluster")
+		if args.Runtime != "node" && args.Runtime != "k8s" {
+			return errors.New("runtime 必须是 node 或 k8s")
 		}
 		plan.Metadata = Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Runtime: args.Runtime}
 		return nil

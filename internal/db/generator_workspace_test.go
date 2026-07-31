@@ -14,7 +14,7 @@ func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	ctx := context.Background()
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "generator-run-one", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
-		Model: "test", PromptVersion: "test", DeadlineAt: time.Now().UTC().Add(time.Hour),
+		Model: "test", PromptVersion: "test", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	now := time.Now().UTC().Round(time.Microsecond)
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "generator-run-pending", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
-		Model: "test", PromptVersion: "test", DeadlineAt: now.Add(time.Hour),
+		Model: "test", PromptVersion: "test", ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}

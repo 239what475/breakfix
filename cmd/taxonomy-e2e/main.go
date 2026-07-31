@@ -56,7 +56,7 @@ type runView struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
-type workView struct {
+type mappingView struct {
 	ID                string `json:"id"`
 	ChallengeID       string `json:"challenge_id"`
 	ChallengeRevision string `json:"challenge_revision"`
@@ -68,12 +68,12 @@ type workView struct {
 }
 
 type statusView struct {
-	InitialSnapshotAbsent bool       `json:"initial_snapshot_absent"`
-	CatalogMapped         bool       `json:"catalog_mapped"`
-	CurrentRevision       string     `json:"current_revision,omitempty"`
-	WorkItems             []workView `json:"work_items"`
-	Runs                  []runView  `json:"runs"`
-	SnapshotError         string     `json:"snapshot_error,omitempty"`
+	InitialSnapshotAbsent bool          `json:"initial_snapshot_absent"`
+	CatalogMapped         bool          `json:"catalog_mapped"`
+	CurrentRevision       string        `json:"current_revision,omitempty"`
+	Mappings              []mappingView `json:"mappings"`
+	Runs                  []runView     `json:"runs"`
+	SnapshotError         string        `json:"snapshot_error,omitempty"`
 }
 
 type statusReporter struct {
@@ -159,10 +159,11 @@ func run(ctx context.Context, options options) error {
 	if err != nil {
 		return err
 	}
+	//nolint:gosec // Disposable local E2E identities, never production credentials.
 	cfg := config.Config{
 		DataDir:         dataDir,
 		JWTSecret:       "taxonomy-e2e-jwt-secret",
-		InternalAPIKey:  "taxonomy-e2e-internal-key",
+		InternalWorkers: config.InternalWorkerKeys{Agent: "taxonomy-e2e-agent-key"},
 		CooldownMinutes: 5,
 		Agent: config.AgentConfig{
 			BaseURL:        options.baseURL,
@@ -172,7 +173,7 @@ func run(ctx context.Context, options options) error {
 			RequestTimeout: "90s",
 		},
 	}
-	router, err := server.SetupRouter(ctx, database, nil, cfg, frontend)
+	router, err := server.SetupRouter(ctx, database, nil, cfg, frontend, server.Dependencies{})
 	if err != nil {
 		return fmt.Errorf("setup taxonomy e2e server: %w", err)
 	}
@@ -181,8 +182,8 @@ func run(ctx context.Context, options options) error {
 	httpServer := httptest.NewServer(router)
 	defer httpServer.Close()
 
-	cfg.Agent.ServerURL = httpServer.URL
-	internalClient, err := taxonomy.NewInternalClient(cfg.Agent.ServerURL, cfg.InternalAPIKey)
+	cfg.Worker.ServerURL = httpServer.URL
+	internalClient, err := taxonomy.NewInternalClient(cfg.Worker.ServerURL, cfg.InternalWorkers.Agent)
 	if err != nil {
 		return err
 	}
@@ -232,19 +233,19 @@ func frontendFS(dir string) (fs.FS, error) {
 }
 
 func (s statusReporter) snapshot(ctx context.Context) statusView {
-	status := statusView{InitialSnapshotAbsent: s.initialSnapshotAbsent, WorkItems: make([]workView, 0), Runs: make([]runView, 0)}
-	items, err := s.database.ListTaxonomyWork(ctx)
+	status := statusView{InitialSnapshotAbsent: s.initialSnapshotAbsent, Mappings: make([]mappingView, 0), Runs: make([]runView, 0)}
+	items, err := s.database.ListTaxonomyMappings(ctx)
 	if err != nil {
 		status.SnapshotError = err.Error()
 		return status
 	}
 	for _, item := range items {
-		status.WorkItems = append(status.WorkItems, workView{
+		status.Mappings = append(status.Mappings, mappingView{
 			ID: item.ID, ChallengeID: item.ChallengeID, ChallengeRevision: item.ChallengeRevision,
 			State: string(item.State), Stage: string(item.ActiveStage), ActiveRunID: item.ActiveRunID,
 			Round: item.Round, LastError: item.LastError,
 		})
-		runs, err := s.database.ListRunsForOwner(ctx, "taxonomy-work", item.ID)
+		runs, err := s.database.ListRunsForOwner(ctx, "taxonomy-mapping", item.ID)
 		if err != nil {
 			status.SnapshotError = err.Error()
 			return status

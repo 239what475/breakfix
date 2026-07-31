@@ -33,7 +33,9 @@ func (c *Client) CopyToPod(namespace, podName, localPath, remotePath string) err
 	if _, err := tw.Write(data); err != nil {
 		return fmt.Errorf("tar write: %w", err)
 	}
-	tw.Close()
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("close tar stream: %w", err)
+	}
 
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Name(podName).Namespace(namespace).

@@ -74,7 +74,7 @@ func (d *DB) ListCompletedChallengeIDs(ctx context.Context, userID string) (map[
 	if err != nil {
 		return nil, fmt.Errorf("list completed challenges: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	completed := make(map[string]struct{})
 	for rows.Next() {

@@ -28,15 +28,15 @@ func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T)
 	_, err := database.CreateMessageAndRun(ctx, agentruntime.Message{
 		ID: "message-user", SessionID: session.ID, Role: "user", Content: "help me", CreatedAt: now,
 	}, agentruntime.CreateRun{
-		ID:            "run-one",
-		SessionID:     session.ID,
-		Purpose:       "assistant",
-		OwnerKind:     "environment",
-		OwnerRef:      "environment-one",
-		InputRevision: "environment-one",
-		Model:         "deepseek-v4-pro",
-		PromptVersion: "assistant-v1",
-		DeadlineAt:    now.Add(time.Hour),
+		ID:               "run-one",
+		SessionID:        session.ID,
+		Purpose:          "assistant",
+		OwnerKind:        "environment",
+		OwnerRef:         "environment-one",
+		InputRevision:    "environment-one",
+		Model:            "deepseek-v4-pro",
+		PromptVersion:    "assistant-v1",
+		ExecutionTimeout: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("create message and run: %v", err)
@@ -122,15 +122,14 @@ func TestAgentRunClaimsFenceStaleAttemptsAndPersistOneFinalMessage(t *testing.T)
 func TestAgentRunExpiredLeaseIsClaimedAsNewAttempt(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Microsecond)
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
-		ID:            "run-expired-lease",
-		Purpose:       "taxonomy-mapper",
-		OwnerKind:     "taxonomy-work-item",
-		OwnerRef:      "work-one",
-		Model:         "deepseek-v4-pro",
-		PromptVersion: "mapper-v1",
-		DeadlineAt:    now.Add(time.Hour),
+		ID:               "run-expired-lease",
+		Purpose:          "taxonomy-mapper",
+		OwnerKind:        "taxonomy-work-item",
+		OwnerRef:         "work-one",
+		Model:            "deepseek-v4-pro",
+		PromptVersion:    "mapper-v1",
+		ExecutionTimeout: time.Hour,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -151,7 +150,7 @@ func TestAgentRunExpiredLeaseIsClaimedAsNewAttempt(t *testing.T) {
 	}
 }
 
-func TestClaimNextTerminatesRunsWhoseDeadlineHasElapsed(t *testing.T) {
+func TestAgentRunDeadlineRecoveryDoesNotRequireAnotherWorkerClaim(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -162,19 +161,36 @@ func TestClaimNextTerminatesRunsWhoseDeadlineHasElapsed(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 	if _, err := database.CreateMessageAndRun(ctx, agentruntime.Message{
-		ID: "expired-user-message", SessionID: session.ID, Role: "user", Content: "help me", CreatedAt: now.Add(-time.Minute),
+		ID: "queued-user-message", SessionID: session.ID, Role: "user", Content: "help me", CreatedAt: now.Add(-2 * time.Hour),
 	}, agentruntime.CreateRun{
-		ID: "expired-run", SessionID: session.ID, Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one",
-		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", DeadlineAt: now.Add(-time.Second),
+		ID: "queued-run", SessionID: session.ID, Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one",
+		Model: "deepseek-v4-pro", PromptVersion: "assistant-v1", ExecutionTimeout: time.Second,
 	}); err != nil {
-		t.Fatalf("create expired run: %v", err)
+		t.Fatalf("create queued run: %v", err)
 	}
 
-	claim, err := database.ClaimNext(ctx, "worker-one", time.Minute, now)
-	if err != nil || claim != nil {
-		t.Fatalf("claim with expired run = %#v, %v", claim, err)
+	queued, err := database.GetRun(ctx, "queued-run")
+	if err != nil {
+		t.Fatalf("get queued run: %v", err)
 	}
-	run, err := database.GetRun(ctx, "expired-run")
+	if queued.DeadlineAt != nil {
+		t.Fatalf("queued run unexpectedly has a deadline: %#v", queued)
+	}
+
+	claimAt := now.Add(2 * time.Hour)
+	claim, err := database.ClaimNext(ctx, "worker-one", time.Minute, claimAt)
+	if err != nil || claim == nil || claim.Run.DeadlineAt == nil {
+		t.Fatalf("claim queued run = %#v, %v", claim, err)
+	}
+	wantDeadline := claimAt.Add(time.Second)
+	if !claim.Run.DeadlineAt.Equal(wantDeadline) {
+		t.Fatalf("claim deadline = %s, want %s", claim.Run.DeadlineAt, wantDeadline)
+	}
+
+	if err := database.ExpireDueAgentRuns(ctx, claimAt.Add(2*time.Second)); err != nil {
+		t.Fatalf("recover expired run: %v", err)
+	}
+	run, err := database.GetRun(ctx, "queued-run")
 	if err != nil {
 		t.Fatalf("get expired run: %v", err)
 	}

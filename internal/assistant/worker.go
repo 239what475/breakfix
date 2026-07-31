@@ -15,16 +15,15 @@ import (
 // database access is durable Runtime state; all environment reads go through
 // RuntimeClient to the Server.
 type WorkerExecutor struct {
-	repo   agentruntime.Repository
 	config config.AgentConfig
 	client RuntimeClient
 }
 
-func NewWorkerExecutor(repo agentruntime.Repository, cfg config.AgentConfig, client RuntimeClient) (*WorkerExecutor, error) {
-	if repo == nil || client == nil {
-		return nil, errors.New("assistant worker executor requires runtime repository and server client")
+func NewWorkerExecutor(cfg config.AgentConfig, client RuntimeClient) (*WorkerExecutor, error) {
+	if client == nil {
+		return nil, errors.New("assistant worker executor requires server client")
 	}
-	return &WorkerExecutor{repo: repo, config: cfg, client: client}, nil
+	return &WorkerExecutor{config: cfg, client: client}, nil
 }
 
 func (e *WorkerExecutor) Execute(ctx context.Context, claim agentruntime.Claim, emit agentworker.Emitter) (agentworker.ExecutionResult, error) {
@@ -35,12 +34,8 @@ func (e *WorkerExecutor) Execute(ctx context.Context, claim agentruntime.Claim, 
 	if err != nil {
 		return agentworker.ExecutionResult{}, fmt.Errorf("load assistant context: %w", err)
 	}
-	history, err := e.repo.ListMessages(ctx, claim.Run.SessionID)
-	if err != nil {
-		return agentworker.ExecutionResult{}, fmt.Errorf("load assistant history: %w", err)
-	}
 	reader := remoteReader{client: e.client, claim: claim}
-	result, err := RunWithEino(ctx, e.config, contextSnapshot.Request(reader), history, func(event Event) {
+	result, err := RunWithEino(ctx, e.config, contextSnapshot.Request(reader), contextSnapshot.History, func(event Event) {
 		switch event.Type {
 		case "delta":
 			emit.EmitDelta(ctx, event.Content)
@@ -73,13 +68,14 @@ type remoteReader struct {
 	claim  agentruntime.Claim
 }
 
-func (r remoteReader) TerminalScrollback(ctx context.Context, window string, offset, lines int) (Scrollback, error) {
+func (r remoteReader) TerminalScrollback(ctx context.Context, node, window string, offset, lines int) (Scrollback, error) {
 	var result Scrollback
 	err := r.client.InvokeTool(ctx, r.claim, "get_terminal_scrollback", struct {
+		Node   string `json:"node,omitempty"`
 		Window string `json:"window"`
 		Offset int    `json:"offset"`
 		Lines  int    `json:"lines"`
-	}{window, offset, lines}, &result)
+	}{node, window, offset, lines}, &result)
 	return result, err
 }
 
@@ -89,23 +85,25 @@ func (r remoteReader) CheckpointStatus(ctx context.Context) (CheckpointSnapshot,
 	return result, err
 }
 
-func (r remoteReader) ListEnvironmentFiles(ctx context.Context, path string, offset, limit int) (EnvironmentFiles, error) {
+func (r remoteReader) ListEnvironmentFiles(ctx context.Context, node, path string, offset, limit int) (EnvironmentFiles, error) {
 	var result EnvironmentFiles
 	err := r.client.InvokeTool(ctx, r.claim, "list_environment_files", struct {
+		Node   string `json:"node,omitempty"`
 		Path   string `json:"path"`
 		Offset int    `json:"offset"`
 		Limit  int    `json:"limit"`
-	}{path, offset, limit}, &result)
+	}{node, path, offset, limit}, &result)
 	return result, err
 }
 
-func (r remoteReader) ReadEnvironmentFile(ctx context.Context, path string, offset int64, maxBytes int) (EnvironmentFile, error) {
+func (r remoteReader) ReadEnvironmentFile(ctx context.Context, node, path string, offset int64, maxBytes int) (EnvironmentFile, error) {
 	var result EnvironmentFile
 	err := r.client.InvokeTool(ctx, r.claim, "read_environment_file", struct {
+		Node     string `json:"node,omitempty"`
 		Path     string `json:"path"`
 		Offset   int64  `json:"offset"`
 		MaxBytes int    `json:"max_bytes"`
-	}{path, offset, maxBytes}, &result)
+	}{node, path, offset, maxBytes}, &result)
 	return result, err
 }
 

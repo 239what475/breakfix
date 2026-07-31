@@ -10,7 +10,7 @@ import {
 
 const runtimeTest = process.env.RUN_RUNTIME_E2E === "1" ? test : test.skip;
 
-runtimeTest("container workbench records progress and completion", async ({ page }) => {
+runtimeTest("node workbench records progress and completion", async ({ page }) => {
 	test.setTimeout(4 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
@@ -31,7 +31,7 @@ runtimeTest("container workbench records progress and completion", async ({ page
 	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });
 
-runtimeTest("opening the authoring page does not end a container environment", async ({ page }) => {
+runtimeTest("opening the authoring page does not end a node environment", async ({ page }) => {
 	test.setTimeout(4 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);

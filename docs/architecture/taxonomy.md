@@ -1,11 +1,11 @@
 # Taxonomy 与 Catalog 发布
 
-Taxonomy 将已验证 challenge 关联到可复用的 Skill、浏览 Tag 和学习前置关系。它不参与题目生成、镜像构建或 VerifyTask；VerifyTask 证明题目可运行，taxonomy 证明题目应如何被浏览和学习。只有两者均完成，题目才进入公开 Catalog。
+Taxonomy 将已验证 challenge 关联到可复用的 Skill、浏览 Tag 和学习前置关系。它不参与题目生成、构建、产物发布或验证；`Build -> ArtifactPublish -> Verify` 证明题目可运行，taxonomy 证明题目应如何被浏览和学习。只有两者均完成，题目才进入公开 Catalog。
 
 ## 独立工作流
 
 ```text
-Authoring -> Generator/Judge -> VerifyTask -> 作者发布 -> 已发布 challenge
+Authoring -> Generator/Judge -> CandidateRevision -> Build -> ArtifactPublish -> Verify -> 作者发布 -> 已发布 challenge
                                                        |
                                                        v
                                     Mapping WorkItem -> Mapper + 两名 reviewer
@@ -65,7 +65,7 @@ Publisher 在临时目录构造完整 snapshot、校验、按内容计算 revisi
 - 每个 source Skill 最多一个 Skill mapping；`requires` 不能自指或成环。
 - 新增 Skill 是可独立解释、可多题复用的能力；新增 Tag 是稳定浏览维度，不能用同义词或细粒度 Skill 伪装。
 
-challenge 内容任何变化都会改变 artifact revision。旧 mapping 因而自动失效，题目在新的 mapping 发布前不会公开；只修改 taxonomy 关系不需要重新构建镜像或运行 VerifyTask。
+challenge 内容任何变化都会改变 artifact revision。旧 mapping 因而自动失效，题目在新的 mapping 发布前不会公开；只修改 taxonomy 关系不需要重新构建镜像或重新验证题目。
 
 ## Catalog、工作台与作者状态
 

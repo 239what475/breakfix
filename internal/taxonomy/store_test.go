@@ -66,7 +66,7 @@ func TestLoadCurrentRejectsTamperedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(store.RevisionsPath(), published.Revision, "skills", "repair-logs.yaml")
-	if err := os.WriteFile(path, []byte("kind: Skill\nid: skill-1111111111111111\ntitle: changed\ndefinition: changed\nmapping_guidance:\n  outcome_when: [changed]\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("kind: Skill\nid: skill-1111111111111111\ntitle: changed\ndefinition: changed\nmapping_guidance:\n  outcome_when: [changed]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.LoadCurrent(); err == nil {

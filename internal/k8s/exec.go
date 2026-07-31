@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/terminal"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -22,6 +23,12 @@ var ErrExecOutputLimit = errors.New("pod exec output exceeded limit")
 
 const tmuxHistoryLimit = 10000
 
+type PodExecResult struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+}
+
 // ExecInPod runs a command in a pod and returns exit code, stdout+stderr, and any error.
 func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, string, error) {
 	return c.ExecInPodContext(context.Background(), namespace, podName, 0, command...)
@@ -30,6 +37,14 @@ func (c *Client) ExecInPod(namespace, podName string, command ...string) (int, s
 // ExecInPodContext runs a command with a caller-controlled deadline. maxOutput
 // bounds combined stdout and stderr; zero leaves output unbounded.
 func (c *Client) ExecInPodContext(ctx context.Context, namespace, podName string, maxOutput int, command ...string) (int, string, error) {
+	result, err := c.ExecInPodStreamsContext(ctx, namespace, podName, maxOutput, command...)
+	return result.ExitCode, joinExecOutput(result.Stdout, result.Stderr), err
+}
+
+// ExecInPodStreamsContext preserves stdout and stderr as separate protocol
+// channels. Runtime checks use stdout for their strict JSON report while
+// retaining stderr as diagnostics.
+func (c *Client) ExecInPodStreamsContext(ctx context.Context, namespace, podName string, maxOutput int, command ...string) (PodExecResult, error) {
 	req := c.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").Name(podName).Namespace(namespace).
 		SubResource("exec").
@@ -41,7 +56,7 @@ func (c *Client) ExecInPodContext(ctx context.Context, namespace, podName string
 
 	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
 	if err != nil {
-		return -1, "", fmt.Errorf("exec: %w", err)
+		return PodExecResult{ExitCode: -1}, fmt.Errorf("exec: %w", err)
 	}
 
 	// SPDY transports stdout and stderr on independent streams. Keep separate
@@ -50,18 +65,19 @@ func (c *Client) ExecInPodContext(ctx context.Context, namespace, podName string
 	stdout := &limitedBuffer{limit: maxOutput}
 	stderr := &limitedBuffer{limit: maxOutput}
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: stdout, Stderr: stderr})
-	output := joinExecOutput(stdout.String(), stderr.String())
-	exitCode := 0
+	result := PodExecResult{Stdout: stdout.String(), Stderr: stderr.String()}
 	if err != nil {
 		if exitErr, ok := err.(k8sexec.CodeExitError); ok {
-			exitCode = exitErr.Code
+			result.ExitCode = exitErr.Code
 		} else if errors.Is(err, ErrExecOutputLimit) {
-			return -1, output, ErrExecOutputLimit
+			result.ExitCode = -1
+			return result, ErrExecOutputLimit
 		} else {
-			return -1, "", fmt.Errorf("exec: %w", err)
+			result.ExitCode = -1
+			return result, fmt.Errorf("exec: %w", err)
 		}
 	}
-	return exitCode, output, nil
+	return result, nil
 }
 
 func joinExecOutput(stdout, stderr string) string {
@@ -228,7 +244,7 @@ dd if="$1" iflag=skip_bytes,count_bytes skip="$2" count="$3" status=none | base6
 // ExecPTY opens a named tmux window through a PTY session. The tmux session
 // remains in the workspace Pod, so reconnecting a browser tab preserves shell
 // state and opening another tab never creates another user environment.
-func (c *Client) ExecPTY(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, resize <-chan remotecommand.TerminalSize, namespace, podName, sessionName, windowName string) error {
+func (c *Client) ExecPTY(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, resize <-chan terminal.Size, namespace, podName, sessionName, windowName string) error {
 	command := fmt.Sprintf(`export TERM=xterm-256color
 if ! tmux has-session -t %[1]s 2>/dev/null; then
   tmux new-session -d -s %[1]s -n %[2]s
@@ -301,7 +317,7 @@ func shellQuote(s string) string {
 }
 
 type sizeQueue struct {
-	ch <-chan remotecommand.TerminalSize
+	ch <-chan terminal.Size
 }
 
 func (q *sizeQueue) Next() *remotecommand.TerminalSize {
@@ -309,5 +325,5 @@ func (q *sizeQueue) Next() *remotecommand.TerminalSize {
 	if !ok {
 		return nil
 	}
-	return &s
+	return &remotecommand.TerminalSize{Width: s.Width, Height: s.Height}
 }
