@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/breakfix/breakfix/internal/challenge"
-	"gopkg.in/yaml.v3"
 )
 
 // Candidate is the immutable archive inspected by the Generator and Judge
@@ -60,49 +58,9 @@ func InspectCandidateArchive(archive []byte) (*Candidate, error) {
 // id, source slug, image, or publication metadata. They are added only by
 // publication.
 func ValidateCandidateDir(chalDir string) (*challenge.Entry, error) {
-	path := filepath.Join(chalDir, "challenge.yaml")
-	data, err := os.ReadFile(path)
+	entry, err := challenge.ValidatePortableDir(chalDir)
 	if err != nil {
-		return nil, fmt.Errorf("read challenge.yaml: %w", err)
-	}
-	var spec map[string]any
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		return nil, fmt.Errorf("parse challenge.yaml: %w", err)
-	}
-	if spec == nil {
-		return nil, errors.New("challenge.yaml must be a mapping")
-	}
-
-	var errs []string
-	for _, field := range []string{"id", "source_slug", "image", "published_at"} {
-		if _, exists := spec[field]; exists {
-			errs = append(errs, fmt.Sprintf("challenge.yaml 不得包含平台托管字段 %q", field))
-		}
-	}
-	runtime := scalarString(spec["runtime"])
-	if runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s {
-		errs = append(errs, fmt.Sprintf("challenge.yaml runtime 必须明确为 node 或 k8s，当前为 %q", runtime))
-	}
-	if scalarString(spec["title"]) == "" {
-		errs = append(errs, "challenge.yaml 缺少 title")
-	}
-	switch scalarString(spec["difficulty"]) {
-	case "easy", "medium", "hard":
-	default:
-		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", scalarString(spec["difficulty"])))
-	}
-	if _, exists := spec["tags"]; exists {
-		errs = append(errs, "challenge.yaml 不得包含 tags；分类由 taxonomy workflow 维护")
-	}
-	if scalarString(spec["description"]) == "" {
-		errs = append(errs, "challenge.yaml 缺少 description")
-	}
-	if len(errs) > 0 {
-		return nil, errors.New(strings.Join(errs, "; "))
-	}
-	entry, err := challenge.ValidateCandidateDir(chalDir)
-	if err != nil {
-		return nil, fmt.Errorf("validate challenge structure: %w", err)
+		return nil, err
 	}
 	return entry, nil
 }
@@ -138,11 +96,4 @@ func candidateFiles(root string) ([]CandidateFile, error) {
 		return nil, fmt.Errorf("read candidate files: %w", err)
 	}
 	return files, nil
-}
-
-func scalarString(v any) string {
-	if v == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(v))
 }

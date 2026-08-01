@@ -15,25 +15,9 @@ var ErrNoCurrentRevision = errors.New("taxonomy current revision does not exist"
 // constructed so a newly published, not-yet-mapped challenge remains hidden
 // instead of breaking the already published catalog.
 func Validate(snapshot Snapshot) error {
-	skills := make(map[string]Skill, len(snapshot.Skills))
-	for _, skill := range snapshot.Skills {
-		if err := validateDefinition(skill.Kind, skill.ID, skill.Title, skill.Definition, skill.MappingGuidance, KindSkill); err != nil {
-			return fmt.Errorf("skill %q: %w", skill.ID, err)
-		}
-		if _, exists := skills[skill.ID]; exists {
-			return fmt.Errorf("duplicate skill id %q", skill.ID)
-		}
-		skills[skill.ID] = skill
-	}
-	tags := make(map[string]Tag, len(snapshot.Tags))
-	for _, tag := range snapshot.Tags {
-		if err := validateDefinition(tag.Kind, tag.ID, tag.Title, tag.Definition, tag.MappingGuidance, KindTag); err != nil {
-			return fmt.Errorf("tag %q: %w", tag.ID, err)
-		}
-		if _, exists := tags[tag.ID]; exists {
-			return fmt.Errorf("duplicate tag id %q", tag.ID)
-		}
-		tags[tag.ID] = tag
+	skills, tags, err := validateDefinitions(snapshot.Skills, snapshot.Tags)
+	if err != nil {
+		return err
 	}
 
 	challengeMappings := make(map[string]struct{}, len(snapshot.ChallengeMappings))
@@ -47,8 +31,36 @@ func Validate(snapshot Snapshot) error {
 		challengeMappings[mapping.Challenge.ID] = struct{}{}
 	}
 
-	edges := make(map[string][]string, len(snapshot.SkillMappings))
-	for _, mapping := range snapshot.SkillMappings {
+	return validateSkillMappings(snapshot.SkillMappings, skills)
+}
+
+func validateDefinitions(values []Skill, tagValues []Tag) (map[string]Skill, map[string]Tag, error) {
+	skills := make(map[string]Skill, len(values))
+	for _, skill := range values {
+		if err := validateDefinition(skill.Kind, skill.ID, skill.Title, skill.Definition, skill.MappingGuidance, KindSkill); err != nil {
+			return nil, nil, fmt.Errorf("skill %q: %w", skill.ID, err)
+		}
+		if _, exists := skills[skill.ID]; exists {
+			return nil, nil, fmt.Errorf("duplicate skill id %q", skill.ID)
+		}
+		skills[skill.ID] = skill
+	}
+	tags := make(map[string]Tag, len(tagValues))
+	for _, tag := range tagValues {
+		if err := validateDefinition(tag.Kind, tag.ID, tag.Title, tag.Definition, tag.MappingGuidance, KindTag); err != nil {
+			return nil, nil, fmt.Errorf("tag %q: %w", tag.ID, err)
+		}
+		if _, exists := tags[tag.ID]; exists {
+			return nil, nil, fmt.Errorf("duplicate tag id %q", tag.ID)
+		}
+		tags[tag.ID] = tag
+	}
+	return skills, tags, nil
+}
+
+func validateSkillMappings(mappings []SkillMapping, skills map[string]Skill) error {
+	edges := make(map[string][]string, len(mappings))
+	for _, mapping := range mappings {
 		if err := validateSkillMapping(mapping, skills); err != nil {
 			return fmt.Errorf("skill mapping %q: %w", mapping.Source.ID, err)
 		}
@@ -61,10 +73,7 @@ func Validate(snapshot Snapshot) error {
 		}
 		edges[mapping.Source.ID] = requires
 	}
-	if err := validateDAG(skills, edges); err != nil {
-		return err
-	}
-	return nil
+	return validateDAG(skills, edges)
 }
 
 func validateDefinition(kind, id, title, definition string, guidance MappingGuidance, expectedKind string) error {
@@ -117,25 +126,29 @@ func validateChallengeMapping(mapping ChallengeMapping, skills map[string]Skill,
 	if !challenge.ValidID(mapping.Challenge.ID) || strings.TrimSpace(mapping.Challenge.Title) == "" || !ValidRevision(mapping.Challenge.Revision) {
 		return errors.New("challenge id, title, and revision are required")
 	}
-	if len(mapping.Tags) == 0 {
+	return validateChallengeRelationships(mapping.Tags, mapping.EntrySkills, mapping.Outcomes, skills, tags)
+}
+
+func validateChallengeRelationships(tagsRef, entrySkills []Ref, outcomes []OutcomeRef, skills map[string]Skill, tags map[string]Tag) error {
+	if len(tagsRef) == 0 {
 		return errors.New("at least one tag is required")
 	}
-	if len(mapping.Outcomes) == 0 {
+	if len(outcomes) == 0 {
 		return errors.New("at least one outcome is required")
 	}
-	if err := validateRefs(mapping.Tags, tags); err != nil {
+	if err := validateRefs(tagsRef, tags); err != nil {
 		return fmt.Errorf("tags: %w", err)
 	}
-	if err := validateRefs(mapping.EntrySkills, skills); err != nil {
+	if err := validateRefs(entrySkills, skills); err != nil {
 		return fmt.Errorf("entry_skills: %w", err)
 	}
-	seenOutcomes := make(map[string]struct{}, len(mapping.Outcomes))
-	entry := make(map[string]struct{}, len(mapping.EntrySkills))
-	for _, skill := range mapping.EntrySkills {
+	seenOutcomes := make(map[string]struct{}, len(outcomes))
+	entry := make(map[string]struct{}, len(entrySkills))
+	for _, skill := range entrySkills {
 		entry[skill.ID] = struct{}{}
 	}
 	primary := 0
-	for _, outcome := range mapping.Outcomes {
+	for _, outcome := range outcomes {
 		skill, exists := skills[outcome.ID]
 		if !exists || skill.Title != outcome.Title {
 			return fmt.Errorf("outcome references unknown or renamed skill %q", outcome.ID)

@@ -93,6 +93,18 @@ func (c Client) pullManifest(ctx context.Context, repository, reference, layout 
 	if err := writeOCIBlob(layout, descriptor.Digest, body); err != nil {
 		return ociDescriptor{}, err
 	}
+	if mediaType == artifactManifestMediaType {
+		var artifact ociArtifactManifest
+		if err := json.Unmarshal(body, &artifact); err != nil {
+			return ociDescriptor{}, fmt.Errorf("parse registry artifact manifest %s: %w", reference, err)
+		}
+		for _, blob := range artifact.Blobs {
+			if err := c.pullBlob(ctx, repository, blob, layout); err != nil {
+				return ociDescriptor{}, err
+			}
+		}
+		return descriptor, nil
+	}
 	var manifest ociManifest
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		return ociDescriptor{}, fmt.Errorf("parse registry manifest %s: %w", reference, err)
@@ -169,6 +181,7 @@ func (c Client) getManifest(ctx context.Context, repository, reference string) (
 	request.Header.Set("Accept", strings.Join([]string{
 		ociManifestMediaType,
 		ociIndexMediaType,
+		artifactManifestMediaType,
 		"application/vnd.docker.distribution.manifest.v2+json",
 		"application/vnd.docker.distribution.manifest.list.v2+json",
 	}, ", "))
@@ -399,7 +412,7 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Accept", ociManifestMediaType+", application/vnd.docker.distribution.manifest.v2+json")
+	request.Header.Set("Accept", ociManifestMediaType+", "+artifactManifestMediaType+", application/vnd.docker.distribution.manifest.v2+json")
 	c.Credentials.apply(request)
 	response, err := c.httpClient().Do(request)
 	if err != nil {
