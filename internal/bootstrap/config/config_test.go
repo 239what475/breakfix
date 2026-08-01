@@ -32,15 +32,14 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_INCUS_ENDPOINT", "https://incus.test.example:8443")
 	t.Setenv("BREAKFIX_TEST_INCUS_FINGERPRINT", strings.Repeat("a", 64))
 	t.Setenv("BREAKFIX_TEST_K8S_IMAGE", "registry.test.example/breakfix/k8s-base@sha256:"+strings.Repeat("b", 64))
-	t.Setenv("BREAKFIX_TEST_REGISTRY_ADDR", "registry.test.example/breakfix")
-	t.Setenv("BREAKFIX_TEST_REGISTRY_CLIENT_ADDR", "registry.test.example")
+	t.Setenv("BREAKFIX_TEST_REGISTRY_REPOSITORY", "registry.test.example/breakfix")
 	t.Setenv("BREAKFIX_TEST_REGISTRY_PULL_SECRET", "breakfix-registry-pull")
 	t.Setenv("BREAKFIX_TEST_REGISTRY_CA", "/run/config/registry-ca.crt")
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	content := "jwt_secret: ${BREAKFIX_TEST_JWT}\n" +
 		"internal_workers:\n  generate: ${BREAKFIX_TEST_GENERATE_WORKER}\n  taxonomy: ${BREAKFIX_TEST_TAXONOMY_WORKER}\n" +
 		"worker:\n  api_key_env: BREAKFIX_TEST_WORKER_KEY\n" +
-		"registry:\n  address: ${BREAKFIX_TEST_REGISTRY_ADDR}\n  client_address: ${BREAKFIX_TEST_REGISTRY_CLIENT_ADDR}\n  pull_secret: ${BREAKFIX_TEST_REGISTRY_PULL_SECRET}\n  trust_bundle_file: ${BREAKFIX_TEST_REGISTRY_CA}\n" +
+		"registry:\n  repository: ${BREAKFIX_TEST_REGISTRY_REPOSITORY}\n  pull_secret: ${BREAKFIX_TEST_REGISTRY_PULL_SECRET}\n  trust_bundle_file: ${BREAKFIX_TEST_REGISTRY_CA}\n" +
 		"opensandbox:\n  base_url: ${BREAKFIX_TEST_SANDBOX_URL}\n  namespace: ${BREAKFIX_TEST_SANDBOX_NAMESPACE}\n" +
 		"incus:\n  endpoint: ${BREAKFIX_TEST_INCUS_ENDPOINT}\n  base_image_fingerprint: ${BREAKFIX_TEST_INCUS_FINGERPRINT}\n" +
 		"runtime:\n  k8s:\n    base_image_digest: ${BREAKFIX_TEST_K8S_IMAGE}\n    management_terminal_image: ${BREAKFIX_TEST_K8S_IMAGE}\n"
@@ -66,7 +65,7 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 		cfg.Runtime.K8s.ManagementTerminalImage != cfg.Runtime.K8s.BaseImageDigest {
 		t.Fatalf("k8s runtime image expansion = base %q, terminal %q", cfg.Runtime.K8s.BaseImageDigest, cfg.Runtime.K8s.ManagementTerminalImage)
 	}
-	if cfg.Registry.Address != "registry.test.example/breakfix" || cfg.Registry.ClientAddress != "registry.test.example" || cfg.Registry.PullSecret != "breakfix-registry-pull" || cfg.Registry.TrustBundleFile != "/run/config/registry-ca.crt" {
+	if cfg.Registry.Repository != "registry.test.example/breakfix" || cfg.Registry.PullSecret != "breakfix-registry-pull" || cfg.Registry.TrustBundleFile != "/run/config/registry-ca.crt" {
 		t.Fatalf("registry runtime expansion = %#v", cfg.Registry)
 	}
 }
@@ -112,7 +111,7 @@ func validProcessConfig() Config {
 		HealthPort:           8081,
 		DataDir:              "/var/lib/breakfix",
 		DatabaseURL:          "postgres://breakfix.example/breakfix",
-		Registry:             RegistryConfig{Address: "registry.breakfix.example/breakfix", ClientAddress: "registry.breakfix.example", PullSecret: "breakfix-registry-pull", Username: "breakfix", Password: "password"},
+		Registry:             RegistryConfig{Repository: "registry.breakfix.example/breakfix", PullSecret: "breakfix-registry-pull", Username: "breakfix", Password: "password"},
 		VClusterBinary:       "/usr/local/bin/vcluster",
 		VClusterChartRepo:    "https://charts.loft.sh",
 		VClusterChartVersion: "0.35.1",

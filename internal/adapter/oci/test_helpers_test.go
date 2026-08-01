@@ -8,7 +8,7 @@ import (
 
 func testTLSRegistryClient(t *testing.T, server *httptest.Server, credentials Credentials) Client {
 	t.Helper()
-	client, err := NewClient(ClientOptions{Endpoint: testTLSRegistryAddress(t, server), Credentials: credentials})
+	client, err := NewClient(ClientOptions{Authority: testTLSRegistryAddress(t, server), Credentials: credentials})
 	if err != nil {
 		t.Fatalf("create Registry client: %v", err)
 	}

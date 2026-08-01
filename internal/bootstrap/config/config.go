@@ -40,14 +40,12 @@ type Config struct {
 	Runtime              RuntimeConfig      `yaml:"runtime"`
 }
 
-// RegistryConfig separates the OCI reference root from the HTTPS endpoint used
-// by control-plane clients. Address is embedded in immutable image references
-// and must be reachable by Kubernetes nodes. ClientAddress is an authority
-// used by Server and Generate Worker HTTP calls; production normally sets it
-// to Address's authority, while Kind uses the Registry Service DNS name.
+// RegistryConfig identifies the only OCI repository root used by the platform.
+// Its authority is embedded in immutable image references and is also used by
+// Server and Generate Worker HTTPS clients, so it must be reachable and trusted
+// by both Kubernetes nodes and control-plane Pods.
 type RegistryConfig struct {
-	Address         string `yaml:"address"`
-	ClientAddress   string `yaml:"client_address"`
+	Repository      string `yaml:"repository"`
 	PullSecret      string `yaml:"pull_secret"`
 	TrustBundleFile string `yaml:"trust_bundle_file"`
 	Username        string `yaml:"-"`
@@ -55,29 +53,25 @@ type RegistryConfig struct {
 }
 
 func (c RegistryConfig) Validate() error {
-	address := strings.TrimRight(strings.TrimSpace(c.Address), "/")
-	if address == "" || strings.Contains(address, "://") || strings.ContainsAny(address, " \t\r\n@") {
-		return fmt.Errorf("registry address must be an OCI repository root")
+	repository := strings.TrimRight(strings.TrimSpace(c.Repository), "/")
+	if repository == "" || strings.Contains(repository, "://") || strings.ContainsAny(repository, " \t\r\n@") {
+		return fmt.Errorf("registry repository must be an OCI repository root")
 	}
-	parts := strings.Split(address, "/")
+	parts := strings.Split(repository, "/")
 	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" {
-		return fmt.Errorf("registry address must include a hostname and repository namespace")
+		return fmt.Errorf("registry repository must include a hostname and repository namespace")
 	}
 	for _, part := range parts[1:] {
 		if strings.TrimSpace(part) == "" {
-			return fmt.Errorf("registry address contains an empty repository component")
+			return fmt.Errorf("registry repository contains an empty repository component")
 		}
 	}
-	if strings.LastIndex(address, ":") > strings.LastIndex(address, "/") {
-		return fmt.Errorf("registry address must not contain an image tag")
+	if strings.LastIndex(repository, ":") > strings.LastIndex(repository, "/") {
+		return fmt.Errorf("registry repository must not contain an image tag")
 	}
-	clientAddress := strings.TrimSpace(c.ClientAddress)
-	if clientAddress == "" || strings.Contains(clientAddress, "://") || strings.ContainsAny(clientAddress, " \t\r\n/@") {
-		return fmt.Errorf("registry client_address must be an HTTPS authority")
-	}
-	clientURL, err := url.Parse("https://" + clientAddress)
-	if err != nil || clientURL.Host == "" || clientURL.Host != clientAddress || clientURL.Path != "" || clientURL.RawQuery != "" || clientURL.Fragment != "" || clientURL.User != nil {
-		return fmt.Errorf("registry client_address must be an HTTPS authority")
+	authorityURL, err := url.Parse("https://" + parts[0])
+	if err != nil || authorityURL.Host == "" || authorityURL.Host != parts[0] || authorityURL.Path != "" || authorityURL.RawQuery != "" || authorityURL.Fragment != "" || authorityURL.User != nil {
+		return fmt.Errorf("registry repository must begin with an HTTPS authority")
 	}
 	if (strings.TrimSpace(c.Username) == "") != (strings.TrimSpace(c.Password) == "") {
 		return fmt.Errorf("registry username and password must be set together")
@@ -295,8 +289,7 @@ func Load(path string) (Config, error) {
 	cfg.InternalWorkers.Generate = os.ExpandEnv(cfg.InternalWorkers.Generate)
 	cfg.InternalWorkers.Taxonomy = os.ExpandEnv(cfg.InternalWorkers.Taxonomy)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
-	cfg.Registry.Address = os.ExpandEnv(cfg.Registry.Address)
-	cfg.Registry.ClientAddress = os.ExpandEnv(cfg.Registry.ClientAddress)
+	cfg.Registry.Repository = os.ExpandEnv(cfg.Registry.Repository)
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)

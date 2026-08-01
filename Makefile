@@ -36,7 +36,6 @@ RUNTIME_IMAGE_TAG ?= dev
 CATALOG_SOURCE ?= catalog
 CATALOG_ARCHIVE ?= dist/catalog.oci.tar
 CATALOG_REFERENCE ?=
-CATALOG_REGISTRY_ENDPOINT ?=
 CATALOG_TRUST_BUNDLE_FILE ?=
 CATALOG_BUNDLE ?=
 CATALOG_SERVER_URL ?= http://localhost:9090
@@ -104,7 +103,7 @@ lint:
 	golangci-lint run ./...
 
 catalog-package:
-	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_REGISTRY_ENDPOINT),-registry-endpoint "$(CATALOG_REGISTRY_ENDPOINT)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
+	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
 
 catalog-install:
 	@test -n "$(CATALOG_BUNDLE)" || { echo "CATALOG_BUNDLE must be an immutable OCI digest reference"; exit 2; }

@@ -19,12 +19,12 @@ Kustomize 包不部署 Registry；Registry 由运营方提供并通过 runtime S
 
 ## Registry
 
-生产部署要求运营方提供一个所有 Kubernetes node 都能解析、访问并信任的 HTTPS OCI Registry。
-`registry_addr` 是 image reference 的 repository root，`registry_client_addr` 是 Server 和 Generate Worker
-使用的 HTTPS authority；外部 Registry 通常分别填 `registry.example.com/breakfix` 和
-`registry.example.com`。同时配置可选的 `registry_pull_secret`、构建推送凭据和内部 CA bundle；Breakfix 不部署或
-管理 Registry，也不修改 node DNS、`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc`
-名称不能作为 kubelet/containerd 的最终镜像地址。
+生产部署要求运营方提供一个所有 Kubernetes node 与平台 Pod 都能解析、访问并信任的 HTTPS OCI
+Registry。运行时 Secret 的 `registry_repository` 是 image reference 的 repository root，例如
+`registry.example.com/breakfix`；其 authority 由 kubelet、Server 和 Generate Worker 原样共享。同步配置可选的
+`registry_pull_secret`、构建推送凭据和内部 CA bundle；Breakfix 不部署或管理 Registry，也不修改 node DNS、
+`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc` 名称不能作为
+kubelet/containerd 的最终镜像 authority。
 
 Kind Registry 的 NodePort、开发 CA 和镜像加载流程属于[本地开发](development.md)，生产不使用它。
 
@@ -52,8 +52,7 @@ artifact，并通过 Server 安装一个 digest 固定的 Catalog Release：
 make catalog-package \
   CATALOG_SOURCE=catalog \
   CATALOG_ARCHIVE=dist/foundation.oci.tar \
-  CATALOG_REFERENCE=registry.example.com/breakfix/catalog/foundation:2026.08.01 \
-  CATALOG_REGISTRY_ENDPOINT=registry.example.com
+  CATALOG_REFERENCE=registry.example.com/breakfix/catalog/foundation:2026.08.01
 # 输出 registry.example.com/breakfix/catalog/foundation@sha256:...
 
 make catalog-install \

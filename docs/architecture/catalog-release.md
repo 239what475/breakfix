@@ -31,6 +31,10 @@ portable source 中的 `challenge.yaml` 是 candidate 语义，禁止包含平�
 发布时间和已发布 content revision。`contentRevision` 覆盖相对路径、文件字节和可执行位；它与 Node Incus fingerprint
 或 K8s OCI digest 是不同概念。后两者只在目标平台真实构建后作为 runtime artifact 保存。
 
+Catalog Release bundle 使用 OCI Image Spec 1.1 的 artifact 表达：根对象是 OCI image manifest，包含
+`artifactType`、`application/vnd.oci.empty.v1+json` config 和 portable source layer。这样可被标准 OCI Registry
+存储，而不会伪装成可运行容器镜像。
+
 ## 安装流程
 
 ```text

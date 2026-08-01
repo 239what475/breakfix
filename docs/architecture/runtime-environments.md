@@ -44,6 +44,6 @@ Workflow 只保存当前阶段和 lease。
 ## 网络与镜像
 
 NodeEnvironment 使用题目私有 Incus project/network；Node 名称与静态地址由平台生成并写入对应节点的
-`/etc/hosts`，避免向学习者暴露 Incus DNS 细节。VK8s 的 OCI image 由 Kubernetes node 按 Registry
-配置拉取；私有 Registry 必须使用 node 可解析、可访问且受信任的 HTTPS 名称，不能用 `.svc` 作为镜像
-引用。
+`/etc/hosts`，避免向学习者暴露 Incus DNS 细节。VK8s 的 OCI image 由 Kubernetes node 按
+`registry_repository` 拉取；私有 Registry 必须让 node 与平台 Pod 使用同一个可解析、可访问且受信任的
+HTTPS authority，不能用 `.svc` 作为镜像引用。

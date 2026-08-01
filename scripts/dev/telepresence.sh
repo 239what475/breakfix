@@ -316,8 +316,7 @@ run_server() {
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
     BREAKFIX_GENERATE_WORKER_API_KEY="$(worker_identity_key generate-worker)" \
     BREAKFIX_TAXONOMY_WORKER_API_KEY="$(worker_identity_key taxonomy-worker)" \
-    BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)" \
-    BREAKFIX_REGISTRY_CLIENT_ADDR="$(secret_value registry_client_addr)" \
+    BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)" \
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
     BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
     BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file" \
@@ -355,8 +354,7 @@ run_generate_worker() {
   printf 'Replacing Generate Worker locally.\n'
   export BREAKFIX_WORKER_API_KEY="$(worker_identity_key generate-worker)"
   export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
-  export BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)"
-  export BREAKFIX_REGISTRY_CLIENT_ADDR="$(secret_value registry_client_addr)"
+  export BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)"
   export BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)"
   export BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)"
   export BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file"

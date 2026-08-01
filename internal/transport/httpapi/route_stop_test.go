@@ -9,7 +9,7 @@ import (
 )
 
 func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
-	router, err := SetupRouter(context.Background(), nil, nil, config.Config{Registry: config.RegistryConfig{ClientAddress: "registry.example.com"}}, nil, Dependencies{})
+	router, err := SetupRouter(context.Background(), nil, nil, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, nil, Dependencies{})
 	if err != nil {
 		t.Fatal(err)
 	}

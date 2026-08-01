@@ -9,11 +9,13 @@ import (
 	"strings"
 )
 
-const artifactManifestMediaType = "application/vnd.oci.artifact.manifest.v1+json"
+const (
+	emptyJSONMediaType = "application/vnd.oci.empty.v1+json"
+	emptyJSONPayload   = "{}"
+)
 
-// Artifact is a generic OCI 1.1 artifact payload. It is separate from an OCI
-// image: it has no runtime config or filesystem layers interpreted by a
-// container runtime.
+// Artifact is a generic OCI 1.1 artifact payload. It is encoded as an OCI
+// image manifest with an artifactType, an empty config and arbitrary layers.
 type Artifact struct {
 	ArtifactType string
 	Blobs        []ArtifactBlob
@@ -37,14 +39,6 @@ type ArtifactDescriptor struct {
 	Digest      string
 	Size        int64
 	Annotations map[string]string
-}
-
-type ociArtifactManifest struct {
-	SchemaVersion int               `json:"schemaVersion"`
-	MediaType     string            `json:"mediaType"`
-	ArtifactType  string            `json:"artifactType"`
-	Blobs         []ociDescriptor   `json:"blobs"`
-	Annotations   map[string]string `json:"annotations,omitempty"`
 }
 
 // WriteArtifactArchive writes a deterministic OCI artifact layout tar. The
@@ -71,6 +65,11 @@ func WriteArtifactArchive(destination string, artifact Artifact) (string, error)
 	if err := os.WriteFile(filepath.Join(root, "oci-layout"), []byte("{\"imageLayoutVersion\":\"1.0.0\"}\n"), 0o600); err != nil {
 		return "", err
 	}
+	emptyConfig := []byte(emptyJSONPayload)
+	emptyConfigDigest := digestBytes(emptyConfig)
+	if err := writeOCIBlob(root, emptyConfigDigest, emptyConfig); err != nil {
+		return "", err
+	}
 
 	blobs := make([]ociDescriptor, 0, len(artifact.Blobs))
 	for _, blob := range artifact.Blobs {
@@ -85,9 +84,17 @@ func WriteArtifactArchive(destination string, artifact Artifact) (string, error)
 			MediaType: blob.MediaType, Digest: digest, Size: int64(len(blob.Data)), Annotations: cloneAnnotations(blob.Annotations),
 		})
 	}
-	manifest, err := json.Marshal(ociArtifactManifest{
-		SchemaVersion: 2, MediaType: artifactManifestMediaType, ArtifactType: artifact.ArtifactType,
-		Blobs: blobs, Annotations: cloneAnnotations(artifact.Annotations),
+	manifest, err := json.Marshal(ociManifest{
+		SchemaVersion: 2,
+		MediaType:     ociManifestMediaType,
+		ArtifactType:  artifact.ArtifactType,
+		Config: ociDescriptor{
+			MediaType: emptyJSONMediaType,
+			Digest:    emptyConfigDigest,
+			Size:      int64(len(emptyConfig)),
+		},
+		Layers:      blobs,
+		Annotations: cloneAnnotations(artifact.Annotations),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal OCI artifact manifest: %w", err)
@@ -97,7 +104,7 @@ func WriteArtifactArchive(destination string, artifact Artifact) (string, error)
 		return "", err
 	}
 	index, err := json.Marshal(ociIndex{SchemaVersion: 2, Manifests: []ociDescriptor{{
-		MediaType: artifactManifestMediaType, Digest: digest, Size: int64(len(manifest)),
+		MediaType: ociManifestMediaType, Digest: digest, Size: int64(len(manifest)),
 	}}})
 	if err != nil {
 		return "", fmt.Errorf("marshal OCI artifact index: %w", err)
@@ -163,7 +170,7 @@ func readArtifactLayout(root string) (ArtifactManifest, error) {
 	if err != nil {
 		return ArtifactManifest{}, err
 	}
-	if descriptor.MediaType != artifactManifestMediaType {
+	if descriptor.MediaType != ociManifestMediaType {
 		return ArtifactManifest{}, fmt.Errorf("OCI root manifest media type is %q, not an artifact manifest", descriptor.MediaType)
 	}
 	data, err := os.ReadFile(ociBlobPath(root, descriptor.Digest))
@@ -173,15 +180,18 @@ func readArtifactLayout(root string) (ArtifactManifest, error) {
 	if int64(len(data)) != descriptor.Size || descriptor.Digest != digestBytes(data) {
 		return ArtifactManifest{}, errors.New("OCI artifact manifest digest or size mismatch")
 	}
-	var manifest ociArtifactManifest
+	var manifest ociManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return ArtifactManifest{}, fmt.Errorf("parse OCI artifact manifest: %w", err)
 	}
-	if manifest.SchemaVersion != 2 || manifest.MediaType != artifactManifestMediaType || strings.TrimSpace(manifest.ArtifactType) == "" || len(manifest.Blobs) == 0 {
+	if manifest.SchemaVersion != 2 || manifest.MediaType != ociManifestMediaType || strings.TrimSpace(manifest.ArtifactType) == "" || len(manifest.Layers) == 0 {
 		return ArtifactManifest{}, errors.New("invalid OCI artifact manifest")
 	}
-	result := ArtifactManifest{ArtifactType: manifest.ArtifactType, Annotations: cloneAnnotations(manifest.Annotations), Blobs: make([]ArtifactDescriptor, 0, len(manifest.Blobs))}
-	for _, blob := range manifest.Blobs {
+	if err := validateEmptyArtifactConfig(root, manifest.Config); err != nil {
+		return ArtifactManifest{}, err
+	}
+	result := ArtifactManifest{ArtifactType: manifest.ArtifactType, Annotations: cloneAnnotations(manifest.Annotations), Blobs: make([]ArtifactDescriptor, 0, len(manifest.Layers))}
+	for _, blob := range manifest.Layers {
 		if strings.TrimSpace(blob.MediaType) == "" || blob.Size < 0 {
 			return ArtifactManifest{}, errors.New("invalid OCI artifact blob descriptor")
 		}
@@ -200,6 +210,20 @@ func readArtifactLayout(root string) (ArtifactManifest, error) {
 		})
 	}
 	return result, nil
+}
+
+func validateEmptyArtifactConfig(root string, descriptor ociDescriptor) error {
+	if descriptor.MediaType != emptyJSONMediaType || descriptor.Size != int64(len(emptyJSONPayload)) || descriptor.Digest != digestBytes([]byte(emptyJSONPayload)) {
+		return errors.New("invalid OCI artifact empty config")
+	}
+	data, err := os.ReadFile(ociBlobPath(root, descriptor.Digest))
+	if err != nil {
+		return fmt.Errorf("read OCI artifact empty config: %w", err)
+	}
+	if string(data) != emptyJSONPayload {
+		return errors.New("invalid OCI artifact empty config")
+	}
+	return nil
 }
 
 func cloneAnnotations(values map[string]string) map[string]string {

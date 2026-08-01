@@ -28,7 +28,7 @@ type Handler struct {
 	authoring          *appauthoring.RuntimeService
 	catalog            *appcatalog.Service
 	assistant          *appassistant.Service
-	registryAddr       string
+	registryRepository string
 	registryClient     oci.Client
 	catalogInstaller   *appcatalog.Installer
 	releaseCoordinator *appcatalog.ReleaseCoordinator
@@ -76,7 +76,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		db:                 database,
 		k8s:                client,
 		catalog:            appcatalog.NewService(cfg.ChallengesDir(), taxonomyStore, catalogGate),
-		registryAddr:       cfg.Registry.Address,
+		registryRepository: cfg.Registry.Repository,
 		registryClient:     dependencies.RegistryClient,
 		catalogAdminToken:  []byte(cfg.CatalogAdminToken),
 		namespace:          cfg.Namespace,

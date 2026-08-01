@@ -37,9 +37,13 @@ type ociIndex struct {
 }
 
 type ociManifest struct {
-	Config    ociDescriptor   `json:"config"`
-	Layers    []ociDescriptor `json:"layers"`
-	Manifests []ociDescriptor `json:"manifests"`
+	SchemaVersion int               `json:"schemaVersion,omitempty"`
+	MediaType     string            `json:"mediaType,omitempty"`
+	ArtifactType  string            `json:"artifactType,omitempty"`
+	Config        ociDescriptor     `json:"config"`
+	Layers        []ociDescriptor   `json:"layers"`
+	Manifests     []ociDescriptor   `json:"manifests,omitempty"`
+	Annotations   map[string]string `json:"annotations,omitempty"`
 }
 
 // PullOCIArchive copies a trusted Registry image into a local OCI archive.
@@ -49,7 +53,7 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	_, repository, reference, err := imageReference(imageName)
+	_, repository, reference, err := c.operationReference(imageName)
 	if err != nil {
 		return err
 	}
@@ -92,18 +96,6 @@ func (c Client) pullManifest(ctx context.Context, repository, reference, layout 
 	descriptor := ociDescriptor{MediaType: mediaType, Digest: digest, Size: int64(len(body))}
 	if err := writeOCIBlob(layout, descriptor.Digest, body); err != nil {
 		return ociDescriptor{}, err
-	}
-	if mediaType == artifactManifestMediaType {
-		var artifact ociArtifactManifest
-		if err := json.Unmarshal(body, &artifact); err != nil {
-			return ociDescriptor{}, fmt.Errorf("parse registry artifact manifest %s: %w", reference, err)
-		}
-		for _, blob := range artifact.Blobs {
-			if err := c.pullBlob(ctx, repository, blob, layout); err != nil {
-				return ociDescriptor{}, err
-			}
-		}
-		return descriptor, nil
 	}
 	var manifest ociManifest
 	if err := json.Unmarshal(body, &manifest); err != nil {
@@ -181,7 +173,6 @@ func (c Client) getManifest(ctx context.Context, repository, reference string) (
 	request.Header.Set("Accept", strings.Join([]string{
 		ociManifestMediaType,
 		ociIndexMediaType,
-		artifactManifestMediaType,
 		"application/vnd.docker.distribution.manifest.v2+json",
 		"application/vnd.docker.distribution.manifest.list.v2+json",
 	}, ", "))
@@ -222,7 +213,7 @@ func (c Client) PushOCIArchive(ctx context.Context, imageName, archivePath strin
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	_, repository, reference, err := imageReference(imageName)
+	_, repository, reference, err := c.operationReference(imageName)
 	if err != nil {
 		return err
 	}
@@ -278,10 +269,10 @@ func (c Client) CopyImage(ctx context.Context, sourceImage, targetImage string) 
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	if _, _, _, err := imageReference(sourceImage); err != nil {
+	if _, _, _, err := c.operationReference(sourceImage); err != nil {
 		return err
 	}
-	if _, _, _, err := imageReference(targetImage); err != nil {
+	if _, _, _, err := c.operationReference(targetImage); err != nil {
 		return err
 	}
 	root, err := os.MkdirTemp("", "breakfix-oci-copy-*")
@@ -404,7 +395,7 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	if err := c.Credentials.Validate(); err != nil {
 		return "", err
 	}
-	registryAddress, repository, reference, err := imageReference(imageName)
+	registryAddress, repository, reference, err := c.operationReference(imageName)
 	if err != nil {
 		return "", err
 	}
@@ -412,7 +403,7 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Accept", ociManifestMediaType+", "+artifactManifestMediaType+", application/vnd.docker.distribution.manifest.v2+json")
+	request.Header.Set("Accept", ociManifestMediaType+", application/vnd.docker.distribution.manifest.v2+json")
 	c.Credentials.apply(request)
 	response, err := c.httpClient().Do(request)
 	if err != nil {
@@ -430,7 +421,7 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 }
 
 func (c Client) registryURL(path string) string {
-	return "https://" + c.endpoint + path
+	return "https://" + c.authority + path
 }
 
 func (c Client) resolveLocation(location string) (string, error) {
@@ -439,15 +430,23 @@ func (c Client) resolveLocation(location string) (string, error) {
 		return "", err
 	}
 	if parsed.IsAbs() {
-		if parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-			return "", fmt.Errorf("registry upload location must use HTTPS")
+		if parsed.Scheme != "https" || parsed.Host != c.authority || parsed.User != nil {
+			return "", fmt.Errorf("registry upload location must use the configured HTTPS authority")
 		}
-		return c.registryURL(parsed.RequestURI()), nil
+		return parsed.String(), nil
 	}
-	if parsed.Host != "" {
-		return "", fmt.Errorf("registry upload location must use HTTPS")
+	if parsed.Host != "" || parsed.User != nil {
+		return "", fmt.Errorf("registry upload location must use the configured HTTPS authority")
 	}
-	return c.registryURL(location), nil
+	base, err := url.Parse(c.registryURL("/"))
+	if err != nil {
+		return "", err
+	}
+	resolved := base.ResolveReference(parsed)
+	if resolved.Scheme != "https" || resolved.Host != c.authority {
+		return "", fmt.Errorf("registry upload location must use the configured HTTPS authority")
+	}
+	return resolved.String(), nil
 }
 
 func (c Client) httpClient() *http.Client {
@@ -460,8 +459,8 @@ func (c Client) httpClient() *http.Client {
 		Timeout:   2 * time.Minute,
 		Transport: transport,
 		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
-			if request.URL.Scheme != "https" {
-				return fmt.Errorf("registry redirect must use HTTPS")
+			if request.URL.Scheme != "https" || request.URL.Host != c.authority {
+				return fmt.Errorf("registry redirect must use the configured HTTPS authority")
 			}
 			return nil
 		},

@@ -63,8 +63,12 @@ func Run(ctx context.Context, configPath, workerID string) error {
 		return fmt.Errorf("create Generate Worker Incus client: %w", err)
 	}
 	defer incusClient.Close()
+	registryAuthority, err := oci.AuthorityForReference(cfg.Registry.Repository)
+	if err != nil {
+		return fmt.Errorf("derive Registry authority: %w", err)
+	}
 	registryClient, err := oci.NewClient(oci.ClientOptions{
-		Endpoint:        cfg.Registry.ClientAddress,
+		Authority:       registryAuthority,
 		Credentials:     oci.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
 		TrustBundleFile: cfg.Registry.TrustBundleFile,
 	})
@@ -75,7 +79,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	publisherExecutor, err := publish.NewExecutor(registryClient, incusClient, cfg.Registry.Address)
+	publisherExecutor, err := publish.NewExecutor(registryClient, incusClient, cfg.Registry.Repository)
 	if err != nil {
 		return fmt.Errorf("create publisher executor: %w", err)
 	}

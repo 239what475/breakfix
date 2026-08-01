@@ -20,7 +20,7 @@ func (h *Handler) validateCandidateStagingArtifact(view generation.WorkerView, a
 	}
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		expected, err := candidate.CandidateOCIRepository(h.registryAddr, view.ID)
+		expected, err := candidate.CandidateOCIRepository(h.registryRepository, view.ID)
 		if err != nil {
 			return fmt.Errorf("derive candidate OCI repository: %w", err)
 		}
@@ -62,7 +62,7 @@ func (h *Handler) validateCandidateChallengeArtifact(view generation.WorkerView,
 	}
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		expected, err := candidate.ChallengeOCIRepository(h.registryAddr, view.Publication.ChallengeID)
+		expected, err := candidate.ChallengeOCIRepository(h.registryRepository, view.Publication.ChallengeID)
 		if err != nil {
 			return fmt.Errorf("derive challenge OCI repository: %w", err)
 		}

@@ -87,7 +87,7 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 	}))
 	defer server.Close()
 	client := testTLSRegistryClient(t, server, Credentials{Username: "registry", Password: "secret"})
-	imageAuthority := "registry.node.example:30443"
+	imageAuthority := testTLSRegistryAddress(t, server)
 	if err := client.CopyImage(context.Background(), imageAuthority+"/team/base@"+manifestDigest, imageAuthority+"/team/published:verified"); err != nil {
 		t.Fatalf("copy OCI image: %v", err)
 	}

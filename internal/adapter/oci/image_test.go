@@ -29,7 +29,7 @@ func TestNewClientAppendsOperatorTrustBundle(t *testing.T) {
 	if err := os.WriteFile(bundlePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientOptions{Endpoint: testTLSRegistryAddress(t, server), TrustBundleFile: bundlePath})
+	client, err := NewClient(ClientOptions{Authority: testTLSRegistryAddress(t, server), TrustBundleFile: bundlePath})
 	if err != nil {
 		t.Fatalf("create Registry client with internal CA: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestNewClientRejectsInvalidTrustBundle(t *testing.T) {
 	if err := os.WriteFile(bundlePath, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewClient(ClientOptions{Endpoint: "registry.example.com", TrustBundleFile: bundlePath}); err == nil {
+	if _, err := NewClient(ClientOptions{Authority: "registry.example.com", TrustBundleFile: bundlePath}); err == nil {
 		t.Fatal("Registry client accepted an invalid trust bundle")
 	}
 }

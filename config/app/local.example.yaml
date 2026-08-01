@@ -12,15 +12,12 @@ data_dir: ./data
 database_url: ${BREAKFIX_DATABASE_URL}
 kubeconfig: ~/.kube/config
 
-# Registry address includes the repository namespace used for challenge images.
+# Registry repository includes the namespace used for challenge images. Its
+# authority is used unchanged by Kubernetes nodes, Server, and Generate Worker.
 # Production always uses an operator-provided OCI Registry such as Harbor or a
-# cloud Registry. Kubernetes nodes must independently trust and reach it before
-# pulling challenge images.
+# cloud Registry; every consumer must independently trust and reach it.
 registry:
-  address: registry.example.com/breakfix
-  # HTTPS authority used by Server and Generate Worker. It normally matches
-  # address's authority; Kind development uses the in-cluster Registry Service.
-  client_address: registry.example.com
+  repository: registry.example.com/breakfix
   # Optional for registries that allow anonymous pulls.
   pull_secret: breakfix-registry-pull
   # Leave empty for a publicly trusted Registry certificate.

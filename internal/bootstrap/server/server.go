@@ -61,8 +61,14 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create Incus client: %w", err)
 	}
+	registryAuthority, err := oci.AuthorityForReference(cfg.Registry.Repository)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("derive Registry authority: %w", err)
+	}
 	registryClient, err := oci.NewClient(oci.ClientOptions{
-		Endpoint:        cfg.Registry.ClientAddress,
+		Authority:       registryAuthority,
 		Credentials:     oci.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
 		TrustBundleFile: cfg.Registry.TrustBundleFile,
 	})

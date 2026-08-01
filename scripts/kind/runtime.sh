@@ -63,33 +63,26 @@ secret_value() {
     jq -r --arg key "$1" 'if .data[$key] == null then "" else .data[$key] | @base64d end'
 }
 
-registry_address=$(secret_value registry_addr)
-registry_client_address=$(secret_value registry_client_addr)
+registry_repository=$(secret_value registry_repository)
 registry_pull_secret=$(secret_value registry_pull_secret)
 registry_trust_bundle_file=$(secret_value registry_trust_bundle_file)
-[ -n "$registry_address" ] || {
-  printf 'runtime Secret breakfix-runtime must provide registry_addr\n' >&2
+[ -n "$registry_repository" ] || {
+  printf 'runtime Secret breakfix-runtime must provide registry_repository\n' >&2
   exit 1
 }
-registry_authority=${registry_address%%/*}
+registry_authority=${registry_repository%%/*}
 registry_port=${registry_authority##*:}
 if [ "$registry_port" = "$registry_authority" ]; then
   registry_port=443
 fi
 case "$registry_port" in
   '' | *[!0-9]*)
-    printf 'registry_addr must contain a numeric port when one is specified\n' >&2
+    printf 'registry_repository must contain a numeric port when one is specified\n' >&2
     exit 1
     ;;
 esac
 [ "$registry_port" = "$registry_node_port" ] || {
-  printf 'Kind runtime registry_addr must use NodePort %s, got %s\n' "$registry_node_port" "$registry_address" >&2
-  exit 1
-}
-expected_registry_client_address=breakfix-registry.$namespace.svc.cluster.local
-[ "$registry_client_address" = "$expected_registry_client_address" ] || {
-  printf 'Kind runtime registry_client_addr must use the Registry Service authority %s, got %s\n' \
-    "$expected_registry_client_address" "$registry_client_address" >&2
+  printf 'Kind runtime registry_repository must use NodePort %s, got %s\n' "$registry_node_port" "$registry_repository" >&2
   exit 1
 }
 if [ -n "$registry_pull_secret" ]; then
@@ -151,7 +144,7 @@ esac
 
 base_image_digest=$(secret_value k8s_base_image_digest)
 case "$base_image_digest" in
-  "$registry_address/k8s-base@"*)
+  "$registry_repository/k8s-base@"*)
     ;;
   *)
     docker image inspect breakfix-k8s-base:latest >/dev/null 2>&1 || {
@@ -170,11 +163,12 @@ actual_registry_node_port=$(kubectl -n "$namespace" get service breakfix-registr
   exit 1
 }
 kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
-  jq --argjson incus_port "$incus_port" '
+  jq --argjson incus_port "$incus_port" --argjson registry_node_port "$registry_node_port" '
     .spec.egress |= map(
       if any(.to[]?; has("ipBlock")) then
         .ports = (((.ports // []) + [
-          {protocol: "TCP", port: $incus_port}
+          {protocol: "TCP", port: $incus_port},
+          {protocol: "TCP", port: $registry_node_port}
         ])
           | unique_by([.protocol, .port]))
       else
@@ -214,6 +208,6 @@ for deployment in server controller generate-worker taxonomy-worker; do
   kubectl -n "$namespace" rollout status deployment/"breakfix-$deployment" --timeout=3m >/dev/null
 done
 
-printf 'Applied Kind runtime with %s Generate Worker replica(s), %s Taxonomy Worker replica(s), Incus egress port %s, image NodePort %s at %s, and Registry Service client authority %s.\n' \
-	"$generate_worker_replicas" "$taxonomy_worker_replicas" "$incus_port" "$registry_node_port" "$registry_address" "$registry_client_address"
+printf 'Applied Kind runtime with %s Generate Worker replica(s), %s Taxonomy Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
+	"$generate_worker_replicas" "$taxonomy_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
 printf 'Kind nodes trust the Registry CA through their system trust store; no custom DNS or /etc/hosts entry is required.\n'

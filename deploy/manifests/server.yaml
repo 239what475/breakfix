@@ -73,16 +73,11 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_username
-            - name: BREAKFIX_REGISTRY_ADDR
+            - name: BREAKFIX_REGISTRY_REPOSITORY
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
-                  key: registry_addr
-            - name: BREAKFIX_REGISTRY_CLIENT_ADDR
-              valueFrom:
-                secretKeyRef:
-                  name: breakfix-runtime
-                  key: registry_client_addr
+                  key: registry_repository
             - name: BREAKFIX_REGISTRY_PASSWORD
               valueFrom:
                 secretKeyRef:

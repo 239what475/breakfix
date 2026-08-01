@@ -30,22 +30,20 @@ func (c Credentials) apply(request *http.Request) {
 	}
 }
 
-// ClientOptions configures one HTTPS-only Registry client. Endpoint is the
-// Registry authority used for control-plane HTTP calls. It is separate from
-// the authority embedded in an OCI image reference so Kubernetes nodes can
-// pull through their own reachable endpoint while in-cluster clients use the
-// Registry Service. TrustBundleFile is optional: public CAs use the normal
-// system trust store, while an internal Registry can append an operator-
-// provided CA bundle without disabling TLS verification.
+// ClientOptions configures one HTTPS-only Registry client. Authority must be
+// the authority embedded in every OCI image reference used with the Client.
+// TrustBundleFile is optional: public CAs use the normal system trust store,
+// while an internal Registry can append an operator-provided CA bundle without
+// disabling TLS verification.
 type ClientOptions struct {
-	Endpoint        string
+	Authority       string
 	Credentials     Credentials
 	TrustBundleFile string
 }
 
 type Client struct {
 	Credentials        Credentials
-	endpoint           string
+	authority          string
 	rootCAs            *x509.CertPool
 	httpClientOverride *http.Client
 }
@@ -57,7 +55,7 @@ func NewClient(options ClientOptions) (Client, error) {
 	if err := options.Credentials.Validate(); err != nil {
 		return Client{}, err
 	}
-	endpoint, err := registryEndpoint(options.Endpoint)
+	authority, err := registryAuthority(options.Authority)
 	if err != nil {
 		return Client{}, err
 	}
@@ -75,7 +73,7 @@ func NewClient(options ClientOptions) (Client, error) {
 			return Client{}, fmt.Errorf("registry trust bundle contains no certificates")
 		}
 	}
-	return Client{Credentials: options.Credentials, endpoint: endpoint, rootCAs: roots}, nil
+	return Client{Credentials: options.Credentials, authority: authority, rootCAs: roots}, nil
 }
 
 // Ping verifies Registry V2 availability and the configured credentials.
@@ -105,7 +103,7 @@ func (c Client) DeleteImage(ctx context.Context, imageName string) error {
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	_, repository, reference, err := imageReference(imageName)
+	_, repository, reference, err := c.operationReference(imageName)
 	if err != nil {
 		return err
 	}
@@ -171,6 +169,28 @@ func imageReference(imageName string) (registry, repository, reference string, e
 	return registry, repository, reference, nil
 }
 
+// AuthorityForReference returns the Registry authority embedded in an OCI
+// repository or image reference. Callers use it to construct a Client before
+// issuing any Registry operation.
+func AuthorityForReference(reference string) (string, error) {
+	authority, _, _, err := imageReference(reference)
+	if err != nil {
+		return "", err
+	}
+	return registryAuthority(authority)
+}
+
+func (c Client) operationReference(imageName string) (registry, repository, reference string, err error) {
+	registry, repository, reference, err = imageReference(imageName)
+	if err != nil {
+		return "", "", "", err
+	}
+	if registry != c.authority {
+		return "", "", "", fmt.Errorf("registry image authority %q does not match client authority %q", registry, c.authority)
+	}
+	return registry, repository, reference, nil
+}
+
 func repositoryPath(repository string) string {
 	parts := strings.Split(repository, "/")
 	for index, part := range parts {
@@ -179,14 +199,14 @@ func repositoryPath(repository string) string {
 	return strings.Join(parts, "/")
 }
 
-func registryEndpoint(value string) (string, error) {
-	endpoint := strings.TrimSpace(value)
-	if endpoint == "" || strings.Contains(endpoint, "://") || strings.ContainsAny(endpoint, " \t\r\n/@") {
-		return "", fmt.Errorf("registry client endpoint must be an HTTPS authority")
+func registryAuthority(value string) (string, error) {
+	authority := strings.TrimSpace(value)
+	if authority == "" || strings.Contains(authority, "://") || strings.ContainsAny(authority, " \t\r\n/@") {
+		return "", fmt.Errorf("registry authority must be an HTTPS authority")
 	}
-	parsed, err := url.Parse("https://" + endpoint)
-	if err != nil || parsed.Host == "" || parsed.Host != endpoint || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return "", fmt.Errorf("registry client endpoint must be an HTTPS authority")
+	parsed, err := url.Parse("https://" + authority)
+	if err != nil || parsed.Host == "" || parsed.Host != authority || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return "", fmt.Errorf("registry authority must be an HTTPS authority")
 	}
 	return parsed.Host, nil
 }

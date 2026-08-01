@@ -5,13 +5,12 @@ This development-only overlay installs the bundled Registry as a fixed
 
 Run `make deploy-kind` after creating the runtime and Registry authentication
 Secrets. The command applies the root package first, then this additive overlay.
-It chooses the Kind control-plane Docker-network IP as the image
-authority, issues a local development leaf certificate with both that IP and
-`breakfix-registry.breakfix-system.svc.cluster.local` as SANs, updates the
-runtime and pull Secrets, and installs only the CA in each Kind node's system
-trust store. Immutable image references use `<kind-node-ip>:30443/breakfix`;
-in-cluster control-plane clients use the Registry Service DNS name. No custom
-DNS record, CoreDNS rule, or `/etc/hosts` entry is required.
+It chooses the Kind control-plane Docker-network IP as the one Registry
+authority, issues a local development leaf certificate with that IP as its only
+SAN, updates the runtime and pull Secrets, and installs only the CA in each
+Kind node's system trust store. Immutable image references and in-cluster
+control-plane clients all use `<kind-node-ip>:30443/breakfix`. No custom DNS
+record, CoreDNS rule, or `/etc/hosts` entry is required.
 
 The generated CA and key live under `.local/kind-registry/`, which is ignored by
 Git and belongs only to the disposable local Kind cluster.

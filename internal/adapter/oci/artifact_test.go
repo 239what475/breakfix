@@ -3,10 +3,12 @@ package oci
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +51,34 @@ func TestWriteArtifactArchiveProducesDeterministicOCIArtifact(t *testing.T) {
 	}
 	if err := ValidateOCIArchive(firstPath); err != nil {
 		t.Fatalf("validate artifact archive: %v", err)
+	}
+	layout := t.TempDir()
+	if err := ExtractOCIArchive(firstPath, layout); err != nil {
+		t.Fatalf("extract artifact archive: %v", err)
+	}
+	root, err := loadOCIRootDescriptor(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.MediaType != ociManifestMediaType {
+		t.Fatalf("root media type = %q, want %q", root.MediaType, ociManifestMediaType)
+	}
+	rawManifest, err := os.ReadFile(ociBlobPath(layout, root.Digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded ociManifest
+	if err := json.Unmarshal(rawManifest, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.SchemaVersion != 2 || encoded.MediaType != ociManifestMediaType || encoded.ArtifactType != artifact.ArtifactType {
+		t.Fatalf("encoded artifact manifest = %#v", encoded)
+	}
+	if encoded.Config.MediaType != emptyJSONMediaType || encoded.Config.Digest != digestBytes([]byte(emptyJSONPayload)) || encoded.Config.Size != int64(len(emptyJSONPayload)) {
+		t.Fatalf("encoded artifact config = %#v", encoded.Config)
+	}
+	if len(encoded.Layers) != len(artifact.Blobs) || encoded.Layers[0].MediaType != artifact.Blobs[0].MediaType {
+		t.Fatalf("encoded artifact layers = %#v", encoded.Layers)
 	}
 	manifest, err := ReadArtifactArchive(firstPath)
 	if err != nil {
@@ -93,22 +123,36 @@ func TestPullOCIArchivePreservesArtifactManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var encoded ociManifest
+	if err := json.Unmarshal(manifest, &encoded); err != nil {
+		t.Fatal(err)
+	}
 	parsed, err := ReadArtifactArchive(sourceArchive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blob, err := os.ReadFile(ociBlobPath(layout, parsed.Blobs[0].Digest))
-	if err != nil {
-		t.Fatal(err)
+	blobs := make(map[string][]byte, 1+len(encoded.Layers))
+	for _, descriptor := range append([]ociDescriptor{encoded.Config}, encoded.Layers...) {
+		blob, err := os.ReadFile(ociBlobPath(layout, descriptor.Digest))
+		if err != nil {
+			t.Fatal(err)
+		}
+		blobs[descriptor.Digest] = blob
 	}
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/v2/catalog/foundation/manifests/source":
-			writer.Header().Set("Content-Type", artifactManifestMediaType)
+			writer.Header().Set("Content-Type", ociManifestMediaType)
 			writer.Header().Set("Docker-Content-Digest", root.Digest)
 			_, _ = writer.Write(manifest)
-		case request.Method == http.MethodGet && request.URL.Path == "/v2/catalog/foundation/blobs/"+parsed.Blobs[0].Digest:
+		case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/v2/catalog/foundation/blobs/"):
+			digest := strings.TrimPrefix(request.URL.Path, "/v2/catalog/foundation/blobs/")
+			blob, ok := blobs[digest]
+			if !ok {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
 			_, _ = writer.Write(blob)
 		default:
 			writer.WriteHeader(http.StatusNotFound)

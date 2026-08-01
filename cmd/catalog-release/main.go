@@ -17,14 +17,13 @@ func main() {
 	source := flag.String("source", "catalog", "portable CatalogRelease source directory")
 	output := flag.String("output", "", "destination OCI archive path")
 	reference := flag.String("reference", "", "optional mutable OCI reference to publish, for example registry.example/catalog/foundation:2026.08.01")
-	endpoint := flag.String("registry-endpoint", "", "optional HTTPS Registry authority; defaults to the reference authority")
 	trustBundle := flag.String("trust-bundle-file", "", "optional PEM bundle trusted for the Registry")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	digest, err := bootstrapcatalog.Run(ctx, bootstrapcatalog.Options{
-		Source: *source, Output: *output, Reference: *reference, RegistryEndpoint: *endpoint, TrustBundleFile: *trustBundle,
+		Source: *source, Output: *output, Reference: *reference, TrustBundleFile: *trustBundle,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "catalog release:", err)

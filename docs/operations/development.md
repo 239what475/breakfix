@@ -25,7 +25,8 @@ make deploy-kind
 ```
 
 该命令构建本地镜像、加载 Server/Controller/Worker image、准备 Kind Registry，再按顺序应用生产根包和 Kind Registry
-overlay。Kind Registry 使用固定 `NodePort 30443`，只为 Kind node image pull 服务；生产部署不能复用该地址。
+overlay。Kind Registry 使用固定 `NodePort 30443`；kubelet、Server 和 Generate Worker 共享同一个 Kind node
+IP authority。生产部署不能复用该地址。
 
 需要重新清理本地运行时状态时：
 

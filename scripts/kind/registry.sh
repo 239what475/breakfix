@@ -33,9 +33,8 @@ control_plane=$(kubectl get nodes \
 }
 
 # kubelet/containerd cannot use a cluster-internal Service name as an image
-# authority. Use the control-plane address on the Kind Docker network for
-# immutable image references, and the Service DNS name for control-plane HTTP
-# clients inside the cluster.
+# authority. Use the control-plane address on the Kind Docker network for every
+# Registry consumer, including in-cluster control-plane clients.
 registry_ip=$(docker inspect \
   --format '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' \
   "$control_plane")
@@ -47,8 +46,7 @@ printf '%s\n' "$registry_ip" | awk -F. '
   exit 1
 }
 registry_authority=$registry_ip:$registry_node_port
-registry_address=$registry_authority/breakfix
-registry_client_address=breakfix-registry.$namespace.svc.cluster.local
+registry_repository=$registry_authority/breakfix
 
 secret_value() {
   kubectl -n "$namespace" get secret breakfix-runtime -o json |
@@ -102,8 +100,8 @@ if [ -f "$leaf_key" ] && [ -f "$leaf_certificate" ]; then
   if openssl x509 -in "$leaf_certificate" -checkend 86400 -noout >/dev/null 2>&1 &&
     openssl x509 -in "$leaf_certificate" -noout -ext subjectAltName 2>/dev/null |
       grep -Fq "IP Address:$registry_ip" &&
-    openssl x509 -in "$leaf_certificate" -noout -ext subjectAltName 2>/dev/null |
-      grep -Fq "DNS:$registry_client_address"; then
+    ! openssl x509 -in "$leaf_certificate" -noout -ext subjectAltName 2>/dev/null |
+      grep -Fq "DNS:"; then
     leaf_is_current=true
   fi
 fi
@@ -113,7 +111,7 @@ if [ "$leaf_is_current" != true ]; then
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=IP:$registry_ip,DNS:$registry_client_address
+subjectAltName=IP:$registry_ip
 EOF
   openssl req -new -newkey rsa:2048 -nodes \
     -subj "/CN=$registry_ip" \
@@ -159,12 +157,11 @@ kubectl -n "$namespace" create secret docker-registry "$registry_pull_secret" \
   --docker-password="$registry_password" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-address_encoded=$(printf '%s' "$registry_address" | base64 | tr -d '\n')
-client_address_encoded=$(printf '%s' "$registry_client_address" | base64 | tr -d '\n')
+repository_encoded=$(printf '%s' "$registry_repository" | base64 | tr -d '\n')
 bundle_path_encoded=$(printf '%s' '/var/run/config/breakfix-registry-ca/ca.crt' | base64 | tr -d '\n')
-patch=$(jq -cn --arg address "$address_encoded" --arg client_address "$client_address_encoded" --arg bundle "$bundle_path_encoded" \
-  '{data: {registry_addr: $address, registry_client_addr: $client_address, registry_trust_bundle_file: $bundle}}')
+patch=$(jq -cn --arg repository "$repository_encoded" --arg bundle "$bundle_path_encoded" \
+  '{data: {registry_repository: $repository, registry_trust_bundle_file: $bundle}}')
 kubectl -n "$namespace" patch secret breakfix-runtime --type merge --patch "$patch" >/dev/null
 
-printf 'Prepared Kind Registry credentials and trust for image pulls at https://%s and in-cluster clients at https://%s (CA: %s).\n' \
-  "$registry_address" "$registry_client_address" "$tls_dir"
+printf 'Prepared Kind Registry credentials and trust for https://%s (CA: %s).\n' \
+  "$registry_repository" "$tls_dir"

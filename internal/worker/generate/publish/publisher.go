@@ -33,16 +33,16 @@ type NodeImagePublisher interface {
 }
 
 type Executor struct {
-	registry     Registry
-	node         NodeImagePublisher
-	registryRoot string
+	registry           Registry
+	node               NodeImagePublisher
+	registryRepository string
 }
 
-func NewExecutor(registryClient Registry, node NodeImagePublisher, registryRoot string) (*Executor, error) {
-	if registryClient == nil || strings.TrimSpace(registryRoot) == "" {
-		return nil, errors.New("publisher requires Registry client and Registry root")
+func NewExecutor(registryClient Registry, node NodeImagePublisher, registryRepository string) (*Executor, error) {
+	if registryClient == nil || strings.TrimSpace(registryRepository) == "" {
+		return nil, errors.New("publisher requires Registry client and Registry repository")
 	}
-	return &Executor{registry: registryClient, node: node, registryRoot: strings.TrimRight(strings.TrimSpace(registryRoot), "/")}, nil
+	return &Executor{registry: registryClient, node: node, registryRepository: strings.TrimRight(strings.TrimSpace(registryRepository), "/")}, nil
 }
 
 // DiscardCandidate removes external artifacts for a candidate that will no
@@ -290,11 +290,11 @@ func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string,
 }
 
 func (e *Executor) candidateImage(candidateID string) (string, error) {
-	return candidate.CandidateOCIImageReference(e.registryRoot, candidateID)
+	return candidate.CandidateOCIImageReference(e.registryRepository, candidateID)
 }
 
 func (e *Executor) challengeImage(challengeID string) (string, error) {
-	return candidate.ChallengeOCIImageReference(e.registryRoot, challengeID)
+	return candidate.ChallengeOCIImageReference(e.registryRepository, challengeID)
 }
 
 func nodeBuildResult(build *generation.BuildOutput) (incus.BuildNodeImageResult, error) {

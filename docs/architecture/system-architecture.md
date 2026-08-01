@@ -35,7 +35,7 @@ Registry 保存 K8s OCI artifact，Incus 保存 Node system-container image。�
 | challenge 目录与 taxonomy snapshot | Server data PVC，经 Server 写入 | Worker 只提交 typed 结果，不写文件系统。 |
 | `NodeEnvironment`、`VK8sEnvironment` spec/status | Server 写 spec，Controller 写 status | Server 不直接写 status。 |
 | Node image | Incus image project | Generate Worker 构建和发布；Controller 只消费正式 artifact。 |
-| K8s image | 运营方提供的 OCI Registry；Kind 开发环境使用 NodePort Registry | Generate Worker 经 `registry_client_addr` 发布；节点按 `registry_addr` 拉取。 |
+| K8s image | 运营方提供的 OCI Registry；Kind 开发环境使用 NodePort Registry | Generate Worker 和节点都使用 `registry_repository` 的同一 authority。 |
 
 Server 是 Workflow 状态的唯一写者。每个 Worker 请求都携带 lease owner 与 state attempt；Server
 在同一事务中校验租约、保存阶段输出并推进状态。迟到或失去租约的结果被拒绝。

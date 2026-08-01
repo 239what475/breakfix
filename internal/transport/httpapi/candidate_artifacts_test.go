@@ -13,14 +13,14 @@ import (
 
 func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 	handler := newHandlerForTest(nil, nil, config.Config{
-		Registry: config.RegistryConfig{Address: "registry.example.com/breakfix", ClientAddress: "registry.example.com"},
+		Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"},
 		Incus:    incus.Config{NamePrefix: "bf"},
 	})
 	const fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	t.Run("k8s staging and final artifacts", func(t *testing.T) {
 		view := generation.WorkerView{ID: "candidate-a", Snapshot: generation.ExecutionSnapshot{Runtime: challenge.RuntimeK8s}}
-		stagingRepository, err := candidate.CandidateOCIRepository(handler.registryAddr, view.ID)
+		stagingRepository, err := candidate.CandidateOCIRepository(handler.registryRepository, view.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 
 		view.Artifact = &staging
 		view.Publication = &generation.Publication{ChallengeID: "challenge-a"}
-		finalRepository, err := candidate.ChallengeOCIRepository(handler.registryAddr, view.Publication.ChallengeID)
+		finalRepository, err := candidate.ChallengeOCIRepository(handler.registryRepository, view.Publication.ChallengeID)
 		if err != nil {
 			t.Fatal(err)
 		}

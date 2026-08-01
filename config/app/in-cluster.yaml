@@ -8,8 +8,7 @@ database_url: ${BREAKFIX_DATABASE_URL}
 kubeconfig: ""
 
 registry:
-  address: ${BREAKFIX_REGISTRY_ADDR}
-  client_address: ${BREAKFIX_REGISTRY_CLIENT_ADDR}
+  repository: ${BREAKFIX_REGISTRY_REPOSITORY}
   pull_secret: ${BREAKFIX_REGISTRY_PULL_SECRET}
   trust_bundle_file: ${BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE}
 
