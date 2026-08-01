@@ -1,4 +1,4 @@
-package controller
+package nodeenvironment
 
 import (
 	"context"
@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/adapter/incus"
-	"github.com/lxc/incus/v7/shared/units"
+	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,18 +30,9 @@ const (
 	checkpointInterval                     = 4 * time.Second
 )
 
-type NodeEnvironmentProvider interface {
-	Preflight(context.Context) (incus.PreflightResult, error)
-	NodeEnvironmentIdentity(environmentUID string, logicalNames []string) (incus.NodeEnvironmentIdentity, error)
-	ProvisionNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error)
-	ObserveNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error)
-	DeleteNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) error
-	ExecNode(context.Context, incus.ExecNodeRequest) (incus.ExecNodeResult, error)
-}
-
 type NodeEnvironmentReconciler struct {
 	client.Client
-	Provider NodeEnvironmentProvider
+	Provider environmentdomain.NodeProvider
 	Now      func() time.Time
 }
 
@@ -71,7 +60,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 	identity, changed, err := r.ensureNodeIdentity(&environment)
 	if err != nil {
-		if errors.Is(err, incus.ErrUnavailable) {
+		if errors.Is(err, environmentdomain.ErrProviderUnavailable) {
 			return r.handleProviderError(ctx, statusBefore, &environment, err)
 		}
 		setNodeEnvironmentFailure(&environment, breakfixv1.EnvironmentFailureInfrastructure, "InvalidProviderIdentity", err.Error(), r.now())
@@ -95,21 +84,21 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 
 	stable := environment.Status.Environment.Phase == breakfixv1.EnvironmentReady || environment.Status.Environment.Phase == breakfixv1.EnvironmentCompleted
 	if !stable {
-		if _, err := r.nodeProvider().Preflight(ctx); err != nil {
+		if err := r.nodeProvider().Preflight(ctx); err != nil {
 			return r.handleProviderError(ctx, statusBefore, &environment, err)
 		}
 	}
-	var observation incus.NodeEnvironmentObservation
+	var observation environmentdomain.NodeEnvironmentObservation
 	if stable {
-		observation, err = r.nodeProvider().ObserveNodeEnvironment(ctx, providerRequest)
+		observation, err = r.nodeProvider().Observe(ctx, providerRequest)
 	} else {
-		observation, err = r.nodeProvider().ProvisionNodeEnvironment(ctx, providerRequest)
+		observation, err = r.nodeProvider().Provision(ctx, providerRequest)
 	}
 	if err != nil {
 		// A transient provider outage must not invalidate an already usable
 		// environment. Its next observation can reconnect without making the
 		// user restart the challenge.
-		if stable && errors.Is(err, incus.ErrUnavailable) {
+		if stable && errors.Is(err, environmentdomain.ErrProviderUnavailable) {
 			return ctrl.Result{RequeueAfter: nodeProviderRetryInterval}, nil
 		}
 		return r.handleProviderError(ctx, statusBefore, &environment, err)
@@ -134,8 +123,8 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	markNodeReady(&environment, r.now())
 	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
 		results, checkErr := r.runNodeCheckpoints(ctx, &environment, identity)
-		recordRuntimeCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
-		if checkErr == nil && checkpointsPassed(results) {
+		recordNodeCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
+		if checkErr == nil && environmentdomain.AllCheckpointsPassed(results) {
 			markRuntimeEnvironmentCompleted(&environment.Status.Environment, environment.Generation, r.now())
 		}
 	}
@@ -156,7 +145,7 @@ func (r *NodeEnvironmentReconciler) reconcileDeletion(ctx context.Context, envir
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.nodeProvider().DeleteNodeEnvironment(ctx, nodeProviderRequest(environment, identity)); err != nil {
+	if err := r.nodeProvider().Delete(ctx, nodeProviderRequest(environment, identity)); err != nil {
 		return ctrl.Result{RequeueAfter: nodeProviderRetryInterval}, err
 	}
 	before := environment.DeepCopy()
@@ -167,7 +156,7 @@ func (r *NodeEnvironmentReconciler) reconcileDeletion(ctx context.Context, envir
 	return ctrl.Result{}, nil
 }
 
-func (r *NodeEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.NodeEnvironment, environment *breakfixv1.NodeEnvironment, request incus.ProvisionNodeEnvironmentRequest) (ctrl.Result, error) {
+func (r *NodeEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.NodeEnvironment, environment *breakfixv1.NodeEnvironment, request environmentdomain.NodeProvisionRequest) (ctrl.Result, error) {
 	now := r.now()
 	condition := apiMeta.FindStatusCondition(environment.Status.Environment.Conditions, breakfixv1.ConditionDraining)
 	if environment.Status.Environment.Phase != breakfixv1.EnvironmentDraining || condition == nil || condition.Status != metav1.ConditionTrue {
@@ -188,7 +177,7 @@ func (r *NodeEnvironmentReconciler) reconcileDrain(ctx context.Context, before *
 	if condition != nil && now.Before(condition.LastTransitionTime.Add(grace)) {
 		return ctrl.Result{RequeueAfter: condition.LastTransitionTime.Add(grace).Sub(now)}, nil
 	}
-	if err := r.nodeProvider().DeleteNodeEnvironment(ctx, request); err != nil {
+	if err := r.nodeProvider().Delete(ctx, request); err != nil {
 		return ctrl.Result{RequeueAfter: nodeProviderRetryInterval}, err
 	}
 	completed := metav1.NewTime(now)
@@ -203,7 +192,7 @@ func (r *NodeEnvironmentReconciler) handleProviderError(ctx context.Context, bef
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return ctrl.Result{}, err
-	case errors.Is(err, incus.ErrUnavailable), errors.Is(err, incus.ErrNotFound), errors.Is(err, incus.ErrConflict):
+	case errors.Is(err, environmentdomain.ErrProviderUnavailable), errors.Is(err, environmentdomain.ErrProviderNotFound), errors.Is(err, environmentdomain.ErrProviderConflict):
 		markNodeProvisioning(environment, "ProviderUnavailable", err.Error(), r.now())
 		environment.Status.Environment.Failure = &breakfixv1.EnvironmentFailureStatus{
 			Class: breakfixv1.EnvironmentFailureInfrastructure, Component: "incus", Reason: "ProviderUnavailable", Message: truncate(err.Error(), 4000), At: metav1.NewTime(r.now()),
@@ -218,14 +207,14 @@ func (r *NodeEnvironmentReconciler) handleProviderError(ctx context.Context, bef
 	}
 }
 
-func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.NodeEnvironment) (incus.NodeEnvironmentIdentity, bool, error) {
+func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.NodeEnvironment) (environmentdomain.NodeEnvironmentIdentity, bool, error) {
 	logicalNames := make([]string, 0, len(environment.Spec.Runtime.Nodes))
 	for _, node := range environment.Spec.Runtime.Nodes {
 		logicalNames = append(logicalNames, node.Name)
 	}
-	expected, err := r.nodeProvider().NodeEnvironmentIdentity(string(environment.UID), logicalNames)
+	expected, err := r.nodeProvider().Identity(string(environment.UID), logicalNames)
 	if err != nil {
-		return incus.NodeEnvironmentIdentity{}, false, err
+		return environmentdomain.NodeEnvironmentIdentity{}, false, err
 	}
 	status := &environment.Status.Runtime
 	empty := status.Project == "" && status.Network == "" && status.ACL == "" && status.Profile == "" && len(status.Nodes) == 0
@@ -250,27 +239,27 @@ func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.N
 		return expected, true, nil
 	}
 	if status.Project != expected.Project || status.Network != expected.Network || status.ACL != expected.ACL || status.Profile != expected.Profile || status.ImageFingerprint != environment.Spec.Runtime.ImageFingerprint || len(status.Nodes) != len(expected.Nodes) {
-		return incus.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus identity differs from Environment UID or snapshot")
+		return environmentdomain.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus identity differs from Environment UID or snapshot")
 	}
 	identity := expected
 	for index := range expected.Nodes {
 		if status.Nodes[index].Name != expected.Nodes[index].LogicalName || status.Nodes[index].InstanceName != expected.Nodes[index].InstanceName {
-			return incus.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus node identity differs from Environment UID")
+			return environmentdomain.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus node identity differs from Environment UID")
 		}
 		identity.Nodes[index].Address = status.Nodes[index].Address
 	}
 	return identity, false, nil
 }
 
-func nodeProviderRequest(environment *breakfixv1.NodeEnvironment, identity incus.NodeEnvironmentIdentity) incus.ProvisionNodeEnvironmentRequest {
-	return incus.ProvisionNodeEnvironmentRequest{
+func nodeProviderRequest(environment *breakfixv1.NodeEnvironment, identity environmentdomain.NodeEnvironmentIdentity) environmentdomain.NodeProvisionRequest {
+	return environmentdomain.NodeProvisionRequest{
 		EnvironmentUID:        string(environment.UID),
 		Revision:              environment.Spec.Environment.Source.Revision,
 		ImageFingerprint:      environment.Spec.Runtime.ImageFingerprint,
 		ProfileRevision:       environment.Spec.Runtime.ProfileRevision,
 		NetworkPolicyRevision: environment.Spec.Runtime.NetworkPolicyRevision,
 		Identity:              identity,
-		Resources: incus.NodeEnvironmentResources{
+		Resources: environmentdomain.NodeResources{
 			CPU: environment.Spec.Runtime.Resources.CPU, Memory: environment.Spec.Runtime.Resources.Memory,
 			Processes: environment.Spec.Runtime.Resources.Processes, RootDisk: environment.Spec.Runtime.Resources.RootDisk,
 		},
@@ -282,7 +271,7 @@ func validateNodeEnvironmentSpec(environment *breakfixv1.NodeEnvironment) error 
 		return fmt.Errorf("environment UID is required")
 	}
 	spec := environment.Spec.Environment
-	if err := validateEnvironmentSpec(spec); err != nil {
+	if err := commonSpec(spec).Validate(); err != nil {
 		return err
 	}
 	if len(environment.Spec.Runtime.Nodes) == 0 {
@@ -302,8 +291,7 @@ func validateNodeEnvironmentSpec(environment *breakfixv1.NodeEnvironment) error 
 		"memory":    environment.Spec.Runtime.Resources.Memory,
 		"root disk": environment.Spec.Runtime.Resources.RootDisk,
 	} {
-		bytes, err := units.ParseByteSizeString(strings.TrimSpace(value))
-		if err != nil || bytes <= 0 {
+		if err := environmentdomain.ValidatePositiveByteSize(value); err != nil {
 			return fmt.Errorf("node %s must be a positive size", field)
 		}
 	}
@@ -328,7 +316,21 @@ func validateNodeEnvironmentSpec(environment *breakfixv1.NodeEnvironment) error 
 	return nil
 }
 
-func applyNodeObservation(environment *breakfixv1.NodeEnvironment, observation incus.NodeEnvironmentObservation) {
+func commonSpec(spec breakfixv1.EnvironmentSpec) environmentdomain.Spec {
+	checkpoints := make([]environmentdomain.Checkpoint, len(spec.Checkpoints))
+	for index, checkpoint := range spec.Checkpoints {
+		checkpoints[index] = environmentdomain.Checkpoint{ID: checkpoint.ID, Node: checkpoint.Node}
+	}
+	return environmentdomain.Spec{
+		Purpose: environmentdomain.Purpose(spec.Purpose),
+		Source: environmentdomain.Source{
+			Kind: environmentdomain.SourceKind(spec.Source.Kind), Ref: spec.Source.Ref, Revision: spec.Source.Revision,
+		},
+		Checkpoints: checkpoints,
+	}
+}
+
+func applyNodeObservation(environment *breakfixv1.NodeEnvironment, observation environmentdomain.NodeEnvironmentObservation) {
 	environment.Status.Runtime.Project = observation.Identity.Project
 	environment.Status.Runtime.Network = observation.Identity.Network
 	environment.Status.Runtime.ACL = observation.Identity.ACL
@@ -443,19 +445,19 @@ func nodeEnvironmentRequeue(environment *breakfixv1.NodeEnvironment, now time.Ti
 	return ctrl.Result{RequeueAfter: next}
 }
 
-func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity incus.NodeEnvironmentIdentity) ([]breakfixv1.CheckpointResultStatus, error) {
+func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity environmentdomain.NodeEnvironmentIdentity) ([]environmentdomain.CheckpointResult, error) {
 	byNode := make(map[string][]string)
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		byNode[checkpoint.Node] = append(byNode[checkpoint.Node], checkpoint.ID)
 	}
-	all := make(map[string]breakfixv1.CheckpointResultStatus, len(environment.Spec.Environment.Checkpoints))
+	all := make(map[string]environmentdomain.CheckpointResult, len(environment.Spec.Environment.Checkpoints))
 	for _, node := range environment.Spec.Runtime.Nodes {
 		expected := byNode[node.Name]
 		if len(expected) == 0 {
 			continue
 		}
 		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		result, err := r.nodeProvider().ExecNode(checkCtx, incus.ExecNodeRequest{
+		result, err := r.nodeProvider().Execute(checkCtx, environmentdomain.NodeExecutionRequest{
 			EnvironmentUID: string(environment.UID), Revision: environment.Spec.Environment.Source.Revision,
 			Identity: identity, LogicalName: node.Name,
 			Command: []string{"/bin/bash", "/opt/breakfix/challenge/nodes/" + node.Name + "/checks.sh"},
@@ -467,7 +469,7 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 		if result.ExitCode != 0 {
 			return nil, fmt.Errorf("checkpoint runner on node %s exited with %d: %s", node.Name, result.ExitCode, strings.TrimSpace(result.Stderr))
 		}
-		parsed, err := parseCheckpointReport(result.Stdout, expected)
+		parsed, err := environmentdomain.ParseCheckpointReport(result.Stdout, expected)
 		if err != nil {
 			return nil, fmt.Errorf("invalid checkpoint report from node %s: %w", node.Name, err)
 		}
@@ -475,7 +477,7 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 			all[item.ID] = item
 		}
 	}
-	ordered := make([]breakfixv1.CheckpointResultStatus, 0, len(environment.Spec.Environment.Checkpoints))
+	ordered := make([]environmentdomain.CheckpointResult, 0, len(environment.Spec.Environment.Checkpoints))
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		result, ok := all[checkpoint.ID]
 		if !ok {
@@ -486,45 +488,73 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 	return ordered, nil
 }
 
-func (r *NodeEnvironmentReconciler) nodeProvider() NodeEnvironmentProvider {
+func (r *NodeEnvironmentReconciler) nodeProvider() environmentdomain.NodeProvider {
 	if r != nil && r.Provider != nil {
 		return r.Provider
 	}
-	return UnavailableNodeProvider(nil)
+	return UnavailableProvider(nil)
 }
 
-func recordRuntimeCheckpointStatus(status *breakfixv1.EnvironmentStatus, results []breakfixv1.CheckpointResultStatus, checkErr error, now time.Time) {
-	next := &breakfixv1.CheckpointStatus{}
-	if checkErr != nil {
-		next.Error = truncate(checkErr.Error(), 4000)
-		if status.Checkpoints != nil {
-			next.Results = append([]breakfixv1.CheckpointResultStatus(nil), status.Checkpoints.Results...)
-		}
-	} else {
-		firstPassed := make(map[string]*metav1.Time)
-		if status.Checkpoints != nil {
-			for _, result := range status.Checkpoints.Results {
-				if result.FirstPassedAt != nil {
-					firstPassed[result.ID] = result.FirstPassedAt
-				}
-			}
-		}
-		next.Results = append([]breakfixv1.CheckpointResultStatus(nil), results...)
-		for index := range next.Results {
-			if recorded := firstPassed[next.Results[index].ID]; recorded != nil {
-				next.Results[index].FirstPassedAt = recorded
-			} else if next.Results[index].Passed {
-				passed := metav1.NewTime(now)
-				next.Results[index].FirstPassedAt = &passed
-			}
-		}
-	}
-	if status.Checkpoints != nil && status.Checkpoints.Error == next.Error && slices.Equal(status.Checkpoints.Results, next.Results) {
+func recordNodeCheckpointStatus(status *breakfixv1.EnvironmentStatus, results []environmentdomain.CheckpointResult, checkErr error, now time.Time) {
+	next, changed := environmentdomain.RecordCheckpointStatus(nodeCheckpointStatusFromAPI(status.Checkpoints), results, checkErr, now)
+	if !changed {
 		return
 	}
-	checked := metav1.NewTime(now)
-	next.CheckedAt = &checked
-	status.Checkpoints = next
+	status.Checkpoints = nodeCheckpointStatusToAPI(next)
+}
+
+func nodeCheckpointStatusFromAPI(status *breakfixv1.CheckpointStatus) *environmentdomain.CheckpointStatus {
+	if status == nil {
+		return nil
+	}
+	result := &environmentdomain.CheckpointStatus{Error: status.Error, Results: make([]environmentdomain.RecordedCheckpointResult, len(status.Results))}
+	if status.CheckedAt != nil {
+		checked := status.CheckedAt.Time
+		result.CheckedAt = &checked
+	}
+	for index, checkpoint := range status.Results {
+		recorded := environmentdomain.RecordedCheckpointResult{CheckpointResult: environmentdomain.CheckpointResult{
+			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+		}}
+		if checkpoint.FirstPassedAt != nil {
+			firstPassed := checkpoint.FirstPassedAt.Time
+			recorded.FirstPassedAt = &firstPassed
+		}
+		result.Results[index] = recorded
+	}
+	return result
+}
+
+func nodeCheckpointStatusToAPI(status *environmentdomain.CheckpointStatus) *breakfixv1.CheckpointStatus {
+	if status == nil {
+		return nil
+	}
+	result := &breakfixv1.CheckpointStatus{Error: status.Error, Results: make([]breakfixv1.CheckpointResultStatus, len(status.Results))}
+	if status.CheckedAt != nil {
+		checked := metav1.NewTime(*status.CheckedAt)
+		result.CheckedAt = &checked
+	}
+	for index, checkpoint := range status.Results {
+		recorded := breakfixv1.CheckpointResultStatus{
+			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+		}
+		if checkpoint.FirstPassedAt != nil {
+			firstPassed := metav1.NewTime(*checkpoint.FirstPassedAt)
+			recorded.FirstPassedAt = &firstPassed
+		}
+		result.Results[index] = recorded
+	}
+	return result
+}
+
+func truncate(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func (r *NodeEnvironmentReconciler) patchNodeStatus(ctx context.Context, before, environment *breakfixv1.NodeEnvironment) error {

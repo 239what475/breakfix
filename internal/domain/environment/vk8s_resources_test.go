@@ -1,4 +1,4 @@
-package runtimeprofile
+package environment
 
 import "testing"
 

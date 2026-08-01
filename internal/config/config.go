@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
-	"github.com/breakfix/breakfix/internal/runtimeprofile"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -251,7 +251,7 @@ func (c RuntimeConfig) Validate() error {
 	if !immutableOCIReference(c.K8s.BaseImageDigest) || !immutableOCIReference(c.K8s.ManagementTerminalImage) {
 		return fmt.Errorf("runtime k8s base_image_digest and management_terminal_image must be immutable OCI digest references")
 	}
-	if err := (runtimeprofile.VK8sResources{
+	if err := (environment.VK8sResources{
 		ControlPlaneCPU: c.K8s.Resources.ControlPlaneCPU, ControlPlaneMemory: c.K8s.Resources.ControlPlaneMemory,
 		ControlPlaneEphemeralStorage: c.K8s.Resources.ControlPlaneEphemeralStorage,
 		WorkloadCPU:                  c.K8s.Resources.WorkloadCPU, WorkloadMemory: c.K8s.Resources.WorkloadMemory,

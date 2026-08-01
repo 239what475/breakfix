@@ -8,6 +8,9 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/vcluster"
+	"github.com/breakfix/breakfix/internal/controller/nodeenvironment"
+	"github.com/breakfix/breakfix/internal/controller/vk8senvironment"
+	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -21,8 +24,8 @@ type Options struct {
 }
 
 type Dependencies struct {
-	NodeProvider NodeEnvironmentProvider
-	VK8sProvider VK8sEnvironmentProvider
+	NodeProvider environmentdomain.NodeProvider
+	VK8sProvider environmentdomain.VK8sProvider
 }
 
 // Setup registers only the two final Environment reconcilers. Workflow state
@@ -44,20 +47,19 @@ func Setup(manager ctrl.Manager, k8sClient *kubernetes.Client, options Options, 
 		if strings.TrimSpace(options.VClusterChartRepo) == "" || strings.TrimSpace(options.VClusterChartVersion) == "" {
 			return fmt.Errorf("vcluster chart repository and version are required")
 		}
-		vk8sProvider = &kubernetesVK8sProvider{
-			k8s: k8sClient, vcluster: vclusterClient,
-			namespacePrefix: options.Namespace, controlNamespace: options.CRDNamespace,
-			registryPullSecret: options.RegistryPullSecret, verificationServiceAccount: "breakfix-generate-worker",
-			chartRepo: options.VClusterChartRepo, chartVersion: options.VClusterChartVersion,
-		}
+		vk8sProvider = kubernetes.NewVK8sEnvironmentProvider(k8sClient, vclusterClient, kubernetes.VK8sEnvironmentProviderConfig{
+			NamespacePrefix: options.Namespace, ControlNamespace: options.CRDNamespace,
+			RegistryPullSecret: options.RegistryPullSecret, VerificationServiceAccount: "breakfix-generate-worker",
+			ChartRepo: options.VClusterChartRepo, ChartVersion: options.VClusterChartVersion,
+		})
 	}
 
 	nodeProvider := dependencies.NodeProvider
 	if nodeProvider == nil {
-		nodeProvider = UnavailableNodeProvider(nil)
+		nodeProvider = nodeenvironment.UnavailableProvider(nil)
 	}
-	if err := (&NodeEnvironmentReconciler{Client: manager.GetClient(), Provider: nodeProvider}).SetupWithManager(manager); err != nil {
+	if err := (&nodeenvironment.NodeEnvironmentReconciler{Client: manager.GetClient(), Provider: nodeProvider}).SetupWithManager(manager); err != nil {
 		return err
 	}
-	return (&VK8sEnvironmentReconciler{Client: manager.GetClient(), Provider: vk8sProvider}).SetupWithManager(manager)
+	return (&vk8senvironment.VK8sEnvironmentReconciler{Client: manager.GetClient(), Provider: vk8sProvider}).SetupWithManager(manager)
 }

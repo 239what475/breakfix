@@ -1,5 +1,4 @@
-// Package runtimeprofile validates platform-owned runtime resource profiles.
-package runtimeprofile
+package environment
 
 import (
 	"fmt"

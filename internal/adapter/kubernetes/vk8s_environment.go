@@ -1,4 +1,4 @@
-package controller
+package kubernetes
 
 import (
 	"context"
@@ -6,9 +6,8 @@ import (
 	"os"
 	"strings"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/vcluster"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,55 +28,25 @@ const (
 	vk8sChallengeRoot                 = "/opt/breakfix/challenge/k8s"
 )
 
-type VK8sEnvironmentIdentity struct {
-	Namespace            string
-	VClusterName         string
-	KubeconfigSecretName string
-	TerminalPodName      string
-}
-
-type VK8sProvisionRequest struct {
-	EnvironmentUID string
-	Revision       string
-	Purpose        breakfixv1.EnvironmentPurpose
-	Identity       VK8sEnvironmentIdentity
-	Runtime        breakfixv1.VK8sRuntimeSnapshot
-}
-
-type VK8sInitializationObservation struct {
-	Complete bool
-	Failed   bool
-	ExitCode int
-	Message  string
-}
-
-type VK8sEnvironmentObservation struct {
-	ControlPlaneReady bool
-	KubeconfigReady   bool
-	TerminalReady     bool
-	Initialization    VK8sInitializationObservation
-}
-
-type VK8sExecResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-}
-
-type VK8sEnvironmentProvider interface {
-	EnvironmentIdentity(environmentUID string) (VK8sEnvironmentIdentity, error)
-	Provision(context.Context, VK8sProvisionRequest) (VK8sEnvironmentObservation, error)
-	Delete(context.Context, VK8sProvisionRequest) (bool, error)
-	ExecTerminal(context.Context, VK8sProvisionRequest, []string) (VK8sExecResult, error)
-}
-
 type vclusterCommand interface {
 	Create(context.Context, vcluster.CreateOptions) (*vcluster.Result, error)
 	Delete(context.Context, vcluster.DeleteOptions) (*vcluster.Result, error)
 }
 
-type kubernetesVK8sProvider struct {
-	k8s                        *kubernetes.Client
+// VK8sEnvironmentProviderConfig contains the platform-owned dependencies for
+// virtual Kubernetes environments. Individual CRDs carry only their immutable
+// runtime snapshots.
+type VK8sEnvironmentProviderConfig struct {
+	NamespacePrefix            string
+	ControlNamespace           string
+	RegistryPullSecret         string
+	VerificationServiceAccount string
+	ChartRepo                  string
+	ChartVersion               string
+}
+
+type vk8sEnvironmentProvider struct {
+	k8s                        *Client
 	vcluster                   vclusterCommand
 	namespacePrefix            string
 	controlNamespace           string
@@ -87,45 +56,58 @@ type kubernetesVK8sProvider struct {
 	chartVersion               string
 }
 
-func (p *kubernetesVK8sProvider) EnvironmentIdentity(environmentUID string) (VK8sEnvironmentIdentity, error) {
+func NewVK8sEnvironmentProvider(k8s *Client, vclusterClient *vcluster.Client, config VK8sEnvironmentProviderConfig) environment.VK8sProvider {
+	return &vk8sEnvironmentProvider{
+		k8s:                        k8s,
+		vcluster:                   vclusterClient,
+		namespacePrefix:            config.NamespacePrefix,
+		controlNamespace:           config.ControlNamespace,
+		registryPullSecret:         config.RegistryPullSecret,
+		verificationServiceAccount: config.VerificationServiceAccount,
+		chartRepo:                  config.ChartRepo,
+		chartVersion:               config.ChartVersion,
+	}
+}
+
+func (p *vk8sEnvironmentProvider) Identity(environmentUID string) (environment.VK8sEnvironmentIdentity, error) {
 	environmentUID = strings.TrimSpace(environmentUID)
 	if environmentUID == "" {
-		return VK8sEnvironmentIdentity{}, fmt.Errorf("environment UID is required")
+		return environment.VK8sEnvironmentIdentity{}, fmt.Errorf("environment UID is required")
 	}
 	//nolint:gosec // KubeconfigSecretName is a Kubernetes object name, not credential material.
-	return VK8sEnvironmentIdentity{
-		Namespace:            kubernetes.DNSLabelName(p.namespacePrefix+"-vk8s", environmentUID),
-		VClusterName:         kubernetes.DNSLabelNameWithLimit(maxVClusterReleaseNameLength, "vc", environmentUID),
+	return environment.VK8sEnvironmentIdentity{
+		Namespace:            DNSLabelName(p.namespacePrefix+"-vk8s", environmentUID),
+		VClusterName:         DNSLabelNameWithLimit(maxVClusterReleaseNameLength, "vc", environmentUID),
 		KubeconfigSecretName: "breakfix-vk8s-kubeconfig",
 		TerminalPodName:      "terminal",
 	}, nil
 }
 
-func (p *kubernetesVK8sProvider) Provision(ctx context.Context, request VK8sProvisionRequest) (VK8sEnvironmentObservation, error) {
+func (p *vk8sEnvironmentProvider) Provision(ctx context.Context, request environment.VK8sProvisionRequest) (environment.VK8sEnvironmentObservation, error) {
 	if p.k8s == nil || p.vcluster == nil {
-		return VK8sEnvironmentObservation{}, fmt.Errorf("VK8s provider is not configured")
+		return environment.VK8sEnvironmentObservation{}, fmt.Errorf("VK8s provider is not configured")
 	}
 	if err := p.ensureNamespace(ctx, request); err != nil {
-		return VK8sEnvironmentObservation{}, err
+		return environment.VK8sEnvironmentObservation{}, err
 	}
 	if strings.TrimSpace(p.registryPullSecret) != "" {
 		if err := p.k8s.EnsureImagePullSecret(ctx, p.controlNamespace, request.Identity.Namespace, p.registryPullSecret); err != nil {
-			return VK8sEnvironmentObservation{}, fmt.Errorf("ensure registry pull secret: %w", err)
+			return environment.VK8sEnvironmentObservation{}, fmt.Errorf("ensure registry pull secret: %w", err)
 		}
 	}
 	if err := p.k8s.EnsureRuntimeServiceAccount(ctx, request.Identity.Namespace, vk8sRuntimeServiceAccount, p.registryPullSecret); err != nil {
-		return VK8sEnvironmentObservation{}, fmt.Errorf("ensure runtime service account: %w", err)
+		return environment.VK8sEnvironmentObservation{}, fmt.Errorf("ensure runtime service account: %w", err)
 	}
-	if request.Purpose == breakfixv1.EnvironmentPurposeVerification {
+	if request.Purpose == environment.PurposeVerification {
 		if err := p.k8s.EnsureVerificationWorkspaceExecAccess(request.Identity.Namespace, p.controlNamespace, p.verificationServiceAccount); err != nil {
-			return VK8sEnvironmentObservation{}, fmt.Errorf("ensure verification terminal access: %w", err)
+			return environment.VK8sEnvironmentObservation{}, fmt.Errorf("ensure verification terminal access: %w", err)
 		}
 	}
 	if err := p.ensureVCluster(ctx, request); err != nil {
-		return VK8sEnvironmentObservation{}, err
+		return environment.VK8sEnvironmentObservation{}, err
 	}
 
-	observation := VK8sEnvironmentObservation{}
+	observation := environment.VK8sEnvironmentObservation{}
 	ready, err := p.controlPlaneReady(ctx, request.Identity)
 	if err != nil {
 		return observation, err
@@ -170,7 +152,7 @@ func (p *kubernetesVK8sProvider) Provision(ctx context.Context, request VK8sProv
 	return observation, nil
 }
 
-func (p *kubernetesVK8sProvider) Delete(ctx context.Context, request VK8sProvisionRequest) (bool, error) {
+func (p *vk8sEnvironmentProvider) Delete(ctx context.Context, request environment.VK8sProvisionRequest) (bool, error) {
 	if p.k8s == nil || p.vcluster == nil {
 		return false, fmt.Errorf("VK8s provider is not configured")
 	}
@@ -198,18 +180,18 @@ func (p *kubernetesVK8sProvider) Delete(ctx context.Context, request VK8sProvisi
 	return false, nil
 }
 
-func (p *kubernetesVK8sProvider) ExecTerminal(ctx context.Context, request VK8sProvisionRequest, command []string) (VK8sExecResult, error) {
+func (p *vk8sEnvironmentProvider) ExecuteTerminal(ctx context.Context, request environment.VK8sProvisionRequest, command []string) (environment.ExecutionResult, error) {
 	if p.k8s == nil {
-		return VK8sExecResult{}, fmt.Errorf("VK8s provider is not configured")
+		return environment.ExecutionResult{}, fmt.Errorf("VK8s provider is not configured")
 	}
 	if len(command) == 0 {
-		return VK8sExecResult{}, fmt.Errorf("terminal command is required")
+		return environment.ExecutionResult{}, fmt.Errorf("terminal command is required")
 	}
 	result, err := p.k8s.ExecInPodStreamsContext(ctx, request.Identity.Namespace, request.Identity.TerminalPodName, 64*1024, command...)
-	return VK8sExecResult{ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, err
+	return environment.ExecutionResult{ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-func (p *kubernetesVK8sProvider) ensureNamespace(ctx context.Context, request VK8sProvisionRequest) error {
+func (p *vk8sEnvironmentProvider) ensureNamespace(ctx context.Context, request environment.VK8sProvisionRequest) error {
 	namespaces := p.k8s.Clientset().CoreV1().Namespaces()
 	namespace, err := namespaces.Get(ctx, request.Identity.Namespace, metav1.GetOptions{})
 	if err == nil {
@@ -235,14 +217,14 @@ func (p *kubernetesVK8sProvider) ensureNamespace(ctx context.Context, request VK
 	return nil
 }
 
-func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request VK8sProvisionRequest) error {
+func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) error {
 	if namespace == nil || namespace.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || namespace.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || namespace.Labels[vk8sRuntimeLabel] != vk8sRuntimeLabelValue {
 		return fmt.Errorf("VK8s namespace %q has different ownership metadata", request.Identity.Namespace)
 	}
 	return nil
 }
 
-func (p *kubernetesVK8sProvider) ensureVCluster(ctx context.Context, request VK8sProvisionRequest) error {
+func (p *vk8sEnvironmentProvider) ensureVCluster(ctx context.Context, request environment.VK8sProvisionRequest) error {
 	_, err := p.k8s.Clientset().AppsV1().StatefulSets(request.Identity.Namespace).Get(ctx, request.Identity.VClusterName, metav1.GetOptions{})
 	if err == nil {
 		return nil
@@ -266,7 +248,7 @@ func (p *kubernetesVK8sProvider) ensureVCluster(ctx context.Context, request VK8
 	return nil
 }
 
-func (p *kubernetesVK8sProvider) controlPlaneReady(ctx context.Context, identity VK8sEnvironmentIdentity) (bool, error) {
+func (p *vk8sEnvironmentProvider) controlPlaneReady(ctx context.Context, identity environment.VK8sEnvironmentIdentity) (bool, error) {
 	pod, err := p.k8s.Clientset().CoreV1().Pods(identity.Namespace).Get(ctx, identity.VClusterName+"-0", metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return false, nil
@@ -292,7 +274,7 @@ func (p *kubernetesVK8sProvider) controlPlaneReady(ctx context.Context, identity
 	return false, nil
 }
 
-func (p *kubernetesVK8sProvider) readKubeconfig(ctx context.Context, identity VK8sEnvironmentIdentity) ([]byte, error) {
+func (p *vk8sEnvironmentProvider) readKubeconfig(ctx context.Context, identity environment.VK8sEnvironmentIdentity) ([]byte, error) {
 	secret, err := p.k8s.Clientset().CoreV1().Secrets(identity.Namespace).Get(ctx, "vc-"+identity.VClusterName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -307,7 +289,7 @@ func (p *kubernetesVK8sProvider) readKubeconfig(ctx context.Context, identity VK
 	return config, nil
 }
 
-func (p *kubernetesVK8sProvider) vclusterServerAddress(ctx context.Context, identity VK8sEnvironmentIdentity) (string, error) {
+func (p *vk8sEnvironmentProvider) vclusterServerAddress(ctx context.Context, identity environment.VK8sEnvironmentIdentity) (string, error) {
 	_, err := p.k8s.Clientset().CoreV1().Services(identity.Namespace).Get(ctx, identity.VClusterName, metav1.GetOptions{})
 	if err != nil {
 		return "", err
@@ -315,13 +297,13 @@ func (p *kubernetesVK8sProvider) vclusterServerAddress(ctx context.Context, iden
 	return vclusterServiceAddress(identity), nil
 }
 
-func vclusterServiceAddress(identity VK8sEnvironmentIdentity) string {
+func vclusterServiceAddress(identity environment.VK8sEnvironmentIdentity) string {
 	// vcluster's serving certificate covers the service short name and namespace,
 	// but not the fully-qualified .svc.cluster.local name.
 	return fmt.Sprintf("https://%s.%s:443", identity.VClusterName, identity.Namespace)
 }
 
-func (p *kubernetesVK8sProvider) upsertKubeconfig(ctx context.Context, request VK8sProvisionRequest, config []byte) error {
+func (p *vk8sEnvironmentProvider) upsertKubeconfig(ctx context.Context, request environment.VK8sProvisionRequest, config []byte) error {
 	secrets := p.k8s.Clientset().CoreV1().Secrets(request.Identity.Namespace)
 	secret, err := secrets.Get(ctx, request.Identity.KubeconfigSecretName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
@@ -342,7 +324,7 @@ func (p *kubernetesVK8sProvider) upsertKubeconfig(ctx context.Context, request V
 	return err
 }
 
-func (p *kubernetesVK8sProvider) ensureTerminal(ctx context.Context, request VK8sProvisionRequest) error {
+func (p *vk8sEnvironmentProvider) ensureTerminal(ctx context.Context, request environment.VK8sProvisionRequest) error {
 	pods := p.k8s.Clientset().CoreV1().Pods(request.Identity.Namespace)
 	pod, err := pods.Get(ctx, request.Identity.TerminalPodName, metav1.GetOptions{})
 	if err == nil {
@@ -366,7 +348,7 @@ func (p *kubernetesVK8sProvider) ensureTerminal(ctx context.Context, request VK8
 	return nil
 }
 
-func newVK8sTerminalPod(request VK8sProvisionRequest, resources corev1.ResourceRequirements, kubeconfigMode int32) *corev1.Pod {
+func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources corev1.ResourceRequirements, kubeconfigMode int32) *corev1.Pod {
 	automount := false
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -395,40 +377,40 @@ func newVK8sTerminalPod(request VK8sProvisionRequest, resources corev1.ResourceR
 	}
 }
 
-func (p *kubernetesVK8sProvider) observeTerminal(ctx context.Context, request VK8sProvisionRequest) (VK8sInitializationObservation, error) {
+func (p *vk8sEnvironmentProvider) observeTerminal(ctx context.Context, request environment.VK8sProvisionRequest) (environment.InitializationObservation, error) {
 	pod, err := p.k8s.Clientset().CoreV1().Pods(request.Identity.Namespace).Get(ctx, request.Identity.TerminalPodName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
-		return VK8sInitializationObservation{}, nil
+		return environment.InitializationObservation{}, nil
 	}
 	if err != nil {
-		return VK8sInitializationObservation{}, fmt.Errorf("get VK8s terminal pod: %w", err)
+		return environment.InitializationObservation{}, fmt.Errorf("get VK8s terminal pod: %w", err)
 	}
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != "challenge" {
 			continue
 		}
 		if status.State.Waiting != nil && terminalPodWaitingReason(status.State.Waiting.Reason) {
-			return VK8sInitializationObservation{}, fmt.Errorf("VK8s terminal cannot start: %s: %s", status.State.Waiting.Reason, strings.TrimSpace(status.State.Waiting.Message))
+			return environment.InitializationObservation{}, fmt.Errorf("VK8s terminal cannot start: %s: %s", status.State.Waiting.Reason, strings.TrimSpace(status.State.Waiting.Message))
 		}
 		if status.State.Terminated != nil {
-			return VK8sInitializationObservation{Failed: true, ExitCode: int(status.State.Terminated.ExitCode), Message: terminalTerminationMessage(status.State.Terminated)}, nil
+			return environment.InitializationObservation{Failed: true, ExitCode: int(status.State.Terminated.ExitCode), Message: terminalTerminationMessage(status.State.Terminated)}, nil
 		}
 		if !status.Ready {
-			return VK8sInitializationObservation{}, nil
+			return environment.InitializationObservation{}, nil
 		}
 		result, err := p.k8s.ExecInPodStreamsContext(ctx, request.Identity.Namespace, request.Identity.TerminalPodName, 4096, "test", "-f", vk8sInitSentinel)
 		if err != nil {
-			return VK8sInitializationObservation{}, err
+			return environment.InitializationObservation{}, err
 		}
 		if result.ExitCode == 0 {
-			return VK8sInitializationObservation{Complete: true}, nil
+			return environment.InitializationObservation{Complete: true}, nil
 		}
 		if result.ExitCode == 1 {
-			return VK8sInitializationObservation{}, nil
+			return environment.InitializationObservation{}, nil
 		}
-		return VK8sInitializationObservation{}, fmt.Errorf("inspect VK8s runtime initializer: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		return environment.InitializationObservation{}, fmt.Errorf("inspect VK8s runtime initializer: exit %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
-	return VK8sInitializationObservation{}, nil
+	return environment.InitializationObservation{}, nil
 }
 
 func terminalPodWaitingReason(reason string) bool {
@@ -454,7 +436,7 @@ func terminalTerminationMessage(state *corev1.ContainerStateTerminated) string {
 	return strings.Join(parts, ": ")
 }
 
-func vk8sWorkloadResources(snapshot breakfixv1.VK8sResourceSnapshot) (corev1.ResourceRequirements, error) {
+func vk8sWorkloadResources(snapshot environment.VK8sRuntimeResources) (corev1.ResourceRequirements, error) {
 	cpu, err := resource.ParseQuantity(snapshot.WorkloadCPU)
 	if err != nil {
 		return corev1.ResourceRequirements{}, fmt.Errorf("parse workload CPU: %w", err)
@@ -471,7 +453,7 @@ func vk8sWorkloadResources(snapshot breakfixv1.VK8sResourceSnapshot) (corev1.Res
 	return corev1.ResourceRequirements{Requests: resources.DeepCopy(), Limits: resources}, nil
 }
 
-func writeVK8sValuesFile(runtime breakfixv1.VK8sRuntimeSnapshot) (string, error) {
+func writeVK8sValuesFile(runtime environment.VK8sRuntime) (string, error) {
 	data, err := yaml.Marshal(buildVK8sValues(runtime))
 	if err != nil {
 		return "", fmt.Errorf("marshal vcluster values: %w", err)
@@ -493,7 +475,7 @@ func writeVK8sValuesFile(runtime breakfixv1.VK8sRuntimeSnapshot) (string, error)
 	return path, nil
 }
 
-func buildVK8sValues(runtime breakfixv1.VK8sRuntimeSnapshot) map[string]any {
+func buildVK8sValues(runtime environment.VK8sRuntime) map[string]any {
 	values := map[string]any{}
 	setNestedValue(values, true, "controlPlane", "distro", "k8s", "enabled")
 	setNestedValue(values, runtime.Version, "controlPlane", "distro", "k8s", "version")

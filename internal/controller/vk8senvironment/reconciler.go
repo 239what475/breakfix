@@ -1,4 +1,4 @@
-package controller
+package vk8senvironment
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/runtimeprofile"
+	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -24,13 +24,15 @@ const (
 	vk8sEnvironmentMaxConcurrentReconciles = 2
 	vk8sProvisioningInterval               = 2 * time.Second
 	vk8sProviderRetryInterval              = 5 * time.Second
+	checkpointInterval                     = 4 * time.Second
+	vk8sCheckpointRoot                     = "/opt/breakfix/challenge/k8s"
 )
 
 var immutableImagePattern = regexp.MustCompile(`^[^[:space:]]+@sha256:[0-9a-f]{64}$`)
 
 type VK8sEnvironmentReconciler struct {
 	client.Client
-	Provider VK8sEnvironmentProvider
+	Provider environmentdomain.VK8sProvider
 	Now      func() time.Time
 }
 
@@ -104,8 +106,8 @@ func (r *VK8sEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	markVK8sReady(&environment, r.now())
 	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
 		results, checkErr := r.runCheckpoints(ctx, &environment, providerRequest)
-		recordRuntimeCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
-		if checkErr == nil && checkpointsPassed(results) {
+		recordVK8sCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
+		if checkErr == nil && environmentdomain.AllCheckpointsPassed(results) {
 			markRuntimeEnvironmentCompleted(&environment.Status.Environment, environment.Generation, r.now())
 		}
 	}
@@ -119,7 +121,7 @@ func (r *VK8sEnvironmentReconciler) reconcileDeletion(ctx context.Context, envir
 	if !controllerutil.ContainsFinalizer(environment, vk8sEnvironmentFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	identity, err := r.Provider.EnvironmentIdentity(string(environment.UID))
+	identity, err := r.Provider.Identity(string(environment.UID))
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -138,7 +140,7 @@ func (r *VK8sEnvironmentReconciler) reconcileDeletion(ctx context.Context, envir
 	return ctrl.Result{}, nil
 }
 
-func (r *VK8sEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.VK8sEnvironment, environment *breakfixv1.VK8sEnvironment, request VK8sProvisionRequest) (ctrl.Result, error) {
+func (r *VK8sEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.VK8sEnvironment, environment *breakfixv1.VK8sEnvironment, request environmentdomain.VK8sProvisionRequest) (ctrl.Result, error) {
 	now := r.now()
 	condition := apiMeta.FindStatusCondition(environment.Status.Environment.Conditions, breakfixv1.ConditionDraining)
 	if environment.Status.Environment.Phase != breakfixv1.EnvironmentDraining || condition == nil || condition.Status != metav1.ConditionTrue {
@@ -188,10 +190,10 @@ func (r *VK8sEnvironmentReconciler) handleProviderError(ctx context.Context, bef
 	return ctrl.Result{RequeueAfter: vk8sProviderRetryInterval}, nil
 }
 
-func (r *VK8sEnvironmentReconciler) ensureIdentity(environment *breakfixv1.VK8sEnvironment) (VK8sEnvironmentIdentity, bool, error) {
-	expected, err := r.Provider.EnvironmentIdentity(string(environment.UID))
+func (r *VK8sEnvironmentReconciler) ensureIdentity(environment *breakfixv1.VK8sEnvironment) (environmentdomain.VK8sEnvironmentIdentity, bool, error) {
+	expected, err := r.Provider.Identity(string(environment.UID))
 	if err != nil {
-		return VK8sEnvironmentIdentity{}, false, err
+		return environmentdomain.VK8sEnvironmentIdentity{}, false, err
 	}
 	status := &environment.Status.Runtime
 	empty := status.Namespace == "" && status.VClusterName == "" && status.KubeconfigSecretName == "" && status.TerminalPodName == ""
@@ -211,15 +213,27 @@ func (r *VK8sEnvironmentReconciler) ensureIdentity(environment *breakfixv1.VK8sE
 		return expected, true, nil
 	}
 	if status.Namespace != expected.Namespace || status.VClusterName != expected.VClusterName || status.KubeconfigSecretName != expected.KubeconfigSecretName || status.TerminalPodName != expected.TerminalPodName {
-		return VK8sEnvironmentIdentity{}, false, fmt.Errorf("recorded VK8s identity differs from Environment UID")
+		return environmentdomain.VK8sEnvironmentIdentity{}, false, fmt.Errorf("recorded VK8s identity differs from Environment UID")
 	}
 	return expected, false, nil
 }
 
-func vk8sProviderRequest(environment *breakfixv1.VK8sEnvironment, identity VK8sEnvironmentIdentity) VK8sProvisionRequest {
-	return VK8sProvisionRequest{
+func vk8sProviderRequest(environment *breakfixv1.VK8sEnvironment, identity environmentdomain.VK8sEnvironmentIdentity) environmentdomain.VK8sProvisionRequest {
+	return environmentdomain.VK8sProvisionRequest{
 		EnvironmentUID: string(environment.UID), Revision: environment.Spec.Environment.Source.Revision,
-		Purpose: environment.Spec.Environment.Purpose, Identity: identity, Runtime: environment.Spec.Runtime,
+		Purpose: environmentdomain.Purpose(environment.Spec.Environment.Purpose), Identity: identity,
+		Runtime: environmentdomain.VK8sRuntime{
+			ImageDigest: environment.Spec.Runtime.ImageDigest, ProfileRevision: environment.Spec.Runtime.ProfileRevision,
+			Version: environment.Spec.Runtime.Version, ManagementTerminalImage: environment.Spec.Runtime.ManagementTerminalImage,
+			Resources: environmentdomain.VK8sRuntimeResources{
+				ControlPlaneCPU: environment.Spec.Runtime.Resources.ControlPlaneCPU, ControlPlaneMemory: environment.Spec.Runtime.Resources.ControlPlaneMemory,
+				ControlPlaneEphemeralStorage: environment.Spec.Runtime.Resources.ControlPlaneEphemeralStorage,
+				WorkloadCPU:                  environment.Spec.Runtime.Resources.WorkloadCPU, WorkloadMemory: environment.Spec.Runtime.Resources.WorkloadMemory,
+				WorkloadEphemeralStorage: environment.Spec.Runtime.Resources.WorkloadEphemeralStorage,
+				QuotaCPU:                 environment.Spec.Runtime.Resources.QuotaCPU, QuotaMemory: environment.Spec.Runtime.Resources.QuotaMemory,
+				QuotaEphemeralStorage: environment.Spec.Runtime.Resources.QuotaEphemeralStorage,
+			},
+		},
 	}
 }
 
@@ -227,7 +241,7 @@ func validateVK8sEnvironmentSpec(environment *breakfixv1.VK8sEnvironment) error 
 	if environment.UID == "" {
 		return fmt.Errorf("environment UID is required")
 	}
-	if err := validateEnvironmentSpec(environment.Spec.Environment); err != nil {
+	if err := commonSpec(environment.Spec.Environment).Validate(); err != nil {
 		return err
 	}
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
@@ -245,7 +259,7 @@ func validateVK8sEnvironmentSpec(environment *breakfixv1.VK8sEnvironment) error 
 	if strings.TrimSpace(runtime.ProfileRevision) == "" || strings.TrimSpace(runtime.Version) == "" {
 		return fmt.Errorf("VK8s profile revision and version are required")
 	}
-	if err := (runtimeprofile.VK8sResources{
+	if err := (environmentdomain.VK8sResources{
 		ControlPlaneCPU: runtime.Resources.ControlPlaneCPU, ControlPlaneMemory: runtime.Resources.ControlPlaneMemory,
 		ControlPlaneEphemeralStorage: runtime.Resources.ControlPlaneEphemeralStorage,
 		WorkloadCPU:                  runtime.Resources.WorkloadCPU, WorkloadMemory: runtime.Resources.WorkloadMemory,
@@ -258,39 +272,21 @@ func validateVK8sEnvironmentSpec(environment *breakfixv1.VK8sEnvironment) error 
 	return nil
 }
 
-func validateEnvironmentSpec(spec breakfixv1.EnvironmentSpec) error {
-	if spec.Purpose != breakfixv1.EnvironmentPurposeLearning && spec.Purpose != breakfixv1.EnvironmentPurposeVerification {
-		return fmt.Errorf("unsupported environment purpose %q", spec.Purpose)
+func commonSpec(spec breakfixv1.EnvironmentSpec) environmentdomain.Spec {
+	checkpoints := make([]environmentdomain.Checkpoint, len(spec.Checkpoints))
+	for index, checkpoint := range spec.Checkpoints {
+		checkpoints[index] = environmentdomain.Checkpoint{ID: checkpoint.ID, Node: checkpoint.Node}
 	}
-	if spec.Source.Kind != breakfixv1.EnvironmentSourcePublished && spec.Source.Kind != breakfixv1.EnvironmentSourceCandidate {
-		return fmt.Errorf("unsupported environment source kind %q", spec.Source.Kind)
+	return environmentdomain.Spec{
+		Purpose: environmentdomain.Purpose(spec.Purpose),
+		Source: environmentdomain.Source{
+			Kind: environmentdomain.SourceKind(spec.Source.Kind), Ref: spec.Source.Ref, Revision: spec.Source.Revision,
+		},
+		Checkpoints: checkpoints,
 	}
-	if strings.TrimSpace(spec.Source.Ref) == "" || strings.TrimSpace(spec.Source.Revision) == "" {
-		return fmt.Errorf("environment source ref and revision are required")
-	}
-	if spec.Purpose == breakfixv1.EnvironmentPurposeLearning && spec.Source.Kind != breakfixv1.EnvironmentSourcePublished {
-		return fmt.Errorf("learning environments require a published source")
-	}
-	if spec.Purpose == breakfixv1.EnvironmentPurposeVerification && spec.Source.Kind != breakfixv1.EnvironmentSourceCandidate {
-		return fmt.Errorf("verification environments require a candidate source")
-	}
-	checkpointIDs := make(map[string]struct{}, len(spec.Checkpoints))
-	for _, checkpoint := range spec.Checkpoints {
-		if strings.TrimSpace(checkpoint.ID) == "" {
-			return fmt.Errorf("checkpoint ID is required")
-		}
-		if _, duplicate := checkpointIDs[checkpoint.ID]; duplicate {
-			return fmt.Errorf("duplicate checkpoint %q", checkpoint.ID)
-		}
-		checkpointIDs[checkpoint.ID] = struct{}{}
-	}
-	if len(checkpointIDs) == 0 {
-		return fmt.Errorf("environment checkpoints are required")
-	}
-	return nil
 }
 
-func applyVK8sObservation(environment *breakfixv1.VK8sEnvironment, observation VK8sEnvironmentObservation) {
+func applyVK8sObservation(environment *breakfixv1.VK8sEnvironment, observation environmentdomain.VK8sEnvironmentObservation) {
 	environment.Status.Runtime.Initialized = observation.Initialization.Complete && !observation.Initialization.Failed
 }
 
@@ -329,6 +325,29 @@ func setVK8sEnvironmentFailure(environment *breakfixv1.VK8sEnvironment, class br
 	}
 	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionFailed, metav1.ConditionTrue, reason, truncate(message, 4000), environment.Generation)
 	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, reason, "environment failed", environment.Generation)
+}
+
+func setRuntimeEnvironmentCondition(status *breakfixv1.EnvironmentStatus, conditionType string, conditionStatus metav1.ConditionStatus, reason, message string, generation int64) {
+	apiMeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type: conditionType, Status: conditionStatus, Reason: reason, Message: message, ObservedGeneration: generation,
+	})
+}
+
+func markRuntimeEnvironmentCompleted(status *breakfixv1.EnvironmentStatus, generation int64, now time.Time) {
+	status.Phase = breakfixv1.EnvironmentCompleted
+	if status.CompletedAt == nil {
+		completed := metav1.NewTime(now)
+		status.CompletedAt = &completed
+	}
+	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionTrue, "CheckpointsCompleted", "all checkpoints passed", generation)
+	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "challenge completed", generation)
+}
+
+func drainGracePeriod(lifecycle breakfixv1.EnvironmentLifecycleSpec) time.Duration {
+	if lifecycle.DrainGracePeriodSeconds == nil || *lifecycle.DrainGracePeriodSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*lifecycle.DrainGracePeriodSeconds) * time.Second
 }
 
 func shouldDestroyVK8sEnvironment(environment *breakfixv1.VK8sEnvironment, now time.Time) bool {
@@ -371,25 +390,87 @@ func vk8sEnvironmentRequeue(environment *breakfixv1.VK8sEnvironment, now time.Ti
 	return ctrl.Result{RequeueAfter: next}
 }
 
-func (r *VK8sEnvironmentReconciler) runCheckpoints(ctx context.Context, environment *breakfixv1.VK8sEnvironment, request VK8sProvisionRequest) ([]breakfixv1.CheckpointResultStatus, error) {
+func (r *VK8sEnvironmentReconciler) runCheckpoints(ctx context.Context, environment *breakfixv1.VK8sEnvironment, request environmentdomain.VK8sProvisionRequest) ([]environmentdomain.CheckpointResult, error) {
 	expected := make([]string, 0, len(environment.Spec.Environment.Checkpoints))
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		expected = append(expected, checkpoint.ID)
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	result, err := r.Provider.ExecTerminal(checkCtx, request, []string{"/bin/bash", vk8sChallengeRoot + "/checks.sh"})
+	result, err := r.Provider.ExecuteTerminal(checkCtx, request, []string{"/bin/bash", vk8sCheckpointRoot + "/checks.sh"})
 	if err != nil {
 		return nil, fmt.Errorf("execute VK8s checkpoints: %w", err)
 	}
 	if result.ExitCode != 0 {
 		return nil, fmt.Errorf("VK8s checkpoint runner exited with %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
-	results, err := parseCheckpointReport(result.Stdout, expected)
+	results, err := environmentdomain.ParseCheckpointReport(result.Stdout, expected)
 	if err != nil {
 		return nil, fmt.Errorf("invalid VK8s checkpoint report: %w", err)
 	}
 	return results, nil
+}
+
+func recordVK8sCheckpointStatus(status *breakfixv1.EnvironmentStatus, results []environmentdomain.CheckpointResult, checkErr error, now time.Time) {
+	next, changed := environmentdomain.RecordCheckpointStatus(vk8sCheckpointStatusFromAPI(status.Checkpoints), results, checkErr, now)
+	if !changed {
+		return
+	}
+	status.Checkpoints = vk8sCheckpointStatusToAPI(next)
+}
+
+func vk8sCheckpointStatusFromAPI(status *breakfixv1.CheckpointStatus) *environmentdomain.CheckpointStatus {
+	if status == nil {
+		return nil
+	}
+	result := &environmentdomain.CheckpointStatus{Error: status.Error, Results: make([]environmentdomain.RecordedCheckpointResult, len(status.Results))}
+	if status.CheckedAt != nil {
+		checked := status.CheckedAt.Time
+		result.CheckedAt = &checked
+	}
+	for index, checkpoint := range status.Results {
+		recorded := environmentdomain.RecordedCheckpointResult{CheckpointResult: environmentdomain.CheckpointResult{
+			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+		}}
+		if checkpoint.FirstPassedAt != nil {
+			firstPassed := checkpoint.FirstPassedAt.Time
+			recorded.FirstPassedAt = &firstPassed
+		}
+		result.Results[index] = recorded
+	}
+	return result
+}
+
+func vk8sCheckpointStatusToAPI(status *environmentdomain.CheckpointStatus) *breakfixv1.CheckpointStatus {
+	if status == nil {
+		return nil
+	}
+	result := &breakfixv1.CheckpointStatus{Error: status.Error, Results: make([]breakfixv1.CheckpointResultStatus, len(status.Results))}
+	if status.CheckedAt != nil {
+		checked := metav1.NewTime(*status.CheckedAt)
+		result.CheckedAt = &checked
+	}
+	for index, checkpoint := range status.Results {
+		recorded := breakfixv1.CheckpointResultStatus{
+			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+		}
+		if checkpoint.FirstPassedAt != nil {
+			firstPassed := metav1.NewTime(*checkpoint.FirstPassedAt)
+			recorded.FirstPassedAt = &firstPassed
+		}
+		result.Results[index] = recorded
+	}
+	return result
+}
+
+func truncate(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func (r *VK8sEnvironmentReconciler) patchStatus(ctx context.Context, before, environment *breakfixv1.VK8sEnvironment) error {

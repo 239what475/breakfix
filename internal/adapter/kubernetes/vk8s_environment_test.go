@@ -1,14 +1,14 @@
-package controller
+package kubernetes
 
 import (
 	"testing"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	corev1 "k8s.io/api/core/v1"
 )
 
 func TestVClusterServiceAddressMatchesServingCertificateName(t *testing.T) {
-	identity := VK8sEnvironmentIdentity{
+	identity := environment.VK8sEnvironmentIdentity{
 		Namespace:    "breakfix-vk8s-environment",
 		VClusterName: "vc-environment",
 	}
@@ -19,13 +19,13 @@ func TestVClusterServiceAddressMatchesServingCertificateName(t *testing.T) {
 }
 
 func TestNewVK8sTerminalPodUsesRuntimeServiceAccountForRegistryPull(t *testing.T) {
-	request := VK8sProvisionRequest{
+	request := environment.VK8sProvisionRequest{
 		EnvironmentUID: "environment-uid",
 		Revision:       "revision",
-		Identity: VK8sEnvironmentIdentity{
+		Identity: environment.VK8sEnvironmentIdentity{
 			Namespace: "breakfix-vk8s-environment", TerminalPodName: "terminal", KubeconfigSecretName: "kubeconfig",
 		},
-		Runtime: breakfixv1.VK8sRuntimeSnapshot{
+		Runtime: environment.VK8sRuntime{
 			ImageDigest: "registry.example/breakfix/candidates/example@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
@@ -44,7 +44,7 @@ func TestNewVK8sTerminalPodUsesRuntimeServiceAccountForRegistryPull(t *testing.T
 
 func vk8sTestResources(t *testing.T) corev1.ResourceRequirements {
 	t.Helper()
-	resources, err := vk8sWorkloadResources(breakfixv1.VK8sResourceSnapshot{
+	resources, err := vk8sWorkloadResources(environment.VK8sRuntimeResources{
 		WorkloadCPU: "500m", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",
 	})
 	if err != nil {

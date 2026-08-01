@@ -87,7 +87,7 @@ func main() {
 		VClusterBinary:       cfg.VClusterBinary,
 		VClusterChartRepo:    cfg.VClusterChartRepo,
 		VClusterChartVersion: cfg.VClusterChartVersion,
-	}, controller.Dependencies{NodeProvider: incusClient}); err != nil {
+	}, controller.Dependencies{NodeProvider: incus.NewNodeEnvironmentProvider(incusClient)}); err != nil {
 		slog.Error("failed to setup controllers", "err", err)
 		os.Exit(1)
 	}

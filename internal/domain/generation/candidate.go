@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/runtimeprofile"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 )
 
 var (
@@ -405,7 +405,7 @@ func (s ExecutionSnapshot) Validate() error {
 		if strings.TrimSpace(s.K8s.ProfileRevision) == "" || strings.TrimSpace(s.K8s.Version) == "" || !strings.Contains(s.K8s.ManagementTerminalImage, "@sha256:") {
 			return errors.New("k8s candidate resource snapshot is incomplete")
 		}
-		if err := (runtimeprofile.VK8sResources{
+		if err := (environment.VK8sResources{
 			ControlPlaneCPU: s.K8s.Resources.ControlPlaneCPU, ControlPlaneMemory: s.K8s.Resources.ControlPlaneMemory,
 			ControlPlaneEphemeralStorage: s.K8s.Resources.ControlPlaneEphemeralStorage,
 			WorkloadCPU:                  s.K8s.Resources.WorkloadCPU, WorkloadMemory: s.K8s.Resources.WorkloadMemory,

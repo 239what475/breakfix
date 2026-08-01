@@ -1,4 +1,4 @@
-package controller
+package vk8senvironment
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,36 +19,36 @@ import (
 const testImageDigest = "registry.example/breakfix/candidate@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeVK8sProvider struct {
-	identity         VK8sEnvironmentIdentity
-	observation      VK8sEnvironmentObservation
+	identity         environmentdomain.VK8sEnvironmentIdentity
+	observation      environmentdomain.VK8sEnvironmentObservation
 	provisionErr     error
 	deleteDone       bool
 	deleteErr        error
-	execResult       VK8sExecResult
+	execResult       environmentdomain.ExecutionResult
 	execErr          error
 	provisionCalls   int
 	deleteCalls      int
 	execCalls        int
 	lastExecCommand  []string
-	lastProvisionReq VK8sProvisionRequest
+	lastProvisionReq environmentdomain.VK8sProvisionRequest
 }
 
-func (f *fakeVK8sProvider) EnvironmentIdentity(string) (VK8sEnvironmentIdentity, error) {
+func (f *fakeVK8sProvider) Identity(string) (environmentdomain.VK8sEnvironmentIdentity, error) {
 	return f.identity, nil
 }
 
-func (f *fakeVK8sProvider) Provision(_ context.Context, request VK8sProvisionRequest) (VK8sEnvironmentObservation, error) {
+func (f *fakeVK8sProvider) Provision(_ context.Context, request environmentdomain.VK8sProvisionRequest) (environmentdomain.VK8sEnvironmentObservation, error) {
 	f.provisionCalls++
 	f.lastProvisionReq = request
 	return f.observation, f.provisionErr
 }
 
-func (f *fakeVK8sProvider) Delete(_ context.Context, _ VK8sProvisionRequest) (bool, error) {
+func (f *fakeVK8sProvider) Delete(_ context.Context, _ environmentdomain.VK8sProvisionRequest) (bool, error) {
 	f.deleteCalls++
 	return f.deleteDone, f.deleteErr
 }
 
-func (f *fakeVK8sProvider) ExecTerminal(_ context.Context, _ VK8sProvisionRequest, command []string) (VK8sExecResult, error) {
+func (f *fakeVK8sProvider) ExecuteTerminal(_ context.Context, _ environmentdomain.VK8sProvisionRequest, command []string) (environmentdomain.ExecutionResult, error) {
 	f.execCalls++
 	f.lastExecCommand = append([]string(nil), command...)
 	return f.execResult, f.execErr
@@ -69,7 +70,7 @@ func TestVK8sVerificationEnvironmentBecomesReadyWithoutAutomaticChecks(t *testin
 	if provider.execCalls != 0 {
 		t.Fatalf("verification environment executed %d automatic checks", provider.execCalls)
 	}
-	if provider.lastProvisionReq.Purpose != breakfixv1.EnvironmentPurposeVerification {
+	if provider.lastProvisionReq.Purpose != environmentdomain.PurposeVerification {
 		t.Fatalf("provider purpose = %q", provider.lastProvisionReq.Purpose)
 	}
 }
@@ -77,7 +78,7 @@ func TestVK8sVerificationEnvironmentBecomesReadyWithoutAutomaticChecks(t *testin
 func TestVK8sLearningEnvironmentCompletesFromCheckpointReport(t *testing.T) {
 	environment := validVK8sEnvironment("learning-complete", breakfixv1.EnvironmentPurposeLearning)
 	provider := readyVK8sProvider()
-	provider.execResult = VK8sExecResult{Stdout: `{"checks":[{"id":"workload-ready","passed":true,"summary":"workload is ready"}]}`}
+	provider.execResult = environmentdomain.ExecutionResult{Stdout: `{"checks":[{"id":"workload-ready","passed":true,"summary":"workload is ready"}]}`}
 	reconciler, kubeClient := newVK8sTestReconciler(t, environment, provider)
 
 	reconcileVK8sTimes(t, reconciler, environment.Name, 3)
@@ -88,7 +89,7 @@ func TestVK8sLearningEnvironmentCompletesFromCheckpointReport(t *testing.T) {
 	if provider.execCalls != 1 {
 		t.Fatalf("checkpoint exec calls = %d, want 1", provider.execCalls)
 	}
-	if len(provider.lastExecCommand) != 2 || provider.lastExecCommand[0] != "/bin/bash" || provider.lastExecCommand[1] != vk8sChallengeRoot+"/checks.sh" {
+	if len(provider.lastExecCommand) != 2 || provider.lastExecCommand[0] != "/bin/bash" || provider.lastExecCommand[1] != vk8sCheckpointRoot+"/checks.sh" {
 		t.Fatalf("checkpoint command = %v", provider.lastExecCommand)
 	}
 	if current.Status.Environment.Checkpoints == nil || len(current.Status.Environment.Checkpoints.Results) != 1 || current.Status.Environment.Checkpoints.Results[0].FirstPassedAt == nil {
@@ -100,7 +101,7 @@ func TestVK8sRuntimeInitializationFailureIsArtifactFailure(t *testing.T) {
 	environment := validVK8sEnvironment("initialization-failed", breakfixv1.EnvironmentPurposeVerification)
 	provider := readyVK8sProvider()
 	provider.observation.TerminalReady = false
-	provider.observation.Initialization = VK8sInitializationObservation{Failed: true, ExitCode: 17, Message: "generate failed"}
+	provider.observation.Initialization = environmentdomain.InitializationObservation{Failed: true, ExitCode: 17, Message: "generate failed"}
 	reconciler, kubeClient := newVK8sTestReconciler(t, environment, provider)
 
 	reconcileVK8sTimes(t, reconciler, environment.Name, 3)
@@ -194,13 +195,13 @@ func validVK8sEnvironment(name string, purpose breakfixv1.EnvironmentPurpose) *b
 func readyVK8sProvider() *fakeVK8sProvider {
 	return &fakeVK8sProvider{
 		//nolint:gosec // Kubernetes Secret object name, not credential material.
-		identity: VK8sEnvironmentIdentity{
+		identity: environmentdomain.VK8sEnvironmentIdentity{
 			Namespace: "breakfix-vk8s-test", VClusterName: "vc-test",
 			KubeconfigSecretName: "breakfix-vk8s-kubeconfig", TerminalPodName: "terminal",
 		},
-		observation: VK8sEnvironmentObservation{
+		observation: environmentdomain.VK8sEnvironmentObservation{
 			ControlPlaneReady: true, KubeconfigReady: true, TerminalReady: true,
-			Initialization: VK8sInitializationObservation{Complete: true},
+			Initialization: environmentdomain.InitializationObservation{Complete: true},
 		},
 		deleteDone: true,
 	}
