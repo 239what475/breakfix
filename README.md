@@ -26,28 +26,28 @@ Worker 不持有 PostgreSQL 凭据。所有 lease、状态转移和阶段结果�
 
 ## 本地开始
 
-前置条件和运行时配置以[`config/breakfix.example.yaml`](config/breakfix.example.yaml)为准。
+前置条件和运行时配置以[`config/app/local.example.yaml`](config/app/local.example.yaml)为准。
 本地开发需要 PostgreSQL、Kubernetes 访问、模型凭据和 OpenSandbox；运行 Node 题还需要准备好的 Incus
-provider。Kind 开发使用 `deploy/overlays/kind` 提供固定 `NodePort 30443` Registry，先运行
-`make dev-kind-registry`；生产部署使用运营方提供的 Registry 配置。
+provider。Kind 开发使用 `deploy/overlays/kind` 提供固定 `NodePort 30443` Registry；创建好运行时 Secret 后，
+`make deploy-kind` 会构建镜像、准备 Registry 并部署运行时。生产部署使用运营方提供的 Registry 配置。
 
 ```bash
-cp config/breakfix.example.yaml config/breakfix.yaml
+cp config/app/local.example.yaml config/app/local.yaml
 # 填写 PostgreSQL、模型、OpenSandbox、Registry 与 Incus 配置。
-make dev
+make build
+./bin/breakfix-server -config config/app/local.yaml
 ```
 
-`make dev` 构建并启动 Server、Controller、Generate Worker 和 Taxonomy Worker。默认界面位于
-`http://localhost:9090`。本地配置含环境专属地址和密钥，不应提交。
+`make build` 生成四个运行时二进制和嵌入式 Web UI。已部署环境的本地接管使用
+`scripts/dev/telepresence.sh`；完整部署与调试步骤见运维文档。本地配置含环境专属地址和密钥，不应提交。
 
 ## 验证
 
 ```bash
-go test -count=1 ./...
-npm run build --prefix web
+make test-unit
 make verify-generated
 kubectl kustomize .
-make e2e
+make test-e2e
 ```
 
 真实 Kubernetes 与模型验收需要显式启用，见[测试与真实验收](docs/operations/testing.md)。
@@ -62,4 +62,4 @@ make e2e
 
 机器可验证的契约以代码为准：HTTP 接口见 `api/http/openapi.yaml`，CRD 见
 `api/v1/`，题目格式见 `internal/challenge/`，运行时配置见
-`config/breakfix.example.yaml`，构建和运维命令见 `Makefile`。
+`config/app/local.example.yaml`，构建和运维命令见 `Makefile`。

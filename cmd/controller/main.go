@@ -26,7 +26,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	ctrl.SetLogger(logr.FromSlogHandler(slog.Default().Handler()))
 
-	configPath := flag.String("config", "config/breakfix.yaml", "Config file path")
+	configPath := flag.String("config", "config/app/local.yaml", "Config file path")
 	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

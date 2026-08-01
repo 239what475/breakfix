@@ -4,9 +4,9 @@ set -euo pipefail
 # Run one Breakfix component locally while retaining its in-cluster identity,
 # Service DNS, and mounted role credentials.
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="${BREAKFIX_TELEPRESENCE_STATE_DIR:-$ROOT_DIR/.local/telepresence}"
-CONFIG_SOURCE="$ROOT_DIR/config/breakfix.in-cluster.yaml"
+CONFIG_SOURCE="$ROOT_DIR/config/app/in-cluster.yaml"
 
 TP_NAMESPACE="${BREAKFIX_TELEPRESENCE_NAMESPACE:-breakfix-system}"
 TP_MANAGER_NAMESPACE="${BREAKFIX_TELEPRESENCE_MANAGER_NAMESPACE:-ambassador}"
@@ -16,7 +16,7 @@ TP_CONTROLLER_HEALTH_PORT="${BREAKFIX_TELEPRESENCE_CONTROLLER_HEALTH_PORT:-18081
 
 usage() {
   cat <<'EOF'
-Usage: dev/telepresence.sh <command>
+Usage: scripts/dev/telepresence.sh <command>
 
 Commands:
   connect                  Install/connect the Traffic Manager for the current cluster.
@@ -114,10 +114,7 @@ health_port_for() {
 
 build_component() {
   case "$1" in
-    server) (cd "$ROOT_DIR" && make --no-print-directory dev-build-server) ;;
-    controller) (cd "$ROOT_DIR" && make --no-print-directory dev-build-controller) ;;
-    generate-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-generate-worker) ;;
-    taxonomy-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-taxonomy-worker) ;;
+    server|controller|generate-worker|taxonomy-worker) (cd "$ROOT_DIR" && make --no-print-directory build) ;;
     *) fail "unknown component: $1" ;;
   esac
 }

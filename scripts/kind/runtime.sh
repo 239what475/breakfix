@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 generate_worker_replicas=${BREAKFIX_KIND_GENERATE_WORKER_REPLICAS:-1}
 taxonomy_worker_replicas=${BREAKFIX_KIND_TAXONOMY_WORKER_REPLICAS:-1}
-manifest=${BREAKFIX_KIND_RUNTIME_MANIFEST:-$repo_root/deploy/overlays/kind}
+root_manifest=${BREAKFIX_KIND_ROOT_MANIFEST:-$repo_root}
+kind_overlay=${BREAKFIX_KIND_OVERLAY_MANIFEST:-$repo_root/deploy/overlays/kind}
 registry_node_port=30443
 
 for command in docker jq kind kubectl; do
@@ -20,7 +21,7 @@ case "$context" in
   kind-*)
     ;;
   *)
-    printf 'dev/kind-runtime.sh requires a Kind context, current context is %s\n' "$context" >&2
+    printf 'scripts/kind/runtime.sh requires a Kind context, current context is %s\n' "$context" >&2
     exit 2
     ;;
 esac
@@ -29,11 +30,11 @@ esac
 # Load the freshly built local images into this Kind cluster before applying
 # them so `IfNotPresent` cannot silently reuse an older node cache.
 kind_cluster=${context#kind-}
-runtime_images=$(kubectl kustomize "$manifest" | awk '
+runtime_images=$(kubectl kustomize "$root_manifest" | awk '
   /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
 ')
 [ -n "$runtime_images" ] || {
-  printf 'could not find Breakfix runtime images in %s\n' "$manifest" >&2
+  printf 'could not find Breakfix runtime images in %s\n' "$root_manifest" >&2
   exit 1
 }
 for image in $runtime_images; do
@@ -44,12 +45,18 @@ for image in $runtime_images; do
   kind load docker-image --name "$kind_cluster" "$image" >/dev/null
 done
 
+kubectl apply -f "$repo_root/deploy/manifests/namespace.yaml" >/dev/null
+
 kubectl -n "$namespace" get secret breakfix-runtime >/dev/null 2>&1 || {
   printf 'runtime Secret breakfix-runtime is required before applying the runtime\n' >&2
   exit 1
 }
 
-"$repo_root/dev/kind-registry.sh"
+kubectl apply -k "$root_manifest"
+
+"$repo_root/scripts/kind/registry.sh"
+kubectl apply -k "$kind_overlay"
+kubectl -n "$namespace" wait --for=condition=Available deployment/breakfix-registry --timeout=2m >/dev/null
 
 secret_value() {
   kubectl -n "$namespace" get secret breakfix-runtime -o json |
@@ -99,7 +106,7 @@ if [ -n "$registry_pull_secret" ]; then
   }
 fi
 
-"$repo_root/dev/kind-worker-identities.sh"
+"$repo_root/scripts/kind/worker-identities.sh"
 
 kubectl -n "$namespace" get secret breakfix-registry-tls >/dev/null 2>&1 || {
   printf 'Kind Registry preparation did not create TLS Secret breakfix-registry-tls\n' >&2
@@ -149,22 +156,19 @@ case "$base_image_digest" in
   *)
     docker image inspect breakfix-k8s-base:latest >/dev/null 2>&1 || {
       printf 'local image breakfix-k8s-base:latest is required after the Kind Registry endpoint changed\n' >&2
-      printf 'build it with: make k8s-base-image\n' >&2
+      printf 'build it with: make images\n' >&2
       exit 1
     }
-    "$repo_root/dev/kind-push-k8s-base.sh"
+    "$repo_root/scripts/kind/push-k8s-base.sh"
     ;;
 esac
 
-kubectl apply -k "$manifest"
 actual_registry_node_port=$(kubectl -n "$namespace" get service breakfix-registry \
   -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
 [ "$actual_registry_node_port" = "$registry_node_port" ] || {
   printf 'Kind Registry Service must expose NodePort %s, got %s\n' "$registry_node_port" "$actual_registry_node_port" >&2
   exit 1
 }
-kubectl -n "$namespace" wait --for=condition=Available deployment/breakfix-registry --timeout=2m >/dev/null
-
 kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
   jq --argjson incus_port "$incus_port" '
     .spec.egress |= map(

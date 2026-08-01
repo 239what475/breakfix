@@ -1,5 +1,5 @@
 # Breakfix runtime configuration.
-# Copy this file to config/breakfix.yaml and adjust it for the target environment.
+# Copy this file to config/app/local.yaml and adjust it for the target environment.
 
 # HTTP and controller health endpoints.
 port: 9090

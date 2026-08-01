@@ -10,7 +10,7 @@
 | HTTP JSON 契约 | [`api/http/openapi.yaml`](../api/http/openapi.yaml) |
 | Kubernetes CRD | [`api/v1/`](../api/v1/) |
 | Challenge 文件契约 | [`internal/challenge/`](../internal/challenge/) |
-| 运行时配置 | [`config/breakfix.example.yaml`](../config/breakfix.example.yaml) |
+| 运行时配置 | [`config/app/local.example.yaml`](../config/app/local.example.yaml) |
 | 构建与部署命令 | [`Makefile`](../Makefile) |
 
 ## 架构

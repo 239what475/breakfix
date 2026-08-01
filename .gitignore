@@ -17,7 +17,8 @@ data/
 # CLI user data
 .breakfix/
 
-# Runtime config (instance-specific, copy from config/breakfix.example.yaml)
+# Runtime config (instance-specific, copy from config/app/local.example.yaml)
+config/app/local.yaml
 config/breakfix.yaml
 config/breakfix.local.yaml
 .breakfix-server

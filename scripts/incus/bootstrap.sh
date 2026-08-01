@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 remote=${BREAKFIX_INCUS_REMOTE:-incus-cluster}
 build_project=${BREAKFIX_INCUS_BUILD_PROJECT:-breakfix-build}
 image_project=${BREAKFIX_INCUS_IMAGE_PROJECT:-breakfix-images}
@@ -16,8 +16,8 @@ instance=breakfix-bootstrap-node-systemd-base
 upstream_alias=ubuntu/24.04
 base_packages="bash ca-certificates curl dnsutils gnupg iproute2 iputils-ping jq less lsof nano netcat-openbsd openssh-client openssh-server procps psmisc rsync socat strace tcpdump tmux traceroute vim-tiny wget"
 
-runtime_init="$repo_root/deploy/images/node-systemd-base/runtime-init.sh"
-runtime_unit="$repo_root/deploy/images/node-systemd-base/breakfix-runtime-init.service"
+runtime_init="$repo_root/build/images/node-systemd-base/runtime-init.sh"
+runtime_unit="$repo_root/build/images/node-systemd-base/breakfix-runtime-init.service"
 
 require_file() {
   [ -f "$1" ] || {

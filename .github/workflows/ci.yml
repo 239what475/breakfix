@@ -40,12 +40,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
-      - name: Build web application
-        run: make web-build
+      - name: Build runtime applications
+        run: make build
       - name: Verify generated contracts
         run: make verify-generated
       - name: Test Go packages against PostgreSQL
-        run: go test -count=1 ./...
+        run: make test-unit
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
@@ -62,10 +62,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
-      - name: Build web application
-        run: make web-build
-      - name: Compile every runtime entrypoint
-        run: |
-          for component in server controller generate-worker taxonomy-worker; do
-            go build -ldflags "-X github.com/breakfix/breakfix/internal/build.Version=dev" -o "$RUNNER_TEMP/breakfix-$component" "./cmd/$component"
-          done
+      - name: Build runtime applications
+        run: make build

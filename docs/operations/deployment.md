@@ -13,7 +13,8 @@ Kustomize 包不部署 Registry；Registry 由运营方提供并通过 runtime S
   配置的稳定域名。
 - Node runtime 还需要私网可访问的 Incus cluster 与 role-specific mTLS 证书。
 
-配置字段以 [`config/breakfix.example.yaml`](../../config/breakfix.example.yaml) 为准。PostgreSQL 是唯一
+配置字段以 [`config/app/local.example.yaml`](../../config/app/local.example.yaml) 和
+[`config/app/in-cluster.yaml`](../../config/app/in-cluster.yaml) 为准。PostgreSQL 是唯一
 关系数据库；Server data PVC 只保存 candidate archive、已发布 challenge 与 taxonomy snapshot，不是队列。
 
 ## Registry
@@ -25,7 +26,7 @@ Kustomize 包不部署 Registry；Registry 由运营方提供并通过 runtime S
 管理 Registry，也不修改 node DNS、`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc`
 名称不能作为 kubelet/containerd 的最终镜像地址。
 
-Kind 开发环境使用 `deploy/overlays/kind` 和 `make dev-kind-registry`。该开发准备步骤将 Registry 暴露为固定
+Kind 开发环境使用 `deploy/overlays/kind` 和 `make deploy-kind`。该开发准备步骤将 Registry 暴露为固定
 `NodePort 30443`，使用 Kind control-plane 的 Docker 网络 IP 作为镜像 authority，并为该 IP 与 Registry
 Service DNS 签发本地开发证书。`registry_addr` 用于 kubelet 拉取，`registry_client_addr` 用于集群内
 Server/Generate Worker 访问 Service。CA 变化时开发脚本会刷新 Kind node 信任库并重启其 containerd；运行时
@@ -36,38 +37,42 @@ NodePort 只属于 Kind 开发环境，生产不使用它。
 
 ```bash
 make verify-generated
-make runtime-push TARGETOS=linux TARGETARCH=amd64 \
+make images TARGETOS=linux TARGETARCH=amd64 \
   RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev
+for component in server controller generate-worker taxonomy-worker; do
+  docker push "ghcr.io/acme/breakfix-${component}:dev"
+done
 kubectl apply -k .
 kubectl -n breakfix-system get deployments,pods
 ```
 
-`make runtime-push` 只把已编译二进制打入 Server、Controller、Generate Worker 与 Taxonomy Worker 的
-distroless image。不要在运行时容器中下载 Go 依赖或编译源码。
+`make images` 只把已编译二进制打入 Server、Controller、Generate Worker 与 Taxonomy Worker 的
+distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go
+依赖或编译源码。
 
 `catalog/` 是 Git 管理的 portable source，不是 Server data directory。Server 可以在空卷上启动；平台基线就绪后，
 管理员将 source 打包为 OCI artifact，向空平台安装一个 digest 固定的 Catalog Release。该过程复用正式的 build、
 真实验证和原子提交链路，只有 release 到达 `Ready` 后题目才对 Catalog API 可见：
 
 ```bash
-go run ./cmd/catalog-release \
-  -source catalog \
-  -output dist/foundation.oci.tar \
-  -reference registry.example.com/breakfix/catalog/foundation:2026.08.01 \
-  -registry-endpoint registry.example.com
+make catalog-package \
+  CATALOG_SOURCE=catalog \
+  CATALOG_ARCHIVE=dist/foundation.oci.tar \
+  CATALOG_REFERENCE=registry.example.com/breakfix/catalog/foundation:2026.08.01 \
+  CATALOG_REGISTRY_ENDPOINT=registry.example.com
 # 输出 registry.example.com/breakfix/catalog/foundation@sha256:...
 
-curl --fail --show-error \
-  -H "X-Breakfix-Catalog-Token: $BREAKFIX_CATALOG_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  --data '{"bundle":"registry.example.com/breakfix/catalog/foundation@sha256:..."}' \
-  https://breakfix.example.com/api/admin/catalog/releases
+make catalog-install \
+  CATALOG_SERVER_URL=https://breakfix.example.com \
+  CATALOG_BUNDLE=registry.example.com/breakfix/catalog/foundation@sha256:... \
+  CATALOG_ADMIN_TOKEN="$BREAKFIX_CATALOG_ADMIN_TOKEN"
 ```
 
-`cmd/catalog-release` 只打包和显式推送 OCI artifact，绝不访问 Server data、Incus 或 Kubernetes。安装必须经由
-Server 管理员 API；它拒绝 mutable tag、非空 data directory 和已有 release。用 `GET
-/api/admin/catalog/releases/{id}` 轮询状态。Kind 开发环境先运行 `make dev-kind-registry` 和 `make dev-kind-runtime`，
-再使用该命令的 `-trust-bundle-file .local/kind-registry/ca.crt` 选项和 Kind Registry authority。
+`make catalog-package` 只打包和显式推送 OCI artifact，绝不访问 Server data、Incus 或 Kubernetes。`make
+catalog-install` 只调用 Server 管理员 API；它绝不复制 data PVC 或直接发布 image。安装入口拒绝 mutable tag、非空
+data directory 和已有 release。用 `GET /api/admin/catalog/releases/{id}` 轮询状态。Kind 开发环境运行 `make deploy-kind`
+后，再为 `catalog-package` 提供 Kind Registry authority 与
+`CATALOG_TRUST_BUNDLE_FILE=.local/kind-registry/ca.crt`。
 
 `data_dir/challenges` 与 `data_dir/taxonomy` 仅保存安装成功后的运行时 materialization 和 taxonomy snapshot；
 它们不再由 Git 或开发脚本复制。
@@ -86,16 +91,23 @@ NodeEnvironment project，不能只限定为 build/image 两个静态 project。
 Controller 是唯一有权限调和 Environment CRD 的组件。Server 创建和更新 Environment `spec`，Controller
 写 `status`。生产 CNI 必须真正执行 NetworkPolicy；Kind 的默认网络行为不能当作隔离验收。
 
+## Incus
+
+Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/bootstrap.sh` 准备。脚本将证书写入被忽略的
+`.local/incus/<role>/`，并输出 `base_image_fingerprint`；管理员再将 `server`、`controller` 和 `generate` 三套证书创建为
+`breakfix-incus-*` Secret，并把该 fingerprint 写入 `breakfix-runtime` 的 `incus_base_image_fingerprint`。
+
 ## 验收
 
 ```bash
-go test -count=1 ./...
+make test-unit
 npm run build --prefix web
-make e2e
-make e2e-runtime-browser
-make e2e-server-recovery
+make test-e2e
+RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
+BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test
 ```
 
-模型驱动的端到端验收显式运行：`make e2e-agent-node`、`make e2e-agent-k8s` 和
-`make e2e-agent-assistant`。Kind 验收要求 Kind overlay、固定 NodePort Registry、OpenSandbox 和
+模型驱动的端到端验收显式运行：`RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:node --prefix test`、
+`RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:k8s --prefix test` 和
+`RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:assistant --prefix test`。Kind 验收要求 Kind overlay、固定 NodePort Registry、OpenSandbox 和
 对应环境 provider；完整边界见[测试与真实验收](testing.md)。

@@ -6,18 +6,18 @@
 ## 确定性验证
 
 ```bash
-go test -count=1 ./...
+make test-unit
 npm run build --prefix web
 make verify-generated
 kubectl kustomize .
-make e2e
+make test-e2e
 ```
 
 Go 测试覆盖 archive、challenge manifest、运行时快照、检查点 JSON、Provider 请求、API 输入输出、
 `GenerationWorkflow` 与 `TaxonomyWorkflow` 的正向阶段推进，以及 Controller 的状态和清理决策。Prompt
 文案不是单元测试对象；测试验证 typed result、工具参数和领域状态，不伪造模型输出来证明自然语言 prompt。
 
-默认 `make e2e` 只覆盖快速的浏览器页面流程。它不调用模型，也不人为写入数据库伪造后台流程。
+默认 `make test-e2e` 只覆盖快速的浏览器页面流程。它不调用模型，也不人为写入数据库伪造后台流程。
 若目标平台的 Catalog 为空，Playwright global setup 要求 `BREAKFIX_E2E_CATALOG_REFERENCE` 提供由
 `test/fixtures/catalog/` 打包并推送后的 immutable OCI digest，同时要求 `BREAKFIX_CATALOG_ADMIN_TOKEN`；它会调用
 正式管理员安装 API 并等待 release 到达 `Ready`。测试不会复制 challenge 或 taxonomy 到 Server data directory。
@@ -25,8 +25,8 @@ Go 测试覆盖 archive、challenge manifest、运行时快照、检查点 JSON�
 ## 已部署运行时验收
 
 ```bash
-make e2e-runtime-browser
-make e2e-server-recovery
+RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
+BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test
 ```
 
 `e2e-runtime-browser` 在已部署环境中使用固定的 `cleanup-logs` challenge，验证终端、自动检查点、
@@ -35,10 +35,10 @@ make e2e-server-recovery
 ## 模型驱动验收
 
 ```bash
-make e2e-agent-node
-make e2e-agent-k8s
-make e2e-agent-assistant
-make e2e-agent-soak
+RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:node --prefix test
+RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:k8s --prefix test
+RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:assistant --prefix test
+RUN_AGENT_SOAK_E2E=1 npm run test:agent-live:soak --prefix test
 ```
 
 这些入口需要显式环境变量和已部署的当前架构。Node/K8s 作者验收从自然语言题意开始，经过 Server 直接

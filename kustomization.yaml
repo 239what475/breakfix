@@ -1,5 +1,22 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: breakfix-system
+
 resources:
-  - deploy/base
+  - deploy/crds/breakfix.dev_nodeenvironments.yaml
+  - deploy/crds/breakfix.dev_vk8senvironments.yaml
+  - deploy/manifests/namespace.yaml
+  - deploy/manifests/rbac.yaml
+  - deploy/manifests/worker-network-policy.yaml
+  - deploy/manifests/postgresql.yaml
+  - deploy/manifests/server-data.yaml
+  - deploy/manifests/server.yaml
+  - deploy/manifests/controller.yaml
+  - deploy/manifests/generate-worker.yaml
+  - deploy/manifests/taxonomy-worker.yaml
+
+configMapGenerator:
+  - name: breakfix-config
+    files:
+      - config.yaml=config/app/in-cluster.yaml

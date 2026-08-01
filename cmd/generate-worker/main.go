@@ -24,7 +24,7 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	configPath := flag.String("config", "config/breakfix.yaml", "Config file path")
+	configPath := flag.String("config", "config/app/local.yaml", "Config file path")
 	workerID := flag.String("worker-id", defaultWorkerID(), "Unique Generate Worker identity")
 	flag.Parse()
 

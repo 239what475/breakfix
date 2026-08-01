@@ -3,8 +3,9 @@
 This development-only overlay installs the bundled Registry as a fixed
 `NodePort` on TCP `30443`. It is not part of the production deployment.
 
-Run `dev/kind-registry.sh` (or `make dev-kind-registry`) before applying the
-runtime. It chooses the Kind control-plane Docker-network IP as the image
+Run `make deploy-kind` after creating the runtime and Registry authentication
+Secrets. The command applies the root package first, then this additive overlay.
+It chooses the Kind control-plane Docker-network IP as the image
 authority, issues a local development leaf certificate with both that IP and
 `breakfix-registry.breakfix-system.svc.cluster.local` as SANs, updates the
 runtime and pull Secrets, and installs only the CA in each Kind node's system

@@ -308,7 +308,7 @@ mapping。`challenge.yaml` 保持 candidate 语义，不保存目标环境 image
 
 ### Kustomize
 
-只保留两层：
+只保留两个 Kustomize 入口：
 
 ```text
 kustomization.yaml                  生产共同清单的唯一入口
@@ -316,12 +316,14 @@ kustomization.yaml                  生产共同清单的唯一入口
   -> deploy/crds/*.yaml
 
 deploy/overlays/kind/kustomization.yaml
-  -> ../../../                       只增加 Kind Registry 和开发 patch
+  -> registry.yaml                   只增加 Kind Registry
 ```
 
 - 删除 `deploy/base`、`deploy/runtime`、`deploy/crd` 和 `config/kustomization.yaml`，也删除它们的 Kustomization 文件。
 - 根 Kustomization 直接列出清单、CRD 和 ConfigMap generator；不再通过“base 引用 runtime、runtime 引用资源、base 再引用
   config”的多层间接关系组装。
+- Kustomize 禁止子目录 overlay 引用其祖先根目录，因此 `scripts/kind/runtime.sh` 依次应用根包与 Kind overlay；不重新引入
+  `base`，也不复制共同资源。
 - `deploy/manifests` 只包含 namespace、RBAC、PostgreSQL、Server、Controller、Generate Worker、Taxonomy Worker、
   NetworkPolicy 和 PVC。`deploy/overlays/kind` 只包含 Registry、Kind patch 和其 README。
 - `build/images` 保存 Dockerfile、entrypoint 和 runtime-init；`deploy` 不再携带镜像构建输入。

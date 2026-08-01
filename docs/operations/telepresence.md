@@ -12,17 +12,17 @@ Generate Worker 和 Taxonomy Worker。被接管组件的日志直接出现在本
 - 本机能访问模型 API；接管 Generate Worker 时还必须能访问 Incus 和 Registry。
 
 ```bash
-make telepresence-connect
-make telepresence-status
+scripts/dev/telepresence.sh connect
+scripts/dev/telepresence.sh status
 ```
 
 ## 接管组件
 
 ```bash
-make telepresence-server
-make telepresence-controller
-make telepresence-generate-worker
-make telepresence-taxonomy-worker
+scripts/dev/telepresence.sh server
+scripts/dev/telepresence.sh controller
+scripts/dev/telepresence.sh generate-worker
+scripts/dev/telepresence.sh taxonomy-worker
 ```
 
 脚本会从集群读取配置、为本地进程准备最小身份和 kubeconfig，并在本地构建对应二进制。接管 Worker 时，
@@ -32,8 +32,8 @@ make telepresence-taxonomy-worker
 接管结束后：
 
 ```bash
-make telepresence-down
-make telepresence-disconnect
+scripts/dev/telepresence.sh down
+scripts/dev/telepresence.sh disconnect
 ```
 
 ## 排障关联

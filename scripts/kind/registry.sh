@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 registry_node_port=${BREAKFIX_KIND_REGISTRY_NODE_PORT:-30443}
 tls_dir=${BREAKFIX_KIND_REGISTRY_TLS_DIR:-$repo_root/.local/kind-registry}
@@ -19,7 +19,7 @@ case "$context" in
     kind_cluster=${context#kind-}
     ;;
   *)
-    printf 'dev/kind-registry.sh requires a Kind context, current context is %s\n' "$context" >&2
+    printf 'scripts/kind/registry.sh requires a Kind context, current context is %s\n' "$context" >&2
     exit 2
     ;;
 esac
@@ -166,9 +166,5 @@ patch=$(jq -cn --arg address "$address_encoded" --arg client_address "$client_ad
   '{data: {registry_addr: $address, registry_client_addr: $client_address, registry_trust_bundle_file: $bundle}}')
 kubectl -n "$namespace" patch secret breakfix-runtime --type merge --patch "$patch" >/dev/null
 
-kubectl -n "$namespace" apply -f "$repo_root/deploy/overlays/kind/registry.yaml" >/dev/null
-kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
-kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
-
-printf 'Prepared Kind Registry for image pulls at https://%s and in-cluster clients at https://%s (CA: %s).\n' \
+printf 'Prepared Kind Registry credentials and trust for image pulls at https://%s and in-cluster clients at https://%s (CA: %s).\n' \
   "$registry_address" "$registry_client_address" "$tls_dir"

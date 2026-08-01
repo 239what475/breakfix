@@ -1,30 +1,13 @@
-.PHONY: dev dev-up dev-down dev-reset dev-status dev-config web-build web-assets \
-	dev-build dev-build-server dev-build-controller dev-build-generate-worker \
-	dev-build-taxonomy-worker dev-worker-configs \
-	dev-start-server dev-start-controller dev-start-generate-worker \
-	dev-start-taxonomy-worker \
-	dev-server dev-controller dev-generate-worker dev-taxonomy-worker \
-	telepresence-connect telepresence-server telepresence-controller \
-	telepresence-generate-worker telepresence-taxonomy-worker \
-	telepresence-down telepresence-status telepresence-disconnect \
-	e2e e2e-runtime-browser e2e-agent-assistant e2e-agent-soak \
-	e2e-agent-node e2e-agent-k8s e2e-server-recovery \
-	dev-data dev-crd dev-rbac dev-images k8s-base-image \
-	dev-incus dev-incus-secrets dev-kind-registry dev-kind-push-k8s-base dev-kind-runtime \
-	generate verify-generated \
-	build build-server build-controller build-generate-worker build-taxonomy-worker \
-	runtime-images runtime-push release-manifest lint clean
+.PHONY: generate verify-generated build images deploy-kind reset-kind test-unit \
+	catalog-package catalog-install test-e2e
 
-# ── Build info ──
-
-VERSION   ?= 0.1.0
-BUILD_TIME = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-COMMIT     = $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-
-LDFLAGS   := -s -w \
-  -X 'github.com/breakfix/breakfix/internal/build.Version=$(VERSION)' \
-  -X 'github.com/breakfix/breakfix/internal/build.BuildTime=$(BUILD_TIME)' \
-  -X 'github.com/breakfix/breakfix/internal/build.Commit=$(COMMIT)'
+VERSION ?= 0.1.0
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -s -w \
+	-X 'github.com/breakfix/breakfix/internal/build.Version=$(VERSION)' \
+	-X 'github.com/breakfix/breakfix/internal/build.BuildTime=$(BUILD_TIME)' \
+	-X 'github.com/breakfix/breakfix/internal/build.Commit=$(COMMIT)'
 
 CONTROLLER_GEN_VERSION := v0.21.0
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
@@ -37,206 +20,24 @@ OPENAPI_GO_OUTPUT := internal/transport/httpapi/generated/server.gen.go
 OPENAPI_FRONTEND_OUTPUT := web/src/api/generated
 OPENAPI_TS := npm exec --prefix web -- openapi-ts
 OPENAPI_TS_ARGS := -i $(CURDIR)/$(OPENAPI_SPEC) -p @hey-api/typescript --no-log-file
+
 WEB_DIR := web
 WEB_DIST := $(WEB_DIR)/dist
 WEB_EMBED_DIR := internal/transport/httpapi/ui/assets
-
-KIND_CLUSTER ?= breakfix-dev
-CONFIG_DIR ?= config
-CONFIG ?= $(CONFIG_DIR)/breakfix.yaml
-DEV_CONFIG ?= $(CONFIG_DIR)/breakfix.local.yaml
-DEV_RUN_DIR ?= .local/dev
-DEV_GENERATE_WORKER_CONFIG := $(DEV_RUN_DIR)/generate-worker.yaml
-DEV_TAXONOMY_WORKER_CONFIG := $(DEV_RUN_DIR)/taxonomy-worker.yaml
-DEV_GENERATE_WORKER_API_KEY ?= breakfix-dev-generate-worker-key
-DEV_TAXONOMY_WORKER_API_KEY ?= breakfix-dev-taxonomy-worker-key
-DEV_CATALOG_ADMIN_TOKEN ?= breakfix-dev-catalog-admin-token
-BIN_DIR  := bin
+BIN_DIR := bin
 TARGETOS ?= linux
 TARGETARCH ?= amd64
-RELEASE_DIR := $(BIN_DIR)/release/$(TARGETOS)-$(TARGETARCH)
-SERVER_RELEASE_DIR := $(RELEASE_DIR)/server
-CONTROLLER_RELEASE_DIR := $(RELEASE_DIR)/controller
-GENERATE_WORKER_RELEASE_DIR := $(RELEASE_DIR)/generate-worker
-TAXONOMY_WORKER_RELEASE_DIR := $(RELEASE_DIR)/taxonomy-worker
-SERVER_RELEASE_BIN := $(SERVER_RELEASE_DIR)/breakfix-server
-CONTROLLER_RELEASE_BIN := $(CONTROLLER_RELEASE_DIR)/breakfix-controller
-GENERATE_WORKER_RELEASE_BIN := $(GENERATE_WORKER_RELEASE_DIR)/breakfix-generate-worker
-TAXONOMY_WORKER_RELEASE_BIN := $(TAXONOMY_WORKER_RELEASE_DIR)/breakfix-taxonomy-worker
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
-RELEASE_SOURCE_IMAGE_REPOSITORY ?= ghcr.io/breakfix
-RELEASE_MANIFEST ?= dist/breakfix-$(RUNTIME_IMAGE_TAG).yaml
-TELEPRESENCE ?= ./dev/telepresence.sh
 
-# ═══════════════════════════════════════════════════════════════
-# Dev build (bin/ — fast, no LDFLAGS)
-# ═══════════════════════════════════════════════════════════════
-
-web-build:
-	npm ci --prefix $(WEB_DIR)
-	npm run build --prefix $(WEB_DIR)
-	$(MAKE) web-assets
-
-web-assets:
-	@test -f $(WEB_DIST)/index.html || { echo "  x missing $(WEB_DIST)/index.html; run make web-build first"; exit 1; }
-	@mkdir -p $(WEB_EMBED_DIR)
-	@find $(WEB_EMBED_DIR) -mindepth 1 ! -name .gitkeep -delete
-	@cp -a $(WEB_DIST)/. $(WEB_EMBED_DIR)/
-
-dev-build-server: web-build
-	go build -o $(BIN_DIR)/breakfix-server ./cmd/server
-	@echo "  ✓ server"
-
-dev-build-controller:
-	go build -o $(BIN_DIR)/breakfix-controller ./cmd/controller
-	@echo "  ✓ controller"
-
-dev-build-generate-worker:
-	go build -o $(BIN_DIR)/breakfix-generate-worker ./cmd/generate-worker
-	@echo "  ✓ generate worker"
-
-dev-build-taxonomy-worker:
-	go build -o $(BIN_DIR)/breakfix-taxonomy-worker ./cmd/taxonomy-worker
-	@echo "  ✓ taxonomy worker"
-
-dev-build: dev-build-server dev-build-controller dev-build-generate-worker dev-build-taxonomy-worker
-	@echo "  ✓ Binaries built"
-
-# ── Dev lifecycle ──
-
-dev-start-controller:
-	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
-	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
-	@sleep 1
-	@find /tmp/breakfix-controller.log /tmp/breakfix-controller.pid -depth -delete 2>/dev/null || true
-	@nohup $(BIN_DIR)/breakfix-controller -config $(DEV_CONFIG) >/tmp/breakfix-controller.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-controller.pid
-	@sleep 3
-	@pid=$$(cat /tmp/breakfix-controller.pid 2>/dev/null); \
-	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Controller failed to stay up"; tail -20 /tmp/breakfix-controller.log; exit 1; }
-	@curl -fsS http://localhost:8081/healthz >/dev/null || { echo "  ✗ Controller health check failed"; tail -20 /tmp/breakfix-controller.log; exit 1; }
-	@echo "  ✓ Controller :8081"
-
-dev-start-server:
-	@test -f $(DEV_CONFIG) || { echo "  ✗ Missing $(DEV_CONFIG). Copy $(CONFIG_DIR)/breakfix.example.yaml to $(CONFIG) and run make dev-config."; exit 1; }
-	@lsof -ti:9090 | xargs kill -9 2>/dev/null || true
-	@sleep 1
-	@find /tmp/breakfix-server.log /tmp/breakfix-server.pid -depth -delete 2>/dev/null || true
-	@env BREAKFIX_GENERATE_WORKER_API_KEY="$(DEV_GENERATE_WORKER_API_KEY)" \
-		BREAKFIX_TAXONOMY_WORKER_API_KEY="$(DEV_TAXONOMY_WORKER_API_KEY)" \
-		BREAKFIX_CATALOG_ADMIN_TOKEN="$(DEV_CATALOG_ADMIN_TOKEN)" \
-		nohup $(BIN_DIR)/breakfix-server -config $(DEV_CONFIG) >/tmp/breakfix-server.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-server.pid
-	@sleep 3
-	@pid=$$(cat /tmp/breakfix-server.pid 2>/dev/null); \
-	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Server failed to stay up"; tail -20 /tmp/breakfix-server.log; exit 1; }
-	@curl -fsS http://localhost:9090/api/openapi.json >/dev/null || { echo "  ✗ Server HTTP check failed"; tail -20 /tmp/breakfix-server.log; exit 1; }
-	@echo "  ✓ Server :9090"
-
-dev-worker-configs: dev-config
-	@mkdir -p $(DEV_RUN_DIR)
-	@sed 's/^health_port:.*/health_port: 18082/' $(DEV_CONFIG) > $(DEV_GENERATE_WORKER_CONFIG)
-	@sed 's/^health_port:.*/health_port: 18083/' $(DEV_CONFIG) > $(DEV_TAXONOMY_WORKER_CONFIG)
-
-dev-start-generate-worker: dev-worker-configs
-	@find /tmp/breakfix-generate-worker.log /tmp/breakfix-generate-worker.pid -depth -delete 2>/dev/null || true
-	@env BREAKFIX_WORKER_API_KEY="$(DEV_GENERATE_WORKER_API_KEY)" nohup $(BIN_DIR)/breakfix-generate-worker -config $(DEV_GENERATE_WORKER_CONFIG) >/tmp/breakfix-generate-worker.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-generate-worker.pid
-	@sleep 1
-	@pid=$$(cat /tmp/breakfix-generate-worker.pid 2>/dev/null); \
-	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Generate Worker failed to stay up"; tail -20 /tmp/breakfix-generate-worker.log; exit 1; }
-	@curl -fsS http://localhost:18082/healthz >/dev/null || { echo "  ✗ Generate Worker health check failed"; tail -20 /tmp/breakfix-generate-worker.log; exit 1; }
-	@echo "  ✓ Generate Worker :18082"
-
-dev-start-taxonomy-worker: dev-worker-configs
-	@find /tmp/breakfix-taxonomy-worker.log /tmp/breakfix-taxonomy-worker.pid -depth -delete 2>/dev/null || true
-	@env BREAKFIX_WORKER_API_KEY="$(DEV_TAXONOMY_WORKER_API_KEY)" nohup $(BIN_DIR)/breakfix-taxonomy-worker -config $(DEV_TAXONOMY_WORKER_CONFIG) >/tmp/breakfix-taxonomy-worker.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-taxonomy-worker.pid
-	@sleep 1
-	@pid=$$(cat /tmp/breakfix-taxonomy-worker.pid 2>/dev/null); \
-	[ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null || { echo "  ✗ Taxonomy Worker failed to stay up"; tail -20 /tmp/breakfix-taxonomy-worker.log; exit 1; }
-	@curl -fsS http://localhost:18083/healthz >/dev/null || { echo "  ✗ Taxonomy Worker health check failed"; tail -20 /tmp/breakfix-taxonomy-worker.log; exit 1; }
-	@echo "  ✓ Taxonomy Worker :18083"
-
-dev-up: dev-config dev-start-controller dev-start-server dev-start-generate-worker dev-start-taxonomy-worker
-	@echo "  ✓ Server, Controller, Generate Worker, and Taxonomy Worker running"
-
-dev-down:
-	@{ [ -f /tmp/breakfix-server.pid ] && kill $$(cat /tmp/breakfix-server.pid) 2>/dev/null && find /tmp/breakfix-server.pid -depth -delete && echo "  ✓ Server stopped"; } || \
-	 { lsof -ti:9090 | xargs kill 2>/dev/null && echo "  ✓ Server stopped"; } || echo "  - Server not running"
-	@{ [ -f /tmp/breakfix-controller.pid ] && kill $$(cat /tmp/breakfix-controller.pid) 2>/dev/null && find /tmp/breakfix-controller.pid -depth -delete && echo "  ✓ Controller stopped"; } || \
-	 { lsof -ti:8081 | xargs kill 2>/dev/null && echo "  ✓ Controller stopped"; } || echo "  - Controller not running"
-	@{ [ -f /tmp/breakfix-generate-worker.pid ] && kill $$(cat /tmp/breakfix-generate-worker.pid) 2>/dev/null && find /tmp/breakfix-generate-worker.pid -depth -delete && echo "  ✓ Generate Worker stopped"; } || echo "  - Generate Worker not running"
-	@{ [ -f /tmp/breakfix-taxonomy-worker.pid ] && kill $$(cat /tmp/breakfix-taxonomy-worker.pid) 2>/dev/null && find /tmp/breakfix-taxonomy-worker.pid -depth -delete && echo "  ✓ Taxonomy Worker stopped"; } || echo "  - Taxonomy Worker not running"
-	@lsof -ti:8081 | xargs kill 2>/dev/null || true
-
-dev-reset: dev-down
-	@if [ -d data ]; then find data -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi
-	@mkdir -p data
-	@echo "  ✓ Data directory reset"
-
-# ── Dev shortcuts (build + restart) ──
-
-dev-server: dev-config dev-build-server dev-start-server
-dev-controller: dev-config dev-build-controller dev-start-controller
-dev-generate-worker: dev-config dev-build-generate-worker dev-start-generate-worker
-dev-taxonomy-worker: dev-config dev-build-taxonomy-worker dev-start-taxonomy-worker
-
-# ── In-cluster local debugging (Telepresence) ──
-
-telepresence-connect:
-	$(TELEPRESENCE) connect
-
-telepresence-server:
-	$(TELEPRESENCE) server
-
-telepresence-controller:
-	$(TELEPRESENCE) controller
-
-telepresence-generate-worker:
-	$(TELEPRESENCE) generate-worker
-
-telepresence-taxonomy-worker:
-	$(TELEPRESENCE) taxonomy-worker
-
-telepresence-down:
-	$(TELEPRESENCE) down all
-
-telepresence-status:
-	$(TELEPRESENCE) status
-
-telepresence-disconnect:
-	$(TELEPRESENCE) disconnect
-
-e2e-server-recovery:
-	npm ci --prefix test
-	npm run test:recovery --prefix test -- --workers=1
-
-e2e-runtime-browser:
-	npm ci --prefix test
-	npm run test:runtime:browser --prefix test -- --workers=1
-
-e2e-agent-assistant:
-	npm ci --prefix test
-	npm run test:agent-live:assistant --prefix test -- --workers=1
-
-e2e-agent-soak:
-	npm ci --prefix test
-	npm run test:agent-live:soak --prefix test -- --workers=1
-
-e2e-agent-node:
-	npm ci --prefix test
-	npm run test:agent-live:node --prefix test -- --workers=1
-
-e2e-agent-k8s:
-	npm ci --prefix test
-	npm run test:agent-live:k8s --prefix test -- --workers=1
-
-e2e:
-	npm ci --prefix test
-	npm run test:e2e --prefix test
-# ── Dev environment ──
-
-dev-data:
-	@mkdir -p data
-	@echo "  ✓ Data dir ready"
+CATALOG_SOURCE ?= catalog
+CATALOG_ARCHIVE ?= dist/catalog.oci.tar
+CATALOG_REFERENCE ?=
+CATALOG_REGISTRY_ENDPOINT ?=
+CATALOG_TRUST_BUNDLE_FILE ?=
+CATALOG_BUNDLE ?=
+CATALOG_SERVER_URL ?= http://localhost:9090
+CATALOG_ADMIN_TOKEN ?= $(BREAKFIX_CATALOG_ADMIN_TOKEN)
 
 generate:
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
@@ -250,168 +51,53 @@ verify-generated:
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR) output:dir=$$tmp; \
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=$$tmp/crd; \
 	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
-	diff -ru --exclude=kustomization.yaml deploy/crds $$tmp/crd; \
+	diff -ru deploy/crds $$tmp/crd; \
 	sed "s|^output:.*|output: $$tmp/server.gen.go|" $(OPENAPI_GO_CONFIG) >"$$tmp/oapi-codegen.yaml" && \
 	$(OAPI_CODEGEN) --config "$$tmp/oapi-codegen.yaml" $(OPENAPI_SPEC) && \
 	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o "$$tmp/frontend" && \
 	diff -u $(OPENAPI_GO_OUTPUT) "$$tmp/server.gen.go" && \
 	diff -ru $(OPENAPI_FRONTEND_OUTPUT) "$$tmp/frontend"
 
-dev-crd:
-	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crds
-	@kubectl apply -f deploy/crds/breakfix.dev_nodeenvironments.yaml >/dev/null
-	@kubectl apply -f deploy/crds/breakfix.dev_vk8senvironments.yaml >/dev/null
-	@echo "  ✓ CRDs applied"
+build:
+	npm ci --prefix $(WEB_DIR)
+	npm run build --prefix $(WEB_DIR)
+	@mkdir -p $(WEB_EMBED_DIR)
+	@find $(WEB_EMBED_DIR) -mindepth 1 ! -name .gitkeep -delete
+	@cp -a $(WEB_DIST)/. $(WEB_EMBED_DIR)/
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-server ./cmd/server
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-controller ./cmd/controller
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-generate-worker ./cmd/generate-worker
+	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-taxonomy-worker ./cmd/taxonomy-worker
 
-dev-rbac:
-	@kubectl create namespace breakfix-system --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-	@kubectl -n breakfix-system apply -f deploy/runtime/rbac.yaml >/dev/null
-	@secret_type="$$(kubectl -n breakfix-system get secret breakfix-registry-pull -o jsonpath='{.type}' 2>/dev/null || true)"; \
-		{ [ -z "$$secret_type" ] || [ "$$secret_type" = 'kubernetes.io/dockerconfigjson' ]; } || \
-		{ echo "  ✗ Docker config Secret breakfix-registry-pull has the wrong type."; exit 1; }
-	@echo "  ✓ RBAC applied"
+images: build
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG) -f build/images/server/Dockerfile $(BIN_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG) -f build/images/controller/Dockerfile $(BIN_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-generate-worker:$(RUNTIME_IMAGE_TAG) -f build/images/generate-worker/Dockerfile $(BIN_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-taxonomy-worker:$(RUNTIME_IMAGE_TAG) -f build/images/taxonomy-worker/Dockerfile $(BIN_DIR)
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-k8s-base:latest build/images/k8s-base
 
-dev-incus:
-	./dev/incus-bootstrap.sh
+deploy-kind: images
+	./scripts/kind/runtime.sh
 
-dev-incus-secrets: dev-incus
-	@for role in server controller generate; do \
-		kubectl -n breakfix-system create secret generic breakfix-incus-$$role \
-			--from-file=server.crt=.local/incus/$$role/server.crt \
-			--from-file=client.crt=.local/incus/$$role/client.crt \
-			--from-file=client.key=.local/incus/$$role/client.key \
-			--dry-run=client -o yaml | kubectl apply -f - >/dev/null; \
-	done
-	@set -eu; \
-		remote="$${BREAKFIX_INCUS_REMOTE:-incus-cluster}"; \
-		image_project="$${BREAKFIX_INCUS_IMAGE_PROJECT:-breakfix-images}"; \
-		base_alias="$${BREAKFIX_INCUS_BASE_ALIAS:-node-systemd-base-v1}"; \
-		runtime_secret="$${BREAKFIX_RUNTIME_SECRET:-breakfix-runtime}"; \
-		fingerprint="$$(incus image list "$$remote:" "$$base_alias" --project "$$image_project" --format csv,noheader --columns F)"; \
-		case "$$fingerprint" in \
-		  [0-9a-f][0-9a-f]* ) [ $${#fingerprint} -eq 64 ] ;; \
-		  * ) echo "  ✗ unable to resolve full Incus base fingerprint for $$base_alias"; exit 1 ;; \
-		esac; \
-		encoded="$$(printf '%s' "$$fingerprint" | base64 | tr -d '\n')"; \
-		patch="$$(jq -cn --arg fingerprint "$$encoded" '{data: {incus_base_image_fingerprint: $$fingerprint}}')"; \
-		kubectl -n breakfix-system patch secret "$$runtime_secret" --type merge --patch "$$patch" >/dev/null; \
-		printf '  ✓ Role-specific Incus Secrets applied; base fingerprint recorded: %s\n' "$$fingerprint"
+reset-kind:
+	./scripts/kind/reset-state.sh
 
-dev-kind-push-k8s-base:
-	./dev/kind-push-k8s-base.sh
+test-unit:
+	go test -count=1 ./...
 
-dev-kind-registry:
-	./dev/kind-registry.sh
+catalog-package:
+	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_REGISTRY_ENDPOINT),-registry-endpoint "$(CATALOG_REGISTRY_ENDPOINT)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
 
-dev-kind-runtime:
-	./dev/kind-runtime.sh
+catalog-install:
+	@test -n "$(CATALOG_BUNDLE)" || { echo "CATALOG_BUNDLE must be an immutable OCI digest reference"; exit 2; }
+	@test -n "$(CATALOG_ADMIN_TOKEN)" || { echo "CATALOG_ADMIN_TOKEN or BREAKFIX_CATALOG_ADMIN_TOKEN is required"; exit 2; }
+	curl --fail --show-error --silent \
+		-H "X-Breakfix-Catalog-Token: $(CATALOG_ADMIN_TOKEN)" \
+		-H 'Content-Type: application/json' \
+		--data '{"bundle":"$(CATALOG_BUNDLE)"}' \
+		"$(CATALOG_SERVER_URL)/api/admin/catalog/releases"
 
-dev-kind-reset-state:
-	./dev/kind-reset-state.sh
-
-dev-images:
-	@$(MAKE) --no-print-directory k8s-base-image
-	@echo "  ✓ Platform base images"
-
-dev: dev-config dev-data dev-crd dev-rbac dev-images dev-build dev-up dev-status
-	@echo ""
-	@echo "══════════════════════════════════════"
-	@echo "  Breakfix dev environment ready"
-	@echo "══════════════════════════════════════"
-
-dev-status:
-	@echo "  Web UI:"
-	@echo "    http://localhost:9090"
-
-# ═══════════════════════════════════════════════════════════════
-# Dev config
-# ═══════════════════════════════════════════════════════════════
-
-dev-config:
-	@mkdir -p $(dir $(DEV_CONFIG))
-	@sed \
-		-e 's|^data_dir:.*|data_dir: ./data|' \
-		-e "s|^kubeconfig:.*|kubeconfig: $${HOME}/.kube/config|" \
-		$(CONFIG) > $(DEV_CONFIG)
-	@echo "  ✓ $(DEV_CONFIG) generated"
-
-# ═══════════════════════════════════════════════════════════════
-# Production build (bin/release/<os>-<arch>/ — stripped, with LDFLAGS)
-# ═══════════════════════════════════════════════════════════════
-
-build-server: web-build
-	@mkdir -p $(SERVER_RELEASE_DIR)
-	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(SERVER_RELEASE_BIN) ./cmd/server
-	@echo "  ✓ Server binary"
-
-build-controller:
-	@mkdir -p $(CONTROLLER_RELEASE_DIR)
-	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(CONTROLLER_RELEASE_BIN) ./cmd/controller
-	@echo "  ✓ Controller binary"
-
-build-generate-worker:
-	@mkdir -p $(GENERATE_WORKER_RELEASE_DIR)
-	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(GENERATE_WORKER_RELEASE_BIN) ./cmd/generate-worker
-	@echo "  ✓ Generate Worker binary"
-
-build-taxonomy-worker:
-	@mkdir -p $(TAXONOMY_WORKER_RELEASE_DIR)
-	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(TAXONOMY_WORKER_RELEASE_BIN) ./cmd/taxonomy-worker
-	@echo "  ✓ Taxonomy Worker binary"
-
-build: build-server build-controller build-generate-worker build-taxonomy-worker
-	@echo "  ✓ Production binaries built"
-
-runtime-images: build-server build-controller build-generate-worker build-taxonomy-worker
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG) -f deploy/images/server/Dockerfile $(SERVER_RELEASE_DIR)
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG) -f deploy/images/controller/Dockerfile $(CONTROLLER_RELEASE_DIR)
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-generate-worker:$(RUNTIME_IMAGE_TAG) -f deploy/images/generate-worker/Dockerfile $(GENERATE_WORKER_RELEASE_DIR)
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-taxonomy-worker:$(RUNTIME_IMAGE_TAG) -f deploy/images/taxonomy-worker/Dockerfile $(TAXONOMY_WORKER_RELEASE_DIR)
-	@echo "  ✓ Runtime images built"
-
-runtime-push: runtime-images
-	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG)
-	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG)
-	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-generate-worker:$(RUNTIME_IMAGE_TAG)
-	docker push $(RUNTIME_IMAGE_REPOSITORY)/breakfix-taxonomy-worker:$(RUNTIME_IMAGE_TAG)
-	@echo "  ✓ Runtime images pushed"
-
-# release-manifest renders the canonical deployment package after pushing all
-# four runtime images and replaces every mutable development reference with the
-# Registry-resolved immutable digest. The resulting YAML is the release's
-# deployable artifact, including the two background Workflow worker images.
-release-manifest: runtime-push
-	@test "$(RUNTIME_IMAGE_TAG)" != "dev" || { echo "  ✗ RUNTIME_IMAGE_TAG must be an immutable release tag"; exit 1; }
-	@mkdir -p $(dir $(RELEASE_MANIFEST))
-	kubectl kustomize . > $(RELEASE_MANIFEST)
-	@set -eu; \
-	for component in server controller generate-worker taxonomy-worker; do \
-		ref="$(RUNTIME_IMAGE_REPOSITORY)/breakfix-$$component:$(RUNTIME_IMAGE_TAG)"; \
-		digest="$$(docker buildx imagetools inspect "$$ref" --format '{{.Manifest.Digest}}')"; \
-		[ -n "$$digest" ] || { echo "  ✗ resolve digest for $$ref"; exit 1; }; \
-		sed -i "s|$(RELEASE_SOURCE_IMAGE_REPOSITORY)/breakfix-$$component:dev|$(RUNTIME_IMAGE_REPOSITORY)/breakfix-$$component@$$digest|g" $(RELEASE_MANIFEST); \
-	done
-	@! rg -n '$(RELEASE_SOURCE_IMAGE_REPOSITORY)/breakfix-(server|controller|generate-worker|taxonomy-worker):dev' $(RELEASE_MANIFEST)
-	@echo "  ✓ $(RELEASE_MANIFEST)"
-
-# ═══════════════════════════════════════════════════════════════
-# Platform images (local dev)
-# ═══════════════════════════════════════════════════════════════
-
-k8s-base-image:
-	@$(MAKE) --no-print-directory dev-kind-registry
-	docker build --platform linux/amd64 --provenance=false -t breakfix-k8s-base:latest ./deploy/images/k8s-base
-	./dev/kind-push-k8s-base.sh
-	@echo "  ✓ breakfix-k8s-base published to the configured OCI Registry"
-
-# ═══════════════════════════════════════════════════════════════
-# Ops
-# ═══════════════════════════════════════════════════════════════
-
-lint:
-	golangci-lint run ./...
-
-clean:
-	rm -rf $(BIN_DIR)/ dist/
-	@echo "  ✓ Cleaned"
+test-e2e:
+	npm ci --prefix test
+	npm run test:e2e --prefix test

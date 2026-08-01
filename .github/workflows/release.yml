@@ -30,8 +30,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build web application
-        run: make web-build
       - name: Verify generated deployment contracts
         run: make verify-generated
       - name: Publish OCI images and digest-pinned deployment manifest
@@ -40,7 +38,22 @@ jobs:
           COMMIT: ${{ github.sha }}
           RUNTIME_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}
           RUNTIME_IMAGE_TAG: ${{ github.ref_name }}
-        run: make release-manifest TARGETOS=linux TARGETARCH=amd64
+        run: |
+          make images TARGETOS=linux TARGETARCH=amd64
+          for component in server controller generate-worker taxonomy-worker; do
+            image="$RUNTIME_IMAGE_REPOSITORY/breakfix-$component:$RUNTIME_IMAGE_TAG"
+            docker push "$image"
+            digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+            test -n "$digest"
+            printf '%s@%s\n' "$RUNTIME_IMAGE_REPOSITORY/breakfix-$component" "$digest" > "/tmp/breakfix-$component.ref"
+          done
+          mkdir -p dist
+          kubectl kustomize . > "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
+          for component in server controller generate-worker taxonomy-worker; do
+            reference="$(cat "/tmp/breakfix-$component.ref")"
+            sed -i "s|ghcr.io/breakfix/breakfix-$component:dev|$reference|g" "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
+          done
+          ! grep -Eq 'ghcr.io/breakfix/breakfix-(server|controller|generate-worker|taxonomy-worker):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
       - name: Release deployment artifact
         uses: softprops/action-gh-release@v2
         with:
