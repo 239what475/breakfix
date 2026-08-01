@@ -7,8 +7,8 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/k8s"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -72,7 +72,7 @@ type environmentRuntimeAdapter struct {
 	readyTimeout    time.Duration
 	list            func(context.Context, string) ([]activeEnvironment, error)
 	get             func(context.Context, string) (*activeEnvironment, error)
-	create          func(context.Context, *db.User, *challenge.Entry) (string, error)
+	create          func(context.Context, *postgres.User, *challenge.Entry) (string, error)
 	updateSpec      func(context.Context, string, func(*breakfixv1.EnvironmentSpec)) error
 	requestDeletion func(context.Context, string) error
 }
@@ -137,7 +137,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				}
 				return environmentFromNode(environment), nil
 			},
-			create: func(ctx context.Context, user *db.User, entry *challenge.Entry) (string, error) {
+			create: func(ctx context.Context, user *postgres.User, entry *challenge.Entry) (string, error) {
 				spec, err := h.newEnvironmentSpec(user.ID, entry)
 				if err != nil {
 					return "", err
@@ -203,7 +203,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				}
 				return environmentFromVK8s(environment), nil
 			},
-			create: func(ctx context.Context, user *db.User, entry *challenge.Entry) (string, error) {
+			create: func(ctx context.Context, user *postgres.User, entry *challenge.Entry) (string, error) {
 				spec, err := h.newEnvironmentSpec(user.ID, entry)
 				if err != nil {
 					return "", err

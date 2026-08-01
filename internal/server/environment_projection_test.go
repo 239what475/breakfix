@@ -6,7 +6,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -47,7 +47,7 @@ func TestEnvironmentStatusProjectionRecordsReadyAndCompletionIdempotently(t *tes
 			t.Fatalf("completed projection = delete:%v err:%v", deleteAfter, err)
 		}
 	}
-	summary, err := handler.db.LearningSummary(ctx, "u-demo", completed.Add(time.Minute))
+	summary, err := handler.db.Environment.LearningSummary(ctx, "u-demo", completed.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,11 +71,11 @@ func TestEnvironmentStatusProjectionFinishesDestroyedAttempt(t *testing.T) {
 	if err != nil || !deleteAfter {
 		t.Fatalf("destroyed projection = delete:%v err:%v", deleteAfter, err)
 	}
-	history, err := handler.db.ListLearningHistory(ctx, "u-demo", db.LearningHistoryFilter{ChallengeIDs: []string{"chal-r7m4x2q9v6kp"}}, 10, nil, destroyed.Add(time.Minute))
+	history, err := handler.db.Environment.ListLearningHistory(ctx, "u-demo", postgres.LearningHistoryFilter{ChallengeIDs: []string{"chal-r7m4x2q9v6kp"}}, 10, nil, destroyed.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 1 || history[0].Outcome != db.AttemptExpired {
+	if len(history) != 1 || history[0].Outcome != postgres.AttemptExpired {
 		t.Fatalf("learning history = %#v", history)
 	}
 }
@@ -94,7 +94,7 @@ func TestEnvironmentStatusProjectionRecordsCheckpointFirstPassOnce(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	events, err := handler.db.ListCheckpointFirstPasses(ctx, []string{projection.UID})
+	events, err := handler.db.Environment.ListCheckpointFirstPasses(ctx, []string{projection.UID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestVerificationEnvironmentIsNotProjectedIntoLearningHistory(t *testing.T) 
 	if deleteAfter, err := handler.projectEnvironmentRecord(ctx, projection); err != nil || deleteAfter {
 		t.Fatalf("verification projection = delete:%v err:%v", deleteAfter, err)
 	}
-	summary, err := handler.db.LearningSummary(ctx, "u-demo", readyAt.Add(time.Minute))
+	summary, err := handler.db.Environment.LearningSummary(ctx, "u-demo", readyAt.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

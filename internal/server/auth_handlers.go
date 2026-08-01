@@ -7,8 +7,8 @@ import (
 
 	"log/slog"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/auth"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -27,7 +27,7 @@ func (h *Handler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "password too short (min 6)"})
 		return
 	}
-	if _, err := h.db.GetUserBySubject(req.Username); err == nil {
+	if _, err := h.db.Identity.GetUserBySubject(req.Username); err == nil {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "user already exists"})
 		return
 	}
@@ -44,7 +44,7 @@ func (h *Handler) Register(c *gin.Context) {
 	}
 
 	id := fmt.Sprintf("u-%d", time.Now().UnixNano())
-	if _, err = h.db.CreateUserWithAuth(id, req.Username, passwordHash, secret); err != nil {
+	if _, err = h.db.Identity.CreateUserWithAuth(id, req.Username, passwordHash, secret); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "failed to create user"})
 		return
 	}
@@ -63,7 +63,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.db.GetUserBySubject(req.Username)
+	user, err := h.db.Identity.GetUserBySubject(req.Username)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "invalid credentials"})
 		return
@@ -91,19 +91,19 @@ func (h *Handler) Login(c *gin.Context) {
 	})
 }
 
-func (h *Handler) getUser(c *gin.Context) *db.User {
+func (h *Handler) getUser(c *gin.Context) *postgres.User {
 	uid, exists := c.Get("user_id")
 	if !exists {
 		return nil
 	}
-	user, err := h.db.GetUserByID(uid.(string))
+	user, err := h.db.Identity.GetUserByID(uid.(string))
 	if err != nil {
 		return nil
 	}
 	return user
 }
 
-func (h *Handler) requireUser(c *gin.Context) *db.User {
+func (h *Handler) requireUser(c *gin.Context) *postgres.User {
 	user := h.getUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "login required"})

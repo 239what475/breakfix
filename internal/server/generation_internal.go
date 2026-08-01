@@ -47,7 +47,7 @@ func (h *Handler) InternalClaimGenerationWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
-	claim, err := h.db.ClaimGenerationWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
+	claim, err := h.db.Generation.ClaimGenerationWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
 		h.writeInternalGenerationError(c, err)
 		return
@@ -69,7 +69,7 @@ func (h *Handler) InternalRenewGenerationWorkflow(c *gin.Context) {
 	}
 	claim, err := h.generationClaim(c, request.LeaseCredential)
 	if err == nil {
-		err = h.db.RenewGenerationLease(c.Request.Context(), *claim, leaseTTL, time.Now().UTC())
+		err = h.db.Generation.RenewGenerationLease(c.Request.Context(), *claim, leaseTTL, time.Now().UTC())
 	}
 	if err != nil {
 		h.writeInternalGenerationError(c, err)
@@ -88,7 +88,7 @@ func (h *Handler) InternalGenerationContext(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	context, err := h.db.LoadGenerationContext(c.Request.Context(), *claim, time.Now().UTC())
+	context, err := h.db.Generation.LoadGenerationContext(c.Request.Context(), *claim, time.Now().UTC())
 	if err != nil {
 		h.writeInternalGenerationError(c, err)
 		return
@@ -121,7 +121,7 @@ func (h *Handler) InternalStartGenerationAgentRun(c *gin.Context) {
 		h.writeInternalGenerationError(c, errors.New("generation agent run metadata does not match Server configuration"))
 		return
 	}
-	run, err := h.db.StartGenerationAgentRun(c.Request.Context(), *claim, agent.CreateRun{
+	run, err := h.db.Generation.StartGenerationAgentRun(c.Request.Context(), *claim, agent.CreateRun{
 		ID:            agent.NewID("generation-agent-run"),
 		Purpose:       request.Purpose,
 		OwnerKind:     "generation-workflow",
@@ -161,26 +161,26 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 	case request.GeneratedCandidate != nil:
 		err = h.finalizeGeneratedCandidate(c, *claim, *request.GeneratedCandidate, now)
 	case request.Judgement != nil:
-		err = h.db.FinalizeGenerationJudgement(c.Request.Context(), *claim, request.Judgement.RunID, request.Judgement.Approved, request.Judgement.Feedback, now)
+		err = h.db.Generation.FinalizeGenerationJudgement(c.Request.Context(), *claim, request.Judgement.RunID, request.Judgement.Approved, request.Judgement.Feedback, now)
 	case request.Build != nil:
 		err = h.completeGenerationBuild(c, *claim, *request.Build, now)
 	case request.ArtifactPublish != nil:
 		err = h.completeGenerationArtifactPublish(c, *claim, request.ArtifactPublish.Artifact, now)
 	case request.VerificationEnvironment != nil:
-		err = h.db.RecordGenerationVerificationEnvironment(c.Request.Context(), *claim, request.VerificationEnvironment.Environment, now)
+		err = h.db.Generation.RecordGenerationVerificationEnvironment(c.Request.Context(), *claim, request.VerificationEnvironment.Environment, now)
 	case request.Verification != nil:
 		err = h.validateGenerationVerificationReport(c, *claim, request.Verification.Report)
 		if err == nil {
-			err = h.db.CompleteGenerationVerification(c.Request.Context(), *claim, request.Verification.Report, now)
+			err = h.db.Generation.CompleteGenerationVerification(c.Request.Context(), *claim, request.Verification.Report, now)
 		}
 	case request.ChallengePublish != nil:
 		err = h.completeGenerationChallengePublish(c, *claim, request.ChallengePublish.Artifact, now)
 	case request.Cleanup != nil:
 		err = h.completeGenerationCleanup(c, *claim, now)
 	case request.InfrastructureFailure != nil:
-		_, err = h.db.ReportGenerationInfrastructureFailure(c.Request.Context(), *claim, request.ExpectedState, request.InfrastructureFailure.Failure, now)
+		_, err = h.db.Generation.ReportGenerationInfrastructureFailure(c.Request.Context(), *claim, request.ExpectedState, request.InfrastructureFailure.Failure, now)
 	case request.ArtifactFailure != nil:
-		err = h.db.ReportGenerationArtifactFailure(c.Request.Context(), *claim, request.ExpectedState, request.ArtifactFailure.Failure, request.ArtifactFailure.Report, now)
+		err = h.db.Generation.ReportGenerationArtifactFailure(c.Request.Context(), *claim, request.ExpectedState, request.ArtifactFailure.Failure, request.ArtifactFailure.Report, now)
 	}
 	if err != nil {
 		var artifactErr *generation.ArtifactError
@@ -188,7 +188,7 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 			h.writeInternalGenerationError(c, err)
 			return
 		}
-		if reportErr := h.db.ReportGenerationArtifactFailure(c.Request.Context(), *claim, request.ExpectedState, artifactErr.Failure, artifactErr.Report, now); reportErr != nil {
+		if reportErr := h.db.Generation.ReportGenerationArtifactFailure(c.Request.Context(), *claim, request.ExpectedState, artifactErr.Failure, artifactErr.Report, now); reportErr != nil {
 			h.writeInternalGenerationError(c, reportErr)
 			return
 		}
@@ -294,7 +294,7 @@ func (h *Handler) generationClaim(c *gin.Context, credential generation.LeaseCre
 	if h.db == nil || !credential.Valid() || strings.TrimSpace(c.Param("id")) == "" {
 		return nil, errors.New("valid generation workflow lease credentials are required")
 	}
-	return h.db.GetGenerationClaim(c.Request.Context(), c.Param("id"), credential, time.Now().UTC())
+	return h.db.Generation.GetGenerationClaim(c.Request.Context(), c.Param("id"), credential, time.Now().UTC())
 }
 
 func (h *Handler) generationCandidateForClaim(c *gin.Context, credential generation.LeaseCredential) (*generation.Claim, *generation.Revision, error) {
@@ -305,7 +305,7 @@ func (h *Handler) generationCandidateForClaim(c *gin.Context, credential generat
 	if strings.TrimSpace(claim.Workflow.CandidateRevisionID) == "" {
 		return nil, nil, generation.ErrCandidateInvalidState
 	}
-	revision, err := h.db.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
+	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -313,18 +313,18 @@ func (h *Handler) generationCandidateForClaim(c *gin.Context, credential generat
 }
 
 func (h *Handler) refreshGenerationClaim(c *gin.Context, prior generation.Claim) (*generation.Claim, error) {
-	workflow, err := h.db.GetGenerationWorkflow(c.Request.Context(), prior.Workflow.ID)
+	workflow, err := h.db.Generation.GetGenerationWorkflow(c.Request.Context(), prior.Workflow.ID)
 	if err != nil {
 		return nil, err
 	}
 	if workflow.State.Terminal() || workflow.State == generation.StateNeedsAuthorReview || strings.TrimSpace(workflow.LeaseOwner) == "" {
 		return nil, nil
 	}
-	return h.db.RefreshGenerationClaim(c.Request.Context(), workflow.ID, prior.LeaseOwner, time.Now().UTC())
+	return h.db.Generation.RefreshGenerationClaim(c.Request.Context(), workflow.ID, prior.LeaseOwner, time.Now().UTC())
 }
 
 func (h *Handler) finalizeGeneratedCandidate(c *gin.Context, claim generation.Claim, result generation.GeneratedCandidate, now time.Time) error {
-	run, err := h.db.GetRun(c.Request.Context(), result.RunID)
+	run, err := h.db.Agent.GetRun(c.Request.Context(), result.RunID)
 	if err != nil {
 		return err
 	}
@@ -346,15 +346,15 @@ func (h *Handler) finalizeGeneratedCandidate(c *gin.Context, claim generation.Cl
 	}
 	revision := generation.Revision{
 		ID:                 id,
-		AuthoringSessionID: claim.Workflow.Source.Ref,
-		AuthoringRevision:  claim.Workflow.AuthoringRevision,
+		Source:             claim.Workflow.Source,
+		SourceRevision:     claim.Workflow.SourceRevision,
 		GeneratorSessionID: run.SessionID,
 		GeneratorRunID:     run.ID,
 		ArchivePath:        path,
 		ArchiveSHA256:      digest,
 		Snapshot:           snapshot,
 	}
-	if err := h.db.FinalizeGeneratedCandidate(c.Request.Context(), claim, run.ID, revision, now); err != nil {
+	if err := h.db.Generation.FinalizeGeneratedCandidate(c.Request.Context(), claim, run.ID, revision, now); err != nil {
 		return err
 	}
 	h.scheduleGeneratorWorkspaceCleanup(run.ID)
@@ -362,7 +362,7 @@ func (h *Handler) finalizeGeneratedCandidate(c *gin.Context, claim generation.Cl
 }
 
 func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim, result generation.BuildResult, now time.Time) error {
-	revision, err := h.db.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
+	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
 	if err != nil {
 		return err
 	}
@@ -389,22 +389,22 @@ func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim
 	default:
 		return generation.NewArtifactError("BUILD_RUNTIME_INVALID", "candidate runtime is unsupported")
 	}
-	return h.db.CompleteGenerationBuild(c.Request.Context(), claim, output, now)
+	return h.db.Generation.CompleteGenerationBuild(c.Request.Context(), claim, output, now)
 }
 
 func (h *Handler) completeGenerationArtifactPublish(c *gin.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
-	revision, err := h.db.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
+	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
 	if err != nil {
 		return err
 	}
 	if err := h.validateCandidateStagingArtifact(revision.WorkerView(), artifact); err != nil {
 		return generation.NewArtifactError("ARTIFACT_REFERENCE_INVALID", err.Error())
 	}
-	return h.db.CompleteGenerationArtifactPublish(c.Request.Context(), claim, artifact, now)
+	return h.db.Generation.CompleteGenerationArtifactPublish(c.Request.Context(), claim, artifact, now)
 }
 
 func (h *Handler) validateGenerationVerificationReport(c *gin.Context, claim generation.Claim, report generation.VerificationReport) error {
-	revision, err := h.db.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
+	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
 	if err != nil {
 		return err
 	}
@@ -415,7 +415,7 @@ func (h *Handler) validateGenerationVerificationReport(c *gin.Context, claim gen
 }
 
 func (h *Handler) completeGenerationChallengePublish(c *gin.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
-	revision, err := h.db.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
+	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), claim.Workflow.CandidateRevisionID)
 	if err != nil {
 		return err
 	}
@@ -437,7 +437,7 @@ func (h *Handler) completeGenerationChallengePublish(c *gin.Context, claim gener
 	if err != nil {
 		return err
 	}
-	return h.db.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, entry.ID, entry.Revision, base.Revision, now)
+	return h.db.Generation.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, entry.ID, entry.Revision, base.Revision, now)
 }
 
 func (h *Handler) completeGenerationCleanup(c *gin.Context, claim generation.Claim, now time.Time) error {
@@ -446,7 +446,7 @@ func (h *Handler) completeGenerationCleanup(c *gin.Context, claim generation.Cla
 			return err
 		}
 	}
-	return h.db.CompleteGenerationCleanup(c.Request.Context(), claim, now)
+	return h.db.Generation.CompleteGenerationCleanup(c.Request.Context(), claim, now)
 }
 
 func validateGenerationOCIArchiveBytes(data []byte) error {

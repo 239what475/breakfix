@@ -19,8 +19,8 @@ import (
 	"log/slog"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/domain/environment"
+	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/gorilla/websocket"
 )
 

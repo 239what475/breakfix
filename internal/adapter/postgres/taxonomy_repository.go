@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -21,7 +21,7 @@ const taxonomyWorkflowColumns = `id, challenge_id, challenge_revision, state, ba
 	lease_owner, lease_expires_at, next_run_at, last_error, created_at, updated_at`
 const taxonomyWorkflowSelect = `SELECT ` + taxonomyWorkflowColumns + ` FROM taxonomy_workflows`
 
-func (d *DB) CreateOrGetTaxonomyWorkflow(ctx context.Context, challengeID, challengeRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
+func (d *TaxonomyRepository) CreateOrGetTaxonomyWorkflow(ctx context.Context, challengeID, challengeRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
 	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeRevision) == "" || now.IsZero() {
 		return nil, false, errors.New("taxonomy workflow requires challenge identity and current time")
 	}
@@ -70,7 +70,7 @@ func createOrGetTaxonomyWorkflowTx(ctx context.Context, tx *Tx, challengeID, cha
 	return created, created.ID == workflow.ID, nil
 }
 
-func (d *DB) GetTaxonomyWorkflow(ctx context.Context, id string) (*taxonomy.Workflow, error) {
+func (d *TaxonomyRepository) GetTaxonomyWorkflow(ctx context.Context, id string) (*taxonomy.Workflow, error) {
 	workflow, err := scanTaxonomyWorkflow(d.conn.QueryRowContext(ctx, taxonomyWorkflowSelect+` WHERE id = ?`, strings.TrimSpace(id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTaxonomyWorkflowNotFound
@@ -81,7 +81,7 @@ func (d *DB) GetTaxonomyWorkflow(ctx context.Context, id string) (*taxonomy.Work
 	return workflow, nil
 }
 
-func (d *DB) GetTaxonomyWorkflowByChallenge(ctx context.Context, challengeID, challengeRevision string) (*taxonomy.Workflow, error) {
+func (d *TaxonomyRepository) GetTaxonomyWorkflowByChallenge(ctx context.Context, challengeID, challengeRevision string) (*taxonomy.Workflow, error) {
 	workflow, err := scanTaxonomyWorkflow(d.conn.QueryRowContext(ctx, taxonomyWorkflowSelect+` WHERE challenge_id = ? AND challenge_revision = ?`,
 		strings.TrimSpace(challengeID), strings.TrimSpace(challengeRevision)))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -93,7 +93,7 @@ func (d *DB) GetTaxonomyWorkflowByChallenge(ctx context.Context, challengeID, ch
 	return workflow, nil
 }
 
-func (d *DB) ClaimTaxonomyWorkflow(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) (*taxonomy.Claim, error) {
+func (d *TaxonomyRepository) ClaimTaxonomyWorkflow(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) (*taxonomy.Claim, error) {
 	if strings.TrimSpace(workerID) == "" || leaseTTL <= 0 || now.IsZero() {
 		return nil, errors.New("taxonomy workflow claim requires worker, lease ttl, and current time")
 	}
@@ -153,7 +153,7 @@ func (d *DB) ClaimTaxonomyWorkflow(ctx context.Context, workerID string, leaseTT
 // RefreshTaxonomyClaim returns the current lease-fenced workflow after a
 // phase report. Technical retries increment state_attempt, so callers must
 // always use this fresh credential for the next report.
-func (d *DB) RefreshTaxonomyClaim(ctx context.Context, workflowID, leaseOwner string, now time.Time) (*taxonomy.Claim, error) {
+func (d *TaxonomyRepository) RefreshTaxonomyClaim(ctx context.Context, workflowID, leaseOwner string, now time.Time) (*taxonomy.Claim, error) {
 	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(leaseOwner) == "" || now.IsZero() {
 		return nil, errors.New("taxonomy workflow identity and lease owner are required")
 	}
@@ -171,7 +171,7 @@ func (d *DB) RefreshTaxonomyClaim(ctx context.Context, workflowID, leaseOwner st
 	}}, nil
 }
 
-func (d *DB) GetTaxonomyClaim(ctx context.Context, id string, credential taxonomy.LeaseCredential, now time.Time) (*taxonomy.Claim, error) {
+func (d *TaxonomyRepository) GetTaxonomyClaim(ctx context.Context, id string, credential taxonomy.LeaseCredential, now time.Time) (*taxonomy.Claim, error) {
 	if strings.TrimSpace(id) == "" || !credential.Valid() || now.IsZero() {
 		return nil, errors.New("taxonomy workflow lease credentials are required")
 	}
@@ -186,7 +186,7 @@ func (d *DB) GetTaxonomyClaim(ctx context.Context, id string, credential taxonom
 	return &taxonomy.Claim{Workflow: *workflow, LeaseCredential: credential}, nil
 }
 
-func (d *DB) RenewTaxonomyLease(ctx context.Context, claim taxonomy.Claim, leaseTTL time.Duration, now time.Time) error {
+func (d *TaxonomyRepository) RenewTaxonomyLease(ctx context.Context, claim taxonomy.Claim, leaseTTL time.Duration, now time.Time) error {
 	if !claim.Valid() || leaseTTL <= 0 || now.IsZero() {
 		return errors.New("taxonomy workflow lease renewal is invalid")
 	}
@@ -205,7 +205,7 @@ func (d *DB) RenewTaxonomyLease(ctx context.Context, claim taxonomy.Claim, lease
 	return nil
 }
 
-func (d *DB) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, role taxonomyapp.AgentRole, model string, now time.Time) (*agent.Run, error) {
+func (d *TaxonomyRepository) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, role taxonomyapp.AgentRole, model string, now time.Time) (*agent.Run, error) {
 	if !claim.Valid() || !role.Valid() || strings.TrimSpace(model) == "" || now.IsZero() {
 		return nil, errors.New("taxonomy agent run is invalid")
 	}
@@ -245,7 +245,7 @@ func (d *DB) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, ro
 	return created, nil
 }
 
-func (d *DB) FinalizeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, runID string, changes taxonomy.ChangeSet, now time.Time) error {
+func (d *TaxonomyRepository) FinalizeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, runID string, changes taxonomy.ChangeSet, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(runID) == "" || changes.Empty() || now.IsZero() {
 		return errors.New("taxonomy mapper finalization is invalid")
 	}
@@ -273,7 +273,7 @@ func (d *DB) FinalizeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, r
 	return tx.Commit()
 }
 
-func (d *DB) FinalizeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Claim, curriculumRunID, sreRunID string, curriculum, sre taxonomy.Review, latestBaseRevision string, now time.Time) error {
+func (d *TaxonomyRepository) FinalizeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Claim, curriculumRunID, sreRunID string, curriculum, sre taxonomy.Review, latestBaseRevision string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(curriculumRunID) == "" || strings.TrimSpace(sreRunID) == "" || curriculumRunID == sreRunID || taxonomy.ValidateReview(curriculum) != nil || taxonomy.ValidateReview(sre) != nil || now.IsZero() {
 		return errors.New("taxonomy reviewer finalization is invalid")
 	}
@@ -323,7 +323,7 @@ func (d *DB) FinalizeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Clai
 	return tx.Commit()
 }
 
-func (d *DB) ResetTaxonomyForLatest(ctx context.Context, claim taxonomy.Claim, baseRevision, reason string, now time.Time) error {
+func (d *TaxonomyRepository) ResetTaxonomyForLatest(ctx context.Context, claim taxonomy.Claim, baseRevision, reason string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(reason) == "" || now.IsZero() {
 		return errors.New("taxonomy reset requires claim, reason, and current time")
 	}
@@ -345,7 +345,7 @@ func (d *DB) ResetTaxonomyForLatest(ctx context.Context, claim taxonomy.Claim, b
 	return tx.Commit()
 }
 
-func (d *DB) SetTaxonomyExpectedSnapshot(ctx context.Context, claim taxonomy.Claim, expected string, now time.Time) error {
+func (d *TaxonomyRepository) SetTaxonomyExpectedSnapshot(ctx context.Context, claim taxonomy.Claim, expected string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(expected) == "" || now.IsZero() {
 		return errors.New("taxonomy expected snapshot is invalid")
 	}
@@ -361,7 +361,7 @@ func (d *DB) SetTaxonomyExpectedSnapshot(ctx context.Context, claim taxonomy.Cla
 	return nil
 }
 
-func (d *DB) CompleteTaxonomyPublication(ctx context.Context, claim taxonomy.Claim, revision string, now time.Time) error {
+func (d *TaxonomyRepository) CompleteTaxonomyPublication(ctx context.Context, claim taxonomy.Claim, revision string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(revision) == "" || now.IsZero() {
 		return errors.New("taxonomy publication finalization is invalid")
 	}
@@ -380,7 +380,7 @@ func (d *DB) CompleteTaxonomyPublication(ctx context.Context, claim taxonomy.Cla
 // RecordTaxonomyTechnicalFailure leaves the same workflow in its current
 // state. The tenth continuous failure releases the lease for a later worker;
 // it never turns a recoverable outage into a semantic failure.
-func (d *DB) ReportTaxonomyTechnicalFailure(ctx context.Context, claim taxonomy.Claim, expected taxonomy.WorkflowState, message string, runIDs []string, now time.Time) (*taxonomy.Workflow, bool, error) {
+func (d *TaxonomyRepository) ReportTaxonomyTechnicalFailure(ctx context.Context, claim taxonomy.Claim, expected taxonomy.WorkflowState, message string, runIDs []string, now time.Time) (*taxonomy.Workflow, bool, error) {
 	if !claim.Valid() || strings.TrimSpace(message) == "" || now.IsZero() {
 		return nil, false, errors.New("taxonomy technical failure is invalid")
 	}
@@ -469,7 +469,7 @@ func failTaxonomyRunTx(ctx context.Context, tx *Tx, runID, workflowID, message s
 	return nil
 }
 
-func (d *DB) CancelTaxonomyWorkflow(ctx context.Context, id, reason string, now time.Time) error {
+func (d *TaxonomyRepository) CancelTaxonomyWorkflow(ctx context.Context, id, reason string, now time.Time) error {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(reason) == "" || now.IsZero() {
 		return errors.New("taxonomy cancellation is invalid")
 	}
@@ -495,7 +495,7 @@ func (d *DB) CancelTaxonomyWorkflow(ctx context.Context, id, reason string, now 
 	return tx.Commit()
 }
 
-func (d *DB) ListActiveTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Workflow, error) {
+func (d *TaxonomyRepository) ListActiveTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Workflow, error) {
 	rows, err := d.conn.QueryContext(ctx, taxonomyWorkflowSelect+` WHERE state NOT IN (?, ?, ?) ORDER BY created_at, id`, taxonomy.WorkflowCompleted, taxonomy.WorkflowFailed, taxonomy.WorkflowCancelled)
 	if err != nil {
 		return nil, fmt.Errorf("list active taxonomy workflows: %w", err)
@@ -512,7 +512,7 @@ func (d *DB) ListActiveTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Workfl
 	return result, rows.Err()
 }
 
-func (d *DB) ListPublishingTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Workflow, error) {
+func (d *TaxonomyRepository) ListPublishingTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Workflow, error) {
 	rows, err := d.conn.QueryContext(ctx, taxonomyWorkflowSelect+` WHERE state = ? ORDER BY created_at, id`, taxonomy.WorkflowPublishing)
 	if err != nil {
 		return nil, fmt.Errorf("list publishing taxonomy workflows: %w", err)
@@ -532,7 +532,7 @@ func (d *DB) ListPublishingTaxonomyWorkflows(ctx context.Context) ([]taxonomy.Wo
 // RecoverTaxonomyPublication completes a publication whose immutable snapshot
 // is already current after Server crashed between filesystem publication and
 // the database completion record.
-func (d *DB) RecoverTaxonomyPublication(ctx context.Context, id, expectedRevision string, now time.Time) error {
+func (d *TaxonomyRepository) RecoverTaxonomyPublication(ctx context.Context, id, expectedRevision string, now time.Time) error {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(expectedRevision) == "" || now.IsZero() {
 		return errors.New("taxonomy publication recovery is invalid")
 	}

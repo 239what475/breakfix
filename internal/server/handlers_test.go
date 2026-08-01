@@ -136,7 +136,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	seedTestTaxonomy(t, root)
 
 	database := testpostgres.New(t)
-	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +257,7 @@ func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) 
 			ID: "complete", Passed: true, Summary: "done",
 		}}}),
 	})
-	if err := handler.db.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,7 +317,7 @@ func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T
 
 func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	if err := handler.db.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -397,7 +397,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 	writeTestChallenge(t, root)
 	seedTestTaxonomy(t, root)
 	database := testpostgres.New(t)
-	if _, err := database.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -25,7 +25,7 @@ type ChallengeAudienceCounts struct {
 	CompletedUsers int
 }
 
-func (d *DB) ListAuthoringSpaceSessions(ctx context.Context, userID string) ([]AuthoringSpaceSession, error) {
+func (d *ReportingRepository) ListAuthoringSpaceSessions(ctx context.Context, userID string) ([]AuthoringSpaceSession, error) {
 	if err := requiredLearningValue("user id", userID); err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (d *DB) ListAuthoringSpaceSessions(ctx context.Context, userID string) ([]A
 	return sessions, nil
 }
 
-func (d *DB) ChallengeAudienceCounts(ctx context.Context, challengeIDs []string) (map[string]ChallengeAudienceCounts, error) {
+func (d *ReportingRepository) ChallengeAudienceCounts(ctx context.Context, challengeIDs []string) (map[string]ChallengeAudienceCounts, error) {
 	counts := make(map[string]ChallengeAudienceCounts, len(challengeIDs))
 	if len(challengeIDs) == 0 {
 		return counts, nil

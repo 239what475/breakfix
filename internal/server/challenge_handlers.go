@@ -11,8 +11,8 @@ import (
 	"log/slog"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
@@ -68,7 +68,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 
 	existing, _ := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
 	if existing != nil {
-		if err := h.db.FinishChallengeAttempt(c.Request.Context(), existing.UID, db.AttemptReset, time.Now().UTC()); err != nil {
+		if err := h.db.Environment.FinishChallengeAttempt(c.Request.Context(), existing.UID, postgres.AttemptReset, time.Now().UTC()); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record reset attempt: %v", err)})
 			return
 		}
@@ -110,7 +110,7 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	if err := h.db.FinishChallengeAttempt(c.Request.Context(), env.UID, db.AttemptStopped, time.Now().UTC()); err != nil {
+	if err := h.db.Environment.FinishChallengeAttempt(c.Request.Context(), env.UID, postgres.AttemptStopped, time.Now().UTC()); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record stopped attempt: %v", err)})
 		return
 	}
@@ -169,7 +169,7 @@ func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 		return
 	}
 	now := time.Now().UTC()
-	if err := h.db.CreateTerminalTicket(c.Request.Context(), db.TerminalTicket{
+	if err := h.db.Environment.CreateTerminalTicket(c.Request.Context(), postgres.TerminalTicket{
 		TokenHash:      terminalTicketHash(ticket),
 		UserID:         user.ID,
 		EnvironmentUID: env.UID,
@@ -199,7 +199,7 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
 	}
-	ticket, err := h.db.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), challengeID, c.Query("window"), time.Now().UTC())
+	ticket, err := h.db.Environment.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), challengeID, c.Query("window"), time.Now().UTC())
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "terminal ticket is invalid or expired"})
 		return
@@ -246,7 +246,7 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 	key := env.Runtime + "/" + env.Name
 	wsUpgrade(c.Writer, c.Request, h.uiOrigin, env, runtimeAdapter, h.cooldownMin, stream, terminalSocketLifecycle{
 		open: func() error {
-			if err := h.db.OpenTerminalConnection(c.Request.Context(), db.TerminalConnection{
+			if err := h.db.Environment.OpenTerminalConnection(c.Request.Context(), postgres.TerminalConnection{
 				ID:               connectionID,
 				EnvironmentUID:   env.UID,
 				UserID:           ticket.UserID,
@@ -262,20 +262,20 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		heartbeat: func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := h.db.TouchTerminalConnection(ctx, connectionID, time.Now().UTC()); err != nil {
+			if err := h.db.Environment.TouchTerminalConnection(ctx, connectionID, time.Now().UTC()); err != nil {
 				slog.Warn("touch terminal connection", "err", err, "environment", env.Name)
 			}
 		},
 		close: func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err := h.db.CloseTerminalConnection(ctx, connectionID, time.Now().UTC())
+			_, err := h.db.Environment.CloseTerminalConnection(ctx, connectionID, time.Now().UTC())
 			cancel()
 			if err != nil {
 				slog.Error("close terminal connection", "err", err, "environment", env.Name)
 			}
 			h.terminals.close(key, func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				closed, err := h.db.FinishTerminalUsageSession(ctx, env.UID, time.Now().UTC())
+				closed, err := h.db.Environment.FinishTerminalUsageSession(ctx, env.UID, time.Now().UTC())
 				cancel()
 				if err != nil {
 					slog.Error("finish terminal usage session", "err", err, "environment", env.Name)

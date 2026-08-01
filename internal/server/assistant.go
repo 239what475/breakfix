@@ -11,10 +11,10 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/gin-gonic/gin"
 )
 
@@ -98,7 +98,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 	c.Status(http.StatusOK)
 	writeSSE(c, "ready", assistantStreamEvent{RunID: runID})
 
-	history, err := h.db.ListMessages(c.Request.Context(), sessionID)
+	history, err := h.db.Agent.ListMessages(c.Request.Context(), sessionID)
 	if err == nil {
 		result, runErr := assistant.RunWithEino(c.Request.Context(), h.llm, request, history, func(event assistant.StreamEvent) {
 			writeSSE(c, event.Type, assistantStreamEvent{RunID: runID, Content: event.Content, Tool: event.Tool})
@@ -110,7 +110,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 			if marshalErr == nil {
 				now := time.Now().UTC()
 				message := agent.Message{ID: assistant.NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata}
-				if completeErr := h.db.CompleteRunWithMessage(c.Request.Context(), runID, message, now); completeErr == nil {
+				if completeErr := h.db.Agent.CompleteRunWithMessage(c.Request.Context(), runID, message, now); completeErr == nil {
 					writeSSE(c, "complete", assistantStreamComplete{RunID: runID, Message: assistant.Message{
 						ID: message.ID, Role: message.Role, Content: message.Content, Evidence: result.Evidence, CreatedAt: now,
 					}})
@@ -125,7 +125,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 			err = runErr
 		}
 	}
-	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
+	if failErr := h.db.Agent.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
 		slog.Error("finalize direct assistant turn", "run_id", runID, "err", errors.Join(err, failErr))
 	}
 	if c.Request.Context().Err() == nil {
@@ -133,7 +133,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 	}
 }
 
-func (h *Handler) assistantRequest(ctx context.Context, user *db.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
+func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
 	entry, err := h.publishedChallenge(challengeID)
 	if err != nil {
 		return assistant.Request{}, err

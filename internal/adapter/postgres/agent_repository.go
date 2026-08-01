@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 )
 
-func (d *DB) CreateSession(ctx context.Context, session agent.Session) (*agent.Session, error) {
+func (d *AgentRepository) CreateSession(ctx context.Context, session agent.Session) (*agent.Session, error) {
 	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.Purpose) == "" || strings.TrimSpace(session.OwnerKind) == "" || strings.TrimSpace(session.OwnerRef) == "" {
 		return nil, errors.New("agent session requires id, purpose, owner kind, and owner ref")
 	}
@@ -39,12 +39,12 @@ func (d *DB) CreateSession(ctx context.Context, session agent.Session) (*agent.S
 	return &session, nil
 }
 
-func (d *DB) GetSession(ctx context.Context, id string) (*agent.Session, error) {
+func (d *AgentRepository) GetSession(ctx context.Context, id string) (*agent.Session, error) {
 	return scanAgentSession(d.conn.QueryRowContext(ctx, `SELECT id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at
 		FROM agent_sessions WHERE id = ?`, id))
 }
 
-func (d *DB) FindOrCreateSession(ctx context.Context, session agent.Session) (*agent.Session, error) {
+func (d *AgentRepository) FindOrCreateSession(ctx context.Context, session agent.Session) (*agent.Session, error) {
 	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.Purpose) == "" || strings.TrimSpace(session.OwnerKind) == "" || strings.TrimSpace(session.OwnerRef) == "" {
 		return nil, errors.New("agent session requires id, purpose, owner kind, and owner ref")
 	}
@@ -66,13 +66,17 @@ func (d *DB) FindOrCreateSession(ctx context.Context, session agent.Session) (*a
 		session.ID, session.Purpose, session.OwnerKind, session.OwnerRef, session.UserRef, session.Status, session.CreatedAt, session.UpdatedAt))
 }
 
-func (d *DB) FindSession(ctx context.Context, purpose, ownerKind, ownerRef, userRef string) (*agent.Session, error) {
+func (d *AgentRepository) FindSession(ctx context.Context, purpose, ownerKind, ownerRef, userRef string) (*agent.Session, error) {
 	return scanAgentSession(d.conn.QueryRowContext(ctx, `SELECT id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at
 		FROM agent_sessions WHERE purpose = ? AND owner_kind = ? AND owner_ref = ? AND user_ref = ?`, purpose, ownerKind, ownerRef, userRef))
 }
 
-func (d *DB) ListMessages(ctx context.Context, sessionID string) ([]agent.Message, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT id, session_id, sequence, role, content, metadata_json, created_at
+func (d *AgentRepository) ListMessages(ctx context.Context, sessionID string) ([]agent.Message, error) {
+	return listAgentMessages(ctx, d.conn, sessionID)
+}
+
+func listAgentMessages(ctx context.Context, conn *Conn, sessionID string) ([]agent.Message, error) {
+	rows, err := conn.QueryContext(ctx, `SELECT id, session_id, sequence, role, content, metadata_json, created_at
 		FROM agent_messages WHERE session_id = ? ORDER BY sequence`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list agent messages: %w", err)
@@ -94,7 +98,7 @@ func (d *DB) ListMessages(ctx context.Context, sessionID string) ([]agent.Messag
 
 // CreateMessageAndRun persists one interactive user message and immediately
 // marks its AgentRun running. Server owns this direct call; it is not queued.
-func (d *DB) CreateMessageAndRun(ctx context.Context, message agent.Message, run agent.CreateRun) (*agent.Run, error) {
+func (d *AgentRepository) CreateMessageAndRun(ctx context.Context, message agent.Message, run agent.CreateRun) (*agent.Run, error) {
 	if strings.TrimSpace(run.SessionID) == "" || run.SessionID != message.SessionID || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
 		return nil, errors.New("agent message and run require the same user session")
 	}
@@ -129,7 +133,7 @@ func (d *DB) CreateMessageAndRun(ctx context.Context, message agent.Message, run
 
 // CreateRun stores one already-running background or direct AgentRun. A
 // workflow, not AgentRun, decides whether and when it is executed.
-func (d *DB) CreateRun(ctx context.Context, run agent.CreateRun) (*agent.Run, error) {
+func (d *AgentRepository) CreateRun(ctx context.Context, run agent.CreateRun) (*agent.Run, error) {
 	if err := agent.ValidateCreateRun(run); err != nil {
 		return nil, err
 	}
@@ -153,7 +157,7 @@ func (d *DB) CreateRun(ctx context.Context, run agent.CreateRun) (*agent.Run, er
 	return created, nil
 }
 
-func (d *DB) GetRun(ctx context.Context, id string) (*agent.Run, error) {
+func (d *AgentRepository) GetRun(ctx context.Context, id string) (*agent.Run, error) {
 	run, err := scanAgentRun(d.conn.QueryRowContext(ctx, agentRunSelect+` WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, agent.ErrNotFound
@@ -164,7 +168,7 @@ func (d *DB) GetRun(ctx context.Context, id string) (*agent.Run, error) {
 	return run, nil
 }
 
-func (d *DB) GetActiveRunForSession(ctx context.Context, sessionID string) (*agent.Run, error) {
+func (d *AgentRepository) GetActiveRunForSession(ctx context.Context, sessionID string) (*agent.Run, error) {
 	run, err := scanAgentRun(d.conn.QueryRowContext(ctx, agentRunSelect+` WHERE session_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT 1`, sessionID, agent.RunRunning))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, agent.ErrNotFound
@@ -175,7 +179,7 @@ func (d *DB) GetActiveRunForSession(ctx context.Context, sessionID string) (*age
 	return run, nil
 }
 
-func (d *DB) ListRunsForOwner(ctx context.Context, ownerKind, ownerRef string) ([]agent.Run, error) {
+func (d *AgentRepository) ListRunsForOwner(ctx context.Context, ownerKind, ownerRef string) ([]agent.Run, error) {
 	if strings.TrimSpace(ownerKind) == "" || strings.TrimSpace(ownerRef) == "" {
 		return nil, errors.New("agent run owner kind and owner reference are required")
 	}
@@ -195,7 +199,7 @@ func (d *DB) ListRunsForOwner(ctx context.Context, ownerKind, ownerRef string) (
 	return result, rows.Err()
 }
 
-func (d *DB) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]agent.Run, error) {
+func (d *AgentRepository) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]agent.Run, error) {
 	if strings.TrimSpace(purpose) == "" {
 		return nil, errors.New("agent run purpose is required")
 	}
@@ -218,7 +222,7 @@ func (d *DB) ListActiveRunsForPurpose(ctx context.Context, purpose string) ([]ag
 	return result, nil
 }
 
-func (d *DB) CompleteRunWithMessage(ctx context.Context, runID string, message agent.Message, now time.Time) error {
+func (d *AgentRepository) CompleteRunWithMessage(ctx context.Context, runID string, message agent.Message, now time.Time) error {
 	if strings.TrimSpace(runID) == "" || strings.TrimSpace(message.Content) == "" || message.Role != "assistant" || now.IsZero() {
 		return errors.New("complete agent run requires a run and assistant message")
 	}
@@ -253,7 +257,7 @@ func (d *DB) CompleteRunWithMessage(ctx context.Context, runID string, message a
 	return tx.Commit()
 }
 
-func (d *DB) CompleteRun(ctx context.Context, runID string, now time.Time) error {
+func (d *AgentRepository) CompleteRun(ctx context.Context, runID string, now time.Time) error {
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin complete agent run: %w", err)
@@ -277,7 +281,7 @@ func completeRunTx(ctx context.Context, tx *Tx, runID string, now time.Time) err
 	return nil
 }
 
-func (d *DB) FailRun(ctx context.Context, runID, message string, now time.Time) error {
+func (d *AgentRepository) FailRun(ctx context.Context, runID, message string, now time.Time) error {
 	if strings.TrimSpace(runID) == "" || strings.TrimSpace(message) == "" || now.IsZero() {
 		return errors.New("fail agent run requires a run, error, and current time")
 	}
@@ -292,7 +296,7 @@ func (d *DB) FailRun(ctx context.Context, runID, message string, now time.Time) 
 	return nil
 }
 
-func (d *DB) CancelRunsForOwner(ctx context.Context, purpose, ownerKind, ownerRef, reason string, now time.Time) (int64, error) {
+func (d *AgentRepository) CancelRunsForOwner(ctx context.Context, purpose, ownerKind, ownerRef, reason string, now time.Time) (int64, error) {
 	if strings.TrimSpace(purpose) == "" || strings.TrimSpace(ownerKind) == "" || strings.TrimSpace(ownerRef) == "" || strings.TrimSpace(reason) == "" {
 		return 0, errors.New("cancel agent runs requires owner and reason")
 	}

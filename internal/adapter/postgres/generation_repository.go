@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,12 +17,12 @@ import (
 
 var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
 
-const generationWorkflowColumns = `id, authoring_session_id, authoring_revision, state, cleanup_intent,
+const generationWorkflowColumns = `id, source_kind, source_ref, source_revision, state, cleanup_intent,
 	COALESCE(candidate_revision_id, ''), COALESCE(active_agent_run_id, ''), state_attempt, lease_owner, lease_expires_at, next_run_at,
 	deadline_at, deadline_paused_at, last_error, created_at, updated_at`
 const generationWorkflowSelect = `SELECT ` + generationWorkflowColumns + ` FROM generation_workflows`
 
-func (d *DB) CreateGenerationWorkflow(ctx context.Context, sessionID, userID string, revision int64, now time.Time) (*generation.Workflow, error) {
+func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, sessionID, userID string, revision int64, now time.Time) (*generation.Workflow, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || revision < 0 || now.IsZero() {
 		return nil, errors.New("generation workflow requires authoring session, user, revision, and current time")
 	}
@@ -48,19 +49,19 @@ func (d *DB) CreateGenerationWorkflow(ctx context.Context, sessionID, userID str
 		return nil, err
 	}
 	workflow := generation.Workflow{
-		ID:                generation.NewID("generation-workflow"),
-		Source:            generation.Source{Kind: generation.SourceAuthoring, Ref: sessionID},
-		AuthoringRevision: revision,
-		State:             generation.StateQueued,
-		NextRunAt:         now.UTC(),
-		CreatedAt:         now.UTC(),
-		UpdatedAt:         now.UTC(),
+		ID:             generation.NewID("generation-workflow"),
+		Source:         generation.Source{Kind: generation.SourceAuthoring, Ref: sessionID},
+		SourceRevision: strconv.FormatInt(revision, 10),
+		State:          generation.StateQueued,
+		NextRunAt:      now.UTC(),
+		CreatedAt:      now.UTC(),
+		UpdatedAt:      now.UTC(),
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_workflows
-		(id, authoring_session_id, authoring_revision, state, cleanup_intent, candidate_revision_id, active_agent_run_id,
+		(id, source_kind, source_ref, source_revision, state, cleanup_intent, candidate_revision_id, active_agent_run_id,
 		state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, '', NULL, NULL, 0, '', ?, '', ?, ?)`,
-		workflow.ID, workflow.Source.Ref, workflow.AuthoringRevision, workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
+		VALUES (?, ?, ?, ?, ?, '', NULL, NULL, 0, '', ?, '', ?, ?)`,
+		workflow.ID, workflow.Source.Kind, workflow.Source.Ref, workflow.SourceRevision, workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("insert generation workflow: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET last_error = '', updated_at = ? WHERE id = ?`, nowText(now), sessionID); err != nil {
@@ -72,7 +73,7 @@ func (d *DB) CreateGenerationWorkflow(ctx context.Context, sessionID, userID str
 	return &workflow, nil
 }
 
-func (d *DB) GetGenerationWorkflow(ctx context.Context, id string) (*generation.Workflow, error) {
+func (d *GenerationRepository) GetGenerationWorkflow(ctx context.Context, id string) (*generation.Workflow, error) {
 	workflow, err := scanGenerationWorkflow(d.conn.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ?`, strings.TrimSpace(id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrGenerationWorkflowNotFound
@@ -83,9 +84,9 @@ func (d *DB) GetGenerationWorkflow(ctx context.Context, id string) (*generation.
 	return workflow, nil
 }
 
-func (d *DB) GetActiveGenerationWorkflow(ctx context.Context, sessionID string) (*generation.Workflow, error) {
-	workflow, err := scanGenerationWorkflow(d.conn.QueryRowContext(ctx, generationWorkflowSelect+` WHERE authoring_session_id = ?
-		AND state NOT IN (?, ?, ?) ORDER BY created_at DESC LIMIT 1`, sessionID, generation.StateCompleted, generation.StateFailed, generation.StateCancelled))
+func (d *GenerationRepository) GetActiveGenerationWorkflow(ctx context.Context, sessionID string) (*generation.Workflow, error) {
+	workflow, err := scanGenerationWorkflow(d.conn.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ?
+		AND state NOT IN (?, ?, ?) ORDER BY created_at DESC LIMIT 1`, generation.SourceAuthoring, sessionID, generation.StateCompleted, generation.StateFailed, generation.StateCancelled))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrGenerationWorkflowNotFound
 	}
@@ -95,7 +96,7 @@ func (d *DB) GetActiveGenerationWorkflow(ctx context.Context, sessionID string) 
 	return workflow, nil
 }
 
-func (d *DB) ClaimGenerationWorkflow(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) (*generation.Claim, error) {
+func (d *GenerationRepository) ClaimGenerationWorkflow(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) (*generation.Claim, error) {
 	if strings.TrimSpace(workerID) == "" || leaseTTL <= 0 || now.IsZero() {
 		return nil, errors.New("generation workflow claim requires worker, lease ttl, and current time")
 	}
@@ -155,7 +156,7 @@ func (d *DB) ClaimGenerationWorkflow(ctx context.Context, workerID string, lease
 	return &generation.Claim{Workflow: *workflow, LeaseCredential: generation.LeaseCredential{StateAttempt: workflow.StateAttempt, LeaseOwner: owner}}, nil
 }
 
-func (d *DB) GetGenerationClaim(ctx context.Context, id string, credential generation.LeaseCredential, now time.Time) (*generation.Claim, error) {
+func (d *GenerationRepository) GetGenerationClaim(ctx context.Context, id string, credential generation.LeaseCredential, now time.Time) (*generation.Claim, error) {
 	if strings.TrimSpace(id) == "" || !credential.Valid() || now.IsZero() {
 		return nil, errors.New("generation workflow lease credentials are required")
 	}
@@ -173,7 +174,7 @@ func (d *DB) GetGenerationClaim(ctx context.Context, id string, credential gener
 // LoadGenerationContext returns only the data a leased worker needs for the
 // current phase. Archive bytes remain behind a separate lease-fenced endpoint
 // so the worker never learns the Server's filesystem layout.
-func (d *DB) LoadGenerationContext(ctx context.Context, claim generation.Claim, now time.Time) (*generation.Context, error) {
+func (d *GenerationRepository) LoadGenerationContext(ctx context.Context, claim generation.Claim, now time.Time) (*generation.Context, error) {
 	if !claim.Valid() || now.IsZero() {
 		return nil, errors.New("generation workflow context requires a valid claim")
 	}
@@ -186,7 +187,11 @@ func (d *DB) LoadGenerationContext(ctx context.Context, claim generation.Claim, 
 	if err != nil {
 		return nil, err
 	}
-	plan, err := readAuthoringRevisionTx(ctx, tx, workflow.Source.Ref, workflow.AuthoringRevision)
+	revision, err := authoringSourceRevision(*workflow)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := readAuthoringRevisionTx(ctx, tx, workflow.Source.Ref, revision)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +233,7 @@ func (d *DB) LoadGenerationContext(ctx context.Context, claim generation.Claim, 
 	return result, nil
 }
 
-func (d *DB) RenewGenerationLease(ctx context.Context, claim generation.Claim, leaseTTL time.Duration, now time.Time) error {
+func (d *GenerationRepository) RenewGenerationLease(ctx context.Context, claim generation.Claim, leaseTTL time.Duration, now time.Time) error {
 	if !claim.Valid() || leaseTTL <= 0 || now.IsZero() {
 		return errors.New("generation workflow lease renewal is invalid")
 	}
@@ -250,7 +255,7 @@ func (d *DB) RenewGenerationLease(ctx context.Context, claim generation.Claim, l
 // RefreshGenerationClaim returns the current state under an already-held
 // lease. A successful phase can reset state_attempt, so callers must obtain a
 // fresh credential before reporting the following phase.
-func (d *DB) RefreshGenerationClaim(ctx context.Context, workflowID, leaseOwner string, now time.Time) (*generation.Claim, error) {
+func (d *GenerationRepository) RefreshGenerationClaim(ctx context.Context, workflowID, leaseOwner string, now time.Time) (*generation.Claim, error) {
 	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(leaseOwner) == "" || now.IsZero() {
 		return nil, errors.New("generation workflow identity and lease owner are required")
 	}
@@ -268,7 +273,7 @@ func (d *DB) RefreshGenerationClaim(ctx context.Context, workflowID, leaseOwner 
 	}}, nil
 }
 
-func (d *DB) StartGenerationAgentRun(ctx context.Context, claim generation.Claim, input agent.CreateRun, now time.Time) (*agent.Run, error) {
+func (d *GenerationRepository) StartGenerationAgentRun(ctx context.Context, claim generation.Claim, input agent.CreateRun, now time.Time) (*agent.Run, error) {
 	if !claim.Valid() || now.IsZero() || input.OwnerKind != "generation-workflow" || input.OwnerRef != claim.Workflow.ID {
 		return nil, errors.New("generation agent run ownership is invalid")
 	}
@@ -287,6 +292,9 @@ func (d *DB) StartGenerationAgentRun(ctx context.Context, claim generation.Claim
 	if (input.Purpose == "generator" && workflow.State != generation.StateGenerating) ||
 		(input.Purpose == "judge" && workflow.State != generation.StateJudging) {
 		return nil, errors.New("generation agent run purpose does not match workflow state")
+	}
+	if workflow.Source.Kind != generation.SourceAuthoring {
+		return nil, errors.New("catalog release workflows do not run generator agents")
 	}
 	if workflow.ActiveAgentRunID != "" {
 		// A prior process died after starting its call. It cannot be resumed, so
@@ -325,11 +333,11 @@ func (d *DB) StartGenerationAgentRun(ctx context.Context, claim generation.Claim
 	return created, nil
 }
 
-func (d *DB) FinalizeGeneratedCandidate(ctx context.Context, claim generation.Claim, runID string, revision generation.Revision, now time.Time) error {
+func (d *GenerationRepository) FinalizeGeneratedCandidate(ctx context.Context, claim generation.Claim, runID string, revision generation.Revision, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(runID) == "" || now.IsZero() {
 		return errors.New("generated candidate finalization is invalid")
 	}
-	if revision.GeneratorRunID != runID || revision.JudgeRunID != "" || revision.AuthoringSessionID != claim.Workflow.Source.Ref || revision.AuthoringRevision != claim.Workflow.AuthoringRevision {
+	if revision.GeneratorRunID != runID || revision.JudgeRunID != "" || revision.Source != claim.Workflow.Source || revision.SourceRevision != claim.Workflow.SourceRevision {
 		return errors.New("generated candidate lineage does not match workflow")
 	}
 	if err := revision.ValidateForCreate(); err != nil {
@@ -363,7 +371,7 @@ func (d *DB) FinalizeGeneratedCandidate(ctx context.Context, claim generation.Cl
 	return tx.Commit()
 }
 
-func (d *DB) FinalizeGenerationJudgement(ctx context.Context, claim generation.Claim, runID string, approved bool, feedback string, now time.Time) error {
+func (d *GenerationRepository) FinalizeGenerationJudgement(ctx context.Context, claim generation.Claim, runID string, approved bool, feedback string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(runID) == "" || now.IsZero() || (!approved && strings.TrimSpace(feedback) == "") {
 		return errors.New("generation judgement finalization is invalid")
 	}
@@ -406,15 +414,15 @@ func (d *DB) FinalizeGenerationJudgement(ctx context.Context, claim generation.C
 	return tx.Commit()
 }
 
-func (d *DB) CompleteGenerationBuild(ctx context.Context, claim generation.Claim, output generation.BuildOutput, now time.Time) error {
+func (d *GenerationRepository) CompleteGenerationBuild(ctx context.Context, claim generation.Claim, output generation.BuildOutput, now time.Time) error {
 	return d.advanceCandidateOutput(ctx, claim, generation.StateBuilding, generation.StateArtifactPublishing, "build_output", output, now)
 }
 
-func (d *DB) CompleteGenerationArtifactPublish(ctx context.Context, claim generation.Claim, output generation.ArtifactReference, now time.Time) error {
+func (d *GenerationRepository) CompleteGenerationArtifactPublish(ctx context.Context, claim generation.Claim, output generation.ArtifactReference, now time.Time) error {
 	return d.advanceCandidateOutput(ctx, claim, generation.StateArtifactPublishing, generation.StateVerifying, "artifact_reference", output, now)
 }
 
-func (d *DB) advanceCandidateOutput(ctx context.Context, claim generation.Claim, expected, next generation.WorkflowState, column string, value any, now time.Time) error {
+func (d *GenerationRepository) advanceCandidateOutput(ctx context.Context, claim generation.Claim, expected, next generation.WorkflowState, column string, value any, now time.Time) error {
 	if !claim.Valid() || now.IsZero() {
 		return errors.New("generation candidate output finalization is invalid")
 	}
@@ -459,7 +467,7 @@ func (d *DB) advanceCandidateOutput(ctx context.Context, claim generation.Claim,
 	return tx.Commit()
 }
 
-func (d *DB) RecordGenerationVerificationEnvironment(ctx context.Context, claim generation.Claim, environment generation.VerificationEnvironment, now time.Time) error {
+func (d *GenerationRepository) RecordGenerationVerificationEnvironment(ctx context.Context, claim generation.Claim, environment generation.VerificationEnvironment, now time.Time) error {
 	if !claim.Valid() || now.IsZero() || environment.WorkflowID != claim.Workflow.ID || environment.Attempt != int64(claim.StateAttempt+1) {
 		return errors.New("generation verification environment identity is invalid")
 	}
@@ -492,7 +500,7 @@ func (d *DB) RecordGenerationVerificationEnvironment(ctx context.Context, claim 
 	return tx.Commit()
 }
 
-func (d *DB) CompleteGenerationVerification(ctx context.Context, claim generation.Claim, report generation.VerificationReport, now time.Time) error {
+func (d *GenerationRepository) CompleteGenerationVerification(ctx context.Context, claim generation.Claim, report generation.VerificationReport, now time.Time) error {
 	if !claim.Valid() || now.IsZero() {
 		return errors.New("generation verification finalization is invalid")
 	}
@@ -512,6 +520,13 @@ func (d *DB) CompleteGenerationVerification(ctx context.Context, claim generatio
 	if err := report.Validate(candidateRevision.Snapshot); err != nil {
 		return err
 	}
+	if workflow.Source.Kind != generation.SourceAuthoring {
+		return errors.New("catalog release verification completion is not implemented")
+	}
+	authoringRevision, err := authoringSourceRevision(*workflow)
+	if err != nil {
+		return err
+	}
 	encoded, err := marshalJSON(report)
 	if err != nil {
 		return err
@@ -520,10 +535,10 @@ func (d *DB) CompleteGenerationVerification(ctx context.Context, claim generatio
 		return fmt.Errorf("record verification report: %w", err)
 	}
 	if report.Passed {
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET candidate_revision_id = ? WHERE session_id = ? AND revision = ?`, candidateRevision.ID, workflow.Source.Ref, workflow.AuthoringRevision); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET candidate_revision_id = ? WHERE session_id = ? AND revision = ?`, candidateRevision.ID, workflow.Source.Ref, authoringRevision); err != nil {
 			return fmt.Errorf("link verified candidate to authoring revision: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET visible_revision = ?, updated_at = ? WHERE id = ?`, workflow.AuthoringRevision, nowText(now), workflow.Source.Ref); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET visible_revision = ?, updated_at = ? WHERE id = ?`, authoringRevision, nowText(now), workflow.Source.Ref); err != nil {
 			return fmt.Errorf("update visible authoring revision: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0, lease_owner = '', lease_expires_at = NULL,
@@ -545,7 +560,7 @@ func (d *DB) CompleteGenerationVerification(ctx context.Context, claim generatio
 	return tx.Commit()
 }
 
-func (d *DB) ResumeGenerationForRevision(ctx context.Context, sessionID, userID string, revision int64, now time.Time) (*generation.Workflow, error) {
+func (d *GenerationRepository) ResumeGenerationForRevision(ctx context.Context, sessionID, userID string, revision int64, now time.Time) (*generation.Workflow, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || revision < 0 || now.IsZero() {
 		return nil, errors.New("resume generation requires authoring session, user, revision, and current time")
 	}
@@ -558,7 +573,7 @@ func (d *DB) ResumeGenerationForRevision(ctx context.Context, sessionID, userID 
 	if err != nil {
 		return nil, err
 	}
-	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE authoring_session_id = ? AND state = ? FOR UPDATE`, sessionID, generation.StateNeedsAuthorReview))
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ? AND state = ? FOR UPDATE`, generation.SourceAuthoring, sessionID, generation.StateNeedsAuthorReview))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrInvalidState
 	}
@@ -576,9 +591,9 @@ func (d *DB) ResumeGenerationForRevision(ctx context.Context, sessionID, userID 
 		return nil, err
 	}
 	deadline := workflow.DeadlineAt.Add(now.UTC().Sub(*workflow.DeadlinePausedAt))
-	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET authoring_revision = ?, state = ?,
+	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET source_revision = ?, state = ?,
 		state_attempt = 0, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, last_error = '', updated_at = ?
-		WHERE id = ? RETURNING `+generationWorkflowColumns, revision, generation.StateGenerating, deadline, now.UTC(), now.UTC(), workflow.ID))
+		WHERE id = ? RETURNING `+generationWorkflowColumns, strconv.FormatInt(revision, 10), generation.StateGenerating, deadline, now.UTC(), now.UTC(), workflow.ID))
 	if err != nil {
 		return nil, fmt.Errorf("resume generation workflow: %w", err)
 	}
@@ -588,7 +603,7 @@ func (d *DB) ResumeGenerationForRevision(ctx context.Context, sessionID, userID 
 	return updated, nil
 }
 
-func (d *DB) BeginGenerationPublication(ctx context.Context, sessionID, userID string, publication generation.Publication, now time.Time) (*generation.Workflow, error) {
+func (d *GenerationRepository) BeginGenerationPublication(ctx context.Context, sessionID, userID string, publication generation.Publication, now time.Time) (*generation.Workflow, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || now.IsZero() || publication.ValidateIntent() != nil {
 		return nil, errors.New("generation publication requires authoring session, user, publication intent, and current time")
 	}
@@ -600,7 +615,7 @@ func (d *DB) BeginGenerationPublication(ctx context.Context, sessionID, userID s
 	if _, err := readAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE authoring_session_id = ? AND state = ? FOR UPDATE`, sessionID, generation.StateNeedsAuthorReview))
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ? AND state = ? FOR UPDATE`, generation.SourceAuthoring, sessionID, generation.StateNeedsAuthorReview))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrInvalidState
 	}
@@ -637,7 +652,7 @@ func (d *DB) BeginGenerationPublication(ctx context.Context, sessionID, userID s
 	return updated, nil
 }
 
-func (d *DB) CompleteGenerationChallengePublish(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, taxonomyChallengeID, taxonomyChallengeRevision, taxonomyBaseRevision string, now time.Time) error {
+func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, taxonomyChallengeID, taxonomyChallengeRevision, taxonomyBaseRevision string, now time.Time) error {
 	if !claim.Valid() || strings.TrimSpace(taxonomyChallengeID) == "" || strings.TrimSpace(taxonomyChallengeRevision) == "" || now.IsZero() {
 		return errors.New("generation challenge publication finalization is invalid")
 	}
@@ -688,7 +703,7 @@ func (d *DB) CompleteGenerationChallengePublish(ctx context.Context, claim gener
 	return tx.Commit()
 }
 
-func (d *DB) ReportGenerationInfrastructureFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, now time.Time) (*generation.Workflow, error) {
+func (d *GenerationRepository) ReportGenerationInfrastructureFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, now time.Time) (*generation.Workflow, error) {
 	if !claim.Valid() || failure.Class != generation.FailureInfrastructure || failure.Validate() != nil || now.IsZero() {
 		return nil, errors.New("generation infrastructure failure is invalid")
 	}
@@ -723,7 +738,7 @@ func (d *DB) ReportGenerationInfrastructureFailure(ctx context.Context, claim ge
 // gives the same generator session another revision. Artifact failures never
 // consume the workflow's infrastructure retry budget or expose a broken
 // candidate to the author.
-func (d *DB) ReportGenerationArtifactFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, report *generation.VerificationReport, now time.Time) error {
+func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, report *generation.VerificationReport, now time.Time) error {
 	if !claim.Valid() || failure.Class != generation.FailureArtifact || failure.Validate() != nil || now.IsZero() {
 		return errors.New("generation artifact failure is invalid")
 	}
@@ -778,7 +793,7 @@ func (d *DB) ReportGenerationArtifactFailure(ctx context.Context, claim generati
 	return tx.Commit()
 }
 
-func (d *DB) CompleteGenerationCleanup(ctx context.Context, claim generation.Claim, now time.Time) error {
+func (d *GenerationRepository) CompleteGenerationCleanup(ctx context.Context, claim generation.Claim, now time.Time) error {
 	if !claim.Valid() || now.IsZero() {
 		return errors.New("generation cleanup finalization is invalid")
 	}
@@ -809,7 +824,7 @@ func (d *DB) CompleteGenerationCleanup(ctx context.Context, claim generation.Cla
 	return tx.Commit()
 }
 
-func (d *DB) CancelGenerationWorkflow(ctx context.Context, id, reason string, now time.Time) error {
+func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, id, reason string, now time.Time) error {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(reason) == "" || now.IsZero() {
 		return errors.New("generation cancellation requires workflow, reason, and current time")
 	}
@@ -843,7 +858,7 @@ func (d *DB) CancelGenerationWorkflow(ctx context.Context, id, reason string, no
 	return nil
 }
 
-func (d *DB) RecoverExpiredGenerationWorkflows(ctx context.Context, now time.Time) error {
+func (d *GenerationRepository) RecoverExpiredGenerationWorkflows(ctx context.Context, now time.Time) error {
 	if now.IsZero() {
 		return errors.New("generation deadline recovery requires current time")
 	}
@@ -894,7 +909,7 @@ func lockGenerationClaimTx(ctx context.Context, tx *Tx, claim generation.Claim, 
 
 func generationLeaseLost() error { return generation.ErrLeaseLost }
 
-func (d *DB) GetCandidateRevision(ctx context.Context, id string) (*generation.Revision, error) {
+func (d *GenerationRepository) GetCandidateRevision(ctx context.Context, id string) (*generation.Revision, error) {
 	revision, err := scanCandidateRevision(d.conn.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ?`, strings.TrimSpace(id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, generation.ErrCandidateNotFound
@@ -908,9 +923,12 @@ func (d *DB) GetCandidateRevision(ctx context.Context, id string) (*generation.R
 // FindLatestCandidateBefore returns the newest immutable candidate from an
 // earlier authoring revision. It is only a presentation helper for the
 // authoring diff; workflow state never derives from this query.
-func (d *DB) FindLatestCandidateBefore(ctx context.Context, sessionID string, revision int64) (*generation.Revision, error) {
-	value, err := scanCandidateRevision(d.conn.QueryRowContext(ctx, candidateRevisionSelect+` WHERE authoring_session_id = ? AND authoring_revision < ?
-		ORDER BY authoring_revision DESC, created_at DESC, id DESC LIMIT 1`, strings.TrimSpace(sessionID), revision))
+func (d *GenerationRepository) FindLatestCandidateBefore(ctx context.Context, sessionID string, revision int64) (*generation.Revision, error) {
+	value, err := scanCandidateRevision(d.conn.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = (
+		SELECT candidate_revision_id FROM authoring_revisions
+		WHERE session_id = ? AND revision < ? AND candidate_revision_id <> ''
+		ORDER BY revision DESC LIMIT 1
+	)`, strings.TrimSpace(sessionID), revision))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -926,10 +944,10 @@ func insertCandidateRevisionTx(ctx context.Context, tx *Tx, revision generation.
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO candidate_revisions
-		(id, authoring_session_id, authoring_revision, generator_session_id, generator_run_id, judge_run_id,
+		(id, source_kind, source_ref, source_revision, generator_session_id, generator_run_id, judge_run_id,
 		archive_path, archive_sha256, execution_snapshot, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`,
-		revision.ID, revision.AuthoringSessionID, revision.AuthoringRevision, revision.GeneratorSessionID, revision.GeneratorRunID,
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?::jsonb, ?, ?)`,
+		revision.ID, revision.Source.Kind, revision.Source.Ref, revision.SourceRevision, revision.GeneratorSessionID, revision.GeneratorRunID,
 		revision.JudgeRunID, revision.ArchivePath, revision.ArchiveSHA256, snapshot, revision.CreatedAt, revision.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert candidate revision: %w", err)
@@ -937,7 +955,7 @@ func insertCandidateRevisionTx(ctx context.Context, tx *Tx, revision generation.
 	return nil
 }
 
-const candidateRevisionColumns = `id, authoring_session_id, authoring_revision, generator_session_id, generator_run_id, judge_run_id,
+const candidateRevisionColumns = `id, source_kind, source_ref, source_revision, COALESCE(generator_session_id, ''), COALESCE(generator_run_id, ''), judge_run_id,
 	archive_path, archive_sha256, execution_snapshot, build_output, artifact_reference, verify_environment, verification_report,
 	failure, publication, created_at, updated_at, verified_at, published_at`
 const candidateRevisionSelect = `SELECT ` + candidateRevisionColumns + ` FROM candidate_revisions`
@@ -947,7 +965,7 @@ func scanCandidateRevision(row agentRow) (*generation.Revision, error) {
 	var snapshot []byte
 	var build, artifact, verifyEnvironment, verification, failure, publication []byte
 	var verifiedAt, publishedAt sql.NullTime
-	err := row.Scan(&revision.ID, &revision.AuthoringSessionID, &revision.AuthoringRevision, &revision.GeneratorSessionID,
+	err := row.Scan(&revision.ID, &revision.Source.Kind, &revision.Source.Ref, &revision.SourceRevision, &revision.GeneratorSessionID,
 		&revision.GeneratorRunID, &revision.JudgeRunID, &revision.ArchivePath, &revision.ArchiveSHA256, &snapshot, &build,
 		&artifact, &verifyEnvironment, &verification, &failure, &publication, &revision.CreatedAt, &revision.UpdatedAt, &verifiedAt, &publishedAt)
 	if err != nil {
@@ -1037,13 +1055,12 @@ func scanGenerationWorkflow(row agentRow) (*generation.Workflow, error) {
 	var workflow generation.Workflow
 	var cleanup string
 	var leaseExpiresAt, deadlineAt, pausedAt sql.NullTime
-	err := row.Scan(&workflow.ID, &workflow.Source.Ref, &workflow.AuthoringRevision, &workflow.State, &cleanup,
+	err := row.Scan(&workflow.ID, &workflow.Source.Kind, &workflow.Source.Ref, &workflow.SourceRevision, &workflow.State, &cleanup,
 		&workflow.CandidateRevisionID, &workflow.ActiveAgentRunID, &workflow.StateAttempt, &workflow.LeaseOwner, &leaseExpiresAt,
 		&workflow.NextRunAt, &deadlineAt, &pausedAt, &workflow.LastError, &workflow.CreatedAt, &workflow.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	workflow.Source.Kind = generation.SourceAuthoring
 	workflow.CleanupIntent = generation.CleanupIntent(cleanup)
 	if leaseExpiresAt.Valid {
 		value := leaseExpiresAt.Time.UTC()
@@ -1061,4 +1078,15 @@ func scanGenerationWorkflow(row agentRow) (*generation.Workflow, error) {
 	workflow.CreatedAt = workflow.CreatedAt.UTC()
 	workflow.UpdatedAt = workflow.UpdatedAt.UTC()
 	return &workflow, nil
+}
+
+func authoringSourceRevision(workflow generation.Workflow) (int64, error) {
+	if workflow.Source.Kind != generation.SourceAuthoring {
+		return 0, errors.New("generation workflow source is not authoring")
+	}
+	revision, err := strconv.ParseInt(workflow.SourceRevision, 10, 64)
+	if err != nil || revision < 0 {
+		return 0, errors.New("authoring generation workflow has an invalid source revision")
+	}
+	return revision, nil
 }

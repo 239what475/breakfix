@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
-func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
+func (d *AuthoringRepository) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
 	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.UserID) == "" {
 		return nil, errors.New("authoring session requires id and user")
 	}
@@ -57,23 +57,23 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 	return &session, nil
 }
 
-func (d *DB) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
+func (d *AuthoringRepository) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
 		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
 }
 
-func (d *DB) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
+func (d *AuthoringRepository) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
 		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions
 		WHERE user_id = ? AND state <> ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
 }
 
-func (d *DB) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
+func (d *AuthoringRepository) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
 		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`, id)
 }
 
-func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any) (*authoring.Session, error) {
+func (d *AuthoringRepository) readAuthoringSession(ctx context.Context, query string, args ...any) (*authoring.Session, error) {
 	var session authoring.Session
 	var state, createdAt, updatedAt string
 	err := d.conn.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID,
@@ -90,9 +90,16 @@ func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any
 	return &session, nil
 }
 
-func (d *DB) GetAuthoringRevision(ctx context.Context, sessionID string, revision int64) (*authoring.Revision, error) {
+func (d *AuthoringRepository) GetAuthoringRevision(ctx context.Context, sessionID string, revision int64) (*authoring.Revision, error) {
 	return readAuthoringRevision(d.conn.QueryRowContext(ctx, `SELECT revision, plan_json, candidate_revision_id, created_at
 		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision))
+}
+
+// ListMessages is part of the authoring runtime port: authoring conversations
+// are stored in the shared agent tables but are read only through the owning
+// authoring aggregate.
+func (d *AuthoringRepository) ListMessages(ctx context.Context, sessionID string) ([]agent.Message, error) {
+	return listAgentMessages(ctx, d.conn, sessionID)
 }
 
 func readAuthoringRevision(row agentRow) (*authoring.Revision, error) {
@@ -119,7 +126,7 @@ func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, numb
 
 // StartAuthoringRun persists the user message and starts a direct Server-owned
 // model call. No worker queue participates in an authoring conversation.
-func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, message agent.Message, run agent.CreateRun) (*authoring.Stage, *agent.Run, error) {
+func (d *AuthoringRepository) StartAuthoringRun(ctx context.Context, sessionID, userID string, message agent.Message, run agent.CreateRun) (*authoring.Stage, *agent.Run, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
 		return nil, nil, errors.New("authoring run requires a user message")
 	}
@@ -181,12 +188,12 @@ func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, me
 	return stage, created, nil
 }
 
-func (d *DB) GetAuthoringStage(ctx context.Context, runID string) (*authoring.Stage, error) {
+func (d *AuthoringRepository) GetAuthoringStage(ctx context.Context, runID string) (*authoring.Stage, error) {
 	return readAuthoringStage(d.conn.QueryRowContext(ctx, `SELECT run_id, session_id, base_revision, stage_revision, plan_json, changes_json, created_at, updated_at
 		FROM authoring_stages WHERE run_id = ?`, runID))
 }
 
-func (d *DB) LoadAuthoringExecution(ctx context.Context, runID string) (*authoring.Stage, []agent.Message, error) {
+func (d *AuthoringRepository) LoadAuthoringExecution(ctx context.Context, runID string) (*authoring.Stage, []agent.Message, error) {
 	stage, err := d.GetAuthoringStage(ctx, runID)
 	if err != nil {
 		return nil, nil, err
@@ -199,14 +206,14 @@ func (d *DB) LoadAuthoringExecution(ctx context.Context, runID string) (*authori
 	if err != nil {
 		return nil, nil, fmt.Errorf("load authoring session for execution: %w", err)
 	}
-	messages, err := d.ListMessages(ctx, sessionID)
+	messages, err := listAgentMessages(ctx, d.conn, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return stage, messages, nil
 }
 
-func (d *DB) UpdateAuthoringStage(ctx context.Context, runID string, expectedStageRevision int64, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
+func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID string, expectedStageRevision int64, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
 	if strings.TrimSpace(runID) == "" || expectedStageRevision < 0 || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
 		return nil, errors.New("authoring stage update is invalid")
 	}
@@ -253,7 +260,7 @@ func (d *DB) UpdateAuthoringStage(ctx context.Context, runID string, expectedSta
 	return stage, nil
 }
 
-func (d *DB) FinalizeAuthoringRun(ctx context.Context, runID, content string, now time.Time) (*authoring.Revision, error) {
+func (d *AuthoringRepository) FinalizeAuthoringRun(ctx context.Context, runID, content string, now time.Time) (*authoring.Revision, error) {
 	if strings.TrimSpace(runID) == "" || strings.TrimSpace(content) == "" || now.IsZero() {
 		return nil, errors.New("authoring finalization requires run and content")
 	}
@@ -322,7 +329,7 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, runID, content string, no
 	return revision, nil
 }
 
-func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string, expected int64, plan authoring.Plan, _ authoring.SessionState) (*authoring.Revision, error) {
+func (d *AuthoringRepository) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string, expected int64, plan authoring.Plan, _ authoring.SessionState) (*authoring.Revision, error) {
 	if err := plan.ValidateForGeneration(); err != nil {
 		return nil, err
 	}

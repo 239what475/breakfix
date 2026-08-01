@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -20,7 +20,7 @@ type CheckpointFirstPassEvent struct {
 	Summary           string
 }
 
-func (d *DB) RecordCheckpointFirstPass(ctx context.Context, event CheckpointFirstPassEvent) error {
+func (d *EnvironmentRepository) RecordCheckpointFirstPass(ctx context.Context, event CheckpointFirstPassEvent) error {
 	for name, value := range map[string]string{
 		"environment uid": event.EnvironmentUID,
 		"user id":         event.UserID,
@@ -49,7 +49,7 @@ func (d *DB) RecordCheckpointFirstPass(ctx context.Context, event CheckpointFirs
 
 // ListCheckpointFirstPasses returns history for the requested attempts in a
 // single query so My Space does not turn a learning page into an N+1 lookup.
-func (d *DB) ListCheckpointFirstPasses(ctx context.Context, environmentUIDs []string) (map[string][]CheckpointFirstPassEvent, error) {
+func (d *EnvironmentRepository) ListCheckpointFirstPasses(ctx context.Context, environmentUIDs []string) (map[string][]CheckpointFirstPassEvent, error) {
 	result := make(map[string][]CheckpointFirstPassEvent, len(environmentUIDs))
 	if len(environmentUIDs) == 0 {
 		return result, nil

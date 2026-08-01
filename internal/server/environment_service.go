@@ -8,8 +8,8 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -141,7 +141,7 @@ func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, en
 	return nil, errors.New("no environment with checkpoint status")
 }
 
-func (h *Handler) createEnvironment(ctx context.Context, user *db.User, entry *challenge.Entry) (*activeEnvironment, error) {
+func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, entry *challenge.Entry) (*activeEnvironment, error) {
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err

@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/server"
@@ -45,7 +45,7 @@ func main() {
 	}
 
 	slog.Info("Breakfix Server starting", "version", build.Version, "data_dir", cfg.DataDir)
-	database, err := db.New(cfg.DatabaseURL)
+	database, err := postgres.New(cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to open database", "err", err)
 		os.Exit(1)

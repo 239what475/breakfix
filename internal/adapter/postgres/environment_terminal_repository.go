@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type TerminalTicket struct {
 	ExpiresAt      time.Time
 }
 
-func (d *DB) CreateTerminalTicket(ctx context.Context, ticket TerminalTicket, now time.Time) error {
+func (d *EnvironmentRepository) CreateTerminalTicket(ctx context.Context, ticket TerminalTicket, now time.Time) error {
 	for name, value := range map[string]string{
 		"token hash": ticket.TokenHash, "user id": ticket.UserID, "environment uid": ticket.EnvironmentUID,
 		"challenge id": ticket.ChallengeID, "window name": ticket.WindowName,
@@ -51,7 +51,7 @@ func (d *DB) CreateTerminalTicket(ctx context.Context, ticket TerminalTicket, no
 // ClaimTerminalTicket atomically consumes one ticket. Caller-supplied route
 // values are part of the predicate, so a ticket cannot be replayed for a
 // different challenge or tmux window.
-func (d *DB) ClaimTerminalTicket(ctx context.Context, tokenHash, challengeID, windowName string, now time.Time) (TerminalTicket, error) {
+func (d *EnvironmentRepository) ClaimTerminalTicket(ctx context.Context, tokenHash, challengeID, windowName string, now time.Time) (TerminalTicket, error) {
 	if strings.TrimSpace(tokenHash) == "" || strings.TrimSpace(challengeID) == "" || strings.TrimSpace(windowName) == "" || now.IsZero() {
 		return TerminalTicket{}, ErrTerminalTicketInvalid
 	}

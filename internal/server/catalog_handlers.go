@@ -24,7 +24,7 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 	completed := make(map[string]struct{})
 	active := make(map[string]activeEnvironment)
 	if user != nil {
-		completed, err = h.db.ListCompletedChallengeIDs(c.Request.Context(), user.ID)
+		completed, err = h.db.Environment.ListCompletedChallengeIDs(c.Request.Context(), user.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 			return

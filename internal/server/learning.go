@@ -32,11 +32,11 @@ func (h *Handler) StartLearningCleanup(ctx context.Context) {
 	}
 	cleanup := func() {
 		now := time.Now().UTC()
-		if err := h.db.CleanupTerminalActivity(ctx, now.Add(-terminalHeartbeatTimeout), now); err != nil {
+		if err := h.db.Environment.CleanupTerminalActivity(ctx, now.Add(-terminalHeartbeatTimeout), now); err != nil {
 			slog.Warn("cleanup terminal activity", "err", err)
 			return
 		}
-		if err := h.db.DeleteClosedTerminalConnections(ctx, now.Add(-terminalConnectionRetention)); err != nil {
+		if err := h.db.Environment.DeleteClosedTerminalConnections(ctx, now.Add(-terminalConnectionRetention)); err != nil {
 			slog.Warn("cleanup terminal connection retention", "err", err)
 		}
 	}

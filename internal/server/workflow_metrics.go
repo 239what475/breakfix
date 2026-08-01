@@ -19,7 +19,7 @@ func (h *Handler) WorkflowMetrics(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "workflow metrics are unavailable"})
 		return
 	}
-	counts, err := h.db.WorkflowStateCounts(c.Request.Context())
+	counts, err := h.db.Reporting.WorkflowStateCounts(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: err.Error()})
 		return

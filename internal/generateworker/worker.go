@@ -295,7 +295,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 
 func supersededCandidate(execution generation.Execution) bool {
 	view := execution.Context.Candidate
-	return view != nil && (view.Failure != nil || view.AuthoringRevision != execution.Claim.Workflow.AuthoringRevision)
+	return view != nil && (view.Failure != nil || view.SourceRevision != execution.Claim.Workflow.SourceRevision)
 }
 
 func (w *Worker) reportError(ctx context.Context, lease *workflowLease, claim generation.Claim, executionErr error) (*generation.Claim, error) {

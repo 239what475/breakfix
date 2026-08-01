@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 // RecordChallengeCompletion stores the user's first successful completion of
 // a challenge. Repeated controller reconciliations must not overwrite it.
-func (d *DB) RecordChallengeCompletion(ctx context.Context, userID, challengeID, environmentUID string, completedAt time.Time) error {
+func (d *EnvironmentRepository) RecordChallengeCompletion(ctx context.Context, userID, challengeID, environmentUID string, completedAt time.Time) error {
 	if strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("completion user id is required")
 	}
@@ -61,7 +61,7 @@ func (d *DB) RecordChallengeCompletion(ctx context.Context, userID, challengeID,
 }
 
 // ListCompletedChallengeIDs returns the user's durable completion history.
-func (d *DB) ListCompletedChallengeIDs(ctx context.Context, userID string) (map[string]struct{}, error) {
+func (d *EnvironmentRepository) ListCompletedChallengeIDs(ctx context.Context, userID string) (map[string]struct{}, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, fmt.Errorf("completion user id is required")
 	}

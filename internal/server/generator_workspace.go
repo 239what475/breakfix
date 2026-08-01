@@ -56,7 +56,7 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	context, err := h.db.LoadGenerationContext(c.Request.Context(), *claim, time.Now().UTC())
+	context, err := h.db.Generation.LoadGenerationContext(c.Request.Context(), *claim, time.Now().UTC())
 	if err != nil {
 		h.writeInternalGenerationError(c, err)
 		return
@@ -195,14 +195,14 @@ func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, work
 	if strings.TrimSpace(workflowID) == "" || !credential.Valid() {
 		return nil, nil, errors.New("generation workflow lease credentials are required")
 	}
-	claim, err := h.db.GetGenerationClaim(ctx, workflowID, credential, time.Now().UTC())
+	claim, err := h.db.Generation.GetGenerationClaim(ctx, workflowID, credential, time.Now().UTC())
 	if err != nil {
 		return nil, nil, err
 	}
 	if claim.Workflow.State != domain.StateGenerating || strings.TrimSpace(claim.Workflow.ActiveAgentRunID) == "" {
 		return nil, nil, errors.New("generation workflow is not running a generator")
 	}
-	run, err := h.db.GetRun(ctx, claim.Workflow.ActiveAgentRunID)
+	run, err := h.db.Agent.GetRun(ctx, claim.Workflow.ActiveAgentRunID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -213,7 +213,7 @@ func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, work
 	if ensure {
 		record, err = h.generatorWorkspace.Ensure(ctx, run.ID)
 	} else {
-		record, err = h.db.GetGeneratorWorkspace(ctx, run.ID)
+		record, err = h.db.Generation.GetGeneratorWorkspace(ctx, run.ID)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -230,11 +230,11 @@ func (h *Handler) materializeGenerationWorkspace(ctx context.Context, record *do
 	}
 	var archive []byte
 	if candidateID := strings.TrimSpace(claim.Workflow.CandidateRevisionID); candidateID != "" {
-		revision, err := h.db.GetCandidateRevision(ctx, candidateID)
+		revision, err := h.db.Generation.GetCandidateRevision(ctx, candidateID)
 		if err != nil {
 			return fmt.Errorf("read generator repair candidate: %w", err)
 		}
-		if revision.AuthoringSessionID != claim.Workflow.Source.Ref || revision.AuthoringRevision > claim.Workflow.AuthoringRevision {
+		if revision.Source != claim.Workflow.Source || revision.SourceRevision != claim.Workflow.SourceRevision {
 			return errors.New("generator repair candidate does not belong to workflow lineage")
 		}
 		archive, err = candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
@@ -255,7 +255,7 @@ func (h *Handler) monitorGenerationCommandLease(ctx context.Context, done <-chan
 		case <-done:
 			return
 		case <-ticker.C:
-			if _, err := h.db.GetGenerationClaim(context.Background(), claim.Workflow.ID, claim.LeaseCredential, time.Now().UTC()); err != nil {
+			if _, err := h.db.Generation.GetGenerationClaim(context.Background(), claim.Workflow.ID, claim.LeaseCredential, time.Now().UTC()); err != nil {
 				mu.Lock()
 				*target = err
 				mu.Unlock()

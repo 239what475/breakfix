@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/testpostgres"
@@ -22,7 +22,7 @@ func TestTaxonomyWorkflowCancelsWhenPublishedArtifactIsStale(t *testing.T) {
 	database := testpostgres.New(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
-	workflow, _, err := database.CreateOrGetTaxonomyWorkflow(ctx, "chal-stale", "sha256:"+strings.Repeat("a", 64), "", now)
+	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, "chal-stale", "sha256:"+strings.Repeat("a", 64), "", now)
 	if err != nil {
 		t.Fatalf("create taxonomy workflow: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestTaxonomyWorkflowCancelsWhenPublishedArtifactIsStale(t *testing.T) {
 	if _, err := handler.taxonomyChallenge(ctx, *workflow); !errors.Is(err, taxonomy.ErrLeaseLost) {
 		t.Fatalf("read stale taxonomy challenge error = %v, want lease loss", err)
 	}
-	stored, err := database.GetTaxonomyWorkflow(ctx, workflow.ID)
+	stored, err := database.Taxonomy.GetTaxonomyWorkflow(ctx, workflow.ID)
 	if err != nil {
 		t.Fatalf("load stale taxonomy workflow: %v", err)
 	}
@@ -45,15 +45,15 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	now := time.Date(2026, time.August, 1, 13, 0, 0, 0, time.UTC)
 	challengeID := "chal-recovery"
 	challengeRevision := "sha256:" + strings.Repeat("b", 64)
-	workflow, _, err := database.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeRevision, "", now)
+	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeRevision, "", now)
 	if err != nil {
 		t.Fatalf("create taxonomy workflow: %v", err)
 	}
-	claim, err := database.ClaimTaxonomyWorkflow(ctx, "taxonomy-worker", time.Minute, now)
+	claim, err := database.Taxonomy.ClaimTaxonomyWorkflow(ctx, "taxonomy-worker", time.Minute, now)
 	if err != nil || claim == nil {
 		t.Fatalf("claim taxonomy workflow = %#v, %v", claim, err)
 	}
-	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
+	mapper, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
 	if err != nil {
 		t.Fatalf("start mapper: %v", err)
 	}
@@ -61,26 +61,26 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 		Operation: taxonomy.ChangeUpsert,
 		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Recovery challenge", Revision: challengeRevision}},
 	}}}
-	if err := database.FinalizeTaxonomyMapper(ctx, *claim, mapper.ID, changes, now); err != nil {
+	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, *claim, mapper.ID, changes, now); err != nil {
 		t.Fatalf("finalize mapper: %v", err)
 	}
-	claim, err = database.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
+	claim, err = database.Taxonomy.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
 	if err != nil {
 		t.Fatalf("refresh reviewer claim: %v", err)
 	}
-	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
+	curriculum, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start curriculum review: %v", err)
 	}
-	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
+	sre, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start SRE review: %v", err)
 	}
-	if err := database.FinalizeTaxonomyReviewPair(ctx, *claim, curriculum.ID, sre.ID,
+	if err := database.Taxonomy.FinalizeTaxonomyReviewPair(ctx, *claim, curriculum.ID, sre.ID,
 		taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, "", now); err != nil {
 		t.Fatalf("finalize review pair: %v", err)
 	}
-	claim, err = database.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
+	claim, err = database.Taxonomy.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
 	if err != nil {
 		t.Fatalf("refresh publishing claim: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	if err != nil {
 		t.Fatalf("preview taxonomy snapshot: %v", err)
 	}
-	if err := database.SetTaxonomyExpectedSnapshot(ctx, *claim, expected, now); err != nil {
+	if err := database.Taxonomy.SetTaxonomyExpectedSnapshot(ctx, *claim, expected, now); err != nil {
 		t.Fatalf("persist expected snapshot: %v", err)
 	}
 	published, err := store.Publish(taxonomy.Snapshot{})
@@ -105,7 +105,7 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	if err := handler.RecoverTaxonomyPublications(ctx); err != nil {
 		t.Fatalf("recover filesystem-published taxonomy workflow: %v", err)
 	}
-	stored, err := database.GetTaxonomyWorkflow(ctx, workflow.ID)
+	stored, err := database.Taxonomy.GetTaxonomyWorkflow(ctx, workflow.ID)
 	if err != nil {
 		t.Fatalf("load recovered taxonomy workflow: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestTaxonomyPublicationSerializesConcurrentMappings(t *testing.T) {
 		if !exists || mapping.Challenge.Revision != entry.Revision {
 			t.Fatalf("current taxonomy lost concurrent mapping for %s: %#v", entry.ID, current.ChallengeMappings)
 		}
-		workflow, err := database.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
+		workflow, err := database.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
 		if err != nil {
 			t.Fatalf("load completed workflow for %s: %v", entry.ID, err)
 		}
@@ -199,14 +199,14 @@ func TestTaxonomyPublicationSerializesConcurrentMappings(t *testing.T) {
 	}
 }
 
-func prepareTaxonomyPublication(t *testing.T, database *db.DB, entry *challenge.Entry, baseRevision string, now time.Time) taxonomy.Claim {
+func prepareTaxonomyPublication(t *testing.T, database *postgres.Store, entry *challenge.Entry, baseRevision string, now time.Time) taxonomy.Claim {
 	t.Helper()
 	ctx := context.Background()
-	workflow, _, err := database.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, baseRevision, now)
+	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, baseRevision, now)
 	if err != nil {
 		t.Fatalf("create taxonomy workflow for %s: %v", entry.ID, err)
 	}
-	claim, err := database.ClaimTaxonomyWorkflow(ctx, "taxonomy-worker-"+entry.ID, time.Minute, now)
+	claim, err := database.Taxonomy.ClaimTaxonomyWorkflow(ctx, "taxonomy-worker-"+entry.ID, time.Minute, now)
 	if err != nil || claim == nil || claim.Workflow.ID != workflow.ID {
 		t.Fatalf("claim taxonomy workflow for %s = %#v, %v", entry.ID, claim, err)
 	}
@@ -218,30 +218,30 @@ func prepareTaxonomyPublication(t *testing.T, database *db.DB, entry *challenge.
 			Outcomes:  []taxonomy.OutcomeRef{{ID: "skill-1111111111111111", Title: "Inspect a service", Primary: true}},
 		},
 	}}}
-	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
+	mapper, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
 	if err != nil {
 		t.Fatalf("start mapper for %s: %v", entry.ID, err)
 	}
-	if err := database.FinalizeTaxonomyMapper(ctx, *claim, mapper.ID, changes, now); err != nil {
+	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, *claim, mapper.ID, changes, now); err != nil {
 		t.Fatalf("finalize mapper for %s: %v", entry.ID, err)
 	}
-	claim, err = database.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
+	claim, err = database.Taxonomy.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
 	if err != nil {
 		t.Fatalf("refresh reviewer claim for %s: %v", entry.ID, err)
 	}
-	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
+	curriculum, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start curriculum reviewer for %s: %v", entry.ID, err)
 	}
-	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
+	sre, err := database.Taxonomy.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start SRE reviewer for %s: %v", entry.ID, err)
 	}
-	if err := database.FinalizeTaxonomyReviewPair(ctx, *claim, curriculum.ID, sre.ID,
+	if err := database.Taxonomy.FinalizeTaxonomyReviewPair(ctx, *claim, curriculum.ID, sre.ID,
 		taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, baseRevision, now); err != nil {
 		t.Fatalf("finalize review pair for %s: %v", entry.ID, err)
 	}
-	claim, err = database.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
+	claim, err = database.Taxonomy.RefreshTaxonomyClaim(ctx, workflow.ID, claim.LeaseOwner, now)
 	if err != nil {
 		t.Fatalf("refresh publication claim for %s: %v", entry.ID, err)
 	}

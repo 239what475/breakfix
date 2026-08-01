@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -19,21 +19,21 @@ func TestCheckpointFirstPassEventsAreImmutablePerEnvironment(t *testing.T) {
 		FirstPassedAt:     first,
 		Summary:           "repair is ready",
 	}
-	if err := database.RecordCheckpointFirstPass(ctx, event); err != nil {
+	if err := database.Environment.RecordCheckpointFirstPass(ctx, event); err != nil {
 		t.Fatal(err)
 	}
 	event.FirstPassedAt = event.FirstPassedAt.Add(time.Hour)
 	event.Summary = "later summary must not replace the learning fact"
-	if err := database.RecordCheckpointFirstPass(ctx, event); err != nil {
+	if err := database.Environment.RecordCheckpointFirstPass(ctx, event); err != nil {
 		t.Fatal(err)
 	}
 
 	event.EnvironmentUID = "environment-two"
-	if err := database.RecordCheckpointFirstPass(ctx, event); err != nil {
+	if err := database.Environment.RecordCheckpointFirstPass(ctx, event); err != nil {
 		t.Fatal(err)
 	}
 
-	events, err := database.ListCheckpointFirstPasses(ctx, []string{"environment-one", "environment-two"})
+	events, err := database.Environment.ListCheckpointFirstPasses(ctx, []string{"environment-one", "environment-two"})
 	if err != nil {
 		t.Fatal(err)
 	}

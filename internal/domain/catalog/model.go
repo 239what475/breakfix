@@ -86,6 +86,40 @@ func (s EntryState) Terminal() bool {
 	return s == EntryCleaned || s == EntryFailed
 }
 
+// CommitState tracks target-platform publication after every entry has passed
+// build and verification. It is separate from EntryState because source
+// validation and filesystem/database commitment have different recovery
+// boundaries.
+type CommitState string
+
+const (
+	CommitPending      CommitState = "Pending"
+	CommitPrepared     CommitState = "Prepared"
+	CommitMaterialized CommitState = "Materialized"
+	CommitCommitted    CommitState = "Committed"
+)
+
+func (s CommitState) Valid() bool {
+	switch s {
+	case CommitPending, CommitPrepared, CommitMaterialized, CommitCommitted:
+		return true
+	default:
+		return false
+	}
+}
+
+// RuntimeIdentity is allocated exactly once during release-level committing.
+// It belongs to the target platform and is intentionally absent from the
+// portable catalog source bundle.
+type RuntimeIdentity struct {
+	ChallengeID string `json:"challenge_id"`
+	Slug        string `json:"slug"`
+}
+
+func (i RuntimeIdentity) Valid() bool {
+	return strings.TrimSpace(i.ChallengeID) != "" && strings.TrimSpace(i.Slug) != ""
+}
+
 // Release is an administrator-owned installation attempt of an immutable
 // portable catalog source bundle. BundleDigest is pinned by its caller and
 // does not identify any target-platform artifact.
@@ -111,14 +145,48 @@ func (r Release) Valid() bool {
 // slug, and artifact references are deliberately absent until a release-level
 // commit has created them on the target platform.
 type Entry struct {
-	ID              string          `json:"id"`
-	ReleaseID       string          `json:"release_id"`
-	SourcePath      string          `json:"source_path"`
-	ContentRevision ContentRevision `json:"content_revision"`
-	State           EntryState      `json:"state"`
-	LastError       string          `json:"last_error,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	ID                  string          `json:"id"`
+	ReleaseID           string          `json:"release_id"`
+	SourcePath          string          `json:"source_path"`
+	ContentRevision     ContentRevision `json:"content_revision"`
+	CandidateRevisionID string          `json:"-"`
+	State               EntryState      `json:"state"`
+	LastError           string          `json:"last_error,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+// Commit stores the target-platform side of an entry installation. The
+// identity is reserved before filesystem materialization so recovery reuses
+// the same challenge ID and slug rather than producing duplicates.
+type Commit struct {
+	EntryID         string           `json:"entry_id"`
+	ContentRevision ContentRevision  `json:"content_revision"`
+	State           CommitState      `json:"state"`
+	RuntimeIdentity *RuntimeIdentity `json:"runtime_identity,omitempty"`
+	MaterializedAt  *time.Time       `json:"materialized_at,omitempty"`
+	CommittedAt     *time.Time       `json:"committed_at,omitempty"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+}
+
+func (c Commit) Valid() bool {
+	if strings.TrimSpace(c.EntryID) == "" || !c.ContentRevision.Valid() || !c.State.Valid() {
+		return false
+	}
+	if c.State == CommitPending {
+		return c.RuntimeIdentity == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+	}
+	if c.RuntimeIdentity == nil || !c.RuntimeIdentity.Valid() {
+		return false
+	}
+	if c.State == CommitPrepared {
+		return c.MaterializedAt == nil && c.CommittedAt == nil
+	}
+	if c.State == CommitMaterialized {
+		return c.MaterializedAt != nil && c.CommittedAt == nil
+	}
+	return c.MaterializedAt != nil && c.CommittedAt != nil
 }
 
 func (e Entry) Valid() bool {

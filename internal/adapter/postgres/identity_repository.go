@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import "time"
 
@@ -11,7 +11,7 @@ type User struct {
 	CreatedAt    time.Time
 }
 
-func (d *DB) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (string, error) {
+func (d *IdentityRepository) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (string, error) {
 	_, err := d.conn.Exec(
 		"INSERT INTO users (id, subject, name, password_hash, totp_secret) VALUES (?, ?, ?, ?, ?)",
 		id, username, username, passwordHash, totpSecret,
@@ -19,7 +19,7 @@ func (d *DB) CreateUserWithAuth(id, username, passwordHash, totpSecret string) (
 	return id, err
 }
 
-func (d *DB) GetUserBySubject(subject string) (*User, error) {
+func (d *IdentityRepository) GetUserBySubject(subject string) (*User, error) {
 	u := &User{}
 	err := d.conn.QueryRow(
 		"SELECT id, subject, name, password_hash, totp_secret, created_at FROM users WHERE subject = ?",
@@ -31,7 +31,7 @@ func (d *DB) GetUserBySubject(subject string) (*User, error) {
 	return u, nil
 }
 
-func (d *DB) GetUserByID(id string) (*User, error) {
+func (d *IdentityRepository) GetUserByID(id string) (*User, error) {
 	u := &User{}
 	err := d.conn.QueryRow(
 		"SELECT id, subject, name, password_hash, totp_secret, created_at FROM users WHERE id = ?",

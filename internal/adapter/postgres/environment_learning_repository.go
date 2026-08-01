@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -100,7 +100,7 @@ func requiredLearningValue(name, value string) error {
 
 // RecordChallengeAttempt persists the point at which a user received a Ready
 // environment. Reconciliation retries must not produce a second attempt.
-func (d *DB) RecordChallengeAttempt(ctx context.Context, userID, challengeID, environmentUID, runtime string, readyAt time.Time) error {
+func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, userID, challengeID, environmentUID, runtime string, readyAt time.Time) error {
 	for name, value := range map[string]string{
 		"user id": userID, "challenge id": challengeID, "environment uid": environmentUID,
 	} {
@@ -125,7 +125,7 @@ func (d *DB) RecordChallengeAttempt(ctx context.Context, userID, challengeID, en
 
 // FinishChallengeAttempt records the final state of a Ready environment. A
 // terminal lifecycle event must never overwrite a previously completed result.
-func (d *DB) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome string, endedAt time.Time) error {
+func (d *EnvironmentRepository) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome string, endedAt time.Time) error {
 	if err := requiredLearningValue("environment uid", environmentUID); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (d *DB) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome
 
 // OpenTerminalConnection creates a durable connection record. The unique
 // active usage-session index makes the first connection transition atomic.
-func (d *DB) OpenTerminalConnection(ctx context.Context, connection TerminalConnection) error {
+func (d *EnvironmentRepository) OpenTerminalConnection(ctx context.Context, connection TerminalConnection) error {
 	for name, value := range map[string]string{
 		"connection id":      connection.ID,
 		"environment uid":    connection.EnvironmentUID,
@@ -192,7 +192,7 @@ func (d *DB) OpenTerminalConnection(ctx context.Context, connection TerminalConn
 	return tx.Commit()
 }
 
-func (d *DB) TouchTerminalConnection(ctx context.Context, connectionID string, at time.Time) error {
+func (d *EnvironmentRepository) TouchTerminalConnection(ctx context.Context, connectionID string, at time.Time) error {
 	if err := requiredLearningValue("connection id", connectionID); err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (d *DB) TouchTerminalConnection(ctx context.Context, connectionID string, a
 // CloseTerminalConnection records an individual WebSocket close immediately.
 // A usage session is deliberately left open for the Server's settle delay so
 // a tab handover does not create a false gap in learning time.
-func (d *DB) CloseTerminalConnection(ctx context.Context, connectionID string, at time.Time) (bool, error) {
+func (d *EnvironmentRepository) CloseTerminalConnection(ctx context.Context, connectionID string, at time.Time) (bool, error) {
 	if err := requiredLearningValue("connection id", connectionID); err != nil {
 		return false, err
 	}
@@ -263,7 +263,7 @@ func (d *DB) CloseTerminalConnection(ctx context.Context, connectionID string, a
 // FinishTerminalUsageSession closes an environment-level usage interval only
 // after a local settle delay. It checks all Server connections transactionally
 // so a connection hosted by another replica keeps the interval alive.
-func (d *DB) FinishTerminalUsageSession(ctx context.Context, environmentUID string, at time.Time) (bool, error) {
+func (d *EnvironmentRepository) FinishTerminalUsageSession(ctx context.Context, environmentUID string, at time.Time) (bool, error) {
 	if err := requiredLearningValue("environment uid", environmentUID); err != nil {
 		return false, err
 	}
@@ -305,7 +305,7 @@ func (d *DB) FinishTerminalUsageSession(ctx context.Context, environmentUID stri
 
 // CleanupTerminalActivity makes Server restarts and lost WebSocket close
 // events bounded. It closes stale records and their orphaned usage sessions.
-func (d *DB) CleanupTerminalActivity(ctx context.Context, staleBefore, now time.Time) error {
+func (d *EnvironmentRepository) CleanupTerminalActivity(ctx context.Context, staleBefore, now time.Time) error {
 	if staleBefore.IsZero() || now.IsZero() {
 		return fmt.Errorf("terminal cleanup times are required")
 	}
@@ -338,7 +338,7 @@ func (d *DB) CleanupTerminalActivity(ctx context.Context, staleBefore, now time.
 // DeleteClosedTerminalConnections removes low-level operational records once
 // they are no longer needed to determine global active connection state.
 // Environment usage sessions remain the durable source for learning time.
-func (d *DB) DeleteClosedTerminalConnections(ctx context.Context, before time.Time) error {
+func (d *EnvironmentRepository) DeleteClosedTerminalConnections(ctx context.Context, before time.Time) error {
 	if before.IsZero() {
 		return fmt.Errorf("terminal connection retention time is required")
 	}
@@ -351,7 +351,7 @@ func (d *DB) DeleteClosedTerminalConnections(ctx context.Context, before time.Ti
 	return nil
 }
 
-func (d *DB) LearningSummary(ctx context.Context, userID string, now time.Time) (LearningSummary, error) {
+func (d *EnvironmentRepository) LearningSummary(ctx context.Context, userID string, now time.Time) (LearningSummary, error) {
 	if err := requiredLearningValue("user id", userID); err != nil {
 		return LearningSummary{}, err
 	}
@@ -382,7 +382,7 @@ func (d *DB) LearningSummary(ctx context.Context, userID string, now time.Time) 
 	return summary, nil
 }
 
-func (d *DB) ListLearningHistory(ctx context.Context, userID string, filter LearningHistoryFilter, limit int, cursor *LearningHistoryCursor, now time.Time) ([]LearningHistoryItem, error) {
+func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID string, filter LearningHistoryFilter, limit int, cursor *LearningHistoryCursor, now time.Time) ([]LearningHistoryItem, error) {
 	if err := requiredLearningValue("user id", userID); err != nil {
 		return nil, err
 	}

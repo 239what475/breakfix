@@ -197,7 +197,7 @@ func newGenerationStore(t *testing.T) *generationStore {
 	archive := candidateArchive(t)
 	store := &generationStore{archive: archive}
 	store.current = generation.Claim{Workflow: generation.Workflow{
-		ID: "generation-workflow-0123456789abcdef", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"}, AuthoringRevision: 0,
+		ID: "generation-workflow-0123456789abcdef", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"}, SourceRevision: "0",
 		State: generation.StateGenerating, StateAttempt: 0, LeaseOwner: "generate-lease",
 		NextRunAt: time.Now().UTC(), DeadlineAt: &deadline,
 	}, LeaseCredential: generation.LeaseCredential{StateAttempt: 0, LeaseOwner: "generate-lease"}}

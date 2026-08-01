@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -84,21 +84,21 @@ func (h *Handler) streamAuthoringTurn(c *gin.Context, runID string) {
 	c.Status(http.StatusOK)
 	writeSSE(c, "ready", authoringStreamEvent{RunID: runID})
 
-	stage, history, err := h.db.LoadAuthoringExecution(c.Request.Context(), runID)
+	stage, history, err := h.db.Authoring.LoadAuthoringExecution(c.Request.Context(), runID)
 	var content string
 	if err == nil {
-		content, err = authoring.RunWithEino(c.Request.Context(), h.llm, runID, *stage, history, h.db, func(event authoring.StreamEvent) {
+		content, err = authoring.RunWithEino(c.Request.Context(), h.llm, runID, *stage, history, h.db.Authoring, func(event authoring.StreamEvent) {
 			writeSSE(c, "delta", authoringStreamEvent{RunID: runID, Content: event.Content})
 		})
 	}
 	if err == nil {
-		_, err = h.db.FinalizeAuthoringRun(c.Request.Context(), runID, content, time.Now().UTC())
+		_, err = h.db.Authoring.FinalizeAuthoringRun(c.Request.Context(), runID, content, time.Now().UTC())
 	}
 	if err == nil {
 		writeSSE(c, "complete", authoringStreamEvent{RunID: runID, Content: content})
 		return
 	}
-	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
+	if failErr := h.db.Agent.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
 		slog.Error("finalize direct authoring turn", "run_id", runID, "err", errors.Join(err, failErr))
 	}
 	if c.Request.Context().Err() == nil {
@@ -121,14 +121,14 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 		return
 	}
 	now := time.Now().UTC()
-	active, activeErr := h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
+	active, activeErr := h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
 	switch {
-	case errors.Is(activeErr, db.ErrGenerationWorkflowNotFound):
-		_, err = h.db.CreateGenerationWorkflow(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
+	case errors.Is(activeErr, postgres.ErrGenerationWorkflowNotFound):
+		_, err = h.db.Generation.CreateGenerationWorkflow(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
 	case activeErr != nil:
 		err = activeErr
 	case active.State == generation.StateNeedsAuthorReview:
-		_, err = h.db.ResumeGenerationForRevision(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
+		_, err = h.db.Generation.ResumeGenerationForRevision(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
 	default:
 		err = authoringdomain.ErrInvalidState
 	}
@@ -149,7 +149,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	workflow, err := h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
+	workflow, err := h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
@@ -174,7 +174,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	}
 	challengeID := challenge.NewID()
 	now := time.Now().UTC()
-	_, err = h.db.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, generation.Publication{
+	_, err = h.db.Generation.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, generation.Publication{
 		ChallengeID: challengeID,
 		SourceSlug:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
 		TargetPath:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
@@ -187,14 +187,14 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	h.writeAuthoringSession(c, user, sessionID)
 }
 
-func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID string) {
+func (h *Handler) writeAuthoringSession(c *gin.Context, user *postgres.User, sessionID string) {
 	session, revision, messages, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
 	authoringTurnActive := false
-	if active, err := h.db.GetActiveRunForSession(c.Request.Context(), session.RuntimeSessionID); err == nil {
+	if active, err := h.db.Agent.GetActiveRunForSession(c.Request.Context(), session.RuntimeSessionID); err == nil {
 		authoringTurnActive = active.Purpose == "authoring" && active.OwnerKind == "authoring-session" && active.OwnerRef == session.ID
 	} else if !errors.Is(err, agent.ErrNotFound) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read active authoring run: %v", err)})
@@ -202,8 +202,8 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 	}
 
 	var workflow *generation.Workflow
-	workflow, err = h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
-	if errors.Is(err, db.ErrGenerationWorkflowNotFound) {
+	workflow, err = h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
+	if errors.Is(err, postgres.ErrGenerationWorkflowNotFound) {
 		workflow = nil
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read generation workflow: %v", err)})
@@ -226,7 +226,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 	}
 	var previousArchive []byte
 	if revision.Number > 0 {
-		previous, err := h.db.FindLatestCandidateBefore(c.Request.Context(), session.ID, revision.Number)
+		previous, err := h.db.Generation.FindLatestCandidateBefore(c.Request.Context(), session.ID, revision.Number)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 			return
@@ -253,7 +253,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 }
 
 func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*generation.Revision, []byte, error) {
-	revision, err := h.db.GetCandidateRevision(ctx, id)
+	revision, err := h.db.Generation.GetCandidateRevision(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -389,7 +389,7 @@ func optionalSlice[T any](values []T) *[]T {
 
 func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, db.ErrGenerationWorkflowNotFound):
+	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
 	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})

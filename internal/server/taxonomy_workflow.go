@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
@@ -46,7 +46,7 @@ func (h *Handler) InternalClaimTaxonomyWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
-	claim, err := h.db.ClaimTaxonomyWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
+	claim, err := h.db.Taxonomy.ClaimTaxonomyWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
 		h.writeInternalTaxonomyWorkflowError(c, err)
 		return
@@ -68,7 +68,7 @@ func (h *Handler) InternalRenewTaxonomyWorkflow(c *gin.Context) {
 	}
 	claim, err := h.taxonomyWorkflowClaim(c, request.LeaseCredential)
 	if err == nil {
-		err = h.db.RenewTaxonomyLease(c.Request.Context(), *claim, leaseTTL, time.Now().UTC())
+		err = h.db.Taxonomy.RenewTaxonomyLease(c.Request.Context(), *claim, leaseTTL, time.Now().UTC())
 	}
 	if err != nil {
 		h.writeInternalTaxonomyWorkflowError(c, err)
@@ -115,7 +115,7 @@ func (h *Handler) InternalStartTaxonomyAgentRun(c *gin.Context) {
 		h.writeInternalTaxonomyWorkflowError(c, errors.New("taxonomy agent run model does not match Server configuration"))
 		return
 	}
-	run, err := h.db.StartTaxonomyAgentRun(c.Request.Context(), *claim, request.Role, h.llm.Model, time.Now().UTC())
+	run, err := h.db.Taxonomy.StartTaxonomyAgentRun(c.Request.Context(), *claim, request.Role, h.llm.Model, time.Now().UTC())
 	if err != nil {
 		h.writeInternalTaxonomyWorkflowError(c, err)
 		return
@@ -150,7 +150,7 @@ func (h *Handler) InternalTaxonomyWorkflowPhase(c *gin.Context) {
 	case request.Publication != nil:
 		err = h.completeTaxonomyPublication(c.Request.Context(), *claim, now)
 	case request.TechnicalFailure != nil:
-		_, _, err = h.db.ReportTaxonomyTechnicalFailure(c.Request.Context(), *claim, request.ExpectedState, request.TechnicalFailure.Message, request.TechnicalFailure.RunIDs, now)
+		_, _, err = h.db.Taxonomy.ReportTaxonomyTechnicalFailure(c.Request.Context(), *claim, request.ExpectedState, request.TechnicalFailure.Message, request.TechnicalFailure.RunIDs, now)
 	}
 	if err != nil {
 		h.writeInternalTaxonomyWorkflowError(c, err)
@@ -170,18 +170,18 @@ func (h *Handler) taxonomyWorkflowClaim(c *gin.Context, credential taxonomy.Leas
 	if h.db == nil || strings.TrimSpace(c.Param("id")) == "" || !credential.Valid() {
 		return nil, errors.New("valid taxonomy workflow lease credentials are required")
 	}
-	return h.db.GetTaxonomyClaim(c.Request.Context(), c.Param("id"), credential, time.Now().UTC())
+	return h.db.Taxonomy.GetTaxonomyClaim(c.Request.Context(), c.Param("id"), credential, time.Now().UTC())
 }
 
 func (h *Handler) refreshTaxonomyWorkflowClaim(ctx context.Context, prior taxonomy.Claim) (*taxonomy.Claim, error) {
-	workflow, err := h.db.GetTaxonomyWorkflow(ctx, prior.Workflow.ID)
+	workflow, err := h.db.Taxonomy.GetTaxonomyWorkflow(ctx, prior.Workflow.ID)
 	if err != nil {
 		return nil, err
 	}
 	if workflow.State.Terminal() || strings.TrimSpace(workflow.LeaseOwner) == "" {
 		return nil, nil
 	}
-	return h.db.RefreshTaxonomyClaim(ctx, workflow.ID, prior.LeaseOwner, time.Now().UTC())
+	return h.db.Taxonomy.RefreshTaxonomyClaim(ctx, workflow.ID, prior.LeaseOwner, time.Now().UTC())
 }
 
 func (h *Handler) taxonomyContext(ctx context.Context, claim taxonomy.Claim) (taxonomyapp.Context, error) {
@@ -236,7 +236,7 @@ func (h *Handler) completeTaxonomyMapper(ctx context.Context, claim taxonomy.Cla
 	if _, err := taxonomy.ValidateWorkflowChangeSet(result.ChangeSet, taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision}, base); err != nil {
 		return fmt.Errorf("mapper candidate failed deterministic validation: %w", err)
 	}
-	return h.db.FinalizeTaxonomyMapper(ctx, claim, result.RunID, result.ChangeSet, now)
+	return h.db.Taxonomy.FinalizeTaxonomyMapper(ctx, claim, result.RunID, result.ChangeSet, now)
 }
 
 func (h *Handler) completeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Claim, result taxonomyapp.ReviewPairResult, now time.Time) error {
@@ -250,7 +250,7 @@ func (h *Handler) completeTaxonomyReviewPair(ctx context.Context, claim taxonomy
 	if err != nil {
 		return err
 	}
-	return h.db.FinalizeTaxonomyReviewPair(ctx, claim, result.CurriculumRunID, result.SRERunID, result.Curriculum, result.SRE, current.Revision, now)
+	return h.db.Taxonomy.FinalizeTaxonomyReviewPair(ctx, claim, result.CurriculumRunID, result.SRERunID, result.Curriculum, result.SRE, current.Revision, now)
 }
 
 func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonomy.Claim, now time.Time) error {
@@ -276,7 +276,7 @@ func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonom
 	changes := *claim.Workflow.CandidateChangeSet
 	if current.Revision != claim.Workflow.BaseTaxonomyRevision {
 		if !changes.MappingOnlyFor(entry.ID) || !taxonomy.ReferencedDefinitionsUnchanged(base, current, changes) {
-			return h.db.ResetTaxonomyForLatest(ctx, claim, current.Revision, "taxonomy 已变化，需要基于最新 revision 重新进行完整审查", now)
+			return h.db.Taxonomy.ResetTaxonomyForLatest(ctx, claim, current.Revision, "taxonomy 已变化，需要基于最新 revision 重新进行完整审查", now)
 		}
 		base = current
 	}
@@ -288,7 +288,7 @@ func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonom
 	if err != nil {
 		return fmt.Errorf("preview taxonomy snapshot: %w", err)
 	}
-	if err := h.db.SetTaxonomyExpectedSnapshot(ctx, claim, expected, now); err != nil {
+	if err := h.db.Taxonomy.SetTaxonomyExpectedSnapshot(ctx, claim, expected, now); err != nil {
 		return err
 	}
 	published, err := h.taxonomy.Publish(next)
@@ -298,7 +298,7 @@ func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonom
 	if published.Revision != expected {
 		return fmt.Errorf("published taxonomy revision %q differs from expected %q", published.Revision, expected)
 	}
-	return h.db.CompleteTaxonomyPublication(ctx, claim, published.Revision, now)
+	return h.db.Taxonomy.CompleteTaxonomyPublication(ctx, claim, published.Revision, now)
 }
 
 func (h *Handler) taxonomyChallenge(ctx context.Context, workflow taxonomy.Workflow) (*challenge.Entry, error) {
@@ -307,7 +307,7 @@ func (h *Handler) taxonomyChallenge(ctx context.Context, workflow taxonomy.Workf
 		return entry, nil
 	}
 	reason := "目标 challenge artifact 已不存在或 revision 已变化"
-	if cancelErr := h.db.CancelTaxonomyWorkflow(ctx, workflow.ID, reason, time.Now().UTC()); cancelErr != nil && !errors.Is(cancelErr, db.ErrTaxonomyWorkflowNotFound) {
+	if cancelErr := h.db.Taxonomy.CancelTaxonomyWorkflow(ctx, workflow.ID, reason, time.Now().UTC()); cancelErr != nil && !errors.Is(cancelErr, postgres.ErrTaxonomyWorkflowNotFound) {
 		return nil, fmt.Errorf("cancel stale taxonomy workflow: %w", cancelErr)
 	}
 	return nil, taxonomy.ErrLeaseLost
@@ -370,7 +370,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 	for _, entry := range entries {
 		byID[entry.ID] = entry
 	}
-	active, err := h.db.ListActiveTaxonomyWorkflows(ctx)
+	active, err := h.db.Taxonomy.ListActiveTaxonomyWorkflows(ctx)
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 		if exists && entry.Revision == workflow.ChallengeRevision {
 			continue
 		}
-		if err := h.db.CancelTaxonomyWorkflow(ctx, workflow.ID, "目标 challenge artifact 已不存在或 revision 已变化", time.Now().UTC()); err != nil && !errors.Is(err, db.ErrTaxonomyWorkflowNotFound) {
+		if err := h.db.Taxonomy.CancelTaxonomyWorkflow(ctx, workflow.ID, "目标 challenge artifact 已不存在或 revision 已变化", time.Now().UTC()); err != nil && !errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound) {
 			return err
 		}
 	}
@@ -397,7 +397,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 				continue
 			}
 		}
-		if _, _, err := h.db.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, current.Revision, time.Now().UTC()); err != nil {
+		if _, _, err := h.db.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, current.Revision, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
@@ -405,7 +405,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 }
 
 func (h *Handler) RecoverTaxonomyPublications(ctx context.Context) error {
-	workflows, err := h.db.ListPublishingTaxonomyWorkflows(ctx)
+	workflows, err := h.db.Taxonomy.ListPublishingTaxonomyWorkflows(ctx)
 	if err != nil {
 		return err
 	}
@@ -420,7 +420,7 @@ func (h *Handler) RecoverTaxonomyPublications(ctx context.Context) error {
 		if workflow.ExpectedSnapshotRevision == "" || workflow.ExpectedSnapshotRevision != current.Revision {
 			continue
 		}
-		if err := h.db.RecoverTaxonomyPublication(ctx, workflow.ID, workflow.ExpectedSnapshotRevision, time.Now().UTC()); err != nil && !errors.Is(err, taxonomy.ErrLeaseLost) {
+		if err := h.db.Taxonomy.RecoverTaxonomyPublication(ctx, workflow.ID, workflow.ExpectedSnapshotRevision, time.Now().UTC()); err != nil && !errors.Is(err, taxonomy.ErrLeaseLost) {
 			return err
 		}
 	}
@@ -430,7 +430,7 @@ func (h *Handler) RecoverTaxonomyPublications(ctx context.Context) error {
 func (h *Handler) writeInternalTaxonomyWorkflowError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, db.ErrTaxonomyWorkflowNotFound), errors.Is(err, agent.ErrNotFound):
+	case errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound), errors.Is(err, agent.ErrNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, taxonomy.ErrLeaseLost):
 		status = http.StatusConflict

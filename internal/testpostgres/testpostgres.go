@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func New(t testing.TB) *db.DB {
+func New(t testing.TB) *postgres.Store {
 	t.Helper()
 	baseURL := strings.TrimSpace(os.Getenv("BREAKFIX_TEST_DATABASE_URL"))
 	if baseURL == "" {
@@ -48,7 +48,7 @@ func New(t testing.TB) *db.DB {
 	query := testURL.Query()
 	query.Set("search_path", schema)
 	testURL.RawQuery = query.Encode()
-	database, err := db.New(testURL.String())
+	database, err := postgres.New(testURL.String())
 	if err != nil {
 		t.Fatalf("open migrated breakfix database: %v", err)
 	}

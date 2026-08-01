@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
-func (d *DB) CreateGeneratorWorkspace(ctx context.Context, record generation.Workspace) (*generation.Workspace, error) {
+func (d *GenerationRepository) CreateGeneratorWorkspace(ctx context.Context, record generation.Workspace) (*generation.Workspace, error) {
 	if record.State == "" {
 		record.State = generation.WorkspacePending
 	}
@@ -45,7 +45,7 @@ func (d *DB) CreateGeneratorWorkspace(ctx context.Context, record generation.Wor
 	return existing, nil
 }
 
-func (d *DB) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (*generation.Workspace, error) {
+func (d *GenerationRepository) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (*generation.Workspace, error) {
 	record, err := scanGeneratorWorkspace(d.conn.QueryRowContext(ctx, generatorWorkspaceSelect+` WHERE generator_run_id = ?`, strings.TrimSpace(generatorRunID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, generation.ErrWorkspaceNotFound
@@ -59,7 +59,7 @@ func (d *DB) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (
 // RecordGeneratorWorkspaceSandbox persists the ID returned by the lifecycle
 // API before Server waits for readiness. A retry therefore reconnects to this
 // exact Sandbox rather than issuing another create request.
-func (d *DB) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
+func (d *GenerationRepository) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
 	if strings.TrimSpace(generatorRunID) == "" || strings.TrimSpace(sandboxID) == "" || now.IsZero() {
 		return errors.New("generator workspace run, sandbox id, and current time are required")
 	}
@@ -83,7 +83,7 @@ func (d *DB) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID
 	return fmt.Errorf("generator workspace cannot record sandbox from state %q", record.State)
 }
 
-func (d *DB) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
+func (d *GenerationRepository) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, sandboxID string, now time.Time) error {
 	if strings.TrimSpace(generatorRunID) == "" || strings.TrimSpace(sandboxID) == "" || now.IsZero() {
 		return errors.New("generator workspace run, sandbox id, and current time are required")
 	}
@@ -107,7 +107,7 @@ func (d *DB) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, san
 	return fmt.Errorf("generator workspace cannot become active from state %q", record.State)
 }
 
-func (d *DB) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID string, now time.Time) (*generation.Workspace, error) {
+func (d *GenerationRepository) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID string, now time.Time) (*generation.Workspace, error) {
 	if strings.TrimSpace(generatorRunID) == "" || now.IsZero() {
 		return nil, errors.New("generator workspace run and current time are required")
 	}
@@ -136,7 +136,7 @@ func (d *DB) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID 
 	return record, nil
 }
 
-func (d *DB) MarkGeneratorWorkspaceDeleted(ctx context.Context, generatorRunID string, now time.Time) error {
+func (d *GenerationRepository) MarkGeneratorWorkspaceDeleted(ctx context.Context, generatorRunID string, now time.Time) error {
 	if strings.TrimSpace(generatorRunID) == "" || now.IsZero() {
 		return errors.New("generator workspace run and current time are required")
 	}
@@ -153,18 +153,18 @@ func (d *DB) MarkGeneratorWorkspaceDeleted(ctx context.Context, generatorRunID s
 	return nil
 }
 
-func (d *DB) ListExpiredPendingGeneratorWorkspaces(ctx context.Context, now time.Time) ([]generation.Workspace, error) {
+func (d *GenerationRepository) ListExpiredPendingGeneratorWorkspaces(ctx context.Context, now time.Time) ([]generation.Workspace, error) {
 	if now.IsZero() {
 		return nil, errors.New("current time is required")
 	}
 	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? AND provision_deadline <= ? ORDER BY provision_deadline, generator_run_id`, generation.WorkspacePending, now)
 }
 
-func (d *DB) ListDeletingGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
+func (d *GenerationRepository) ListDeletingGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
 	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? ORDER BY updated_at, generator_run_id`, generation.WorkspaceDeleting)
 }
 
-func (d *DB) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
+func (d *GenerationRepository) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
 	return listGeneratorWorkspaces(ctx, d.conn, `SELECT w.generator_run_id, w.namespace, w.pvc_name, w.sandbox_id, w.state,
 		w.provision_deadline, w.created_at, w.updated_at, w.deleted_at
 		FROM generator_workspaces w

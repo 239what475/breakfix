@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func newTestDB(t *testing.T) *DB {
+func newTestDB(t *testing.T) *Store {
 	t.Helper()
 	baseURL := strings.TrimSpace(os.Getenv("BREAKFIX_TEST_DATABASE_URL"))
 	if baseURL == "" {

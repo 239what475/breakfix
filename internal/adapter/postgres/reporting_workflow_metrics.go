@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -13,7 +13,7 @@ type WorkflowStateCounts struct {
 	Taxonomy   map[string]int64
 }
 
-func (d *DB) WorkflowStateCounts(ctx context.Context) (WorkflowStateCounts, error) {
+func (d *ReportingRepository) WorkflowStateCounts(ctx context.Context) (WorkflowStateCounts, error) {
 	result := WorkflowStateCounts{Generation: map[string]int64{}, Taxonomy: map[string]int64{}}
 	for _, target := range []struct {
 		statement string

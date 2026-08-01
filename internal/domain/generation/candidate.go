@@ -212,11 +212,11 @@ func (e VerificationEnvironment) Validate(runtime string) error {
 
 type Revision struct {
 	ID                 string                   `json:"id"`
-	AuthoringSessionID string                   `json:"authoring_session_id"`
-	AuthoringRevision  int64                    `json:"authoring_revision"`
-	GeneratorSessionID string                   `json:"generator_session_id"`
-	GeneratorRunID     string                   `json:"generator_run_id"`
-	JudgeRunID         string                   `json:"judge_run_id"`
+	Source             Source                   `json:"source"`
+	SourceRevision     string                   `json:"source_revision"`
+	GeneratorSessionID string                   `json:"generator_session_id,omitempty"`
+	GeneratorRunID     string                   `json:"generator_run_id,omitempty"`
+	JudgeRunID         string                   `json:"judge_run_id,omitempty"`
 	ArchivePath        string                   `json:"-"`
 	ArchiveSHA256      string                   `json:"archive_sha256"`
 	Snapshot           ExecutionSnapshot        `json:"snapshot"`
@@ -237,7 +237,7 @@ type Revision struct {
 // Server volume layout.
 type WorkerView struct {
 	ID                string                   `json:"id"`
-	AuthoringRevision int64                    `json:"authoring_revision"`
+	SourceRevision    string                   `json:"source_revision"`
 	ArchiveSHA256     string                   `json:"archive_sha256"`
 	Snapshot          ExecutionSnapshot        `json:"snapshot"`
 	Build             *BuildOutput             `json:"build,omitempty"`
@@ -261,7 +261,7 @@ func (r Revision) WorkerView() WorkerView {
 		failure = &copy
 	}
 	return WorkerView{
-		ID: r.ID, AuthoringRevision: r.AuthoringRevision, ArchiveSHA256: r.ArchiveSHA256, Snapshot: r.Snapshot,
+		ID: r.ID, SourceRevision: r.SourceRevision, ArchiveSHA256: r.ArchiveSHA256, Snapshot: r.Snapshot,
 		Build: build, Artifact: r.Artifact, VerifyEnvironment: r.VerifyEnvironment,
 		Verification: r.Verification, Failure: failure, Publication: r.Publication,
 	}
@@ -332,11 +332,11 @@ func validFingerprint(value string) bool {
 }
 
 func (r Revision) ValidateForCreate() error {
-	if strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.AuthoringSessionID) == "" || r.AuthoringRevision < 0 {
-		return errors.New("candidate revision requires identity and authoring source")
+	if strings.TrimSpace(r.ID) == "" || !r.Source.Valid() || strings.TrimSpace(r.SourceRevision) == "" {
+		return errors.New("candidate revision requires identity and source revision")
 	}
-	if strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "" {
-		return errors.New("candidate revision requires generator lineage")
+	if r.Source.Kind == SourceAuthoring && (strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "") {
+		return errors.New("authoring candidate revision requires generator lineage")
 	}
 	if strings.TrimSpace(r.ArchivePath) == "" || !ValidSHA256(r.ArchiveSHA256) {
 		return errors.New("candidate revision requires an immutable archive")

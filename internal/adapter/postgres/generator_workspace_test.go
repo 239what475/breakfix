@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -12,14 +12,14 @@ import (
 func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	if _, err := database.CreateRun(ctx, agent.CreateRun{
+	if _, err := database.Agent.CreateRun(ctx, agent.CreateRun{
 		ID: "generator-run-one", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
 		Model: "test", PromptVersion: "test",
 	}); err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
 	now := time.Now().UTC().Round(time.Microsecond)
-	record, err := database.CreateGeneratorWorkspace(ctx, generation.Workspace{
+	record, err := database.Generation.CreateGeneratorWorkspace(ctx, generation.Workspace{
 		GeneratorRunID: "generator-run-one", Namespace: "opensandbox", PVCName: generation.NewWorkspacePVCName("generator-run-one"),
 		State: generation.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 	})
@@ -29,16 +29,16 @@ func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	if record.State != generation.WorkspacePending {
 		t.Fatalf("workspace state = %q", record.State)
 	}
-	if err := database.ActivateGeneratorWorkspace(ctx, record.GeneratorRunID, "sandbox-one", now.Add(time.Second)); err != nil {
+	if err := database.Generation.ActivateGeneratorWorkspace(ctx, record.GeneratorRunID, "sandbox-one", now.Add(time.Second)); err != nil {
 		t.Fatalf("activate workspace: %v", err)
 	}
-	if _, err := database.BeginGeneratorWorkspaceCleanup(ctx, record.GeneratorRunID, now.Add(2*time.Second)); err != nil {
+	if _, err := database.Generation.BeginGeneratorWorkspaceCleanup(ctx, record.GeneratorRunID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("begin workspace cleanup: %v", err)
 	}
-	if err := database.MarkGeneratorWorkspaceDeleted(ctx, record.GeneratorRunID, now.Add(3*time.Second)); err != nil {
+	if err := database.Generation.MarkGeneratorWorkspaceDeleted(ctx, record.GeneratorRunID, now.Add(3*time.Second)); err != nil {
 		t.Fatalf("mark workspace deleted: %v", err)
 	}
-	stored, err := database.GetGeneratorWorkspace(ctx, record.GeneratorRunID)
+	stored, err := database.Generation.GetGeneratorWorkspace(ctx, record.GeneratorRunID)
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
@@ -51,23 +51,23 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(time.Microsecond)
-	run, err := database.CreateRun(ctx, agent.CreateRun{
+	run, err := database.Agent.CreateRun(ctx, agent.CreateRun{
 		ID: "generator-run-pending", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
 		Model: "test", PromptVersion: "test",
 	})
 	if err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
-	if _, err := database.CreateGeneratorWorkspace(ctx, generation.Workspace{
+	if _, err := database.Generation.CreateGeneratorWorkspace(ctx, generation.Workspace{
 		GeneratorRunID: "generator-run-pending", Namespace: "opensandbox", PVCName: generation.NewWorkspacePVCName("generator-run-pending"),
 		State: generation.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create pending workspace: %v", err)
 	}
-	if err := database.FailRun(ctx, run.ID, "workspace cleanup", now.Add(time.Second)); err != nil {
+	if err := database.Agent.FailRun(ctx, run.ID, "workspace cleanup", now.Add(time.Second)); err != nil {
 		t.Fatalf("finish generator run: %v", err)
 	}
-	workspaces, err := database.ListTerminalGeneratorWorkspaces(ctx)
+	workspaces, err := database.Generation.ListTerminalGeneratorWorkspaces(ctx)
 	if err != nil {
 		t.Fatalf("list terminal workspaces: %v", err)
 	}

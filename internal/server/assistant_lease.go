@@ -32,7 +32,7 @@ func (h *Handler) StartAssistantEnvironmentLeaseMaintainer(ctx context.Context) 
 }
 
 func (h *Handler) maintainAssistantEnvironmentLeases(ctx context.Context) error {
-	runs, err := h.db.ListActiveRunsForPurpose(ctx, "assistant")
+	runs, err := h.db.Agent.ListActiveRunsForPurpose(ctx, "assistant")
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (h *Handler) maintainAssistantEnvironmentLeases(ctx context.Context) error 
 		if run.OwnerKind != "environment" || run.OwnerRef == "" || run.SessionID == "" {
 			continue
 		}
-		session, err := h.db.GetSession(ctx, run.SessionID)
+		session, err := h.db.Agent.GetSession(ctx, run.SessionID)
 		if err != nil {
 			return err
 		}

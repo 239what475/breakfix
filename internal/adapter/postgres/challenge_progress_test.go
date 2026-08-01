@@ -1,4 +1,4 @@
-package db
+package postgres
 
 import (
 	"context"
@@ -10,14 +10,14 @@ func TestChallengeCompletionPersistsFirstCompletion(t *testing.T) {
 	database := newTestDB(t)
 
 	first := time.Date(2026, time.July, 24, 9, 30, 0, 0, time.UTC)
-	if err := database.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-a", first); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-a", first); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-b", first.Add(time.Hour)); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-b", first.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
-	completed, err := database.ListCompletedChallengeIDs(context.Background(), "user-a")
+	completed, err := database.Environment.ListCompletedChallengeIDs(context.Background(), "user-a")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/breakfix/breakfix/internal/taxonomy"
@@ -65,7 +65,7 @@ func (h *Handler) GetMySpaceLearning(c *gin.Context, params api.GetMySpaceLearni
 	c.JSON(200, page)
 }
 
-func (h *Handler) mySpace(ctx context.Context, user *db.User, learningLimit int) (api.MySpace, error) {
+func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimit int) (api.MySpace, error) {
 	if h.db == nil || h.k8s == nil {
 		return api.MySpace{}, fmt.Errorf("user space dependencies are not configured")
 	}
@@ -83,7 +83,7 @@ func (h *Handler) mySpace(ctx context.Context, user *db.User, learningLimit int)
 		catalog[entry.ID] = entry
 	}
 
-	learning, err := h.db.LearningSummary(ctx, user.ID, now)
+	learning, err := h.db.Environment.LearningSummary(ctx, user.ID, now)
 	if err != nil {
 		return api.MySpace{}, err
 	}
@@ -119,7 +119,7 @@ func (h *Handler) mySpace(ctx context.Context, user *db.User, learningLimit int)
 		})
 	}
 
-	page, err := h.mySpaceLearningFromCatalog(ctx, user.ID, nil, db.LearningHistoryFilter{}, learningLimit, now, catalog)
+	page, err := h.mySpaceLearningFromCatalog(ctx, user.ID, nil, postgres.LearningHistoryFilter{}, learningLimit, now, catalog)
 	if err != nil {
 		return api.MySpace{}, err
 	}
@@ -179,7 +179,7 @@ func (h *Handler) occupiedEnvironmentCount(ctx context.Context, userID string) (
 	return occupied, nil
 }
 
-func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *db.LearningHistoryCursor, filter db.LearningHistoryFilter, limit int) (api.MySpaceLearningPage, error) {
+func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int) (api.MySpaceLearningPage, error) {
 	entries, err := challenge.List(h.challengesDir)
 	if err != nil {
 		return api.MySpaceLearningPage{}, fmt.Errorf("list challenge catalog: %w", err)
@@ -191,12 +191,12 @@ func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *db
 	return h.mySpaceLearningFromCatalog(ctx, userID, cursor, filter, limit, time.Now().UTC(), catalog)
 }
 
-func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string, cursor *db.LearningHistoryCursor, filter db.LearningHistoryFilter, limit int, now time.Time, catalog map[string]challenge.Entry) (api.MySpaceLearningPage, error) {
+func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int, now time.Time, catalog map[string]challenge.Entry) (api.MySpaceLearningPage, error) {
 	filter.ChallengeIDs = make([]string, 0, len(catalog))
 	for challengeID := range catalog {
 		filter.ChallengeIDs = append(filter.ChallengeIDs, challengeID)
 	}
-	items, err := h.db.ListLearningHistory(ctx, userID, filter, limit+1, cursor, now)
+	items, err := h.db.Environment.ListLearningHistory(ctx, userID, filter, limit+1, cursor, now)
 	if err != nil {
 		return api.MySpaceLearningPage{}, err
 	}
@@ -210,7 +210,7 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 	for _, item := range items {
 		environmentUIDs = append(environmentUIDs, item.EnvironmentUID)
 	}
-	firstPasses, err := h.db.ListCheckpointFirstPasses(ctx, environmentUIDs)
+	firstPasses, err := h.db.Environment.ListCheckpointFirstPasses(ctx, environmentUIDs)
 	if err != nil {
 		return api.MySpaceLearningPage{}, err
 	}
@@ -251,7 +251,7 @@ func encodeMySpaceLearningCursor(readyAt time.Time, environmentUID string) *stri
 	return &encoded
 }
 
-func parseMySpaceLearningCursor(raw *string) (*db.LearningHistoryCursor, error) {
+func parseMySpaceLearningCursor(raw *string) (*postgres.LearningHistoryCursor, error) {
 	if raw == nil || *raw == "" {
 		return nil, nil
 	}
@@ -267,11 +267,11 @@ func parseMySpaceLearningCursor(raw *string) (*db.LearningHistoryCursor, error) 
 	if err != nil || readyAt.IsZero() || token.EnvironmentUID == "" {
 		return nil, fmt.Errorf("learning history cursor is invalid")
 	}
-	return &db.LearningHistoryCursor{ReadyAt: readyAt.UTC(), EnvironmentUID: token.EnvironmentUID}, nil
+	return &postgres.LearningHistoryCursor{ReadyAt: readyAt.UTC(), EnvironmentUID: token.EnvironmentUID}, nil
 }
 
-func mySpaceLearningFilter(params api.GetMySpaceLearningParams) (db.LearningHistoryFilter, error) {
-	filter := db.LearningHistoryFilter{}
+func mySpaceLearningFilter(params api.GetMySpaceLearningParams) (postgres.LearningHistoryFilter, error) {
+	filter := postgres.LearningHistoryFilter{}
 	if params.State != nil {
 		if !params.State.Valid() {
 			return filter, fmt.Errorf("learning history state is invalid")
@@ -288,13 +288,13 @@ func mySpaceLearningFilter(params api.GetMySpaceLearningParams) (db.LearningHist
 }
 
 func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog map[string]challenge.Entry) (api.MySpaceAuthoring, int, int, error) {
-	sessions, err := h.db.ListAuthoringSpaceSessions(ctx, userID)
+	sessions, err := h.db.Reporting.ListAuthoringSpaceSessions(ctx, userID)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
 	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedChallenge, 0)}
 	type authoredPublished struct {
-		session        db.AuthoringSpaceSession
+		session        postgres.AuthoringSpaceSession
 		entry          challenge.Entry
 		taxonomyStatus api.MySpacePublishedChallengeTaxonomyStatus
 	}
@@ -302,9 +302,9 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 	for _, session := range sessions {
 		if session.State != authoring.StatePublished {
 			var workflowState *api.MySpaceAuthoringDraftWorkflowState
-			workflow, workflowErr := h.db.GetActiveGenerationWorkflow(ctx, session.ID)
+			workflow, workflowErr := h.db.Generation.GetActiveGenerationWorkflow(ctx, session.ID)
 			switch {
-			case errors.Is(workflowErr, db.ErrGenerationWorkflowNotFound):
+			case errors.Is(workflowErr, postgres.ErrGenerationWorkflowNotFound):
 			case workflowErr != nil:
 				return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authoring generation workflow: %w", workflowErr)
 			default:
@@ -332,7 +332,7 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 	for _, item := range published {
 		challengeIDs = append(challengeIDs, item.session.PublishChallengeID)
 	}
-	counts, err := h.db.ChallengeAudienceCounts(ctx, challengeIDs)
+	counts, err := h.db.Reporting.ChallengeAudienceCounts(ctx, challengeIDs)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
@@ -371,8 +371,8 @@ func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.E
 		}
 	}
 
-	workflow, err := h.db.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
-	if errors.Is(err, db.ErrTaxonomyWorkflowNotFound) {
+	workflow, err := h.db.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
+	if errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound) {
 		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 	}
 	if err != nil {

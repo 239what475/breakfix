@@ -98,7 +98,7 @@ func (f Failure) Validate() error {
 type Workflow struct {
 	ID                  string        `json:"id"`
 	Source              Source        `json:"source"`
-	AuthoringRevision   int64         `json:"authoring_revision,omitempty"`
+	SourceRevision      string        `json:"source_revision"`
 	State               WorkflowState `json:"state"`
 	CleanupIntent       CleanupIntent `json:"cleanup_intent,omitempty"`
 	CandidateRevisionID string        `json:"candidate_revision_id,omitempty"`
@@ -115,13 +115,10 @@ type Workflow struct {
 }
 
 func (w Workflow) Valid() bool {
-	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || !w.State.Valid() || w.StateAttempt < 0 {
+	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || strings.TrimSpace(w.SourceRevision) == "" || !w.State.Valid() || w.StateAttempt < 0 {
 		return false
 	}
-	if w.Source.Kind == SourceAuthoring {
-		return w.AuthoringRevision >= 0
-	}
-	return w.AuthoringRevision == 0
+	return true
 }
 
 type LeaseCredential struct {

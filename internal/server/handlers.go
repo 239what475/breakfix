@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/opensandbox"
@@ -20,7 +20,7 @@ import (
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
 // by domain so routing stays stable while each endpoint's responsibility is local.
 type Handler struct {
-	db                 *db.DB
+	db                 *postgres.Store
 	k8s                *k8s.Client
 	authoring          *appauthoring.RuntimeService
 	assistant          *assistant.Service
@@ -53,11 +53,11 @@ type Dependencies struct {
 	NodeTerminal NodeTerminalProvider
 }
 
-func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler {
+func NewHandler(database *postgres.Store, client *k8s.Client, cfg config.Config) *Handler {
 	return NewHandlerWithDependencies(database, client, cfg, Dependencies{})
 }
 
-func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.Config, dependencies Dependencies) *Handler {
+func NewHandlerWithDependencies(database *postgres.Store, client *k8s.Client, cfg config.Config, dependencies Dependencies) *Handler {
 	taxonomyStore := taxonomy.NewStore(cfg.DataDir)
 	registryClient, registryErr := registry.NewClient(registry.ClientOptions{
 		Endpoint:        cfg.Registry.ClientAddress,
@@ -67,8 +67,6 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 	handler := &Handler{
 		db:              database,
 		k8s:             client,
-		authoring:       appauthoring.NewRuntimeService(database, cfg.Agent.Model),
-		assistant:       assistant.NewService(database, cfg.Agent.Model),
 		registryAddr:    cfg.Registry.Address,
 		registryClient:  registryClient,
 		namespace:       cfg.Namespace,
@@ -88,6 +86,13 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 		incusConfig:     cfg.Incus,
 		nodeTerminal:    dependencies.NodeTerminal,
 	}
+	if database != nil {
+		handler.authoring = appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model)
+		handler.assistant = assistant.NewService(database.Agent, cfg.Agent.Model)
+	} else {
+		handler.authoring = appauthoring.NewRuntimeService(nil, cfg.Agent.Model)
+		handler.assistant = assistant.NewService(nil, cfg.Agent.Model)
+	}
 	if ready, ok := dependencies.NodeTerminal.(NodeProviderReadiness); ok {
 		handler.nodeProviderReady = ready
 	}
@@ -106,7 +111,7 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 			handler.startupErr = fmt.Errorf("parse opensandbox workspace provision timeout: %w", err)
 			return handler
 		}
-		manager, err := appgeneration.NewManager(database, client, sandbox, appgeneration.Config{
+		manager, err := appgeneration.NewManager(database.Generation, client, sandbox, appgeneration.Config{
 			Namespace:        cfg.OpenSandbox.Namespace,
 			Storage:          cfg.OpenSandbox.WorkspaceStorage,
 			ProvisionTimeout: provisionTimeout,
