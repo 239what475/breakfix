@@ -11,12 +11,12 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
+	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
@@ -161,7 +161,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
 		return
 	}
-	inspected, err := generator.InspectCandidateArchive(archive)
+	inspected, err := generationapp.InspectCandidateArchive(archive)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return

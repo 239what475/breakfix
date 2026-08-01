@@ -1,4 +1,4 @@
-package generator
+package agent
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/schema"
@@ -159,7 +160,7 @@ func (b *OpenSandboxBackend) ExecuteStreaming(ctx context.Context, request *file
 	go func() {
 		defer writer.Close()
 		var terminal bool
-		err := b.client.Execute(ctx, b.claim, request.Command, func(event ExecuteEvent) error {
+		err := b.client.Execute(ctx, b.claim, request.Command, func(event app.ExecuteEvent) error {
 			switch event.Type {
 			case "stdout":
 				if event.Content != "" {
@@ -184,7 +185,7 @@ func (b *OpenSandboxBackend) ExecuteStreaming(ctx context.Context, request *file
 func (b *OpenSandboxBackend) execute(ctx context.Context, command string) (string, int, error) {
 	var output strings.Builder
 	var exitCode *int
-	if err := b.client.Execute(ctx, b.claim, command, func(event ExecuteEvent) error {
+	if err := b.client.Execute(ctx, b.claim, command, func(event app.ExecuteEvent) error {
 		switch event.Type {
 		case "stdout":
 			output.WriteString(event.Content)

@@ -10,15 +10,15 @@ import (
 	"syscall"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/internalapi"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
-	"github.com/breakfix/breakfix/internal/builder"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/generateworker"
-	"github.com/breakfix/breakfix/internal/generation"
-	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/publisher"
-	"github.com/breakfix/breakfix/internal/verifier"
+	"github.com/breakfix/breakfix/internal/worker/generate"
+	"github.com/breakfix/breakfix/internal/worker/generate/agent"
+	"github.com/breakfix/breakfix/internal/worker/generate/build"
+	"github.com/breakfix/breakfix/internal/worker/generate/publish"
+	"github.com/breakfix/breakfix/internal/worker/generate/verify"
 	"github.com/breakfix/breakfix/internal/workerhealth"
 )
 
@@ -35,15 +35,15 @@ func main() {
 	if err := cfg.ValidateGenerateWorker(); err != nil {
 		fatal("validate Generate Worker configuration", err)
 	}
-	workflowClient, err := generation.NewClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
+	workflowClient, err := internalapi.NewGenerationWorkflowClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		fatal("create generation workflow client", err)
 	}
-	generatorClient, err := generator.NewInternalClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
+	generatorClient, err := internalapi.NewGeneratorWorkspaceClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		fatal("create generator workspace client", err)
 	}
-	generatorExecutor, err := generator.NewExecutor(cfg.Agent, generatorClient)
+	generatorExecutor, err := agent.NewExecutor(cfg.Agent, generatorClient)
 	if err != nil {
 		fatal("create generator executor", err)
 	}
@@ -65,16 +65,16 @@ func main() {
 	if err != nil {
 		fatal("create Kubernetes client", err)
 	}
-	publisherExecutor, err := publisher.NewExecutor(registryClient, generateIncus, cfg.Registry.Address)
+	publisherExecutor, err := publish.NewExecutor(registryClient, generateIncus, cfg.Registry.Address)
 	if err != nil {
 		fatal("create publisher executor", err)
 	}
-	verifierExecutor, err := verifier.NewExecutor(k8sClient, generateIncus, cfg.CRDNamespace)
+	verifierExecutor, err := verify.NewExecutor(k8sClient, generateIncus, cfg.CRDNamespace)
 	if err != nil {
 		fatal("create verifier executor", err)
 	}
-	worker, err := generateworker.New(workflowClient, generatorExecutor, builder.NewExecutor(generateIncus, cfg.Incus), publisherExecutor, verifierExecutor,
-		generateworker.Config{WorkerID: *workerID, Model: cfg.Agent.Model})
+	worker, err := generate.New(workflowClient, generatorExecutor, build.NewExecutor(generateIncus, cfg.Incus), publisherExecutor, verifierExecutor,
+		generate.Config{WorkerID: *workerID, Model: cfg.Agent.Model})
 	if err != nil {
 		fatal("create Generate Worker", err)
 	}

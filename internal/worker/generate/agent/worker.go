@@ -1,4 +1,4 @@
-package generator
+package agent
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/adapter/llm"
+	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -23,6 +24,16 @@ const generatorMaxIterations = 40
 type Executor struct {
 	config config.AgentConfig
 	client RuntimeClient
+}
+
+// RuntimeClient is the narrow Server proxy used by the Generator's sandbox
+// tools. Every request is fenced by the enclosing GenerationWorkflow lease.
+type RuntimeClient interface {
+	LoadWorkspace(context.Context, generation.Claim) (app.WorkspaceContext, error)
+	ReadFile(context.Context, generation.Claim, string, int, int) (app.FileReadResponse, error)
+	WriteFile(context.Context, generation.Claim, string, string) error
+	Execute(context.Context, generation.Claim, string, func(app.ExecuteEvent) error) error
+	ArchiveWorkspace(context.Context, generation.Claim) (app.ArchiveResponse, error)
 }
 
 func NewExecutor(cfg config.AgentConfig, client RuntimeClient) (*Executor, error) {
@@ -63,13 +74,13 @@ func (e *Executor) Generate(ctx context.Context, execution generation.Execution)
 	if err != nil {
 		return nil, fmt.Errorf("archive generator workspace: %w", err)
 	}
-	if _, err := InspectCandidateArchive(archive.Archive); err != nil {
+	if _, err := app.InspectCandidateArchive(archive.Archive); err != nil {
 		return nil, generation.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
 	return archive.Archive, nil
 }
 
-func (e *Executor) Judge(ctx context.Context, plan authoring.Plan, candidate *Candidate) (Judgement, error) {
+func (e *Executor) Judge(ctx context.Context, plan authoring.Plan, candidate *app.Candidate) (app.Judgement, error) {
 	return judgeCandidate(ctx, e.config, plan, candidate)
 }
 
@@ -139,17 +150,17 @@ type judgementResult struct {
 	Feedback string            `json:"feedback" jsonschema:"required"`
 }
 
-func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.Plan, candidate *Candidate) (Judgement, error) {
+func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.Plan, candidate *app.Candidate) (app.Judgement, error) {
 	if candidate == nil {
-		return Judgement{}, errors.New("judge candidate is required")
+		return app.Judgement{}, errors.New("judge candidate is required")
 	}
 	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
-		return Judgement{}, err
+		return app.Judgement{}, err
 	}
 	resultTool, err := llm.NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
 	if err != nil {
-		return Judgement{}, err
+		return app.Judgement{}, err
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "generator_judge",
@@ -168,7 +179,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 		},
 	})
 	if err != nil {
-		return Judgement{}, fmt.Errorf("create generator judge: %w", err)
+		return app.Judgement{}, fmt.Errorf("create generator judge: %w", err)
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
 	events := runner.Run(ctx, []adk.Message{schema.UserMessage(generatorJudgePrompt(plan, candidate))})
@@ -178,7 +189,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 			break
 		}
 		if event.Err != nil {
-			return Judgement{}, event.Err
+			return app.Judgement{}, event.Err
 		}
 		if event.Action != nil && event.Action.Exit {
 			break
@@ -186,17 +197,17 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 	}
 	value, called := resultTool.Value()
 	if !called {
-		return Judgement{}, errors.New("generator judge did not submit its typed result")
+		return app.Judgement{}, errors.New("generator judge did not submit its typed result")
 	}
-	result := Judgement{Approved: value.Decision == judgementPass, Feedback: strings.TrimSpace(value.Feedback)}
+	result := app.Judgement{Approved: value.Decision == judgementPass, Feedback: strings.TrimSpace(value.Feedback)}
 	if err := result.Validate(); err != nil {
-		return Judgement{}, err
+		return app.Judgement{}, err
 	}
 	return result, nil
 }
 
 func validateJudgement(value judgementResult) error {
-	result := Judgement{Approved: value.Decision == judgementPass, Feedback: strings.TrimSpace(value.Feedback)}
+	result := app.Judgement{Approved: value.Decision == judgementPass, Feedback: strings.TrimSpace(value.Feedback)}
 	if value.Decision != judgementPass && value.Decision != judgementReject {
 		return errors.New("judge decision must be pass or reject")
 	}

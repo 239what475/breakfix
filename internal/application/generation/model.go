@@ -1,7 +1,4 @@
-// Package generator implements the model-facing Generator and Judge phases of
-// a GenerationWorkflow. Durable scheduling and candidate persistence belong to
-// generation and Server respectively.
-package generator
+package generation
 
 import (
 	"errors"

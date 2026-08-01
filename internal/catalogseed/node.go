@@ -16,8 +16,8 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
+	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/generator"
 	"gopkg.in/yaml.v3"
 )
 
@@ -149,7 +149,7 @@ func candidateBundle(source string) ([]incus.ImageFile, string, func(), error) {
 		cleanup()
 		return nil, "", nil, err
 	}
-	if _, err := generator.ValidateCandidateDir(root); err != nil {
+	if _, err := generationapp.ValidateCandidateDir(root); err != nil {
 		cleanup()
 		return nil, "", nil, fmt.Errorf("validate catalog candidate bundle: %w", err)
 	}

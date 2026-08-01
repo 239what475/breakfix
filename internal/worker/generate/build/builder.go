@@ -1,6 +1,6 @@
-// Package builder builds an immutable candidate for one GenerationWorkflow
+// Package build builds an immutable candidate for one GenerationWorkflow
 // phase. It owns no queue, lease, or Server mutation.
-package builder
+package build
 
 import (
 	"bytes"
@@ -12,10 +12,10 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
+	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 )
 
 type NodeImageBuilder interface {
@@ -41,7 +41,7 @@ func (e *Executor) Execute(ctx context.Context, execution generation.Execution, 
 	if candidate.Digest(archive) != view.ArchiveSHA256 {
 		return generation.BuildResult{}, generation.NewArtifactError("CANDIDATE_ARCHIVE_DIGEST_MISMATCH", "candidate archive digest does not match its immutable revision")
 	}
-	if _, err := generator.InspectCandidateArchive(archive); err != nil {
+	if _, err := app.InspectCandidateArchive(archive); err != nil {
 		return generation.BuildResult{}, generation.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
 	root, err := os.MkdirTemp("", "breakfix-builder-")

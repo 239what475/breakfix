@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
+	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/generator"
 )
 
 const workflowTestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -29,7 +29,7 @@ func TestGenerationWorkflowPersistsRepairAndPublicationLifecycle(t *testing.T) {
 	if claim.Workflow.State != generation.StateJudging {
 		t.Fatalf("state after generation = %s, want Judging", claim.Workflow.State)
 	}
-	judgeRun := startGenerationRun(t, database, claim, generator.JudgePurpose, now)
+	judgeRun := startGenerationRun(t, database, claim, generationapp.JudgePurpose, now)
 	if err := database.Generation.FinalizeGenerationJudgement(ctx, claim, judgeRun.ID, false, "检查点描述与实际题目不一致", now); err != nil {
 		t.Fatalf("reject generated candidate: %v", err)
 	}
@@ -442,7 +442,7 @@ func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, p
 		OwnerKind:     "generation-workflow",
 		OwnerRef:      claim.Workflow.ID,
 		Model:         "test-model",
-		PromptVersion: map[string]string{generator.GeneratorPurpose: generator.GeneratorPromptVersion, generator.JudgePurpose: generator.JudgePromptVersion}[purpose],
+		PromptVersion: map[string]string{generationapp.GeneratorPurpose: generationapp.GeneratorPromptVersion, generationapp.JudgePurpose: generationapp.JudgePromptVersion}[purpose],
 	}, now)
 	if err != nil {
 		t.Fatalf("start %s agent run: %v", purpose, err)
@@ -452,7 +452,7 @@ func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, p
 
 func finalizeGeneratedCandidate(t *testing.T, database *Store, claim generation.Claim, sequence int, now time.Time) generation.Revision {
 	t.Helper()
-	run := startGenerationRun(t, database, claim, generator.GeneratorPurpose, now)
+	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
 	revision := generation.Revision{
 		ID:                 generation.IDForGeneratorRun(run.ID),
 		Source:             claim.Workflow.Source,
@@ -471,7 +471,7 @@ func finalizeGeneratedCandidate(t *testing.T, database *Store, claim generation.
 
 func approveGenerationJudgement(t *testing.T, database *Store, claim generation.Claim, now time.Time) {
 	t.Helper()
-	run := startGenerationRun(t, database, claim, generator.JudgePurpose, now)
+	run := startGenerationRun(t, database, claim, generationapp.JudgePurpose, now)
 	if err := database.Generation.FinalizeGenerationJudgement(context.Background(), claim, run.ID, true, "", now); err != nil {
 		t.Fatalf("approve generation judgement: %v", err)
 	}

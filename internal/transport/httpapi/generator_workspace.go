@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
+	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -61,7 +61,7 @@ func (h *Handler) InternalGeneratorContext(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, generator.WorkspaceContext{Plan: context.Plan, Feedback: context.Feedback})
+	c.JSON(http.StatusOK, generationapp.WorkspaceContext{Plan: context.Plan, Feedback: context.Feedback})
 }
 
 func (h *Handler) InternalGeneratorReadFile(c *gin.Context) {
@@ -83,7 +83,7 @@ func (h *Handler) InternalGeneratorReadFile(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, generator.FileReadResponse{Content: selectWorkspaceLines(string(content), request.Offset, request.Limit)})
+	c.JSON(http.StatusOK, generationapp.FileReadResponse{Content: selectWorkspaceLines(string(content), request.Offset, request.Limit)})
 }
 
 func (h *Handler) InternalGeneratorWriteFile(c *gin.Context) {
@@ -122,7 +122,7 @@ func (h *Handler) InternalGeneratorArchiveWorkspace(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, generator.ArchiveResponse{Archive: archive})
+	c.JSON(http.StatusOK, generationapp.ArchiveResponse{Archive: archive})
 }
 
 // InternalGeneratorExecute proxies a streaming command to the workspace. It
@@ -148,7 +148,7 @@ func (h *Handler) InternalGeneratorExecute(c *gin.Context) {
 	c.Status(http.StatusOK)
 	encoder := json.NewEncoder(c.Writer)
 	flusher, _ := c.Writer.(http.Flusher)
-	write := func(event generator.ExecuteEvent) error {
+	write := func(event generationapp.ExecuteEvent) error {
 		if err := encoder.Encode(event); err != nil {
 			return err
 		}
@@ -167,25 +167,25 @@ func (h *Handler) InternalGeneratorExecute(c *gin.Context) {
 	streamed := false
 	result, runErr := h.generatorSandbox.Execute(execCtx, record.SandboxID, request.Command, "/workspace", func(content string) error {
 		streamed = streamed || content != ""
-		return write(generator.ExecuteEvent{Type: "stdout", Content: content})
+		return write(generationapp.ExecuteEvent{Type: "stdout", Content: content})
 	})
 	close(done)
 	leaseMu.Lock()
 	currentLeaseErr := leaseErr
 	leaseMu.Unlock()
 	if currentLeaseErr != nil {
-		_ = write(generator.ExecuteEvent{Type: "error", Error: currentLeaseErr.Error()})
+		_ = write(generationapp.ExecuteEvent{Type: "error", Error: currentLeaseErr.Error()})
 		return
 	}
 	if runErr != nil {
-		_ = write(generator.ExecuteEvent{Type: "error", Error: runErr.Error()})
+		_ = write(generationapp.ExecuteEvent{Type: "error", Error: runErr.Error()})
 		return
 	}
 	content := ""
 	if !streamed {
 		content = result.Output
 	}
-	_ = write(generator.ExecuteEvent{Type: "result", Content: content, ExitCode: &result.ExitCode})
+	_ = write(generationapp.ExecuteEvent{Type: "result", Content: content, ExitCode: &result.ExitCode})
 }
 
 func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, workflowID string, credential domain.LeaseCredential, ensure bool) (*domain.Claim, *domain.Workspace, error) {
@@ -206,7 +206,7 @@ func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, work
 	if err != nil {
 		return nil, nil, err
 	}
-	if run.Status != agent.RunRunning || run.Purpose != generator.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
+	if run.Status != agent.RunRunning || run.Purpose != generationapp.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
 		return nil, nil, errors.New("generation workflow has no current generator agent run")
 	}
 	var record *domain.Workspace

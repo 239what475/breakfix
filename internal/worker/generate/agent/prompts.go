@@ -1,9 +1,10 @@
-package generator
+package agent
 
 import (
 	"fmt"
 	"strings"
 
+	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -111,7 +112,7 @@ func generatorJudgeSystemPrompt() string {
 你必须使用 submit_judgement 交付审核结论。发现任一实质问题时 decision 必须为 reject，feedback 必须用中文说明具体文件、问题和可操作修复方向；没有实质问题时 decision 必须为 pass，feedback 必须为空。不得用普通文本、Markdown、代码块或其他工具替代该调用。工具返回 {"ok":false,"error":"..."} 时，根据 error 在同一次对话中修正并重新调用；只有 {"ok":true} 才表示结果已被接受，此时结束回复。`
 }
 
-func generatorJudgePrompt(plan authoring.Plan, candidate *Candidate) string {
+func generatorJudgePrompt(plan authoring.Plan, candidate *app.Candidate) string {
 	var files strings.Builder
 	for _, file := range candidate.Files {
 		fmt.Fprintf(&files, "\n--- 文件：%s ---\n%s\n", file.Path, file.Content)

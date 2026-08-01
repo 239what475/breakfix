@@ -1,4 +1,4 @@
-package generateworker
+package generate
 
 import (
 	"archive/tar"
@@ -17,7 +17,6 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 )
 
 func TestWorkerCompletesGenerationWorkflowThroughAuthorReview(t *testing.T) {
@@ -131,9 +130,9 @@ func (e *generationExecutors) Generate(ctx context.Context, _ generation.Executi
 	return append([]byte(nil), e.archive...), nil
 }
 
-func (e *generationExecutors) Judge(context.Context, authoring.Plan, *generator.Candidate) (generator.Judgement, error) {
+func (e *generationExecutors) Judge(context.Context, authoring.Plan, *app.Candidate) (app.Judgement, error) {
 	e.judgeCalls.Add(1)
-	return generator.Judgement{Approved: true}, nil
+	return app.Judgement{Approved: true}, nil
 }
 
 type generationBuilder struct{ calls *atomic.Int32 }

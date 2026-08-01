@@ -1,6 +1,6 @@
-// Package publisher publishes and cleans immutable candidate artifacts for a
+// Package publish publishes and cleans immutable candidate artifacts for a
 // GenerationWorkflow phase. It does not schedule work or mutate Server state.
-package publisher
+package publish
 
 import (
 	"context"

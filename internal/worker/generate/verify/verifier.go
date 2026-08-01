@@ -1,6 +1,6 @@
-// Package verifier executes an immutable candidate in the same Environment
+// Package verify executes an immutable candidate in the same Environment
 // runtime used by learners. It owns neither scheduling nor Server state.
-package verifier
+package verify
 
 import (
 	"context"

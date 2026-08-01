@@ -16,7 +16,6 @@ import (
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -113,9 +112,9 @@ func (h *Handler) InternalStartGenerationAgentRun(c *gin.Context) {
 		h.writeInternalGenerationError(c, err)
 		return
 	}
-	expectedPrompt := generator.GeneratorPromptVersion
-	if request.Purpose == generator.JudgePurpose {
-		expectedPrompt = generator.JudgePromptVersion
+	expectedPrompt := app.GeneratorPromptVersion
+	if request.Purpose == app.JudgePurpose {
+		expectedPrompt = app.JudgePromptVersion
 	}
 	if request.Model != h.llm.Model || request.PromptVersion != expectedPrompt {
 		h.writeInternalGenerationError(c, errors.New("generation agent run metadata does not match Server configuration"))
@@ -328,10 +327,10 @@ func (h *Handler) finalizeGeneratedCandidate(c *gin.Context, claim generation.Cl
 	if err != nil {
 		return err
 	}
-	if run.ID != claim.Workflow.ActiveAgentRunID || run.Status != agent.RunRunning || run.Purpose != generator.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
+	if run.ID != claim.Workflow.ActiveAgentRunID || run.Status != agent.RunRunning || run.Purpose != app.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
 		return generation.ErrLeaseLost
 	}
-	inspected, err := generator.InspectCandidateArchive(result.Archive)
+	inspected, err := app.InspectCandidateArchive(result.Archive)
 	if err != nil {
 		return generation.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}

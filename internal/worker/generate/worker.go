@@ -1,7 +1,7 @@
-// Package generateworker executes the complete active lifecycle of one
+// Package generate executes the complete active lifecycle of one
 // GenerationWorkflow. It has no PostgreSQL dependency: every durable read and
 // state transition crosses the Server's lease-fenced internal API.
-package generateworker
+package generate
 
 import (
 	"context"
@@ -16,7 +16,6 @@ import (
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/generator"
 )
 
 type Store interface {
@@ -35,7 +34,7 @@ type Store interface {
 // side effect for one workflow state.
 type GeneratorExecutor interface {
 	Generate(context.Context, generation.Execution) ([]byte, error)
-	Judge(context.Context, authoring.Plan, *generator.Candidate) (generator.Judgement, error)
+	Judge(context.Context, authoring.Plan, *app.Candidate) (app.Judgement, error)
 }
 
 type BuilderExecutor interface {
@@ -192,7 +191,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 			}
 		}
 		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
-			Purpose: generator.GeneratorPurpose, Model: w.config.Model, PromptVersion: generator.GeneratorPromptVersion,
+			Purpose: app.GeneratorPurpose, Model: w.config.Model, PromptVersion: app.GeneratorPromptVersion,
 		})
 		if err != nil {
 			return nil, err
@@ -205,7 +204,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 
 	case generation.StateJudging:
 		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
-			Purpose: generator.JudgePurpose, Model: w.config.Model, PromptVersion: generator.JudgePromptVersion,
+			Purpose: app.JudgePurpose, Model: w.config.Model, PromptVersion: app.JudgePromptVersion,
 		})
 		if err != nil {
 			return nil, err
@@ -214,7 +213,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		candidateValue, err := generator.InspectCandidateArchive(archive)
+		candidateValue, err := app.InspectCandidateArchive(archive)
 		if err != nil {
 			return nil, generation.NewArtifactError("CANDIDATE_INVALID", err.Error())
 		}
