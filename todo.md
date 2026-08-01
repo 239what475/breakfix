@@ -1,345 +1,409 @@
-# 下一阶段：单一 Generation Workflow
+# 仓库结构彻底重构
 
-当前的 Builder、Publisher、Verifier 与 Agent Worker 按 `kind` 创建和领取 `build`、
-`artifact_publish`、`verify` 等任务。即使只合并进程，这仍然只是把旧任务队列塞进同一容器，
-没有真正合并工作流。
+## 目标
 
-本次重构的目标是：交互式 Agent 回到 Server；一道题目的生成与发布过程只有一个持久化
-`GenerationWorkflow`，由 Generate Worker 按当前阶段继续执行并通过 Server 内部接口报告结果；taxonomy
-保留为独立的 `TaxonomyWorkflow`。后台阶段不再是独立 WorkItem，也不再使用通用 `kind` 路由。
+当前仓库的核心问题不是文件数量，而是所有权不清：`internal/server` 同时承担 HTTP、领域编排、文件系统、
+数据库调用和运行时装配；`internal/db` 同时承担 schema、所有领域 repository 和状态机；`internal/k8s`、
+`internal/incusprovider` 又混合了 Provider、CRD、终端协议和应用逻辑。`generator`、`builder`、`publisher`、
+`verifier` 保留了已经取消的部署边界，名称和实际运行模型不一致。
 
-## 顶层架构
+这次重构的目标是让目录直接表达系统边界。完成后，任何文件的归属可以只从路径判断：它是领域规则、应用用例、
+传输协议、基础设施适配、Worker 执行器、Controller reconcile，还是进程装配。不能再出现“先放进
+`server`/`db`，以后再整理”的兜底位置。
+
+这是一次开发阶段的彻底迁移：不保留旧 package path、type alias、re-export shim、旧 Kustomization 入口、旧脚本名或
+旧配置键。数据库仍按当前开发约定重建，不写兼容迁移。
+
+## 最终根目录
 
 ```text
-Browser
-  |
-  v
-Server <----------------------> PostgreSQL
-  |                                  |
-  | Environment CRD                 | GenerationWorkflow
-  |                                  | TaxonomyWorkflow
-  |                                  v
-  |                           Generate Worker x N
-  |                           Taxonomy Worker x M
-  v
-Controller
-  |
-  v
-Environment resources
+api/                         外部契约的唯一来源
+  http/openapi.yaml          HTTP OpenAPI 源文件
+  http/oapi-codegen.yaml     OpenAPI Go 生成配置
+  v1/                        CRD Go 类型源文件和 controller-gen deepcopy 生成物
 
-Server directly runs Authoring / Assistant conversations and streams replies to Browser.
+build/                       镜像和发布构建输入，不含 Kubernetes 清单
+  images/
 
-Registry: Kind development NodePort Registry or production external OCI Registry
-Environment: NodeEnvironment / VK8sEnvironment and their runtime resources
+cmd/                         只有进程 main；不含业务装配细节
+  server/
+  controller/
+  generate-worker/
+  taxonomy-worker/
+
+config/                      所有非密钥配置源和示例
+  app/
+  examples/
+
+catalog/                     Git 管理的可复用题库 release，不是运行时 data
+  release.yaml               release identity、source path 与 contentRevision 映射
+  challenges/                题目 candidate source，不含环境发布字段
+  taxonomy/                  已审查的 Skill、Tag、mapping snapshot source
+
+deploy/                      只保存 Kubernetes 部署资源
+  manifests/                 生产共同资源，均为普通 YAML
+  crds/                      controller-gen 生成的 CRD YAML
+  overlays/kind/             唯一开发 overlay
+
+docs/                        当前系统的长期文档
+  architecture/
+  operations/
+  product/
+  reference/
+
+internal/                    不对外暴露的应用实现，按下文分层
+
+scripts/                     人可执行的开发、Kind、Incus 和生成脚本
+  dev/
+  kind/
+  incus/
+
+test/                        黑盒和跨进程测试；不保存业务单元测试
+  e2e/
+  runtime/
+  agent/
+  support/
+
+web/                          Vue 应用、Node 配置和生成的 TypeScript client
 ```
 
-系统仍是六个顶层架构部分；Worker 是一个逻辑部分，初始由两个职责明确的 Deployment 组成：
+顶层保留 `README.md`、`Makefile`、`kustomization.yaml`、`go.mod`、`go.sum`、`NEXT.md`、`REVIEW.md`、`TODO.md` 与
+`package` 所需锁文件；CI 与工具元数据仍保留在 `.github/` 和根 dotfile。现有 `todo.md` 在本次迁移中统一为 `TODO.md`。
+`data/` 是 Server 的本地运行时目录，生产对应 Server PVC，不属于仓库内容；构建产物、嵌入前端 dist、本地配置、测试报告和
+全部运行数据一律 gitignore。
 
-| 部分 | 形态 | 职责 |
+## Internal 分层
+
+```text
+internal/
+  domain/
+    agent/                   AgentSession、AgentRun、消息与其不变量
+    authoring/               作者题意、revision、可见方案
+    catalog/                 CatalogRelease、source identity、安装状态与 content revision
+    challenge/               Challenge 格式、资产、发布 identity
+    environment/             Node/VK8s 环境、终端和检查点的 Provider 无关模型
+    generation/              GenerationWorkflow、CandidateRevision、阶段协议
+    learning/                用户学习进度、attempt 和统计
+    taxonomy/                Skill、Tag、mapping、snapshot、TaxonomyWorkflow
+
+  application/
+    assistant/               做题助手用例
+    authoring/               作者对话、方案 revision 用例
+    catalog/                 Catalog Release 安装、catalog 扫描和可见性
+    environment/             启动、停止、状态投影和学习完成用例
+    generation/              Server 侧 Workflow 创建、阶段提交、作者审核和发布
+    taxonomy/                taxonomy 维护、snapshot 串行发布
+
+  adapter/
+    internalapi/             Worker 到 Server 的受认证 HTTP client
+    kubernetes/              Kubernetes API、CRD client、Pod exec 和终端实现
+    incus/                   Incus client、project、image、instance 和网络实现
+    llm/                     Eino/模型调用、重试和 typed tool 适配
+    oci/                     Registry client、OCI archive 与镜像操作
+    opensandbox/             OpenSandbox SDK 与连接实现
+    postgres/                schema 初始化及按领域拆分的 repository 实现
+    vcluster/                vcluster CLI/SDK 适配
+
+  controller/
+    nodeenvironment/         NodeEnvironment Reconciler
+    vk8senvironment/         VK8sEnvironment Reconciler
+    manager.go                controller-runtime 装配
+
+  worker/
+    generate/                GenerationWorkflow 与 CatalogRelease 共用的构建、发布、验证执行器
+      agent/                 Generator/Judge 与其 sandbox backend
+      build/                 Node/K8s candidate build
+      publish/               artifact staging 与作者题目的 final publish
+      verify/                真实环境 answer/checkpoint 验证
+    taxonomy/                Mapper、reviewer pair 和 taxonomy workflow 执行器
+
+  transport/
+    health/                  Server/Worker health 与 metrics HTTP surface
+    httpapi/
+      public/                浏览器 API handler 和 request/response 映射
+      worker/                内部 Worker API handler 和 lease 认证
+      middleware/            JWT、CORS、错误映射
+      stream/                SSE 与 WebSocket 共用传输辅助代码
+      ui/                    前端嵌入入口；只包含 embed 声明，不存放 dist
+
+  bootstrap/
+    config/                  配置加载、环境变量覆盖和进程级校验
+    server/                  Server 依赖装配
+    controller/              Controller 依赖装配
+    generateworker/          Generate Worker 依赖装配
+    taxonomyworker/          Taxonomy Worker 依赖装配
+
+  buildinfo/                 版本、commit、构建时间
+  testkit/                   PostgreSQL、时钟、HTTP、Kubernetes 等测试 fixture
+```
+
+### 依赖规则
+
+1. `domain` 不依赖 Gin、`database/sql`、Kubernetes、Incus、OCI、OpenSandbox、Eino 或配置；只包含模型、验证、
+   状态转移和由领域拥有的端口接口。
+2. `application` 只依赖 `domain` 和其消费端定义的接口。它不能 import `adapter`、`transport`、Gin 或具体数据库类型。
+3. `adapter` 实现领域或应用端口；一个 adapter 可以依赖 SDK，但不能把 SDK 类型泄漏到 `domain`、`application` 的
+   public API 中。
+4. `transport/httpapi` 只做认证、请求解码、调用 application、响应编码和流传输。它不能直接访问 PostgreSQL、文件系统、
+   Registry、Kubernetes 或 Incus。
+5. `worker/generate`、`worker/taxonomy` 通过 `adapter/internalapi` 与 Server 交互，绝不持有 PostgreSQL DSN。
+   Generate Worker 内部的 build/publish/verify 是一个 Workflow 的阶段执行器，不再是独立“服务”或通用队列 worker。
+6. `controller` 只调和 Environment CRD 与真实 Provider 资源，不导入 HTTP transport、数据库 repository 或 Workflow
+   用例。
+7. `bootstrap` 与 `cmd` 是唯一允许同时引用多个层的地方。`cmd/*/main.go` 只解析退出码、信号和调用对应 bootstrap。
+8. 不创建 `common`、`utils`、`helpers`、`models`、`service` 或无领域前缀的万能包。复用代码必须属于明确的领域或平台边界。
+
+## 当前目录到最终目录
+
+| 当前位置 | 最终归属 | 处理原则 |
 | --- | --- | --- |
-| Server | Deployment | 用户 API、领域逻辑、题库、Workflow 状态唯一写者、内部 Worker API，以及直接执行 Authoring/Assistant 对话。 |
-| Controller | Deployment | 只调和 NodeEnvironment/VK8sEnvironment CRD，供应和回收真实环境。 |
-| PostgreSQL | StatefulSet 或外部托管服务 | 保存 Workflow、AgentRun、CandidateRevision、作者会话和学习事实。 |
-| Registry | Kind overlay Deployment 或生产外部服务 | 保存候选及正式 OCI 运行时产物。 |
-| Worker | 两个 Deployment | Generate Worker 一次执行一个完整 GenerationWorkflow；Taxonomy Worker 一次执行一个完整 TaxonomyWorkflow；均不直接访问 PostgreSQL。 |
-| Environment | CRD 与动态资源 | 用户学习环境和真实验证环境，不是常驻 Deployment。 |
+| `internal/server` | `transport/httpapi`、`application/*`、`bootstrap/server` | 按 handler、用例、装配拆分，目录本身删除。 |
+| `internal/db` | `adapter/postgres` | schema、连接和每个领域 repository 分文件；application 不再接触 `*db.DB`。 |
+| `internal/k8s` | `adapter/kubernetes`，CRD 类型移至 `api/v1` | API 类型、client、exec、RBAC 辅助和 Provider 实现不再混放。 |
+| `internal/incusprovider` | `adapter/incus` | 将 Incus SDK、镜像、project、网络、terminal 实现聚合为一个 adapter。 |
+| `internal/vclustercli` | `adapter/vcluster` | 只保留 vcluster API/CLI 包装，不夹带 Controller 策略。 |
+| `internal/registry` | `adapter/oci` | Registry endpoint、认证、archive、manifest 逻辑集中。 |
+| `internal/opensandbox` | `adapter/opensandbox` | 只保留 OpenSandbox SDK、请求映射和连接实现。 |
+| `internal/workspace` | `domain/generation` 与 `application/generation` | workspace record 是 GenerationWorkflow 的领域状态；PVC/Sandbox 的 ensure/cleanup 是 Server 用例，依赖由 Kubernetes 和 OpenSandbox adapter 实现。 |
+| `internal/agentmodel` | `adapter/llm` | 模型构造、重试、typed tool 适配不作为领域模型。 |
+| `internal/agentserver` | `adapter/internalapi` | 统一 Server 内部 API client；不按旧 worker 命名。 |
+| `internal/generator`、`builder`、`publisher`、`verifier`、`generateworker` | `worker/generate` | 移除旧 Deployment 语义的顶层包名。 |
+| `internal/taxonomyworker` | `worker/taxonomy` | taxonomy 工作流执行器与委员会实现放在同一边界。 |
+| `internal/candidate` | `domain/generation` 与 `domain/catalog` | CandidateRevision 是生成领域对象；Catalog source 的 canonical content revision 由 catalog/challenge 领域共同定义。 |
+| `internal/runtimeprofile`、`terminal`、`verification` | `domain/environment` 或 `worker/generate/verify` | 按“环境模型”与“验证执行”重新归属。 |
+| `internal/catalogseed`、`cmd/catalog-seed` | 删除；Catalog Release 用例归入 `application/catalog` | 历史单题镜像初始化旁路。新的 release 安装不直接写已发布目录，也不复制 builder/publisher 实现。 |
+| `internal/config`、`build`、`workerhealth`、`testpostgres` | `bootstrap/config`、`buildinfo`、`transport/health`、`testkit/postgres` | 消除没有层次的顶层技术包。 |
+| `internal/api/server.gen.go` | `transport/httpapi/generated` | OpenAPI Go 生成物不能与业务实现混放。 |
 
-Server 与 Controller 不合并。Server 拥有领域数据和 Workflow，Controller 只拥有 Environment 的 reconcile/status。
-Kind 开发 overlay 提供固定 NodePort Registry；生产环境由运营方提供外部 OCI Registry。Environment 由 Controller
-在 Kubernetes/vcluster 或 Incus 中实现。
+迁移后旧目录必须直接删除，不能通过导入转发让两套结构并存。
 
-## Generation Workflow 边界
+## API、前端与生成物
 
-作者和 Agent 的题意讨论仍然属于 `AuthoringSession`。作者确认“生成题目”后，Server 创建一个
-`GenerationWorkflow`，它贯穿候选生成、真实验证和最终发布：
+1. 将 `api/openapi.yaml` 移到 `api/http/openapi.yaml`；Go HTTP 生成物输出到
+   `internal/transport/httpapi/generated`，TypeScript 生成物输出到 `web/src/api/generated`。
+2. 将 `internal/k8s/apis/breakfix/v1` 移到 `api/v1`。这里的手写 Go 类型是 CRD 契约源；
+   deepcopy 与 `deploy/crds/*.yaml` 是唯一允许提交的生成物。
+3. `make generate` 统一生成 CRD、OpenAPI Go 和 TypeScript；`make verify-generated` 在临时目录重跑并 diff。不存在各自
+   隐藏的生成命令或手改生成文件。
+4. 前端从 `frontend/` 改为 `web/`。Vite 输出只进入 `web/dist`，由 `transport/httpapi/ui` 的嵌入构建步骤消费；
+   不再在 `cmd/server/frontend/dist` 留第二份目录。
+5. `api` 只保存契约源和契约生成物，不能存 Handler、数据库模型或业务类型。
 
-```text
-AuthoringSession (author confirms)
-  -> GenerationWorkflow
-       -> generate -> judge -> build -> artifact_publish -> verify
-       -> needs_author_review -> challenge_publish -> cleanup -> completed
-```
+## 配置、脚本与部署
 
-一次 Workflow 只有一个持久身份。阶段推进不会创建新的 WorkItem；同一 Workflow 中可以产生多个
-`AgentRun` 和多个不可变 `CandidateRevision`。
-
-### 状态转移图
-
-```mermaid
-stateDiagram-v2
-    [*] --> Queued: 作者确认生成
-
-    Queued --> Generating: Generate Worker 领取 Workflow
-    Generating --> Judging: Generator 产出合法候选
-    Judging --> Building: Judge 通过
-    Judging --> Generating: Judge 拒绝/需要修订
-
-    Building --> ArtifactPublishing: 构建成功
-    ArtifactPublishing --> Verifying: staging artifact 成功
-    Verifying --> NeedsAuthorReview: 真实验证通过
-
-    NeedsAuthorReview --> Generating: 作者提出修改意见
-    NeedsAuthorReview --> ChallengePublishing: 作者确认发布
-    ChallengePublishing --> CleaningUp: 正式题目发布成功
-    CleaningUp --> Completed: 清理完成
-    Completed --> [*]
-
-    Generating --> Generating: 生成/修复失败，创建新 CandidateRevision
-    Building --> Generating: 候选构建失败
-    ArtifactPublishing --> Generating: 候选产物失败
-    Verifying --> Generating: answer/checkpoint 失败
-
-    Queued --> CleaningUp: deadline 用尽
-    Generating --> CleaningUp: deadline 用尽
-    Judging --> CleaningUp: deadline 用尽
-    Building --> CleaningUp: deadline 用尽
-    ArtifactPublishing --> CleaningUp: deadline 用尽
-    Verifying --> CleaningUp: deadline 用尽
-    ChallengePublishing --> CleaningUp: deadline 用尽
-    CleaningUp --> Failed: 基础设施失败后的清理完成
-    Failed --> [*]
-
-    Queued --> CleaningUp: Server 明确取消
-    Generating --> CleaningUp: Server 明确取消
-    Judging --> CleaningUp: Server 明确取消
-    Building --> CleaningUp: Server 明确取消
-    ArtifactPublishing --> CleaningUp: Server 明确取消
-    Verifying --> CleaningUp: Server 明确取消
-    NeedsAuthorReview --> CleaningUp: Server 明确取消
-    ChallengePublishing --> CleaningUp: Server 明确取消
-    CleaningUp --> Cancelled: 取消后的清理完成
-    Cancelled --> [*]
-```
-
-图中的“失败”需要区分：
-
-- `GenerationWorkflow.state` 是唯一的生命周期枚举：`Queued`、`Generating`、`Judging`、`Building`、
-  `ArtifactPublishing`、`Verifying`、`NeedsAuthorReview`、`ChallengePublishing`、`CleaningUp`、`Completed`、
-  `Failed`、`Cancelled`。不再同时维护 `current_phase` 和 `status`。
-- 候选内容、脚本、answer 或 checkpoint 的失败，不直接暴露给作者，Workflow 回到 `Generating`，
-  使用同一个 Generator session 产生新的 CandidateRevision。
-- Server、Registry、Kubernetes、Incus、Provider 或 Generate Worker 故障，在 Workflow deadline 内重试当前阶段，
-  不改变候选内容；deadline 用尽后以结构化 `failure_class=infrastructure` 进入 `CleaningUp`，清理完成才进入
-  `Failed`。
-- `NeedsAuthorReview` 不占用 Worker lease。作者反馈重新进入 `Generating`，作者确认才进入 `ChallengePublishing`。
-- 一个 Workflow 只有一份总执行预算，在首次被 Generate Worker 领取时开始消耗；`Queued` 与 `NeedsAuthorReview`
-  不消耗它。进入 `NeedsAuthorReview` 时，Server 暂停 deadline；恢复活动 state 时以剩余预算继续，而不是为每个 state
-  重置一小时 deadline。
-- `Cancelled` 不由 Judge、脚本失败、浏览器关闭、WebSocket 断开或 Worker 故障触发。它只能由作者明确丢弃整个
-  AuthoringSession、一个明确的新 Workflow 替代当前 Workflow，或管理员中止触发。Server 取消 lease、围栏迟到结果，
-  先进入 `CleaningUp`，清理完成才成为终态。
-- `CleaningUp` 只保存一个不可变的 cleanup intent（`completed`、`failed` 或 `cancelled`），以便 Worker 崩溃后能按
-  确定资源引用恢复清理；它不是第二套 Workflow 状态或可由客户端自由修改的字段。
-
-## Taxonomy Workflow
-
-Taxonomy 是一个维护领域；当前先实现最小的 `TaxonomyWorkflow`：它对应唯一的 `(challenge_id, challenge_revision)`，
-在 Challenge Publish 后由 Server 创建或获取，为新发布题目补充 Skill、Tag 与 mapping。在其完成前，题目不进入公开 Catalog。
-Server 的 catalog scanner 只负责补回“文件系统已发布但尚未创建 Workflow”的缺口，不直接修改 taxonomy 内容。
-
-### 状态与轮次
-
-`TaxonomyWorkflow.state` 是独立的单一状态枚举：`Queued`、`Mapping`、`Reviewing`、`Publishing`、`Completed`、
-`Failed`、`Cancelled`。
-
-```mermaid
-stateDiagram-v2
-    [*] --> Queued: Challenge Publish
-    Queued --> Mapping: Taxonomy Worker 领取
-    Mapping --> Reviewing: Mapper 产出并通过静态校验
-    Reviewing --> Publishing: 两位 reviewer 均 approve
-    Reviewing --> Mapping: 任一 reviewer reject，释放 lease
-    Publishing --> Completed: taxonomy snapshot 原子发布
-    Publishing --> Mapping: taxonomy head 的语义变更冲突
-
-    Mapping --> Mapping: Mapper 技术重试
-    Reviewing --> Reviewing: reviewer pair 技术重试
-    Publishing --> Publishing: 发布基础设施重试
-
-    Queued --> Cancelled: artifact 消失或 revision 改变
-    Mapping --> Cancelled: artifact 消失或 revision 改变
-    Reviewing --> Cancelled: artifact 消失或 revision 改变
-    Publishing --> Cancelled: artifact 消失或 revision 改变
-    Queued --> Failed: 不可恢复的不变量错误
-    Mapping --> Failed: 不可恢复的不变量错误
-    Reviewing --> Failed: 不可恢复的不变量错误
-    Publishing --> Failed: 不可恢复的不变量错误
-    Completed --> [*]
-    Failed --> [*]
-    Cancelled --> [*]
-```
-
-一个 semantic round 由“Mapper candidate + reviewer pair”组成。`round` 只在两位 reviewer 结论均合法、且至少一位
-`reject` 时递增；两份意见一起持久化，Server 刷新 `base_taxonomy_revision`、重置 `state_attempt`、将 Workflow 回到
-`Mapping` 并写入立即可运行的 `next_run_at` 后释放 lease，下一次领取的 Mapper 必须读取它们。
-模型输出无效、传输失败、超时或静态结构校验失败都是技术失败，不增加 `round`，也不把错误候选或单边 review 当作
-委员会结论。
-
-### 委员会执行与重试
-
-一个 `taxonomy-worker` Pod 同时只持有一个 TaxonomyWorkflow lease。该 Workflow 内的角色和顺序固定：
+### 配置
 
 ```text
-Mapper -> Curriculum Reviewer + SRE Reviewer (parallel) -> Server publish
-                    ^ reject
-                    |____________________________________ 释放 lease；下一次领取的 Mapper 读取两份意见
+config/
+  app/in-cluster.yaml
+  app/local.example.yaml
+  examples/runtime.env
+  examples/worker-identity.env
 ```
 
-- Mapper 以 `base_taxonomy_revision`、目标题目的 immutable artifact 和上一 round 的正式意见生成完整 ChangeSet。
-- ChangeSet 必须先经 Server 的严格 typed/static 校验。当前最小实现只能复用已有 Skill/Tag、创建新 Skill/Tag、
-  创建目标 challenge mapping，并为本次新建 Skill 声明 `Skill.requires`；不能修改或删除已有 Skill、Tag、已有
-  `Skill.requires` 或其他 challenge 的 mapping。
-- 两位 reviewer 必须同时开始且都产生合法结果。任一调用或结果失败时，丢弃另一位的结果，完整重跑 reviewer pair。
-- 当前 state 的连续技术失败计入 `state_attempt`。达到 10 次时，Worker 不会中断正在运行的调用；本次调用结束后释放 lease，
-  保留 state、round 与候选，写入退避后的 `next_run_at`，由下一次 Taxonomy Worker 接管。它不是 `Failed`，也不是新 round。
-- Worker 崩溃或 lease 过期时，下一副本从持久化 state 接管。若崩溃发生在 reviewer pair 中，未同时持久化的结果一律丢弃并重跑 pair。
+- 非密钥的部署配置由根 `kustomization.yaml` 直接生成 `breakfix-config`；不再有 `config/kustomization.yaml`。
+- Secret 只由管理员创建；仓库只保存无值 example，生产 Registry、内部 CA、外部 Registry 仍保持当前职责边界。
+- 配置 schema、默认值和环境变量覆盖在 `bootstrap/config`；每个进程只调用一个对应的 `Validate*` 函数。
+- `data_dir` 是 Server PVC 上的独立工作目录；本地开发可使用被 gitignore 的 `./data`。Server 只扫描已提交的
+  `data_dir/challenges` 与 `data_dir/taxonomy`，不把构建产物或作者临时文件写回 Git 工作树。Catalog Release 安装期间的
+  source materialization 位于 `data_dir/.staging/releases/<release-id>/`；Catalog API 只在数据库中该 release 为 `Ready` 后
+  才读取其最终目录，因此 staging 或提交中断不会形成可见题库。
 
-每次模型调用都保存为关联该 Workflow、round 和角色（Mapper、Curriculum Reviewer、SRE Reviewer）的 `AgentRun`。`AgentRun`
-只记录调用，不拥有 lease 或调度状态；所有结果报告必须携带 TaxonomyWorkflow 的 lease credential，迟到结果由 Server 拒绝。
+### Catalog Release 初始化
 
-### Snapshot 发布与并发
-
-两位 reviewer approve 后进入 `Publishing`。Taxonomy Worker 只向 Server 提交已批准的 ChangeSet；Server 是 taxonomy 文件系统
-的唯一写者，并在短暂的 publish 临界区内串行化 `taxonomy/current` 的更新。这不是另一个队列：多个 TaxonomyWorkflow 可以
-并行 Mapping/Reviewing，只有不可变 snapshot 的最终构造、校验和指针替换需要串行。
-
-Server 以 Workflow 保存的 `base_taxonomy_revision` 与当前 taxonomy head 比较：
-
-- ChangeSet 仅修改目标 challenge mapping 时，Server 可以在最新 snapshot 上确定性重验并直接发布。
-- ChangeSet 包含新建 Skill、Tag 或新的 `Skill.requires` 时，head 已变化意味着语义上下文过期；Server 清除 candidate/reviews，
-  `round + 1` 后回到 `Mapping`，由 Mapper 基于最新 snapshot 重做委员会流程。
-
-发布前 Server 先计算并持久化预期 snapshot revision，再原子写入 `revisions/<sha256>` 并替换 `current` 指针；若在文件系统与
-数据库更新之间崩溃，恢复器只观察该预期 revision 是否已成为 current，匹配则完成 `Completed`，不匹配则报告不变量错误。
-`Cancelled` 只用于目标题目 artifact 消失、revision 改变或管理员中止；`Failed` 只用于存储损坏等不可自动恢复的不变量错误。
-
-当前的单题 Workflow 是 taxonomy maintenance 的最小实现，不伪装成完整的全局图维护能力。题库形成规模后，再增加明确的
-全局 maintenance workflow：它读取完整 snapshot，才允许审查或修改既有 Skill、Tag 与 `Skill.requires`；仍由
-`taxonomy-worker` 执行，不把这种全局变更混入新题 mapping。
-
-## 持久化模型
-
-将现有阶段型 `work_items` 重构为 `generation_workflows` 与 `taxonomy_workflows`（开发阶段允许直接删除旧表并重建，
-不保留兼容迁移）。`GenerationWorkflow` 至少保存：
-
-- `id`
-- `authoring_session_id`
-- `state`
-- `cleanup_intent`（仅 `CleaningUp` 时存在）
-- `candidate_revision_id`
-- `active_agent_run_id`
-- `state_attempt`
-- `lease_owner`、`lease_expires_at`
-- `next_run_at`、`deadline_at`、`deadline_paused_at`
-- `last_error`
-- `created_at`、`updated_at`
-
-进入 `NeedsAuthorReview` 时，Server 持久化 `deadline_paused_at`；离开该 state 时将暂停时长加回 `deadline_at` 后清空它。
-因此 deadline 的暂停、Server 重启和剩余执行预算都可恢复，不需要第二个状态枚举。
-
-`TaxonomyWorkflow` 至少保存：
-
-- `id`
-- `challenge_id`、`challenge_revision`
-- `state`
-- `base_taxonomy_revision`
-- `round`、`state_attempt`
-- `candidate_changeset`、`curriculum_review`、`sre_review`
-- `expected_snapshot_revision`、`published_revision`
-- `lease_owner`、`lease_expires_at`、`next_run_at`
-- `last_error`
-- `created_at`、`updated_at`
-
-所有阶段共用这一条 Workflow 记录，不再有 `kind`、`subject_type` 或“每个阶段一条任务”的关系。
-
-其他记录的职责保持清晰：
-
-- `AgentRun`：一次模型调用的 session、输入、typed result 和执行错误；它不是调度任务。
-- `CandidateRevision`：一份不可变候选归档及其构建、artifact、验证和发布引用；它不是阶段状态机。
-- `GenerationWorkflow`：唯一的流程阶段、lease、attempt、deadline 和恢复权威。
-- `AuthoringSession`：作者与 Agent 的题意讨论和可见 revision。
-- `TaxonomyWorkflow`：一个 challenge revision 的 Mapper、reviewer pair 与 taxonomy 发布流程；它是独立的后台聚合，
-  不混入 GenerationWorkflow，拥有自己的 state、round、lease、candidate/reviews 与发布引用。
-
-Authoring 和学习助手不是后台 Workflow。Server 在同一会话内持久化用户消息和 AgentRun，并直接调用模型、执行受限工具、
-将流式输出转发给浏览器，最后持久化完整回复。它们不创建 Worker lease、WorkItem 或待领取的后台任务。
-
-CandidateRevision 不再重复保存 `Building`、`PublishingArtifact`、`Verifying`、`PublishingChallenge` 等 Workflow 阶段。
-它只保存当前 revision 的内容和阶段产出；当前流程阶段由 GenerationWorkflow 的 `state` 唯一决定。
-
-## Server、Generate Worker 与 Taxonomy Worker
-
-Server 直接承载两类交互式 Agent：Authoring 对话和做题助手。用户消息到达后，Server 先保存消息和 AgentRun，再在请求上下文中
-调用模型；模型增量经同一 Server 流式发送给浏览器，完成后 Server 保存完整回复和工具结果。一个会话同一时刻只允许一轮回复，
-从而保持对话顺序；不同会话可由 Server 并发处理。Server 重启或浏览器断开会中止该轮调用并保留已完成历史，用户可在同一会话继续
-提问，不尝试伪造恢复一条已经中断的模型调用。当前 Server 按单副本部署；多副本时的流式连接与共享文件系统协调留到独立的扩展设计，
-不提前引入。
-
-`generate-worker` 和 `taxonomy-worker` 是两个明确的 Deployment，均不携带 PostgreSQL DSN，所有状态只经 Server 内部 API
-读写。Generate Worker 只领取 `GenerationWorkflow`；Taxonomy Worker 只领取 `TaxonomyWorkflow`。不存在通用 Worker、
-通用 claim 路由、`kind` 字段或由 Worker 指定下一阶段的协议。
+`CatalogRelease` 是题库的唯一初始化来源，不是持续同步器、用户可见提交入口或 Kubernetes CRD。它是 Server 持久化的
+管理员级聚合，安装一个 Git 管理、OCI 分发、按 digest 固定的 `catalog/` source bundle 到一个尚未初始化的平台。
 
 ```text
-POST /api/internal/generation-workflows/claim
-POST /api/internal/generation-workflows/:id/renew
-POST /api/internal/generation-workflows/:id/phase
-POST /api/internal/taxonomy-workflows/claim
-POST /api/internal/taxonomy-workflows/:id/renew
-POST /api/internal/taxonomy-workflows/:id/phase
+CatalogRelease
+  Pending -> Installing -> Committing -> Ready
+                  |              |
+                  +-------> CleaningUp -> Failed
 ```
 
-`GenerationWorkflow` 的 `phase` 接口必须携带：
+`release.yaml` 只描述 portable source，不承担平台身份：
 
-- Workflow ID
-- lease credential（attempt + lease owner）
-- expected current state
-- 合法的阶段结果
-- typed output reference 或结构化 failure
+```yaml
+apiVersion: breakfix.dev/catalog/v1
+kind: CatalogRelease
+metadata:
+  name: foundation
+  version: 2026.08.01
+entries:
+  - path: challenges/linux/cleanup-logs
+    contentRevision: sha256:...
+taxonomy:
+  contentRevision: sha256:...
+```
 
-Server 在事务中校验合法状态迁移、保存阶段输出引用并更新 Workflow。Worker 不能自行跳过阶段、修改作者审核状态或
-直接推进数据库中的下一阶段。阶段结果应按阶段使用明确的 Go 类型，不用一个任意 JSON 字段绕过校验。
+- 新平台只有在没有已安装 Catalog Release、`data_dir/challenges` 为空且没有 taxonomy `current` 时接受安装；不会覆盖或
+  合并后来由用户工作流产生的 challenge、learning 事实或 taxonomy 变化。
+- source bundle 由 CI 从 `catalog/` 打包为 OCI artifact。管理员只提交不可变 digest；Server 下载后先校验 manifest、
+  每个 source path 对应的 canonical `contentRevision` 和 taxonomy source。release source 不包含或引用平台 challenge ID、
+  slug、镜像或发布时间；集群中的进程不读取 Git 工作树，也不使用 ConfigMap 承载题库。
+- 每个 catalog challenge 形成普通 CandidateRevision，并复用 Generate Worker 的 build、artifact staging、真实 verification
+  与 cleanup 执行器。验证成功的 entry 进入 `ReadyToCommit`，不执行逐题 final publish；它不调用 Generator、Judge 或
+  Taxonomy Agent，也没有 AuthoringSession。source 本身是已审查内容，安装阶段只验证它能在当前目标环境真实运行。
+- GenerationWorkflow 的 source 只有两种：`authoring` 和 `release`。`authoring` 的 `ref` 指向作者会话，并保存作者确认时的
+  revision；`release` 的 `ref` 必须指向单题 `CatalogReleaseEntry`，不能直接指向整批 CatalogRelease。Entry 保存所属 release、
+  source path 和 `contentRevision`，因此每道题的 build、verify、失败报告和 cleanup 都有独立 source identity。Server 只在
+  release `Committing` 时为该 Entry 生成并持久化新的 opaque challenge ID 与运行时 slug；重试始终复用该身份，随后才
+  materialize 目录、保存 artifact reference 和写入发布时间。
+- 任一 source、构建或真实验证出现非基础设施失败后，release 立即停止领取新的 entry，转入 `CleaningUp`；已经执行的 worker
+  不被强杀，在当前阶段结束后按其 cleanup 协议清理 staging。清理完成后 release 才成为 `Failed`。内容失败只能修改 `catalog/`
+  后创建新 digest；基础设施错误在同一 entry deadline 内重试，耗尽后同样清理并失败。两类失败都不进入 Agent 修复。
+- 所有 entry 到达 `ReadyToCommit` 后，Server 执行唯一的 release-level commit：先在短事务中为每个 Entry 持久化运行时身份，
+  再将 source materialize 到 staging 目录，并按 release ID、contentRevision 和已持久化身份幂等移动到最终目录；随后在同一
+  数据库事务中写入新 Challenge、runtime artifact、编译后的 taxonomy mapping，并将 release 置为 `Ready`。文件操作必须发生在
+  最终事务之前，事务提交前崩溃时 release 保持 `Committing`，恢复后按目标文件树 hash 与已保存身份继续，不公开也不重新构建
+  artifact。`Committing` 的基础设施错误在 release deadline 内重试；文件树 hash 不匹配、非空目标目录等语义错误转入
+  `CleaningUp`。
+- staging artifact 使用不可变 OCI digest 或 Incus fingerprint，不需要跨多题的 Registry/Incus "final promotion"；只有 `Ready`
+  后的 Challenge 记录会引用它们。成功前 Catalog API 不公开任何 challenge，失败时清理 staging artifact，只保留 release digest、
+  逐题状态和结构化报告。
+- `Failed` 是不可变历史记录。管理员再次安装时创建新的 CatalogRelease attempt；若上次只存在基础设施失败，可以使用同一
+  source digest 重试，内容失败则必须使用新 digest。
+- `Ready` 后，Catalog Release 只是一条不可变初始化谱系记录。普通作者继续走
+  AuthoringSession -> GenerationWorkflow -> 真实验证 -> NeedsAuthorReview -> ChallengePublishing；Taxonomy Worker 以该
+  release 安装的基线 snapshot 为起点处理后续增量。
 
-Generate Worker 从 `Queued` 领取一个 Workflow 后，在全部活动 state 间持有并续租同一 lease；只有进入
-`NeedsAuthorReview`、完成、取消、失败或达到 deadline 才释放。Generate Worker 崩溃或 lease 过期后，另一个副本重新领取同一
-Workflow，从数据库保存的 `state` 继续。构建、Registry、
-Environment 和发布操作必须使用由 Workflow ID、CandidateRevision ID 和 state attempt 派生的确定名称，并实现
-create-or-observe，避免副作用已完成但报告未提交时重复创建资源。
+#### Source 与运行时 revision
 
-## 调度与并发
+可复用 source 不能绑定环境生成的镜像指纹。需要明确拆分两类 revision：
 
-交互式对话不进入后台调度。Server 是 HTTP/WebSocket 服务，多个 Authoring 或学习助手会话可直接并发；同一会话只串行一轮回复，
-保证消息和工具上下文的顺序。当前不实现模型 API 配额、每用户限流或交互队列；后续确有真实配额需求时再单独设计，不能反向污染
-Workflow 调度模型。
+| 概念 | 计算内容 | 用途 |
+| --- | --- | --- |
+| `contentRevision` | candidate source 的确定性文件树 hash：相对路径按字节排序，纳入普通文件的原始内容和可执行位。拒绝 symlink、设备文件、路径逃逸及 `id`、`source_slug`、`image`、`published_at` 等平台字段；YAML schema 校验独立执行，不对 YAML 做语义重写。 | Catalog Release source 校验、taxonomy mapping 和跨环境复用。 |
+| `runtimeArtifact` | 目标环境的 Incus image fingerprint 或 OCI immutable reference，以及生成时间等发布信息 | Node/VK8s Environment 启动和运行时 artifact 回收。 |
 
-后台并发只由两个 Deployment 的副本数控制：
+taxonomy mapping 必须绑定 `challenge ID + contentRevision`，不再绑定包含 `image`、`published_at` 的完整已发布目录 revision。
+平台 artifact 变化不会使 Skill/Tag 关系失效；题目源文件改变才会失效。Catalog `release.yaml` 只保存每题 source path 与
+contentRevision；source taxonomy 也引用同一对值。安装时 Server 将它们编译为运行时的 `challenge ID + contentRevision`
+mapping。`challenge.yaml` 保持 candidate 语义，不保存目标环境 image、发布时间或其他平台运行时字段。
 
-| Deployment | 一个 Pod 同时执行 | 并发上限 | 内部执行 |
-| --- | --- | --- | --- |
-| `generate-worker` | 一个 `GenerationWorkflow` | `generate-worker.replicas` | 按 state 顺序执行 Generator、Judge、Build、Artifact Publish、Verify、Challenge Publish 与 Cleanup；`NeedsAuthorReview` 不占 Pod。 |
-| `taxonomy-worker` | 一个 `TaxonomyWorkflow` | `taxonomy-worker.replicas` | Mapper 后执行 reviewer pair；pair 可以在同一 Workflow 内并行调用，但不拆成独立调度任务；合法 reject 后释放 lease，下一次领取进入新 round。 |
+已发布的作者题目可以导出为同一份 portable candidate source，再加入 `catalog/challenges/`；导出过程只保留 source 文件和
+语义 metadata，重新计算 `contentRevision`，绝不导出原平台的 challenge ID、slug、artifact、发布时间、学习记录或数据库事实。
+导入 release 后仍由目标平台在安装成功时生成新的运行时身份。
 
-因此 Generate Worker 的副本数就是同时生成、构建或真实验证的题目数。Build 是其主要本地资源峰值，Pod 的 CPU、内存和临时存储按此配置；
-其他阶段不需要额外的内部并发模型。Taxonomy 的资源和失败不会影响 Generation Workflow，二者可独立扩缩容。未来新增后台能力时，
-只有它拥有独立的持久流程、资源轮廓或失败语义，才新增一个明确 Worker Deployment；不能重新引入按 `kind` 路由的万能队列。
+#### 初始化与测试
 
-## 实施顺序
+1. **平台基线由管理员准备**：Kubernetes CRD、PostgreSQL、Server PVC、外部 Registry 及其 CA、Incus endpoint、
+   project/network/role identity、Node system-container base image、K8s runtime base image 都是可信平台依赖。它们由
+   `scripts/incus/bootstrap.sh`、镜像构建目标和部署前置条件显式创建；Server、Controller、Worker 只做 readiness/preflight，
+   不在启动时隐式修改这些资源。
+2. **产品初始化安装 release**：平台基线就绪后，管理员安装一个正式 Catalog Release；`Ready` 才代表平台有可见题库。
+   没有 release 的全新 Server 仍可合法启动并返回空 Catalog，便于运维诊断，但不是正常产品初始化完成态。
+3. **E2E 使用同一入口**：`test/fixtures/catalog/` 保存极小的 fixture release（至少一个 Node、一个 VK8s 和一个 Catalog/UI
+   fixture）。global setup 将它打包为 OCI artifact，通过正式管理员安装入口安装并等待 `Ready`，然后浏览器和 runtime E2E
+   才开始。常规 E2E 不调用模型，也不依赖历史 PVC 或直接复制 `data/`。
+4. **测试层次**：Catalog Release 安装有单独的真实集成测试，覆盖 source -> build -> staging -> verify -> release commit ->
+   taxonomy 基线，以及 `Committing`/`CleaningUp` 中断后的幂等恢复；
+   浏览器 E2E 只验证已安装题库上的 Catalog、环境、终端、检查点、Assistant 和 My Space；Agent 真实测试仍是独立、显式执行的
+   测试层。
 
-1. 增加 `GenerationWorkflow` 领域模型、唯一 `state` 枚举、`NeedsAuthorReview`/`CleaningUp` 转移表与清理恢复测试。
-2. 将 `work_items` 改为两个明确的后台聚合：`GenerationWorkflow`、`TaxonomyWorkflow`；为 taxonomy 增加 Mapper/reviewer/
-   publish 状态机、round、state attempt、lease 和 snapshot 发布恢复记录；删除 `kind`、`subject_type` 和按阶段创建任务的逻辑。
-3. 将 Authoring 和学习助手的 AgentRun 迁入 Server 直接流式执行；对话消息、流式增量和最终回复均由 Server 持久化，不进入
-   Worker 调度。Generator/Judge 与 taxonomy Mapper/reviewer 则归属各自的后台 Workflow。
-4. 将生成、Judge、构建、artifact 发布、验证、正式发布和 cleanup 的 Server 回调改为阶段报告接口；每次报告与 Workflow
-   state 在同一事务提交。
-5. 将 Generator/Judge、Builder、Publisher、Verifier 装配到 `cmd/generate-worker`，每个 Pod 一次领取一个完整 GenerationWorkflow；
-   将 taxonomy executor 装配到 `cmd/taxonomy-worker`，每个 Pod 一次领取一个完整 TaxonomyWorkflow。
-6. 删除旧的 Agent Worker、Builder、Publisher、Verifier、通用 `ClaimNext`、`ClaimCandidateWork(kind)`、`/work-items/:kind`
-   路由，以及对应的身份/RBAC/NetworkPolicy 和 Deployment。
-7. 更新数据库、OpenAPI、前端作者状态、指标、Telepresence、部署清单和架构文档；Server 获得交互 Agent 所需模型与工具能力，
-   两类后台 Worker 只取得各自工作所需凭据。
-8. 增加真实流程验收：Server 直接流式对话、成功、Judge 修订、验证失败自动修复、基础设施重试、Worker 崩溃接管、作者审核后发布、
-   cleanup、取消，以及 taxonomy approve/reject 循环、reviewer pair 重试、并发 snapshot 发布和 stale artifact 取消。
+本次重构将当前 `data/challenges/cleanup-logs` 迁移为 `catalog/challenges/cleanup-logs` candidate source，将当前 taxonomy
+内容迁移为 `catalog/taxonomy` source，并删除平台字段与环境特定 artifact 引用。删除直接复制 `data/` 的
+`dev/kind-catalog.sh`、单题镜像旁路 `dev/incus-catalog.sh`、`cmd/catalog-seed`、`internal/catalogseed` 及其文档/Make 入口；
+以 Catalog Release OCI 打包与安装入口替代它们。
 
-本次重构不改变 NodeEnvironment、VK8sEnvironment、运行时初始化、Kind NodePort / 生产外部 Registry 契约或
-Environment CRD 的语义；
-只重构题目生成与发布的持久工作流。实现完成前不提交代码。
+### Kustomize
+
+只保留两层：
+
+```text
+kustomization.yaml                  生产共同清单的唯一入口
+  -> deploy/manifests/*.yaml
+  -> deploy/crds/*.yaml
+
+deploy/overlays/kind/kustomization.yaml
+  -> ../../../                       只增加 Kind Registry 和开发 patch
+```
+
+- 删除 `deploy/base`、`deploy/runtime`、`deploy/crd` 和 `config/kustomization.yaml`，也删除它们的 Kustomization 文件。
+- 根 Kustomization 直接列出清单、CRD 和 ConfigMap generator；不再通过“base 引用 runtime、runtime 引用资源、base 再引用
+  config”的多层间接关系组装。
+- `deploy/manifests` 只包含 namespace、RBAC、PostgreSQL、Server、Controller、Generate Worker、Taxonomy Worker、
+  NetworkPolicy 和 PVC。`deploy/overlays/kind` 只包含 Registry、Kind patch 和其 README。
+- `build/images` 保存 Dockerfile、entrypoint 和 runtime-init；`deploy` 不再携带镜像构建输入。
+
+### 脚本与 Makefile
+
+- 将 `dev/*.sh` 分类移入 `scripts/dev`、`scripts/kind`、`scripts/incus`；脚本均使用 `.sh` 扩展名。
+- Makefile 只暴露稳定动作：`generate`、`verify-generated`、`build`、`images`、`deploy-kind`、`reset-kind`、`test-unit`、
+  `catalog-package`、`catalog-install`、`test-e2e`。`catalog-install` 只调用 Server 的管理员 release 安装入口，不能复制
+  data PVC 或直接发布 image。目标不再泄漏历史 worker 名称或内部目录。
+- README 只列这些入口。操作前提、TLS/Registry 约束、Telepresence 和故障定位写入 `docs/operations`。
+
+## 文档整理
+
+`REVIEW/` 已删除。长期有效的结论只保留在 `docs`，并且每篇文档有唯一职责：
+
+| 文档 | 唯一职责 |
+| --- | --- |
+| `docs/architecture/system-architecture.md` | 六个顶层组件与依赖图。 |
+| `docs/architecture/code-layout.md` | 本文最终目录、分层和 import 规则。 |
+| `docs/architecture/workflows.md` | GenerationWorkflow、TaxonomyWorkflow 与 Worker 协议。 |
+| `docs/architecture/catalog-release.md` | Catalog source、content revision、安装状态、原子性和管理员边界。 |
+| `docs/architecture/runtime-environments.md` | Node/VK8s/Incus/Registry runtime 边界。 |
+| `docs/architecture/api-contracts.md` | HTTP、内部 Worker API、CRD 和生成规则。 |
+| `docs/operations/deployment.md` | 生产部署、外部 Registry 和 CA 前提。 |
+| `docs/operations/development.md` | 本地、Kind、Incus、Telepresence。 |
+| `docs/operations/testing.md` | 单元、集成、E2E 分层与命令。 |
+| `docs/product/*` | 用户体验、题目格式、taxonomy 和产品方向。 |
+
+根 `README.md` 只保留项目定位、最短启动路径和 docs 导航。完成结构迁移后，旧文档应合并或删除，不能保留两份描述同一契约的文件。
+顶层 `NEXT.md`、`REVIEW.md`、`TODO.md` 保留：前者记录下一阶段路线，第二者记录持续审查发现与待讨论风险，第三者记录
+当前可执行工作。它们只链接到 `docs` 中的权威设计，不复制 API、运行时或部署契约。
+
+## 实施提交序列
+
+这是一套 13 个可独立审查的提交。每次迁移在同一提交内完成路径移动、全部 import 重写和旧路径删除；不保留 type alias、
+re-export、旧 Kustomization 入口或兼容配置键。每次提交都必须保持可编译。
+
+1. **`docs: define repository refactor and catalog release protocol`**：提交本设计，删除 `REVIEW/`。只变更文档，不改运行时行为。
+2. **`refactor(api): centralize contracts and generated clients`**：迁移 OpenAPI、CRD Go 类型和生成物到 `api/`、
+   `internal/transport/httpapi/generated`、`web/src/api/generated`；建立统一 `make generate` / `make verify-generated`。
+3. **`refactor(domain): establish domain models and application ports`**：建立 `domain/*` 与 `application/*`，迁移纯模型、状态机和
+   端口接口。包含 `GenerationWorkflow`、`CatalogRelease`、`CatalogReleaseEntry`、source kind 与 `contentRevision`，不迁移 SDK。
+4. **`refactor(postgres): split durable repositories by domain`**：将 `internal/db` 拆到 `adapter/postgres`，按领域拆 schema 和
+   repository；建立 Catalog Release、entry、运行时身份和提交状态持久化。开发环境直接重建 schema，不写兼容迁移。
+5. **`refactor(adapters): isolate runtime and external clients`**：迁移 Kubernetes、Incus、OCI Registry、vcluster、OpenSandbox、
+   LLM 和内部 Worker HTTP client 到 `adapter/*`；SDK 类型不得泄漏到领域或应用层。
+6. **`refactor(server): separate application services from HTTP transport`**：抽出 authoring、generation、catalog、environment、
+   assistant 等 application 用例；将公开/内部 HTTP、SSE、WebSocket、认证和错误映射迁到 `transport/httpapi`，使 `cmd/server`
+   只调用 `bootstrap/server`。
+7. **`refactor(generate-worker): consolidate generation execution`**：将 `generator`、`builder`、`publisher`、`verifier`、
+   `generateworker` 收敛为 `worker/generate`。Worker 仅通过内部 API 领取、续租和报告阶段，绝不访问 PostgreSQL。
+8. **`refactor(taxonomy-worker): isolate maintenance workflow`**：将 Mapper、reviewer pair、状态机和执行器收敛到
+   `worker/taxonomy`，删除旧 taxonomy worker 入口及通用 work-item 残留。
+9. **`refactor(controller): split environment reconcilers`**：拆为 `controller/nodeenvironment` 与
+   `controller/vk8senvironment`，使 Controller 只依赖 environment domain 与 provider adapter。
+10. **`feat(catalog): add portable release bundle tooling`**：实现 portable export、确定性 `contentRevision`、source/taxonomy
+    校验和 OCI release bundle 打包。source 中拒绝平台字段；此提交不安装或公开 release。
+11. **`feat(catalog): install verified releases atomically`**：实现管理员安装入口、Release/Entry 生命周期、artifact staging、
+    `ReadyToCommit`、`Committing`、幂等恢复、`CleaningUp` 与原子可见性提交。迁移静态题目为 catalog source，删除
+    `catalog-seed` 旁路，并让 E2E 通过正式安装入口准备题库。
+12. **`refactor(ops): normalize configuration deployment and scripts`**：迁移配置、镜像输入、Kustomize 和开发脚本到最终目录，
+    删除 `deploy/base`、`deploy/runtime`、旧 `dev/`、多层 Kustomization 和旧配置键。
+13. **`test(docs): rebuild fixtures and finalize repository layout`**：迁移测试目录与长期文档，`todo.md` 改为 `TODO.md`，删除未引用
+    生成物、重复文档、旧 Make target 和剩余旧路径。
+
+### 每次提交的验证门槛
+
+- 每次：`git diff --check`、相关 Go 单元测试和对应二进制构建必须通过。
+- 第 2 次：`make generate`、`make verify-generated`；第 4、7、11 次：追加 PostgreSQL、Worker 或 Catalog 集成测试。
+- 第 11 次：覆盖 release source -> build -> staging -> verify -> commit、`Committing`/`CleaningUp` 恢复和失败清理。
+- 第 13 次：`go test -count=1 ./...`、`make lint`、`npm run build --prefix web`、`make verify-generated`、两套
+  Kustomize 渲染及完整确定性 E2E。Live Agent 测试保持显式单独执行，不作为每次重构提交的默认门槛。
+
+## 完成标准
+
+- `internal/server`、`internal/db`、`internal/k8s`、`internal/incusprovider`、`internal/generator`、`internal/generateworker`、
+  `internal/taxonomyworker`、`internal/builder`、`internal/publisher`、`internal/verifier` 等旧顶层目录不存在。
+- 每个二进制的 `main.go` 不超过进程生命周期与 bootstrap 调用；没有业务逻辑、配置拼装或 SDK 初始化。
+- `domain` 与 `application` 不 import 任何 adapter/transport/SDK；Worker 不访问 PostgreSQL；HTTP handler 不访问 SDK。
+- 仓库只剩根生产 Kustomization 和 Kind overlay 两个入口，构建与部署资源彻底分离。
+- `Catalog Release` 在空平台可从 immutable OCI bundle 自动安装；source 失败不调用 Agent，所有题通过后才原子公开基线
+  challenge 与 taxonomy；E2E fixture 通过相同入口安装且不调用模型。
+- `REVIEW/`、历史 data copy/catalog seed、重复文档、旧 Make target、旧脚本路径和未引用生成物全部删除。
+- 所有既有用户可见行为与当前 Workflow/Environment 契约保持一致，但实现不保留兼容层。
