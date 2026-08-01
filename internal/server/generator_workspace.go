@@ -10,33 +10,32 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	domain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/opensandbox"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
-	"github.com/breakfix/breakfix/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
 
 const generatorWorkspaceCleanupTimeout = 2 * time.Minute
 
 type internalGeneratorReadRequest struct {
-	generation.LeaseCredential
+	domain.LeaseCredential
 	Path   string `json:"path"`
 	Offset int    `json:"offset"`
 	Limit  int    `json:"limit"`
 }
 
 type internalGeneratorWriteRequest struct {
-	generation.LeaseCredential
+	domain.LeaseCredential
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
 type internalGeneratorExecuteRequest struct {
-	generation.LeaseCredential
+	domain.LeaseCredential
 	Command string `json:"command"`
 }
 
@@ -44,7 +43,7 @@ type internalGeneratorExecuteRequest struct {
 // for the current Generator agent run. The Generate Worker never receives a
 // sandbox identifier, PVC name, or provider credential.
 func (h *Handler) InternalGeneratorContext(c *gin.Context) {
-	var credential generation.LeaseCredential
+	var credential domain.LeaseCredential
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &credential) {
 		return
 	}
@@ -109,7 +108,7 @@ func (h *Handler) InternalGeneratorWriteFile(c *gin.Context) {
 }
 
 func (h *Handler) InternalGeneratorArchiveWorkspace(c *gin.Context) {
-	var credential generation.LeaseCredential
+	var credential domain.LeaseCredential
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &credential) {
 		return
 	}
@@ -189,7 +188,7 @@ func (h *Handler) InternalGeneratorExecute(c *gin.Context) {
 	_ = write(generator.ExecuteEvent{Type: "result", Content: content, ExitCode: &result.ExitCode})
 }
 
-func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, workflowID string, credential generation.LeaseCredential, ensure bool) (*generation.Claim, *workspace.Record, error) {
+func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, workflowID string, credential domain.LeaseCredential, ensure bool) (*domain.Claim, *domain.Workspace, error) {
 	if h.db == nil || h.generatorSandbox == nil || h.generatorWorkspace == nil {
 		return nil, nil, errors.New("generator workspace runtime is unavailable")
 	}
@@ -200,17 +199,17 @@ func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, work
 	if err != nil {
 		return nil, nil, err
 	}
-	if claim.Workflow.State != generation.StateGenerating || strings.TrimSpace(claim.Workflow.ActiveAgentRunID) == "" {
+	if claim.Workflow.State != domain.StateGenerating || strings.TrimSpace(claim.Workflow.ActiveAgentRunID) == "" {
 		return nil, nil, errors.New("generation workflow is not running a generator")
 	}
 	run, err := h.db.GetRun(ctx, claim.Workflow.ActiveAgentRunID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if run.Status != agentruntime.RunRunning || run.Purpose != generator.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
+	if run.Status != agent.RunRunning || run.Purpose != generator.GeneratorPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID || strings.TrimSpace(run.SessionID) == "" {
 		return nil, nil, errors.New("generation workflow has no current generator agent run")
 	}
-	var record *workspace.Record
+	var record *domain.Workspace
 	if ensure {
 		record, err = h.generatorWorkspace.Ensure(ctx, run.ID)
 	} else {
@@ -219,13 +218,13 @@ func (h *Handler) generatorWorkspaceForGenerationClaim(ctx context.Context, work
 	if err != nil {
 		return nil, nil, err
 	}
-	if record.State != workspace.StateActive || strings.TrimSpace(record.SandboxID) == "" {
+	if record.State != domain.WorkspaceActive || strings.TrimSpace(record.SandboxID) == "" {
 		return nil, nil, errors.New("generator workspace is not active")
 	}
 	return claim, record, nil
 }
 
-func (h *Handler) materializeGenerationWorkspace(ctx context.Context, record *workspace.Record, claim *generation.Claim) error {
+func (h *Handler) materializeGenerationWorkspace(ctx context.Context, record *domain.Workspace, claim *domain.Claim) error {
 	if record == nil || claim == nil || strings.TrimSpace(record.SandboxID) == "" {
 		return errors.New("generation workspace record is incomplete")
 	}
@@ -235,7 +234,7 @@ func (h *Handler) materializeGenerationWorkspace(ctx context.Context, record *wo
 		if err != nil {
 			return fmt.Errorf("read generator repair candidate: %w", err)
 		}
-		if revision.AuthoringSessionID != claim.Workflow.AuthoringSessionID || revision.AuthoringRevision > claim.Workflow.AuthoringRevision {
+		if revision.AuthoringSessionID != claim.Workflow.Source.Ref || revision.AuthoringRevision > claim.Workflow.AuthoringRevision {
 			return errors.New("generator repair candidate does not belong to workflow lineage")
 		}
 		archive, err = candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
@@ -246,7 +245,7 @@ func (h *Handler) materializeGenerationWorkspace(ctx context.Context, record *wo
 	return h.generatorSandbox.ResetWorkspace(ctx, record.SandboxID, archive)
 }
 
-func (h *Handler) monitorGenerationCommandLease(ctx context.Context, done <-chan struct{}, cancel context.CancelFunc, claim generation.Claim, target *error, mu *sync.Mutex) {
+func (h *Handler) monitorGenerationCommandLease(ctx context.Context, done <-chan struct{}, cancel context.CancelFunc, claim domain.Claim, target *error, mu *sync.Mutex) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -320,9 +319,9 @@ func selectWorkspaceLines(content string, offset, limit int) string {
 func (h *Handler) writeInternalGenerationError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, generation.ErrNotFound), errors.Is(err, candidate.ErrNotFound), errors.Is(err, agentruntime.ErrNotFound), errors.Is(err, workspace.ErrNotFound):
+	case errors.Is(err, domain.ErrWorkflowNotFound), errors.Is(err, domain.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, domain.ErrWorkspaceNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, generation.ErrLeaseLost):
+	case errors.Is(err, domain.ErrLeaseLost):
 		status = http.StatusConflict
 	case strings.Contains(err.Error(), "unavailable"):
 		status = http.StatusServiceUnavailable

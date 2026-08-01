@@ -1,6 +1,4 @@
-// Package candidate owns immutable generated challenge revisions and their
-// recorded outputs. Scheduling state belongs exclusively to generation.
-package candidate
+package generation
 
 import (
 	"crypto/sha256"
@@ -14,16 +12,8 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("candidate revision not found")
-	ErrInvalidState = errors.New("candidate revision is not in the required state")
-)
-
-type FailureClass string
-
-const (
-	FailureArtifact       FailureClass = "artifact"
-	FailureInfrastructure FailureClass = "infrastructure"
-	FailureCancelled      FailureClass = "cancelled"
+	ErrCandidateNotFound     = errors.New("candidate revision not found")
+	ErrCandidateInvalidState = errors.New("candidate revision is not in the required state")
 )
 
 type CheckpointSnapshot struct {
@@ -197,19 +187,6 @@ func (r VerificationReport) Validate(snapshot ExecutionSnapshot) error {
 	return nil
 }
 
-type Failure struct {
-	Class   FailureClass `json:"class"`
-	Code    string       `json:"code"`
-	Summary string       `json:"summary"`
-}
-
-func (f Failure) Validate() error {
-	if (f.Class != FailureArtifact && f.Class != FailureInfrastructure && f.Class != FailureCancelled) || strings.TrimSpace(f.Code) == "" || strings.TrimSpace(f.Summary) == "" {
-		return errors.New("candidate failure requires a valid class, code, and summary")
-	}
-	return nil
-}
-
 type Publication struct {
 	ChallengeID string             `json:"challenge_id"`
 	SourceSlug  string             `json:"source_slug"`
@@ -302,7 +279,7 @@ func (o BuildOutput) Validate(runtime string) error {
 		return errors.New("build output runtime does not match candidate")
 	}
 	if runtime == challenge.RuntimeK8s {
-		if strings.TrimSpace(o.OCIArchivePath) == "" || !validSHA256(o.OCIArchiveSHA256) || o.Incus != nil {
+		if strings.TrimSpace(o.OCIArchivePath) == "" || !ValidSHA256(o.OCIArchiveSHA256) || o.Incus != nil {
 			return errors.New("k8s build output is incomplete")
 		}
 		return nil
@@ -330,7 +307,7 @@ func (r ArtifactReference) Validate(runtime string) error {
 			return errors.New("k8s artifact requires an immutable OCI reference")
 		}
 		parts := strings.SplitN(r.OCIReference, "@", 2)
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || !validSHA256(parts[1]) {
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || !ValidSHA256(parts[1]) {
 			return errors.New("k8s artifact OCI reference is invalid")
 		}
 		return nil
@@ -361,7 +338,7 @@ func (r Revision) ValidateForCreate() error {
 	if strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "" {
 		return errors.New("candidate revision requires generator lineage")
 	}
-	if strings.TrimSpace(r.ArchivePath) == "" || !validSHA256(r.ArchiveSHA256) {
+	if strings.TrimSpace(r.ArchivePath) == "" || !ValidSHA256(r.ArchiveSHA256) {
 		return errors.New("candidate revision requires an immutable archive")
 	}
 	if r.Build != nil || r.Artifact != nil || r.VerifyEnvironment != nil || r.Verification != nil || r.Failure != nil || r.Publication != nil {
@@ -370,7 +347,7 @@ func (r Revision) ValidateForCreate() error {
 	return r.Snapshot.Validate()
 }
 
-func validSHA256(value string) bool {
+func ValidSHA256(value string) bool {
 	value = strings.TrimSpace(value)
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false

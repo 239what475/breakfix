@@ -5,28 +5,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/workspace"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
+	if _, err := database.CreateRun(ctx, agent.CreateRun{
 		ID: "generator-run-one", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
 		Model: "test", PromptVersion: "test",
 	}); err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
 	now := time.Now().UTC().Round(time.Microsecond)
-	record, err := database.CreateGeneratorWorkspace(ctx, workspace.Record{
-		GeneratorRunID: "generator-run-one", Namespace: "opensandbox", PVCName: workspace.NewPVCName("generator-run-one"),
-		State: workspace.StatePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+	record, err := database.CreateGeneratorWorkspace(ctx, generation.Workspace{
+		GeneratorRunID: "generator-run-one", Namespace: "opensandbox", PVCName: generation.NewWorkspacePVCName("generator-run-one"),
+		State: generation.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("create generator workspace: %v", err)
 	}
-	if record.State != workspace.StatePending {
+	if record.State != generation.WorkspacePending {
 		t.Fatalf("workspace state = %q", record.State)
 	}
 	if err := database.ActivateGeneratorWorkspace(ctx, record.GeneratorRunID, "sandbox-one", now.Add(time.Second)); err != nil {
@@ -42,7 +42,7 @@ func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if stored.State != workspace.StateDeleted || stored.SandboxID != "sandbox-one" || stored.DeletedAt == nil {
+	if stored.State != generation.WorkspaceDeleted || stored.SandboxID != "sandbox-one" || stored.DeletedAt == nil {
 		t.Fatalf("stored workspace = %#v", stored)
 	}
 }
@@ -51,16 +51,16 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(time.Microsecond)
-	run, err := database.CreateRun(ctx, agentruntime.CreateRun{
+	run, err := database.CreateRun(ctx, agent.CreateRun{
 		ID: "generator-run-pending", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
 		Model: "test", PromptVersion: "test",
 	})
 	if err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
-	if _, err := database.CreateGeneratorWorkspace(ctx, workspace.Record{
-		GeneratorRunID: "generator-run-pending", Namespace: "opensandbox", PVCName: workspace.NewPVCName("generator-run-pending"),
-		State: workspace.StatePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+	if _, err := database.CreateGeneratorWorkspace(ctx, generation.Workspace{
+		GeneratorRunID: "generator-run-pending", Namespace: "opensandbox", PVCName: generation.NewWorkspacePVCName("generator-run-pending"),
+		State: generation.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create pending workspace: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list terminal workspaces: %v", err)
 	}
-	if len(workspaces) != 1 || workspaces[0].GeneratorRunID != "generator-run-pending" || workspaces[0].State != workspace.StatePending {
+	if len(workspaces) != 1 || workspaces[0].GeneratorRunID != "generator-run-pending" || workspaces[0].State != generation.WorkspacePending {
 		t.Fatalf("terminal workspaces = %#v", workspaces)
 	}
 }

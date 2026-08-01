@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 // mapperResult is the model-facing mapping protocol. It intentionally has no
@@ -55,7 +56,7 @@ type mapperNewSkillRequirement struct {
 	NewRequirementKeys     []string `json:"new_requirement_keys" jsonschema:"required" jsonschema_description:"新增前置 Skill 本地键"`
 }
 
-func (r mapperResult) ChangeSet(validation taxonomy.MapperValidation) (taxonomy.ChangeSet, error) {
+func (r mapperResult) ChangeSet(validation taxonomyapp.MapperValidation) (taxonomy.ChangeSet, error) {
 	if err := r.validateShape(); err != nil {
 		return taxonomy.ChangeSet{}, err
 	}

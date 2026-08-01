@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 func generatorSystemPrompt() string {

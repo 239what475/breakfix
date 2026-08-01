@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 // OpaqueName derives the resource component used for candidate-scoped OCI
@@ -44,7 +46,7 @@ func ChallengeOCIImageReference(registryRoot, challengeID string) (string, error
 // resource-ownership boundary enforced by Server.
 func OCIRepository(reference string) (string, error) {
 	repository, digest, found := strings.Cut(strings.TrimSpace(reference), "@")
-	if !found || strings.TrimSpace(repository) == "" || !validSHA256(digest) {
+	if !found || strings.TrimSpace(repository) == "" || !generation.ValidSHA256(digest) {
 		return "", errors.New("invalid immutable OCI reference")
 	}
 	return repository, nil
@@ -52,7 +54,7 @@ func OCIRepository(reference string) (string, error) {
 
 func OCIDigest(reference string) (string, error) {
 	_, digest, found := strings.Cut(strings.TrimSpace(reference), "@")
-	if !found || !validSHA256(digest) {
+	if !found || !generation.ValidSHA256(digest) {
 		return "", errors.New("invalid immutable OCI reference")
 	}
 	return digest, nil

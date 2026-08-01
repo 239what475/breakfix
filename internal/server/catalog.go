@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/breakfix/breakfix/internal/challenge"
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
@@ -15,15 +16,15 @@ type publishedChallenge struct {
 
 type challengeTaxonomy struct {
 	Revision       string
-	Tags           []taxonomy.Ref
-	PrimaryOutcome taxonomy.Ref
-	Outcomes       []taxonomy.OutcomeRef
+	Tags           []domain.Ref
+	PrimaryOutcome domain.Ref
+	Outcomes       []domain.OutcomeRef
 	EntrySkills    []taxonomyEntrySkill
 }
 
 type taxonomyEntrySkill struct {
-	Ref      taxonomy.Ref
-	Requires []taxonomy.Ref
+	Ref      domain.Ref
+	Requires []domain.Ref
 }
 
 // publishedChallenges reads the publicly visible catalog. A challenge is
@@ -38,7 +39,7 @@ func (h *Handler) publishedChallenges() ([]publishedChallenge, error) {
 		return []publishedChallenge{}, nil
 	}
 	snapshot, err := h.taxonomy.LoadCurrent()
-	if errors.Is(err, taxonomy.ErrNoCurrentRevision) {
+	if errors.Is(err, domain.ErrNoCurrentRevision) {
 		return []publishedChallenge{}, nil
 	}
 	if err != nil {
@@ -80,27 +81,27 @@ func (h *Handler) publishedChallengeWithTaxonomy(id string) (*publishedChallenge
 	return nil, challenge.ErrNotFound
 }
 
-func projectChallengeTaxonomy(snapshot taxonomy.Snapshot, mapping taxonomy.ChallengeMapping) challengeTaxonomy {
-	requires := make(map[string][]taxonomy.Ref, len(snapshot.SkillMappings))
+func projectChallengeTaxonomy(snapshot domain.Snapshot, mapping domain.ChallengeMapping) challengeTaxonomy {
+	requires := make(map[string][]domain.Ref, len(snapshot.SkillMappings))
 	for _, skillMapping := range snapshot.SkillMappings {
-		requires[skillMapping.Source.ID] = append([]taxonomy.Ref{}, skillMapping.Requires...)
+		requires[skillMapping.Source.ID] = append([]domain.Ref{}, skillMapping.Requires...)
 	}
 	projection := challengeTaxonomy{
 		Revision:    snapshot.Revision,
-		Tags:        append([]taxonomy.Ref{}, mapping.Tags...),
-		Outcomes:    append([]taxonomy.OutcomeRef{}, mapping.Outcomes...),
+		Tags:        append([]domain.Ref{}, mapping.Tags...),
+		Outcomes:    append([]domain.OutcomeRef{}, mapping.Outcomes...),
 		EntrySkills: make([]taxonomyEntrySkill, 0, len(mapping.EntrySkills)),
 	}
 	for _, outcome := range mapping.Outcomes {
 		if outcome.Primary {
-			projection.PrimaryOutcome = taxonomy.Ref{ID: outcome.ID, Title: outcome.Title}
+			projection.PrimaryOutcome = domain.Ref{ID: outcome.ID, Title: outcome.Title}
 			break
 		}
 	}
 	for _, entrySkill := range mapping.EntrySkills {
 		projection.EntrySkills = append(projection.EntrySkills, taxonomyEntrySkill{
 			Ref:      entrySkill,
-			Requires: append([]taxonomy.Ref{}, requires[entrySkill.ID]...),
+			Requires: append([]domain.Ref{}, requires[entrySkill.ID]...),
 		})
 	}
 	return projection

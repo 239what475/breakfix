@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 func TestWorkerPublishesApprovedTaxonomyWorkflow(t *testing.T) {
@@ -31,10 +32,10 @@ func TestWorkerPublishesApprovedTaxonomyWorkflow(t *testing.T) {
 	if store.current.Workflow.State != taxonomy.WorkflowCompleted || store.current.LeaseOwner != "" {
 		t.Fatalf("completed taxonomy workflow = %#v, want completed without lease", store.current.Workflow)
 	}
-	wantRoles := []taxonomy.AgentRole{
-		taxonomy.AgentRoleMapper,
-		taxonomy.AgentRoleCurriculumReviewer,
-		taxonomy.AgentRoleSREReviewer,
+	wantRoles := []taxonomyapp.AgentRole{
+		taxonomyapp.AgentRoleMapper,
+		taxonomyapp.AgentRoleCurriculumReviewer,
+		taxonomyapp.AgentRoleSREReviewer,
 	}
 	if !rolesEqual(store.roles, wantRoles) {
 		t.Fatalf("agent roles = %#v, want %#v", store.roles, wantRoles)
@@ -95,12 +96,12 @@ type rejectThenApproveCommittee struct {
 	reviewCalls int
 }
 
-func (c *rejectThenApproveCommittee) Map(context.Context, taxonomy.Context) (taxonomy.ChangeSet, error) {
+func (c *rejectThenApproveCommittee) Map(context.Context, taxonomyapp.Context) (taxonomy.ChangeSet, error) {
 	c.mapCalls++
 	return testChangeSet(), nil
 }
 
-func (c *rejectThenApproveCommittee) Review(context.Context, taxonomy.Context) (taxonomy.Review, taxonomy.Review, error) {
+func (c *rejectThenApproveCommittee) Review(context.Context, taxonomyapp.Context) (taxonomy.Review, taxonomy.Review, error) {
 	c.reviewCalls++
 	if c.reviewCalls == 1 {
 		return taxonomy.Review{Decision: taxonomy.ReviewReject, Feedback: "mapping needs a clearer prerequisite"}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, nil
@@ -108,12 +109,12 @@ func (c *rejectThenApproveCommittee) Review(context.Context, taxonomy.Context) (
 	return taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, nil
 }
 
-func (c *scriptedCommittee) Map(context.Context, taxonomy.Context) (taxonomy.ChangeSet, error) {
+func (c *scriptedCommittee) Map(context.Context, taxonomyapp.Context) (taxonomy.ChangeSet, error) {
 	c.mapCalls++
 	return testChangeSet(), nil
 }
 
-func (c *scriptedCommittee) Review(context.Context, taxonomy.Context) (taxonomy.Review, taxonomy.Review, error) {
+func (c *scriptedCommittee) Review(context.Context, taxonomyapp.Context) (taxonomy.Review, taxonomy.Review, error) {
 	c.reviewCalls++
 	return taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, nil
 }
@@ -124,7 +125,7 @@ type taxonomyStore struct {
 	claimed     bool
 	claimNumber int
 	phaseStates []taxonomy.WorkflowState
-	roles       []taxonomy.AgentRole
+	roles       []taxonomyapp.AgentRole
 	runIDs      []string
 	phaseCalls  int
 }
@@ -171,21 +172,21 @@ func (s *taxonomyStore) Claim(context.Context, string, time.Duration) (*taxonomy
 
 func (s *taxonomyStore) Renew(context.Context, taxonomy.Claim, time.Duration) error { return nil }
 
-func (s *taxonomyStore) Context(_ context.Context, claim taxonomy.Claim) (*taxonomy.Context, error) {
+func (s *taxonomyStore) Context(_ context.Context, claim taxonomy.Claim) (*taxonomyapp.Context, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if claim.Workflow.ID != s.current.Workflow.ID || claim.Workflow.State != s.current.Workflow.State {
 		return nil, taxonomy.ErrLeaseLost
 	}
-	return &taxonomy.Context{
+	return &taxonomyapp.Context{
 		Workflow:         claim.Workflow,
-		Mapper:           taxonomy.ModelInput{SystemPrompt: "mapper", Prompt: "map this challenge"},
-		CurriculumReview: taxonomy.ModelInput{SystemPrompt: "curriculum", Prompt: "review this mapping"},
-		SREReview:        taxonomy.ModelInput{SystemPrompt: "sre", Prompt: "review this mapping"},
+		Mapper:           taxonomyapp.ModelInput{SystemPrompt: "mapper", Prompt: "map this challenge"},
+		CurriculumReview: taxonomyapp.ModelInput{SystemPrompt: "curriculum", Prompt: "review this mapping"},
+		SREReview:        taxonomyapp.ModelInput{SystemPrompt: "sre", Prompt: "review this mapping"},
 	}, nil
 }
 
-func (s *taxonomyStore) StartAgentRun(_ context.Context, claim taxonomy.Claim, role taxonomy.AgentRole, _ string) (*taxonomy.StartAgentRunResponse, error) {
+func (s *taxonomyStore) StartAgentRun(_ context.Context, claim taxonomy.Claim, role taxonomyapp.AgentRole, _ string) (*taxonomyapp.StartAgentRunResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if claim.Workflow.State != s.current.Workflow.State || claim.LeaseOwner != s.current.LeaseOwner {
@@ -194,12 +195,12 @@ func (s *taxonomyStore) StartAgentRun(_ context.Context, claim taxonomy.Claim, r
 	s.roles = append(s.roles, role)
 	runID := fmt.Sprintf("taxonomy-run-%d", len(s.runIDs)+1)
 	s.runIDs = append(s.runIDs, runID)
-	return &taxonomy.StartAgentRunResponse{Run: agentruntime.Run{
-		ID: runID, Status: agentruntime.RunRunning, Purpose: role.Purpose(), OwnerKind: "taxonomy-workflow", OwnerRef: claim.Workflow.ID,
+	return &taxonomyapp.StartAgentRunResponse{Run: agent.Run{
+		ID: runID, Status: agent.RunRunning, Purpose: role.Purpose(), OwnerKind: "taxonomy-workflow", OwnerRef: claim.Workflow.ID,
 	}}, nil
 }
 
-func (s *taxonomyStore) Phase(_ context.Context, claim taxonomy.Claim, request taxonomy.PhaseRequest) (*taxonomy.Claim, error) {
+func (s *taxonomyStore) Phase(_ context.Context, claim taxonomy.Claim, request taxonomyapp.PhaseRequest) (*taxonomy.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if claim.Workflow.State != s.current.Workflow.State || claim.LeaseOwner != s.current.LeaseOwner {
@@ -265,7 +266,7 @@ func workflowStatesEqual(left, right []taxonomy.WorkflowState) bool {
 	return true
 }
 
-func rolesEqual(left, right []taxonomy.AgentRole) bool {
+func rolesEqual(left, right []taxonomyapp.AgentRole) bool {
 	if len(left) != len(right) {
 		return false
 	}

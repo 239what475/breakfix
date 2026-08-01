@@ -25,7 +25,7 @@ type VK8sResources struct {
 
 // Validate verifies quantities and ensures the environment quota can start
 // the platform itself: the vcluster control plane, its distro init container,
-// and the management terminal. Remaining quota is available to challenge
+// and the management environment. Remaining quota is available to challenge
 // workloads.
 func (r VK8sResources) Validate() error {
 	values := map[string]string{

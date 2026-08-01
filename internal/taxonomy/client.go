@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentserver"
+	app "github.com/breakfix/breakfix/internal/application/taxonomy"
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 // Client is the taxonomy-worker's complete durable boundary. It only talks to
@@ -24,9 +26,9 @@ func NewClient(serverURL, apiKey string) (*Client, error) {
 	return &Client{server: server}, nil
 }
 
-func (c *Client) Claim(ctx context.Context, workerID string, leaseTTL time.Duration) (*Claim, error) {
+func (c *Client) Claim(ctx context.Context, workerID string, leaseTTL time.Duration) (*domain.Claim, error) {
 	var response struct {
-		Claim *Claim `json:"claim,omitempty"`
+		Claim *domain.Claim `json:"claim,omitempty"`
 	}
 	err := c.post(ctx, "/api/internal/taxonomy-workflows/claim", struct {
 		WorkerID       string `json:"worker_id"`
@@ -41,22 +43,22 @@ func (c *Client) Claim(ctx context.Context, workerID string, leaseTTL time.Durat
 	return response.Claim, nil
 }
 
-func (c *Client) Renew(ctx context.Context, claim Claim, leaseTTL time.Duration) error {
+func (c *Client) Renew(ctx context.Context, claim domain.Claim, leaseTTL time.Duration) error {
 	if !claim.Valid() {
 		return errors.New("renew taxonomy workflow requires a valid claim")
 	}
 	return c.post(ctx, workflowPath(claim.Workflow.ID, "renew"), struct {
-		LeaseCredential
+		domain.LeaseCredential
 		LeaseTTLMillis int64 `json:"lease_ttl_millis"`
 	}{LeaseCredential: claim.LeaseCredential, LeaseTTLMillis: leaseTTL.Milliseconds()}, nil)
 }
 
-func (c *Client) Context(ctx context.Context, claim Claim) (*Context, error) {
+func (c *Client) Context(ctx context.Context, claim domain.Claim) (*app.Context, error) {
 	if !claim.Valid() {
 		return nil, errors.New("taxonomy context requires a valid claim")
 	}
 	var response struct {
-		Context Context `json:"context"`
+		Context app.Context `json:"context"`
 	}
 	if err := c.postLong(ctx, workflowPath(claim.Workflow.ID, "context"), claim.LeaseCredential, &response); err != nil {
 		return nil, err
@@ -67,22 +69,22 @@ func (c *Client) Context(ctx context.Context, claim Claim) (*Context, error) {
 	return &response.Context, nil
 }
 
-func (c *Client) StartAgentRun(ctx context.Context, claim Claim, role AgentRole, model string) (*StartAgentRunResponse, error) {
+func (c *Client) StartAgentRun(ctx context.Context, claim domain.Claim, role app.AgentRole, model string) (*app.StartAgentRunResponse, error) {
 	if !claim.Valid() {
 		return nil, errors.New("start taxonomy agent run requires a valid claim")
 	}
-	request := StartAgentRunRequest{LeaseCredential: claim.LeaseCredential, ExpectedState: claim.Workflow.State, Role: role, Model: model}
+	request := app.StartAgentRunRequest{LeaseCredential: claim.LeaseCredential, ExpectedState: claim.Workflow.State, Role: role, Model: model}
 	if err := request.Validate(claim.Workflow.ID); err != nil {
 		return nil, err
 	}
-	var response StartAgentRunResponse
+	var response app.StartAgentRunResponse
 	if err := c.post(ctx, workflowPath(claim.Workflow.ID, "agent-runs"), request, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
 }
 
-func (c *Client) Phase(ctx context.Context, claim Claim, request PhaseRequest) (*Claim, error) {
+func (c *Client) Phase(ctx context.Context, claim domain.Claim, request app.PhaseRequest) (*domain.Claim, error) {
 	if !claim.Valid() {
 		return nil, errors.New("taxonomy phase requires a valid claim")
 	}
@@ -92,7 +94,7 @@ func (c *Client) Phase(ctx context.Context, claim Claim, request PhaseRequest) (
 		return nil, err
 	}
 	var response struct {
-		Claim *Claim `json:"claim,omitempty"`
+		Claim *domain.Claim `json:"claim,omitempty"`
 	}
 	if err := c.postLong(ctx, workflowPath(claim.Workflow.ID, "phase"), request, &response); err != nil {
 		return nil, err
@@ -126,10 +128,10 @@ func mapClientError(err error) error {
 		return nil
 	}
 	if agentserver.IsStatus(err, http.StatusConflict) {
-		return ErrLeaseLost
+		return domain.ErrLeaseLost
 	}
 	if agentserver.IsStatus(err, http.StatusNotFound) {
-		return ErrNotFound
+		return domain.ErrWorkflowNotFound
 	}
 	return fmt.Errorf("taxonomy worker server request: %w", err)
 }

@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
+	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 func seedTestTaxonomy(t *testing.T, root string) {
@@ -74,7 +75,7 @@ func seedTestTaxonomy(t *testing.T, root string) {
 		Requires: []taxonomy.Ref{{ID: "skill-6666666666666666", Title: "Read test service state"}},
 		File:     "inspect-test-service",
 	}}
-	if _, err := taxonomy.NewStore(root).Publish(snapshot); err != nil {
+	if _, err := taxonomystore.NewStore(root).Publish(snapshot); err != nil {
 		t.Fatal(err)
 	}
 }

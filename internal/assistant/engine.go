@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -31,7 +31,7 @@ const (
 // messages. It does not own Session, Run, or streaming persistence; the
 // Worker supplies those boundaries and only this function performs model/tool
 // work.
-func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(StreamEvent)) (EngineResult, error) {
+func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, history []agent.Message, emit func(StreamEvent)) (EngineResult, error) {
 	if err := validateRequest(request); err != nil {
 		return EngineResult{}, err
 	}
@@ -56,7 +56,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 	return EngineResult{}, errors.New("assistant transport retry exhausted")
 }
 
-func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(StreamEvent)) (EngineResult, error) {
+func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agent.Message, emit func(StreamEvent)) (EngineResult, error) {
 	chat, err := agentmodel.NewChatModel(ctx, cfg)
 	if err != nil {
 		return EngineResult{}, err
@@ -145,7 +145,7 @@ func waitAssistantTransportRetry(ctx context.Context, attempt int) error {
 	}
 }
 
-func assistantInputs(conversation *conversation, history []agentruntime.Message) ([]adk.Message, error) {
+func assistantInputs(conversation *conversation, history []agent.Message) ([]adk.Message, error) {
 	inputs := make([]adk.Message, 0, len(history))
 	for index, message := range history {
 		switch message.Role {

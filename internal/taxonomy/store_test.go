@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/challenge"
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 func TestPublishLoadsCompleteImmutableSnapshotAndAtomicallySwitchesCurrent(t *testing.T) {
@@ -66,7 +67,7 @@ func TestLoadCurrentRejectsTamperedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(store.RevisionsPath(), published.Revision, "skills", "repair-logs.yaml")
-	if err := os.WriteFile(path, []byte("kind: Skill\nid: skill-1111111111111111\ntitle: changed\ndefinition: changed\nmapping_guidance:\n  outcome_when: [changed]\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("kind: domain.Skill\nid: skill-1111111111111111\ntitle: changed\ndefinition: changed\nmapping_guidance:\n  outcome_when: [changed]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.LoadCurrent(); err == nil {
@@ -77,26 +78,26 @@ func TestLoadCurrentRejectsTamperedSnapshot(t *testing.T) {
 func TestValidateEnforcesReferencesOutcomesAndDAG(t *testing.T) {
 	snapshot := testSnapshot("validate")
 	snapshot.ChallengeMappings[0].Outcomes[0].Title = "stale title"
-	if err := Validate(snapshot); err == nil {
+	if err := domain.Validate(snapshot); err == nil {
 		t.Fatal("stale title accepted")
 	}
 
 	snapshot = testSnapshot("validate")
-	snapshot.ChallengeMappings[0].EntrySkills = []Ref{{ID: "skill-1111111111111111", Title: "Repair logs"}}
-	if err := Validate(snapshot); err == nil {
+	snapshot.ChallengeMappings[0].EntrySkills = []domain.Ref{{ID: "skill-1111111111111111", Title: "Repair logs"}}
+	if err := domain.Validate(snapshot); err == nil {
 		t.Fatal("entry/outcome overlap accepted")
 	}
 
 	snapshot = testSnapshot("validate")
-	snapshot.Skills = append(snapshot.Skills, Skill{
-		Kind: KindSkill, ID: "skill-2222222222222222", Title: "Inspect logs", Definition: "Inspect a log directory.",
-		MappingGuidance: MappingGuidance{EntryWhen: []string{"The task assumes basic log inspection."}}, File: "inspect-logs",
+	snapshot.Skills = append(snapshot.Skills, domain.Skill{
+		Kind: domain.KindSkill, ID: "skill-2222222222222222", Title: "Inspect logs", Definition: "Inspect a log directory.",
+		MappingGuidance: domain.MappingGuidance{EntryWhen: []string{"The task assumes basic log inspection."}}, File: "inspect-logs",
 	})
-	snapshot.SkillMappings = []SkillMapping{
-		{Source: Ref{ID: "skill-1111111111111111", Title: "Repair logs"}, Requires: []Ref{{ID: "skill-2222222222222222", Title: "Inspect logs"}}, File: "repair-logs"},
-		{Source: Ref{ID: "skill-2222222222222222", Title: "Inspect logs"}, Requires: []Ref{{ID: "skill-1111111111111111", Title: "Repair logs"}}, File: "inspect-logs"},
+	snapshot.SkillMappings = []domain.SkillMapping{
+		{Source: domain.Ref{ID: "skill-1111111111111111", Title: "Repair logs"}, Requires: []domain.Ref{{ID: "skill-2222222222222222", Title: "Inspect logs"}}, File: "repair-logs"},
+		{Source: domain.Ref{ID: "skill-2222222222222222", Title: "Inspect logs"}, Requires: []domain.Ref{{ID: "skill-1111111111111111", Title: "Repair logs"}}, File: "inspect-logs"},
 	}
-	if err := Validate(snapshot); err == nil {
+	if err := domain.Validate(snapshot); err == nil {
 		t.Fatal("skill requires cycle accepted")
 	}
 }
@@ -123,7 +124,7 @@ func TestCatalogIndexOnlyExposesExactChallengeRevisionMapping(t *testing.T) {
 
 func TestLoadCurrentMissing(t *testing.T) {
 	_, err := NewStore(t.TempDir()).LoadCurrent()
-	if !errors.Is(err, ErrNoCurrentRevision) {
+	if !errors.Is(err, domain.ErrNoCurrentRevision) {
 		t.Fatalf("LoadCurrent error = %v", err)
 	}
 }
@@ -131,7 +132,7 @@ func TestLoadCurrentMissing(t *testing.T) {
 func TestValidateRejectsSemanticDefinitionID(t *testing.T) {
 	snapshot := testSnapshot("semantic-id")
 	snapshot.Skills[0].ID = "skill-repair-logs"
-	if err := Validate(snapshot); err == nil {
+	if err := domain.Validate(snapshot); err == nil {
 		t.Fatal("semantic skill id accepted")
 	}
 }
@@ -163,21 +164,21 @@ func TestPublishUsesReadableUnicodeSourceFilenames(t *testing.T) {
 	}
 }
 
-func testSnapshot(fileSuffix string) Snapshot {
+func testSnapshot(fileSuffix string) domain.Snapshot {
 	revision := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	return Snapshot{
-		Skills: []Skill{{
-			Kind: KindSkill, ID: "skill-1111111111111111", Title: "Repair logs", Definition: "Diagnose and repair failed log cleanup.", File: "repair-logs",
-			MappingGuidance: MappingGuidance{OutcomeWhen: []string{"The challenge requires correcting log cleanup behavior."}, ExcludeWhen: []string{"Logs are only incidental."}},
+	return domain.Snapshot{
+		Skills: []domain.Skill{{
+			Kind: domain.KindSkill, ID: "skill-1111111111111111", Title: "Repair logs", Definition: "Diagnose and repair failed log cleanup.", File: "repair-logs",
+			MappingGuidance: domain.MappingGuidance{OutcomeWhen: []string{"The challenge requires correcting log cleanup behavior."}, ExcludeWhen: []string{"Logs are only incidental."}},
 		}},
-		Tags: []Tag{{
-			Kind: KindTag, ID: "tag-1111111111111111", Title: "Linux", Definition: "Linux administration and troubleshooting.", File: "linux",
-			MappingGuidance: MappingGuidance{IncludeWhen: []string{"Linux behavior is central to the task."}, ExcludeWhen: []string{"Linux is only the base image."}},
+		Tags: []domain.Tag{{
+			Kind: domain.KindTag, ID: "tag-1111111111111111", Title: "Linux", Definition: "Linux administration and troubleshooting.", File: "linux",
+			MappingGuidance: domain.MappingGuidance{IncludeWhen: []string{"Linux behavior is central to the task."}, ExcludeWhen: []string{"Linux is only the base image."}},
 		}},
-		ChallengeMappings: []ChallengeMapping{{
-			Challenge: ChallengeRef{ID: "challenge-demo", Title: "Demo", Revision: revision}, File: "demo-" + fileSuffix,
-			Tags:     []Ref{{ID: "tag-1111111111111111", Title: "Linux"}},
-			Outcomes: []OutcomeRef{{ID: "skill-1111111111111111", Title: "Repair logs", Primary: true}},
+		ChallengeMappings: []domain.ChallengeMapping{{
+			Challenge: domain.ChallengeRef{ID: "challenge-demo", Title: "Demo", Revision: revision}, File: "demo-" + fileSuffix,
+			Tags:     []domain.Ref{{ID: "tag-1111111111111111", Title: "Linux"}},
+			Outcomes: []domain.OutcomeRef{{ID: "skill-1111111111111111", Title: "Repair logs", Primary: true}},
 		}},
 	}
 }

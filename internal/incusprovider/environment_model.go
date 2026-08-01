@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 )
 
 type NodeEnvironmentResources struct {
@@ -85,7 +85,7 @@ type ExecNodePTYRequest struct {
 	WindowName     string
 	Stdin          io.Reader
 	Stdout         io.Writer
-	Resize         <-chan terminal.Size
+	Resize         <-chan environment.Size
 }
 
 type CloseNodePTYWindowRequest struct {

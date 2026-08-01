@@ -10,7 +10,8 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	domain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -19,14 +20,14 @@ import (
 )
 
 type ExecutionContext struct {
-	Stage   Stage                  `json:"stage"`
-	History []agentruntime.Message `json:"history"`
+	Stage   domain.Stage  `json:"stage"`
+	History []agent.Message `json:"history"`
 }
 
 // StageUpdater is the direct Server boundary used while an interactive
 // authoring call is running. It has no lease because the Server owns the call.
 type StageUpdater interface {
-	UpdateAuthoringStage(context.Context, string, int64, Plan, Change) (*Stage, error)
+	UpdateAuthoringStage(context.Context, string, int64, domain.Plan, domain.Change) (*domain.Stage, error)
 }
 
 // StreamEvent is emitted only while a direct Server-owned authoring turn is
@@ -35,7 +36,7 @@ type StreamEvent struct {
 	Content string `json:"content"`
 }
 
-func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stage Stage, history []agentruntime.Message, updater StageUpdater, emit func(StreamEvent)) (string, error) {
+func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stage domain.Stage, history []agent.Message, updater StageUpdater, emit func(StreamEvent)) (string, error) {
 	if strings.TrimSpace(runID) == "" || updater == nil {
 		return "", errors.New("authoring execution requires run and Server stage updater")
 	}
@@ -123,7 +124,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stag
 	return content, nil
 }
 
-func authoringInputs(conversation *runtimeConversation, history []agentruntime.Message) ([]adk.Message, error) {
+func authoringInputs(conversation *runtimeConversation, history []agent.Message) ([]adk.Message, error) {
 	inputs := make([]adk.Message, 0, len(history))
 	for index, message := range history {
 		switch message.Role {
@@ -157,7 +158,7 @@ func toBaseAuthoringTools(values []tool.InvokableTool) []tool.BaseTool {
 type runtimeConversation struct {
 	runID   string
 	updater StageUpdater
-	stage   Stage
+	stage   domain.Stage
 }
 
 func (c *runtimeConversation) prompt(userMessage string) (string, error) {
@@ -201,7 +202,7 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 	}
 }
 
-func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficultyImpact string, mutate func(*Plan) error) (string, error) {
+func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficultyImpact string, mutate func(*domain.Plan) error) (string, error) {
 	if strings.TrimSpace(summary) == "" || strings.TrimSpace(difficultyImpact) == "" {
 		return "", invalidToolInput(errors.New("修改理由和难度影响不能为空"))
 	}
@@ -209,7 +210,7 @@ func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficul
 	if err := mutate(&plan); err != nil {
 		return "", invalidToolInput(err)
 	}
-	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.StageRevision, plan, Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
+	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.StageRevision, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
 	if err != nil {
 		return "", err
 	}
@@ -229,7 +230,7 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "metadata", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "metadata", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Description) == "" {
 			return errors.New("标题和简介不能为空")
 		}
@@ -239,7 +240,7 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 		if args.Runtime != "node" && args.Runtime != "k8s" {
 			return errors.New("runtime 必须是 node 或 k8s")
 		}
-		plan.Metadata = Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Runtime: args.Runtime}
+		plan.Metadata = domain.Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Runtime: args.Runtime}
 		return nil
 	})
 }
@@ -253,7 +254,7 @@ func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "overview", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "overview", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
 		if strings.TrimSpace(args.Markdown) == "" {
 			return errors.New("概览不能为空")
 		}
@@ -274,21 +275,21 @@ func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Markdown) == "" || args.Position < 1 {
 			return errors.New("检查点标题、说明不能为空，position 必须从 1 开始")
 		}
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
-			id = NewID("checkpoint")
+			id = domain.NewID("checkpoint")
 		}
 		for index := range plan.Checkpoints {
 			if plan.Checkpoints[index].ID == id {
-				plan.Checkpoints[index] = Checkpoint{ID: id, Title: strings.TrimSpace(args.Title), Markdown: strings.TrimSpace(args.Markdown), Position: args.Position}
+				plan.Checkpoints[index] = domain.Checkpoint{ID: id, Title: strings.TrimSpace(args.Title), Markdown: strings.TrimSpace(args.Markdown), Position: args.Position}
 				return nil
 			}
 		}
-		plan.Checkpoints = append(plan.Checkpoints, Checkpoint{ID: id, Title: strings.TrimSpace(args.Title), Markdown: strings.TrimSpace(args.Markdown), Position: args.Position})
+		plan.Checkpoints = append(plan.Checkpoints, domain.Checkpoint{ID: id, Title: strings.TrimSpace(args.Title), Markdown: strings.TrimSpace(args.Markdown), Position: args.Position})
 		return nil
 	})
 }
@@ -302,7 +303,7 @@ func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
 		if strings.TrimSpace(args.ID) == "" {
 			return errors.New("检查点 id 不能为空")
 		}
@@ -325,7 +326,7 @@ func (c *runtimeConversation) reorderCheckpoints(ctx context.Context, raw string
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint-order", args.Reason, args.DifficultyImpact, func(plan *Plan) error {
+	return c.apply(ctx, "checkpoint-order", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
 		if len(args.IDs) != len(plan.Checkpoints) {
 			return errors.New("ids 必须恰好覆盖全部检查点")
 		}

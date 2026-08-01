@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+var (
+	ErrWorkflowNotFound = errors.New("taxonomy workflow not found")
+	ErrLeaseLost        = errors.New("taxonomy workflow lease was lost")
+)
+
 type WorkflowState string
 
 const (

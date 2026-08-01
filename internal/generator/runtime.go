@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/agentserver"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 // RuntimeClient is the narrow Server proxy used by the Generator's sandbox
@@ -115,7 +115,7 @@ func mapClientError(err error) error {
 		return generation.ErrLeaseLost
 	}
 	if agentserver.IsStatus(err, http.StatusNotFound) {
-		return generation.ErrNotFound
+		return generation.ErrWorkflowNotFound
 	}
 	return fmt.Errorf("generator server request: %w", err)
 }

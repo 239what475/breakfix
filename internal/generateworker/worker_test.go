@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/authoring"
+	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 )
 
@@ -31,7 +32,7 @@ func TestWorkerCompletesGenerationWorkflowThroughAuthorReview(t *testing.T) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	wantStates := []generation.State{
+	wantStates := []generation.WorkflowState{
 		generation.StateGenerating,
 		generation.StateJudging,
 		generation.StateBuilding,
@@ -152,13 +153,13 @@ func (e *generationPublisher) DiscardCandidate(context.Context, generation.Execu
 	return nil
 }
 
-func (e *generationPublisher) PublishArtifact(context.Context, generation.Execution, []byte) (candidate.ArtifactReference, error) {
+func (e *generationPublisher) PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error) {
 	e.calls.Add(1)
-	return candidate.ArtifactReference{}, nil
+	return generation.ArtifactReference{}, nil
 }
 
-func (*generationPublisher) PublishChallenge(context.Context, generation.Execution) (candidate.ArtifactReference, error) {
-	return candidate.ArtifactReference{}, nil
+func (*generationPublisher) PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error) {
+	return generation.ArtifactReference{}, nil
 }
 
 func (*generationPublisher) Cleanup(context.Context, generation.Execution) error { return nil }
@@ -168,23 +169,23 @@ type generationVerifier struct {
 	failuresBeforePass atomic.Int32
 }
 
-func (e *generationVerifier) Execute(ctx context.Context, execution generation.Execution, record func(context.Context, candidate.VerificationEnvironment) error) (candidate.VerificationReport, error) {
+func (e *generationVerifier) Execute(ctx context.Context, execution generation.Execution, record func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
 	call := e.calls.Add(1)
-	if err := record(ctx, candidate.VerificationEnvironment{Runtime: "node", Name: "verification", UID: "uid", WorkflowID: execution.Claim.Workflow.ID, Attempt: 1}); err != nil {
-		return candidate.VerificationReport{}, err
+	if err := record(ctx, generation.VerificationEnvironment{Runtime: "node", Name: "verification", UID: "uid", WorkflowID: execution.Claim.Workflow.ID, Attempt: 1}); err != nil {
+		return generation.VerificationReport{}, err
 	}
 	if call <= e.failuresBeforePass.Load() {
-		return candidate.VerificationReport{}, generation.NewArtifactError("CHECKPOINTS_FAILED", "verification checkpoint did not pass")
+		return generation.VerificationReport{}, generation.NewArtifactError("CHECKPOINTS_FAILED", "verification checkpoint did not pass")
 	}
-	return candidate.VerificationReport{}, nil
+	return generation.VerificationReport{}, nil
 }
 
 type generationStore struct {
 	mu            sync.Mutex
 	current       generation.Claim
 	archive       []byte
-	candidate     *candidate.WorkerView
-	phaseStates   []generation.State
+	candidate     *generation.WorkerView
+	phaseStates   []generation.WorkflowState
 	claimReturned bool
 	runNumber     int
 	renewCalls    atomic.Int32
@@ -196,13 +197,13 @@ func newGenerationStore(t *testing.T) *generationStore {
 	archive := candidateArchive(t)
 	store := &generationStore{archive: archive}
 	store.current = generation.Claim{Workflow: generation.Workflow{
-		ID: "generation-workflow-0123456789abcdef", AuthoringSessionID: "authoring-session", AuthoringRevision: 0,
+		ID: "generation-workflow-0123456789abcdef", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"}, AuthoringRevision: 0,
 		State: generation.StateGenerating, StateAttempt: 0, LeaseOwner: "generate-lease",
 		NextRunAt: time.Now().UTC(), DeadlineAt: &deadline,
 	}, LeaseCredential: generation.LeaseCredential{StateAttempt: 0, LeaseOwner: "generate-lease"}}
-	store.candidate = &candidate.WorkerView{ID: "candidate-0123456789abcdef", Snapshot: candidate.ExecutionSnapshot{
-		Runtime: "node", Checkpoints: []candidate.CheckpointSnapshot{{ID: "ready", Node: "host"}},
-		Node: &candidate.NodeRuntimeSnapshot{Nodes: []candidate.NodeSnapshot{{Name: "host", Title: "Host"}}},
+	store.candidate = &generation.WorkerView{ID: "candidate-0123456789abcdef", Snapshot: generation.ExecutionSnapshot{
+		Runtime: "node", Checkpoints: []generation.CheckpointSnapshot{{ID: "ready", Node: "host"}},
+		Node: &generation.NodeRuntimeSnapshot{Nodes: []generation.NodeSnapshot{{Name: "host", Title: "Host"}}},
 	}}
 	return store
 }
@@ -245,16 +246,16 @@ func (s *generationStore) Context(_ context.Context, claim generation.Claim) (*g
 	return result, nil
 }
 
-func (s *generationStore) StartAgentRun(_ context.Context, claim generation.Claim, request generation.StartAgentRunRequest) (*generation.StartAgentRunResponse, error) {
+func (s *generationStore) StartAgentRun(_ context.Context, claim generation.Claim, request app.StartAgentRunRequest) (*app.StartAgentRunResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runNumber++
-	run := agentruntime.Run{ID: "generation-agent-run-" + string(rune('a'+s.runNumber-1)), Status: agentruntime.RunRunning, Purpose: request.Purpose, OwnerKind: "generation-workflow", OwnerRef: claim.Workflow.ID, SessionID: "generator-session"}
+	run := agent.Run{ID: "generation-agent-run-" + string(rune('a'+s.runNumber-1)), Status: agent.RunRunning, Purpose: request.Purpose, OwnerKind: "generation-workflow", OwnerRef: claim.Workflow.ID, SessionID: "generator-session"}
 	s.current.Workflow.ActiveAgentRunID = run.ID
-	return &generation.StartAgentRunResponse{Run: run}, nil
+	return &app.StartAgentRunResponse{Run: run}, nil
 }
 
-func (s *generationStore) Phase(_ context.Context, claim generation.Claim, request generation.PhaseRequest) (*generation.Claim, error) {
+func (s *generationStore) Phase(_ context.Context, claim generation.Claim, request app.PhaseRequest) (*generation.Claim, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.phaseStates = append(s.phaseStates, claim.Workflow.State)
@@ -280,7 +281,7 @@ func (s *generationStore) Phase(_ context.Context, claim generation.Claim, reque
 		s.current.LeaseOwner = ""
 		return nil, nil
 	case request.ArtifactFailure != nil:
-		failure := candidate.Failure{Class: candidate.FailureArtifact, Code: request.ArtifactFailure.Failure.Code, Summary: request.ArtifactFailure.Failure.Summary}
+		failure := generation.Failure{Class: generation.FailureArtifact, Code: request.ArtifactFailure.Failure.Code, Summary: request.ArtifactFailure.Failure.Summary}
 		s.candidate.Failure = &failure
 		s.current.Workflow.State = generation.StateGenerating
 	}
@@ -345,7 +346,7 @@ func candidateArchive(t *testing.T) []byte {
 	return buffer.Bytes()
 }
 
-func slicesEqual(left, right []generation.State) bool {
+func slicesEqual(left, right []generation.WorkflowState) bool {
 	if len(left) != len(right) {
 		return false
 	}

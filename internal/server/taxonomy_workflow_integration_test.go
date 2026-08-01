@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
+	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 )
 
@@ -24,7 +26,7 @@ func TestTaxonomyWorkflowCancelsWhenPublishedArtifactIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create taxonomy workflow: %v", err)
 	}
-	handler := &Handler{db: database, challengesDir: t.TempDir(), taxonomy: taxonomy.NewStore(t.TempDir())}
+	handler := &Handler{db: database, challengesDir: t.TempDir(), taxonomy: taxonomystore.NewStore(t.TempDir())}
 	if _, err := handler.taxonomyChallenge(ctx, *workflow); !errors.Is(err, taxonomy.ErrLeaseLost) {
 		t.Fatalf("read stale taxonomy challenge error = %v, want lease loss", err)
 	}
@@ -51,7 +53,7 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	if err != nil || claim == nil {
 		t.Fatalf("claim taxonomy workflow = %#v, %v", claim, err)
 	}
-	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleMapper, "test-model", now)
+	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
 	if err != nil {
 		t.Fatalf("start mapper: %v", err)
 	}
@@ -66,11 +68,11 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	if err != nil {
 		t.Fatalf("refresh reviewer claim: %v", err)
 	}
-	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleCurriculumReviewer, "test-model", now)
+	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start curriculum review: %v", err)
 	}
-	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleSREReviewer, "test-model", now)
+	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start SRE review: %v", err)
 	}
@@ -83,7 +85,7 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 		t.Fatalf("refresh publishing claim: %v", err)
 	}
 
-	store := taxonomy.NewStore(t.TempDir())
+	store := taxonomystore.NewStore(t.TempDir())
 	expected, err := store.PreviewRevision(taxonomy.Snapshot{})
 	if err != nil {
 		t.Fatalf("preview taxonomy snapshot: %v", err)
@@ -121,7 +123,7 @@ func TestTaxonomyPublicationSerializesConcurrentMappings(t *testing.T) {
 
 	first := writeTaxonomyWorkflowChallenge(t, challengesDir, "taxonomy-concurrent-one", "Concurrent one")
 	second := writeTaxonomyWorkflowChallenge(t, challengesDir, "taxonomy-concurrent-two", "Concurrent two")
-	store := taxonomy.NewStore(root)
+	store := taxonomystore.NewStore(root)
 	base, err := store.Publish(taxonomy.Snapshot{
 		Skills: []taxonomy.Skill{{
 			Kind:       taxonomy.KindSkill,
@@ -216,7 +218,7 @@ func prepareTaxonomyPublication(t *testing.T, database *db.DB, entry *challenge.
 			Outcomes:  []taxonomy.OutcomeRef{{ID: "skill-1111111111111111", Title: "Inspect a service", Primary: true}},
 		},
 	}}}
-	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleMapper, "test-model", now)
+	mapper, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleMapper, "test-model", now)
 	if err != nil {
 		t.Fatalf("start mapper for %s: %v", entry.ID, err)
 	}
@@ -227,11 +229,11 @@ func prepareTaxonomyPublication(t *testing.T, database *db.DB, entry *challenge.
 	if err != nil {
 		t.Fatalf("refresh reviewer claim for %s: %v", entry.ID, err)
 	}
-	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleCurriculumReviewer, "test-model", now)
+	curriculum, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleCurriculumReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start curriculum reviewer for %s: %v", entry.ID, err)
 	}
-	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomy.AgentRoleSREReviewer, "test-model", now)
+	sre, err := database.StartTaxonomyAgentRun(ctx, *claim, taxonomyapp.AgentRoleSREReviewer, "test-model", now)
 	if err != nil {
 		t.Fatalf("start SRE reviewer for %s: %v", entry.ID, err)
 	}

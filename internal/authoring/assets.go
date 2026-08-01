@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/challenge"
+	domain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/pmezard/go-difflib/difflib"
 )
 
@@ -77,20 +78,20 @@ func ReadAssets(archive []byte) ([]Asset, error) {
 	return assets, nil
 }
 
-func ReadVerifiedChallenge(archive []byte) (*VerifiedChallenge, error) {
+func ReadVerifiedChallenge(archive []byte) (*domain.VerifiedChallenge, error) {
 	if len(archive) == 0 {
 		return nil, nil
 	}
-	var result *VerifiedChallenge
+	var result *domain.VerifiedChallenge
 	err := withCandidateArchive(archive, func(_ string, entry *challenge.Entry) error {
-		result = &VerifiedChallenge{
-			Metadata: Metadata{
+		result = &domain.VerifiedChallenge{
+			Metadata: domain.Metadata{
 				Title: entry.Title, Difficulty: entry.Difficulty, Description: entry.Description, Runtime: entry.Runtime,
 			},
-			Checkpoints: make([]VerifiedCheckpoint, 0, len(entry.Checkpoints)),
+			Checkpoints: make([]domain.VerifiedCheckpoint, 0, len(entry.Checkpoints)),
 		}
 		for _, checkpoint := range entry.Checkpoints {
-			result.Checkpoints = append(result.Checkpoints, VerifiedCheckpoint{
+			result.Checkpoints = append(result.Checkpoints, domain.VerifiedCheckpoint{
 				ID: checkpoint.ID, Title: checkpoint.Title, Description: checkpoint.Description,
 				Hint: checkpoint.Hint, Node: checkpoint.Node,
 			})

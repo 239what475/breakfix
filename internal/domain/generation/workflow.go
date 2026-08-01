@@ -15,28 +15,28 @@ import (
 const ExecutionDeadline = time.Hour
 
 var (
-	ErrNotFound  = errors.New("generation workflow not found")
-	ErrLeaseLost = errors.New("generation workflow lease was lost")
+	ErrWorkflowNotFound = errors.New("generation workflow not found")
+	ErrLeaseLost        = errors.New("generation workflow lease was lost")
 )
 
-type State string
+type WorkflowState string
 
 const (
-	StateQueued              State = "Queued"
-	StateGenerating          State = "Generating"
-	StateJudging             State = "Judging"
-	StateBuilding            State = "Building"
-	StateArtifactPublishing  State = "ArtifactPublishing"
-	StateVerifying           State = "Verifying"
-	StateNeedsAuthorReview   State = "NeedsAuthorReview"
-	StateChallengePublishing State = "ChallengePublishing"
-	StateCleaningUp          State = "CleaningUp"
-	StateCompleted           State = "Completed"
-	StateFailed              State = "Failed"
-	StateCancelled           State = "Cancelled"
+	StateQueued              WorkflowState = "Queued"
+	StateGenerating          WorkflowState = "Generating"
+	StateJudging             WorkflowState = "Judging"
+	StateBuilding            WorkflowState = "Building"
+	StateArtifactPublishing  WorkflowState = "ArtifactPublishing"
+	StateVerifying           WorkflowState = "Verifying"
+	StateNeedsAuthorReview   WorkflowState = "NeedsAuthorReview"
+	StateChallengePublishing WorkflowState = "ChallengePublishing"
+	StateCleaningUp          WorkflowState = "CleaningUp"
+	StateCompleted           WorkflowState = "Completed"
+	StateFailed              WorkflowState = "Failed"
+	StateCancelled           WorkflowState = "Cancelled"
 )
 
-func (s State) Valid() bool {
+func (s WorkflowState) Valid() bool {
 	switch s {
 	case StateQueued, StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
 		StateVerifying, StateNeedsAuthorReview, StateChallengePublishing, StateCleaningUp,
@@ -47,15 +47,15 @@ func (s State) Valid() bool {
 	}
 }
 
-func (s State) Terminal() bool {
+func (s WorkflowState) Terminal() bool {
 	return s == StateCompleted || s == StateFailed || s == StateCancelled
 }
 
-func (s State) Leaseable() bool {
+func (s WorkflowState) Leaseable() bool {
 	return !s.Terminal() && s != StateNeedsAuthorReview
 }
 
-func (s State) DeadlineActive() bool {
+func (s WorkflowState) DeadlineActive() bool {
 	return s.Leaseable() && s != StateCleaningUp
 }
 
@@ -76,6 +76,7 @@ type FailureClass string
 const (
 	FailureArtifact       FailureClass = "artifact"
 	FailureInfrastructure FailureClass = "infrastructure"
+	FailureCancelled      FailureClass = "cancelled"
 )
 
 type Failure struct {
@@ -85,7 +86,7 @@ type Failure struct {
 }
 
 func (f Failure) Validate() error {
-	if (f.Class != FailureArtifact && f.Class != FailureInfrastructure) || strings.TrimSpace(f.Code) == "" || strings.TrimSpace(f.Summary) == "" {
+	if (f.Class != FailureArtifact && f.Class != FailureInfrastructure && f.Class != FailureCancelled) || strings.TrimSpace(f.Code) == "" || strings.TrimSpace(f.Summary) == "" {
 		return errors.New("workflow failure requires class, code, and summary")
 	}
 	return nil
@@ -96,9 +97,9 @@ func (f Failure) Validate() error {
 // LeaseOwner is randomized for every claim and fences late worker reports.
 type Workflow struct {
 	ID                  string        `json:"id"`
-	AuthoringSessionID  string        `json:"authoring_session_id"`
-	AuthoringRevision   int64         `json:"authoring_revision"`
-	State               State         `json:"state"`
+	Source              Source        `json:"source"`
+	AuthoringRevision   int64         `json:"authoring_revision,omitempty"`
+	State               WorkflowState `json:"state"`
 	CleanupIntent       CleanupIntent `json:"cleanup_intent,omitempty"`
 	CandidateRevisionID string        `json:"candidate_revision_id,omitempty"`
 	ActiveAgentRunID    string        `json:"active_agent_run_id,omitempty"`
@@ -114,7 +115,13 @@ type Workflow struct {
 }
 
 func (w Workflow) Valid() bool {
-	return strings.TrimSpace(w.ID) != "" && strings.TrimSpace(w.AuthoringSessionID) != "" && w.AuthoringRevision >= 0 && w.State.Valid() && w.StateAttempt >= 0
+	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || !w.State.Valid() || w.StateAttempt < 0 {
+		return false
+	}
+	if w.Source.Kind == SourceAuthoring {
+		return w.AuthoringRevision >= 0
+	}
+	return w.AuthoringRevision == 0
 }
 
 type LeaseCredential struct {

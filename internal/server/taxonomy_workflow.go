@@ -9,11 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
+	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -82,11 +84,11 @@ func (h *Handler) InternalTaxonomyWorkflowContext(c *gin.Context) {
 	}
 	claim, err := h.taxonomyWorkflowClaim(c, credential)
 	if err == nil {
-		var snapshot taxonomy.Context
+		var snapshot taxonomyapp.Context
 		snapshot, err = h.taxonomyContext(c.Request.Context(), *claim)
 		if err == nil {
 			c.JSON(http.StatusOK, struct {
-				Context taxonomy.Context `json:"context"`
+				Context taxonomyapp.Context `json:"context"`
 			}{Context: snapshot})
 			return
 		}
@@ -95,7 +97,7 @@ func (h *Handler) InternalTaxonomyWorkflowContext(c *gin.Context) {
 }
 
 func (h *Handler) InternalStartTaxonomyAgentRun(c *gin.Context) {
-	var request taxonomy.StartAgentRunRequest
+	var request taxonomyapp.StartAgentRunRequest
 	if !h.decodeInternalWorkerRequest(c, internalTaxonomyRole, &request) {
 		return
 	}
@@ -118,11 +120,11 @@ func (h *Handler) InternalStartTaxonomyAgentRun(c *gin.Context) {
 		h.writeInternalTaxonomyWorkflowError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, taxonomy.StartAgentRunResponse{Run: *run})
+	c.JSON(http.StatusOK, taxonomyapp.StartAgentRunResponse{Run: *run})
 }
 
 func (h *Handler) InternalTaxonomyWorkflowPhase(c *gin.Context) {
-	var request taxonomy.PhaseRequest
+	var request taxonomyapp.PhaseRequest
 	if !h.decodeInternalWorkerRequest(c, internalTaxonomyRole, &request) {
 		return
 	}
@@ -182,47 +184,47 @@ func (h *Handler) refreshTaxonomyWorkflowClaim(ctx context.Context, prior taxono
 	return h.db.RefreshTaxonomyClaim(ctx, workflow.ID, prior.LeaseOwner, time.Now().UTC())
 }
 
-func (h *Handler) taxonomyContext(ctx context.Context, claim taxonomy.Claim) (taxonomy.Context, error) {
+func (h *Handler) taxonomyContext(ctx context.Context, claim taxonomy.Claim) (taxonomyapp.Context, error) {
 	entry, err := h.taxonomyChallenge(ctx, claim.Workflow)
 	if err != nil {
-		return taxonomy.Context{}, err
+		return taxonomyapp.Context{}, err
 	}
 	base, err := h.taxonomySnapshotForRevision(claim.Workflow.BaseTaxonomyRevision)
 	if err != nil {
-		return taxonomy.Context{}, err
+		return taxonomyapp.Context{}, err
 	}
-	artifact, err := taxonomy.ReadChallengeArtifact(entry.Dir)
+	artifact, err := taxonomystore.ReadChallengeArtifact(entry.Dir)
 	if err != nil {
-		return taxonomy.Context{}, fmt.Errorf("read taxonomy challenge artifact: %w", err)
+		return taxonomyapp.Context{}, fmt.Errorf("read taxonomy challenge artifact: %w", err)
 	}
-	result := taxonomy.Context{Workflow: claim.Workflow}
+	result := taxonomyapp.Context{Workflow: claim.Workflow}
 	switch claim.Workflow.State {
 	case taxonomy.WorkflowMapping:
-		result.MapperValidation = &taxonomy.MapperValidation{
+		result.MapperValidation = &taxonomyapp.MapperValidation{
 			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision},
 			Base:      base,
 		}
-		result.Mapper, err = taxonomy.MapperModelInput(claim.Workflow, entry.ID, entry.Title, entry.Revision, base, artifact)
+		result.Mapper, err = taxonomyapp.MapperModelInput(claim.Workflow, entry.ID, entry.Title, entry.Revision, base, artifact)
 	case taxonomy.WorkflowReviewing:
 		if claim.Workflow.CandidateChangeSet == nil {
-			return taxonomy.Context{}, errors.New("taxonomy review has no mapper candidate")
+			return taxonomyapp.Context{}, errors.New("taxonomy review has no mapper candidate")
 		}
-		result.CurriculumReview, err = taxonomy.CurriculumReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
+		result.CurriculumReview, err = taxonomyapp.CurriculumReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
 		if err == nil {
-			result.SREReview, err = taxonomy.SREReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
+			result.SREReview, err = taxonomyapp.SREReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
 		}
 	case taxonomy.WorkflowPublishing:
 		return result, nil
 	default:
-		return taxonomy.Context{}, fmt.Errorf("taxonomy workflow state %s has no worker context", claim.Workflow.State)
+		return taxonomyapp.Context{}, fmt.Errorf("taxonomy workflow state %s has no worker context", claim.Workflow.State)
 	}
 	if err != nil {
-		return taxonomy.Context{}, err
+		return taxonomyapp.Context{}, err
 	}
 	return result, nil
 }
 
-func (h *Handler) completeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, result taxonomy.MapperResult, now time.Time) error {
+func (h *Handler) completeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, result taxonomyapp.MapperResult, now time.Time) error {
 	entry, err := h.taxonomyChallenge(ctx, claim.Workflow)
 	if err != nil {
 		return err
@@ -237,7 +239,7 @@ func (h *Handler) completeTaxonomyMapper(ctx context.Context, claim taxonomy.Cla
 	return h.db.FinalizeTaxonomyMapper(ctx, claim, result.RunID, result.ChangeSet, now)
 }
 
-func (h *Handler) completeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Claim, result taxonomy.ReviewPairResult, now time.Time) error {
+func (h *Handler) completeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Claim, result taxonomyapp.ReviewPairResult, now time.Time) error {
 	if err := taxonomy.ValidateReview(result.Curriculum); err != nil {
 		return err
 	}
@@ -385,7 +387,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	index, err := taxonomy.NewCatalogIndex(current, entries)
+	index, err := taxonomystore.NewCatalogIndex(current, entries)
 	if err != nil && current.Revision != "" {
 		return fmt.Errorf("index current taxonomy: %w", err)
 	}
@@ -428,7 +430,7 @@ func (h *Handler) RecoverTaxonomyPublications(ctx context.Context) error {
 func (h *Handler) writeInternalTaxonomyWorkflowError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, db.ErrTaxonomyWorkflowNotFound), errors.Is(err, taxonomy.ErrNotFound), errors.Is(err, agentruntime.ErrNotFound):
+	case errors.Is(err, db.ErrTaxonomyWorkflowNotFound), errors.Is(err, agent.ErrNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, taxonomy.ErrLeaseLost):
 		status = http.StatusConflict

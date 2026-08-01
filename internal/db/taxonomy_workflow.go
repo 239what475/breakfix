@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 var ErrTaxonomyWorkflowNotFound = errors.New("taxonomy workflow not found")
@@ -124,8 +125,8 @@ func (d *DB) ClaimTaxonomyWorkflow(ctx context.Context, workerID string, leaseTT
 	// cannot be resumed under a new lease, so preserve their history as failed
 	// before another worker starts the same workflow state.
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-		WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agentruntime.RunFailed,
-		"taxonomy worker lease replaced before agent call completed", now, now, "taxonomy-workflow", workflow.ID, agentruntime.RunRunning); err != nil {
+		WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agent.RunFailed,
+		"taxonomy worker lease replaced before agent call completed", now, now, "taxonomy-workflow", workflow.ID, agent.RunRunning); err != nil {
 		return nil, fmt.Errorf("abandon prior taxonomy agent runs: %w", err)
 	}
 	state := workflow.State
@@ -204,7 +205,7 @@ func (d *DB) RenewTaxonomyLease(ctx context.Context, claim taxonomy.Claim, lease
 	return nil
 }
 
-func (d *DB) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, role taxonomy.AgentRole, model string, now time.Time) (*agentruntime.Run, error) {
+func (d *DB) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, role taxonomyapp.AgentRole, model string, now time.Time) (*agent.Run, error) {
 	if !claim.Valid() || !role.Valid() || strings.TrimSpace(model) == "" || now.IsZero() {
 		return nil, errors.New("taxonomy agent run is invalid")
 	}
@@ -218,15 +219,15 @@ func (d *DB) StartTaxonomyAgentRun(ctx context.Context, claim taxonomy.Claim, ro
 		return nil, err
 	}
 	input, err := marshalJSON(struct {
-		Role         taxonomy.AgentRole `json:"role"`
-		Round        int                `json:"round"`
-		StateAttempt int                `json:"state_attempt"`
+		Role         taxonomyapp.AgentRole `json:"role"`
+		Round        int                   `json:"round"`
+		StateAttempt int                   `json:"state_attempt"`
 	}{Role: role, Round: workflow.Round, StateAttempt: workflow.StateAttempt})
 	if err != nil {
 		return nil, err
 	}
-	created, err := createRunTx(ctx, tx, agentruntime.CreateRun{
-		ID:            agentruntime.NewID("taxonomy-agent-run"),
+	created, err := createRunTx(ctx, tx, agent.CreateRun{
+		ID:            agent.NewID("taxonomy-agent-run"),
 		Purpose:       role.Purpose(),
 		OwnerKind:     "taxonomy-workflow",
 		OwnerRef:      workflow.ID,
@@ -261,7 +262,7 @@ func (d *DB) FinalizeTaxonomyMapper(ctx context.Context, claim taxonomy.Claim, r
 	if err != nil {
 		return err
 	}
-	if err := completeTaxonomyRunTx(ctx, tx, runID, workflow.ID, taxonomy.AgentRoleMapper, now.UTC()); err != nil {
+	if err := completeTaxonomyRunTx(ctx, tx, runID, workflow.ID, taxonomyapp.AgentRoleMapper, now.UTC()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE taxonomy_workflows SET state = ?, candidate_changeset = ?::jsonb,
@@ -296,10 +297,10 @@ func (d *DB) FinalizeTaxonomyReviewPair(ctx context.Context, claim taxonomy.Clai
 	if workflow.CandidateChangeSet == nil {
 		return errors.New("taxonomy review has no mapper changeset")
 	}
-	if err := completeTaxonomyRunTx(ctx, tx, curriculumRunID, workflow.ID, taxonomy.AgentRoleCurriculumReviewer, now.UTC()); err != nil {
+	if err := completeTaxonomyRunTx(ctx, tx, curriculumRunID, workflow.ID, taxonomyapp.AgentRoleCurriculumReviewer, now.UTC()); err != nil {
 		return err
 	}
-	if err := completeTaxonomyRunTx(ctx, tx, sreRunID, workflow.ID, taxonomy.AgentRoleSREReviewer, now.UTC()); err != nil {
+	if err := completeTaxonomyRunTx(ctx, tx, sreRunID, workflow.ID, taxonomyapp.AgentRoleSREReviewer, now.UTC()); err != nil {
 		return err
 	}
 	state := taxonomy.WorkflowPublishing
@@ -428,17 +429,17 @@ func (d *DB) ReportTaxonomyTechnicalFailure(ctx context.Context, claim taxonomy.
 	return updated, release, nil
 }
 
-func completeTaxonomyRunTx(ctx context.Context, tx *Tx, runID, workflowID string, role taxonomy.AgentRole, now time.Time) error {
+func completeTaxonomyRunTx(ctx context.Context, tx *Tx, runID, workflowID string, role taxonomyapp.AgentRole, now time.Time) error {
 	var purpose, ownerKind, ownerRef string
-	var status agentruntime.RunStatus
+	var status agent.RunStatus
 	err := tx.QueryRowContext(ctx, `SELECT purpose, owner_kind, owner_ref, status FROM agent_runs WHERE id = ? FOR UPDATE`, runID).Scan(&purpose, &ownerKind, &ownerRef, &status)
 	if errors.Is(err, sql.ErrNoRows) {
-		return agentruntime.ErrNotFound
+		return agent.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("load taxonomy agent run: %w", err)
 	}
-	if purpose != role.Purpose() || ownerKind != "taxonomy-workflow" || ownerRef != workflowID || status != agentruntime.RunRunning {
+	if purpose != role.Purpose() || ownerKind != "taxonomy-workflow" || ownerRef != workflowID || status != agent.RunRunning {
 		return taxonomyLeaseLost()
 	}
 	return completeRunTx(ctx, tx, runID, now)
@@ -446,19 +447,19 @@ func completeTaxonomyRunTx(ctx context.Context, tx *Tx, runID, workflowID string
 
 func failTaxonomyRunTx(ctx context.Context, tx *Tx, runID, workflowID, message string, now time.Time) error {
 	var ownerKind, ownerRef string
-	var status agentruntime.RunStatus
+	var status agent.RunStatus
 	err := tx.QueryRowContext(ctx, `SELECT owner_kind, owner_ref, status FROM agent_runs WHERE id = ? FOR UPDATE`, runID).Scan(&ownerKind, &ownerRef, &status)
 	if errors.Is(err, sql.ErrNoRows) {
-		return agentruntime.ErrNotFound
+		return agent.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("load taxonomy agent run: %w", err)
 	}
-	if ownerKind != "taxonomy-workflow" || ownerRef != workflowID || status != agentruntime.RunRunning {
+	if ownerKind != "taxonomy-workflow" || ownerRef != workflowID || status != agent.RunRunning {
 		return taxonomyLeaseLost()
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = ?`,
-		agentruntime.RunFailed, message, now, now, runID, agentruntime.RunRunning)
+		agent.RunFailed, message, now, now, runID, agent.RunRunning)
 	if err != nil {
 		return fmt.Errorf("fail taxonomy agent run: %w", err)
 	}
@@ -487,8 +488,8 @@ func (d *DB) CancelTaxonomyWorkflow(ctx context.Context, id, reason string, now 
 		return ErrTaxonomyWorkflowNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-		WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agentruntime.RunCancelled, reason, now.UTC(), now.UTC(),
-		"taxonomy-workflow", id, agentruntime.RunRunning); err != nil {
+		WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agent.RunCancelled, reason, now.UTC(), now.UTC(),
+		"taxonomy-workflow", id, agent.RunRunning); err != nil {
 		return fmt.Errorf("cancel taxonomy agent runs: %w", err)
 	}
 	return tx.Commit()

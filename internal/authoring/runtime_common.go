@@ -9,32 +9,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func stateAllowsAuthorMessage(state SessionState) bool {
-	switch state {
-	case StateDraftConversation, StateIntentReview:
-		return true
-	default:
-		return false
-	}
-}
-
-func stateAllowsAgentPlanRevision(state SessionState) bool {
-	return stateAllowsAuthorMessage(state)
-}
-
-// AllowsAgentPlanStage reports whether an Agent Run may mutate its private
-// staged Plan. Public revisions are created only by finalization.
-func AllowsAgentPlanStage(state SessionState) bool {
-	return stateAllowsAgentPlanRevision(state)
-}
-
-// NextPlanRevisionState deliberately does not mirror GenerationWorkflow.
-// Workflow state is the only execution lifecycle authority.
-func NextPlanRevisionState(state SessionState) SessionState {
-	_ = state
-	return StateIntentReview
-}
-
 type authoringTool struct {
 	name   string
 	desc   string

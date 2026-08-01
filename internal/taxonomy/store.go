@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode"
 
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,7 +38,7 @@ func (s *Store) CurrentPath() string { return filepath.Join(s.root, currentPoint
 
 func (s *Store) RevisionsPath() string { return filepath.Join(s.root, revisionsDirectory) }
 
-func (s *Store) LoadCurrent() (*Snapshot, error) {
+func (s *Store) LoadCurrent() (*domain.Snapshot, error) {
 	target, err := s.currentTarget()
 	if err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func (s *Store) LoadCurrent() (*Snapshot, error) {
 		return nil, fmt.Errorf("taxonomy current pointer has invalid target %q", target)
 	}
 	revision := filepath.Base(target)
-	if !validRevision(revision) {
+	if !domain.ValidRevision(revision) {
 		return nil, fmt.Errorf("taxonomy current pointer has invalid revision %q", revision)
 	}
 	return s.LoadRevision(revision)
@@ -60,7 +61,7 @@ func (s *Store) currentTarget() (string, error) {
 	info, err := os.Lstat(s.CurrentPath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", ErrNoCurrentRevision
+			return "", domain.ErrNoCurrentRevision
 		}
 		return "", fmt.Errorf("stat taxonomy current pointer: %w", err)
 	}
@@ -81,8 +82,8 @@ func (s *Store) currentTarget() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func (s *Store) LoadRevision(revision string) (*Snapshot, error) {
-	if !validRevision(revision) {
+func (s *Store) LoadRevision(revision string) (*domain.Snapshot, error) {
+	if !domain.ValidRevision(revision) {
 		return nil, fmt.Errorf("invalid taxonomy revision %q", revision)
 	}
 	dir := filepath.Join(s.RevisionsPath(), revision)
@@ -98,7 +99,7 @@ func (s *Store) LoadRevision(revision string) (*Snapshot, error) {
 		return nil, fmt.Errorf("taxonomy revision directory %q hashes to %q", revision, hash)
 	}
 	loaded.Revision = revision
-	if err := Validate(*loaded); err != nil {
+	if err := domain.Validate(*loaded); err != nil {
 		return nil, fmt.Errorf("validate taxonomy revision %q: %w", revision, err)
 	}
 	return loaded, nil
@@ -107,8 +108,8 @@ func (s *Store) LoadRevision(revision string) (*Snapshot, error) {
 // Publish validates and writes a complete snapshot, then atomically makes it
 // current. The returned revision is the content hash of the complete tree.
 // A snapshot that already exists is reused rather than rewritten.
-func (s *Store) Publish(snapshot Snapshot) (*Snapshot, error) {
-	if err := Validate(snapshot); err != nil {
+func (s *Store) Publish(snapshot domain.Snapshot) (*domain.Snapshot, error) {
+	if err := domain.Validate(snapshot); err != nil {
 		return nil, fmt.Errorf("validate taxonomy snapshot: %w", err)
 	}
 	if err := os.MkdirAll(s.RevisionsPath(), 0755); err != nil {
@@ -150,8 +151,8 @@ func (s *Store) Publish(snapshot Snapshot) (*Snapshot, error) {
 // PreviewRevision computes the immutable revision that Publish would create
 // without changing current. Server records this value before publication so a
 // restart can determine whether the filesystem side effect already happened.
-func (s *Store) PreviewRevision(snapshot Snapshot) (string, error) {
-	if err := Validate(snapshot); err != nil {
+func (s *Store) PreviewRevision(snapshot domain.Snapshot) (string, error) {
+	if err := domain.Validate(snapshot); err != nil {
 		return "", fmt.Errorf("validate taxonomy snapshot: %w", err)
 	}
 	if err := os.MkdirAll(s.RevisionsPath(), 0755); err != nil {
@@ -184,7 +185,7 @@ func (s *Store) replaceCurrent(revision string) error {
 	return nil
 }
 
-func loadSnapshot(root string) (*Snapshot, error) {
+func loadSnapshot(root string) (*domain.Snapshot, error) {
 	requiredDirs := []string{
 		filepath.Join(root, "skills"),
 		filepath.Join(root, "tags"),
@@ -203,18 +204,18 @@ func loadSnapshot(root string) (*Snapshot, error) {
 		return nil, err
 	}
 
-	snapshot := &Snapshot{}
+	snapshot := &domain.Snapshot{}
 	var err error
-	if snapshot.Skills, err = readDefinitions[Skill](filepath.Join(root, "skills"), func(value *Skill, file string) { value.File = file }); err != nil {
+	if snapshot.Skills, err = readDefinitions[domain.Skill](filepath.Join(root, "skills"), func(value *domain.Skill, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
-	if snapshot.Tags, err = readDefinitions[Tag](filepath.Join(root, "tags"), func(value *Tag, file string) { value.File = file }); err != nil {
+	if snapshot.Tags, err = readDefinitions[domain.Tag](filepath.Join(root, "tags"), func(value *domain.Tag, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
-	if snapshot.ChallengeMappings, err = readDefinitions[ChallengeMapping](filepath.Join(root, "mappings", "challenges"), func(value *ChallengeMapping, file string) { value.File = file }); err != nil {
+	if snapshot.ChallengeMappings, err = readDefinitions[domain.ChallengeMapping](filepath.Join(root, "mappings", "challenges"), func(value *domain.ChallengeMapping, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
-	if snapshot.SkillMappings, err = readOptionalDefinitions[SkillMapping](filepath.Join(root, "mappings", "skills"), func(value *SkillMapping, file string) { value.File = file }); err != nil {
+	if snapshot.SkillMappings, err = readOptionalDefinitions[domain.SkillMapping](filepath.Join(root, "mappings", "skills"), func(value *domain.SkillMapping, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
 	return snapshot, nil
@@ -303,29 +304,29 @@ func readOptionalDefinitions[T any](dir string, setFile func(*T, string)) ([]T, 
 	return readDefinitions(dir, setFile)
 }
 
-func writeSnapshot(root string, snapshot Snapshot) error {
+func writeSnapshot(root string, snapshot domain.Snapshot) error {
 	for _, dir := range []string{"skills", "tags", filepath.Join("mappings", "challenges"), filepath.Join("mappings", "skills")} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
 			return fmt.Errorf("create taxonomy snapshot directory: %w", err)
 		}
 	}
 	snapshot = snapshot.Sorted()
-	if err := writeDefinitions(filepath.Join(root, "skills"), snapshot.Skills, func(value Skill) (string, string, string) {
+	if err := writeDefinitions(filepath.Join(root, "skills"), snapshot.Skills, func(value domain.Skill) (string, string, string) {
 		return value.File, value.Title, value.ID
 	}); err != nil {
 		return err
 	}
-	if err := writeDefinitions(filepath.Join(root, "tags"), snapshot.Tags, func(value Tag) (string, string, string) {
+	if err := writeDefinitions(filepath.Join(root, "tags"), snapshot.Tags, func(value domain.Tag) (string, string, string) {
 		return value.File, value.Title, value.ID
 	}); err != nil {
 		return err
 	}
-	if err := writeDefinitions(filepath.Join(root, "mappings", "challenges"), snapshot.ChallengeMappings, func(value ChallengeMapping) (string, string, string) {
+	if err := writeDefinitions(filepath.Join(root, "mappings", "challenges"), snapshot.ChallengeMappings, func(value domain.ChallengeMapping) (string, string, string) {
 		return value.File, value.Challenge.Title, value.Challenge.ID
 	}); err != nil {
 		return err
 	}
-	return writeDefinitions(filepath.Join(root, "mappings", "skills"), snapshot.SkillMappings, func(value SkillMapping) (string, string, string) {
+	return writeDefinitions(filepath.Join(root, "mappings", "skills"), snapshot.SkillMappings, func(value domain.SkillMapping) (string, string, string) {
 		return value.File, value.Source.Title, value.Source.ID
 	})
 }

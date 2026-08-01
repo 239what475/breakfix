@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 var ErrArchiveConflict = errors.New("candidate archive conflicts with the immutable stored archive")
@@ -77,7 +78,7 @@ func SaveArchiveAtomic(root, id string, data []byte) (string, string, error) {
 }
 
 func ReadArchive(path, expectedDigest string) ([]byte, error) {
-	if strings.TrimSpace(path) == "" || !validSHA256(expectedDigest) {
+	if strings.TrimSpace(path) == "" || !generation.ValidSHA256(expectedDigest) {
 		return nil, errors.New("candidate archive path and digest are required")
 	}
 	data, err := os.ReadFile(path)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
 // AuthoringSpaceSession is the database-owned portion of an author's card.

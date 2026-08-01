@@ -10,9 +10,10 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
+	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -356,7 +357,7 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.Entry) (api.MySpacePublishedChallengeTaxonomyStatus, error) {
 	if h.taxonomy != nil {
 		snapshot, err := h.taxonomy.LoadCurrent()
-		if err != nil && !errors.Is(err, taxonomy.ErrNoCurrentRevision) {
+		if err != nil && !errors.Is(err, taxonomydomain.ErrNoCurrentRevision) {
 			return "", fmt.Errorf("load current taxonomy for authoring status: %w", err)
 		}
 		if snapshot != nil {
@@ -378,9 +379,9 @@ func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.E
 		return "", fmt.Errorf("read taxonomy workflow for authoring status: %w", err)
 	}
 	switch workflow.State {
-	case taxonomy.WorkflowFailed, taxonomy.WorkflowCancelled:
+	case taxonomydomain.WorkflowFailed, taxonomydomain.WorkflowCancelled:
 		return api.MySpacePublishedChallengeTaxonomyStatus("blocked"), nil
-	case taxonomy.WorkflowQueued, taxonomy.WorkflowMapping, taxonomy.WorkflowReviewing, taxonomy.WorkflowPublishing:
+	case taxonomydomain.WorkflowQueued, taxonomydomain.WorkflowMapping, taxonomydomain.WorkflowReviewing, taxonomydomain.WorkflowPublishing:
 		if strings.TrimSpace(workflow.LastError) != "" {
 			return api.MySpacePublishedChallengeTaxonomyStatus("retrying"), nil
 		}

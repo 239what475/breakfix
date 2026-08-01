@@ -114,7 +114,7 @@ func validDefinitionID(id, kind string) bool {
 }
 
 func validateChallengeMapping(mapping ChallengeMapping, skills map[string]Skill, tags map[string]Tag) error {
-	if !challenge.ValidID(mapping.Challenge.ID) || strings.TrimSpace(mapping.Challenge.Title) == "" || !validRevision(mapping.Challenge.Revision) {
+	if !challenge.ValidID(mapping.Challenge.ID) || strings.TrimSpace(mapping.Challenge.Title) == "" || !ValidRevision(mapping.Challenge.Revision) {
 		return errors.New("challenge id, title, and revision are required")
 	}
 	if len(mapping.Tags) == 0 {
@@ -228,7 +228,7 @@ func validateDAG(skills map[string]Skill, edges map[string][]string) error {
 	return nil
 }
 
-func validRevision(value string) bool {
+func ValidRevision(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false
 	}

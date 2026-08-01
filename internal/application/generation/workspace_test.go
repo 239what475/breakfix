@@ -1,10 +1,12 @@
-package workspace
+package generation
 
 import (
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 func TestManagerCreatesOneOwnedWorkspaceAndCleansIt(t *testing.T) {
@@ -22,7 +24,7 @@ func TestManagerCreatesOneOwnedWorkspaceAndCleansIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure workspace: %v", err)
 	}
-	if record.State != StateActive || record.SandboxID != "sandbox-one" {
+	if record.State != domain.WorkspaceActive || record.SandboxID != "sandbox-one" {
 		t.Fatalf("workspace = %#v", record)
 	}
 	if pvcs.created != 1 || sandboxes.created != 1 {
@@ -63,7 +65,7 @@ func TestManagerCleansPendingWorkspaceAfterUnknownSandboxCreate(t *testing.T) {
 		t.Fatal("unknown sandbox create unexpectedly succeeded")
 	}
 	record, err := repo.GetGeneratorWorkspace(context.Background(), "generator-run-timeout")
-	if err != nil || record.State != StatePending || record.SandboxID != "" {
+	if err != nil || record.State != domain.WorkspacePending || record.SandboxID != "" {
 		t.Fatalf("pending workspace = %#v, err=%v", record, err)
 	}
 	now = now.Add(2 * time.Minute)
@@ -71,7 +73,7 @@ func TestManagerCleansPendingWorkspaceAfterUnknownSandboxCreate(t *testing.T) {
 		t.Fatalf("cleanup expired pending workspace: %v", err)
 	}
 	record, err = repo.GetGeneratorWorkspace(context.Background(), "generator-run-timeout")
-	if err != nil || record.State != StateDeleted {
+	if err != nil || record.State != domain.WorkspaceDeleted {
 		t.Fatalf("cleaned workspace = %#v, err=%v", record, err)
 	}
 	if sandboxes.deleted != 0 || pvcs.deleted != 1 {
@@ -94,7 +96,7 @@ func TestManagerResumesPersistedSandboxAfterReadinessFailure(t *testing.T) {
 		t.Fatal("first ensure unexpectedly succeeded")
 	}
 	record, err := repo.GetGeneratorWorkspace(context.Background(), "generator-run-resume")
-	if err != nil || record.State != StatePending || record.SandboxID != "sandbox-one" {
+	if err != nil || record.State != domain.WorkspacePending || record.SandboxID != "sandbox-one" {
 		t.Fatalf("persisted pending workspace = %#v, err=%v", record, err)
 	}
 	if _, err := manager.Ensure(context.Background(), "generator-run-resume"); err != nil {
@@ -127,10 +129,10 @@ func TestManagerRecoversUnknownCreatedSandboxFromMetadata(t *testing.T) {
 
 func TestManagerCleanupFindsSandboxWhenCreateResponseWasLost(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
-	repo := &memoryRepository{records: map[string]Record{
+	repo := &memoryRepository{records: map[string]domain.Workspace{
 		"generator-run-lost-response": {
-			GeneratorRunID: "generator-run-lost-response", Namespace: "opensandbox", PVCName: NewPVCName("generator-run-lost-response"),
-			State: StatePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+			GeneratorRunID: "generator-run-lost-response", Namespace: "opensandbox", PVCName: domain.NewWorkspacePVCName("generator-run-lost-response"),
+			State: domain.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 		},
 	}}
 	pvcs := &memoryPVCs{}
@@ -152,10 +154,10 @@ func TestManagerCleanupFindsSandboxWhenCreateResponseWasLost(t *testing.T) {
 func TestManagerCleansTerminalRunWorkspace(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	repo := &memoryRepository{
-		records: map[string]Record{
+		records: map[string]domain.Workspace{
 			"generator-run-terminal": {
-				GeneratorRunID: "generator-run-terminal", Namespace: "opensandbox", PVCName: NewPVCName("generator-run-terminal"),
-				SandboxID: "sandbox-terminal", State: StateActive, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+				GeneratorRunID: "generator-run-terminal", Namespace: "opensandbox", PVCName: domain.NewWorkspacePVCName("generator-run-terminal"),
+				SandboxID: "sandbox-terminal", State: domain.WorkspaceActive, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 			},
 		},
 		terminal: map[string]bool{"generator-run-terminal": true},
@@ -172,7 +174,7 @@ func TestManagerCleansTerminalRunWorkspace(t *testing.T) {
 		t.Fatalf("cleanup terminal workspace: %v", err)
 	}
 	record, err := repo.GetGeneratorWorkspace(context.Background(), "generator-run-terminal")
-	if err != nil || record.State != StateDeleted {
+	if err != nil || record.State != domain.WorkspaceDeleted {
 		t.Fatalf("terminal workspace = %#v, err=%v", record, err)
 	}
 	if sandboxes.deleted != 1 || pvcs.deleted != 1 {
@@ -183,10 +185,10 @@ func TestManagerCleansTerminalRunWorkspace(t *testing.T) {
 func TestManagerCleansTerminalPendingWorkspace(t *testing.T) {
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	repo := &memoryRepository{
-		records: map[string]Record{
+		records: map[string]domain.Workspace{
 			"generator-run-pending": {
-				GeneratorRunID: "generator-run-pending", Namespace: "opensandbox", PVCName: NewPVCName("generator-run-pending"),
-				State: StatePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+				GeneratorRunID: "generator-run-pending", Namespace: "opensandbox", PVCName: domain.NewWorkspacePVCName("generator-run-pending"),
+				State: domain.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 			},
 		},
 		terminal: map[string]bool{"generator-run-pending": true},
@@ -203,7 +205,7 @@ func TestManagerCleansTerminalPendingWorkspace(t *testing.T) {
 		t.Fatalf("cleanup terminal pending workspace: %v", err)
 	}
 	record, err := repo.GetGeneratorWorkspace(context.Background(), "generator-run-pending")
-	if err != nil || record.State != StateDeleted {
+	if err != nil || record.State != domain.WorkspaceDeleted {
 		t.Fatalf("terminal pending workspace = %#v, err=%v", record, err)
 	}
 	if sandboxes.deleted != 0 || pvcs.deleted != 1 {
@@ -212,13 +214,13 @@ func TestManagerCleansTerminalPendingWorkspace(t *testing.T) {
 }
 
 type memoryRepository struct {
-	records  map[string]Record
+	records  map[string]domain.Workspace
 	terminal map[string]bool
 }
 
-func (r *memoryRepository) CreateGeneratorWorkspace(_ context.Context, record Record) (*Record, error) {
+func (r *memoryRepository) CreateGeneratorWorkspace(_ context.Context, record domain.Workspace) (*domain.Workspace, error) {
 	if r.records == nil {
-		r.records = map[string]Record{}
+		r.records = map[string]domain.Workspace{}
 	}
 	if current, ok := r.records[record.GeneratorRunID]; ok {
 		copy := current
@@ -229,10 +231,10 @@ func (r *memoryRepository) CreateGeneratorWorkspace(_ context.Context, record Re
 	return &copy, nil
 }
 
-func (r *memoryRepository) GetGeneratorWorkspace(_ context.Context, id string) (*Record, error) {
+func (r *memoryRepository) GetGeneratorWorkspace(_ context.Context, id string) (*domain.Workspace, error) {
 	record, ok := r.records[id]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, domain.ErrWorkspaceNotFound
 	}
 	copy := record
 	return &copy, nil
@@ -241,9 +243,9 @@ func (r *memoryRepository) GetGeneratorWorkspace(_ context.Context, id string) (
 func (r *memoryRepository) RecordGeneratorWorkspaceSandbox(_ context.Context, id, sandboxID string, now time.Time) error {
 	record, ok := r.records[id]
 	if !ok {
-		return ErrNotFound
+		return domain.ErrWorkspaceNotFound
 	}
-	if record.State != StatePending || (record.SandboxID != "" && record.SandboxID != sandboxID) {
+	if record.State != domain.WorkspacePending || (record.SandboxID != "" && record.SandboxID != sandboxID) {
 		return errors.New("workspace sandbox cannot be recorded")
 	}
 	record.SandboxID, record.UpdatedAt = sandboxID, now
@@ -254,20 +256,20 @@ func (r *memoryRepository) RecordGeneratorWorkspaceSandbox(_ context.Context, id
 func (r *memoryRepository) ActivateGeneratorWorkspace(_ context.Context, id, sandboxID string, now time.Time) error {
 	record, ok := r.records[id]
 	if !ok {
-		return ErrNotFound
+		return domain.ErrWorkspaceNotFound
 	}
-	record.State, record.SandboxID, record.UpdatedAt = StateActive, sandboxID, now
+	record.State, record.SandboxID, record.UpdatedAt = domain.WorkspaceActive, sandboxID, now
 	r.records[id] = record
 	return nil
 }
 
-func (r *memoryRepository) BeginGeneratorWorkspaceCleanup(_ context.Context, id string, now time.Time) (*Record, error) {
+func (r *memoryRepository) BeginGeneratorWorkspaceCleanup(_ context.Context, id string, now time.Time) (*domain.Workspace, error) {
 	record, ok := r.records[id]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, domain.ErrWorkspaceNotFound
 	}
-	if record.State != StateDeleted {
-		record.State, record.UpdatedAt = StateDeleting, now
+	if record.State != domain.WorkspaceDeleted {
+		record.State, record.UpdatedAt = domain.WorkspaceDeleting, now
 		r.records[id] = record
 	}
 	return &record, nil
@@ -276,38 +278,38 @@ func (r *memoryRepository) BeginGeneratorWorkspaceCleanup(_ context.Context, id 
 func (r *memoryRepository) MarkGeneratorWorkspaceDeleted(_ context.Context, id string, now time.Time) error {
 	record, ok := r.records[id]
 	if !ok {
-		return ErrNotFound
+		return domain.ErrWorkspaceNotFound
 	}
-	record.State, record.UpdatedAt = StateDeleted, now
+	record.State, record.UpdatedAt = domain.WorkspaceDeleted, now
 	record.DeletedAt = &now
 	r.records[id] = record
 	return nil
 }
 
-func (r *memoryRepository) ListExpiredPendingGeneratorWorkspaces(_ context.Context, now time.Time) ([]Record, error) {
-	var values []Record
+func (r *memoryRepository) ListExpiredPendingGeneratorWorkspaces(_ context.Context, now time.Time) ([]domain.Workspace, error) {
+	var values []domain.Workspace
 	for _, record := range r.records {
-		if record.State == StatePending && !record.ProvisionDeadline.After(now) {
+		if record.State == domain.WorkspacePending && !record.ProvisionDeadline.After(now) {
 			values = append(values, record)
 		}
 	}
 	return values, nil
 }
 
-func (r *memoryRepository) ListDeletingGeneratorWorkspaces(_ context.Context) ([]Record, error) {
-	var values []Record
+func (r *memoryRepository) ListDeletingGeneratorWorkspaces(_ context.Context) ([]domain.Workspace, error) {
+	var values []domain.Workspace
 	for _, record := range r.records {
-		if record.State == StateDeleting {
+		if record.State == domain.WorkspaceDeleting {
 			values = append(values, record)
 		}
 	}
 	return values, nil
 }
 
-func (r *memoryRepository) ListTerminalGeneratorWorkspaces(_ context.Context) ([]Record, error) {
-	var values []Record
+func (r *memoryRepository) ListTerminalGeneratorWorkspaces(_ context.Context) ([]domain.Workspace, error) {
+	var values []domain.Workspace
 	for id := range r.terminal {
-		if record, ok := r.records[id]; ok && (record.State == StatePending || record.State == StateActive) {
+		if record, ok := r.records[id]; ok && (record.State == domain.WorkspacePending || record.State == domain.WorkspaceActive) {
 			values = append(values, record)
 		}
 	}

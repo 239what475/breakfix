@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
-	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 	"github.com/cloudwego/eino/components/tool"

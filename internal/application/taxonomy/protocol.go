@@ -4,12 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-)
-
-var (
-	ErrNotFound  = errors.New("taxonomy workflow not found")
-	ErrLeaseLost = errors.New("taxonomy workflow lease was lost")
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 const (
@@ -55,12 +51,12 @@ func (r AgentRole) PromptVersion() string {
 	return ""
 }
 
-func (r AgentRole) State() WorkflowState {
+func (r AgentRole) State() domain.WorkflowState {
 	if r == AgentRoleMapper {
-		return WorkflowMapping
+		return domain.WorkflowMapping
 	}
 	if r == AgentRoleCurriculumReviewer || r == AgentRoleSREReviewer {
-		return WorkflowReviewing
+		return domain.WorkflowReviewing
 	}
 	return ""
 }
@@ -73,7 +69,7 @@ type ModelInput struct {
 }
 
 type Context struct {
-	Workflow         Workflow          `json:"workflow"`
+	Workflow         domain.Workflow   `json:"workflow"`
 	Mapper           ModelInput        `json:"mapper"`
 	MapperValidation *MapperValidation `json:"mapper_validation,omitempty"`
 	CurriculumReview ModelInput        `json:"curriculum_review"`
@@ -84,20 +80,20 @@ type Context struct {
 // reject an invalid ChangeSet before the result is accepted by the Mapper.
 // It travels to the Worker over the internal API but is not prompt content.
 type MapperValidation struct {
-	Challenge ChallengeRef `json:"challenge"`
-	Base      Snapshot     `json:"base"`
+	Challenge domain.ChallengeRef `json:"challenge"`
+	Base      domain.Snapshot     `json:"base"`
 }
 
-func (c Context) ValidFor(claim Claim) bool {
+func (c Context) ValidFor(claim domain.Claim) bool {
 	if !claim.Valid() || c.Workflow.ID != claim.Workflow.ID || c.Workflow.State != claim.Workflow.State {
 		return false
 	}
 	switch claim.Workflow.State {
-	case WorkflowMapping:
+	case domain.WorkflowMapping:
 		return strings.TrimSpace(c.Mapper.SystemPrompt) != "" && strings.TrimSpace(c.Mapper.Prompt) != "" &&
 			c.MapperValidation != nil && c.MapperValidation.Challenge.ID == claim.Workflow.ChallengeID &&
 			c.MapperValidation.Challenge.Revision == claim.Workflow.ChallengeRevision
-	case WorkflowReviewing:
+	case domain.WorkflowReviewing:
 		return strings.TrimSpace(c.CurriculumReview.SystemPrompt) != "" && strings.TrimSpace(c.CurriculumReview.Prompt) != "" &&
 			strings.TrimSpace(c.SREReview.SystemPrompt) != "" && strings.TrimSpace(c.SREReview.Prompt) != ""
 	default:
@@ -106,8 +102,8 @@ func (c Context) ValidFor(claim Claim) bool {
 }
 
 type StartAgentRunRequest struct {
-	LeaseCredential
-	ExpectedState WorkflowState `json:"expected_state"`
+	domain.LeaseCredential
+	ExpectedState domain.WorkflowState `json:"expected_state"`
 	Role          AgentRole     `json:"role"`
 	Model         string        `json:"model"`
 }
@@ -123,19 +119,19 @@ func (r StartAgentRunRequest) Validate(workflowID string) error {
 }
 
 type StartAgentRunResponse struct {
-	Run agentruntime.Run `json:"run"`
+	Run agent.Run `json:"run"`
 }
 
 type MapperResult struct {
 	RunID     string    `json:"run_id"`
-	ChangeSet ChangeSet `json:"changeset"`
+	ChangeSet domain.ChangeSet `json:"changeset"`
 }
 
 type ReviewPairResult struct {
 	CurriculumRunID string `json:"curriculum_run_id"`
 	SRERunID        string `json:"sre_run_id"`
-	Curriculum      Review `json:"curriculum"`
-	SRE             Review `json:"sre"`
+	Curriculum      domain.Review `json:"curriculum"`
+	SRE             domain.Review `json:"sre"`
 }
 
 type PublicationResult struct{}
@@ -148,8 +144,8 @@ type TechnicalFailure struct {
 }
 
 type PhaseRequest struct {
-	LeaseCredential
-	ExpectedState WorkflowState `json:"expected_state"`
+	domain.LeaseCredential
+	ExpectedState domain.WorkflowState `json:"expected_state"`
 
 	Mapper           *MapperResult      `json:"mapper,omitempty"`
 	ReviewPair       *ReviewPairResult  `json:"review_pair,omitempty"`
@@ -190,21 +186,21 @@ func (r PhaseRequest) Validate() error {
 		return nil
 	}
 	switch r.ExpectedState {
-	case WorkflowMapping:
+	case domain.WorkflowMapping:
 		if r.Mapper == nil || strings.TrimSpace(r.Mapper.RunID) == "" || r.Mapper.ChangeSet.Empty() {
 			return errors.New("Mapping phase requires a mapper result")
 		}
-	case WorkflowReviewing:
+	case domain.WorkflowReviewing:
 		if r.ReviewPair == nil || strings.TrimSpace(r.ReviewPair.CurriculumRunID) == "" || strings.TrimSpace(r.ReviewPair.SRERunID) == "" {
 			return errors.New("reviewing phase requires both reviewer runs")
 		}
-		if err := ValidateReview(r.ReviewPair.Curriculum); err != nil {
+		if err := domain.ValidateReview(r.ReviewPair.Curriculum); err != nil {
 			return err
 		}
-		if err := ValidateReview(r.ReviewPair.SRE); err != nil {
+		if err := domain.ValidateReview(r.ReviewPair.SRE); err != nil {
 			return err
 		}
-	case WorkflowPublishing:
+	case domain.WorkflowPublishing:
 		if r.Publication == nil {
 			return errors.New("Publishing phase requires publication completion")
 		}

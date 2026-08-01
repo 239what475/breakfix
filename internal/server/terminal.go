@@ -20,7 +20,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/gorilla/websocket"
 )
 
@@ -55,7 +55,7 @@ type NodeProviderReadiness interface {
 	Preflight(context.Context) (incusprovider.PreflightResult, error)
 }
 
-type terminalStream func(context.Context, io.Reader, io.Writer, <-chan terminal.Size) error
+type terminalStream func(context.Context, io.Reader, io.Writer, <-chan environment.Size) error
 
 func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *activeEnvironment, runtime *environmentRuntimeAdapter, cooldownMin int, stream terminalStream, lifecycle terminalSocketLifecycle) {
 	upgrader := terminalUpgrader(uiOrigin)
@@ -89,7 +89,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 		go keepTerminalConnectionAlive(terminalCtx, conn, stopHeartbeat)
 	}
 
-	resizeCh := make(chan terminal.Size, 4)
+	resizeCh := make(chan environment.Size, 4)
 	stdinR, stdinW := io.Pipe()
 	output := &wsWriter{conn: conn}
 
@@ -111,7 +111,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 			}
 			if m.Type == "resize" {
 				select {
-				case resizeCh <- terminal.Size{Width: uint16(m.Cols), Height: uint16(m.Rows)}:
+				case resizeCh <- environment.Size{Width: uint16(m.Cols), Height: uint16(m.Rows)}:
 				default:
 				}
 				continue

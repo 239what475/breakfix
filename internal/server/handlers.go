@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
+	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
+	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/assistant"
-	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/incusprovider"
@@ -14,7 +15,6 @@ import (
 	"github.com/breakfix/breakfix/internal/opensandbox"
 	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/taxonomy"
-	"github.com/breakfix/breakfix/internal/workspace"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
@@ -22,7 +22,7 @@ import (
 type Handler struct {
 	db                 *db.DB
 	k8s                *k8s.Client
-	authoring          *authoring.RuntimeService
+	authoring          *appauthoring.RuntimeService
 	assistant          *assistant.Service
 	registryAddr       string
 	registryClient     registry.Client
@@ -42,7 +42,7 @@ type Handler struct {
 	terminals          *terminalConnectionTracker
 	serverInstance     string
 	generatorSandbox   *opensandbox.Client
-	generatorWorkspace *workspace.Manager
+	generatorWorkspace *appgeneration.Manager
 	runtimeConfig      config.RuntimeConfig
 	incusConfig        incusprovider.Config
 	nodeTerminal       NodeTerminalProvider
@@ -67,7 +67,7 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 	handler := &Handler{
 		db:              database,
 		k8s:             client,
-		authoring:       authoring.NewRuntimeService(database, cfg.Agent.Model),
+		authoring:       appauthoring.NewRuntimeService(database, cfg.Agent.Model),
 		assistant:       assistant.NewService(database, cfg.Agent.Model),
 		registryAddr:    cfg.Registry.Address,
 		registryClient:  registryClient,
@@ -106,7 +106,7 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 			handler.startupErr = fmt.Errorf("parse opensandbox workspace provision timeout: %w", err)
 			return handler
 		}
-		manager, err := workspace.NewManager(database, client, sandbox, workspace.Config{
+		manager, err := appgeneration.NewManager(database, client, sandbox, appgeneration.Config{
 			Namespace:        cfg.OpenSandbox.Namespace,
 			Storage:          cfg.OpenSandbox.WorkspaceStorage,
 			ProvisionTimeout: provisionTimeout,

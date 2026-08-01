@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/domain/agent"
 )
 
 const (
@@ -18,11 +18,11 @@ const (
 )
 
 type Service struct {
-	repo  agentruntime.Repository
+	repo  agent.Repository
 	model string
 }
 
-func NewService(repo agentruntime.Repository, model string) *Service {
+func NewService(repo agent.Repository, model string) *Service {
 	return &Service{repo: repo, model: strings.TrimSpace(model)}
 }
 
@@ -33,7 +33,7 @@ func (s *Service) GetOrCreate(ctx context.Context, request Request) (*Session, [
 	if s.repo == nil {
 		return nil, nil, errors.New("assistant runtime repository is required")
 	}
-	session, err := s.repo.FindOrCreateSession(ctx, agentruntime.Session{
+	session, err := s.repo.FindOrCreateSession(ctx, agent.Session{
 		ID:        NewID("assistant"),
 		Purpose:   "assistant",
 		OwnerKind: "environment",
@@ -57,7 +57,7 @@ func (s *Service) GetOrCreate(ctx context.Context, request Request) (*Session, [
 // StartTurn stores the user message and an already-running Server-owned call
 // in one transaction. The caller directly executes the model after this
 // method returns.
-func (s *Service) StartTurn(ctx context.Context, request Request, content string) (*Session, *agentruntime.Run, error) {
+func (s *Service) StartTurn(ctx context.Context, request Request, content string) (*Session, *agent.Run, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, nil, errors.New("消息不能为空")
@@ -71,13 +71,13 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode assistant run input: %w", err)
 	}
-	run, err := s.repo.CreateMessageAndRun(ctx, agentruntime.Message{
+	run, err := s.repo.CreateMessageAndRun(ctx, agent.Message{
 		ID:        NewID("assistant-message"),
 		SessionID: session.ID,
 		Role:      "user",
 		Content:   content,
 		CreatedAt: now,
-	}, agentruntime.CreateRun{
+	}, agent.CreateRun{
 		ID:            NewID("assistant-run"),
 		SessionID:     session.ID,
 		Purpose:       "assistant",
@@ -88,7 +88,7 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 		Model:         s.model,
 		PromptVersion: promptVersion,
 	})
-	if errors.Is(err, agentruntime.ErrRunActive) {
+	if errors.Is(err, agent.ErrRunActive) {
 		return nil, nil, ErrTurnRunning
 	}
 	if err != nil {
@@ -108,7 +108,7 @@ func (s *Service) DeleteEnvironment(ctx context.Context, environmentUID string) 
 	return err
 }
 
-func sessionProjection(value *agentruntime.Session, request Request) *Session {
+func sessionProjection(value *agent.Session, request Request) *Session {
 	return &Session{
 		ID:              value.ID,
 		UserID:          request.UserID,
@@ -121,7 +121,7 @@ func sessionProjection(value *agentruntime.Session, request Request) *Session {
 	}
 }
 
-func projectMessages(values []agentruntime.Message) ([]Message, error) {
+func projectMessages(values []agent.Message) ([]Message, error) {
 	result := make([]Message, 0, len(values))
 	for _, value := range values {
 		message, err := projectMessage(value)
@@ -133,7 +133,7 @@ func projectMessages(values []agentruntime.Message) ([]Message, error) {
 	return result, nil
 }
 
-func projectMessage(value agentruntime.Message) (Message, error) {
+func projectMessage(value agent.Message) (Message, error) {
 	message := Message{ID: value.ID, Role: value.Role, Content: value.Content, CreatedAt: value.CreatedAt}
 	if len(value.Metadata) == 0 || bytes.Equal(value.Metadata, []byte("{}")) {
 		return message, nil

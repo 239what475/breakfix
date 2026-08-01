@@ -1,6 +1,6 @@
-// Package agentruntime stores provider-neutral model sessions, messages, and
-// individual calls. It intentionally contains no scheduling or lease model.
-package agentruntime
+// Package agent owns provider-neutral model sessions, messages, and calls.
+// It intentionally contains no scheduling or provider implementation.
+package agent
 
 import (
 	"context"

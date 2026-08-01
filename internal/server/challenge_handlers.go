@@ -13,8 +13,8 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
+	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/terminal"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -372,7 +372,7 @@ func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windo
 		if h.nodeTerminal == nil {
 			return nil, fmt.Errorf("node terminal provider is unavailable")
 		}
-		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan terminal.Size) error {
+		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan environmentdomain.Size) error {
 			return h.nodeTerminal.ExecNodePTY(ctx, incusprovider.ExecNodePTYRequest{
 				EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
 				LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
@@ -380,7 +380,7 @@ func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windo
 			})
 		}, nil
 	case challenge.RuntimeK8s:
-		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan terminal.Size) error {
+		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan environmentdomain.Size) error {
 			return h.k8s.ExecPTY(ctx, stdin, stdout, stdout, resize, environment.Namespace, environment.WorkspacePod, sessionName, windowName)
 		}, nil
 	default:

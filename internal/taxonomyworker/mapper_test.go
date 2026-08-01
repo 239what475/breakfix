@@ -4,7 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 func TestMapperResultBuildsNewDefinitionsWithoutChangingBase(t *testing.T) {
@@ -43,7 +44,7 @@ func TestMapperResultBuildsNewDefinitionsWithoutChangingBase(t *testing.T) {
 	entry := taxonomy.ChallengeRef{
 		ID: "challenge-test", Title: "测试题目", Revision: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
-	changes, err := result.ChangeSet(taxonomy.MapperValidation{Challenge: entry, Base: base})
+	changes, err := result.ChangeSet(taxonomyapp.MapperValidation{Challenge: entry, Base: base})
 	if err != nil {
 		t.Fatalf("convert mapper result: %v", err)
 	}

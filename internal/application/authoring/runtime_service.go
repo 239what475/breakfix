@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	domain "github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
 const (
@@ -20,15 +21,15 @@ const (
 // RuntimeRepository is the Server-owned Authoring boundary. The Server owns
 // the mutable stage and finalization methods for direct authoring turns.
 type RuntimeRepository interface {
-	CreateAuthoringSession(context.Context, Session, Plan) (*Session, error)
-	GetAuthoringSession(context.Context, string, string) (*Session, error)
-	GetLatestOpenAuthoringSession(context.Context, string) (*Session, error)
-	GetAuthoringRevision(context.Context, string, int64) (*Revision, error)
-	StartAuthoringRun(context.Context, string, string, agentruntime.Message, agentruntime.CreateRun) (*Stage, *agentruntime.Run, error)
-	ListMessages(context.Context, string) ([]agentruntime.Message, error)
+	CreateAuthoringSession(context.Context, domain.Session, domain.Plan) (*domain.Session, error)
+	GetAuthoringSession(context.Context, string, string) (*domain.Session, error)
+	GetLatestOpenAuthoringSession(context.Context, string) (*domain.Session, error)
+	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
+	StartAuthoringRun(context.Context, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, error)
+	ListMessages(context.Context, string) ([]agent.Message, error)
 }
 
-// RuntimeService owns only user-facing Session and Run creation. It never
+// RuntimeService owns only user-facing domain.Session and Run creation. It never
 // invokes a model in the Server process.
 type RuntimeService struct {
 	repo  RuntimeRepository
@@ -39,17 +40,17 @@ func NewRuntimeService(repo RuntimeRepository, model string) *RuntimeService {
 	return &RuntimeService{repo: repo, model: strings.TrimSpace(model)}
 }
 
-func (s *RuntimeService) Create(ctx context.Context, userID string) (*Session, error) {
+func (s *RuntimeService) Create(ctx context.Context, userID string) (*domain.Session, error) {
 	if s == nil || s.repo == nil {
 		return nil, errors.New("authoring runtime repository is required")
 	}
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("authoring session requires a user")
 	}
-	return s.repo.CreateAuthoringSession(ctx, Session{ID: NewID("author"), UserID: userID}, Plan{})
+	return s.repo.CreateAuthoringSession(ctx, domain.Session{ID: domain.NewID("author"), UserID: userID}, domain.Plan{})
 }
 
-func (s *RuntimeService) Get(ctx context.Context, userID, sessionID string) (*Session, *Revision, []Message, error) {
+func (s *RuntimeService) Get(ctx context.Context, userID, sessionID string) (*domain.Session, *domain.Revision, []domain.Message, error) {
 	if s == nil || s.repo == nil {
 		return nil, nil, nil, errors.New("authoring runtime repository is required")
 	}
@@ -79,7 +80,7 @@ func (s *RuntimeService) Get(ctx context.Context, userID, sessionID string) (*Se
 	return session, revision, messages, nil
 }
 
-func (s *RuntimeService) GetCurrent(ctx context.Context, userID string) (*Session, error) {
+func (s *RuntimeService) GetCurrent(ctx context.Context, userID string) (*domain.Session, error) {
 	if s == nil || s.repo == nil {
 		return nil, errors.New("authoring runtime repository is required")
 	}
@@ -88,7 +89,7 @@ func (s *RuntimeService) GetCurrent(ctx context.Context, userID string) (*Sessio
 
 // StartTurn atomically creates the user message, Agent Run, and private stage.
 // The Server then executes and streams this turn in the request that created it.
-func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, content string) (*Session, *agentruntime.Run, error) {
+func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, content string) (*domain.Session, *agent.Run, error) {
 	if s == nil || s.repo == nil {
 		return nil, nil, errors.New("authoring runtime repository is required")
 	}
@@ -103,8 +104,8 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 	if err != nil {
 		return nil, nil, err
 	}
-	if !stateAllowsAuthorMessage(session.State) || strings.TrimSpace(session.RuntimeSessionID) == "" {
-		return nil, nil, ErrInvalidState
+	if !domain.AllowsAuthorMessage(session.State) || strings.TrimSpace(session.RuntimeSessionID) == "" {
+		return nil, nil, domain.ErrInvalidState
 	}
 	input, err := json.Marshal(struct {
 		BaseRevision int64 `json:"base_revision"`
@@ -113,14 +114,14 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		return nil, nil, fmt.Errorf("encode authoring run input: %w", err)
 	}
 	now := time.Now().UTC()
-	_, run, err := s.repo.StartAuthoringRun(ctx, session.ID, userID, agentruntime.Message{
-		ID:        agentruntime.NewID("authoring-message"),
+	_, run, err := s.repo.StartAuthoringRun(ctx, session.ID, userID, agent.Message{
+		ID:        agent.NewID("authoring-message"),
 		SessionID: session.RuntimeSessionID,
 		Role:      "user",
 		Content:   content,
 		CreatedAt: now,
-	}, agentruntime.CreateRun{
-		ID:            agentruntime.NewID("authoring-run"),
+	}, agent.CreateRun{
+		ID:            agent.NewID("authoring-run"),
 		SessionID:     session.RuntimeSessionID,
 		Purpose:       "authoring",
 		OwnerKind:     "authoring-session",
@@ -140,8 +141,8 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 	return updated, run, nil
 }
 
-func projectRuntimeMessages(values []agentruntime.Message) ([]Message, error) {
-	result := make([]Message, 0, len(values))
+func projectRuntimeMessages(values []agent.Message) ([]domain.Message, error) {
+	result := make([]domain.Message, 0, len(values))
 	for _, value := range values {
 		role := value.Role
 		switch role {
@@ -151,10 +152,10 @@ func projectRuntimeMessages(values []agentruntime.Message) ([]Message, error) {
 		default:
 			return nil, fmt.Errorf("unsupported authoring runtime message role %q", value.Role)
 		}
-		message := Message{ID: value.ID, Role: role, Content: value.Content, CreatedAt: value.CreatedAt}
+		message := domain.Message{ID: value.ID, Role: role, Content: value.Content, CreatedAt: value.CreatedAt}
 		if len(value.Metadata) > 0 && !bytes.Equal(value.Metadata, []byte("{}")) {
 			var metadata struct {
-				Changes []Change `json:"changes"`
+				Changes []domain.Change `json:"changes"`
 			}
 			decoder := json.NewDecoder(bytes.NewReader(value.Metadata))
 			decoder.DisallowUnknownFields()

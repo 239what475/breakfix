@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -24,9 +25,9 @@ import (
 type Store interface {
 	Claim(context.Context, string, time.Duration) (*taxonomy.Claim, error)
 	Renew(context.Context, taxonomy.Claim, time.Duration) error
-	Context(context.Context, taxonomy.Claim) (*taxonomy.Context, error)
-	StartAgentRun(context.Context, taxonomy.Claim, taxonomy.AgentRole, string) (*taxonomy.StartAgentRunResponse, error)
-	Phase(context.Context, taxonomy.Claim, taxonomy.PhaseRequest) (*taxonomy.Claim, error)
+	Context(context.Context, taxonomy.Claim) (*taxonomyapp.Context, error)
+	StartAgentRun(context.Context, taxonomy.Claim, taxonomyapp.AgentRole, string) (*taxonomyapp.StartAgentRunResponse, error)
+	Phase(context.Context, taxonomy.Claim, taxonomyapp.PhaseRequest) (*taxonomy.Claim, error)
 }
 
 // Committee executes the model-facing part of one taxonomy state. The worker
@@ -34,8 +35,8 @@ type Store interface {
 // those guarantees testable without replacing the model protocol with a fake
 // prompt test.
 type Committee interface {
-	Map(context.Context, taxonomy.Context) (taxonomy.ChangeSet, error)
-	Review(context.Context, taxonomy.Context) (taxonomy.Review, taxonomy.Review, error)
+	Map(context.Context, taxonomyapp.Context) (taxonomy.ChangeSet, error)
+	Review(context.Context, taxonomyapp.Context) (taxonomy.Review, taxonomy.Review, error)
 }
 
 type Config struct {
@@ -145,10 +146,10 @@ func (w *Worker) processClaim(parent context.Context, initial taxonomy.Claim) {
 	}
 }
 
-func (w *Worker) executeState(ctx context.Context, claim taxonomy.Claim, snapshot taxonomy.Context) (*taxonomy.Claim, error) {
+func (w *Worker) executeState(ctx context.Context, claim taxonomy.Claim, snapshot taxonomyapp.Context) (*taxonomy.Claim, error) {
 	switch claim.Workflow.State {
 	case taxonomy.WorkflowMapping:
-		run, err := w.store.StartAgentRun(ctx, claim, taxonomy.AgentRoleMapper, w.agent.Model)
+		run, err := w.store.StartAgentRun(ctx, claim, taxonomyapp.AgentRoleMapper, w.agent.Model)
 		if err != nil {
 			return nil, err
 		}
@@ -156,13 +157,13 @@ func (w *Worker) executeState(ctx context.Context, claim taxonomy.Claim, snapsho
 		if err != nil {
 			return nil, &executionFailure{runIDs: []string{run.Run.ID}, cause: err}
 		}
-		return w.store.Phase(ctx, claim, taxonomy.PhaseRequest{Mapper: &taxonomy.MapperResult{RunID: run.Run.ID, ChangeSet: changes}})
+		return w.store.Phase(ctx, claim, taxonomyapp.PhaseRequest{Mapper: &taxonomyapp.MapperResult{RunID: run.Run.ID, ChangeSet: changes}})
 	case taxonomy.WorkflowReviewing:
-		curriculumRun, err := w.store.StartAgentRun(ctx, claim, taxonomy.AgentRoleCurriculumReviewer, w.agent.Model)
+		curriculumRun, err := w.store.StartAgentRun(ctx, claim, taxonomyapp.AgentRoleCurriculumReviewer, w.agent.Model)
 		if err != nil {
 			return nil, err
 		}
-		sreRun, err := w.store.StartAgentRun(ctx, claim, taxonomy.AgentRoleSREReviewer, w.agent.Model)
+		sreRun, err := w.store.StartAgentRun(ctx, claim, taxonomyapp.AgentRoleSREReviewer, w.agent.Model)
 		if err != nil {
 			return nil, &executionFailure{runIDs: []string{curriculumRun.Run.ID}, cause: err}
 		}
@@ -170,11 +171,11 @@ func (w *Worker) executeState(ctx context.Context, claim taxonomy.Claim, snapsho
 		if err != nil {
 			return nil, &executionFailure{runIDs: []string{curriculumRun.Run.ID, sreRun.Run.ID}, cause: err}
 		}
-		return w.store.Phase(ctx, claim, taxonomy.PhaseRequest{ReviewPair: &taxonomy.ReviewPairResult{
+		return w.store.Phase(ctx, claim, taxonomyapp.PhaseRequest{ReviewPair: &taxonomyapp.ReviewPairResult{
 			CurriculumRunID: curriculumRun.Run.ID, SRERunID: sreRun.Run.ID, Curriculum: curriculum, SRE: sre,
 		}})
 	case taxonomy.WorkflowPublishing:
-		return w.store.Phase(ctx, claim, taxonomy.PhaseRequest{Publication: &taxonomy.PublicationResult{}})
+		return w.store.Phase(ctx, claim, taxonomyapp.PhaseRequest{Publication: &taxonomyapp.PublicationResult{}})
 	default:
 		return nil, fmt.Errorf("taxonomy worker cannot execute workflow state %s", claim.Workflow.State)
 	}
@@ -193,7 +194,7 @@ func (w *Worker) reportFailure(ctx context.Context, claim taxonomy.Claim, runIDs
 	if message == "" {
 		message = "taxonomy workflow technical failure"
 	}
-	next, err := w.store.Phase(ctx, claim, taxonomy.PhaseRequest{TechnicalFailure: &taxonomy.TechnicalFailure{Message: message, RunIDs: runIDs}})
+	next, err := w.store.Phase(ctx, claim, taxonomyapp.PhaseRequest{TechnicalFailure: &taxonomyapp.TechnicalFailure{Message: message, RunIDs: runIDs}})
 	if err != nil && !errors.Is(err, taxonomy.ErrLeaseLost) {
 		slog.Error("report taxonomy workflow technical failure", "workflow_id", claim.Workflow.ID, "state", claim.Workflow.State, "err", err)
 	}
@@ -302,7 +303,7 @@ func (r reviewerResult) Review() taxonomy.Review {
 	return taxonomy.Review{Decision: taxonomy.ReviewReject, Feedback: strings.TrimSpace(r.Rejection.Feedback)}
 }
 
-func runMapper(ctx context.Context, cfg config.AgentConfig, input taxonomy.ModelInput, validation taxonomy.MapperValidation) (taxonomy.ChangeSet, error) {
+func runMapper(ctx context.Context, cfg config.AgentConfig, input taxonomyapp.ModelInput, validation taxonomyapp.MapperValidation) (taxonomy.ChangeSet, error) {
 	var accepted taxonomy.ChangeSet
 	_, err := invokeTypedResult(ctx, cfg, "taxonomy_mapper", input, "submit_mapping", "提交本轮最终 taxonomy mapping。仅在完成分类判断后调用；所有字段以工具 schema 为准。", func(value mapperResult) error {
 		changes, err := value.ChangeSet(validation)
@@ -321,7 +322,7 @@ func runMapper(ctx context.Context, cfg config.AgentConfig, input taxonomy.Model
 	return accepted, nil
 }
 
-func runReviewPair(ctx context.Context, cfg config.AgentConfig, curriculumInput, sreInput taxonomy.ModelInput) (taxonomy.Review, taxonomy.Review, error) {
+func runReviewPair(ctx context.Context, cfg config.AgentConfig, curriculumInput, sreInput taxonomyapp.ModelInput) (taxonomy.Review, taxonomy.Review, error) {
 	type outcome struct {
 		review taxonomy.Review
 		err    error
@@ -361,7 +362,7 @@ func runReviewPair(ctx context.Context, cfg config.AgentConfig, curriculumInput,
 	return curriculum.review, sre.review, nil
 }
 
-func invokeTypedResult[T any](ctx context.Context, cfg config.AgentConfig, name string, input taxonomy.ModelInput, toolName, toolDescription string, validate func(T) error) (T, error) {
+func invokeTypedResult[T any](ctx context.Context, cfg config.AgentConfig, name string, input taxonomyapp.ModelInput, toolName, toolDescription string, validate func(T) error) (T, error) {
 	var zero T
 	chat, err := agentmodel.NewChatModel(ctx, cfg)
 	if err != nil {

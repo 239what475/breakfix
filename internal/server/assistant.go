@@ -11,7 +11,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
@@ -109,7 +109,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 			}{Evidence: result.Evidence})
 			if marshalErr == nil {
 				now := time.Now().UTC()
-				message := agentruntime.Message{ID: assistant.NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata}
+				message := agent.Message{ID: assistant.NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata}
 				if completeErr := h.db.CompleteRunWithMessage(c.Request.Context(), runID, message, now); completeErr == nil {
 					writeSSE(c, "complete", assistantStreamComplete{RunID: runID, Message: assistant.Message{
 						ID: message.ID, Role: message.Role, Content: message.Content, Evidence: result.Evidence, CreatedAt: now,
@@ -125,7 +125,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 			err = runErr
 		}
 	}
-	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agentruntime.ErrRunActive) {
+	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
 		slog.Error("finalize direct assistant turn", "run_id", runID, "err", errors.Join(err, failErr))
 	}
 	if c.Request.Context().Err() == nil {

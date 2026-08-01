@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/authoring"
-	"github.com/breakfix/breakfix/internal/candidate"
+	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 const workflowTestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -108,7 +108,7 @@ func TestGenerationWorkflowPersistsRepairAndPublicationLifecycle(t *testing.T) {
 
 	challengeID := challenge.NewID()
 	publicationTime := resumedAt.Add(10 * time.Minute)
-	if _, err := database.BeginGenerationPublication(ctx, sessionID, userID, candidate.Publication{
+	if _, err := database.BeginGenerationPublication(ctx, sessionID, userID, generation.Publication{
 		ChallengeID: challengeID,
 		SourceSlug:  challenge.SourceSlugFor("Workflow lifecycle", challengeID),
 		TargetPath:  challenge.SourceSlugFor("Workflow lifecycle", challengeID),
@@ -258,13 +258,13 @@ func TestTaxonomyWorkflowPersistsCommitteeRoundsAndReclaimsTechnicalFailures(t *
 	}
 	claim := claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-a", now)
 	changes := taxonomyTestChangeSet(challengeID, challengeRevision)
-	mapper := startTaxonomyRun(t, database, claim, taxonomy.AgentRoleMapper, now)
+	mapper := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
 	if err := database.FinalizeTaxonomyMapper(ctx, claim, mapper.ID, changes, now); err != nil {
 		t.Fatalf("finalize first mapper: %v", err)
 	}
 	claim = refreshTaxonomyClaim(t, database, claim, now)
-	curriculum := startTaxonomyRun(t, database, claim, taxonomy.AgentRoleCurriculumReviewer, now)
-	sre := startTaxonomyRun(t, database, claim, taxonomy.AgentRoleSREReviewer, now)
+	curriculum := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleCurriculumReviewer, now)
+	sre := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleSREReviewer, now)
 	if err := database.FinalizeTaxonomyReviewPair(ctx, claim, curriculum.ID, sre.ID,
 		taxonomy.Review{Decision: taxonomy.ReviewReject, Feedback: "请明确入口能力与学习结果的边界"},
 		taxonomy.Review{Decision: taxonomy.ReviewApprove}, "base-1", now); err != nil {
@@ -278,13 +278,13 @@ func TestTaxonomyWorkflowPersistsCommitteeRoundsAndReclaimsTechnicalFailures(t *
 		t.Fatalf("workflow after semantic reject = %#v", rejected)
 	}
 	claim = claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-b", now)
-	mapper = startTaxonomyRun(t, database, claim, taxonomy.AgentRoleMapper, now)
+	mapper = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
 	if err := database.FinalizeTaxonomyMapper(ctx, claim, mapper.ID, changes, now); err != nil {
 		t.Fatalf("finalize second mapper: %v", err)
 	}
 	claim = refreshTaxonomyClaim(t, database, claim, now)
-	curriculum = startTaxonomyRun(t, database, claim, taxonomy.AgentRoleCurriculumReviewer, now)
-	sre = startTaxonomyRun(t, database, claim, taxonomy.AgentRoleSREReviewer, now)
+	curriculum = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleCurriculumReviewer, now)
+	sre = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleSREReviewer, now)
 	if err := database.FinalizeTaxonomyReviewPair(ctx, claim, curriculum.ID, sre.ID,
 		taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, "base-1", now); err != nil {
 		t.Fatalf("finalize approved reviewer pair: %v", err)
@@ -307,14 +307,14 @@ func TestTaxonomyWorkflowPersistsCommitteeRoundsAndReclaimsTechnicalFailures(t *
 		t.Fatalf("create retry taxonomy workflow: %v", err)
 	}
 	retryClaim := claimTaxonomyWorkflow(t, database, retryWorkflow.ID, "taxonomy-c", now)
-	mapper = startTaxonomyRun(t, database, retryClaim, taxonomy.AgentRoleMapper, now)
+	mapper = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleMapper, now)
 	if err := database.FinalizeTaxonomyMapper(ctx, retryClaim, mapper.ID, taxonomyTestChangeSet(retryID, retryRevision), now); err != nil {
 		t.Fatalf("finalize retry mapper: %v", err)
 	}
 	retryClaim = refreshTaxonomyClaim(t, database, retryClaim, now)
 	for attempt := 1; attempt <= 10; attempt++ {
-		curriculum = startTaxonomyRun(t, database, retryClaim, taxonomy.AgentRoleCurriculumReviewer, now)
-		sre = startTaxonomyRun(t, database, retryClaim, taxonomy.AgentRoleSREReviewer, now)
+		curriculum = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleCurriculumReviewer, now)
+		sre = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleSREReviewer, now)
 		updated, released, err := database.ReportTaxonomyTechnicalFailure(ctx, retryClaim, taxonomy.WorkflowReviewing, "reviewer transport failed", []string{curriculum.ID, sre.ID}, now)
 		if err != nil {
 			t.Fatalf("report reviewer technical failure %d: %v", attempt, err)
@@ -350,7 +350,7 @@ func TestTaxonomyLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
 		t.Fatalf("create taxonomy workflow: %v", err)
 	}
 	initial := claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-a", now)
-	mapperRun := startTaxonomyRun(t, database, initial, taxonomy.AgentRoleMapper, now)
+	mapperRun := startTaxonomyRun(t, database, initial, taxonomyapp.AgentRoleMapper, now)
 	updated, released, err := database.ReportTaxonomyTechnicalFailure(ctx, initial, taxonomy.WorkflowMapping, "mapper transport failed", []string{mapperRun.ID}, now)
 	if err != nil {
 		t.Fatalf("record taxonomy retry: %v", err)
@@ -359,7 +359,7 @@ func TestTaxonomyLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
 		t.Fatalf("taxonomy retry = %#v, released=%v", updated, released)
 	}
 	claim := refreshTaxonomyClaim(t, database, initial, now)
-	mapperRun = startTaxonomyRun(t, database, claim, taxonomy.AgentRoleMapper, now)
+	mapperRun = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
 	if err := database.FinalizeTaxonomyMapper(ctx, claim, mapperRun.ID, taxonomyTestChangeSet(challengeID, challengeRevision), now); err != nil {
 		t.Fatalf("finalize taxonomy mapper: %v", err)
 	}
@@ -434,10 +434,10 @@ func refreshGenerationClaim(t *testing.T, database *DB, claim generation.Claim, 
 	return *refreshed
 }
 
-func startGenerationRun(t *testing.T, database *DB, claim generation.Claim, purpose string, now time.Time) *agentruntime.Run {
+func startGenerationRun(t *testing.T, database *DB, claim generation.Claim, purpose string, now time.Time) *agent.Run {
 	t.Helper()
-	run, err := database.StartGenerationAgentRun(context.Background(), claim, agentruntime.CreateRun{
-		ID:            agentruntime.NewID("generation-test-run"),
+	run, err := database.StartGenerationAgentRun(context.Background(), claim, agent.CreateRun{
+		ID:            agent.NewID("generation-test-run"),
 		Purpose:       purpose,
 		OwnerKind:     "generation-workflow",
 		OwnerRef:      claim.Workflow.ID,
@@ -450,11 +450,11 @@ func startGenerationRun(t *testing.T, database *DB, claim generation.Claim, purp
 	return run
 }
 
-func finalizeGeneratedCandidate(t *testing.T, database *DB, claim generation.Claim, sessionID string, sequence int, now time.Time) candidate.Revision {
+func finalizeGeneratedCandidate(t *testing.T, database *DB, claim generation.Claim, sessionID string, sequence int, now time.Time) generation.Revision {
 	t.Helper()
 	run := startGenerationRun(t, database, claim, generator.GeneratorPurpose, now)
-	revision := candidate.Revision{
-		ID:                 candidate.IDForGeneratorRun(run.ID),
+	revision := generation.Revision{
+		ID:                 generation.IDForGeneratorRun(run.ID),
 		AuthoringSessionID: sessionID,
 		AuthoringRevision:  claim.Workflow.AuthoringRevision,
 		GeneratorSessionID: run.SessionID,
@@ -479,8 +479,8 @@ func approveGenerationJudgement(t *testing.T, database *DB, claim generation.Cla
 
 func advanceGenerationBuildAndArtifact(t *testing.T, database *DB, claim generation.Claim, now time.Time) {
 	t.Helper()
-	if err := database.CompleteGenerationBuild(context.Background(), claim, candidate.BuildOutput{
-		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/candidate.oci.tar", OCIArchiveSHA256: workflowTestDigest,
+	if err := database.CompleteGenerationBuild(context.Background(), claim, generation.BuildOutput{
+		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/generation.oci.tar", OCIArchiveSHA256: workflowTestDigest,
 	}, now); err != nil {
 		t.Fatalf("complete generation build: %v", err)
 	}
@@ -490,16 +490,16 @@ func advanceGenerationBuildAndArtifact(t *testing.T, database *DB, claim generat
 	}
 }
 
-func generationTestSnapshot() candidate.ExecutionSnapshot {
-	return candidate.ExecutionSnapshot{
+func generationTestSnapshot() generation.ExecutionSnapshot {
+	return generation.ExecutionSnapshot{
 		Runtime:     challenge.RuntimeK8s,
-		Checkpoints: []candidate.CheckpointSnapshot{{ID: "ready"}},
-		K8s: &candidate.K8sRuntimeSnapshot{
+		Checkpoints: []generation.CheckpointSnapshot{{ID: "ready"}},
+		K8s: &generation.K8sRuntimeSnapshot{
 			BaseImageDigest:         "registry.example/base@" + workflowTestDigest,
 			ProfileRevision:         "profile-v1",
 			Version:                 "v0.30.0",
 			ManagementTerminalImage: "registry.example/terminal@" + workflowTestDigest,
-			Resources: candidate.K8sResources{
+			Resources: generation.K8sResources{
 				ControlPlaneCPU: "100m", ControlPlaneMemory: "128Mi", ControlPlaneEphemeralStorage: "256Mi",
 				WorkloadCPU: "100m", WorkloadMemory: "128Mi", WorkloadEphemeralStorage: "256Mi",
 				QuotaCPU: "1", QuotaMemory: "1Gi", QuotaEphemeralStorage: "2Gi",
@@ -508,23 +508,23 @@ func generationTestSnapshot() candidate.ExecutionSnapshot {
 	}
 }
 
-func artifactReference() candidate.ArtifactReference {
-	return candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/candidate@" + workflowTestDigest}
+func artifactReference() generation.ArtifactReference {
+	return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/candidate@" + workflowTestDigest}
 }
 
-func verificationEnvironment(claim generation.Claim) candidate.VerificationEnvironment {
-	return candidate.VerificationEnvironment{
+func verificationEnvironment(claim generation.Claim) generation.VerificationEnvironment {
+	return generation.VerificationEnvironment{
 		Runtime: challenge.RuntimeK8s, Name: "verify-environment", UID: "verify-uid", WorkflowID: claim.Workflow.ID,
 		Attempt: int64(claim.StateAttempt + 1),
 	}
 }
 
-func verificationReport(passed bool) candidate.VerificationReport {
-	return candidate.VerificationReport{
+func verificationReport(passed bool) generation.VerificationReport {
+	return generation.VerificationReport{
 		Passed:      passed,
 		Summary:     map[bool]string{true: "all checks passed", false: "the ready checkpoint did not pass"}[passed],
-		Answers:     []candidate.ExecutionResult{{Location: "management", ExitCode: 0}},
-		Checkpoints: []candidate.CheckpointResult{{ID: "ready", Passed: passed, Summary: map[bool]string{true: "ready", false: "not ready"}[passed]}},
+		Answers:     []generation.ExecutionResult{{Location: "management", ExitCode: 0}},
+		Checkpoints: []generation.CheckpointResult{{ID: "ready", Passed: passed, Summary: map[bool]string{true: "ready", false: "not ready"}[passed]}},
 	}
 }
 
@@ -549,7 +549,7 @@ func refreshTaxonomyClaim(t *testing.T, database *DB, claim taxonomy.Claim, now 
 	return *refreshed
 }
 
-func startTaxonomyRun(t *testing.T, database *DB, claim taxonomy.Claim, role taxonomy.AgentRole, now time.Time) *agentruntime.Run {
+func startTaxonomyRun(t *testing.T, database *DB, claim taxonomy.Claim, role taxonomyapp.AgentRole, now time.Time) *agent.Run {
 	t.Helper()
 	run, err := database.StartTaxonomyAgentRun(context.Background(), claim, role, "test-model", now)
 	if err != nil {

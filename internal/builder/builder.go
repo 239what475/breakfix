@@ -12,7 +12,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/registry"
@@ -86,9 +86,9 @@ func (e *Executor) buildNode(ctx context.Context, execution generation.Execution
 	if err != nil {
 		return generation.BuildResult{}, fmt.Errorf("build stopped Node image: %w", err)
 	}
-	output := candidate.BuildOutput{
+	output := generation.BuildOutput{
 		Runtime: challenge.RuntimeNode,
-		Incus: &candidate.IncusBuildReference{
+		Incus: &generation.IncusBuildReference{
 			Project:      e.config.BuildProject,
 			WorkflowID:   result.WorkflowID,
 			Attempt:      result.Attempt,
@@ -116,7 +116,7 @@ func (e *Executor) buildK8s(bundle, root string, base []byte) (generation.BuildR
 	if err != nil {
 		return generation.BuildResult{}, err
 	}
-	return generation.BuildResult{Output: candidate.BuildOutput{
+	return generation.BuildResult{Output: generation.BuildOutput{
 		Runtime: challenge.RuntimeK8s, OCIArchiveSHA256: candidate.Digest(archive),
 	}, Archive: archive}, nil
 }

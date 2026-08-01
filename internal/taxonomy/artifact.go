@@ -5,23 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
-
-// ChallengeArtifact is the deterministic, read-only artifact document sent to
-// taxonomy agents. It deliberately contains no host path or write capability.
-type ChallengeArtifact struct {
-	Files []ChallengeArtifactFile `json:"files"`
-}
-
-type ChallengeArtifactFile struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-}
 
 // ReadChallengeArtifact produces deterministic, untrusted model context from
 // a published challenge directory. It deliberately exposes content only, not
 // a host path or any write capability.
-func ReadChallengeArtifact(root string) (ChallengeArtifact, error) {
+func ReadChallengeArtifact(root string) (domain.ChallengeArtifact, error) {
 	files := make([]string, 0)
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -40,16 +31,16 @@ func ReadChallengeArtifact(root string) (ChallengeArtifact, error) {
 		files = append(files, filepath.ToSlash(rel))
 		return nil
 	}); err != nil {
-		return ChallengeArtifact{}, err
+		return domain.ChallengeArtifact{}, err
 	}
 	slices.Sort(files)
-	artifact := ChallengeArtifact{Files: make([]ChallengeArtifactFile, 0, len(files))}
+	artifact := domain.ChallengeArtifact{Files: make([]domain.ChallengeArtifactFile, 0, len(files))}
 	for _, rel := range files {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			return ChallengeArtifact{}, err
+			return domain.ChallengeArtifact{}, err
 		}
-		artifact.Files = append(artifact.Files, ChallengeArtifactFile{Path: rel, Content: string(data)})
+		artifact.Files = append(artifact.Files, domain.ChallengeArtifactFile{Path: rel, Content: string(data)})
 	}
 	return artifact, nil
 }

@@ -1,4 +1,4 @@
-package workspace
+package generation
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 type PVCManager interface {
@@ -21,7 +23,7 @@ type SandboxManager interface {
 }
 
 type Manager struct {
-	repo             Repository
+	repo             WorkspaceRepository
 	pvcs             PVCManager
 	sandboxes        SandboxManager
 	namespace        string
@@ -36,7 +38,7 @@ type Config struct {
 	ProvisionTimeout time.Duration
 }
 
-func NewManager(repo Repository, pvcs PVCManager, sandboxes SandboxManager, config Config) (*Manager, error) {
+func NewManager(repo WorkspaceRepository, pvcs PVCManager, sandboxes SandboxManager, config Config) (*Manager, error) {
 	if repo == nil || pvcs == nil || sandboxes == nil {
 		return nil, errors.New("workspace manager requires repository, pvc manager, and sandbox manager")
 	}
@@ -56,7 +58,7 @@ func NewManager(repo Repository, pvcs PVCManager, sandboxes SandboxManager, conf
 
 // Ensure creates or resumes the one workspace belonging to a Generator Run.
 // A pending record makes PVC cleanup durable if provisioning cannot complete.
-func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, error) {
+func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*domain.Workspace, error) {
 	if m == nil {
 		return nil, errors.New("workspace manager is not configured")
 	}
@@ -65,13 +67,13 @@ func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, e
 		return nil, errors.New("generator run id is required")
 	}
 	record, err := m.repo.GetGeneratorWorkspace(ctx, generatorRunID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, domain.ErrWorkspaceNotFound) {
 		now := m.now()
-		record, err = m.repo.CreateGeneratorWorkspace(ctx, Record{
+		record, err = m.repo.CreateGeneratorWorkspace(ctx, domain.Workspace{
 			GeneratorRunID:    generatorRunID,
 			Namespace:         m.namespace,
-			PVCName:           NewPVCName(generatorRunID),
-			State:             StatePending,
+			PVCName:           domain.NewWorkspacePVCName(generatorRunID),
+			State:             domain.WorkspacePending,
 			ProvisionDeadline: now.Add(m.provisionTimeout),
 			CreatedAt:         now,
 			UpdatedAt:         now,
@@ -80,7 +82,7 @@ func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, e
 	if err != nil {
 		return nil, err
 	}
-	if record.State == StateDeleted || record.State == StateDeleting {
+	if record.State == domain.WorkspaceDeleted || record.State == domain.WorkspaceDeleting {
 		return nil, fmt.Errorf("generator workspace is %s", record.State)
 	}
 	provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
@@ -88,7 +90,7 @@ func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*Record, e
 	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.GeneratorRunID, m.storage); err != nil {
 		return nil, fmt.Errorf("ensure generator workspace pvc: %w", err)
 	}
-	if record.State == StateActive && strings.TrimSpace(record.SandboxID) != "" {
+	if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
 		return record, nil
 	}
 	if strings.TrimSpace(record.SandboxID) == "" {
@@ -126,7 +128,7 @@ func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
 		return errors.New("workspace manager is not configured")
 	}
 	record, err := m.repo.BeginGeneratorWorkspaceCleanup(ctx, generatorRunID, m.now())
-	if errors.Is(err, ErrNotFound) || (err == nil && record.State == StateDeleted) {
+	if errors.Is(err, domain.ErrWorkspaceNotFound) || (err == nil && record.State == domain.WorkspaceDeleted) {
 		return nil
 	}
 	if err != nil {

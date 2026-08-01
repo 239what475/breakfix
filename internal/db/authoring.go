@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/authoring"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
 func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
@@ -24,7 +24,7 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 	session.CreatedAt = now
 	session.UpdatedAt = now
 	if session.RuntimeSessionID == "" {
-		session.RuntimeSessionID = agentruntime.NewID("authoring-session")
+		session.RuntimeSessionID = agent.NewID("authoring-session")
 	}
 	planJSON, err := marshalJSON(plan)
 	if err != nil {
@@ -38,7 +38,7 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
 		(id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at)
 		VALUES (?, 'authoring', 'authoring-session', ?, ?, ?, ?, ?)`,
-		session.RuntimeSessionID, session.ID, session.UserID, agentruntime.SessionActive, now, now); err != nil {
+		session.RuntimeSessionID, session.ID, session.UserID, agent.SessionActive, now, now); err != nil {
 		return nil, fmt.Errorf("create authoring agent session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
@@ -119,11 +119,11 @@ func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, numb
 
 // StartAuthoringRun persists the user message and starts a direct Server-owned
 // model call. No worker queue participates in an authoring conversation.
-func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, message agentruntime.Message, run agentruntime.CreateRun) (*authoring.Stage, *agentruntime.Run, error) {
+func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, message agent.Message, run agent.CreateRun) (*authoring.Stage, *agent.Run, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
 		return nil, nil, errors.New("authoring run requires a user message")
 	}
-	if err := agentruntime.ValidateCreateRun(run); err != nil {
+	if err := agent.ValidateCreateRun(run); err != nil {
 		return nil, nil, err
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -151,7 +151,7 @@ func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, me
 	}
 	now := time.Now().UTC()
 	if message.ID == "" {
-		message.ID = agentruntime.NewID("authoring-message")
+		message.ID = agent.NewID("authoring-message")
 	}
 	message.SessionID = run.SessionID
 	message.CreatedAt = now
@@ -186,7 +186,7 @@ func (d *DB) GetAuthoringStage(ctx context.Context, runID string) (*authoring.St
 		FROM authoring_stages WHERE run_id = ?`, runID))
 }
 
-func (d *DB) LoadAuthoringExecution(ctx context.Context, runID string) (*authoring.Stage, []agentruntime.Message, error) {
+func (d *DB) LoadAuthoringExecution(ctx context.Context, runID string) (*authoring.Stage, []agent.Message, error) {
 	stage, err := d.GetAuthoringStage(ctx, runID)
 	if err != nil {
 		return nil, nil, err
@@ -306,7 +306,7 @@ func (d *DB) FinalizeAuthoringRun(ctx context.Context, runID, content string, no
 	if err := tx.QueryRowContext(ctx, `SELECT runtime_session_id FROM authoring_sessions WHERE id = ?`, stage.SessionID).Scan(&runtimeSessionID); err != nil {
 		return nil, err
 	}
-	message := agentruntime.Message{ID: agentruntime.NewID("authoring-message"), SessionID: runtimeSessionID, Role: "assistant", Content: strings.TrimSpace(content), Metadata: []byte(metadata), CreatedAt: now.UTC()}
+	message := agent.Message{ID: agent.NewID("authoring-message"), SessionID: runtimeSessionID, Role: "assistant", Content: strings.TrimSpace(content), Metadata: []byte(metadata), CreatedAt: now.UTC()}
 	if err := insertAgentMessageTx(ctx, tx, &message); err != nil {
 		return nil, err
 	}
@@ -405,12 +405,12 @@ func requireRunningAuthoringRunTx(ctx context.Context, tx *Tx, runID, authoringS
 	var exists bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs
 		WHERE id = ? AND purpose = 'authoring' AND owner_kind = 'authoring-session' AND owner_ref = ? AND status = ?)`,
-		runID, authoringSessionID, agentruntime.RunRunning).Scan(&exists)
+		runID, authoringSessionID, agent.RunRunning).Scan(&exists)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return agentruntime.ErrRunActive
+		return agent.ErrRunActive
 	}
 	return nil
 }

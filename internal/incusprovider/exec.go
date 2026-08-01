@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/gorilla/websocket"
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
@@ -141,7 +141,7 @@ func (c *Client) nodeForExec(ctx context.Context, environmentUID, revision strin
 	return server, node, nil
 }
 
-func forwardTerminalResize(ctx context.Context, connection *websocket.Conn, resize <-chan terminal.Size) {
+func forwardTerminalResize(ctx context.Context, connection *websocket.Conn, resize <-chan environment.Size) {
 	defer func() { _ = connection.Close() }()
 	for {
 		select {

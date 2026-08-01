@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -97,7 +98,7 @@ func (h *Handler) streamAuthoringTurn(c *gin.Context, runID string) {
 		writeSSE(c, "complete", authoringStreamEvent{RunID: runID, Content: content})
 		return
 	}
-	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agentruntime.ErrRunActive) {
+	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
 		slog.Error("finalize direct authoring turn", "run_id", runID, "err", errors.Join(err, failErr))
 	}
 	if c.Request.Context().Err() == nil {
@@ -115,7 +116,7 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if session.State != authoring.StateIntentReview {
+	if session.State != authoringdomain.StateIntentReview {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current intent is not ready to generate"})
 		return
 	}
@@ -129,7 +130,7 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 	case active.State == generation.StateNeedsAuthorReview:
 		_, err = h.db.ResumeGenerationForRevision(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
 	default:
-		err = authoring.ErrInvalidState
+		err = authoringdomain.ErrInvalidState
 	}
 	if err != nil {
 		h.writeAuthoringError(c, err)
@@ -154,7 +155,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		return
 	}
 	if workflow.State != generation.StateNeedsAuthorReview || workflow.CandidateRevisionID == "" {
-		h.writeAuthoringError(c, authoring.ErrInvalidState)
+		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
 		return
 	}
 	revision, archive, err := h.readCandidateArchive(c.Request.Context(), workflow.CandidateRevisionID)
@@ -163,7 +164,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		return
 	}
 	if revision.Verification == nil || !revision.Verification.Passed || revision.Artifact == nil {
-		h.writeAuthoringError(c, authoring.ErrInvalidState)
+		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
 		return
 	}
 	inspected, err := generator.InspectCandidateArchive(archive)
@@ -173,7 +174,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	}
 	challengeID := challenge.NewID()
 	now := time.Now().UTC()
-	_, err = h.db.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, candidate.Publication{
+	_, err = h.db.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, generation.Publication{
 		ChallengeID: challengeID,
 		SourceSlug:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
 		TargetPath:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
@@ -195,7 +196,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 	authoringTurnActive := false
 	if active, err := h.db.GetActiveRunForSession(c.Request.Context(), session.RuntimeSessionID); err == nil {
 		authoringTurnActive = active.Purpose == "authoring" && active.OwnerKind == "authoring-session" && active.OwnerRef == session.ID
-	} else if !errors.Is(err, agentruntime.ErrNotFound) {
+	} else if !errors.Is(err, agent.ErrNotFound) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read active authoring run: %v", err)})
 		return
 	}
@@ -209,7 +210,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 		return
 	}
 
-	var visibleCandidate *candidate.Revision
+	var visibleCandidate *generation.Revision
 	var archive []byte
 	if revision.CandidateRevisionID != "" {
 		visibleCandidate, archive, err = h.readCandidateArchive(c.Request.Context(), revision.CandidateRevisionID)
@@ -251,7 +252,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, workflow, authoringTurnActive, messages, assets, diff, verified))
 }
 
-func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*candidate.Revision, []byte, error) {
+func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*generation.Revision, []byte, error) {
 	revision, err := h.db.GetCandidateRevision(ctx, id)
 	if err != nil {
 		return nil, nil, err
@@ -263,7 +264,7 @@ func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*candida
 	return revision, archive, nil
 }
 
-func toAPIAuthoringSession(session *authoring.Session, revision *authoring.Revision, visibleCandidate *candidate.Revision, workflow *generation.Workflow, turnActive bool, messages []authoring.Message, assets []authoring.Asset, diff []authoring.FileDiff, verified *authoring.VerifiedChallenge) api.AuthoringSession {
+func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoringdomain.Revision, visibleCandidate *generation.Revision, workflow *generation.Workflow, turnActive bool, messages []authoringdomain.Message, assets []authoring.Asset, diff []authoring.FileDiff, verified *authoringdomain.VerifiedChallenge) api.AuthoringSession {
 	var verification *api.AuthoringVerificationReport
 	if visibleCandidate != nil {
 		verification = toAPIAuthoringVerificationReport(visibleCandidate.Verification)
@@ -278,7 +279,7 @@ func toAPIAuthoringSession(session *authoring.Session, revision *authoring.Revis
 	}
 }
 
-func toAPIAuthoringCandidate(revision *candidate.Revision) *api.AuthoringCandidate {
+func toAPIAuthoringCandidate(revision *generation.Revision) *api.AuthoringCandidate {
 	if revision == nil {
 		return nil
 	}
@@ -306,7 +307,7 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 	}
 }
 
-func toAPIAuthoringVerificationReport(report *candidate.VerificationReport) *api.AuthoringVerificationReport {
+func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *api.AuthoringVerificationReport {
 	if report == nil {
 		return nil
 	}
@@ -321,7 +322,7 @@ func toAPIAuthoringVerificationReport(report *candidate.VerificationReport) *api
 	return &api.AuthoringVerificationReport{Passed: report.Passed, Summary: report.Summary, Answers: answers, Checkpoints: checkpoints}
 }
 
-func toAPIAuthoringPlan(plan authoring.Plan) api.AuthoringPlan {
+func toAPIAuthoringPlan(plan authoringdomain.Plan) api.AuthoringPlan {
 	checkpoints := make([]api.AuthoringCheckpoint, 0, len(plan.Checkpoints))
 	for _, checkpoint := range plan.Checkpoints {
 		checkpoints = append(checkpoints, api.AuthoringCheckpoint{Id: checkpoint.ID, Markdown: checkpoint.Markdown, Position: checkpoint.Position, Title: checkpoint.Title})
@@ -329,11 +330,11 @@ func toAPIAuthoringPlan(plan authoring.Plan) api.AuthoringPlan {
 	return api.AuthoringPlan{Checkpoints: checkpoints, Metadata: toAPIAuthoringMetadata(plan.Metadata), Overview: plan.Overview}
 }
 
-func toAPIAuthoringMetadata(metadata authoring.Metadata) api.AuthoringMetadata {
+func toAPIAuthoringMetadata(metadata authoringdomain.Metadata) api.AuthoringMetadata {
 	return api.AuthoringMetadata{Description: metadata.Description, Difficulty: api.AuthoringMetadataDifficulty(metadata.Difficulty), Runtime: api.AuthoringMetadataRuntime(metadata.Runtime), Title: metadata.Title}
 }
 
-func toAPIVerifiedChallenge(value *authoring.VerifiedChallenge) *api.VerifiedChallenge {
+func toAPIVerifiedChallenge(value *authoringdomain.VerifiedChallenge) *api.VerifiedChallenge {
 	if value == nil {
 		return nil
 	}
@@ -344,7 +345,7 @@ func toAPIVerifiedChallenge(value *authoring.VerifiedChallenge) *api.VerifiedCha
 	return &api.VerifiedChallenge{Checkpoints: checkpoints, Metadata: toAPIAuthoringMetadata(value.Metadata)}
 }
 
-func toAPIAuthoringMessages(messages []authoring.Message) []api.AuthoringMessage {
+func toAPIAuthoringMessages(messages []authoringdomain.Message) []api.AuthoringMessage {
 	result := make([]api.AuthoringMessage, 0, len(messages))
 	for _, message := range messages {
 		changes := make([]api.AuthoringChange, 0, len(message.Changes))
@@ -388,9 +389,9 @@ func optionalSlice[T any](values []T) *[]T {
 
 func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, authoring.ErrNotFound), errors.Is(err, candidate.ErrNotFound), errors.Is(err, db.ErrGenerationWorkflowNotFound):
+	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, db.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
-	case errors.Is(err, authoring.ErrVersionConflict), errors.Is(err, authoring.ErrInvalidState), errors.Is(err, candidate.ErrInvalidState):
+	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})

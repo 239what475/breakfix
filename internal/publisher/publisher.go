@@ -12,7 +12,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/generation"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/registry"
 )
@@ -56,51 +56,51 @@ func (e *Executor) DiscardCandidate(ctx context.Context, execution generation.Ex
 	return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *execution.Context.Candidate)
 }
 
-func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Execution, buildArchive []byte) (candidate.ArtifactReference, error) {
+func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Execution, buildArchive []byte) (generation.ArtifactReference, error) {
 	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateArtifactPublishing || execution.Context.Candidate == nil {
-		return candidate.ArtifactReference{}, errors.New("artifact publication requires an ArtifactPublishing workflow with a candidate")
+		return generation.ArtifactReference{}, errors.New("artifact publication requires an ArtifactPublishing workflow with a candidate")
 	}
 	view := execution.Context.Candidate
 	if view.Build == nil {
-		return candidate.ArtifactReference{}, errors.New("candidate has no build output")
+		return generation.ArtifactReference{}, errors.New("candidate has no build output")
 	}
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
 		if candidate.Digest(buildArchive) != view.Build.OCIArchiveSHA256 {
-			return candidate.ArtifactReference{}, errors.New("candidate OCI archive does not match the recorded build output")
+			return generation.ArtifactReference{}, errors.New("candidate OCI archive does not match the recorded build output")
 		}
 		root, err := os.MkdirTemp("", "breakfix-publisher-")
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
 		defer func() { _ = os.RemoveAll(root) }()
 		archivePath := filepath.Join(root, "candidate.oci.tar")
 		if err := os.WriteFile(archivePath, buildArchive, 0o400); err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
 		if err := registry.ValidateOCIArchive(archivePath); err != nil {
-			return candidate.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
+			return generation.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
 		}
 		target, err := e.candidateImage(view.ID)
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
 		if err := e.registry.PushOCIArchive(ctx, target, archivePath); err != nil {
-			return candidate.ArtifactReference{}, fmt.Errorf("publish candidate OCI image: %w", err)
+			return generation.ArtifactReference{}, fmt.Errorf("publish candidate OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
-		return candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return candidate.ArtifactReference{}, errors.New("node image publisher is unavailable")
+			return generation.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
 		build, err := nodeBuildResult(view.Build)
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
 		published, err := e.node.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
 			CandidateRevisionID: view.ID,
@@ -108,40 +108,40 @@ func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Exe
 			Build:               build,
 		})
 		if err != nil {
-			return candidate.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
+			return generation.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
 		}
-		return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return candidate.ArtifactReference{}, errors.New("candidate runtime is unsupported")
+		return generation.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Execution) (candidate.ArtifactReference, error) {
+func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Execution) (generation.ArtifactReference, error) {
 	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateChallengePublishing || execution.Context.Candidate == nil {
-		return candidate.ArtifactReference{}, errors.New("challenge publication requires a ChallengePublishing workflow with a candidate")
+		return generation.ArtifactReference{}, errors.New("challenge publication requires a ChallengePublishing workflow with a candidate")
 	}
 	view := execution.Context.Candidate
 	if view.Publication == nil || view.Artifact == nil {
-		return candidate.ArtifactReference{}, errors.New("candidate challenge publication has no intent or verified artifact")
+		return generation.ArtifactReference{}, errors.New("candidate challenge publication has no intent or verified artifact")
 	}
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
 		target, err := e.challengeImage(view.Publication.ChallengeID)
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
 		if err := e.registry.CopyImage(ctx, view.Artifact.OCIReference, target); err != nil {
-			return candidate.ArtifactReference{}, fmt.Errorf("publish final challenge OCI image: %w", err)
+			return generation.ArtifactReference{}, fmt.Errorf("publish final challenge OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return candidate.ArtifactReference{}, err
+			return generation.ArtifactReference{}, err
 		}
-		return candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return candidate.ArtifactReference{}, errors.New("node image publisher is unavailable")
+			return generation.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
 		published, err := e.node.PublishChallengeNodeImage(ctx, incusprovider.PublishChallengeNodeImageRequest{
 			CandidateRevisionID: view.ID,
@@ -151,11 +151,11 @@ func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Ex
 			},
 		})
 		if err != nil {
-			return candidate.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
+			return generation.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
 		}
-		return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return candidate.ArtifactReference{}, errors.New("candidate runtime is unsupported")
+		return generation.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
@@ -198,7 +198,7 @@ func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) 
 	}
 }
 
-func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view candidate.WorkerView) error {
+func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view generation.WorkerView) error {
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
 		candidateImage, err := e.candidateImage(view.ID)
@@ -243,7 +243,7 @@ func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view
 	}
 }
 
-func cleanupNodeFingerprint(view candidate.WorkerView) string {
+func cleanupNodeFingerprint(view generation.WorkerView) string {
 	if view.Artifact != nil && view.Artifact.IncusFingerprint != "" {
 		return view.Artifact.IncusFingerprint
 	}
@@ -258,7 +258,7 @@ func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve published OCI image: %w", err)
 	}
-	if err := (candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
+	if err := (generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
 		return "", fmt.Errorf("Registry returned an invalid immutable OCI reference: %w", err)
 	}
 	return immutable, nil
@@ -272,7 +272,7 @@ func (e *Executor) challengeImage(challengeID string) (string, error) {
 	return candidate.ChallengeOCIImageReference(e.registryRoot, challengeID)
 }
 
-func nodeBuildResult(build *candidate.BuildOutput) (incusprovider.BuildNodeImageResult, error) {
+func nodeBuildResult(build *generation.BuildOutput) (incusprovider.BuildNodeImageResult, error) {
 	if build == nil || build.Incus == nil {
 		return incusprovider.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
 	}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 func TestSaveArchiveAtomicAcceptsOnlyIdenticalRetry(t *testing.T) {
@@ -34,8 +36,8 @@ func TestSaveArchiveAtomicAcceptsOnlyIdenticalRetry(t *testing.T) {
 }
 
 func TestIDForGeneratorRunIsOpaqueAndStable(t *testing.T) {
-	first := IDForGeneratorRun("generator-run-one")
-	if first != IDForGeneratorRun("generator-run-one") || first == IDForGeneratorRun("generator-run-two") {
+	first := generation.IDForGeneratorRun("generator-run-one")
+	if first != generation.IDForGeneratorRun("generator-run-one") || first == generation.IDForGeneratorRun("generator-run-two") {
 		t.Fatalf("candidate IDs are not stable and unique: %q", first)
 	}
 }

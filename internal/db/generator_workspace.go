@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/workspace"
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
-func (d *DB) CreateGeneratorWorkspace(ctx context.Context, record workspace.Record) (*workspace.Record, error) {
+func (d *DB) CreateGeneratorWorkspace(ctx context.Context, record generation.Workspace) (*generation.Workspace, error) {
 	if record.State == "" {
-		record.State = workspace.StatePending
+		record.State = generation.WorkspacePending
 	}
-	if err := workspace.Validate(record); err != nil {
+	if err := generation.ValidateWorkspace(record); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
@@ -45,10 +45,10 @@ func (d *DB) CreateGeneratorWorkspace(ctx context.Context, record workspace.Reco
 	return existing, nil
 }
 
-func (d *DB) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (*workspace.Record, error) {
+func (d *DB) GetGeneratorWorkspace(ctx context.Context, generatorRunID string) (*generation.Workspace, error) {
 	record, err := scanGeneratorWorkspace(d.conn.QueryRowContext(ctx, generatorWorkspaceSelect+` WHERE generator_run_id = ?`, strings.TrimSpace(generatorRunID)))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, workspace.ErrNotFound
+		return nil, generation.ErrWorkspaceNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get generator workspace: %w", err)
@@ -66,7 +66,7 @@ func (d *DB) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID
 	result, err := d.conn.ExecContext(ctx, `UPDATE generator_workspaces
 		SET sandbox_id = ?, updated_at = ?
 		WHERE generator_run_id = ? AND state = ? AND (sandbox_id = '' OR sandbox_id = ?)`,
-		sandboxID, now, generatorRunID, workspace.StatePending, sandboxID)
+		sandboxID, now, generatorRunID, generation.WorkspacePending, sandboxID)
 	if err != nil {
 		return fmt.Errorf("record generator workspace sandbox: %w", err)
 	}
@@ -77,7 +77,7 @@ func (d *DB) RecordGeneratorWorkspaceSandbox(ctx context.Context, generatorRunID
 	if err != nil {
 		return err
 	}
-	if record.State == workspace.StatePending && record.SandboxID == sandboxID {
+	if record.State == generation.WorkspacePending && record.SandboxID == sandboxID {
 		return nil
 	}
 	return fmt.Errorf("generator workspace cannot record sandbox from state %q", record.State)
@@ -90,7 +90,7 @@ func (d *DB) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, san
 	result, err := d.conn.ExecContext(ctx, `UPDATE generator_workspaces
 		SET sandbox_id = ?, state = ?, updated_at = ?
 		WHERE generator_run_id = ? AND state IN (?, ?) AND (sandbox_id = '' OR sandbox_id = ?)`,
-		sandboxID, workspace.StateActive, now, generatorRunID, workspace.StatePending, workspace.StateActive, sandboxID)
+		sandboxID, generation.WorkspaceActive, now, generatorRunID, generation.WorkspacePending, generation.WorkspaceActive, sandboxID)
 	if err != nil {
 		return fmt.Errorf("activate generator workspace: %w", err)
 	}
@@ -101,13 +101,13 @@ func (d *DB) ActivateGeneratorWorkspace(ctx context.Context, generatorRunID, san
 	if err != nil {
 		return err
 	}
-	if record.State == workspace.StateActive && record.SandboxID == sandboxID {
+	if record.State == generation.WorkspaceActive && record.SandboxID == sandboxID {
 		return nil
 	}
 	return fmt.Errorf("generator workspace cannot become active from state %q", record.State)
 }
 
-func (d *DB) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID string, now time.Time) (*workspace.Record, error) {
+func (d *DB) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID string, now time.Time) (*generation.Workspace, error) {
 	if strings.TrimSpace(generatorRunID) == "" || now.IsZero() {
 		return nil, errors.New("generator workspace run and current time are required")
 	}
@@ -118,16 +118,16 @@ func (d *DB) BeginGeneratorWorkspaceCleanup(ctx context.Context, generatorRunID 
 	defer func() { _ = tx.Rollback() }()
 	record, err := scanGeneratorWorkspace(tx.QueryRowContext(ctx, generatorWorkspaceSelect+` WHERE generator_run_id = ? FOR UPDATE`, generatorRunID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, workspace.ErrNotFound
+		return nil, generation.ErrWorkspaceNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lock generator workspace cleanup: %w", err)
 	}
-	if record.State != workspace.StateDeleted && record.State != workspace.StateDeleting {
-		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, updated_at = ? WHERE generator_run_id = ?`, workspace.StateDeleting, now, generatorRunID); err != nil {
+	if record.State != generation.WorkspaceDeleted && record.State != generation.WorkspaceDeleting {
+		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, updated_at = ? WHERE generator_run_id = ?`, generation.WorkspaceDeleting, now, generatorRunID); err != nil {
 			return nil, fmt.Errorf("mark generator workspace deleting: %w", err)
 		}
-		record.State = workspace.StateDeleting
+		record.State = generation.WorkspaceDeleting
 		record.UpdatedAt = now
 	}
 	if err := tx.Commit(); err != nil {
@@ -143,35 +143,35 @@ func (d *DB) MarkGeneratorWorkspaceDeleted(ctx context.Context, generatorRunID s
 	result, err := d.conn.ExecContext(ctx, `UPDATE generator_workspaces
 		SET state = ?, updated_at = ?, deleted_at = ?
 		WHERE generator_run_id = ? AND state IN (?, ?)`,
-		workspace.StateDeleted, now, now, generatorRunID, workspace.StateDeleting, workspace.StateDeleted)
+		generation.WorkspaceDeleted, now, now, generatorRunID, generation.WorkspaceDeleting, generation.WorkspaceDeleted)
 	if err != nil {
 		return fmt.Errorf("mark generator workspace deleted: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return workspace.ErrNotFound
+		return generation.ErrWorkspaceNotFound
 	}
 	return nil
 }
 
-func (d *DB) ListExpiredPendingGeneratorWorkspaces(ctx context.Context, now time.Time) ([]workspace.Record, error) {
+func (d *DB) ListExpiredPendingGeneratorWorkspaces(ctx context.Context, now time.Time) ([]generation.Workspace, error) {
 	if now.IsZero() {
 		return nil, errors.New("current time is required")
 	}
-	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? AND provision_deadline <= ? ORDER BY provision_deadline, generator_run_id`, workspace.StatePending, now)
+	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? AND provision_deadline <= ? ORDER BY provision_deadline, generator_run_id`, generation.WorkspacePending, now)
 }
 
-func (d *DB) ListDeletingGeneratorWorkspaces(ctx context.Context) ([]workspace.Record, error) {
-	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? ORDER BY updated_at, generator_run_id`, workspace.StateDeleting)
+func (d *DB) ListDeletingGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
+	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? ORDER BY updated_at, generator_run_id`, generation.WorkspaceDeleting)
 }
 
-func (d *DB) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]workspace.Record, error) {
+func (d *DB) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
 	return listGeneratorWorkspaces(ctx, d.conn, `SELECT w.generator_run_id, w.namespace, w.pvc_name, w.sandbox_id, w.state,
 		w.provision_deadline, w.created_at, w.updated_at, w.deleted_at
 		FROM generator_workspaces w
 		JOIN agent_runs r ON r.id = w.generator_run_id
 		WHERE w.state IN (?, ?) AND r.status IN (?, ?, ?)
 		ORDER BY w.updated_at, w.generator_run_id`,
-		workspace.StatePending, workspace.StateActive, agentruntime.RunSucceeded, agentruntime.RunFailed, agentruntime.RunCancelled)
+		generation.WorkspacePending, generation.WorkspaceActive, agent.RunSucceeded, agent.RunFailed, agent.RunCancelled)
 }
 
 const generatorWorkspaceSelect = `SELECT generator_run_id, namespace, pvc_name, sandbox_id, state, provision_deadline, created_at, updated_at, deleted_at FROM generator_workspaces`
@@ -180,13 +180,13 @@ type generatorWorkspaceQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func listGeneratorWorkspaces(ctx context.Context, query generatorWorkspaceQuerier, statement string, args ...any) ([]workspace.Record, error) {
+func listGeneratorWorkspaces(ctx context.Context, query generatorWorkspaceQuerier, statement string, args ...any) ([]generation.Workspace, error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list generator workspaces: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	result := make([]workspace.Record, 0)
+	result := make([]generation.Workspace, 0)
 	for rows.Next() {
 		record, err := scanGeneratorWorkspace(rows)
 		if err != nil {
@@ -204,8 +204,8 @@ type generatorWorkspaceScanner interface {
 	Scan(...any) error
 }
 
-func scanGeneratorWorkspace(row generatorWorkspaceScanner) (*workspace.Record, error) {
-	var record workspace.Record
+func scanGeneratorWorkspace(row generatorWorkspaceScanner) (*generation.Workspace, error) {
+	var record generation.Workspace
 	var deletedAt sql.NullTime
 	if err := row.Scan(&record.GeneratorRunID, &record.Namespace, &record.PVCName, &record.SandboxID, &record.State,
 		&record.ProvisionDeadline, &record.CreatedAt, &record.UpdatedAt, &deletedAt); err != nil {

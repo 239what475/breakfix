@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/terminal"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -244,7 +244,7 @@ dd if="$1" iflag=skip_bytes,count_bytes skip="$2" count="$3" status=none | base6
 // ExecPTY opens a named tmux window through a PTY session. The tmux session
 // remains in the workspace Pod, so reconnecting a browser tab preserves shell
 // state and opening another tab never creates another user environment.
-func (c *Client) ExecPTY(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, resize <-chan terminal.Size, namespace, podName, sessionName, windowName string) error {
+func (c *Client) ExecPTY(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, resize <-chan environment.Size, namespace, podName, sessionName, windowName string) error {
 	command := fmt.Sprintf(`export TERM=xterm-256color
 if ! tmux has-session -t %[1]s 2>/dev/null; then
   tmux new-session -d -s %[1]s -n %[2]s
@@ -317,7 +317,7 @@ func shellQuote(s string) string {
 }
 
 type sizeQueue struct {
-	ch <-chan terminal.Size
+	ch <-chan environment.Size
 }
 
 func (q *sizeQueue) Next() *remotecommand.TerminalSize {

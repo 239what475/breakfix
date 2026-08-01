@@ -6,6 +6,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
@@ -13,7 +14,7 @@ import (
 // of an artifact handoff. A worker may report only the staging repository or
 // alias derived from the claimed candidate; a syntactically valid reference to
 // another candidate is never an acceptable result.
-func (h *Handler) validateCandidateStagingArtifact(view candidate.WorkerView, artifact candidate.ArtifactReference) error {
+func (h *Handler) validateCandidateStagingArtifact(view generation.WorkerView, artifact generation.ArtifactReference) error {
 	if err := artifact.Validate(view.Snapshot.Runtime); err != nil {
 		return err
 	}
@@ -45,16 +46,16 @@ func (h *Handler) validateCandidateStagingArtifact(view candidate.WorkerView, ar
 		}
 		return nil
 	default:
-		return candidate.ErrInvalidState
+		return generation.ErrCandidateInvalidState
 	}
 }
 
 // validateCandidateChallengeArtifact enforces both final-artifact ownership and
 // content identity. Publishing must not turn a candidate artifact into a
 // different image merely because both values are valid immutable references.
-func (h *Handler) validateCandidateChallengeArtifact(view candidate.WorkerView, artifact candidate.ArtifactReference) error {
+func (h *Handler) validateCandidateChallengeArtifact(view generation.WorkerView, artifact generation.ArtifactReference) error {
 	if view.Publication == nil || view.Artifact == nil {
-		return candidate.ErrInvalidState
+		return generation.ErrCandidateInvalidState
 	}
 	if err := artifact.Validate(view.Snapshot.Runtime); err != nil {
 		return err
@@ -95,6 +96,6 @@ func (h *Handler) validateCandidateChallengeArtifact(view candidate.WorkerView, 
 		}
 		return nil
 	default:
-		return candidate.ErrInvalidState
+		return generation.ErrCandidateInvalidState
 	}
 }

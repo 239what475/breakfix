@@ -9,6 +9,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 var errCandidatePublicationInvariant = errors.New("candidate publication invariant breach")
@@ -16,9 +17,9 @@ var errCandidatePublicationInvariant = errors.New("candidate publication invaria
 // materializeCandidatePublication is the Server-owned final filesystem write.
 // Generate Worker only publishes the immutable runtime artifact and reports it
 // under its GenerationWorkflow lease.
-func (h *Handler) materializeCandidatePublication(revision *candidate.Revision) (*challenge.Entry, error) {
+func (h *Handler) materializeCandidatePublication(revision *generation.Revision) (*challenge.Entry, error) {
 	if revision == nil || revision.Publication == nil || revision.Publication.Artifact == nil {
-		return nil, candidate.ErrInvalidState
+		return nil, generation.ErrCandidateInvalidState
 	}
 	publication := revision.Publication
 	intent := *publication

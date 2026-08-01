@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/authoring"
-	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/generation"
+	app "github.com/breakfix/breakfix/internal/application/generation"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 )
 
@@ -23,8 +23,8 @@ type Store interface {
 	Claim(context.Context, string, time.Duration) (*generation.Claim, error)
 	Renew(context.Context, generation.Claim, time.Duration) error
 	Context(context.Context, generation.Claim) (*generation.Context, error)
-	StartAgentRun(context.Context, generation.Claim, generation.StartAgentRunRequest) (*generation.StartAgentRunResponse, error)
-	Phase(context.Context, generation.Claim, generation.PhaseRequest) (*generation.Claim, error)
+	StartAgentRun(context.Context, generation.Claim, app.StartAgentRunRequest) (*app.StartAgentRunResponse, error)
+	Phase(context.Context, generation.Claim, app.PhaseRequest) (*generation.Claim, error)
 	CandidateArchive(context.Context, generation.Claim) ([]byte, string, error)
 	K8sBase(context.Context, generation.Claim) ([]byte, string, error)
 	BuildArchive(context.Context, generation.Claim) ([]byte, string, error)
@@ -44,13 +44,13 @@ type BuilderExecutor interface {
 
 type PublisherExecutor interface {
 	DiscardCandidate(context.Context, generation.Execution) error
-	PublishArtifact(context.Context, generation.Execution, []byte) (candidate.ArtifactReference, error)
-	PublishChallenge(context.Context, generation.Execution) (candidate.ArtifactReference, error)
+	PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error)
+	PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error)
 	Cleanup(context.Context, generation.Execution) error
 }
 
 type VerifierExecutor interface {
-	Execute(context.Context, generation.Execution, func(context.Context, candidate.VerificationEnvironment) error) (candidate.VerificationReport, error)
+	Execute(context.Context, generation.Execution, func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error)
 }
 
 type Config struct {
@@ -191,7 +191,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 				return nil, fmt.Errorf("discard superseded candidate: %w", err)
 			}
 		}
-		run, err := w.store.StartAgentRun(ctx, claim, generation.StartAgentRunRequest{
+		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
 			Purpose: generator.GeneratorPurpose, Model: w.config.Model, PromptVersion: generator.GeneratorPromptVersion,
 		})
 		if err != nil {
@@ -201,10 +201,10 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{GeneratedCandidate: &generation.GeneratedCandidateResult{RunID: run.Run.ID, Archive: archive}})
+		return w.store.Phase(ctx, claim, app.PhaseRequest{GeneratedCandidate: &generation.GeneratedCandidate{RunID: run.Run.ID, Archive: archive}})
 
 	case generation.StateJudging:
-		run, err := w.store.StartAgentRun(ctx, claim, generation.StartAgentRunRequest{
+		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
 			Purpose: generator.JudgePurpose, Model: w.config.Model, PromptVersion: generator.JudgePromptVersion,
 		})
 		if err != nil {
@@ -222,7 +222,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{Judgement: &generation.Judgement{
+		return w.store.Phase(ctx, claim, app.PhaseRequest{Judgement: &generation.Judgement{
 			RunID: run.Run.ID, Approved: judgement.Approved, Feedback: judgement.Feedback,
 		}})
 
@@ -242,7 +242,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{Build: &result})
+		return w.store.Phase(ctx, claim, app.PhaseRequest{Build: &result})
 
 	case generation.StateArtifactPublishing:
 		var archive []byte
@@ -257,11 +257,11 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{ArtifactPublish: &generation.ArtifactPublishResult{Artifact: artifact}})
+		return w.store.Phase(ctx, claim, app.PhaseRequest{ArtifactPublish: &generation.ArtifactPublishResult{Artifact: artifact}})
 
 	case generation.StateVerifying:
-		report, err := w.verifier.Execute(ctx, execution, func(recordCtx context.Context, environment candidate.VerificationEnvironment) error {
-			next, phaseErr := w.store.Phase(recordCtx, lease.current(), generation.PhaseRequest{
+		report, err := w.verifier.Execute(ctx, execution, func(recordCtx context.Context, environment generation.VerificationEnvironment) error {
+			next, phaseErr := w.store.Phase(recordCtx, lease.current(), app.PhaseRequest{
 				VerificationEnvironment: &generation.VerificationEnvironmentResult{Environment: environment},
 			})
 			if phaseErr == nil && next != nil {
@@ -272,14 +272,14 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, lease.current(), generation.PhaseRequest{Verification: &generation.VerificationResult{Report: report}})
+		return w.store.Phase(ctx, lease.current(), app.PhaseRequest{Verification: &generation.VerificationResult{Report: report}})
 
 	case generation.StateChallengePublishing:
 		artifact, err := w.publisher.PublishChallenge(ctx, execution)
 		if err != nil {
 			return nil, err
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{ChallengePublish: &generation.ChallengePublishResult{Artifact: artifact}})
+		return w.store.Phase(ctx, claim, app.PhaseRequest{ChallengePublish: &generation.ChallengePublishResult{Artifact: artifact}})
 
 	case generation.StateCleaningUp:
 		if execution.Context.Candidate != nil {
@@ -287,7 +287,7 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 				return nil, err
 			}
 		}
-		return w.store.Phase(ctx, claim, generation.PhaseRequest{Cleanup: &generation.CleanupResult{}})
+		return w.store.Phase(ctx, claim, app.PhaseRequest{Cleanup: &generation.CleanupResult{}})
 	default:
 		return nil, fmt.Errorf("generate worker cannot execute workflow state %s", claim.Workflow.State)
 	}
@@ -307,7 +307,7 @@ func (w *Worker) reportError(ctx context.Context, lease *workflowLease, claim ge
 		return nil, nil
 	default:
 	}
-	request := generation.PhaseRequest{}
+	request := app.PhaseRequest{}
 	var artifact *generation.ArtifactError
 	if errors.As(executionErr, &artifact) {
 		request.ArtifactFailure = &generation.ArtifactFailureResult{Failure: artifact.Failure, Report: artifact.Report}
