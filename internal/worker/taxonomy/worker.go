@@ -1,6 +1,6 @@
-// Package taxonomyworker executes one complete TaxonomyWorkflow lease at a
+// Package taxonomy executes one complete TaxonomyWorkflow lease at a
 // time. Server remains the only database and taxonomy-filesystem writer.
-package taxonomyworker
+package taxonomy
 
 import (
 	"context"

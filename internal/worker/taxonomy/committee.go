@@ -1,4 +1,4 @@
-package taxonomyworker
+package taxonomy
 
 import (
 	"context"

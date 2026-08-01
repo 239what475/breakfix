@@ -9,9 +9,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/breakfix/breakfix/internal/adapter/internalapi"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/taxonomy"
-	"github.com/breakfix/breakfix/internal/taxonomyworker"
+	"github.com/breakfix/breakfix/internal/worker/taxonomy"
 	"github.com/breakfix/breakfix/internal/workerhealth"
 )
 
@@ -28,11 +28,11 @@ func main() {
 	if err := cfg.ValidateTaxonomyWorker(); err != nil {
 		fatal("validate Taxonomy Worker configuration", err)
 	}
-	client, err := taxonomy.NewClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
+	client, err := internalapi.NewTaxonomyWorkflowClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		fatal("create taxonomy workflow client", err)
 	}
-	worker, err := taxonomyworker.New(client, cfg.Agent, taxonomyworker.Config{WorkerID: *workerID})
+	worker, err := taxonomy.New(client, cfg.Agent, taxonomy.Config{WorkerID: *workerID})
 	if err != nil {
 		fatal("create Taxonomy Worker", err)
 	}
