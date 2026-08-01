@@ -27,7 +27,7 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 		for (let turn = 1; turn <= 20; turn++) {
 			const message = turn === 1
 				? `第 ${turn} 次验证：回答前必须调用 get_terminal_scrollback（shell-1）、get_checkpoint_status 和 get_solution。` +
-					`只根据工具结果说明你看到的 ${marker}。最终回复使用 Markdown，包含二级标题、无序列表、表格和代码块。`
+					`只根据工具结果说明你看到的 ${marker}。`
 				: `第 ${turn} 次连续运行检查：基于已经保存的会话，用一句中文给出下一步学习建议；不要执行任何环境操作。`;
 			await composer.fill(message);
 			await page.getByRole("button", { name: "Send message" }).click();

@@ -12,6 +12,8 @@ Thumbs.db
 data/*
 !data/challenges/
 !data/challenges/**
+!data/taxonomy/
+!data/taxonomy/**
 
 # Local certificate material
 *.pem

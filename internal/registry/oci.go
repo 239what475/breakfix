@@ -49,7 +49,7 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	registryAddress, repository, reference, err := imageReference(imageName)
+	_, repository, reference, err := imageReference(imageName)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 		return err
 	}
 
-	rootDescriptor, err := c.pullManifest(ctx, registryAddress, repository, reference, layout)
+	rootDescriptor, err := c.pullManifest(ctx, repository, reference, layout)
 	if err != nil {
 		return err
 	}
@@ -84,8 +84,8 @@ func (c Client) PullOCIArchive(ctx context.Context, imageName, destination strin
 	return nil
 }
 
-func (c Client) pullManifest(ctx context.Context, registryAddress, repository, reference, layout string) (ociDescriptor, error) {
-	body, mediaType, digest, err := c.getManifest(ctx, registryAddress, repository, reference)
+func (c Client) pullManifest(ctx context.Context, repository, reference, layout string) (ociDescriptor, error) {
+	body, mediaType, digest, err := c.getManifest(ctx, repository, reference)
 	if err != nil {
 		return ociDescriptor{}, err
 	}
@@ -99,24 +99,24 @@ func (c Client) pullManifest(ctx context.Context, registryAddress, repository, r
 	}
 	if len(manifest.Manifests) != 0 {
 		for _, child := range manifest.Manifests {
-			if _, err := c.pullManifest(ctx, registryAddress, repository, child.Digest, layout); err != nil {
+			if _, err := c.pullManifest(ctx, repository, child.Digest, layout); err != nil {
 				return ociDescriptor{}, err
 			}
 		}
 		return descriptor, nil
 	}
-	if err := c.pullBlob(ctx, registryAddress, repository, manifest.Config, layout); err != nil {
+	if err := c.pullBlob(ctx, repository, manifest.Config, layout); err != nil {
 		return ociDescriptor{}, err
 	}
 	for _, layer := range manifest.Layers {
-		if err := c.pullBlob(ctx, registryAddress, repository, layer, layout); err != nil {
+		if err := c.pullBlob(ctx, repository, layer, layout); err != nil {
 			return ociDescriptor{}, err
 		}
 	}
 	return descriptor, nil
 }
 
-func (c Client) pullBlob(ctx context.Context, registryAddress, repository string, descriptor ociDescriptor, layout string) error {
+func (c Client) pullBlob(ctx context.Context, repository string, descriptor ociDescriptor, layout string) error {
 	if err := validateDigest(descriptor.Digest); err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (c Client) pullBlob(ctx context.Context, registryAddress, repository string
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/blobs/"+url.PathEscape(descriptor.Digest)), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registryURL("/v2/"+repositoryPath(repository)+"/blobs/"+url.PathEscape(descriptor.Digest)), nil)
 	if err != nil {
 		return err
 	}
@@ -161,8 +161,8 @@ func (c Client) pullBlob(ctx context.Context, registryAddress, repository string
 	return nil
 }
 
-func (c Client) getManifest(ctx context.Context, registryAddress, repository, reference string) ([]byte, string, string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), nil)
+func (c Client) getManifest(ctx context.Context, repository, reference string) ([]byte, string, string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.registryURL("/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), nil)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -209,7 +209,7 @@ func (c Client) PushOCIArchive(ctx context.Context, imageName, archivePath strin
 	if err := c.Credentials.Validate(); err != nil {
 		return err
 	}
-	registryAddress, repository, reference, err := imageReference(imageName)
+	_, repository, reference, err := imageReference(imageName)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (c Client) PushOCIArchive(ctx context.Context, imageName, archivePath strin
 		return err
 	}
 	for _, blob := range blobs {
-		if err := c.pushBlob(ctx, registryAddress, repository, blob.digest, blob.path); err != nil {
+		if err := c.pushBlob(ctx, repository, blob.digest, blob.path); err != nil {
 			return err
 		}
 	}
@@ -241,7 +241,7 @@ func (c Client) PushOCIArchive(ctx context.Context, imageName, archivePath strin
 	if descriptor.Digest != "sha256:"+sha256Hex(manifest) {
 		return fmt.Errorf("OCI root manifest digest mismatch")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), strings.NewReader(string(manifest)))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, c.registryURL("/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), strings.NewReader(string(manifest)))
 	if err != nil {
 		return err
 	}
@@ -320,8 +320,8 @@ func listOCIBlobs(root string) ([]ociBlob, error) {
 	return blobs, nil
 }
 
-func (c Client) pushBlob(ctx context.Context, registryAddress, repository, digest, path string) error {
-	head, err := http.NewRequestWithContext(ctx, http.MethodHead, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/blobs/"+url.PathEscape(digest)), nil)
+func (c Client) pushBlob(ctx context.Context, repository, digest, path string) error {
+	head, err := http.NewRequestWithContext(ctx, http.MethodHead, c.registryURL("/v2/"+repositoryPath(repository)+"/blobs/"+url.PathEscape(digest)), nil)
 	if err != nil {
 		return err
 	}
@@ -337,7 +337,7 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	if response.StatusCode != http.StatusNotFound {
 		return fmt.Errorf("check registry blob %s: status %d", digest, response.StatusCode)
 	}
-	start, err := http.NewRequestWithContext(ctx, http.MethodPost, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/blobs/uploads/"), nil)
+	start, err := http.NewRequestWithContext(ctx, http.MethodPost, c.registryURL("/v2/"+repositoryPath(repository)+"/blobs/uploads/"), nil)
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func (c Client) pushBlob(ctx context.Context, registryAddress, repository, diges
 	if status != http.StatusAccepted || location == "" {
 		return fmt.Errorf("start registry blob upload: status %d", status)
 	}
-	uploadURL, err := c.resolveLocation(registryAddress, location)
+	uploadURL, err := c.resolveLocation(location)
 	if err != nil {
 		return err
 	}
@@ -395,7 +395,7 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	if err != nil {
 		return "", err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, c.registryURL(registryAddress, "/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, c.registryURL("/v2/"+repositoryPath(repository)+"/manifests/"+url.PathEscape(reference)), nil)
 	if err != nil {
 		return "", err
 	}
@@ -416,25 +416,25 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	return registryAddress + "/" + repository + "@" + digest, nil
 }
 
-func (c Client) registryURL(registryAddress, path string) string {
-	return "https://" + registryAddress + path
+func (c Client) registryURL(path string) string {
+	return "https://" + c.endpoint + path
 }
 
-func (c Client) resolveLocation(registryAddress, location string) (string, error) {
+func (c Client) resolveLocation(location string) (string, error) {
 	parsed, err := url.Parse(location)
 	if err != nil {
 		return "", err
 	}
 	if parsed.IsAbs() {
-		if parsed.Scheme != "https" {
+		if parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 			return "", fmt.Errorf("registry upload location must use HTTPS")
 		}
-		return parsed.String(), nil
+		return c.registryURL(parsed.RequestURI()), nil
 	}
 	if parsed.Host != "" {
 		return "", fmt.Errorf("registry upload location must use HTTPS")
 	}
-	return c.registryURL(registryAddress, location), nil
+	return c.registryURL(location), nil
 }
 
 func (c Client) httpClient() *http.Client {

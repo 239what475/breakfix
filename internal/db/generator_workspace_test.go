@@ -14,7 +14,7 @@ func TestGeneratorWorkspacePersistsAgainstGeneratorRun(t *testing.T) {
 	ctx := context.Background()
 	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "generator-run-one", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
-		Model: "test", PromptVersion: "test", ExecutionTimeout: time.Hour,
+		Model: "test", PromptVersion: "test",
 	}); err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
@@ -51,10 +51,11 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(time.Microsecond)
-	if _, err := database.CreateRun(ctx, agentruntime.CreateRun{
+	run, err := database.CreateRun(ctx, agentruntime.CreateRun{
 		ID: "generator-run-pending", Purpose: "generator", OwnerKind: "authoring-session", OwnerRef: "authoring-one",
-		Model: "test", PromptVersion: "test", ExecutionTimeout: time.Hour,
-	}); err != nil {
+		Model: "test", PromptVersion: "test",
+	})
+	if err != nil {
 		t.Fatalf("create generator run: %v", err)
 	}
 	if _, err := database.CreateGeneratorWorkspace(ctx, workspace.Record{
@@ -63,8 +64,8 @@ func TestListTerminalGeneratorWorkspacesIncludesPendingWorkspace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create pending workspace: %v", err)
 	}
-	if err := database.Cancel(ctx, "generator-run-pending", now.Add(time.Second)); err != nil {
-		t.Fatalf("cancel generator run: %v", err)
+	if err := database.FailRun(ctx, run.ID, "workspace cleanup", now.Add(time.Second)); err != nil {
+		t.Fatalf("finish generator run: %v", err)
 	}
 	workspaces, err := database.ListTerminalGeneratorWorkspaces(ctx)
 	if err != nil {

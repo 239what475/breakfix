@@ -12,7 +12,7 @@ import (
 
 func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 	handler := NewHandler(nil, nil, config.Config{
-		Registry: config.RegistryConfig{Address: "registry.breakfix.internal/breakfix"},
+		Registry: config.RegistryConfig{Address: "registry.example.com/breakfix", ClientAddress: "registry.example.com"},
 		Incus:    incusprovider.Config{NamePrefix: "bf"},
 	})
 	const fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -27,7 +27,7 @@ func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 		if err := handler.validateCandidateStagingArtifact(view, staging); err != nil {
 			t.Fatalf("validate staging artifact: %v", err)
 		}
-		wrongRepository := candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.breakfix.internal/breakfix/candidates/other@sha256:" + fingerprint}
+		wrongRepository := candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example.com/breakfix/candidates/other@sha256:" + fingerprint}
 		if err := handler.validateCandidateStagingArtifact(view, wrongRepository); err == nil {
 			t.Fatal("accepted an OCI artifact from another candidate repository")
 		}

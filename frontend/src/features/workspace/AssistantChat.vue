@@ -5,10 +5,9 @@ import MarkdownIt from "markdown-it";
 import {
   api,
   streamAssistantMessage,
-  subscribeAssistantTurn,
   type AssistantStreamHandlers,
 } from "../../api/client";
-import type { AssistantMessage, AssistantTerminalContext, AssistantTurn } from "../../api/types";
+import type { AssistantMessage, AssistantTerminalContext } from "../../api/types";
 
 const props = defineProps<{
   challengeId: string;
@@ -22,7 +21,7 @@ const error = ref("");
 const status = ref("");
 const draft = ref("");
 const messages = ref<AssistantMessage[]>([]);
-const activeTurn = ref<AssistantTurn>();
+const activeRunID = ref("");
 const timeline = ref<HTMLElement>();
 let streamController: AbortController | undefined;
 let animationFrame: number | undefined;
@@ -73,8 +72,8 @@ function isAbortError(err: unknown) {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-function partialID(turnID: string) {
-  return `assistant-turn-${turnID}`;
+function partialID(runID: string) {
+	return `assistant-run-${runID}`;
 }
 
 function stopSubscription() {
@@ -85,31 +84,27 @@ function stopSubscription() {
   pendingDelta = "";
 }
 
-function partialMessage(turn: AssistantTurn) {
-  const id = partialID(turn.id);
+function partialMessage(runID: string) {
+	const id = partialID(runID);
   let message = messages.value.find((item) => item.id === id);
   if (!message) {
     message = {
       id,
       role: "assistant",
-      content: turn.content,
-      evidence: turn.evidence,
-      created_at: turn.created_at,
+      content: "",
+      created_at: new Date().toISOString(),
     };
     messages.value = [...messages.value, message];
-  } else {
-    message.content = turn.content;
-    message.evidence = turn.evidence;
   }
   return message;
 }
 
 function flushDelta() {
   animationFrame = undefined;
-  const turn = activeTurn.value;
-  if (!turn || !pendingDelta) return;
-  turn.content += pendingDelta;
-  partialMessage(turn).content = turn.content;
+	const runID = activeRunID.value;
+	if (!runID || !pendingDelta) return;
+	const message = partialMessage(runID);
+	message.content += pendingDelta;
   pendingDelta = "";
   void scrollToLatest();
 }
@@ -120,45 +115,44 @@ function queueDelta(content: string) {
   if (animationFrame === undefined) animationFrame = requestAnimationFrame(flushDelta);
 }
 
-function finishTurn(complete: { turn_id: string; message: AssistantMessage }) {
-  flushDelta();
-  const id = partialID(complete.turn_id);
+function finishTurn(complete: { run_id: string; message: AssistantMessage }) {
+	flushDelta();
+	const id = partialID(complete.run_id);
   let replaced = false;
   messages.value = messages.value.map((message) =>
     message.id === id ? ((replaced = true), complete.message) : message,
   );
   if (!replaced) messages.value = [...messages.value, complete.message];
-  activeTurn.value = undefined;
+	activeRunID.value = "";
   sending.value = false;
   status.value = "";
   void scrollToLatest();
 }
 
 function failTurn(message: string) {
-  flushDelta();
-  const turn = activeTurn.value;
-  if (turn) messages.value = messages.value.filter((item) => item.id !== partialID(turn.id));
-  activeTurn.value = undefined;
+	flushDelta();
+	const runID = activeRunID.value;
+	if (runID) messages.value = messages.value.filter((item) => item.id !== partialID(runID));
+	activeRunID.value = "";
   sending.value = false;
   status.value = "";
   error.value = message;
 }
 
 function streamHandlers(): AssistantStreamHandlers {
-  return {
-    onEvent(event) {
-      if (event.type === "ready" && event.turn) {
-        activeTurn.value = event.turn;
-        partialMessage(event.turn);
-        sending.value = true;
+	return {
+		onEvent(event) {
+			if (event.type === "ready") {
+				activeRunID.value = event.run_id;
+				partialMessage(event.run_id);
+				sending.value = true;
         error.value = "";
         status.value = "正在分析...";
       }
       if (event.type === "tool") status.value = toolStatus(event.tool);
-      if (event.type === "reset" && activeTurn.value) {
-        pendingDelta = "";
-        activeTurn.value.content = "";
-        partialMessage(activeTurn.value).content = "";
+			if (event.type === "reset" && activeRunID.value) {
+				pendingDelta = "";
+				partialMessage(activeRunID.value).content = "";
         status.value = "正在重新分析...";
       }
       if (event.type === "delta") queueDelta(event.content ?? "");
@@ -172,38 +166,14 @@ function streamHandlers(): AssistantStreamHandlers {
   };
 }
 
-async function followTurn(turnID: string) {
-  while (activeTurn.value?.id === turnID) {
-    const controller = new AbortController();
-    streamController = controller;
-    try {
-      await subscribeAssistantTurn(props.challengeId, turnID, streamHandlers(), controller.signal);
-    } catch (err) {
-      if (isAbortError(err)) return;
-      error.value = err instanceof Error ? err.message : "Assistant stream disconnected";
-    }
-    if (!activeTurn.value || controller.signal.aborted) return;
-    await new Promise((resolve) => window.setTimeout(resolve, 750));
-  }
-}
-
-function attachActiveTurn(turn: AssistantTurn) {
-  activeTurn.value = turn;
-  partialMessage(turn);
-  sending.value = true;
-  status.value = "正在分析...";
-  void followTurn(turn.id);
-}
-
 async function loadConversation() {
   stopSubscription();
   loading.value = true;
   error.value = "";
   try {
-    const conversation = await api.getChallengeAssistant(props.challengeId);
-    messages.value = conversation.messages;
-    if (conversation.active_turn) attachActiveTurn(conversation.active_turn);
-    await scrollToLatest();
+		const conversation = await api.getChallengeAssistant(props.challengeId);
+		messages.value = conversation.messages;
+		await scrollToLatest();
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Unable to load assistant";
   } finally {
@@ -229,7 +199,7 @@ async function send() {
   try {
     const controller = new AbortController();
     streamController = controller;
-    await streamAssistantMessage(
+		await streamAssistantMessage(
       props.challengeId,
       {
         content,
@@ -238,17 +208,13 @@ async function send() {
         terminals: props.terminals,
       },
       streamHandlers(),
-      controller.signal,
-    );
-	const turnID = activeTurn.value?.id;
-	if (turnID && !controller.signal.aborted) void followTurn(turnID);
-  } catch (err) {
-    if (isAbortError(err)) return;
-    error.value = err instanceof Error ? err.message : "Assistant request failed";
-    const turnID = activeTurn.value?.id;
-    if (turnID) void followTurn(turnID);
-  } finally {
-    if (!activeTurn.value) {
+			controller.signal,
+		);
+	} catch (err) {
+		if (isAbortError(err)) return;
+		error.value = err instanceof Error ? err.message : "Assistant request failed";
+	} finally {
+		if (!activeRunID.value) {
       sending.value = false;
       status.value = "";
     }
@@ -272,7 +238,7 @@ watch(
     status.value = "";
     draft.value = "";
     messages.value = [];
-    activeTurn.value = undefined;
+		activeRunID.value = "";
     await loadConversation();
   },
   { immediate: true },

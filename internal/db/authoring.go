@@ -11,10 +11,12 @@ import (
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/authoring"
-	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.UserID) == "" {
+		return nil, errors.New("authoring session requires id and user")
+	}
 	now := time.Now().UTC()
 	session.State = authoring.StateDraftConversation
 	session.CurrentRevision = 0
@@ -24,63 +26,58 @@ func (d *DB) CreateAuthoringSession(ctx context.Context, session authoring.Sessi
 	if session.RuntimeSessionID == "" {
 		session.RuntimeSessionID = agentruntime.NewID("authoring-session")
 	}
-	planJSON, err := json.Marshal(plan)
+	planJSON, err := marshalJSON(plan)
 	if err != nil {
-		return nil, fmt.Errorf("marshal initial authoring plan: %w", err)
+		return nil, fmt.Errorf("encode initial authoring plan: %w", err)
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin authoring session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
 		(id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.RuntimeSessionID, "authoring", "authoring-session", session.ID, session.UserID, agentruntime.SessionActive, now, now); err != nil {
-		return nil, fmt.Errorf("insert authoring agent session: %w", err)
+		VALUES (?, 'authoring', 'authoring-session', ?, ?, ?, ?, ?)`,
+		session.RuntimeSessionID, session.ID, session.UserID, agentruntime.SessionActive, now, now); err != nil {
+		return nil, fmt.Errorf("create authoring agent session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
-		(id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision, publish_challenge_id, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.RuntimeSessionID, "", "", "", session.State, session.CurrentRevision, session.VisibleRevision, "", "", nowText(now), nowText(now)); err != nil {
-		return nil, fmt.Errorf("insert authoring session: %w", err)
+		(id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision, publish_challenge_id, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, '', ?, 0, 0, '', '', ?, ?)`,
+		session.ID, session.UserID, session.RuntimeSessionID, session.State, nowText(now), nowText(now)); err != nil {
+		return nil, fmt.Errorf("create authoring session: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, created_at)
-		VALUES (?, ?, ?, ?)`, session.ID, 0, string(planJSON), nowText(now)); err != nil {
-		return nil, fmt.Errorf("insert initial authoring revision: %w", err)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
+		VALUES (?, 0, ?::jsonb, '', ?)`, session.ID, planJSON, nowText(now)); err != nil {
+		return nil, fmt.Errorf("create initial authoring revision: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("commit authoring session: %w", err)
 	}
 	return &session, nil
 }
 
 func (d *DB) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at
-		FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
 }
 
 func (d *DB) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at
-		FROM authoring_sessions WHERE user_id = ? AND state != ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions
+		WHERE user_id = ? AND state <> ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
 }
 
 func (d *DB) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
-	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at
-		FROM authoring_sessions WHERE id = ?`, id)
+	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
+		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`, id)
 }
 
 func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any) (*authoring.Session, error) {
 	var session authoring.Session
-	var state string
-	var createdAt, updatedAt string
-	err := d.conn.QueryRowContext(ctx, query, args...).Scan(
-		&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID, &session.GeneratorRunID, &session.CandidateRevisionID,
-		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt,
-	)
+	var state, createdAt, updatedAt string
+	err := d.conn.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID,
+		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
@@ -94,35 +91,37 @@ func (d *DB) readAuthoringSession(ctx context.Context, query string, args ...any
 }
 
 func (d *DB) GetAuthoringRevision(ctx context.Context, sessionID string, revision int64) (*authoring.Revision, error) {
-	var planJSON, candidateRevisionID, createdAt string
-	var number int64
-	err := d.conn.QueryRowContext(ctx, `SELECT revision, plan_json, candidate_revision_id, created_at FROM authoring_revisions
-		WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(
-		&number, &planJSON, &candidateRevisionID, &createdAt,
-	)
+	return readAuthoringRevision(d.conn.QueryRowContext(ctx, `SELECT revision, plan_json, candidate_revision_id, created_at
+		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision))
+}
+
+func readAuthoringRevision(row agentRow) (*authoring.Revision, error) {
+	var revision authoring.Revision
+	var planJSON, createdAt string
+	err := row.Scan(&revision.Number, &planJSON, &revision.CandidateRevisionID, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read authoring revision: %w", err)
 	}
-	return decodeAuthoringRevision(number, planJSON, candidateRevisionID, createdAt)
-}
-
-func decodeAuthoringRevision(number int64, planJSON, candidateRevisionID, createdAt string) (*authoring.Revision, error) {
-	var plan authoring.Plan
-	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+	if err := json.Unmarshal([]byte(planJSON), &revision.Plan); err != nil {
 		return nil, fmt.Errorf("decode authoring plan: %w", err)
 	}
-	return &authoring.Revision{Number: number, Plan: plan, CandidateRevisionID: candidateRevisionID, CreatedAt: parseAuthoringTime(createdAt)}, nil
+	revision.CreatedAt = parseAuthoringTime(createdAt)
+	return &revision, nil
 }
 
-// StartAuthoringRun atomically records a user message, creates its durable
-// Agent Run, and snapshots a private Plan stage. Nothing is publicly revised
-// until FinalizeAuthoringRun commits the corresponding attempt.
+func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, number int64) (*authoring.Revision, error) {
+	return readAuthoringRevision(tx.QueryRowContext(ctx, `SELECT revision, plan_json, candidate_revision_id, created_at
+		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, number))
+}
+
+// StartAuthoringRun persists the user message and starts a direct Server-owned
+// model call. No worker queue participates in an authoring conversation.
 func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, message agentruntime.Message, run agentruntime.CreateRun) (*authoring.Stage, *agentruntime.Run, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || message.Role != "user" || strings.TrimSpace(message.Content) == "" {
-		return nil, nil, errors.New("authoring run requires session, user, and user message")
+		return nil, nil, errors.New("authoring run requires a user message")
 	}
 	if err := agentruntime.ValidateCreateRun(run); err != nil {
 		return nil, nil, err
@@ -139,24 +138,11 @@ func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, me
 	if err != nil {
 		return nil, nil, err
 	}
-	if !authoring.AllowsAgentPlanStage(session.State) || session.RuntimeSessionID == "" {
+	if !authoring.AllowsAgentPlanStage(session.State) || session.RuntimeSessionID == "" || run.SessionID != session.RuntimeSessionID ||
+		run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.OwnerRef != session.ID {
 		return nil, nil, authoring.ErrInvalidState
 	}
-	if run.SessionID != session.RuntimeSessionID || run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.OwnerRef != session.ID {
-		return nil, nil, errors.New("authoring run ownership is invalid")
-	}
-	var runtimeStatus agentruntime.SessionStatus
-	err = tx.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE id = ? FOR UPDATE`, run.SessionID).Scan(&runtimeStatus)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, agentruntime.ErrNotFound
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("lock authoring agent session: %w", err)
-	}
-	if runtimeStatus != agentruntime.SessionActive {
-		return nil, nil, errors.New("authoring agent session is not active")
-	}
-	if err := ensureNoActiveSessionRun(ctx, tx, run.SessionID); err != nil {
+	if err := lockActiveSessionTx(ctx, tx, run.SessionID); err != nil {
 		return nil, nil, err
 	}
 	base, err := readAuthoringRevisionTx(ctx, tx, session.ID, session.CurrentRevision)
@@ -176,28 +162,18 @@ func (d *DB) StartAuthoringRun(ctx context.Context, sessionID, userID string, me
 	if err != nil {
 		return nil, nil, err
 	}
-	planJSON, err := json.Marshal(base.Plan)
+	planJSON, err := marshalJSON(base.Plan)
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode initial authoring stage: %w", err)
+		return nil, nil, err
 	}
-	stage := &authoring.Stage{
-		RunID:         created.ID,
-		SessionID:     session.ID,
-		BaseRevision:  base.Number,
-		StageRevision: base.Number,
-		Plan:          base.Plan,
-		Changes:       []authoring.Change{},
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
+	stage := &authoring.Stage{RunID: created.ID, SessionID: session.ID, BaseRevision: base.Number, StageRevision: base.Number, Plan: base.Plan, Changes: []authoring.Change{}, CreatedAt: now, UpdatedAt: now}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_stages
 		(run_id, session_id, base_revision, stage_revision, plan_json, changes_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?::jsonb, '[]'::jsonb, ?, ?)`,
-		stage.RunID, stage.SessionID, stage.BaseRevision, stage.StageRevision, string(planJSON), now, now); err != nil {
-		return nil, nil, fmt.Errorf("insert authoring stage: %w", err)
+		VALUES (?, ?, ?, ?, ?::jsonb, '[]'::jsonb, ?, ?)`, stage.RunID, stage.SessionID, stage.BaseRevision, stage.StageRevision, planJSON, now, now); err != nil {
+		return nil, nil, fmt.Errorf("create authoring stage: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET updated_at = ? WHERE id = ?`, nowText(now), session.ID); err != nil {
-		return nil, nil, fmt.Errorf("touch authoring session: %w", err)
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("commit authoring run: %w", err)
@@ -210,10 +186,28 @@ func (d *DB) GetAuthoringStage(ctx context.Context, runID string) (*authoring.St
 		FROM authoring_stages WHERE run_id = ?`, runID))
 }
 
-// UpdateAuthoringStage applies one Server-validated tool mutation. The lease
-// and stage revision prevent stale Workers from changing a newer attempt.
-func (d *DB) UpdateAuthoringStage(ctx context.Context, claim agentruntime.Claim, expectedStageRevision int64, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
-	if !claim.Valid() || expectedStageRevision < 0 || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
+func (d *DB) LoadAuthoringExecution(ctx context.Context, runID string) (*authoring.Stage, []agentruntime.Message, error) {
+	stage, err := d.GetAuthoringStage(ctx, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var sessionID string
+	err = d.conn.QueryRowContext(ctx, `SELECT runtime_session_id FROM authoring_sessions WHERE id = ?`, stage.SessionID).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, authoring.ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("load authoring session for execution: %w", err)
+	}
+	messages, err := d.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return stage, messages, nil
+}
+
+func (d *DB) UpdateAuthoringStage(ctx context.Context, runID string, expectedStageRevision int64, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
+	if strings.TrimSpace(runID) == "" || expectedStageRevision < 0 || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
 		return nil, errors.New("authoring stage update is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -221,174 +215,120 @@ func (d *DB) UpdateAuthoringStage(ctx context.Context, claim agentruntime.Claim,
 		return nil, fmt.Errorf("begin authoring stage update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := validateLeaseTx(ctx, tx, claim, time.Now().UTC()); err != nil {
-		return nil, err
-	}
 	stage, err := readAuthoringStage(tx.QueryRowContext(ctx, `SELECT run_id, session_id, base_revision, stage_revision, plan_json, changes_json, created_at, updated_at
-		FROM authoring_stages WHERE run_id = ? FOR UPDATE`, claim.Run.ID))
+		FROM authoring_stages WHERE run_id = ? FOR UPDATE`, runID))
 	if err != nil {
 		return nil, err
 	}
 	if stage.StageRevision != expectedStageRevision {
 		return nil, authoring.ErrVersionConflict
 	}
-	session, err := readAuthoringSessionTx(ctx, tx, stage.SessionID, "")
+	if err := requireRunningAuthoringRunTx(ctx, tx, stage.RunID, stage.SessionID); err != nil {
+		return nil, err
+	}
+	planJSON, err := marshalJSON(plan)
 	if err != nil {
 		return nil, err
 	}
-	if session.RuntimeSessionID != claim.Run.SessionID || !authoring.AllowsAgentPlanStage(session.State) {
-		return nil, authoring.ErrInvalidState
-	}
-	planJSON, err := json.Marshal(plan)
-	if err != nil {
-		return nil, fmt.Errorf("encode staged authoring plan: %w", err)
-	}
-	// All staged mutations become the same single public Revision if the Run
-	// succeeds, so expose that eventual revision rather than private stage hops.
 	change.Revision = stage.BaseRevision + 1
 	stage.Changes = append(stage.Changes, change)
-	changesJSON, err := json.Marshal(stage.Changes)
+	changesJSON, err := marshalJSON(stage.Changes)
 	if err != nil {
-		return nil, fmt.Errorf("encode staged authoring changes: %w", err)
+		return nil, err
 	}
 	now := time.Now().UTC()
 	stage.StageRevision++
 	stage.Plan = plan
 	stage.UpdatedAt = now
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_stages
-		SET stage_revision = ?, plan_json = ?::jsonb, changes_json = ?::jsonb, updated_at = ? WHERE run_id = ?`,
-		stage.StageRevision, string(planJSON), string(changesJSON), now, stage.RunID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_stages SET stage_revision = ?, plan_json = ?::jsonb, changes_json = ?::jsonb, updated_at = ? WHERE run_id = ?`,
+		stage.StageRevision, planJSON, changesJSON, now, stage.RunID); err != nil {
 		return nil, fmt.Errorf("update authoring stage: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET updated_at = ? WHERE id = ?`, nowText(now), stage.SessionID); err != nil {
-		return nil, fmt.Errorf("touch staged authoring session: %w", err)
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit authoring stage update: %w", err)
+		return nil, err
 	}
 	return stage, nil
 }
 
-// FinalizeAuthoringRun atomically makes at most one public Revision visible,
-// stores the final Assistant message, and completes the matching Agent Run.
-func (d *DB) FinalizeAuthoringRun(ctx context.Context, claim agentruntime.Claim, content string) (*authoring.Revision, error) {
-	content = strings.TrimSpace(content)
-	if !claim.Valid() || content == "" {
-		return nil, errors.New("authoring finalization requires lease and message")
+func (d *DB) FinalizeAuthoringRun(ctx context.Context, runID, content string, now time.Time) (*authoring.Revision, error) {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(content) == "" || now.IsZero() {
+		return nil, errors.New("authoring finalization requires run and content")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin authoring finalization: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UTC()
-	if err := validateLeaseTx(ctx, tx, claim, now); err != nil {
-		return nil, err
-	}
 	stage, err := readAuthoringStage(tx.QueryRowContext(ctx, `SELECT run_id, session_id, base_revision, stage_revision, plan_json, changes_json, created_at, updated_at
-		FROM authoring_stages WHERE run_id = ? FOR UPDATE`, claim.Run.ID))
+		FROM authoring_stages WHERE run_id = ? FOR UPDATE`, runID))
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `SELECT id FROM authoring_sessions WHERE id = ? FOR UPDATE`, stage.SessionID); err != nil {
-		return nil, fmt.Errorf("lock finalizing authoring session: %w", err)
+	if err := requireRunningAuthoringRunTx(ctx, tx, stage.RunID, stage.SessionID); err != nil {
+		return nil, err
 	}
 	session, err := readAuthoringSessionTx(ctx, tx, stage.SessionID, "")
 	if err != nil {
 		return nil, err
 	}
-	if session.RuntimeSessionID != claim.Run.SessionID || session.CurrentRevision != stage.BaseRevision || !authoring.AllowsAgentPlanStage(session.State) {
+	if session.CurrentRevision != stage.BaseRevision || !authoring.AllowsAgentPlanStage(session.State) {
 		return nil, authoring.ErrInvalidState
 	}
-	var revision *authoring.Revision
+	revision := &authoring.Revision{Number: session.CurrentRevision, Plan: stage.Plan, CreatedAt: now.UTC()}
 	if len(stage.Changes) > 0 {
 		if err := stage.Plan.ValidateForGeneration(); err != nil {
 			return nil, err
 		}
-		planJSON, err := json.Marshal(stage.Plan)
+		planJSON, err := marshalJSON(stage.Plan)
 		if err != nil {
-			return nil, fmt.Errorf("encode finalized authoring plan: %w", err)
+			return nil, err
 		}
-		next := stage.BaseRevision + 1
-		if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, created_at)
-			VALUES (?, ?, ?, ?)`, session.ID, next, string(planJSON), nowText(now)); err != nil {
-			return nil, fmt.Errorf("insert finalized authoring revision: %w", err)
+		revision.Number = stage.BaseRevision + 1
+		if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
+			VALUES (?, ?, ?::jsonb, '', ?)`, stage.SessionID, revision.Number, planJSON, nowText(now)); err != nil {
+			return nil, fmt.Errorf("create finalized authoring revision: %w", err)
 		}
-		nextState := authoring.NextPlanRevisionState(session.State)
-		if nextState == authoring.StateRevisingAndVerifying {
-			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, generator_run_id = '', candidate_revision_id = '', last_error = '', updated_at = ? WHERE id = ?`,
-				next, nextState, nowText(now), session.ID); err != nil {
-				return nil, fmt.Errorf("update finalized authoring session: %w", err)
-			}
-		} else if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, last_error = '', updated_at = ? WHERE id = ?`,
-			next, nextState, nowText(now), session.ID); err != nil {
-			return nil, fmt.Errorf("update finalized authoring session: %w", err)
+		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, last_error = '', updated_at = ? WHERE id = ?`,
+			revision.Number, authoring.StateIntentReview, nowText(now), stage.SessionID); err != nil {
+			return nil, fmt.Errorf("advance authoring revision: %w", err)
 		}
-		revision = &authoring.Revision{Number: next, Plan: stage.Plan, CreatedAt: now}
-	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET updated_at = ? WHERE id = ?`, nowText(now), session.ID); err != nil {
-			return nil, fmt.Errorf("touch finalized authoring session: %w", err)
-		}
-		revision = &authoring.Revision{Number: session.CurrentRevision, Plan: stage.Plan, CreatedAt: now}
 	}
-	metadata, err := json.Marshal(struct {
+	metadata, err := marshalJSON(struct {
 		Changes []authoring.Change `json:"changes"`
 	}{Changes: stage.Changes})
 	if err != nil {
-		return nil, fmt.Errorf("encode authoring final message metadata: %w", err)
+		return nil, err
 	}
-	message := agentruntime.Message{ID: agentruntime.NewID("authoring-message"), SessionID: claim.Run.SessionID, Role: "assistant", Content: content, Metadata: metadata, CreatedAt: now}
+	var runtimeSessionID string
+	if err := tx.QueryRowContext(ctx, `SELECT runtime_session_id FROM authoring_sessions WHERE id = ?`, stage.SessionID).Scan(&runtimeSessionID); err != nil {
+		return nil, err
+	}
+	message := agentruntime.Message{ID: agentruntime.NewID("authoring-message"), SessionID: runtimeSessionID, Role: "assistant", Content: strings.TrimSpace(content), Metadata: []byte(metadata), CreatedAt: now.UTC()}
 	if err := insertAgentMessageTx(ctx, tx, &message); err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ?`, agentruntime.RunSucceeded, now, now, claim.Run.ID, agentruntime.RunRunning)
-	if err != nil {
-		return nil, fmt.Errorf("complete finalized authoring run: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return nil, agentruntime.ErrLeaseLost
-	}
-	if err := completeAgentWorkItemTx(ctx, tx, claim, worklist.StateSucceeded, "", "", now); err != nil {
+	if err := completeRunTx(ctx, tx, stage.RunID, now.UTC()); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM authoring_stages WHERE run_id = ?`, stage.RunID); err != nil {
-		return nil, fmt.Errorf("delete finalized authoring stage: %w", err)
+		return nil, fmt.Errorf("delete completed authoring stage: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit authoring finalization: %w", err)
+		return nil, err
 	}
 	return revision, nil
 }
 
-func validateLeaseTx(ctx context.Context, tx *Tx, claim agentruntime.Claim, now time.Time) error {
-	_, err := lockAgentClaim(ctx, tx, claim, now)
-	return err
-}
-
-func readAuthoringStage(row agentRow) (*authoring.Stage, error) {
-	var stage authoring.Stage
-	var planJSON, changesJSON []byte
-	err := row.Scan(&stage.RunID, &stage.SessionID, &stage.BaseRevision, &stage.StageRevision, &planJSON, &changesJSON, &stage.CreatedAt, &stage.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, authoring.ErrNotFound
+func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string, expected int64, plan authoring.Plan, _ authoring.SessionState) (*authoring.Revision, error) {
+	if err := plan.ValidateForGeneration(); err != nil {
+		return nil, err
 	}
+	planJSON, err := marshalJSON(plan)
 	if err != nil {
-		return nil, fmt.Errorf("read authoring stage: %w", err)
-	}
-	if err := json.Unmarshal(planJSON, &stage.Plan); err != nil {
-		return nil, fmt.Errorf("decode authoring stage plan: %w", err)
-	}
-	if err := json.Unmarshal(changesJSON, &stage.Changes); err != nil {
-		return nil, fmt.Errorf("decode authoring stage changes: %w", err)
-	}
-	return &stage, nil
-}
-
-func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string, expected int64, plan authoring.Plan, state authoring.SessionState) (*authoring.Revision, error) {
-	planJSON, err := json.Marshal(plan)
-	if err != nil {
-		return nil, fmt.Errorf("marshal authoring plan: %w", err)
+		return nil, err
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -404,21 +344,13 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 	}
 	next := expected + 1
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, created_at)
-		VALUES (?, ?, ?, ?)`, sessionID, next, string(planJSON), nowText(now)); err != nil {
-		return nil, fmt.Errorf("insert authoring revision: %w", err)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
+		VALUES (?, ?, ?::jsonb, '', ?)`, sessionID, next, planJSON, nowText(now)); err != nil {
+		return nil, err
 	}
-	// A changed intent starts a new candidate lineage while the previous
-	// verified revision remains author-visible until its replacement passes.
-	if state == authoring.StateRevisingAndVerifying {
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions
-				SET current_revision = ?, state = ?, generator_run_id = '', candidate_revision_id = '', last_error = '', updated_at = ?
-			WHERE id = ? AND user_id = ?`, next, state, nowText(now), sessionID, userID); err != nil {
-			return nil, fmt.Errorf("update authoring session revision: %w", err)
-		}
-	} else if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, last_error = '', updated_at = ?
-		WHERE id = ? AND user_id = ?`, next, state, nowText(now), sessionID, userID); err != nil {
-		return nil, fmt.Errorf("update authoring session revision: %w", err)
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, last_error = '', updated_at = ? WHERE id = ? AND user_id = ?`,
+		next, authoring.StateIntentReview, nowText(now), sessionID, userID); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -427,18 +359,17 @@ func (d *DB) ReplaceAuthoringPlan(ctx context.Context, sessionID, userID string,
 }
 
 func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {
-	query := `SELECT id, user_id, runtime_session_id, generator_session_id, generator_run_id, candidate_revision_id, state, current_revision, visible_revision,
+	query := `SELECT id, user_id, runtime_session_id, generator_session_id, state, current_revision, visible_revision,
 		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
 	args := []any{id}
 	if userID != "" {
-		query += " AND user_id = ?"
+		query += ` AND user_id = ?`
 		args = append(args, userID)
 	}
 	var session authoring.Session
 	var state, createdAt, updatedAt string
 	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID, &session.GeneratorSessionID,
-		&session.GeneratorRunID, &session.CandidateRevisionID, &state, &session.CurrentRevision, &session.VisibleRevision,
-		&session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
+		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
@@ -451,17 +382,37 @@ func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*au
 	return &session, nil
 }
 
-func readAuthoringRevisionTx(ctx context.Context, tx *Tx, sessionID string, revision int64) (*authoring.Revision, error) {
-	var planJSON, candidateRevisionID, createdAt string
-	err := tx.QueryRowContext(ctx, `SELECT plan_json, candidate_revision_id, created_at
-		FROM authoring_revisions WHERE session_id = ? AND revision = ?`, sessionID, revision).Scan(&planJSON, &candidateRevisionID, &createdAt)
+func readAuthoringStage(row agentRow) (*authoring.Stage, error) {
+	var stage authoring.Stage
+	var planJSON, changesJSON []byte
+	err := row.Scan(&stage.RunID, &stage.SessionID, &stage.BaseRevision, &stage.StageRevision, &planJSON, &changesJSON, &stage.CreatedAt, &stage.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return decodeAuthoringRevision(revision, planJSON, candidateRevisionID, createdAt)
+	if err := json.Unmarshal(planJSON, &stage.Plan); err != nil {
+		return nil, fmt.Errorf("decode authoring stage plan: %w", err)
+	}
+	if err := json.Unmarshal(changesJSON, &stage.Changes); err != nil {
+		return nil, fmt.Errorf("decode authoring stage changes: %w", err)
+	}
+	return &stage, nil
+}
+
+func requireRunningAuthoringRunTx(ctx context.Context, tx *Tx, runID, authoringSessionID string) error {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs
+		WHERE id = ? AND purpose = 'authoring' AND owner_kind = 'authoring-session' AND owner_ref = ? AND status = ?)`,
+		runID, authoringSessionID, agentruntime.RunRunning).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return agentruntime.ErrRunActive
+	}
+	return nil
 }
 
 func nowText(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }

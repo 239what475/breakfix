@@ -77,14 +77,14 @@ type vclusterCommand interface {
 }
 
 type kubernetesVK8sProvider struct {
-	k8s                    *k8s.Client
-	vcluster               vclusterCommand
-	namespacePrefix        string
-	controlNamespace       string
-	registryPullSecret     string
-	verifierServiceAccount string
-	chartRepo              string
-	chartVersion           string
+	k8s                        *k8s.Client
+	vcluster                   vclusterCommand
+	namespacePrefix            string
+	controlNamespace           string
+	registryPullSecret         string
+	verificationServiceAccount string
+	chartRepo                  string
+	chartVersion               string
 }
 
 func (p *kubernetesVK8sProvider) EnvironmentIdentity(environmentUID string) (VK8sEnvironmentIdentity, error) {
@@ -117,8 +117,8 @@ func (p *kubernetesVK8sProvider) Provision(ctx context.Context, request VK8sProv
 		return VK8sEnvironmentObservation{}, fmt.Errorf("ensure runtime service account: %w", err)
 	}
 	if request.Purpose == breakfixv1.EnvironmentPurposeVerification {
-		if err := p.k8s.EnsureVerifierWorkspaceExecAccess(request.Identity.Namespace, p.controlNamespace, p.verifierServiceAccount); err != nil {
-			return VK8sEnvironmentObservation{}, fmt.Errorf("ensure verifier terminal access: %w", err)
+		if err := p.k8s.EnsureVerificationWorkspaceExecAccess(request.Identity.Namespace, p.controlNamespace, p.verificationServiceAccount); err != nil {
+			return VK8sEnvironmentObservation{}, fmt.Errorf("ensure verification terminal access: %w", err)
 		}
 	}
 	if err := p.ensureVCluster(ctx, request); err != nil {

@@ -8,16 +8,19 @@ health_port: 8081
 # Persistent server state: artifacts and the filesystem challenge catalog.
 data_dir: ./data
 # PostgreSQL is the only relational database. The Server data directory is not
-# a database volume and must not be shared with the Controller or Agent Worker.
+# a database volume and must not be shared with the Controller or Generate Worker.
 database_url: ${BREAKFIX_DATABASE_URL}
 kubeconfig: ~/.kube/config
 
 # Registry address includes the repository namespace used for challenge images.
-# It can point to the bundled private Registry or an operator-provided OCI
-# Registry such as Harbor. An internal CA bundle is mounted only by Server and
-# Publisher; Kubernetes nodes must independently trust that CA before pulling.
+# Production always uses an operator-provided OCI Registry such as Harbor or a
+# cloud Registry. Kubernetes nodes must independently trust and reach it before
+# pulling challenge images.
 registry:
-  address: registry.breakfix.internal/breakfix
+  address: registry.example.com/breakfix
+  # HTTPS authority used by Server and Generate Worker. It normally matches
+  # address's authority; Kind development uses the in-cluster Registry Service.
+  client_address: registry.example.com
   # Optional for registries that allow anonymous pulls.
   pull_secret: breakfix-registry-pull
   # Leave empty for a publicly trusted Registry certificate.
@@ -37,10 +40,8 @@ cooldown_minutes: 5
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
 internal_workers:
-  agent: ${BREAKFIX_AGENT_WORKER_API_KEY}
-  builder: ${BREAKFIX_BUILDER_WORKER_API_KEY}
-  publisher: ${BREAKFIX_PUBLISHER_WORKER_API_KEY}
-  verifier: ${BREAKFIX_VERIFIER_WORKER_API_KEY}
+  generate: ${BREAKFIX_GENERATE_WORKER_API_KEY}
+  taxonomy: ${BREAKFIX_TAXONOMY_WORKER_API_KEY}
 # Internal endpoint and identity environment used by fixed workers. Production
 # workers receive only BREAKFIX_WORKER_API_KEY from their role-specific Secret.
 worker:
@@ -55,7 +56,7 @@ agent:
   request_timeout: 2m
 
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
-# lifecycle API key is only present in the Server process, never Agent Worker.
+# lifecycle API key is only present in the Server process, never a Generate Worker.
 # Each Generator Run creates one ManualCleanup Sandbox and Server deletes the
 # Sandbox and PVC when that Run reaches a terminal state.
 opensandbox:
@@ -77,10 +78,10 @@ runtime:
     profile_revision: node-profile-v1
     network_policy_revision: node-network-v1
   k8s:
-    base_image_digest: registry.breakfix.internal/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    base_image_digest: registry.example.com/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     profile_revision: vk8s-profile-v1
     version: v1.36.2
-    management_terminal_image: registry.breakfix.internal/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    management_terminal_image: registry.example.com/breakfix/k8s-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     resources:
       control_plane_cpu: 500m
       control_plane_memory: 512Mi

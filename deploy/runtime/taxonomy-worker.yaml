@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: breakfix-taxonomy-worker
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: breakfix-taxonomy-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: breakfix-taxonomy-worker
+    spec:
+      serviceAccountName: breakfix-taxonomy-worker
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: taxonomy-worker
+          image: ghcr.io/breakfix/breakfix-taxonomy-worker:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/etc/breakfix/config.yaml"]
+          ports:
+            - name: health
+              containerPort: 8081
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: BREAKFIX_WORKER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-taxonomy-worker-identity
+                  key: worker_api_key
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: deepseek_api_key
+          volumeMounts:
+            - name: config
+              mountPath: /etc/breakfix
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: breakfix-config
+        - name: tmp
+          emptyDir: {}

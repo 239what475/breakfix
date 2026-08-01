@@ -142,14 +142,12 @@ type Role string
 const (
 	RoleController Role = "controller"
 	RoleServer     Role = "server"
-	RoleBuilder    Role = "builder"
-	RolePublisher  Role = "publisher"
-	RoleVerifier   Role = "verifier"
+	RoleGenerate   Role = "generate"
 )
 
 func (r Role) Valid() bool {
 	switch r {
-	case RoleController, RoleServer, RoleBuilder, RolePublisher, RoleVerifier:
+	case RoleController, RoleServer, RoleGenerate:
 		return true
 	default:
 		return false

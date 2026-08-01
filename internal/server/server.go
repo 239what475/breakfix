@@ -23,24 +23,18 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 	if h.startupErr != nil {
 		return nil, h.startupErr
 	}
-	if err := h.RecoverCandidatePublications(runCtx); err != nil {
-		return nil, err
-	}
-	if err := h.RecoverExpiredWork(runCtx); err != nil {
+	if err := h.RecoverExpiredGenerationWorkflows(runCtx); err != nil {
 		return nil, err
 	}
 	if err := h.validateStartup(); err != nil {
 		return nil, err
 	}
-	if h.taxonomyWorkflow != nil {
-		h.taxonomyWorkflow.Start(runCtx)
-	}
+	h.StartTaxonomyWorkflowMaintenance(runCtx)
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	h.StartGeneratorWorkspaceCleanup(runCtx)
-	h.StartCandidatePublicationRecovery(runCtx)
-	h.StartWorkDeadlineRecovery(runCtx)
+	h.StartGenerationDeadlineRecovery(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := auth.JWTMiddleware(jwtSecret)
 	optionalJWTMW := auth.OptionalJWTMiddleware(jwtSecret)
@@ -61,7 +55,7 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 		}
 		c.Status(http.StatusOK)
 	})
-	router.GET("/metrics", h.WorklistMetrics)
+	router.GET("/metrics", h.WorkflowMetrics)
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
@@ -140,12 +134,6 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.SendChallengeAssistantMessage(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/challenges/:id/assistant/turns/:turnID/events", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.StreamChallengeAssistantTurn(c, c.Param("id"), c.Param("turnID"))
-		}
-	})
 	router.POST("/api/challenges/:id/reset", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -200,41 +188,24 @@ func SetupRouter(runCtx context.Context, database *db.DB, k8sClient *k8s.Client,
 			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/internal/agent-runs/:id/assistant/context", h.InternalAssistantContext)
-	router.POST("/api/internal/agent-runs/:id/assistant/tools/:tool", h.InternalAssistantTool)
-	router.POST("/api/internal/agent-runs/:id/assistant/events", h.InternalAssistantEvent)
-	router.POST("/api/internal/agent-runs/:id/authoring/context", h.InternalAuthoringContext)
-	router.POST("/api/internal/agent-runs/:id/authoring/stage", h.InternalAuthoringStage)
-	router.POST("/api/internal/agent-runs/:id/authoring/finalize", h.InternalAuthoringFinalize)
-	router.POST("/api/internal/agent-runs/:id/taxonomy/context", h.InternalTaxonomyContext)
-	router.POST("/api/internal/agent-runs/:id/taxonomy/mapper/finalize", h.InternalTaxonomyFinalizeMapper)
-	router.POST("/api/internal/agent-runs/:id/taxonomy/review/finalize", h.InternalTaxonomyFinalizeReviewPair)
-	router.POST("/api/internal/agent-runs/:id/generator/context", h.InternalGeneratorContext)
-	router.POST("/api/internal/agent-runs/:id/generator/files/read", h.InternalGeneratorReadFile)
-	router.POST("/api/internal/agent-runs/:id/generator/files/write", h.InternalGeneratorWriteFile)
-	router.POST("/api/internal/agent-runs/:id/generator/execute", h.InternalGeneratorExecute)
-	router.POST("/api/internal/agent-runs/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
-	router.POST("/api/internal/agent-runs/:id/generator/finalize", h.InternalGeneratorFinalizeCandidate)
-	router.POST("/api/internal/work-items/agent/claim", h.InternalClaimAgentWork)
-	router.POST("/api/internal/work-items/inspect", h.InternalInspectWorkItems)
-	router.POST("/api/internal/work-items/:kind/claim", h.InternalClaimCandidateWork)
-	router.POST("/api/internal/work-items/:kind/:id/renew", h.InternalRenewCandidateWork)
-	router.POST("/api/internal/work-items/:kind/:id/requeue", h.InternalRequeueCandidateWork)
-	router.POST("/api/internal/work-items/:kind/:id/candidate/archive", h.InternalDownloadCandidateArchive)
-	router.POST("/api/internal/work-items/:kind/:id/k8s/base", h.InternalDownloadCandidateK8sBase)
-	router.POST("/api/internal/work-items/:kind/:id/build/archive", h.InternalDownloadCandidateBuildArchive)
-	router.POST("/api/internal/work-items/:kind/:id/complete/build", h.InternalCompleteCandidateBuild)
-	router.POST("/api/internal/work-items/:kind/:id/complete/artifact-publish", h.InternalCompleteCandidateArtifactPublish)
-	router.POST("/api/internal/work-items/:kind/:id/verify/environment", h.InternalRecordCandidateVerificationEnvironment)
-	router.POST("/api/internal/work-items/:kind/:id/complete/verify", h.InternalCompleteCandidateVerification)
-	router.POST("/api/internal/work-items/:kind/:id/fail/artifact", h.InternalFailCandidateArtifact)
-	router.POST("/api/internal/work-items/:kind/:id/complete/cleanup", h.InternalCompleteCandidateCleanup)
-	router.POST("/api/internal/work-items/:kind/:id/complete/challenge-publish", h.InternalCompleteCandidateChallengePublish)
-	router.POST("/api/internal/agent-runs/:id/status", h.InternalAgentRunStatus)
-	router.POST("/api/internal/agent-runs/:id/renew", h.InternalRenewAgentWork)
-	router.POST("/api/internal/agent-runs/:id/requeue", h.InternalRequeueAgentWork)
-	router.POST("/api/internal/agent-runs/:id/complete", h.InternalCompleteAgentWork)
-	router.POST("/api/internal/agent-runs/:id/fail", h.InternalFailAgentWork)
+	router.POST("/api/internal/generation-workflows/claim", h.InternalClaimGenerationWorkflow)
+	router.POST("/api/internal/generation-workflows/:id/renew", h.InternalRenewGenerationWorkflow)
+	router.POST("/api/internal/generation-workflows/:id/context", h.InternalGenerationContext)
+	router.POST("/api/internal/generation-workflows/:id/agent-runs", h.InternalStartGenerationAgentRun)
+	router.POST("/api/internal/generation-workflows/:id/phase", h.InternalGenerationPhase)
+	router.POST("/api/internal/generation-workflows/:id/candidate/archive", h.InternalDownloadGenerationCandidateArchive)
+	router.POST("/api/internal/generation-workflows/:id/k8s/base", h.InternalDownloadGenerationK8sBase)
+	router.POST("/api/internal/generation-workflows/:id/build/archive", h.InternalDownloadGenerationBuildArchive)
+	router.POST("/api/internal/generation-workflows/:id/generator/context", h.InternalGeneratorContext)
+	router.POST("/api/internal/generation-workflows/:id/generator/files/read", h.InternalGeneratorReadFile)
+	router.POST("/api/internal/generation-workflows/:id/generator/files/write", h.InternalGeneratorWriteFile)
+	router.POST("/api/internal/generation-workflows/:id/generator/execute", h.InternalGeneratorExecute)
+	router.POST("/api/internal/generation-workflows/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
+	router.POST("/api/internal/taxonomy-workflows/claim", h.InternalClaimTaxonomyWorkflow)
+	router.POST("/api/internal/taxonomy-workflows/:id/renew", h.InternalRenewTaxonomyWorkflow)
+	router.POST("/api/internal/taxonomy-workflows/:id/context", h.InternalTaxonomyWorkflowContext)
+	router.POST("/api/internal/taxonomy-workflows/:id/agent-runs", h.InternalStartTaxonomyAgentRun)
+	router.POST("/api/internal/taxonomy-workflows/:id/phase", h.InternalTaxonomyWorkflowPhase)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)

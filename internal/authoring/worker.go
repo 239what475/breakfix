@@ -7,13 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/agentmodel"
 	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/agentserver"
-	"github.com/breakfix/breakfix/internal/agentworker"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -21,93 +18,26 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type LeaseCredential = agentruntime.LeaseCredential
-
 type ExecutionContext struct {
 	Stage   Stage                  `json:"stage"`
 	History []agentruntime.Message `json:"history"`
 }
 
-type RuntimeClient interface {
-	LoadContext(context.Context, agentruntime.Claim) (ExecutionContext, error)
-	UpdateStage(context.Context, agentruntime.Claim, int64, Plan, Change) (Stage, error)
-	Finalize(context.Context, agentruntime.Claim, string) error
+// StageUpdater is the direct Server boundary used while an interactive
+// authoring call is running. It has no lease because the Server owns the call.
+type StageUpdater interface {
+	UpdateAuthoringStage(context.Context, string, int64, Plan, Change) (*Stage, error)
 }
 
-type InternalClient struct{ server *agentserver.Client }
-
-func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
-	client, err := agentserver.New(serverURL, apiKey)
-	if err != nil {
-		return nil, err
-	}
-	return &InternalClient{server: client}, nil
+// StreamEvent is emitted only while a direct Server-owned authoring turn is
+// active. The complete response remains the durable AgentRun output.
+type StreamEvent struct {
+	Content string `json:"content"`
 }
 
-func (c *InternalClient) LoadContext(ctx context.Context, claim agentruntime.Claim) (ExecutionContext, error) {
-	var result ExecutionContext
-	err := c.post(ctx, claim.Run.ID, "/authoring/context", claim.Credential(), &result)
-	return result, err
-}
-
-func (c *InternalClient) UpdateStage(ctx context.Context, claim agentruntime.Claim, revision int64, plan Plan, change Change) (Stage, error) {
-	var result Stage
-	err := c.post(ctx, claim.Run.ID, "/authoring/stage", struct {
-		LeaseCredential
-		StageRevision int64  `json:"stage_revision"`
-		Plan          Plan   `json:"plan"`
-		Change        Change `json:"change"`
-	}{claim.Credential(), revision, plan, change}, &result)
-	return result, err
-}
-
-func (c *InternalClient) Finalize(ctx context.Context, claim agentruntime.Claim, content string) error {
-	return c.post(ctx, claim.Run.ID, "/authoring/finalize", struct {
-		LeaseCredential
-		Content string `json:"content"`
-	}{claim.Credential(), content}, nil)
-}
-
-func (c *InternalClient) post(ctx context.Context, runID, suffix string, body any, result any) error {
-	if c == nil || c.server == nil {
-		return errors.New("authoring internal client is not configured")
-	}
-	return c.server.Post(ctx, "/api/internal/agent-runs/"+url.PathEscape(runID)+suffix, body, result)
-}
-
-type WorkerExecutor struct {
-	config config.AgentConfig
-	client RuntimeClient
-}
-
-func NewWorkerExecutor(cfg config.AgentConfig, client RuntimeClient) (*WorkerExecutor, error) {
-	if client == nil {
-		return nil, errors.New("authoring worker executor requires server client")
-	}
-	return &WorkerExecutor{config: cfg, client: client}, nil
-}
-
-func (e *WorkerExecutor) Execute(ctx context.Context, claim agentruntime.Claim, _ agentworker.Emitter) (agentworker.ExecutionResult, error) {
-	if !claim.Valid() || claim.Run.Purpose != "authoring" {
-		return agentworker.ExecutionResult{}, errors.New("invalid authoring agent run claim")
-	}
-	contextSnapshot, err := e.client.LoadContext(ctx, claim)
-	if err != nil {
-		return agentworker.ExecutionResult{}, fmt.Errorf("load authoring context: %w", err)
-	}
-	response, err := RunWithEino(ctx, e.config, claim, contextSnapshot.Stage, contextSnapshot.History, e.client)
-	if err != nil {
-		return agentworker.ExecutionResult{}, err
-	}
-	if err := e.client.Finalize(ctx, claim, response); err != nil {
-		return agentworker.ExecutionResult{}, fmt.Errorf("finalize authoring run: %w", err)
-	}
-	return agentworker.ExecutionResult{Finalized: true}, nil
-}
-
-func RunWithEino(ctx context.Context, cfg config.AgentConfig, claim agentruntime.Claim, stage Stage, history []agentruntime.Message, client RuntimeClient) (string, error) {
-	if !claim.Valid() || client == nil {
-		return "", errors.New("authoring execution requires claim and server client")
+func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stage Stage, history []agentruntime.Message, updater StageUpdater, emit func(StreamEvent)) (string, error) {
+	if strings.TrimSpace(runID) == "" || updater == nil {
+		return "", errors.New("authoring execution requires run and Server stage updater")
 	}
 	if len(history) == 0 || history[len(history)-1].Role != "user" {
 		return "", errors.New("authoring execution requires a latest user message")
@@ -116,7 +46,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, claim agentruntime
 	if err != nil {
 		return "", err
 	}
-	conversation := &runtimeConversation{claim: claim, client: client, stage: stage}
+	conversation := &runtimeConversation{runID: runID, updater: updater, stage: stage}
 	inputs, err := authoringInputs(conversation, history)
 	if err != nil {
 		return "", err
@@ -141,9 +71,9 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, claim agentruntime
 	if err != nil {
 		return "", fmt.Errorf("create Eino authoring agent: %w", err)
 	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent, EnableStreaming: true})
 	events := runner.Run(ctx, inputs)
-	var response string
+	var response strings.Builder
 	for {
 		event, ok := events.Next()
 		if !ok {
@@ -152,19 +82,45 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, claim agentruntime
 		if event.Err != nil {
 			return "", event.Err
 		}
-		if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.Message != nil {
-			if content := strings.TrimSpace(event.Output.MessageOutput.Message.Content); content != "" {
-				response = content
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			output := event.Output.MessageOutput
+			if output.IsStreaming && output.MessageStream != nil {
+				stream := output.MessageStream
+				for {
+					chunk, streamErr := stream.Recv()
+					if errors.Is(streamErr, io.EOF) {
+						break
+					}
+					if streamErr != nil {
+						stream.Close()
+						return "", fmt.Errorf("read Eino authoring stream: %w", streamErr)
+					}
+					if chunk == nil || chunk.Content == "" {
+						continue
+					}
+					response.WriteString(chunk.Content)
+					if emit != nil {
+						emit(StreamEvent{Content: chunk.Content})
+					}
+				}
+				stream.Close()
+			}
+			if output.Message != nil && output.Message.Content != "" {
+				response.WriteString(output.Message.Content)
+				if emit != nil {
+					emit(StreamEvent{Content: output.Message.Content})
+				}
 			}
 		}
 		if event.Action != nil && event.Action.Exit {
 			break
 		}
 	}
-	if strings.TrimSpace(response) == "" {
+	content := strings.TrimSpace(response.String())
+	if content == "" {
 		return "", errors.New("authoring agent returned an empty response")
 	}
-	return response, nil
+	return content, nil
 }
 
 func authoringInputs(conversation *runtimeConversation, history []agentruntime.Message) ([]adk.Message, error) {
@@ -199,9 +155,9 @@ func toBaseAuthoringTools(values []tool.InvokableTool) []tool.BaseTool {
 }
 
 type runtimeConversation struct {
-	claim  agentruntime.Claim
-	client RuntimeClient
-	stage  Stage
+	runID   string
+	updater StageUpdater
+	stage   Stage
 }
 
 func (c *runtimeConversation) prompt(userMessage string) (string, error) {
@@ -247,17 +203,17 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 
 func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficultyImpact string, mutate func(*Plan) error) (string, error) {
 	if strings.TrimSpace(summary) == "" || strings.TrimSpace(difficultyImpact) == "" {
-		return "", errors.New("修改理由和难度影响不能为空")
+		return "", invalidToolInput(errors.New("修改理由和难度影响不能为空"))
 	}
 	plan := c.stage.Plan.Clone()
 	if err := mutate(&plan); err != nil {
-		return "", err
+		return "", invalidToolInput(err)
 	}
-	stage, err := c.client.UpdateStage(ctx, c.claim, c.stage.StageRevision, plan, Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
+	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.StageRevision, plan, Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
 	if err != nil {
 		return "", err
 	}
-	c.stage = stage
+	c.stage = *stage
 	return fmt.Sprintf(`{"change":%q}`, summary), nil
 }
 
@@ -399,14 +355,14 @@ func decodeAuthoringToolArguments(raw string, target any) error {
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("decode authoring tool arguments: %w", err)
+		return invalidToolInput(fmt.Errorf("decode authoring tool arguments: %w", err))
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("authoring tool arguments have a second JSON document")
+			return invalidToolInput(errors.New("authoring tool arguments have a second JSON document"))
 		}
-		return fmt.Errorf("decode authoring tool arguments suffix: %w", err)
+		return invalidToolInput(fmt.Errorf("decode authoring tool arguments suffix: %w", err))
 	}
 	return nil
 }

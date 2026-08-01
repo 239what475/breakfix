@@ -38,12 +38,9 @@ func (s *Store) CurrentPath() string { return filepath.Join(s.root, currentPoint
 func (s *Store) RevisionsPath() string { return filepath.Join(s.root, revisionsDirectory) }
 
 func (s *Store) LoadCurrent() (*Snapshot, error) {
-	target, err := os.Readlink(s.CurrentPath())
+	target, err := s.currentTarget()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrNoCurrentRevision
-		}
-		return nil, fmt.Errorf("read taxonomy current pointer: %w", err)
+		return nil, err
 	}
 	if filepath.IsAbs(target) || filepath.Clean(target) != filepath.Join(revisionsDirectory, filepath.Base(target)) {
 		return nil, fmt.Errorf("taxonomy current pointer has invalid target %q", target)
@@ -53,6 +50,35 @@ func (s *Store) LoadCurrent() (*Snapshot, error) {
 		return nil, fmt.Errorf("taxonomy current pointer has invalid revision %q", revision)
 	}
 	return s.LoadRevision(revision)
+}
+
+// currentTarget reads the current snapshot pointer. Runtime publication uses a
+// symlink so replacement is atomic. A checked-in catalog seed may use a plain
+// text pointer instead because Git does not preserve empty directories needed
+// by an otherwise valid snapshot without skill prerequisite mappings.
+func (s *Store) currentTarget() (string, error) {
+	info, err := os.Lstat(s.CurrentPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNoCurrentRevision
+		}
+		return "", fmt.Errorf("stat taxonomy current pointer: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(s.CurrentPath())
+		if err != nil {
+			return "", fmt.Errorf("read taxonomy current pointer: %w", err)
+		}
+		return target, nil
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("taxonomy current pointer must be a symlink or regular file")
+	}
+	data, err := os.ReadFile(s.CurrentPath())
+	if err != nil {
+		return "", fmt.Errorf("read taxonomy seed pointer: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func (s *Store) LoadRevision(revision string) (*Snapshot, error) {
@@ -121,6 +147,27 @@ func (s *Store) Publish(snapshot Snapshot) (*Snapshot, error) {
 	return s.LoadRevision(revision)
 }
 
+// PreviewRevision computes the immutable revision that Publish would create
+// without changing current. Server records this value before publication so a
+// restart can determine whether the filesystem side effect already happened.
+func (s *Store) PreviewRevision(snapshot Snapshot) (string, error) {
+	if err := Validate(snapshot); err != nil {
+		return "", fmt.Errorf("validate taxonomy snapshot: %w", err)
+	}
+	if err := os.MkdirAll(s.RevisionsPath(), 0755); err != nil {
+		return "", fmt.Errorf("create taxonomy revisions directory: %w", err)
+	}
+	staging, err := os.MkdirTemp(s.RevisionsPath(), ".preview-")
+	if err != nil {
+		return "", fmt.Errorf("create taxonomy preview directory: %w", err)
+	}
+	defer os.RemoveAll(staging) //nolint:errcheck
+	if err := writeSnapshot(staging, snapshot); err != nil {
+		return "", err
+	}
+	return treeRevision(staging)
+}
+
 func (s *Store) replaceCurrent(revision string) error {
 	if err := os.MkdirAll(s.root, 0755); err != nil {
 		return fmt.Errorf("create taxonomy root: %w", err)
@@ -142,7 +189,6 @@ func loadSnapshot(root string) (*Snapshot, error) {
 		filepath.Join(root, "skills"),
 		filepath.Join(root, "tags"),
 		filepath.Join(root, "mappings", "challenges"),
-		filepath.Join(root, "mappings", "skills"),
 	}
 	for _, dir := range requiredDirs {
 		info, err := os.Stat(dir)
@@ -168,7 +214,7 @@ func loadSnapshot(root string) (*Snapshot, error) {
 	if snapshot.ChallengeMappings, err = readDefinitions[ChallengeMapping](filepath.Join(root, "mappings", "challenges"), func(value *ChallengeMapping, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
-	if snapshot.SkillMappings, err = readDefinitions[SkillMapping](filepath.Join(root, "mappings", "skills"), func(value *SkillMapping, file string) { value.File = file }); err != nil {
+	if snapshot.SkillMappings, err = readOptionalDefinitions[SkillMapping](filepath.Join(root, "mappings", "skills"), func(value *SkillMapping, file string) { value.File = file }); err != nil {
 		return nil, err
 	}
 	return snapshot, nil
@@ -246,6 +292,15 @@ func readDefinitions[T any](dir string, setFile func(*T, string)) ([]T, error) {
 		values = append(values, value)
 	}
 	return values, nil
+}
+
+func readOptionalDefinitions[T any](dir string, setFile func(*T, string)) ([]T, error) {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return readDefinitions(dir, setFile)
 }
 
 func writeSnapshot(root string, snapshot Snapshot) error {

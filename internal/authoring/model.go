@@ -22,14 +22,9 @@ var (
 type SessionState string
 
 const (
-	StateDraftConversation      SessionState = "DraftConversation"
-	StateIntentReview           SessionState = "IntentReview"
-	StateGeneratingAndVerifying SessionState = "GeneratingAndVerifying"
-	StateInfrastructureFailed   SessionState = "InfrastructureFailed"
-	StateAwaitingVerifiedReview SessionState = "AwaitingVerifiedReview"
-	StateRevisingAndVerifying   SessionState = "RevisingAndVerifying"
-	StatePublishing             SessionState = "Publishing"
-	StatePublished              SessionState = "Published"
+	StateDraftConversation SessionState = "DraftConversation"
+	StateIntentReview      SessionState = "IntentReview"
+	StatePublished         SessionState = "Published"
 )
 
 type Metadata struct {
@@ -149,20 +144,16 @@ type Session struct {
 	ID               string `json:"id"`
 	UserID           string `json:"user_id"`
 	RuntimeSessionID string `json:"-"`
-	// GeneratorSessionID is the durable Agent Session for one implementation
-	// and repair lineage. It is intentionally distinct from the authoring
-	// conversation Session: a confirmed revision gets a Generator Session, and
-	// an author-requested revision after verification starts a new lineage.
-	GeneratorSessionID  string       `json:"-"`
-	GeneratorRunID      string       `json:"generator_run_id,omitempty"`
-	CandidateRevisionID string       `json:"candidate_revision_id,omitempty"`
-	State               SessionState `json:"state"`
-	CurrentRevision     int64        `json:"current_revision"`
-	VisibleRevision     int64        `json:"visible_revision"`
-	PublishChallengeID  string       `json:"publish_challenge_id,omitempty"`
-	LastError           string       `json:"last_error,omitempty"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
+	// GeneratorSessionID is reused by automatic generator repairs in one
+	// authoring session. It is distinct from the interactive authoring session.
+	GeneratorSessionID string       `json:"-"`
+	State              SessionState `json:"state"`
+	CurrentRevision    int64        `json:"current_revision"`
+	VisibleRevision    int64        `json:"visible_revision"`
+	PublishChallengeID string       `json:"publish_challenge_id,omitempty"`
+	LastError          string       `json:"last_error,omitempty"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
 }
 
 // Stage is a private, attempt-resumable Plan draft. It becomes a public

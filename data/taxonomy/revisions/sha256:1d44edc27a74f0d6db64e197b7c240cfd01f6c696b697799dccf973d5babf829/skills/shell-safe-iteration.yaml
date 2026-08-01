@@ -1,0 +1,13 @@
+kind: Skill
+id: skill-1d7f3a9b5e8024c6
+title: Shell 管道安全迭代
+definition: 在 Shell 脚本中使用 null 分隔符（find -print0 | while IFS= read -r -d ''）安全地迭代文件名列表，避免空格、换行等特殊字符导致处理错误。
+mapping_guidance:
+    outcome_when:
+        - 题目需要在脚本中逐文件处理管道输出的文件列表
+        - 需要处理可能包含特殊字符的文件名
+    entry_when:
+        - 题目只涉及单次命令调用而不需要循环迭代文件
+    exclude_when:
+        - 使用 for file in $(...) 等不安全模式即能满足需求
+        - 在非 Shell 语言（Python、Go 等）中迭代文件

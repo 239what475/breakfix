@@ -47,7 +47,7 @@ func Setup(manager ctrl.Manager, k8sClient *k8s.Client, options Options, depende
 		vk8sProvider = &kubernetesVK8sProvider{
 			k8s: k8sClient, vcluster: vclusterClient,
 			namespacePrefix: options.Namespace, controlNamespace: options.CRDNamespace,
-			registryPullSecret: options.RegistryPullSecret, verifierServiceAccount: "breakfix-verifier",
+			registryPullSecret: options.RegistryPullSecret, verificationServiceAccount: "breakfix-generate-worker",
 			chartRepo: options.VClusterChartRepo, chartVersion: options.VClusterChartVersion,
 		}
 	}

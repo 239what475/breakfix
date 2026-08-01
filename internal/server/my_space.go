@@ -300,11 +300,22 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 	published := make([]authoredPublished, 0)
 	for _, session := range sessions {
 		if session.State != authoring.StatePublished {
+			var workflowState *api.MySpaceAuthoringDraftWorkflowState
+			workflow, workflowErr := h.db.GetActiveGenerationWorkflow(ctx, session.ID)
+			switch {
+			case errors.Is(workflowErr, db.ErrGenerationWorkflowNotFound):
+			case workflowErr != nil:
+				return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authoring generation workflow: %w", workflowErr)
+			default:
+				state := api.MySpaceAuthoringDraftWorkflowState(workflow.State)
+				workflowState = &state
+			}
 			view.Drafts = append(view.Drafts, api.MySpaceAuthoringDraft{
-				SessionId: session.ID,
-				Title:     authoringSessionTitle(session.Title),
-				State:     api.MySpaceAuthoringDraftState(session.State),
-				UpdatedAt: session.UpdatedAt,
+				SessionId:     session.ID,
+				Title:         authoringSessionTitle(session.Title),
+				State:         api.MySpaceAuthoringDraftState(session.State),
+				UpdatedAt:     session.UpdatedAt,
+				WorkflowState: workflowState,
 			})
 			continue
 		}
@@ -359,18 +370,18 @@ func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.E
 		}
 	}
 
-	mapping, err := h.db.GetTaxonomyMappingByChallenge(ctx, entry.ID, entry.Revision)
-	if errors.Is(err, db.ErrTaxonomyMappingNotFound) {
+	workflow, err := h.db.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
+	if errors.Is(err, db.ErrTaxonomyWorkflowNotFound) {
 		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read taxonomy work for authoring status: %w", err)
+		return "", fmt.Errorf("read taxonomy workflow for authoring status: %w", err)
 	}
-	switch mapping.State {
-	case taxonomy.MappingFailed, taxonomy.MappingCancelled:
+	switch workflow.State {
+	case taxonomy.WorkflowFailed, taxonomy.WorkflowCancelled:
 		return api.MySpacePublishedChallengeTaxonomyStatus("blocked"), nil
-	case taxonomy.MappingPending:
-		if strings.TrimSpace(mapping.LastError) != "" {
+	case taxonomy.WorkflowQueued, taxonomy.WorkflowMapping, taxonomy.WorkflowReviewing, taxonomy.WorkflowPublishing:
+		if strings.TrimSpace(workflow.LastError) != "" {
 			return api.MySpacePublishedChallengeTaxonomyStatus("retrying"), nil
 		}
 	}

@@ -1,6 +1,5 @@
-// Package candidate owns immutable generated challenge revisions and the
-// domain state that moves them through build, artifact publication, real
-// verification, author review, and catalog publication.
+// Package candidate owns immutable generated challenge revisions and their
+// recorded outputs. Scheduling state belongs exclusively to generation.
 package candidate
 
 import (
@@ -17,23 +16,6 @@ import (
 var (
 	ErrNotFound     = errors.New("candidate revision not found")
 	ErrInvalidState = errors.New("candidate revision is not in the required state")
-)
-
-const StageDeadline = time.Hour
-
-type State string
-
-const (
-	StateBuilding             State = "Building"
-	StatePublishingArtifact   State = "PublishingArtifact"
-	StateVerifying            State = "Verifying"
-	StateVerified             State = "Verified"
-	StatePublishingChallenge  State = "PublishingChallenge"
-	StatePublished            State = "Published"
-	StateArtifactFailed       State = "ArtifactFailed"
-	StateInfrastructureFailed State = "InfrastructureFailed"
-	StateCancelled            State = "Cancelled"
-	StateSuperseded           State = "Superseded"
 )
 
 type FailureClass string
@@ -108,7 +90,7 @@ type BuildOutput struct {
 // candidate ID or scan an Incus Project.
 type IncusBuildReference struct {
 	Project      string `json:"project"`
-	WorkItemID   string `json:"work_item_id"`
+	WorkflowID   string `json:"workflow_id"`
 	Attempt      int64  `json:"attempt"`
 	InstanceName string `json:"instance_name"`
 	Alias        string `json:"alias"`
@@ -126,7 +108,7 @@ type VerificationEnvironment struct {
 	Runtime    string `json:"runtime"`
 	Name       string `json:"name"`
 	UID        string `json:"uid"`
-	WorkItemID string `json:"work_item_id"`
+	WorkflowID string `json:"workflow_id"`
 	Attempt    int64  `json:"attempt"`
 }
 
@@ -245,7 +227,7 @@ func (p Publication) ValidateIntent() error {
 
 func (e VerificationEnvironment) Validate(runtime string) error {
 	if e.Runtime != runtime || (runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s) ||
-		strings.TrimSpace(e.Name) == "" || strings.TrimSpace(e.UID) == "" || strings.TrimSpace(e.WorkItemID) == "" || e.Attempt <= 0 {
+		strings.TrimSpace(e.Name) == "" || strings.TrimSpace(e.UID) == "" || strings.TrimSpace(e.WorkflowID) == "" || e.Attempt <= 0 {
 		return errors.New("verification environment identity is incomplete")
 	}
 	return nil
@@ -261,14 +243,12 @@ type Revision struct {
 	ArchivePath        string                   `json:"-"`
 	ArchiveSHA256      string                   `json:"archive_sha256"`
 	Snapshot           ExecutionSnapshot        `json:"snapshot"`
-	State              State                    `json:"state"`
 	Build              *BuildOutput             `json:"build,omitempty"`
 	Artifact           *ArtifactReference       `json:"artifact,omitempty"`
 	VerifyEnvironment  *VerificationEnvironment `json:"verify_environment,omitempty"`
 	Verification       *VerificationReport      `json:"verification,omitempty"`
 	Failure            *Failure                 `json:"failure,omitempty"`
 	Publication        *Publication             `json:"publication,omitempty"`
-	SupersededBy       string                   `json:"superseded_by,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
 	VerifiedAt         *time.Time               `json:"verified_at,omitempty"`
@@ -280,29 +260,15 @@ type Revision struct {
 // Server volume layout.
 type WorkerView struct {
 	ID                string                   `json:"id"`
+	AuthoringRevision int64                    `json:"authoring_revision"`
 	ArchiveSHA256     string                   `json:"archive_sha256"`
 	Snapshot          ExecutionSnapshot        `json:"snapshot"`
-	State             State                    `json:"state"`
 	Build             *BuildOutput             `json:"build,omitempty"`
 	Artifact          *ArtifactReference       `json:"artifact,omitempty"`
 	VerifyEnvironment *VerificationEnvironment `json:"verify_environment,omitempty"`
 	Verification      *VerificationReport      `json:"verification,omitempty"`
+	Failure           *Failure                 `json:"failure,omitempty"`
 	Publication       *Publication             `json:"publication,omitempty"`
-}
-
-// CleanupHints contains only deterministic scheduler identities needed to
-// remove side effects whose result was never committed. It never contains a
-// provider path or a discovered resource name.
-type CleanupHints struct {
-	BuildWorkItemID string `json:"build_work_item_id,omitempty"`
-	BuildAttempts   int64  `json:"build_attempts,omitempty"`
-}
-
-func (h CleanupHints) Validate() error {
-	if strings.TrimSpace(h.BuildWorkItemID) == "" || h.BuildAttempts < 0 {
-		return errors.New("candidate cleanup hints require a build work item and attempts")
-	}
-	return nil
 }
 
 func (r Revision) WorkerView() WorkerView {
@@ -312,10 +278,15 @@ func (r Revision) WorkerView() WorkerView {
 		copy.OCIArchivePath = ""
 		build = &copy
 	}
+	var failure *Failure
+	if r.Failure != nil {
+		copy := *r.Failure
+		failure = &copy
+	}
 	return WorkerView{
-		ID: r.ID, ArchiveSHA256: r.ArchiveSHA256, Snapshot: r.Snapshot,
-		State: r.State, Build: build, Artifact: r.Artifact, VerifyEnvironment: r.VerifyEnvironment,
-		Verification: r.Verification, Publication: r.Publication,
+		ID: r.ID, AuthoringRevision: r.AuthoringRevision, ArchiveSHA256: r.ArchiveSHA256, Snapshot: r.Snapshot,
+		Build: build, Artifact: r.Artifact, VerifyEnvironment: r.VerifyEnvironment,
+		Verification: r.Verification, Failure: failure, Publication: r.Publication,
 	}
 }
 
@@ -343,7 +314,7 @@ func (o BuildOutput) Validate(runtime string) error {
 }
 
 func (r IncusBuildReference) Validate() error {
-	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.WorkItemID) == "" || r.Attempt <= 0 ||
+	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.WorkflowID) == "" || r.Attempt <= 0 ||
 		strings.TrimSpace(r.InstanceName) == "" || strings.TrimSpace(r.Alias) == "" || !validFingerprint(r.Fingerprint) {
 		return errors.New("incus build reference is incomplete")
 	}
@@ -387,14 +358,14 @@ func (r Revision) ValidateForCreate() error {
 	if strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.AuthoringSessionID) == "" || r.AuthoringRevision < 0 {
 		return errors.New("candidate revision requires identity and authoring source")
 	}
-	if strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "" || strings.TrimSpace(r.JudgeRunID) == "" {
-		return errors.New("candidate revision requires generator and judge lineage")
+	if strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "" {
+		return errors.New("candidate revision requires generator lineage")
 	}
 	if strings.TrimSpace(r.ArchivePath) == "" || !validSHA256(r.ArchiveSHA256) {
 		return errors.New("candidate revision requires an immutable archive")
 	}
-	if r.State != StateBuilding || r.Build != nil || r.Artifact != nil || r.VerifyEnvironment != nil || r.Verification != nil || r.Failure != nil || r.Publication != nil || r.SupersededBy != "" {
-		return errors.New("new candidate revision must start in Building without results")
+	if r.Build != nil || r.Artifact != nil || r.VerifyEnvironment != nil || r.Verification != nil || r.Failure != nil || r.Publication != nil {
+		return errors.New("new candidate revision must not contain stage outputs")
 	}
 	return r.Snapshot.Validate()
 }
@@ -474,13 +445,4 @@ func (s ExecutionSnapshot) Validate() error {
 		}
 	}
 	return nil
-}
-
-func Terminal(state State) bool {
-	switch state {
-	case StatePublished, StateArtifactFailed, StateInfrastructureFailed, StateCancelled, StateSuperseded:
-		return true
-	default:
-		return false
-	}
 }

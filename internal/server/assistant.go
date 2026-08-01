@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/agentruntime"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
@@ -26,7 +29,17 @@ type assistantConversationResponse struct {
 	ID          string              `json:"id"`
 	ChallengeID string              `json:"challenge_id"`
 	Messages    []assistant.Message `json:"messages"`
-	ActiveTurn  *assistant.Turn     `json:"active_turn,omitempty"`
+}
+
+type assistantStreamEvent struct {
+	RunID   string `json:"run_id"`
+	Content string `json:"content,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+}
+
+type assistantStreamComplete struct {
+	RunID   string            `json:"run_id"`
+	Message assistant.Message `json:"message"`
 }
 
 func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
@@ -48,7 +61,6 @@ func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
 		ID:          session.ID,
 		ChallengeID: challengeID,
 		Messages:    messages,
-		ActiveTurn:  h.assistant.ActiveTurn(c.Request.Context(), session.ID),
 	})
 }
 
@@ -70,65 +82,54 @@ func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID stri
 		return
 	}
 
-	session, turn, err := h.assistant.StartTurn(c.Request.Context(), request, body.Content)
+	session, run, err := h.assistant.StartTurn(c.Request.Context(), request, body.Content)
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
 	}
-	subscription, err := h.assistant.Subscribe(c.Request.Context(), session.ID, turn.ID)
-	if err != nil {
-		h.writeAssistantError(c, err)
-		return
-	}
-	h.streamAssistantTurn(c, subscription)
+	h.streamAssistantTurn(c, session.ID, run.ID, request)
 }
 
-func (h *Handler) StreamChallengeAssistantTurn(c *gin.Context, challengeID, turnID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{CurrentWindow: "shell-1"})
-	if err != nil {
-		h.writeAssistantError(c, err)
-		return
-	}
-	session, _, err := h.assistant.GetOrCreate(c.Request.Context(), request)
-	if err != nil {
-		h.writeAssistantError(c, err)
-		return
-	}
-	subscription, err := h.assistant.Subscribe(c.Request.Context(), session.ID, turnID)
-	if err != nil {
-		h.writeAssistantError(c, err)
-		return
-	}
-	h.streamAssistantTurn(c, subscription)
-}
-
-func (h *Handler) streamAssistantTurn(c *gin.Context, subscription *assistant.Subscription) {
-	defer subscription.Close()
+func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, request assistant.Request) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
+	writeSSE(c, "ready", assistantStreamEvent{RunID: runID})
 
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	for {
-		select {
-		case event := <-subscription.Events:
-			writeAssistantSSE(c, event.Type, event)
-			if event.Type == "complete" || event.Type == "error" {
-				return
+	history, err := h.db.ListMessages(c.Request.Context(), sessionID)
+	if err == nil {
+		result, runErr := assistant.RunWithEino(c.Request.Context(), h.llm, request, history, func(event assistant.StreamEvent) {
+			writeSSE(c, event.Type, assistantStreamEvent{RunID: runID, Content: event.Content, Tool: event.Tool})
+		})
+		if runErr == nil {
+			metadata, marshalErr := json.Marshal(struct {
+				Evidence []assistant.Evidence `json:"evidence"`
+			}{Evidence: result.Evidence})
+			if marshalErr == nil {
+				now := time.Now().UTC()
+				message := agentruntime.Message{ID: assistant.NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata}
+				if completeErr := h.db.CompleteRunWithMessage(c.Request.Context(), runID, message, now); completeErr == nil {
+					writeSSE(c, "complete", assistantStreamComplete{RunID: runID, Message: assistant.Message{
+						ID: message.ID, Role: message.Role, Content: message.Content, Evidence: result.Evidence, CreatedAt: now,
+					}})
+					return
+				} else {
+					err = completeErr
+				}
+			} else {
+				err = marshalErr
 			}
-		case <-heartbeat.C:
-			_, _ = fmt.Fprint(c.Writer, ": keepalive\n\n")
-			c.Writer.Flush()
-		case <-c.Request.Context().Done():
-			return
+		} else {
+			err = runErr
 		}
+	}
+	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agentruntime.ErrRunActive) {
+		slog.Error("finalize direct assistant turn", "run_id", runID, "err", errors.Join(err, failErr))
+	}
+	if c.Request.Context().Err() == nil {
+		writeSSE(c, "error", assistantStreamEvent{RunID: runID, Content: err.Error()})
 	}
 }
 
@@ -286,6 +287,15 @@ func assistantWindows(currentWindow string, openWindows []string) ([]string, str
 	return windows, currentWindow, nil
 }
 
+func assistantWindowOpen(windows []string, wanted string) bool {
+	for _, window := range windows {
+		if window == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func assistantCheckpointSnapshot(entry *challenge.Entry, env *activeEnvironment) assistant.CheckpointSnapshot {
 	titles := make(map[string]string, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
@@ -318,13 +328,4 @@ func (h *Handler) writeAssistantError(c *gin.Context, err error) {
 		status = http.StatusConflict
 	}
 	c.JSON(status, map[string]string{"error": message})
-}
-
-func writeAssistantSSE(c *gin.Context, event string, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
-	c.Writer.Flush()
 }

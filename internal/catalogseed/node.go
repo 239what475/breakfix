@@ -1,5 +1,5 @@
 // Package catalogseed publishes committed catalog source through the same Node
-// image primitives used by the fixed Builder and Publisher workers.
+// image primitives used by the Generate Worker.
 package catalogseed
 
 import (
@@ -30,7 +30,7 @@ type NodeImageProvider interface {
 	PublishChallengeNodeImage(context.Context, incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
 	FindChallengeNodeImage(context.Context, string, string) (incusprovider.PublishNodeImageResult, bool, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
-	DeleteBuildNodeImage(context.Context, incusprovider.BuildNodeImageResult, string) error
+	DeleteBuildNodeImage(context.Context, incusprovider.BuildNodeImageResult) error
 }
 
 type NodeOptions struct {
@@ -84,9 +84,9 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 
 	digest := strings.TrimPrefix(revision, "sha256:")
 	candidateID := "catalog-" + digest[:24]
-	workItemID := "catalog-build-" + digest[:24]
+	workflowID := "catalog-build-" + digest[:24]
 	build, err := provider.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
-		WorkItemID: workItemID,
+		WorkflowID: workflowID,
 		Attempt:    1,
 		Revision:   revision,
 		Files:      files,
@@ -95,7 +95,7 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 		return NodeResult{}, fmt.Errorf("build catalog Node image: %w", err)
 	}
 	defer func() {
-		if cleanupErr := provider.DeleteBuildNodeImage(ctx, build, revision); cleanupErr != nil && err == nil {
+		if cleanupErr := provider.DeleteBuildNodeImage(ctx, build); cleanupErr != nil && err == nil {
 			err = fmt.Errorf("clean catalog Node build image: %w", cleanupErr)
 		}
 	}()

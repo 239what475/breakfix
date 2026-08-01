@@ -15,11 +15,18 @@
 .authoring-status { flex: none; gap: 6px; color: var(--muted); font: 10px "DM Mono", monospace; white-space: nowrap; }
 .authoring-status i { width: 7px; height: 7px; border-radius: 50%; background: #a4ada8; }
 .authoring-status[data-state="IntentReview"] i,
-.authoring-status[data-state="AwaitingVerifiedReview"] i { background: var(--blue); }
-.authoring-status[data-state="GeneratingAndVerifying"] i,
-.authoring-status[data-state="RevisingAndVerifying"] i,
-.authoring-status[data-state="Publishing"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
+.authoring-status[data-state="NeedsAuthorReview"] i { background: var(--blue); }
+.authoring-status[data-state="Queued"] i,
+.authoring-status[data-state="Generating"] i,
+.authoring-status[data-state="Judging"] i,
+.authoring-status[data-state="Building"] i,
+.authoring-status[data-state="ArtifactPublishing"] i,
+.authoring-status[data-state="Verifying"] i,
+.authoring-status[data-state="ChallengePublishing"] i,
+.authoring-status[data-state="CleaningUp"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
 .authoring-status[data-state="Published"] i { background: var(--green); }
+.authoring-status[data-state="Completed"] i { background: var(--green); }
+.authoring-status[data-state="Failed"] i { background: #b8504c; }
 .authoring-plan-actions { justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .authoring-primary-action { flex: none; }
 .authoring-narrow-tabs { display: none; }

@@ -87,7 +87,8 @@ export type MySpaceLearningPage = {
 export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'InfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview';
+    workflow_state?: 'Queued' | 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'CleaningUp' | 'Completed' | 'Failed' | 'Cancelled';
     updated_at: string;
 };
 
@@ -224,19 +225,6 @@ export type AssistantConversation = {
     id: string;
     challenge_id: string;
     messages: Array<AssistantMessage>;
-    active_turn?: AssistantTurn;
-};
-
-export type AssistantTurn = {
-    id: string;
-    session_id: string;
-    status: 'running' | 'completed' | 'failed';
-    content: string;
-    evidence?: Array<AssistantEvidence>;
-    error?: string;
-    message?: AssistantMessage;
-    created_at: string;
-    updated_at: string;
 };
 
 export type AssistantTerminalContext = {
@@ -314,7 +302,17 @@ export type AuthoringCandidate = {
     id: string;
     generator_run_id: string;
     archive_sha256: string;
-    state: 'Building' | 'PublishingArtifact' | 'Verifying' | 'Verified' | 'PublishingChallenge' | 'Published' | 'ArtifactFailed' | 'InfrastructureFailed' | 'Cancelled' | 'Superseded';
+};
+
+export type AuthoringGenerationWorkflow = {
+    id: string;
+    state: 'Queued' | 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'CleaningUp' | 'Completed' | 'Failed' | 'Cancelled';
+    state_attempt: number;
+    candidate_revision_id?: string;
+    deadline_at?: string | null;
+    last_error?: string | null;
+    created_at: string;
+    updated_at: string;
 };
 
 export type AuthoringVerificationReport = {
@@ -369,16 +367,15 @@ export type AuthoringMessageRequest = {
 
 export type AuthoringSession = {
     id: string;
-    state: 'DraftConversation' | 'IntentReview' | 'GeneratingAndVerifying' | 'InfrastructureFailed' | 'AwaitingVerifiedReview' | 'RevisingAndVerifying' | 'Publishing' | 'Published';
+    state: 'DraftConversation' | 'IntentReview' | 'Published';
     /**
      * Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
      */
     authoring_turn_active: boolean;
     intent_revision: number;
     visible_revision: number;
-    generator_run_id?: string;
     publish_challenge_id?: string;
-    pipeline_state?: 'Building' | 'PublishingArtifact' | 'Verifying' | 'Verified' | 'PublishingChallenge' | 'Published' | 'ArtifactFailed' | 'InfrastructureFailed' | 'Cancelled' | 'Superseded';
+    workflow?: AuthoringGenerationWorkflow;
     last_error?: string;
     updated_at: string;
     intent: AuthoringPlan;
@@ -673,38 +670,6 @@ export type SendChallengeAssistantMessageResponses = {
 
 export type SendChallengeAssistantMessageResponse = SendChallengeAssistantMessageResponses[keyof SendChallengeAssistantMessageResponses];
 
-export type StreamChallengeAssistantTurnData = {
-    body?: never;
-    path: {
-        id: string;
-        turnID: string;
-    };
-    query?: never;
-    url: '/challenges/{id}/assistant/turns/{turnID}/events';
-};
-
-export type StreamChallengeAssistantTurnErrors = {
-    /**
-     * Error
-     */
-    404: ErrorResponse;
-    /**
-     * Error
-     */
-    409: ErrorResponse;
-};
-
-export type StreamChallengeAssistantTurnError = StreamChallengeAssistantTurnErrors[keyof StreamChallengeAssistantTurnErrors];
-
-export type StreamChallengeAssistantTurnResponses = {
-    /**
-     * Server-sent assistant status, tool, delta, complete, and error events
-     */
-    200: string;
-};
-
-export type StreamChallengeAssistantTurnResponse = StreamChallengeAssistantTurnResponses[keyof StreamChallengeAssistantTurnResponses];
-
 export type ResetChallengeData = {
     body?: never;
     path: {
@@ -904,9 +869,9 @@ export type SendAuthoringMessageError = SendAuthoringMessageErrors[keyof SendAut
 
 export type SendAuthoringMessageResponses = {
     /**
-     * Updated authoring session
+     * Server-sent authoring ready, delta, complete, and error events
      */
-    200: AuthoringSession;
+    200: string;
 };
 
 export type SendAuthoringMessageResponse = SendAuthoringMessageResponses[keyof SendAuthoringMessageResponses];

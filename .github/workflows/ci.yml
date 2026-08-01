@@ -72,7 +72,7 @@ jobs:
           npm run build --prefix frontend
       - name: Compile every runtime entrypoint
         run: |
-          for component in server controller agent-worker builder publisher verifier; do
+          for component in server controller generate-worker taxonomy-worker; do
             go build -ldflags "-X github.com/breakfix/breakfix/internal/build.Version=dev" -o "$RUNNER_TEMP/breakfix-$component" "./cmd/$component"
           done
 
@@ -94,6 +94,8 @@ jobs:
           - 5432:5432
     env:
       BREAKFIX_DATABASE_URL: postgres://breakfix:breakfix@localhost:5432/breakfix?sslmode=disable
+      BREAKFIX_GENERATE_WORKER_API_KEY: ci-generate-worker
+      BREAKFIX_TAXONOMY_WORKER_API_KEY: ci-taxonomy-worker
       BREAKFIX_REGISTRY_USERNAME: smoke
       BREAKFIX_REGISTRY_PASSWORD: smoke
       OPEN_SANDBOX_API_KEY: smoke-only-no-network-call
@@ -118,7 +120,8 @@ jobs:
         run: |
           npm ci --prefix frontend
           npm run build --prefix frontend
-          cp -a test/fixtures/catalog "$RUNNER_TEMP/catalog-data"
+          mkdir -p "$RUNNER_TEMP/catalog-data"
+          cp -a test/fixtures/challenges "$RUNNER_TEMP/catalog-data/challenges"
           sed \
             -e "s|^data_dir:.*|data_dir: $RUNNER_TEMP/catalog-data|" \
             -e "s|^kubeconfig:.*|kubeconfig: ${KUBECONFIG:-$HOME/.kube/config}|" \

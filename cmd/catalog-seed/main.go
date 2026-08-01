@@ -60,25 +60,16 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	builder, err := connectRole(ctx, cfg, *serverCertificate, *tlsDir, incusprovider.RoleBuilder)
+	provider, err := connectRole(ctx, cfg, *serverCertificate, *tlsDir, incusprovider.RoleGenerate)
 	if err != nil {
 		fatal(err)
 	}
-	defer builder.Close()
-	publisher, err := connectRole(ctx, cfg, *serverCertificate, *tlsDir, incusprovider.RolePublisher)
-	if err != nil {
-		fatal(err)
-	}
-	defer publisher.Close()
-	if _, err := builder.Preflight(ctx, incusprovider.RoleBuilder); err != nil {
-		fatal(fmt.Errorf("preflight builder Incus identity: %w", err))
-	}
-	if _, err := publisher.Preflight(ctx, incusprovider.RolePublisher); err != nil {
-		fatal(fmt.Errorf("preflight publisher Incus identity: %w", err))
+	defer provider.Close()
+	if _, err := provider.Preflight(ctx, incusprovider.RoleGenerate); err != nil {
+		fatal(fmt.Errorf("preflight generate Incus identity: %w", err))
 	}
 
-	provider := &seedProvider{builder: builder, publisher: publisher}
-	result, err := catalogseed.PublishNode(ctx, provider, catalogseed.NodeOptions{
+	result, err := catalogseed.PublishNode(ctx, &seedProvider{client: provider}, catalogseed.NodeOptions{
 		ChallengeDir:         *challengeDir,
 		ReplaceExistingImage: *replaceExistingImage,
 	})
@@ -118,32 +109,31 @@ func splitCIDRs(value string) []string {
 }
 
 type seedProvider struct {
-	builder   *incusprovider.Client
-	publisher *incusprovider.Client
+	client *incusprovider.Client
 }
 
 func (p *seedProvider) BuildNodeImage(ctx context.Context, request incusprovider.BuildNodeImageRequest) (incusprovider.BuildNodeImageResult, error) {
-	return p.builder.BuildNodeImage(ctx, request)
+	return p.client.BuildNodeImage(ctx, request)
 }
 
 func (p *seedProvider) PublishNodeImage(ctx context.Context, request incusprovider.PublishNodeImageRequest) (incusprovider.PublishNodeImageResult, error) {
-	return p.publisher.PublishNodeImage(ctx, request)
+	return p.client.PublishNodeImage(ctx, request)
 }
 
 func (p *seedProvider) PublishChallengeNodeImage(ctx context.Context, request incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error) {
-	return p.publisher.PublishChallengeNodeImage(ctx, request)
+	return p.client.PublishChallengeNodeImage(ctx, request)
 }
 
 func (p *seedProvider) FindChallengeNodeImage(ctx context.Context, challengeID, revision string) (incusprovider.PublishNodeImageResult, bool, error) {
-	return p.publisher.FindChallengeNodeImage(ctx, challengeID, revision)
+	return p.client.FindChallengeNodeImage(ctx, challengeID, revision)
 }
 
 func (p *seedProvider) DeleteCandidateNodeImage(ctx context.Context, candidateID, fingerprint string) error {
-	return p.publisher.DeleteCandidateNodeImage(ctx, candidateID, fingerprint)
+	return p.client.DeleteCandidateNodeImage(ctx, candidateID, fingerprint)
 }
 
-func (p *seedProvider) DeleteBuildNodeImage(ctx context.Context, build incusprovider.BuildNodeImageResult, revision string) error {
-	return p.builder.DeleteBuildNodeImage(ctx, build, revision)
+func (p *seedProvider) DeleteBuildNodeImage(ctx context.Context, build incusprovider.BuildNodeImageResult) error {
+	return p.client.DeleteBuildNodeImage(ctx, build)
 }
 
 func fatal(err error) {

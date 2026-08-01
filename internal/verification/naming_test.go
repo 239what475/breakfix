@@ -6,12 +6,12 @@ import (
 )
 
 func TestNamesAreDeterministicAndBounded(t *testing.T) {
-	workItemID := strings.Repeat("work-item-", 8)
-	name := EnvironmentName(workItemID)
+	workflowID := strings.Repeat("generation-workflow-", 8)
+	name := EnvironmentName(workflowID)
 	if len(name) > 63 {
 		t.Fatalf("name length = %d, want <= 63: %q", len(name), name)
 	}
-	if EnvironmentName(workItemID) != name {
+	if EnvironmentName(workflowID) != name {
 		t.Fatal("names must be deterministic")
 	}
 }

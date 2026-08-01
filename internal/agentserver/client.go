@@ -59,7 +59,7 @@ func (c *Client) Post(ctx context.Context, path string, body any, output any) er
 
 // PostLong uses the request context as the sole deadline. Candidate archives
 // and base OCI images can legitimately take longer than the ordinary internal
-// API timeout, while the WorkItem deadline still bounds the operation.
+// API timeout, while the Workflow deadline still bounds the operation.
 func (c *Client) PostLong(ctx context.Context, path string, body any, output any) error {
 	if c == nil || c.http == nil {
 		return errors.New("server internal client is not configured")

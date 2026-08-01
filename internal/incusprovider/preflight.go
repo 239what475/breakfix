@@ -100,11 +100,9 @@ func (c *Client) Preflight(ctx context.Context, role Role) (PreflightResult, err
 
 func projectsForRole(role Role, config Config) []string {
 	switch role {
-	case RoleBuilder:
-		return []string{config.BuildProject}
-	case RolePublisher:
+	case RoleGenerate:
 		return []string{config.BuildProject, config.ImageProject}
-	case RoleController, RoleVerifier:
+	case RoleController:
 		return []string{config.ImageProject}
 	case RoleServer:
 		return nil

@@ -27,9 +27,7 @@ func TestPreflightAgainstIncus(t *testing.T) {
 	for _, role := range []incusprovider.Role{
 		incusprovider.RoleController,
 		incusprovider.RoleServer,
-		incusprovider.RoleBuilder,
-		incusprovider.RolePublisher,
-		incusprovider.RoleVerifier,
+		incusprovider.RoleGenerate,
 	} {
 		t.Run(string(role), func(t *testing.T) {
 			client, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, role))
@@ -56,12 +54,12 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	config := integrationConfig(t, endpoint, incusprovider.RoleController)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	builderClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleBuilder))
+	builderClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleGenerate))
 	if err != nil {
 		t.Fatalf("create Incus builder client: %v", err)
 	}
 	defer builderClient.Close()
-	publisherClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RolePublisher))
+	publisherClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleGenerate))
 	if err != nil {
 		t.Fatalf("create Incus publisher client: %v", err)
 	}
@@ -76,7 +74,7 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	revision := "sha256:integration-" + runID
 	t.Log("build stopped Node image")
 	build, err := builderClient.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
-		WorkItemID: runID,
+		WorkflowID: runID,
 		Attempt:    1,
 		Revision:   revision,
 		Files: []incusprovider.ImageFile{
@@ -89,7 +87,7 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build node image: %v", err)
 	}
-	defer cleanupBuildImage(t, builderClient, build, revision)
+	defer cleanupBuildImage(t, builderClient, build)
 	t.Log("publish candidate Node image")
 	published, err := publisherClient.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
 		CandidateRevisionID: runID,
@@ -161,6 +159,51 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	}
 }
 
+func TestNodeBuildSlotReplacesSupersededCandidateAgainstIncus(t *testing.T) {
+	endpoint := os.Getenv("BREAKFIX_INCUS_TEST_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("BREAKFIX_INCUS_TEST_ENDPOINT is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	client, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleGenerate))
+	if err != nil {
+		t.Fatalf("create Incus build client: %v", err)
+	}
+	defer client.Close()
+
+	workflowID := fmt.Sprintf("build-slot-%d", time.Now().UnixNano())
+	first, err := client.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
+		WorkflowID: workflowID,
+		Attempt:    1,
+		Revision:   "sha256:first-" + workflowID,
+		Files: []incusprovider.ImageFile{
+			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
+			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf first >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build first candidate: %v", err)
+	}
+
+	second, err := client.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
+		WorkflowID: workflowID,
+		Attempt:    1,
+		Revision:   "sha256:second-" + workflowID,
+		Files: []incusprovider.ImageFile{
+			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
+			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf second >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
+		},
+	})
+	if err != nil {
+		t.Fatalf("replace superseded candidate build: %v", err)
+	}
+	defer cleanupBuildImage(t, client, second)
+	if first.Fingerprint == second.Fingerprint {
+		t.Fatal("replaced candidate build retained the first image fingerprint")
+	}
+}
+
 func TestNodeReverseProxyAgainstIncus(t *testing.T) {
 	endpoint := os.Getenv("BREAKFIX_INCUS_TEST_ENDPOINT")
 	if endpoint == "" {
@@ -169,12 +212,12 @@ func TestNodeReverseProxyAgainstIncus(t *testing.T) {
 	config := integrationConfig(t, endpoint, incusprovider.RoleController)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	builderClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleBuilder))
+	builderClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleGenerate))
 	if err != nil {
 		t.Fatalf("create Incus builder client: %v", err)
 	}
 	defer builderClient.Close()
-	publisherClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RolePublisher))
+	publisherClient, err := incusprovider.Connect(ctx, integrationConfig(t, endpoint, incusprovider.RoleGenerate))
 	if err != nil {
 		t.Fatalf("create Incus publisher client: %v", err)
 	}
@@ -193,12 +236,12 @@ func TestNodeReverseProxyAgainstIncus(t *testing.T) {
 	revision := "sha256:" + runID
 	t.Log("build stopped three-node reverse-proxy image")
 	build, err := builderClient.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
-		WorkItemID: runID, Attempt: 1, Revision: revision, Files: files,
+		WorkflowID: runID, Attempt: 1, Revision: revision, Files: files,
 	})
 	if err != nil {
 		t.Fatalf("build Node image: %v", err)
 	}
-	defer cleanupBuildImage(t, builderClient, build, revision)
+	defer cleanupBuildImage(t, builderClient, build)
 	t.Log("publish reverse-proxy candidate Node image")
 	published, err := publisherClient.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
 		CandidateRevisionID: runID, Revision: revision, Build: build,
@@ -416,11 +459,11 @@ func cleanupPublishedImage(t *testing.T, client *incusprovider.Client, candidate
 	}
 }
 
-func cleanupBuildImage(t *testing.T, client *incusprovider.Client, result incusprovider.BuildNodeImageResult, revision string) {
+func cleanupBuildImage(t *testing.T, client *incusprovider.Client, result incusprovider.BuildNodeImageResult) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := client.DeleteBuildNodeImage(ctx, result, revision); err != nil {
+	if err := client.DeleteBuildNodeImage(ctx, result); err != nil {
 		t.Errorf("clean up build node image: %v", err)
 	}
 }

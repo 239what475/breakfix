@@ -1,14 +1,4 @@
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: breakfix-server-data
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 20Gi
----
-apiVersion: v1
 kind: Service
 metadata:
   name: breakfix-server
@@ -58,26 +48,21 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: jwt_secret
-            - name: BREAKFIX_AGENT_WORKER_API_KEY
+            - name: BREAKFIX_GENERATE_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-agent-worker-identity
+                  name: breakfix-generate-worker-identity
                   key: worker_api_key
-            - name: BREAKFIX_BUILDER_WORKER_API_KEY
+            - name: BREAKFIX_TAXONOMY_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-builder-identity
+                  name: breakfix-taxonomy-worker-identity
                   key: worker_api_key
-            - name: BREAKFIX_PUBLISHER_WORKER_API_KEY
+            - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-publisher-identity
-                  key: worker_api_key
-            - name: BREAKFIX_VERIFIER_WORKER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: breakfix-verifier-identity
-                  key: worker_api_key
+                  name: breakfix-runtime
+                  key: deepseek_api_key
             - name: BREAKFIX_REGISTRY_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -88,6 +73,11 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_addr
+            - name: BREAKFIX_REGISTRY_CLIENT_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_client_addr
             - name: BREAKFIX_REGISTRY_PASSWORD
               valueFrom:
                 secretKeyRef:

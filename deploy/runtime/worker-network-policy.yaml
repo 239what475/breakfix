@@ -1,11 +1,11 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: breakfix-agent-worker
+  name: breakfix-generate-worker
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: breakfix-agent-worker
+      app.kubernetes.io/name: breakfix-generate-worker
   policyTypes: [Ingress, Egress]
   ingress: []
   egress:
@@ -31,129 +31,41 @@ spec:
             cidr: 0.0.0.0/0
       ports:
         - {protocol: TCP, port: 443}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-registry
-      ports:
-        - {protocol: TCP, port: 5000}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: breakfix-builder
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: breakfix-builder
-  policyTypes: [Ingress, Egress]
-  ingress: []
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-server
-      ports:
-        - {protocol: TCP, port: 9090}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - {protocol: UDP, port: 53}
-        - {protocol: TCP, port: 53}
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - {protocol: TCP, port: 8443}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-registry
-      ports:
-        - {protocol: TCP, port: 5000}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: breakfix-publisher
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: breakfix-publisher
-  policyTypes: [Ingress, Egress]
-  ingress: []
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-server
-      ports:
-        - {protocol: TCP, port: 9090}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - {protocol: UDP, port: 53}
-        - {protocol: TCP, port: 53}
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - {protocol: TCP, port: 443}
-        - {protocol: TCP, port: 8443}
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-registry
-      ports:
-        - {protocol: TCP, port: 5000}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: breakfix-verifier
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: breakfix-verifier
-  policyTypes: [Ingress, Egress]
-  ingress: []
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: breakfix-server
-      ports:
-        - {protocol: TCP, port: 9090}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - {protocol: UDP, port: 53}
-        - {protocol: TCP, port: 53}
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - {protocol: TCP, port: 443}
+        # kube-proxy DNATs the in-cluster Kubernetes Service to the API server
+        # endpoint before this policy is enforced.
         - {protocol: TCP, port: 6443}
         - {protocol: TCP, port: 8443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: breakfix-taxonomy-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: breakfix-taxonomy-worker
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: breakfix-registry
+              app.kubernetes.io/name: breakfix-server
       ports:
-        - {protocol: TCP, port: 5000}
+        - protocol: TCP
+          port: 9090
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - {protocol: TCP, port: 443}

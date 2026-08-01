@@ -1,32 +1,38 @@
 package taxonomy
 
 import (
-	"encoding/json"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
-	"io"
+	"fmt"
 	"strings"
 	"time"
 )
 
-type WorkStage string
+type WorkflowState string
 
 const (
-	WorkStageMapper WorkStage = "mapper"
-	WorkStageReview WorkStage = "review"
-
-	RuntimePurposeMapper = "taxonomy-mapper"
-	RuntimePurposeReview = "taxonomy-review"
+	WorkflowQueued     WorkflowState = "Queued"
+	WorkflowMapping    WorkflowState = "Mapping"
+	WorkflowReviewing  WorkflowState = "Reviewing"
+	WorkflowPublishing WorkflowState = "Publishing"
+	WorkflowCompleted  WorkflowState = "Completed"
+	WorkflowFailed     WorkflowState = "Failed"
+	WorkflowCancelled  WorkflowState = "Cancelled"
 )
 
-type MappingState string
+func (s WorkflowState) Valid() bool {
+	switch s {
+	case WorkflowQueued, WorkflowMapping, WorkflowReviewing, WorkflowPublishing, WorkflowCompleted, WorkflowFailed, WorkflowCancelled:
+		return true
+	default:
+		return false
+	}
+}
 
-const (
-	MappingPending      MappingState = "Pending"
-	MappingReadyPublish MappingState = "ReadyToPublish"
-	MappingPublished    MappingState = "Published"
-	MappingFailed       MappingState = "Failed"
-	MappingCancelled    MappingState = "Cancelled"
-)
+func (s WorkflowState) Terminal() bool {
+	return s == WorkflowCompleted || s == WorkflowFailed || s == WorkflowCancelled
+}
 
 type ReviewDecision string
 
@@ -40,73 +46,88 @@ type Review struct {
 	Feedback string         `json:"feedback,omitempty"`
 }
 
-type TaxonomyMapping struct {
-	ID                string
-	ChallengeID       string
-	ChallengeRevision string
-	BaseRevision      string
-	ActiveStage       WorkStage
-	ActiveRunID       string
-	Candidate         *ChangeSet
-	CurriculumReview  *Review
-	SREReview         *Review
-	Round             int
-	State             MappingState
-	PublishedRevision string
-	LastError         string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
-// RunInput is the immutable, non-secret identity of a taxonomy Agent Run.
-// Challenge content, snapshot data, and review feedback stay Server-owned and
-// are resolved again through the authenticated internal API on every attempt.
-type RunInput struct {
-	WorkID string    `json:"work_id"`
-	Stage  WorkStage `json:"stage"`
-	Round  int       `json:"round"`
-}
-
-func (i RunInput) Validate() error {
-	if strings.TrimSpace(i.WorkID) == "" {
-		return errors.New("taxonomy run input requires work_id")
-	}
-	if i.Stage != WorkStageMapper && i.Stage != WorkStageReview {
-		return errors.New("taxonomy run input has an invalid stage")
-	}
-	if i.Round < 0 {
-		return errors.New("taxonomy run input has a negative round")
+func ValidateReview(value Review) error {
+	switch value.Decision {
+	case ReviewApprove:
+		if strings.TrimSpace(value.Feedback) != "" {
+			return errors.New("approved taxonomy review must have empty feedback")
+		}
+	case ReviewReject:
+		if strings.TrimSpace(value.Feedback) == "" {
+			return errors.New("rejected taxonomy review requires feedback")
+		}
+	default:
+		return fmt.Errorf("unknown taxonomy review decision %q", value.Decision)
 	}
 	return nil
 }
 
-func DecodeRunInput(raw json.RawMessage) (RunInput, error) {
-	var input RunInput
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
-		return RunInput{}, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return RunInput{}, errors.New("taxonomy run input has a second JSON document")
-		}
-		return RunInput{}, err
-	}
-	if err := input.Validate(); err != nil {
-		return RunInput{}, err
-	}
-	return input, nil
+// Workflow is a complete, lease-protected taxonomy maintenance unit for one
+// immutable published challenge revision. It is not a generic task record.
+type Workflow struct {
+	ID                       string        `json:"id"`
+	ChallengeID              string        `json:"challenge_id"`
+	ChallengeRevision        string        `json:"challenge_revision"`
+	State                    WorkflowState `json:"state"`
+	BaseTaxonomyRevision     string        `json:"base_taxonomy_revision"`
+	Round                    int           `json:"round"`
+	StateAttempt             int           `json:"state_attempt"`
+	CandidateChangeSet       *ChangeSet    `json:"candidate_changeset,omitempty"`
+	CurriculumReview         *Review       `json:"curriculum_review,omitempty"`
+	SREReview                *Review       `json:"sre_review,omitempty"`
+	ExpectedSnapshotRevision string        `json:"expected_snapshot_revision,omitempty"`
+	PublishedRevision        string        `json:"published_revision,omitempty"`
+	LeaseOwner               string        `json:"-"`
+	LeaseExpiresAt           *time.Time    `json:"lease_expires_at,omitempty"`
+	NextRunAt                time.Time     `json:"next_run_at"`
+	LastError                string        `json:"last_error,omitempty"`
+	CreatedAt                time.Time     `json:"created_at"`
+	UpdatedAt                time.Time     `json:"updated_at"`
 }
 
-func PurposeForStage(stage WorkStage) (string, error) {
-	switch stage {
-	case WorkStageMapper:
-		return RuntimePurposeMapper, nil
-	case WorkStageReview:
-		return RuntimePurposeReview, nil
-	default:
-		return "", errors.New("unknown taxonomy work stage")
+func (w Workflow) Valid() bool {
+	return strings.TrimSpace(w.ID) != "" && strings.TrimSpace(w.ChallengeID) != "" && strings.TrimSpace(w.ChallengeRevision) != "" &&
+		w.State.Valid() && w.Round >= 0 && w.StateAttempt >= 0
+}
+
+type LeaseCredential struct {
+	StateAttempt int    `json:"state_attempt"`
+	LeaseOwner   string `json:"lease_owner"`
+}
+
+func (c LeaseCredential) Valid() bool {
+	return c.StateAttempt >= 0 && strings.TrimSpace(c.LeaseOwner) != ""
+}
+
+type Claim struct {
+	Workflow Workflow `json:"workflow"`
+	LeaseCredential
+}
+
+func (c Claim) Valid() bool { return c.Workflow.Valid() && c.LeaseCredential.Valid() }
+
+func NewWorkflowID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return fmt.Sprintf("taxonomy-workflow-%d", time.Now().UnixNano())
 	}
+	return "taxonomy-workflow-" + hex.EncodeToString(raw[:])
+}
+
+func RetryAt(attempt int, now time.Time) time.Time {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := time.Second * time.Duration(1<<min(attempt-1, 6))
+	if delay > time.Minute {
+		delay = time.Minute
+	}
+	return now.UTC().Add(delay)
+}
+
+func min(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }

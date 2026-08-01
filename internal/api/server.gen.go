@@ -41,63 +41,48 @@ func (e AssistantMessageRole) Valid() bool {
 	}
 }
 
-// Defines values for AssistantTurnStatus.
+// Defines values for AuthoringGenerationWorkflowState.
 const (
-	AssistantTurnStatusCompleted AssistantTurnStatus = "completed"
-	AssistantTurnStatusFailed    AssistantTurnStatus = "failed"
-	AssistantTurnStatusRunning   AssistantTurnStatus = "running"
+	AuthoringGenerationWorkflowStateArtifactPublishing  AuthoringGenerationWorkflowState = "ArtifactPublishing"
+	AuthoringGenerationWorkflowStateBuilding            AuthoringGenerationWorkflowState = "Building"
+	AuthoringGenerationWorkflowStateCancelled           AuthoringGenerationWorkflowState = "Cancelled"
+	AuthoringGenerationWorkflowStateChallengePublishing AuthoringGenerationWorkflowState = "ChallengePublishing"
+	AuthoringGenerationWorkflowStateCleaningUp          AuthoringGenerationWorkflowState = "CleaningUp"
+	AuthoringGenerationWorkflowStateCompleted           AuthoringGenerationWorkflowState = "Completed"
+	AuthoringGenerationWorkflowStateFailed              AuthoringGenerationWorkflowState = "Failed"
+	AuthoringGenerationWorkflowStateGenerating          AuthoringGenerationWorkflowState = "Generating"
+	AuthoringGenerationWorkflowStateJudging             AuthoringGenerationWorkflowState = "Judging"
+	AuthoringGenerationWorkflowStateNeedsAuthorReview   AuthoringGenerationWorkflowState = "NeedsAuthorReview"
+	AuthoringGenerationWorkflowStateQueued              AuthoringGenerationWorkflowState = "Queued"
+	AuthoringGenerationWorkflowStateVerifying           AuthoringGenerationWorkflowState = "Verifying"
 )
 
-// Valid indicates whether the value is a known member of the AssistantTurnStatus enum.
-func (e AssistantTurnStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the AuthoringGenerationWorkflowState enum.
+func (e AuthoringGenerationWorkflowState) Valid() bool {
 	switch e {
-	case AssistantTurnStatusCompleted:
+	case AuthoringGenerationWorkflowStateArtifactPublishing:
 		return true
-	case AssistantTurnStatusFailed:
+	case AuthoringGenerationWorkflowStateBuilding:
 		return true
-	case AssistantTurnStatusRunning:
+	case AuthoringGenerationWorkflowStateCancelled:
 		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AuthoringCandidateState.
-const (
-	AuthoringCandidateStateArtifactFailed       AuthoringCandidateState = "ArtifactFailed"
-	AuthoringCandidateStateBuilding             AuthoringCandidateState = "Building"
-	AuthoringCandidateStateCancelled            AuthoringCandidateState = "Cancelled"
-	AuthoringCandidateStateInfrastructureFailed AuthoringCandidateState = "InfrastructureFailed"
-	AuthoringCandidateStatePublished            AuthoringCandidateState = "Published"
-	AuthoringCandidateStatePublishingArtifact   AuthoringCandidateState = "PublishingArtifact"
-	AuthoringCandidateStatePublishingChallenge  AuthoringCandidateState = "PublishingChallenge"
-	AuthoringCandidateStateSuperseded           AuthoringCandidateState = "Superseded"
-	AuthoringCandidateStateVerified             AuthoringCandidateState = "Verified"
-	AuthoringCandidateStateVerifying            AuthoringCandidateState = "Verifying"
-)
-
-// Valid indicates whether the value is a known member of the AuthoringCandidateState enum.
-func (e AuthoringCandidateState) Valid() bool {
-	switch e {
-	case AuthoringCandidateStateArtifactFailed:
+	case AuthoringGenerationWorkflowStateChallengePublishing:
 		return true
-	case AuthoringCandidateStateBuilding:
+	case AuthoringGenerationWorkflowStateCleaningUp:
 		return true
-	case AuthoringCandidateStateCancelled:
+	case AuthoringGenerationWorkflowStateCompleted:
 		return true
-	case AuthoringCandidateStateInfrastructureFailed:
+	case AuthoringGenerationWorkflowStateFailed:
 		return true
-	case AuthoringCandidateStatePublished:
+	case AuthoringGenerationWorkflowStateGenerating:
 		return true
-	case AuthoringCandidateStatePublishingArtifact:
+	case AuthoringGenerationWorkflowStateJudging:
 		return true
-	case AuthoringCandidateStatePublishingChallenge:
+	case AuthoringGenerationWorkflowStateNeedsAuthorReview:
 		return true
-	case AuthoringCandidateStateSuperseded:
+	case AuthoringGenerationWorkflowStateQueued:
 		return true
-	case AuthoringCandidateStateVerified:
-		return true
-	case AuthoringCandidateStateVerifying:
+	case AuthoringGenerationWorkflowStateVerifying:
 		return true
 	default:
 		return false
@@ -167,78 +152,21 @@ func (e AuthoringMetadataRuntime) Valid() bool {
 	}
 }
 
-// Defines values for AuthoringSessionPipelineState.
-const (
-	AuthoringSessionPipelineStateArtifactFailed       AuthoringSessionPipelineState = "ArtifactFailed"
-	AuthoringSessionPipelineStateBuilding             AuthoringSessionPipelineState = "Building"
-	AuthoringSessionPipelineStateCancelled            AuthoringSessionPipelineState = "Cancelled"
-	AuthoringSessionPipelineStateInfrastructureFailed AuthoringSessionPipelineState = "InfrastructureFailed"
-	AuthoringSessionPipelineStatePublished            AuthoringSessionPipelineState = "Published"
-	AuthoringSessionPipelineStatePublishingArtifact   AuthoringSessionPipelineState = "PublishingArtifact"
-	AuthoringSessionPipelineStatePublishingChallenge  AuthoringSessionPipelineState = "PublishingChallenge"
-	AuthoringSessionPipelineStateSuperseded           AuthoringSessionPipelineState = "Superseded"
-	AuthoringSessionPipelineStateVerified             AuthoringSessionPipelineState = "Verified"
-	AuthoringSessionPipelineStateVerifying            AuthoringSessionPipelineState = "Verifying"
-)
-
-// Valid indicates whether the value is a known member of the AuthoringSessionPipelineState enum.
-func (e AuthoringSessionPipelineState) Valid() bool {
-	switch e {
-	case AuthoringSessionPipelineStateArtifactFailed:
-		return true
-	case AuthoringSessionPipelineStateBuilding:
-		return true
-	case AuthoringSessionPipelineStateCancelled:
-		return true
-	case AuthoringSessionPipelineStateInfrastructureFailed:
-		return true
-	case AuthoringSessionPipelineStatePublished:
-		return true
-	case AuthoringSessionPipelineStatePublishingArtifact:
-		return true
-	case AuthoringSessionPipelineStatePublishingChallenge:
-		return true
-	case AuthoringSessionPipelineStateSuperseded:
-		return true
-	case AuthoringSessionPipelineStateVerified:
-		return true
-	case AuthoringSessionPipelineStateVerifying:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AuthoringSessionState.
 const (
-	AuthoringSessionStateAwaitingVerifiedReview AuthoringSessionState = "AwaitingVerifiedReview"
-	AuthoringSessionStateDraftConversation      AuthoringSessionState = "DraftConversation"
-	AuthoringSessionStateGeneratingAndVerifying AuthoringSessionState = "GeneratingAndVerifying"
-	AuthoringSessionStateInfrastructureFailed   AuthoringSessionState = "InfrastructureFailed"
-	AuthoringSessionStateIntentReview           AuthoringSessionState = "IntentReview"
-	AuthoringSessionStatePublished              AuthoringSessionState = "Published"
-	AuthoringSessionStatePublishing             AuthoringSessionState = "Publishing"
-	AuthoringSessionStateRevisingAndVerifying   AuthoringSessionState = "RevisingAndVerifying"
+	AuthoringSessionStateDraftConversation AuthoringSessionState = "DraftConversation"
+	AuthoringSessionStateIntentReview      AuthoringSessionState = "IntentReview"
+	AuthoringSessionStatePublished         AuthoringSessionState = "Published"
 )
 
 // Valid indicates whether the value is a known member of the AuthoringSessionState enum.
 func (e AuthoringSessionState) Valid() bool {
 	switch e {
-	case AuthoringSessionStateAwaitingVerifiedReview:
-		return true
 	case AuthoringSessionStateDraftConversation:
-		return true
-	case AuthoringSessionStateGeneratingAndVerifying:
-		return true
-	case AuthoringSessionStateInfrastructureFailed:
 		return true
 	case AuthoringSessionStateIntentReview:
 		return true
 	case AuthoringSessionStatePublished:
-		return true
-	case AuthoringSessionStatePublishing:
-		return true
-	case AuthoringSessionStateRevisingAndVerifying:
 		return true
 	default:
 		return false
@@ -322,34 +250,64 @@ func (e MySpaceActiveEnvironmentRuntime) Valid() bool {
 
 // Defines values for MySpaceAuthoringDraftState.
 const (
-	MySpaceAuthoringDraftStateAwaitingVerifiedReview MySpaceAuthoringDraftState = "AwaitingVerifiedReview"
-	MySpaceAuthoringDraftStateDraftConversation      MySpaceAuthoringDraftState = "DraftConversation"
-	MySpaceAuthoringDraftStateGeneratingAndVerifying MySpaceAuthoringDraftState = "GeneratingAndVerifying"
-	MySpaceAuthoringDraftStateInfrastructureFailed   MySpaceAuthoringDraftState = "InfrastructureFailed"
-	MySpaceAuthoringDraftStateIntentReview           MySpaceAuthoringDraftState = "IntentReview"
-	MySpaceAuthoringDraftStatePublished              MySpaceAuthoringDraftState = "Published"
-	MySpaceAuthoringDraftStatePublishing             MySpaceAuthoringDraftState = "Publishing"
-	MySpaceAuthoringDraftStateRevisingAndVerifying   MySpaceAuthoringDraftState = "RevisingAndVerifying"
+	MySpaceAuthoringDraftStateDraftConversation MySpaceAuthoringDraftState = "DraftConversation"
+	MySpaceAuthoringDraftStateIntentReview      MySpaceAuthoringDraftState = "IntentReview"
 )
 
 // Valid indicates whether the value is a known member of the MySpaceAuthoringDraftState enum.
 func (e MySpaceAuthoringDraftState) Valid() bool {
 	switch e {
-	case MySpaceAuthoringDraftStateAwaitingVerifiedReview:
-		return true
 	case MySpaceAuthoringDraftStateDraftConversation:
-		return true
-	case MySpaceAuthoringDraftStateGeneratingAndVerifying:
-		return true
-	case MySpaceAuthoringDraftStateInfrastructureFailed:
 		return true
 	case MySpaceAuthoringDraftStateIntentReview:
 		return true
-	case MySpaceAuthoringDraftStatePublished:
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceAuthoringDraftWorkflowState.
+const (
+	MySpaceAuthoringDraftWorkflowStateArtifactPublishing  MySpaceAuthoringDraftWorkflowState = "ArtifactPublishing"
+	MySpaceAuthoringDraftWorkflowStateBuilding            MySpaceAuthoringDraftWorkflowState = "Building"
+	MySpaceAuthoringDraftWorkflowStateCancelled           MySpaceAuthoringDraftWorkflowState = "Cancelled"
+	MySpaceAuthoringDraftWorkflowStateChallengePublishing MySpaceAuthoringDraftWorkflowState = "ChallengePublishing"
+	MySpaceAuthoringDraftWorkflowStateCleaningUp          MySpaceAuthoringDraftWorkflowState = "CleaningUp"
+	MySpaceAuthoringDraftWorkflowStateCompleted           MySpaceAuthoringDraftWorkflowState = "Completed"
+	MySpaceAuthoringDraftWorkflowStateFailed              MySpaceAuthoringDraftWorkflowState = "Failed"
+	MySpaceAuthoringDraftWorkflowStateGenerating          MySpaceAuthoringDraftWorkflowState = "Generating"
+	MySpaceAuthoringDraftWorkflowStateJudging             MySpaceAuthoringDraftWorkflowState = "Judging"
+	MySpaceAuthoringDraftWorkflowStateNeedsAuthorReview   MySpaceAuthoringDraftWorkflowState = "NeedsAuthorReview"
+	MySpaceAuthoringDraftWorkflowStateQueued              MySpaceAuthoringDraftWorkflowState = "Queued"
+	MySpaceAuthoringDraftWorkflowStateVerifying           MySpaceAuthoringDraftWorkflowState = "Verifying"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceAuthoringDraftWorkflowState enum.
+func (e MySpaceAuthoringDraftWorkflowState) Valid() bool {
+	switch e {
+	case MySpaceAuthoringDraftWorkflowStateArtifactPublishing:
 		return true
-	case MySpaceAuthoringDraftStatePublishing:
+	case MySpaceAuthoringDraftWorkflowStateBuilding:
 		return true
-	case MySpaceAuthoringDraftStateRevisingAndVerifying:
+	case MySpaceAuthoringDraftWorkflowStateCancelled:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateChallengePublishing:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateCleaningUp:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateCompleted:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateFailed:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateGenerating:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateJudging:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateNeedsAuthorReview:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateQueued:
+		return true
+	case MySpaceAuthoringDraftWorkflowStateVerifying:
 		return true
 	default:
 		return false
@@ -427,19 +385,19 @@ func (e MySpacePublishedChallengeTaxonomyStatus) Valid() bool {
 
 // Defines values for GetMySpaceLearningParamsState.
 const (
-	Active    GetMySpaceLearningParamsState = "active"
-	Completed GetMySpaceLearningParamsState = "completed"
-	Ended     GetMySpaceLearningParamsState = "ended"
+	GetMySpaceLearningParamsStateActive    GetMySpaceLearningParamsState = "active"
+	GetMySpaceLearningParamsStateCompleted GetMySpaceLearningParamsState = "completed"
+	GetMySpaceLearningParamsStateEnded     GetMySpaceLearningParamsState = "ended"
 )
 
 // Valid indicates whether the value is a known member of the GetMySpaceLearningParamsState enum.
 func (e GetMySpaceLearningParamsState) Valid() bool {
 	switch e {
-	case Active:
+	case GetMySpaceLearningParamsStateActive:
 		return true
-	case Completed:
+	case GetMySpaceLearningParamsStateCompleted:
 		return true
-	case Ended:
+	case GetMySpaceLearningParamsStateEnded:
 		return true
 	default:
 		return false
@@ -466,7 +424,6 @@ func (e GetMySpaceLearningParamsRuntime) Valid() bool {
 
 // AssistantConversation defines model for AssistantConversation.
 type AssistantConversation struct {
-	ActiveTurn  *AssistantTurn     `json:"active_turn,omitempty"`
 	ChallengeId string             `json:"challenge_id"`
 	Id          string             `json:"id"`
 	Messages    []AssistantMessage `json:"messages"`
@@ -504,22 +461,6 @@ type AssistantTerminalContext struct {
 	Windows []string `json:"windows"`
 }
 
-// AssistantTurn defines model for AssistantTurn.
-type AssistantTurn struct {
-	Content   string               `json:"content"`
-	CreatedAt string               `json:"created_at"`
-	Error     *string              `json:"error,omitempty"`
-	Evidence  *[]AssistantEvidence `json:"evidence,omitempty"`
-	Id        string               `json:"id"`
-	Message   *AssistantMessage    `json:"message,omitempty"`
-	SessionId string               `json:"session_id"`
-	Status    AssistantTurnStatus  `json:"status"`
-	UpdatedAt string               `json:"updated_at"`
-}
-
-// AssistantTurnStatus defines model for AssistantTurn.Status.
-type AssistantTurnStatus string
-
 // AuthoringAsset defines model for AuthoringAsset.
 type AuthoringAsset struct {
 	Content string `json:"content"`
@@ -528,14 +469,10 @@ type AuthoringAsset struct {
 
 // AuthoringCandidate defines model for AuthoringCandidate.
 type AuthoringCandidate struct {
-	ArchiveSha256  string                  `json:"archive_sha256"`
-	GeneratorRunId string                  `json:"generator_run_id"`
-	Id             string                  `json:"id"`
-	State          AuthoringCandidateState `json:"state"`
+	ArchiveSha256  string `json:"archive_sha256"`
+	GeneratorRunId string `json:"generator_run_id"`
+	Id             string `json:"id"`
 }
-
-// AuthoringCandidateState defines model for AuthoringCandidate.State.
-type AuthoringCandidateState string
 
 // AuthoringChange defines model for AuthoringChange.
 type AuthoringChange struct {
@@ -574,6 +511,21 @@ type AuthoringFileDiff struct {
 	Diff string `json:"diff"`
 	Path string `json:"path"`
 }
+
+// AuthoringGenerationWorkflow defines model for AuthoringGenerationWorkflow.
+type AuthoringGenerationWorkflow struct {
+	CandidateRevisionId *string                          `json:"candidate_revision_id,omitempty"`
+	CreatedAt           time.Time                        `json:"created_at"`
+	DeadlineAt          *time.Time                       `json:"deadline_at,omitempty"`
+	Id                  string                           `json:"id"`
+	LastError           *string                          `json:"last_error,omitempty"`
+	State               AuthoringGenerationWorkflowState `json:"state"`
+	StateAttempt        int                              `json:"state_attempt"`
+	UpdatedAt           time.Time                        `json:"updated_at"`
+}
+
+// AuthoringGenerationWorkflowState defines model for AuthoringGenerationWorkflow.State.
+type AuthoringGenerationWorkflowState string
 
 // AuthoringMessage defines model for AuthoringMessage.
 type AuthoringMessage struct {
@@ -618,26 +570,22 @@ type AuthoringSession struct {
 	Assets []AuthoringAsset `json:"assets"`
 
 	// AuthoringTurnActive Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
-	AuthoringTurnActive bool                           `json:"authoring_turn_active"`
-	Candidate           *AuthoringCandidate            `json:"candidate,omitempty"`
-	Diff                []AuthoringFileDiff            `json:"diff"`
-	GeneratorRunId      *string                        `json:"generator_run_id,omitempty"`
-	Id                  string                         `json:"id"`
-	Intent              AuthoringPlan                  `json:"intent"`
-	IntentRevision      int                            `json:"intent_revision"`
-	LastError           *string                        `json:"last_error,omitempty"`
-	Messages            []AuthoringMessage             `json:"messages"`
-	PipelineState       *AuthoringSessionPipelineState `json:"pipeline_state,omitempty"`
-	PublishChallengeId  *string                        `json:"publish_challenge_id,omitempty"`
-	State               AuthoringSessionState          `json:"state"`
-	UpdatedAt           time.Time                      `json:"updated_at"`
-	Verification        *AuthoringVerificationReport   `json:"verification,omitempty"`
-	Verified            *VerifiedChallenge             `json:"verified,omitempty"`
-	VisibleRevision     int                            `json:"visible_revision"`
+	AuthoringTurnActive bool                         `json:"authoring_turn_active"`
+	Candidate           *AuthoringCandidate          `json:"candidate,omitempty"`
+	Diff                []AuthoringFileDiff          `json:"diff"`
+	Id                  string                       `json:"id"`
+	Intent              AuthoringPlan                `json:"intent"`
+	IntentRevision      int                          `json:"intent_revision"`
+	LastError           *string                      `json:"last_error,omitempty"`
+	Messages            []AuthoringMessage           `json:"messages"`
+	PublishChallengeId  *string                      `json:"publish_challenge_id,omitempty"`
+	State               AuthoringSessionState        `json:"state"`
+	UpdatedAt           time.Time                    `json:"updated_at"`
+	Verification        *AuthoringVerificationReport `json:"verification,omitempty"`
+	Verified            *VerifiedChallenge           `json:"verified,omitempty"`
+	VisibleRevision     int                          `json:"visible_revision"`
+	Workflow            *AuthoringGenerationWorkflow `json:"workflow,omitempty"`
 }
-
-// AuthoringSessionPipelineState defines model for AuthoringSession.PipelineState.
-type AuthoringSessionPipelineState string
 
 // AuthoringSessionState defines model for AuthoringSession.State.
 type AuthoringSessionState string
@@ -809,14 +757,18 @@ type MySpaceAuthoring struct {
 
 // MySpaceAuthoringDraft defines model for MySpaceAuthoringDraft.
 type MySpaceAuthoringDraft struct {
-	SessionId string                     `json:"session_id"`
-	State     MySpaceAuthoringDraftState `json:"state"`
-	Title     string                     `json:"title"`
-	UpdatedAt time.Time                  `json:"updated_at"`
+	SessionId     string                              `json:"session_id"`
+	State         MySpaceAuthoringDraftState          `json:"state"`
+	Title         string                              `json:"title"`
+	UpdatedAt     time.Time                           `json:"updated_at"`
+	WorkflowState *MySpaceAuthoringDraftWorkflowState `json:"workflow_state,omitempty"`
 }
 
 // MySpaceAuthoringDraftState defines model for MySpaceAuthoringDraft.State.
 type MySpaceAuthoringDraftState string
+
+// MySpaceAuthoringDraftWorkflowState defines model for MySpaceAuthoringDraft.WorkflowState.
+type MySpaceAuthoringDraftWorkflowState string
 
 // MySpaceChallenge defines model for MySpaceChallenge.
 type MySpaceChallenge struct {
@@ -1033,9 +985,6 @@ type ServerInterface interface {
 	// Send a message to the active challenge assistant and receive SSE events
 	// (POST /challenges/{id}/assistant/messages)
 	SendChallengeAssistantMessage(c *gin.Context, id string)
-	// Reconnect to a running assistant response stream
-	// (GET /challenges/{id}/assistant/turns/{turnID}/events)
-	StreamChallengeAssistantTurn(c *gin.Context, id string, turnID string)
 	// Get challenge problem, solution, hints, and checkpoint metadata
 	// (GET /challenges/{id}/content)
 	GetChallengeContent(c *gin.Context, id string)
@@ -1303,42 +1252,6 @@ func (siw *ServerInterfaceWrapper) SendChallengeAssistantMessage(c *gin.Context)
 	}
 
 	siw.Handler.SendChallengeAssistantMessage(c, id)
-}
-
-// StreamChallengeAssistantTurn operation middleware
-func (siw *ServerInterfaceWrapper) StreamChallengeAssistantTurn(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Path parameter "turnID" -------------
-	var turnID string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "turnID", c.Param("turnID"), &turnID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter turnID: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StreamChallengeAssistantTurn(c, id, turnID)
 }
 
 // GetChallengeContent operation middleware
@@ -1656,7 +1569,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
 	router.GET(options.BaseURL+"/challenges/:id/assistant", wrapper.GetChallengeAssistant)
 	router.POST(options.BaseURL+"/challenges/:id/assistant/messages", wrapper.SendChallengeAssistantMessage)
-	router.GET(options.BaseURL+"/challenges/:id/assistant/turns/:turnID/events", wrapper.StreamChallengeAssistantTurn)
 	router.GET(options.BaseURL+"/challenges/:id/content", wrapper.GetChallengeContent)
 	router.GET(options.BaseURL+"/challenges/:id/progress", wrapper.GetChallengeProgress)
 	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
@@ -1673,76 +1585,74 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"RZKnm6f/DwAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

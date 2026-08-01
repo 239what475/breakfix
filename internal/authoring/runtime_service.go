@@ -15,11 +15,10 @@ import (
 
 const (
 	authoringPromptVersion = "authoring-v1"
-	authoringRunDeadline   = agentruntime.ExecutionDeadline
 )
 
-// RuntimeRepository is the Server-owned Authoring boundary. Agent Workers only
-// reach the mutable stage and finalization methods through internal HTTP APIs.
+// RuntimeRepository is the Server-owned Authoring boundary. The Server owns
+// the mutable stage and finalization methods for direct authoring turns.
 type RuntimeRepository interface {
 	CreateAuthoringSession(context.Context, Session, Plan) (*Session, error)
 	GetAuthoringSession(context.Context, string, string) (*Session, error)
@@ -88,7 +87,7 @@ func (s *RuntimeService) GetCurrent(ctx context.Context, userID string) (*Sessio
 }
 
 // StartTurn atomically creates the user message, Agent Run, and private stage.
-// The response itself is finalized asynchronously by an Agent Worker.
+// The Server then executes and streams this turn in the request that created it.
 func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, content string) (*Session, *agentruntime.Run, error) {
 	if s == nil || s.repo == nil {
 		return nil, nil, errors.New("authoring runtime repository is required")
@@ -121,16 +120,15 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		Content:   content,
 		CreatedAt: now,
 	}, agentruntime.CreateRun{
-		ID:               agentruntime.NewID("authoring-run"),
-		SessionID:        session.RuntimeSessionID,
-		Purpose:          "authoring",
-		OwnerKind:        "authoring-session",
-		OwnerRef:         session.ID,
-		InputRevision:    fmt.Sprintf("%d", session.CurrentRevision),
-		Input:            input,
-		Model:            s.model,
-		PromptVersion:    authoringPromptVersion,
-		ExecutionTimeout: authoringRunDeadline,
+		ID:            agentruntime.NewID("authoring-run"),
+		SessionID:     session.RuntimeSessionID,
+		Purpose:       "authoring",
+		OwnerKind:     "authoring-session",
+		OwnerRef:      session.ID,
+		InputRevision: fmt.Sprintf("%d", session.CurrentRevision),
+		Input:         input,
+		Model:         s.model,
+		PromptVersion: authoringPromptVersion,
 	})
 	if err != nil {
 		return nil, nil, err

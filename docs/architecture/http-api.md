@@ -1,37 +1,46 @@
 # HTTP 与终端接口
 
-[`api/openapi.yaml`](../../api/openapi.yaml) 是 HTTP JSON 契约的唯一来源。Server 的 Go 路由、前端生成类型和 CI 校验都以它为准；本文只说明接口边界和认证规则，不维护逐字段副本。
+公开 HTTP 契约由 [`api/openapi.yaml`](../../api/openapi.yaml) 定义并生成 Go 与 TypeScript 类型：
 
-## 认证与会话
+```bash
+make generate-api
+make verify-api-generated
+```
 
-注册和登录使用用户名、密码与 TOTP。登录成功后 Server 签发 JWT，受保护的 JSON 接口使用 `Authorization: Bearer <token>`。
+## 公开接口分组
 
-终端不将 JWT 放入 WebSocket URL。浏览器先通过带 `Authorization` 的
-`POST /api/challenges/{id}/terminal-ticket` 请求一张一分钟有效、仅能消费一次的
-ticket；ticket 绑定用户、Environment UID、挑战和 tmux window，PostgreSQL 只保存其
-SHA-256 hash。随后 WebSocket 只携带 ticket 与 window。升级前和 upgrader 都会将
-`Origin` 与运行时配置的精确 `ui_origin` 比较，缺失或不同 Origin 不会消费 ticket。
+- 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
+- Catalog 与题目：浏览已映射的 challenge、读取 problem/solution/hint、开始或停止学习环境。
+- Authoring：创建和读取会话、发送自然语言消息、确认生成、读取只读候选、确认发布。
+- Assistant：在活动学习环境中发送消息并读取持久对话与工具证据。
+- 终端：先经 JWT 保护的 HTTP 接口签发一次性 ticket，再由 WebSocket 消费。
 
-题库摘要是公开只读接口；完整题目内容、挑战环境、作者会话、个人空间和助手均需要登录。
+浏览器不提交 challenge artifact，也没有做题 Submit。检查点由 Controller 自动评估；作者发布通过
+`GenerationWorkflow` 的作者审核状态触发，而不是上传任意文件。
 
-## 接口分组
+## 内部 Worker 接口
 
-| 范围 | 用途 |
-| --- | --- |
-| `/api/auth/*` | 注册与登录。 |
-| `/api/challenges` | 公开题库摘要；携带 JWT 时附加当前用户的完成、活动与检查点进度。 |
-| `/api/challenges/{id}/*` | 读取题面、启动、重置、停止、查询检查点、终端 ticket/窗口和挑战助手。 |
-| `/api/me/space*` | 当前用户的学习、环境和作者聚合视图。 |
-| `/api/authoring/sessions*` | 作者讨论、生成确认、已验证 revision 查看和发布。 |
-| `/api/internal/*` | 仅 Agent Worker/Verifier 使用的围栏领域工具、Generator 工作区和 artifact 下载；必须携带内部密钥，不能当作公开 API。 |
+内部 API 不属于 OpenAPI 公开契约。它们只供两个固定 Worker 调用，并使用独立 role key：
 
-终端使用 `/api/challenges/{id}/terminal` WebSocket。字节流不通过 OpenAPI JSON schema 表达；其 ticket 签发 JSON 接口在 OpenAPI 中定义，WebSocket 的一次性 ticket 和 Origin 约束由 Server 负责执行。
+```text
+POST /api/internal/generation-workflows/claim
+POST /api/internal/generation-workflows/:id/renew
+POST /api/internal/generation-workflows/:id/context
+POST /api/internal/generation-workflows/:id/agent-runs
+POST /api/internal/generation-workflows/:id/phase
 
-挑战助手消息接口会返回 Server-Sent Events。前端的 SSE envelope 是本地客户端状态，故不与普通 JSON model 混为一谈；`make generate-api` 从 OpenAPI 同时生成 Go 路由模型和前端 API 类型，见 [`internal/api/server.gen.go`](../../internal/api/server.gen.go) 与 [`frontend/src/api/generated/`](../../frontend/src/api/generated/)。
+POST /api/internal/taxonomy-workflows/claim
+POST /api/internal/taxonomy-workflows/:id/renew
+POST /api/internal/taxonomy-workflows/:id/context
+POST /api/internal/taxonomy-workflows/:id/agent-runs
+POST /api/internal/taxonomy-workflows/:id/phase
+```
 
-## 兼容性规则
+Generate Worker 的 artifact/workspace 子接口同样要求 generation lease。所有请求使用严格 JSON 解码，
+携带 Workflow ID、lease owner、state attempt 与 expected state；Server 只接受当前 lease 的 typed 结果。
 
-- 修改 HTTP JSON 先更新 `api/openapi.yaml`，再运行 `make generate-api`。
-- `make verify-api-generated` 与 CI 会在临时目录重建并比较 Go 和前端生成物。
-- CRD 不是 HTTP API 的附属模型；其权威来源独立于 OpenAPI，见[运行环境](runtime-environments.md)。
-- 接口不提供用户上传任意 challenge artifact 或手动提交挑战完成状态。题目发布和挑战完成分别由作者工作流和检查点状态机驱动。
+## 终端安全边界
+
+终端 WebSocket 使用一次性 ticket，不接受 URL JWT。Server 验证 ticket 的用户、Environment、challenge、
+窗口和过期时间，并要求浏览器 Origin 与配置的 `ui_origin` 完全一致。terminal connection 与 usage
+session 被持久化，因此 Server 重启或 WebSocket 断开后，环境清理仍能按活动状态收敛。

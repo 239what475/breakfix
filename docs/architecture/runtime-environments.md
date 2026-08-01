@@ -1,49 +1,49 @@
 # 运行环境
 
-Challenge 只描述学习内容。用户和验证所使用的真实运行环境由 Kubernetes CRD 表达，当前只有两种：`NodeEnvironment` 与 `VK8sEnvironment`。它们共享不可变执行快照、运行时初始化、检查点 JSON 协议和生命周期模型，但不会向题目、浏览器或作者暴露底层 Provider。
+Breakfix 的学习与真实验证都使用相同的 Environment 契约。Environment 是短生命周期 CRD；
+Server 写 `spec`，Controller 调和实际资源并写 `status`。Controller 不拥有候选、Workflow 或
+发布状态。
 
-## Environment CRD
+## 两类环境
 
-Server 从已发布 challenge 或不可变 CandidateRevision 创建 `NodeEnvironment`、`VK8sEnvironment`。创建时写入完整的运行时快照、来源、检查点和 `purpose`：
+| CRD | runtime | 学习者入口 | 底层资源 |
+| --- | --- | --- | --- |
+| `NodeEnvironment` | `node` | 可以进入题目声明的所有节点 | Incus system containers 与每环境隔离网络。 |
+| `VK8sEnvironment` | `k8s` | 进入管理 terminal，通过 kubeconfig 操作 vcluster | vcluster、管理 terminal 和题目工作负载。 |
 
-- `learning` 是用户开始题目后得到的环境。Controller 周期执行检查点，将结果写入 status；所有检查点通过时环境自动 `Completed`。
-- `verification` 只由 Verifier Worker 创建。Controller 只供应、初始化和回收它；Verifier 在参考答案执行后单次运行检查点，避免两个组件同时判定或改变同一环境。
+环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自已发布 challenge；
+验证环境来自 immutable CandidateRevision artifact。两者都复制运行时 profile、challenge revision、
+checkpoint 定义和 artifact reference，因此后续配置或题目修改不会改变已运行环境。
 
-Server 不写 CRD status，Controller 不从文件系统读取 challenge，也不访问 PostgreSQL。完整类型和生成清单分别位于 [`internal/k8s/apis/breakfix/v1/`](../../internal/k8s/apis/breakfix/v1/) 与 [`deploy/crd/`](../../deploy/crd/)。
+## 生命周期
 
-Environment spec 是不可变执行快照。学习环境引用已发布 revision；验证环境引用 CandidateRevision。Controller 只消费快照中的节点、检查点、镜像/Incus fingerprint、资源档位和运行时配置 revision，不能在运行时重新解释题目目录或候选归档。
+```text
+Pending -> Provisioning -> Ready -> Draining -> Destroyed
+                              |
+                              +-> Completed
+                              +-> Failed
+```
 
-## NodeEnvironment
+Controller 根据 CRD finalizer、用户停止、完成、空闲时间和 drain grace period 回收资源。Server 记录
+终端/学习活动并更新 Environment `spec` 中的 activity 信息；Controller 即使 Server 重启也能继续按已
+持久化的生命周期策略收敛。
 
-`runtime: node` 对应一组真实 Linux 节点。每个逻辑节点由 Incus 提供 unprivileged system container，以 systemd 为 PID 1；用户可以分别进入全部节点，使用 shell、`systemctl`、`journalctl`、SSH 和网络工具。
+## 运行时初始化与检查点
 
-一个 NodeEnvironment 具有独占 Incus Project、managed bridge、ACL、profile 和节点实例。逻辑节点名例如 `client`、`proxy`、`app` 是题目协议的一部分，平台在每个节点写入托管 `/etc/hosts` 段实现名称解析；用户不需要也不应了解 Incus instance、Project、bridge 或成员名。不同 Environment 使用不同 Project 与网络，节点不能跨 Environment 互通。
+每道题携带 `generate.sh`，但它不是镜像构建步骤。基础镜像只包含平台运行时；Environment 启动后由
+runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 challenge bundle 可以
+在学习与验证环境使用一致的初始化语义。
 
-Server 使用 Incus SDK 代理交互 exec WebSocket。每个节点持久保留一个 tmux 会话；浏览器断开只结束本次 attach，Environment 删除才回收节点与会话。Controller 负责 Project、image、network、profile、instance 和 finalizer 的精确清理。
+检查点没有人为 Submit。Controller 按题目定义运行对应的检查脚本、写入结构化 checkpoint 状态，并将首次
+通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
 
-## VK8sEnvironment
+Generate Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init、运行
+`answer.sh`、收集相同检查点的结构化结果，再删除该 Environment。验证报告属于 CandidateRevision，
+Workflow 只保存当前阶段和 lease。
 
-`runtime: k8s` 对应一个隔离 Kubernetes 管理实验。Controller 创建专属 namespace、隐藏的 vcluster 和唯一管理终端；终端持有 kubeconfig，用户通过 `kubectl` 操作虚拟集群，而不是登录 Kubernetes worker node。
+## 网络与镜像
 
-vcluster 是实现细节，不是 manifest、API 或 UI 中的 runtime 值。`VK8sEnvironment` 同样只在 Controller 的 CRD reconcile 中创建和删除；它与 NodeEnvironment 有相同的 status、deadline、条件和 finalizer 约束。
-
-## 初始化与检查点
-
-所有题目都在运行时初始化。平台总是通过 `/bin/bash` 调用脚本，因此题目脚本不依赖可执行位或 shebang：
-
-- Node 题的每个逻辑节点拥有 `nodes/<node>/generate.sh`、`answer.sh`，有检查点的节点还拥有 `checks.sh`。Node 基础镜像首次启动时运行本节点的 `generate.sh` 并写 sentinel。
-- K8s 题使用 `k8s/generate.sh`、`answer.sh`、`checks.sh`。管理终端启动后运行 `k8s/generate.sh`。
-
-`generate.sh` 负责建立错误初态，可以安装题目专属软件；Builder 从不执行它。`answer.sh` 仅用于真实验证，学习环境永远不会自动运行答案。`checks.sh` 不接收平台参数，stdout 只输出覆盖本执行位置全部 checkpoint 的结构化 JSON；未通过应输出 `passed: false` 且退出 0，脚本/协议错误才以非零退出。
-
-学习环境中的 Controller 周期执行同一份 `checks.sh` 并记录首次通过时间、最近结果和执行错误。没有用户可见的 Submit，也没有 `verify.sh` 兼容路径。
-
-## 生命周期与清理
-
-典型状态是 Pending、Provisioning、Ready、Draining、Completed、Destroyed 和 Failed。Server 将终端活动写入 Environment spec，Controller 根据 idle TTL、drain grace 与 deadline 调和状态。Stop 或 Reset 请求删除 CRD；finalizer 必须回收 Node 的 Incus 资源或 VK8s 的 namespace、vcluster、Secret 和终端资源。
-
-Provider、网络、镜像、Project/namespace/vcluster 供应失败属于 infrastructure；候选 `generate.sh` 已开始后非零退出属于 artifact。status 使用结构化 failure class 和稳定 reason，不通过 stderr 关键词重分类。Node provider 不可用时只影响新的 NodeEnvironment，不能影响 VK8sEnvironment。
-
-## 与真实验证的关系
-
-Verifier Worker 从 CandidateRevision 创建 `purpose=verification` Environment，等待 runtime-init 完成，运行所有 `answer.sh`，再运行同一套 `checks.sh`。无论通过、artifact failure、infrastructure failure 或 lease 丢失，Verifier 和 Controller 都按 Environment UID 精确清理资源。Build、ArtifactPublish、Verify、作者审核与 ChallengePublish 的完整所有权见[作者生成与真实验证](authoring-workflow.md)。
+NodeEnvironment 使用题目私有 Incus project/network；Node 名称与静态地址由平台生成并写入对应节点的
+`/etc/hosts`，避免向学习者暴露 Incus DNS 细节。VK8s 的 OCI image 由 Kubernetes node 按 Registry
+配置拉取；私有 Registry 必须使用 node 可解析、可访问且受信任的 HTTPS 名称，不能用 `.svc` 作为镜像
+引用。

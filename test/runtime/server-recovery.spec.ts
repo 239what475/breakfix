@@ -12,7 +12,7 @@ const execFile = promisify(execFileCallback);
 const namespace = "breakfix-system";
 const serverDeployment = "breakfix-server";
 const controllerDeployment = "breakfix-controller";
-const workerDeployments = ["agent-worker", "builder", "publisher", "verifier"] as const;
+const workerDeployments = ["generate-worker", "taxonomy-worker"] as const;
 // The browser origin must match Server's configured UI origin so its terminal
 // WebSocket upgrade passes the same-origin check.
 const serverURL = process.env.BREAKFIX_E2E_BASE_URL ?? "http://localhost:9090";
@@ -180,8 +180,8 @@ recoveryTest("server restart leaves controller reconciliation active", async ({ 
       timeout: 90_000,
       intervals: [1_000, 2_000, 5_000],
     }).toBe("Draining");
-    // A Server outage makes outstanding claim requests fail. Fixed Workers
-    // must retry in-process rather than rely on a Deployment crash restart.
+    // A Server outage makes outstanding workflow claims fail. Workers retry
+    // in-process rather than relying on a Deployment crash restart.
     await new Promise<void>((resolve) => setTimeout(resolve, 35_000));
     expect(await workerRestartCounts()).toEqual(workerRestartsBefore);
 

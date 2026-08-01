@@ -1,5 +1,5 @@
-// Package publisher implements the fixed artifact publication, cleanup, and
-// final challenge publication stages. It never executes candidate files.
+// Package publisher publishes and cleans immutable candidate artifacts for a
+// GenerationWorkflow phase. It does not schedule work or mutate Server state.
 package publisher
 
 import (
@@ -11,11 +11,10 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/candidateworker"
 	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/registry"
-	"github.com/breakfix/breakfix/internal/worklist"
 )
 
 type Registry interface {
@@ -29,155 +28,149 @@ type NodeImagePublisher interface {
 	PublishNodeImage(context.Context, incusprovider.PublishNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
 	PublishChallengeNodeImage(context.Context, incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
-	DeleteBuildNodeImage(context.Context, incusprovider.BuildNodeImageResult, string) error
-	DeleteBuildNodeImageAttempt(context.Context, string, int64, string) error
+	DeleteBuildNodeImageAttempt(context.Context, string, int64) error
 	DeleteChallengeNodeImage(context.Context, string, string) error
 }
 
 type Executor struct {
-	client       *candidateworker.Client
 	registry     Registry
 	node         NodeImagePublisher
 	registryRoot string
 }
 
-func NewExecutor(client *candidateworker.Client, registryClient Registry, node NodeImagePublisher, registryRoot string) (*Executor, error) {
-	if client == nil || registryClient == nil || strings.TrimSpace(registryRoot) == "" {
-		return nil, errors.New("publisher requires Server and Registry clients plus a Registry root")
+func NewExecutor(registryClient Registry, node NodeImagePublisher, registryRoot string) (*Executor, error) {
+	if registryClient == nil || strings.TrimSpace(registryRoot) == "" {
+		return nil, errors.New("publisher requires Registry client and Registry root")
 	}
-	return &Executor{client: client, registry: registryClient, node: node, registryRoot: strings.TrimRight(strings.TrimSpace(registryRoot), "/")}, nil
+	return &Executor{registry: registryClient, node: node, registryRoot: strings.TrimRight(strings.TrimSpace(registryRoot), "/")}, nil
 }
 
-func (e *Executor) Execute(ctx context.Context, claim candidateworker.Claim) error {
-	switch claim.Work.Item.Kind {
-	case worklist.KindArtifactPublish:
-		return e.publishArtifact(ctx, claim)
-	case worklist.KindArtifactCleanup:
-		return e.cleanupArtifact(ctx, claim)
-	case worklist.KindChallengePublish:
-		return e.publishChallenge(ctx, claim)
-	default:
-		return fmt.Errorf("publisher cannot execute work kind %q", claim.Work.Item.Kind)
+// DiscardCandidate removes external artifacts for a candidate that will no
+// longer advance through this workflow. It is called before the next Generator
+// run, while the failed or superseded candidate is still durably referenced by
+// GenerationWorkflow, so a retry can repeat the deletion safely.
+func (e *Executor) DiscardCandidate(ctx context.Context, execution generation.Execution) error {
+	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateGenerating || execution.Context.Candidate == nil {
+		return errors.New("candidate discard requires a Generating workflow with a candidate")
 	}
+	return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *execution.Context.Candidate)
 }
 
-func (e *Executor) publishArtifact(ctx context.Context, claim candidateworker.Claim) error {
-	if claim.Candidate.Build == nil {
-		return errors.New("candidate has no build output")
+func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Execution, buildArchive []byte) (candidate.ArtifactReference, error) {
+	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateArtifactPublishing || execution.Context.Candidate == nil {
+		return candidate.ArtifactReference{}, errors.New("artifact publication requires an ArtifactPublishing workflow with a candidate")
 	}
-	switch claim.Candidate.Snapshot.Runtime {
+	view := execution.Context.Candidate
+	if view.Build == nil {
+		return candidate.ArtifactReference{}, errors.New("candidate has no build output")
+	}
+	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		archive, digest, err := e.client.DownloadBuildArchive(ctx, claim)
-		if err != nil {
-			return err
-		}
-		if digest != claim.Candidate.Build.OCIArchiveSHA256 || candidate.Digest(archive) != digest {
-			return errors.New("candidate OCI archive does not match the recorded build output")
+		if candidate.Digest(buildArchive) != view.Build.OCIArchiveSHA256 {
+			return candidate.ArtifactReference{}, errors.New("candidate OCI archive does not match the recorded build output")
 		}
 		root, err := os.MkdirTemp("", "breakfix-publisher-")
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
-		defer os.RemoveAll(root) //nolint:errcheck
-		path := filepath.Join(root, "candidate.oci.tar")
-		if err := os.WriteFile(path, archive, 0o400); err != nil {
-			return err
+		defer func() { _ = os.RemoveAll(root) }()
+		archivePath := filepath.Join(root, "candidate.oci.tar")
+		if err := os.WriteFile(archivePath, buildArchive, 0o400); err != nil {
+			return candidate.ArtifactReference{}, err
 		}
-		if err := registry.ValidateOCIArchive(path); err != nil {
-			return fmt.Errorf("validate Server build archive: %w", err)
+		if err := registry.ValidateOCIArchive(archivePath); err != nil {
+			return candidate.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
 		}
-		target, err := e.candidateImage(claim.Candidate.ID)
+		target, err := e.candidateImage(view.ID)
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
-		if err := e.registry.PushOCIArchive(ctx, target, path); err != nil {
-			return fmt.Errorf("publish candidate OCI image: %w", err)
+		if err := e.registry.PushOCIArchive(ctx, target, archivePath); err != nil {
+			return candidate.ArtifactReference{}, fmt.Errorf("publish candidate OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
-		return e.client.CompleteArtifactPublish(ctx, claim, candidate.ArtifactReference{
-			Runtime: challenge.RuntimeK8s, OCIReference: immutable,
-		})
+		return candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return errors.New("node image publisher is unavailable")
+			return candidate.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
-		build, err := nodeBuildResult(claim.Candidate.Build)
+		build, err := nodeBuildResult(view.Build)
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
 		published, err := e.node.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
-			CandidateRevisionID: claim.Candidate.ID,
-			Revision:            claim.Candidate.ArchiveSHA256,
+			CandidateRevisionID: view.ID,
+			Revision:            view.ArchiveSHA256,
 			Build:               build,
 		})
 		if err != nil {
-			return fmt.Errorf("publish candidate Node image: %w", err)
+			return candidate.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
 		}
-		return e.client.CompleteArtifactPublish(ctx, claim, candidate.ArtifactReference{
-			Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint,
-		})
+		return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return errors.New("candidate runtime is unsupported")
+		return candidate.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) publishChallenge(ctx context.Context, claim candidateworker.Claim) error {
-	publication := claim.Candidate.Publication
-	artifact := claim.Candidate.Artifact
-	if publication == nil || artifact == nil {
-		return errors.New("candidate challenge publication has no intent or verified artifact")
+func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Execution) (candidate.ArtifactReference, error) {
+	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateChallengePublishing || execution.Context.Candidate == nil {
+		return candidate.ArtifactReference{}, errors.New("challenge publication requires a ChallengePublishing workflow with a candidate")
 	}
-	switch claim.Candidate.Snapshot.Runtime {
+	view := execution.Context.Candidate
+	if view.Publication == nil || view.Artifact == nil {
+		return candidate.ArtifactReference{}, errors.New("candidate challenge publication has no intent or verified artifact")
+	}
+	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		target, err := e.challengeImage(publication.ChallengeID)
+		target, err := e.challengeImage(view.Publication.ChallengeID)
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
-		if err := e.registry.CopyImage(ctx, artifact.OCIReference, target); err != nil {
-			return fmt.Errorf("publish final challenge OCI image: %w", err)
+		if err := e.registry.CopyImage(ctx, view.Artifact.OCIReference, target); err != nil {
+			return candidate.ArtifactReference{}, fmt.Errorf("publish final challenge OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return err
+			return candidate.ArtifactReference{}, err
 		}
-		return e.client.CompleteChallengePublish(ctx, claim, candidate.ArtifactReference{
-			Runtime: challenge.RuntimeK8s, OCIReference: immutable,
-		})
+		return candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return errors.New("node image publisher is unavailable")
+			return candidate.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
 		published, err := e.node.PublishChallengeNodeImage(ctx, incusprovider.PublishChallengeNodeImageRequest{
-			CandidateRevisionID: claim.Candidate.ID,
-			ChallengeID:         publication.ChallengeID,
+			CandidateRevisionID: view.ID,
+			ChallengeID:         view.Publication.ChallengeID,
 			Staging: incusprovider.PublishNodeImageResult{
-				Alias: artifact.IncusAlias, Fingerprint: artifact.IncusFingerprint,
+				Alias: view.Artifact.IncusAlias, Fingerprint: view.Artifact.IncusFingerprint,
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("publish final challenge Node image: %w", err)
+			return candidate.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
 		}
-		return e.client.CompleteChallengePublish(ctx, claim, candidate.ArtifactReference{
-			Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint,
-		})
+		return candidate.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return errors.New("candidate runtime is unsupported")
+		return candidate.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) cleanupArtifact(ctx context.Context, claim candidateworker.Claim) error {
-	if claim.Cleanup == nil || claim.Cleanup.Validate() != nil {
-		return errors.New("candidate cleanup has no deterministic build identity")
+// Cleanup removes only deterministic resources for this workflow. It is safe
+// to repeat after a process crash because each provider deletion is ownership
+// checked and create-or-observe was used for every preceding phase.
+func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) error {
+	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateCleaningUp || execution.Context.Candidate == nil {
+		return errors.New("generation cleanup requires a CleaningUp workflow with a candidate")
 	}
-	switch claim.Candidate.Snapshot.Runtime {
+	view := execution.Context.Candidate
+	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		if claim.Candidate.Publication != nil && claim.Candidate.State != candidate.StatePublished {
-			challengeImage, err := e.challengeImage(claim.Candidate.Publication.ChallengeID)
+		if view.Publication != nil && execution.Claim.Workflow.CleanupIntent != generation.CleanupCompleted {
+			challengeImage, err := e.challengeImage(view.Publication.ChallengeID)
 			if err != nil {
 				return err
 			}
@@ -185,48 +178,77 @@ func (e *Executor) cleanupArtifact(ctx context.Context, claim candidateworker.Cl
 				return fmt.Errorf("delete uncommitted challenge OCI image: %w", err)
 			}
 		}
-		candidateImage, err := e.candidateImage(claim.Candidate.ID)
-		if err != nil {
-			return err
-		}
-		if claim.Candidate.Artifact != nil {
-			candidateImage = claim.Candidate.Artifact.OCIReference
-		}
-		if err := e.registry.DeleteImage(ctx, candidateImage); err != nil {
-			return fmt.Errorf("delete candidate OCI image: %w", err)
-		}
+		return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *view)
+
 	case challenge.RuntimeNode:
 		if e.node == nil {
 			return errors.New("node image publisher is unavailable")
 		}
-		for attempt := int64(1); attempt <= claim.Cleanup.BuildAttempts; attempt++ {
-			if err := e.node.DeleteBuildNodeImageAttempt(ctx, claim.Cleanup.BuildWorkItemID, attempt, claim.Candidate.ArchiveSHA256); err != nil {
-				return fmt.Errorf("delete Node build attempt %d: %w", attempt, err)
-			}
-		}
-		fingerprint := cleanupNodeFingerprint(claim.Candidate)
+		fingerprint := cleanupNodeFingerprint(*view)
 		if fingerprint != "" {
-			if claim.Candidate.Publication != nil && claim.Candidate.State != candidate.StatePublished {
-				if err := e.node.DeleteChallengeNodeImage(ctx, claim.Candidate.Publication.ChallengeID, fingerprint); err != nil {
+			if view.Publication != nil && execution.Claim.Workflow.CleanupIntent != generation.CleanupCompleted {
+				if err := e.node.DeleteChallengeNodeImage(ctx, view.Publication.ChallengeID, fingerprint); err != nil {
 					return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
 				}
 			}
-			if err := e.node.DeleteCandidateNodeImage(ctx, claim.Candidate.ID, fingerprint); err != nil {
-				return fmt.Errorf("delete candidate Node image: %w", err)
-			}
 		}
+		return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *view)
 	default:
 		return errors.New("candidate runtime is unsupported")
 	}
-	return e.client.CompleteCleanup(ctx, claim)
 }
 
-func cleanupNodeFingerprint(candidateView candidate.WorkerView) string {
-	if candidateView.Artifact != nil && candidateView.Artifact.IncusFingerprint != "" {
-		return candidateView.Artifact.IncusFingerprint
+func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view candidate.WorkerView) error {
+	switch view.Snapshot.Runtime {
+	case challenge.RuntimeK8s:
+		candidateImage, err := e.candidateImage(view.ID)
+		if err != nil {
+			return err
+		}
+		if view.Artifact != nil && view.Artifact.OCIReference != "" {
+			candidateImage = view.Artifact.OCIReference
+		}
+		if view.Artifact == nil {
+			return nil
+		}
+		if err := e.registry.DeleteImage(ctx, candidateImage); err != nil {
+			return fmt.Errorf("delete candidate OCI image: %w", err)
+		}
+		return nil
+
+	case challenge.RuntimeNode:
+		if e.node == nil {
+			return errors.New("node image publisher is unavailable")
+		}
+		if view.Artifact != nil && view.Artifact.IncusFingerprint != "" {
+			if err := e.node.DeleteCandidateNodeImage(ctx, view.ID, view.Artifact.IncusFingerprint); err != nil {
+				return fmt.Errorf("delete candidate Node image: %w", err)
+			}
+		}
+		attempts := int64(0)
+		if view.Build != nil && view.Build.Incus != nil {
+			if view.Build.Incus.WorkflowID != workflowID {
+				return errors.New("candidate Node build does not belong to generation workflow")
+			}
+			attempts = view.Build.Incus.Attempt
+		}
+		for attempt := int64(1); attempt <= attempts; attempt++ {
+			if err := e.node.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt); err != nil {
+				return fmt.Errorf("delete Node build attempt %d: %w", attempt, err)
+			}
+		}
+		return nil
+	default:
+		return errors.New("candidate runtime is unsupported")
 	}
-	if candidateView.Build != nil && candidateView.Build.Incus != nil && candidateView.Build.Incus.Fingerprint != "" {
-		return candidateView.Build.Incus.Fingerprint
+}
+
+func cleanupNodeFingerprint(view candidate.WorkerView) string {
+	if view.Artifact != nil && view.Artifact.IncusFingerprint != "" {
+		return view.Artifact.IncusFingerprint
+	}
+	if view.Build != nil && view.Build.Incus != nil && view.Build.Incus.Fingerprint != "" {
+		return view.Build.Incus.Fingerprint
 	}
 	return ""
 }
@@ -236,9 +258,7 @@ func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve published OCI image: %w", err)
 	}
-	if err := (candidate.ArtifactReference{
-		Runtime: challenge.RuntimeK8s, OCIReference: immutable,
-	}).Validate(challenge.RuntimeK8s); err != nil {
+	if err := (candidate.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
 		return "", fmt.Errorf("Registry returned an invalid immutable OCI reference: %w", err)
 	}
 	return immutable, nil
@@ -257,7 +277,10 @@ func nodeBuildResult(build *candidate.BuildOutput) (incusprovider.BuildNodeImage
 		return incusprovider.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
 	}
 	return incusprovider.BuildNodeImageResult{
-		WorkItemID: build.Incus.WorkItemID, Attempt: build.Incus.Attempt,
-		InstanceName: build.Incus.InstanceName, Alias: build.Incus.Alias, Fingerprint: build.Incus.Fingerprint,
+		WorkflowID:   build.Incus.WorkflowID,
+		Attempt:      build.Incus.Attempt,
+		InstanceName: build.Incus.InstanceName,
+		Alias:        build.Incus.Alias,
+		Fingerprint:  build.Incus.Fingerprint,
 	}, nil
 }

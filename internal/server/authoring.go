@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
+	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/gin-gonic/gin"
 )
@@ -32,8 +34,7 @@ func (h *Handler) CreateAuthoringSession(c *gin.Context) {
 }
 
 func (h *Handler) GetAuthoringSession(c *gin.Context, sessionID string) {
-	user := h.requireUser(c)
-	if user != nil {
+	if user := h.requireUser(c); user != nil {
 		h.writeAuthoringSession(c, user, sessionID)
 	}
 }
@@ -61,11 +62,47 @@ func (h *Handler) SendAuthoringMessage(c *gin.Context, sessionID string) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	if _, _, err := h.authoring.StartTurn(c.Request.Context(), user.ID, sessionID, request.Content); err != nil {
+	_, run, err := h.authoring.StartTurn(c.Request.Context(), user.ID, sessionID, request.Content)
+	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	h.writeAuthoringSession(c, user, sessionID)
+	h.streamAuthoringTurn(c, run.ID)
+}
+
+type authoringStreamEvent struct {
+	RunID   string `json:"run_id"`
+	Content string `json:"content,omitempty"`
+}
+
+func (h *Handler) streamAuthoringTurn(c *gin.Context, runID string) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	writeSSE(c, "ready", authoringStreamEvent{RunID: runID})
+
+	stage, history, err := h.db.LoadAuthoringExecution(c.Request.Context(), runID)
+	var content string
+	if err == nil {
+		content, err = authoring.RunWithEino(c.Request.Context(), h.llm, runID, *stage, history, h.db, func(event authoring.StreamEvent) {
+			writeSSE(c, "delta", authoringStreamEvent{RunID: runID, Content: event.Content})
+		})
+	}
+	if err == nil {
+		_, err = h.db.FinalizeAuthoringRun(c.Request.Context(), runID, content, time.Now().UTC())
+	}
+	if err == nil {
+		writeSSE(c, "complete", authoringStreamEvent{RunID: runID, Content: content})
+		return
+	}
+	if failErr := h.db.FailRun(context.Background(), runID, err.Error(), time.Now().UTC()); failErr != nil && !errors.Is(failErr, agentruntime.ErrRunActive) {
+		slog.Error("finalize direct authoring turn", "run_id", runID, "err", errors.Join(err, failErr))
+	}
+	if c.Request.Context().Err() == nil {
+		writeSSE(c, "error", authoringStreamEvent{RunID: runID, Content: err.Error()})
+	}
 }
 
 func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
@@ -78,52 +115,27 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if session.State != authoring.StateIntentReview && session.State != authoring.StateRevisingAndVerifying {
+	if session.State != authoring.StateIntentReview {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current intent is not ready to generate"})
 		return
 	}
-	revision, err := h.db.GetAuthoringRevision(c.Request.Context(), session.ID, session.CurrentRevision)
+	now := time.Now().UTC()
+	active, activeErr := h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
+	switch {
+	case errors.Is(activeErr, db.ErrGenerationWorkflowNotFound):
+		_, err = h.db.CreateGenerationWorkflow(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
+	case activeErr != nil:
+		err = activeErr
+	case active.State == generation.StateNeedsAuthorReview:
+		_, err = h.db.ResumeGenerationForRevision(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
+	default:
+		err = authoring.ErrInvalidState
+	}
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	input := generator.RunInput{}
-	if session.State == authoring.StateRevisingAndVerifying {
-		previous, err := h.db.FindLatestAuthoringCandidate(c.Request.Context(), session.ID, revision.Number-1)
-		if err != nil {
-			h.writeAuthoringError(c, err)
-			return
-		}
-		if previous == nil {
-			h.writeAuthoringError(c, authoring.ErrInvalidState)
-			return
-		}
-		input.SeedCandidateRevisionID = previous.ID
-	}
-	if err := h.startAuthoringGeneratorRun(c.Request.Context(), user, session, revision, input); err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
 	h.writeAuthoringSession(c, user, sessionID)
-}
-
-func (h *Handler) startAuthoringGeneratorRun(ctx context.Context, user *db.User, session *authoring.Session, revision *authoring.Revision, input generator.RunInput) error {
-	if h.db == nil || h.generatorWorkspace == nil || h.generatorSandbox == nil {
-		return errors.New("generator runtime is unavailable")
-	}
-	if user == nil || session == nil || revision == nil || revision.Number != session.CurrentRevision {
-		return authoring.ErrInvalidState
-	}
-	if err := revision.Plan.ValidateForGeneration(); err != nil {
-		return err
-	}
-	input.AuthoringSessionID = session.ID
-	input.Revision = revision.Number
-	_, _, err := h.db.StartGeneratorRun(ctx, session.ID, user.ID, revision.Number, agentruntime.CreateRun{
-		ID: generator.NewRunID(), Purpose: generator.RuntimePurpose, OwnerKind: "authoring-session", OwnerRef: session.ID,
-		Model: h.llm.Model, PromptVersion: generator.PromptVersion, ExecutionTimeout: generator.RunDeadline,
-	}, input)
-	return err
 }
 
 func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
@@ -131,21 +143,26 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	if user == nil {
 		return
 	}
-	session, revision, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
+	session, _, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if session.State != authoring.StateAwaitingVerifiedReview || revision.CandidateRevisionID == "" || session.CandidateRevisionID != revision.CandidateRevisionID {
-		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current revision is not verified and ready to publish"})
-		return
-	}
-	candidateRevision, archive, err := h.readCandidateArchive(c.Request.Context(), revision.CandidateRevisionID)
+	workflow, err := h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if candidateRevision.State != candidate.StateVerified || candidateRevision.Verification == nil || !candidateRevision.Verification.Passed {
+	if workflow.State != generation.StateNeedsAuthorReview || workflow.CandidateRevisionID == "" {
+		h.writeAuthoringError(c, authoring.ErrInvalidState)
+		return
+	}
+	revision, archive, err := h.readCandidateArchive(c.Request.Context(), workflow.CandidateRevisionID)
+	if err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	if revision.Verification == nil || !revision.Verification.Passed || revision.Artifact == nil {
 		h.writeAuthoringError(c, authoring.ErrInvalidState)
 		return
 	}
@@ -155,11 +172,14 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		return
 	}
 	challengeID := challenge.NewID()
-	sourceSlug := challenge.SourceSlugFor(inspected.Entry.Title, challengeID)
 	now := time.Now().UTC()
-	if err := h.db.BeginAuthoringCandidatePublish(c.Request.Context(), session.ID, user.ID, candidateRevision.ID, candidate.Publication{
-		ChallengeID: challengeID, SourceSlug: sourceSlug, TargetPath: sourceSlug, RequestedAt: now,
-	}, now); err != nil {
+	_, err = h.db.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, candidate.Publication{
+		ChallengeID: challengeID,
+		SourceSlug:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
+		TargetPath:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
+		RequestedAt: now,
+	}, now)
+	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
@@ -180,6 +200,15 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 		return
 	}
 
+	var workflow *generation.Workflow
+	workflow, err = h.db.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
+	if errors.Is(err, db.ErrGenerationWorkflowNotFound) {
+		workflow = nil
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read generation workflow: %v", err)})
+		return
+	}
+
 	var visibleCandidate *candidate.Revision
 	var archive []byte
 	if revision.CandidateRevisionID != "" {
@@ -196,7 +225,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 	}
 	var previousArchive []byte
 	if revision.Number > 0 {
-		previous, err := h.db.FindLatestAuthoringCandidate(c.Request.Context(), session.ID, revision.Number-1)
+		previous, err := h.db.FindLatestCandidateBefore(c.Request.Context(), session.ID, revision.Number)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 			return
@@ -219,17 +248,7 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *db.User, sessionID
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	var pipelineState *api.AuthoringSessionPipelineState
-	if session.CandidateRevisionID != "" {
-		active, err := h.db.GetCandidateRevision(c.Request.Context(), session.CandidateRevisionID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-			return
-		}
-		value := api.AuthoringSessionPipelineState(active.State)
-		pipelineState = &value
-	}
-	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, pipelineState, authoringTurnActive, messages, assets, diff, verified))
+	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, workflow, authoringTurnActive, messages, assets, diff, verified))
 }
 
 func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*candidate.Revision, []byte, error) {
@@ -244,18 +263,18 @@ func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*candida
 	return revision, archive, nil
 }
 
-func toAPIAuthoringSession(session *authoring.Session, revision *authoring.Revision, visibleCandidate *candidate.Revision, pipelineState *api.AuthoringSessionPipelineState, turnActive bool, messages []authoring.Message, assets []authoring.Asset, diff []authoring.FileDiff, verified *authoring.VerifiedChallenge) api.AuthoringSession {
+func toAPIAuthoringSession(session *authoring.Session, revision *authoring.Revision, visibleCandidate *candidate.Revision, workflow *generation.Workflow, turnActive bool, messages []authoring.Message, assets []authoring.Asset, diff []authoring.FileDiff, verified *authoring.VerifiedChallenge) api.AuthoringSession {
 	var verification *api.AuthoringVerificationReport
 	if visibleCandidate != nil {
 		verification = toAPIAuthoringVerificationReport(visibleCandidate.Verification)
 	}
 	return api.AuthoringSession{
 		Assets: assetsToAPI(assets), AuthoringTurnActive: turnActive, Candidate: toAPIAuthoringCandidate(visibleCandidate),
-		Diff: toAPIAuthoringFileDiffs(diff), GeneratorRunId: optionalString(session.GeneratorRunID), Id: session.ID,
-		Intent: toAPIAuthoringPlan(revision.Plan), IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError),
-		Messages: toAPIAuthoringMessages(messages), PipelineState: pipelineState, PublishChallengeId: optionalString(session.PublishChallengeID),
-		State: api.AuthoringSessionState(session.State), UpdatedAt: session.UpdatedAt.UTC(), Verification: verification,
-		Verified: toAPIVerifiedChallenge(verified), VisibleRevision: int(revision.Number),
+		Diff: toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
+		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
+		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
+		UpdatedAt: session.UpdatedAt.UTC(), Verification: verification, Verified: toAPIVerifiedChallenge(verified), VisibleRevision: int(revision.Number),
+		Workflow: toAPIAuthoringGenerationWorkflow(workflow),
 	}
 }
 
@@ -263,7 +282,28 @@ func toAPIAuthoringCandidate(revision *candidate.Revision) *api.AuthoringCandida
 	if revision == nil {
 		return nil
 	}
-	return &api.AuthoringCandidate{Id: revision.ID, GeneratorRunId: revision.GeneratorRunID, ArchiveSha256: revision.ArchiveSHA256, State: api.AuthoringCandidateState(revision.State)}
+	return &api.AuthoringCandidate{Id: revision.ID, GeneratorRunId: revision.GeneratorRunID, ArchiveSha256: revision.ArchiveSHA256}
+}
+
+func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.AuthoringGenerationWorkflow {
+	if workflow == nil {
+		return nil
+	}
+	var deadline *time.Time
+	if workflow.DeadlineAt != nil {
+		value := workflow.DeadlineAt.UTC()
+		deadline = &value
+	}
+	return &api.AuthoringGenerationWorkflow{
+		Id:                  workflow.ID,
+		State:               api.AuthoringGenerationWorkflowState(workflow.State),
+		StateAttempt:        workflow.StateAttempt,
+		CandidateRevisionId: optionalString(workflow.CandidateRevisionID),
+		DeadlineAt:          deadline,
+		LastError:           optionalString(workflow.LastError),
+		CreatedAt:           workflow.CreatedAt.UTC(),
+		UpdatedAt:           workflow.UpdatedAt.UTC(),
+	}
 }
 
 func toAPIAuthoringVerificationReport(report *candidate.VerificationReport) *api.AuthoringVerificationReport {
@@ -272,15 +312,11 @@ func toAPIAuthoringVerificationReport(report *candidate.VerificationReport) *api
 	}
 	answers := make([]api.AuthoringExecutionResult, 0, len(report.Answers))
 	for _, answer := range report.Answers {
-		answers = append(answers, api.AuthoringExecutionResult{
-			Location: answer.Location, ExitCode: answer.ExitCode, Stdout: optionalString(answer.Stdout), Stderr: optionalString(answer.Stderr),
-		})
+		answers = append(answers, api.AuthoringExecutionResult{Location: answer.Location, ExitCode: answer.ExitCode, Stdout: optionalString(answer.Stdout), Stderr: optionalString(answer.Stderr)})
 	}
 	checkpoints := make([]api.AuthoringCheckpointResult, 0, len(report.Checkpoints))
 	for _, checkpoint := range report.Checkpoints {
-		checkpoints = append(checkpoints, api.AuthoringCheckpointResult{
-			Id: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: optionalString(checkpoint.Details),
-		})
+		checkpoints = append(checkpoints, api.AuthoringCheckpointResult{Id: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: optionalString(checkpoint.Details)})
 	}
 	return &api.AuthoringVerificationReport{Passed: report.Passed, Summary: report.Summary, Answers: answers, Checkpoints: checkpoints}
 }
@@ -352,8 +388,8 @@ func optionalSlice[T any](values []T) *[]T {
 
 func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, authoring.ErrNotFound), errors.Is(err, candidate.ErrNotFound):
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session or candidate not found"})
+	case errors.Is(err, authoring.ErrNotFound), errors.Is(err, candidate.ErrNotFound), errors.Is(err, db.ErrGenerationWorkflowNotFound):
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
 	case errors.Is(err, authoring.ErrVersionConflict), errors.Is(err, authoring.ErrInvalidState), errors.Is(err, candidate.ErrInvalidState):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:

@@ -6,21 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 )
 
-var ErrResultAlreadySubmitted = errors.New("typed result was already submitted")
-
 // ResultTool exposes exactly one structured completion tool to a model. It
 // keeps the schema derived from the Go result type while using encoding/json's
-// strict decoder: unknown fields, a second JSON document, and a caller-defined
-// missing or invalid field all fail the tool call.
+// strict decoder. Invalid model arguments are returned as a structured tool
+// result, so the same Agent run can correct them without accepting a value.
 type ResultTool[T any] struct {
 	info     *schema.ToolInfo
 	validate func(T) error
@@ -45,22 +45,29 @@ func (t *ResultTool[T]) Info(context.Context) (*schema.ToolInfo, error) {
 	return t.info, nil
 }
 
-func (t *ResultTool[T]) InvokableRun(_ context.Context, arguments string, _ ...tool.Option) (string, error) {
+func (t *ResultTool[T]) InvokableRun(ctx context.Context, arguments string, _ ...tool.Option) (string, error) {
 	value, err := decodeStrict[T](arguments)
 	if err != nil {
-		return "", err
+		slog.Warn("agent typed result rejected", "tool", t.info.Name, "reason", err)
+		return rejectedResult(err)
 	}
 	if err := t.validate(value); err != nil {
-		return "", err
+		slog.Warn("agent typed result rejected", "tool", t.info.Name, "reason", err)
+		return rejectedResult(err)
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.called {
-		return "", ErrResultAlreadySubmitted
+		err := errors.New("a valid typed result was already accepted; do not call this tool again")
+		slog.Warn("agent typed result rejected", "tool", t.info.Name, "reason", err)
+		return rejectedResult(err)
+	}
+	if err := adk.SendToolGenAction(ctx, t.info.Name, adk.NewExitAction()); err != nil {
+		return "", fmt.Errorf("finish typed result agent: %w", err)
 	}
 	t.called = true
 	t.value = value
-	return `{"accepted":true}`, nil
+	return `{"ok":true}`, nil
 }
 
 func (t *ResultTool[T]) Value() (T, bool) {
@@ -137,4 +144,15 @@ func jsonFieldName(field reflect.StructField) string {
 		return name
 	}
 	return field.Name
+}
+
+func rejectedResult(err error) (string, error) {
+	payload, marshalErr := json.Marshal(struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}{OK: false, Error: err.Error()})
+	if marshalErr != nil {
+		return "", fmt.Errorf("marshal rejected typed result: %w", marshalErr)
+	}
+	return string(payload), nil
 }

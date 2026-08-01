@@ -2,9 +2,11 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-source_dir=${BREAKFIX_CHALLENGES_DIR:-$repo_root/data/challenges}
+catalog_dir=${BREAKFIX_CATALOG_DIR:-$repo_root/data}
+challenges_dir=${BREAKFIX_CHALLENGES_DIR:-$catalog_dir/challenges}
+taxonomy_dir=${BREAKFIX_TAXONOMY_DIR:-$catalog_dir/taxonomy}
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
-pvc=${BREAKFIX_SERVER_DATA_PVC:-breakfix-server-data}
+pvc=breakfix-server-data
 pod_name=${BREAKFIX_CATALOG_SYNC_POD:-breakfix-catalog-sync}
 sync_image=${BREAKFIX_CATALOG_SYNC_IMAGE:-curlimages/curl:8.12.1}
 
@@ -14,10 +16,15 @@ for command in kubectl tar; do
     exit 1
   }
 done
-[ -d "$source_dir" ] || {
-  printf 'Challenge source directory does not exist: %s\n' "$source_dir" >&2
+[ -d "$challenges_dir" ] || {
+  printf 'Challenge source directory does not exist: %s\n' "$challenges_dir" >&2
   exit 1
 }
+[ -d "$taxonomy_dir" ] || {
+  printf 'Taxonomy source directory does not exist: %s\n' "$taxonomy_dir" >&2
+  exit 1
+}
+kubectl -n "$namespace" apply -f "$repo_root/deploy/runtime/server-data.yaml" >/dev/null
 kubectl -n "$namespace" get persistentvolumeclaim "$pvc" >/dev/null
 
 cleanup() {
@@ -66,17 +73,27 @@ fi
 
 kubectl -n "$namespace" exec "$pod_name" -- /bin/sh -ec '
   rm -rf /var/lib/breakfix/challenges.next
+  rm -rf /var/lib/breakfix/taxonomy.next
   mkdir -p /var/lib/breakfix/challenges.next
+  mkdir -p /var/lib/breakfix/taxonomy.next
 '
-tar -C "$source_dir" -cf - . | kubectl -n "$namespace" exec -i "$pod_name" -- \
+tar -C "$challenges_dir" -cf - . | kubectl -n "$namespace" exec -i "$pod_name" -- \
   tar -xf - -C /var/lib/breakfix/challenges.next
+tar -C "$taxonomy_dir" -cf - . | kubectl -n "$namespace" exec -i "$pod_name" -- \
+  tar -xf - -C /var/lib/breakfix/taxonomy.next
 kubectl -n "$namespace" exec "$pod_name" -- /bin/sh -ec '
   rm -rf /var/lib/breakfix/challenges.previous
+  rm -rf /var/lib/breakfix/taxonomy.previous
   if [ -d /var/lib/breakfix/challenges ]; then
     mv /var/lib/breakfix/challenges /var/lib/breakfix/challenges.previous
   fi
+  if [ -d /var/lib/breakfix/taxonomy ]; then
+    mv /var/lib/breakfix/taxonomy /var/lib/breakfix/taxonomy.previous
+  fi
   mv /var/lib/breakfix/challenges.next /var/lib/breakfix/challenges
+  mv /var/lib/breakfix/taxonomy.next /var/lib/breakfix/taxonomy
   rm -rf /var/lib/breakfix/challenges.previous
+  rm -rf /var/lib/breakfix/taxonomy.previous
 '
 
-printf 'Synchronized %s to %s/%s.\n' "$source_dir" "$namespace" "$pvc"
+printf 'Synchronized catalog from %s to %s/%s.\n' "$catalog_dir" "$namespace" "$pvc"

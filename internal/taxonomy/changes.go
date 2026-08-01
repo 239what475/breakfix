@@ -13,8 +13,9 @@ const (
 	ChangeDelete ChangeOperation = "delete"
 )
 
-// ChangeSet is the only mutable representation produced by taxonomy agents.
-// It is applied to a complete immutable snapshot by the model-free Publisher.
+// ChangeSet is the internal mutable representation accepted by Server after
+// Worker has converted a model-facing mapper result. It is applied to a
+// complete immutable snapshot by the model-free Publisher.
 type ChangeSet struct {
 	Skills            []SkillChange            `json:"skills"`
 	Tags              []TagChange              `json:"tags"`

@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: breakfix-system
+
+# Kind has no cloud LoadBalancer. This overlay is the only place where the
+# development Registry is installed; production uses the root external-Registry
+# package and an operator-provided endpoint.
+resources:
+  - ../../base
+  - registry.yaml

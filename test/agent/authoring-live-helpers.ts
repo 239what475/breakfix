@@ -1,11 +1,15 @@
 import type { Page } from "@playwright/test";
 
 export type AuthoringSnapshot = {
-	state: string;
-	pipeline_state?: string;
-	last_error?: string;
+	state: "DraftConversation" | "IntentReview" | "Published";
+	workflow?: {
+		state: "Queued" | "Generating" | "Judging" | "Building" | "ArtifactPublishing" | "Verifying" | "NeedsAuthorReview" | "ChallengePublishing" | "CleaningUp" | "Completed" | "Failed" | "Cancelled";
+		candidate_revision_id?: string;
+		last_error?: string;
+	};
 	publish_challenge_id?: string;
-	candidate?: { id: string; state: string };
+	candidate?: { id: string };
+	verification?: { passed: boolean };
 };
 
 async function readAuthoringSession(page: Page, sessionID: string): Promise<AuthoringSnapshot> {
@@ -22,15 +26,11 @@ export async function waitForVerifiedCandidate(page: Page, sessionID: string): P
 	const deadline = Date.now() + 30 * 60_000;
 	while (Date.now() < deadline) {
 		const snapshot = await readAuthoringSession(page, sessionID);
-		if (
-			snapshot.state === "AwaitingVerifiedReview" &&
-			snapshot.pipeline_state === "Verified" &&
-			snapshot.candidate?.state === "Verified"
-		) {
+		if (snapshot.workflow?.state === "NeedsAuthorReview" && snapshot.verification?.passed && snapshot.candidate?.id) {
 			return snapshot.candidate.id;
 		}
-		if (snapshot.state === "InfrastructureFailed") {
-			throw new Error(`candidate pipeline failed: ${snapshot.last_error ?? "infrastructure failure"}`);
+		if (snapshot.workflow?.state === "Failed" || snapshot.workflow?.state === "Cancelled") {
+			throw new Error(`candidate workflow stopped: ${snapshot.workflow.last_error ?? snapshot.workflow.state}`);
 		}
 		await page.waitForTimeout(1_000);
 	}
@@ -41,17 +41,28 @@ export async function waitForPublishedChallenge(page: Page, sessionID: string): 
 	const deadline = Date.now() + 10 * 60_000;
 	while (Date.now() < deadline) {
 		const snapshot = await readAuthoringSession(page, sessionID);
-		if (
-			snapshot.state === "Published" &&
-			snapshot.pipeline_state === "Published" &&
-			snapshot.publish_challenge_id
-		) {
+		if (snapshot.state === "Published" && snapshot.publish_challenge_id) {
 			return snapshot.publish_challenge_id;
 		}
-		if (snapshot.state === "InfrastructureFailed") {
-			throw new Error(`challenge publication failed: ${snapshot.last_error ?? "infrastructure failure"}`);
+		if (snapshot.workflow?.state === "Failed" || snapshot.workflow?.state === "Cancelled") {
+			throw new Error(`challenge publication stopped: ${snapshot.workflow.last_error ?? snapshot.workflow.state}`);
 		}
 		await page.waitForTimeout(1_000);
 	}
 	throw new Error(`authoring session ${sessionID} did not publish before timeout`);
+}
+
+export async function waitForCatalogChallenge(page: Page, challengeID: string): Promise<void> {
+	const deadline = Date.now() + 15 * 60_000;
+	while (Date.now() < deadline) {
+		const published = await page.evaluate(async (id) => {
+			const response = await fetch("/api/challenges");
+			if (!response.ok) throw new Error(await response.text());
+			const body = (await response.json()) as { challenges: Array<{ id: string }> };
+			return body.challenges.some((challenge) => challenge.id === id);
+		}, challengeID);
+		if (published) return;
+		await page.waitForTimeout(1_000);
+	}
+	throw new Error(`published challenge ${challengeID} did not enter the public catalog before timeout`);
 }

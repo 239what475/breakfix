@@ -11,10 +11,10 @@ const (
 )
 
 type MappingGuidance struct {
-	OutcomeWhen []string `yaml:"outcome_when,omitempty" json:"outcome_when,omitempty"`
-	EntryWhen   []string `yaml:"entry_when,omitempty" json:"entry_when,omitempty"`
-	IncludeWhen []string `yaml:"include_when,omitempty" json:"include_when,omitempty"`
-	ExcludeWhen []string `yaml:"exclude_when,omitempty" json:"exclude_when,omitempty"`
+	OutcomeWhen []string `yaml:"outcome_when,omitempty" json:"outcome_when,omitempty" jsonschema_description:"题目应将该 Skill 映射为学习结果的条件"`
+	EntryWhen   []string `yaml:"entry_when,omitempty" json:"entry_when,omitempty" jsonschema_description:"题目应将该 Skill 作为前置能力的条件"`
+	IncludeWhen []string `yaml:"include_when,omitempty" json:"include_when,omitempty" jsonschema_description:"题目应包含该 Tag 的条件"`
+	ExcludeWhen []string `yaml:"exclude_when,omitempty" json:"exclude_when,omitempty" jsonschema_description:"题目不应包含该 Tag 的条件"`
 }
 
 type Skill struct {
@@ -84,10 +84,10 @@ type Snapshot struct {
 
 func (s Snapshot) Clone() Snapshot {
 	clone := Snapshot{Revision: s.Revision}
-	clone.Skills = append([]Skill{}, s.Skills...)
-	clone.Tags = append([]Tag{}, s.Tags...)
-	clone.ChallengeMappings = append([]ChallengeMapping{}, s.ChallengeMappings...)
-	clone.SkillMappings = append([]SkillMapping{}, s.SkillMappings...)
+	clone.Skills = append([]Skill(nil), s.Skills...)
+	clone.Tags = append([]Tag(nil), s.Tags...)
+	clone.ChallengeMappings = append([]ChallengeMapping(nil), s.ChallengeMappings...)
+	clone.SkillMappings = append([]SkillMapping(nil), s.SkillMappings...)
 	for i := range clone.Skills {
 		clone.Skills[i].MappingGuidance = cloneGuidance(clone.Skills[i].MappingGuidance)
 	}
@@ -95,21 +95,21 @@ func (s Snapshot) Clone() Snapshot {
 		clone.Tags[i].MappingGuidance = cloneGuidance(clone.Tags[i].MappingGuidance)
 	}
 	for i := range clone.ChallengeMappings {
-		clone.ChallengeMappings[i].Tags = append([]Ref{}, clone.ChallengeMappings[i].Tags...)
-		clone.ChallengeMappings[i].EntrySkills = append([]Ref{}, clone.ChallengeMappings[i].EntrySkills...)
-		clone.ChallengeMappings[i].Outcomes = append([]OutcomeRef{}, clone.ChallengeMappings[i].Outcomes...)
+		clone.ChallengeMappings[i].Tags = append([]Ref(nil), clone.ChallengeMappings[i].Tags...)
+		clone.ChallengeMappings[i].EntrySkills = append([]Ref(nil), clone.ChallengeMappings[i].EntrySkills...)
+		clone.ChallengeMappings[i].Outcomes = append([]OutcomeRef(nil), clone.ChallengeMappings[i].Outcomes...)
 	}
 	for i := range clone.SkillMappings {
-		clone.SkillMappings[i].Requires = append([]Ref{}, clone.SkillMappings[i].Requires...)
+		clone.SkillMappings[i].Requires = append([]Ref(nil), clone.SkillMappings[i].Requires...)
 	}
 	return clone
 }
 
 func cloneGuidance(value MappingGuidance) MappingGuidance {
-	value.OutcomeWhen = append([]string{}, value.OutcomeWhen...)
-	value.EntryWhen = append([]string{}, value.EntryWhen...)
-	value.IncludeWhen = append([]string{}, value.IncludeWhen...)
-	value.ExcludeWhen = append([]string{}, value.ExcludeWhen...)
+	value.OutcomeWhen = append([]string(nil), value.OutcomeWhen...)
+	value.EntryWhen = append([]string(nil), value.EntryWhen...)
+	value.IncludeWhen = append([]string(nil), value.IncludeWhen...)
+	value.ExcludeWhen = append([]string(nil), value.ExcludeWhen...)
 	return value
 }
 

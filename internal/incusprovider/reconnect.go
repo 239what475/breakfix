@@ -136,15 +136,15 @@ func (c *ReconnectableClient) FindChallengeNodeImage(ctx context.Context, challe
 	return result, found, err
 }
 
-func (c *ReconnectableClient) DeleteBuildNodeImage(ctx context.Context, result BuildNodeImageResult, revision string) error {
+func (c *ReconnectableClient) DeleteBuildNodeImage(ctx context.Context, result BuildNodeImageResult) error {
 	return c.use(ctx, func(client *Client) error {
-		return client.DeleteBuildNodeImage(ctx, result, revision)
+		return client.DeleteBuildNodeImage(ctx, result)
 	})
 }
 
-func (c *ReconnectableClient) DeleteBuildNodeImageAttempt(ctx context.Context, workItemID string, attempt int64, revision string) error {
+func (c *ReconnectableClient) DeleteBuildNodeImageAttempt(ctx context.Context, workflowID string, attempt int64) error {
 	return c.use(ctx, func(client *Client) error {
-		return client.DeleteBuildNodeImageAttempt(ctx, workItemID, attempt, revision)
+		return client.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt)
 	})
 }
 

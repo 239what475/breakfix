@@ -9,22 +9,22 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/breakfix/breakfix/internal/agentruntime"
+	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/schema"
 )
 
-// OpenSandboxBackend implements only Eino's filesystem and streaming shell
-// contracts. Every operation is forwarded to a Server API bound to one Run
-// claim, so a Worker never receives a Sandbox ID or lifecycle credential.
+// OpenSandboxBackend implements Eino's filesystem and streaming-shell
+// contracts over the Server-owned sandbox proxy. The worker never receives a
+// sandbox identifier or lifecycle credential.
 type OpenSandboxBackend struct {
-	claim  agentruntime.Claim
+	claim  generation.Claim
 	client RuntimeClient
 }
 
-func NewOpenSandboxBackend(claim agentruntime.Claim, client RuntimeClient) (*OpenSandboxBackend, error) {
+func NewOpenSandboxBackend(claim generation.Claim, client RuntimeClient) (*OpenSandboxBackend, error) {
 	if !claim.Valid() || client == nil {
-		return nil, errors.New("opensandbox backend requires an active claim and runtime client")
+		return nil, errors.New("opensandbox backend requires an active workflow claim and runtime client")
 	}
 	return &OpenSandboxBackend{claim: claim, client: client}, nil
 }
@@ -183,26 +183,27 @@ func (b *OpenSandboxBackend) ExecuteStreaming(ctx context.Context, request *file
 
 func (b *OpenSandboxBackend) execute(ctx context.Context, command string) (string, int, error) {
 	var output strings.Builder
-	var exit *int
-	err := b.client.Execute(ctx, b.claim, command, func(event ExecuteEvent) error {
+	var exitCode *int
+	if err := b.client.Execute(ctx, b.claim, command, func(event ExecuteEvent) error {
 		switch event.Type {
 		case "stdout":
 			output.WriteString(event.Content)
 		case "result":
 			output.WriteString(event.Content)
-			exit = event.ExitCode
+			if event.ExitCode != nil {
+				exitCode = event.ExitCode
+			}
 		case "error":
 			return errors.New(event.Error)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return "", 0, err
 	}
-	if exit == nil {
+	if exitCode == nil {
 		return "", 0, errors.New("workspace command ended without result")
 	}
-	return output.String(), *exit, nil
+	return output.String(), *exitCode, nil
 }
 
 func backendPath(value string, directory bool) (string, error) {

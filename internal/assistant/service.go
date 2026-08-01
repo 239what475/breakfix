@@ -36,7 +36,7 @@ func assistantSystemPrompt() string {
 
 type conversation struct {
 	request Request
-	emit    func(Event)
+	emit    func(StreamEvent)
 
 	mu        sync.Mutex
 	evidence_ []Evidence
@@ -68,7 +68,7 @@ func (c *conversation) prompt(userMessage string) (string, error) {
 		strings.Join(c.request.Nodes, ", "), c.request.CurrentNode, c.request.CurrentWindow, string(terminals), c.request.Problem, string(checkpoints), userMessage), nil
 }
 
-func (c *conversation) notify(event Event) {
+func (c *conversation) notify(event StreamEvent) {
 	if c.emit != nil {
 		c.emit(event)
 	}

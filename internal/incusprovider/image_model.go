@@ -7,14 +7,14 @@ type ImageFile struct {
 }
 
 type BuildNodeImageRequest struct {
-	WorkItemID string
+	WorkflowID string
 	Attempt    int64
 	Revision   string
 	Files      []ImageFile
 }
 
 type BuildNodeImageResult struct {
-	WorkItemID   string
+	WorkflowID   string
 	Attempt      int64
 	InstanceName string
 	Alias        string

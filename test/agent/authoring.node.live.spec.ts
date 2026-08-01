@@ -8,7 +8,7 @@ import {
 	waitForVerifiedRevision,
 } from "../support/live-helpers";
 import { waitForEnvironmentDeletion } from "../support/runtime-cleanup";
-import { waitForPublishedChallenge, waitForVerifiedCandidate } from "./authoring-live-helpers";
+import { waitForCatalogChallenge, waitForPublishedChallenge, waitForVerifiedCandidate } from "./authoring-live-helpers";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
@@ -46,12 +46,11 @@ agentLiveTest("generator verifies, publishes, and runs a node challenge", async 
 
 		await page.getByRole("button", { name: "发布挑战", exact: true }).click();
 		challengeID = await waitForPublishedChallenge(page, session.id);
-		const title = (await page.locator(".verified-challenge h2").textContent())?.trim() ?? "";
+		await waitForCatalogChallenge(page, challengeID);
 
 		await page.getByRole("button", { name: "Catalog", exact: true }).click();
 		const card = challengeCardByID(page, challengeID);
 		await expect(card).toBeVisible({ timeout: 30_000 });
-		if (title) await expect(card.getByRole("heading", { name: title, exact: true })).toBeVisible();
 		await card.getByRole("button", { name: "Start challenge", exact: true }).click();
 		await expectTerminalConnected(page);
 		environmentName = await activeEnvironmentName(page, challengeID);

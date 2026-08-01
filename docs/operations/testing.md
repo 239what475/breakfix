@@ -1,66 +1,56 @@
 # 测试与真实验收
 
-Breakfix 的测试必须隔离失败边界。日常测试不能把模型质量、Agent 修复、OpenSandbox、构建、Registry、Incus、vcluster、真实验证和浏览器交互串成一条长链；真实环境仍必须验收，但每层只证明明确的能力。
+日常测试必须短、可重复，并只证明一个明确边界。模型、OpenSandbox、Registry、Incus、vcluster、浏览器和
+真实 Environment 的完整链路仍要验收，但不能伪装成稳定的单条单元测试。
 
-## 分层
+## 确定性验证
 
-### 确定性代码测试
+```bash
+go test -count=1 ./...
+npm run build --prefix frontend
+make verify-crd-generated
+make verify-api-generated
+kubectl kustomize .
+make e2e
+```
 
-`go test ./...` 覆盖不依赖真实模型、浏览器或集群生命周期的契约：
+Go 测试覆盖 archive、challenge manifest、运行时快照、检查点 JSON、Provider 请求、API 输入输出、
+`GenerationWorkflow` 与 `TaxonomyWorkflow` 的正向阶段推进，以及 Controller 的状态和清理决策。Prompt
+文案不是单元测试对象；测试验证 typed result、工具参数和领域状态，不伪造模型输出来证明自然语言 prompt。
 
-- WorkItem 的并发领取、唯一约束、lease、围栏、deadline、接管和阶段事务。
-- Server 对 Authoring、CandidateRevision、Build/ArtifactPublish/Verify/ChallengePublish 的持久化与幂等交接。
-- Controller 对 NodeEnvironment、VK8sEnvironment 的状态、清理和检查点决策。
-- archive、challenge manifest、运行时快照、检查点 JSON、Provider request 与 API 输入输出校验。
+默认 `make e2e` 只覆盖快速的浏览器页面流程。它不调用模型，也不人为写入数据库伪造后台流程。
 
-Prompt 文案不是单元测试对象。测试验证结构化结果、工具参数和领域状态，不能用伪造模型回复证明自然语言 prompt “正确”。
+## 已部署运行时验收
 
-### 真实运行时组件验收
+```bash
+make e2e-runtime-browser
+make e2e-server-recovery
+```
 
-`make e2e-runtime-workflow` 使用固定、人工审阅的 challenge artifact，不调用模型，验证真实 `Build -> ArtifactPublish -> Verify`：
+`e2e-runtime-browser` 在已部署环境中使用固定的 `cleanup-logs` challenge，验证终端、自动检查点、
+完成投影与停止。`e2e-server-recovery` 验证 Server 或 Controller 重启后，环境生命周期仍可收敛。
 
-- Builder 从受信任 base 形成 Node Incus image 或 K8s OCI artifact，且不执行 `generate.sh`。
-- Publisher 返回真实 staging OCI digest 或 Incus fingerprint。
-- Verifier 创建真实 `purpose=verification` Environment，等待 runtime-init，运行 `answer.sh` 和全部 checkpoint。
-- `runtime: node` 与 `runtime: k8s` 都经过同一阶段图；测试使用实际 Registry、Incus、Kubernetes、vcluster 和固定 Worker Deployment，不使用 fake artifact 或 fake Environment。
-- 验证结束后精确清理 Environment、candidate staging 引用和本次测试归档，不按宽泛前缀扫描资源。
+## 模型驱动验收
 
-`make e2e-runtime-browser` 只覆盖固定已发布题目的用户终端、周期检查点、完成投影与停止。`make e2e-server-recovery` 证明 Server 或 Controller 重启后 Environment 生命周期仍可收敛。
+```bash
+make e2e-agent-node
+make e2e-agent-k8s
+make e2e-agent-assistant
+make e2e-agent-soak
+```
 
-### 浏览器 E2E
+这些入口需要显式环境变量和已部署的当前架构。Node/K8s 作者验收从自然语言题意开始，经过 Server 直接
+Authoring 对话、Generate Worker、真实验证、作者确认、正式发布、Taxonomy Worker 映射，再启动学习环境
+运行答案。它们是完整流程验收，必须串行运行并在失败时立即保留 Workflow、AgentRun、CandidateRevision、
+Environment 和 Worker 日志用于定位，不能自动重跑掩盖问题。
 
-默认 `make e2e` 只验证用户可见的确定性流程：注册、登录、Catalog、筛选、My Space、固定题目的页面和窄视口行为。它不调用模型，也不创建真实 Build/Publish/Verify candidate。
+Assistant 验收验证真实终端上下文、工具调用和 Markdown 渲染；soak 验收验证同一持久对话的连续调用。它们
+不替代题目生成验证。
 
-CI 应运行 PostgreSQL 下的 `go test -count=1 ./...`、CRD/OpenAPI 生成物校验、前端构建与浏览器套件。Kind 默认 CNI 不执行 NetworkPolicy，因此网络隔离需在能够执行相应策略的真实 CNI 环境单独验收，不能由“清单已创建”替代。
+## 原则
 
-### Agent Live 验收
-
-真实模型生成是人工或发布前验收，不是日常 CI gate。它验证：作者题意、Server-owned OpenSandbox workspace、Generator、Judge、CandidateRevision、真实固定 Worker 流水线、artifact failure 的下一 Generator Run、验证成功后的作者审核与 ChallengePublish，以及发布题目的学习环境。
-
-Agent Live 使用明确、简短的题意，并串行运行。deadline 到期、WorkItem 失败或基础设施异常时应立即输出相关 WorkItem、Run、CandidateRevision、Environment 与 Worker 日志；不得自动第二次运行掩盖问题。artifact failure 的自动修复是产品行为，不以模型轮次作为通过条件。
-
-### Taxonomy Live 验收
-
-taxonomy 有独立模型闭环，不与其他 Agent Live 验收并发。它在隔离 data directory 中只放入已发布 challenge，验证 Mapping、Mapper、reviewer pair、immutable snapshot 与 Catalog 投影。它不需要也不应重复触发 Build/ArtifactPublish/Verify。
-
-## 运行原则与入口
-
-- 默认 `make e2e` 只运行快速、可重复的浏览器测试。
-- 真实运行时、恢复和模型验收必须显式启用并串行执行。
-- 未设置 `BREAKFIX_E2E_BASE_URL` 时，浏览器套件会临时将本机 `9090` 转发到集群内的 `breakfix-server` Service；显式提供该变量时，调用方负责目标地址的可达性。
-- 运行 `make e2e-server-recovery` 时，浏览器地址必须与 Server 的 `ui_origin` 一致，否则终端 WebSocket 会被 Origin 校验拒绝；默认开发配置两者均为 `http://localhost:9090`。
-- Telepresence 接管 Server、Controller 或任一 Worker 时，将本地日志与 Playwright 输出并排观察；失败时按 `work_item_id`、kind、subject、attempt 和 Environment UID 定位。
-- 真实测试只删除自身精确登记的资源，仓库固定题目和其他测试资源不能被清理逻辑接管。
-
-| 命令 | 证明的边界 |
-| --- | --- |
-| `make e2e` | 默认浏览器页面测试。 |
-| `make e2e-runtime-workflow` | 固定 Node/K8s candidate 的真实 Build、ArtifactPublish、Verify。 |
-| `make e2e-runtime-browser` | 固定 `cleanup-logs` 的 Node terminal、检查点和学习进度。 |
-| `make e2e-server-recovery` | Server/Controller 重启后的环境回收和检查点。 |
-| `make e2e-agent-assistant` | Assistant 的真实模型验收。 |
-| `make e2e-agent-node` / `make e2e-agent-k8s` | 生成、修复、真实验证与发布的模型验收。 |
-| `make e2e-agent-soak` | 同一真实环境中 Assistant 会话与模型传输的串行 soak。 |
-| `make e2e-taxonomy` | 隔离 taxonomy committee 的单次真实模型验收。 |
-
-运行时边界见[系统架构](../architecture/system-architecture.md)、[运行环境](../architecture/runtime-environments.md)和[作者生成与真实验证](../architecture/authoring-workflow.md)。
+- 实际 E2E 只删除自身精确登记的 Environment 和临时资源，不能按宽泛前缀清理。
+- 未部署当前 `breakfix-generate-worker` 与 `breakfix-taxonomy-worker` 时，不能将旧 Deployment 的结果
+  视为本次架构验收。
+- Telepresence 接管时，将本地日志与测试输出并排观察；以 Workflow ID、state、attempt 和 Environment UID
+  定位，而不是使用旧 `kind` 路由术语。

@@ -2,6 +2,7 @@
 set -eu
 
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
+workspace_namespace=${BREAKFIX_OPENSANDBOX_NAMESPACE:-opensandbox}
 context=$(kubectl config current-context)
 
 case "$context" in
@@ -44,14 +45,16 @@ wait_for_pods() {
   done
 }
 
-# The new schema deliberately has no migration from the former development
+# The current schema deliberately has no migration from the former development
 # database. Stop every process that can hold either RWO volume before removal.
-for deployment in breakfix-server breakfix-agent-worker breakfix-builder breakfix-publisher breakfix-verifier; do
+for deployment in breakfix-server breakfix-generate-worker breakfix-taxonomy-worker; do
   scale_down deployment "$deployment"
 done
 scale_down statefulset breakfix-postgresql
 
 wait_for_pods app.kubernetes.io/name=breakfix-server
+wait_for_pods app.kubernetes.io/name=breakfix-generate-worker
+wait_for_pods app.kubernetes.io/name=breakfix-taxonomy-worker
 wait_for_pods app.kubernetes.io/name=breakfix-postgresql
 
 # Runtime test and catalog-sync Pods can retain the Server RWO claim after a
@@ -60,6 +63,28 @@ wait_for_pods app.kubernetes.io/name=breakfix-postgresql
 kubectl -n "$namespace" delete pod -l app.kubernetes.io/name=breakfix-runtime-candidate-data \
   --ignore-not-found --wait=true >/dev/null 2>&1 || true
 kubectl -n "$namespace" delete pod breakfix-catalog-sync --ignore-not-found --wait=true >/dev/null 2>&1 || true
+
+# Generator workspaces are Server-owned but materialized by OpenSandbox in a
+# separate namespace. A disposable Kind reset must remove both the provider
+# resource and its explicitly labeled PVCs after stopping every Breakfix
+# process, otherwise interrupted live tests pollute the next baseline.
+if kubectl get namespace "$workspace_namespace" >/dev/null 2>&1; then
+  kubectl -n "$workspace_namespace" delete batchsandboxes -l breakfix.generator_run_id \
+    --ignore-not-found --wait=true >/dev/null
+  kubectl -n "$workspace_namespace" delete persistentvolumeclaims -l app.kubernetes.io/part-of=breakfix \
+    --ignore-not-found --wait=true >/dev/null
+fi
+
+# Kustomize creates a content-addressed ConfigMap. Old hashes are unreferenced
+# after the control plane stops and must not make a reset look like it still
+# carries the previous internal-worker contract.
+kubectl -n "$namespace" get configmap -o name | while IFS= read -r resource; do
+  case "$resource" in
+    configmap/breakfix-config-*)
+      kubectl -n "$namespace" delete "$resource" --ignore-not-found --wait=true >/dev/null
+      ;;
+  esac
+done
 
 kubectl -n "$namespace" delete persistentvolumeclaim breakfix-server-data --ignore-not-found --wait=true
 kubectl -n "$namespace" delete persistentvolumeclaim data-breakfix-postgresql-0 --ignore-not-found --wait=true

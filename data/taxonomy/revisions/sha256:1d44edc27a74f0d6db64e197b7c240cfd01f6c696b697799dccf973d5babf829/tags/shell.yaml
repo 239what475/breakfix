@@ -1,0 +1,11 @@
+kind: Tag
+id: tag-2a8d5f1c4b7390e6
+title: Shell 脚本
+definition: 涉及 Bash/Shell 脚本编写、执行和调试的题目，包括脚本结构、权限管理、控制流和错误处理。
+mapping_guidance:
+    include_when:
+        - 题目需要编写或修改 Shell 脚本文件
+        - 题目涉及 shebang、chmod、set 选项等脚本基础设施
+    exclude_when:
+        - 仅涉及在交互式终端中执行单条命令
+        - 使用 Python/Perl 等非 Shell 语言编写脚本

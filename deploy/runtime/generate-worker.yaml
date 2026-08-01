@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: breakfix-generate-worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: breakfix-generate-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: breakfix-generate-worker
+    spec:
+      serviceAccountName: breakfix-generate-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: generate-worker
+          image: ghcr.io/breakfix/breakfix-generate-worker:dev
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/etc/breakfix/config.yaml"]
+          ports:
+            - name: health
+              containerPort: 8081
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: BREAKFIX_WORKER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-generate-worker-identity
+                  key: worker_api_key
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: deepseek_api_key
+            - name: BREAKFIX_REGISTRY_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_addr
+            - name: BREAKFIX_REGISTRY_CLIENT_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_client_addr
+            - name: BREAKFIX_REGISTRY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_username
+            - name: BREAKFIX_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_password
+            - name: BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: registry_trust_bundle_file
+            - name: BREAKFIX_INCUS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_endpoint
+            - name: BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_base_image_fingerprint
+          volumeMounts:
+            - name: config
+              mountPath: /etc/breakfix
+              readOnly: true
+            - name: incus-tls
+              mountPath: /var/run/secrets/breakfix-incus
+              readOnly: true
+            - name: registry-ca
+              mountPath: /var/run/config/breakfix-registry-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+              ephemeral-storage: 10Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: breakfix-config
+        - name: incus-tls
+          secret:
+            secretName: breakfix-incus-generate
+            defaultMode: 0440
+        - name: registry-ca
+          configMap:
+            name: breakfix-registry-ca
+            optional: true
+        - name: tmp
+          emptyDir:
+            sizeLimit: 10Gi

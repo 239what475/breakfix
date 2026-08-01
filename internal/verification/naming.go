@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-func EnvironmentName(taskID string) string {
-	return boundedName("verify-env-", taskID)
+func EnvironmentName(workflowID string) string {
+	return boundedName("verify-env-", workflowID)
 }
 
 func boundedName(prefix, value string) string {

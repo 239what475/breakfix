@@ -8,7 +8,6 @@ export type {
 	AssistantMessage,
 	AssistantMessageRequest,
 	AssistantTerminalContext,
-	AssistantTurn,
 	AuthoringAsset,
 	AuthoringCandidate,
 	AuthoringChange,
@@ -55,14 +54,23 @@ export type AuthoringState = GeneratedAuthoringSession["state"];
 // response, so these client-side event envelopes remain local.
 export interface AssistantStreamEvent {
 	type: "ready" | "tool" | "delta" | "reset";
-	turn_id?: string;
+	run_id: string;
 	content?: string;
 	tool?: string;
-	turn?: import("./generated").AssistantTurn;
 }
 
 export interface AssistantStreamComplete {
-	turn_id: string;
-	session_id: string;
+	run_id: string;
 	message: import("./generated").AssistantMessage;
+}
+
+export interface AuthoringStreamEvent {
+	type: "ready" | "delta";
+	run_id: string;
+	content?: string;
+}
+
+export interface AuthoringStreamComplete {
+	run_id: string;
+	content: string;
 }

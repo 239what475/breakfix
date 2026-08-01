@@ -1,5 +1,7 @@
 import type {
 	AuthoringSession,
+	AuthoringStreamComplete,
+	AuthoringStreamEvent,
 	AssistantConversation,
 	AssistantMessageRequest,
 	AssistantStreamComplete,
@@ -97,13 +99,19 @@ export interface AssistantStreamHandlers {
   onError: (message: string) => void;
 }
 
-async function consumeAssistantStream(
-  response: Response,
-  handlers: AssistantStreamHandlers,
+export interface AuthoringStreamHandlers {
+	onEvent: (event: AuthoringStreamEvent) => void;
+	onComplete: (value: AuthoringStreamComplete) => void;
+	onError: (message: string) => void;
+}
+
+async function consumeEventStream(
+	response: Response,
+	onEvent: (name: string, data: string) => boolean | void,
 ): Promise<void> {
-  if (!response.body) throw new Error("Assistant stream is unavailable");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+	if (!response.body) throw new Error("Event stream is unavailable");
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
     const { value, done } = await reader.read();
@@ -111,22 +119,28 @@ async function consumeAssistantStream(
     const events = buffer.split("\n\n");
     buffer = events.pop() ?? "";
     for (const raw of events) {
-      const name = raw.match(/^event: (.+)$/m)?.[1];
-      const data = raw.match(/^data: (.+)$/m)?.[1];
-      if (!name || !data) continue;
-      const parsed = JSON.parse(data) as AssistantStreamEvent | AssistantStreamComplete | { error?: string };
-      if (name === "error") {
-        handlers.onError((parsed as { error?: string }).error || "Assistant request failed");
-        return;
-      }
-      if (name === "complete") {
-        handlers.onComplete(parsed as AssistantStreamComplete);
-        return;
-      }
-      handlers.onEvent({ ...(parsed as AssistantStreamEvent), type: name as AssistantStreamEvent["type"] });
-    }
-    if (done) break;
-  }
+		const name = raw.match(/^event: (.+)$/m)?.[1];
+		const data = raw.match(/^data: (.+)$/m)?.[1];
+		if (!name || !data) continue;
+		if (onEvent(name, data)) return;
+	}
+	if (done) break;
+	}
+}
+
+async function consumeAssistantStream(response: Response, handlers: AssistantStreamHandlers): Promise<void> {
+	await consumeEventStream(response, (name, data) => {
+		const parsed = JSON.parse(data) as AssistantStreamEvent | AssistantStreamComplete | { content?: string };
+		if (name === "error") {
+			handlers.onError((parsed as { content?: string }).content || "Assistant request failed");
+			return true;
+		}
+		if (name === "complete") {
+			handlers.onComplete(parsed as AssistantStreamComplete);
+			return true;
+		}
+		handlers.onEvent({ ...(parsed as AssistantStreamEvent), type: name as AssistantStreamEvent["type"] });
+	});
 }
 
 export async function streamAssistantMessage(
@@ -151,24 +165,37 @@ export async function streamAssistantMessage(
   await consumeAssistantStream(response, handlers);
 }
 
-export async function subscribeAssistantTurn(
-  id: string,
-  turnID: string,
-  handlers: AssistantStreamHandlers,
-  signal?: AbortSignal,
+export async function streamAuthoringMessage(
+	id: string,
+	content: string,
+	handlers: AuthoringStreamHandlers,
+	signal?: AbortSignal,
 ): Promise<void> {
-  const headers: Record<string, string> = {};
-  const currentToken = token();
-  if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
-  const response = await fetch(`${base}/challenges/${id}/assistant/turns/${turnID}/events`, {
-    headers,
-    signal,
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${response.status})`);
-  }
-  await consumeAssistantStream(response, handlers);
+	const headers: Record<string, string> = { "Content-Type": "application/json" };
+	const currentToken = token();
+	if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+	const response = await fetch(`${base}/authoring/sessions/${id}/messages`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ content }),
+		signal,
+	});
+	if (!response.ok) {
+		const data = await response.json().catch(() => ({}));
+		throw new APIError(response.status, data.error || `Request failed (${response.status})`);
+	}
+	await consumeEventStream(response, (name, data) => {
+		const parsed = JSON.parse(data) as AuthoringStreamEvent | AuthoringStreamComplete | { content?: string };
+		if (name === "error") {
+			handlers.onError((parsed as { content?: string }).content || "Authoring request failed");
+			return true;
+		}
+		if (name === "complete") {
+			handlers.onComplete(parsed as AuthoringStreamComplete);
+			return true;
+		}
+		handlers.onEvent({ ...(parsed as AuthoringStreamEvent), type: name as AuthoringStreamEvent["type"] });
+	});
 }
 
 export const api = {
@@ -226,10 +253,6 @@ export const api = {
     request<AuthoringSession>("GET", "/authoring/sessions/current"),
   getAuthoringSession: (id: string) =>
     request<AuthoringSession>("GET", `/authoring/sessions/${id}`),
-  sendAuthoringMessage: (id: string, content: string) =>
-    request<AuthoringSession>("POST", `/authoring/sessions/${id}/messages`, {
-      content,
-    }),
   confirmAuthoringGeneration: (id: string) =>
     request<AuthoringSession>(
       "POST",

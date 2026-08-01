@@ -1,91 +1,13 @@
 package server
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
-	"net/http"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/gin-gonic/gin"
 )
-
-const generatorWorkspaceCleanupTimeout = 2 * time.Minute
-
-// InternalGeneratorFinalizeCandidate is the deterministic boundary between
-// the model workflow and the trusted candidate pipeline. The exact archive
-// accepted by the Judge becomes an immutable CandidateRevision; no field is
-// normalized and no runtime work is performed in this request.
-func (h *Handler) InternalGeneratorFinalizeCandidate(c *gin.Context) {
-	var request internalGeneratorFinalizeRequest
-	if !h.decodeInternalAgentRequest(c, &request) {
-		return
-	}
-	claim, _, err := h.generatorWorkspaceForClaim(c.Request.Context(), c.Param("id"), request.LeaseCredential, false)
-	if err != nil {
-		h.writeInternalGeneratorError(c, err)
-		return
-	}
-	record, err := h.db.GetGeneratorRun(c.Request.Context(), claim.Run.ID)
-	if err != nil {
-		h.writeInternalGeneratorError(c, err)
-		return
-	}
-	inspected, err := generator.InspectCandidateArchive(request.Archive)
-	if err != nil {
-		h.writeInternalGeneratorError(c, fmt.Errorf("validate generator candidate: %w", err))
-		return
-	}
-	snapshot, err := candidateExecutionSnapshot(inspected.Entry, h.runtimeConfig, h.incusConfig)
-	if err != nil {
-		h.writeInternalGeneratorError(c, err)
-		return
-	}
-	id := candidate.IDForGeneratorRun(claim.Run.ID)
-	path, digest, err := candidate.SaveArchiveAtomic(h.dataDir, id, inspected.Archive)
-	if err != nil {
-		h.writeInternalGeneratorError(c, fmt.Errorf("save generator candidate: %w", err))
-		return
-	}
-	revision := candidate.Revision{
-		ID:                 id,
-		AuthoringSessionID: record.AuthoringSessionID,
-		AuthoringRevision:  record.AuthoringRevision,
-		GeneratorSessionID: claim.Run.SessionID,
-		GeneratorRunID:     claim.Run.ID,
-		JudgeRunID:         claim.Run.ID,
-		ArchivePath:        path,
-		ArchiveSHA256:      digest,
-		Snapshot:           snapshot,
-		State:              candidate.StateBuilding,
-	}
-	if err := h.db.FinalizeGeneratorCandidate(c.Request.Context(), *claim, revision, time.Now().UTC()); err != nil {
-		h.writeInternalGeneratorError(c, err)
-		return
-	}
-	// Finalization invalidates the Worker lease, so cleanup must not inherit the
-	// request context that the Worker cancels after receiving this response.
-	h.scheduleGeneratorWorkspaceCleanup(claim.Run.ID)
-	c.JSON(http.StatusOK, generator.FinalizedCandidate{CandidateRevisionID: id})
-}
-
-func (h *Handler) scheduleGeneratorWorkspaceCleanup(runID string) {
-	if h.generatorWorkspace == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), generatorWorkspaceCleanupTimeout)
-		defer cancel()
-		if err := h.generatorWorkspace.Cleanup(ctx, runID); err != nil {
-			slog.Warn("clean generator workspace", "run_id", runID, "err", err)
-		}
-	}()
-}
 
 func candidateExecutionSnapshot(entry challenge.Entry, runtime config.RuntimeConfig, incus incusprovider.Config) (candidate.ExecutionSnapshot, error) {
 	checkpoints := make([]candidate.CheckpointSnapshot, 0, len(entry.Checkpoints))

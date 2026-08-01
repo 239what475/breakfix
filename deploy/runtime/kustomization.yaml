@@ -3,12 +3,10 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - rbac.yaml
-  - worker-rbac.yaml
   - worker-network-policy.yaml
   - postgresql.yaml
+  - server-data.yaml
   - server.yaml
   - controller.yaml
-  - agent-worker.yaml
-  - builder.yaml
-  - publisher.yaml
-  - verifier.yaml
+  - generate-worker.yaml
+  - taxonomy-worker.yaml

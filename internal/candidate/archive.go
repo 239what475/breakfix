@@ -19,8 +19,8 @@ func ArchivePath(root, id string) string {
 	return filepath.Join(root, "candidates", id, "candidate.tar.gz")
 }
 
-func BuildArchivePath(root, candidateID, workItemID string, attempt int64) string {
-	return filepath.Join(root, "candidates", candidateID, "builds", fmt.Sprintf("%s-%d.oci.tar", workItemID, attempt))
+func BuildArchivePath(root, candidateID, workflowID string, attempt int64) string {
+	return filepath.Join(root, "candidates", candidateID, "builds", fmt.Sprintf("%s-%d.oci.tar", workflowID, attempt))
 }
 
 // SaveArchiveAtomic stores exactly one immutable archive for a revision. A
@@ -93,15 +93,15 @@ func ReadArchive(path, expectedDigest string) ([]byte, error) {
 // SaveBuildArchiveAtomic persists only the exact output of one fenced build
 // attempt. A later attempt gets a different path and therefore cannot be
 // overwritten by a delayed worker response.
-func SaveBuildArchiveAtomic(root, candidateID, workItemID string, attempt int64, data []byte) (string, string, error) {
-	if !challenge.ValidID(candidateID) || !challenge.ValidID(workItemID) || attempt <= 0 {
-		return "", "", errors.New("build archive requires valid candidate, work item, and attempt identities")
+func SaveBuildArchiveAtomic(root, candidateID, workflowID string, attempt int64, data []byte) (string, string, error) {
+	if !challenge.ValidID(candidateID) || !challenge.ValidID(workflowID) || attempt <= 0 {
+		return "", "", errors.New("build archive requires valid candidate, workflow, and attempt identities")
 	}
 	if len(data) == 0 {
 		return "", "", errors.New("build archive is empty")
 	}
 	digest := Digest(data)
-	path := BuildArchivePath(root, candidateID, workItemID, attempt)
+	path := BuildArchivePath(root, candidateID, workflowID, attempt)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return "", "", fmt.Errorf("create build archive directory: %w", err)
 	}

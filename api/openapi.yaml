@@ -251,36 +251,6 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/assistant/turns/{turnID}/events:
-    get:
-      operationId: streamChallengeAssistantTurn
-      summary: Reconnect to a running assistant response stream
-      tags: [assistant]
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: turnID
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Server-sent assistant status, tool, delta, complete, and error events
-          content:
-            text/event-stream:
-              schema:
-                type: string
-        "404":
-          $ref: "#/components/responses/Error"
-        "409":
-          $ref: "#/components/responses/Error"
-
   /challenges/{id}/reset:
     post:
       operationId: resetChallenge
@@ -459,11 +429,11 @@ paths:
               $ref: "#/components/schemas/AuthoringMessageRequest"
       responses:
         "200":
-          description: Updated authoring session
+          description: Server-sent authoring ready, delta, complete, and error events
           content:
-            application/json:
+            text/event-stream:
               schema:
-                $ref: "#/components/schemas/AuthoringSession"
+                type: string
         "404":
           $ref: "#/components/responses/Error"
 
@@ -704,7 +674,10 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, InfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview]
+        workflow_state:
+          type: string
+          enum: [Queued, Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, CleaningUp, Completed, Failed, Cancelled]
         updated_at:
           type: string
           format: date-time
@@ -1004,35 +977,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AssistantMessage"
-        active_turn:
-          $ref: "#/components/schemas/AssistantTurn"
-
-    AssistantTurn:
-      type: object
-      required: [id, session_id, status, content, created_at, updated_at]
-      properties:
-        id:
-          type: string
-        session_id:
-          type: string
-        status:
-          type: string
-          enum: [running, completed, failed]
-        content:
-          type: string
-        evidence:
-          type: array
-          items:
-            $ref: "#/components/schemas/AssistantEvidence"
-        error:
-          type: string
-        message:
-          $ref: "#/components/schemas/AssistantMessage"
-        created_at:
-          type: string
-        updated_at:
-          type: string
-
     AssistantTerminalContext:
       type: object
       required: [windows]
@@ -1183,7 +1127,7 @@ components:
 
     AuthoringCandidate:
       type: object
-      required: [id, generator_run_id, archive_sha256, state]
+      required: [id, generator_run_id, archive_sha256]
       properties:
         id:
           type: string
@@ -1191,9 +1135,34 @@ components:
           type: string
         archive_sha256:
           type: string
+
+    AuthoringGenerationWorkflow:
+      type: object
+      required: [id, state, state_attempt, created_at, updated_at]
+      properties:
+        id:
+          type: string
         state:
           type: string
-          enum: [Building, PublishingArtifact, Verifying, Verified, PublishingChallenge, Published, ArtifactFailed, InfrastructureFailed, Cancelled, Superseded]
+          enum: [Queued, Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, CleaningUp, Completed, Failed, Cancelled]
+        state_attempt:
+          type: integer
+          minimum: 0
+        candidate_revision_id:
+          type: string
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     AuthoringVerificationReport:
       type: object
@@ -1303,7 +1272,7 @@ components:
           type: string
         state:
           type: string
-          enum: [DraftConversation, IntentReview, GeneratingAndVerifying, InfrastructureFailed, AwaitingVerifiedReview, RevisingAndVerifying, Publishing, Published]
+          enum: [DraftConversation, IntentReview, Published]
         authoring_turn_active:
           type: boolean
           description: Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
@@ -1311,13 +1280,10 @@ components:
           type: integer
         visible_revision:
           type: integer
-        generator_run_id:
-          type: string
         publish_challenge_id:
           type: string
-        pipeline_state:
-          type: string
-          enum: [Building, PublishingArtifact, Verifying, Verified, PublishingChallenge, Published, ArtifactFailed, InfrastructureFailed, Cancelled, Superseded]
+        workflow:
+          $ref: "#/components/schemas/AuthoringGenerationWorkflow"
         last_error:
           type: string
         updated_at:

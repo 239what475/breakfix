@@ -19,16 +19,14 @@ usage() {
 Usage: dev/telepresence.sh <command>
 
 Commands:
-  connect         Install/connect the Traffic Manager for the current cluster.
-  server          Replace Server with a local foreground process.
-  controller      Replace Controller with a local foreground process.
-  agent-worker    Replace the Agent Worker pool locally.
-  builder         Replace the Builder Worker pool locally.
-  publisher       Replace the Publisher Worker pool locally.
-  verifier        Replace the Verifier Worker pool locally.
-  down [name]     Restore one component or all components.
-  status          Show Telepresence and Breakfix runtime status.
-  disconnect      Restore all components and stop local Telepresence daemons.
+  connect                  Install/connect the Traffic Manager for the current cluster.
+  server                   Replace Server with a local foreground process.
+  controller               Replace Controller with a local foreground process.
+  generate-worker          Replace the Generate Worker pool locally.
+  taxonomy-worker          Replace the Taxonomy Worker pool locally.
+  down [name]              Restore one component or all components.
+  status                   Show Telepresence and Breakfix runtime status.
+  disconnect               Restore all components and stop local Telepresence daemons.
 
 Replacement commands remain in the foreground so their logs are visible during
 E2E runs. Worker replacement requires
@@ -72,12 +70,12 @@ ensure_connected() {
 }
 
 all_components() {
-  printf '%s\n' server controller agent-worker builder publisher verifier
+  printf '%s\n' server controller generate-worker taxonomy-worker
 }
 
 is_worker() {
   case "$1" in
-    agent-worker|builder|publisher|verifier) return 0 ;;
+    generate-worker|taxonomy-worker) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -86,18 +84,16 @@ workload_for() {
   case "$1" in
     server) printf '%s\n' breakfix-server ;;
     controller) printf '%s\n' breakfix-controller ;;
-    agent-worker) printf '%s\n' breakfix-agent-worker ;;
-    builder) printf '%s\n' breakfix-builder ;;
-    publisher) printf '%s\n' breakfix-publisher ;;
-    verifier) printf '%s\n' breakfix-verifier ;;
+    generate-worker) printf '%s\n' breakfix-generate-worker ;;
+    taxonomy-worker) printf '%s\n' breakfix-taxonomy-worker ;;
     *) fail "unknown component: $1" ;;
   esac
 }
 
 container_for() {
   case "$1" in
-    server|controller|builder|publisher|verifier) printf '%s\n' "$1" ;;
-    agent-worker) printf '%s\n' agent-worker ;;
+    server|controller) printf '%s\n' "$1" ;;
+    generate-worker|taxonomy-worker) printf '%s\n' "$1" ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -109,25 +105,20 @@ binary_for() {
 health_port_for() {
   case "$1" in
     controller) printf '%s\n' "$TP_CONTROLLER_HEALTH_PORT" ;;
-    agent-worker) printf '%s\n' 18082 ;;
-    builder) printf '%s\n' 18083 ;;
-    publisher) printf '%s\n' 18084 ;;
-    verifier) printf '%s\n' 18085 ;;
+    generate-worker) printf '%s\n' 18082 ;;
+    taxonomy-worker) printf '%s\n' 18083 ;;
     server) printf '%s\n' 18086 ;;
     *) fail "unknown component: $1" ;;
   esac
 }
 
 build_component() {
-  local component="$1"
-  case "$component" in
+  case "$1" in
     server) (cd "$ROOT_DIR" && make --no-print-directory dev-build-server) ;;
     controller) (cd "$ROOT_DIR" && make --no-print-directory dev-build-controller) ;;
-    agent-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-agent-worker) ;;
-    builder) (cd "$ROOT_DIR" && make --no-print-directory dev-build-builder) ;;
-    publisher) (cd "$ROOT_DIR" && make --no-print-directory dev-build-publisher) ;;
-    verifier) (cd "$ROOT_DIR" && make --no-print-directory dev-build-verifier) ;;
-    *) fail "unknown component: $component" ;;
+    generate-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-generate-worker) ;;
+    taxonomy-worker) (cd "$ROOT_DIR" && make --no-print-directory dev-build-taxonomy-worker) ;;
+    *) fail "unknown component: $1" ;;
   esac
 }
 
@@ -139,10 +130,8 @@ secret_value() {
 
 worker_identity_secret() {
   case "$1" in
-    agent-worker) printf '%s\n' breakfix-agent-worker-identity ;;
-    builder) printf '%s\n' breakfix-builder-identity ;;
-    publisher) printf '%s\n' breakfix-publisher-identity ;;
-    verifier) printf '%s\n' breakfix-verifier-identity ;;
+    generate-worker) printf '%s\n' breakfix-generate-worker-identity ;;
+    taxonomy-worker) printf '%s\n' breakfix-taxonomy-worker-identity ;;
     *) fail "unknown worker identity: $1" ;;
   esac
 }
@@ -301,6 +290,17 @@ replace_command() {
   fi
 }
 
+registry_trust_bundle_for_mount() {
+  local mount_root="$1"
+  local configured
+  configured="$(secret_value registry_trust_bundle_file)"
+  if test -n "$configured"; then
+    printf '%s\n' "$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
+    return
+  fi
+  printf '%s\n' ''
+}
+
 run_server() {
   local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file
   ensure_server_fuse
@@ -311,20 +311,16 @@ run_server() {
   sandbox_namespace="$(deployment_env_value breakfix-server server BREAKFIX_OPENSANDBOX_NAMESPACE)"
   test -n "$base_url" && test -n "$sandbox_namespace" || \
     fail "Server Deployment is missing OpenSandbox environment values"
-  registry_trust_bundle_file="$(secret_value registry_trust_bundle_file)"
-  if test -n "$registry_trust_bundle_file"; then
-    registry_trust_bundle_file="$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
-  fi
+  registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
 
   printf 'Replacing Server locally at http://127.0.0.1:%s.\n' "$TP_SERVER_PORT"
   env \
     BREAKFIX_DATABASE_URL="$(secret_value database_url)" \
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
-    BREAKFIX_AGENT_WORKER_API_KEY="$(worker_identity_key agent-worker)" \
-    BREAKFIX_BUILDER_WORKER_API_KEY="$(worker_identity_key builder)" \
-    BREAKFIX_PUBLISHER_WORKER_API_KEY="$(worker_identity_key publisher)" \
-    BREAKFIX_VERIFIER_WORKER_API_KEY="$(worker_identity_key verifier)" \
+    BREAKFIX_GENERATE_WORKER_API_KEY="$(worker_identity_key generate-worker)" \
+    BREAKFIX_TAXONOMY_WORKER_API_KEY="$(worker_identity_key taxonomy-worker)" \
     BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)" \
+    BREAKFIX_REGISTRY_CLIENT_ADDR="$(secret_value registry_client_addr)" \
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
     BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
     BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file" \
@@ -352,59 +348,34 @@ run_controller() {
   replace_command controller "$config" "$mount_root" env HOME="$STATE_DIR/controller-data"
 }
 
-run_agent_worker() {
-  local config
-  prepare_worker_replacement agent-worker
-  config="$(prepare_config agent-worker "" "")"
-  printf 'Replacing Agent Worker locally.\n'
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key agent-worker)"
+run_generate_worker() {
+  local kubeconfig config mount_root registry_trust_bundle_file
+  prepare_worker_replacement generate-worker
+  mount_root="$STATE_DIR/mount-generate-worker"
+  kubeconfig="$(create_service_account_kubeconfig generate-worker)"
+  config="$(prepare_config generate-worker "$kubeconfig" "$mount_root")"
+  registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
+  printf 'Replacing Generate Worker locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key generate-worker)"
   export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
-  replace_command agent-worker "$config" "" env POD_NAME=telepresence-agent-worker
-}
-
-run_builder() {
-  local config mount_root
-  prepare_worker_replacement builder
-  mount_root="$STATE_DIR/mount-builder"
-  config="$(prepare_config builder "" "$mount_root")"
-  printf 'Replacing Builder locally.\n'
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key builder)"
-  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
-  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
-  replace_command builder "$config" "$mount_root" env POD_NAME=telepresence-builder
-}
-
-run_publisher() {
-  local config mount_root registry_trust_bundle_file
-  prepare_worker_replacement publisher
-  mount_root="$STATE_DIR/mount-publisher"
-  config="$(prepare_config publisher "" "$mount_root")"
-  printf 'Replacing Publisher locally.\n'
-  registry_trust_bundle_file="$(secret_value registry_trust_bundle_file)"
-  if test -n "$registry_trust_bundle_file"; then
-    registry_trust_bundle_file="$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
-  fi
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key publisher)"
   export BREAKFIX_REGISTRY_ADDR="$(secret_value registry_addr)"
+  export BREAKFIX_REGISTRY_CLIENT_ADDR="$(secret_value registry_client_addr)"
   export BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)"
   export BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)"
   export BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file"
   export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
   export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
-  replace_command publisher "$config" "$mount_root" env POD_NAME=telepresence-publisher
+  replace_command generate-worker "$config" "$mount_root" env POD_NAME=telepresence-generate-worker
 }
 
-run_verifier() {
-  local kubeconfig config mount_root
-  prepare_worker_replacement verifier
-  mount_root="$STATE_DIR/mount-verifier"
-  kubeconfig="$(create_service_account_kubeconfig verifier)"
-  config="$(prepare_config verifier "$kubeconfig" "$mount_root")"
-  printf 'Replacing Verifier locally.\n'
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key verifier)"
-  export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
-  export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
-  replace_command verifier "$config" "$mount_root" env POD_NAME=telepresence-verifier
+run_taxonomy_worker() {
+  local config
+  prepare_worker_replacement taxonomy-worker
+  config="$(prepare_config taxonomy-worker '' '')"
+  printf 'Replacing Taxonomy Worker locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key taxonomy-worker)"
+  export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
+  replace_command taxonomy-worker "$config" '' env POD_NAME=telepresence-taxonomy-worker
 }
 
 run_component() {
@@ -450,7 +421,7 @@ main() {
       ensure_prerequisites
       ensure_connected
       ;;
-    server|controller|agent-worker|builder|publisher|verifier)
+    server|controller|generate-worker|taxonomy-worker)
       run_component "$command"
       ;;
     down)
@@ -458,7 +429,7 @@ main() {
         restore_all
       else
         case "$2" in
-          server|controller|agent-worker|builder|publisher|verifier) detach_component "$2" ;;
+          server|controller|generate-worker|taxonomy-worker) detach_component "$2" ;;
           *) fail "unknown component: $2" ;;
         esac
       fi

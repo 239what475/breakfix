@@ -8,7 +8,7 @@ import {
 	waitForVerifiedRevision,
 } from "../support/live-helpers";
 import { waitForEnvironmentDeletion } from "../support/runtime-cleanup";
-import { waitForPublishedChallenge, waitForVerifiedCandidate } from "./authoring-live-helpers";
+import { waitForCatalogChallenge, waitForPublishedChallenge, waitForVerifiedCandidate } from "./authoring-live-helpers";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
@@ -44,6 +44,7 @@ agentLiveTest("generator verifies, publishes, and runs a k8s challenge", async (
 
 		await page.getByRole("button", { name: "发布挑战", exact: true }).click();
 		challengeID = await waitForPublishedChallenge(page, session.id);
+		await waitForCatalogChallenge(page, challengeID);
 
 		await page.getByRole("button", { name: "Catalog", exact: true }).click();
 		const card = challengeCardByID(page, challengeID);

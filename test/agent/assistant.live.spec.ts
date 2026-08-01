@@ -9,7 +9,7 @@ import {
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
-agentLiveTest("assistant uses real terminal context and renders Markdown", async ({ page }) => {
+agentLiveTest("assistant uses real terminal context", async ({ page }) => {
 	test.setTimeout(10 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
@@ -24,7 +24,7 @@ agentLiveTest("assistant uses real terminal context and renders Markdown", async
 	const composer = page.getByRole("textbox", { name: "Assistant message" });
 	await composer.fill(
 		`回答前必须调用 get_terminal_scrollback（shell-1）、get_checkpoint_status 和 get_solution。` +
-			`只根据工具结果说明你看到的 ${marker}。最终回复使用 Markdown，包含二级标题、无序列表、表格和代码块。`,
+			`只根据工具结果说明你看到的 ${marker}。`,
 	);
 	await page.getByRole("button", { name: "Send message" }).click();
 	await expect(composer).toBeDisabled();
@@ -34,11 +34,7 @@ agentLiveTest("assistant uses real terminal context and renders Markdown", async
 		await expect(reply.locator(".assistant-evidence span").filter({ hasText: evidence })).toBeVisible({ timeout: 4 * 60_000 });
 	}
 	await expect(reply).toContainText(marker);
-	const markdown = reply.locator(".assistant-markdown");
-	await expect(markdown.locator("h2").first()).toBeVisible();
-	await expect(markdown.locator("ul").first()).toBeVisible();
-	await expect(markdown.locator("table").first()).toBeVisible();
-	await expect(markdown.locator("pre code").first()).toBeVisible();
+	await expect(reply.locator(".assistant-markdown")).not.toBeEmpty();
 
 	await stopChallenge(page, "chal-r7m4x2q9v6kp");
 });

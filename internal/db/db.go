@@ -258,7 +258,7 @@ func (d *DB) migrate(ctx context.Context) error {
 	return tx.Commit()
 }
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 5
 
 // currentSchemaStatements is the only database schema accepted by this
 // development-only, intentionally destructive runtime migration. Do not add
@@ -277,8 +277,6 @@ var currentSchemaStatements = []string{
 		user_id TEXT NOT NULL,
 		runtime_session_id TEXT NOT NULL DEFAULT '',
 		generator_session_id TEXT NOT NULL DEFAULT '',
-		generator_run_id TEXT NOT NULL DEFAULT '',
-		candidate_revision_id TEXT NOT NULL DEFAULT '',
 		state TEXT NOT NULL,
 		current_revision BIGINT NOT NULL DEFAULT 0,
 		visible_revision BIGINT NOT NULL DEFAULT 0,
@@ -287,7 +285,6 @@ var currentSchemaStatements = []string{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
-	`CREATE INDEX authoring_sessions_candidate_revision ON authoring_sessions(candidate_revision_id) WHERE candidate_revision_id <> ''`,
 	`CREATE TABLE authoring_revisions (
 		session_id TEXT NOT NULL,
 		revision BIGINT NOT NULL,
@@ -371,13 +368,12 @@ var currentSchemaStatements = []string{
 		status TEXT NOT NULL,
 		model TEXT NOT NULL,
 		prompt_version TEXT NOT NULL,
-		deadline_at TIMESTAMPTZ,
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		completed_at TIMESTAMPTZ
 	)`,
-	`CREATE UNIQUE INDEX agent_runs_session_active ON agent_runs(session_id) WHERE session_id IS NOT NULL AND status IN ('pending', 'running')`,
+	`CREATE UNIQUE INDEX agent_runs_session_active ON agent_runs(session_id) WHERE session_id IS NOT NULL AND status = 'running'`,
 	`CREATE TABLE authoring_stages (
 		run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE CASCADE,
@@ -389,20 +385,6 @@ var currentSchemaStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX authoring_stages_session ON authoring_stages(session_id)`,
-	`CREATE TABLE generator_runs (
-		run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
-		generator_session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE RESTRICT,
-		authoring_session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
-		authoring_revision BIGINT NOT NULL,
-		seed_candidate_revision_id TEXT NOT NULL DEFAULT '',
-		workspace_initialized_at TIMESTAMPTZ,
-		candidate_revision_id TEXT NOT NULL DEFAULT '',
-		created_at TIMESTAMPTZ NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(generator_session_id, run_id)
-	)`,
-	`CREATE INDEX generator_runs_authoring_session ON generator_runs(authoring_session_id, authoring_revision, created_at)`,
-	`CREATE UNIQUE INDEX generator_runs_candidate_revision ON generator_runs(candidate_revision_id) WHERE candidate_revision_id <> ''`,
 	`CREATE TABLE generator_workspaces (
 		generator_run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE RESTRICT,
 		namespace TEXT NOT NULL,
@@ -438,29 +420,6 @@ var currentSchemaStatements = []string{
 		PRIMARY KEY (environment_uid, checkpoint_id)
 	)`,
 	`CREATE INDEX checkpoint_pass_events_user_challenge ON checkpoint_pass_events(user_id, challenge_id, first_passed_at)`,
-	`CREATE TABLE work_items (
-		id TEXT PRIMARY KEY,
-		kind TEXT NOT NULL CHECK (kind IN ('agent', 'build', 'artifact_publish', 'verify', 'artifact_cleanup', 'challenge_publish')),
-		subject_type TEXT NOT NULL CHECK (subject_type IN ('agent_run', 'candidate_revision')),
-		subject_id TEXT NOT NULL,
-		state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
-		attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
-		lease_owner TEXT NOT NULL DEFAULT '',
-		lease_expires_at TIMESTAMPTZ,
-		next_run_at TIMESTAMPTZ NOT NULL,
-		execution_timeout_millis BIGINT NOT NULL,
-		deadline_at TIMESTAMPTZ,
-		error_code TEXT NOT NULL DEFAULT '',
-		error_summary TEXT NOT NULL DEFAULT '',
-		created_at TIMESTAMPTZ NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(kind, subject_type, subject_id),
-		CHECK ((kind = 'agent' AND subject_type = 'agent_run') OR (kind <> 'agent' AND subject_type = 'candidate_revision')),
-		CHECK ((kind = 'artifact_cleanup' AND execution_timeout_millis = 0 AND deadline_at IS NULL)
-			OR (kind <> 'artifact_cleanup' AND execution_timeout_millis > 0))
-	)`,
-	`CREATE INDEX work_items_claim ON work_items(kind, state, next_run_at, lease_expires_at, created_at, id)`,
-	`CREATE INDEX work_items_subject ON work_items(subject_type, subject_id, created_at)`,
 	`CREATE TABLE candidate_revisions (
 		id TEXT PRIMARY KEY,
 		authoring_session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
@@ -471,14 +430,12 @@ var currentSchemaStatements = []string{
 		archive_path TEXT NOT NULL,
 		archive_sha256 TEXT NOT NULL,
 		execution_snapshot JSONB NOT NULL,
-		state TEXT NOT NULL,
 		build_output JSONB,
 		artifact_reference JSONB,
 		verification_report JSONB,
 		verify_environment JSONB,
 		failure JSONB,
 		publication JSONB,
-		superseded_by TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		verified_at TIMESTAMPTZ,
@@ -486,27 +443,51 @@ var currentSchemaStatements = []string{
 		UNIQUE(generator_run_id)
 	)`,
 	`CREATE INDEX candidate_revisions_authoring ON candidate_revisions(authoring_session_id, authoring_revision, created_at)`,
-	`CREATE INDEX candidate_revisions_state ON candidate_revisions(state, updated_at)`,
-	`CREATE TABLE taxonomy_mappings (
+	`CREATE TABLE generation_workflows (
+		id TEXT PRIMARY KEY,
+		authoring_session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
+		authoring_revision BIGINT NOT NULL,
+		state TEXT NOT NULL CHECK (state IN ('Queued', 'Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'ChallengePublishing', 'CleaningUp', 'Completed', 'Failed', 'Cancelled')),
+		cleanup_intent TEXT NOT NULL DEFAULT '' CHECK (cleanup_intent IN ('', 'completed', 'failed', 'cancelled')),
+		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
+		active_agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,
+		state_attempt INTEGER NOT NULL DEFAULT 0 CHECK (state_attempt >= 0),
+		lease_owner TEXT NOT NULL DEFAULT '',
+		lease_expires_at TIMESTAMPTZ,
+		next_run_at TIMESTAMPTZ NOT NULL,
+		deadline_at TIMESTAMPTZ,
+		deadline_paused_at TIMESTAMPTZ,
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL,
+		CHECK ((state = 'CleaningUp') = (cleanup_intent <> '')),
+		CHECK ((state = 'NeedsAuthorReview') = (deadline_paused_at IS NOT NULL)),
+		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
+	)`,
+	`CREATE UNIQUE INDEX generation_workflows_active_authoring_session ON generation_workflows(authoring_session_id) WHERE state NOT IN ('Completed', 'Failed', 'Cancelled')`,
+	`CREATE INDEX generation_workflows_claim ON generation_workflows(state, next_run_at, lease_expires_at, created_at, id)`,
+	`CREATE INDEX generation_workflows_deadline ON generation_workflows(deadline_at) WHERE deadline_at IS NOT NULL`,
+	`CREATE TABLE taxonomy_workflows (
 		id TEXT PRIMARY KEY,
 		challenge_id TEXT NOT NULL,
 		challenge_revision TEXT NOT NULL,
 		base_revision TEXT NOT NULL DEFAULT '',
-		active_stage TEXT NOT NULL DEFAULT '',
-		active_run_id TEXT NOT NULL DEFAULT '',
-		candidate_json JSONB,
+		state TEXT NOT NULL CHECK (state IN ('Queued', 'Mapping', 'Reviewing', 'Publishing', 'Completed', 'Failed', 'Cancelled')),
+		round INTEGER NOT NULL DEFAULT 0 CHECK (round >= 0),
+		state_attempt INTEGER NOT NULL DEFAULT 0 CHECK (state_attempt >= 0),
+		candidate_changeset JSONB,
 		curriculum_review_json JSONB,
 		sre_review_json JSONB,
-		round INTEGER NOT NULL DEFAULT 0 CHECK (round >= 0),
-		state TEXT NOT NULL CHECK (state IN ('Pending', 'ReadyToPublish', 'Published', 'Failed', 'Cancelled')),
+		expected_snapshot_revision TEXT NOT NULL DEFAULT '',
 		published_revision TEXT NOT NULL DEFAULT '',
+		lease_owner TEXT NOT NULL DEFAULT '',
+		lease_expires_at TIMESTAMPTZ,
+		next_run_at TIMESTAMPTZ NOT NULL,
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		UNIQUE(challenge_id, challenge_revision),
-		CHECK ((active_stage = '') = (active_run_id = '')),
-		CHECK (active_stage IN ('', 'mapper', 'review'))
+		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
-	`CREATE INDEX taxonomy_mappings_ready ON taxonomy_mappings(state, updated_at, created_at, id)`,
-	`CREATE INDEX taxonomy_mappings_active_run ON taxonomy_mappings(active_run_id) WHERE active_run_id <> ''`,
+	`CREATE INDEX taxonomy_workflows_claim ON taxonomy_workflows(state, next_run_at, lease_expires_at, created_at, id)`,
 }

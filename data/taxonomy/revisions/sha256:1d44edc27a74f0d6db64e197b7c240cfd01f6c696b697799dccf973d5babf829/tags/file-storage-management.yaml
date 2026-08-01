@@ -1,0 +1,9 @@
+kind: Tag
+id: tag-7c3e1b9f5a2846d0
+title: 文件与存储管理
+definition: 涉及文件系统操作、磁盘空间管理、文件查找与归档的题目，关注文件和目录的创建、移动、压缩、删除等操作。
+mapping_guidance:
+    include_when:
+        - 题目涉及文件查找、批量处理、压缩归档、磁盘清理等文件系统操作
+    exclude_when:
+        - 仅涉及文件内容编辑或文本处理而不涉及文件系统元数据操作

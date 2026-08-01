@@ -9,6 +9,7 @@ kubeconfig: ""
 
 registry:
   address: ${BREAKFIX_REGISTRY_ADDR}
+  client_address: ${BREAKFIX_REGISTRY_CLIENT_ADDR}
   pull_secret: ${BREAKFIX_REGISTRY_PULL_SECRET}
   trust_bundle_file: ${BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE}
 
@@ -23,10 +24,8 @@ cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
 internal_workers:
-  agent: ${BREAKFIX_AGENT_WORKER_API_KEY}
-  builder: ${BREAKFIX_BUILDER_WORKER_API_KEY}
-  publisher: ${BREAKFIX_PUBLISHER_WORKER_API_KEY}
-  verifier: ${BREAKFIX_VERIFIER_WORKER_API_KEY}
+  generate: ${BREAKFIX_GENERATE_WORKER_API_KEY}
+  taxonomy: ${BREAKFIX_TAXONOMY_WORKER_API_KEY}
 
 worker:
   server_url: http://breakfix-server:9090

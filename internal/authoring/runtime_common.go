@@ -2,6 +2,8 @@ package authoring
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -9,7 +11,7 @@ import (
 
 func stateAllowsAuthorMessage(state SessionState) bool {
 	switch state {
-	case StateDraftConversation, StateIntentReview, StateInfrastructureFailed, StateAwaitingVerifiedReview:
+	case StateDraftConversation, StateIntentReview:
 		return true
 	default:
 		return false
@@ -17,7 +19,7 @@ func stateAllowsAuthorMessage(state SessionState) bool {
 }
 
 func stateAllowsAgentPlanRevision(state SessionState) bool {
-	return stateAllowsAuthorMessage(state) || state == StateRevisingAndVerifying
+	return stateAllowsAuthorMessage(state)
 }
 
 // AllowsAgentPlanStage reports whether an Agent Run may mutate its private
@@ -26,12 +28,10 @@ func AllowsAgentPlanStage(state SessionState) bool {
 	return stateAllowsAgentPlanRevision(state)
 }
 
-// NextPlanRevisionState preserves the last verified artifact while a revised
-// Plan is being generated and verified.
+// NextPlanRevisionState deliberately does not mirror GenerationWorkflow.
+// Workflow state is the only execution lifecycle authority.
 func NextPlanRevisionState(state SessionState) SessionState {
-	if state == StateAwaitingVerifiedReview || state == StateInfrastructureFailed || state == StateRevisingAndVerifying {
-		return StateRevisingAndVerifying
-	}
+	_ = state
 	return StateIntentReview
 }
 
@@ -42,12 +42,49 @@ type authoringTool struct {
 	run    func(context.Context, string) (string, error)
 }
 
+// invalidToolInputError marks a rejected model request. The rejected request
+// must be returned to the Agent as a tool result so it can correct its own
+// arguments in the same conversation; it must never change the staged plan.
+type invalidToolInputError struct {
+	err error
+}
+
+func (e *invalidToolInputError) Error() string {
+	return e.err.Error()
+}
+
+func (e *invalidToolInputError) Unwrap() error {
+	return e.err
+}
+
+func invalidToolInput(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &invalidToolInputError{err: err}
+}
+
 func (t *authoringTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{Name: t.name, Desc: t.desc, ParamsOneOf: schema.NewParamsOneOfByParams(t.params)}, nil
 }
 
 func (t *authoringTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (string, error) {
-	return t.run(ctx, args)
+	result, err := t.run(ctx, args)
+	if err == nil {
+		return result, nil
+	}
+	var inputErr *invalidToolInputError
+	if !errors.As(err, &inputErr) {
+		return "", err
+	}
+	payload, marshalErr := json.Marshal(struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}{OK: false, Error: inputErr.Error()})
+	if marshalErr != nil {
+		return "", marshalErr
+	}
+	return string(payload), nil
 }
 
 func authoringSystemPrompt() string {
@@ -63,5 +100,6 @@ func authoringSystemPrompt() string {
 5. 题意约定完整后直接告知作者可以点击界面上的“生成并验证题目”。你没有任何生成、验证或发布工具。
 6. 已验证题目审核中，作者要求改动时继续使用函数修改题意约定。实际生成文件由后续 generator 负责；你不能假装已经查看或修改过源码。
 7. 真实验证失败不会展示给作者，系统会自动把反馈交给 generator 修复。不能声称已经生成、验证或发布。
-8. 回复保持简洁，说明你理解的变更、仍需澄清的地方或已经落盘的 revision。`
+8. function 返回 {"ok":false,"error":"..."} 时，表示该次调用没有写入任何内容。你必须根据 error 修正参数并在同一轮重新调用，不能忽略错误或声称修改成功。
+9. 回复保持简洁，说明你理解的变更、仍需澄清的地方或已经落盘的 revision。`
 }

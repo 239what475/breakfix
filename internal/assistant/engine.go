@@ -22,13 +22,16 @@ type EngineResult struct {
 	Evidence []Evidence
 }
 
-const maxAssistantTransportAttempts = 3
+const (
+	maxAssistantTransportAttempts = 3
+	maxAssistantTurns             = 12
+)
 
 // RunWithEino executes one assistant response from durable conversation
 // messages. It does not own Session, Run, or streaming persistence; the
 // Worker supplies those boundaries and only this function performs model/tool
 // work.
-func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(Event)) (EngineResult, error) {
+func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(StreamEvent)) (EngineResult, error) {
 	if err := validateRequest(request); err != nil {
 		return EngineResult{}, err
 	}
@@ -44,7 +47,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 			return EngineResult{}, err
 		}
 		if emit != nil {
-			emit(Event{Type: "reset"})
+			emit(StreamEvent{Type: "reset"})
 		}
 		if err := waitAssistantTransportRetry(ctx, attempt); err != nil {
 			return EngineResult{}, err
@@ -53,7 +56,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 	return EngineResult{}, errors.New("assistant transport retry exhausted")
 }
 
-func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(Event)) (EngineResult, error) {
+func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agentruntime.Message, emit func(StreamEvent)) (EngineResult, error) {
 	chat, err := agentmodel.NewChatModel(ctx, cfg)
 	if err != nil {
 		return EngineResult{}, err
@@ -105,17 +108,17 @@ func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Re
 						continue
 					}
 					response.WriteString(chunk.Content)
-					conversation.notify(Event{Type: "delta", Content: chunk.Content})
+					conversation.notify(StreamEvent{Type: "delta", Content: chunk.Content})
 				}
 				stream.Close()
 			}
 			if output.Message != nil {
 				for _, call := range output.Message.ToolCalls {
-					conversation.notify(Event{Type: "tool", Tool: call.Function.Name})
+					conversation.notify(StreamEvent{Type: "tool", Tool: call.Function.Name})
 				}
 				if content := output.Message.Content; content != "" {
 					response.WriteString(content)
-					conversation.notify(Event{Type: "delta", Content: content})
+					conversation.notify(StreamEvent{Type: "delta", Content: content})
 				}
 			}
 		}

@@ -39,19 +39,21 @@ type Config struct {
 	Runtime              RuntimeConfig        `yaml:"runtime"`
 }
 
-// RegistryConfig identifies the OCI repository namespace used for K8s
-// artifacts. The deployment decides whether that endpoint is the bundled
-// Registry or an operator-provided external Registry; application code uses
-// the same HTTPS OCI contract for both.
+// RegistryConfig separates the OCI reference root from the HTTPS endpoint used
+// by control-plane clients. Address is embedded in immutable image references
+// and must be reachable by Kubernetes nodes. ClientAddress is an authority
+// used by Server and Generate Worker HTTP calls; production normally sets it
+// to Address's authority, while Kind uses the Registry Service DNS name.
 type RegistryConfig struct {
 	Address         string `yaml:"address"`
+	ClientAddress   string `yaml:"client_address"`
 	PullSecret      string `yaml:"pull_secret"`
 	TrustBundleFile string `yaml:"trust_bundle_file"`
 	Username        string `yaml:"-"`
 	Password        string `yaml:"-"`
 }
 
-func (c RegistryConfig) ValidateAddress() error {
+func (c RegistryConfig) Validate() error {
 	address := strings.TrimRight(strings.TrimSpace(c.Address), "/")
 	if address == "" || strings.Contains(address, "://") || strings.ContainsAny(address, " \t\r\n@") {
 		return fmt.Errorf("registry address must be an OCI repository root")
@@ -67,6 +69,14 @@ func (c RegistryConfig) ValidateAddress() error {
 	}
 	if strings.LastIndex(address, ":") > strings.LastIndex(address, "/") {
 		return fmt.Errorf("registry address must not contain an image tag")
+	}
+	clientAddress := strings.TrimSpace(c.ClientAddress)
+	if clientAddress == "" || strings.Contains(clientAddress, "://") || strings.ContainsAny(clientAddress, " \t\r\n/@") {
+		return fmt.Errorf("registry client_address must be an HTTPS authority")
+	}
+	clientURL, err := url.Parse("https://" + clientAddress)
+	if err != nil || clientURL.Host == "" || clientURL.Host != clientAddress || clientURL.Path != "" || clientURL.RawQuery != "" || clientURL.Fragment != "" || clientURL.User != nil {
+		return fmt.Errorf("registry client_address must be an HTTPS authority")
 	}
 	if (strings.TrimSpace(c.Username) == "") != (strings.TrimSpace(c.Password) == "") {
 		return fmt.Errorf("registry username and password must be set together")
@@ -128,31 +138,23 @@ type WorkerConfig struct {
 type InternalWorkerRole string
 
 const (
-	InternalWorkerAgent     InternalWorkerRole = "agent"
-	InternalWorkerBuilder   InternalWorkerRole = "builder"
-	InternalWorkerPublisher InternalWorkerRole = "publisher"
-	InternalWorkerVerifier  InternalWorkerRole = "verifier"
+	InternalWorkerGenerate InternalWorkerRole = "generate"
+	InternalWorkerTaxonomy InternalWorkerRole = "taxonomy"
 )
 
 // InternalWorkerKeys are read only by Server. Every fixed worker receives its
 // own API key through WorkerConfig.APIKeyEnv instead of this complete set.
 type InternalWorkerKeys struct {
-	Agent     string `yaml:"agent"`
-	Builder   string `yaml:"builder"`
-	Publisher string `yaml:"publisher"`
-	Verifier  string `yaml:"verifier"`
+	Generate string `yaml:"generate"`
+	Taxonomy string `yaml:"taxonomy"`
 }
 
 func (k InternalWorkerKeys) Key(role InternalWorkerRole) string {
 	switch role {
-	case InternalWorkerAgent:
-		return k.Agent
-	case InternalWorkerBuilder:
-		return k.Builder
-	case InternalWorkerPublisher:
-		return k.Publisher
-	case InternalWorkerVerifier:
-		return k.Verifier
+	case InternalWorkerGenerate:
+		return k.Generate
+	case InternalWorkerTaxonomy:
+		return k.Taxonomy
 	default:
 		return ""
 	}
@@ -163,10 +165,8 @@ func (k InternalWorkerKeys) Validate() error {
 		role InternalWorkerRole
 		key  string
 	}{
-		{InternalWorkerAgent, k.Agent},
-		{InternalWorkerBuilder, k.Builder},
-		{InternalWorkerPublisher, k.Publisher},
-		{InternalWorkerVerifier, k.Verifier},
+		{InternalWorkerGenerate, k.Generate},
+		{InternalWorkerTaxonomy, k.Taxonomy},
 	}
 	seen := make(map[string]InternalWorkerRole, len(keys))
 	for _, item := range keys {
@@ -183,7 +183,7 @@ func (k InternalWorkerKeys) Validate() error {
 }
 
 // OpenSandboxConfig describes the Server-owned Generator workspace plane.
-// Its lifecycle key intentionally never appears in the Agent Worker config.
+// Its lifecycle key intentionally never appears in a Generate Worker config.
 type OpenSandboxConfig struct {
 	BaseURL                   string `yaml:"base_url"`
 	APIKeyEnv                 string `yaml:"api_key_env"`
@@ -290,12 +290,11 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
-	cfg.InternalWorkers.Agent = os.ExpandEnv(cfg.InternalWorkers.Agent)
-	cfg.InternalWorkers.Builder = os.ExpandEnv(cfg.InternalWorkers.Builder)
-	cfg.InternalWorkers.Publisher = os.ExpandEnv(cfg.InternalWorkers.Publisher)
-	cfg.InternalWorkers.Verifier = os.ExpandEnv(cfg.InternalWorkers.Verifier)
+	cfg.InternalWorkers.Generate = os.ExpandEnv(cfg.InternalWorkers.Generate)
+	cfg.InternalWorkers.Taxonomy = os.ExpandEnv(cfg.InternalWorkers.Taxonomy)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
 	cfg.Registry.Address = os.ExpandEnv(cfg.Registry.Address)
+	cfg.Registry.ClientAddress = os.ExpandEnv(cfg.Registry.ClientAddress)
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
@@ -344,7 +343,7 @@ func expandKubeconfigPath(value string) string {
 
 // ValidateServer checks the complete dependency contract of the Server
 // process. Other processes intentionally validate only the configuration they
-// consume, so an Agent Worker never needs a Kubernetes or OpenSandbox secret.
+// consume, so a Generate Worker never needs a Kubernetes or OpenSandbox secret.
 func (c Config) ValidateServer() error {
 	if c.Port <= 0 || strings.TrimSpace(c.DataDir) == "" || strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("server port, data_dir, and database_url are required")
@@ -355,7 +354,7 @@ func (c Config) ValidateServer() error {
 	if err := c.InternalWorkers.Validate(); err != nil {
 		return fmt.Errorf("server %w", err)
 	}
-	if err := c.Registry.ValidateAddress(); err != nil {
+	if err := c.Registry.Validate(); err != nil {
 		return fmt.Errorf("server registry: %w", err)
 	}
 	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
@@ -401,51 +400,37 @@ func (c Config) ValidateController() error {
 	return nil
 }
 
-func (c Config) ValidateAgentWorker() error {
+func (c Config) ValidateGenerateWorker() error {
 	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("agent worker: %w", err)
+		return fmt.Errorf("generate worker: %w", err)
 	}
 	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" {
-		return fmt.Errorf("agent worker base_url, api_key_env, API key, and model are required")
+		return fmt.Errorf("generate worker base_url, api_key_env, API key, and model are required")
 	}
 	if _, err := c.Agent.Timeout(); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (c Config) ValidateBuilderWorker() error {
-	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("builder worker: %w", err)
-	}
-	if err := c.Incus.Validate(); err != nil {
-		return fmt.Errorf("builder worker incus: %w", err)
-	}
-	return nil
-}
-
-func (c Config) ValidatePublisherWorker() error {
-	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("publisher worker: %w", err)
-	}
-	if err := c.Registry.ValidateAddress(); err != nil {
-		return fmt.Errorf("publisher worker registry: %w", err)
-	}
-	if err := c.Incus.Validate(); err != nil {
-		return fmt.Errorf("publisher worker incus: %w", err)
-	}
-	return nil
-}
-
-func (c Config) ValidateVerifierWorker() error {
-	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("verifier worker: %w", err)
+	if err := c.Registry.Validate(); err != nil {
+		return fmt.Errorf("generate worker registry: %w", err)
 	}
 	if strings.TrimSpace(c.CRDNamespace) == "" {
-		return fmt.Errorf("verifier worker crd_namespace is required")
+		return fmt.Errorf("generate worker crd_namespace is required")
 	}
 	if err := c.Incus.Validate(); err != nil {
-		return fmt.Errorf("verifier worker incus: %w", err)
+		return fmt.Errorf("generate worker incus: %w", err)
+	}
+	return nil
+}
+
+func (c Config) ValidateTaxonomyWorker() error {
+	if err := c.validateWorker(); err != nil {
+		return fmt.Errorf("taxonomy worker: %w", err)
+	}
+	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" {
+		return fmt.Errorf("taxonomy worker base_url, api_key_env, API key, and model are required")
+	}
+	if _, err := c.Agent.Timeout(); err != nil {
+		return err
 	}
 	return nil
 }

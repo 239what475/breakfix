@@ -66,10 +66,10 @@ func TestVerificationReportRequiresManagementAnswerForK8s(t *testing.T) {
 		Runtime:     challenge.RuntimeK8s,
 		Checkpoints: []CheckpointSnapshot{{ID: "deployment-ready"}},
 		K8s: &K8sRuntimeSnapshot{
-			BaseImageDigest:         "registry.breakfix.internal/base@sha256:" + strings.Repeat("a", 64),
+			BaseImageDigest:         "registry.example.com/base@sha256:" + strings.Repeat("a", 64),
 			ProfileRevision:         "k8s-profile-v1",
 			Version:                 "v0.28.0",
-			ManagementTerminalImage: "registry.breakfix.internal/terminal@sha256:" + strings.Repeat("b", 64),
+			ManagementTerminalImage: "registry.example.com/terminal@sha256:" + strings.Repeat("b", 64),
 			Resources: K8sResources{
 				ControlPlaneCPU: "1", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
 				WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",

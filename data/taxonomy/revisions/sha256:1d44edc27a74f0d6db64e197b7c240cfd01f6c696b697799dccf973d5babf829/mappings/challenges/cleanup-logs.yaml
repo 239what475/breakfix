@@ -1,0 +1,24 @@
+challenge:
+    id: chal-r7m4x2q9v6kp
+    title: 批量压缩旧日志
+    revision: sha256:435171f6b9e733553c3d9f4da1d3890d86f8defaa79430cf0d6033f1b268d3f7
+tags:
+    - id: tag-2a8d5f1c4b7390e6
+      title: Shell 脚本
+    - id: tag-7c3e1b9f5a2846d0
+      title: 文件与存储管理
+    - id: tag-5f9d2c7a1b4038e6
+      title: 系统运维
+entry_skills:
+    - id: skill-6b3c8e2f1a7459d0
+      title: 可执行 Shell 脚本创建
+outcomes:
+    - id: skill-fc8e3a1b7d5290c4
+      title: find 多条件文件定位
+      primary: true
+    - id: skill-9a2e5b1d7c8340f6
+      title: tar 压缩归档管理
+      primary: false
+    - id: skill-1d7f3a9b5e8024c6
+      title: Shell 管道安全迭代
+      primary: false

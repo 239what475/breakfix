@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from "vue";
 import { FileCode2, MessageSquareText, Send } from "lucide-vue-next";
-import { APIError, api } from "../../api/client";
+import { APIError, api, streamAuthoringMessage } from "../../api/client";
 import type {
   AuthoringAsset,
   AuthoringFileDiff,
+	AuthoringMessage,
   AuthoringSession,
 } from "../../api/types";
 import MarkdownDocument from "../workspace/MarkdownDocument.vue";
@@ -20,17 +21,28 @@ const activeTab = ref("overview");
 const activeAsset = ref("");
 const activeDiff = ref("");
 const narrowPane = ref<"plan" | "chat">("plan");
+const pendingMessages = ref<AuthoringMessage[]>([]);
 let pollTimer: number | undefined;
+let streamController: AbortController | undefined;
 
-const stateLabel: Record<string, string> = {
+const sessionStateLabel: Record<string, string> = {
   DraftConversation: "等待题意",
   IntentReview: "题意约定待确认",
-  GeneratingAndVerifying: "正在生成并验证",
-  InfrastructureFailed: "基础设施故障",
-  AwaitingVerifiedReview: "等待已验证题目审核",
-  RevisingAndVerifying: "正在生成并验证修订题目",
-  Publishing: "正在发布",
   Published: "已发布",
+};
+const workflowStateLabel: Record<string, string> = {
+  Queued: "等待生成",
+  Generating: "正在生成",
+  Judging: "正在审查",
+  Building: "正在构建",
+  ArtifactPublishing: "正在发布候选产物",
+  Verifying: "正在真实验证",
+  NeedsAuthorReview: "等待作者审核",
+  ChallengePublishing: "正在发布挑战",
+  CleaningUp: "正在清理",
+  Completed: "已完成",
+  Failed: "基础设施失败",
+  Cancelled: "已取消",
 };
 
 const usingVerifiedRevision = computed(() => !!session.value?.verified);
@@ -90,14 +102,24 @@ const selectedDiff = computed<AuthoringFileDiff | undefined>(() => {
   const diffs = session.value?.diff ?? [];
   return diffs.find((entry) => entry.path === activeDiff.value) ?? diffs[0];
 });
-const canCompose = computed(
+const workflowState = computed(() => session.value?.workflow?.state);
+const displayState = computed(
+  () => workflowState.value ?? session.value?.state ?? "",
+);
+const displayStateLabel = computed(
   () =>
-    !!session.value &&
-    !busy.value &&
-    !session.value.authoring_turn_active &&
-    ["DraftConversation", "IntentReview", "AwaitingVerifiedReview"].includes(
-      session.value.state,
-    ),
+    workflowState.value
+      ? workflowStateLabel[workflowState.value]
+      : sessionStateLabel[session.value?.state ?? ""],
+);
+const canCompose = computed(
+  () => {
+    const current = session.value;
+    if (!current || busy.value || current.authoring_turn_active || current.state === "Published") {
+      return false;
+    }
+    return !current.workflow || ["NeedsAuthorReview", "Failed", "Cancelled"].includes(current.workflow.state);
+  },
 );
 const canSend = computed(
   () => canCompose.value && message.value.trim().length > 0,
@@ -105,16 +127,17 @@ const canSend = computed(
 const canGenerate = computed(
   () =>
     !session.value?.authoring_turn_active &&
-    (session.value?.state === "IntentReview" ||
-      (session.value?.state === "RevisingAndVerifying" &&
-        !session.value.generator_run_id)) &&
+    session.value?.state === "IntentReview" &&
+    (!session.value.workflow ||
+      ["Failed", "Cancelled"].includes(session.value.workflow.state)) &&
     checkpoints.value.length > 0,
 );
 const canPublish = computed(
   () =>
     !session.value?.authoring_turn_active &&
-    session.value?.state === "AwaitingVerifiedReview" &&
-    session.value.candidate?.state === "Verified" &&
+    session.value?.workflow?.state === "NeedsAuthorReview" &&
+    session.value.intent_revision === session.value.visible_revision &&
+    !!session.value.candidate &&
     session.value.verification?.passed === true,
 );
 const canOpenPublished = computed(
@@ -128,17 +151,23 @@ const actionLabel = computed(() => {
   if (canOpenPublished.value) return "查看已发布题目";
   return "";
 });
+const displayMessages = computed(() => [
+	...(session.value?.messages ?? []),
+	...pendingMessages.value,
+]);
 
 function clearPoll() {
   if (pollTimer !== undefined) window.clearTimeout(pollTimer);
   pollTimer = undefined;
 }
 function shouldPoll() {
+  const currentWorkflow = session.value?.workflow;
   return (
     session.value?.authoring_turn_active ||
-    ["GeneratingAndVerifying", "RevisingAndVerifying", "Publishing"].includes(
-      session.value?.state ?? "",
-    )
+    (!!currentWorkflow &&
+      !["NeedsAuthorReview", "Completed", "Failed", "Cancelled"].includes(
+        currentWorkflow.state,
+      ))
   );
 }
 function schedulePoll() {
@@ -146,8 +175,8 @@ function schedulePoll() {
   if (!shouldPoll() || !session.value) return;
   pollTimer = window.setTimeout(() => void refresh(), 3000);
 }
-async function refresh() {
-  if (!session.value || busy.value) return;
+async function refresh(force = false) {
+	if (!session.value || (!force && busy.value)) return;
   try {
     session.value = await api.getAuthoringSession(session.value.id);
     syncSelections();
@@ -192,19 +221,53 @@ async function createOrResume() {
 }
 async function send() {
   if (!session.value || !canSend.value) return;
+	const sessionID = session.value.id;
+	const content = message.value.trim();
+	const createdAt = new Date().toISOString();
+	const userMessage: AuthoringMessage = {
+		id: `pending-author-${Date.now()}`,
+		role: "user",
+		content,
+		created_at: createdAt,
+	};
+	const agentMessage: AuthoringMessage = {
+		id: `pending-agent-${Date.now()}`,
+		role: "agent",
+		content: "",
+		created_at: createdAt,
+	};
+	pendingMessages.value = [userMessage, agentMessage];
+	message.value = "";
   busy.value = true;
   error.value = "";
   try {
-    session.value = await api.sendAuthoringMessage(
-      session.value.id,
-      message.value.trim(),
-    );
-    message.value = "";
-    syncSelections();
+		const controller = new AbortController();
+		streamController = controller;
+		await streamAuthoringMessage(
+			sessionID,
+			content,
+			{
+				onEvent(event) {
+					if (event.type === "delta" && event.content) {
+						agentMessage.content += event.content;
+						pendingMessages.value = [...pendingMessages.value];
+					}
+				},
+				onComplete() {},
+				onError(message) {
+					error.value = message;
+				},
+			},
+			controller.signal,
+		);
   } catch (err) {
+		if (err instanceof DOMException && err.name === "AbortError") return;
     error.value = err instanceof Error ? err.message : "发送消息失败";
   } finally {
+		streamController = undefined;
     busy.value = false;
+		pendingMessages.value = [];
+		await refresh(true);
     schedulePoll();
   }
 }
@@ -242,11 +305,14 @@ function messageLabel(role: string) {
 }
 
 watch(
-  () => session.value?.state,
+  () => `${session.value?.state ?? ""}:${session.value?.workflow?.state ?? ""}:${session.value?.authoring_turn_active ?? false}`,
   () => schedulePoll(),
 );
 onMounted(() => void createOrResume());
-onScopeDispose(clearPoll);
+onScopeDispose(() => {
+	clearPoll();
+	streamController?.abort();
+});
 </script>
 
 <template>
@@ -262,7 +328,7 @@ onScopeDispose(clearPoll);
         <header class="authoring-plan-heading">
           <div><p class="eyebrow">{{ session?.candidate ? "Verified revision" : "Intent revision" }}</p><h1>{{ session?.candidate ? "已验证题目" : "题意约定" }}</h1></div>
           <div class="authoring-plan-actions">
-            <div v-if="session" class="authoring-status" :data-state="session.state"><i></i><span>{{ stateLabel[session.state] }}</span><span>{{ session.candidate ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.pipeline_state">{{ session.pipeline_state }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
+            <div v-if="session" class="authoring-status" :data-state="displayState"><i></i><span>{{ displayStateLabel }}</span><span>{{ session.candidate ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.workflow">{{ session.workflow.state }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
             <div v-if="session" class="authoring-meta"><span>{{ displayMetadata?.runtime || "runtime 待定" }}</span><span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span></div>
             <button v-if="actionLabel" class="primary-button authoring-primary-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
           </div>
@@ -294,7 +360,7 @@ onScopeDispose(clearPoll);
             <strong>{{ session.verification?.passed ? "真实验证已通过" : "真实验证未通过" }}</strong>
             <p>{{ session.verification?.summary || session.last_error || "验证没有返回摘要" }}</p>
             <dl>
-              <div><dt>候选流水线</dt><dd>{{ session.candidate?.state || session.pipeline_state || "-" }}</dd></div>
+              <div><dt>生成工作流</dt><dd>{{ session.workflow?.state || "-" }}</dd></div>
               <div><dt>标准解答</dt><dd>{{ session.verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ session.verification?.answers.length || 0 }}</dd></div>
               <div><dt>检查点</dt><dd>{{ session.verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ session.verification?.checkpoints.length || 0 }}</dd></div>
             </dl>
@@ -306,10 +372,10 @@ onScopeDispose(clearPoll);
         <header class="authoring-chat-heading"><strong><MessageSquareText :size="15" /> 题意讨论</strong><span>agent 仅通过受控函数修改题意约定</span></header>
         <p v-if="error" class="authoring-alert">{{ error }}</p>
         <div class="authoring-timeline">
-          <div v-if="session && !session.messages.length" class="authoring-empty">
+          <div v-if="session && !displayMessages.length" class="authoring-empty">
             <FileCode2 :size="22" /><strong>描述你希望学习者解决的真实场景</strong>
           </div>
-          <article v-for="entry in session?.messages" :key="entry.id" class="authoring-message" :class="entry.role">
+          <article v-for="entry in displayMessages" :key="entry.id" class="authoring-message" :class="entry.role">
             <span class="authoring-message-label">{{ messageLabel(entry.role) }}</span>
             <div class="authoring-bubble">{{ entry.content }}</div>
             <div v-for="change in entry.changes" :key="`${entry.id}-${change.revision}-${change.kind}`" class="authoring-change-card">

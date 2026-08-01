@@ -78,13 +78,15 @@ trust_certificate() {
       actual_projects=$(printf '%s\n' "$trust" | awk '/^projects:/ { print $2; exit }')
       expected_projects='[]'
     fi
-    [ "$actual_name" = "$trust_name" ] && \
+    if [ "$actual_name" = "$trust_name" ] && \
       [ "$actual_restricted" = "$expected_restricted" ] && \
-      [ "$actual_projects" = "$expected_projects" ] || {
-        printf 'Incus trust entry %s does not match role %s\n' "$fingerprint" "$role" >&2
-        exit 1
-      }
-    return
+      [ "$actual_projects" = "$expected_projects" ]; then
+      return
+    fi
+    # This bootstrap owns these role identities. Recreate only its own trust
+    # entry when its declared access scope changes so development bootstrap is
+    # convergent rather than requiring manual Incus state repair.
+    incus config trust remove "$remote:$fingerprint"
   fi
 
   if [ -n "$projects" ]; then
@@ -175,9 +177,11 @@ ensure_project "$image_project"
 
 trust_certificate server ""
 trust_certificate controller ""
-trust_certificate builder "$build_project"
-trust_certificate publisher "$build_project,$image_project"
-trust_certificate verifier ""
+# Generate Worker owns the complete GenerationWorkflow, including execution in
+# short-lived NodeEnvironment projects created by Controller. Those projects
+# do not exist when this identity is provisioned, so a static project allowlist
+# cannot express the required verification access.
+trust_certificate generate ""
 
 if ! incus network show "$remote:$network" --project default >/dev/null 2>&1; then
   incus network create "$remote:$network" --project default --type bridge \

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/assistant"
@@ -29,7 +30,7 @@ type Handler struct {
 	crdNamespace       string
 	challengesDir      string
 	taxonomy           *taxonomy.Store
-	taxonomyWorkflow   *taxonomy.Service
+	taxonomyPublishMu  sync.Mutex
 	dataDir            string
 	cooldownMin        int
 	llm                config.AgentConfig
@@ -46,7 +47,6 @@ type Handler struct {
 	incusConfig        incusprovider.Config
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness
-	worklistMetrics    *worklistOperationMetrics
 }
 
 type Dependencies struct {
@@ -60,6 +60,7 @@ func NewHandler(database *db.DB, client *k8s.Client, cfg config.Config) *Handler
 func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.Config, dependencies Dependencies) *Handler {
 	taxonomyStore := taxonomy.NewStore(cfg.DataDir)
 	registryClient, registryErr := registry.NewClient(registry.ClientOptions{
+		Endpoint:        cfg.Registry.ClientAddress,
 		Credentials:     registry.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
 		TrustBundleFile: cfg.Registry.TrustBundleFile,
 	})
@@ -86,7 +87,6 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 		runtimeConfig:   cfg.Runtime,
 		incusConfig:     cfg.Incus,
 		nodeTerminal:    dependencies.NodeTerminal,
-		worklistMetrics: newWorklistOperationMetrics(),
 	}
 	if ready, ok := dependencies.NodeTerminal.(NodeProviderReadiness); ok {
 		handler.nodeProviderReady = ready
@@ -94,9 +94,6 @@ func NewHandlerWithDependencies(database *db.DB, client *k8s.Client, cfg config.
 	if registryErr != nil {
 		handler.startupErr = fmt.Errorf("initialize registry client: %w", registryErr)
 		return handler
-	}
-	if database != nil {
-		handler.taxonomyWorkflow = taxonomy.NewService(database, taxonomyStore, cfg.ChallengesDir(), cfg.Agent)
 	}
 	if database != nil && client != nil && cfg.OpenSandbox.APIKey != "" {
 		sandbox, err := opensandbox.New(cfg.OpenSandbox)

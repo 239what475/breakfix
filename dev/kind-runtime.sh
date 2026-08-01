@@ -3,10 +3,12 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
-worker_replicas=${BREAKFIX_KIND_WORKER_REPLICAS:-1}
-manifest=${BREAKFIX_KIND_RUNTIME_MANIFEST:-$repo_root}
+generate_worker_replicas=${BREAKFIX_KIND_GENERATE_WORKER_REPLICAS:-1}
+taxonomy_worker_replicas=${BREAKFIX_KIND_TAXONOMY_WORKER_REPLICAS:-1}
+manifest=${BREAKFIX_KIND_RUNTIME_MANIFEST:-$repo_root/deploy/overlays/kind}
+registry_node_port=30443
 
-for command in jq kubectl; do
+for command in docker jq kind kubectl; do
   command -v "$command" >/dev/null 2>&1 || {
     printf '%s is required\n' "$command" >&2
     exit 1
@@ -23,10 +25,31 @@ case "$context" in
     ;;
 esac
 
+# The development manifests intentionally use the mutable `:dev` image tags.
+# Load the freshly built local images into this Kind cluster before applying
+# them so `IfNotPresent` cannot silently reuse an older node cache.
+kind_cluster=${context#kind-}
+runtime_images=$(kubectl kustomize "$manifest" | awk '
+  /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+')
+[ -n "$runtime_images" ] || {
+  printf 'could not find Breakfix runtime images in %s\n' "$manifest" >&2
+  exit 1
+}
+for image in $runtime_images; do
+  docker image inspect "$image" >/dev/null 2>&1 || {
+    printf 'local runtime image is required before Kind deployment: %s\n' "$image" >&2
+    exit 1
+  }
+  kind load docker-image --name "$kind_cluster" "$image" >/dev/null
+done
+
 kubectl -n "$namespace" get secret breakfix-runtime >/dev/null 2>&1 || {
   printf 'runtime Secret breakfix-runtime is required before applying the runtime\n' >&2
   exit 1
 }
+
+"$repo_root/dev/kind-registry.sh"
 
 secret_value() {
   kubectl -n "$namespace" get secret breakfix-runtime -o json |
@@ -34,14 +57,9 @@ secret_value() {
 }
 
 registry_address=$(secret_value registry_addr)
+registry_client_address=$(secret_value registry_client_addr)
 registry_pull_secret=$(secret_value registry_pull_secret)
 registry_trust_bundle_file=$(secret_value registry_trust_bundle_file)
-managed_registry=$(kubectl kustomize "$manifest" | awk '
-  $1 == "kind:" { kind = $2; in_metadata = 0; next }
-  $1 == "metadata:" { in_metadata = 1; next }
-  in_metadata && kind == "Deployment" && $1 == "name:" && $2 == "breakfix-registry" { found = 1 }
-  END { print found ? "true" : "false" }
-')
 [ -n "$registry_address" ] || {
   printf 'runtime Secret breakfix-runtime must provide registry_addr\n' >&2
   exit 1
@@ -57,19 +75,58 @@ case "$registry_port" in
     exit 1
     ;;
 esac
+[ "$registry_port" = "$registry_node_port" ] || {
+  printf 'Kind runtime registry_addr must use NodePort %s, got %s\n' "$registry_node_port" "$registry_address" >&2
+  exit 1
+}
+expected_registry_client_address=breakfix-registry.$namespace.svc.cluster.local
+[ "$registry_client_address" = "$expected_registry_client_address" ] || {
+  printf 'Kind runtime registry_client_addr must use the Registry Service authority %s, got %s\n' \
+    "$expected_registry_client_address" "$registry_client_address" >&2
+  exit 1
+}
 if [ -n "$registry_pull_secret" ]; then
   pull_secret_type=$(kubectl -n "$namespace" get secret "$registry_pull_secret" -o jsonpath='{.type}' 2>/dev/null || true)
   [ "$pull_secret_type" = 'kubernetes.io/dockerconfigjson' ] || {
     printf 'Docker pull Secret %s must exist in %s with type kubernetes.io/dockerconfigjson\n' "$registry_pull_secret" "$namespace" >&2
     exit 1
   }
+  pull_secret_hosts=$(kubectl -n "$namespace" get secret "$registry_pull_secret" -o json |
+    jq -r '.data[".dockerconfigjson"] | @base64d | fromjson | .auths | keys[]')
+  printf '%s\n' "$pull_secret_hosts" | grep -Fqx "$registry_authority" || {
+    printf 'Docker pull Secret %s must contain credentials for %s\n' "$registry_pull_secret" "$registry_authority" >&2
+    exit 1
+  }
 fi
 
 "$repo_root/dev/kind-worker-identities.sh"
 
-case "$worker_replicas" in
+kubectl -n "$namespace" get secret breakfix-registry-tls >/dev/null 2>&1 || {
+  printf 'Kind Registry preparation did not create TLS Secret breakfix-registry-tls\n' >&2
+  exit 1
+}
+kubectl -n "$namespace" get secret breakfix-registry-auth >/dev/null 2>&1 || {
+  printf 'Kind Registry requires authentication Secret breakfix-registry-auth\n' >&2
+  exit 1
+}
+if [ -n "$registry_trust_bundle_file" ]; then
+  registry_ca=$(kubectl -n "$namespace" get configmap breakfix-registry-ca -o json 2>/dev/null |
+    jq -r '.data["ca.crt"] // empty')
+  [ -n "$registry_ca" ] || {
+    printf 'registry_trust_bundle_file is set but ConfigMap breakfix-registry-ca has no ca.crt\n' >&2
+    exit 1
+  }
+fi
+
+case "$generate_worker_replicas" in
   '' | *[!0-9]*)
-    printf 'BREAKFIX_KIND_WORKER_REPLICAS must be a non-negative integer\n' >&2
+    printf 'BREAKFIX_KIND_GENERATE_WORKER_REPLICAS must be a non-negative integer\n' >&2
+    exit 2
+    ;;
+esac
+case "$taxonomy_worker_replicas" in
+  '' | *[!0-9]*)
+    printf 'BREAKFIX_KIND_TAXONOMY_WORKER_REPLICAS must be a non-negative integer\n' >&2
     exit 2
     ;;
 esac
@@ -85,77 +142,74 @@ case "$incus_port" in
     ;;
 esac
 
-kubectl apply -k "$manifest"
-
-registry_mode=external
-if [ "$managed_registry" = true ]; then
-  registry_mode=managed
-  kubectl -n "$namespace" get secret breakfix-registry-tls >/dev/null 2>&1 || {
-    printf 'managed Registry requires the operator-provided TLS Secret breakfix-registry-tls\n' >&2
-    exit 1
-  }
-  kubectl -n "$namespace" get secret breakfix-registry-auth >/dev/null 2>&1 || {
-    printf 'managed Registry requires the authentication Secret breakfix-registry-auth\n' >&2
-    exit 1
-  }
-  if [ -n "$registry_trust_bundle_file" ]; then
-    registry_ca=$(kubectl -n "$namespace" get configmap breakfix-registry-ca -o json 2>/dev/null |
-      jq -r '.data["ca.crt"] // empty')
-    [ -n "$registry_ca" ] || {
-      printf 'registry_trust_bundle_file is set but ConfigMap breakfix-registry-ca has no ca.crt\n' >&2
+base_image_digest=$(secret_value k8s_base_image_digest)
+case "$base_image_digest" in
+  "$registry_address/k8s-base@"*)
+    ;;
+  *)
+    docker image inspect breakfix-k8s-base:latest >/dev/null 2>&1 || {
+      printf 'local image breakfix-k8s-base:latest is required after the Kind Registry endpoint changed\n' >&2
+      printf 'build it with: make k8s-base-image\n' >&2
       exit 1
     }
-  fi
-  kubectl -n "$namespace" wait --for=condition=Available deployment/breakfix-registry --timeout=2m >/dev/null
-fi
+    "$repo_root/dev/kind-push-k8s-base.sh"
+    ;;
+esac
 
-for policy in breakfix-builder breakfix-publisher breakfix-verifier; do
-  kubectl -n "$namespace" get networkpolicy "$policy" -o json |
-    jq --argjson incus_port "$incus_port" --argjson registry_port "$registry_port" '
-      .spec.egress |= map(
-        if any(.to[]?; has("ipBlock")) then
-          .ports = (((.ports // []) + [
-            {protocol: "TCP", port: $incus_port},
-            {protocol: "TCP", port: $registry_port}
-          ])
-            | unique_by([.protocol, .port]))
-        else
-          .
-        end
+kubectl apply -k "$manifest"
+actual_registry_node_port=$(kubectl -n "$namespace" get service breakfix-registry \
+  -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
+[ "$actual_registry_node_port" = "$registry_node_port" ] || {
+  printf 'Kind Registry Service must expose NodePort %s, got %s\n' "$registry_node_port" "$actual_registry_node_port" >&2
+  exit 1
+}
+kubectl -n "$namespace" wait --for=condition=Available deployment/breakfix-registry --timeout=2m >/dev/null
+
+kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
+  jq --argjson incus_port "$incus_port" '
+    .spec.egress |= map(
+      if any(.to[]?; has("ipBlock")) then
+        .ports = (((.ports // []) + [
+          {protocol: "TCP", port: $incus_port}
+        ])
+          | unique_by([.protocol, .port]))
+      else
+        .
+      end
+    )
+    | del(
+        .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"],
+        .metadata.creationTimestamp,
+        .metadata.generation,
+        .metadata.managedFields,
+        .metadata.resourceVersion,
+        .metadata.uid
       )
-      | del(
-          .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"],
-          .metadata.creationTimestamp,
-          .metadata.generation,
-          .metadata.managedFields,
-          .metadata.resourceVersion,
-          .metadata.uid
-        )
-    ' | kubectl replace -f - >/dev/null
-done
+  ' | kubectl replace -f - >/dev/null
 
-for deployment in agent-worker builder publisher verifier; do
-  kubectl -n "$namespace" scale deployment/"breakfix-$deployment" \
-    --replicas="$worker_replicas" >/dev/null
-done
+kubectl -n "$namespace" scale deployment/breakfix-generate-worker \
+  --replicas="$generate_worker_replicas" >/dev/null
+kubectl -n "$namespace" scale deployment/breakfix-taxonomy-worker \
+  --replicas="$taxonomy_worker_replicas" >/dev/null
 
 # Secret-backed environment variables are read only when a Pod starts. This
 # development entry point applies an administrator-owned Secret and must make
 # every local control-plane process observe its current values.
-if [ "$managed_registry" = true ]; then
-  kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
-  kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
-fi
-for deployment in server controller agent-worker builder publisher verifier; do
+kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
+kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
+for deployment in server controller generate-worker taxonomy-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
-for deployment in server controller agent-worker builder publisher verifier; do
-  if [ "$deployment" = agent-worker ] || [ "$deployment" = builder ] || [ "$deployment" = publisher ] || [ "$deployment" = verifier ]; then
-    [ "$worker_replicas" -gt 0 ] || continue
+for deployment in server controller generate-worker taxonomy-worker; do
+  if [ "$deployment" = generate-worker ] && [ "$generate_worker_replicas" -eq 0 ]; then
+    continue
+  fi
+  if [ "$deployment" = taxonomy-worker ] && [ "$taxonomy_worker_replicas" -eq 0 ]; then
+    continue
   fi
   kubectl -n "$namespace" rollout status deployment/"breakfix-$deployment" --timeout=3m >/dev/null
 done
 
-printf 'Applied Kind runtime with %s Worker replica(s), Incus egress port %s, and %s Registry %s.\n' \
-  "$worker_replicas" "$incus_port" "$registry_mode" "$registry_address"
-printf 'Verify that every Kind node resolves this Registry endpoint and trusts its TLS CA before VK8s image pulls.\n'
+printf 'Applied Kind runtime with %s Generate Worker replica(s), %s Taxonomy Worker replica(s), Incus egress port %s, image NodePort %s at %s, and Registry Service client authority %s.\n' \
+	"$generate_worker_replicas" "$taxonomy_worker_replicas" "$incus_port" "$registry_node_port" "$registry_address" "$registry_client_address"
+printf 'Kind nodes trust the Registry CA through their system trust store; no custom DNS or /etc/hosts entry is required.\n'

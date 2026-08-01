@@ -86,9 +86,9 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	address := testTLSRegistryAddress(t, server)
 	client := testTLSRegistryClient(t, server, Credentials{Username: "registry", Password: "secret"})
-	if err := client.CopyImage(context.Background(), address+"/team/base@"+manifestDigest, address+"/team/published:verified"); err != nil {
+	imageAuthority := "registry.node.example:30443"
+	if err := client.CopyImage(context.Background(), imageAuthority+"/team/base@"+manifestDigest, imageAuthority+"/team/published:verified"); err != nil {
 		t.Fatalf("copy OCI image: %v", err)
 	}
 	if string(publishedManifest) != string(manifest) {
@@ -99,11 +99,11 @@ func TestCopyImageUsesRegistryContentDigests(t *testing.T) {
 			t.Fatalf("registry did not receive blob %s", digest)
 		}
 	}
-	got, err := client.ResolveImmutableReference(context.Background(), address+"/team/published:verified")
+	got, err := client.ResolveImmutableReference(context.Background(), imageAuthority+"/team/published:verified")
 	if err != nil {
 		t.Fatalf("resolve copied image: %v", err)
 	}
-	if want := address + "/team/published@" + manifestDigest; got != want {
+	if want := imageAuthority + "/team/published@" + manifestDigest; got != want {
 		t.Fatalf("resolved copied image = %q, want %q", got, want)
 	}
 }
