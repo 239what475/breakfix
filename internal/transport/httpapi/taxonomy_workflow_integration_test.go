@@ -44,8 +44,8 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 1, 13, 0, 0, 0, time.UTC)
 	challengeID := "chal-recovery"
-	challengeRevision := "sha256:" + strings.Repeat("b", 64)
-	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeRevision, "", now)
+	challengeContentRevision := "sha256:" + strings.Repeat("b", 64)
+	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeContentRevision, "", now)
 	if err != nil {
 		t.Fatalf("create taxonomy workflow: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestTaxonomyPublicationRecoveryCompletesFilesystemPublishedSnapshot(t *test
 	}
 	changes := taxonomy.ChangeSet{ChallengeMappings: []taxonomy.ChallengeMappingChange{{
 		Operation: taxonomy.ChangeUpsert,
-		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Recovery challenge", Revision: challengeRevision}},
+		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Recovery challenge", ContentRevision: challengeContentRevision}},
 	}}}
 	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, *claim, mapper.ID, changes, now); err != nil {
 		t.Fatalf("finalize mapper: %v", err)
@@ -186,10 +186,10 @@ func TestTaxonomyPublicationSerializesConcurrentMappings(t *testing.T) {
 	}
 	for _, entry := range []*challenge.Entry{first, second} {
 		mapping, exists := mappings[entry.ID]
-		if !exists || mapping.Challenge.Revision != entry.Revision {
+		if !exists || mapping.Challenge.ContentRevision != entry.ContentRevision {
 			t.Fatalf("current taxonomy lost concurrent mapping for %s: %#v", entry.ID, current.ChallengeMappings)
 		}
-		workflow, err := database.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
+		workflow, err := database.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.ContentRevision)
 		if err != nil {
 			t.Fatalf("load completed workflow for %s: %v", entry.ID, err)
 		}
@@ -202,7 +202,7 @@ func TestTaxonomyPublicationSerializesConcurrentMappings(t *testing.T) {
 func prepareTaxonomyPublication(t *testing.T, database *postgres.Store, entry *challenge.Entry, baseRevision string, now time.Time) taxonomy.Claim {
 	t.Helper()
 	ctx := context.Background()
-	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, baseRevision, now)
+	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.ContentRevision, baseRevision, now)
 	if err != nil {
 		t.Fatalf("create taxonomy workflow for %s: %v", entry.ID, err)
 	}
@@ -213,7 +213,7 @@ func prepareTaxonomyPublication(t *testing.T, database *postgres.Store, entry *c
 	changes := taxonomy.ChangeSet{ChallengeMappings: []taxonomy.ChallengeMappingChange{{
 		Operation: taxonomy.ChangeUpsert,
 		Value: &taxonomy.ChallengeMapping{
-			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision},
+			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, ContentRevision: entry.ContentRevision},
 			Tags:      []taxonomy.Ref{{ID: "tag-1111111111111111", Title: "Operations"}},
 			Outcomes:  []taxonomy.OutcomeRef{{ID: "skill-1111111111111111", Title: "Inspect a service", Primary: true}},
 		},
@@ -251,7 +251,7 @@ func prepareTaxonomyPublication(t *testing.T, database *postgres.Store, entry *c
 func writeTaxonomyWorkflowChallenge(t *testing.T, root, id, title string) *challenge.Entry {
 	t.Helper()
 	dir := filepath.Join(root, id)
-	writeTestFile(t, filepath.Join(dir, "challenge.yaml"), fmt.Sprintf("id: %s\nsource_slug: %s\ntitle: %s\nruntime: node\ndifficulty: easy\ndescription: taxonomy publication fixture\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\npublished_at: 2026-08-01T00:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n", id, id, title))
+	writeTestFile(t, filepath.Join(dir, "challenge.yaml"), fmt.Sprintf("id: %s\nsource_slug: %s\ntitle: %s\nruntime: node\ndifficulty: easy\ndescription: taxonomy publication fixture\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-08-01T00:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n", id, id, title))
 	writeTestFile(t, filepath.Join(dir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(dir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(dir, "hints", "complete.md"), "hint\n")

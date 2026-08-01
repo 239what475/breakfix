@@ -11,6 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
@@ -204,6 +205,125 @@ func TestGenerationWorkflowReclaimsInfrastructureRetryAndCleansTerminalStates(t 
 	}
 	if cancelled.State != generation.StateCancelled {
 		t.Fatalf("cancelled workflow terminal state = %s, want Cancelled", cancelled.State)
+	}
+}
+
+func TestCatalogReleaseWorkflowCommitsOnlyAfterVerifiedEntryCleanup(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	release, entry, workflow := createCatalogReleaseInstallation(t, database, now)
+
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "catalog-worker", now)
+	if claim.Workflow.State != generation.StateBuilding || claim.Workflow.Source.Kind != generation.SourceRelease {
+		t.Fatalf("catalog installation claim = %#v", claim.Workflow)
+	}
+	if err := database.Generation.CompleteGenerationBuild(ctx, claim, generation.BuildOutput{
+		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/catalog-release.oci.tar", OCIArchiveSHA256: workflowTestDigest,
+	}, now); err != nil {
+		t.Fatalf("complete catalog build: %v", err)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if err := database.Generation.CompleteGenerationArtifactPublish(ctx, claim, artifactReference(), now); err != nil {
+		t.Fatalf("publish catalog artifact: %v", err)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
+		t.Fatalf("record catalog verification environment: %v", err)
+	}
+	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(true), now); err != nil {
+		t.Fatalf("complete catalog verification: %v", err)
+	}
+
+	readyEntry, err := database.Catalog.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("load verified catalog entry: %v", err)
+	}
+	if readyEntry.State != catalog.EntryReadyToCommit {
+		t.Fatalf("verified catalog entry state = %s, want %s", readyEntry.State, catalog.EntryReadyToCommit)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if claim.Workflow.State != generation.StateCleaningUp || claim.Workflow.CleanupIntent != generation.CleanupCompleted {
+		t.Fatalf("verified catalog workflow = %#v", claim.Workflow)
+	}
+	if err := database.Generation.CompleteGenerationCleanup(ctx, claim, now); err != nil {
+		t.Fatalf("complete verified catalog cleanup: %v", err)
+	}
+
+	committing, began, err := database.Catalog.BeginReleaseCommit(ctx, release.ID, now)
+	if err != nil {
+		t.Fatalf("begin catalog release commit: %v", err)
+	}
+	if !began || committing.State != catalog.ReleaseCommitting {
+		t.Fatalf("catalog release commit transition = %#v, began=%v", committing, began)
+	}
+	identity := catalog.RuntimeIdentity{ChallengeID: "chal-catalog-release", Slug: "cleanup-logs-catalog-release"}
+	if _, err := database.Catalog.PrepareCommit(ctx, entry.ID, identity, now); err != nil {
+		t.Fatalf("prepare catalog runtime identity: %v", err)
+	}
+	if _, err := database.Catalog.MarkCommitMaterialized(ctx, entry.ID, now); err != nil {
+		t.Fatalf("mark catalog materialized: %v", err)
+	}
+	completed, err := database.Catalog.CompleteReleaseCommit(ctx, release.ID, now)
+	if err != nil {
+		t.Fatalf("complete catalog release commit: %v", err)
+	}
+	if completed.State != catalog.ReleaseReady {
+		t.Fatalf("catalog release state = %s, want %s", completed.State, catalog.ReleaseReady)
+	}
+}
+
+func TestCatalogReleaseVerificationFailureCleansTheWholeInstallation(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 1, 13, 0, 0, 0, time.UTC)
+	release, entry, workflow := createCatalogReleaseInstallation(t, database, now)
+
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "catalog-worker", now)
+	if err := database.Generation.CompleteGenerationBuild(ctx, claim, generation.BuildOutput{
+		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/catalog-release.oci.tar", OCIArchiveSHA256: workflowTestDigest,
+	}, now); err != nil {
+		t.Fatalf("complete catalog build: %v", err)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if err := database.Generation.CompleteGenerationArtifactPublish(ctx, claim, artifactReference(), now); err != nil {
+		t.Fatalf("publish catalog artifact: %v", err)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
+		t.Fatalf("record catalog verification environment: %v", err)
+	}
+	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(false), now); err != nil {
+		t.Fatalf("record catalog verification failure: %v", err)
+	}
+
+	failedEntry, err := database.Catalog.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("load failed catalog entry: %v", err)
+	}
+	if failedEntry.State != catalog.EntryFailed || failedEntry.LastError == "" {
+		t.Fatalf("failed catalog entry = %#v", failedEntry)
+	}
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if claim.Workflow.State != generation.StateCleaningUp || claim.Workflow.CleanupIntent != generation.CleanupFailed {
+		t.Fatalf("failed catalog workflow = %#v", claim.Workflow)
+	}
+	if err := database.Generation.CompleteGenerationCleanup(ctx, claim, now); err != nil {
+		t.Fatalf("complete failed catalog cleanup: %v", err)
+	}
+	ready, err := database.Catalog.ReleaseCleanupReady(ctx, release.ID)
+	if err != nil {
+		t.Fatalf("check catalog cleanup readiness: %v", err)
+	}
+	if !ready {
+		t.Fatal("catalog cleanup should be ready after its worker terminal state")
+	}
+	completed, err := database.Catalog.CompleteReleaseCleanup(ctx, release.ID, now)
+	if err != nil {
+		t.Fatalf("complete catalog release cleanup: %v", err)
+	}
+	if completed.State != catalog.ReleaseFailed {
+		t.Fatalf("catalog release state = %s, want %s", completed.State, catalog.ReleaseFailed)
 	}
 }
 
@@ -405,6 +525,51 @@ func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Tim
 	return workflow, session.ID, userID
 }
 
+func createCatalogReleaseInstallation(t *testing.T, database *Store, now time.Time) (catalog.Release, catalog.Entry, generation.Workflow) {
+	t.Helper()
+	contentRevision := catalog.ContentRevision(workflowTestDigest)
+	release := catalog.Release{
+		ID:                      "catalog-release-" + now.Format("20060102150405"),
+		Name:                    "catalog-integration",
+		Version:                 now.Format("2006.01.02"),
+		BundleDigest:            catalog.BundleDigest(workflowTestDigest),
+		TaxonomyContentRevision: contentRevision,
+		State:                   catalog.ReleaseInstalling,
+		DeadlineAt:              timePointer(now.Add(time.Hour)),
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+	entry := catalog.Entry{
+		ID:              "catalog-entry-" + now.Format("20060102150405"),
+		ReleaseID:       release.ID,
+		SourcePath:      "challenges/catalog-smoke",
+		ContentRevision: contentRevision,
+		State:           catalog.EntryBuilding,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	candidate := generation.Revision{
+		ID: "catalog-candidate-" + now.Format("20060102150405"),
+		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
+		ArchivePath: "/tmp/catalog-candidate.tar.gz", ArchiveSHA256: workflowTestDigest, Snapshot: generationTestSnapshot(),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	entry.CandidateRevisionID = candidate.ID
+	workflow := generation.Workflow{
+		ID: "catalog-workflow-" + now.Format("20060102150405"),
+		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
+		State: generation.StateBuilding, CandidateRevisionID: candidate.ID, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := database.Catalog.CreateInstallation(context.Background(), catalog.Installation{
+		Release: release, Entries: []catalog.InstallationEntry{{Entry: entry, Candidate: candidate, Workflow: workflow}},
+	}); err != nil {
+		t.Fatalf("create catalog installation: %v", err)
+	}
+	return release, entry, workflow
+}
+
+func timePointer(value time.Time) *time.Time { return &value }
+
 func generationTestPlan() authoring.Plan {
 	return authoring.Plan{
 		Metadata:    authoring.Metadata{Title: "Workflow lifecycle", Difficulty: "medium", Description: "Exercise durable workflow recovery.", Runtime: "k8s"},
@@ -558,9 +723,9 @@ func startTaxonomyRun(t *testing.T, database *Store, claim taxonomy.Claim, role 
 	return run
 }
 
-func taxonomyTestChangeSet(challengeID, revision string) taxonomy.ChangeSet {
+func taxonomyTestChangeSet(challengeID, contentRevision string) taxonomy.ChangeSet {
 	return taxonomy.ChangeSet{ChallengeMappings: []taxonomy.ChallengeMappingChange{{
 		Operation: taxonomy.ChangeUpsert,
-		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Taxonomy workflow", Revision: revision}},
+		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Taxonomy workflow", ContentRevision: contentRevision}},
 	}}}
 }

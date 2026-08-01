@@ -54,9 +54,7 @@ func (s *Store) LoadCurrent() (*domain.Snapshot, error) {
 }
 
 // currentTarget reads the current snapshot pointer. Runtime publication uses a
-// symlink so replacement is atomic. A checked-in catalog seed may use a plain
-// text pointer instead because Git does not preserve empty directories needed
-// by an otherwise valid snapshot without skill prerequisite mappings.
+// symlink so replacement is atomic.
 func (s *Store) currentTarget() (string, error) {
 	info, err := os.Lstat(s.CurrentPath())
 	if err != nil {
@@ -167,6 +165,32 @@ func (s *Store) PreviewRevision(snapshot domain.Snapshot) (string, error) {
 		return "", err
 	}
 	return treeRevision(staging)
+}
+
+// RemoveCurrentRevision removes a snapshot only when it is still the current
+// pointer. Catalog release cleanup uses this to undo an unpublished taxonomy
+// filesystem write without touching a concurrent taxonomy publication.
+func (s *Store) RemoveCurrentRevision(revision string) (bool, error) {
+	if !domain.ValidRevision(revision) {
+		return false, fmt.Errorf("invalid taxonomy revision %q", revision)
+	}
+	target, err := s.currentTarget()
+	if errors.Is(err, domain.ErrNoCurrentRevision) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if target != filepath.Join(revisionsDirectory, revision) {
+		return false, nil
+	}
+	if err := os.Remove(s.CurrentPath()); err != nil {
+		return false, fmt.Errorf("remove taxonomy current pointer: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(s.RevisionsPath(), revision)); err != nil {
+		return false, fmt.Errorf("remove taxonomy revision: %w", err)
+	}
+	return true, nil
 }
 
 func (s *Store) replaceCurrent(revision string) error {

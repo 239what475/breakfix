@@ -72,7 +72,7 @@ func ValidateReview(value Review) error {
 type Workflow struct {
 	ID                       string        `json:"id"`
 	ChallengeID              string        `json:"challenge_id"`
-	ChallengeRevision        string        `json:"challenge_revision"`
+	ChallengeContentRevision string        `json:"challenge_content_revision"`
 	State                    WorkflowState `json:"state"`
 	BaseTaxonomyRevision     string        `json:"base_taxonomy_revision"`
 	Round                    int           `json:"round"`
@@ -91,7 +91,7 @@ type Workflow struct {
 }
 
 func (w Workflow) Valid() bool {
-	return strings.TrimSpace(w.ID) != "" && strings.TrimSpace(w.ChallengeID) != "" && strings.TrimSpace(w.ChallengeRevision) != "" &&
+	return strings.TrimSpace(w.ID) != "" && strings.TrimSpace(w.ChallengeID) != "" && strings.TrimSpace(w.ChallengeContentRevision) != "" &&
 		w.State.Valid() && w.Round >= 0 && w.StateAttempt >= 0
 }
 

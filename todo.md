@@ -301,7 +301,7 @@ mapping。`challenge.yaml` 保持 candidate 语义，不保存目标环境 image
    浏览器 E2E 只验证已安装题库上的 Catalog、环境、终端、检查点、Assistant 和 My Space；Agent 真实测试仍是独立、显式执行的
    测试层。
 
-本次重构将当前 `data/challenges/cleanup-logs` 迁移为 `catalog/challenges/cleanup-logs` candidate source，将当前 taxonomy
+本次重构将当前 `data/challenges/cleanup-logs` 迁移为 `catalog/challenges/linux/cleanup-logs` candidate source，将当前 taxonomy
 内容迁移为 `catalog/taxonomy` source，并删除平台字段与环境特定 artifact 引用。删除直接复制 `data/` 的
 `dev/kind-catalog.sh`、单题镜像旁路 `dev/incus-catalog.sh`、`cmd/catalog-seed`、`internal/catalogseed` 及其文档/Make 入口；
 以 Catalog Release OCI 打包与安装入口替代它们。

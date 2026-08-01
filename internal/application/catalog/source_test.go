@@ -7,12 +7,27 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 )
+
+func TestCheckedInCatalogSourcesArePortable(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate catalog source test")
+	}
+	repository := filepath.Join(filepath.Dir(file), "..", "..", "..")
+	for _, relative := range []string{"catalog", filepath.Join("test", "fixtures", "catalog")} {
+		root := filepath.Join(repository, relative)
+		if _, err := LoadPortableSource(root); err != nil {
+			t.Fatalf("load checked-in catalog source %q: %v", relative, err)
+		}
+	}
+}
 
 func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
 	root, challengeRevision, taxonomyRevision := writePortableRelease(t)
@@ -273,6 +288,7 @@ runtime: node
 title: Cleanup logs
 difficulty: easy
 image: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+content_revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 published_at: 2026-08-01T00:00:00Z
 description: |
   Keep this indentation.

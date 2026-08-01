@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
@@ -180,7 +178,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
@@ -340,47 +338,6 @@ func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	}
 }
 
-func TestChallengeArtifactRevisionMismatchRemovesChallengeFromPublicEndpoints(t *testing.T) {
-	handler := newProgressTestHandler(t, nil)
-	if _, err := handler.catalog.Entry("demo"); err != nil {
-		t.Fatalf("published challenge was unavailable before artifact change: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(handler.challengesDir, "demo", "problem.md"), []byte("changed problem\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
-	handler.ListChallenges(ctx)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("catalog status = %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var list api.ChallengeList
-	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil {
-		t.Fatal(err)
-	}
-	if len(list.Challenges) != 0 {
-		t.Fatalf("stale taxonomy mapping left challenge public: %#v", list.Challenges)
-	}
-	if _, err := handler.catalog.Entry("demo"); !errors.Is(err, challenge.ErrNotFound) {
-		t.Fatalf("stale mapping challenge lookup error = %v, want not found", err)
-	}
-	for name, handlerFunc := range map[string]func(*gin.Context, string){
-		"content": handler.GetChallengeContent,
-		"start":   handler.StartChallenge,
-	} {
-		recorder := httptest.NewRecorder()
-		requestContext, _ := gin.CreateTestContext(recorder)
-		requestContext.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/"+name, nil)
-		requestContext.Set("user_id", "u-demo")
-		handlerFunc(requestContext, "demo")
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("%s stale mapping status = %d: %s", name, recorder.Code, recorder.Body.String())
-		}
-	}
-}
-
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -452,7 +409,7 @@ func writeTestChallenge(t *testing.T, root string) {
 }
 
 func nodeTestManifest(title string) string {
-	return "id: demo\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return "id: demo\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {

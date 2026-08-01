@@ -201,17 +201,17 @@ func (h *Handler) taxonomyContext(ctx context.Context, claim taxonomy.Claim) (ta
 	switch claim.Workflow.State {
 	case taxonomy.WorkflowMapping:
 		result.MapperValidation = &taxonomyapp.MapperValidation{
-			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision},
+			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, ContentRevision: entry.ContentRevision},
 			Base:      base,
 		}
-		result.Mapper, err = taxonomyapp.MapperModelInput(claim.Workflow, entry.ID, entry.Title, entry.Revision, base, artifact)
+		result.Mapper, err = taxonomyapp.MapperModelInput(claim.Workflow, entry.ID, entry.Title, entry.ContentRevision, base, artifact)
 	case taxonomy.WorkflowReviewing:
 		if claim.Workflow.CandidateChangeSet == nil {
 			return taxonomyapp.Context{}, errors.New("taxonomy review has no mapper candidate")
 		}
-		result.CurriculumReview, err = taxonomyapp.CurriculumReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
+		result.CurriculumReview, err = taxonomyapp.CurriculumReviewModelInput(entry.ID, entry.Title, entry.ContentRevision, base, *claim.Workflow.CandidateChangeSet, artifact)
 		if err == nil {
-			result.SREReview, err = taxonomyapp.SREReviewModelInput(entry.ID, entry.Title, entry.Revision, base, *claim.Workflow.CandidateChangeSet, artifact)
+			result.SREReview, err = taxonomyapp.SREReviewModelInput(entry.ID, entry.Title, entry.ContentRevision, base, *claim.Workflow.CandidateChangeSet, artifact)
 		}
 	case taxonomy.WorkflowPublishing:
 		return result, nil
@@ -233,7 +233,7 @@ func (h *Handler) completeTaxonomyMapper(ctx context.Context, claim taxonomy.Cla
 	if err != nil {
 		return err
 	}
-	if _, err := taxonomy.ValidateWorkflowChangeSet(result.ChangeSet, taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision}, base); err != nil {
+	if _, err := taxonomy.ValidateWorkflowChangeSet(result.ChangeSet, taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, ContentRevision: entry.ContentRevision}, base); err != nil {
 		return fmt.Errorf("mapper candidate failed deterministic validation: %w", err)
 	}
 	return h.db.Taxonomy.FinalizeTaxonomyMapper(ctx, claim, result.RunID, result.ChangeSet, now)
@@ -280,7 +280,7 @@ func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonom
 		}
 		base = current
 	}
-	next, err := taxonomy.ValidateWorkflowChangeSet(changes, taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision}, base)
+	next, err := taxonomy.ValidateWorkflowChangeSet(changes, taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, ContentRevision: entry.ContentRevision}, base)
 	if err != nil {
 		return fmt.Errorf("validate approved taxonomy changeset: %w", err)
 	}
@@ -303,7 +303,7 @@ func (h *Handler) completeTaxonomyPublication(ctx context.Context, claim taxonom
 
 func (h *Handler) taxonomyChallenge(ctx context.Context, workflow taxonomy.Workflow) (*challenge.Entry, error) {
 	entry, err := challenge.Get(h.challengesDir, workflow.ChallengeID)
-	if err == nil && entry.Revision == workflow.ChallengeRevision {
+	if err == nil && entry.ContentRevision == workflow.ChallengeContentRevision {
 		return entry, nil
 	}
 	reason := "目标 challenge artifact 已不存在或 revision 已变化"
@@ -376,7 +376,7 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 	}
 	for _, workflow := range active {
 		entry, exists := byID[workflow.ChallengeID]
-		if exists && entry.Revision == workflow.ChallengeRevision {
+		if exists && entry.ContentRevision == workflow.ChallengeContentRevision {
 			continue
 		}
 		if err := h.db.Taxonomy.CancelTaxonomyWorkflow(ctx, workflow.ID, "目标 challenge artifact 已不存在或 revision 已变化", time.Now().UTC()); err != nil && !errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound) {
@@ -393,11 +393,11 @@ func (h *Handler) ReconcileTaxonomyWorkflows(ctx context.Context) error {
 	}
 	for _, entry := range entries {
 		if current.Revision != "" {
-			if mapping, mapped := index.Mapping(entry.ID); mapped && mapping.Challenge.Revision == entry.Revision {
+			if mapping, mapped := index.Mapping(entry.ID); mapped && mapping.Challenge.ContentRevision == entry.ContentRevision {
 				continue
 			}
 		}
-		if _, _, err := h.db.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.Revision, current.Revision, time.Now().UTC()); err != nil {
+		if _, _, err := h.db.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, entry.ID, entry.ContentRevision, current.Revision, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

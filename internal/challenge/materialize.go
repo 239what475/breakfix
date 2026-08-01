@@ -15,6 +15,7 @@ var commonRequiredFiles = []string{"challenge.yaml", "problem.md", "solution.md"
 var (
 	nodeImageFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	k8sImageDigestPattern       = regexp.MustCompile(`^[^@[:space:]]+@sha256:[0-9a-f]{64}$`)
+	contentRevisionPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 const MaxChallengeNodes = 4
@@ -88,6 +89,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	}
 	if !ValidSourceSlug(challenge.SourceSlug) {
 		return nil, fmt.Errorf("invalid challenge source slug %q", challenge.SourceSlug)
+	}
+	if !contentRevisionPattern.MatchString(challenge.ContentRevision) {
+		return nil, fmt.Errorf("challenge content_revision must be a lowercase sha256 digest")
 	}
 	if err := validateChallengeFiles(challenge, dir); err != nil {
 		return nil, err

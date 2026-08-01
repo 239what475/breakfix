@@ -9,6 +9,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
+	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -54,6 +55,10 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 	if err != nil {
 		return nil, err
 	}
+	contentRevision, err := appcatalog.ContentRevision(source)
+	if err != nil {
+		return nil, fmt.Errorf("hash verified candidate source: %w", err)
+	}
 	if challenge.SourceSlugFor(candidateEntry.Title, publication.ChallengeID) != publication.SourceSlug {
 		return nil, fmt.Errorf("%w: intent does not match immutable archive", errCandidatePublicationInvariant)
 	}
@@ -62,7 +67,7 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 		image = artifact.OCIReference
 	}
 	expectedRoot := filepath.Join(root, "expected")
-	expected, err := challenge.PromoteDirectoryAt(expectedRoot, source, publication.ChallengeID, image, publication.RequestedAt)
+	expected, err := challenge.PromoteDirectoryAt(expectedRoot, source, publication.ChallengeID, image, string(contentRevision), publication.RequestedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,7 @@ import (
 
 // CatalogIndex is the immutable projection of a taxonomy snapshot that is
 // usable with the challenge directories visible to one Server process.
-// Mappings whose artifact revision is stale are deliberately excluded.
+// Mappings whose portable content revision is stale are deliberately excluded.
 type CatalogIndex struct {
 	Revision string
 	byID     map[string]domain.ChallengeMapping
@@ -24,7 +24,7 @@ func NewCatalogIndex(snapshot domain.Snapshot, challenges []challenge.Entry) (*C
 	index := &CatalogIndex{Revision: snapshot.Revision, byID: make(map[string]domain.ChallengeMapping)}
 	for _, mapping := range snapshot.ChallengeMappings {
 		entry, exists := entries[mapping.Challenge.ID]
-		if !exists || entry.Title != mapping.Challenge.Title || entry.Revision != mapping.Challenge.Revision {
+		if !exists || entry.Title != mapping.Challenge.Title || entry.ContentRevision != mapping.Challenge.ContentRevision {
 			continue
 		}
 		index.byID[entry.ID] = cloneChallengeMapping(mapping)

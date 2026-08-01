@@ -16,13 +16,13 @@ import (
 
 var ErrTaxonomyWorkflowNotFound = errors.New("taxonomy workflow not found")
 
-const taxonomyWorkflowColumns = `id, challenge_id, challenge_revision, state, base_revision, round, state_attempt,
+const taxonomyWorkflowColumns = `id, challenge_id, challenge_content_revision, state, base_revision, round, state_attempt,
 	candidate_changeset, curriculum_review_json, sre_review_json, expected_snapshot_revision, published_revision,
 	lease_owner, lease_expires_at, next_run_at, last_error, created_at, updated_at`
 const taxonomyWorkflowSelect = `SELECT ` + taxonomyWorkflowColumns + ` FROM taxonomy_workflows`
 
-func (d *TaxonomyRepository) CreateOrGetTaxonomyWorkflow(ctx context.Context, challengeID, challengeRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
-	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeRevision) == "" || now.IsZero() {
+func (d *TaxonomyRepository) CreateOrGetTaxonomyWorkflow(ctx context.Context, challengeID, challengeContentRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
+	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeContentRevision) == "" || now.IsZero() {
 		return nil, false, errors.New("taxonomy workflow requires challenge identity and current time")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -30,7 +30,7 @@ func (d *TaxonomyRepository) CreateOrGetTaxonomyWorkflow(ctx context.Context, ch
 		return nil, false, fmt.Errorf("begin taxonomy workflow creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, created, err := createOrGetTaxonomyWorkflowTx(ctx, tx, challengeID, challengeRevision, baseRevision, now)
+	workflow, created, err := createOrGetTaxonomyWorkflowTx(ctx, tx, challengeID, challengeContentRevision, baseRevision, now)
 	if err != nil {
 		return nil, false, err
 	}
@@ -43,25 +43,25 @@ func (d *TaxonomyRepository) CreateOrGetTaxonomyWorkflow(ctx context.Context, ch
 // createOrGetTaxonomyWorkflowTx is shared by catalog recovery and final
 // challenge publication, so a published authoring session and its taxonomy
 // work item become visible in one database transaction.
-func createOrGetTaxonomyWorkflowTx(ctx context.Context, tx *Tx, challengeID, challengeRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
-	if tx == nil || strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeRevision) == "" || now.IsZero() {
+func createOrGetTaxonomyWorkflowTx(ctx context.Context, tx *Tx, challengeID, challengeContentRevision, baseRevision string, now time.Time) (*taxonomy.Workflow, bool, error) {
+	if tx == nil || strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeContentRevision) == "" || now.IsZero() {
 		return nil, false, errors.New("taxonomy workflow requires transaction, challenge identity, and current time")
 	}
 	workflow := taxonomy.Workflow{
-		ID:                   taxonomy.NewWorkflowID(),
-		ChallengeID:          challengeID,
-		ChallengeRevision:    challengeRevision,
-		State:                taxonomy.WorkflowQueued,
-		BaseTaxonomyRevision: baseRevision,
-		NextRunAt:            now.UTC(),
-		CreatedAt:            now.UTC(),
-		UpdatedAt:            now.UTC(),
+		ID:                       taxonomy.NewWorkflowID(),
+		ChallengeID:              challengeID,
+		ChallengeContentRevision: challengeContentRevision,
+		State:                    taxonomy.WorkflowQueued,
+		BaseTaxonomyRevision:     baseRevision,
+		NextRunAt:                now.UTC(),
+		CreatedAt:                now.UTC(),
+		UpdatedAt:                now.UTC(),
 	}
 	row := tx.QueryRowContext(ctx, `INSERT INTO taxonomy_workflows
-		(id, challenge_id, challenge_revision, base_revision, state, round, state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
+		(id, challenge_id, challenge_content_revision, base_revision, state, round, state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 0, 0, '', ?, '', ?, ?)
-		ON CONFLICT (challenge_id, challenge_revision) DO UPDATE SET updated_at = taxonomy_workflows.updated_at
-		RETURNING `+taxonomyWorkflowColumns, workflow.ID, workflow.ChallengeID, workflow.ChallengeRevision, workflow.BaseTaxonomyRevision,
+		ON CONFLICT (challenge_id, challenge_content_revision) DO UPDATE SET updated_at = taxonomy_workflows.updated_at
+		RETURNING `+taxonomyWorkflowColumns, workflow.ID, workflow.ChallengeID, workflow.ChallengeContentRevision, workflow.BaseTaxonomyRevision,
 		workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt)
 	created, err := scanTaxonomyWorkflow(row)
 	if err != nil {
@@ -81,9 +81,9 @@ func (d *TaxonomyRepository) GetTaxonomyWorkflow(ctx context.Context, id string)
 	return workflow, nil
 }
 
-func (d *TaxonomyRepository) GetTaxonomyWorkflowByChallenge(ctx context.Context, challengeID, challengeRevision string) (*taxonomy.Workflow, error) {
-	workflow, err := scanTaxonomyWorkflow(d.conn.QueryRowContext(ctx, taxonomyWorkflowSelect+` WHERE challenge_id = ? AND challenge_revision = ?`,
-		strings.TrimSpace(challengeID), strings.TrimSpace(challengeRevision)))
+func (d *TaxonomyRepository) GetTaxonomyWorkflowByChallenge(ctx context.Context, challengeID, challengeContentRevision string) (*taxonomy.Workflow, error) {
+	workflow, err := scanTaxonomyWorkflow(d.conn.QueryRowContext(ctx, taxonomyWorkflowSelect+` WHERE challenge_id = ? AND challenge_content_revision = ?`,
+		strings.TrimSpace(challengeID), strings.TrimSpace(challengeContentRevision)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTaxonomyWorkflowNotFound
 	}
@@ -566,7 +566,7 @@ func scanTaxonomyWorkflow(row agentRow) (*taxonomy.Workflow, error) {
 	var workflow taxonomy.Workflow
 	var candidateJSON, curriculumJSON, sreJSON []byte
 	var leaseExpiresAt sql.NullTime
-	err := row.Scan(&workflow.ID, &workflow.ChallengeID, &workflow.ChallengeRevision, &workflow.State, &workflow.BaseTaxonomyRevision,
+	err := row.Scan(&workflow.ID, &workflow.ChallengeID, &workflow.ChallengeContentRevision, &workflow.State, &workflow.BaseTaxonomyRevision,
 		&workflow.Round, &workflow.StateAttempt, &candidateJSON, &curriculumJSON, &sreJSON, &workflow.ExpectedSnapshotRevision,
 		&workflow.PublishedRevision, &workflow.LeaseOwner, &leaseExpiresAt, &workflow.NextRunAt, &workflow.LastError, &workflow.CreatedAt, &workflow.UpdatedAt)
 	if err != nil {

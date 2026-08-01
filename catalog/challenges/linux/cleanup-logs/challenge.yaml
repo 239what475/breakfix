@@ -1,10 +1,6 @@
-id: chal-r7m4x2q9v6kp
-source_slug: cleanup-logs
 runtime: node
 title: "批量压缩旧日志"
 difficulty: easy
-image: 0cf2f68424ef6c0cf46dbf01457fadf69f21b5d7d094b13231eebc6ab01b0401
-published_at: 2026-07-23T07:33:11Z
 description: |
   服务器磁盘空间不足，/var/log 下有大量历史日志文件。
 

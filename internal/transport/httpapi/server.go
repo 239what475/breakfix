@@ -19,8 +19,14 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	h := NewHandlerWithDependencies(database, k8sClient, cfg, dependencies)
+	h, err := NewHandlerWithDependencies(database, k8sClient, cfg, dependencies)
+	if err != nil {
+		return nil, err
+	}
 	if err := h.RecoverExpiredGenerationWorkflows(runCtx); err != nil {
+		return nil, err
+	}
+	if err := h.RecoverCatalogReleases(runCtx); err != nil {
 		return nil, err
 	}
 	if err := h.validateStartup(); err != nil {
@@ -32,6 +38,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	h.StartGeneratorWorkspaceCleanup(runCtx)
 	h.StartGenerationDeadlineRecovery(runCtx)
+	h.StartCatalogReleaseRecovery(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := middleware.JWTMiddleware(jwtSecret)
 	optionalJWTMW := middleware.OptionalJWTMiddleware(jwtSecret)
@@ -57,6 +64,8 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
 	router.POST("/api/auth/login", h.Login)
+	router.POST("/api/admin/catalog/releases", h.InstallCatalogRelease)
+	router.GET("/api/admin/catalog/releases/:id", h.GetCatalogRelease)
 	router.GET("/api/me/space", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

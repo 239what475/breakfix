@@ -25,7 +25,7 @@ func (h *Handler) StartChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := h.catalog.Entry(id)
+	challengeEntry, err := h.catalog.Entry(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -60,7 +60,7 @@ func (h *Handler) ResetChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := h.catalog.Entry(id)
+	challengeEntry, err := h.catalog.Entry(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -98,7 +98,7 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := h.catalog.Entry(id)
+	challengeEntry, err := h.catalog.Entry(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -148,7 +148,7 @@ func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	challengeEntry, err := h.catalog.Entry(challengeID)
+	challengeEntry, err := h.catalog.Entry(c.Request.Context(), challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -194,7 +194,7 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusForbidden, api.ErrorResponse{Error: "terminal origin is not allowed"})
 		return
 	}
-	challengeEntry, err := h.catalog.Entry(challengeID)
+	challengeEntry, err := h.catalog.Entry(c.Request.Context(), challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -300,7 +300,7 @@ func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName st
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	entry, err := h.catalog.Entry(challengeID)
+	entry, err := h.catalog.Entry(c.Request.Context(), challengeID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return

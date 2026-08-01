@@ -1,10 +1,6 @@
-id: chal-2c4a6e8b0d1f3a5c
-source_slug: catalog-smoke
 runtime: node
 title: "批量压缩旧日志"
 difficulty: easy
-image: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-published_at: 2026-07-23T07:33:11Z
 description: |
   服务器磁盘空间不足，/var/log 下有大量历史日志文件。
 
@@ -16,4 +12,5 @@ checkpoints:
   - id: cleanup-script-ready
     title: 创建清理脚本
     description: 清理脚本存在且可执行。
+    hint: hints/cleanup-script-ready.md
     node: host

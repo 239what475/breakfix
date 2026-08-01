@@ -114,7 +114,7 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 }
 
 func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
-	entry, err := h.catalog.Entry(challengeID)
+	entry, err := h.catalog.Entry(ctx, challengeID)
 	if err != nil {
 		return assistant.Request{}, err
 	}

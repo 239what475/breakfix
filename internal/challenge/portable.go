@@ -29,7 +29,7 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 	}
 
 	var errs []string
-	for _, field := range []string{"id", "source_slug", "image", "published_at"} {
+	for _, field := range []string{"id", "source_slug", "image", "content_revision", "published_at"} {
 		if _, exists := spec[field]; exists {
 			errs = append(errs, fmt.Sprintf("challenge.yaml 不得包含平台托管字段 %q", field))
 		}

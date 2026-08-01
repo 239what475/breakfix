@@ -18,31 +18,33 @@ import (
 var ErrNotFound = errors.New("challenge not found")
 
 type Entry struct {
-	ID          string
-	SourceSlug  string
-	Title       string
-	Runtime     string
-	Difficulty  string
-	Description string
-	Image       string
-	Revision    string
-	PublishedAt time.Time
-	Nodes       []Node
-	Checkpoints []Checkpoint
-	Dir         string
+	ID              string
+	SourceSlug      string
+	Title           string
+	Runtime         string
+	Difficulty      string
+	Description     string
+	Image           string
+	ContentRevision string
+	Revision        string
+	PublishedAt     time.Time
+	Nodes           []Node
+	Checkpoints     []Checkpoint
+	Dir             string
 }
 
 type Spec struct {
-	ID          string       `yaml:"id"`
-	SourceSlug  string       `yaml:"source_slug,omitempty"`
-	Title       string       `yaml:"title"`
-	Runtime     string       `yaml:"runtime"`
-	Difficulty  string       `yaml:"difficulty"`
-	Description string       `yaml:"description"`
-	Image       string       `yaml:"image"`
-	PublishedAt time.Time    `yaml:"published_at,omitempty"`
-	Nodes       []Node       `yaml:"nodes,omitempty"`
-	Checkpoints []Checkpoint `yaml:"checkpoints"`
+	ID              string       `yaml:"id"`
+	SourceSlug      string       `yaml:"source_slug,omitempty"`
+	Title           string       `yaml:"title"`
+	Runtime         string       `yaml:"runtime"`
+	Difficulty      string       `yaml:"difficulty"`
+	Description     string       `yaml:"description"`
+	Image           string       `yaml:"image"`
+	ContentRevision string       `yaml:"content_revision,omitempty"`
+	PublishedAt     time.Time    `yaml:"published_at,omitempty"`
+	Nodes           []Node       `yaml:"nodes,omitempty"`
+	Checkpoints     []Checkpoint `yaml:"checkpoints"`
 }
 
 type Node struct {
@@ -205,16 +207,17 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 	spec.Runtime = NormalizeRuntime(spec.Runtime)
 
 	return &Entry{
-		ID:          spec.ID,
-		SourceSlug:  spec.SourceSlug,
-		Title:       spec.Title,
-		Runtime:     spec.Runtime,
-		Difficulty:  spec.Difficulty,
-		Description: spec.Description,
-		Image:       spec.Image,
-		PublishedAt: spec.PublishedAt,
-		Nodes:       append([]Node{}, spec.Nodes...),
-		Checkpoints: append([]Checkpoint{}, spec.Checkpoints...),
-		Dir:         dir,
+		ID:              spec.ID,
+		SourceSlug:      spec.SourceSlug,
+		Title:           spec.Title,
+		Runtime:         spec.Runtime,
+		Difficulty:      spec.Difficulty,
+		Description:     spec.Description,
+		Image:           spec.Image,
+		ContentRevision: spec.ContentRevision,
+		PublishedAt:     spec.PublishedAt,
+		Nodes:           append([]Node{}, spec.Nodes...),
+		Checkpoints:     append([]Checkpoint{}, spec.Checkpoints...),
+		Dir:             dir,
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 var contentRevisionPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
@@ -192,6 +194,55 @@ func (c Commit) Valid() bool {
 func (e Entry) Valid() bool {
 	return strings.TrimSpace(e.ID) != "" && strings.TrimSpace(e.ReleaseID) != "" && validSourcePath(e.SourcePath) &&
 		e.ContentRevision.Valid() && e.State.Valid()
+}
+
+// Installation is the durable unit created after a portable source has been
+// staged and validated. It keeps the catalog aggregate and its reusable
+// GenerationWorkflow inputs in one transaction, so a crash cannot leave an
+// entry without the candidate it is meant to verify.
+type Installation struct {
+	Release Release             `json:"release"`
+	Entries []InstallationEntry `json:"entries"`
+}
+
+type InstallationEntry struct {
+	Entry     Entry               `json:"entry"`
+	Candidate generation.Revision `json:"candidate"`
+	Workflow  generation.Workflow `json:"workflow"`
+}
+
+func (i Installation) Validate() error {
+	if !i.Release.Valid() || i.Release.State != ReleaseInstalling {
+		return errors.New("catalog installation requires an installing release")
+	}
+	if len(i.Entries) == 0 {
+		return errors.New("catalog installation requires at least one entry")
+	}
+	seenPaths := make(map[string]struct{}, len(i.Entries))
+	seenEntries := make(map[string]struct{}, len(i.Entries))
+	for _, value := range i.Entries {
+		if value.Entry.ReleaseID != i.Release.ID || !value.Entry.Valid() || value.Entry.State != EntryBuilding {
+			return errors.New("catalog installation entry is invalid")
+		}
+		if value.Candidate.Source.Kind != generation.SourceRelease || value.Candidate.Source.Ref != value.Entry.ID ||
+			value.Candidate.SourceRevision != string(value.Entry.ContentRevision) || value.Candidate.ValidateForCreate() != nil {
+			return errors.New("catalog installation candidate lineage is invalid")
+		}
+		if !value.Workflow.Valid() || value.Workflow.Source.Kind != generation.SourceRelease ||
+			value.Workflow.Source.Ref != value.Entry.ID || value.Workflow.SourceRevision != string(value.Entry.ContentRevision) ||
+			value.Workflow.State != generation.StateBuilding || value.Workflow.CandidateRevisionID != value.Candidate.ID {
+			return errors.New("catalog installation workflow lineage is invalid")
+		}
+		if _, exists := seenPaths[value.Entry.SourcePath]; exists {
+			return errors.New("catalog installation has duplicate source paths")
+		}
+		if _, exists := seenEntries[value.Entry.ID]; exists {
+			return errors.New("catalog installation has duplicate entries")
+		}
+		seenPaths[value.Entry.SourcePath] = struct{}{}
+		seenEntries[value.Entry.ID] = struct{}{}
+	}
+	return nil
 }
 
 func validSourcePath(value string) bool {

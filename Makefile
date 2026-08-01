@@ -10,7 +10,7 @@
 	e2e e2e-runtime-browser e2e-agent-assistant e2e-agent-soak \
 	e2e-agent-node e2e-agent-k8s e2e-server-recovery \
 	dev-data dev-crd dev-rbac dev-images k8s-base-image \
-	dev-incus dev-incus-catalog dev-incus-secrets dev-kind-registry dev-kind-push-k8s-base dev-kind-catalog dev-kind-runtime \
+	dev-incus dev-incus-secrets dev-kind-registry dev-kind-push-k8s-base dev-kind-runtime \
 	generate verify-generated \
 	build build-server build-controller build-generate-worker build-taxonomy-worker \
 	runtime-images runtime-push release-manifest lint clean
@@ -50,6 +50,7 @@ DEV_GENERATE_WORKER_CONFIG := $(DEV_RUN_DIR)/generate-worker.yaml
 DEV_TAXONOMY_WORKER_CONFIG := $(DEV_RUN_DIR)/taxonomy-worker.yaml
 DEV_GENERATE_WORKER_API_KEY ?= breakfix-dev-generate-worker-key
 DEV_TAXONOMY_WORKER_API_KEY ?= breakfix-dev-taxonomy-worker-key
+DEV_CATALOG_ADMIN_TOKEN ?= breakfix-dev-catalog-admin-token
 BIN_DIR  := bin
 TARGETOS ?= linux
 TARGETARCH ?= amd64
@@ -123,6 +124,7 @@ dev-start-server:
 	@find /tmp/breakfix-server.log /tmp/breakfix-server.pid -depth -delete 2>/dev/null || true
 	@env BREAKFIX_GENERATE_WORKER_API_KEY="$(DEV_GENERATE_WORKER_API_KEY)" \
 		BREAKFIX_TAXONOMY_WORKER_API_KEY="$(DEV_TAXONOMY_WORKER_API_KEY)" \
+		BREAKFIX_CATALOG_ADMIN_TOKEN="$(DEV_CATALOG_ADMIN_TOKEN)" \
 		nohup $(BIN_DIR)/breakfix-server -config $(DEV_CONFIG) >/tmp/breakfix-server.log 2>&1 </dev/null & echo $$! >/tmp/breakfix-server.pid
 	@sleep 3
 	@pid=$$(cat /tmp/breakfix-server.pid 2>/dev/null); \
@@ -166,8 +168,8 @@ dev-down:
 	@lsof -ti:8081 | xargs kill 2>/dev/null || true
 
 dev-reset: dev-down
-	@if [ -d data ]; then find data -mindepth 1 -maxdepth 1 ! -name challenges ! -name taxonomy -exec rm -rf {} +; fi
-	@mkdir -p data/challenges data/taxonomy
+	@if [ -d data ]; then find data -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi
+	@mkdir -p data
 	@echo "  ✓ Data directory reset"
 
 # ── Dev shortcuts (build + restart) ──
@@ -233,7 +235,7 @@ e2e:
 # ── Dev environment ──
 
 dev-data:
-	@mkdir -p data/challenges
+	@mkdir -p data
 	@echo "  ✓ Data dir ready"
 
 generate:
@@ -273,9 +275,6 @@ dev-rbac:
 dev-incus:
 	./dev/incus-bootstrap.sh
 
-dev-incus-catalog: dev-incus
-	./dev/incus-catalog.sh
-
 dev-incus-secrets: dev-incus
 	@for role in server controller generate; do \
 		kubectl -n breakfix-system create secret generic breakfix-incus-$$role \
@@ -304,9 +303,6 @@ dev-kind-push-k8s-base:
 
 dev-kind-registry:
 	./dev/kind-registry.sh
-
-dev-kind-catalog: dev-incus-catalog
-	./dev/kind-catalog.sh
 
 dev-kind-runtime:
 	./dev/kind-runtime.sh

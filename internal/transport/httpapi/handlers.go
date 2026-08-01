@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,7 +14,9 @@ import (
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
+	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
@@ -27,6 +30,9 @@ type Handler struct {
 	assistant          *appassistant.Service
 	registryAddr       string
 	registryClient     oci.Client
+	catalogInstaller   *appcatalog.Installer
+	releaseCoordinator *appcatalog.ReleaseCoordinator
+	catalogAdminToken  []byte
 	namespace          string
 	crdNamespace       string
 	challengesDir      string
@@ -57,16 +63,22 @@ type Dependencies struct {
 	TaxonomyStore      *taxonomy.Store
 	GeneratorSandbox   *opensandbox.Client
 	GeneratorWorkspace *appgeneration.Manager
+	CatalogGate        appcatalog.ReleaseGate
 }
 
-func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) *Handler {
+func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
 	taxonomyStore := dependencies.TaxonomyStore
+	catalogGate := dependencies.CatalogGate
+	if catalogGate == nil && database != nil {
+		catalogGate = database.Catalog
+	}
 	handler := &Handler{
 		db:                 database,
 		k8s:                client,
-		catalog:            appcatalog.NewService(cfg.ChallengesDir(), taxonomyStore),
+		catalog:            appcatalog.NewService(cfg.ChallengesDir(), taxonomyStore, catalogGate),
 		registryAddr:       cfg.Registry.Address,
 		registryClient:     dependencies.RegistryClient,
+		catalogAdminToken:  []byte(cfg.CatalogAdminToken),
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,
 		challengesDir:      cfg.ChallengesDir(),
@@ -96,5 +108,32 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	if ready, ok := dependencies.NodeTerminal.(NodeProviderReadiness); ok {
 		handler.nodeProviderReady = ready
 	}
-	return handler
+	if database == nil || taxonomyStore == nil {
+		return handler, nil
+	}
+	installer, err := appcatalog.NewInstaller(appcatalog.InstallerConfig{
+		DataDir: cfg.DataDir, ChallengesDir: cfg.ChallengesDir(), Taxonomy: taxonomyStore,
+		Puller: dependencies.RegistryClient,
+		LayerReader: oci.ArtifactLayerReader{
+			ArtifactType: appcatalog.ReleaseArtifactType,
+			LayerType:    appcatalog.ReleaseSourceLayerType,
+		},
+		Store: database.Catalog,
+		Snapshotter: func(entry challenge.Entry) (generation.ExecutionSnapshot, error) {
+			return candidateExecutionSnapshot(entry, cfg.Runtime, cfg.Incus)
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create catalog installer: %w", err)
+	}
+	coordinator, err := appcatalog.NewReleaseCoordinator(appcatalog.ReleaseCoordinatorConfig{
+		DataDir: cfg.DataDir, ChallengesDir: cfg.ChallengesDir(), Taxonomy: taxonomyStore,
+		Releases: database.Catalog, Candidates: database.Generation,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create catalog release coordinator: %w", err)
+	}
+	handler.catalogInstaller = installer
+	handler.releaseCoordinator = coordinator
+	return handler, nil
 }

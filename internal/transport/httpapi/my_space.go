@@ -371,7 +371,7 @@ func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.E
 		}
 	}
 
-	workflow, err := h.db.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.Revision)
+	workflow, err := h.db.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.ContentRevision)
 	if errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound) {
 		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 	}

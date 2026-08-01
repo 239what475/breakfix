@@ -42,7 +42,7 @@ func TestMapperResultBuildsNewDefinitionsWithoutChangingBase(t *testing.T) {
 		NewSkillRequirements: []mapperNewSkillRequirement{},
 	}
 	entry := taxonomy.ChallengeRef{
-		ID: "challenge-test", Title: "测试题目", Revision: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		ID: "challenge-test", Title: "测试题目", ContentRevision: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	changes, err := result.ChangeSet(taxonomyapp.MapperValidation{Challenge: entry, Base: base})
 	if err != nil {

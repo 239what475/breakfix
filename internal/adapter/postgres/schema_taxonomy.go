@@ -4,7 +4,7 @@ var schemaTaxonomyStatements = []string{
 	`CREATE TABLE taxonomy_workflows (
 		id TEXT PRIMARY KEY,
 		challenge_id TEXT NOT NULL,
-		challenge_revision TEXT NOT NULL,
+		challenge_content_revision TEXT NOT NULL,
 		base_revision TEXT NOT NULL DEFAULT '',
 		state TEXT NOT NULL CHECK (state IN ('Queued', 'Mapping', 'Reviewing', 'Publishing', 'Completed', 'Failed', 'Cancelled')),
 		round INTEGER NOT NULL DEFAULT 0 CHECK (round >= 0),
@@ -20,7 +20,7 @@ var schemaTaxonomyStatements = []string{
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(challenge_id, challenge_revision),
+		UNIQUE(challenge_id, challenge_content_revision),
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
 	`CREATE INDEX taxonomy_workflows_claim ON taxonomy_workflows(state, next_run_at, lease_expires_at, created_at, id)`,

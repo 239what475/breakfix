@@ -16,7 +16,7 @@ import (
 func (h *Handler) ListChallenges(c *gin.Context) {
 	user := h.getUser(c)
 
-	challenges, err := h.catalog.List()
+	challenges, err := h.catalog.List(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -87,7 +87,7 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	if h.requireUser(c) == nil {
 		return
 	}
-	published, err := h.catalog.Find(id)
+	published, err := h.catalog.Find(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return
@@ -151,7 +151,7 @@ func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
 	if user == nil {
 		return
 	}
-	entry, err := h.catalog.Entry(id)
+	entry, err := h.catalog.Entry(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 		return

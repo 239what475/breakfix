@@ -123,8 +123,8 @@ func validDefinitionID(id, kind string) bool {
 }
 
 func validateChallengeMapping(mapping ChallengeMapping, skills map[string]Skill, tags map[string]Tag) error {
-	if !challenge.ValidID(mapping.Challenge.ID) || strings.TrimSpace(mapping.Challenge.Title) == "" || !ValidRevision(mapping.Challenge.Revision) {
-		return errors.New("challenge id, title, and revision are required")
+	if !challenge.ValidID(mapping.Challenge.ID) || strings.TrimSpace(mapping.Challenge.Title) == "" || !ValidRevision(mapping.Challenge.ContentRevision) {
+		return errors.New("challenge id, title, and contentRevision are required")
 	}
 	return validateChallengeRelationships(mapping.Tags, mapping.EntrySkills, mapping.Outcomes, skills, tags)
 }

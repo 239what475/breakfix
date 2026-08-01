@@ -1,0 +1,10 @@
+apiVersion: breakfix.dev/catalog/v1
+kind: CatalogRelease
+metadata:
+  name: foundation
+  version: 2026.08.01
+entries:
+  - path: challenges/linux/cleanup-logs
+    contentRevision: sha256:05dcc8623c7d5b645452960dd2aa9850490d3e215007de8007df314e69e8a1db
+taxonomy:
+  contentRevision: sha256:d1bdef9c0e5802928725ecf9f715b9ae80d57ecc0f4a25215edb1cdd5be79ec4

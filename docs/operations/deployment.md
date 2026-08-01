@@ -45,20 +45,32 @@ kubectl -n breakfix-system get deployments,pods
 `make runtime-push` 只把已编译二进制打入 Server、Controller、Generate Worker 与 Taxonomy Worker 的
 distroless image。不要在运行时容器中下载 Go 依赖或编译源码。
 
-开发环境的初始 catalog 是一个完整的 `data/challenges` 与 `data/taxonomy` snapshot。先同步它，再启动
-Runtime，避免 Server 在空卷上把已经审核的静态题目误判为待 mapping 的新题：
+`catalog/` 是 Git 管理的 portable source，不是 Server data directory。Server 可以在空卷上启动；平台基线就绪后，
+管理员将 source 打包为 OCI artifact，向空平台安装一个 digest 固定的 Catalog Release。该过程复用正式的 build、
+真实验证和原子提交链路，只有 release 到达 `Ready` 后题目才对 Catalog API 可见：
 
 ```bash
-make dev-kind-reset-state
-make dev-kind-catalog
-make dev-kind-registry
-make dev-kind-runtime
+go run ./cmd/catalog-release \
+  -source catalog \
+  -output dist/foundation.oci.tar \
+  -reference registry.example.com/breakfix/catalog/foundation:2026.08.01 \
+  -registry-endpoint registry.example.com
+# 输出 registry.example.com/breakfix/catalog/foundation@sha256:...
+
+curl --fail --show-error \
+  -H "X-Breakfix-Catalog-Token: $BREAKFIX_CATALOG_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"bundle":"registry.example.com/breakfix/catalog/foundation@sha256:..."}' \
+  https://breakfix.example.com/api/admin/catalog/releases
 ```
 
-`make dev-kind-runtime` 使用 Kind overlay；生产部署只使用根目录清单，并在部署前准备外部 Registry。
+`cmd/catalog-release` 只打包和显式推送 OCI artifact，绝不访问 Server data、Incus 或 Kubernetes。安装必须经由
+Server 管理员 API；它拒绝 mutable tag、非空 data directory 和已有 release。用 `GET
+/api/admin/catalog/releases/{id}` 轮询状态。Kind 开发环境先运行 `make dev-kind-registry` 和 `make dev-kind-runtime`，
+再使用该命令的 `-trust-bundle-file .local/kind-registry/ca.crt` 选项和 Kind Registry authority。
 
-`data/taxonomy/current` 在 Git 中是只读文本指针；Server 后续发布 taxonomy snapshot 时会原子替换为运行时
-符号链接。静态 snapshot 中的 mapping 必须精确匹配每个 challenge artifact revision。
+`data_dir/challenges` 与 `data_dir/taxonomy` 仅保存安装成功后的运行时 materialization 和 taxonomy snapshot；
+它们不再由 Git 或开发脚本复制。
 
 本次数据库 schema 是开发阶段的破坏性基线。检测到不匹配 schema 时 Server 会拒绝启动，必须重建开发数据库；
 不提供历史数据库的兼容迁移。

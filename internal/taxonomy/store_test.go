@@ -104,7 +104,7 @@ func TestValidateEnforcesReferencesOutcomesAndDAG(t *testing.T) {
 
 func TestCatalogIndexOnlyExposesExactChallengeRevisionMapping(t *testing.T) {
 	snapshot := testSnapshot("catalog")
-	entry := challenge.Entry{ID: "challenge-demo", Title: "Demo", Revision: snapshot.ChallengeMappings[0].Challenge.Revision}
+	entry := challenge.Entry{ID: "challenge-demo", Title: "Demo", ContentRevision: snapshot.ChallengeMappings[0].Challenge.ContentRevision}
 	index, err := NewCatalogIndex(snapshot, []challenge.Entry{entry})
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestCatalogIndexOnlyExposesExactChallengeRevisionMapping(t *testing.T) {
 	if mapping, ok := index.Mapping(entry.ID); !ok || len(mapping.Tags) != 1 || mapping.Tags[0].ID != "tag-1111111111111111" {
 		t.Fatalf("matching challenge not exposed: %#v, %v", mapping, ok)
 	}
-	entry.Revision = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	entry.ContentRevision = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	index, err = NewCatalogIndex(snapshot, []challenge.Entry{entry})
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func testSnapshot(fileSuffix string) domain.Snapshot {
 			MappingGuidance: domain.MappingGuidance{IncludeWhen: []string{"Linux behavior is central to the task."}, ExcludeWhen: []string{"Linux is only the base image."}},
 		}},
 		ChallengeMappings: []domain.ChallengeMapping{{
-			Challenge: domain.ChallengeRef{ID: "challenge-demo", Title: "Demo", Revision: revision}, File: "demo-" + fileSuffix,
+			Challenge: domain.ChallengeRef{ID: "challenge-demo", Title: "Demo", ContentRevision: revision}, File: "demo-" + fileSuffix,
 			Tags:     []domain.Ref{{ID: "tag-1111111111111111", Title: "Linux"}},
 			Outcomes: []domain.OutcomeRef{{ID: "skill-1111111111111111", Title: "Repair logs", Primary: true}},
 		}},

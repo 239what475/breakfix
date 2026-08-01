@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/domain/catalog"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 var (
@@ -28,6 +29,296 @@ const catalogEntrySelect = `SELECT ` + catalogEntryColumns + ` FROM catalog_rele
 const catalogCommitColumns = `entry_id, content_revision, state, challenge_id, slug, materialized_at,
 	committed_at, created_at, updated_at`
 const catalogCommitSelect = `SELECT ` + catalogCommitColumns + ` FROM catalog_release_entry_commits`
+
+// CreateInstallation records an already-staged portable source and every
+// release-owned candidate/workflow in one transaction. The catalog aggregate
+// owns this cross-domain write because an entry without its matching immutable
+// candidate can never be recovered safely.
+func (r *CatalogRepository) CreateInstallation(ctx context.Context, installation catalog.Installation) (*catalog.Release, error) {
+	if err := installation.Validate(); err != nil {
+		return nil, err
+	}
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin catalog installation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(487550140918)`); err != nil {
+		return nil, fmt.Errorf("lock catalog installation: %w", err)
+	}
+	var occupied bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM catalog_releases WHERE state <> ?
+	)`, catalog.ReleaseFailed).Scan(&occupied); err != nil {
+		return nil, fmt.Errorf("check catalog installation state: %w", err)
+	}
+	if occupied {
+		return nil, errors.New("catalog release installation requires an uninitialized platform")
+	}
+	release := installation.Release
+	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_releases
+		(id, name, version, bundle_digest, taxonomy_content_revision, state, deadline_at, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+		release.ID, release.Name, release.Version, release.BundleDigest, release.TaxonomyContentRevision,
+		release.State, release.DeadlineAt, release.CreatedAt.UTC(), release.UpdatedAt.UTC()); err != nil {
+		return nil, fmt.Errorf("insert catalog installation release: %w", err)
+	}
+	for _, value := range installation.Entries {
+		candidate := value.Candidate
+		if err := insertCandidateRevisionTx(ctx, tx, candidate); err != nil {
+			return nil, err
+		}
+		entry := value.Entry
+		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_release_entries
+			(id, release_id, source_path, content_revision, candidate_revision_id, state, last_error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
+			entry.ID, entry.ReleaseID, entry.SourcePath, entry.ContentRevision, value.Candidate.ID, entry.State, entry.CreatedAt.UTC(), entry.UpdatedAt.UTC()); err != nil {
+			return nil, fmt.Errorf("insert catalog installation entry %q: %w", entry.ID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_release_entry_commits
+			(entry_id, content_revision, state, challenge_id, slug, created_at, updated_at)
+			VALUES (?, ?, ?, NULL, NULL, ?, ?)`, entry.ID, entry.ContentRevision, catalog.CommitPending, entry.CreatedAt.UTC(), entry.UpdatedAt.UTC()); err != nil {
+			return nil, fmt.Errorf("insert catalog installation commit %q: %w", entry.ID, err)
+		}
+		workflow := value.Workflow
+		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_workflows
+			(id, source_kind, source_ref, source_revision, state, cleanup_intent, candidate_revision_id, active_agent_run_id,
+			state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, '', ?, NULL, 0, '', ?, '', ?, ?)`,
+			workflow.ID, workflow.Source.Kind, workflow.Source.Ref, workflow.SourceRevision, workflow.State,
+			workflow.CandidateRevisionID, workflow.NextRunAt.UTC(), workflow.CreatedAt.UTC(), workflow.UpdatedAt.UTC()); err != nil {
+			return nil, fmt.Errorf("insert catalog installation workflow %q: %w", workflow.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit catalog installation: %w", err)
+	}
+	return &release, nil
+}
+
+// HasReadyRelease gates catalog visibility. Challenge and taxonomy files may
+// be materialized while a release is Committing, but are not publicly visible
+// until this durable state transition completes.
+func (r *CatalogRepository) HasReadyRelease(ctx context.Context) (bool, error) {
+	var ready bool
+	if err := r.conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_releases WHERE state = ?)`, catalog.ReleaseReady).Scan(&ready); err != nil {
+		return false, fmt.Errorf("check ready catalog release: %w", err)
+	}
+	return ready, nil
+}
+
+// ListRecoverableReleases includes Ready releases so Server can retry removal
+// of non-visible staging residue after its durable visibility transition.
+func (r *CatalogRepository) ListRecoverableReleases(ctx context.Context) ([]catalog.Release, error) {
+	rows, err := r.conn.QueryContext(ctx, catalogReleaseSelect+` WHERE state IN (?, ?, ?, ?) ORDER BY created_at, id`,
+		catalog.ReleaseInstalling, catalog.ReleaseCommitting, catalog.ReleaseCleaningUp, catalog.ReleaseReady)
+	if err != nil {
+		return nil, fmt.Errorf("list recoverable catalog releases: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	releases := make([]catalog.Release, 0)
+	for rows.Next() {
+		release, err := scanCatalogRelease(rows)
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, *release)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recoverable catalog releases: %w", err)
+	}
+	return releases, nil
+}
+
+// BeginReleaseCommit changes a fully verified installation into Committing.
+// It is intentionally idempotent so a Server restart can resume the same
+// release without creating a second target-platform identity set.
+func (r *CatalogRepository) BeginReleaseCommit(ctx context.Context, releaseID string, now time.Time) (*catalog.Release, bool, error) {
+	if strings.TrimSpace(releaseID) == "" || now.IsZero() {
+		return nil, false, errors.New("catalog release commit requires release identity and current time")
+	}
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin catalog release commit: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	release, err := scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ? FOR UPDATE`, releaseID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, ErrCatalogReleaseNotFound
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if release.State == catalog.ReleaseCommitting {
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return release, true, nil
+	}
+	if release.State != catalog.ReleaseInstalling {
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return release, false, nil
+	}
+	var unfinished bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_release_entries WHERE release_id = ? AND state <> ?)`,
+		releaseID, catalog.EntryReadyToCommit).Scan(&unfinished); err != nil {
+		return nil, false, fmt.Errorf("check catalog release entries: %w", err)
+	}
+	if unfinished {
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return release, false, nil
+	}
+	release, err = scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = '', updated_at = ?
+		WHERE id = ? RETURNING `+catalogReleaseColumns, catalog.ReleaseCommitting, now.UTC(), releaseID))
+	if err != nil {
+		return nil, false, fmt.Errorf("begin catalog release commit: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return release, true, nil
+}
+
+// CompleteReleaseCommit is the single durable visibility transition after all
+// target directories and the compiled taxonomy snapshot have been prepared.
+func (r *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID string, now time.Time) (*catalog.Release, error) {
+	if strings.TrimSpace(releaseID) == "" || now.IsZero() {
+		return nil, errors.New("catalog release completion requires release identity and current time")
+	}
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin catalog release completion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	release, err := scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ? FOR UPDATE`, releaseID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCatalogReleaseNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if release.State == catalog.ReleaseReady {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return release, nil
+	}
+	if release.State != catalog.ReleaseCommitting {
+		return nil, errors.New("catalog release is not committing")
+	}
+	var incomplete bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM catalog_release_entries entry
+		JOIN catalog_release_entry_commits entry_commit ON entry_commit.entry_id = entry.id
+		WHERE entry.release_id = ? AND (entry.state <> ? OR entry_commit.state NOT IN (?, ?))
+	)`, releaseID, catalog.EntryReadyToCommit, catalog.CommitMaterialized, catalog.CommitCommitted).Scan(&incomplete); err != nil {
+		return nil, fmt.Errorf("check catalog release commit state: %w", err)
+	}
+	if incomplete {
+		return nil, errors.New("catalog release has entries that are not materialized")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entry_commits SET state = ?, committed_at = COALESCE(committed_at, ?), updated_at = ?
+		WHERE entry_id IN (SELECT id FROM catalog_release_entries WHERE release_id = ?)`, catalog.CommitCommitted, now.UTC(), now.UTC(), releaseID); err != nil {
+		return nil, fmt.Errorf("complete catalog entry commits: %w", err)
+	}
+	release, err = scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = '', updated_at = ?
+		WHERE id = ? RETURNING `+catalogReleaseColumns, catalog.ReleaseReady, now.UTC(), releaseID))
+	if err != nil {
+		return nil, fmt.Errorf("mark catalog release ready: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return release, nil
+}
+
+// StartReleaseCleanup stops future release work and turns every unleased
+// release workflow into a cleanup task. It intentionally leaves the release
+// in CleaningUp until Server has removed its filesystem residue.
+func (r *CatalogRepository) StartReleaseCleanup(ctx context.Context, releaseID, reason string, now time.Time) error {
+	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(reason) == "" || now.IsZero() {
+		return errors.New("catalog release cleanup requires release identity, reason, and current time")
+	}
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin catalog release cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := setCatalogReleaseCleaningUpTx(ctx, tx, releaseID, reason, now); err != nil {
+		return err
+	}
+	if err := scheduleCatalogReleaseCleanupTx(ctx, tx, releaseID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ReleaseCleanupReady reports whether every release-owned workflow is
+// terminal. It does not mutate state so the coordinator can remove files
+// before calling CompleteReleaseCleanup.
+func (r *CatalogRepository) ReleaseCleanupReady(ctx context.Context, releaseID string) (bool, error) {
+	if strings.TrimSpace(releaseID) == "" {
+		return false, errors.New("catalog release cleanup readiness requires release identity")
+	}
+	var complete bool
+	if err := r.conn.QueryRowContext(ctx, `SELECT NOT EXISTS (
+		SELECT 1 FROM generation_workflows workflow
+		JOIN catalog_release_entries entry ON entry.id = workflow.source_ref
+		WHERE workflow.source_kind = ? AND entry.release_id = ?
+		AND workflow.state NOT IN (?, ?, ?)
+	)`, generation.SourceRelease, releaseID, generation.StateCompleted, generation.StateFailed, generation.StateCancelled).Scan(&complete); err != nil {
+		return false, fmt.Errorf("check catalog release cleanup: %w", err)
+	}
+	return complete, nil
+}
+
+// CompleteReleaseCleanup transitions to Failed only after the coordinator has
+// cleaned release-owned files. It rechecks workflow completion under a lock
+// so a concurrent worker cannot race the terminal transition.
+func (r *CatalogRepository) CompleteReleaseCleanup(ctx context.Context, releaseID string, now time.Time) (*catalog.Release, error) {
+	if strings.TrimSpace(releaseID) == "" || now.IsZero() {
+		return nil, errors.New("catalog release cleanup completion requires release identity and current time")
+	}
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin catalog release cleanup completion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	release, err := scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ? FOR UPDATE`, releaseID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCatalogReleaseNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if release.State == catalog.ReleaseFailed {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return release, nil
+	}
+	if release.State != catalog.ReleaseCleaningUp {
+		return nil, errors.New("catalog release is not cleaning up")
+	}
+	if err := finalizeCatalogReleaseCleanupTx(ctx, tx, releaseID, now); err != nil {
+		return nil, err
+	}
+	release, err = scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ?`, releaseID))
+	if err != nil {
+		return nil, fmt.Errorf("read completed catalog release cleanup: %w", err)
+	}
+	if release.State != catalog.ReleaseFailed {
+		return nil, errors.New("catalog release cleanup still has active workflows")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return release, nil
+}
 
 // CreateRelease persists a single immutable catalog source and every entry in
 // one transaction. Source paths and content revisions are portable; target

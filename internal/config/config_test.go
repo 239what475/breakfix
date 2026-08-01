@@ -23,6 +23,7 @@ func TestExampleConfigLoads(t *testing.T) {
 
 func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
+	t.Setenv("BREAKFIX_CATALOG_ADMIN_TOKEN", "catalog-admin-from-environment")
 	t.Setenv("BREAKFIX_TEST_GENERATE_WORKER", "generate-from-environment")
 	t.Setenv("BREAKFIX_TEST_TAXONOMY_WORKER", "taxonomy-from-environment")
 	t.Setenv("BREAKFIX_TEST_WORKER_KEY", "worker-from-environment")
@@ -51,7 +52,7 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalWorkers.Generate != "generate-from-environment" ||
+	if cfg.JWTSecret != "jwt-from-environment" || cfg.CatalogAdminToken != "catalog-admin-from-environment" || cfg.InternalWorkers.Generate != "generate-from-environment" ||
 		cfg.InternalWorkers.Taxonomy != "taxonomy-from-environment" || cfg.Worker.APIKey != "worker-from-environment" {
 		t.Fatalf("runtime secret expansion = jwt %q, workers %#v, worker key %q", cfg.JWTSecret, cfg.InternalWorkers, cfg.Worker.APIKey)
 	}
@@ -120,6 +121,7 @@ func validProcessConfig() Config {
 		CRDNamespace:         "breakfix-system",
 		CooldownMinutes:      5,
 		JWTSecret:            "jwt",
+		CatalogAdminToken:    "catalog-admin",
 		InternalWorkers:      InternalWorkerKeys{Generate: "generate-internal", Taxonomy: "taxonomy-internal"},
 		Worker:               WorkerConfig{ServerURL: "http://breakfix-server:9090", APIKeyEnv: "BREAKFIX_TEST_WORKER_KEY", APIKey: "worker-internal"},
 		Agent: AgentConfig{

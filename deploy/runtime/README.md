@@ -109,11 +109,11 @@ kubectl apply -k .
 kubectl -n breakfix-system get deployments,pods
 ```
 
-这是开发阶段的破坏性 schema 基线：不会导入旧数据库或旧 data layout。要重建 disposable Kind 基线，
-先运行 `make dev-kind-reset-state`，再运行 `make dev-kind-catalog` 和 `make dev-kind-runtime`。catalog 同步先创建
-并填充 Server data PVC，确保 Server 启动时同时看到 challenge 与精确绑定的 taxonomy snapshot。重置脚本不会
-偷偷安装 insecure registry、node DNS/hosts、containerd 配置或镜像 preload fallback；`make dev-kind-registry`
-会显式安装其开发 CA。
+这是开发阶段的破坏性 schema 基线：不会导入旧数据库或旧 data layout。要重建 disposable Kind 基线，先运行
+`make dev-kind-reset-state` 和 `make dev-kind-runtime`，再通过 Server 的管理员 Catalog Release API 安装一个
+digest 固定的 portable source artifact。Server data PVC 只在 release 成功验证后才接收 challenge 与 taxonomy
+materialization。重置脚本不会偷偷安装 insecure registry、node DNS/hosts、containerd 配置或镜像 preload fallback；
+`make dev-kind-registry` 会显式安装其开发 CA。
 
 Server data 和 PostgreSQL 各自使用独立 PVC。Kind overlay 的 Registry 另有独立 PVC。Server data PVC 为
 RWO，因此 Server 使用单副本 `Recreate` 策略。Generate Worker 的副本数就是同时运行生成、构建或真实验证的最大任务数；

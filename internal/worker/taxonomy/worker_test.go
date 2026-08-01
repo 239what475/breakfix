@@ -133,7 +133,7 @@ type taxonomyStore struct {
 func newTaxonomyStore() *taxonomyStore {
 	expires := time.Now().UTC().Add(time.Hour)
 	return &taxonomyStore{current: taxonomy.Claim{Workflow: taxonomy.Workflow{
-		ID: "taxonomy-workflow-test", ChallengeID: "challenge-test", ChallengeRevision: "revision-1",
+		ID: "taxonomy-workflow-test", ChallengeID: "challenge-test", ChallengeContentRevision: "revision-1",
 		State: taxonomy.WorkflowQueued, BaseTaxonomyRevision: "", NextRunAt: time.Now().UTC(),
 		LeaseExpiresAt: &expires,
 	}, LeaseCredential: taxonomy.LeaseCredential{StateAttempt: 0, LeaseOwner: ""}}}
@@ -250,7 +250,7 @@ func testChangeSet() taxonomy.ChangeSet {
 	return taxonomy.ChangeSet{ChallengeMappings: []taxonomy.ChallengeMappingChange{{
 		Operation:   taxonomy.ChangeUpsert,
 		ChallengeID: "challenge-test",
-		Value:       &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: "challenge-test", Title: "Test challenge", Revision: "revision-1"}},
+		Value:       &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: "challenge-test", Title: "Test challenge", ContentRevision: "revision-1"}},
 	}}}
 }
 

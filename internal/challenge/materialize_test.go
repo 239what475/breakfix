@@ -10,6 +10,7 @@ import (
 const (
 	testNodeImageFingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testK8sImageDigest       = "registry.example/breakfix/k8s@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	testContentRevision      = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
 func TestListAndGet(t *testing.T) {
@@ -156,7 +157,7 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	}
 
 	publishedAt := time.Date(2026, time.July, 24, 8, 15, 0, 0, time.UTC)
-	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", testNodeImageFingerprint, publishedAt)
+	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", testNodeImageFingerprint, testContentRevision, publishedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func validManifest(prefix string) string {
 }
 
 func validPublishedNodeManifest(prefix string) string {
-	return prefix + "image: " + testNodeImageFingerprint + "\n" + validManifest("")
+	return prefix + "image: " + testNodeImageFingerprint + "\ncontent_revision: " + testContentRevision + "\n" + validManifest("")
 }
 
 func validK8sManifest(prefix string) string {
@@ -243,7 +244,7 @@ func validK8sManifest(prefix string) string {
 }
 
 func validPublishedK8sManifest(prefix string) string {
-	return prefix + "image: " + testK8sImageDigest + "\n" + validK8sManifest("")
+	return prefix + "image: " + testK8sImageDigest + "\ncontent_revision: " + testContentRevision + "\n" + validK8sManifest("")
 }
 
 func writeChallengeAssets(t *testing.T, root string) {

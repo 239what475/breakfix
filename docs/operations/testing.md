@@ -18,6 +18,9 @@ Go 测试覆盖 archive、challenge manifest、运行时快照、检查点 JSON�
 文案不是单元测试对象；测试验证 typed result、工具参数和领域状态，不伪造模型输出来证明自然语言 prompt。
 
 默认 `make e2e` 只覆盖快速的浏览器页面流程。它不调用模型，也不人为写入数据库伪造后台流程。
+若目标平台的 Catalog 为空，Playwright global setup 要求 `BREAKFIX_E2E_CATALOG_REFERENCE` 提供由
+`test/fixtures/catalog/` 打包并推送后的 immutable OCI digest，同时要求 `BREAKFIX_CATALOG_ADMIN_TOKEN`；它会调用
+正式管理员安装 API 并等待 release 到达 `Ready`。测试不会复制 challenge 或 taxonomy 到 Server data directory。
 
 ## 已部署运行时验收
 

@@ -20,7 +20,7 @@ func ValidateWorkflowChangeSet(changes ChangeSet, entry ChallengeRef, base Snaps
 	if mapping.Operation != ChangeUpsert || mapping.Value == nil {
 		return Snapshot{}, errors.New("mapper must upsert the target challenge mapping")
 	}
-	if mapping.Value.Challenge.ID != entry.ID || mapping.Value.Challenge.Title != entry.Title || mapping.Value.Challenge.Revision != entry.Revision {
+	if mapping.Value.Challenge.ID != entry.ID || mapping.Value.Challenge.Title != entry.Title || mapping.Value.Challenge.ContentRevision != entry.ContentRevision {
 		return Snapshot{}, errors.New("mapper challenge mapping must exactly match the verified challenge")
 	}
 	if mapping.ChallengeID != "" && mapping.ChallengeID != entry.ID {

@@ -48,6 +48,11 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: jwt_secret
+            - name: BREAKFIX_CATALOG_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: catalog_admin_token
             - name: BREAKFIX_GENERATE_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:

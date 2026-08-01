@@ -8,6 +8,26 @@ export type ErrorResponse = {
     error: string;
 };
 
+export type CatalogReleaseInstallRequest = {
+    /**
+     * Immutable OCI artifact reference in repository@sha256:digest form
+     */
+    bundle: string;
+};
+
+export type CatalogRelease = {
+    id: string;
+    name: string;
+    version: string;
+    bundle_digest: string;
+    taxonomy_content_revision: string;
+    state: 'Pending' | 'Installing' | 'Committing' | 'Ready' | 'CleaningUp' | 'Failed';
+    deadline_at?: string | null;
+    last_error?: string;
+    created_at: string;
+    updated_at: string;
+};
+
 export type RegisterRequest = {
     username: string;
     password: string;
@@ -911,3 +931,67 @@ export type PublishAuthoringRevisionResponses = {
 };
 
 export type PublishAuthoringRevisionResponse = PublishAuthoringRevisionResponses[keyof PublishAuthoringRevisionResponses];
+
+export type InstallCatalogReleaseData = {
+    body: CatalogReleaseInstallRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/catalog/releases';
+};
+
+export type InstallCatalogReleaseErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type InstallCatalogReleaseError = InstallCatalogReleaseErrors[keyof InstallCatalogReleaseErrors];
+
+export type InstallCatalogReleaseResponses = {
+    /**
+     * Catalog release accepted for build and verification
+     */
+    202: CatalogRelease;
+};
+
+export type InstallCatalogReleaseResponse = InstallCatalogReleaseResponses[keyof InstallCatalogReleaseResponses];
+
+export type GetCatalogReleaseData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/catalog/releases/{id}';
+};
+
+export type GetCatalogReleaseErrors = {
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetCatalogReleaseError = GetCatalogReleaseErrors[keyof GetCatalogReleaseErrors];
+
+export type GetCatalogReleaseResponses = {
+    /**
+     * Catalog release state
+     */
+    200: CatalogRelease;
+};
+
+export type GetCatalogReleaseResponse = GetCatalogReleaseResponses[keyof GetCatalogReleaseResponses];

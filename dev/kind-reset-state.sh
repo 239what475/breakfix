@@ -57,12 +57,10 @@ wait_for_pods app.kubernetes.io/name=breakfix-generate-worker
 wait_for_pods app.kubernetes.io/name=breakfix-taxonomy-worker
 wait_for_pods app.kubernetes.io/name=breakfix-postgresql
 
-# Runtime test and catalog-sync Pods can retain the Server RWO claim after a
-# previous interrupted test. They are disposable local helpers, not product
-# environments.
+# Runtime test Pods can retain the Server RWO claim after a previous
+# interrupted test. They are disposable local helpers, not product environments.
 kubectl -n "$namespace" delete pod -l app.kubernetes.io/name=breakfix-runtime-candidate-data \
   --ignore-not-found --wait=true >/dev/null 2>&1 || true
-kubectl -n "$namespace" delete pod breakfix-catalog-sync --ignore-not-found --wait=true >/dev/null 2>&1 || true
 
 # Generator workspaces are Server-owned but materialized by OpenSandbox in a
 # separate namespace. A disposable Kind reset must remove both the provider
@@ -89,4 +87,4 @@ done
 kubectl -n "$namespace" delete persistentvolumeclaim breakfix-server-data --ignore-not-found --wait=true
 kubectl -n "$namespace" delete persistentvolumeclaim data-breakfix-postgresql-0 --ignore-not-found --wait=true
 
-printf 'Removed Kind PostgreSQL and Server data state in %s. Reapply the runtime and sync the catalog.\n' "$namespace"
+printf 'Removed Kind PostgreSQL and Server data state in %s. Reapply the runtime, then install a Catalog Release.\n' "$namespace"

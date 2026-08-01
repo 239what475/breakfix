@@ -31,6 +31,7 @@ type Config struct {
 	CRDNamespace         string             `yaml:"crd_namespace"`
 	CooldownMinutes      int                `yaml:"cooldown_minutes"`
 	JWTSecret            string             `yaml:"jwt_secret"`
+	CatalogAdminToken    string             `yaml:"-"`
 	InternalWorkers      InternalWorkerKeys `yaml:"internal_workers"`
 	Worker               WorkerConfig       `yaml:"worker"`
 	Agent                AgentConfig        `yaml:"agent"`
@@ -290,6 +291,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
+	cfg.CatalogAdminToken = os.Getenv("BREAKFIX_CATALOG_ADMIN_TOKEN")
 	cfg.InternalWorkers.Generate = os.ExpandEnv(cfg.InternalWorkers.Generate)
 	cfg.InternalWorkers.Taxonomy = os.ExpandEnv(cfg.InternalWorkers.Taxonomy)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
@@ -350,6 +352,9 @@ func (c Config) ValidateServer() error {
 	}
 	if strings.TrimSpace(c.JWTSecret) == "" {
 		return fmt.Errorf("server jwt_secret is required")
+	}
+	if strings.TrimSpace(c.CatalogAdminToken) == "" {
+		return fmt.Errorf("server catalog administrator token is required")
 	}
 	if err := c.InternalWorkers.Validate(); err != nil {
 		return fmt.Errorf("server %w", err)

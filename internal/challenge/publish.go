@@ -14,18 +14,21 @@ import (
 // PromoteDirectory atomically turns a verified CandidateRevision directory into a
 // catalog challenge. The source directory is never modified: platform-owned
 // identity and image metadata are written only to Materialize's staging copy.
-func PromoteDirectory(challengesDir, sourceDir, challengeID, image string) (*Entry, error) {
-	return PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, time.Now().UTC())
+func PromoteDirectory(challengesDir, sourceDir, challengeID, image, contentRevision string) (*Entry, error) {
+	return PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, contentRevision, time.Now().UTC())
 }
 
 // PromoteDirectoryAt has the same publication behavior as PromoteDirectory,
 // with an explicit platform publication time for deterministic callers.
-func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image string, publishedAt time.Time) (*Entry, error) {
+func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, contentRevision string, publishedAt time.Time) (*Entry, error) {
 	if !ValidID(challengeID) {
 		return nil, fmt.Errorf("invalid challenge id %q", challengeID)
 	}
 	if strings.TrimSpace(image) == "" {
 		return nil, fmt.Errorf("published image is empty")
+	}
+	if !contentRevisionPattern.MatchString(contentRevision) {
+		return nil, fmt.Errorf("published content revision must be a lowercase sha256 digest")
 	}
 	if publishedAt.IsZero() {
 		return nil, fmt.Errorf("published time is required")
@@ -39,11 +42,11 @@ func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image string, pub
 		if err := CopyRegularFiles(sourceDir, staging); err != nil {
 			return err
 		}
-		return writePublishedManifest(staging, challengeID, sourceSlug, image, publishedAt)
+		return writePublishedManifest(staging, challengeID, sourceSlug, image, contentRevision, publishedAt)
 	})
 }
 
-func writePublishedManifest(dir, challengeID, sourceSlug, image string, publishedAt time.Time) error {
+func writePublishedManifest(dir, challengeID, sourceSlug, image, contentRevision string, publishedAt time.Time) error {
 	manifestPath := filepath.Join(dir, "challenge.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -56,6 +59,7 @@ func writePublishedManifest(dir, challengeID, sourceSlug, image string, publishe
 	manifest.ID = challengeID
 	manifest.SourceSlug = sourceSlug
 	manifest.Image = image
+	manifest.ContentRevision = contentRevision
 	manifest.PublishedAt = publishedAt.UTC()
 	normalized, err := yaml.Marshal(manifest)
 	if err != nil {

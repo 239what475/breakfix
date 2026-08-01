@@ -39,6 +39,7 @@ cooldown_minutes: 5
 
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
+# Export BREAKFIX_CATALOG_ADMIN_TOKEN with a separate administrator token.
 internal_workers:
   generate: ${BREAKFIX_GENERATE_WORKER_API_KEY}
   taxonomy: ${BREAKFIX_TAXONOMY_WORKER_API_KEY}

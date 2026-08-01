@@ -196,6 +196,7 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 	if failureRecorded && cleanupGeneratorWorkspace {
 		h.scheduleGeneratorWorkspaceCleanup(claim.Workflow.ActiveAgentRunID)
 	}
+	h.advanceCatalogRelease(c.Request.Context(), claim.Workflow)
 	refreshed, err := h.refreshGenerationClaim(c, *claim)
 	if err != nil {
 		h.writeInternalGenerationError(c, err)
@@ -436,7 +437,7 @@ func (h *Handler) completeGenerationChallengePublish(c *gin.Context, claim gener
 	if err != nil {
 		return err
 	}
-	return h.db.Generation.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, entry.ID, entry.Revision, base.Revision, now)
+	return h.db.Generation.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, entry.ID, entry.ContentRevision, base.Revision, now)
 }
 
 func (h *Handler) completeGenerationCleanup(c *gin.Context, claim generation.Claim, now time.Time) error {

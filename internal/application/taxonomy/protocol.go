@@ -92,7 +92,7 @@ func (c Context) ValidFor(claim domain.Claim) bool {
 	case domain.WorkflowMapping:
 		return strings.TrimSpace(c.Mapper.SystemPrompt) != "" && strings.TrimSpace(c.Mapper.Prompt) != "" &&
 			c.MapperValidation != nil && c.MapperValidation.Challenge.ID == claim.Workflow.ChallengeID &&
-			c.MapperValidation.Challenge.Revision == claim.Workflow.ChallengeRevision
+			c.MapperValidation.Challenge.ContentRevision == claim.Workflow.ChallengeContentRevision
 	case domain.WorkflowReviewing:
 		return strings.TrimSpace(c.CurriculumReview.SystemPrompt) != "" && strings.TrimSpace(c.CurriculumReview.Prompt) != "" &&
 			strings.TrimSpace(c.SREReview.SystemPrompt) != "" && strings.TrimSpace(c.SREReview.Prompt) != ""

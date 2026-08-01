@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -13,6 +14,13 @@ import (
 // challenge artifacts are visible in the catalog.
 type SnapshotReader interface {
 	LoadCurrent() (*domain.Snapshot, error)
+}
+
+// ReleaseGate makes the installation commit the sole catalog visibility
+// boundary. Files may exist while a release is being committed, but callers
+// must not observe them until the durable release state is Ready.
+type ReleaseGate interface {
+	HasReadyRelease(context.Context) (bool, error)
 }
 
 type PublishedChallenge struct {
@@ -36,22 +44,30 @@ type EntrySkill struct {
 type Service struct {
 	challengesDir string
 	snapshots     SnapshotReader
+	gate          ReleaseGate
 }
 
-func NewService(challengesDir string, snapshots SnapshotReader) *Service {
-	return &Service{challengesDir: challengesDir, snapshots: snapshots}
+func NewService(challengesDir string, snapshots SnapshotReader, gate ReleaseGate) *Service {
+	return &Service{challengesDir: challengesDir, snapshots: snapshots, gate: gate}
 }
 
 // publishedChallenges reads the publicly visible catalog. A challenge is
 // public only after the current immutable taxonomy snapshot maps its exact
-// artifact revision; publishing the directory alone is not sufficient.
-func (s *Service) List() ([]PublishedChallenge, error) {
+// portable content revision; publishing the directory alone is not sufficient.
+func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
+	if s == nil || s.snapshots == nil || s.gate == nil {
+		return nil, errors.New("catalog service dependencies are not configured")
+	}
+	ready, err := s.gate.HasReadyRelease(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read catalog release visibility: %w", err)
+	}
+	if !ready {
+		return []PublishedChallenge{}, nil
+	}
 	entries, err := challenge.List(s.challengesDir)
 	if err != nil {
 		return nil, err
-	}
-	if s == nil || s.snapshots == nil {
-		return []PublishedChallenge{}, nil
 	}
 	snapshot, err := s.snapshots.LoadCurrent()
 	if errors.Is(err, domain.ErrNoCurrentRevision) {
@@ -75,16 +91,16 @@ func (s *Service) List() ([]PublishedChallenge, error) {
 	return result, nil
 }
 
-func (s *Service) Entry(id string) (*challenge.Entry, error) {
-	published, err := s.Find(id)
+func (s *Service) Entry(ctx context.Context, id string) (*challenge.Entry, error) {
+	published, err := s.Find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return &published.Entry, nil
 }
 
-func (s *Service) Find(id string) (*PublishedChallenge, error) {
-	entries, err := s.List()
+func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, error) {
+	entries, err := s.List(ctx)
 	if err != nil {
 		return nil, err
 	}

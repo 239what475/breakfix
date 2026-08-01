@@ -9,11 +9,7 @@
 Thumbs.db
 
 # Project data
-data/*
-!data/challenges/
-!data/challenges/**
-!data/taxonomy/
-!data/taxonomy/**
+data/
 
 # Local certificate material
 *.pem

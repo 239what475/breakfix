@@ -61,7 +61,7 @@ func seedTestTaxonomy(t *testing.T, root string) {
 	}
 	for _, entry := range entries {
 		snapshot.ChallengeMappings = append(snapshot.ChallengeMappings, taxonomy.ChallengeMapping{
-			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, Revision: entry.Revision},
+			Challenge: taxonomy.ChallengeRef{ID: entry.ID, Title: entry.Title, ContentRevision: entry.ContentRevision},
 			Tags:      []taxonomy.Ref{{ID: "tag-4444444444444444", Title: "Test"}},
 			EntrySkills: []taxonomy.Ref{{
 				ID: "skill-5555555555555555", Title: "Inspect a test service",

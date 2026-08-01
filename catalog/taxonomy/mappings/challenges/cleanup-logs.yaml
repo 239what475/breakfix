@@ -1,7 +1,7 @@
 challenge:
-    id: chal-r7m4x2q9v6kp
+    path: challenges/linux/cleanup-logs
     title: 批量压缩旧日志
-    revision: sha256:435171f6b9e733553c3d9f4da1d3890d86f8defaa79430cf0d6033f1b268d3f7
+    contentRevision: sha256:05dcc8623c7d5b645452960dd2aa9850490d3e215007de8007df314e69e8a1db
 tags:
     - id: tag-2a8d5f1c4b7390e6
       title: Shell 脚本

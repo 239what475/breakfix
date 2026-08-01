@@ -471,12 +471,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
+  /admin/catalog/releases:
+    post:
+      operationId: installCatalogRelease
+      summary: Install an immutable catalog release on an uninitialized platform
+      tags: [catalog-admin]
+      security:
+        - catalogAdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogReleaseInstallRequest"
+      responses:
+        "202":
+          description: Catalog release accepted for build and verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogRelease"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/catalog/releases/{id}:
+    get:
+      operationId: getCatalogRelease
+      summary: Read an administrator-installed catalog release
+      tags: [catalog-admin]
+      security:
+        - catalogAdminToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Catalog release state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogRelease"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    catalogAdminToken:
+      type: apiKey
+      in: header
+      name: X-Breakfix-Catalog-Token
 
   responses:
     Error:
@@ -501,6 +557,52 @@ components:
       properties:
         error:
           type: string
+
+    CatalogReleaseInstallRequest:
+      type: object
+      required: [bundle]
+      properties:
+        bundle:
+          type: string
+          description: Immutable OCI artifact reference in repository@sha256:digest form
+
+    CatalogRelease:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - bundle_digest
+        - taxonomy_content_revision
+        - state
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        bundle_digest:
+          type: string
+        taxonomy_content_revision:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Installing, Committing, Ready, CleaningUp, Failed]
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     RegisterRequest:
       type: object

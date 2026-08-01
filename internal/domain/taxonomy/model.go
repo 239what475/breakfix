@@ -51,9 +51,9 @@ type OutcomeRef struct {
 }
 
 type ChallengeRef struct {
-	ID       string `yaml:"id" json:"id"`
-	Title    string `yaml:"title" json:"title"`
-	Revision string `yaml:"revision" json:"revision"`
+	ID              string `yaml:"id" json:"id"`
+	Title           string `yaml:"title" json:"title"`
+	ContentRevision string `yaml:"contentRevision" json:"contentRevision"`
 }
 
 type ChallengeMapping struct {

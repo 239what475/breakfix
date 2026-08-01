@@ -167,6 +167,9 @@ func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) 
 		return errors.New("generation cleanup requires a CleaningUp workflow with a candidate")
 	}
 	view := execution.Context.Candidate
+	if execution.Claim.Workflow.Source.Kind == generation.SourceRelease && execution.Claim.Workflow.CleanupIntent == generation.CleanupCompleted {
+		return e.cleanupVerifiedRelease(ctx, execution.Claim.Workflow.ID, *view)
+	}
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
 		if view.Publication != nil && execution.Claim.Workflow.CleanupIntent != generation.CleanupCompleted {
@@ -193,6 +196,24 @@ func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) 
 			}
 		}
 		return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *view)
+	default:
+		return errors.New("candidate runtime is unsupported")
+	}
+}
+
+// cleanupVerifiedRelease removes build intermediates after a successful
+// catalog verification while retaining the immutable staging artifact. The
+// release-level commit later writes that exact verified artifact reference
+// into every visible challenge; deleting it here would make recovery unsafe.
+func (e *Executor) cleanupVerifiedRelease(ctx context.Context, workflowID string, view generation.WorkerView) error {
+	switch view.Snapshot.Runtime {
+	case challenge.RuntimeK8s:
+		return nil
+	case challenge.RuntimeNode:
+		if e.node == nil {
+			return errors.New("node image publisher is unavailable")
+		}
+		return e.cleanupNodeBuildAttempts(ctx, workflowID, view)
 	default:
 		return errors.New("candidate runtime is unsupported")
 	}
@@ -225,22 +246,26 @@ func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view
 				return fmt.Errorf("delete candidate Node image: %w", err)
 			}
 		}
-		attempts := int64(0)
-		if view.Build != nil && view.Build.Incus != nil {
-			if view.Build.Incus.WorkflowID != workflowID {
-				return errors.New("candidate Node build does not belong to generation workflow")
-			}
-			attempts = view.Build.Incus.Attempt
-		}
-		for attempt := int64(1); attempt <= attempts; attempt++ {
-			if err := e.node.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt); err != nil {
-				return fmt.Errorf("delete Node build attempt %d: %w", attempt, err)
-			}
-		}
-		return nil
+		return e.cleanupNodeBuildAttempts(ctx, workflowID, view)
 	default:
 		return errors.New("candidate runtime is unsupported")
 	}
+}
+
+func (e *Executor) cleanupNodeBuildAttempts(ctx context.Context, workflowID string, view generation.WorkerView) error {
+	attempts := int64(0)
+	if view.Build != nil && view.Build.Incus != nil {
+		if view.Build.Incus.WorkflowID != workflowID {
+			return errors.New("candidate Node build does not belong to generation workflow")
+		}
+		attempts = view.Build.Incus.Attempt
+	}
+	for attempt := int64(1); attempt <= attempts; attempt++ {
+		if err := e.node.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt); err != nil {
+			return fmt.Errorf("delete Node build attempt %d: %w", attempt, err)
+		}
+	}
+	return nil
 }
 
 func cleanupNodeFingerprint(view generation.WorkerView) string {
