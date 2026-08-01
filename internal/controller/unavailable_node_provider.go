@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 )
 
 // UnavailableNodeProvider keeps the Controller and VK8s reconciler available
@@ -23,32 +23,32 @@ type unavailableNodeProvider struct {
 }
 
 func (p unavailableNodeProvider) unavailable() error {
-	if errors.Is(p.cause, incusprovider.ErrUnavailable) {
+	if errors.Is(p.cause, incus.ErrUnavailable) {
 		return p.cause
 	}
-	return fmt.Errorf("%w: %v", incusprovider.ErrUnavailable, p.cause)
+	return fmt.Errorf("%w: %v", incus.ErrUnavailable, p.cause)
 }
 
-func (p unavailableNodeProvider) Preflight(context.Context) (incusprovider.PreflightResult, error) {
-	return incusprovider.PreflightResult{}, p.unavailable()
+func (p unavailableNodeProvider) Preflight(context.Context) (incus.PreflightResult, error) {
+	return incus.PreflightResult{}, p.unavailable()
 }
 
-func (p unavailableNodeProvider) NodeEnvironmentIdentity(string, []string) (incusprovider.NodeEnvironmentIdentity, error) {
-	return incusprovider.NodeEnvironmentIdentity{}, p.unavailable()
+func (p unavailableNodeProvider) NodeEnvironmentIdentity(string, []string) (incus.NodeEnvironmentIdentity, error) {
+	return incus.NodeEnvironmentIdentity{}, p.unavailable()
 }
 
-func (p unavailableNodeProvider) ProvisionNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error) {
-	return incusprovider.NodeEnvironmentObservation{}, p.unavailable()
+func (p unavailableNodeProvider) ProvisionNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error) {
+	return incus.NodeEnvironmentObservation{}, p.unavailable()
 }
 
-func (p unavailableNodeProvider) ObserveNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error) {
-	return incusprovider.NodeEnvironmentObservation{}, p.unavailable()
+func (p unavailableNodeProvider) ObserveNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error) {
+	return incus.NodeEnvironmentObservation{}, p.unavailable()
 }
 
-func (p unavailableNodeProvider) DeleteNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) error {
+func (p unavailableNodeProvider) DeleteNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) error {
 	return p.unavailable()
 }
 
-func (p unavailableNodeProvider) ExecNode(context.Context, incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error) {
-	return incusprovider.ExecNodeResult{}, p.unavailable()
+func (p unavailableNodeProvider) ExecNode(context.Context, incus.ExecNodeRequest) (incus.ExecNodeResult, error) {
+	return incus.ExecNodeResult{}, p.unavailable()
 }

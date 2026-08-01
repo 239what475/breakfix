@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
 type environmentAssistantReader struct {
@@ -213,7 +213,7 @@ func (r *environmentAssistantReader) execNode(ctx context.Context, node, script 
 	}
 	command := []string{"/bin/bash", "-lc", script, "--"}
 	command = append(command, arguments...)
-	result, err := r.node.ExecNode(ctx, incusprovider.ExecNodeRequest{
+	result, err := r.node.ExecNode(ctx, incus.ExecNodeRequest{
 		EnvironmentUID: r.env.UID,
 		Revision:       r.env.SourceRevision,
 		Identity:       r.env.NodeIdentity,

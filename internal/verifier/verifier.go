@@ -14,10 +14,10 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/verification"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,11 +42,11 @@ type EnvironmentClient interface {
 	CreateVK8sEnvironment(context.Context, string, *breakfixv1.VK8sEnvironment) (*breakfixv1.VK8sEnvironment, error)
 	GetVK8sEnvironment(context.Context, string, string) (*breakfixv1.VK8sEnvironment, error)
 	DeleteVK8sEnvironmentWithUID(context.Context, string, string, types.UID) error
-	ExecInPodStreamsContext(context.Context, string, string, int, ...string) (k8s.PodExecResult, error)
+	ExecInPodStreamsContext(context.Context, string, string, int, ...string) (kubernetes.PodExecResult, error)
 }
 
 type NodeExecutor interface {
-	ExecNode(context.Context, incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error)
+	ExecNode(context.Context, incus.ExecNodeRequest) (incus.ExecNodeResult, error)
 }
 
 type Executor struct {
@@ -307,7 +307,7 @@ func (e *Executor) verifyNode(ctx context.Context, view generation.WorkerView, r
 	}
 	nodes := view.Snapshot.Node.Nodes
 	answers, err := executeParallel(nodes, func(node generation.NodeSnapshot) (generation.ExecutionResult, error) {
-		result, execErr := e.node.ExecNode(ctx, incusprovider.ExecNodeRequest{
+		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: view.ArchiveSHA256, Identity: identity,
 			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "answer.sh")},
 		})
@@ -333,7 +333,7 @@ func (e *Executor) verifyNode(ctx context.Context, view generation.WorkerView, r
 		}
 	}
 	runs, err := executeParallel(checkNodes, func(node generation.NodeSnapshot) (checkRun, error) {
-		result, execErr := e.node.ExecNode(ctx, incusprovider.ExecNodeRequest{
+		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: view.ArchiveSHA256, Identity: identity,
 			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "checks.sh")},
 		})
@@ -471,18 +471,18 @@ func orderedCheckpointResults(snapshots []generation.CheckpointSnapshot, values 
 	return result
 }
 
-func nodeIdentity(environment *breakfixv1.NodeEnvironment) (incusprovider.NodeEnvironmentIdentity, error) {
+func nodeIdentity(environment *breakfixv1.NodeEnvironment) (incus.NodeEnvironmentIdentity, error) {
 	if environment == nil || environment.UID == "" {
-		return incusprovider.NodeEnvironmentIdentity{}, errors.New("ready Node verification environment is missing")
+		return incus.NodeEnvironmentIdentity{}, errors.New("ready Node verification environment is missing")
 	}
 	status := environment.Status.Runtime
 	if strings.TrimSpace(status.Project) == "" || strings.TrimSpace(status.Network) == "" || strings.TrimSpace(status.ACL) == "" || strings.TrimSpace(status.Profile) == "" {
-		return incusprovider.NodeEnvironmentIdentity{}, errors.New("ready Node verification environment has incomplete runtime identity")
+		return incus.NodeEnvironmentIdentity{}, errors.New("ready Node verification environment has incomplete runtime identity")
 	}
-	identity := incusprovider.NodeEnvironmentIdentity{Project: status.Project, Network: status.Network, ACL: status.ACL, Profile: status.Profile}
-	identity.Nodes = make([]incusprovider.NodeIdentity, len(status.Nodes))
+	identity := incus.NodeEnvironmentIdentity{Project: status.Project, Network: status.Network, ACL: status.ACL, Profile: status.Profile}
+	identity.Nodes = make([]incus.NodeIdentity, len(status.Nodes))
 	for index, node := range status.Nodes {
-		identity.Nodes[index] = incusprovider.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
+		identity.Nodes[index] = incus.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
 	}
 	return identity, nil
 }

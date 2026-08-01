@@ -8,9 +8,9 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -23,7 +23,7 @@ type activeEnvironment struct {
 	Purpose        breakfixv1.EnvironmentPurpose
 	Namespace      string
 	WorkspacePod   string
-	NodeIdentity   incusprovider.NodeEnvironmentIdentity
+	NodeIdentity   incus.NodeEnvironmentIdentity
 	Nodes          []breakfixv1.NodeRuntimeNodeSpec
 	Phase          breakfixv1.EnvironmentPhase
 	ExpiresAt      *metav1.Time
@@ -36,13 +36,13 @@ func environmentFromNode(environment *breakfixv1.NodeEnvironment) *activeEnviron
 	if environment == nil {
 		return nil
 	}
-	identity := incusprovider.NodeEnvironmentIdentity{
+	identity := incus.NodeEnvironmentIdentity{
 		Project: environment.Status.Runtime.Project, Network: environment.Status.Runtime.Network,
 		ACL: environment.Status.Runtime.ACL, Profile: environment.Status.Runtime.Profile,
-		Nodes: make([]incusprovider.NodeIdentity, len(environment.Status.Runtime.Nodes)),
+		Nodes: make([]incus.NodeIdentity, len(environment.Status.Runtime.Nodes)),
 	}
 	for index, node := range environment.Status.Runtime.Nodes {
-		identity.Nodes[index] = incusprovider.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
+		identity.Nodes[index] = incus.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
 	}
 	return &activeEnvironment{
 		UID: string(environment.UID), Runtime: challenge.RuntimeNode, Name: environment.Name,

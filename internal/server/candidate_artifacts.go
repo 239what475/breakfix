@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
 // validateCandidateStagingArtifact enforces the Server-owned resource identity
@@ -37,7 +37,7 @@ func (h *Handler) validateCandidateStagingArtifact(view generation.WorkerView, a
 		if view.Build == nil || view.Build.Incus == nil {
 			return errors.New("node candidate has no build image identity")
 		}
-		expected, err := incusprovider.AliasForCandidate(h.incusConfig.NamePrefix, view.ID)
+		expected, err := incus.AliasForCandidate(h.incusConfig.NamePrefix, view.ID)
 		if err != nil {
 			return fmt.Errorf("derive candidate Incus alias: %w", err)
 		}
@@ -87,7 +87,7 @@ func (h *Handler) validateCandidateChallengeArtifact(view generation.WorkerView,
 		return nil
 
 	case challenge.RuntimeNode:
-		expected, err := incusprovider.AliasForChallenge(h.incusConfig.NamePrefix, view.Publication.ChallengeID)
+		expected, err := incus.AliasForChallenge(h.incusConfig.NamePrefix, view.Publication.ChallengeID)
 		if err != nil {
 			return fmt.Errorf("derive challenge Incus alias: %w", err)
 		}

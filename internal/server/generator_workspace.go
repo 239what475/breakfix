@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/opensandbox"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )

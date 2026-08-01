@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 )
 
 func TestExampleConfigLoads(t *testing.T) {
@@ -140,9 +140,9 @@ func validProcessConfig() Config {
 			WorkspaceMemory:           "512Mi",
 			WorkspaceProvisionTimeout: "5m",
 		},
-		Incus: incusprovider.Config{
+		Incus: incus.Config{
 			Endpoint: "https://incus.example:8443",
-			TLS: incusprovider.TLSConfig{
+			TLS: incus.TLSConfig{
 				ServerCertificateFile: "/var/run/secrets/breakfix-incus/server.crt",
 				ClientCertificateFile: "/var/run/secrets/breakfix-incus/client.crt",
 				ClientKeyFile:         "/var/run/secrets/breakfix-incus/client.key",

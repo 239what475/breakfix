@@ -11,10 +11,10 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/controller"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,12 +40,12 @@ func main() {
 		slog.Error("invalid controller configuration", "err", err)
 		os.Exit(1)
 	}
-	k8sClient, err := k8s.New(cfg.Kubeconfig)
+	k8sClient, err := kubernetes.New(cfg.Kubeconfig)
 	if err != nil {
 		slog.Error("failed to create K8s client", "err", err)
 		os.Exit(1)
 	}
-	incusClient, err := incusprovider.NewReconnectableClient(cfg.Incus, incusprovider.RoleController)
+	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleController)
 	if err != nil {
 		slog.Error("invalid Incus provider configuration", "err", err)
 		os.Exit(1)

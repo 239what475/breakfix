@@ -19,8 +19,8 @@ import (
 	"log/slog"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/domain/environment"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/gorilla/websocket"
 )
 
@@ -43,16 +43,16 @@ type terminalSocketLifecycle struct {
 }
 
 type NodeTerminalProvider interface {
-	ExecNodePTY(context.Context, incusprovider.ExecNodePTYRequest) error
-	CloseNodePTYWindow(context.Context, incusprovider.CloseNodePTYWindowRequest) error
-	ExecNode(context.Context, incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error)
+	ExecNodePTY(context.Context, incus.ExecNodePTYRequest) error
+	CloseNodePTYWindow(context.Context, incus.CloseNodePTYWindowRequest) error
+	ExecNode(context.Context, incus.ExecNodeRequest) (incus.ExecNodeResult, error)
 }
 
 // NodeProviderReadiness is intentionally separate from terminal operations.
 // The concrete Incus client exposes this so Server can report whether the
 // Node runtime is currently usable without broadening the terminal contract.
 type NodeProviderReadiness interface {
-	Preflight(context.Context) (incusprovider.PreflightResult, error)
+	Preflight(context.Context) (incus.PreflightResult, error)
 }
 
 type terminalStream func(context.Context, io.Reader, io.Writer, <-chan environment.Size) error

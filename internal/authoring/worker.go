@@ -9,10 +9,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/agentmodel"
+	"github.com/breakfix/breakfix/internal/adapter/llm"
+	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/authoring"
-	"github.com/breakfix/breakfix/internal/config"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -20,7 +20,7 @@ import (
 )
 
 type ExecutionContext struct {
-	Stage   domain.Stage  `json:"stage"`
+	Stage   domain.Stage    `json:"stage"`
 	History []agent.Message `json:"history"`
 }
 
@@ -43,7 +43,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stag
 	if len(history) == 0 || history[len(history)-1].Role != "user" {
 		return "", errors.New("authoring execution requires a latest user message")
 	}
-	chat, err := agentmodel.NewChatModel(ctx, cfg)
+	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -65,7 +65,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, runID string, stag
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return agentmodel.IsTransientTransportError(err)
+				return llm.IsTransientTransportError(err)
 			},
 		},
 	})

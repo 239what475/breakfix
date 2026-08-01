@@ -12,7 +12,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/lxc/incus/v7/shared/units"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,12 +33,12 @@ const (
 )
 
 type NodeEnvironmentProvider interface {
-	Preflight(context.Context) (incusprovider.PreflightResult, error)
-	NodeEnvironmentIdentity(environmentUID string, logicalNames []string) (incusprovider.NodeEnvironmentIdentity, error)
-	ProvisionNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error)
-	ObserveNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error)
-	DeleteNodeEnvironment(context.Context, incusprovider.ProvisionNodeEnvironmentRequest) error
-	ExecNode(context.Context, incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error)
+	Preflight(context.Context) (incus.PreflightResult, error)
+	NodeEnvironmentIdentity(environmentUID string, logicalNames []string) (incus.NodeEnvironmentIdentity, error)
+	ProvisionNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error)
+	ObserveNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error)
+	DeleteNodeEnvironment(context.Context, incus.ProvisionNodeEnvironmentRequest) error
+	ExecNode(context.Context, incus.ExecNodeRequest) (incus.ExecNodeResult, error)
 }
 
 type NodeEnvironmentReconciler struct {
@@ -71,7 +71,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 	identity, changed, err := r.ensureNodeIdentity(&environment)
 	if err != nil {
-		if errors.Is(err, incusprovider.ErrUnavailable) {
+		if errors.Is(err, incus.ErrUnavailable) {
 			return r.handleProviderError(ctx, statusBefore, &environment, err)
 		}
 		setNodeEnvironmentFailure(&environment, breakfixv1.EnvironmentFailureInfrastructure, "InvalidProviderIdentity", err.Error(), r.now())
@@ -99,7 +99,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 			return r.handleProviderError(ctx, statusBefore, &environment, err)
 		}
 	}
-	var observation incusprovider.NodeEnvironmentObservation
+	var observation incus.NodeEnvironmentObservation
 	if stable {
 		observation, err = r.nodeProvider().ObserveNodeEnvironment(ctx, providerRequest)
 	} else {
@@ -109,7 +109,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 		// A transient provider outage must not invalidate an already usable
 		// environment. Its next observation can reconnect without making the
 		// user restart the challenge.
-		if stable && errors.Is(err, incusprovider.ErrUnavailable) {
+		if stable && errors.Is(err, incus.ErrUnavailable) {
 			return ctrl.Result{RequeueAfter: nodeProviderRetryInterval}, nil
 		}
 		return r.handleProviderError(ctx, statusBefore, &environment, err)
@@ -167,7 +167,7 @@ func (r *NodeEnvironmentReconciler) reconcileDeletion(ctx context.Context, envir
 	return ctrl.Result{}, nil
 }
 
-func (r *NodeEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.NodeEnvironment, environment *breakfixv1.NodeEnvironment, request incusprovider.ProvisionNodeEnvironmentRequest) (ctrl.Result, error) {
+func (r *NodeEnvironmentReconciler) reconcileDrain(ctx context.Context, before *breakfixv1.NodeEnvironment, environment *breakfixv1.NodeEnvironment, request incus.ProvisionNodeEnvironmentRequest) (ctrl.Result, error) {
 	now := r.now()
 	condition := apiMeta.FindStatusCondition(environment.Status.Environment.Conditions, breakfixv1.ConditionDraining)
 	if environment.Status.Environment.Phase != breakfixv1.EnvironmentDraining || condition == nil || condition.Status != metav1.ConditionTrue {
@@ -203,7 +203,7 @@ func (r *NodeEnvironmentReconciler) handleProviderError(ctx context.Context, bef
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return ctrl.Result{}, err
-	case errors.Is(err, incusprovider.ErrUnavailable), errors.Is(err, incusprovider.ErrNotFound), errors.Is(err, incusprovider.ErrConflict):
+	case errors.Is(err, incus.ErrUnavailable), errors.Is(err, incus.ErrNotFound), errors.Is(err, incus.ErrConflict):
 		markNodeProvisioning(environment, "ProviderUnavailable", err.Error(), r.now())
 		environment.Status.Environment.Failure = &breakfixv1.EnvironmentFailureStatus{
 			Class: breakfixv1.EnvironmentFailureInfrastructure, Component: "incus", Reason: "ProviderUnavailable", Message: truncate(err.Error(), 4000), At: metav1.NewTime(r.now()),
@@ -218,14 +218,14 @@ func (r *NodeEnvironmentReconciler) handleProviderError(ctx context.Context, bef
 	}
 }
 
-func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.NodeEnvironment) (incusprovider.NodeEnvironmentIdentity, bool, error) {
+func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.NodeEnvironment) (incus.NodeEnvironmentIdentity, bool, error) {
 	logicalNames := make([]string, 0, len(environment.Spec.Runtime.Nodes))
 	for _, node := range environment.Spec.Runtime.Nodes {
 		logicalNames = append(logicalNames, node.Name)
 	}
 	expected, err := r.nodeProvider().NodeEnvironmentIdentity(string(environment.UID), logicalNames)
 	if err != nil {
-		return incusprovider.NodeEnvironmentIdentity{}, false, err
+		return incus.NodeEnvironmentIdentity{}, false, err
 	}
 	status := &environment.Status.Runtime
 	empty := status.Project == "" && status.Network == "" && status.ACL == "" && status.Profile == "" && len(status.Nodes) == 0
@@ -250,27 +250,27 @@ func (r *NodeEnvironmentReconciler) ensureNodeIdentity(environment *breakfixv1.N
 		return expected, true, nil
 	}
 	if status.Project != expected.Project || status.Network != expected.Network || status.ACL != expected.ACL || status.Profile != expected.Profile || status.ImageFingerprint != environment.Spec.Runtime.ImageFingerprint || len(status.Nodes) != len(expected.Nodes) {
-		return incusprovider.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus identity differs from Environment UID or snapshot")
+		return incus.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus identity differs from Environment UID or snapshot")
 	}
 	identity := expected
 	for index := range expected.Nodes {
 		if status.Nodes[index].Name != expected.Nodes[index].LogicalName || status.Nodes[index].InstanceName != expected.Nodes[index].InstanceName {
-			return incusprovider.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus node identity differs from Environment UID")
+			return incus.NodeEnvironmentIdentity{}, false, fmt.Errorf("recorded Incus node identity differs from Environment UID")
 		}
 		identity.Nodes[index].Address = status.Nodes[index].Address
 	}
 	return identity, false, nil
 }
 
-func nodeProviderRequest(environment *breakfixv1.NodeEnvironment, identity incusprovider.NodeEnvironmentIdentity) incusprovider.ProvisionNodeEnvironmentRequest {
-	return incusprovider.ProvisionNodeEnvironmentRequest{
+func nodeProviderRequest(environment *breakfixv1.NodeEnvironment, identity incus.NodeEnvironmentIdentity) incus.ProvisionNodeEnvironmentRequest {
+	return incus.ProvisionNodeEnvironmentRequest{
 		EnvironmentUID:        string(environment.UID),
 		Revision:              environment.Spec.Environment.Source.Revision,
 		ImageFingerprint:      environment.Spec.Runtime.ImageFingerprint,
 		ProfileRevision:       environment.Spec.Runtime.ProfileRevision,
 		NetworkPolicyRevision: environment.Spec.Runtime.NetworkPolicyRevision,
 		Identity:              identity,
-		Resources: incusprovider.NodeEnvironmentResources{
+		Resources: incus.NodeEnvironmentResources{
 			CPU: environment.Spec.Runtime.Resources.CPU, Memory: environment.Spec.Runtime.Resources.Memory,
 			Processes: environment.Spec.Runtime.Resources.Processes, RootDisk: environment.Spec.Runtime.Resources.RootDisk,
 		},
@@ -328,7 +328,7 @@ func validateNodeEnvironmentSpec(environment *breakfixv1.NodeEnvironment) error 
 	return nil
 }
 
-func applyNodeObservation(environment *breakfixv1.NodeEnvironment, observation incusprovider.NodeEnvironmentObservation) {
+func applyNodeObservation(environment *breakfixv1.NodeEnvironment, observation incus.NodeEnvironmentObservation) {
 	environment.Status.Runtime.Project = observation.Identity.Project
 	environment.Status.Runtime.Network = observation.Identity.Network
 	environment.Status.Runtime.ACL = observation.Identity.ACL
@@ -443,7 +443,7 @@ func nodeEnvironmentRequeue(environment *breakfixv1.NodeEnvironment, now time.Ti
 	return ctrl.Result{RequeueAfter: next}
 }
 
-func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity incusprovider.NodeEnvironmentIdentity) ([]breakfixv1.CheckpointResultStatus, error) {
+func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity incus.NodeEnvironmentIdentity) ([]breakfixv1.CheckpointResultStatus, error) {
 	byNode := make(map[string][]string)
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		byNode[checkpoint.Node] = append(byNode[checkpoint.Node], checkpoint.ID)
@@ -455,7 +455,7 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 			continue
 		}
 		checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		result, err := r.nodeProvider().ExecNode(checkCtx, incusprovider.ExecNodeRequest{
+		result, err := r.nodeProvider().ExecNode(checkCtx, incus.ExecNodeRequest{
 			EnvironmentUID: string(environment.UID), Revision: environment.Spec.Environment.Source.Revision,
 			Identity: identity, LogicalName: node.Name,
 			Command: []string{"/bin/bash", "/opt/breakfix/challenge/nodes/" + node.Name + "/checks.sh"},

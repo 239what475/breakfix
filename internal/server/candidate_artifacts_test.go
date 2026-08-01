@@ -4,17 +4,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
 func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 	handler := NewHandler(nil, nil, config.Config{
 		Registry: config.RegistryConfig{Address: "registry.example.com/breakfix", ClientAddress: "registry.example.com"},
-		Incus:    incusprovider.Config{NamePrefix: "bf"},
+		Incus:    incus.Config{NamePrefix: "bf"},
 	})
 	const fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -50,7 +50,7 @@ func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 	})
 
 	t.Run("node staging and final artifacts", func(t *testing.T) {
-		candidateAlias, err := incusprovider.AliasForCandidate("bf", "candidate-node")
+		candidateAlias, err := incus.AliasForCandidate("bf", "candidate-node")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
 		}
 		view.Artifact = &staging
 		view.Publication = &generation.Publication{ChallengeID: "challenge-node"}
-		challengeAlias, err := incusprovider.AliasForChallenge("bf", view.Publication.ChallengeID)
+		challengeAlias, err := incus.AliasForChallenge("bf", view.Publication.ChallengeID)
 		if err != nil {
 			t.Fatal(err)
 		}

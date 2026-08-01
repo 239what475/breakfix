@@ -10,33 +10,33 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/runtimeprofile"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type Config struct {
-	Port                 int                  `yaml:"port"`
-	HealthPort           int                  `yaml:"health_port"`
-	DataDir              string               `yaml:"data_dir"`
-	DatabaseURL          string               `yaml:"database_url"`
-	Kubeconfig           string               `yaml:"kubeconfig"`
-	Registry             RegistryConfig       `yaml:"registry"`
-	VClusterBinary       string               `yaml:"vcluster_binary"`
-	VClusterChartRepo    string               `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion string               `yaml:"vcluster_chart_version"`
-	UIOrigin             string               `yaml:"ui_origin"`
-	Namespace            string               `yaml:"namespace"`
-	CRDNamespace         string               `yaml:"crd_namespace"`
-	CooldownMinutes      int                  `yaml:"cooldown_minutes"`
-	JWTSecret            string               `yaml:"jwt_secret"`
-	InternalWorkers      InternalWorkerKeys   `yaml:"internal_workers"`
-	Worker               WorkerConfig         `yaml:"worker"`
-	Agent                AgentConfig          `yaml:"agent"`
-	OpenSandbox          OpenSandboxConfig    `yaml:"opensandbox"`
-	Incus                incusprovider.Config `yaml:"incus"`
-	Runtime              RuntimeConfig        `yaml:"runtime"`
+	Port                 int                `yaml:"port"`
+	HealthPort           int                `yaml:"health_port"`
+	DataDir              string             `yaml:"data_dir"`
+	DatabaseURL          string             `yaml:"database_url"`
+	Kubeconfig           string             `yaml:"kubeconfig"`
+	Registry             RegistryConfig     `yaml:"registry"`
+	VClusterBinary       string             `yaml:"vcluster_binary"`
+	VClusterChartRepo    string             `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion string             `yaml:"vcluster_chart_version"`
+	UIOrigin             string             `yaml:"ui_origin"`
+	Namespace            string             `yaml:"namespace"`
+	CRDNamespace         string             `yaml:"crd_namespace"`
+	CooldownMinutes      int                `yaml:"cooldown_minutes"`
+	JWTSecret            string             `yaml:"jwt_secret"`
+	InternalWorkers      InternalWorkerKeys `yaml:"internal_workers"`
+	Worker               WorkerConfig       `yaml:"worker"`
+	Agent                AgentConfig        `yaml:"agent"`
+	OpenSandbox          OpenSandboxConfig  `yaml:"opensandbox"`
+	Incus                incus.Config       `yaml:"incus"`
+	Runtime              RuntimeConfig      `yaml:"runtime"`
 }
 
 // RegistryConfig separates the OCI reference root from the HTTPS endpoint used

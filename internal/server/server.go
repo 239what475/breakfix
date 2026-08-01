@@ -6,15 +6,15 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/auth"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *k8s.Client, cfg config.Config, frontendFS fs.FS, dependencies Dependencies) (*gin.Engine, error) {
+func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *kubernetes.Client, cfg config.Config, frontendFS fs.FS, dependencies Dependencies) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())

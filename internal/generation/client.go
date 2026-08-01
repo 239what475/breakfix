@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentserver"
+	"github.com/breakfix/breakfix/internal/adapter/internalapi"
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
@@ -17,11 +17,11 @@ import (
 // Client is the Generate Worker's complete Server boundary. It intentionally
 // exposes one workflow lease rather than the former per-stage task queue.
 type Client struct {
-	server *agentserver.Client
+	server *internalapi.Client
 }
 
 func NewClient(serverURL, apiKey string) (*Client, error) {
-	server, err := agentserver.New(serverURL, apiKey)
+	server, err := internalapi.New(serverURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -164,10 +164,10 @@ func mapClientError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if agentserver.IsStatus(err, http.StatusConflict) {
+	if internalapi.IsStatus(err, http.StatusConflict) {
 		return domain.ErrLeaseLost
 	}
-	if agentserver.IsStatus(err, http.StatusNotFound) {
+	if internalapi.IsStatus(err, http.StatusNotFound) {
 		return domain.ErrWorkflowNotFound
 	}
 	return fmt.Errorf("generation worker server request: %w", err)

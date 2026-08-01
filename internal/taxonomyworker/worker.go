@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentmodel"
+	"github.com/breakfix/breakfix/internal/adapter/llm"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
@@ -364,11 +364,11 @@ func runReviewPair(ctx context.Context, cfg config.AgentConfig, curriculumInput,
 
 func invokeTypedResult[T any](ctx context.Context, cfg config.AgentConfig, name string, input taxonomyapp.ModelInput, toolName, toolDescription string, validate func(T) error) (T, error) {
 	var zero T
-	chat, err := agentmodel.NewChatModel(ctx, cfg)
+	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
 		return zero, err
 	}
-	resultTool, err := agentmodel.NewResultTool[T](toolName, toolDescription, validate)
+	resultTool, err := llm.NewResultTool[T](toolName, toolDescription, validate)
 	if err != nil {
 		return zero, err
 	}
@@ -382,7 +382,7 @@ func invokeTypedResult[T any](ctx context.Context, cfg config.AgentConfig, name 
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{resultTool}},
 		},
 		ModelRetryConfig: &adk.ModelRetryConfig{MaxRetries: 3, IsRetryAble: func(_ context.Context, err error) bool {
-			return agentmodel.IsTransientTransportError(err)
+			return llm.IsTransientTransportError(err)
 		}},
 	})
 	if err != nil {

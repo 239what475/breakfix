@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/k8s"
-	"github.com/breakfix/breakfix/internal/vclustercli"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/vcluster"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -72,12 +72,12 @@ type VK8sEnvironmentProvider interface {
 }
 
 type vclusterCommand interface {
-	Create(context.Context, vclustercli.CreateOptions) (*vclustercli.Result, error)
-	Delete(context.Context, vclustercli.DeleteOptions) (*vclustercli.Result, error)
+	Create(context.Context, vcluster.CreateOptions) (*vcluster.Result, error)
+	Delete(context.Context, vcluster.DeleteOptions) (*vcluster.Result, error)
 }
 
 type kubernetesVK8sProvider struct {
-	k8s                        *k8s.Client
+	k8s                        *kubernetes.Client
 	vcluster                   vclusterCommand
 	namespacePrefix            string
 	controlNamespace           string
@@ -94,8 +94,8 @@ func (p *kubernetesVK8sProvider) EnvironmentIdentity(environmentUID string) (VK8
 	}
 	//nolint:gosec // KubeconfigSecretName is a Kubernetes object name, not credential material.
 	return VK8sEnvironmentIdentity{
-		Namespace:            k8s.DNSLabelName(p.namespacePrefix+"-vk8s", environmentUID),
-		VClusterName:         k8s.DNSLabelNameWithLimit(maxVClusterReleaseNameLength, "vc", environmentUID),
+		Namespace:            kubernetes.DNSLabelName(p.namespacePrefix+"-vk8s", environmentUID),
+		VClusterName:         kubernetes.DNSLabelNameWithLimit(maxVClusterReleaseNameLength, "vc", environmentUID),
 		KubeconfigSecretName: "breakfix-vk8s-kubeconfig",
 		TerminalPodName:      "terminal",
 	}, nil
@@ -185,10 +185,10 @@ func (p *kubernetesVK8sProvider) Delete(ctx context.Context, request VK8sProvisi
 	if err := verifyVK8sNamespaceOwner(namespace, request); err != nil {
 		return false, err
 	}
-	_, err = p.vcluster.Delete(ctx, vclustercli.DeleteOptions{
+	_, err = p.vcluster.Delete(ctx, vcluster.DeleteOptions{
 		Name: request.Identity.VClusterName, Namespace: request.Identity.Namespace,
 	})
-	if err != nil && !vclustercli.IsCode(err, vclustercli.ErrNotFound) {
+	if err != nil && !vcluster.IsCode(err, vcluster.ErrNotFound) {
 		return false, fmt.Errorf("delete vcluster: %w", err)
 	}
 	uid := namespace.UID
@@ -255,12 +255,12 @@ func (p *kubernetesVK8sProvider) ensureVCluster(ctx context.Context, request VK8
 		return err
 	}
 	defer func() { _ = os.Remove(valuesFile) }()
-	_, err = p.vcluster.Create(ctx, vclustercli.CreateOptions{
+	_, err = p.vcluster.Create(ctx, vcluster.CreateOptions{
 		Name: request.Identity.VClusterName, Namespace: request.Identity.Namespace,
 		Connect: false, BackgroundProxy: false, ChartRepo: p.chartRepo,
 		ChartVersion: p.chartVersion, ValuesFiles: []string{valuesFile},
 	})
-	if err != nil && !vclustercli.IsCode(err, vclustercli.ErrAlreadyExists) {
+	if err != nil && !vcluster.IsCode(err, vcluster.ErrAlreadyExists) {
 		return fmt.Errorf("create vcluster: %w", err)
 	}
 	return nil

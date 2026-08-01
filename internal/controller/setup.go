@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/k8s"
-	"github.com/breakfix/breakfix/internal/vclustercli"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/vcluster"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -27,7 +27,7 @@ type Dependencies struct {
 
 // Setup registers only the two final Environment reconcilers. Workflow state
 // belongs to Server/PostgreSQL and is never reconciled by this process.
-func Setup(manager ctrl.Manager, k8sClient *k8s.Client, options Options, dependencies Dependencies) error {
+func Setup(manager ctrl.Manager, k8sClient *kubernetes.Client, options Options, dependencies Dependencies) error {
 	if err := breakfixv1.AddToScheme(manager.GetScheme()); err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func Setup(manager ctrl.Manager, k8sClient *k8s.Client, options Options, depende
 
 	vk8sProvider := dependencies.VK8sProvider
 	if vk8sProvider == nil {
-		vclusterClient := &vclustercli.Client{BinaryPath: options.VClusterBinary}
+		vclusterClient := &vcluster.Client{BinaryPath: options.VClusterBinary}
 		if _, err := vclusterClient.Validate(context.Background()); err != nil {
 			return fmt.Errorf("validate vcluster CLI: %w", err)
 		}

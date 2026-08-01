@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/build"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/server"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -52,12 +52,12 @@ func main() {
 	}
 	defer func() { _ = database.Close() }()
 
-	k8sClient, err := k8s.New(cfg.Kubeconfig)
+	k8sClient, err := kubernetes.New(cfg.Kubeconfig)
 	if err != nil {
 		slog.Error("failed to create K8s client", "err", err)
 		os.Exit(1)
 	}
-	incusClient, err := incusprovider.NewReconnectableClient(cfg.Incus, incusprovider.RoleServer)
+	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleServer)
 	if err != nil {
 		slog.Error("invalid Incus provider configuration", "err", err)
 		os.Exit(1)

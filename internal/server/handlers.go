@@ -5,15 +5,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/oci"
+	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/assistant"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/k8s"
-	"github.com/breakfix/breakfix/internal/opensandbox"
-	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
@@ -21,11 +21,11 @@ import (
 // by domain so routing stays stable while each endpoint's responsibility is local.
 type Handler struct {
 	db                 *postgres.Store
-	k8s                *k8s.Client
+	k8s                *kubernetes.Client
 	authoring          *appauthoring.RuntimeService
 	assistant          *assistant.Service
 	registryAddr       string
-	registryClient     registry.Client
+	registryClient     oci.Client
 	namespace          string
 	crdNamespace       string
 	challengesDir      string
@@ -44,7 +44,7 @@ type Handler struct {
 	generatorSandbox   *opensandbox.Client
 	generatorWorkspace *appgeneration.Manager
 	runtimeConfig      config.RuntimeConfig
-	incusConfig        incusprovider.Config
+	incusConfig        incus.Config
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness
 }
@@ -53,15 +53,15 @@ type Dependencies struct {
 	NodeTerminal NodeTerminalProvider
 }
 
-func NewHandler(database *postgres.Store, client *k8s.Client, cfg config.Config) *Handler {
+func NewHandler(database *postgres.Store, client *kubernetes.Client, cfg config.Config) *Handler {
 	return NewHandlerWithDependencies(database, client, cfg, Dependencies{})
 }
 
-func NewHandlerWithDependencies(database *postgres.Store, client *k8s.Client, cfg config.Config, dependencies Dependencies) *Handler {
+func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) *Handler {
 	taxonomyStore := taxonomy.NewStore(cfg.DataDir)
-	registryClient, registryErr := registry.NewClient(registry.ClientOptions{
+	registryClient, registryErr := oci.NewClient(oci.ClientOptions{
 		Endpoint:        cfg.Registry.ClientAddress,
-		Credentials:     registry.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
+		Credentials:     oci.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
 		TrustBundleFile: cfg.Registry.TrustBundleFile,
 	})
 	handler := &Handler{

@@ -3,13 +3,13 @@ package server
 import (
 	"fmt"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
-func candidateExecutionSnapshot(entry challenge.Entry, runtime config.RuntimeConfig, incus incusprovider.Config) (generation.ExecutionSnapshot, error) {
+func candidateExecutionSnapshot(entry challenge.Entry, runtime config.RuntimeConfig, incus incus.Config) (generation.ExecutionSnapshot, error) {
 	checkpoints := make([]generation.CheckpointSnapshot, 0, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
 		checkpoints = append(checkpoints, generation.CheckpointSnapshot{ID: checkpoint.ID, Node: checkpoint.Node})

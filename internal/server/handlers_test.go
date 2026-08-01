@@ -12,9 +12,9 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/testpostgres"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -432,7 +432,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 	t.Cleanup(server.Close)
 	kubeconfig := filepath.Join(root, "kubeconfig")
 	writeTestFile(t, kubeconfig, "apiVersion: v1\nclusters:\n- cluster:\n    server: "+server.URL+"\n  name: test\ncontexts:\n- context:\n    cluster: test\n    user: test\n  name: test\ncurrent-context: test\nkind: Config\nusers:\n- name: test\n  user: {}\n")
-	client, err := k8s.New(kubeconfig)
+	client, err := kubernetes.New(kubeconfig)
 	if err != nil {
 		t.Fatal(err)
 	}

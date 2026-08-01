@@ -7,9 +7,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/agentmodel"
-	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/adapter/llm"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
@@ -86,7 +86,7 @@ func sameFeedback(left, right generation.Feedback) bool {
 }
 
 func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSandboxBackend, plan authoring.Plan, feedback generation.Feedback) error {
-	chat, err := agentmodel.NewChatModel(ctx, cfg)
+	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSand
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return agentmodel.IsTransientTransportError(err)
+				return llm.IsTransientTransportError(err)
 			},
 		},
 	})
@@ -143,11 +143,11 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 	if candidate == nil {
 		return Judgement{}, errors.New("judge candidate is required")
 	}
-	chat, err := agentmodel.NewChatModel(ctx, cfg)
+	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
 		return Judgement{}, err
 	}
-	resultTool, err := agentmodel.NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
+	resultTool, err := llm.NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
 	if err != nil {
 		return Judgement{}, err
 	}
@@ -163,7 +163,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return agentmodel.IsTransientTransportError(err)
+				return llm.IsTransientTransportError(err)
 			},
 		},
 	})

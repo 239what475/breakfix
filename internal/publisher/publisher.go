@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/registry"
 )
 
 type Registry interface {
@@ -25,8 +25,8 @@ type Registry interface {
 }
 
 type NodeImagePublisher interface {
-	PublishNodeImage(context.Context, incusprovider.PublishNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
-	PublishChallengeNodeImage(context.Context, incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
+	PublishNodeImage(context.Context, incus.PublishNodeImageRequest) (incus.PublishNodeImageResult, error)
+	PublishChallengeNodeImage(context.Context, incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
 	DeleteBuildNodeImageAttempt(context.Context, string, int64) error
 	DeleteChallengeNodeImage(context.Context, string, string) error
@@ -78,7 +78,7 @@ func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Exe
 		if err := os.WriteFile(archivePath, buildArchive, 0o400); err != nil {
 			return generation.ArtifactReference{}, err
 		}
-		if err := registry.ValidateOCIArchive(archivePath); err != nil {
+		if err := oci.ValidateOCIArchive(archivePath); err != nil {
 			return generation.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
 		}
 		target, err := e.candidateImage(view.ID)
@@ -102,7 +102,7 @@ func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Exe
 		if err != nil {
 			return generation.ArtifactReference{}, err
 		}
-		published, err := e.node.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
+		published, err := e.node.PublishNodeImage(ctx, incus.PublishNodeImageRequest{
 			CandidateRevisionID: view.ID,
 			Revision:            view.ArchiveSHA256,
 			Build:               build,
@@ -143,10 +143,10 @@ func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Ex
 		if e.node == nil {
 			return generation.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
-		published, err := e.node.PublishChallengeNodeImage(ctx, incusprovider.PublishChallengeNodeImageRequest{
+		published, err := e.node.PublishChallengeNodeImage(ctx, incus.PublishChallengeNodeImageRequest{
 			CandidateRevisionID: view.ID,
 			ChallengeID:         view.Publication.ChallengeID,
-			Staging: incusprovider.PublishNodeImageResult{
+			Staging: incus.PublishNodeImageResult{
 				Alias: view.Artifact.IncusAlias, Fingerprint: view.Artifact.IncusFingerprint,
 			},
 		})
@@ -272,11 +272,11 @@ func (e *Executor) challengeImage(challengeID string) (string, error) {
 	return candidate.ChallengeOCIImageReference(e.registryRoot, challengeID)
 }
 
-func nodeBuildResult(build *generation.BuildOutput) (incusprovider.BuildNodeImageResult, error) {
+func nodeBuildResult(build *generation.BuildOutput) (incus.BuildNodeImageResult, error) {
 	if build == nil || build.Incus == nil {
-		return incusprovider.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
+		return incus.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
 	}
-	return incusprovider.BuildNodeImageResult{
+	return incus.BuildNodeImageResult{
 		WorkflowID:   build.Incus.WorkflowID,
 		Attempt:      build.Incus.Attempt,
 		InstanceName: build.Incus.InstanceName,

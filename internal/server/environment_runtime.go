@@ -7,9 +7,9 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/k8s"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -146,7 +146,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				for index, node := range entry.Nodes {
 					nodes[index] = breakfixv1.NodeRuntimeNodeSpec{Name: node.Name, Title: node.Title}
 				}
-				name := k8s.RandomID()
+				name := kubernetes.RandomID()
 				environment := &breakfixv1.NodeEnvironment{
 					ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, entry.ID, breakfixv1.EnvironmentPurposeLearning),
 					Spec: breakfixv1.NodeEnvironmentSpec{
@@ -208,7 +208,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				if err != nil {
 					return "", err
 				}
-				name := k8s.RandomID()
+				name := kubernetes.RandomID()
 				resources := h.runtimeConfig.K8s.Resources
 				environment := &breakfixv1.VK8sEnvironment{
 					ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, entry.ID, breakfixv1.EnvironmentPurposeLearning),

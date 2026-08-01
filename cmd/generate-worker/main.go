@@ -9,15 +9,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/builder"
 	"github.com/breakfix/breakfix/internal/config"
 	"github.com/breakfix/breakfix/internal/generateworker"
 	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/publisher"
-	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/verifier"
 	"github.com/breakfix/breakfix/internal/workerhealth"
 )
@@ -48,20 +48,20 @@ func main() {
 		fatal("create generator executor", err)
 	}
 
-	generateIncus, err := incusprovider.NewReconnectableClient(cfg.Incus, incusprovider.RoleGenerate)
+	generateIncus, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleGenerate)
 	if err != nil {
 		fatal("create Generate Worker Incus client", err)
 	}
 	defer generateIncus.Close()
-	registryClient, err := registry.NewClient(registry.ClientOptions{
+	registryClient, err := oci.NewClient(oci.ClientOptions{
 		Endpoint:        cfg.Registry.ClientAddress,
-		Credentials:     registry.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
+		Credentials:     oci.Credentials{Username: cfg.Registry.Username, Password: cfg.Registry.Password},
 		TrustBundleFile: cfg.Registry.TrustBundleFile,
 	})
 	if err != nil {
 		fatal("create registry client", err)
 	}
-	k8sClient, err := k8s.New(cfg.Kubeconfig)
+	k8sClient, err := kubernetes.New(cfg.Kubeconfig)
 	if err != nil {
 		fatal("create Kubernetes client", err)
 	}

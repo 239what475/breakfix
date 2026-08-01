@@ -11,9 +11,9 @@ import (
 type StartAgentRunRequest struct {
 	domain.LeaseCredential
 	ExpectedState domain.WorkflowState `json:"expected_state"`
-	Purpose       string `json:"purpose"`
-	Model         string `json:"model"`
-	PromptVersion string `json:"prompt_version"`
+	Purpose       string               `json:"purpose"`
+	Model         string               `json:"model"`
+	PromptVersion string               `json:"prompt_version"`
 }
 
 func (r StartAgentRunRequest) Validate(workflowID string) error {
@@ -43,16 +43,16 @@ type PhaseRequest struct {
 	domain.LeaseCredential
 	ExpectedState domain.WorkflowState `json:"expected_state"`
 
-	GeneratedCandidate      *domain.GeneratedCandidate               `json:"generated_candidate,omitempty"`
-	Judgement               *domain.Judgement                        `json:"judgement,omitempty"`
-	Build                   *domain.BuildResult                      `json:"build,omitempty"`
-	ArtifactPublish         *domain.ArtifactPublishResult            `json:"artifact_publish,omitempty"`
-	VerificationEnvironment *domain.VerificationEnvironmentResult    `json:"verification_environment,omitempty"`
-	Verification            *domain.VerificationResult               `json:"verification,omitempty"`
-	ChallengePublish        *domain.ChallengePublishResult           `json:"challenge_publish,omitempty"`
-	Cleanup                 *domain.CleanupResult                    `json:"cleanup,omitempty"`
-	InfrastructureFailure   *domain.InfrastructureFailureResult      `json:"infrastructure_failure,omitempty"`
-	ArtifactFailure         *domain.ArtifactFailureResult            `json:"artifact_failure,omitempty"`
+	GeneratedCandidate      *domain.GeneratedCandidate            `json:"generated_candidate,omitempty"`
+	Judgement               *domain.Judgement                     `json:"judgement,omitempty"`
+	Build                   *domain.BuildResult                   `json:"build,omitempty"`
+	ArtifactPublish         *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
+	VerificationEnvironment *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
+	Verification            *domain.VerificationResult            `json:"verification,omitempty"`
+	ChallengePublish        *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
+	Cleanup                 *domain.CleanupResult                 `json:"cleanup,omitempty"`
+	InfrastructureFailure   *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
+	ArtifactFailure         *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
 }
 
 func (r PhaseRequest) ResultCount() int {

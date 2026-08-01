@@ -8,6 +8,7 @@ import (
 )
 
 // assets is populated from web/dist by the web-assets build target.
+//
 //go:embed all:assets
 var embeddedAssets embed.FS
 

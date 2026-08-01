@@ -10,24 +10,24 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
+	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/incusprovider"
-	"github.com/breakfix/breakfix/internal/registry"
 )
 
 type NodeImageBuilder interface {
-	BuildNodeImage(context.Context, incusprovider.BuildNodeImageRequest) (incusprovider.BuildNodeImageResult, error)
+	BuildNodeImage(context.Context, incus.BuildNodeImageRequest) (incus.BuildNodeImageResult, error)
 }
 
 type Executor struct {
 	node   NodeImageBuilder
-	config incusprovider.Config
+	config incus.Config
 }
 
-func NewExecutor(node NodeImageBuilder, config incusprovider.Config) *Executor {
+func NewExecutor(node NodeImageBuilder, config incus.Config) *Executor {
 	return &Executor{node: node, config: config}
 }
 
@@ -71,13 +71,13 @@ func (e *Executor) buildNode(ctx context.Context, execution generation.Execution
 	if e.node == nil {
 		return generation.BuildResult{}, errors.New("node image builder is unavailable")
 	}
-	files, err := incusprovider.ImageFilesFromDirectory(bundle)
+	files, err := incus.ImageFilesFromDirectory(bundle)
 	if err != nil {
 		return generation.BuildResult{}, generation.NewArtifactError("CANDIDATE_FILES_INVALID", err.Error())
 	}
 	view := execution.Context.Candidate
 	attempt := int64(execution.Claim.StateAttempt + 1)
-	result, err := e.node.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
+	result, err := e.node.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
 		WorkflowID: execution.Claim.Workflow.ID,
 		Attempt:    attempt,
 		Revision:   view.ArchiveSHA256,
@@ -109,7 +109,7 @@ func (e *Executor) buildK8s(bundle, root string, base []byte) (generation.BuildR
 	if err := os.WriteFile(basePath, base, 0o400); err != nil {
 		return generation.BuildResult{}, err
 	}
-	if _, err := registry.AppendChallengeLayer(basePath, bundle, outputPath); err != nil {
+	if _, err := oci.AppendChallengeLayer(basePath, bundle, outputPath); err != nil {
 		return generation.BuildResult{}, fmt.Errorf("append deterministic K8s challenge layer: %w", err)
 	}
 	archive, err := os.ReadFile(outputPath)

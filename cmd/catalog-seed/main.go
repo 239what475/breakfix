@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/catalogseed"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 )
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
 	if *timeout <= 0 {
 		fatal(fmt.Errorf("timeout must be positive"))
 	}
-	cfg := incusprovider.Config{
+	cfg := incus.Config{
 		Endpoint:               *endpoint,
 		StoragePool:            *storagePool,
 		NetworkDriver:          "bridge",
@@ -60,12 +60,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	provider, err := connectRole(ctx, cfg, *serverCertificate, *tlsDir, incusprovider.RoleGenerate)
+	provider, err := connectRole(ctx, cfg, *serverCertificate, *tlsDir, incus.RoleGenerate)
 	if err != nil {
 		fatal(err)
 	}
 	defer provider.Close()
-	if _, err := provider.Preflight(ctx, incusprovider.RoleGenerate); err != nil {
+	if _, err := provider.Preflight(ctx, incus.RoleGenerate); err != nil {
 		fatal(fmt.Errorf("preflight generate Incus identity: %w", err))
 	}
 
@@ -83,14 +83,14 @@ func main() {
 	fmt.Printf("Published catalog Node image for %s: %s\n", result.ChallengeID, result.Fingerprint)
 }
 
-func connectRole(ctx context.Context, cfg incusprovider.Config, serverCertificate, tlsDir string, role incusprovider.Role) (*incusprovider.Client, error) {
+func connectRole(ctx context.Context, cfg incus.Config, serverCertificate, tlsDir string, role incus.Role) (*incus.Client, error) {
 	roleDir := filepath.Join(tlsDir, string(role))
-	cfg.TLS = incusprovider.TLSConfig{
+	cfg.TLS = incus.TLSConfig{
 		ServerCertificateFile: serverCertificate,
 		ClientCertificateFile: filepath.Join(roleDir, "client.crt"),
 		ClientKeyFile:         filepath.Join(roleDir, "client.key"),
 	}
-	client, err := incusprovider.Connect(ctx, cfg)
+	client, err := incus.Connect(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s Incus identity: %w", role, err)
 	}
@@ -109,22 +109,22 @@ func splitCIDRs(value string) []string {
 }
 
 type seedProvider struct {
-	client *incusprovider.Client
+	client *incus.Client
 }
 
-func (p *seedProvider) BuildNodeImage(ctx context.Context, request incusprovider.BuildNodeImageRequest) (incusprovider.BuildNodeImageResult, error) {
+func (p *seedProvider) BuildNodeImage(ctx context.Context, request incus.BuildNodeImageRequest) (incus.BuildNodeImageResult, error) {
 	return p.client.BuildNodeImage(ctx, request)
 }
 
-func (p *seedProvider) PublishNodeImage(ctx context.Context, request incusprovider.PublishNodeImageRequest) (incusprovider.PublishNodeImageResult, error) {
+func (p *seedProvider) PublishNodeImage(ctx context.Context, request incus.PublishNodeImageRequest) (incus.PublishNodeImageResult, error) {
 	return p.client.PublishNodeImage(ctx, request)
 }
 
-func (p *seedProvider) PublishChallengeNodeImage(ctx context.Context, request incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error) {
+func (p *seedProvider) PublishChallengeNodeImage(ctx context.Context, request incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error) {
 	return p.client.PublishChallengeNodeImage(ctx, request)
 }
 
-func (p *seedProvider) FindChallengeNodeImage(ctx context.Context, challengeID, revision string) (incusprovider.PublishNodeImageResult, bool, error) {
+func (p *seedProvider) FindChallengeNodeImage(ctx context.Context, challengeID, revision string) (incus.PublishNodeImageResult, bool, error) {
 	return p.client.FindChallengeNodeImage(ctx, challengeID, revision)
 }
 
@@ -132,7 +132,7 @@ func (p *seedProvider) DeleteCandidateNodeImage(ctx context.Context, candidateID
 	return p.client.DeleteCandidateNodeImage(ctx, candidateID, fingerprint)
 }
 
-func (p *seedProvider) DeleteBuildNodeImage(ctx context.Context, build incusprovider.BuildNodeImageResult) error {
+func (p *seedProvider) DeleteBuildNodeImage(ctx context.Context, build incus.BuildNodeImageResult) error {
 	return p.client.DeleteBuildNodeImage(ctx, build)
 }
 

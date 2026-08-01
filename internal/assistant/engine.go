@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/agentmodel"
-	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/adapter/llm"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -43,7 +43,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 		if err == nil {
 			return result, nil
 		}
-		if !agentmodel.IsTransientTransportError(err) || attempt == maxAssistantTransportAttempts-1 {
+		if !llm.IsTransientTransportError(err) || attempt == maxAssistantTransportAttempts-1 {
 			return EngineResult{}, err
 		}
 		if emit != nil {
@@ -57,7 +57,7 @@ func RunWithEino(ctx context.Context, cfg config.AgentConfig, request Request, h
 }
 
 func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request Request, history []agent.Message, emit func(StreamEvent)) (EngineResult, error) {
-	chat, err := agentmodel.NewChatModel(ctx, cfg)
+	chat, err := llm.NewChatModel(ctx, cfg)
 	if err != nil {
 		return EngineResult{}, err
 	}

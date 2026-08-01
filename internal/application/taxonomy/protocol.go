@@ -104,8 +104,8 @@ func (c Context) ValidFor(claim domain.Claim) bool {
 type StartAgentRunRequest struct {
 	domain.LeaseCredential
 	ExpectedState domain.WorkflowState `json:"expected_state"`
-	Role          AgentRole     `json:"role"`
-	Model         string        `json:"model"`
+	Role          AgentRole            `json:"role"`
+	Model         string               `json:"model"`
 }
 
 func (r StartAgentRunRequest) Validate(workflowID string) error {
@@ -123,13 +123,13 @@ type StartAgentRunResponse struct {
 }
 
 type MapperResult struct {
-	RunID     string    `json:"run_id"`
+	RunID     string           `json:"run_id"`
 	ChangeSet domain.ChangeSet `json:"changeset"`
 }
 
 type ReviewPairResult struct {
-	CurriculumRunID string `json:"curriculum_run_id"`
-	SRERunID        string `json:"sre_run_id"`
+	CurriculumRunID string        `json:"curriculum_run_id"`
+	SRERunID        string        `json:"sre_run_id"`
 	Curriculum      domain.Review `json:"curriculum"`
 	SRE             domain.Review `json:"sre"`
 }

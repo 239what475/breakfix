@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/agentserver"
+	"github.com/breakfix/breakfix/internal/adapter/internalapi"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -23,10 +23,10 @@ type RuntimeClient interface {
 	ArchiveWorkspace(context.Context, generation.Claim) (ArchiveResponse, error)
 }
 
-type InternalClient struct{ server *agentserver.Client }
+type InternalClient struct{ server *internalapi.Client }
 
 func NewInternalClient(serverURL, apiKey string) (*InternalClient, error) {
-	client, err := agentserver.New(serverURL, apiKey)
+	client, err := internalapi.New(serverURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -111,10 +111,10 @@ func mapClientError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if agentserver.IsStatus(err, http.StatusConflict) {
+	if internalapi.IsStatus(err, http.StatusConflict) {
 		return generation.ErrLeaseLost
 	}
-	if agentserver.IsStatus(err, http.StatusNotFound) {
+	if internalapi.IsStatus(err, http.StatusNotFound) {
 		return generation.ErrWorkflowNotFound
 	}
 	return fmt.Errorf("generator server request: %w", err)

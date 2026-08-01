@@ -6,9 +6,9 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -99,7 +99,7 @@ func TestLearningNodeRuntimeSnapshotUsesPlatformConfiguration(t *testing.T) {
 		Runtime: config.RuntimeConfig{Node: config.NodeRuntimeConfig{
 			ProfileRevision: "node-profile-v1", NetworkPolicyRevision: "node-network-v1",
 		}},
-		Incus: incusprovider.Config{NodeCPU: "1", NodeMemory: "512MiB", NodeProcesses: 512, NodeRootDisk: "5GiB"},
+		Incus: incus.Config{NodeCPU: "1", NodeMemory: "512MiB", NodeProcesses: 512, NodeRootDisk: "5GiB"},
 	})
 	if handler.runtimeConfig.Node.ProfileRevision != "node-profile-v1" || handler.incusConfig.NodeProcesses != 512 {
 		t.Fatalf("handler lost fixed runtime configuration: %#v %#v", handler.runtimeConfig, handler.incusConfig)

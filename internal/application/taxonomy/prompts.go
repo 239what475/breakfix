@@ -108,7 +108,7 @@ func reviewerModelInput(systemPrompt, task, challengeID, title, challengeRevisio
 }
 
 type referenceCatalogDocument struct {
-	Revision          string         `json:"revision"`
+	Revision          string                `json:"revision"`
 	Skills            []domain.Skill        `json:"skills"`
 	Tags              []domain.Tag          `json:"tags"`
 	SkillRequirements []domain.SkillMapping `json:"skill_requirements"`
@@ -158,8 +158,8 @@ type reviewCandidateDocument struct {
 }
 
 type reviewDefinition struct {
-	Title           string          `json:"title"`
-	Definition      string          `json:"definition"`
+	Title           string                 `json:"title"`
+	Definition      string                 `json:"definition"`
 	MappingGuidance domain.MappingGuidance `json:"mapping_guidance"`
 }
 

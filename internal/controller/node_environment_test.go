@@ -7,7 +7,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/incusprovider"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -17,50 +17,50 @@ import (
 )
 
 type fakeNodeProvider struct {
-	identity         incusprovider.NodeEnvironmentIdentity
-	observation      incusprovider.NodeEnvironmentObservation
+	identity         incus.NodeEnvironmentIdentity
+	observation      incus.NodeEnvironmentObservation
 	preflightErr     error
 	provisionErr     error
 	observeErr       error
 	deleteErr        error
-	execResult       incusprovider.ExecNodeResult
+	execResult       incus.ExecNodeResult
 	execErr          error
 	provisionCalls   int
 	observeCalls     int
 	preflightCalls   int
 	deleteCalls      int
 	execCalls        int
-	lastExecRequest  incusprovider.ExecNodeRequest
-	lastProvisionReq incusprovider.ProvisionNodeEnvironmentRequest
+	lastExecRequest  incus.ExecNodeRequest
+	lastProvisionReq incus.ProvisionNodeEnvironmentRequest
 }
 
-func (f *fakeNodeProvider) Preflight(context.Context) (incusprovider.PreflightResult, error) {
+func (f *fakeNodeProvider) Preflight(context.Context) (incus.PreflightResult, error) {
 	f.preflightCalls++
-	return incusprovider.PreflightResult{}, f.preflightErr
+	return incus.PreflightResult{}, f.preflightErr
 }
 
-func (f *fakeNodeProvider) NodeEnvironmentIdentity(string, []string) (incusprovider.NodeEnvironmentIdentity, error) {
+func (f *fakeNodeProvider) NodeEnvironmentIdentity(string, []string) (incus.NodeEnvironmentIdentity, error) {
 	return f.identity, nil
 }
 
-func (f *fakeNodeProvider) ProvisionNodeEnvironment(_ context.Context, request incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error) {
+func (f *fakeNodeProvider) ProvisionNodeEnvironment(_ context.Context, request incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error) {
 	f.provisionCalls++
 	f.lastProvisionReq = request
 	return f.observation, f.provisionErr
 }
 
-func (f *fakeNodeProvider) ObserveNodeEnvironment(_ context.Context, request incusprovider.ProvisionNodeEnvironmentRequest) (incusprovider.NodeEnvironmentObservation, error) {
+func (f *fakeNodeProvider) ObserveNodeEnvironment(_ context.Context, request incus.ProvisionNodeEnvironmentRequest) (incus.NodeEnvironmentObservation, error) {
 	f.observeCalls++
 	f.lastProvisionReq = request
 	return f.observation, f.observeErr
 }
 
-func (f *fakeNodeProvider) DeleteNodeEnvironment(_ context.Context, _ incusprovider.ProvisionNodeEnvironmentRequest) error {
+func (f *fakeNodeProvider) DeleteNodeEnvironment(_ context.Context, _ incus.ProvisionNodeEnvironmentRequest) error {
 	f.deleteCalls++
 	return f.deleteErr
 }
 
-func (f *fakeNodeProvider) ExecNode(_ context.Context, request incusprovider.ExecNodeRequest) (incusprovider.ExecNodeResult, error) {
+func (f *fakeNodeProvider) ExecNode(_ context.Context, request incus.ExecNodeRequest) (incus.ExecNodeResult, error) {
 	f.execCalls++
 	f.lastExecRequest = request
 	return f.execResult, f.execErr
@@ -87,7 +87,7 @@ func TestNodeVerificationEnvironmentBecomesReadyWithoutAutomaticChecks(t *testin
 func TestNodeLearningEnvironmentCompletesFromNodeCheckpoint(t *testing.T) {
 	environment := validNodeEnvironment("node-learning", breakfixv1.EnvironmentPurposeLearning)
 	provider := readyNodeProvider()
-	provider.execResult = incusprovider.ExecNodeResult{Stdout: `{"checks":[{"id":"proxy-ready","passed":true,"summary":"proxy is ready"}]}`}
+	provider.execResult = incus.ExecNodeResult{Stdout: `{"checks":[{"id":"proxy-ready","passed":true,"summary":"proxy is ready"}]}`}
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 3)
@@ -108,7 +108,7 @@ func TestNodeRuntimeInitializationFailureIsArtifactFailure(t *testing.T) {
 	environment := validNodeEnvironment("node-init-failed", breakfixv1.EnvironmentPurposeVerification)
 	provider := readyNodeProvider()
 	provider.observation.Ready = false
-	provider.observation.Nodes[0].Initialization = incusprovider.NodeInitialization{Failed: true, ExitCode: 23, Message: "generate failed"}
+	provider.observation.Nodes[0].Initialization = incus.NodeInitialization{Failed: true, ExitCode: 23, Message: "generate failed"}
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 3)
@@ -124,7 +124,7 @@ func TestNodeRuntimeInitializationFailureIsArtifactFailure(t *testing.T) {
 func TestNodeProviderUnavailableRemainsRetryableInfrastructureState(t *testing.T) {
 	environment := validNodeEnvironment("node-provider-failed", breakfixv1.EnvironmentPurposeVerification)
 	provider := readyNodeProvider()
-	provider.provisionErr = fmt.Errorf("dial Incus: %w", incusprovider.ErrUnavailable)
+	provider.provisionErr = fmt.Errorf("dial Incus: %w", incus.ErrUnavailable)
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 3)
@@ -140,7 +140,7 @@ func TestNodeProviderUnavailableRemainsRetryableInfrastructureState(t *testing.T
 func TestNodePreflightStopsProvisioningWhenProviderIsUnavailable(t *testing.T) {
 	environment := validNodeEnvironment("node-preflight-failed", breakfixv1.EnvironmentPurposeVerification)
 	provider := readyNodeProvider()
-	provider.preflightErr = fmt.Errorf("dial provider: %w", incusprovider.ErrUnavailable)
+	provider.preflightErr = fmt.Errorf("dial provider: %w", incus.ErrUnavailable)
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 3)
@@ -162,7 +162,7 @@ func TestReadyNodeEnvironmentRemainsReadyWhenProviderIsTemporarilyUnavailable(t 
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 3)
-	provider.observeErr = fmt.Errorf("dial provider: %w", incusprovider.ErrUnavailable)
+	provider.observeErr = fmt.Errorf("dial provider: %w", incus.ErrUnavailable)
 	reconcileNodeTimes(t, reconciler, environment.Name, 1)
 
 	current := getNodeEnvironment(t, kubeClient, environment.Name)
@@ -180,7 +180,7 @@ func TestNodeDeletionRunsExactProviderCleanupBeforeRemovingFinalizer(t *testing.
 	now := metav1.NewTime(time.Now().UTC())
 	environment.DeletionTimestamp = &now
 	provider := readyNodeProvider()
-	provider.preflightErr = fmt.Errorf("base image unavailable: %w", incusprovider.ErrUnavailable)
+	provider.preflightErr = fmt.Errorf("base image unavailable: %w", incus.ErrUnavailable)
 	reconciler, kubeClient := newNodeTestReconciler(t, environment, provider)
 
 	reconcileNodeTimes(t, reconciler, environment.Name, 1)
@@ -231,20 +231,20 @@ func validNodeEnvironment(name string, purpose breakfixv1.EnvironmentPurpose) *b
 }
 
 func readyNodeProvider() *fakeNodeProvider {
-	identity := incusprovider.NodeEnvironmentIdentity{
+	identity := incus.NodeEnvironmentIdentity{
 		Project: "bf-project", Network: "bf-network", ACL: "bf-acl", Profile: "bf-profile",
-		Nodes: []incusprovider.NodeIdentity{
+		Nodes: []incus.NodeIdentity{
 			{LogicalName: "client", InstanceName: "bf-client", Address: "10.1.1.10"},
 			{LogicalName: "proxy", InstanceName: "bf-proxy", Address: "10.1.1.11"},
 		},
 	}
 	return &fakeNodeProvider{
 		identity: identity,
-		observation: incusprovider.NodeEnvironmentObservation{
+		observation: incus.NodeEnvironmentObservation{
 			Identity: identity, Ready: true,
-			Nodes: []incusprovider.NodeObservation{
-				{Node: identity.Nodes[0], Running: true, Initialization: incusprovider.NodeInitialization{Complete: true}},
-				{Node: identity.Nodes[1], Running: true, Initialization: incusprovider.NodeInitialization{Complete: true}},
+			Nodes: []incus.NodeObservation{
+				{Node: identity.Nodes[0], Running: true, Initialization: incus.NodeInitialization{Complete: true}},
+				{Node: identity.Nodes[1], Running: true, Initialization: incus.NodeInitialization{Complete: true}},
 			},
 		},
 	}

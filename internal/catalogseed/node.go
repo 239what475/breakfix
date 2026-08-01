@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,12 +25,12 @@ import (
 // a committed Node challenge. It does not expose environment provisioning or
 // arbitrary Incus operations to the seed command.
 type NodeImageProvider interface {
-	BuildNodeImage(context.Context, incusprovider.BuildNodeImageRequest) (incusprovider.BuildNodeImageResult, error)
-	PublishNodeImage(context.Context, incusprovider.PublishNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
-	PublishChallengeNodeImage(context.Context, incusprovider.PublishChallengeNodeImageRequest) (incusprovider.PublishNodeImageResult, error)
-	FindChallengeNodeImage(context.Context, string, string) (incusprovider.PublishNodeImageResult, bool, error)
+	BuildNodeImage(context.Context, incus.BuildNodeImageRequest) (incus.BuildNodeImageResult, error)
+	PublishNodeImage(context.Context, incus.PublishNodeImageRequest) (incus.PublishNodeImageResult, error)
+	PublishChallengeNodeImage(context.Context, incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error)
+	FindChallengeNodeImage(context.Context, string, string) (incus.PublishNodeImageResult, bool, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
-	DeleteBuildNodeImage(context.Context, incusprovider.BuildNodeImageResult) error
+	DeleteBuildNodeImage(context.Context, incus.BuildNodeImageResult) error
 }
 
 type NodeOptions struct {
@@ -85,7 +85,7 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 	digest := strings.TrimPrefix(revision, "sha256:")
 	candidateID := "catalog-" + digest[:24]
 	workflowID := "catalog-build-" + digest[:24]
-	build, err := provider.BuildNodeImage(ctx, incusprovider.BuildNodeImageRequest{
+	build, err := provider.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
 		WorkflowID: workflowID,
 		Attempt:    1,
 		Revision:   revision,
@@ -100,7 +100,7 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 		}
 	}()
 
-	staging, err := provider.PublishNodeImage(ctx, incusprovider.PublishNodeImageRequest{
+	staging, err := provider.PublishNodeImage(ctx, incus.PublishNodeImageRequest{
 		CandidateRevisionID: candidateID,
 		Revision:            revision,
 		Build:               build,
@@ -114,7 +114,7 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 		}
 	}()
 
-	publish := incusprovider.PublishChallengeNodeImageRequest{
+	publish := incus.PublishChallengeNodeImageRequest{
 		CandidateRevisionID: candidateID,
 		ChallengeID:         source.ID,
 		Staging:             staging,
@@ -135,7 +135,7 @@ func PublishNode(ctx context.Context, provider NodeImageProvider, options NodeOp
 	return result, nil
 }
 
-func candidateBundle(source string) ([]incusprovider.ImageFile, string, func(), error) {
+func candidateBundle(source string) ([]incus.ImageFile, string, func(), error) {
 	root, err := os.MkdirTemp("", "breakfix-catalog-seed-")
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("create catalog candidate staging: %w", err)
@@ -153,7 +153,7 @@ func candidateBundle(source string) ([]incusprovider.ImageFile, string, func(), 
 		cleanup()
 		return nil, "", nil, fmt.Errorf("validate catalog candidate bundle: %w", err)
 	}
-	files, err := incusprovider.ImageFilesFromDirectory(root)
+	files, err := incus.ImageFilesFromDirectory(root)
 	if err != nil {
 		cleanup()
 		return nil, "", nil, fmt.Errorf("read catalog candidate bundle: %w", err)
@@ -161,9 +161,9 @@ func candidateBundle(source string) ([]incusprovider.ImageFile, string, func(), 
 	return files, bundleRevision(files), cleanup, nil
 }
 
-func bundleRevision(files []incusprovider.ImageFile) string {
-	ordered := append([]incusprovider.ImageFile(nil), files...)
-	slices.SortFunc(ordered, func(left, right incusprovider.ImageFile) int {
+func bundleRevision(files []incus.ImageFile) string {
+	ordered := append([]incus.ImageFile(nil), files...)
+	slices.SortFunc(ordered, func(left, right incus.ImageFile) int {
 		return strings.Compare(left.Path, right.Path)
 	})
 	hash := sha256.New()

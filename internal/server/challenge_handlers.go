@@ -11,10 +11,10 @@ import (
 	"log/slog"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/challenge"
 	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
-	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -373,7 +373,7 @@ func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windo
 			return nil, fmt.Errorf("node terminal provider is unavailable")
 		}
 		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan environmentdomain.Size) error {
-			return h.nodeTerminal.ExecNodePTY(ctx, incusprovider.ExecNodePTYRequest{
+			return h.nodeTerminal.ExecNodePTY(ctx, incus.ExecNodePTYRequest{
 				EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
 				LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
 				Stdin: stdin, Stdout: stdout, Resize: resize,
@@ -391,7 +391,7 @@ func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windo
 func (h *Handler) closeTerminalWindow(ctx context.Context, environment *activeEnvironment, nodeName, windowName string) error {
 	sessionName := terminalSessionName(environment.UID)
 	if environment.Runtime == challenge.RuntimeNode {
-		return h.nodeTerminal.CloseNodePTYWindow(ctx, incusprovider.CloseNodePTYWindowRequest{
+		return h.nodeTerminal.CloseNodePTYWindow(ctx, incus.CloseNodePTYWindowRequest{
 			EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
 			LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
 		})

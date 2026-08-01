@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/adapter/oci"
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
@@ -16,7 +17,6 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/generator"
-	"github.com/breakfix/breakfix/internal/registry"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -459,5 +459,5 @@ func validateGenerationOCIArchiveBytes(data []byte) error {
 	if err := os.WriteFile(path, data, 0o400); err != nil {
 		return err
 	}
-	return registry.ValidateOCIArchive(path)
+	return oci.ValidateOCIArchive(path)
 }
