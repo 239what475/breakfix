@@ -27,17 +27,36 @@ type RuntimeRepository interface {
 	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
 	StartAuthoringRun(context.Context, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, error)
 	ListMessages(context.Context, string) ([]agent.Message, error)
+	LoadAuthoringExecution(context.Context, string) (*domain.Stage, []agent.Message, error)
+	UpdateAuthoringStage(context.Context, string, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+	FinalizeAuthoringRun(context.Context, string, string, time.Time) (*domain.Revision, error)
 }
 
-// RuntimeService owns only user-facing domain.Session and Run creation. It never
-// invokes a model in the Server process.
+// Executor owns the model call for one interactive authoring run. The Eino
+// implementation lives in adapter/llm; this package owns only state changes.
+type Executor interface {
+	Run(context.Context, string, domain.Stage, []agent.Message, StageUpdater, func(StreamEvent)) (string, error)
+}
+
+type StageUpdater interface {
+	UpdateAuthoringStage(context.Context, string, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+}
+
+type StreamEvent struct {
+	Content string
+}
+
+// RuntimeService owns user-facing authoring state and direct interactive turn
+// completion. It delegates model execution through Executor.
 type RuntimeService struct {
-	repo  RuntimeRepository
-	model string
+	repo     RuntimeRepository
+	failures agent.Repository
+	model    string
+	executor Executor
 }
 
-func NewRuntimeService(repo RuntimeRepository, model string) *RuntimeService {
-	return &RuntimeService{repo: repo, model: strings.TrimSpace(model)}
+func NewRuntimeService(repo RuntimeRepository, failures agent.Repository, model string, executor Executor) *RuntimeService {
+	return &RuntimeService{repo: repo, failures: failures, model: strings.TrimSpace(model), executor: executor}
 }
 
 func (s *RuntimeService) Create(ctx context.Context, userID string) (*domain.Session, error) {
@@ -139,6 +158,31 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		return nil, nil, err
 	}
 	return updated, run, nil
+}
+
+func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(StreamEvent)) (string, error) {
+	if s == nil || s.repo == nil || s.executor == nil {
+		return "", errors.New("authoring turn executor is required")
+	}
+	stage, history, err := s.repo.LoadAuthoringExecution(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	content, err := s.executor.Run(ctx, runID, *stage, history, s.repo, emit)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.repo.FinalizeAuthoringRun(ctx, runID, content, time.Now().UTC()); err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
+func (s *RuntimeService) FailTurn(ctx context.Context, runID, message string) error {
+	if s == nil || s.failures == nil {
+		return errors.New("authoring failure repository is required")
+	}
+	return s.failures.FailRun(ctx, runID, message, time.Now().UTC())
 }
 
 func projectRuntimeMessages(values []agent.Message) ([]domain.Message, error) {
