@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 // SnapshotReader is the immutable taxonomy projection used to decide which

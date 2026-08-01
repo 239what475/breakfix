@@ -26,12 +26,7 @@ Kustomize 包不部署 Registry；Registry 由运营方提供并通过 runtime S
 管理 Registry，也不修改 node DNS、`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc`
 名称不能作为 kubelet/containerd 的最终镜像地址。
 
-Kind 开发环境使用 `deploy/overlays/kind` 和 `make deploy-kind`。该开发准备步骤将 Registry 暴露为固定
-`NodePort 30443`，使用 Kind control-plane 的 Docker 网络 IP 作为镜像 authority，并为该 IP 与 Registry
-Service DNS 签发本地开发证书。`registry_addr` 用于 kubelet 拉取，`registry_client_addr` 用于集群内
-Server/Generate Worker 访问 Service。CA 变化时开发脚本会刷新 Kind node 信任库并重启其 containerd；运行时
-Secret、pull Secret 和 Registry TLS Secret 由同一步骤同步，不需要自定义 DNS、CoreDNS 或 `/etc/hosts`。
-NodePort 只属于 Kind 开发环境，生产不使用它。
+Kind Registry 的 NodePort、开发 CA 和镜像加载流程属于[本地开发](development.md)，生产不使用它。
 
 ## 构建与部署
 
@@ -50,9 +45,8 @@ kubectl -n breakfix-system get deployments,pods
 distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go
 依赖或编译源码。
 
-`catalog/` 是 Git 管理的 portable source，不是 Server data directory。Server 可以在空卷上启动；平台基线就绪后，
-管理员将 source 打包为 OCI artifact，向空平台安装一个 digest 固定的 Catalog Release。该过程复用正式的 build、
-真实验证和原子提交链路，只有 release 到达 `Ready` 后题目才对 Catalog API 可见：
+`catalog/` 是 Git 管理的 portable source，不是 Server data directory。平台基线就绪后，管理员将 source 打包为 OCI
+artifact，并通过 Server 安装一个 digest 固定的 Catalog Release：
 
 ```bash
 make catalog-package \
@@ -69,9 +63,8 @@ make catalog-install \
 ```
 
 `make catalog-package` 只打包和显式推送 OCI artifact，绝不访问 Server data、Incus 或 Kubernetes。`make
-catalog-install` 只调用 Server 管理员 API；它绝不复制 data PVC 或直接发布 image。安装入口拒绝 mutable tag、非空
-data directory 和已有 release。用 `GET /api/admin/catalog/releases/{id}` 轮询状态。Kind 开发环境运行 `make deploy-kind`
-后，再为 `catalog-package` 提供 Kind Registry authority 与
+catalog-install` 只调用 Server 管理员 API；它绝不复制 data PVC 或直接发布 image。安装状态、失败语义与原子可见性见
+[Catalog Release](../architecture/catalog-release.md)。Kind 开发时可为 `catalog-package` 提供
 `CATALOG_TRUST_BUNDLE_FILE=.local/kind-registry/ca.crt`。
 
 `data_dir/challenges` 与 `data_dir/taxonomy` 仅保存安装成功后的运行时 materialization 和 taxonomy snapshot；
@@ -101,7 +94,8 @@ Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/boot
 
 ```bash
 make test-unit
-npm run build --prefix web
+make lint
+make build
 make test-e2e
 RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
 BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test

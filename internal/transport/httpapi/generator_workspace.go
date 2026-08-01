@@ -12,10 +12,10 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
 	generationapp "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/candidate"
+	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

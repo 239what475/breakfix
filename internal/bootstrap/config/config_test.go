@@ -15,7 +15,7 @@ func TestExampleConfigLoads(t *testing.T) {
 	if !ok {
 		t.Fatal("locate config test source")
 	}
-	examplePath := filepath.Join(filepath.Dir(source), "..", "..", "config", "app", "local.example.yaml")
+	examplePath := filepath.Join(filepath.Dir(source), "..", "..", "..", "config", "app", "local.example.yaml")
 	if _, err := Load(examplePath); err != nil {
 		t.Fatalf("load example config: %v", err)
 	}

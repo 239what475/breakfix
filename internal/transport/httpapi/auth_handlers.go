@@ -7,9 +7,9 @@ import (
 
 	"log/slog"
 
+	"github.com/breakfix/breakfix/internal/adapter/auth"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/auth"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/middleware"
 	"github.com/gin-gonic/gin"
 )

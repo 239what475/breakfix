@@ -11,12 +11,12 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	app "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/candidate"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

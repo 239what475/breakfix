@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 func TestVerificationReportRequiresExactAnswerCoverage(t *testing.T) {

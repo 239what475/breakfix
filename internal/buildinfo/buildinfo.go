@@ -1,4 +1,4 @@
-package build
+package buildinfo
 
 // Set via ldflags at compile time.
 var (

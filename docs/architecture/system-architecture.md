@@ -24,6 +24,9 @@ NodeEnvironment / VK8sEnvironment
 Registry 保存 K8s OCI artifact，Incus 保存 Node system-container image。两者都是运行时依赖，
 不是浏览器 API 的一部分。
 
+空平台的题库基线由管理员安装 immutable Catalog Release；其 portable source、真实验证和原子公开语义见
+[Catalog Release](catalog-release.md)。
+
 ## 所有权
 
 | 数据或副作用 | 权威所有者 | 其他组件的边界 |

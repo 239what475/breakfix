@@ -5,8 +5,8 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 )
 
 type readyCatalogGate struct{}

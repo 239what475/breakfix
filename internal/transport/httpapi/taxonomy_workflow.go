@@ -11,12 +11,12 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
-	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	taxonomystore "github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
-	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

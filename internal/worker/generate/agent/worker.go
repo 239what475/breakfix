@@ -9,7 +9,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/llm"
 	app "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/cloudwego/eino/adk"

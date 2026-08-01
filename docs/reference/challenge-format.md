@@ -1,10 +1,18 @@
 # 题目内容格式
 
-已发布题目是 `data_dir/challenges/<source_slug>/` 下的目录。题库不存入数据库，也不是 Kubernetes CRD；Server 从该目录和当前 taxonomy snapshot 构造 Catalog。目录、校验和发布行为以 [`internal/challenge/`](../../internal/challenge/) 为准。
+portable candidate 与已发布题目使用同一组教学和运行时文件，但平台身份由后者在 materialize 时补充。题库不存入数据库，也不是
+Kubernetes CRD；Server 从已发布目录和当前 taxonomy snapshot 构造 Catalog。目录、校验和发布行为以
+[`internal/content/challenge/`](../../internal/content/challenge/) 为准。
+
+## Portable Candidate
+
+作者生成的 CandidateRevision 和 `catalog/` 中的 release source 都是 portable candidate。它们的 `challenge.yaml` 只保存
+标题、运行时、难度、描述、节点和检查点，不能包含 `id`、`source_slug`、`image`、`content_revision` 或 `published_at`。
+source 的确定性 `contentRevision` 由文件树计算，不写回 candidate manifest。
 
 ## 已发布目录
 
-所有题目都包含：
+已发布题目是 `data_dir/challenges/<source_slug>/` 下的目录，包含：
 
 ```text
 challenge.yaml
@@ -27,11 +35,12 @@ k8s/answer.sh
 k8s/checks.sh
 ```
 
-`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`source_slug`、`image`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
+`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`source_slug`、`image`、`content_revision`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
 
 发布目录必须有合法的发布字段、非空标题/描述、`easy|medium|hard` 难度和至少一个 checkpoint。`runtime: node` 的 `image` 必须是完整的 64 位小写 Incus fingerprint；`runtime: k8s` 的 `image` 必须是完整的 `repository@sha256:<64 位小写摘要>` OCI 引用。Node manifest 还必须声明唯一逻辑节点；每个 checkpoint 必须声明执行节点，节点名称不能泄漏 Provider 实现。K8s checkpoint 没有节点字段。checkpoint 数组顺序只决定 UI 展示，不表达依赖或必须通过的先后顺序。
 
-Generator 产出的 CandidateRevision 使用相同布局，但不能生成平台托管的 `id`、`source_slug`、`image` 或 `published_at`。Server 只在验证成功、作者确认 ChallengePublish 后写入这些字段；它不会改写已验证 candidate archive。
+Server 只在验证成功后为已发布目录写入平台托管字段；作者流程在 `ChallengePublishing` 写入，Catalog Release 在所有 entry
+验证完成后的原子 commit 写入。它不会改写已验证 candidate archive。
 
 发布后，Server 为该 revision 创建 taxonomy mapping。Skill、Tag、entry skill、outcome 和关系不属于 `challenge.yaml`，而位于 `data_dir/taxonomy/current`；只有 exact mapping 发布后题目才进入公开 Catalog。
 
@@ -66,4 +75,5 @@ Controller 在学习环境周期执行同一协议并写入 Environment status�
 
 `problem.md` 应清楚描述症状、目标和边界。每个 checkpoint 可通过 `hints/` 提供渐进提示；`solution.md` 说明诊断与修复理由，而不只粘贴命令。`answer.sh` 必须在 generate 初始化后的真实环境通过全部 checkpoint。
 
-学习者没有手动 Submit：进度来自 Controller 自动检查。作者在发布前看到经 `Build -> ArtifactPublish -> Verify` 真实验证的资产，详见[作者生成与真实验证](../architecture/authoring-workflow.md)。
+学习者没有手动 Submit：进度来自 Controller 自动检查。作者在发布前看到经 `Build -> ArtifactPublish -> Verify` 真实验证的
+资产，详见[工作流](../architecture/workflows.md)。

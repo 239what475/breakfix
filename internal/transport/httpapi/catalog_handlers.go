@@ -7,9 +7,9 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

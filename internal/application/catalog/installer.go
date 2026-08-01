@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/candidate"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 // BundlePuller copies one immutable OCI artifact to a Server-owned staging

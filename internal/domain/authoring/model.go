@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 var (

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 )
 
@@ -21,7 +21,7 @@ func TestCheckedInCatalogSourcesArePortable(t *testing.T) {
 		t.Fatal("locate catalog source test")
 	}
 	repository := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, relative := range []string{"catalog", filepath.Join("test", "fixtures", "catalog")} {
+	for _, relative := range []string{"catalog", filepath.Join("test", "fixtures", "catalog-release")} {
 		root := filepath.Join(repository, relative)
 		if _, err := LoadPortableSource(root); err != nil {
 			t.Fatalf("load checked-in catalog source %q: %v", relative, err)
@@ -78,6 +78,7 @@ func TestContentRevisionIncludesExecutableBit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- this test explicitly verifies that an executable fixture changes the revision.
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +89,7 @@ func TestContentRevisionIncludesExecutableBit(t *testing.T) {
 	if regular == executable {
 		t.Fatal("content revision did not include executable bit")
 	}
+	// #nosec G302 -- this test verifies equivalent executable modes have the same revision.
 	if err := os.Chmod(path, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +189,11 @@ func sourceLayerFiles(t *testing.T, layer []byte) map[string]sourceLayerFile {
 	if err != nil {
 		t.Fatalf("open source layer: %v", err)
 	}
-	defer reader.Close()
+	t.Cleanup(func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close source layer: %v", err)
+		}
+	})
 	tarReader := tar.NewReader(reader)
 	files := map[string]sourceLayerFile{}
 	for {

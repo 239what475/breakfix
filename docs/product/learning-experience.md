@@ -43,7 +43,7 @@ Catalog 公开展示已经通过 exact taxonomy mapping 的题目摘要，并按
 
 <img src="../assets/authoring-workspace-sketch.png" alt="作者工作台信息架构草图" width="100%">
 
-作者工作流的状态、artifact 交接和发布边界见[作者生成与真实验证](../architecture/authoring-workflow.md)。
+作者工作流的状态、artifact 交接和发布边界见[工作流](../architecture/workflows.md)。
 
 ## My space
 
@@ -59,4 +59,4 @@ My space 汇总当前用户的学习和创作事实：已完成与已尝试题�
 - Solution 是学习资产，检查点是完成判断；两者不通过手动提交按钮耦合。
 - Catalog、Workspace、My space 和 Authoring 维持单页应用导航，不引入多页面路由作为产品前提。
 - 学习路径、推荐、排行榜、讨论区、付费和组织集成需要更大题库或真实使用数据，当前方向见根目录 [`NEXT.md`](../../NEXT.md)。
-- Skill、Tag、entry/outcome 与 Catalog 准入不属于 challenge manifest，详见[Taxonomy 与 Catalog 发布](../architecture/taxonomy.md)。
+- Skill、Tag、entry/outcome 与 Catalog 准入不属于 challenge manifest，详见[Taxonomy](../architecture/taxonomy.md)。

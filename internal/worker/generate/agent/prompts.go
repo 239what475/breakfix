@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	app "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )

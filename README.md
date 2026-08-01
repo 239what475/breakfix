@@ -55,11 +55,12 @@ make test-e2e
 ## 文档与契约
 
 - [文档索引](docs/README.md)
-- [作者生成与真实验证](docs/architecture/authoring-workflow.md)
-- [Taxonomy 与 Catalog 发布](docs/architecture/taxonomy.md)
+- [代码布局](docs/architecture/code-layout.md)
+- [工作流](docs/architecture/workflows.md)
+- [Catalog Release](docs/architecture/catalog-release.md)
 - [运行环境](docs/architecture/runtime-environments.md)
 - [部署与运行](docs/operations/deployment.md)
 
 机器可验证的契约以代码为准：HTTP 接口见 `api/http/openapi.yaml`，CRD 见
-`api/v1/`，题目格式见 `internal/challenge/`，运行时配置见
+`api/v1/`，题目格式见 `internal/content/challenge/`，运行时配置见
 `config/app/local.example.yaml`，构建和运维命令见 `Makefile`。

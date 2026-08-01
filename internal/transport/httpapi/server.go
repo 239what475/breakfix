@@ -8,8 +8,8 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/middleware"
 	"github.com/gin-gonic/gin"
 )

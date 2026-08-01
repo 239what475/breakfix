@@ -13,7 +13,7 @@ import (
 	"time"
 
 	app "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/candidate"
+	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"

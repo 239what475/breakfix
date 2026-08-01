@@ -7,7 +7,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/testpostgres"
+	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

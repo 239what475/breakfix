@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 // validateStartup keeps the catalog in strict mode: a malformed published

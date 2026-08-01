@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

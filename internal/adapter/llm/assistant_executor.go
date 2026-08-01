@@ -9,7 +9,7 @@ import (
 	"time"
 
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"

@@ -12,10 +12,10 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	taxonomystore "github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
-	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
-	"github.com/breakfix/breakfix/internal/testpostgres"
+	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 )
 
 func TestTaxonomyWorkflowCancelsWhenPublishedArtifactIsStale(t *testing.T) {

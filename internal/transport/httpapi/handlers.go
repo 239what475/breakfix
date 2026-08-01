@@ -14,10 +14,10 @@ import (
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated

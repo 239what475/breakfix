@@ -8,7 +8,7 @@ import (
 )
 
 func TestTeachingAssetFixturesValidate(t *testing.T) {
-	projectRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	projectRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,10 +18,10 @@ func TestTeachingAssetFixturesValidate(t *testing.T) {
 		validate  func(string) (*Entry, error)
 	}{
 		{name: "catalog cleanup logs", directory: filepath.Join(projectRoot, "catalog", "challenges", "linux", "cleanup-logs"), validate: ValidatePortableDir},
-		{name: "node runtime init", directory: filepath.Join(projectRoot, "test", "fixtures", "challenges", "node-runtime-init"), validate: ValidateCandidateDir},
-		{name: "node checkpoint coverage", directory: filepath.Join(projectRoot, "test", "fixtures", "challenges", "node-checkpoint-dependency"), validate: ValidateCandidateDir},
-		{name: "node reverse proxy", directory: filepath.Join(projectRoot, "test", "fixtures", "challenges", "node-reverse-proxy"), validate: ValidateCandidateDir},
-		{name: "k8s web service", directory: filepath.Join(projectRoot, "test", "fixtures", "challenges", "k8s-web-service"), validate: ValidateCandidateDir},
+		{name: "node runtime init", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-runtime-init"), validate: ValidateCandidateDir},
+		{name: "node checkpoint coverage", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-checkpoint-dependency"), validate: ValidateCandidateDir},
+		{name: "node reverse proxy", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-reverse-proxy"), validate: ValidateCandidateDir},
+		{name: "k8s web service", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "k8s-web-service"), validate: ValidateCandidateDir},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

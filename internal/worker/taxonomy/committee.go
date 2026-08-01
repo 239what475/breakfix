@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 

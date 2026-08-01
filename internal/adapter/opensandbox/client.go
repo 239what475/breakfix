@@ -12,7 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 )
 
 const workspaceMountPath = "/workspace"

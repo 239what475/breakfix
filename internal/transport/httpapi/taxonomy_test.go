@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	taxonomystore "github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
-	taxonomystore "github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 func seedTestTaxonomy(t *testing.T, root string) {

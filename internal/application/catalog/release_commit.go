@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 var errReleaseCommitSemantic = errors.New("catalog release commit has invalid content")

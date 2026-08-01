@@ -12,9 +12,9 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/testpostgres"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"

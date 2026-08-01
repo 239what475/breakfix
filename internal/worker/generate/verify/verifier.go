@@ -16,9 +16,9 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/verification"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -85,7 +85,7 @@ func (e *Executor) Execute(ctx context.Context, execution generation.Execution, 
 		return generation.VerificationReport{}, errors.New("verification candidate has no immutable artifact or deadline")
 	}
 	attempt := int64(execution.Claim.StateAttempt + 1)
-	name := verification.EnvironmentName(fmt.Sprintf("%s-%s-%d", execution.Claim.Workflow.ID, view.ID, attempt))
+	name := EnvironmentName(fmt.Sprintf("%s-%s-%d", execution.Claim.Workflow.ID, view.ID, attempt))
 	if err := e.removePreviousEnvironment(ctx, execution, name); err != nil {
 		return generation.VerificationReport{}, fmt.Errorf("remove previous verification environment: %w", err)
 	}

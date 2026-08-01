@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 var ErrNoCurrentRevision = errors.New("taxonomy current revision does not exist")

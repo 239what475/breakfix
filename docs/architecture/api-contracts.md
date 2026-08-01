@@ -1,13 +1,14 @@
-# HTTP 与终端接口
+# API 契约
 
-公开 HTTP 契约由 [`api/http/openapi.yaml`](../../api/http/openapi.yaml) 定义并生成 Go 与 TypeScript 类型：
+公开 HTTP 契约由 [`api/http/openapi.yaml`](../../api/http/openapi.yaml) 定义，并生成 Server 的 Go 类型和 Web 的
+TypeScript client：
 
 ```bash
 make generate
 make verify-generated
 ```
 
-## 公开接口分组
+## 公开 HTTP
 
 - 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
 - Catalog 与题目：浏览已映射的 challenge、读取 problem/solution/hint、开始或停止学习环境。
@@ -18,7 +19,7 @@ make verify-generated
 浏览器不提交 challenge artifact，也没有做题 Submit。检查点由 Controller 自动评估；作者发布通过
 `GenerationWorkflow` 的作者审核状态触发，而不是上传任意文件。
 
-## 内部 Worker 接口
+## 内部 Worker HTTP
 
 内部 API 不属于 OpenAPI 公开契约。它们只供两个固定 Worker 调用，并使用独立 role key：
 
@@ -39,7 +40,7 @@ POST /api/internal/taxonomy-workflows/:id/phase
 Generate Worker 的 artifact/workspace 子接口同样要求 generation lease。所有请求使用严格 JSON 解码，
 携带 Workflow ID、lease owner、state attempt 与 expected state；Server 只接受当前 lease 的 typed 结果。
 
-## 终端安全边界
+## 终端与流传输
 
 终端 WebSocket 使用一次性 ticket，不接受 URL JWT。Server 验证 ticket 的用户、Environment、challenge、
 窗口和过期时间，并要求浏览器 Origin 与配置的 `ui_origin` 完全一致。terminal connection 与 usage

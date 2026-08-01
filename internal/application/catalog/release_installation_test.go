@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
-	"github.com/breakfix/breakfix/internal/taxonomy"
 )
 
 func TestInstallerStagesPortableReleaseWithDurableWorkflowInputs(t *testing.T) {
@@ -254,6 +254,7 @@ func (p copiedBundlePuller) PullOCIArchive(_ context.Context, _ string, destinat
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- the installer supplies this controlled temporary archive destination in the test double.
 	return os.WriteFile(destination, data, 0o600)
 }
 

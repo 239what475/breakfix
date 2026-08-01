@@ -7,9 +7,11 @@
 
 ```bash
 make test-unit
-npm run build --prefix web
+make lint
+make build
 make verify-generated
 kubectl kustomize .
+kubectl kustomize deploy/overlays/kind
 make test-e2e
 ```
 
@@ -19,8 +21,18 @@ Go 测试覆盖 archive、challenge manifest、运行时快照、检查点 JSON�
 
 默认 `make test-e2e` 只覆盖快速的浏览器页面流程。它不调用模型，也不人为写入数据库伪造后台流程。
 若目标平台的 Catalog 为空，Playwright global setup 要求 `BREAKFIX_E2E_CATALOG_REFERENCE` 提供由
-`test/fixtures/catalog/` 打包并推送后的 immutable OCI digest，同时要求 `BREAKFIX_CATALOG_ADMIN_TOKEN`；它会调用
-正式管理员安装 API 并等待 release 到达 `Ready`。测试不会复制 challenge 或 taxonomy 到 Server data directory。
+`test/fixtures/catalog-release/` 打包并推送后的 immutable OCI digest，同时要求 `BREAKFIX_CATALOG_ADMIN_TOKEN`；它会调用
+正式管理员安装 API 并等待 release 到达 `Ready`。测试不会复制 challenge 或 taxonomy 到 Server data directory。先生成
+本地 archive 的命令为：
+
+```bash
+make catalog-package \
+  CATALOG_SOURCE=test/fixtures/catalog-release \
+  CATALOG_ARCHIVE=dist/e2e-catalog.oci.tar
+```
+
+将 archive 推送到目标 Registry 后，把得到的 immutable digest 设置为 `BREAKFIX_E2E_CATALOG_REFERENCE`。`make test-e2e`
+会复用 `test/node_modules`；只有测试锁文件变化或依赖缺失时才重新执行 `npm ci`。
 
 ## 已部署运行时验收
 

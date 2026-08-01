@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/challenge"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
+	"github.com/breakfix/breakfix/internal/content/candidate"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 

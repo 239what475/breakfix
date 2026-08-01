@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"gopkg.in/yaml.v3"
 )
@@ -54,6 +54,7 @@ func ExportPublishedCandidate(source, destination string) (catalogdomain.Content
 	if err != nil {
 		return "", err
 	}
+	// #nosec G306,G703 -- the manifest is a non-secret portable source file in a staging directory returned by MkdirTemp.
 	if err := os.WriteFile(manifestPath, portable, 0o644); err != nil {
 		return "", fmt.Errorf("write portable challenge manifest: %w", err)
 	}

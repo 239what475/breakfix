@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
-	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 

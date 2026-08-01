@@ -1,4 +1,4 @@
-package workerhealth
+package health
 
 import (
 	"context"

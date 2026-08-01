@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
+	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

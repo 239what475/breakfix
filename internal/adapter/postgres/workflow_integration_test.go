@@ -8,7 +8,7 @@ import (
 
 	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/catalog"
@@ -549,14 +549,14 @@ func createCatalogReleaseInstallation(t *testing.T, database *Store, now time.Ti
 		UpdatedAt:       now,
 	}
 	candidate := generation.Revision{
-		ID: "catalog-candidate-" + now.Format("20060102150405"),
+		ID:     "catalog-candidate-" + now.Format("20060102150405"),
 		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
 		ArchivePath: "/tmp/catalog-candidate.tar.gz", ArchiveSHA256: workflowTestDigest, Snapshot: generationTestSnapshot(),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	entry.CandidateRevisionID = candidate.ID
 	workflow := generation.Workflow{
-		ID: "catalog-workflow-" + now.Format("20060102150405"),
+		ID:     "catalog-workflow-" + now.Format("20060102150405"),
 		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
 		State: generation.StateBuilding, CandidateRevisionID: candidate.ID, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 	}

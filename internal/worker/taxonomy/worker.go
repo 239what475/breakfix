@@ -14,7 +14,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/llm"
 	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"

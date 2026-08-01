@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/cloudwego/eino/adk"

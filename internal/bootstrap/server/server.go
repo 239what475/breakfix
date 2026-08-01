@@ -16,9 +16,9 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/build"
-	"github.com/breakfix/breakfix/internal/config"
-	"github.com/breakfix/breakfix/internal/taxonomy"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/buildinfo"
+	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -119,7 +119,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("setup HTTP API: %w", err)
 	}
 
-	slog.Info("Breakfix Server starting", "version", build.Version, "data_dir", cfg.DataDir)
+	slog.Info("Breakfix Server starting", "version", buildinfo.Version, "data_dir", cfg.DataDir)
 	return &Runtime{
 		server: &http.Server{
 			Addr:              fmt.Sprintf(":%d", cfg.Port),

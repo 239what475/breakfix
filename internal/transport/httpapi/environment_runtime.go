@@ -9,7 +9,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

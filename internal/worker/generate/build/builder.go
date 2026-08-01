@@ -13,8 +13,8 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	app "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/candidate"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/candidate"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 

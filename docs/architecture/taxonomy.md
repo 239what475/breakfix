@@ -1,8 +1,8 @@
-# Taxonomy 与 Catalog 发布
+# Taxonomy
 
 Taxonomy 将已发布 challenge 映射到可读的 Skill、Tag 与关系图。challenge artifact 与 taxonomy 定义是
-两套独立内容：先发布题目，再由 `TaxonomyWorkflow` 建立稳定的 mapping。Server 是 taxonomy 文件系统的
-唯一写者。
+两套独立内容：普通作者题先发布，再由 `TaxonomyWorkflow` 建立稳定的 mapping。Server 是 taxonomy 文件系统的
+唯一写者；Catalog Release 则携带预审查的 portable taxonomy source，并在 Release 原子提交时安装其基线 snapshot。
 
 ## 单题 Workflow
 
@@ -51,3 +51,5 @@ state 接管。artifact 消失、revision 改变或管理员中止才会进入 `
 Server 定期扫描已发布 challenge 目录，补回 crash 后遗漏的 TaxonomyWorkflow，也会取消 artifact 已消失或
 revision 已变化的活动 Workflow。Catalog 只投影 current snapshot 中与当前 challenge revision 匹配的 mapping，
 因此不会展示未完成 taxonomy 的新题。
+
+Catalog Release source、初始化与原子提交边界见[Catalog Release](catalog-release.md)。

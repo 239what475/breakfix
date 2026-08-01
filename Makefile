@@ -1,13 +1,13 @@
-.PHONY: generate verify-generated build images deploy-kind reset-kind test-unit \
-	catalog-package catalog-install test-e2e
+.PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
+	test-unit lint catalog-package catalog-install test-e2e
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
-	-X 'github.com/breakfix/breakfix/internal/build.Version=$(VERSION)' \
-	-X 'github.com/breakfix/breakfix/internal/build.BuildTime=$(BUILD_TIME)' \
-	-X 'github.com/breakfix/breakfix/internal/build.Commit=$(COMMIT)'
+	-X 'github.com/breakfix/breakfix/internal/buildinfo.Version=$(VERSION)' \
+	-X 'github.com/breakfix/breakfix/internal/buildinfo.BuildTime=$(BUILD_TIME)' \
+	-X 'github.com/breakfix/breakfix/internal/buildinfo.Commit=$(COMMIT)'
 
 CONTROLLER_GEN_VERSION := v0.21.0
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
@@ -24,6 +24,9 @@ OPENAPI_TS_ARGS := -i $(CURDIR)/$(OPENAPI_SPEC) -p @hey-api/typescript --no-log-
 WEB_DIR := web
 WEB_DIST := $(WEB_DIR)/dist
 WEB_EMBED_DIR := internal/transport/httpapi/ui/assets
+WEB_DEPS_STAMP := $(WEB_DIR)/node_modules/.breakfix-deps
+TEST_DIR := test
+TEST_DEPS_STAMP := $(TEST_DIR)/node_modules/.breakfix-deps
 BIN_DIR := bin
 TARGETOS ?= linux
 TARGETARCH ?= amd64
@@ -39,13 +42,25 @@ CATALOG_BUNDLE ?=
 CATALOG_SERVER_URL ?= http://localhost:9090
 CATALOG_ADMIN_TOKEN ?= $(BREAKFIX_CATALOG_ADMIN_TOKEN)
 
-generate:
+$(WEB_DEPS_STAMP): $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
+	npm ci --prefix $(WEB_DIR)
+	@touch $@
+
+web-deps: $(WEB_DEPS_STAMP)
+
+$(TEST_DEPS_STAMP): $(TEST_DIR)/package.json $(TEST_DIR)/package-lock.json
+	npm ci --prefix $(TEST_DIR)
+	@touch $@
+
+test-deps: $(TEST_DEPS_STAMP)
+
+generate: web-deps
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crds
 	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
 	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
 
-verify-generated:
+verify-generated: web-deps
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR) output:dir=$$tmp; \
@@ -58,8 +73,7 @@ verify-generated:
 	diff -u $(OPENAPI_GO_OUTPUT) "$$tmp/server.gen.go" && \
 	diff -ru $(OPENAPI_FRONTEND_OUTPUT) "$$tmp/frontend"
 
-build:
-	npm ci --prefix $(WEB_DIR)
+build: web-deps
 	npm run build --prefix $(WEB_DIR)
 	@mkdir -p $(WEB_EMBED_DIR)
 	@find $(WEB_EMBED_DIR) -mindepth 1 ! -name .gitkeep -delete
@@ -86,6 +100,9 @@ reset-kind:
 test-unit:
 	go test -count=1 ./...
 
+lint:
+	golangci-lint run ./...
+
 catalog-package:
 	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_REGISTRY_ENDPOINT),-registry-endpoint "$(CATALOG_REGISTRY_ENDPOINT)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
 
@@ -98,6 +115,5 @@ catalog-install:
 		--data '{"bundle":"$(CATALOG_BUNDLE)"}' \
 		"$(CATALOG_SERVER_URL)/api/admin/catalog/releases"
 
-test-e2e:
-	npm ci --prefix test
-	npm run test:e2e --prefix test
+test-e2e: test-deps
+	npm run test:e2e --prefix $(TEST_DIR)

@@ -10,7 +10,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 type environmentAssistantReader struct {

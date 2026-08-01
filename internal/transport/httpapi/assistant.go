@@ -12,7 +12,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
-	"github.com/breakfix/breakfix/internal/challenge"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"

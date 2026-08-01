@@ -188,7 +188,7 @@ func (r PhaseRequest) Validate() error {
 	switch r.ExpectedState {
 	case domain.WorkflowMapping:
 		if r.Mapper == nil || strings.TrimSpace(r.Mapper.RunID) == "" || r.Mapper.ChangeSet.Empty() {
-			return errors.New("Mapping phase requires a mapper result")
+			return errors.New("mapping phase requires a mapper result")
 		}
 	case domain.WorkflowReviewing:
 		if r.ReviewPair == nil || strings.TrimSpace(r.ReviewPair.CurriculumRunID) == "" || strings.TrimSpace(r.ReviewPair.SRERunID) == "" {
@@ -202,7 +202,7 @@ func (r PhaseRequest) Validate() error {
 		}
 	case domain.WorkflowPublishing:
 		if r.Publication == nil {
-			return errors.New("Publishing phase requires publication completion")
+			return errors.New("publishing phase requires publication completion")
 		}
 	default:
 		return errors.New("taxonomy state cannot receive a phase result")

@@ -1,7 +1,7 @@
 # Breakfix 文档
 
-本文档目录记录稳定的架构决策、产品流程、内容不变量与运行说明。完整 HTTP、CRD 和
-题目字段由代码与生成物维护，不在 Markdown 中复制为第二份契约。
+本文档目录保存当前系统的长期说明。完整 HTTP、CRD 和题目字段仍以代码与生成物为准；Markdown 解释边界、所有权和操作路径，
+不复制第二份机器契约。
 
 ## 权威来源
 
@@ -9,30 +9,32 @@
 | --- | --- |
 | HTTP JSON 契约 | [`api/http/openapi.yaml`](../api/http/openapi.yaml) |
 | Kubernetes CRD | [`api/v1/`](../api/v1/) |
-| Challenge 文件契约 | [`internal/challenge/`](../internal/challenge/) |
+| Challenge 文件契约 | [`internal/content/challenge/`](../internal/content/challenge/) |
 | 运行时配置 | [`config/app/local.example.yaml`](../config/app/local.example.yaml) |
-| 构建与部署命令 | [`Makefile`](../Makefile) |
+| 构建、生成与测试命令 | [`Makefile`](../Makefile) |
 
 ## 架构
 
-- [系统架构](architecture/system-architecture.md)：Server、Controller、两个 Worker 与数据所有权。
-- [Agent Runtime](architecture/agent-runtime.md)：Eino、AgentRun、直接对话与后台 Workflow 边界。
+- [系统架构](architecture/system-architecture.md)：组件、数据所有权和部署边界。
+- [代码布局](architecture/code-layout.md)：目录职责和依赖方向。
+- [工作流](architecture/workflows.md)：GenerationWorkflow、TaxonomyWorkflow、lease 与阶段语义。
+- [Catalog Release](architecture/catalog-release.md)：portable source、安装、失败清理和原子提交。
 - [运行环境](architecture/runtime-environments.md)：`NodeEnvironment`、`VK8sEnvironment`、生命周期和检查点。
-- [作者生成与真实验证](architecture/authoring-workflow.md)：AuthoringSession、GenerationWorkflow、CandidateRevision 与发布。
-- [Taxonomy 与 Catalog 发布](architecture/taxonomy.md)：Skill、Tag、mapping 委员会和公开题目准入。
-- [HTTP 与终端接口](architecture/http-api.md)：认证、接口分组、WebSocket/SSE 边界与生成契约。
+- [Agent Runtime](architecture/agent-runtime.md)：Eino、AgentRun、直接对话与后台 Worker 边界。
+- [Taxonomy](architecture/taxonomy.md)：Skill、Tag、mapping 委员会和 Catalog 准入。
+- [API 契约](architecture/api-contracts.md)：公开 HTTP、内部 Worker API 和终端流传输。
 
-## 产品与内容
+## 产品与参考
 
 - [学习与创作体验](product/learning-experience.md)
-- [题目内容格式](content/challenge-format.md)
-
-## 运维与资源
-
-- [部署与运行](operations/deployment.md)
-- [Telepresence 本地调试](operations/telepresence.md)
-- [测试与真实验收](operations/testing.md)
+- [题目内容格式](reference/challenge-format.md)
 - [`assets/`](assets/)：产品设计草图与参考截图，仅用于设计沟通。
 
-根目录 [`NEXT.md`](../NEXT.md) 是下一阶段方向，[`todo.md`](../todo.md) 是当前执行清单；两者
-不是长期架构规范。
+## 运维
+
+- [部署与运行](operations/deployment.md)
+- [本地开发](operations/development.md)
+- [测试与真实验收](operations/testing.md)
+
+根目录 [`NEXT.md`](../NEXT.md)、[`REVIEW.md`](../REVIEW.md) 与 [`TODO.md`](../TODO.md) 分别记录后续方向、持续审查和
+当前可执行工作；它们不是长期架构规范。

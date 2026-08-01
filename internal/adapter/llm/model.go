@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	deepseek "github.com/cloudwego/eino-ext/components/model/deepseek"
 	"github.com/cloudwego/eino/components/model"
 	deepseekapi "github.com/cohesion-org/deepseek-go"

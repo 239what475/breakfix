@@ -7,8 +7,8 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
-	"github.com/breakfix/breakfix/internal/challenge"
-	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

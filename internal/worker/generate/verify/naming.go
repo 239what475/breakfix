@@ -1,4 +1,4 @@
-package verification
+package verify
 
 import (
 	"crypto/sha256"

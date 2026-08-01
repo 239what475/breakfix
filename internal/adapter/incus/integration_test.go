@@ -296,7 +296,7 @@ func nodeReverseProxyFixture(t *testing.T) string {
 	if !ok {
 		t.Fatal("locate Incus integration test source")
 	}
-	return filepath.Join(filepath.Dir(source), "..", "..", "test", "fixtures", "challenges", "node-reverse-proxy")
+	return filepath.Join(filepath.Dir(source), "..", "..", "..", "test", "fixtures", "candidates", "node-reverse-proxy")
 }
 
 type nodeCheckDocument struct {

@@ -76,9 +76,7 @@ func ParseCheckpointReport(raw string, expectedIDs []string) ([]CheckpointResult
 			return nil, fmt.Errorf("checkpoint report has empty summary for %q", check.ID)
 		}
 		seen[check.ID] = struct{}{}
-		results = append(results, CheckpointResult{
-			ID: check.ID, Passed: check.Passed, Summary: check.Summary, Details: check.Details,
-		})
+		results = append(results, CheckpointResult(check))
 	}
 	for id := range expected {
 		if _, ok := seen[id]; !ok {
