@@ -1,4 +1,4 @@
-.PHONY: dev dev-up dev-down dev-reset dev-status dev-config frontend-build \
+.PHONY: dev dev-up dev-down dev-reset dev-status dev-config web-build web-assets \
 	dev-build dev-build-server dev-build-controller dev-build-generate-worker \
 	dev-build-taxonomy-worker dev-worker-configs \
 	dev-start-server dev-start-controller dev-start-generate-worker \
@@ -11,7 +11,7 @@
 	e2e-agent-node e2e-agent-k8s e2e-server-recovery \
 	dev-data dev-crd dev-rbac dev-images k8s-base-image \
 	dev-incus dev-incus-catalog dev-incus-secrets dev-kind-registry dev-kind-push-k8s-base dev-kind-catalog dev-kind-runtime \
-	generate-crd verify-crd-generated generate-api generate-api-go generate-api-frontend verify-api-generated \
+	generate verify-generated \
 	build build-server build-controller build-generate-worker build-taxonomy-worker \
 	runtime-images runtime-push release-manifest lint clean
 
@@ -28,15 +28,18 @@ LDFLAGS   := -s -w \
 
 CONTROLLER_GEN_VERSION := v0.21.0
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
-CRD_TYPES_DIR := internal/k8s/apis/breakfix/v1
+CRD_TYPES_DIR := api/v1
 OAPI_CODEGEN_VERSION := v2.7.1
 OAPI_CODEGEN := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
-OPENAPI_SPEC := api/openapi.yaml
-OPENAPI_GO_CONFIG := api/cfg.yaml
-OPENAPI_GO_OUTPUT := internal/api/server.gen.go
-OPENAPI_FRONTEND_OUTPUT := frontend/src/api/generated
-OPENAPI_TS := npm exec --prefix frontend -- openapi-ts
+OPENAPI_SPEC := api/http/openapi.yaml
+OPENAPI_GO_CONFIG := api/http/oapi-codegen.yaml
+OPENAPI_GO_OUTPUT := internal/transport/httpapi/generated/server.gen.go
+OPENAPI_FRONTEND_OUTPUT := web/src/api/generated
+OPENAPI_TS := npm exec --prefix web -- openapi-ts
 OPENAPI_TS_ARGS := -i $(CURDIR)/$(OPENAPI_SPEC) -p @hey-api/typescript --no-log-file
+WEB_DIR := web
+WEB_DIST := $(WEB_DIR)/dist
+WEB_EMBED_DIR := internal/transport/httpapi/ui/assets
 
 KIND_CLUSTER ?= breakfix-dev
 CONFIG_DIR ?= config
@@ -69,11 +72,18 @@ TELEPRESENCE ?= ./dev/telepresence.sh
 # Dev build (bin/ — fast, no LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
-frontend-build:
-	npm ci --prefix frontend
-	npm run build --prefix frontend
+web-build:
+	npm ci --prefix $(WEB_DIR)
+	npm run build --prefix $(WEB_DIR)
+	$(MAKE) web-assets
 
-dev-build-server: frontend-build
+web-assets:
+	@test -f $(WEB_DIST)/index.html || { echo "  x missing $(WEB_DIST)/index.html; run make web-build first"; exit 1; }
+	@mkdir -p $(WEB_EMBED_DIR)
+	@find $(WEB_EMBED_DIR) -mindepth 1 ! -name .gitkeep -delete
+	@cp -a $(WEB_DIST)/. $(WEB_EMBED_DIR)/
+
+dev-build-server: web-build
 	go build -o $(BIN_DIR)/breakfix-server ./cmd/server
 	@echo "  ✓ server"
 
@@ -226,38 +236,30 @@ dev-data:
 	@mkdir -p data/challenges
 	@echo "  ✓ Data dir ready"
 
-generate-crd:
+generate:
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crd
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crds
+	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
+	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
 
-verify-crd-generated:
+verify-generated:
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR) output:dir=$$tmp; \
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=$$tmp/crd; \
 	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
-		diff -ru --exclude=kustomization.yaml deploy/crd $$tmp/crd
-
-generate-api-go:
-	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
-
-generate-api-frontend:
-	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
-
-generate-api: generate-api-go generate-api-frontend
-
-verify-api-generated:
-	@tmp=$$(mktemp -d); \
-	trap 'rm -rf "$$tmp"' EXIT; \
+	diff -ru --exclude=kustomization.yaml deploy/crds $$tmp/crd; \
 	sed "s|^output:.*|output: $$tmp/server.gen.go|" $(OPENAPI_GO_CONFIG) >"$$tmp/oapi-codegen.yaml" && \
 	$(OAPI_CODEGEN) --config "$$tmp/oapi-codegen.yaml" $(OPENAPI_SPEC) && \
 	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o "$$tmp/frontend" && \
 	diff -u $(OPENAPI_GO_OUTPUT) "$$tmp/server.gen.go" && \
 	diff -ru $(OPENAPI_FRONTEND_OUTPUT) "$$tmp/frontend"
 
-dev-crd: generate-crd
-	@kubectl apply -f deploy/crd/breakfix.dev_nodeenvironments.yaml >/dev/null
-	@kubectl apply -f deploy/crd/breakfix.dev_vk8senvironments.yaml >/dev/null
+dev-crd:
+	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crds
+	@kubectl apply -f deploy/crds/breakfix.dev_nodeenvironments.yaml >/dev/null
+	@kubectl apply -f deploy/crds/breakfix.dev_vk8senvironments.yaml >/dev/null
 	@echo "  ✓ CRDs applied"
 
 dev-rbac:
@@ -342,7 +344,7 @@ dev-config:
 # Production build (bin/release/<os>-<arch>/ — stripped, with LDFLAGS)
 # ═══════════════════════════════════════════════════════════════
 
-build-server: frontend-build
+build-server: web-build
 	@mkdir -p $(SERVER_RELEASE_DIR)
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(SERVER_RELEASE_BIN) ./cmd/server
 	@echo "  ✓ Server binary"

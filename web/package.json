@@ -1,11 +1,11 @@
 {
-  "name": "frontend",
+  "name": "breakfix-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "generate:api": "openapi-ts -i ../api/openapi.yaml -o src/api/generated -p @hey-api/typescript --no-log-file",
+    "generate:api": "openapi-ts -i ../api/http/openapi.yaml -o src/api/generated -p @hey-api/typescript --no-log-file",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },

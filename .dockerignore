@@ -5,13 +5,13 @@ bin
 dist
 data
 
-frontend/node_modules
-frontend/test-results
+web/node_modules
+web/test-results
 test/node_modules
 test/results
 test/report
 
-cmd/server/frontend/dist
+internal/transport/httpapi/ui/assets
 
 config/breakfix.yaml
 config/breakfix.local.yaml

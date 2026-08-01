@@ -7,9 +7,8 @@
 
 ```bash
 go test -count=1 ./...
-npm run build --prefix frontend
-make verify-crd-generated
-make verify-api-generated
+npm run build --prefix web
+make verify-generated
 kubectl kustomize .
 make e2e
 ```

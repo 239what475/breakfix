@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/incusprovider"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

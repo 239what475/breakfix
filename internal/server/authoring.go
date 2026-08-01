@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/authoring"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/challenge"
 	"github.com/breakfix/breakfix/internal/db"
 	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/breakfix/breakfix/internal/generator"
+	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

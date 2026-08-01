@@ -15,7 +15,7 @@ NeedsAuthorReview <- verified candidate                 candidate repair -> Gene
 ChallengePublishing ----> CleaningUp -> Completed
 ```
 
-实际状态枚举和接口字段以 `internal/generation/` 与 `api/openapi.yaml` 为准。
+实际状态枚举和接口字段以 `internal/generation/` 与 `api/http/openapi.yaml` 为准。
 
 ## 阶段职责
 

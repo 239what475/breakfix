@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/agentruntime"
-	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/candidate"
 	"github.com/breakfix/breakfix/internal/generation"
 	"github.com/breakfix/breakfix/internal/generator"
 	"github.com/breakfix/breakfix/internal/opensandbox"
+	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/workspace"
 	"github.com/gin-gonic/gin"
 )

@@ -103,8 +103,7 @@ make dev-incus-secrets
 ## Apply 与检查
 
 ```bash
-make verify-crd-generated
-make verify-api-generated
+make verify-generated
 kubectl kustomize .
 kubectl apply -k .
 kubectl -n breakfix-system get deployments,pods

@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/incusprovider"
 	"github.com/breakfix/breakfix/internal/k8s"
 	"github.com/breakfix/breakfix/internal/server"
+	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
 
 func main() {
@@ -62,6 +63,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer incusClient.Close()
+	frontendFS, err := ui.Filesystem()
+	if err != nil {
+		slog.Error("failed to load embedded web assets", "err", err)
+		os.Exit(1)
+	}
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()

@@ -44,9 +44,8 @@ make dev
 
 ```bash
 go test -count=1 ./...
-npm run build --prefix frontend
-make verify-crd-generated
-make verify-api-generated
+npm run build --prefix web
+make verify-generated
 kubectl kustomize .
 make e2e
 ```
@@ -61,6 +60,6 @@ make e2e
 - [运行环境](docs/architecture/runtime-environments.md)
 - [部署与运行](docs/operations/deployment.md)
 
-机器可验证的契约以代码为准：HTTP 接口见 `api/openapi.yaml`，CRD 见
-`internal/k8s/apis/breakfix/v1/`，题目格式见 `internal/challenge/`，运行时配置见
+机器可验证的契约以代码为准：HTTP 接口见 `api/http/openapi.yaml`，CRD 见
+`api/v1/`，题目格式见 `internal/challenge/`，运行时配置见
 `config/breakfix.example.yaml`，构建和运维命令见 `Makefile`。

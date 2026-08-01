@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/k8s"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/vclustercli"
 	ctrl "sigs.k8s.io/controller-runtime"
 )

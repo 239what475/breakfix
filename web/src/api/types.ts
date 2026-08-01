@@ -1,6 +1,6 @@
 import type { AuthoringSession as GeneratedAuthoringSession } from "./generated";
 
-// JSON API models are generated from api/openapi.yaml. These aliases preserve
+// JSON API models are generated from api/http/openapi.yaml. These aliases preserve
 // concise feature-facing names without duplicating the server contract.
 export type {
 	AssistantConversation,

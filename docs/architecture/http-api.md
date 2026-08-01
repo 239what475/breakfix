@@ -1,10 +1,10 @@
 # HTTP 与终端接口
 
-公开 HTTP 契约由 [`api/openapi.yaml`](../../api/openapi.yaml) 定义并生成 Go 与 TypeScript 类型：
+公开 HTTP 契约由 [`api/http/openapi.yaml`](../../api/http/openapi.yaml) 定义并生成 Go 与 TypeScript 类型：
 
 ```bash
-make generate-api
-make verify-api-generated
+make generate
+make verify-generated
 ```
 
 ## 公开接口分组

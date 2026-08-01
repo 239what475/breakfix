@@ -18,8 +18,8 @@ import (
 
 	"log/slog"
 
+	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/incusprovider"
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
 	"github.com/breakfix/breakfix/internal/terminal"
 	"github.com/gorilla/websocket"
 )

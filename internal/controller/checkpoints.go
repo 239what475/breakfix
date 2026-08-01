@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	breakfixv1 "github.com/breakfix/breakfix/internal/k8s/apis/breakfix/v1"
+	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 )
 
 type checkpointReport struct {

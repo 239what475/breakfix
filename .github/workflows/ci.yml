@@ -35,19 +35,15 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: |
-            frontend/package-lock.json
+            web/package-lock.json
             test/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
-      - name: Build frontend
-        run: |
-          npm ci --prefix frontend
-          npm run build --prefix frontend
-      - name: Verify generated CRD files
-        run: make verify-crd-generated
-      - name: Verify generated API types
-        run: make verify-api-generated
+      - name: Build web application
+        run: make web-build
+      - name: Verify generated contracts
+        run: make verify-generated
       - name: Test Go packages against PostgreSQL
         run: go test -count=1 ./...
       - uses: golangci/golangci-lint-action@v6
@@ -62,14 +58,12 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.3"
-      - name: Build frontend
-        run: |
-          npm ci --prefix frontend
-          npm run build --prefix frontend
+      - name: Build web application
+        run: make web-build
       - name: Compile every runtime entrypoint
         run: |
           for component in server controller generate-worker taxonomy-worker; do
@@ -106,7 +100,7 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: |
-            frontend/package-lock.json
+            web/package-lock.json
             test/package-lock.json
       - uses: actions/setup-go@v5
         with:
@@ -116,10 +110,9 @@ jobs:
         run: |
           kubectl create namespace breakfix-system
           make dev-crd
-      - name: Build frontend and start the Server
+      - name: Build web application and start the Server
         run: |
-          npm ci --prefix frontend
-          npm run build --prefix frontend
+          make web-build
           mkdir -p "$RUNNER_TEMP/catalog-data"
           cp -a test/fixtures/challenges "$RUNNER_TEMP/catalog-data/challenges"
           sed \

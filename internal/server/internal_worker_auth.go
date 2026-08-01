@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/api"
 	"github.com/breakfix/breakfix/internal/config"
+	"github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 

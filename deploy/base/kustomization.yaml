@@ -4,5 +4,5 @@ namespace: breakfix-system
 
 resources:
   - ../../config
-  - ../crd
+  - ../crds
   - ../runtime

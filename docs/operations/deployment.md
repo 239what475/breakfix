@@ -35,8 +35,7 @@ NodePort 只属于 Kind 开发环境，生产不使用它。
 ## 构建与部署
 
 ```bash
-make verify-crd-generated
-make verify-api-generated
+make verify-generated
 make runtime-push TARGETOS=linux TARGETARCH=amd64 \
   RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev
 kubectl apply -k .
@@ -79,7 +78,7 @@ Controller 是唯一有权限调和 Environment CRD 的组件。Server 创建和
 
 ```bash
 go test -count=1 ./...
-npm run build --prefix frontend
+npm run build --prefix web
 make e2e
 make e2e-runtime-browser
 make e2e-server-recovery

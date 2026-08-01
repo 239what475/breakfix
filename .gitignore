@@ -38,4 +38,4 @@ dist/
 test/node_modules/
 test/results/
 test/report/
-frontend/test-results/
+web/test-results/
