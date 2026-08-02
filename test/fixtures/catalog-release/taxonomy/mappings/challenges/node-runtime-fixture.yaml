@@ -1,0 +1,12 @@
+challenge:
+    path: challenges/node-runtime-fixture
+    title: Node 运行时验收
+    contentRevision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
+tags:
+    - id: tag-1a3c5e7b9d0f2a4c
+      title: 运行时验收
+entry_skills: []
+outcomes:
+    - id: skill-2b4d6f8a0c1e3a5b
+      title: Node 运行时状态
+      primary: true

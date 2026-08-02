@@ -15,17 +15,15 @@ import (
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 )
 
-func TestCheckedInCatalogSourcesArePortable(t *testing.T) {
+func TestCheckedInCatalogFixtureSourceIsPortable(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate catalog source test")
 	}
 	repository := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, relative := range []string{"catalog", filepath.Join("test", "fixtures", "catalog-release")} {
-		root := filepath.Join(repository, relative)
-		if _, err := LoadPortableSource(root); err != nil {
-			t.Fatalf("load checked-in catalog source %q: %v", relative, err)
-		}
+	root := filepath.Join(repository, "test", "fixtures", "catalog-release")
+	if _, err := LoadPortableSource(root); err != nil {
+		t.Fatalf("load checked-in catalog fixture source: %v", err)
 	}
 }
 

@@ -41,8 +41,9 @@ RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
 BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test
 ```
 
-`e2e-runtime-browser` 在已部署环境中使用固定的 `cleanup-logs` challenge，验证终端、自动检查点、
-完成投影与停止。`e2e-server-recovery` 验证 Server 或 Controller 重启后，环境生命周期仍可收敛。
+`e2e-runtime-browser` 和 `e2e-server-recovery` 只在专用测试平台运行。global setup 在空平台安装
+`test/fixtures/catalog-release/`，测试从 Catalog 动态读取 fixture 的发布 ID；它们不依赖生产 Catalog 的题目标题或身份。
+前者验证终端、自动检查点、完成投影与停止，后者验证 Server 或 Controller 重启后环境生命周期仍可收敛。
 
 ## 模型驱动验收
 

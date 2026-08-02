@@ -17,7 +17,7 @@ func TestTeachingAssetFixturesValidate(t *testing.T) {
 		directory string
 		validate  func(string) (*Entry, error)
 	}{
-		{name: "catalog cleanup logs", directory: filepath.Join(projectRoot, "catalog", "challenges", "linux", "cleanup-logs"), validate: ValidatePortableDir},
+		{name: "catalog release fixture", directory: filepath.Join(projectRoot, "test", "fixtures", "catalog-release", "challenges", "node-runtime-fixture"), validate: ValidatePortableDir},
 		{name: "node runtime init", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-runtime-init"), validate: ValidateCandidateDir},
 		{name: "node checkpoint coverage", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-checkpoint-dependency"), validate: ValidateCandidateDir},
 		{name: "node reverse proxy", directory: filepath.Join(projectRoot, "test", "fixtures", "candidates", "node-reverse-proxy"), validate: ValidateCandidateDir},

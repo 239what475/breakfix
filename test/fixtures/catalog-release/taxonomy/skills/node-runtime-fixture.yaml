@@ -1,0 +1,7 @@
+kind: Skill
+id: skill-2b4d6f8a0c1e3a5b
+title: Node 运行时状态
+definition: 验证 Node 环境能够初始化、执行命令并报告检查点。
+mapping_guidance:
+    outcome_when:
+        - 内容仅服务于 Node 运行时验收。

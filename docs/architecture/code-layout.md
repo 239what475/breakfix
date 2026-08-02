@@ -8,7 +8,7 @@
 ```text
 api/        HTTP 与 CRD 契约及其受控生成物
 build/      镜像构建输入
-catalog/    Git 管理的 portable Catalog Release source
+catalog/    可选：与真实基础题库一起提交的 portable Catalog Release source
 cmd/        可执行进程的 main
 config/     非密钥配置与 Secret 示例
 deploy/     Kubernetes 清单和唯一的 Kind overlay

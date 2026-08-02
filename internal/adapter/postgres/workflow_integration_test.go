@@ -542,7 +542,7 @@ func createCatalogReleaseInstallation(t *testing.T, database *Store, now time.Ti
 	entry := catalog.Entry{
 		ID:              "catalog-entry-" + now.Format("20060102150405"),
 		ReleaseID:       release.ID,
-		SourcePath:      "challenges/catalog-smoke",
+		SourcePath:      "challenges/node-runtime-fixture",
 		ContentRevision: contentRevision,
 		State:           catalog.EntryBuilding,
 		CreatedAt:       now,

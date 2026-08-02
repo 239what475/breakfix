@@ -45,12 +45,13 @@ kubectl -n breakfix-system get deployments,pods
 distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go
 依赖或编译源码。
 
-`catalog/` 是 Git 管理的 portable source，不是 Server data directory。平台基线就绪后，管理员将 source 打包为 OCI
-artifact，并通过 Server 安装一个 digest 固定的 Catalog Release：
+Catalog Release source 是 Git 管理的 portable source，不是 Server data directory。代码仓库不附带样例题库；真实基础题库
+应在内容仓库或随其发布的 `catalog/` 目录中维护。平台基线就绪后，管理员显式指定 source，将其打包为 OCI artifact，并通过
+Server 安装一个 digest 固定的 Catalog Release：
 
 ```bash
 make catalog-package \
-  CATALOG_SOURCE=catalog \
+  CATALOG_SOURCE=/path/to/foundation-catalog \
   CATALOG_ARCHIVE=dist/foundation.oci.tar \
   CATALOG_REFERENCE=registry.example.com/breakfix/catalog/foundation:2026.08.01
 # 输出 registry.example.com/breakfix/catalog/foundation@sha256:...

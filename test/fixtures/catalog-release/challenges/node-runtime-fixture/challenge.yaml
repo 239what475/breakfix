@@ -1,0 +1,16 @@
+runtime: node
+title: "Node 运行时验收"
+difficulty: easy
+description: |
+  此环境仅用于验证 Breakfix 的 Node 运行时、终端和自动检查点链路。
+
+  创建指定的可执行标记文件。
+nodes:
+  - name: host
+    title: 验收节点
+checkpoints:
+  - id: runtime-fixture-ready
+    title: 运行时标记已创建
+    description: 指定标记文件存在且可执行。
+    hint: hints/runtime-fixture-ready.md
+    node: host

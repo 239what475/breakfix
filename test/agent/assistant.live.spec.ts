@@ -6,6 +6,7 @@ import {
 	startChallengeFromCatalog,
 	stopChallenge,
 } from "../support/live-helpers";
+import { nodeRuntimeFixture } from "../support/catalog-fixture";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
@@ -13,7 +14,7 @@ agentLiveTest("assistant uses real terminal context", async ({ page }) => {
 	test.setTimeout(10 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	await startChallengeFromCatalog(page, "批量压缩旧日志");
+	const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
 	await expectTerminalConnected(page);
 
 	const marker = `BREAKFIX_ASSISTANT_SCROLLBACK_${Date.now()}`;
@@ -36,5 +37,5 @@ agentLiveTest("assistant uses real terminal context", async ({ page }) => {
 	await expect(reply).toContainText(marker);
 	await expect(reply.locator(".assistant-markdown")).not.toBeEmpty();
 
-	await stopChallenge(page, "chal-r7m4x2q9v6kp");
+	await stopChallenge(page, challenge.id);
 });

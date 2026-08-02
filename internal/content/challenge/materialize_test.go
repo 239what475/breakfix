@@ -187,15 +187,15 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 
 func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T) {
 	root := t.TempDir()
-	entry, err := MaterializeWithSlug(root, "chal-4m6q8r2t9v3x", "批量压缩旧日志-4m6q8r2", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 批量压缩旧日志-4m6q8r2\ntitle: 批量压缩旧日志\npublished_at: 2026-07-24T08:00:00Z\n"))
+	entry, err := MaterializeWithSlug(root, "chal-4m6q8r2t9v3x", "示例节点题-4m6q8r2", func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 示例节点题-4m6q8r2\ntitle: 示例节点题\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeChallengeAssets(t, dst)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.ID != "chal-4m6q8r2t9v3x" || filepath.Base(entry.Dir) != "批量压缩旧日志-4m6q8r2" {
+	if entry.ID != "chal-4m6q8r2t9v3x" || filepath.Base(entry.Dir) != "示例节点题-4m6q8r2" {
 		t.Fatalf("opaque ID and source directory were not separated: %#v", entry)
 	}
 	loaded, err := Get(root, entry.ID)

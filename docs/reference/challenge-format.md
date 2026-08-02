@@ -6,7 +6,7 @@ Kubernetes CRD；Server 从已发布目录和当前 taxonomy snapshot 构造 Cat
 
 ## Portable Candidate
 
-作者生成的 CandidateRevision 和 `catalog/` 中的 release source 都是 portable candidate。它们的 `challenge.yaml` 只保存
+作者生成的 CandidateRevision 和 Catalog Release source 都是 portable candidate。它们的 `challenge.yaml` 只保存
 标题、运行时、难度、描述、节点和检查点，不能包含 `id`、`source_slug`、`image`、`content_revision` 或 `published_at`。
 source 的确定性 `contentRevision` 由文件树计算，不写回 candidate manifest。
 

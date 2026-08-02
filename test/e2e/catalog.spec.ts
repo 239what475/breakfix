@@ -3,6 +3,7 @@ import {
 	challengeCard,
 	expectViewportWithoutPageOverflow,
 } from "../support/live-helpers";
+import { nodeRuntimeFixture } from "../support/catalog-fixture";
 
 test("guest can filter, sort, and browse the public catalog without page overflow", async ({
 	page,
@@ -14,11 +15,11 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 	});
 	await page.goto("/");
 
-	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	expect(contentRequests).toEqual([]);
 
-	await page.getByRole("textbox", { name: "Search challenges" }).fill("日志");
-	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+	await page.getByRole("textbox", { name: "Search challenges" }).fill(nodeRuntimeFixture.searchTerm);
+	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	await page.getByRole("textbox", { name: "Search challenges" }).fill("not-a-challenge");
 	await expect(page.getByText("No challenges match these filters.", { exact: true })).toBeVisible();
 
@@ -35,16 +36,16 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 			}>;
 		}>;
 	});
-	const challenge = catalog.challenges.find((entry) => entry.title === "批量压缩旧日志");
+	const challenge = catalog.challenges.find((entry) => entry.title === nodeRuntimeFixture.title);
 	expect(challenge?.tags.length).toBeGreaterThan(0);
 	const taxonomyTag = challenge?.tags[0]?.title ?? "";
 	await page.locator(".catalog-filters").getByLabel(taxonomyTag, { exact: true }).check();
-	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	await page.locator(".catalog-filters").getByLabel("Kubernetes", { exact: true }).check();
 	await expect(page.getByText("No challenges match these filters.", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Reset filters", exact: true }).click();
 
-	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	await page.getByLabel("Sort challenges").selectOption("oldest");
 	const oldestFirst = [...catalog.challenges]
 		.sort((left, right) => new Date(left.published_at).getTime() - new Date(right.published_at).getTime())
@@ -53,7 +54,7 @@ test("guest can filter, sort, and browse the public catalog without page overflo
 	await page.getByLabel("Sort challenges").selectOption("newest");
 	await expect(page.locator("article.challenge-card h2").allTextContents()).resolves.toEqual([...oldestFirst].reverse());
 
-	await challengeCard(page, "批量压缩旧日志")
+	await challengeCard(page, nodeRuntimeFixture.title)
 		.getByRole("button", { name: "Start challenge", exact: true })
 		.click();
 	await expect(page.getByRole("dialog")).toBeVisible();

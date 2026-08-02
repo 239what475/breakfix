@@ -6,6 +6,7 @@ import {
 	startChallengeFromCatalog,
 	stopChallenge,
 } from "../support/live-helpers";
+import { nodeRuntimeFixture } from "../support/catalog-fixture";
 
 const soakTest = process.env.RUN_AGENT_SOAK_E2E === "1" ? test : test.skip;
 
@@ -13,7 +14,7 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 	test.setTimeout(30 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	await startChallengeFromCatalog(page, "批量压缩旧日志");
+	const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
 	await expectTerminalConnected(page);
 
 	const marker = `BREAKFIX_ASSISTANT_SOAK_${Date.now()}`;
@@ -45,6 +46,6 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 			}
 		}
 	} finally {
-		await stopChallenge(page, "chal-r7m4x2q9v6kp");
+		await stopChallenge(page, challenge.id);
 	}
 });

@@ -1,4 +1,10 @@
 import { expect, type Page } from "@playwright/test";
+import { nodeRuntimeFixture } from "./catalog-fixture";
+
+export type StartedChallenge = {
+	id: string;
+	title: string;
+};
 
 async function totpCode(page: Page, secret: string): Promise<string> {
   return page.evaluate(async (value: string) => {
@@ -76,10 +82,12 @@ export function challengeCardByID(page: Page, challengeID: string) {
   return page.locator(`article.challenge-card[data-challenge-id="${challengeID}"]`);
 }
 
-export async function startChallengeFromCatalog(page: Page, title: string) {
-  await challengeCard(page, title)
-    .getByRole("button", { name: "Start challenge", exact: true })
-    .click();
+export async function startChallengeFromCatalog(page: Page, title: string): Promise<StartedChallenge> {
+	const card = challengeCard(page, title);
+	const id = await card.getAttribute("data-challenge-id");
+	if (!id) throw new Error(`catalog challenge ${title} is missing its published ID`);
+	await card.getByRole("button", { name: "Start challenge", exact: true }).click();
+	return { id, title };
 }
 
 export async function expectTerminalConnected(page: Page) {
@@ -127,8 +135,8 @@ export async function runTerminalCommand(page: Page, command: string) {
 	await page.keyboard.press("Enter");
 }
 
-export async function runAnswer(page: Page) {
-	await runTerminalCommand(page, "/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
+export async function runNodeRuntimeFixtureAnswer(page: Page) {
+	await runTerminalCommand(page, nodeRuntimeFixture.answerCommand);
 }
 
 export async function stopChallenge(page: Page, challengeID: string) {

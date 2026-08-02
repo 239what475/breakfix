@@ -4,7 +4,7 @@ metadata:
   name: catalog-fixture
   version: 2026.08.01
 entries:
-  - path: challenges/catalog-smoke
-    contentRevision: sha256:cf43a62520e8c7efc9fbfca5240192fe17e539cde0969697e650835b64c5bbc3
+  - path: challenges/node-runtime-fixture
+    contentRevision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
 taxonomy:
-  contentRevision: sha256:155cb0b005aa271fcb52d097aea4753496f70903171888579781756f84d2e338
+  contentRevision: sha256:f47d2c4daba5544d57c9cf547bd91466297d8c9560c046e3aeae9e9a4d49fd1f

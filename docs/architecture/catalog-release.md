@@ -5,11 +5,12 @@ Catalog Release 是空平台的管理员初始化机制。它安装一个经 OCI
 
 ## Portable Source
 
+一个 portable source 是 Git 管理的目录，通常位于独立内容仓库或与真实基础题库一同提交：
+
 ```text
-catalog/
-  release.yaml
-  challenges/<topic>/<source>/
-  taxonomy/
+release.yaml
+challenges/<topic>/<source>/
+taxonomy/
 ```
 
 `release.yaml` 只保存 source 路径和确定性的 `contentRevision`：
@@ -21,7 +22,7 @@ metadata:
   name: foundation
   version: 2026.08.01
 entries:
-  - path: challenges/linux/cleanup-logs
+  - path: challenges/linux/service-recovery
     contentRevision: sha256:...
 taxonomy:
   contentRevision: sha256:...

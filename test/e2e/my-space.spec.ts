@@ -7,6 +7,7 @@ import {
 	expectViewportWithoutPageOverflow,
 	registerAndLogin,
 } from "../support/live-helpers";
+import { nodeRuntimeFixture } from "../support/catalog-fixture";
 
 test("authenticated learner can navigate the responsive My space shell", async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
@@ -72,7 +73,7 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await expect(page.getByRole("button", { name: "Challenge studio", exact: true })).toHaveCount(0);
 	await captureWorkspace(page, "my-space-mobile-menu");
 	await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Catalog", exact: true }).click();
-	await expect(challengeCard(page, "批量压缩旧日志")).toBeVisible();
+	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	await expect(page.getByRole("button", { name: "Start challenge", exact: true })).toHaveCount(0);
 	await expectViewportWithoutPageOverflow(page);
 	await captureWorkspace(page, "catalog-mobile");

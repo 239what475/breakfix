@@ -6,6 +6,7 @@ import {
   registerAndLogin,
   startChallengeFromCatalog,
 } from "../support/live-helpers";
+import { nodeRuntimeFixture } from "../support/catalog-fixture";
 
 const recoveryTest = process.env.RUN_SERVER_RECOVERY_E2E === "1" ? test : test.skip;
 const execFile = promisify(execFileCallback);
@@ -127,25 +128,25 @@ async function setShortIdleLease(name: string) {
   await kubectl(["patch", "nodeenvironment", name, "-n", namespace, "--type=merge", "-p", patch]);
 }
 
-async function currentCleanupEnvironment(page: Page) {
-  return page.evaluate(async () => {
+async function currentFixtureEnvironment(page: Page, challengeID: string) {
+  return page.evaluate(async (id) => {
     const response = await fetch("/api/me/space", {
       headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
     });
     if (!response.ok) throw new Error(await response.text());
     const body = (await response.json()) as { active_environments: ActiveEnvironment[] };
-    return body.active_environments.find((environment) => environment.challenge.id === "chal-r7m4x2q9v6kp") ?? null;
-  });
+    return body.active_environments.find((environment) => environment.challenge.id === id) ?? null;
+  }, challengeID);
 }
 
-async function startCleanupEnvironment(page: Page) {
+async function startFixtureEnvironment(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await registerAndLogin(page);
-  await startChallengeFromCatalog(page, "批量压缩旧日志");
+  const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
   await expectTerminalConnected(page);
-  await expect.poll(() => currentCleanupEnvironment(page), { timeout: 30_000 }).not.toBeNull();
-  const environment = await currentCleanupEnvironment(page);
-  if (environment === null) throw new Error("cleanup logs environment was not created");
+  await expect.poll(() => currentFixtureEnvironment(page, challenge.id), { timeout: 30_000 }).not.toBeNull();
+  const environment = await currentFixtureEnvironment(page, challenge.id);
+  if (environment === null) throw new Error("node runtime fixture environment was not created");
   return environment;
 }
 
@@ -168,7 +169,7 @@ recoveryTest("server restart leaves controller reconciliation active", async ({ 
   let environmentName = "";
   let serverStopped = false;
   try {
-    const environment = await startCleanupEnvironment(page);
+    const environment = await startFixtureEnvironment(page);
     environmentName = environment.environment_id;
     const workerRestartsBefore = await workerRestartCounts();
 
@@ -209,12 +210,12 @@ recoveryTest("controller restart reconciles an existing environment", async ({ p
   test.setTimeout(5 * 60_000);
   let environmentName = "";
   try {
-    const environment = await startCleanupEnvironment(page);
+    const environment = await startFixtureEnvironment(page);
     environmentName = environment.environment_id;
 
     await restartDeployment(controllerDeployment);
     await page.getByRole("textbox", { name: "Terminal input" }).focus();
-    await page.keyboard.type("/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
+    await page.keyboard.type(nodeRuntimeFixture.answerCommand);
     await page.keyboard.press("Enter");
     await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
     await expect.poll(() => kubectlValue(environmentName, "{.status.environment.phase}"), { timeout: 30_000 }).toBe("Completed");

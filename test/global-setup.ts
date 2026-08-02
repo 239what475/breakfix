@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { nodeRuntimeFixture } from "./support/catalog-fixture";
 
 const defaultServerURL = "http://localhost:9090";
 const namespace = process.env.BREAKFIX_RUNTIME_NAMESPACE ?? "breakfix-system";
@@ -67,10 +68,11 @@ export default async function globalSetup() {
 }
 
 async function ensureCatalogRelease(serverURL: string) {
-	const catalog = await fetch(`${serverURL}/api/challenges`);
-	if (!catalog.ok) throw new Error(`read catalog before E2E: ${await catalog.text()}`);
-	const existing = (await catalog.json()) as { challenges?: unknown[] };
-	if ((existing.challenges?.length ?? 0) > 0) return;
+	const existing = await readCatalog(serverURL);
+	if (existing.length > 0) {
+		if (existing.some((challenge) => challenge.title === nodeRuntimeFixture.title)) return;
+		throw new Error("target Catalog is not the dedicated Breakfix E2E fixture; use an empty test platform");
+	}
 
 	const bundle = process.env.BREAKFIX_E2E_CATALOG_REFERENCE?.trim();
 	const token = process.env.BREAKFIX_CATALOG_ADMIN_TOKEN?.trim();
@@ -98,11 +100,22 @@ async function ensureCatalogRelease(serverURL: string) {
 		});
 		if (!response.ok) throw new Error(`read E2E catalog release: ${await response.text()}`);
 		const current = (await response.json()) as { state?: string; last_error?: string };
-		if (current.state === "Ready") return;
+		if (current.state === "Ready") {
+			const installed = await readCatalog(serverURL);
+			if (installed.some((challenge) => challenge.title === nodeRuntimeFixture.title)) return;
+			throw new Error("installed E2E Catalog release does not contain the node runtime fixture");
+		}
 		if (current.state === "Failed") {
 			throw new Error(`E2E catalog release failed${current.last_error ? `: ${current.last_error}` : ""}`);
 		}
 		await sleep(1_000);
 	}
 	throw new Error(`timed out waiting for E2E catalog release ${release.id} to become Ready`);
+}
+
+async function readCatalog(serverURL: string): Promise<Array<{ title?: string }>> {
+	const response = await fetch(`${serverURL}/api/challenges`);
+	if (!response.ok) throw new Error(`read catalog before E2E: ${await response.text()}`);
+	const body = (await response.json()) as { challenges?: Array<{ title?: string }> };
+	return body.challenges ?? [];
 }

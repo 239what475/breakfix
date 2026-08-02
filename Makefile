@@ -33,7 +33,7 @@ TARGETARCH ?= amd64
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
 
-CATALOG_SOURCE ?= catalog
+CATALOG_SOURCE ?=
 CATALOG_ARCHIVE ?= dist/catalog.oci.tar
 CATALOG_REFERENCE ?=
 CATALOG_TRUST_BUNDLE_FILE ?=
@@ -103,6 +103,8 @@ lint:
 	golangci-lint run ./...
 
 catalog-package:
+	@test -n "$(CATALOG_SOURCE)" || { echo "CATALOG_SOURCE must name a portable Catalog Release source"; exit 2; }
+	@test -f "$(CATALOG_SOURCE)/release.yaml" || { echo "$(CATALOG_SOURCE) does not contain release.yaml"; exit 2; }
 	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
 
 catalog-install:
