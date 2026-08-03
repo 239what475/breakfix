@@ -27,6 +27,9 @@ config/breakfix.local.yaml
 bin/
 dist/
 
+# Local reference repositories
+projects/
+
 # Kind kubeconfig
 .kube/
 .local/
