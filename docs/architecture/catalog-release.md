@@ -52,6 +52,25 @@ Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并�
 
 source、Build 或 Verify 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。Registry、Kubernetes、Incus 或本地存储的基础设施错误在 release deadline 内仅重试当前阶段。相同 digest 可幂等恢复；后续 release 只能添加新的 `source_ref`，不能原地修改或删除已安装内容。
 
+## 调试导出
+
+Server 提供一个不属于 OpenAPI 或浏览器 UI 的只读调试接口：
+
+```text
+GET /internal/debug/roadmap-revisions/{revision_id}/export
+```
+
+它按指定 immutable `RoadmapRevision` 流式返回
+`breakfix-roadmap-r{revision_id}.tar.gz`。归档根目录是完整的 portable Catalog Release：
+`release.yaml`、所有 `roadmap/` 定义、Challenge binding、Topic/Challenge 两张关系图，以及该 revision
+中每一道题的 portable source。Server 在开始写响应前读取并核对每个 materialized Challenge 的 title 和
+content revision；发布 manifest 中的 `id`、`source_slug`、`image`、`content_revision` 与
+`published_at` 会被移除。
+
+导出不包含数据库或运行时 ID、OCI/Incus artifact、构建中间产物、验证报告、临时文件或宿主机路径。
+文件路径按字典序写入，文件 mode、owner、tar mtime 和 gzip mtime 固定，因此同一 revision 的重复导出
+字节稳定。实现只使用 Go 标准库 `archive/tar` 与 `compress/gzip`，不创建临时目录或回写 Catalog 工作区。
+
 ## 配置与测试
 
 部署者先打包并推送 source，获得 immutable digest，然后将它写入 Server runtime Secret 的 `catalog_release_reference`。更新 Secret 后重启或 rollout Server，安装器会从该配置恢复。

@@ -111,6 +111,25 @@
   line-height: 1.35;
 }
 
+.filter-option-with-context {
+	align-items: flex-start;
+}
+
+.filter-option-with-context > span {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+
+.filter-option-with-context strong {
+	font-weight: 500;
+}
+
+.filter-option-with-context small {
+	color: var(--muted);
+	font-size: 10px;
+}
+
 .filter-option input {
   width: 14px;
   height: 14px;

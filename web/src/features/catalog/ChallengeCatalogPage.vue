@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { Challenge, RoadmapReference } from "../../api/types";
 import CatalogFilters from "./CatalogFilters.vue";
 import ChallengeList from "./ChallengeList.vue";
-import { challengeStatus, toggleSelection, type CatalogSort } from "./catalog";
+import { challengeStatus, toggleSelection, type CatalogSort, type CatalogTopicFilter } from "./catalog";
 import "./catalog.css";
 
 const props = defineProps<{
@@ -22,11 +22,30 @@ const emit = defineEmits<{
 const query = ref("");
 const difficulties = ref<string[]>([]);
 const runtimes = ref<string[]>([]);
+const domains = ref<string[]>([]);
+const topics = ref<string[]>([]);
 const tags = ref<string[]>([]);
 const statuses = ref<string[]>([]);
 const sort = ref<CatalogSort>("newest");
 const filtersOpen = ref(false);
 const catalogPage = ref<HTMLElement>();
+
+const availableDomains = computed(() => {
+	const domains = new Map<string, RoadmapReference>();
+	for (const challenge of props.challenges) domains.set(challenge.domain.id, challenge.domain);
+	return [...domains.values()].sort((left, right) => left.title.localeCompare(right.title));
+});
+
+const availableTopics = computed<CatalogTopicFilter[]>(() => {
+	const topics = new Map<string, CatalogTopicFilter>();
+	for (const challenge of props.challenges) {
+		topics.set(challenge.topic.id, { ...challenge.topic, domainTitle: challenge.domain.title });
+	}
+	return [...topics.values()].sort((left, right) => {
+		const domainDifference = left.domainTitle.localeCompare(right.domainTitle);
+		return domainDifference || left.title.localeCompare(right.title);
+	});
+});
 
 const availableTags = computed(() => {
 	const tags = new Map<string, RoadmapReference>();
@@ -50,6 +69,8 @@ const filteredChallenges = computed(() => {
 		}
 		if (difficulties.value.length && !difficulties.value.includes(challenge.difficulty)) return false;
 		if (runtimes.value.length && !runtimes.value.includes(challenge.runtime)) return false;
+		if (domains.value.length && !domains.value.includes(challenge.domain.id)) return false;
+		if (topics.value.length && !topics.value.includes(challenge.topic.id)) return false;
 		if (tags.value.length && !tags.value.some((tag) => challenge.tags.some((value) => value.id === tag))) return false;
 		if (props.loggedIn && statuses.value.length && !statuses.value.includes(challengeStatus(challenge))) return false;
 		return true;
@@ -64,6 +85,8 @@ function resetFilters() {
 	query.value = "";
 	difficulties.value = [];
 	runtimes.value = [];
+	domains.value = [];
+	topics.value = [];
 	tags.value = [];
 	statuses.value = [];
 }
@@ -89,8 +112,12 @@ watch([() => props.focusChallengeId, () => props.challenges], ([id]) => {
 				:query="query"
 				:difficulties="difficulties"
 				:runtimes="runtimes"
+				:domains="domains"
+				:topics="topics"
 				:tags="tags"
 				:statuses="statuses"
+				:available-domains="availableDomains"
+				:available-topics="availableTopics"
 				:available-tags="availableTags"
 				:result-count="filteredChallenges.length"
 				:logged-in="loggedIn"
@@ -98,6 +125,8 @@ watch([() => props.focusChallengeId, () => props.challenges], ([id]) => {
 				@update:query="query = $event"
 				@toggle:difficulty="difficulties = toggleSelection(difficulties, $event)"
 				@toggle:runtime="runtimes = toggleSelection(runtimes, $event)"
+				@toggle:domain="domains = toggleSelection(domains, $event)"
+				@toggle:topic="topics = toggleSelection(topics, $event)"
 				@toggle:tag="tags = toggleSelection(tags, $event)"
 				@toggle:status="statuses = toggleSelection(statuses, $event)"
 				@reset="resetFilters"

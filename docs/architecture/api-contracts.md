@@ -19,6 +19,17 @@ make verify-generated
 浏览器不提交 challenge artifact，也没有做题 Submit。检查点由 Controller 自动评估；作者发布通过
 `GenerationWorkflow` 的作者审核状态触发，而不是上传任意文件。
 
+## 调试 HTTP
+
+下列接口同样不进入 OpenAPI，也不由浏览器调用：
+
+```text
+GET /internal/debug/roadmap-revisions/{revision_id}/export
+```
+
+它导出一个指定 immutable RoadmapRevision 对应的完整 portable Catalog Release `.tar.gz`，用于本地检查和
+内容迁移调试；详细的内容边界与确定性归档规则见 [Catalog Release](catalog-release.md)。
+
 ## 内部 Worker HTTP
 
 内部 API 不属于 OpenAPI 公开契约。当前它们只供 Generate Worker 调用，并使用独立 role key：

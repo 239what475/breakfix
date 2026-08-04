@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,6 +26,11 @@ func ContentRevision(root string) (catalogdomain.ContentRevision, error) {
 	if err != nil {
 		return "", err
 	}
+	return contentRevisionForFiles(files), nil
+}
+
+func contentRevisionForFiles(files []sourceFile) catalogdomain.ContentRevision {
+	files = sortedSourceFiles(files)
 	hash := sha256.New()
 	for _, file := range files {
 		_, _ = hash.Write([]byte(file.Path))
@@ -38,7 +44,7 @@ func ContentRevision(root string) (catalogdomain.ContentRevision, error) {
 		_, _ = hash.Write(file.Content)
 		_, _ = hash.Write([]byte{0})
 	}
-	return catalogdomain.ContentRevision("sha256:" + hex.EncodeToString(hash.Sum(nil))), nil
+	return catalogdomain.ContentRevision("sha256:" + hex.EncodeToString(hash.Sum(nil)))
 }
 
 type sourceFile struct {
@@ -108,7 +114,52 @@ func readSourceFiles(root string) ([]sourceFile, error) {
 
 func writeSourceLayer(files []sourceFile) ([]byte, error) {
 	var uncompressed bytes.Buffer
-	tw := tar.NewWriter(&uncompressed)
+	if err := writeSourceTar(&uncompressed, files); err != nil {
+		return nil, err
+	}
+	var compressed bytes.Buffer
+	if err := writeSourceArchive(&compressed, bytes.NewReader(uncompressed.Bytes())); err != nil {
+		return nil, err
+	}
+	return compressed.Bytes(), nil
+}
+
+func writeSourceArchive(destination io.Writer, source io.Reader) error {
+	zw, err := gzip.NewWriterLevel(destination, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
+	zw.ModTime = time.Unix(0, 0).UTC()
+	zw.OS = 255
+	if _, err := io.Copy(zw, source); err != nil {
+		return err
+	}
+	if err := zw.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeSourceArchiveFiles(destination io.Writer, files []sourceFile) error {
+	zw, err := gzip.NewWriterLevel(destination, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
+	zw.ModTime = time.Unix(0, 0).UTC()
+	zw.OS = 255
+	if err := writeSourceTar(zw, files); err != nil {
+		_ = zw.Close()
+		return err
+	}
+	if err := zw.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeSourceTar(destination io.Writer, files []sourceFile) error {
+	files = sortedSourceFiles(files)
+	tw := tar.NewWriter(destination)
 	for _, file := range files {
 		mode := int64(0o644)
 		if file.Executable {
@@ -119,27 +170,20 @@ func writeSourceLayer(files []sourceFile) ([]byte, error) {
 			ModTime: time.Unix(0, 0).UTC(), AccessTime: time.Time{}, ChangeTime: time.Time{}, Format: tar.FormatPAX,
 		}
 		if err := tw.WriteHeader(header); err != nil {
-			return nil, fmt.Errorf("write portable source layer header %s: %w", file.Path, err)
+			return fmt.Errorf("write portable source layer header %s: %w", file.Path, err)
 		}
 		if _, err := tw.Write(file.Content); err != nil {
-			return nil, fmt.Errorf("write portable source layer %s: %w", file.Path, err)
+			return fmt.Errorf("write portable source layer %s: %w", file.Path, err)
 		}
 	}
 	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("close portable source layer: %w", err)
+		return fmt.Errorf("close portable source layer: %w", err)
 	}
-	var compressed bytes.Buffer
-	zw, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
-	if err != nil {
-		return nil, err
-	}
-	zw.ModTime = time.Unix(0, 0).UTC()
-	zw.OS = 255
-	if _, err := zw.Write(uncompressed.Bytes()); err != nil {
-		return nil, err
-	}
-	if err := zw.Close(); err != nil {
-		return nil, err
-	}
-	return compressed.Bytes(), nil
+	return nil
+}
+
+func sortedSourceFiles(files []sourceFile) []sourceFile {
+	result := append([]sourceFile(nil), files...)
+	slices.SortFunc(result, func(left, right sourceFile) int { return strings.Compare(left.Path, right.Path) })
+	return result
 }

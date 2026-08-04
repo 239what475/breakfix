@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
 import type { RoadmapReference } from "../../api/types";
+import type { CatalogTopicFilter } from "./catalog";
 
 const props = defineProps<{
 	query: string;
 	difficulties: string[];
 	runtimes: string[];
+	domains: string[];
+	topics: string[];
 	tags: string[];
 	statuses: string[];
+	availableDomains: RoadmapReference[];
+	availableTopics: CatalogTopicFilter[];
 	availableTags: RoadmapReference[];
 	resultCount: number;
 	loggedIn: boolean;
@@ -18,6 +23,8 @@ const emit = defineEmits<{
 	"update:query": [value: string];
 	"toggle:difficulty": [value: string];
 	"toggle:runtime": [value: string];
+	"toggle:domain": [value: string];
+	"toggle:topic": [value: string];
 	"toggle:tag": [value: string];
 	"toggle:status": [value: string];
 	reset: [];
@@ -64,6 +71,25 @@ function updateQuery(event: Event) {
 			<label v-for="runtime in ['node', 'k8s']" :key="runtime" class="filter-option">
 				<input type="checkbox" :checked="runtimes.includes(runtime)" @change="emit('toggle:runtime', runtime)" />
 				<span>{{ runtime === 'k8s' ? 'Kubernetes' : 'Linux nodes' }}</span>
+			</label>
+		</section>
+
+		<section v-if="availableDomains.length" class="filter-group" aria-labelledby="domain-filter">
+			<h2 id="domain-filter">Domain</h2>
+			<label v-for="domain in availableDomains" :key="domain.id" class="filter-option">
+				<input type="checkbox" :checked="domains.includes(domain.id)" @change="emit('toggle:domain', domain.id)" />
+				<span>{{ domain.title }}</span>
+			</label>
+		</section>
+
+		<section v-if="availableTopics.length" class="filter-group" aria-labelledby="topic-filter">
+			<h2 id="topic-filter">Topic</h2>
+			<label v-for="topic in availableTopics" :key="topic.id" class="filter-option filter-option-with-context">
+				<input type="checkbox" :checked="topics.includes(topic.id)" @change="emit('toggle:topic', topic.id)" />
+				<span>
+					<strong>{{ topic.title }}</strong>
+					<small>{{ topic.domainTitle }}</small>
+				</span>
 			</label>
 		</section>
 

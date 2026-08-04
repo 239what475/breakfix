@@ -58,6 +58,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	})
 	router.GET("/metrics", h.WorkflowMetrics)
 	router.POST("/internal/debug/roadmap-maintenance", h.RequestRoadmapMaintenance)
+	router.GET("/internal/debug/roadmap-revisions/:revision_id/export", h.ExportRoadmapRevision)
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)

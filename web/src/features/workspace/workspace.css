@@ -265,8 +265,39 @@
   line-height: 1.45;
 }
 .roadmap-group small {
-  display: block;
-  margin-top: 2px;
+	display: block;
+	margin-top: 2px;
+}
+.roadmap-neighbors {
+	grid-column: 1 / -1;
+	padding-top: 10px;
+	border-top: 1px solid #d9e2dc;
+}
+.roadmap-edge-list {
+	display: grid;
+	gap: 8px;
+	margin: 7px 0 0;
+	padding: 0;
+	list-style: none;
+}
+.roadmap-edge-list li {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 2px 8px;
+}
+.roadmap-edge-list strong {
+	min-width: 0;
+	font-size: 11px;
+	font-weight: 600;
+}
+.roadmap-edge-list span {
+	color: #4c7963;
+	font: 10px "DM Mono", monospace;
+}
+.roadmap-edge-list small {
+	grid-column: 1 / -1;
+	color: var(--muted);
+	font-size: 10px;
 }
 .markdown-document h1 {
   margin: 0 0 24px;

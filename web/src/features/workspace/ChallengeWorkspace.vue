@@ -188,7 +188,7 @@ onUnmounted(() => {
             :terminals="terminalContexts"
           />
           <template v-else>
-            <RoadmapPanel v-if="view === 'problem' && content" :roadmap="content.roadmap" />
+            <RoadmapPanel v-if="view === 'problem' && content" :roadmap="content.roadmap" :challenge-id="content.id" />
             <MarkdownDocument :source="documentSource" />
             <aside
               v-if="activeHint && content?.hints[activeHint]"

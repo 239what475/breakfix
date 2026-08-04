@@ -147,30 +147,30 @@ Topic 间的推荐顺序由 Roadmap Workflow 的有向 `precedes` 边维护，�
 
 ### 迁移清单
 
-当前实现仍有遗留 `Skill`、`Tag`、challenge mapping 和 `Skill requires` 模型，且 source 只接受扁平目录。首个正式题库发布前必须无兼容地替换它们。`RoadmapRevision` 是唯一的全局课程数据版本：Domain、Topic、Tag、Challenge 绑定和两张关系图始终由同一个 revision 一起读取、校验和发布，不能再并存另一份分类读模型。
+P0 已无兼容地完成遗留 `Skill`、`Tag`、challenge mapping 和 `Skill requires` 模型的迁移。`RoadmapRevision` 是唯一的全局课程数据版本：Domain、Topic、Tag、Challenge 绑定和两张关系图始终由同一个 revision 一起读取、校验和发布，不能再并存另一份分类读模型。
 
-- [ ] 删除遗留 `Skill` 模型、`skills/` 布局、`entry_skills`、`outcomes`、`requires` 及相关 API/前端术语，不保留兼容读取路径。
-- [ ] 定义 immutable `RoadmapRevision` 的完整内容：Domain、Topic、Tag、`Challenge -> Topic`、`Challenge -> Tag`、`topic_edges` 与 `challenge_edges`。它是分类、目录、筛选和学习路径唯一的读模型；发布 Challenge 分类或路线关系时，均以 copy-on-write 生成下一份 revision。
-- [ ] Catalog Release 安装后，数据库中的 RoadmapRevision 是运行时唯一事实来源。`catalog/` 与 portable release 只作为 immutable import/export source，Server 不回写 Git 工作区，也不做双向同步。
-- [ ] portable source 使用可读、不可变的 `source_ref` 和 `title`，不携带平台 Challenge ID、镜像或发布时间。Domain `source_ref` 全局唯一；Topic 使用 `domain/topic`；Tag 全局唯一；Challenge 使用 `domain/topic/challenge`。对于作者确认发布的新 Topic、Tag 和 Challenge，Server 只在首次发布时从规范化英文 title 分配 `source_ref`：Topic 为 `<domain-source-ref>/<title>`，Tag 为 `<title>`，Challenge 为 `<topic-source-ref>/<title>`。新 Topic/Tag 的规范化冲突拒绝发布并回到分类调整；Challenge 的规范化冲突回到内容审核并形成新的 PlanRevision；两者都绝不追加随机后缀。成功后永久保存，title 或 source filename 改名也不得重算。source filename 可默认采用 source_ref 的末段，但不承担身份。安装时 Server 将 source_ref 解析为运行时稳定 ID；运行时绑定与边同时保留 ID 和 title 快照，保证机器可引用、人可审查。
-- [ ] 增加 immutable `Domain` 定义：`source_ref`、`title`、`definition`、`scope`、`non_goals` 与可读 source filename。Domain 不直接映射 Challenge，也不参与关系边。
-- [ ] 增加 immutable `Topic` 定义：`source_ref`、`title`、`domain: {source_ref, title}`、`definition`、`scope`、`non_goals`、`challenge_guidance` 与可读 source filename。Topic title 在同一 Domain 内规范化唯一；`challenge_guidance` 用自然语言说明什么样的题唯一归属该 Topic，避免分类只靠名称猜测。
-- [ ] 增加 immutable `Tag` 定义：`source_ref`、`title`、`description` 与可读 source filename。Tag title 在全局规范化唯一；没有跨 Topic 筛选价值的偶然命令或底层 Provider 细节不创建 Tag。
-- [ ] 将 GenerationWorkflow 收敛为业务状态：`Generating`、`Judging`、`Building`、`ArtifactPublishing`、`Verifying`、`NeedsAuthorReview`、`Classifying`、`NeedsClassificationReview`、`ChallengePublishing`、`Published`、`Failed`、`Cancelled`、`Superseded`。删除 `CleaningUp`、`CleanupIntent` 及所有把资源回收作为 workflow 阶段的协议/API；supersede、取消和 candidate 尚未验证的不可恢复失败直接进入各自终态，但不终止 AuthoringSession。
-- [ ] 为 CandidateRevision 持久化输入 PlanRevision、parent candidate、repair reason、AgentRun、archive digest、构建/验证结果和外部资源记录。每条资源记录至少有类型、外部身份、归属 workflow/candidate、创建时间、回收状态、最近错误和下次重试时间；保留 source archive、失败原因和报告。Controller 与 Generate Worker 基于这些记录执行幂等 reaper，回收 verification Environment、workspace、candidate OCI/Incus staging artifact 和 build intermediate，而不改变 workflow state。
-- [ ] 为 verified CandidateRevision 增加独立的 ClassificationProposal：结果为 `proposed` 或 `unclassifiable`。`proposed` 恰有一个 Topic 与零到多个 Tags，既有定义按稳定引用选择，新定义只保留作者可读的候选字段；`unclassifiable` 只带原因和内容调整建议，不能发布。提案固定 candidate 与 `roadmap_revision`，不改写已真实验证的 runtime archive；发布后才成为 Challenge 的最终分类事实。删除 `primary_topic`、`related_topics` 和所有由 Roadmap Workflow 生成的分类字段，Challenge 不重复保存 Domain。
-- [ ] 在 GenerationWorkflow 中增加 `Classifying -> NeedsClassificationReview`：内容审核确认后才由独立分类 Agent 读取冻结 candidate 和当前 RoadmapRevision。两个审核态均通过 typed `change_scope` 路由自然语言反馈：内容变更先形成私有 Plan 草稿并经作者确认后创建新 workflow，分类变更才只重跑 `Classifying`。分类变更不重新 Build 或 Verify。
-- [ ] 定义阶段敏感的失败恢复：candidate 尚未验证时，技术/资源预算耗尽进入 `Failed`；verified candidate 之后，`Classifying` 或 `ChallengePublishing` 的技术耗尽返回 `NeedsClassificationReview` 并保留 candidate、proposal 与 publication intent，以可重试的 `classification_unavailable` 或 `publication_unavailable` 表达，不重新 Build 或 Verify。
-- [ ] 所有内容、分类和发布确认 API 均使用乐观并发：请求绑定 `workflow_id`、Plan draft/revision、candidate revision 或 publication intent 的 expected revision，并带 idempotency key。旧标签页与重复点击不得创建第二个 workflow、Challenge 或 promote。
-- [ ] Server 只判断 ID/source_ref 引用、规范化 title 和关系图的确定性约束；无向 `related` 去重并优先于同对的 `precedes`，反向 `precedes` 规范化为 `related`，按稳定顺序跳过会成环的候选 `precedes`。这些归并结果必须留下审计原因；“语义是否重复”仍由 Agent 与作者审核，不能伪装为 Server 自动判断。
-- [ ] 发布时允许无关 RoadmapRevision 增量的确定性 rebase，只在已引用定义失效，或新 Topic/Tag 的 `source_ref`、规范化 title 冲突时重跑 `Classifying`。Challenge 由 title 派生的 `source_ref` 冲突则回到 `NeedsAuthorReview`，不得由分类调整掩盖内容冲突。Server 不判断语义重复。首次确认发布分配唯一 publication intent，staging/promote、数据库可见性提交和崩溃恢复都复用该 intent。
-- [ ] 让两个审核态暂停 Worker deadline；新 PlanRevision 和每次由审核态恢复的 `Classifying`/`ChallengePublishing` 都开始新的执行窗口。每个活动 state 最多十次连续技术重试，每个 workflow 最多十个 CandidateRevision（含首次）。
-- [ ] 实现 Server-owned、只读的 Roadmap Retrieval：按 immutable `roadmap_revision` 提供 Topic/Tag/Challenge 的 typed search/read 工具，以精确 ID/title 匹配加 BM25F 作为初始检索策略。分类 Agent 只经此接口读取定义，并通过 typed result 提出既有引用或新定义候选；Roadmap Planner 以单个 subject 为中心，在固定 revision 的全部其他已发布 Topic 或 Challenge 中按需搜索和读取关系候选，不提供快照遍历工具。作者对内容和分类的两次显式确认是这些候选进入公开 Roadmap 的唯一入口。
-- [ ] 增加 immutable `topic_edges` 和 `challenge_edges`：`precedes` 是有向无环边，`related` 是无向规范化边；每条边保存稳定 source/target 引用、title 快照和面向审查的理由。
-- [ ] 将现有 Taxonomy Workflow 迁移为 Server-owned 的增量 `RoadmapWorkflow`：不保留独立 deployment、通用 executor、slot 或全量关系规划。Server 在 PostgreSQL 中持久化 `roadmap_requested`、启动时全部 pending entry 的固定快照、TopicTask/ChallengeTask、每个 Agent 的调用次数、结果和 lease，并直接异步并发执行 task；Server 重启或多副本竞争时通过 lease 接管。每累计 20 道新发布 Challenge 只创建一个自动请求；20 只是触发阈值，请求存在时新题继续累积，workflow 启动时固定全部 pending entry 并消费请求。仅供调试的内部手工触发可在任意 pending entry 存在时创建同一种请求，不暴露给普通用户或 Catalog UI。两种触发均只在没有执行中的 GenerationWorkflow 时，才以同一事务创建唯一的 `Queued` RoadmapWorkflow；Roadmap 运行期间所有 Generation 执行阶段和 Catalog Release commit 都必须等待。每个 entry 只重建尚未完成的 TopicTask/ChallengeTask；两类 task 全部并发，每个 task 内 Planner 串行驱动、两位 Reviewer 并发审查，三种 Agent 各自最多五次调用；每次 Planner 修订后两位 Reviewer 都重新审查。task 只有 `Accepted` 或 `Failed`：失败 entry 自然保留为 pending，在下一次自动或调试手工 workflow 的完整快照中重试，不立即循环，也不产生额外重试项。Server 将 `related` 优先于同对的 `precedes`，将反向 `precedes` 合并为 `related`，再按稳定顺序忽略成环候选边，最后一次发布有效增量；这些合并结果不导致 task 失败。Catalog 安装以同一 RoadmapRevision 写锁建立已处理基线。它不产出或修改分类、Domain、Topic 或 Tag。
-- [ ] 将 portable Roadmap source、运行时 RoadmapRevision、内容校验、Catalog 安装、API/前端筛选和测试 fixture 全部升级为同一契约。当前没有正式题库，因此不保留旧 schema。
-- [ ] 增加只读、仅调试的 RoadmapRevision `.tar.gz` 导出接口：使用标准库流式生成完整 portable Catalog Release，固定归档顺序和元数据，不写 Git、不创建临时文件、不导出运行时资源，也不提供 UI 或子集导出。
-- [ ] 将 source 布局改为可读的领域分组，并让 reader/writer 保留相对 source 路径：
+- [x] 删除遗留 `Skill` 模型、`skills/` 布局、`entry_skills`、`outcomes`、`requires` 及相关 API/前端术语，不保留兼容读取路径。
+- [x] 定义 immutable `RoadmapRevision` 的完整内容：Domain、Topic、Tag、`Challenge -> Topic`、`Challenge -> Tag`、`topic_edges` 与 `challenge_edges`。它是分类、目录、筛选和学习路径唯一的读模型；发布 Challenge 分类或路线关系时，均以 copy-on-write 生成下一份 revision。
+- [x] Catalog Release 安装后，数据库中的 RoadmapRevision 是运行时唯一事实来源。`catalog/` 与 portable release 只作为 immutable import/export source，Server 不回写 Git 工作区，也不做双向同步。
+- [x] portable source 使用可读、不可变的 `source_ref` 和 `title`，不携带平台 Challenge ID、镜像或发布时间。Domain `source_ref` 全局唯一；Topic 使用 `domain/topic`；Tag 全局唯一；Challenge 使用 `domain/topic/challenge`。对于作者确认发布的新 Topic、Tag 和 Challenge，Server 只在首次发布时从规范化英文 title 分配 `source_ref`：Topic 为 `<domain-source-ref>/<title>`，Tag 为 `<title>`，Challenge 为 `<topic-source-ref>/<title>`。新 Topic/Tag 的规范化冲突拒绝发布并回到分类调整；Challenge 的规范化冲突回到内容审核并形成新的 PlanRevision；两者都绝不追加随机后缀。成功后永久保存，title 或 source filename 改名也不得重算。source filename 可默认采用 source_ref 的末段，但不承担身份。安装时 Server 将 source_ref 解析为运行时稳定 ID；运行时绑定与边同时保留 ID 和 title 快照，保证机器可引用、人可审查。
+- [x] 增加 immutable `Domain` 定义：`source_ref`、`title`、`definition`、`scope`、`non_goals` 与可读 source filename。Domain 不直接映射 Challenge，也不参与关系边。
+- [x] 增加 immutable `Topic` 定义：`source_ref`、`title`、`domain: {source_ref, title}`、`definition`、`scope`、`non_goals`、`challenge_guidance` 与可读 source filename。Topic title 在同一 Domain 内规范化唯一；`challenge_guidance` 用自然语言说明什么样的题唯一归属该 Topic，避免分类只靠名称猜测。
+- [x] 增加 immutable `Tag` 定义：`source_ref`、`title`、`description` 与可读 source filename。Tag title 在全局规范化唯一；没有跨 Topic 筛选价值的偶然命令或底层 Provider 细节不创建 Tag。
+- [x] 将 GenerationWorkflow 收敛为业务状态：`Generating`、`Judging`、`Building`、`ArtifactPublishing`、`Verifying`、`NeedsAuthorReview`、`Classifying`、`NeedsClassificationReview`、`ChallengePublishing`、`Published`、`Failed`、`Cancelled`、`Superseded`。删除 `CleaningUp`、`CleanupIntent` 及所有把资源回收作为 workflow 阶段的协议/API；supersede、取消和 candidate 尚未验证的不可恢复失败直接进入各自终态，但不终止 AuthoringSession。
+- [x] 为 CandidateRevision 持久化输入 PlanRevision、parent candidate、repair reason、AgentRun、archive digest、构建/验证结果和外部资源记录。每条资源记录至少有类型、外部身份、归属 workflow/candidate、创建时间、回收状态、最近错误和下次重试时间；保留 source archive、失败原因和报告。Controller 与 Generate Worker 基于这些记录执行幂等 reaper，回收 verification Environment、workspace、candidate OCI/Incus staging artifact 和 build intermediate，而不改变 workflow state。
+- [x] 为 verified CandidateRevision 增加独立的 ClassificationProposal：结果为 `proposed` 或 `unclassifiable`。`proposed` 恰有一个 Topic 与零到多个 Tags，既有定义按稳定引用选择，新定义只保留作者可读的候选字段；`unclassifiable` 只带原因和内容调整建议，不能发布。提案固定 candidate 与 `roadmap_revision`，不改写已真实验证的 runtime archive；发布后才成为 Challenge 的最终分类事实。删除 `primary_topic`、`related_topics` 和所有由 Roadmap Workflow 生成的分类字段，Challenge 不重复保存 Domain。
+- [x] 在 GenerationWorkflow 中增加 `Classifying -> NeedsClassificationReview`：内容审核确认后才由独立分类 Agent 读取冻结 candidate 和当前 RoadmapRevision。两个审核态均通过 typed `change_scope` 路由自然语言反馈：内容变更先形成私有 Plan 草稿并经作者确认后创建新 workflow，分类变更才只重跑 `Classifying`。分类变更不重新 Build 或 Verify。
+- [x] 定义阶段敏感的失败恢复：candidate 尚未验证时，技术/资源预算耗尽进入 `Failed`；verified candidate 之后，`Classifying` 或 `ChallengePublishing` 的技术耗尽返回 `NeedsClassificationReview` 并保留 candidate、proposal 与 publication intent，以可重试的 `classification_unavailable` 或 `publication_unavailable` 表达，不重新 Build 或 Verify。
+- [x] 所有内容、分类和发布确认 API 均使用乐观并发：请求绑定 `workflow_id`、Plan draft/revision、candidate revision 或 publication intent 的 expected revision，并带 idempotency key。旧标签页与重复点击不得创建第二个 workflow、Challenge 或 promote。
+- [x] Server 只判断 ID/source_ref 引用、规范化 title 和关系图的确定性约束；无向 `related` 去重并优先于同对的 `precedes`，反向 `precedes` 规范化为 `related`，按稳定顺序跳过会成环的候选 `precedes`。这些归并结果必须留下审计原因；“语义是否重复”仍由 Agent 与作者审核，不能伪装为 Server 自动判断。
+- [x] 发布时允许无关 RoadmapRevision 增量的确定性 rebase，只在已引用定义失效，或新 Topic/Tag 的 `source_ref`、规范化 title 冲突时重跑 `Classifying`。Challenge 由 title 派生的 `source_ref` 冲突则回到 `NeedsAuthorReview`，不得由分类调整掩盖内容冲突。Server 不判断语义重复。首次确认发布分配唯一 publication intent，staging/promote、数据库可见性提交和崩溃恢复都复用该 intent。
+- [x] 让两个审核态暂停 Worker deadline；新 PlanRevision 和每次由审核态恢复的 `Classifying`/`ChallengePublishing` 都开始新的执行窗口。每个活动 state 最多十次连续技术重试，每个 workflow 最多十个 CandidateRevision（含首次）。
+- [x] 实现 Server-owned、只读的 Roadmap Retrieval：按 immutable `roadmap_revision` 提供 Topic/Tag/Challenge 的 typed search/read 工具，以精确 ID/title 匹配加 BM25F 作为初始检索策略。分类 Agent 只经此接口读取定义，并通过 typed result 提出既有引用或新定义候选；Roadmap Planner 以单个 subject 为中心，在固定 revision 的全部其他已发布 Topic 或 Challenge 中按需搜索和读取关系候选，不提供快照遍历工具。作者对内容和分类的两次显式确认是这些候选进入公开 Roadmap 的唯一入口。
+- [x] 增加 immutable `topic_edges` 和 `challenge_edges`：`precedes` 是有向无环边，`related` 是无向规范化边；每条边保存稳定 source/target 引用、title 快照和面向审查的理由。
+- [x] 将现有 Taxonomy Workflow 迁移为 Server-owned 的增量 `RoadmapWorkflow`：不保留独立 deployment、通用 executor、slot 或全量关系规划。Server 在 PostgreSQL 中持久化 `roadmap_requested`、启动时全部 pending entry 的固定快照、TopicTask/ChallengeTask、每个 Agent 的调用次数、结果和 lease，并直接异步并发执行 task；Server 重启或多副本竞争时通过 lease 接管。每累计 20 道新发布 Challenge 只创建一个自动请求；20 只是触发阈值，请求存在时新题继续累积，workflow 启动时固定全部 pending entry 并消费请求。仅供调试的内部手工触发可在任意 pending entry 存在时创建同一种请求，不暴露给普通用户或 Catalog UI。两种触发均只在没有执行中的 GenerationWorkflow 时，才以同一事务创建唯一的 `Queued` RoadmapWorkflow；Roadmap 运行期间所有 Generation 执行阶段和 Catalog Release commit 都必须等待。每个 entry 只重建尚未完成的 TopicTask/ChallengeTask；两类 task 全部并发，每个 task 内 Planner 串行驱动、两位 Reviewer 并发审查，三种 Agent 各自最多五次调用；每次 Planner 修订后两位 Reviewer 都重新审查。task 只有 `Accepted` 或 `Failed`：失败 entry 自然保留为 pending，在下一次自动或调试手工 workflow 的完整快照中重试，不立即循环，也不产生额外重试项。Server 将 `related` 优先于同对的 `precedes`，将反向 `precedes` 合并为 `related`，再按稳定顺序忽略成环候选边，最后一次发布有效增量；这些合并结果不导致 task 失败。Catalog 安装以同一 RoadmapRevision 写锁建立已处理基线。它不产出或修改分类、Domain、Topic 或 Tag。
+- [x] 将 portable Roadmap source、运行时 RoadmapRevision、内容校验、Catalog 安装、API/前端筛选和测试 fixture 全部升级为同一契约。当前没有正式题库，因此不保留旧 schema。
+- [x] 增加只读、仅调试的 RoadmapRevision `.tar.gz` 导出接口：使用标准库流式生成完整 portable Catalog Release，固定归档顺序和元数据，不写 Git、不创建临时文件、不导出运行时资源，也不提供 UI 或子集导出。
+- [x] 将 source 布局改为可读的领域分组，并让 reader/writer 保留相对 source 路径：
 
 ```text
 roadmap/
@@ -190,8 +190,8 @@ roadmap/
   challenge-edges.yaml
 ```
 
-- [ ] Catalog 的领域和主题筛选只从 Challenge 的唯一 Topic 推导；跨 Topic 发现由 Topic 图和 Challenge 图提供，不使用多 Topic mapping。
-- [ ] 初期禁止 Generate Agent、Classifying Agent 或 Roadmap Workflow 创建或合并 Domain。Domain 是人工维护的课程边界；Classifying Agent 只能提出 Topic/Tag 候选并等待作者确认。全局领域调整属于后续 maintenance workflow。
+- [x] Catalog 的领域和主题筛选只从 Challenge 的唯一 Topic 推导；跨 Topic 发现由 Topic 图和 Challenge 图提供，不使用多 Topic mapping。
+- [x] 初期禁止 Generate Agent、Classifying Agent 或 Roadmap Workflow 创建或合并 Domain。Domain 是人工维护的课程边界；Classifying Agent 只能提出 Topic/Tag 候选并等待作者确认。全局领域调整属于后续 maintenance workflow。
 
 ### Catalog Release 契约
 

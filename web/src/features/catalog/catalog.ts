@@ -1,7 +1,8 @@
-import type { Challenge } from "../../api/types";
+import type { Challenge, RoadmapReference } from "../../api/types";
 
 export type ChallengeStatus = "todo" | "in-progress" | "completed";
 export type CatalogSort = "newest" | "oldest";
+export type CatalogTopicFilter = RoadmapReference & { domainTitle: string };
 
 export function challengeStatus(challenge: Challenge): ChallengeStatus {
 	if (challenge.active) return "in-progress";
