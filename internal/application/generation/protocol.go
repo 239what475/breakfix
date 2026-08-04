@@ -21,13 +21,16 @@ func (r StartAgentRunRequest) Validate(workflowID string) error {
 		strings.TrimSpace(r.Model) == "" || strings.TrimSpace(r.PromptVersion) == "" || strings.TrimSpace(workflowID) == "" {
 		return errors.New("generation agent run request is incomplete")
 	}
-	if r.Purpose == "generator" && r.ExpectedState != domain.StateGenerating {
+	if r.Purpose == GeneratorPurpose && r.ExpectedState != domain.StateGenerating {
 		return errors.New("generator run requires Generating state")
 	}
-	if r.Purpose == "judge" && r.ExpectedState != domain.StateJudging {
+	if r.Purpose == JudgePurpose && r.ExpectedState != domain.StateJudging {
 		return errors.New("judge run requires Judging state")
 	}
-	if r.Purpose != "generator" && r.Purpose != "judge" {
+	if r.Purpose == ClassifierPurpose && r.ExpectedState != domain.StateClassifying {
+		return errors.New("classifier run requires Classifying state")
+	}
+	if r.Purpose != GeneratorPurpose && r.Purpose != JudgePurpose && r.Purpose != ClassifierPurpose {
 		return errors.New("unknown generation agent purpose")
 	}
 	return nil
@@ -45,12 +48,12 @@ type PhaseRequest struct {
 
 	GeneratedCandidate      *domain.GeneratedCandidate            `json:"generated_candidate,omitempty"`
 	Judgement               *domain.Judgement                     `json:"judgement,omitempty"`
+	Classification          *domain.Classification                `json:"classification,omitempty"`
 	Build                   *domain.BuildResult                   `json:"build,omitempty"`
 	ArtifactPublish         *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
 	VerificationEnvironment *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
 	Verification            *domain.VerificationResult            `json:"verification,omitempty"`
 	ChallengePublish        *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
-	Cleanup                 *domain.CleanupResult                 `json:"cleanup,omitempty"`
 	InfrastructureFailure   *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
 	ArtifactFailure         *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
 }
@@ -61,6 +64,9 @@ func (r PhaseRequest) ResultCount() int {
 		count++
 	}
 	if r.Judgement != nil {
+		count++
+	}
+	if r.Classification != nil {
 		count++
 	}
 	if r.Build != nil {
@@ -76,9 +82,6 @@ func (r PhaseRequest) ResultCount() int {
 		count++
 	}
 	if r.ChallengePublish != nil {
-		count++
-	}
-	if r.Cleanup != nil {
 		count++
 	}
 	if r.InfrastructureFailure != nil {
@@ -115,6 +118,10 @@ func (r PhaseRequest) Validate() error {
 		if r.Judgement == nil || strings.TrimSpace(r.Judgement.RunID) == "" || (!r.Judgement.Approved && strings.TrimSpace(r.Judgement.Feedback) == "") || (r.Judgement.Approved && r.Judgement.Feedback != "") {
 			return errors.New("judging phase requires a valid judgement")
 		}
+	case domain.StateClassifying:
+		if r.Classification == nil || strings.TrimSpace(r.Classification.RunID) == "" || r.Classification.Output.Validate() != nil {
+			return errors.New("Classifying phase requires a valid classification output")
+		}
 	case domain.StateBuilding:
 		if r.Build == nil {
 			return errors.New("building phase requires build output")
@@ -130,10 +137,6 @@ func (r PhaseRequest) Validate() error {
 	case domain.StateChallengePublishing:
 		if r.ChallengePublish == nil {
 			return errors.New("ChallengePublishing phase requires a final artifact")
-		}
-	case domain.StateCleaningUp:
-		if r.Cleanup == nil {
-			return errors.New("CleaningUp phase requires cleanup completion")
 		}
 	default:
 		return errors.New("generation state cannot receive a phase result")

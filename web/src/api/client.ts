@@ -1,5 +1,8 @@
 import type {
 	AuthoringSession,
+	AuthoringContentConfirmationRequest,
+	AuthoringGenerationRequest,
+	AuthoringClassificationPublicationRequest,
 	AuthoringStreamComplete,
 	AuthoringStreamEvent,
 	AssistantConversation,
@@ -253,11 +256,14 @@ export const api = {
     request<AuthoringSession>("GET", "/authoring/sessions/current"),
   getAuthoringSession: (id: string) =>
     request<AuthoringSession>("GET", `/authoring/sessions/${id}`),
-  confirmAuthoringGeneration: (id: string) =>
+  confirmAuthoringGeneration: (id: string, body: AuthoringGenerationRequest) =>
     request<AuthoringSession>(
       "POST",
       `/authoring/sessions/${id}/generate`,
+			body,
     ),
-  publishAuthoringRevision: (id: string) =>
-    request<AuthoringSession>("POST", `/authoring/sessions/${id}/publish`),
+  confirmAuthoringContent: (id: string, body: AuthoringContentConfirmationRequest) =>
+    request<AuthoringSession>("POST", `/authoring/sessions/${id}/classify`, body),
+  publishAuthoringRevision: (id: string, body: AuthoringClassificationPublicationRequest) =>
+    request<AuthoringSession>("POST", `/authoring/sessions/${id}/publish`, body),
 };

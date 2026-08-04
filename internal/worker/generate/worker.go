@@ -43,10 +43,17 @@ type BuilderExecutor interface {
 }
 
 type PublisherExecutor interface {
-	DiscardCandidate(context.Context, generation.Execution) error
 	PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error)
 	PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error)
-	Cleanup(context.Context, generation.Execution) error
+}
+
+type ResourceReapStore interface {
+	ClaimResourceReap(context.Context, string, generation.ResourceReapKind, time.Duration) (*generation.ResourceReapClaim, error)
+	CompleteResourceReap(context.Context, generation.ResourceReapClaim, string) error
+}
+
+type ResourceReapExecutor interface {
+	ReapCandidate(context.Context, generation.ResourceReap) error
 }
 
 type VerifierExecutor interface {
@@ -66,6 +73,8 @@ type Worker struct {
 	builder   BuilderExecutor
 	publisher PublisherExecutor
 	verifier  VerifierExecutor
+	reapStore ResourceReapStore
+	reaper    ResourceReapExecutor
 	config    Config
 	sleep     func(context.Context, time.Duration) error
 }
@@ -80,13 +89,23 @@ func New(store Store, generatorExecutor GeneratorExecutor, builderExecutor Build
 	if config.PollEvery <= 0 {
 		config.PollEvery = time.Second
 	}
-	return &Worker{
+	worker := &Worker{
 		store: store, generator: generatorExecutor, builder: builderExecutor, publisher: publisherExecutor, verifier: verifierExecutor,
 		config: config, sleep: sleepContext,
-	}, nil
+	}
+	if reapStore, ok := store.(ResourceReapStore); ok {
+		if reaper, ok := publisherExecutor.(ResourceReapExecutor); ok {
+			worker.reapStore = reapStore
+			worker.reaper = reaper
+		}
+	}
+	return worker, nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	if w.reapStore != nil && w.reaper != nil {
+		go w.runResourceReaper(ctx)
+	}
 	claimFailures := 0
 	for {
 		select {
@@ -122,6 +141,60 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 	}
 	w.processClaim(ctx, *claim)
 	return true, nil
+}
+
+func (w *Worker) runResourceReaper(ctx context.Context) {
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		processed, err := w.reapOne(ctx)
+		if err != nil {
+			failures++
+			delay := retryDelay(failures)
+			slog.Warn("reap generation resources", "worker_id", w.config.WorkerID, "retry_in", delay, "err", err)
+			if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
+				slog.Error("wait to retry generation resource reap", "worker_id", w.config.WorkerID, "err", err)
+			}
+			continue
+		}
+		failures = 0
+		if !processed {
+			if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
+				slog.Error("wait for generation resource reap", "worker_id", w.config.WorkerID, "err", err)
+			}
+		}
+	}
+}
+
+func (w *Worker) reapOne(ctx context.Context) (bool, error) {
+	if w.reapStore == nil || w.reaper == nil {
+		return false, nil
+	}
+	for _, kind := range []generation.ResourceReapKind{
+		generation.ResourceReapNodeBuildImage,
+		generation.ResourceReapCandidateArtifact,
+	} {
+		claim, err := w.reapStore.ClaimResourceReap(ctx, w.config.WorkerID, kind, w.config.LeaseTTL)
+		if err != nil {
+			return false, err
+		}
+		if claim == nil {
+			continue
+		}
+		failure := ""
+		if err := w.reaper.ReapCandidate(ctx, claim.ResourceReap); err != nil {
+			failure = err.Error()
+		}
+		if err := w.reapStore.CompleteResourceReap(ctx, *claim, failure); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (w *Worker) processClaim(parent context.Context, initial generation.Claim) {
@@ -186,11 +259,6 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 	claim := execution.Claim
 	switch claim.Workflow.State {
 	case generation.StateGenerating:
-		if supersededCandidate(execution) {
-			if err := w.publisher.DiscardCandidate(ctx, execution); err != nil {
-				return nil, fmt.Errorf("discard superseded candidate: %w", err)
-			}
-		}
 		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
 			Purpose: app.GeneratorPurpose, Model: w.config.Model, PromptVersion: app.GeneratorPromptVersion,
 		})
@@ -281,21 +349,9 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		}
 		return w.store.Phase(ctx, claim, app.PhaseRequest{ChallengePublish: &generation.ChallengePublishResult{Artifact: artifact}})
 
-	case generation.StateCleaningUp:
-		if execution.Context.Candidate != nil {
-			if err := w.publisher.Cleanup(ctx, execution); err != nil {
-				return nil, err
-			}
-		}
-		return w.store.Phase(ctx, claim, app.PhaseRequest{Cleanup: &generation.CleanupResult{}})
 	default:
 		return nil, fmt.Errorf("generate worker cannot execute workflow state %s", claim.Workflow.State)
 	}
-}
-
-func supersededCandidate(execution generation.Execution) bool {
-	view := execution.Context.Candidate
-	return view != nil && (view.Failure != nil || view.SourceRevision != execution.Claim.Workflow.SourceRevision)
 }
 
 func (w *Worker) reportError(ctx context.Context, lease *workflowLease, claim generation.Claim, executionErr error) (*generation.Claim, error) {

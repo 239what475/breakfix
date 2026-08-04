@@ -12,35 +12,83 @@ import (
 	"time"
 )
 
-const ExecutionDeadline = time.Hour
+const (
+	ExecutionDeadline    = time.Hour
+	MaxStateAttempts     = 10
+	MaxCandidateRevisions = 10
+)
 
 var (
-	ErrWorkflowNotFound = errors.New("generation workflow not found")
-	ErrLeaseLost        = errors.New("generation workflow lease was lost")
+	ErrWorkflowNotFound           = errors.New("generation workflow not found")
+	ErrLeaseLost                  = errors.New("generation workflow lease was lost")
+	ErrClassificationConflict     = errors.New("classification proposal conflicts with the current roadmap")
+	ErrChallengeSourceRefConflict = errors.New("challenge source reference conflicts with the current roadmap")
 )
 
 type WorkflowState string
 
 const (
-	StateQueued              WorkflowState = "Queued"
 	StateGenerating          WorkflowState = "Generating"
 	StateJudging             WorkflowState = "Judging"
 	StateBuilding            WorkflowState = "Building"
 	StateArtifactPublishing  WorkflowState = "ArtifactPublishing"
 	StateVerifying           WorkflowState = "Verifying"
 	StateNeedsAuthorReview   WorkflowState = "NeedsAuthorReview"
+	StateClassifying         WorkflowState = "Classifying"
+	StateNeedsClassificationReview WorkflowState = "NeedsClassificationReview"
 	StateChallengePublishing WorkflowState = "ChallengePublishing"
-	StateCleaningUp          WorkflowState = "CleaningUp"
-	StateCompleted           WorkflowState = "Completed"
+	StatePublished           WorkflowState = "Published"
 	StateFailed              WorkflowState = "Failed"
 	StateCancelled           WorkflowState = "Cancelled"
+	StateSuperseded          WorkflowState = "Superseded"
 )
+
+// StartConfirmation is the explicit, idempotent confirmation of one author
+// plan revision. The workflow does not exist before this request.
+type StartConfirmation struct {
+	PlanRevision   int64  `json:"plan_revision"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (c StartConfirmation) Valid() bool {
+	return c.PlanRevision >= 0 && validIdempotencyKey(c.IdempotencyKey)
+}
+
+// ContentConfirmation freezes one verified CandidateRevision and starts the
+// independent classification lifecycle.
+type ContentConfirmation struct {
+	WorkflowID          string `json:"workflow_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+func (c ContentConfirmation) Valid() bool {
+	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" && validIdempotencyKey(c.IdempotencyKey)
+}
+
+// PublicationConfirmation makes a reviewed private classification proposal
+// public. The proposal revision is the optimistic-concurrency fence.
+type PublicationConfirmation struct {
+	WorkflowID          string `json:"workflow_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	ProposalRevision    int    `json:"proposal_revision"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+func (c PublicationConfirmation) Valid() bool {
+	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" && c.ProposalRevision > 0 && validIdempotencyKey(c.IdempotencyKey)
+}
+
+func validIdempotencyKey(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && len(value) <= 200
+}
 
 func (s WorkflowState) Valid() bool {
 	switch s {
-	case StateQueued, StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
-		StateVerifying, StateNeedsAuthorReview, StateChallengePublishing, StateCleaningUp,
-		StateCompleted, StateFailed, StateCancelled:
+	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
+		StateVerifying, StateNeedsAuthorReview, StateClassifying, StateNeedsClassificationReview,
+		StateChallengePublishing, StatePublished, StateFailed, StateCancelled, StateSuperseded:
 		return true
 	default:
 		return false
@@ -48,27 +96,25 @@ func (s WorkflowState) Valid() bool {
 }
 
 func (s WorkflowState) Terminal() bool {
-	return s == StateCompleted || s == StateFailed || s == StateCancelled
+	return s == StatePublished || s == StateFailed || s == StateCancelled || s == StateSuperseded
 }
 
 func (s WorkflowState) Leaseable() bool {
-	return !s.Terminal() && s != StateNeedsAuthorReview
+	switch s {
+	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
+		StateVerifying, StateClassifying, StateChallengePublishing:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s WorkflowState) DeadlineActive() bool {
-	return s.Leaseable() && s != StateCleaningUp
+	return s.Leaseable()
 }
 
-type CleanupIntent string
-
-const (
-	CleanupCompleted CleanupIntent = "completed"
-	CleanupFailed    CleanupIntent = "failed"
-	CleanupCancelled CleanupIntent = "cancelled"
-)
-
-func (i CleanupIntent) Valid() bool {
-	return i == CleanupCompleted || i == CleanupFailed || i == CleanupCancelled
+func (s WorkflowState) Review() bool {
+	return s == StateNeedsAuthorReview || s == StateNeedsClassificationReview
 }
 
 type FailureClass string
@@ -96,22 +142,23 @@ func (f Failure) Validate() error {
 // publication. StateAttempt counts continuous technical failures of State;
 // LeaseOwner is randomized for every claim and fences late worker reports.
 type Workflow struct {
-	ID                  string        `json:"id"`
-	Source              Source        `json:"source"`
-	SourceRevision      string        `json:"source_revision"`
-	State               WorkflowState `json:"state"`
-	CleanupIntent       CleanupIntent `json:"cleanup_intent,omitempty"`
-	CandidateRevisionID string        `json:"candidate_revision_id,omitempty"`
-	ActiveAgentRunID    string        `json:"active_agent_run_id,omitempty"`
-	StateAttempt        int           `json:"state_attempt"`
-	LeaseOwner          string        `json:"-"`
-	LeaseExpiresAt      *time.Time    `json:"lease_expires_at,omitempty"`
-	NextRunAt           time.Time     `json:"next_run_at"`
-	DeadlineAt          *time.Time    `json:"deadline_at,omitempty"`
-	DeadlinePausedAt    *time.Time    `json:"deadline_paused_at,omitempty"`
-	LastError           string        `json:"last_error,omitempty"`
-	CreatedAt           time.Time     `json:"created_at"`
-	UpdatedAt           time.Time     `json:"updated_at"`
+	ID                          string        `json:"id"`
+	Source                      Source        `json:"source"`
+	SourceRevision              string        `json:"source_revision"`
+	State                       WorkflowState `json:"state"`
+	ClassificationRoadmapRevision string      `json:"classification_roadmap_revision,omitempty"`
+	SupersededByWorkflowID      string        `json:"superseded_by_workflow_id,omitempty"`
+	CandidateRevisionID         string        `json:"candidate_revision_id,omitempty"`
+	ActiveAgentRunID            string        `json:"active_agent_run_id,omitempty"`
+	StateAttempt                int           `json:"state_attempt"`
+	LeaseOwner                  string        `json:"-"`
+	LeaseExpiresAt              *time.Time    `json:"lease_expires_at,omitempty"`
+	NextRunAt                   time.Time     `json:"next_run_at"`
+	DeadlineAt                  *time.Time    `json:"deadline_at,omitempty"`
+	DeadlinePausedAt            *time.Time    `json:"deadline_paused_at,omitempty"`
+	LastError                   string        `json:"last_error,omitempty"`
+	CreatedAt                   time.Time     `json:"created_at"`
+	UpdatedAt                   time.Time     `json:"updated_at"`
 }
 
 func (w Workflow) Valid() bool {

@@ -29,7 +29,7 @@ type NodeImagePublisher interface {
 	PublishNodeImage(context.Context, incus.PublishNodeImageRequest) (incus.PublishNodeImageResult, error)
 	PublishChallengeNodeImage(context.Context, incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
-	DeleteBuildNodeImageAttempt(context.Context, string, int64) error
+	DeleteBuildNodeImage(context.Context, incus.BuildNodeImageResult) error
 	DeleteChallengeNodeImage(context.Context, string, string) error
 }
 
@@ -44,17 +44,6 @@ func NewExecutor(registryClient Registry, node NodeImagePublisher, registryRepos
 		return nil, errors.New("publisher requires Registry client and Registry repository")
 	}
 	return &Executor{registry: registryClient, node: node, registryRepository: strings.TrimRight(strings.TrimSpace(registryRepository), "/")}, nil
-}
-
-// DiscardCandidate removes external artifacts for a candidate that will no
-// longer advance through this workflow. It is called before the next Generator
-// run, while the failed or superseded candidate is still durably referenced by
-// GenerationWorkflow, so a retry can repeat the deletion safely.
-func (e *Executor) DiscardCandidate(ctx context.Context, execution generation.Execution) error {
-	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateGenerating || execution.Context.Candidate == nil {
-		return errors.New("candidate discard requires a Generating workflow with a candidate")
-	}
-	return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *execution.Context.Candidate)
 }
 
 func (e *Executor) PublishArtifact(ctx context.Context, value generation.Execution, buildArchive []byte) (generation.ArtifactReference, error) {
@@ -199,17 +188,28 @@ func workFromGeneration(value generation.Execution) (domainexecution.Work, error
 	}, nil
 }
 
-// Cleanup removes only deterministic resources for this workflow. It is safe
-// to repeat after a process crash because each provider deletion is ownership
-// checked and create-or-observe was used for every preceding phase.
-func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) error {
-	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateCleaningUp || execution.Context.Candidate == nil {
-		return errors.New("generation cleanup requires a CleaningUp workflow with a candidate")
+// ReapCandidate removes candidate-scoped external resources after the Server
+// has durably determined that no active workflow needs them. It does not
+// mutate workflow state and is safe to repeat after a lost worker lease.
+func (e *Executor) ReapCandidate(ctx context.Context, reap generation.ResourceReap) error {
+	if !reap.Valid() {
+		return errors.New("candidate resource reap is invalid")
 	}
-	view := execution.Context.Candidate
+	switch reap.Kind {
+	case generation.ResourceReapNodeBuildImage:
+		return e.reapNodeBuildImage(ctx, reap.Candidate)
+	case generation.ResourceReapCandidateArtifact:
+		return e.reapCandidateArtifact(ctx, reap)
+	default:
+		return errors.New("generate worker does not own this resource reap")
+	}
+}
+
+func (e *Executor) reapCandidateArtifact(ctx context.Context, reap generation.ResourceReap) error {
+	view := reap.Candidate
 	switch view.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		if view.Publication != nil && execution.Claim.Workflow.CleanupIntent != generation.CleanupCompleted {
+		if reap.DeleteFinalArtifact && view.Publication != nil {
 			challengeImage, err := e.challengeImage(view.Publication.ChallengeID)
 			if err != nil {
 				return err
@@ -218,38 +218,12 @@ func (e *Executor) Cleanup(ctx context.Context, execution generation.Execution) 
 				return fmt.Errorf("delete uncommitted challenge OCI image: %w", err)
 			}
 		}
-		return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *view)
-
-	case challenge.RuntimeNode:
-		if e.node == nil {
-			return errors.New("node image publisher is unavailable")
-		}
-		fingerprint := cleanupNodeFingerprint(*view)
-		if fingerprint != "" {
-			if view.Publication != nil && execution.Claim.Workflow.CleanupIntent != generation.CleanupCompleted {
-				if err := e.node.DeleteChallengeNodeImage(ctx, view.Publication.ChallengeID, fingerprint); err != nil {
-					return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
-				}
-			}
-		}
-		return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *view)
-	default:
-		return errors.New("candidate runtime is unsupported")
-	}
-}
-
-func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view generation.WorkerView) error {
-	switch view.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
 		candidateImage, err := e.candidateImage(view.ID)
 		if err != nil {
 			return err
 		}
 		if view.Artifact != nil && view.Artifact.OCIReference != "" {
 			candidateImage = view.Artifact.OCIReference
-		}
-		if view.Artifact == nil {
-			return nil
 		}
 		if err := e.registry.DeleteImage(ctx, candidateImage); err != nil {
 			return fmt.Errorf("delete candidate OCI image: %w", err)
@@ -260,41 +234,52 @@ func (e *Executor) discardCandidate(ctx context.Context, workflowID string, view
 		if e.node == nil {
 			return errors.New("node image publisher is unavailable")
 		}
-		if view.Artifact != nil && view.Artifact.IncusFingerprint != "" {
-			if err := e.node.DeleteCandidateNodeImage(ctx, view.ID, view.Artifact.IncusFingerprint); err != nil {
+		if reap.DeleteFinalArtifact && view.Publication != nil {
+			fingerprint := view.Artifact
+			if view.Publication.Artifact != nil {
+				fingerprint = view.Publication.Artifact
+			}
+			if fingerprint != nil && fingerprint.IncusFingerprint != "" {
+				if err := e.node.DeleteChallengeNodeImage(ctx, view.Publication.ChallengeID, fingerprint.IncusFingerprint); err != nil {
+					return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
+				}
+			}
+		}
+		fingerprint := ""
+		if view.Artifact != nil {
+			fingerprint = view.Artifact.IncusFingerprint
+		} else if view.Build != nil && view.Build.Incus != nil {
+			fingerprint = view.Build.Incus.Fingerprint
+		}
+		if fingerprint != "" {
+			if err := e.node.DeleteCandidateNodeImage(ctx, view.ID, fingerprint); err != nil {
 				return fmt.Errorf("delete candidate Node image: %w", err)
 			}
 		}
-		return e.cleanupNodeBuildAttempts(ctx, workflowID, view)
+		return nil
 	default:
 		return errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) cleanupNodeBuildAttempts(ctx context.Context, workflowID string, view generation.WorkerView) error {
-	attempts := int64(0)
-	if view.Build != nil && view.Build.Incus != nil {
-		if view.Build.Incus.WorkflowID != workflowID {
-			return errors.New("candidate Node build does not belong to generation workflow")
-		}
-		attempts = view.Build.Incus.Attempt
+func (e *Executor) reapNodeBuildImage(ctx context.Context, view generation.WorkerView) error {
+	if view.Snapshot.Runtime != challenge.RuntimeNode || view.Build == nil || view.Build.Incus == nil {
+		return nil
 	}
-	for attempt := int64(1); attempt <= attempts; attempt++ {
-		if err := e.node.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt); err != nil {
-			return fmt.Errorf("delete Node build attempt %d: %w", attempt, err)
-		}
+	if e.node == nil {
+		return errors.New("node image publisher is unavailable")
+	}
+	build, err := nodeBuildResult(view.Build)
+	if err != nil {
+		return err
+	}
+	if build.CandidateRevisionID != view.ID {
+		return errors.New("candidate Node build does not belong to candidate revision")
+	}
+	if err := e.node.DeleteBuildNodeImage(ctx, build); err != nil {
+		return fmt.Errorf("delete Node build image: %w", err)
 	}
 	return nil
-}
-
-func cleanupNodeFingerprint(view generation.WorkerView) string {
-	if view.Artifact != nil && view.Artifact.IncusFingerprint != "" {
-		return view.Artifact.IncusFingerprint
-	}
-	if view.Build != nil && view.Build.Incus != nil && view.Build.Incus.Fingerprint != "" {
-		return view.Build.Incus.Fingerprint
-	}
-	return ""
 }
 
 func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string, error) {
@@ -321,10 +306,7 @@ func nodeBuildResult(build *generation.BuildOutput) (incus.BuildNodeImageResult,
 		return incus.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
 	}
 	return incus.BuildNodeImageResult{
-		WorkflowID:   build.Incus.WorkflowID,
-		Attempt:      build.Incus.Attempt,
-		InstanceName: build.Incus.InstanceName,
-		Alias:        build.Incus.Alias,
-		Fingerprint:  build.Incus.Fingerprint,
+		WorkflowID: build.Incus.WorkflowID, CandidateRevisionID: build.Incus.CandidateRevisionID,
+		Attempt: build.Incus.Attempt, InstanceName: build.Incus.InstanceName, Alias: build.Incus.Alias, Fingerprint: build.Incus.Fingerprint,
 	}, nil
 }

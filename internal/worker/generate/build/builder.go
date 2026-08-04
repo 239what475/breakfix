@@ -96,10 +96,8 @@ func (e *Executor) buildNode(ctx context.Context, work domainexecution.Work, bun
 		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_FILES_INVALID", err.Error())
 	}
 	result, err := e.node.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
-		WorkflowID: work.OwnerID,
-		Attempt:    work.Attempt,
-		Revision:   work.ArchiveSHA256,
-		Files:      files,
+		WorkflowID: work.OwnerID, CandidateRevisionID: work.CandidateID,
+		Attempt: work.Attempt, Revision: work.ArchiveSHA256, Files: files,
 	})
 	if err != nil {
 		return domainexecution.BuildOutput{}, fmt.Errorf("build stopped Node image: %w", err)
@@ -107,12 +105,8 @@ func (e *Executor) buildNode(ctx context.Context, work domainexecution.Work, bun
 	output := domainexecution.BuildOutput{
 		Runtime: challenge.RuntimeNode,
 		Incus: &domainexecution.IncusBuildReference{
-			Project:      e.config.BuildProject,
-			WorkflowID:   result.WorkflowID,
-			Attempt:      result.Attempt,
-			InstanceName: result.InstanceName,
-			Alias:        result.Alias,
-			Fingerprint:  result.Fingerprint,
+			Project: e.config.BuildProject, WorkflowID: result.WorkflowID, CandidateRevisionID: result.CandidateRevisionID,
+			Attempt: result.Attempt, InstanceName: result.InstanceName, Alias: result.Alias, Fingerprint: result.Fingerprint,
 		},
 	}
 	return output, nil

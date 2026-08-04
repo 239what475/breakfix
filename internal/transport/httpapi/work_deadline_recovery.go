@@ -10,8 +10,8 @@ import (
 const generationDeadlineRecoveryInterval = 10 * time.Second
 
 // RecoverExpiredGenerationWorkflows is Server-owned recovery for the only
-// generation deadline. Cleanup itself remains leaseable after the deadline so
-// resource release can resume after a Worker restart.
+// generation execution deadline. Resource reapers run independently from the
+// business workflow state and never delay its terminal transition.
 func (h *Handler) RecoverExpiredGenerationWorkflows(ctx context.Context) error {
 	return h.recoverExpiredGenerationWorkflowsAt(ctx, time.Now().UTC())
 }

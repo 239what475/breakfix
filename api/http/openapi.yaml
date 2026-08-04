@@ -446,9 +446,38 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/AuthoringSessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthoringGenerationRequest"
       responses:
         "200":
           description: Generator Run and verification started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+
+  /authoring/sessions/{id}/classify:
+    post:
+      operationId: confirmAuthoringContent
+      summary: Freeze the verified candidate and start its private classification review
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthoringContentConfirmationRequest"
+      responses:
+        "200":
+          description: Verified revision entered classification
           content:
             application/json:
               schema:
@@ -463,6 +492,12 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/AuthoringSessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthoringClassificationPublicationRequest"
       responses:
         "200":
           description: Verified revision published
@@ -676,7 +711,7 @@ components:
           enum: [DraftConversation, IntentReview]
         workflow_state:
           type: string
-          enum: [Queued, Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, CleaningUp, Completed, Failed, Cancelled]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled, Superseded]
         updated_at:
           type: string
           format: date-time
@@ -1187,11 +1222,13 @@ components:
           type: string
         state:
           type: string
-          enum: [Queued, Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, CleaningUp, Completed, Failed, Cancelled]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled, Superseded]
         state_attempt:
           type: integer
           minimum: 0
         candidate_revision_id:
+          type: string
+        classification_roadmap_revision:
           type: string
         deadline_at:
           type: string
@@ -1307,6 +1344,123 @@ components:
         content:
           type: string
 
+    AuthoringGenerationRequest:
+      type: object
+      required: [plan_revision, idempotency_key]
+      properties:
+        plan_revision:
+          type: integer
+          minimum: 0
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    AuthoringContentConfirmationRequest:
+      type: object
+      required: [workflow_id, candidate_revision_id, idempotency_key]
+      properties:
+        workflow_id:
+          type: string
+        candidate_revision_id:
+          type: string
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    AuthoringClassificationPublicationRequest:
+      type: object
+      required: [workflow_id, candidate_revision_id, proposal_revision, idempotency_key]
+      properties:
+        workflow_id:
+          type: string
+        candidate_revision_id:
+          type: string
+        proposal_revision:
+          type: integer
+          minimum: 1
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    AuthoringClassificationNewTopic:
+      type: object
+      required: [domain, title, definition, scope, non_goals, challenge_guidance]
+      properties:
+        domain:
+          $ref: "#/components/schemas/RoadmapReference"
+        title:
+          type: string
+        definition:
+          type: string
+        scope:
+          type: string
+        non_goals:
+          type: string
+        challenge_guidance:
+          type: string
+
+    AuthoringClassificationTopic:
+      type: object
+      required: [reason]
+      properties:
+        existing:
+          $ref: "#/components/schemas/RoadmapReference"
+        new:
+          $ref: "#/components/schemas/AuthoringClassificationNewTopic"
+        reason:
+          type: string
+
+    AuthoringClassificationNewTag:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+
+    AuthoringClassificationTag:
+      type: object
+      required: [reason]
+      properties:
+        existing:
+          $ref: "#/components/schemas/RoadmapReference"
+        new:
+          $ref: "#/components/schemas/AuthoringClassificationNewTag"
+        reason:
+          type: string
+
+    AuthoringClassificationProposal:
+      type: object
+      required: [revision, candidate_revision_id, roadmap_revision, result, tags, updated_at]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+        candidate_revision_id:
+          type: string
+        roadmap_revision:
+          type: string
+        result:
+          type: string
+          enum: [proposed, unclassifiable]
+        topic:
+          $ref: "#/components/schemas/AuthoringClassificationTopic"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringClassificationTag"
+        unclassifiable_reason:
+          type: string
+        adjustment_suggestion:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
     AuthoringSession:
       type: object
       required: [id, state, authoring_turn_active, intent_revision, visible_revision, updated_at, intent, messages, assets, diff]
@@ -1340,6 +1494,8 @@ components:
           $ref: "#/components/schemas/VerifiedChallenge"
         verification:
           $ref: "#/components/schemas/AuthoringVerificationReport"
+        classification:
+          $ref: "#/components/schemas/AuthoringClassificationProposal"
         messages:
           type: array
           items:

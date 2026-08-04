@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,234 +11,392 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/roadmap"
+	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
 )
 
 const workflowTestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func TestGenerationWorkflowPersistsRepairAndPublicationLifecycle(t *testing.T) {
+func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 9, 0, 0, 0, time.UTC)
+	now := time.Date(2026, time.August, 4, 9, 0, 0, 0, time.UTC)
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
 	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
 
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "generator-a", now)
-	candidateOne := finalizeGeneratedCandidate(t, database, claim, 1, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if claim.Workflow.State != generation.StateJudging {
-		t.Fatalf("state after generation = %s, want Judging", claim.Workflow.State)
+	classificationStart := now.Add(10 * time.Minute)
+	classified, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-1",
+	}, classificationStart)
+	if err != nil {
+		t.Fatalf("confirm verified content: %v", err)
 	}
-	judgeRun := startGenerationRun(t, database, claim, generationapp.JudgePurpose, now)
-	if err := database.Generation.FinalizeGenerationJudgement(ctx, claim, judgeRun.ID, false, "检查点描述与实际题目不一致", now); err != nil {
-		t.Fatalf("reject generated candidate: %v", err)
+	if classified.State != generation.StateClassifying || classified.CandidateRevisionID != candidate.ID ||
+		classified.ClassificationRoadmapRevision != initialRoadmap.Revision || classified.DeadlinePausedAt != nil || classified.DeadlineAt == nil {
+		t.Fatalf("classification start = %#v", classified)
 	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if claim.Workflow.State != generation.StateGenerating || claim.Workflow.CandidateRevisionID != candidateOne.ID {
-		t.Fatalf("workflow after judge repair = %#v", claim.Workflow)
+	repeatedContent, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-1",
+	}, classificationStart.Add(time.Second))
+	if err != nil {
+		t.Fatalf("repeat content confirmation: %v", err)
 	}
-
-	candidateTwo := finalizeGeneratedCandidate(t, database, claim, 2, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	approveGenerationJudgement(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	advanceGenerationBuildAndArtifact(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
-		t.Fatalf("record failed candidate verification environment: %v", err)
-	}
-	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(false), now); err != nil {
-		t.Fatalf("record failed candidate verification: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if claim.Workflow.State != generation.StateGenerating || claim.Workflow.CandidateRevisionID != candidateTwo.ID {
-		t.Fatalf("workflow after verification repair = %#v", claim.Workflow)
+	if repeatedContent.ID != classified.ID || repeatedContent.State != generation.StateClassifying {
+		t.Fatalf("idempotent content confirmation = %#v", repeatedContent)
 	}
 
-	firstVerifiedCandidate := finalizeGeneratedCandidate(t, database, claim, 3, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	approveGenerationJudgement(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	advanceGenerationBuildAndArtifact(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
-		t.Fatalf("record passing candidate verification environment: %v", err)
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-a", classificationStart)
+	classifierRun := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, classificationStart)
+	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, classifierRun.ID, existingClassification(initialRoadmap, candidate.ID), classificationStart); err != nil {
+		t.Fatalf("persist classification proposal: %v", err)
 	}
-	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(true), now); err != nil {
-		t.Fatalf("record passing candidate verification: %v", err)
+	awaitingReview, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("load classification review workflow: %v", err)
+	}
+	if awaitingReview.State != generation.StateNeedsClassificationReview || awaitingReview.DeadlinePausedAt == nil || awaitingReview.LeaseOwner != "" {
+		t.Fatalf("classification review workflow = %#v", awaitingReview)
+	}
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("load classified candidate: %v", err)
+	}
+	if persisted.Classification == nil || persisted.Classification.Revision != 1 || persisted.Classification.RoadmapRevision != initialRoadmap.Revision ||
+		persisted.Build == nil || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
+		t.Fatalf("classified candidate = %#v", persisted)
+	}
+
+	publishAt := classificationStart.Add(10 * time.Minute)
+	publishing, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: persisted.Classification.Revision, IdempotencyKey: "confirm-publication-1",
+	}, publishAt)
+	if err != nil {
+		t.Fatalf("begin classification publication: %v", err)
+	}
+	if publishing.State != generation.StateChallengePublishing || publishing.DeadlinePausedAt != nil || publishing.CandidateRevisionID != candidate.ID {
+		t.Fatalf("publication workflow = %#v", publishing)
+	}
+	repeatedPublication, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: persisted.Classification.Revision, IdempotencyKey: "confirm-publication-1",
+	}, publishAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("repeat publication confirmation: %v", err)
+	}
+	if repeatedPublication.ID != publishing.ID || repeatedPublication.State != generation.StateChallengePublishing {
+		t.Fatalf("idempotent publication confirmation = %#v", repeatedPublication)
+	}
+
+	claim = claimGenerationWorkflow(t, database, workflow.ID, "publisher-a", publishAt)
+	finalArtifact := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/challenge@" + workflowTestDigest}
+	if err := database.Generation.CompleteGenerationChallengePublish(ctx, claim, finalArtifact, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", publishAt); err != nil {
+		t.Fatalf("complete classification publication: %v", err)
+	}
+	published, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("load published workflow: %v", err)
+	}
+	if published.State != generation.StatePublished || !published.State.Terminal() || published.CandidateRevisionID != candidate.ID {
+		t.Fatalf("published workflow = %#v", published)
+	}
+	current, err := database.Roadmap.CurrentRoadmap(ctx)
+	if err != nil {
+		t.Fatalf("load published roadmap: %v", err)
+	}
+	if current.Revision == initialRoadmap.Revision || len(current.ChallengeBindings) != len(initialRoadmap.ChallengeBindings)+1 {
+		t.Fatalf("published roadmap = %#v", current)
+	}
+	if !hasChallengeBinding(current, "platform-runtime/systemd-service-recovery/workflow-lifecycle") {
+		t.Fatalf("published roadmap omitted generated challenge binding: %#v", current.ChallengeBindings)
+	}
+}
+
+func TestGenerationClassificationTechnicalRetryPreservesVerifiedCandidate(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 10, 0, 0, 0, time.UTC)
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	start := now.Add(time.Minute)
+	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-retry",
+	}, start); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-a", start)
+	run := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, start)
+	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), start); err != nil {
+		t.Fatalf("persist initial proposal: %v", err)
+	}
+	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, start.Add(time.Minute)); err != nil {
+		t.Fatalf("resume classification: %v", err)
+	}
+
+	attemptAt := start.Add(time.Minute)
+	for attempt := 0; attempt < generation.MaxStateAttempts; attempt++ {
+		claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-retry", attemptAt)
+		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateClassifying, generation.Failure{
+			Class: generation.FailureInfrastructure, Code: "MODEL_UNAVAILABLE", Summary: "classification service is unavailable",
+		}, attemptAt)
+		if err != nil {
+			t.Fatalf("record classification retry %d: %v", attempt+1, err)
+		}
+		if attempt < generation.MaxStateAttempts-1 {
+			if updated.State != generation.StateClassifying || updated.StateAttempt != attempt+1 {
+				t.Fatalf("classification retry %d = %#v", attempt+1, updated)
+			}
+			attemptAt = updated.NextRunAt
+		}
 	}
 	paused, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
 	if err != nil {
-		t.Fatalf("load workflow waiting for author: %v", err)
+		t.Fatalf("load exhausted classification workflow: %v", err)
 	}
-	if paused.State != generation.StateNeedsAuthorReview || paused.LeaseOwner != "" || paused.DeadlinePausedAt == nil {
-		t.Fatalf("workflow after passing verification = %#v", paused)
+	if paused.State != generation.StateNeedsClassificationReview || paused.DeadlinePausedAt == nil || !strings.HasPrefix(paused.LastError, "classification_unavailable:") {
+		t.Fatalf("exhausted classification workflow = %#v", paused)
 	}
-	resumedAt := now.Add(10 * time.Minute)
-	resumed, err := database.Generation.ResumeGenerationForRevision(ctx, sessionID, userID, 1, resumedAt)
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
 	if err != nil {
-		t.Fatalf("resume generation for author feedback: %v", err)
+		t.Fatalf("load candidate after retries: %v", err)
 	}
-	if resumed.State != generation.StateGenerating || resumed.DeadlinePausedAt != nil || resumed.DeadlineAt == nil || !resumed.DeadlineAt.After(*paused.DeadlineAt) {
-		t.Fatalf("resumed generation workflow = %#v", resumed)
-	}
-	claim = claimGenerationWorkflow(t, database, workflow.ID, "generator-c", resumedAt)
-	finalCandidate := finalizeGeneratedCandidate(t, database, claim, 4, resumedAt)
-	claim = refreshGenerationClaim(t, database, claim, resumedAt)
-	approveGenerationJudgement(t, database, claim, resumedAt)
-	claim = refreshGenerationClaim(t, database, claim, resumedAt)
-	advanceGenerationBuildAndArtifact(t, database, claim, resumedAt)
-	claim = refreshGenerationClaim(t, database, claim, resumedAt)
-	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), resumedAt); err != nil {
-		t.Fatalf("record reverified candidate environment: %v", err)
-	}
-	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(true), resumedAt); err != nil {
-		t.Fatalf("record reverified candidate: %v", err)
-	}
-	paused, err = database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load reverified workflow: %v", err)
-	}
-	if paused.State != generation.StateNeedsAuthorReview || paused.CandidateRevisionID != finalCandidate.ID {
-		t.Fatalf("workflow after author-requested regeneration = %#v", paused)
-	}
-	if firstVerifiedCandidate.ID == finalCandidate.ID {
-		t.Fatal("author-requested regeneration reused its previous candidate revision")
-	}
-
-	challengeID := challenge.NewID()
-	publicationTime := resumedAt.Add(10 * time.Minute)
-	if _, err := database.Generation.BeginGenerationPublication(ctx, sessionID, userID, generation.Publication{
-		ChallengeID: challengeID,
-		SourceSlug:  challenge.SourceSlugFor("Workflow lifecycle", challengeID),
-		TargetPath:  challenge.SourceSlugFor("Workflow lifecycle", challengeID),
-		RequestedAt: publicationTime,
-	}, publicationTime); err != nil {
-		t.Fatalf("begin generation publication: %v", err)
-	}
-	claim = claimGenerationWorkflow(t, database, workflow.ID, "generator-b", publicationTime)
-	if claim.Workflow.State != generation.StateChallengePublishing {
-		t.Fatalf("state after author publication = %s, want ChallengePublishing", claim.Workflow.State)
-	}
-	if err := database.Generation.CompleteGenerationChallengePublish(ctx, claim, artifactReference(), publicationTime); err != nil {
-		t.Fatalf("complete challenge publication: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, publicationTime)
-	if claim.Workflow.State != generation.StateCleaningUp || claim.Workflow.CleanupIntent != generation.CleanupCompleted {
-		t.Fatalf("workflow after challenge publication = %#v", claim.Workflow)
-	}
-	if err := database.Generation.CompleteGenerationCleanup(ctx, claim, publicationTime); err != nil {
-		t.Fatalf("complete generation cleanup: %v", err)
-	}
-	completed, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load completed workflow: %v", err)
-	}
-	if completed.State != generation.StateCompleted {
-		t.Fatalf("completed workflow state = %s, want Completed", completed.State)
-	}
-	if completed.CandidateRevisionID != finalCandidate.ID {
-		t.Fatalf("published candidate = %q, want %q", completed.CandidateRevisionID, finalCandidate.ID)
+	if persisted.Classification == nil || persisted.Classification.Revision != 1 || persisted.Build == nil || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
+		t.Fatalf("candidate changed during classification retries = %#v", persisted)
 	}
 }
 
-func TestGenerationWorkflowReclaimsInfrastructureRetryAndCleansTerminalStates(t *testing.T) {
+func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
-	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "generator-a", now)
-	failed, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateGenerating, generation.Failure{
-		Class: generation.FailureInfrastructure, Code: "REGISTRY_UNAVAILABLE", Summary: "registry temporarily unavailable",
-	}, now)
+	now := time.Date(2026, time.August, 4, 10, 30, 0, 0, time.UTC)
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	classificationAt := now.Add(time.Minute)
+	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-publication-retry",
+	}, classificationAt); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-a", classificationAt)
+	run := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, classificationAt)
+	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), classificationAt); err != nil {
+		t.Fatalf("persist classification proposal: %v", err)
+	}
+	classified, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
 	if err != nil {
-		t.Fatalf("record infrastructure retry: %v", err)
+		t.Fatalf("load classified candidate: %v", err)
 	}
-	if failed.State != generation.StateGenerating || failed.StateAttempt != 1 || failed.LeaseOwner != "" {
-		t.Fatalf("workflow after infrastructure retry = %#v", failed)
-	}
-	takeover := claimGenerationWorkflow(t, database, workflow.ID, "generator-b", failed.NextRunAt)
-	if takeover.Workflow.State != generation.StateGenerating || takeover.Workflow.StateAttempt != 1 || takeover.LeaseOwner == claim.LeaseOwner {
-		t.Fatalf("workflow was not reclaimed with a fresh lease = %#v", takeover)
+	publishingAt := classificationAt.Add(time.Minute)
+	if _, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: classified.Classification.Revision, IdempotencyKey: "confirm-publication-retry",
+	}, publishingAt); err != nil {
+		t.Fatalf("begin publication: %v", err)
 	}
 
-	if err := database.Generation.RecoverExpiredGenerationWorkflows(ctx, *takeover.Workflow.DeadlineAt); err != nil {
-		t.Fatalf("expire generation workflow: %v", err)
+	attemptAt := publishingAt
+	for attempt := 0; attempt < generation.MaxStateAttempts; attempt++ {
+		claim = claimGenerationWorkflow(t, database, workflow.ID, "publisher-retry", attemptAt)
+		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateChallengePublishing, generation.Failure{
+			Class: generation.FailureInfrastructure, Code: "REGISTRY_UNAVAILABLE", Summary: "registry is unavailable",
+		}, attemptAt)
+		if err != nil {
+			t.Fatalf("record publication retry %d: %v", attempt+1, err)
+		}
+		if attempt < generation.MaxStateAttempts-1 {
+			if updated.State != generation.StateChallengePublishing || updated.StateAttempt != attempt+1 {
+				t.Fatalf("publication retry %d = %#v", attempt+1, updated)
+			}
+			attemptAt = updated.NextRunAt
+		}
 	}
-	expired, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	paused, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
 	if err != nil {
-		t.Fatalf("load expired workflow: %v", err)
+		t.Fatalf("load exhausted publication workflow: %v", err)
 	}
-	if expired.State != generation.StateCleaningUp || expired.CleanupIntent != generation.CleanupFailed {
-		t.Fatalf("expired workflow = %#v", expired)
-	}
-	cleanup := claimGenerationWorkflow(t, database, workflow.ID, "generator-c", *takeover.Workflow.DeadlineAt)
-	if err := database.Generation.CompleteGenerationCleanup(ctx, cleanup, *takeover.Workflow.DeadlineAt); err != nil {
-		t.Fatalf("complete failed cleanup: %v", err)
-	}
-	terminal, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load failed workflow: %v", err)
-	}
-	if terminal.State != generation.StateFailed {
-		t.Fatalf("expired workflow terminal state = %s, want Failed", terminal.State)
+	if paused.State != generation.StateNeedsClassificationReview || paused.DeadlinePausedAt == nil || !strings.HasPrefix(paused.LastError, "publication_unavailable:") {
+		t.Fatalf("exhausted publication workflow = %#v", paused)
 	}
 
-	cancelledWorkflow, _, _ := createGenerationWorkflowFixture(t, database, now.Add(time.Hour))
-	if err := database.Generation.CancelGenerationWorkflow(ctx, cancelledWorkflow.ID, "author discarded this draft", now.Add(time.Hour)); err != nil {
+	resumed, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: classified.Classification.Revision, IdempotencyKey: "resume-publication",
+	}, attemptAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("resume publication: %v", err)
+	}
+	if resumed.State != generation.StateChallengePublishing || resumed.CandidateRevisionID != candidate.ID || resumed.DeadlinePausedAt != nil || resumed.StateAttempt != 0 {
+		t.Fatalf("resumed publication workflow = %#v", resumed)
+	}
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("load candidate after publication retry: %v", err)
+	}
+	if persisted.Publication == nil || persisted.Publication.ChallengeID == "" || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
+		t.Fatalf("publication retry changed candidate = %#v", persisted)
+	}
+}
+
+func TestConfirmedPlanSupersedesOnlyAReviewWorkflow(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 11, 0, 0, 0, time.UTC)
+	publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	plan := generationTestPlan()
+	plan.Overview = "A replacement authoring plan creates a separate workflow."
+	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, plan, authoring.StateIntentReview); err != nil {
+		t.Fatalf("confirm replacement authoring plan: %v", err)
+	}
+	replacement, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
+		PlanRevision: 2, IdempotencyKey: "start-replacement",
+	}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("start replacement workflow: %v", err)
+	}
+	if replacement.ID == workflow.ID || replacement.SourceRevision != "2" || replacement.State != generation.StateGenerating {
+		t.Fatalf("replacement workflow = %#v", replacement)
+	}
+	old, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("load superseded workflow: %v", err)
+	}
+	if old.State != generation.StateSuperseded || old.SupersededByWorkflowID != replacement.ID {
+		t.Fatalf("superseded workflow = %#v", old)
+	}
+	repeated, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
+		PlanRevision: 2, IdempotencyKey: "start-replacement",
+	}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("repeat replacement confirmation: %v", err)
+	}
+	if repeated.ID != replacement.ID {
+		t.Fatalf("idempotent replacement confirmation created %q, want %q", repeated.ID, replacement.ID)
+	}
+}
+
+func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 12, 0, 0, 0, time.UTC)
+	publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, generation.ResourceReapCandidateArtifact, "reaper", time.Minute, now)
+	if err != nil {
+		t.Fatalf("claim active candidate artifact reap: %v", err)
+	}
+	if reapClaim != nil {
+		t.Fatalf("active verified candidate was eligible for artifact reap: %#v", reapClaim)
+	}
+	classificationAt := now.Add(30 * time.Second)
+	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-reaper",
+	}, classificationAt); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	workflowClaim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-reaper", classificationAt)
+	run := startGenerationRun(t, database, workflowClaim, generationapp.ClassifierPurpose, classificationAt)
+	currentRoadmap, err := database.Roadmap.CurrentRoadmap(ctx)
+	if err != nil {
+		t.Fatalf("load current roadmap for classification: %v", err)
+	}
+	if err := database.Generation.FinalizeGenerationClassification(ctx, workflowClaim, run.ID, existingClassification(currentRoadmap, candidate.ID), classificationAt); err != nil {
+		t.Fatalf("persist classification proposal: %v", err)
+	}
+	reapClaim, err = database.Generation.ClaimGenerationResourceReap(ctx, generation.ResourceReapCandidateArtifact, "reaper", time.Minute, classificationAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("claim classification-review artifact reap: %v", err)
+	}
+	if reapClaim != nil {
+		t.Fatalf("classification-review candidate was eligible for artifact reap: %#v", reapClaim)
+	}
+
+	if err := database.Generation.CancelGenerationWorkflow(ctx, workflow.ID, "author cancelled generation", now.Add(time.Minute)); err != nil {
 		t.Fatalf("cancel generation workflow: %v", err)
 	}
-	cancelCleanup := claimGenerationWorkflow(t, database, cancelledWorkflow.ID, "generator-d", now.Add(time.Hour))
-	if cancelCleanup.Workflow.State != generation.StateCleaningUp || cancelCleanup.Workflow.CleanupIntent != generation.CleanupCancelled {
-		t.Fatalf("cancelled workflow cleanup state = %#v", cancelCleanup.Workflow)
-	}
-	if err := database.Generation.CompleteGenerationCleanup(ctx, cancelCleanup, now.Add(time.Hour)); err != nil {
-		t.Fatalf("complete cancelled cleanup: %v", err)
-	}
-	cancelled, err := database.Generation.GetGenerationWorkflow(ctx, cancelledWorkflow.ID)
-	if err != nil {
-		t.Fatalf("load cancelled workflow: %v", err)
-	}
-	if cancelled.State != generation.StateCancelled {
-		t.Fatalf("cancelled workflow terminal state = %s, want Cancelled", cancelled.State)
+	for _, kind := range []generation.ResourceReapKind{
+		generation.ResourceReapVerificationEnvironment,
+		generation.ResourceReapBuildArchive,
+		generation.ResourceReapCandidateArtifact,
+	} {
+		reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, kind, "reaper", time.Minute, now.Add(2*time.Minute))
+		if err != nil {
+			t.Fatalf("claim %s reap: %v", kind, err)
+		}
+		if reapClaim == nil || reapClaim.CandidateRevisionID != candidate.ID || reapClaim.Kind != kind || reapClaim.Candidate.ID != candidate.ID {
+			t.Fatalf("claimed %s reap = %#v", kind, reapClaim)
+		}
+		if err := database.Generation.CompleteGenerationResourceReap(ctx, *reapClaim, "", now.Add(2*time.Minute)); err != nil {
+			t.Fatalf("complete %s reap: %v", kind, err)
+		}
+		repeated, err := database.Generation.ClaimGenerationResourceReap(ctx, kind, "reaper", time.Minute, now.Add(3*time.Minute))
+		if err != nil {
+			t.Fatalf("claim completed %s reap: %v", kind, err)
+		}
+		if repeated != nil {
+			t.Fatalf("completed %s reap was claimed again: %#v", kind, repeated)
+		}
 	}
 }
 
-func TestGenerationLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
-	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+func publishWorkflowRoadmap(t *testing.T, database *Store, now time.Time) *roadmap.Revision {
+	t.Helper()
+	value, err := database.Roadmap.PublishRoadmap(context.Background(), roadmaptest.RuntimeRevision(), now)
+	if err != nil {
+		t.Fatalf("publish workflow roadmap fixture: %v", err)
+	}
+	return value
+}
 
-	initial := claimGenerationWorkflow(t, database, workflow.ID, "generate-a", now)
-	retried, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, initial, generation.StateGenerating, generation.Failure{
-		Class: generation.FailureInfrastructure, Code: "MODEL_UNAVAILABLE", Summary: "model temporarily unavailable",
-	}, now)
-	if err != nil {
-		t.Fatalf("record generation retry: %v", err)
+func advanceToVerifiedCandidate(t *testing.T, database *Store, workflowID string, now time.Time) generation.Revision {
+	t.Helper()
+	claim := claimGenerationWorkflow(t, database, workflowID, "generator-a", now)
+	candidate := finalizeGeneratedCandidate(t, database, claim, 1, now)
+	claim = refreshGenerationClaim(t, database, claim, now)
+	approveGenerationJudgement(t, database, claim, now)
+	claim = refreshGenerationClaim(t, database, claim, now)
+	advanceGenerationBuildAndArtifact(t, database, claim, now)
+	claim = refreshGenerationClaim(t, database, claim, now)
+	if err := database.Generation.RecordGenerationVerificationEnvironment(context.Background(), claim, verificationEnvironment(claim), now); err != nil {
+		t.Fatalf("record verification environment: %v", err)
 	}
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "generate-a", retried.NextRunAt)
-	if claim.Workflow.StateAttempt != 1 {
-		t.Fatalf("retry state attempt = %d, want 1", claim.Workflow.StateAttempt)
+	if err := database.Generation.CompleteGenerationVerification(context.Background(), claim, verificationReport(true), now); err != nil {
+		t.Fatalf("complete verification: %v", err)
 	}
+	return candidate
+}
 
-	finalizeGeneratedCandidate(t, database, claim, 1, retried.NextRunAt)
-	advanced, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load advanced generation workflow: %v", err)
+func existingClassification(value *roadmap.Revision, candidateID string) generation.ClassificationOutput {
+	for _, topic := range value.Topics {
+		if topic.SourceRef != "platform-runtime/systemd-service-recovery" {
+			continue
+		}
+		for _, tag := range value.Tags {
+			if tag.SourceRef != "runtime-fixture" {
+				continue
+			}
+			return generation.ClassificationOutput{
+				Result: generation.ClassificationProposed,
+				Topic:  &generation.TopicProposal{Existing: &roadmap.Ref{ID: topic.ID, SourceRef: topic.SourceRef, Title: topic.Title}, Reason: "题目要求恢复由 systemd 管理的服务。"},
+				Tags:   []generation.TagProposal{{Existing: &roadmap.Ref{ID: tag.ID, SourceRef: tag.SourceRef, Title: tag.Title}, Reason: "题目依赖真实运行时验证。"}},
+			}
+		}
 	}
-	if advanced.State != generation.StateJudging || advanced.StateAttempt != 0 || advanced.LeaseOwner != claim.LeaseOwner {
-		t.Fatalf("advanced generation workflow = %#v", advanced)
+	panic("workflow roadmap fixture is missing the expected topic or tag")
+}
+
+func hasChallengeBinding(value *roadmap.Revision, sourceRef string) bool {
+	for _, binding := range value.ChallengeBindings {
+		if binding.Challenge.SourceRef == sourceRef {
+			return true
+		}
 	}
-	oldExpiry := *advanced.LeaseExpiresAt
-	if err := database.Generation.RenewGenerationLease(ctx, claim, time.Minute, retried.NextRunAt.Add(time.Second)); err != nil {
-		t.Fatalf("renew generation lease after phase transition: %v", err)
-	}
-	renewed, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load renewed generation workflow: %v", err)
-	}
-	if renewed.LeaseExpiresAt == nil || !renewed.LeaseExpiresAt.After(oldExpiry) {
-		t.Fatalf("generation lease expiry was not extended: %#v", renewed.LeaseExpiresAt)
-	}
+	return false
 }
 
 func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Time) (*generation.Workflow, string, string) {
@@ -255,7 +414,9 @@ func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Tim
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, session.ID, session.UserID, 0, plan, authoring.StateIntentReview); err != nil {
 		t.Fatalf("confirm authoring plan: %v", err)
 	}
-	workflow, err := database.Generation.CreateGenerationWorkflow(ctx, session.ID, session.UserID, 1, now)
+	workflow, err := database.Generation.CreateGenerationWorkflow(ctx, session.ID, session.UserID, generation.StartConfirmation{
+		PlanRevision: 1, IdempotencyKey: "start-workflow",
+	}, now)
 	if err != nil {
 		t.Fatalf("create generation workflow: %v", err)
 	}
@@ -293,13 +454,18 @@ func refreshGenerationClaim(t *testing.T, database *Store, claim generation.Clai
 
 func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, purpose string, now time.Time) *agent.Run {
 	t.Helper()
+	promptVersions := map[string]string{
+		generationapp.GeneratorPurpose:  generationapp.GeneratorPromptVersion,
+		generationapp.JudgePurpose:      generationapp.JudgePromptVersion,
+		generationapp.ClassifierPurpose: generationapp.ClassifierPromptVersion,
+	}
 	run, err := database.Generation.StartGenerationAgentRun(context.Background(), claim, agent.CreateRun{
 		ID:            agent.NewID("generation-test-run"),
 		Purpose:       purpose,
 		OwnerKind:     "generation-workflow",
 		OwnerRef:      claim.Workflow.ID,
 		Model:         "test-model",
-		PromptVersion: map[string]string{generationapp.GeneratorPurpose: generationapp.GeneratorPromptVersion, generationapp.JudgePurpose: generationapp.JudgePromptVersion}[purpose],
+		PromptVersion: promptVersions[purpose],
 	}, now)
 	if err != nil {
 		t.Fatalf("start %s agent run: %v", purpose, err)

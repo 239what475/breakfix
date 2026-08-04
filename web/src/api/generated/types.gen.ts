@@ -88,7 +88,7 @@ export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
     state: 'DraftConversation' | 'IntentReview';
-    workflow_state?: 'Queued' | 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'CleaningUp' | 'Completed' | 'Failed' | 'Cancelled';
+    workflow_state?: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled' | 'Superseded';
     updated_at: string;
 };
 
@@ -330,9 +330,10 @@ export type AuthoringCandidate = {
 
 export type AuthoringGenerationWorkflow = {
     id: string;
-    state: 'Queued' | 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'CleaningUp' | 'Completed' | 'Failed' | 'Cancelled';
+    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled' | 'Superseded';
     state_attempt: number;
     candidate_revision_id?: string;
+    classification_roadmap_revision?: string;
     deadline_at?: string | null;
     last_error?: string | null;
     created_at: string;
@@ -389,6 +390,62 @@ export type AuthoringMessageRequest = {
     content: string;
 };
 
+export type AuthoringGenerationRequest = {
+    plan_revision: number;
+    idempotency_key: string;
+};
+
+export type AuthoringContentConfirmationRequest = {
+    workflow_id: string;
+    candidate_revision_id: string;
+    idempotency_key: string;
+};
+
+export type AuthoringClassificationPublicationRequest = {
+    workflow_id: string;
+    candidate_revision_id: string;
+    proposal_revision: number;
+    idempotency_key: string;
+};
+
+export type AuthoringClassificationNewTopic = {
+    domain: RoadmapReference;
+    title: string;
+    definition: string;
+    scope: string;
+    non_goals: string;
+    challenge_guidance: string;
+};
+
+export type AuthoringClassificationTopic = {
+    existing?: RoadmapReference;
+    new?: AuthoringClassificationNewTopic;
+    reason: string;
+};
+
+export type AuthoringClassificationNewTag = {
+    title: string;
+    description: string;
+};
+
+export type AuthoringClassificationTag = {
+    existing?: RoadmapReference;
+    new?: AuthoringClassificationNewTag;
+    reason: string;
+};
+
+export type AuthoringClassificationProposal = {
+    revision: number;
+    candidate_revision_id: string;
+    roadmap_revision: string;
+    result: 'proposed' | 'unclassifiable';
+    topic?: AuthoringClassificationTopic;
+    tags: Array<AuthoringClassificationTag>;
+    unclassifiable_reason?: string;
+    adjustment_suggestion?: string;
+    updated_at: string;
+};
+
 export type AuthoringSession = {
     id: string;
     state: 'DraftConversation' | 'IntentReview' | 'Published';
@@ -406,6 +463,7 @@ export type AuthoringSession = {
     candidate?: AuthoringCandidate;
     verified?: VerifiedChallenge;
     verification?: AuthoringVerificationReport;
+    classification?: AuthoringClassificationProposal;
     messages: Array<AuthoringMessage>;
     assets: Array<AuthoringAsset>;
     diff: Array<AuthoringFileDiff>;
@@ -901,7 +959,7 @@ export type SendAuthoringMessageResponses = {
 export type SendAuthoringMessageResponse = SendAuthoringMessageResponses[keyof SendAuthoringMessageResponses];
 
 export type ConfirmAuthoringGenerationData = {
-    body?: never;
+    body: AuthoringGenerationRequest;
     path: {
         id: string;
     };
@@ -918,8 +976,26 @@ export type ConfirmAuthoringGenerationResponses = {
 
 export type ConfirmAuthoringGenerationResponse = ConfirmAuthoringGenerationResponses[keyof ConfirmAuthoringGenerationResponses];
 
+export type ConfirmAuthoringContentData = {
+    body: AuthoringContentConfirmationRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/authoring/sessions/{id}/classify';
+};
+
+export type ConfirmAuthoringContentResponses = {
+    /**
+     * Verified revision entered classification
+     */
+    200: AuthoringSession;
+};
+
+export type ConfirmAuthoringContentResponse = ConfirmAuthoringContentResponses[keyof ConfirmAuthoringContentResponses];
+
 export type PublishAuthoringRevisionData = {
-    body?: never;
+    body: AuthoringClassificationPublicationRequest;
     path: {
         id: string;
     };

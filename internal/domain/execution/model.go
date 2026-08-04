@@ -75,12 +75,13 @@ type BuildOutput struct {
 }
 
 type IncusBuildReference struct {
-	Project      string `json:"project"`
-	WorkflowID   string `json:"workflow_id"`
-	Attempt      int64  `json:"attempt"`
-	InstanceName string `json:"instance_name"`
-	Alias        string `json:"alias"`
-	Fingerprint  string `json:"fingerprint"`
+	Project             string `json:"project"`
+	WorkflowID          string `json:"workflow_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	Attempt             int64  `json:"attempt"`
+	InstanceName        string `json:"instance_name"`
+	Alias               string `json:"alias"`
+	Fingerprint         string `json:"fingerprint"`
 }
 
 type ArtifactReference struct {
@@ -278,7 +279,7 @@ func (o BuildOutput) Validate(runtime string) error {
 }
 
 func (r IncusBuildReference) Validate() error {
-	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.WorkflowID) == "" || r.Attempt <= 0 ||
+	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.WorkflowID) == "" || strings.TrimSpace(r.CandidateRevisionID) == "" || r.Attempt <= 0 ||
 		strings.TrimSpace(r.InstanceName) == "" || strings.TrimSpace(r.Alias) == "" || !validFingerprint(r.Fingerprint) {
 		return errors.New("incus build reference is incomplete")
 	}

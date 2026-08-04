@@ -58,7 +58,7 @@ func TestCatalogRepositoryCommitsReleaseAndRoadmapAtomically(t *testing.T) {
 	assertNoCurrentRoadmap(t, database)
 	claim := claimCatalogEntry(t, database, initialized.ID, now)
 	build := execution.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &execution.IncusBuildReference{
-		Project: "catalog-build", WorkflowID: entry.ID, Attempt: int64(claim.Entry.Attempt),
+		Project: "catalog-build", WorkflowID: entry.ID, CandidateRevisionID: entry.ID, Attempt: int64(claim.Entry.Attempt),
 		InstanceName: "catalog-build-node", Alias: "catalog-build-node", Fingerprint: strings.Repeat("c", 64),
 	}}
 	if _, err := database.Catalog.CompleteEntryBuild(ctx, claim, build, now); err != nil {

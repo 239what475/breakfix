@@ -31,18 +31,19 @@ const sessionStateLabel: Record<string, string> = {
   Published: "已发布",
 };
 const workflowStateLabel: Record<string, string> = {
-  Queued: "等待生成",
   Generating: "正在生成",
   Judging: "正在审查",
   Building: "正在构建",
   ArtifactPublishing: "正在发布候选产物",
   Verifying: "正在真实验证",
   NeedsAuthorReview: "等待作者审核",
+  Classifying: "正在分类",
+  NeedsClassificationReview: "等待分类审核",
   ChallengePublishing: "正在发布挑战",
-  CleaningUp: "正在清理",
-  Completed: "已完成",
+  Published: "已发布",
   Failed: "基础设施失败",
   Cancelled: "已取消",
+  Superseded: "已替代",
 };
 
 const usingVerifiedRevision = computed(() => !!session.value?.verified);
@@ -132,7 +133,7 @@ const canGenerate = computed(
       ["Failed", "Cancelled"].includes(session.value.workflow.state)) &&
     checkpoints.value.length > 0,
 );
-const canPublish = computed(
+const canConfirmContent = computed(
   () =>
     !session.value?.authoring_turn_active &&
     session.value?.workflow?.state === "NeedsAuthorReview" &&
@@ -147,7 +148,7 @@ const canOpenPublished = computed(
 );
 const actionLabel = computed(() => {
   if (canGenerate.value) return "生成并验证题目";
-  if (canPublish.value) return "发布挑战";
+  if (canConfirmContent.value) return "确认题目内容";
   if (canOpenPublished.value) return "查看已发布题目";
   return "";
 });
@@ -165,7 +166,7 @@ function shouldPoll() {
   return (
     session.value?.authoring_turn_active ||
     (!!currentWorkflow &&
-      !["NeedsAuthorReview", "Completed", "Failed", "Cancelled"].includes(
+      !["NeedsAuthorReview", "NeedsClassificationReview", "Published", "Failed", "Cancelled", "Superseded"].includes(
         currentWorkflow.state,
       ))
   );
@@ -280,9 +281,18 @@ async function confirmAction() {
       emit("published", session.value.publish_challenge_id);
       return;
     }
-    session.value = canGenerate.value
-      ? await api.confirmAuthoringGeneration(session.value.id)
-      : await api.publishAuthoringRevision(session.value.id);
+    if (canGenerate.value) {
+      session.value = await api.confirmAuthoringGeneration(session.value.id, {
+        plan_revision: session.value.intent_revision,
+        idempotency_key: authoringIdempotencyKey(),
+      });
+    } else if (canConfirmContent.value && session.value.workflow && session.value.candidate) {
+      session.value = await api.confirmAuthoringContent(session.value.id, {
+        workflow_id: session.value.workflow.id,
+        candidate_revision_id: session.value.candidate.id,
+        idempotency_key: authoringIdempotencyKey(),
+      });
+    }
     syncSelections();
   } catch (err) {
     error.value = err instanceof Error ? err.message : "确认操作失败";
@@ -290,6 +300,9 @@ async function confirmAction() {
     busy.value = false;
     schedulePoll();
   }
+}
+function authoringIdempotencyKey() {
+	return globalThis.crypto?.randomUUID?.() ?? `authoring-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 function focusChange(revision: number) {
   activeTab.value =

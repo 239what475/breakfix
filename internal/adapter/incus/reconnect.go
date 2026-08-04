@@ -142,9 +142,9 @@ func (c *ReconnectableClient) DeleteBuildNodeImage(ctx context.Context, result B
 	})
 }
 
-func (c *ReconnectableClient) DeleteBuildNodeImageAttempt(ctx context.Context, workflowID string, attempt int64) error {
+func (c *ReconnectableClient) DeleteBuildNodeImageAttempt(ctx context.Context, workflowID, candidateRevisionID string, attempt int64) error {
 	return c.use(ctx, func(client *Client) error {
-		return client.DeleteBuildNodeImageAttempt(ctx, workflowID, attempt)
+		return client.DeleteBuildNodeImageAttempt(ctx, workflowID, candidateRevisionID, attempt)
 	})
 }
 

@@ -88,9 +88,6 @@ func TestWorkerRepairsVerificationFailureBeforeAuthorReview(t *testing.T) {
 	if executors.generateCalls.Load() != 2 || executors.judgeCalls.Load() != 2 || executors.buildCalls.Load() != 2 || executors.publishCalls.Load() != 2 || executors.verifyCalls.Load() != 2 {
 		t.Fatalf("phase calls after repair = generate %d judge %d build %d publish %d verify %d", executors.generateCalls.Load(), executors.judgeCalls.Load(), executors.buildCalls.Load(), executors.publishCalls.Load(), executors.verifyCalls.Load())
 	}
-	if executors.discardCalls.Load() != 1 {
-		t.Fatalf("discard calls = %d, want 1", executors.discardCalls.Load())
-	}
 }
 
 type generationExecutors struct {
@@ -100,7 +97,6 @@ type generationExecutors struct {
 	buildCalls    atomic.Int32
 	publishCalls  atomic.Int32
 	verifyCalls   atomic.Int32
-	discardCalls  atomic.Int32
 	generateDelay time.Duration
 	builder       *generationBuilder
 	publisher     *generationPublisher
@@ -111,7 +107,7 @@ func newGenerationExecutors(t *testing.T, archive []byte) *generationExecutors {
 	t.Helper()
 	result := &generationExecutors{archive: archive}
 	result.builder = &generationBuilder{calls: &result.buildCalls}
-	result.publisher = &generationPublisher{calls: &result.publishCalls, discardCalls: &result.discardCalls}
+	result.publisher = &generationPublisher{calls: &result.publishCalls}
 	result.verifier = &generationVerifier{calls: &result.verifyCalls}
 	return result
 }
@@ -143,13 +139,7 @@ func (e *generationBuilder) Execute(context.Context, generation.Execution, []byt
 }
 
 type generationPublisher struct {
-	calls        *atomic.Int32
-	discardCalls *atomic.Int32
-}
-
-func (e *generationPublisher) DiscardCandidate(context.Context, generation.Execution) error {
-	e.discardCalls.Add(1)
-	return nil
+	calls *atomic.Int32
 }
 
 func (e *generationPublisher) PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error) {
@@ -160,8 +150,6 @@ func (e *generationPublisher) PublishArtifact(context.Context, generation.Execut
 func (*generationPublisher) PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error) {
 	return generation.ArtifactReference{}, nil
 }
-
-func (*generationPublisher) Cleanup(context.Context, generation.Execution) error { return nil }
 
 type generationVerifier struct {
 	calls              *atomic.Int32

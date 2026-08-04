@@ -36,6 +36,17 @@ type generationLeaseRequest struct {
 	LeaseTTLMillis int64 `json:"lease_ttl_millis,omitempty"`
 }
 
+type generationResourceReapClaimRequest struct {
+	WorkerID       string                      `json:"worker_id"`
+	Kind           generation.ResourceReapKind `json:"kind"`
+	LeaseTTLMillis int64                       `json:"lease_ttl_millis"`
+}
+
+type generationResourceReapCompleteRequest struct {
+	Claim   generation.ResourceReapClaim `json:"claim"`
+	Failure string                       `json:"failure,omitempty"`
+}
+
 func (h *Handler) InternalClaimGenerationWorkflow(c *gin.Context) {
 	var request generationClaimRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
@@ -54,6 +65,42 @@ func (h *Handler) InternalClaimGenerationWorkflow(c *gin.Context) {
 	c.JSON(http.StatusOK, struct {
 		Claim *generation.Claim `json:"claim,omitempty"`
 	}{Claim: claim})
+}
+
+func (h *Handler) InternalClaimGenerationResourceReap(c *gin.Context) {
+	var request generationResourceReapClaimRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
+	if strings.TrimSpace(request.WorkerID) == "" || request.Kind.Owner() != "generate-worker" || leaseTTL < generationMinLease || leaseTTL > generationMaxLease {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id, a generate-worker resource kind, and a lease between 5 seconds and 2 minutes are required"})
+		return
+	}
+	claim, err := h.db.Generation.ClaimGenerationResourceReap(c.Request.Context(), request.Kind, request.WorkerID, leaseTTL, time.Now().UTC())
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		Claim *generation.ResourceReapClaim `json:"claim,omitempty"`
+	}{Claim: claim})
+}
+
+func (h *Handler) InternalCompleteGenerationResourceReap(c *gin.Context) {
+	var request generationResourceReapCompleteRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	if request.Claim.Valid() != nil || request.Claim.Kind.Owner() != "generate-worker" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "generation resource reap completion is invalid"})
+		return
+	}
+	if err := h.db.Generation.CompleteGenerationResourceReap(c.Request.Context(), request.Claim, request.Failure, time.Now().UTC()); err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) InternalRenewGenerationWorkflow(c *gin.Context) {
@@ -113,8 +160,11 @@ func (h *Handler) InternalStartGenerationAgentRun(c *gin.Context) {
 		return
 	}
 	expectedPrompt := app.GeneratorPromptVersion
-	if request.Purpose == app.JudgePurpose {
+	switch request.Purpose {
+	case app.JudgePurpose:
 		expectedPrompt = app.JudgePromptVersion
+	case app.ClassifierPurpose:
+		expectedPrompt = app.ClassifierPromptVersion
 	}
 	if request.Model != h.llm.Model || request.PromptVersion != expectedPrompt {
 		h.writeInternalGenerationError(c, errors.New("generation agent run metadata does not match Server configuration"))
@@ -161,6 +211,8 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 		err = h.finalizeGeneratedCandidate(c, *claim, *request.GeneratedCandidate, now)
 	case request.Judgement != nil:
 		err = h.db.Generation.FinalizeGenerationJudgement(c.Request.Context(), *claim, request.Judgement.RunID, request.Judgement.Approved, request.Judgement.Feedback, now)
+	case request.Classification != nil:
+		err = h.db.Generation.FinalizeGenerationClassification(c.Request.Context(), *claim, request.Classification.RunID, request.Classification.Output, now)
 	case request.Build != nil:
 		err = h.completeGenerationBuild(c, *claim, *request.Build, now)
 	case request.ArtifactPublish != nil:
@@ -174,8 +226,6 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 		}
 	case request.ChallengePublish != nil:
 		err = h.completeGenerationChallengePublish(c, *claim, request.ChallengePublish.Artifact, now)
-	case request.Cleanup != nil:
-		err = h.completeGenerationCleanup(c, *claim, now)
 	case request.InfrastructureFailure != nil:
 		_, err = h.db.Generation.ReportGenerationInfrastructureFailure(c.Request.Context(), *claim, request.ExpectedState, request.InfrastructureFailure.Failure, now)
 	case request.ArtifactFailure != nil:
@@ -316,7 +366,7 @@ func (h *Handler) refreshGenerationClaim(c *gin.Context, prior generation.Claim)
 	if err != nil {
 		return nil, err
 	}
-	if workflow.State.Terminal() || workflow.State == generation.StateNeedsAuthorReview || strings.TrimSpace(workflow.LeaseOwner) == "" {
+	if workflow.State.Terminal() || workflow.State.Review() || strings.TrimSpace(workflow.LeaseOwner) == "" {
 		return nil, nil
 	}
 	return h.db.Generation.RefreshGenerationClaim(c.Request.Context(), workflow.ID, prior.LeaseOwner, time.Now().UTC())
@@ -382,7 +432,7 @@ func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim
 		output.OCIArchiveSHA256 = digest
 	case challenge.RuntimeNode:
 		if len(result.Archive) != 0 || output.Incus == nil || output.Incus.Project != h.incusConfig.BuildProject ||
-			output.Incus.WorkflowID != claim.Workflow.ID || output.Incus.Attempt != int64(claim.StateAttempt+1) {
+			output.Incus.WorkflowID != claim.Workflow.ID || output.Incus.CandidateRevisionID != revision.ID || output.Incus.Attempt != int64(claim.StateAttempt+1) {
 			return generation.NewArtifactError("BUILD_OUTPUT_INVALID", "node build output does not match its fenced generation attempt")
 		}
 	default:
@@ -428,19 +478,11 @@ func (h *Handler) completeGenerationChallengePublish(c *gin.Context, claim gener
 	publication := *revision.Publication
 	publication.Artifact = &artifact
 	copyRevision.Publication = &publication
-	if _, err := h.materializeCandidatePublication(&copyRevision); err != nil {
+	published, err := h.materializeCandidatePublication(&copyRevision)
+	if err != nil {
 		return err
 	}
-	return h.db.Generation.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, now)
-}
-
-func (h *Handler) completeGenerationCleanup(c *gin.Context, claim generation.Claim, now time.Time) error {
-	if candidateID := strings.TrimSpace(claim.Workflow.CandidateRevisionID); candidateID != "" {
-		if err := candidate.RemoveBuildArchives(h.dataDir, candidateID); err != nil {
-			return err
-		}
-	}
-	return h.db.Generation.CompleteGenerationCleanup(c.Request.Context(), claim, now)
+	return h.db.Generation.CompleteGenerationChallengePublish(c.Request.Context(), claim, artifact, published.ContentRevision, now)
 }
 
 func validateGenerationOCIArchiveBytes(data []byte) error {

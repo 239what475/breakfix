@@ -14,6 +14,11 @@ type Judgement struct {
 	Feedback string `json:"feedback,omitempty"`
 }
 
+type Classification struct {
+	RunID  string               `json:"run_id"`
+	Output ClassificationOutput `json:"output"`
+}
+
 type BuildResult struct {
 	Output  BuildOutput `json:"output"`
 	Archive []byte      `json:"archive,omitempty"`
@@ -43,5 +48,3 @@ type ArtifactFailureResult struct {
 	Failure Failure             `json:"failure"`
 	Report  *VerificationReport `json:"report,omitempty"`
 }
-
-type CleanupResult struct{}

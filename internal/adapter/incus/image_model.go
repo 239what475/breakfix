@@ -7,18 +7,20 @@ type ImageFile struct {
 }
 
 type BuildNodeImageRequest struct {
-	WorkflowID string
-	Attempt    int64
-	Revision   string
-	Files      []ImageFile
+	WorkflowID          string
+	CandidateRevisionID string
+	Attempt             int64
+	Revision            string
+	Files               []ImageFile
 }
 
 type BuildNodeImageResult struct {
-	WorkflowID   string
-	Attempt      int64
-	InstanceName string
-	Alias        string
-	Fingerprint  string
+	WorkflowID          string
+	CandidateRevisionID string
+	Attempt             int64
+	InstanceName        string
+	Alias               string
+	Fingerprint         string
 }
 
 type PublishNodeImageRequest struct {

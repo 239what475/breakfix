@@ -34,6 +34,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	h.StartGeneratorWorkspaceCleanup(runCtx)
 	h.StartGenerationDeadlineRecovery(runCtx)
+	h.StartGenerationResourceReaper(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := middleware.JWTMiddleware(jwtSecret)
 	optionalJWTMW := middleware.OptionalJWTMiddleware(jwtSecret)
@@ -181,6 +182,12 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.ConfirmAuthoringGeneration(c, c.Param("id"))
 		}
 	})
+	router.POST("/api/authoring/sessions/:id/classify", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.ConfirmAuthoringContent(c, c.Param("id"))
+		}
+	})
 	router.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -188,6 +195,8 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 		}
 	})
 	router.POST("/api/internal/generation-workflows/claim", h.InternalClaimGenerationWorkflow)
+	router.POST("/api/internal/generation-resource-reaps/claim", h.InternalClaimGenerationResourceReap)
+	router.POST("/api/internal/generation-resource-reaps/complete", h.InternalCompleteGenerationResourceReap)
 	router.POST("/api/internal/generation-workflows/:id/renew", h.InternalRenewGenerationWorkflow)
 	router.POST("/api/internal/generation-workflows/:id/context", h.InternalGenerationContext)
 	router.POST("/api/internal/generation-workflows/:id/agent-runs", h.InternalStartGenerationAgentRun)

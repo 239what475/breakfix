@@ -28,14 +28,15 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 		return BuildNodeImageResult{}, err
 	}
 	result := BuildNodeImageResult{
-		WorkflowID: request.WorkflowID, Attempt: request.Attempt, InstanceName: names.Instance, Alias: names.Alias,
+		WorkflowID: request.WorkflowID, CandidateRevisionID: request.CandidateRevisionID,
+		Attempt: request.Attempt, InstanceName: names.Instance, Alias: names.Alias,
 	}
 	server, err := c.scoped(ctx, c.config.BuildProject)
 	if err != nil {
 		return BuildNodeImageResult{}, err
 	}
 	for attempt := int64(1); attempt < request.Attempt; attempt++ {
-		if err := c.deleteBuildNodeImageAttempt(ctx, server, request.WorkflowID, attempt); err != nil {
+		if err := c.deleteBuildNodeImageAttempt(ctx, server, request.WorkflowID, request.CandidateRevisionID, attempt); err != nil {
 			return BuildNodeImageResult{}, fmt.Errorf("clean earlier Node build attempt %d: %w", attempt, err)
 		}
 	}
@@ -50,10 +51,7 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 		} else if !errors.Is(err, ErrInvariant) {
 			return BuildNodeImageResult{}, err
 		}
-		// A workflow can produce a new immutable candidate after a verifier
-		// rejection. Build slots are owned by workflow and attempt; revision is
-		// content provenance, so an older revision in this exact slot is replaced.
-		if err := c.deleteBuildNodeImageAttempt(ctx, server, request.WorkflowID, request.Attempt); err != nil {
+		if err := c.deleteBuildNodeImageAttempt(ctx, server, request.WorkflowID, request.CandidateRevisionID, request.Attempt); err != nil {
 			return BuildNodeImageResult{}, fmt.Errorf("replace stale Node build attempt %d: %w", request.Attempt, err)
 		}
 	} else {
@@ -98,6 +96,7 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 			Properties: map[string]string{
 				resourceKindKey:    "build-image",
 				workflowIDKey:      request.WorkflowID,
+				candidateIDKey:     request.CandidateRevisionID,
 				workflowAttemptKey: strconv.FormatInt(request.Attempt, 10),
 				revisionKey:        request.Revision,
 			},
@@ -129,11 +128,11 @@ func (c *Client) PublishNodeImage(ctx context.Context, request PublishNodeImageR
 	if strings.TrimSpace(request.CandidateRevisionID) == "" || strings.TrimSpace(request.Revision) == "" {
 		return PublishNodeImageResult{}, fmt.Errorf("%w: candidate revision ID and revision are required", ErrInvalid)
 	}
-	names, err := NamesForBuildAttempt(c.config.NamePrefix, request.Build.WorkflowID, request.Build.Attempt)
+	names, err := NamesForBuildAttempt(c.config.NamePrefix, request.Build.WorkflowID, request.Build.CandidateRevisionID, request.Build.Attempt)
 	if err != nil {
 		return PublishNodeImageResult{}, err
 	}
-	if request.Build.InstanceName != names.Instance || request.Build.Alias != names.Alias || !fullFingerprintPattern.MatchString(request.Build.Fingerprint) {
+	if request.Build.CandidateRevisionID != request.CandidateRevisionID || request.Build.InstanceName != names.Instance || request.Build.Alias != names.Alias || !fullFingerprintPattern.MatchString(request.Build.Fingerprint) {
 		return PublishNodeImageResult{}, fmt.Errorf("%w: build image identity is invalid", ErrInvalid)
 	}
 	candidateAlias, err := AliasForCandidate(c.config.NamePrefix, request.CandidateRevisionID)
@@ -147,7 +146,8 @@ func (c *Client) PublishNodeImage(ctx context.Context, request PublishNodeImageR
 		return PublishNodeImageResult{}, err
 	}
 	if err := validateBuiltImage(buildServer, BuildNodeImageRequest{
-		WorkflowID: request.Build.WorkflowID, Attempt: request.Build.Attempt, Revision: request.Revision,
+		WorkflowID: request.Build.WorkflowID, CandidateRevisionID: request.Build.CandidateRevisionID,
+		Attempt: request.Build.Attempt, Revision: request.Revision,
 	}, request.Build); err != nil {
 		return PublishNodeImageResult{}, err
 	}
@@ -204,7 +204,7 @@ func (c *Client) PublishNodeImage(ctx context.Context, request PublishNodeImageR
 }
 
 func (c *Client) DeleteBuildNodeImage(ctx context.Context, result BuildNodeImageResult) error {
-	names, err := NamesForBuildAttempt(c.config.NamePrefix, result.WorkflowID, result.Attempt)
+	names, err := NamesForBuildAttempt(c.config.NamePrefix, result.WorkflowID, result.CandidateRevisionID, result.Attempt)
 	if err != nil {
 		return err
 	}
@@ -215,32 +215,32 @@ func (c *Client) DeleteBuildNodeImage(ctx context.Context, result BuildNodeImage
 	if err != nil {
 		return err
 	}
-	request := BuildNodeImageRequest{WorkflowID: result.WorkflowID, Attempt: result.Attempt}
+	request := BuildNodeImageRequest{WorkflowID: result.WorkflowID, CandidateRevisionID: result.CandidateRevisionID, Attempt: result.Attempt}
 	if err := c.deleteBuildInstanceIfPresent(ctx, server, request, names.Instance); err != nil {
 		return err
 	}
 	return deleteOwnedImageAlias(ctx, server, names.Alias, result.Fingerprint, func(image *api.Image) error {
-		return validateBuildImageOwner(image, result.WorkflowID, result.Attempt)
+		return validateBuildImageOwner(image, result.WorkflowID, result.CandidateRevisionID, result.Attempt)
 	})
 }
 
 // DeleteBuildNodeImageAttempt removes one exact attempt without requiring a
 // previously committed fingerprint. Ownership is verified from Incus metadata
 // before any instance, alias, or image is removed.
-func (c *Client) DeleteBuildNodeImageAttempt(ctx context.Context, workflowID string, attempt int64) error {
+func (c *Client) DeleteBuildNodeImageAttempt(ctx context.Context, workflowID, candidateRevisionID string, attempt int64) error {
 	server, err := c.scoped(ctx, c.config.BuildProject)
 	if err != nil {
 		return err
 	}
-	return c.deleteBuildNodeImageAttempt(ctx, server, workflowID, attempt)
+	return c.deleteBuildNodeImageAttempt(ctx, server, workflowID, candidateRevisionID, attempt)
 }
 
-func (c *Client) deleteBuildNodeImageAttempt(ctx context.Context, server incus.InstanceServer, workflowID string, attempt int64) error {
-	names, err := NamesForBuildAttempt(c.config.NamePrefix, workflowID, attempt)
+func (c *Client) deleteBuildNodeImageAttempt(ctx context.Context, server incus.InstanceServer, workflowID, candidateRevisionID string, attempt int64) error {
+	names, err := NamesForBuildAttempt(c.config.NamePrefix, workflowID, candidateRevisionID, attempt)
 	if err != nil {
 		return err
 	}
-	request := BuildNodeImageRequest{WorkflowID: workflowID, Attempt: attempt}
+	request := BuildNodeImageRequest{WorkflowID: workflowID, CandidateRevisionID: candidateRevisionID, Attempt: attempt}
 	if err := c.deleteBuildInstanceIfPresent(ctx, server, request, names.Instance); err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (c *Client) deleteBuildNodeImageAttempt(ctx context.Context, server incus.I
 		return classified
 	}
 	return deleteOwnedImageAlias(ctx, server, names.Alias, alias.Target, func(image *api.Image) error {
-		return validateBuildImageOwner(image, workflowID, attempt)
+		return validateBuildImageOwner(image, workflowID, candidateRevisionID, attempt)
 	})
 }
 
@@ -417,7 +417,7 @@ func (c *Client) DeleteChallengeNodeImage(ctx context.Context, challengeID, fing
 }
 
 func (c *Client) validateBuildNodeImageRequest(request BuildNodeImageRequest) (BuildNames, []ImageFile, error) {
-	names, err := NamesForBuildAttempt(c.config.NamePrefix, request.WorkflowID, request.Attempt)
+	names, err := NamesForBuildAttempt(c.config.NamePrefix, request.WorkflowID, request.CandidateRevisionID, request.Attempt)
 	if err != nil {
 		return BuildNames{}, nil, err
 	}
@@ -449,6 +449,7 @@ func buildInstance(request BuildNodeImageRequest, names BuildNames, baseFingerpr
 	config := api.ConfigMap{
 		resourceKindKey:    "build-instance",
 		workflowIDKey:      request.WorkflowID,
+		candidateIDKey:     request.CandidateRevisionID,
 		workflowAttemptKey: strconv.FormatInt(request.Attempt, 10),
 		revisionKey:        request.Revision,
 	}
@@ -474,7 +475,7 @@ func (c *Client) deleteBuildInstanceIfPresent(ctx context.Context, server incus.
 		}
 		return classified
 	}
-	if err := validateBuildInstanceOwner(instance, request.WorkflowID, request.Attempt); err != nil {
+	if err := validateBuildInstanceOwner(instance, request.WorkflowID, request.CandidateRevisionID, request.Attempt); err != nil {
 		return err
 	}
 	if instance.IsActive() {
@@ -487,8 +488,8 @@ func (c *Client) deleteBuildInstanceIfPresent(ctx context.Context, server incus.
 	return waitOperation(ctx, "delete node image build instance", name, op)
 }
 
-func validateBuildInstanceOwner(instance *api.Instance, workflowID string, attempt int64) error {
-	if instance == nil || instance.Type != string(api.InstanceTypeContainer) || instance.Config[resourceKindKey] != "build-instance" || instance.Config[workflowIDKey] != workflowID || instance.Config[workflowAttemptKey] != strconv.FormatInt(attempt, 10) {
+func validateBuildInstanceOwner(instance *api.Instance, workflowID, candidateRevisionID string, attempt int64) error {
+	if instance == nil || instance.Type != string(api.InstanceTypeContainer) || instance.Config[resourceKindKey] != "build-instance" || instance.Config[workflowIDKey] != workflowID || instance.Config[candidateIDKey] != candidateRevisionID || instance.Config[workflowAttemptKey] != strconv.FormatInt(attempt, 10) {
 		return fmt.Errorf("%w: node image build instance has mismatched owner", ErrInvariant)
 	}
 	return nil
@@ -527,7 +528,7 @@ func validateBuiltImage(server incus.InstanceServer, request BuildNodeImageReque
 }
 
 func validateBuiltImageProperties(image *api.Image, request BuildNodeImageRequest) error {
-	if err := validateBuildImageOwner(image, request.WorkflowID, request.Attempt); err != nil {
+	if err := validateBuildImageOwner(image, request.WorkflowID, request.CandidateRevisionID, request.Attempt); err != nil {
 		return err
 	}
 	if image.Properties[revisionKey] != request.Revision {
@@ -536,8 +537,8 @@ func validateBuiltImageProperties(image *api.Image, request BuildNodeImageReques
 	return nil
 }
 
-func validateBuildImageOwner(image *api.Image, workflowID string, attempt int64) error {
-	if image == nil || !image.ExpiresAt.IsZero() || image.Public || image.Type != string(api.InstanceTypeContainer) || image.Properties[resourceKindKey] != "build-image" || image.Properties[workflowIDKey] != workflowID || image.Properties[workflowAttemptKey] != strconv.FormatInt(attempt, 10) {
+func validateBuildImageOwner(image *api.Image, workflowID, candidateRevisionID string, attempt int64) error {
+	if image == nil || !image.ExpiresAt.IsZero() || image.Public || image.Type != string(api.InstanceTypeContainer) || image.Properties[resourceKindKey] != "build-image" || image.Properties[workflowIDKey] != workflowID || image.Properties[candidateIDKey] != candidateRevisionID || image.Properties[workflowAttemptKey] != strconv.FormatInt(attempt, 10) {
 		return fmt.Errorf("%w: node build image has mismatched owner", ErrInvariant)
 	}
 	return nil

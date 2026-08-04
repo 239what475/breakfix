@@ -13,7 +13,6 @@ import (
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	generationapp "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -105,27 +104,39 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 	if user == nil {
 		return
 	}
-	session, _, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
+	var request api.AuthoringGenerationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	_, err := h.db.Generation.CreateGenerationWorkflow(c.Request.Context(), sessionID, user.ID, generation.StartConfirmation{
+		PlanRevision:   int64(request.PlanRevision),
+		IdempotencyKey: request.IdempotencyKey,
+	}, time.Now().UTC())
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if session.State != authoringdomain.StateIntentReview {
-		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "the current intent is not ready to generate"})
+	h.writeAuthoringSession(c, user, sessionID)
+}
+
+// ConfirmAuthoringContent moves the frozen verified candidate into the
+// separate classification lifecycle. It does not publish a Challenge.
+func (h *Handler) ConfirmAuthoringContent(c *gin.Context, sessionID string) {
+	user := h.requireUser(c)
+	if user == nil {
 		return
 	}
-	now := time.Now().UTC()
-	active, activeErr := h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
-	switch {
-	case errors.Is(activeErr, postgres.ErrGenerationWorkflowNotFound):
-		_, err = h.db.Generation.CreateGenerationWorkflow(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
-	case activeErr != nil:
-		err = activeErr
-	case active.State == generation.StateNeedsAuthorReview:
-		_, err = h.db.Generation.ResumeGenerationForRevision(c.Request.Context(), session.ID, user.ID, session.CurrentRevision, now)
-	default:
-		err = authoringdomain.ErrInvalidState
+	var request api.AuthoringContentConfirmationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
 	}
+	_, err := h.db.Generation.ConfirmGenerationContent(c.Request.Context(), sessionID, user.ID, generation.ContentConfirmation{
+		WorkflowID:          request.WorkflowId,
+		CandidateRevisionID: request.CandidateRevisionId,
+		IdempotencyKey:      request.IdempotencyKey,
+	}, time.Now().UTC())
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
@@ -138,6 +149,11 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	if user == nil {
 		return
 	}
+	var request api.AuthoringClassificationPublicationRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
 	session, _, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
@@ -148,7 +164,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if workflow.State != generation.StateNeedsAuthorReview || workflow.CandidateRevisionID == "" {
+	if workflow.ID != request.WorkflowId || workflow.State != generation.StateNeedsClassificationReview || workflow.CandidateRevisionID != request.CandidateRevisionId {
 		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
 		return
 	}
@@ -157,7 +173,7 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	if revision.Verification == nil || !revision.Verification.Passed || revision.Artifact == nil {
+	if revision.Verification == nil || !revision.Verification.Passed || revision.Artifact == nil || revision.Classification == nil {
 		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
 		return
 	}
@@ -166,13 +182,12 @@ func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 		h.writeAuthoringError(c, err)
 		return
 	}
-	challengeID := challenge.NewID()
 	now := time.Now().UTC()
-	_, err = h.db.Generation.BeginGenerationPublication(c.Request.Context(), session.ID, user.ID, generation.Publication{
-		ChallengeID: challengeID,
-		SourceSlug:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
-		TargetPath:  challenge.SourceSlugFor(inspected.Entry.Title, challengeID),
-		RequestedAt: now,
+	_, err = h.db.Generation.BeginClassificationPublication(c.Request.Context(), session.ID, user.ID, inspected.Entry.Title, generation.PublicationConfirmation{
+		WorkflowID:          request.WorkflowId,
+		CandidateRevisionID: request.CandidateRevisionId,
+		ProposalRevision:    request.ProposalRevision,
+		IdempotencyKey:      request.IdempotencyKey,
 	}, now)
 	if err != nil {
 		h.writeAuthoringError(c, err)
@@ -265,7 +280,8 @@ func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoring
 	}
 	return api.AuthoringSession{
 		Assets: assetsToAPI(assets), AuthoringTurnActive: turnActive, Candidate: toAPIAuthoringCandidate(visibleCandidate),
-		Diff: toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
+		Classification: toAPIAuthoringClassificationProposal(classificationForVisibleCandidate(visibleCandidate, workflow)),
+		Diff:           toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
 		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
 		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
 		UpdatedAt: session.UpdatedAt.UTC(), Verification: verification, Verified: toAPIVerifiedChallenge(verified), VisibleRevision: int(revision.Number),
@@ -290,15 +306,77 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 		deadline = &value
 	}
 	return &api.AuthoringGenerationWorkflow{
-		Id:                  workflow.ID,
-		State:               api.AuthoringGenerationWorkflowState(workflow.State),
-		StateAttempt:        workflow.StateAttempt,
-		CandidateRevisionId: optionalString(workflow.CandidateRevisionID),
-		DeadlineAt:          deadline,
-		LastError:           optionalString(workflow.LastError),
-		CreatedAt:           workflow.CreatedAt.UTC(),
-		UpdatedAt:           workflow.UpdatedAt.UTC(),
+		Id:                            workflow.ID,
+		State:                         api.AuthoringGenerationWorkflowState(workflow.State),
+		StateAttempt:                  workflow.StateAttempt,
+		CandidateRevisionId:           optionalString(workflow.CandidateRevisionID),
+		ClassificationRoadmapRevision: optionalString(workflow.ClassificationRoadmapRevision),
+		DeadlineAt:                    deadline,
+		LastError:                     optionalString(workflow.LastError),
+		CreatedAt:                     workflow.CreatedAt.UTC(),
+		UpdatedAt:                     workflow.UpdatedAt.UTC(),
 	}
+}
+
+func classificationForVisibleCandidate(visible *generation.Revision, workflow *generation.Workflow) *generation.ClassificationProposal {
+	if visible == nil || workflow == nil || workflow.CandidateRevisionID != visible.ID {
+		return nil
+	}
+	return visible.Classification
+}
+
+func toAPIAuthoringClassificationProposal(value *generation.ClassificationProposal) *api.AuthoringClassificationProposal {
+	if value == nil {
+		return nil
+	}
+	result := &api.AuthoringClassificationProposal{
+		Revision:             value.Revision,
+		CandidateRevisionId:  value.CandidateRevisionID,
+		RoadmapRevision:      value.RoadmapRevision,
+		Result:               api.AuthoringClassificationProposalResult(value.Result),
+		Tags:                 make([]api.AuthoringClassificationTag, 0, len(value.Tags)),
+		UnclassifiableReason: optionalString(value.UnclassifiableReason),
+		AdjustmentSuggestion: optionalString(value.AdjustmentSuggestion),
+		UpdatedAt:            value.UpdatedAt.UTC(),
+	}
+	if value.Topic != nil {
+		result.Topic = toAPIAuthoringClassificationTopic(*value.Topic)
+	}
+	for _, tag := range value.Tags {
+		result.Tags = append(result.Tags, toAPIAuthoringClassificationTag(tag))
+	}
+	return result
+}
+
+func toAPIAuthoringClassificationTopic(value generation.TopicProposal) *api.AuthoringClassificationTopic {
+	result := &api.AuthoringClassificationTopic{Reason: value.Reason}
+	if value.Existing != nil {
+		reference := toAPIRoadmapReference(*value.Existing)
+		result.Existing = &reference
+	}
+	if value.New != nil {
+		result.New = &api.AuthoringClassificationNewTopic{
+			Domain:            toAPIRoadmapReference(value.New.Domain),
+			Title:             value.New.Title,
+			Definition:        value.New.Definition,
+			Scope:             value.New.Scope,
+			NonGoals:          value.New.NonGoals,
+			ChallengeGuidance: value.New.ChallengeGuidance,
+		}
+	}
+	return result
+}
+
+func toAPIAuthoringClassificationTag(value generation.TagProposal) api.AuthoringClassificationTag {
+	result := api.AuthoringClassificationTag{Reason: value.Reason}
+	if value.Existing != nil {
+		reference := toAPIRoadmapReference(*value.Existing)
+		result.Existing = &reference
+	}
+	if value.New != nil {
+		result.New = &api.AuthoringClassificationNewTag{Title: value.New.Title, Description: value.New.Description}
+	}
+	return result
 }
 
 func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *api.AuthoringVerificationReport {
@@ -385,7 +463,8 @@ func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
-	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState):
+	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState),
+		errors.Is(err, generation.ErrClassificationConflict), errors.Is(err, generation.ErrChallengeSourceRefConflict):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})

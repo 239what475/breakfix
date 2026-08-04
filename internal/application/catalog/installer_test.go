@@ -330,7 +330,7 @@ func (b fakeBuilder) ExecuteWork(_ context.Context, work execution.Work, _ []byt
 		return execution.BuildOutput{}, nil, err
 	}
 	return execution.BuildOutput{Runtime: work.Snapshot.Runtime, Incus: &execution.IncusBuildReference{
-		Project: "catalog-build", WorkflowID: work.OwnerID, Attempt: work.Attempt,
+		Project: "catalog-build", WorkflowID: work.OwnerID, CandidateRevisionID: work.CandidateID, Attempt: work.Attempt,
 		InstanceName: "build-" + work.CandidateID, Alias: "build-" + work.CandidateID,
 		Fingerprint: strings.Repeat("b", 64),
 	}}, nil, nil

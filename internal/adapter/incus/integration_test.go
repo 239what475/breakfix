@@ -74,9 +74,8 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	revision := "sha256:integration-" + runID
 	t.Log("build stopped Node image")
 	build, err := builderClient.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
-		WorkflowID: runID,
-		Attempt:    1,
-		Revision:   revision,
+		WorkflowID: runID, CandidateRevisionID: runID,
+		Attempt: 1, Revision: revision,
 		Files: []incus.ImageFile{
 			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/bash\nset -euo pipefail\nprintf ready >/var/lib/breakfix-node-ready\n"), Mode: 0o644},
@@ -159,7 +158,7 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	}
 }
 
-func TestNodeBuildSlotReplacesSupersededCandidateAgainstIncus(t *testing.T) {
+func TestNodeBuildSlotsAreCandidateScopedAgainstIncus(t *testing.T) {
 	endpoint := os.Getenv("BREAKFIX_INCUS_TEST_ENDPOINT")
 	if endpoint == "" {
 		t.Skip("BREAKFIX_INCUS_TEST_ENDPOINT is not set")
@@ -174,9 +173,8 @@ func TestNodeBuildSlotReplacesSupersededCandidateAgainstIncus(t *testing.T) {
 
 	workflowID := fmt.Sprintf("build-slot-%d", time.Now().UnixNano())
 	first, err := client.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
-		WorkflowID: workflowID,
-		Attempt:    1,
-		Revision:   "sha256:first-" + workflowID,
+		WorkflowID: workflowID, CandidateRevisionID: workflowID + "-first",
+		Attempt: 1, Revision: "sha256:first-" + workflowID,
 		Files: []incus.ImageFile{
 			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf first >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
@@ -185,22 +183,22 @@ func TestNodeBuildSlotReplacesSupersededCandidateAgainstIncus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build first candidate: %v", err)
 	}
+	defer cleanupBuildImage(t, client, first)
 
 	second, err := client.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
-		WorkflowID: workflowID,
-		Attempt:    1,
-		Revision:   "sha256:second-" + workflowID,
+		WorkflowID: workflowID, CandidateRevisionID: workflowID + "-second",
+		Attempt: 1, Revision: "sha256:second-" + workflowID,
 		Files: []incus.ImageFile{
 			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf second >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
 		},
 	})
 	if err != nil {
-		t.Fatalf("replace superseded candidate build: %v", err)
+		t.Fatalf("build second candidate: %v", err)
 	}
 	defer cleanupBuildImage(t, client, second)
 	if first.Fingerprint == second.Fingerprint {
-		t.Fatal("replaced candidate build retained the first image fingerprint")
+		t.Fatal("candidate-scoped builds retained the same image fingerprint")
 	}
 }
 
@@ -236,7 +234,7 @@ func TestNodeReverseProxyAgainstIncus(t *testing.T) {
 	revision := "sha256:" + runID
 	t.Log("build stopped three-node reverse-proxy image")
 	build, err := builderClient.BuildNodeImage(ctx, incus.BuildNodeImageRequest{
-		WorkflowID: runID, Attempt: 1, Revision: revision, Files: files,
+		WorkflowID: runID, CandidateRevisionID: runID, Attempt: 1, Revision: revision, Files: files,
 	})
 	if err != nil {
 		t.Fatalf("build Node image: %v", err)

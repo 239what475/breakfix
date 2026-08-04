@@ -39,11 +39,11 @@ func NameForNode(prefix, environmentUID, logicalName string) (string, error) {
 	return prefix + "-node-" + opaqueSuffix(environmentUID, 16) + "-" + opaqueSuffix(logicalName, 10), nil
 }
 
-func NamesForBuildAttempt(prefix, workflowID string, attempt int64) (BuildNames, error) {
-	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(workflowID) == "" || attempt < 1 {
-		return BuildNames{}, fmt.Errorf("%w: name prefix, workflow ID, and positive attempt are required", ErrInvalid)
+func NamesForBuildAttempt(prefix, workflowID, candidateRevisionID string, attempt int64) (BuildNames, error) {
+	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" || attempt < 1 {
+		return BuildNames{}, fmt.Errorf("%w: name prefix, workflow ID, candidate revision ID, and positive attempt are required", ErrInvalid)
 	}
-	suffix := opaqueSuffix(fmt.Sprintf("%s\x00%d", workflowID, attempt), 24)
+	suffix := opaqueSuffix(fmt.Sprintf("%s\x00%s\x00%d", workflowID, candidateRevisionID, attempt), 24)
 	return BuildNames{
 		Instance: prefix + "-build-" + suffix,
 		Alias:    prefix + "-build-image-" + suffix,

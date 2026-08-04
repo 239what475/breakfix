@@ -11,8 +11,10 @@ import (
 const (
 	GeneratorPurpose       = "generator"
 	JudgePurpose           = "judge"
+	ClassifierPurpose      = "classifier"
 	GeneratorPromptVersion = "generator-deep-v5"
 	JudgePromptVersion     = "generator-judge-v6"
+	ClassifierPromptVersion = "classification-v1"
 )
 
 type WorkspaceContext struct {

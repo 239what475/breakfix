@@ -141,6 +141,36 @@ func (c *GenerationWorkflowClient) BuildArchive(ctx context.Context, claim domai
 	return response.Archive, response.SHA256, nil
 }
 
+func (c *GenerationWorkflowClient) ClaimResourceReap(ctx context.Context, workerID string, kind domain.ResourceReapKind, leaseTTL time.Duration) (*domain.ResourceReapClaim, error) {
+	if strings.TrimSpace(workerID) == "" || !kind.Valid() || kind.Owner() != "generate-worker" || leaseTTL <= 0 {
+		return nil, errors.New("generation resource reap claim is invalid")
+	}
+	var response struct {
+		Claim *domain.ResourceReapClaim `json:"claim,omitempty"`
+	}
+	if err := c.post(ctx, "/api/internal/generation-resource-reaps/claim", struct {
+		WorkerID       string                  `json:"worker_id"`
+		Kind           domain.ResourceReapKind `json:"kind"`
+		LeaseTTLMillis int64                   `json:"lease_ttl_millis"`
+	}{WorkerID: workerID, Kind: kind, LeaseTTLMillis: leaseTTL.Milliseconds()}, &response); err != nil {
+		return nil, err
+	}
+	if response.Claim != nil && response.Claim.Valid() != nil {
+		return nil, errors.New("server returned an invalid generation resource reap claim")
+	}
+	return response.Claim, nil
+}
+
+func (c *GenerationWorkflowClient) CompleteResourceReap(ctx context.Context, claim domain.ResourceReapClaim, failure string) error {
+	if claim.Valid() != nil {
+		return errors.New("generation resource reap completion is invalid")
+	}
+	return c.post(ctx, "/api/internal/generation-resource-reaps/complete", struct {
+		Claim   domain.ResourceReapClaim `json:"claim"`
+		Failure string                   `json:"failure,omitempty"`
+	}{Claim: claim, Failure: strings.TrimSpace(failure)}, nil)
+}
+
 func (c *GenerationWorkflowClient) post(ctx context.Context, path string, body, output any) error {
 	if c == nil || c.server == nil {
 		return errors.New("generation worker client is not configured")
