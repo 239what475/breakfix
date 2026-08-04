@@ -178,6 +178,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		NodeTerminal:       incusClient,
 		AssistantExecutor:  llm.NewAssistantExecutor(cfg.Agent),
 		AuthoringExecutor:  llm.NewAuthoringExecutor(cfg.Agent),
+		RoadmapExecutor:    llm.NewRoadmapExecutor(cfg.Agent),
 		RegistryClient:     registryClient,
 		GeneratorSandbox:   generatorSandbox,
 		GeneratorWorkspace: generatorWorkspace,

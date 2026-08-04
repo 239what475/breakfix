@@ -3,6 +3,7 @@
 package roadmap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	domain "github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
@@ -31,6 +33,19 @@ func (q TopicSearch) Validate() error {
 type TagSearch struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
+}
+
+type ChallengeSearch struct {
+	Query   string `json:"query"`
+	TopicID string `json:"topic_id,omitempty"`
+	Limit   int    `json:"limit"`
+}
+
+func (q ChallengeSearch) Validate() error {
+	if strings.TrimSpace(q.Query) == "" || q.Limit < 1 || q.Limit > maxSearchResults {
+		return fmt.Errorf("challenge search requires a query and limit from 1 to %d", maxSearchResults)
+	}
+	return nil
 }
 
 func (q TagSearch) Validate() error {
@@ -61,11 +76,61 @@ type TagMatch struct {
 	MatchReason string `json:"match_reason"`
 }
 
+// ChallengeMatch is intentionally compact. A Roadmap Planner must explicitly
+// read a selected challenge before it uses its full teaching material as
+// evidence for a relationship proposal.
+type ChallengeMatch struct {
+	ID          string     `json:"id"`
+	SourceRef   string     `json:"source_ref"`
+	Title       string     `json:"title"`
+	Summary     string     `json:"summary"`
+	Topic       domain.Ref `json:"topic"`
+	MatchReason string     `json:"match_reason"`
+}
+
+type ChallengeCheckpoint struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Node        string `json:"node,omitempty"`
+}
+
+type ChallengeDetail struct {
+	Challenge   domain.ChallengeRef   `json:"challenge"`
+	Topic       domain.Ref            `json:"topic"`
+	Tags        []domain.Ref          `json:"tags"`
+	Runtime     string                `json:"runtime"`
+	Difficulty  string                `json:"difficulty"`
+	Description string                `json:"description"`
+	Problem     string                `json:"problem"`
+	Solution    string                `json:"solution"`
+	Checkpoints []ChallengeCheckpoint `json:"checkpoints"`
+}
+
+// ChallengeContentReader is the one non-Roadmap dependency available to a
+// Planner's read_challenge tool. It may only return a challenge that still
+// matches the fixed immutable binding supplied by Retrieval.
+type ChallengeContentReader interface {
+	ReadRoadmapChallenge(context.Context, domain.ChallengeBinding) (ChallengeContent, error)
+}
+
+type ChallengeContent struct {
+	Runtime     string
+	Difficulty  string
+	Description string
+	Problem     string
+	Solution    string
+	Checkpoints []ChallengeCheckpoint
+}
+
 // Retrieval binds every query to one immutable RoadmapRevision. It is safe to
 // construct per leased run because the revision is small in the initial
 // catalog; persistence and revision selection remain Server responsibilities.
 type Retrieval struct {
-	revision domain.Revision
+	revision            domain.Revision
+	excludedTopicID     string
+	excludedChallengeID string
+	challengeReader     ChallengeContentReader
 }
 
 func NewRetrieval(revision domain.Revision) (*Retrieval, error) {
@@ -76,6 +141,40 @@ func NewRetrieval(revision domain.Revision) (*Retrieval, error) {
 		return nil, fmt.Errorf("validate roadmap retrieval revision: %w", err)
 	}
 	return &Retrieval{revision: revision.Clone()}, nil
+}
+
+// NewPlannerRetrieval creates the narrower read model used by one Roadmap
+// task. The subject is deliberately excluded from same-kind search and read
+// operations so the model cannot manufacture a self-edge through retrieval.
+func NewPlannerRetrieval(revision domain.Revision, kind domain.TaskKind, subject domain.Subject, reader ChallengeContentReader) (*Retrieval, error) {
+	if !kind.Valid() || !subject.Valid(kind) || reader == nil {
+		return nil, errors.New("roadmap planner retrieval requires a valid subject and challenge reader")
+	}
+	value, err := NewRetrieval(revision)
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case domain.TaskTopic:
+		if _, err := value.ReadTopic(subject.Ref.ID); err != nil {
+			return nil, fmt.Errorf("roadmap planner subject: %w", err)
+		}
+		value.excludedTopicID = subject.Ref.ID
+	case domain.TaskChallenge:
+		found := false
+		for _, binding := range value.revision.ChallengeBindings {
+			if binding.Challenge.ID == subject.Ref.ID && binding.Challenge.SourceRef == subject.Ref.SourceRef && binding.Challenge.Title == subject.Ref.Title && binding.Challenge.ContentRevision == subject.ContentRevision {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, errors.New("roadmap planner challenge subject is absent from its revision")
+		}
+		value.excludedChallengeID = subject.Ref.ID
+	}
+	value.challengeReader = reader
+	return value, nil
 }
 
 func (r *Retrieval) Revision() string {
@@ -94,6 +193,9 @@ func (r *Retrieval) SearchTopics(query TopicSearch) ([]TopicMatch, error) {
 	}
 	documents := make([]topicDocument, 0, len(r.revision.Topics))
 	for _, topic := range r.revision.Topics {
+		if topic.ID == r.excludedTopicID {
+			continue
+		}
 		if query.DomainID != "" && topic.Domain.ID != query.DomainID {
 			continue
 		}
@@ -133,12 +235,122 @@ func (r *Retrieval) ReadTopic(id string) (*domain.Topic, error) {
 		return nil, errors.New("roadmap topic read requires an id")
 	}
 	for _, topic := range r.revision.Topics {
+		if topic.ID == r.excludedTopicID {
+			continue
+		}
 		if topic.ID == id {
 			value := topic
 			return &value, nil
 		}
 	}
 	return nil, fmt.Errorf("roadmap topic %q was not found in revision %s", id, r.revision.Revision)
+}
+
+func (r *Retrieval) SearchChallenges(query ChallengeSearch) ([]ChallengeMatch, error) {
+	if r == nil {
+		return nil, errors.New("roadmap retrieval is not configured")
+	}
+	if err := query.Validate(); err != nil {
+		return nil, err
+	}
+	topics := make(map[string]domain.Ref, len(r.revision.Topics))
+	for _, topic := range r.revision.Topics {
+		topics[topic.ID] = domain.Ref{ID: topic.ID, SourceRef: topic.SourceRef, Title: topic.Title}
+	}
+	if query.TopicID != "" {
+		if _, exists := topics[query.TopicID]; !exists {
+			return nil, fmt.Errorf("roadmap topic %q was not found in revision %s", query.TopicID, r.revision.Revision)
+		}
+	}
+	documents := make([]challengeDocument, 0, len(r.revision.ChallengeBindings))
+	for _, binding := range r.revision.ChallengeBindings {
+		if binding.Challenge.ID == r.excludedChallengeID || query.TopicID != "" && binding.Topic.ID != query.TopicID {
+			continue
+		}
+		documents = append(documents, challengeDocument{binding: binding})
+	}
+	scores := scoreDocuments(strings.TrimSpace(query.Query), challengeSearchDocuments(documents))
+	result := make([]ChallengeMatch, 0, min(query.Limit, len(documents)))
+	for _, document := range documents {
+		score, found := scores[document.binding.Challenge.ID]
+		if !found || score.value <= 0 {
+			continue
+		}
+		result = append(result, ChallengeMatch{
+			ID: document.binding.Challenge.ID, SourceRef: document.binding.Challenge.SourceRef, Title: document.binding.Challenge.Title,
+			Summary: "所属 Topic：" + document.binding.Topic.Title, Topic: document.binding.Topic, MatchReason: score.reason,
+		})
+	}
+	slices.SortFunc(result, func(left, right ChallengeMatch) int {
+		leftScore := scores[left.ID].value
+		rightScore := scores[right.ID].value
+		if leftScore > rightScore {
+			return -1
+		}
+		if leftScore < rightScore {
+			return 1
+		}
+		return strings.Compare(left.SourceRef, right.SourceRef)
+	})
+	if len(result) > query.Limit {
+		result = result[:query.Limit]
+	}
+	return result, nil
+}
+
+func (r *Retrieval) ReadChallenge(ctx context.Context, id string) (*ChallengeDetail, error) {
+	if r == nil || r.challengeReader == nil || strings.TrimSpace(id) == "" {
+		return nil, errors.New("roadmap challenge read requires a configured reader and id")
+	}
+	if id == r.excludedChallengeID {
+		return nil, fmt.Errorf("roadmap challenge %q was not found in revision %s", id, r.revision.Revision)
+	}
+	for _, binding := range r.revision.ChallengeBindings {
+		if binding.Challenge.ID != id {
+			continue
+		}
+		content, err := r.challengeReader.ReadRoadmapChallenge(ctx, binding)
+		if err != nil {
+			return nil, err
+		}
+		return &ChallengeDetail{
+			Challenge: binding.Challenge, Topic: binding.Topic, Tags: append([]domain.Ref(nil), binding.Tags...),
+			Runtime: content.Runtime, Difficulty: content.Difficulty, Description: content.Description,
+			Problem: content.Problem, Solution: content.Solution, Checkpoints: append([]ChallengeCheckpoint(nil), content.Checkpoints...),
+		}, nil
+	}
+	return nil, fmt.Errorf("roadmap challenge %q was not found in revision %s", id, r.revision.Revision)
+}
+
+// FilesystemChallengeReader reads only the content of the materialized
+// challenge named by an immutable Roadmap binding. The binding check prevents
+// a late file replacement from silently changing a Planner's evidence.
+type FilesystemChallengeReader struct {
+	Root string
+}
+
+func (r FilesystemChallengeReader) ReadRoadmapChallenge(_ context.Context, binding domain.ChallengeBinding) (ChallengeContent, error) {
+	entry, err := challenge.Get(r.Root, binding.Challenge.ID)
+	if err != nil {
+		return ChallengeContent{}, fmt.Errorf("read roadmap challenge %q: %w", binding.Challenge.ID, err)
+	}
+	if entry.Title != binding.Challenge.Title || entry.ContentRevision != binding.Challenge.ContentRevision {
+		return ChallengeContent{}, fmt.Errorf("roadmap challenge %q no longer matches its fixed revision", binding.Challenge.ID)
+	}
+	content, err := challenge.ReadContent(entry)
+	if err != nil {
+		return ChallengeContent{}, fmt.Errorf("read roadmap challenge content %q: %w", binding.Challenge.ID, err)
+	}
+	checkpoints := make([]ChallengeCheckpoint, 0, len(entry.Checkpoints))
+	for _, checkpoint := range entry.Checkpoints {
+		checkpoints = append(checkpoints, ChallengeCheckpoint{
+			ID: checkpoint.ID, Title: checkpoint.Title, Description: checkpoint.Description, Node: checkpoint.Node,
+		})
+	}
+	return ChallengeContent{
+		Runtime: entry.Runtime, Difficulty: entry.Difficulty, Description: entry.Description,
+		Problem: content.Problem, Solution: content.Solution, Checkpoints: checkpoints,
+	}, nil
 }
 
 func (r *Retrieval) SearchTags(query TagSearch) ([]TagMatch, error) {
@@ -196,6 +408,7 @@ func (r *Retrieval) ReadTag(id string) (*domain.Tag, error) {
 
 type topicDocument struct{ topic domain.Topic }
 type tagDocument struct{ tag domain.Tag }
+type challengeDocument struct{ binding domain.ChallengeBinding }
 
 type searchDocument struct {
 	id        string
@@ -236,6 +449,21 @@ func tagSearchDocuments(values []tagDocument) []searchDocument {
 			fields: []weightedField{
 				{name: "title", value: tag.Title, weight: 5},
 				{name: "description", value: tag.Description, weight: 3},
+			},
+		})
+	}
+	return result
+}
+
+func challengeSearchDocuments(values []challengeDocument) []searchDocument {
+	result := make([]searchDocument, 0, len(values))
+	for _, value := range values {
+		binding := value.binding
+		result = append(result, searchDocument{
+			id: binding.Challenge.ID, sourceRef: binding.Challenge.SourceRef, title: binding.Challenge.Title,
+			fields: []weightedField{
+				{name: "title", value: binding.Challenge.Title, weight: 5},
+				{name: "topic", value: binding.Topic.Title, weight: 2},
 			},
 		})
 	}

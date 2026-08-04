@@ -51,6 +51,9 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	if session.CurrentRevision != confirmation.PlanRevision || session.State != authoring.StateIntentReview {
 		return nil, authoring.ErrInvalidState
 	}
+	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	plan, err := readAuthoringRevisionTx(ctx, tx, sessionID, confirmation.PlanRevision)
 	if err != nil {
 		return nil, err
@@ -663,6 +666,9 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	if candidateRevision.Verification == nil || !candidateRevision.Verification.Passed || candidateRevision.Artifact == nil {
 		return nil, authoring.ErrInvalidState
 	}
+	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	roadmapRevision, err := currentRoadmapForUpdateTx(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -871,10 +877,13 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 		candidateRevision.Classification.RoadmapRevision != workflow.ClassificationRoadmapRevision {
 		return nil, authoring.ErrInvalidState
 	}
+	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	deadline := resumeGenerationDeadline(*workflow, now)
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0,
 		lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, classification_feedback = ?, last_error = '', updated_at = ?
-		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), now.UTC(), strings.TrimSpace(confirmation.Feedback), now.UTC(), workflow.ID))
+		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), strings.TrimSpace(confirmation.Feedback), now.UTC(), workflow.ID))
 	if err != nil {
 		return nil, fmt.Errorf("resume generation classification: %w", err)
 	}
@@ -943,6 +952,9 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 			if workflow.DeadlinePausedAt == nil || workflow.DeadlineAt == nil {
 				return nil, authoring.ErrInvalidState
 			}
+			if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
+				return nil, err
+			}
 			deadline := resumeGenerationDeadline(*workflow, now)
 			workflow, err = scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0,
 				lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, last_error = '', updated_at = ?
@@ -967,6 +979,9 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	if workflow.State != generation.StateNeedsClassificationReview || workflow.DeadlinePausedAt == nil || workflow.DeadlineAt == nil ||
 		candidateRevision.Verification == nil || !candidateRevision.Verification.Passed || candidateRevision.Artifact == nil {
 		return nil, authoring.ErrInvalidState
+	}
+	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
 	}
 	current, err := currentRoadmapForUpdateTx(ctx, tx)
 	if err != nil {
@@ -1078,9 +1093,8 @@ func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Co
 	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_current SET revision_id = ?, updated_at = ? WHERE singleton = TRUE`, revisionID, now.UTC()); err != nil {
 		return fmt.Errorf("publish generation roadmap revision: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_entries (challenge_id, topic_id, topic_processed, challenge_processed, created_at)
-		VALUES (?, ?, ?, FALSE, ?)`, publication.ChallengeID, roadmap.RuntimeID(roadmap.KindTopic, publication.TopicSourceRef), !topicWasNew, now.UTC()); err != nil {
-		return fmt.Errorf("record published roadmap entry: %w", err)
+	if err := recordRoadmapEntryTx(ctx, tx, publication.ChallengeID, roadmap.RuntimeID(roadmap.KindTopic, publication.TopicSourceRef), !topicWasNew, now.UTC()); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, published_at = ?, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), now.UTC(), candidateRevision.ID); err != nil {
 		return fmt.Errorf("record challenge publication: %w", err)

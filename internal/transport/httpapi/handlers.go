@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
@@ -12,6 +13,7 @@ import (
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
+	approadmap "github.com/breakfix/breakfix/internal/application/roadmap"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 )
 
@@ -43,6 +45,7 @@ type Handler struct {
 	incusConfig        incus.Config
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness
+	roadmapMaintenance *approadmap.MaintenanceService
 }
 
 type Dependencies struct {
@@ -52,6 +55,7 @@ type Dependencies struct {
 	RegistryClient     oci.Client
 	GeneratorSandbox   *opensandbox.Client
 	GeneratorWorkspace *appgeneration.Manager
+	RoadmapExecutor    approadmap.CommitteeExecutor
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
@@ -86,6 +90,17 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	if database != nil {
 		handler.authoring = appauthoring.NewRuntimeService(database.Authoring, database.Agent, cfg.Agent.Model, dependencies.AuthoringExecutor)
 		handler.assistant = appassistant.NewService(database.Agent, cfg.Agent.Model, dependencies.AssistantExecutor)
+		if dependencies.RoadmapExecutor != nil {
+			maintenance, err := approadmap.NewMaintenanceService(approadmap.MaintenanceConfig{
+				Repository: database.Roadmap, Executor: dependencies.RoadmapExecutor,
+				ChallengeReader: approadmap.FilesystemChallengeReader{Root: cfg.ChallengesDir()},
+				Model:           cfg.Agent.Model, ServerID: handler.serverInstance,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create roadmap maintenance service: %w", err)
+			}
+			handler.roadmapMaintenance = maintenance
+		}
 	} else {
 		handler.authoring = appauthoring.NewRuntimeService(nil, nil, cfg.Agent.Model, dependencies.AuthoringExecutor)
 		handler.assistant = appassistant.NewService(nil, cfg.Agent.Model, dependencies.AssistantExecutor)

@@ -35,6 +35,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	h.StartGeneratorWorkspaceCleanup(runCtx)
 	h.StartGenerationDeadlineRecovery(runCtx)
 	h.StartGenerationResourceReaper(runCtx)
+	h.StartRoadmapMaintenance(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := middleware.JWTMiddleware(jwtSecret)
 	optionalJWTMW := middleware.OptionalJWTMiddleware(jwtSecret)
@@ -56,6 +57,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 		c.Status(http.StatusOK)
 	})
 	router.GET("/metrics", h.WorkflowMetrics)
+	router.POST("/internal/debug/roadmap-maintenance", h.RequestRoadmapMaintenance)
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)

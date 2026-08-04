@@ -167,6 +167,13 @@ func TestCatalogRepositoryCommitsReleaseAndRoadmapAtomically(t *testing.T) {
 	if !topicProcessed || !challengeProcessed {
 		t.Fatalf("catalog roadmap baseline = topic:%v challenge:%v", topicProcessed, challengeProcessed)
 	}
+	workflow, err := database.Roadmap.TryStartRoadmapWorkflow(ctx, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("check catalog roadmap baseline does not request maintenance: %v", err)
+	}
+	if workflow != nil {
+		t.Fatalf("catalog baseline unexpectedly started roadmap maintenance: %#v", workflow)
+	}
 }
 
 func catalogRepositoryEntry(releaseID string, binding roadmap.PortableChallengeBinding, now time.Time) catalogdomain.Entry {

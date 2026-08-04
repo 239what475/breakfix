@@ -702,6 +702,9 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, release c
 	if _, err := tx.ExecContext(ctx, `SELECT revision_id FROM roadmap_current WHERE singleton = TRUE FOR UPDATE`); err != nil {
 		return nil, fmt.Errorf("lock roadmap current revision: %w", err)
 	}
+	if err := ensureRoadmapPublicationAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	commits, err := listCatalogCommitsTx(ctx, tx, release.ID)
 	if err != nil {
 		return nil, err

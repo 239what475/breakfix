@@ -35,6 +35,9 @@ func (d *RoadmapRepository) PublishRoadmap(ctx context.Context, value roadmap.Re
 	if _, err := tx.ExecContext(ctx, `SELECT revision_id FROM roadmap_current WHERE singleton = TRUE FOR UPDATE`); err != nil {
 		return nil, fmt.Errorf("lock roadmap current revision: %w", err)
 	}
+	if err := ensureRoadmapPublicationAllowedTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_revisions (id, content_json, created_at)
 		VALUES (?, ?::jsonb, ?)
 		ON CONFLICT (id) DO NOTHING`, revisionID, encoded, now.UTC()); err != nil {

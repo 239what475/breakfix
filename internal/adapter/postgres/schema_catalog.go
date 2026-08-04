@@ -60,11 +60,4 @@ var schemaCatalogStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX catalog_release_entry_commits_release ON catalog_release_entry_commits(release_id, state, entry_id)`,
-	`CREATE TABLE roadmap_entries (
-		challenge_id TEXT PRIMARY KEY,
-		topic_id TEXT NOT NULL,
-		topic_processed BOOLEAN NOT NULL,
-		challenge_processed BOOLEAN NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL
-	)`,
 }

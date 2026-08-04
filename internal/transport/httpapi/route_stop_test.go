@@ -25,6 +25,7 @@ func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
 		"POST /api/challenges/:id/assistant/messages",
 		"POST /api/internal/generation-workflows/claim",
 		"POST /api/internal/generation-workflows/:id/phase",
+		"POST /internal/debug/roadmap-maintenance",
 		"GET /readyz",
 		"GET /capabilities/node-provider",
 	} {
