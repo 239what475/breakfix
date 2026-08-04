@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
@@ -15,11 +16,16 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/adapter/opensandbox"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
+	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
+	"github.com/breakfix/breakfix/internal/worker/generate/build"
+	"github.com/breakfix/breakfix/internal/worker/generate/publish"
+	"github.com/breakfix/breakfix/internal/worker/generate/verify"
 )
 
 // Runtime owns process-scoped Server resources. Application and transport code
@@ -30,6 +36,9 @@ type Runtime struct {
 }
 
 func New(ctx context.Context, configPath string) (*Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("load configuration: %w", err)
@@ -102,8 +111,65 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			return nil, fmt.Errorf("create generator workspace manager: %w", err)
 		}
 	}
+
+	stopCatalogInstaller := func() {}
+	if cfg.Catalog.Enabled() {
+		deadline, err := cfg.Catalog.Deadline()
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("parse catalog install deadline: %w", err)
+		}
+		publisherExecutor, err := publish.NewExecutor(registryClient, incusClient, cfg.Registry.Repository)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create catalog publisher: %w", err)
+		}
+		verifierExecutor, err := verify.NewExecutor(k8sClient, incusClient, cfg.CRDNamespace)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create catalog verifier: %w", err)
+		}
+		installer, err := appcatalog.NewInstaller(appcatalog.InstallerConfig{
+			DataDir:          cfg.DataDir,
+			ChallengesDir:    cfg.ChallengesDir(),
+			ReleaseReference: cfg.Catalog.ReleaseReference,
+			InstallDeadline:  deadline,
+			LeaseTTL:         2 * time.Minute,
+			PollInterval:     2 * time.Second,
+			WorkerID:         catalogInstallerID(),
+			Snapshot:         runtimesnapshot.From(cfg.Runtime, cfg.Incus),
+			Puller:           registryClient,
+			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
+			Store:            database.Catalog,
+			Roadmap:          database.Roadmap,
+			Builder:          build.NewExecutor(incusClient, cfg.Incus),
+			Publisher:        publisherExecutor,
+			Verifier:         verifierExecutor,
+		})
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create catalog installer: %w", err)
+		}
+		installerCtx, cancelInstaller := context.WithCancel(ctx)
+		installerDone := make(chan struct{})
+		go func() {
+			defer close(installerDone)
+			if err := installer.Run(installerCtx); err != nil && installerCtx.Err() == nil {
+				slog.Error("catalog installer stopped", "err", err)
+			}
+		}()
+		stopCatalogInstaller = func() {
+			cancelInstaller()
+			<-installerDone
+		}
+	}
 	frontendFS, err := ui.Filesystem()
 	if err != nil {
+		stopCatalogInstaller()
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("load embedded web assets: %w", err)
@@ -117,6 +183,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		GeneratorWorkspace: generatorWorkspace,
 	})
 	if err != nil {
+		stopCatalogInstaller()
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("setup HTTP API: %w", err)
@@ -130,10 +197,21 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 		closeFn: func() {
+			stopCatalogInstaller()
 			incusClient.Close()
 			cleanupDatabase()
 		},
 	}, nil
+}
+
+func catalogInstallerID() string {
+	if value := strings.TrimSpace(os.Getenv("POD_NAME")); value != "" {
+		return "catalog-" + value
+	}
+	if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
+		return "catalog-" + strings.TrimSpace(host)
+	}
+	return "catalog-server"
 }
 
 func (r *Runtime) Run(ctx context.Context) error {

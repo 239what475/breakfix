@@ -14,6 +14,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -56,107 +57,146 @@ func (e *Executor) DiscardCandidate(ctx context.Context, execution generation.Ex
 	return e.discardCandidate(ctx, execution.Claim.Workflow.ID, *execution.Context.Candidate)
 }
 
-func (e *Executor) PublishArtifact(ctx context.Context, execution generation.Execution, buildArchive []byte) (generation.ArtifactReference, error) {
-	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateArtifactPublishing || execution.Context.Candidate == nil {
+func (e *Executor) PublishArtifact(ctx context.Context, value generation.Execution, buildArchive []byte) (generation.ArtifactReference, error) {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateArtifactPublishing || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
 		return generation.ArtifactReference{}, errors.New("artifact publication requires an ArtifactPublishing workflow with a candidate")
 	}
-	view := execution.Context.Candidate
-	if view.Build == nil {
+	work, err := workFromGeneration(value)
+	if err != nil {
+		return generation.ArtifactReference{}, err
+	}
+	return e.PublishArtifactWork(ctx, work, buildArchive)
+}
+
+// PublishArtifactWork publishes an immutable staging artifact for a neutral
+// execution owner. It deliberately does not perform any workflow transition.
+func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution.Work, buildArchive []byte) (domainexecution.ArtifactReference, error) {
+	if err := work.Validate(); err != nil {
+		return domainexecution.ArtifactReference{}, fmt.Errorf("artifact publication execution work: %w", err)
+	}
+	if work.Build == nil {
 		return generation.ArtifactReference{}, errors.New("candidate has no build output")
 	}
-	switch view.Snapshot.Runtime {
+	switch work.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		if candidate.Digest(buildArchive) != view.Build.OCIArchiveSHA256 {
-			return generation.ArtifactReference{}, errors.New("candidate OCI archive does not match the recorded build output")
+		if candidate.Digest(buildArchive) != work.Build.OCIArchiveSHA256 {
+			return domainexecution.ArtifactReference{}, errors.New("candidate OCI archive does not match the recorded build output")
 		}
 		root, err := os.MkdirTemp("", "breakfix-publisher-")
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
 		defer func() { _ = os.RemoveAll(root) }()
 		archivePath := filepath.Join(root, "candidate.oci.tar")
 		if err := os.WriteFile(archivePath, buildArchive, 0o400); err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
 		if err := oci.ValidateOCIArchive(archivePath); err != nil {
-			return generation.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
+			return domainexecution.ArtifactReference{}, fmt.Errorf("validate Server build archive: %w", err)
 		}
-		target, err := e.candidateImage(view.ID)
+		target, err := e.candidateImage(work.CandidateID)
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
 		if err := e.registry.PushOCIArchive(ctx, target, archivePath); err != nil {
-			return generation.ArtifactReference{}, fmt.Errorf("publish candidate OCI image: %w", err)
+			return domainexecution.ArtifactReference{}, fmt.Errorf("publish candidate OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
-		return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return generation.ArtifactReference{}, errors.New("node image publisher is unavailable")
+			return domainexecution.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
-		build, err := nodeBuildResult(view.Build)
+		build, err := nodeBuildResult(work.Build)
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
 		published, err := e.node.PublishNodeImage(ctx, incus.PublishNodeImageRequest{
-			CandidateRevisionID: view.ID,
-			Revision:            view.ArchiveSHA256,
+			CandidateRevisionID: work.CandidateID,
+			Revision:            work.ArchiveSHA256,
 			Build:               build,
 		})
 		if err != nil {
-			return generation.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
+			return domainexecution.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
 		}
-		return generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return generation.ArtifactReference{}, errors.New("candidate runtime is unsupported")
+		return domainexecution.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) PublishChallenge(ctx context.Context, execution generation.Execution) (generation.ArtifactReference, error) {
-	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateChallengePublishing || execution.Context.Candidate == nil {
+func (e *Executor) PublishChallenge(ctx context.Context, value generation.Execution) (generation.ArtifactReference, error) {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateChallengePublishing || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
 		return generation.ArtifactReference{}, errors.New("challenge publication requires a ChallengePublishing workflow with a candidate")
 	}
-	view := execution.Context.Candidate
-	if view.Publication == nil || view.Artifact == nil {
+	if value.Context.Candidate.Publication == nil {
 		return generation.ArtifactReference{}, errors.New("candidate challenge publication has no intent or verified artifact")
 	}
-	switch view.Snapshot.Runtime {
+	work, err := workFromGeneration(value)
+	if err != nil {
+		return generation.ArtifactReference{}, err
+	}
+	return e.PublishChallengeWork(ctx, work, value.Context.Candidate.Publication.ChallengeID)
+}
+
+// PublishChallengeWork promotes a verified staging artifact to a final,
+// challenge-scoped artifact. The caller owns materialization and visibility.
+func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecution.Work, challengeID string) (domainexecution.ArtifactReference, error) {
+	if err := work.Validate(); err != nil {
+		return domainexecution.ArtifactReference{}, fmt.Errorf("challenge publication execution work: %w", err)
+	}
+	if work.Artifact == nil || !challenge.ValidID(challengeID) {
+		return domainexecution.ArtifactReference{}, errors.New("challenge publication requires a verified artifact and challenge identity")
+	}
+	switch work.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		target, err := e.challengeImage(view.Publication.ChallengeID)
+		target, err := e.challengeImage(challengeID)
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
-		if err := e.registry.CopyImage(ctx, view.Artifact.OCIReference, target); err != nil {
-			return generation.ArtifactReference{}, fmt.Errorf("publish final challenge OCI image: %w", err)
+		if err := e.registry.CopyImage(ctx, work.Artifact.OCIReference, target); err != nil {
+			return domainexecution.ArtifactReference{}, fmt.Errorf("publish final challenge OCI image: %w", err)
 		}
 		immutable, err := e.resolveImmutable(ctx, target)
 		if err != nil {
-			return generation.ArtifactReference{}, err
+			return domainexecution.ArtifactReference{}, err
 		}
-		return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 
 	case challenge.RuntimeNode:
 		if e.node == nil {
-			return generation.ArtifactReference{}, errors.New("node image publisher is unavailable")
+			return domainexecution.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
 		published, err := e.node.PublishChallengeNodeImage(ctx, incus.PublishChallengeNodeImageRequest{
-			CandidateRevisionID: view.ID,
-			ChallengeID:         view.Publication.ChallengeID,
+			CandidateRevisionID: work.CandidateID,
+			ChallengeID:         challengeID,
 			Staging: incus.PublishNodeImageResult{
-				Alias: view.Artifact.IncusAlias, Fingerprint: view.Artifact.IncusFingerprint,
+				Alias: work.Artifact.IncusAlias, Fingerprint: work.Artifact.IncusFingerprint,
 			},
 		})
 		if err != nil {
-			return generation.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
+			return domainexecution.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
 		}
-		return generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
-		return generation.ArtifactReference{}, errors.New("candidate runtime is unsupported")
+		return domainexecution.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
+}
+
+func workFromGeneration(value generation.Execution) (domainexecution.Work, error) {
+	if value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+		return domainexecution.Work{}, errors.New("generation execution has no candidate or deadline")
+	}
+	view := value.Context.Candidate
+	return domainexecution.Work{
+		OwnerID: value.Claim.Workflow.ID, CandidateID: view.ID, ArchiveSHA256: view.ArchiveSHA256,
+		Snapshot: view.Snapshot, Attempt: int64(value.Claim.StateAttempt + 1), DeadlineAt: value.Claim.Workflow.DeadlineAt.UTC(),
+		Build: view.Build, Artifact: view.Artifact,
+	}, nil
 }
 
 // Cleanup removes only deterministic resources for this workflow. It is safe

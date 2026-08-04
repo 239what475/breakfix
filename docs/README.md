@@ -17,11 +17,10 @@
 
 - [系统架构](architecture/system-architecture.md)：组件、数据所有权和部署边界。
 - [代码布局](architecture/code-layout.md)：目录职责和依赖方向。
-- [工作流](architecture/workflows.md)：GenerationWorkflow、TaxonomyWorkflow、lease 与阶段语义。
-- [Catalog Release](architecture/catalog-release.md)：portable source、安装、失败清理和原子提交。
+- [工作流](architecture/workflows.md)：GenerationWorkflow、CatalogRelease、lease 与阶段语义。
+- [Catalog Release](architecture/catalog-release.md)：portable source、启动安装和原子提交。
 - [运行环境](architecture/runtime-environments.md)：`NodeEnvironment`、`VK8sEnvironment`、生命周期和检查点。
 - [Agent Runtime](architecture/agent-runtime.md)：Eino、AgentRun、直接对话与后台 Worker 边界。
-- [Taxonomy](architecture/taxonomy.md)：Skill、Tag、mapping 委员会和 Catalog 准入。
 - [API 契约](architecture/api-contracts.md)：公开 HTTP、内部 Worker API 和终端流传输。
 
 ## 产品与参考

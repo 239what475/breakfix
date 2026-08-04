@@ -15,6 +15,7 @@ import (
 
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
+	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -308,8 +309,13 @@ func (w *Worker) reportError(ctx context.Context, lease *workflowLease, claim ge
 	}
 	request := app.PhaseRequest{}
 	var artifact *generation.ArtifactError
+	var sharedArtifact *domainexecution.ArtifactError
 	if errors.As(executionErr, &artifact) {
 		request.ArtifactFailure = &generation.ArtifactFailureResult{Failure: artifact.Failure, Report: artifact.Report}
+	} else if errors.As(executionErr, &sharedArtifact) {
+		request.ArtifactFailure = &generation.ArtifactFailureResult{Failure: generation.Failure{
+			Class: generation.FailureArtifact, Code: sharedArtifact.Code, Summary: sharedArtifact.Summary,
+		}, Report: sharedArtifact.Report}
 	} else {
 		summary := strings.TrimSpace(executionErr.Error())
 		if summary == "" {

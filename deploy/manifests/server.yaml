@@ -78,6 +78,12 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: registry_trust_bundle_file
+            - name: BREAKFIX_CATALOG_RELEASE_REFERENCE
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: catalog_release_reference
+                  optional: true
             - name: OPEN_SANDBOX_API_KEY
               valueFrom:
                 secretKeyRef:

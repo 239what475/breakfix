@@ -11,7 +11,7 @@ make verify-generated
 ## 公开 HTTP
 
 - 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
-- Catalog 与题目：浏览已映射的 challenge、读取 problem/solution/hint、开始或停止学习环境。
+- Catalog 与题目：浏览当前 RoadmapRevision 中可见的 challenge、读取 problem/solution/hint、开始或停止学习环境。
 - Authoring：创建和读取会话、发送自然语言消息、确认生成、读取只读候选、确认发布。
 - Assistant：在活动学习环境中发送消息并读取持久对话与工具证据。
 - 终端：先经 JWT 保护的 HTTP 接口签发一次性 ticket，再由 WebSocket 消费。
@@ -21,7 +21,7 @@ make verify-generated
 
 ## 内部 Worker HTTP
 
-内部 API 不属于 OpenAPI 公开契约。它们只供两个固定 Worker 调用，并使用独立 role key：
+内部 API 不属于 OpenAPI 公开契约。当前它们只供 Generate Worker 调用，并使用独立 role key：
 
 ```text
 POST /api/internal/generation-workflows/claim
@@ -30,11 +30,6 @@ POST /api/internal/generation-workflows/:id/context
 POST /api/internal/generation-workflows/:id/agent-runs
 POST /api/internal/generation-workflows/:id/phase
 
-POST /api/internal/taxonomy-workflows/claim
-POST /api/internal/taxonomy-workflows/:id/renew
-POST /api/internal/taxonomy-workflows/:id/context
-POST /api/internal/taxonomy-workflows/:id/agent-runs
-POST /api/internal/taxonomy-workflows/:id/phase
 ```
 
 Generate Worker 的 artifact/workspace 子接口同样要求 generation lease。所有请求使用严格 JSON 解码，

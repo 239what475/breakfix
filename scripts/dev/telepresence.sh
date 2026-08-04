@@ -119,7 +119,7 @@ build_component() {
 secret_value() {
   local key="$1"
   kubectl -n "$TP_NAMESPACE" get secret "$TP_RUNTIME_SECRET" \
-    -o "go-template={{index .data \"$key\"}}" | base64 --decode
+    -o "go-template={{with index .data \"$key\"}}{{.}}{{end}}" | base64 --decode
 }
 
 worker_identity_secret() {
@@ -295,7 +295,7 @@ registry_trust_bundle_for_mount() {
 }
 
 run_server() {
-  local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file
+  local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file catalog_release_reference
   ensure_server_fuse
   mount_root="$STATE_DIR/mount-server"
   kubeconfig="$(create_service_account_kubeconfig server)"
@@ -305,6 +305,7 @@ run_server() {
   test -n "$base_url" && test -n "$sandbox_namespace" || \
     fail "Server Deployment is missing OpenSandbox environment values"
   registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
+  catalog_release_reference="$(secret_value catalog_release_reference)"
 
   printf 'Replacing Server locally at http://127.0.0.1:%s.\n' "$TP_SERVER_PORT"
   env \
@@ -315,6 +316,7 @@ run_server() {
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
     BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
     BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file" \
+    BREAKFIX_CATALOG_RELEASE_REFERENCE="$catalog_release_reference" \
     BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)" \
     BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)" \
     BREAKFIX_K8S_BASE_IMAGE_DIGEST="$(secret_value k8s_base_image_digest)" \

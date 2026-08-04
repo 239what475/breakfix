@@ -59,7 +59,7 @@ export default async function globalSetup() {
 	}
 
 	try {
-		await ensureCatalogRelease(serverURL);
+		await waitForConfiguredCatalog(serverURL);
 	} catch (error) {
 		if (cleanup) await cleanup();
 		throw error;
@@ -67,50 +67,20 @@ export default async function globalSetup() {
 	return cleanup;
 }
 
-async function ensureCatalogRelease(serverURL: string) {
-	const existing = await readCatalog(serverURL);
-	if (existing.length > 0) {
-		if (existing.some((challenge) => challenge.title === nodeRuntimeFixture.title)) return;
-		throw new Error("target Catalog is not the dedicated Breakfix E2E fixture; use an empty test platform");
-	}
-
-	const bundle = process.env.BREAKFIX_E2E_CATALOG_REFERENCE?.trim();
-	const token = process.env.BREAKFIX_CATALOG_ADMIN_TOKEN?.trim();
-	if (!bundle || !token) {
-		throw new Error(
-			"catalog is empty; set BREAKFIX_E2E_CATALOG_REFERENCE to an immutable fixture release and BREAKFIX_CATALOG_ADMIN_TOKEN before running E2E",
-		);
-	}
-	const install = await fetch(`${serverURL}/api/admin/catalog/releases`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			"X-Breakfix-Catalog-Token": token,
-		},
-		body: JSON.stringify({ bundle }),
-	});
-	if (!install.ok) throw new Error(`install E2E catalog release: ${await install.text()}`);
-	const release = (await install.json()) as { id?: string };
-	if (!release.id) throw new Error("catalog release installation returned no release id");
-
+async function waitForConfiguredCatalog(serverURL: string) {
 	const deadline = Date.now() + catalogInstallTimeout;
 	while (Date.now() < deadline) {
-		const response = await fetch(`${serverURL}/api/admin/catalog/releases/${encodeURIComponent(release.id)}`, {
-			headers: { "X-Breakfix-Catalog-Token": token },
-		});
-		if (!response.ok) throw new Error(`read E2E catalog release: ${await response.text()}`);
-		const current = (await response.json()) as { state?: string; last_error?: string };
-		if (current.state === "Ready") {
+		try {
 			const installed = await readCatalog(serverURL);
 			if (installed.some((challenge) => challenge.title === nodeRuntimeFixture.title)) return;
-			throw new Error("installed E2E Catalog release does not contain the node runtime fixture");
-		}
-		if (current.state === "Failed") {
-			throw new Error(`E2E catalog release failed${current.last_error ? `: ${current.last_error}` : ""}`);
+		} catch {
+			// Server may still be recovering its configured immutable release.
 		}
 		await sleep(1_000);
 	}
-	throw new Error(`timed out waiting for E2E catalog release ${release.id} to become Ready`);
+	throw new Error(
+		`timed out waiting for the configured Catalog Release to expose ${nodeRuntimeFixture.title}; configure the Server with the immutable E2E fixture reference before running browser tests`,
+	);
 }
 
 async function readCatalog(serverURL: string): Promise<Array<{ title?: string }>> {

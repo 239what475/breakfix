@@ -1,7 +1,7 @@
 # 题目内容格式
 
 portable candidate 与已发布题目使用同一组教学和运行时文件，但平台身份由后者在 materialize 时补充。题库不存入数据库，也不是
-Kubernetes CRD；Server 从已发布目录和当前 taxonomy snapshot 构造 Catalog。目录、校验和发布行为以
+Kubernetes CRD；Server 从已发布目录和当前 RoadmapRevision 构造 Catalog。目录、校验和发布行为以
 [`internal/content/challenge/`](../../internal/content/challenge/) 为准。
 
 ## Portable Candidate
@@ -35,14 +35,14 @@ k8s/answer.sh
 k8s/checks.sh
 ```
 
-`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`source_slug`、`image`、`content_revision`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 taxonomy mapping 一律引用它；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
+`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`source_slug`、`image`、`content_revision`、`published_at`。`id` 是与题意无关的 opaque identity，API、Environment、学习记录和 Roadmap binding 一律引用它；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
 
 发布目录必须有合法的发布字段、非空标题/描述、`easy|medium|hard` 难度和至少一个 checkpoint。`runtime: node` 的 `image` 必须是完整的 64 位小写 Incus fingerprint；`runtime: k8s` 的 `image` 必须是完整的 `repository@sha256:<64 位小写摘要>` OCI 引用。Node manifest 还必须声明唯一逻辑节点；每个 checkpoint 必须声明执行节点，节点名称不能泄漏 Provider 实现。K8s checkpoint 没有节点字段。checkpoint 数组顺序只决定 UI 展示，不表达依赖或必须通过的先后顺序。
 
 Server 只在验证成功后为已发布目录写入平台托管字段；作者流程在 `ChallengePublishing` 写入，Catalog Release 在所有 entry
 验证完成后的原子 commit 写入。它不会改写已验证 candidate archive。
 
-发布后，Server 为该 revision 创建 taxonomy mapping。Skill、Tag、entry skill、outcome 和关系不属于 `challenge.yaml`，而位于 `data_dir/taxonomy/current`；只有 exact mapping 发布后题目才进入公开 Catalog。
+发布后的课程归属和横向筛选信息不属于 `challenge.yaml`。Catalog Release 在最终 commit 时将 Domain、Topic、Tag、Challenge binding 和关系图一并写入 immutable RoadmapRevision；只有与当前 revision 精确绑定的题目才进入公开 Catalog。
 
 ## 运行时初始化
 

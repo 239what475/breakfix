@@ -37,6 +37,7 @@ type Config struct {
 	OpenSandbox          OpenSandboxConfig  `yaml:"opensandbox"`
 	Incus                incus.Config       `yaml:"incus"`
 	Runtime              RuntimeConfig      `yaml:"runtime"`
+	Catalog              CatalogConfig      `yaml:"catalog"`
 }
 
 // RegistryConfig identifies the only OCI repository root used by the platform.
@@ -49,6 +50,39 @@ type RegistryConfig struct {
 	TrustBundleFile string `yaml:"trust_bundle_file"`
 	Username        string `yaml:"-"`
 	Password        string `yaml:"-"`
+}
+
+// CatalogConfig names an optional immutable portable release that Server
+// installs during bootstrap. An empty reference intentionally leaves a local
+// or development catalog empty; there is no HTTP installation endpoint.
+type CatalogConfig struct {
+	ReleaseReference string `yaml:"release_reference"`
+	InstallDeadline  string `yaml:"install_deadline"`
+}
+
+func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
+
+func (c CatalogConfig) Deadline() (time.Duration, error) {
+	value := strings.TrimSpace(c.InstallDeadline)
+	if value == "" {
+		return 0, fmt.Errorf("catalog install_deadline is required when release_reference is configured")
+	}
+	deadline, err := time.ParseDuration(value)
+	if err != nil || deadline <= 0 {
+		return 0, fmt.Errorf("catalog install_deadline must be a positive duration")
+	}
+	return deadline, nil
+}
+
+func (c CatalogConfig) Validate() error {
+	if !c.Enabled() {
+		return nil
+	}
+	if !immutableOCIReference(c.ReleaseReference) {
+		return fmt.Errorf("catalog release_reference must be an immutable OCI digest reference")
+	}
+	_, err := c.Deadline()
+	return err
 }
 
 func (c RegistryConfig) Validate() error {
@@ -284,6 +318,7 @@ func Load(path string) (Config, error) {
 	cfg.Registry.Repository = os.ExpandEnv(cfg.Registry.Repository)
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
+	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	cfg.UIOrigin = os.ExpandEnv(cfg.UIOrigin)
@@ -364,6 +399,9 @@ func (c Config) ValidateServer() error {
 	}
 	if err := c.Runtime.Validate(); err != nil {
 		return err
+	}
+	if err := c.Catalog.Validate(); err != nil {
+		return fmt.Errorf("server catalog: %w", err)
 	}
 	return nil
 }

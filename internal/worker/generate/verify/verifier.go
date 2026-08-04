@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -70,28 +71,38 @@ type environmentRef struct {
 	vk8s    *breakfixv1.VK8sEnvironment
 }
 
-// Execute performs the Verifying phase. recordEnvironment is deliberately the
-// only Server callback: the Generate Worker reports both it and the final
-// result through the phase protocol under the workflow lease.
-func (e *Executor) Execute(ctx context.Context, execution generation.Execution, recordEnvironment func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
-	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateVerifying || execution.Context.Candidate == nil {
+// Execute preserves the GenerationWorker adapter while the verification
+// mechanics consume the neutral execution contract below.
+func (e *Executor) Execute(ctx context.Context, value generation.Execution, recordEnvironment func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateVerifying || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
 		return generation.VerificationReport{}, errors.New("verifier requires a Verifying generation workflow with a candidate")
 	}
-	if recordEnvironment == nil {
-		return generation.VerificationReport{}, errors.New("verifier requires an environment recorder")
-	}
-	view := execution.Context.Candidate
-	if view.Artifact == nil || execution.Claim.Workflow.DeadlineAt == nil {
-		return generation.VerificationReport{}, errors.New("verification candidate has no immutable artifact or deadline")
-	}
-	attempt := int64(execution.Claim.StateAttempt + 1)
-	name := EnvironmentName(fmt.Sprintf("%s-%s-%d", execution.Claim.Workflow.ID, view.ID, attempt))
-	if err := e.removePreviousEnvironment(ctx, execution, name); err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("remove previous verification environment: %w", err)
-	}
-	environment, err := e.createEnvironment(ctx, execution, name)
+	work, err := workFromGeneration(value)
 	if err != nil {
 		return generation.VerificationReport{}, err
+	}
+	return e.ExecuteWork(ctx, work, recordEnvironment)
+}
+
+// ExecuteWork verifies one immutable artifact without assuming that its
+// owner is a GenerationWorkflow. The callback is the only persistence hook.
+func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, recordEnvironment func(context.Context, domainexecution.VerificationEnvironment) error) (domainexecution.VerificationReport, error) {
+	if err := work.Validate(); err != nil {
+		return domainexecution.VerificationReport{}, fmt.Errorf("verifier execution work: %w", err)
+	}
+	if recordEnvironment == nil {
+		return domainexecution.VerificationReport{}, errors.New("verifier requires an environment recorder")
+	}
+	if work.Artifact == nil {
+		return domainexecution.VerificationReport{}, errors.New("verification candidate has no immutable artifact")
+	}
+	name := EnvironmentName(fmt.Sprintf("%s-%s-%d", work.OwnerID, work.CandidateID, work.Attempt))
+	if err := e.removePreviousEnvironment(ctx, work, name); err != nil {
+		return domainexecution.VerificationReport{}, fmt.Errorf("remove previous verification environment: %w", err)
+	}
+	environment, err := e.createEnvironment(ctx, work, name)
+	if err != nil {
+		return domainexecution.VerificationReport{}, err
 	}
 	cleaned := false
 	defer func() {
@@ -101,28 +112,28 @@ func (e *Executor) Execute(ctx context.Context, execution generation.Execution, 
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
 		if cleanupErr := e.deleteAndWait(cleanupCtx, *environment); cleanupErr != nil {
-			slog.Error("clean verification environment", "workflow_id", execution.Claim.Workflow.ID, "attempt", attempt, "environment_uid", environment.uid, "err", cleanupErr)
+			slog.Error("clean verification environment", "owner_id", work.OwnerID, "attempt", work.Attempt, "environment_uid", environment.uid, "err", cleanupErr)
 		}
 	}()
 
-	identity := generation.VerificationEnvironment{
-		Runtime: view.Snapshot.Runtime, Name: environment.name, UID: string(environment.uid),
-		WorkflowID: execution.Claim.Workflow.ID, Attempt: attempt,
+	identity := domainexecution.VerificationEnvironment{
+		Runtime: work.Snapshot.Runtime, Name: environment.name, UID: string(environment.uid),
+		WorkflowID: work.OwnerID, Attempt: work.Attempt,
 	}
 	if err := recordEnvironment(ctx, identity); err != nil {
-		return generation.VerificationReport{}, err
+		return domainexecution.VerificationReport{}, err
 	}
 	ready, err := e.waitReady(ctx, *environment)
 	if err != nil {
 		if cleanupErr := e.deleteAndWait(ctx, *environment); cleanupErr == nil {
 			cleaned = true
 		}
-		return generation.VerificationReport{}, err
+		return domainexecution.VerificationReport{}, err
 	}
 
-	report, verificationErr := e.runVerification(ctx, *view, ready)
+	report, verificationErr := e.runVerification(ctx, work, ready)
 	if err := e.deleteAndWait(ctx, ready); err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("delete verification environment: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("delete verification environment: %w", err)
 	}
 	cleaned = true
 	if verificationErr != nil {
@@ -131,33 +142,32 @@ func (e *Executor) Execute(ctx context.Context, execution generation.Execution, 
 	return report, nil
 }
 
-func (e *Executor) createEnvironment(ctx context.Context, execution generation.Execution, name string) (*environmentRef, error) {
-	view := execution.Context.Candidate
-	if view == nil || view.Artifact == nil || execution.Claim.Workflow.DeadlineAt == nil {
+func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.Work, name string) (*environmentRef, error) {
+	if work.Artifact == nil {
 		return nil, errors.New("verification environment requires candidate artifact and deadline")
 	}
 	common := breakfixv1.EnvironmentSpec{
 		Purpose: breakfixv1.EnvironmentPurposeVerification,
 		Source: breakfixv1.EnvironmentSourceSpec{
-			Kind: breakfixv1.EnvironmentSourceCandidate, Ref: view.ID, Revision: view.ArchiveSHA256,
+			Kind: breakfixv1.EnvironmentSourceCandidate, Ref: work.CandidateID, Revision: work.ArchiveSHA256,
 		},
-		Checkpoints: environmentCheckpoints(view.Snapshot.Checkpoints),
+		Checkpoints: environmentCheckpoints(work.Snapshot.Checkpoints),
 		Lifecycle: breakfixv1.EnvironmentLifecycleSpec{
-			DeadlineAt: &metav1.Time{Time: execution.Claim.Workflow.DeadlineAt.UTC()},
+			DeadlineAt: &metav1.Time{Time: work.DeadlineAt.UTC()},
 		},
 	}
 	metadata := metav1.ObjectMeta{
 		Name: name, Namespace: e.namespace,
 		Labels: map[string]string{"breakfix.dev/purpose": string(breakfixv1.EnvironmentPurposeVerification)},
 		Annotations: map[string]string{
-			workflowAnnotation:        execution.Claim.Workflow.ID,
-			workflowAttemptAnnotation: strconv.Itoa(execution.Claim.StateAttempt + 1),
-			candidateAnnotation:       view.ID,
+			workflowAnnotation:        work.OwnerID,
+			workflowAttemptAnnotation: strconv.FormatInt(work.Attempt, 10),
+			candidateAnnotation:       work.CandidateID,
 		},
 	}
-	switch view.Snapshot.Runtime {
+	switch work.Snapshot.Runtime {
 	case challenge.RuntimeNode:
-		snapshot := view.Snapshot.Node
+		snapshot := work.Snapshot.Node
 		if snapshot == nil {
 			return nil, errors.New("node candidate has no runtime snapshot")
 		}
@@ -170,7 +180,7 @@ func (e *Executor) createEnvironment(ctx context.Context, execution generation.E
 			Spec: breakfixv1.NodeEnvironmentSpec{
 				Environment: common,
 				Runtime: breakfixv1.NodeRuntimeSnapshot{
-					ImageFingerprint: view.Artifact.IncusFingerprint,
+					ImageFingerprint: work.Artifact.IncusFingerprint,
 					ProfileRevision:  snapshot.ProfileRevision, NetworkPolicyRevision: snapshot.NetworkPolicyRevision,
 					Nodes: nodes,
 					Resources: breakfixv1.NodeResourceSnapshot{
@@ -189,7 +199,7 @@ func (e *Executor) createEnvironment(ctx context.Context, execution generation.E
 		return &environmentRef{runtime: challenge.RuntimeNode, name: name, uid: created.UID, node: created}, nil
 
 	case challenge.RuntimeK8s:
-		snapshot := view.Snapshot.K8s
+		snapshot := work.Snapshot.K8s
 		if snapshot == nil {
 			return nil, errors.New("K8s candidate has no runtime snapshot")
 		}
@@ -198,7 +208,7 @@ func (e *Executor) createEnvironment(ctx context.Context, execution generation.E
 			Spec: breakfixv1.VK8sEnvironmentSpec{
 				Environment: common,
 				Runtime: breakfixv1.VK8sRuntimeSnapshot{
-					ImageDigest:     view.Artifact.OCIReference,
+					ImageDigest:     work.Artifact.OCIReference,
 					ProfileRevision: snapshot.ProfileRevision, Version: snapshot.Version,
 					ManagementTerminalImage: snapshot.ManagementTerminalImage,
 					Resources: breakfixv1.VK8sResourceSnapshot{
@@ -275,7 +285,7 @@ func environmentFailure(failure *breakfixv1.EnvironmentFailureStatus) error {
 		summary = strings.TrimSpace(failure.Reason)
 	}
 	if failure.Class == breakfixv1.EnvironmentFailureArtifact {
-		return generation.NewArtifactError("RUNTIME_INIT_FAILED", summary)
+		return domainexecution.NewArtifactError("RUNTIME_INIT_FAILED", summary)
 	}
 	if failure.Class != breakfixv1.EnvironmentFailureInfrastructure {
 		return errors.New("verification environment returned an unknown failure class")
@@ -283,58 +293,58 @@ func environmentFailure(failure *breakfixv1.EnvironmentFailureStatus) error {
 	return fmt.Errorf("verification environment infrastructure failure %s: %s", failure.Reason, summary)
 }
 
-func (e *Executor) runVerification(ctx context.Context, view generation.WorkerView, ref environmentRef) (generation.VerificationReport, error) {
+func (e *Executor) runVerification(ctx context.Context, work domainexecution.Work, ref environmentRef) (domainexecution.VerificationReport, error) {
 	switch ref.runtime {
 	case challenge.RuntimeNode:
-		return e.verifyNode(ctx, view, ref)
+		return e.verifyNode(ctx, work, ref)
 	case challenge.RuntimeK8s:
-		return e.verifyK8s(ctx, view, ref)
+		return e.verifyK8s(ctx, work, ref)
 	default:
-		return generation.VerificationReport{}, errors.New("candidate runtime is unsupported")
+		return domainexecution.VerificationReport{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-func (e *Executor) verifyNode(ctx context.Context, view generation.WorkerView, ref environmentRef) (generation.VerificationReport, error) {
+func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, ref environmentRef) (domainexecution.VerificationReport, error) {
 	if e.node == nil {
-		return generation.VerificationReport{}, errors.New("node verifier is unavailable")
+		return domainexecution.VerificationReport{}, errors.New("node verifier is unavailable")
 	}
-	if view.Snapshot.Node == nil {
-		return generation.VerificationReport{}, errors.New("node verification candidate has no node snapshot")
+	if work.Snapshot.Node == nil {
+		return domainexecution.VerificationReport{}, errors.New("node verification candidate has no node snapshot")
 	}
 	identity, err := nodeIdentity(ref.node)
 	if err != nil {
-		return generation.VerificationReport{}, err
+		return domainexecution.VerificationReport{}, err
 	}
-	nodes := view.Snapshot.Node.Nodes
-	answers, err := executeParallel(nodes, func(node generation.NodeSnapshot) (generation.ExecutionResult, error) {
+	nodes := work.Snapshot.Node.Nodes
+	answers, err := executeParallel(nodes, func(node domainexecution.NodeSnapshot) (domainexecution.ExecutionResult, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
-			EnvironmentUID: string(ref.uid), Revision: view.ArchiveSHA256, Identity: identity,
+			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
 			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "answer.sh")},
 		})
-		return generation.ExecutionResult{Location: node.Name, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, execErr
+		return domainexecution.ExecutionResult{Location: node.Name, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, execErr
 	})
 	if err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("execute Node answers: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("execute Node answers: %w", err)
 	}
 	if hasFailedAnswer(answers) {
-		report := failedReport(view.Snapshot, answers, "one or more answer scripts failed")
-		return report, generation.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
+		report := failedReport(work.Snapshot, answers, "one or more answer scripts failed")
+		return report, domainexecution.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
 	}
 
-	groups := nodeCheckpointGroups(view.Snapshot.Checkpoints)
+	groups := nodeCheckpointGroups(work.Snapshot.Checkpoints)
 	type checkRun struct {
 		node    string
-		results []generation.CheckpointResult
+		results []domainexecution.CheckpointResult
 	}
-	checkNodes := make([]generation.NodeSnapshot, 0, len(groups))
+	checkNodes := make([]domainexecution.NodeSnapshot, 0, len(groups))
 	for _, node := range nodes {
 		if len(groups[node.Name]) > 0 {
 			checkNodes = append(checkNodes, node)
 		}
 	}
-	runs, err := executeParallel(checkNodes, func(node generation.NodeSnapshot) (checkRun, error) {
+	runs, err := executeParallel(checkNodes, func(node domainexecution.NodeSnapshot) (checkRun, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
-			EnvironmentUID: string(ref.uid), Revision: view.ArchiveSHA256, Identity: identity,
+			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
 			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "checks.sh")},
 		})
 		if execErr != nil {
@@ -352,52 +362,52 @@ func (e *Executor) verifyNode(ctx context.Context, view generation.WorkerView, r
 	if err != nil {
 		var protocol *checkpointProtocolError
 		if errors.As(err, &protocol) {
-			report := failedReport(view.Snapshot, answers, protocol.Error())
-			return report, generation.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
+			report := failedReport(work.Snapshot, answers, protocol.Error())
+			return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 		}
-		return generation.VerificationReport{}, fmt.Errorf("execute Node checkpoints: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("execute Node checkpoints: %w", err)
 	}
-	byID := make(map[string]generation.CheckpointResult)
+	byID := make(map[string]domainexecution.CheckpointResult)
 	for _, run := range runs {
 		for _, result := range run.results {
 			byID[result.ID] = result
 		}
 	}
-	checks := orderedCheckpointResults(view.Snapshot.Checkpoints, byID)
-	return finishReport(view.Snapshot, answers, checks)
+	checks := orderedCheckpointResults(work.Snapshot.Checkpoints, byID)
+	return finishReport(work.Snapshot, answers, checks)
 }
 
-func (e *Executor) verifyK8s(ctx context.Context, view generation.WorkerView, ref environmentRef) (generation.VerificationReport, error) {
+func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref environmentRef) (domainexecution.VerificationReport, error) {
 	if ref.vk8s == nil || strings.TrimSpace(ref.vk8s.Status.Runtime.Namespace) == "" || strings.TrimSpace(ref.vk8s.Status.Runtime.TerminalPodName) == "" {
-		return generation.VerificationReport{}, errors.New("ready K8s verification environment has no terminal identity")
+		return domainexecution.VerificationReport{}, errors.New("ready K8s verification environment has no terminal identity")
 	}
 	runtime := ref.vk8s.Status.Runtime
 	answer, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(challengeRoot, "k8s", "answer.sh"))
 	if err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("execute K8s answer: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s answer: %w", err)
 	}
-	answers := []generation.ExecutionResult{{Location: "management", ExitCode: answer.ExitCode, Stdout: answer.Stdout, Stderr: answer.Stderr}}
+	answers := []domainexecution.ExecutionResult{{Location: "management", ExitCode: answer.ExitCode, Stdout: answer.Stdout, Stderr: answer.Stderr}}
 	if answer.ExitCode != 0 {
-		report := failedReport(view.Snapshot, answers, "K8s answer script failed")
-		return report, generation.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
+		report := failedReport(work.Snapshot, answers, "K8s answer script failed")
+		return report, domainexecution.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
 	}
 	check, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(challengeRoot, "k8s", "checks.sh"))
 	if err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("execute K8s checkpoints: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s checkpoints: %w", err)
 	}
 	if check.ExitCode != 0 {
-		report := failedReport(view.Snapshot, answers, fmt.Sprintf("K8s checks.sh exited with %d: %s", check.ExitCode, strings.TrimSpace(check.Stderr)))
-		return report, generation.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
+		report := failedReport(work.Snapshot, answers, fmt.Sprintf("K8s checks.sh exited with %d: %s", check.ExitCode, strings.TrimSpace(check.Stderr)))
+		return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 	}
-	checks, err := parseCheckpointResults(check.Stdout, view.Snapshot.Checkpoints)
+	checks, err := parseCheckpointResults(check.Stdout, work.Snapshot.Checkpoints)
 	if err != nil {
-		report := failedReport(view.Snapshot, answers, "K8s checks.sh: "+err.Error())
-		return report, generation.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
+		report := failedReport(work.Snapshot, answers, "K8s checks.sh: "+err.Error())
+		return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 	}
-	return finishReport(view.Snapshot, answers, checks)
+	return finishReport(work.Snapshot, answers, checks)
 }
 
-func finishReport(snapshot generation.ExecutionSnapshot, answers []generation.ExecutionResult, checks []generation.CheckpointResult) (generation.VerificationReport, error) {
+func finishReport(snapshot domainexecution.Snapshot, answers []domainexecution.ExecutionResult, checks []domainexecution.CheckpointResult) (domainexecution.VerificationReport, error) {
 	passed := !hasFailedAnswer(answers)
 	for _, check := range checks {
 		passed = passed && check.Passed
@@ -406,12 +416,12 @@ func finishReport(snapshot generation.ExecutionSnapshot, answers []generation.Ex
 	if !passed {
 		summary = "one or more checkpoints did not pass"
 	}
-	report := generation.VerificationReport{Passed: passed, Answers: answers, Checkpoints: checks, Summary: summary}
+	report := domainexecution.VerificationReport{Passed: passed, Answers: answers, Checkpoints: checks, Summary: summary}
 	if err := report.Validate(snapshot); err != nil {
-		return generation.VerificationReport{}, fmt.Errorf("construct verification report: %w", err)
+		return domainexecution.VerificationReport{}, fmt.Errorf("construct verification report: %w", err)
 	}
 	if !passed {
-		return report, generation.NewArtifactErrorWithReport("CHECKPOINTS_FAILED", summary, report)
+		return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINTS_FAILED", summary, report)
 	}
 	return report, nil
 }
@@ -420,7 +430,7 @@ type checkpointProtocolError struct{ message string }
 
 func (e *checkpointProtocolError) Error() string { return e.message }
 
-func parseCheckpointResults(raw string, snapshots []generation.CheckpointSnapshot) ([]generation.CheckpointResult, error) {
+func parseCheckpointResults(raw string, snapshots []domainexecution.CheckpointSnapshot) ([]domainexecution.CheckpointResult, error) {
 	expected := make([]challenge.Checkpoint, len(snapshots))
 	for index, checkpoint := range snapshots {
 		expected[index] = challenge.Checkpoint{ID: checkpoint.ID, Node: checkpoint.Node}
@@ -429,22 +439,22 @@ func parseCheckpointResults(raw string, snapshots []generation.CheckpointSnapsho
 	if err != nil {
 		return nil, err
 	}
-	results := make([]generation.CheckpointResult, len(report.Checks))
+	results := make([]domainexecution.CheckpointResult, len(report.Checks))
 	for index, check := range report.Checks {
-		results[index] = generation.CheckpointResult{ID: check.ID, Passed: check.Passed, Summary: check.Summary, Details: check.Details}
+		results[index] = domainexecution.CheckpointResult{ID: check.ID, Passed: check.Passed, Summary: check.Summary, Details: check.Details}
 	}
 	return results, nil
 }
 
-func failedReport(snapshot generation.ExecutionSnapshot, answers []generation.ExecutionResult, summary string) generation.VerificationReport {
-	checks := make([]generation.CheckpointResult, len(snapshot.Checkpoints))
+func failedReport(snapshot domainexecution.Snapshot, answers []domainexecution.ExecutionResult, summary string) domainexecution.VerificationReport {
+	checks := make([]domainexecution.CheckpointResult, len(snapshot.Checkpoints))
 	for index, checkpoint := range snapshot.Checkpoints {
-		checks[index] = generation.CheckpointResult{ID: checkpoint.ID, Passed: false, Summary: "not passed during verification", Details: summary}
+		checks[index] = domainexecution.CheckpointResult{ID: checkpoint.ID, Passed: false, Summary: "not passed during verification", Details: summary}
 	}
-	return generation.VerificationReport{Passed: false, Answers: answers, Checkpoints: checks, Summary: summary}
+	return domainexecution.VerificationReport{Passed: false, Answers: answers, Checkpoints: checks, Summary: summary}
 }
 
-func hasFailedAnswer(results []generation.ExecutionResult) bool {
+func hasFailedAnswer(results []domainexecution.ExecutionResult) bool {
 	for _, result := range results {
 		if result.ExitCode != 0 {
 			return true
@@ -453,16 +463,16 @@ func hasFailedAnswer(results []generation.ExecutionResult) bool {
 	return false
 }
 
-func nodeCheckpointGroups(checkpoints []generation.CheckpointSnapshot) map[string][]generation.CheckpointSnapshot {
-	groups := make(map[string][]generation.CheckpointSnapshot)
+func nodeCheckpointGroups(checkpoints []domainexecution.CheckpointSnapshot) map[string][]domainexecution.CheckpointSnapshot {
+	groups := make(map[string][]domainexecution.CheckpointSnapshot)
 	for _, checkpoint := range checkpoints {
 		groups[checkpoint.Node] = append(groups[checkpoint.Node], checkpoint)
 	}
 	return groups
 }
 
-func orderedCheckpointResults(snapshots []generation.CheckpointSnapshot, values map[string]generation.CheckpointResult) []generation.CheckpointResult {
-	result := make([]generation.CheckpointResult, 0, len(snapshots))
+func orderedCheckpointResults(snapshots []domainexecution.CheckpointSnapshot, values map[string]domainexecution.CheckpointResult) []domainexecution.CheckpointResult {
+	result := make([]domainexecution.CheckpointResult, 0, len(snapshots))
 	for _, checkpoint := range snapshots {
 		if value, ok := values[checkpoint.ID]; ok {
 			result = append(result, value)
@@ -487,7 +497,7 @@ func nodeIdentity(environment *breakfixv1.NodeEnvironment) (incus.NodeEnvironmen
 	return identity, nil
 }
 
-func environmentCheckpoints(checkpoints []generation.CheckpointSnapshot) []breakfixv1.EnvironmentCheckpointSpec {
+func environmentCheckpoints(checkpoints []domainexecution.CheckpointSnapshot) []breakfixv1.EnvironmentCheckpointSpec {
 	result := make([]breakfixv1.EnvironmentCheckpointSpec, len(checkpoints))
 	for index, checkpoint := range checkpoints {
 		result[index] = breakfixv1.EnvironmentCheckpointSpec{ID: checkpoint.ID, Node: checkpoint.Node}
@@ -515,18 +525,14 @@ func executeParallel[I any, O any](inputs []I, execute func(I) (O, error)) ([]O,
 	return results, nil
 }
 
-func (e *Executor) removePreviousEnvironment(ctx context.Context, execution generation.Execution, name string) error {
-	view := execution.Context.Candidate
-	if view == nil {
-		return errors.New("verification cleanup requires candidate")
-	}
-	if previous := view.VerifyEnvironment; previous != nil {
-		if previous.WorkflowID != execution.Claim.Workflow.ID || previous.Runtime != view.Snapshot.Runtime {
-			return errors.New("recorded verification environment does not belong to this workflow")
+func (e *Executor) removePreviousEnvironment(ctx context.Context, work domainexecution.Work, name string) error {
+	if previous := work.VerificationEnvironment; previous != nil {
+		if previous.WorkflowID != work.OwnerID || previous.Runtime != work.Snapshot.Runtime || previous.Attempt <= 0 {
+			return errors.New("recorded verification environment does not belong to this execution")
 		}
 		return e.deleteAndWait(ctx, environmentRef{runtime: previous.Runtime, name: previous.Name, uid: types.UID(previous.UID)})
 	}
-	ref, err := e.findEnvironment(ctx, view.Snapshot.Runtime, name)
+	ref, err := e.findEnvironment(ctx, work.Snapshot.Runtime, name)
 	if err != nil || ref == nil {
 		return err
 	}
@@ -536,11 +542,26 @@ func (e *Executor) removePreviousEnvironment(ctx context.Context, execution gene
 	} else {
 		annotations = ref.vk8s.Annotations
 	}
-	if annotations[workflowAnnotation] != execution.Claim.Workflow.ID || annotations[candidateAnnotation] != view.ID ||
-		annotations[workflowAttemptAnnotation] != strconv.Itoa(execution.Claim.StateAttempt+1) {
+	if annotations[workflowAnnotation] != work.OwnerID || annotations[candidateAnnotation] != work.CandidateID ||
+		annotations[workflowAttemptAnnotation] != strconv.FormatInt(work.Attempt, 10) {
 		return errors.New("existing verification environment has different ownership metadata")
 	}
 	return e.deleteAndWait(ctx, *ref)
+}
+
+func workFromGeneration(value generation.Execution) (domainexecution.Work, error) {
+	if value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+		return domainexecution.Work{}, errors.New("generation execution has no candidate or deadline")
+	}
+	view := value.Context.Candidate
+	if view.Artifact == nil {
+		return domainexecution.Work{}, errors.New("generation execution has no verified artifact")
+	}
+	return domainexecution.Work{
+		OwnerID: value.Claim.Workflow.ID, CandidateID: view.ID, ArchiveSHA256: view.ArchiveSHA256,
+		Snapshot: view.Snapshot, Attempt: int64(value.Claim.StateAttempt + 1), DeadlineAt: value.Claim.Workflow.DeadlineAt.UTC(),
+		Build: view.Build, Artifact: view.Artifact, VerificationEnvironment: view.VerifyEnvironment,
+	}, nil
 }
 
 func (e *Executor) findEnvironment(ctx context.Context, runtime, name string) (*environmentRef, error) {

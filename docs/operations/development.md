@@ -14,7 +14,7 @@ make build
 ```
 
 `make build` 在 `web/package-lock.json` 未变化时复用 `web/node_modules`，不会反复执行 `npm ci`；缺少依赖或锁文件更新时
-才重新安装。需要主动刷新前端依赖时运行 `make web-deps`。四个可执行文件都接受相同的 `-config` 参数。
+才重新安装。需要主动刷新前端依赖时运行 `make web-deps`。三个可执行文件都接受相同的 `-config` 参数。
 
 ## Kind
 
@@ -39,8 +39,8 @@ Node runtime 的 Incus project、桥接网络、基础 system-container image �
 
 ## Telepresence
 
-Telepresence 用于保留集群依赖的同时，在本机运行一个 Breakfix 组件。支持 Server、Controller、Generate Worker 和
-Taxonomy Worker；被接管组件的日志直接出现在本机终端，适合与 Playwright 或真实运行时验收并排观察。
+Telepresence 用于保留集群依赖的同时，在本机运行一个 Breakfix 组件。支持 Server、Controller 和 Generate Worker；
+被接管组件的日志直接出现在本机终端，适合与 Playwright 或真实运行时验收并排观察。
 
 前置条件：已连接目标 Kubernetes context 和 Traffic Manager，本机具备 `telepresence`、`kubectl`、Go、Node.js 及项目依赖；
 目标集群已部署当前版本，Generate Worker 的本地进程还能访问模型 API、Incus 与 Registry。
@@ -52,7 +52,6 @@ scripts/dev/telepresence.sh status
 scripts/dev/telepresence.sh server
 scripts/dev/telepresence.sh controller
 scripts/dev/telepresence.sh generate-worker
-scripts/dev/telepresence.sh taxonomy-worker
 ```
 
 脚本读取集群配置、准备最小身份和 kubeconfig，并在本机构建对应二进制。接管 Worker 时会缩容目标 Deployment，避免两个副本
@@ -65,6 +64,6 @@ scripts/dev/telepresence.sh down
 scripts/dev/telepresence.sh disconnect
 ```
 
-排障时以 `GenerationWorkflow` 或 `TaxonomyWorkflow` ID、state attempt、AgentRun、CandidateRevision 与 Environment UID
+排障时以 `GenerationWorkflow`、CatalogRelease、AgentRun、CandidateRevision 与 Environment UID
 关联日志。Telepresence 不会汇总其他集群工作负载日志；Controller、Registry 和 Environment 仍用 `kubectl logs` 或
 `kubectl describe` 观察。

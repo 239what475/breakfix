@@ -18,6 +18,7 @@ type Store struct {
 
 	Agent       *AgentRepository
 	Authoring   *AuthoringRepository
+	Catalog     *CatalogRepository
 	Environment *EnvironmentRepository
 	Generation  *GenerationRepository
 	Identity    *IdentityRepository
@@ -64,6 +65,7 @@ func newStore(conn *Conn) *Store {
 		conn:        conn,
 		Agent:       &AgentRepository{conn: conn},
 		Authoring:   &AuthoringRepository{conn: conn},
+		Catalog:     &CatalogRepository{conn: conn},
 		Environment: &EnvironmentRepository{conn: conn},
 		Generation:  &GenerationRepository{conn: conn},
 		Identity:    &IdentityRepository{conn: conn},
@@ -130,6 +132,10 @@ func (t *Tx) ExecContext(ctx context.Context, query string, args ...any) (sql.Re
 
 func (t *Tx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return t.raw.QueryRowContext(ctx, bind(query), args...)
+}
+
+func (t *Tx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return t.raw.QueryContext(ctx, bind(query), args...)
 }
 
 // bind rewrites positional parameters outside SQL literals and comments. The

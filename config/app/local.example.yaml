@@ -23,6 +23,12 @@ registry:
   # Leave empty for a publicly trusted Registry certificate.
   trust_bundle_file: ""
 
+# Leave release_reference empty for a deliberately blank local catalog. A
+# nonempty value must use a digest such as registry.example.com/breakfix/catalog@sha256:...
+catalog:
+  release_reference: ""
+  install_deadline: 1h
+
 # vcluster command and chart source.
 vcluster_binary: vcluster
 vcluster_chart_repo: https://charts.loft.sh

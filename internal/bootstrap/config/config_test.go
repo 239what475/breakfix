@@ -160,5 +160,9 @@ func validProcessConfig() Config {
 				},
 			},
 		},
+		Catalog: CatalogConfig{
+			ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("c", 64),
+			InstallDeadline:  "1h",
+		},
 	}
 }

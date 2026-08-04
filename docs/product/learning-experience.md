@@ -18,7 +18,7 @@ Breakfix 的核心体验是：用户在真实、可回收的运行环境中完�
 
 ## 题库与工作台
 
-Catalog 公开展示已经通过 exact taxonomy mapping 的题目摘要，并按搜索、标签、难度、runtime、学习状态和发布时间帮助用户定位题目。登录用户能看到自己题目的完成、进行中和检查点进度；未登录用户只能浏览摘要。卡片展示主要学习 outcome，Problem 面板展示本题练习和建议具备的直接前置能力。移动端保留浏览与筛选，不把需要键盘的终端和创作工作流压缩进手机布局。
+Catalog 公开展示当前 RoadmapRevision 中已绑定的题目摘要，并按搜索、标签、难度、runtime、学习状态和发布时间帮助用户定位题目。登录用户能看到自己题目的完成、进行中和检查点进度；未登录用户只能浏览摘要。卡片展示题目概览和唯一 Topic；Problem 面板展示本题练习目标。移动端保留浏览与筛选，不把需要键盘的终端和创作工作流压缩进手机布局。
 
 开始题目会进入固定工作台：左侧显示 Problem、Solution、Assistant 和公开检查点，右侧是浏览器终端。Problem、Solution 和提示服务于同一组检查点；用户可以打开多个终端窗口、重置环境或停止挑战。页面本身不应滚动，正文、助手消息和终端各自管理滚动区域。
 
@@ -59,4 +59,4 @@ My space 汇总当前用户的学习和创作事实：已完成与已尝试题�
 - Solution 是学习资产，检查点是完成判断；两者不通过手动提交按钮耦合。
 - Catalog、Workspace、My space 和 Authoring 维持单页应用导航，不引入多页面路由作为产品前提。
 - 学习路径、推荐、排行榜、讨论区、付费和组织集成需要更大题库或真实使用数据，当前方向见根目录 [`NEXT.md`](../../NEXT.md)。
-- Skill、Tag、entry/outcome 与 Catalog 准入不属于 challenge manifest，详见[Taxonomy](../architecture/taxonomy.md)。
+- Domain、Topic、Tag、Challenge binding 与关系图不属于 challenge manifest；它们由 immutable RoadmapRevision 提供。

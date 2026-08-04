@@ -26,19 +26,19 @@ web/        Vue 应用、Node 配置和 TypeScript 生成 client
 ```text
 internal/
   adapter/       Kubernetes、Incus、OCI、OpenSandbox、LLM、PostgreSQL 和内部 HTTP 的具体实现
-  application/   作者、生成、catalog、学习和 taxonomy 用例
+  application/   作者、生成、catalog、学习和执行快照用例
   bootstrap/     各进程的配置加载、依赖装配和生命周期
   buildinfo/     由 ldflags 写入的版本信息
-  content/       challenge candidate、发布 materialization 和 taxonomy snapshot 文件契约
+  content/       portable challenge、发布 materialization 和 Roadmap source 文件契约
   controller/    NodeEnvironment 与 VK8sEnvironment reconciler
-  domain/        Workflow、Environment、Catalog、Authoring、Taxonomy 的状态与不变量
+  domain/        Workflow、Environment、Catalog、Authoring、Roadmap 的状态与不变量
   testkit/       仅供测试使用的 PostgreSQL 等基础设施
   transport/     HTTP API、WebSocket/SSE、嵌入式 UI 和健康检查
-  worker/        Generate 与 Taxonomy Workflow 的阶段执行器
+  worker/        Generate Workflow 的阶段执行器
 ```
 
-`content` 是共享的文件内容边界：它处理 portable challenge source、已发布题目目录、candidate archive 和 taxonomy
-snapshot，但不拥有数据库状态、Kubernetes SDK 或 Worker lease。`domain` 保持 SDK 无关；`adapter` 是唯一直接依赖外部
+`content` 是共享的文件内容边界：它处理 portable challenge source、已发布题目目录、candidate archive 和 Roadmap
+source，但不拥有数据库状态、Kubernetes SDK 或 Worker lease。`domain` 保持 SDK 无关；`adapter` 是唯一直接依赖外部
 服务 SDK 的层。`application` 编排用例，`transport` 只做认证、输入输出和流传输，`bootstrap` 是唯一可以同时连接多个
 层的位置。
 

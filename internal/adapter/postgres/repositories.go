@@ -7,6 +7,8 @@ type AgentRepository struct{ conn *Conn }
 
 type AuthoringRepository struct{ conn *Conn }
 
+type CatalogRepository struct{ conn *Conn }
+
 type EnvironmentRepository struct{ conn *Conn }
 
 type GenerationRepository struct{ conn *Conn }
