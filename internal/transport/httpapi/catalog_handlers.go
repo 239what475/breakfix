@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -8,7 +9,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/domain/taxonomy"
+	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -76,11 +77,24 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 				s.Progress = &progress
 			}
 		}
-		s.Tags = toAPITaxonomyReferences(published.Taxonomy.Tags)
-		s.PrimaryOutcome = toAPITaxonomyReference(published.Taxonomy.PrimaryOutcome)
+		s.Domain = toAPIRoadmapReference(published.Roadmap.Domain)
+		s.Topic = toAPIRoadmapReference(roadmap.Ref{ID: published.Roadmap.Topic.ID, SourceRef: published.Roadmap.Topic.SourceRef, Title: published.Roadmap.Topic.Title})
+		s.Tags = toAPIRoadmapReferences(published.Roadmap.Tags)
 		summaries = append(summaries, s)
 	}
 	c.JSON(http.StatusOK, api.ChallengeList{Challenges: summaries})
+}
+
+func (h *Handler) catalogEntries(ctx context.Context) (map[string]challenge.Entry, error) {
+	published, err := h.catalog.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make(map[string]challenge.Entry, len(published))
+	for _, item := range published {
+		entries[item.Entry.ID] = item.Entry
+	}
+	return entries, nil
 }
 
 func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
@@ -108,41 +122,52 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 		Solution:    content.Solution,
 		Hints:       hints,
 		Checkpoints: checkpoints,
-		Taxonomy:    toAPIChallengeTaxonomy(published.Taxonomy),
+		Roadmap:     toAPIChallengeRoadmap(published.Roadmap),
 	})
 }
 
-func toAPITaxonomyReference(value taxonomy.Ref) api.TaxonomyReference {
-	return api.TaxonomyReference{Id: value.ID, Title: value.Title}
+func toAPIRoadmapReference(value roadmap.Ref) api.RoadmapReference {
+	return api.RoadmapReference{Id: value.ID, SourceRef: value.SourceRef, Title: value.Title}
 }
 
-func toAPITaxonomyReferences(values []taxonomy.Ref) []api.TaxonomyReference {
-	result := make([]api.TaxonomyReference, 0, len(values))
+func toAPIRoadmapReferences(values []roadmap.Tag) []api.RoadmapReference {
+	result := make([]api.RoadmapReference, 0, len(values))
 	for _, value := range values {
-		result = append(result, toAPITaxonomyReference(value))
+		result = append(result, toAPIRoadmapReference(roadmap.Ref{ID: value.ID, SourceRef: value.SourceRef, Title: value.Title}))
 	}
 	return result
 }
 
-func toAPIChallengeTaxonomy(value appcatalog.ChallengeTaxonomy) api.ChallengeTaxonomy {
-	entrySkills := make([]api.ChallengeEntrySkill, 0, len(value.EntrySkills))
-	for _, entrySkill := range value.EntrySkills {
-		entrySkills = append(entrySkills, api.ChallengeEntrySkill{
-			Id:       entrySkill.Ref.ID,
-			Title:    entrySkill.Ref.Title,
-			Requires: toAPITaxonomyReferences(entrySkill.Requires),
+func toAPIRoadmapTag(value roadmap.Tag) api.RoadmapTag {
+	return api.RoadmapTag{Id: value.ID, SourceRef: value.SourceRef, Title: value.Title, Description: value.Description}
+}
+
+func toAPIRoadmapTopic(value roadmap.Topic) api.RoadmapTopic {
+	return api.RoadmapTopic{
+		Id: value.ID, SourceRef: value.SourceRef, Title: value.Title, Domain: toAPIRoadmapReference(value.Domain),
+		Definition: value.Definition, Scope: value.Scope, NonGoals: value.NonGoals, ChallengeGuidance: value.ChallengeGuidance,
+	}
+}
+
+func toAPIRoadmapEdges(values []roadmap.Edge) []api.RoadmapEdge {
+	result := make([]api.RoadmapEdge, 0, len(values))
+	for _, value := range values {
+		result = append(result, api.RoadmapEdge{
+			Source: toAPIRoadmapReference(value.Source), Target: toAPIRoadmapReference(value.Target),
+			Relation: api.RoadmapEdgeRelation(value.Relation), Reason: value.Reason,
 		})
 	}
-	outcomes := make([]api.ChallengeOutcome, 0, len(value.Outcomes))
-	for _, outcome := range value.Outcomes {
-		outcomes = append(outcomes, api.ChallengeOutcome{Id: outcome.ID, Title: outcome.Title, Primary: outcome.Primary})
+	return result
+}
+
+func toAPIChallengeRoadmap(value appcatalog.ChallengeRoadmap) api.ChallengeRoadmap {
+	tags := make([]api.RoadmapTag, 0, len(value.Tags))
+	for _, tag := range value.Tags {
+		tags = append(tags, toAPIRoadmapTag(tag))
 	}
-	return api.ChallengeTaxonomy{
-		Revision:       value.Revision,
-		Tags:           toAPITaxonomyReferences(value.Tags),
-		PrimaryOutcome: toAPITaxonomyReference(value.PrimaryOutcome),
-		Outcomes:       outcomes,
-		EntrySkills:    entrySkills,
+	return api.ChallengeRoadmap{
+		Revision: value.Revision, Domain: toAPIRoadmapReference(value.Domain), Topic: toAPIRoadmapTopic(value.Topic), Tags: tags,
+		TopicNeighbors: toAPIRoadmapEdges(value.TopicNeighbors), ChallengeNeighbors: toAPIRoadmapEdges(value.ChallengeNeighbors),
 	}
 }
 

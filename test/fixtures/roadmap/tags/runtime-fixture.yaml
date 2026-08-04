@@ -1,0 +1,4 @@
+kind: Tag
+source_ref: runtime-fixture
+title: 运行时验证
+description: 任务依赖真实运行时行为和自动检查点验证。

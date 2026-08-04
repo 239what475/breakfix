@@ -31,7 +31,6 @@ type Config struct {
 	CRDNamespace         string             `yaml:"crd_namespace"`
 	CooldownMinutes      int                `yaml:"cooldown_minutes"`
 	JWTSecret            string             `yaml:"jwt_secret"`
-	CatalogAdminToken    string             `yaml:"-"`
 	InternalWorkers      InternalWorkerKeys `yaml:"internal_workers"`
 	Worker               WorkerConfig       `yaml:"worker"`
 	Agent                AgentConfig        `yaml:"agent"`
@@ -134,22 +133,18 @@ type InternalWorkerRole string
 
 const (
 	InternalWorkerGenerate InternalWorkerRole = "generate"
-	InternalWorkerTaxonomy InternalWorkerRole = "taxonomy"
 )
 
 // InternalWorkerKeys are read only by Server. Every fixed worker receives its
 // own API key through WorkerConfig.APIKeyEnv instead of this complete set.
 type InternalWorkerKeys struct {
 	Generate string `yaml:"generate"`
-	Taxonomy string `yaml:"taxonomy"`
 }
 
 func (k InternalWorkerKeys) Key(role InternalWorkerRole) string {
 	switch role {
 	case InternalWorkerGenerate:
 		return k.Generate
-	case InternalWorkerTaxonomy:
-		return k.Taxonomy
 	default:
 		return ""
 	}
@@ -161,7 +156,6 @@ func (k InternalWorkerKeys) Validate() error {
 		key  string
 	}{
 		{InternalWorkerGenerate, k.Generate},
-		{InternalWorkerTaxonomy, k.Taxonomy},
 	}
 	seen := make(map[string]InternalWorkerRole, len(keys))
 	for _, item := range keys {
@@ -285,9 +279,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
-	cfg.CatalogAdminToken = os.Getenv("BREAKFIX_CATALOG_ADMIN_TOKEN")
 	cfg.InternalWorkers.Generate = os.ExpandEnv(cfg.InternalWorkers.Generate)
-	cfg.InternalWorkers.Taxonomy = os.ExpandEnv(cfg.InternalWorkers.Taxonomy)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
 	cfg.Registry.Repository = os.ExpandEnv(cfg.Registry.Repository)
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
@@ -345,9 +337,6 @@ func (c Config) ValidateServer() error {
 	}
 	if strings.TrimSpace(c.JWTSecret) == "" {
 		return fmt.Errorf("server jwt_secret is required")
-	}
-	if strings.TrimSpace(c.CatalogAdminToken) == "" {
-		return fmt.Errorf("server catalog administrator token is required")
 	}
 	if err := c.InternalWorkers.Validate(); err != nil {
 		return fmt.Errorf("server %w", err)
@@ -416,19 +405,6 @@ func (c Config) ValidateGenerateWorker() error {
 	}
 	if err := c.Incus.Validate(); err != nil {
 		return fmt.Errorf("generate worker incus: %w", err)
-	}
-	return nil
-}
-
-func (c Config) ValidateTaxonomyWorker() error {
-	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("taxonomy worker: %w", err)
-	}
-	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" {
-		return fmt.Errorf("taxonomy worker base_url, api_key_env, API key, and model are required")
-	}
-	if _, err := c.Agent.Timeout(); err != nil {
-		return err
 	}
 	return nil
 }

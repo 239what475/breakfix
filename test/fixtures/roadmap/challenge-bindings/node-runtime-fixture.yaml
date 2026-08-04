@@ -1,0 +1,12 @@
+kind: Challenge
+challenge:
+  path: challenges/node-runtime-fixture
+  source_ref: platform-runtime/node-environment-validation/node-runtime-fixture
+  title: 节点运行时验证
+  content_revision: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+topic:
+  source_ref: platform-runtime/node-environment-validation
+  title: 节点环境验证
+tags:
+  - source_ref: runtime-fixture
+    title: 运行时验证

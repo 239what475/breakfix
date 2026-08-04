@@ -1,0 +1,4 @@
+kind: Tag
+source_ref: runtime-fixture
+title: 运行时验收
+description: 仅用于验证平台运行时行为的测试内容。

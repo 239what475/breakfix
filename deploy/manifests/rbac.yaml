@@ -13,12 +13,6 @@ kind: ServiceAccount
 metadata:
   name: breakfix-generate-worker
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: breakfix-taxonomy-worker
-automountServiceAccountToken: false
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

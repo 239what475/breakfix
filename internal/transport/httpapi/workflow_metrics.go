@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WorkflowMetrics reports the two durable background aggregates. There is no
+// WorkflowMetrics reports durable background aggregates. There is no
 // generic work-item metric because the platform has no generic work queue.
 func (h *Handler) WorkflowMetrics(c *gin.Context) {
 	if h == nil || h.db == nil {
@@ -32,8 +32,6 @@ func (h *Handler) WorkflowMetrics(c *gin.Context) {
 	var output strings.Builder
 	output.WriteString("# TYPE breakfix_generation_workflows gauge\n")
 	writeWorkflowStateMetrics(&output, "breakfix_generation_workflows", counts.Generation)
-	output.WriteString("# TYPE breakfix_taxonomy_workflows gauge\n")
-	writeWorkflowStateMetrics(&output, "breakfix_taxonomy_workflows", counts.Taxonomy)
 	output.WriteString("# TYPE breakfix_verification_environments gauge\n")
 	_, _ = fmt.Fprintf(&output, "breakfix_verification_environments %d\n", activeVerification)
 	c.Data(http.StatusOK, "text/plain; version=0.0.4; charset=utf-8", []byte(output.String()))

@@ -28,7 +28,7 @@ func TestCheckedInCatalogFixtureSourceIsPortable(t *testing.T) {
 }
 
 func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
-	root, challengeRevision, taxonomyRevision := writePortableRelease(t)
+	root, challengeRevision, roadmapRevision := writePortableRelease(t)
 
 	source, err := LoadPortableSource(root)
 	if err != nil {
@@ -37,10 +37,10 @@ func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
 	if got := source.Manifest.Entries[0].ContentRevision; got != challengeRevision {
 		t.Fatalf("challenge contentRevision = %q, want %q", got, challengeRevision)
 	}
-	if got := source.Manifest.Taxonomy.ContentRevision; got != taxonomyRevision {
-		t.Fatalf("taxonomy contentRevision = %q, want %q", got, taxonomyRevision)
+	if got := source.Manifest.Roadmap.ContentRevision; got != roadmapRevision {
+		t.Fatalf("roadmap contentRevision = %q, want %q", got, roadmapRevision)
 	}
-	if len(source.Challenges) != 1 || source.Challenges[0].Entry.Title != "Cleanup logs" {
+	if len(source.Challenges) != 1 || source.Challenges[0].Entry.Title != "Cleanup logs" || len(source.Roadmap.ChallengeBindings) != 1 {
 		t.Fatalf("loaded challenges = %#v", source.Challenges)
 	}
 
@@ -221,36 +221,46 @@ func writePortableRelease(t *testing.T) (string, catalogdomain.ContentRevision, 
 		t.Fatal(err)
 	}
 
-	taxonomyRoot := filepath.Join(root, "taxonomy")
-	writeCatalogFile(t, filepath.Join(taxonomyRoot, "skills", "cleanup-script.yaml"), []byte(`kind: Skill
-id: skill-1111111111111111
-title: Cleanup script
-definition: Create a shell script that safely cleans old logs.
-mapping_guidance:
-  outcome_when:
-    - The task requires a reusable cleanup script.
+	roadmapRoot := filepath.Join(root, "roadmap")
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "domains", "linux.yaml"), []byte(`kind: Domain
+source_ref: linux
+title: Linux operations
+definition: Operate and recover Linux systems from observable evidence.
+scope: Files, services, and local operational tooling.
+non_goals: Kernel development and provider implementation details.
 `), 0o644)
-	writeCatalogFile(t, filepath.Join(taxonomyRoot, "tags", "shell.yaml"), []byte(`kind: Tag
-id: tag-1111111111111111
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "topics", "linux", "shell-files.yaml"), []byte(`kind: Topic
+source_ref: linux/shell-files
+title: Shell and files
+domain:
+  source_ref: linux
+  title: Linux operations
+definition: Locate, inspect, and repair shell and file state.
+scope: Shell execution and file content used by operational tasks.
+non_goals: Service orchestration and network configuration.
+challenge_guidance: Use for challenges whose root cause and recovery are primarily shell or file state.
+`), 0o644)
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "tags", "shell.yaml"), []byte(`kind: Tag
+source_ref: shell
 title: Shell
-definition: Tasks centered on shell scripting.
-mapping_guidance:
-  include_when:
-    - Shell behavior is central to the task.
+description: The challenge substantially depends on shell behavior or shell tooling.
 `), 0o644)
-	writeCatalogFile(t, filepath.Join(taxonomyRoot, "mappings", "challenges", "cleanup-logs.yaml"), []byte(`challenge:
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "challenge-bindings", "cleanup-logs.yaml"), []byte(`kind: Challenge
+challenge:
   path: challenges/linux/cleanup-logs
+  source_ref: linux/shell-files/cleanup-logs
   title: Cleanup logs
-  contentRevision: `+string(challengeRevision)+`
+  content_revision: `+string(challengeRevision)+`
+topic:
+  source_ref: linux/shell-files
+  title: Shell and files
 tags:
-  - id: tag-1111111111111111
+  - source_ref: shell
     title: Shell
-outcomes:
-  - id: skill-1111111111111111
-    title: Cleanup script
-    primary: true
 `), 0o644)
-	taxonomyRevision, err := ContentRevision(taxonomyRoot)
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "topic-edges.yaml"), []byte("[]\n"), 0o644)
+	writeCatalogFile(t, filepath.Join(roadmapRoot, "challenge-edges.yaml"), []byte("[]\n"), 0o644)
+	roadmapRevision, err := ContentRevision(roadmapRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +272,10 @@ metadata:
 entries:
   - path: challenges/linux/cleanup-logs
     contentRevision: `+string(challengeRevision)+`
-taxonomy:
-  contentRevision: `+string(taxonomyRevision)+`
+roadmap:
+  contentRevision: `+string(roadmapRevision)+`
 `), 0o644)
-	return root, challengeRevision, taxonomyRevision
+	return root, challengeRevision, roadmapRevision
 }
 
 func writeChallengeSource(t *testing.T, root string, published bool) {

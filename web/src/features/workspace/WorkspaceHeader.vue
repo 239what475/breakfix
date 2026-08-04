@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <header class="workspace-header">
-    <div class="workspace-title"><div><p class="eyebrow">{{ challenge.runtime }} lab</p><h1>{{ challenge.title }}</h1><div class="workspace-tags"><span :class="['difficulty', challenge.difficulty]">{{ challenge.difficulty }}</span><span v-for="tag in challenge.tags" :key="tag.id">{{ tag.title }}</span></div><p class="workspace-primary-skill">Practice: {{ challenge.primary_outcome.title }}</p></div></div>
+    <div class="workspace-title"><div><p class="eyebrow">{{ challenge.runtime }} lab</p><h1>{{ challenge.title }}</h1><div class="workspace-tags"><span :class="['difficulty', challenge.difficulty]">{{ challenge.difficulty }}</span><span v-for="tag in challenge.tags" :key="tag.id">{{ tag.title }}</span></div><p class="workspace-primary-topic">Topic: {{ challenge.topic.title }}</p></div></div>
     <div class="workspace-header-actions">
       <div class="mobile-view-toggle"><button :class="{ active: mobileView === 'document' }" @click="emit('updateMobileView', 'document')">Docs</button><button :class="{ active: mobileView === 'terminal' }" @click="emit('updateMobileView', 'terminal')">Terminal</button></div>
       <span class="progress-count">{{ complete }} / {{ total }} complete</span>

@@ -12,7 +12,6 @@ import (
 
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
-	"github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -130,26 +129,6 @@ func (d *GenerationRepository) ClaimGenerationWorkflow(ctx context.Context, work
 	if err != nil {
 		return nil, err
 	}
-	if workflow.Source.Kind == generation.SourceRelease {
-		var releaseState catalog.ReleaseState
-		err := tx.QueryRowContext(ctx, `SELECT release.state FROM catalog_releases release
-			JOIN catalog_release_entries entry ON entry.release_id = release.id
-			WHERE entry.id = ? FOR UPDATE`, workflow.Source.Ref).Scan(&releaseState)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("catalog release workflow entry does not exist")
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read catalog release workflow state: %w", err)
-		}
-		if releaseState == catalog.ReleaseCleaningUp && workflow.State != generation.StateCleaningUp {
-			workflow, err = scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?,
-				state_attempt = 0, active_agent_run_id = NULL, next_run_at = ?, updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
-				generation.StateCleaningUp, generation.CleanupFailed, now, now, workflow.ID))
-			if err != nil {
-				return nil, fmt.Errorf("route catalog workflow to cleanup: %w", err)
-			}
-		}
-	}
 	if !workflow.State.Leaseable() {
 		return nil, fmt.Errorf("generation workflow %s is not leaseable", workflow.ID)
 	}
@@ -209,40 +188,27 @@ func (d *GenerationRepository) LoadGenerationContext(ctx context.Context, claim 
 		return nil, err
 	}
 	result := &generation.Context{Workflow: *workflow}
-	switch workflow.Source.Kind {
-	case generation.SourceAuthoring:
-		revision, err := authoringSourceRevision(*workflow)
-		if err != nil {
-			return nil, err
-		}
-		plan, err := readAuthoringRevisionTx(ctx, tx, workflow.Source.Ref, revision)
-		if err != nil {
-			return nil, err
-		}
-		session, err := readAuthoringSessionTx(ctx, tx, workflow.Source.Ref, "")
-		if err != nil {
-			return nil, err
-		}
-		generatorSession, err := ensureGeneratorSessionTx(ctx, tx, session)
-		if err != nil {
-			return nil, err
-		}
-		result.Plan = plan.Plan
-		result.GeneratorSession = generatorSession
-	case generation.SourceRelease:
-		entry, err := scanCatalogEntry(tx.QueryRowContext(ctx, catalogEntrySelect+` WHERE id = ? FOR UPDATE`, workflow.Source.Ref))
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("catalog release workflow entry does not exist")
-		}
-		if err != nil {
-			return nil, err
-		}
-		if entry.CandidateRevisionID != workflow.CandidateRevisionID || string(entry.ContentRevision) != workflow.SourceRevision {
-			return nil, errors.New("catalog release workflow lineage is inconsistent")
-		}
-	default:
+	if workflow.Source.Kind != generation.SourceAuthoring {
 		return nil, errors.New("generation workflow source is invalid")
 	}
+	revision, err := authoringSourceRevision(*workflow)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := readAuthoringRevisionTx(ctx, tx, workflow.Source.Ref, revision)
+	if err != nil {
+		return nil, err
+	}
+	session, err := readAuthoringSessionTx(ctx, tx, workflow.Source.Ref, "")
+	if err != nil {
+		return nil, err
+	}
+	generatorSession, err := ensureGeneratorSessionTx(ctx, tx, session)
+	if err != nil {
+		return nil, err
+	}
+	result.Plan = plan.Plan
+	result.GeneratorSession = generatorSession
 	if workflow.CandidateRevisionID != "" {
 		revision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ?`, workflow.CandidateRevisionID))
 		if err != nil {
@@ -500,35 +466,8 @@ func (d *GenerationRepository) advanceCandidateOutput(ctx context.Context, claim
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET `+column+` = ?::jsonb, updated_at = ? WHERE id = ?`, encoded, now.UTC(), candidateRevision.ID); err != nil {
 		return fmt.Errorf("record generation candidate output: %w", err)
 	}
-	nextState := next
-	cleanupIntent := generation.CleanupIntent("")
-	if workflow.Source.Kind == generation.SourceRelease {
-		entry, release, err := catalogEntryReleaseTx(ctx, tx, workflow.Source.Ref)
-		if err != nil {
-			return err
-		}
-		if entry.CandidateRevisionID != candidateRevision.ID || string(entry.ContentRevision) != workflow.SourceRevision {
-			return errors.New("catalog release output lineage is inconsistent")
-		}
-		if release.State == catalog.ReleaseCleaningUp {
-			nextState = generation.StateCleaningUp
-			cleanupIntent = generation.CleanupFailed
-			if entry.State != catalog.EntryFailed {
-				if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ? WHERE id = ?`, catalog.EntryCleaningUp, now.UTC(), entry.ID); err != nil {
-					return fmt.Errorf("schedule catalog entry cleanup: %w", err)
-				}
-			}
-		} else if expected == generation.StateArtifactPublishing {
-			if entry.State != catalog.EntryBuilding {
-				return errors.New("catalog release entry is not building")
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ? WHERE id = ?`, catalog.EntryVerifying, now.UTC(), entry.ID); err != nil {
-				return fmt.Errorf("advance catalog entry to verification: %w", err)
-			}
-		}
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, state_attempt = 0, last_error = '', next_run_at = ?, updated_at = ? WHERE id = ?`,
-		nextState, cleanupIntent, now.UTC(), now.UTC(), workflow.ID); err != nil {
+		next, generation.CleanupIntent(""), now.UTC(), now.UTC(), workflow.ID); err != nil {
 		return fmt.Errorf("advance generation workflow: %w", err)
 	}
 	return tx.Commit()
@@ -594,88 +533,35 @@ func (d *GenerationRepository) CompleteGenerationVerification(ctx context.Contex
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET verification_report = ?::jsonb, verified_at = ?, updated_at = ? WHERE id = ?`, encoded, now.UTC(), now.UTC(), candidateRevision.ID); err != nil {
 		return fmt.Errorf("record verification report: %w", err)
 	}
-	switch workflow.Source.Kind {
-	case generation.SourceAuthoring:
-		authoringRevision, err := authoringSourceRevision(*workflow)
-		if err != nil {
-			return err
-		}
-		if report.Passed {
-			if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET candidate_revision_id = ? WHERE session_id = ? AND revision = ?`, candidateRevision.ID, workflow.Source.Ref, authoringRevision); err != nil {
-				return fmt.Errorf("link verified candidate to authoring revision: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET visible_revision = ?, updated_at = ? WHERE id = ?`, authoringRevision, nowText(now), workflow.Source.Ref); err != nil {
-				return fmt.Errorf("update visible authoring revision: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0, lease_owner = '', lease_expires_at = NULL,
-				deadline_paused_at = ?, last_error = '', updated_at = ? WHERE id = ?`, generation.StateNeedsAuthorReview, now.UTC(), now.UTC(), workflow.ID); err != nil {
-				return fmt.Errorf("pause generation workflow for author review: %w", err)
-			}
-			break
-		}
-		failure, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: "VERIFY_FAILED", Summary: report.Summary})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, failure, now.UTC(), candidateRevision.ID); err != nil {
-			return fmt.Errorf("record verification failure: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, report.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("return failed verification to generator: %w", err)
-		}
-
-	case generation.SourceRelease:
-		entry, release, err := catalogEntryReleaseTx(ctx, tx, workflow.Source.Ref)
-		if err != nil {
-			return err
-		}
-		if entry.CandidateRevisionID != candidateRevision.ID || string(entry.ContentRevision) != workflow.SourceRevision {
-			return errors.New("catalog release verification lineage is inconsistent")
-		}
-		if report.Passed && release.State == catalog.ReleaseInstalling {
-			if entry.State != catalog.EntryVerifying {
-				return errors.New("catalog release entry is not verifying")
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, last_error = '', updated_at = ? WHERE id = ?`, catalog.EntryReadyToCommit, now.UTC(), entry.ID); err != nil {
-				return fmt.Errorf("mark catalog entry ready to commit: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, state_attempt = 0, last_error = '', next_run_at = ?, updated_at = ? WHERE id = ?`,
-				generation.StateCleaningUp, generation.CleanupCompleted, now.UTC(), now.UTC(), workflow.ID); err != nil {
-				return fmt.Errorf("clean verified catalog workflow: %w", err)
-			}
-			break
-		}
-
-		if !report.Passed {
-			failure, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: "VERIFY_FAILED", Summary: report.Summary})
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, failure, now.UTC(), candidateRevision.ID); err != nil {
-				return fmt.Errorf("record catalog verification failure: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`, catalog.EntryFailed, report.Summary, now.UTC(), entry.ID); err != nil {
-				return fmt.Errorf("mark catalog entry failed: %w", err)
-			}
-			if err := setCatalogReleaseCleaningUpTx(ctx, tx, release.ID, report.Summary, now); err != nil {
-				return err
-			}
-		} else if entry.State != catalog.EntryFailed {
-			if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ? WHERE id = ?`, catalog.EntryCleaningUp, now.UTC(), entry.ID); err != nil {
-				return fmt.Errorf("clean catalog entry after release failure: %w", err)
-			}
-		}
-		if err := scheduleCatalogReleaseCleanupTx(ctx, tx, release.ID, now); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, state_attempt = 0,
-			last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateCleaningUp, generation.CleanupFailed,
-			report.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("schedule failed catalog workflow cleanup: %w", err)
-		}
-
-	default:
+	if workflow.Source.Kind != generation.SourceAuthoring {
 		return errors.New("generation workflow source is invalid")
+	}
+	authoringRevision, err := authoringSourceRevision(*workflow)
+	if err != nil {
+		return err
+	}
+	if report.Passed {
+		if _, err := tx.ExecContext(ctx, `UPDATE authoring_revisions SET candidate_revision_id = ? WHERE session_id = ? AND revision = ?`, candidateRevision.ID, workflow.Source.Ref, authoringRevision); err != nil {
+			return fmt.Errorf("link verified candidate to authoring revision: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET visible_revision = ?, updated_at = ? WHERE id = ?`, authoringRevision, nowText(now), workflow.Source.Ref); err != nil {
+			return fmt.Errorf("update visible authoring revision: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0, lease_owner = '', lease_expires_at = NULL,
+			deadline_paused_at = ?, last_error = '', updated_at = ? WHERE id = ?`, generation.StateNeedsAuthorReview, now.UTC(), now.UTC(), workflow.ID); err != nil {
+			return fmt.Errorf("pause generation workflow for author review: %w", err)
+		}
+		return tx.Commit()
+	}
+	failure, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: "VERIFY_FAILED", Summary: report.Summary})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, failure, now.UTC(), candidateRevision.ID); err != nil {
+		return fmt.Errorf("record verification failure: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, report.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
+		return fmt.Errorf("return failed verification to generator: %w", err)
 	}
 	return tx.Commit()
 }
@@ -772,8 +658,8 @@ func (d *GenerationRepository) BeginGenerationPublication(ctx context.Context, s
 	return updated, nil
 }
 
-func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, taxonomyChallengeID, taxonomyChallengeContentRevision, taxonomyBaseRevision string, now time.Time) error {
-	if !claim.Valid() || strings.TrimSpace(taxonomyChallengeID) == "" || strings.TrimSpace(taxonomyChallengeContentRevision) == "" || now.IsZero() {
+func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
+	if !claim.Valid() || now.IsZero() {
 		return errors.New("generation challenge publication finalization is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -799,9 +685,6 @@ func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Co
 	if err := publication.ValidateIntent(); err != nil {
 		return err
 	}
-	if publication.ChallengeID != taxonomyChallengeID {
-		return errors.New("taxonomy workflow challenge does not match generation publication")
-	}
 	publication.Artifact = &artifact
 	encodedPublication, err := marshalJSON(publication)
 	if err != nil {
@@ -809,9 +692,6 @@ func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Co
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, published_at = ?, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), now.UTC(), candidateRevision.ID); err != nil {
 		return fmt.Errorf("record challenge publication: %w", err)
-	}
-	if _, _, err := createOrGetTaxonomyWorkflowTx(ctx, tx, taxonomyChallengeID, taxonomyChallengeContentRevision, taxonomyBaseRevision, now); err != nil {
-		return fmt.Errorf("create taxonomy workflow for published challenge: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, publish_challenge_id = ?, updated_at = ? WHERE id = ?`, authoring.StatePublished, publication.ChallengeID, nowText(now), workflow.Source.Ref); err != nil {
 		return fmt.Errorf("mark authoring session published: %w", err)
@@ -854,10 +734,8 @@ func (d *GenerationRepository) ReportGenerationInfrastructureFailure(ctx context
 	return updated, nil
 }
 
-// ReportGenerationArtifactFailure records a deterministic candidate defect.
-// Authoring workflows return to their generator session, while immutable
-// catalog source must never be repaired by an Agent and therefore transitions
-// its whole release into cleanup.
+// ReportGenerationArtifactFailure records a deterministic candidate defect and
+// returns the authoring workflow to the same generator session for repair.
 func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, report *generation.VerificationReport, now time.Time) error {
 	if !claim.Valid() || failure.Class != generation.FailureArtifact || failure.Validate() != nil || now.IsZero() {
 		return errors.New("generation artifact failure is invalid")
@@ -906,33 +784,12 @@ func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Conte
 			return fmt.Errorf("fail generation agent run: %w", err)
 		}
 	}
-	if workflow.Source.Kind == generation.SourceRelease {
-		entry, release, err := catalogEntryReleaseTx(ctx, tx, workflow.Source.Ref)
-		if err != nil {
-			return err
-		}
-		if entry.CandidateRevisionID != workflow.CandidateRevisionID || string(entry.ContentRevision) != workflow.SourceRevision {
-			return errors.New("catalog release artifact failure lineage is inconsistent")
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, last_error = ?, updated_at = ? WHERE id = ?`, catalog.EntryFailed, failure.Summary, now.UTC(), entry.ID); err != nil {
-			return fmt.Errorf("mark catalog entry artifact failure: %w", err)
-		}
-		if err := setCatalogReleaseCleaningUpTx(ctx, tx, release.ID, failure.Summary, now); err != nil {
-			return err
-		}
-		if err := scheduleCatalogReleaseCleanupTx(ctx, tx, release.ID, now); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, active_agent_run_id = NULL,
-			state_attempt = 0, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateCleaningUp,
-			generation.CleanupFailed, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("clean failed catalog workflow: %w", err)
-		}
-	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL, state_attempt = 0,
-			last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("return artifact failure to generator: %w", err)
-		}
+	if workflow.Source.Kind != generation.SourceAuthoring {
+		return errors.New("generation workflow source is invalid")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL, state_attempt = 0,
+		last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
+		return fmt.Errorf("return artifact failure to generator: %w", err)
 	}
 	return tx.Commit()
 }
@@ -960,22 +817,6 @@ func (d *GenerationRepository) CompleteGenerationCleanup(ctx context.Context, cl
 		next = generation.StateCancelled
 	default:
 		return errors.New("generation cleanup intent is invalid")
-	}
-	if workflow.Source.Kind == generation.SourceRelease {
-		entry, release, err := catalogEntryReleaseTx(ctx, tx, workflow.Source.Ref)
-		if err != nil {
-			return err
-		}
-		if entry.CandidateRevisionID != workflow.CandidateRevisionID || string(entry.ContentRevision) != workflow.SourceRevision {
-			return errors.New("catalog release cleanup lineage is inconsistent")
-		}
-		if workflow.CleanupIntent != generation.CleanupCompleted || release.State == catalog.ReleaseCleaningUp {
-			if entry.State != catalog.EntryFailed {
-				if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ? WHERE id = ?`, catalog.EntryCleaned, now.UTC(), entry.ID); err != nil {
-					return fmt.Errorf("complete catalog entry cleanup: %w", err)
-				}
-			}
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = '', lease_owner = '', lease_expires_at = NULL,
 		active_agent_run_id = NULL, updated_at = ? WHERE id = ?`, next, now.UTC(), workflow.ID); err != nil {
@@ -1052,31 +893,6 @@ func expireGenerationDeadlinesTx(ctx context.Context, tx *Tx, now time.Time) err
 		return fmt.Errorf("expire generation workflows: %w", err)
 	}
 	_ = result
-	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, last_error = 'generation execution deadline exceeded', updated_at = ?
-		WHERE id IN (SELECT source_ref FROM generation_workflows WHERE source_kind = ? AND state = ?
-			AND last_error = 'generation execution deadline exceeded') AND state <> ?`, catalog.EntryFailed, now.UTC(),
-		generation.SourceRelease, generation.StateCleaningUp, catalog.EntryFailed); err != nil {
-		return fmt.Errorf("mark expired catalog entries failed: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = CASE WHEN last_error = '' THEN 'generation execution deadline exceeded' ELSE last_error END,
-		updated_at = ? WHERE state IN (?, ?) AND id IN (
-			SELECT DISTINCT release_id FROM catalog_release_entries WHERE state = ? AND last_error = 'generation execution deadline exceeded'
-		)`, catalog.ReleaseCleaningUp, now.UTC(), catalog.ReleaseInstalling, catalog.ReleaseCommitting, catalog.EntryFailed); err != nil {
-		return fmt.Errorf("mark expired catalog releases cleaning up: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ? WHERE state IN (?, ?, ?)
-		AND release_id IN (SELECT id FROM catalog_releases WHERE state = ?)`, catalog.EntryCleaningUp, now.UTC(),
-		catalog.EntryBuilding, catalog.EntryVerifying, catalog.EntryReadyToCommit, catalog.ReleaseCleaningUp); err != nil {
-		return fmt.Errorf("schedule expired catalog entry cleanup: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, state_attempt = 0,
-		active_agent_run_id = NULL, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, updated_at = ?
-		WHERE source_kind = ? AND lease_owner = '' AND state NOT IN (?, ?, ?)
-		AND source_ref IN (SELECT entry.id FROM catalog_release_entries entry JOIN catalog_releases release ON release.id = entry.release_id
-			WHERE release.state = ?)`, generation.StateCleaningUp, generation.CleanupFailed, now.UTC(), now.UTC(), generation.SourceRelease,
-		generation.StateCleaningUp, generation.StateFailed, generation.StateCancelled, catalog.ReleaseCleaningUp); err != nil {
-		return fmt.Errorf("schedule expired catalog workflow cleanup: %w", err)
-	}
 	return nil
 }
 
@@ -1090,76 +906,6 @@ func lockGenerationClaimTx(ctx context.Context, tx *Tx, claim generation.Claim, 
 		return nil, fmt.Errorf("lock generation workflow lease: %w", err)
 	}
 	return workflow, nil
-}
-
-func catalogEntryReleaseTx(ctx context.Context, tx *Tx, entryID string) (*catalog.Entry, *catalog.Release, error) {
-	entry, err := scanCatalogEntry(tx.QueryRowContext(ctx, catalogEntrySelect+` WHERE id = ? FOR UPDATE`, strings.TrimSpace(entryID)))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, errors.New("catalog release entry does not exist")
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	release, err := scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ? FOR UPDATE`, entry.ReleaseID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, errors.New("catalog release does not exist")
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	return entry, release, nil
-}
-
-func setCatalogReleaseCleaningUpTx(ctx context.Context, tx *Tx, releaseID, reason string, now time.Time) error {
-	result, err := tx.ExecContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = CASE WHEN last_error = '' THEN ? ELSE last_error END,
-		updated_at = ? WHERE id = ? AND state IN (?, ?, ?)`, catalog.ReleaseCleaningUp, strings.TrimSpace(reason), now.UTC(), releaseID,
-		catalog.ReleaseInstalling, catalog.ReleaseCommitting, catalog.ReleaseCleaningUp)
-	if err != nil {
-		return fmt.Errorf("mark catalog release cleaning up: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return errors.New("catalog release cannot enter cleanup")
-	}
-	return nil
-}
-
-// scheduleCatalogReleaseCleanupTx changes only unleased workflows. A worker
-// that already owns a lease is allowed to finish its current side effect; its
-// next reported phase sees the release state and is routed into cleanup.
-func scheduleCatalogReleaseCleanupTx(ctx context.Context, tx *Tx, releaseID string, now time.Time) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entries SET state = ?, updated_at = ?
-		WHERE release_id = ? AND state IN (?, ?, ?)`, catalog.EntryCleaningUp, now.UTC(), releaseID,
-		catalog.EntryBuilding, catalog.EntryVerifying, catalog.EntryReadyToCommit); err != nil {
-		return fmt.Errorf("schedule catalog entry cleanup: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, cleanup_intent = ?, state_attempt = 0,
-		active_agent_run_id = NULL, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, updated_at = ?
-		WHERE source_kind = ? AND source_ref IN (SELECT id FROM catalog_release_entries WHERE release_id = ?)
-		AND lease_owner = '' AND state NOT IN (?, ?, ?)`, generation.StateCleaningUp, generation.CleanupFailed, now.UTC(), now.UTC(),
-		generation.SourceRelease, releaseID, generation.StateCleaningUp, generation.StateFailed, generation.StateCancelled); err != nil {
-		return fmt.Errorf("schedule catalog workflow cleanup: %w", err)
-	}
-	return nil
-}
-
-func finalizeCatalogReleaseCleanupTx(ctx context.Context, tx *Tx, releaseID string, now time.Time) error {
-	var complete bool
-	if err := tx.QueryRowContext(ctx, `SELECT NOT EXISTS (
-		SELECT 1 FROM generation_workflows workflow
-		JOIN catalog_release_entries entry ON entry.id = workflow.source_ref
-		WHERE workflow.source_kind = ? AND entry.release_id = ?
-		AND workflow.state NOT IN (?, ?, ?)
-	)`, generation.SourceRelease, releaseID, generation.StateCompleted, generation.StateFailed, generation.StateCancelled).Scan(&complete); err != nil {
-		return fmt.Errorf("check catalog release cleanup: %w", err)
-	}
-	if !complete {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE catalog_releases SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
-		catalog.ReleaseFailed, now.UTC(), releaseID, catalog.ReleaseCleaningUp); err != nil {
-		return fmt.Errorf("complete catalog release cleanup: %w", err)
-	}
-	return nil
 }
 
 func generationLeaseLost() error { return generation.ErrLeaseLost }

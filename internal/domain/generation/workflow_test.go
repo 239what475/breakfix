@@ -17,7 +17,7 @@ func TestGenerationStateClassification(t *testing.T) {
 	}
 }
 
-func TestWorkflowSourceKeepsAuthoringAndReleaseLineageDistinct(t *testing.T) {
+func TestWorkflowSourceRequiresAuthoringLineage(t *testing.T) {
 	authoring := Workflow{
 		ID: "generation-authoring", Source: Source{Kind: SourceAuthoring, Ref: "authoring-session"},
 		SourceRevision: "2", State: StateQueued,
@@ -25,15 +25,8 @@ func TestWorkflowSourceKeepsAuthoringAndReleaseLineageDistinct(t *testing.T) {
 	if !authoring.Valid() {
 		t.Fatalf("valid authoring workflow rejected: %#v", authoring)
 	}
-	release := Workflow{
-		ID: "generation-release", Source: Source{Kind: SourceRelease, Ref: "catalog-entry"},
-		SourceRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", State: StateQueued,
-	}
-	if !release.Valid() {
-		t.Fatalf("valid release workflow rejected: %#v", release)
-	}
-	release.SourceRevision = ""
-	if release.Valid() {
+	authoring.SourceRevision = ""
+	if authoring.Valid() {
 		t.Fatal("workflow accepted an empty source revision")
 	}
 }

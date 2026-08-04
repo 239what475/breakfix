@@ -26,7 +26,7 @@ func (h *Handler) recoverExpiredGenerationWorkflowsAt(ctx context.Context, now t
 	if err := h.db.Generation.RecoverExpiredGenerationWorkflows(ctx, now.UTC()); err != nil {
 		return err
 	}
-	return h.RecoverCatalogReleases(ctx)
+	return nil
 }
 
 func (h *Handler) StartGenerationDeadlineRecovery(ctx context.Context) {

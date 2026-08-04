@@ -35,7 +35,7 @@ const emit = defineEmits<{ start: [id: string] }>();
 					<span v-if="challenge.active && challenge.solved" class="completion-history">Completed before</span>
 				</div>
 			</div>
-			<p class="challenge-primary-skill">Practice: {{ challenge.primary_outcome.title }}</p>
+			<p class="challenge-primary-topic">Topic: {{ challenge.topic.title }}</p>
 		</div>
 		<div class="challenge-card-action">
 			<button class="primary-button" type="button" :disabled="starting" @click="emit('start', challenge.id)">

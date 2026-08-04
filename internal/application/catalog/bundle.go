@@ -43,7 +43,7 @@ func BuildPortableBundle(root string) (*PortableBundle, error) {
 		Annotations: map[string]string{
 			"org.opencontainers.image.title":                 source.Manifest.Metadata.Name,
 			"org.opencontainers.image.version":               source.Manifest.Metadata.Version,
-			"breakfix.dev/catalog.taxonomy-content-revision": string(source.Manifest.Taxonomy.ContentRevision),
+			"breakfix.dev/catalog.roadmap-content-revision":  string(source.Manifest.Roadmap.ContentRevision),
 		},
 		Manifest: source.Manifest,
 	}, nil

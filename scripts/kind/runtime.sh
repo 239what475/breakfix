@@ -4,7 +4,6 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 generate_worker_replicas=${BREAKFIX_KIND_GENERATE_WORKER_REPLICAS:-1}
-taxonomy_worker_replicas=${BREAKFIX_KIND_TAXONOMY_WORKER_REPLICAS:-1}
 root_manifest=${BREAKFIX_KIND_ROOT_MANIFEST:-$repo_root}
 kind_overlay=${BREAKFIX_KIND_OVERLAY_MANIFEST:-$repo_root/deploy/overlays/kind}
 registry_node_port=30443
@@ -124,13 +123,6 @@ case "$generate_worker_replicas" in
     exit 2
     ;;
 esac
-case "$taxonomy_worker_replicas" in
-  '' | *[!0-9]*)
-    printf 'BREAKFIX_KIND_TAXONOMY_WORKER_REPLICAS must be a non-negative integer\n' >&2
-    exit 2
-    ;;
-esac
-
 endpoint=$(kubectl -n "$namespace" get secret breakfix-runtime -o json |
   jq -r '.data.incus_endpoint | @base64d')
 incus_port=${endpoint##*:}
@@ -187,27 +179,22 @@ kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
 
 kubectl -n "$namespace" scale deployment/breakfix-generate-worker \
   --replicas="$generate_worker_replicas" >/dev/null
-kubectl -n "$namespace" scale deployment/breakfix-taxonomy-worker \
-  --replicas="$taxonomy_worker_replicas" >/dev/null
 
 # Secret-backed environment variables are read only when a Pod starts. This
 # development entry point applies an administrator-owned Secret and must make
 # every local control-plane process observe its current values.
 kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
-for deployment in server controller generate-worker taxonomy-worker; do
+for deployment in server controller generate-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
-for deployment in server controller generate-worker taxonomy-worker; do
+for deployment in server controller generate-worker; do
   if [ "$deployment" = generate-worker ] && [ "$generate_worker_replicas" -eq 0 ]; then
-    continue
-  fi
-  if [ "$deployment" = taxonomy-worker ] && [ "$taxonomy_worker_replicas" -eq 0 ]; then
     continue
   fi
   kubectl -n "$namespace" rollout status deployment/"breakfix-$deployment" --timeout=3m >/dev/null
 done
 
-printf 'Applied Kind runtime with %s Generate Worker replica(s), %s Taxonomy Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
-	"$generate_worker_replicas" "$taxonomy_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
+printf 'Applied Kind runtime with %s Generate Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
+	"$generate_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
 printf 'Kind nodes trust the Registry CA through their system trust store; no custom DNS or /etc/hosts entry is required.\n'

@@ -106,7 +106,7 @@ func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 }
 
 func TestGetChallengeProgressRequiresLogin(t *testing.T) {
-	handler := newHandlerForTest(nil, nil, config.Config{})
+	handler := newHandlerForTest(t, nil, nil, config.Config{})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
@@ -131,14 +131,12 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
-	seedTestTaxonomy(t, root)
-
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 
-	handler := newHandlerForTest(database, nil, config.Config{DataDir: root})
+	handler := newHandlerForTest(t, database, nil, config.Config{DataDir: root})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/content", nil)
@@ -159,12 +157,11 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
-	if content.Taxonomy.PrimaryOutcome.Id != "skill-4444444444444444" || len(content.Taxonomy.EntrySkills) != 1 {
-		t.Fatalf("taxonomy projection = %#v", content.Taxonomy)
+	if content.Roadmap.Domain.SourceRef != "test-catalog" || content.Roadmap.Topic.SourceRef != "test-catalog/repair" {
+		t.Fatalf("roadmap topic projection = %#v", content.Roadmap)
 	}
-	entry := content.Taxonomy.EntrySkills[0]
-	if entry.Id != "skill-5555555555555555" || len(entry.Requires) != 1 || entry.Requires[0].Id != "skill-6666666666666666" {
-		t.Fatalf("entry skill prerequisites = %#v", entry)
+	if len(content.Roadmap.Tags) != 1 || content.Roadmap.Tags[0].SourceRef != "test" || content.Roadmap.Tags[0].Description != "Test fixture tag." {
+		t.Fatalf("roadmap tag projection = %#v", content.Roadmap.Tags)
 	}
 }
 
@@ -185,10 +182,9 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	writeTestFile(t, filepath.Join(challengeDir, "k8s", "generate.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "k8s", "checks.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(challengeDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
-	seedTestTaxonomy(t, root)
-
 	cfg := config.Config{DataDir: root}
-	handler := newHandlerForTest(nil, nil, cfg)
+	database := testpostgres.New(t)
+	handler := newHandlerForTest(t, database, nil, cfg)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -217,35 +213,11 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
 	}
-	if len(got.Tags) != 1 || got.Tags[0].Id != "tag-4444444444444444" || got.Tags[0].Title != "Test" {
+	if got.Domain.SourceRef != "test-catalog" || got.Topic.SourceRef != "test-catalog/repair" {
+		t.Fatalf("roadmap summary = %#v", got)
+	}
+	if len(got.Tags) != 1 || got.Tags[0].SourceRef != "test" || got.Tags[0].Title != "Test" {
 		t.Fatalf("structured tags = %#v", got.Tags)
-	}
-	if got.PrimaryOutcome.Id != "skill-4444444444444444" || got.PrimaryOutcome.Title != "Repair a test service" {
-		t.Fatalf("primary outcome = %#v", got.PrimaryOutcome)
-	}
-}
-
-func TestListChallengesHidesPublishedChallengeBeforeTaxonomyMapping(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	root := t.TempDir()
-	writeTestChallenge(t, root)
-	handler := newHandlerForTest(nil, nil, config.Config{DataDir: root})
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
-	handler.ListChallenges(ctx)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var response api.ChallengeList
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Challenges) != 0 {
-		t.Fatalf("unmapped published challenge entered public catalog: %#v", response.Challenges)
 	}
 }
 
@@ -352,7 +324,6 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 	t.Helper()
 	root := t.TempDir()
 	writeTestChallenge(t, root)
-	seedTestTaxonomy(t, root)
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -393,7 +364,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newHandlerForTest(database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
+	return newHandlerForTest(t, database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
 }
 
 func writeTestChallenge(t *testing.T, root string) {

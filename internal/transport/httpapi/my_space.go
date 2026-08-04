@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
-	taxonomydomain "github.com/breakfix/breakfix/internal/domain/taxonomy"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -74,13 +71,9 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 	if createdAt.IsZero() {
 		return api.MySpace{}, fmt.Errorf("user creation time is missing")
 	}
-	entries, err := challenge.List(h.challengesDir)
+	catalog, err := h.catalogEntries(ctx)
 	if err != nil {
 		return api.MySpace{}, fmt.Errorf("list challenge catalog: %w", err)
-	}
-	catalog := make(map[string]challenge.Entry, len(entries))
-	for _, entry := range entries {
-		catalog[entry.ID] = entry
 	}
 
 	learning, err := h.db.Environment.LearningSummary(ctx, user.ID, now)
@@ -180,13 +173,9 @@ func (h *Handler) occupiedEnvironmentCount(ctx context.Context, userID string) (
 }
 
 func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int) (api.MySpaceLearningPage, error) {
-	entries, err := challenge.List(h.challengesDir)
+	catalog, err := h.catalogEntries(ctx)
 	if err != nil {
 		return api.MySpaceLearningPage{}, fmt.Errorf("list challenge catalog: %w", err)
-	}
-	catalog := make(map[string]challenge.Entry, len(entries))
-	for _, entry := range entries {
-		catalog[entry.ID] = entry
 	}
 	return h.mySpaceLearningFromCatalog(ctx, userID, cursor, filter, limit, time.Now().UTC(), catalog)
 }
@@ -294,9 +283,8 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 	}
 	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedChallenge, 0)}
 	type authoredPublished struct {
-		session        postgres.AuthoringSpaceSession
-		entry          challenge.Entry
-		taxonomyStatus api.MySpacePublishedChallengeTaxonomyStatus
+		session postgres.AuthoringSpaceSession
+		entry   challenge.Entry
 	}
 	published := make([]authoredPublished, 0)
 	for _, session := range sessions {
@@ -320,13 +308,14 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 			})
 			continue
 		}
-		if entry, ok := catalog[session.PublishChallengeID]; ok && session.PublishChallengeID != "" {
-			status, err := h.authoringTaxonomyStatus(ctx, entry)
-			if err != nil {
-				return api.MySpaceAuthoring{}, 0, 0, err
-			}
-			published = append(published, authoredPublished{session: session, entry: entry, taxonomyStatus: status})
+		if session.PublishChallengeID == "" {
+			continue
 		}
+		entry, ok := catalog[session.PublishChallengeID]
+		if !ok {
+			continue
+		}
+		published = append(published, authoredPublished{session: session, entry: entry})
 	}
 	challengeIDs := make([]string, 0, len(published))
 	for _, item := range published {
@@ -341,7 +330,6 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 		card := api.MySpacePublishedChallenge{
 			Challenge:      mySpaceChallenge(item.entry),
 			PublishedAt:    item.entry.PublishedAt,
-			TaxonomyStatus: item.taxonomyStatus,
 			AttemptedUsers: count.AttemptedUsers,
 			CompletedUsers: count.CompletedUsers,
 		}
@@ -352,41 +340,6 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 		view.Published = append(view.Published, card)
 	}
 	return view, len(view.Drafts), len(view.Published), nil
-}
-
-func (h *Handler) authoringTaxonomyStatus(ctx context.Context, entry challenge.Entry) (api.MySpacePublishedChallengeTaxonomyStatus, error) {
-	if h.taxonomy != nil {
-		snapshot, err := h.taxonomy.LoadCurrent()
-		if err != nil && !errors.Is(err, taxonomydomain.ErrNoCurrentRevision) {
-			return "", fmt.Errorf("load current taxonomy for authoring status: %w", err)
-		}
-		if snapshot != nil {
-			index, err := taxonomy.NewCatalogIndex(*snapshot, []challenge.Entry{entry})
-			if err != nil {
-				return "", fmt.Errorf("build taxonomy index for authoring status: %w", err)
-			}
-			if _, mapped := index.Mapping(entry.ID); mapped {
-				return api.MySpacePublishedChallengeTaxonomyStatus("mapped"), nil
-			}
-		}
-	}
-
-	workflow, err := h.db.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, entry.ID, entry.ContentRevision)
-	if errors.Is(err, postgres.ErrTaxonomyWorkflowNotFound) {
-		return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read taxonomy workflow for authoring status: %w", err)
-	}
-	switch workflow.State {
-	case taxonomydomain.WorkflowFailed, taxonomydomain.WorkflowCancelled:
-		return api.MySpacePublishedChallengeTaxonomyStatus("blocked"), nil
-	case taxonomydomain.WorkflowQueued, taxonomydomain.WorkflowMapping, taxonomydomain.WorkflowReviewing, taxonomydomain.WorkflowPublishing:
-		if strings.TrimSpace(workflow.LastError) != "" {
-			return api.MySpacePublishedChallengeTaxonomyStatus("retrying"), nil
-		}
-	}
-	return api.MySpacePublishedChallengeTaxonomyStatus("mapping"), nil
 }
 
 func mySpaceChallenge(entry challenge.Entry) api.MySpaceChallenge {

@@ -24,15 +24,11 @@ read_identity() {
 }
 
 generate_worker_api_key=$(read_identity generate-worker || true)
-taxonomy_worker_api_key=$(read_identity taxonomy-worker || true)
 
-# The Server validates the two Worker identities independently. A missing or
-# shared key is replaced as a pair so a freshly applied runtime cannot expose
-# one Workflow API through the other Worker identity.
-if [ -z "$generate_worker_api_key" ] || [ -z "$taxonomy_worker_api_key" ] || \
-  [ "$generate_worker_api_key" = "$taxonomy_worker_api_key" ]; then
+# The Server validates the fixed Generate Worker identity before exposing its
+# internal workflow API.
+if [ -z "$generate_worker_api_key" ]; then
   generate_worker_api_key=$(new_key)
-  taxonomy_worker_api_key=$(new_key)
 fi
 
 apply_identity() {
@@ -49,6 +45,5 @@ apply_identity() {
 }
 
 apply_identity generate-worker "$generate_worker_api_key"
-apply_identity taxonomy-worker "$taxonomy_worker_api_key"
 
-printf 'Verified Generate Worker and Taxonomy Worker identity Secrets in %s.\n' "$namespace"
+printf 'Verified Generate Worker identity Secret in %s.\n' "$namespace"

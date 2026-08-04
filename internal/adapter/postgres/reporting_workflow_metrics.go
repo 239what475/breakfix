@@ -5,22 +5,20 @@ import (
 	"fmt"
 )
 
-// WorkflowStateCounts exposes only the two durable workflow aggregates. It is
+// WorkflowStateCounts exposes durable workflow aggregates. It is
 // deliberately separate from scheduler internals so metrics cannot recreate a
 // generic work-item model.
 type WorkflowStateCounts struct {
 	Generation map[string]int64
-	Taxonomy   map[string]int64
 }
 
 func (d *ReportingRepository) WorkflowStateCounts(ctx context.Context) (WorkflowStateCounts, error) {
-	result := WorkflowStateCounts{Generation: map[string]int64{}, Taxonomy: map[string]int64{}}
+	result := WorkflowStateCounts{Generation: map[string]int64{}}
 	for _, target := range []struct {
 		statement string
 		values    map[string]int64
 	}{
 		{`SELECT state, COUNT(*) FROM generation_workflows GROUP BY state`, result.Generation},
-		{`SELECT state, COUNT(*) FROM taxonomy_workflows GROUP BY state`, result.Taxonomy},
 	} {
 		rows, err := d.conn.QueryContext(ctx, target.statement)
 		if err != nil {

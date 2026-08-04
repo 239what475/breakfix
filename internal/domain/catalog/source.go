@@ -19,7 +19,7 @@ type SourceManifest struct {
 	Kind       string         `yaml:"kind" json:"kind"`
 	Metadata   SourceMetadata `yaml:"metadata" json:"metadata"`
 	Entries    []SourceEntry  `yaml:"entries" json:"entries"`
-	Taxonomy   SourceTaxonomy `yaml:"taxonomy" json:"taxonomy"`
+	Roadmap    SourceRoadmap  `yaml:"roadmap" json:"roadmap"`
 }
 
 type SourceMetadata struct {
@@ -34,7 +34,7 @@ type SourceEntry struct {
 	ContentRevision ContentRevision `yaml:"contentRevision" json:"contentRevision"`
 }
 
-type SourceTaxonomy struct {
+type SourceRoadmap struct {
 	ContentRevision ContentRevision `yaml:"contentRevision" json:"contentRevision"`
 }
 
@@ -51,8 +51,8 @@ func (m SourceManifest) Validate() error {
 	if len(m.Entries) == 0 {
 		return errors.New("release entries are required")
 	}
-	if err := m.Taxonomy.ContentRevision.Validate(); err != nil {
-		return fmt.Errorf("release taxonomy contentRevision: %w", err)
+	if err := m.Roadmap.ContentRevision.Validate(); err != nil {
+		return fmt.Errorf("release roadmap contentRevision: %w", err)
 	}
 	seen := make(map[string]struct{}, len(m.Entries))
 	for _, entry := range m.Entries {

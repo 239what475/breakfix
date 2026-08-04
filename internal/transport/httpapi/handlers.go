@@ -1,8 +1,6 @@
 package httpapi
 
 import (
-	"fmt"
-	"sync"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
@@ -15,9 +13,6 @@ import (
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/content/taxonomy"
-	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
@@ -30,14 +25,9 @@ type Handler struct {
 	assistant          *appassistant.Service
 	registryRepository string
 	registryClient     oci.Client
-	catalogInstaller   *appcatalog.Installer
-	releaseCoordinator *appcatalog.ReleaseCoordinator
-	catalogAdminToken  []byte
 	namespace          string
 	crdNamespace       string
 	challengesDir      string
-	taxonomy           *taxonomy.Store
-	taxonomyPublishMu  sync.Mutex
 	dataDir            string
 	cooldownMin        int
 	llm                config.AgentConfig
@@ -60,29 +50,24 @@ type Dependencies struct {
 	AssistantExecutor  appassistant.Executor
 	AuthoringExecutor  appauthoring.Executor
 	RegistryClient     oci.Client
-	TaxonomyStore      *taxonomy.Store
 	GeneratorSandbox   *opensandbox.Client
 	GeneratorWorkspace *appgeneration.Manager
-	CatalogGate        appcatalog.ReleaseGate
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
-	taxonomyStore := dependencies.TaxonomyStore
-	catalogGate := dependencies.CatalogGate
-	if catalogGate == nil && database != nil {
-		catalogGate = database.Catalog
+	var roadmap appcatalog.RoadmapStore
+	if database != nil {
+		roadmap = database.Roadmap
 	}
 	handler := &Handler{
 		db:                 database,
 		k8s:                client,
-		catalog:            appcatalog.NewService(cfg.ChallengesDir(), taxonomyStore, catalogGate),
+		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap),
 		registryRepository: cfg.Registry.Repository,
 		registryClient:     dependencies.RegistryClient,
-		catalogAdminToken:  []byte(cfg.CatalogAdminToken),
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,
 		challengesDir:      cfg.ChallengesDir(),
-		taxonomy:           taxonomyStore,
 		dataDir:            cfg.DataDir,
 		cooldownMin:        cfg.CooldownMinutes,
 		llm:                cfg.Agent,
@@ -108,32 +93,8 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	if ready, ok := dependencies.NodeTerminal.(NodeProviderReadiness); ok {
 		handler.nodeProviderReady = ready
 	}
-	if database == nil || taxonomyStore == nil {
+	if database == nil {
 		return handler, nil
 	}
-	installer, err := appcatalog.NewInstaller(appcatalog.InstallerConfig{
-		DataDir: cfg.DataDir, ChallengesDir: cfg.ChallengesDir(), Taxonomy: taxonomyStore,
-		Puller: dependencies.RegistryClient,
-		LayerReader: oci.ArtifactLayerReader{
-			ArtifactType: appcatalog.ReleaseArtifactType,
-			LayerType:    appcatalog.ReleaseSourceLayerType,
-		},
-		Store: database.Catalog,
-		Snapshotter: func(entry challenge.Entry) (generation.ExecutionSnapshot, error) {
-			return candidateExecutionSnapshot(entry, cfg.Runtime, cfg.Incus)
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create catalog installer: %w", err)
-	}
-	coordinator, err := appcatalog.NewReleaseCoordinator(appcatalog.ReleaseCoordinatorConfig{
-		DataDir: cfg.DataDir, ChallengesDir: cfg.ChallengesDir(), Taxonomy: taxonomyStore,
-		Releases: database.Catalog, Candidates: database.Generation,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create catalog release coordinator: %w", err)
-	}
-	handler.catalogInstaller = installer
-	handler.releaseCoordinator = coordinator
 	return handler, nil
 }

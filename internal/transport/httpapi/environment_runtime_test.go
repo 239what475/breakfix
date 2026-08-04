@@ -95,7 +95,7 @@ func TestMutateNodeEnvironmentSpecDoesNotWriteStatus(t *testing.T) {
 }
 
 func TestLearningNodeRuntimeSnapshotUsesPlatformConfiguration(t *testing.T) {
-	handler := newHandlerForTest(nil, nil, config.Config{
+	handler := newHandlerForTest(t, nil, nil, config.Config{
 		Runtime: config.RuntimeConfig{Node: config.NodeRuntimeConfig{
 			ProfileRevision: "node-profile-v1", NetworkPolicyRevision: "node-network-v1",
 		}},

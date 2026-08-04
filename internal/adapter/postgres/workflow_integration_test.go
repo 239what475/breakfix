@@ -2,18 +2,14 @@ package postgres
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	generationapp "github.com/breakfix/breakfix/internal/application/generation"
-	taxonomyapp "github.com/breakfix/breakfix/internal/application/taxonomy"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
-	"github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/domain/taxonomy"
 )
 
 const workflowTestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -121,7 +117,7 @@ func TestGenerationWorkflowPersistsRepairAndPublicationLifecycle(t *testing.T) {
 	if claim.Workflow.State != generation.StateChallengePublishing {
 		t.Fatalf("state after author publication = %s, want ChallengePublishing", claim.Workflow.State)
 	}
-	if err := database.Generation.CompleteGenerationChallengePublish(ctx, claim, artifactReference(), challengeID, workflowTestDigest, "", publicationTime); err != nil {
+	if err := database.Generation.CompleteGenerationChallengePublish(ctx, claim, artifactReference(), publicationTime); err != nil {
 		t.Fatalf("complete challenge publication: %v", err)
 	}
 	claim = refreshGenerationClaim(t, database, claim, publicationTime)
@@ -140,9 +136,6 @@ func TestGenerationWorkflowPersistsRepairAndPublicationLifecycle(t *testing.T) {
 	}
 	if completed.CandidateRevisionID != finalCandidate.ID {
 		t.Fatalf("published candidate = %q, want %q", completed.CandidateRevisionID, finalCandidate.ID)
-	}
-	if _, err := database.Taxonomy.GetTaxonomyWorkflowByChallenge(ctx, challengeID, workflowTestDigest); err != nil {
-		t.Fatalf("taxonomy workflow was not created for published challenge: %v", err)
 	}
 }
 
@@ -208,125 +201,6 @@ func TestGenerationWorkflowReclaimsInfrastructureRetryAndCleansTerminalStates(t 
 	}
 }
 
-func TestCatalogReleaseWorkflowCommitsOnlyAfterVerifiedEntryCleanup(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
-	release, entry, workflow := createCatalogReleaseInstallation(t, database, now)
-
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "catalog-worker", now)
-	if claim.Workflow.State != generation.StateBuilding || claim.Workflow.Source.Kind != generation.SourceRelease {
-		t.Fatalf("catalog installation claim = %#v", claim.Workflow)
-	}
-	if err := database.Generation.CompleteGenerationBuild(ctx, claim, generation.BuildOutput{
-		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/catalog-release.oci.tar", OCIArchiveSHA256: workflowTestDigest,
-	}, now); err != nil {
-		t.Fatalf("complete catalog build: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.CompleteGenerationArtifactPublish(ctx, claim, artifactReference(), now); err != nil {
-		t.Fatalf("publish catalog artifact: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
-		t.Fatalf("record catalog verification environment: %v", err)
-	}
-	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(true), now); err != nil {
-		t.Fatalf("complete catalog verification: %v", err)
-	}
-
-	readyEntry, err := database.Catalog.GetEntry(ctx, entry.ID)
-	if err != nil {
-		t.Fatalf("load verified catalog entry: %v", err)
-	}
-	if readyEntry.State != catalog.EntryReadyToCommit {
-		t.Fatalf("verified catalog entry state = %s, want %s", readyEntry.State, catalog.EntryReadyToCommit)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if claim.Workflow.State != generation.StateCleaningUp || claim.Workflow.CleanupIntent != generation.CleanupCompleted {
-		t.Fatalf("verified catalog workflow = %#v", claim.Workflow)
-	}
-	if err := database.Generation.CompleteGenerationCleanup(ctx, claim, now); err != nil {
-		t.Fatalf("complete verified catalog cleanup: %v", err)
-	}
-
-	committing, began, err := database.Catalog.BeginReleaseCommit(ctx, release.ID, now)
-	if err != nil {
-		t.Fatalf("begin catalog release commit: %v", err)
-	}
-	if !began || committing.State != catalog.ReleaseCommitting {
-		t.Fatalf("catalog release commit transition = %#v, began=%v", committing, began)
-	}
-	identity := catalog.RuntimeIdentity{ChallengeID: "chal-catalog-release", Slug: "cleanup-logs-catalog-release"}
-	if _, err := database.Catalog.PrepareCommit(ctx, entry.ID, identity, now); err != nil {
-		t.Fatalf("prepare catalog runtime identity: %v", err)
-	}
-	if _, err := database.Catalog.MarkCommitMaterialized(ctx, entry.ID, now); err != nil {
-		t.Fatalf("mark catalog materialized: %v", err)
-	}
-	completed, err := database.Catalog.CompleteReleaseCommit(ctx, release.ID, now)
-	if err != nil {
-		t.Fatalf("complete catalog release commit: %v", err)
-	}
-	if completed.State != catalog.ReleaseReady {
-		t.Fatalf("catalog release state = %s, want %s", completed.State, catalog.ReleaseReady)
-	}
-}
-
-func TestCatalogReleaseVerificationFailureCleansTheWholeInstallation(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 13, 0, 0, 0, time.UTC)
-	release, entry, workflow := createCatalogReleaseInstallation(t, database, now)
-
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "catalog-worker", now)
-	if err := database.Generation.CompleteGenerationBuild(ctx, claim, generation.BuildOutput{
-		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/catalog-release.oci.tar", OCIArchiveSHA256: workflowTestDigest,
-	}, now); err != nil {
-		t.Fatalf("complete catalog build: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.CompleteGenerationArtifactPublish(ctx, claim, artifactReference(), now); err != nil {
-		t.Fatalf("publish catalog artifact: %v", err)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if err := database.Generation.RecordGenerationVerificationEnvironment(ctx, claim, verificationEnvironment(claim), now); err != nil {
-		t.Fatalf("record catalog verification environment: %v", err)
-	}
-	if err := database.Generation.CompleteGenerationVerification(ctx, claim, verificationReport(false), now); err != nil {
-		t.Fatalf("record catalog verification failure: %v", err)
-	}
-
-	failedEntry, err := database.Catalog.GetEntry(ctx, entry.ID)
-	if err != nil {
-		t.Fatalf("load failed catalog entry: %v", err)
-	}
-	if failedEntry.State != catalog.EntryFailed || failedEntry.LastError == "" {
-		t.Fatalf("failed catalog entry = %#v", failedEntry)
-	}
-	claim = refreshGenerationClaim(t, database, claim, now)
-	if claim.Workflow.State != generation.StateCleaningUp || claim.Workflow.CleanupIntent != generation.CleanupFailed {
-		t.Fatalf("failed catalog workflow = %#v", claim.Workflow)
-	}
-	if err := database.Generation.CompleteGenerationCleanup(ctx, claim, now); err != nil {
-		t.Fatalf("complete failed catalog cleanup: %v", err)
-	}
-	ready, err := database.Catalog.ReleaseCleanupReady(ctx, release.ID)
-	if err != nil {
-		t.Fatalf("check catalog cleanup readiness: %v", err)
-	}
-	if !ready {
-		t.Fatal("catalog cleanup should be ready after its worker terminal state")
-	}
-	completed, err := database.Catalog.CompleteReleaseCleanup(ctx, release.ID, now)
-	if err != nil {
-		t.Fatalf("complete catalog release cleanup: %v", err)
-	}
-	if completed.State != catalog.ReleaseFailed {
-		t.Fatalf("catalog release state = %s, want %s", completed.State, catalog.ReleaseFailed)
-	}
-}
-
 func TestGenerationLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
@@ -366,143 +240,6 @@ func TestGenerationLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
 	}
 }
 
-func TestTaxonomyWorkflowPersistsCommitteeRoundsAndReclaimsTechnicalFailures(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 11, 0, 0, 0, time.UTC)
-	challengeID := "chal-taxonomy-round"
-	challengeRevision := "sha256:" + strings.Repeat("b", 64)
-	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeRevision, "base-0", now)
-	if err != nil {
-		t.Fatalf("create taxonomy workflow: %v", err)
-	}
-	claim := claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-a", now)
-	changes := taxonomyTestChangeSet(challengeID, challengeRevision)
-	mapper := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
-	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, claim, mapper.ID, changes, now); err != nil {
-		t.Fatalf("finalize first mapper: %v", err)
-	}
-	claim = refreshTaxonomyClaim(t, database, claim, now)
-	curriculum := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleCurriculumReviewer, now)
-	sre := startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleSREReviewer, now)
-	if err := database.Taxonomy.FinalizeTaxonomyReviewPair(ctx, claim, curriculum.ID, sre.ID,
-		taxonomy.Review{Decision: taxonomy.ReviewReject, Feedback: "请明确入口能力与学习结果的边界"},
-		taxonomy.Review{Decision: taxonomy.ReviewApprove}, "base-1", now); err != nil {
-		t.Fatalf("finalize rejected reviewer pair: %v", err)
-	}
-	rejected, err := database.Taxonomy.GetTaxonomyWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load rejected taxonomy workflow: %v", err)
-	}
-	if rejected.State != taxonomy.WorkflowMapping || rejected.Round != 1 || rejected.LeaseOwner != "" || rejected.BaseTaxonomyRevision != "base-1" {
-		t.Fatalf("workflow after semantic reject = %#v", rejected)
-	}
-	claim = claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-b", now)
-	mapper = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
-	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, claim, mapper.ID, changes, now); err != nil {
-		t.Fatalf("finalize second mapper: %v", err)
-	}
-	claim = refreshTaxonomyClaim(t, database, claim, now)
-	curriculum = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleCurriculumReviewer, now)
-	sre = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleSREReviewer, now)
-	if err := database.Taxonomy.FinalizeTaxonomyReviewPair(ctx, claim, curriculum.ID, sre.ID,
-		taxonomy.Review{Decision: taxonomy.ReviewApprove}, taxonomy.Review{Decision: taxonomy.ReviewApprove}, "base-1", now); err != nil {
-		t.Fatalf("finalize approved reviewer pair: %v", err)
-	}
-	claim = refreshTaxonomyClaim(t, database, claim, now)
-	if claim.Workflow.State != taxonomy.WorkflowPublishing || claim.Workflow.Round != 1 {
-		t.Fatalf("workflow after approved committee = %#v", claim.Workflow)
-	}
-	if err := database.Taxonomy.SetTaxonomyExpectedSnapshot(ctx, claim, "sha256:"+strings.Repeat("c", 64), now); err != nil {
-		t.Fatalf("record expected taxonomy snapshot: %v", err)
-	}
-	if err := database.Taxonomy.CompleteTaxonomyPublication(ctx, claim, "sha256:"+strings.Repeat("c", 64), now); err != nil {
-		t.Fatalf("complete taxonomy publication: %v", err)
-	}
-
-	retryID := "chal-taxonomy-retry"
-	retryRevision := "sha256:" + strings.Repeat("d", 64)
-	retryWorkflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, retryID, retryRevision, "base-0", now)
-	if err != nil {
-		t.Fatalf("create retry taxonomy workflow: %v", err)
-	}
-	retryClaim := claimTaxonomyWorkflow(t, database, retryWorkflow.ID, "taxonomy-c", now)
-	mapper = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleMapper, now)
-	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, retryClaim, mapper.ID, taxonomyTestChangeSet(retryID, retryRevision), now); err != nil {
-		t.Fatalf("finalize retry mapper: %v", err)
-	}
-	retryClaim = refreshTaxonomyClaim(t, database, retryClaim, now)
-	for attempt := 1; attempt <= 10; attempt++ {
-		curriculum = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleCurriculumReviewer, now)
-		sre = startTaxonomyRun(t, database, retryClaim, taxonomyapp.AgentRoleSREReviewer, now)
-		updated, released, err := database.Taxonomy.ReportTaxonomyTechnicalFailure(ctx, retryClaim, taxonomy.WorkflowReviewing, "reviewer transport failed", []string{curriculum.ID, sre.ID}, now)
-		if err != nil {
-			t.Fatalf("report reviewer technical failure %d: %v", attempt, err)
-		}
-		if updated.StateAttempt != attempt {
-			t.Fatalf("state attempt = %d, want %d", updated.StateAttempt, attempt)
-		}
-		if attempt < 10 {
-			if released || updated.LeaseOwner == "" {
-				t.Fatalf("technical attempt %d released the workflow too early", attempt)
-			}
-			retryClaim = refreshTaxonomyClaim(t, database, retryClaim, now)
-			continue
-		}
-		if !released || updated.LeaseOwner != "" {
-			t.Fatalf("tenth technical attempt did not release workflow = %#v", updated)
-		}
-		retryClaim = claimTaxonomyWorkflow(t, database, retryWorkflow.ID, "taxonomy-d", updated.NextRunAt)
-		if retryClaim.Workflow.StateAttempt != 0 || retryClaim.Workflow.State != taxonomy.WorkflowReviewing {
-			t.Fatalf("reclaimed retry workflow = %#v", retryClaim.Workflow)
-		}
-	}
-}
-
-func TestTaxonomyLeaseRenewsAfterSuccessfulPhaseResetsAttempt(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 1, 13, 0, 0, 0, time.UTC)
-	challengeID := "chal-taxonomy-lease"
-	challengeRevision := "sha256:" + strings.Repeat("e", 64)
-	workflow, _, err := database.Taxonomy.CreateOrGetTaxonomyWorkflow(ctx, challengeID, challengeRevision, "base-0", now)
-	if err != nil {
-		t.Fatalf("create taxonomy workflow: %v", err)
-	}
-	initial := claimTaxonomyWorkflow(t, database, workflow.ID, "taxonomy-a", now)
-	mapperRun := startTaxonomyRun(t, database, initial, taxonomyapp.AgentRoleMapper, now)
-	updated, released, err := database.Taxonomy.ReportTaxonomyTechnicalFailure(ctx, initial, taxonomy.WorkflowMapping, "mapper transport failed", []string{mapperRun.ID}, now)
-	if err != nil {
-		t.Fatalf("record taxonomy retry: %v", err)
-	}
-	if released || updated.StateAttempt != 1 {
-		t.Fatalf("taxonomy retry = %#v, released=%v", updated, released)
-	}
-	claim := refreshTaxonomyClaim(t, database, initial, now)
-	mapperRun = startTaxonomyRun(t, database, claim, taxonomyapp.AgentRoleMapper, now)
-	if err := database.Taxonomy.FinalizeTaxonomyMapper(ctx, claim, mapperRun.ID, taxonomyTestChangeSet(challengeID, challengeRevision), now); err != nil {
-		t.Fatalf("finalize taxonomy mapper: %v", err)
-	}
-	advanced, err := database.Taxonomy.GetTaxonomyWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load advanced taxonomy workflow: %v", err)
-	}
-	if advanced.State != taxonomy.WorkflowReviewing || advanced.StateAttempt != 0 || advanced.LeaseOwner != claim.LeaseOwner {
-		t.Fatalf("advanced taxonomy workflow = %#v", advanced)
-	}
-	oldExpiry := *advanced.LeaseExpiresAt
-	if err := database.Taxonomy.RenewTaxonomyLease(ctx, claim, time.Minute, now.Add(time.Second)); err != nil {
-		t.Fatalf("renew taxonomy lease after phase transition: %v", err)
-	}
-	renewed, err := database.Taxonomy.GetTaxonomyWorkflow(ctx, workflow.ID)
-	if err != nil {
-		t.Fatalf("load renewed taxonomy workflow: %v", err)
-	}
-	if renewed.LeaseExpiresAt == nil || !renewed.LeaseExpiresAt.After(oldExpiry) {
-		t.Fatalf("taxonomy lease expiry was not extended: %#v", renewed.LeaseExpiresAt)
-	}
-}
-
 func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Time) (*generation.Workflow, string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -524,51 +261,6 @@ func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Tim
 	}
 	return workflow, session.ID, userID
 }
-
-func createCatalogReleaseInstallation(t *testing.T, database *Store, now time.Time) (catalog.Release, catalog.Entry, generation.Workflow) {
-	t.Helper()
-	contentRevision := catalog.ContentRevision(workflowTestDigest)
-	release := catalog.Release{
-		ID:                      "catalog-release-" + now.Format("20060102150405"),
-		Name:                    "catalog-integration",
-		Version:                 now.Format("2006.01.02"),
-		BundleDigest:            catalog.BundleDigest(workflowTestDigest),
-		TaxonomyContentRevision: contentRevision,
-		State:                   catalog.ReleaseInstalling,
-		DeadlineAt:              timePointer(now.Add(time.Hour)),
-		CreatedAt:               now,
-		UpdatedAt:               now,
-	}
-	entry := catalog.Entry{
-		ID:              "catalog-entry-" + now.Format("20060102150405"),
-		ReleaseID:       release.ID,
-		SourcePath:      "challenges/node-runtime-fixture",
-		ContentRevision: contentRevision,
-		State:           catalog.EntryBuilding,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	candidate := generation.Revision{
-		ID:     "catalog-candidate-" + now.Format("20060102150405"),
-		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
-		ArchivePath: "/tmp/catalog-candidate.tar.gz", ArchiveSHA256: workflowTestDigest, Snapshot: generationTestSnapshot(),
-		CreatedAt: now, UpdatedAt: now,
-	}
-	entry.CandidateRevisionID = candidate.ID
-	workflow := generation.Workflow{
-		ID:     "catalog-workflow-" + now.Format("20060102150405"),
-		Source: generation.Source{Kind: generation.SourceRelease, Ref: entry.ID}, SourceRevision: string(contentRevision),
-		State: generation.StateBuilding, CandidateRevisionID: candidate.ID, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
-	}
-	if _, err := database.Catalog.CreateInstallation(context.Background(), catalog.Installation{
-		Release: release, Entries: []catalog.InstallationEntry{{Entry: entry, Candidate: candidate, Workflow: workflow}},
-	}); err != nil {
-		t.Fatalf("create catalog installation: %v", err)
-	}
-	return release, entry, workflow
-}
-
-func timePointer(value time.Time) *time.Time { return &value }
 
 func generationTestPlan() authoring.Plan {
 	return authoring.Plan{
@@ -691,41 +383,4 @@ func verificationReport(passed bool) generation.VerificationReport {
 		Answers:     []generation.ExecutionResult{{Location: "management", ExitCode: 0}},
 		Checkpoints: []generation.CheckpointResult{{ID: "ready", Passed: passed, Summary: map[bool]string{true: "ready", false: "not ready"}[passed]}},
 	}
-}
-
-func claimTaxonomyWorkflow(t *testing.T, database *Store, workflowID, workerID string, now time.Time) taxonomy.Claim {
-	t.Helper()
-	claim, err := database.Taxonomy.ClaimTaxonomyWorkflow(context.Background(), workerID, time.Minute, now)
-	if err != nil {
-		t.Fatalf("claim taxonomy workflow: %v", err)
-	}
-	if claim == nil || claim.Workflow.ID != workflowID {
-		t.Fatalf("claimed taxonomy workflow = %#v, want %q", claim, workflowID)
-	}
-	return *claim
-}
-
-func refreshTaxonomyClaim(t *testing.T, database *Store, claim taxonomy.Claim, now time.Time) taxonomy.Claim {
-	t.Helper()
-	refreshed, err := database.Taxonomy.RefreshTaxonomyClaim(context.Background(), claim.Workflow.ID, claim.LeaseOwner, now)
-	if err != nil {
-		t.Fatalf("refresh taxonomy claim: %v", err)
-	}
-	return *refreshed
-}
-
-func startTaxonomyRun(t *testing.T, database *Store, claim taxonomy.Claim, role taxonomyapp.AgentRole, now time.Time) *agent.Run {
-	t.Helper()
-	run, err := database.Taxonomy.StartTaxonomyAgentRun(context.Background(), claim, role, "test-model", now)
-	if err != nil {
-		t.Fatalf("start %s taxonomy run: %v", role, err)
-	}
-	return run
-}
-
-func taxonomyTestChangeSet(challengeID, contentRevision string) taxonomy.ChangeSet {
-	return taxonomy.ChangeSet{ChallengeMappings: []taxonomy.ChallengeMappingChange{{
-		Operation: taxonomy.ChangeUpsert,
-		Value:     &taxonomy.ChallengeMapping{Challenge: taxonomy.ChallengeRef{ID: challengeID, Title: "Taxonomy workflow", ContentRevision: contentRevision}},
-	}}}
 }

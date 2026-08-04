@@ -7,20 +7,18 @@ Breakfix 是一个提供真实、可回收运维实验环境的练习平台。�
 ## 架构
 
 - **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、作者对话与 Assistant
-  对话；也是 PostgreSQL 与 taxonomy 文件系统的唯一写者。
+  对话；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
 - **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
   回收真实环境。
 - **Generate Worker**：一次领取一个 `GenerationWorkflow`，顺序执行生成、Judge、构建、
   staging artifact、真实验证、正式发布和 cleanup。
-- **Taxonomy Worker**：一次领取一个 `TaxonomyWorkflow`，执行 Mapper、两位并行 reviewer
-  和 taxonomy snapshot 发布。
-- **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision 和两类
-  Workflow 的权威存储。
+- **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
+  GenerationWorkflow 和 RoadmapRevision 的权威存储。
 - **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是
   浏览器 API 的一部分。
 
 Worker 不持有 PostgreSQL 凭据。所有 lease、状态转移和阶段结果都通过 Server 的内部 API
-完成；后台调度只围绕两条具体 Workflow 进行。
+完成。
 
 架构边界和数据所有权见[系统架构](docs/architecture/system-architecture.md)。
 
@@ -38,7 +36,7 @@ make build
 ./bin/breakfix-server -config config/app/local.yaml
 ```
 
-`make build` 生成四个运行时二进制和嵌入式 Web UI。已部署环境的本地接管使用
+`make build` 生成三个运行时二进制和嵌入式 Web UI。已部署环境的本地接管使用
 `scripts/dev/telepresence.sh`；完整部署与调试步骤见运维文档。本地配置含环境专属地址和密钥，不应提交。
 
 ## 验证

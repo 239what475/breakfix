@@ -16,11 +16,10 @@ type SourceKind string
 
 const (
 	SourceAuthoring SourceKind = "authoring"
-	SourceRelease   SourceKind = "release"
 )
 
 func (k SourceKind) Valid() bool {
-	return k == SourceAuthoring || k == SourceRelease
+	return k == SourceAuthoring
 }
 
 func (s Source) Valid() bool {

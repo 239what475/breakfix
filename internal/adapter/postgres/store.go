@@ -18,12 +18,11 @@ type Store struct {
 
 	Agent       *AgentRepository
 	Authoring   *AuthoringRepository
-	Catalog     *CatalogRepository
 	Environment *EnvironmentRepository
 	Generation  *GenerationRepository
 	Identity    *IdentityRepository
+	Roadmap     *RoadmapRepository
 	Reporting   *ReportingRepository
-	Taxonomy    *TaxonomyRepository
 }
 
 // New opens a PostgreSQL DSN and applies the current schema. Existing SQLite
@@ -65,12 +64,11 @@ func newStore(conn *Conn) *Store {
 		conn:        conn,
 		Agent:       &AgentRepository{conn: conn},
 		Authoring:   &AuthoringRepository{conn: conn},
-		Catalog:     &CatalogRepository{conn: conn},
 		Environment: &EnvironmentRepository{conn: conn},
 		Generation:  &GenerationRepository{conn: conn},
 		Identity:    &IdentityRepository{conn: conn},
+		Roadmap:     &RoadmapRepository{conn: conn},
 		Reporting:   &ReportingRepository{conn: conn},
-		Taxonomy:    &TaxonomyRepository{conn: conn},
 	}
 }
 

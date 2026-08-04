@@ -1,0 +1,10 @@
+kind: Topic
+source_ref: platform-runtime/node-environment-validation
+title: 节点环境验证
+domain:
+  source_ref: platform-runtime
+  title: 平台运行时
+definition: 验证节点环境中可观察的任务完成状态。
+scope: 节点、检查点和运行时初始化。
+non_goals: 不讨论服务管理策略。
+challenge_guidance: 题目唯一归属此主题，当重点是节点环境与检查点的可观察状态。

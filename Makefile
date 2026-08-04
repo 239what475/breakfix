@@ -1,5 +1,5 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
-	test-unit lint catalog-package catalog-install test-e2e
+	test-unit lint catalog-package test-e2e
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -38,8 +38,6 @@ CATALOG_ARCHIVE ?= dist/catalog.oci.tar
 CATALOG_REFERENCE ?=
 CATALOG_TRUST_BUNDLE_FILE ?=
 CATALOG_BUNDLE ?=
-CATALOG_SERVER_URL ?= http://localhost:9090
-CATALOG_ADMIN_TOKEN ?= $(BREAKFIX_CATALOG_ADMIN_TOKEN)
 
 $(WEB_DEPS_STAMP): $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 	npm ci --prefix $(WEB_DIR)
@@ -81,13 +79,11 @@ build: web-deps
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-server ./cmd/server
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-controller ./cmd/controller
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-generate-worker ./cmd/generate-worker
-	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/breakfix-taxonomy-worker ./cmd/taxonomy-worker
 
 images: build
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-server:$(RUNTIME_IMAGE_TAG) -f build/images/server/Dockerfile $(BIN_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-controller:$(RUNTIME_IMAGE_TAG) -f build/images/controller/Dockerfile $(BIN_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-generate-worker:$(RUNTIME_IMAGE_TAG) -f build/images/generate-worker/Dockerfile $(BIN_DIR)
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-taxonomy-worker:$(RUNTIME_IMAGE_TAG) -f build/images/taxonomy-worker/Dockerfile $(BIN_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-k8s-base:latest build/images/k8s-base
 
 deploy-kind: images
@@ -106,15 +102,6 @@ catalog-package:
 	@test -n "$(CATALOG_SOURCE)" || { echo "CATALOG_SOURCE must name a portable Catalog Release source"; exit 2; }
 	@test -f "$(CATALOG_SOURCE)/release.yaml" || { echo "$(CATALOG_SOURCE) does not contain release.yaml"; exit 2; }
 	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
-
-catalog-install:
-	@test -n "$(CATALOG_BUNDLE)" || { echo "CATALOG_BUNDLE must be an immutable OCI digest reference"; exit 2; }
-	@test -n "$(CATALOG_ADMIN_TOKEN)" || { echo "CATALOG_ADMIN_TOKEN or BREAKFIX_CATALOG_ADMIN_TOKEN is required"; exit 2; }
-	curl --fail --show-error --silent \
-		-H "X-Breakfix-Catalog-Token: $(CATALOG_ADMIN_TOKEN)" \
-		-H 'Content-Type: application/json' \
-		--data '{"bundle":"$(CATALOG_BUNDLE)"}' \
-		"$(CATALOG_SERVER_URL)/api/admin/catalog/releases"
 
 test-e2e: test-deps
 	npm run test:e2e --prefix $(TEST_DIR)

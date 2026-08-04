@@ -12,7 +12,7 @@
 
 草案不包含平台身份、运行时镜像摘要、OCI bundle 或声称已经验证的 candidate 脚本。一道题目规格只有满足以下条件后，才能成为 portable candidate：
 
-1. `Domain` 和 `Topic` taxonomy 契约已经实现。
+1. `Domain`、`Topic`、`Tag` 和 RoadmapRevision 契约已经实现。
 2. 题目依赖的 NodeEnvironment capability 已通过真实 probe。
 3. 规格已转换为 `challenge.yaml`、`problem.md`、`solution.md`、提示文件、`generate.sh`、`answer.sh` 和 `checks.sh`。
 4. 完整 candidate 已通过真实 `Build -> ArtifactPublish -> Verify`。

@@ -1,0 +1,8 @@
+- source:
+    source_ref: platform-runtime/node-environment-validation
+    title: 节点环境验证
+  target:
+    source_ref: platform-runtime/systemd-service-recovery
+    title: systemd 服务恢复
+  relation: precedes
+  reason: 服务恢复题依赖对节点环境与检查点状态的基本理解。

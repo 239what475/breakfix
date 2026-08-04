@@ -1,0 +1,6 @@
+kind: Domain
+source_ref: platform-runtime
+title: 平台运行时
+definition: 验证平台题目运行时的基础行为与可观察结果。
+scope: Node 与 Kubernetes 学习环境的基础验收。
+non_goals: 不作为用户学习路线或通用运维课程内容。

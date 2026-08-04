@@ -1,7 +1,0 @@
-kind: Tag
-id: tag-1a3c5e7b9d0f2a4c
-title: 运行时验收
-definition: 仅用于验证平台运行时行为的测试内容。
-mapping_guidance:
-    include_when:
-        - 内容仅服务于运行时验收。

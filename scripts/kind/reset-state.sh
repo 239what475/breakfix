@@ -47,14 +47,13 @@ wait_for_pods() {
 
 # The current schema deliberately has no migration from the former development
 # database. Stop every process that can hold either RWO volume before removal.
-for deployment in breakfix-server breakfix-generate-worker breakfix-taxonomy-worker; do
+for deployment in breakfix-server breakfix-generate-worker; do
   scale_down deployment "$deployment"
 done
 scale_down statefulset breakfix-postgresql
 
 wait_for_pods app.kubernetes.io/name=breakfix-server
 wait_for_pods app.kubernetes.io/name=breakfix-generate-worker
-wait_for_pods app.kubernetes.io/name=breakfix-taxonomy-worker
 wait_for_pods app.kubernetes.io/name=breakfix-postgresql
 
 # Runtime test Pods can retain the Server RWO claim after a previous
@@ -87,4 +86,4 @@ done
 kubectl -n "$namespace" delete persistentvolumeclaim breakfix-server-data --ignore-not-found --wait=true
 kubectl -n "$namespace" delete persistentvolumeclaim data-breakfix-postgresql-0 --ignore-not-found --wait=true
 
-printf 'Removed Kind PostgreSQL and Server data state in %s. Reapply the runtime, then install a Catalog Release.\n' "$namespace"
+printf 'Removed Kind PostgreSQL and Server data state in %s. Reapply the runtime.\n' "$namespace"

@@ -15,7 +15,7 @@ import (
 )
 
 // decodeInternalWorkerRequest is the complete authentication boundary for the
-// two fixed background deployments. Server-owned interactive calls never use
+// fixed background deployment. Server-owned interactive calls never use
 // this endpoint family.
 func (h *Handler) decodeInternalWorkerRequest(c *gin.Context, expected config.InternalWorkerRole, value any) bool {
 	if !h.authorizeInternalWorker(c, expected) {
@@ -67,7 +67,7 @@ func (h *Handler) internalWorkerRole(value string) (config.InternalWorkerRole, b
 		return "", false
 	}
 	matches := make([]config.InternalWorkerRole, 0, 1)
-	for _, role := range []config.InternalWorkerRole{config.InternalWorkerGenerate, config.InternalWorkerTaxonomy} {
+	for _, role := range []config.InternalWorkerRole{config.InternalWorkerGenerate} {
 		key := h.internalWorkers.Key(role)
 		if key != "" && subtle.ConstantTimeCompare([]byte(value), []byte(key)) == 1 {
 			matches = append(matches, role)

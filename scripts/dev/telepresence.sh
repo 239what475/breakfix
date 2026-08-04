@@ -23,7 +23,6 @@ Commands:
   server                   Replace Server with a local foreground process.
   controller               Replace Controller with a local foreground process.
   generate-worker          Replace the Generate Worker pool locally.
-  taxonomy-worker          Replace the Taxonomy Worker pool locally.
   down [name]              Restore one component or all components.
   status                   Show Telepresence and Breakfix runtime status.
   disconnect               Restore all components and stop local Telepresence daemons.
@@ -70,12 +69,12 @@ ensure_connected() {
 }
 
 all_components() {
-  printf '%s\n' server controller generate-worker taxonomy-worker
+  printf '%s\n' server controller generate-worker
 }
 
 is_worker() {
   case "$1" in
-    generate-worker|taxonomy-worker) return 0 ;;
+    generate-worker) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -85,7 +84,6 @@ workload_for() {
     server) printf '%s\n' breakfix-server ;;
     controller) printf '%s\n' breakfix-controller ;;
     generate-worker) printf '%s\n' breakfix-generate-worker ;;
-    taxonomy-worker) printf '%s\n' breakfix-taxonomy-worker ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -93,7 +91,7 @@ workload_for() {
 container_for() {
   case "$1" in
     server|controller) printf '%s\n' "$1" ;;
-    generate-worker|taxonomy-worker) printf '%s\n' "$1" ;;
+    generate-worker) printf '%s\n' "$1" ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -106,7 +104,6 @@ health_port_for() {
   case "$1" in
     controller) printf '%s\n' "$TP_CONTROLLER_HEALTH_PORT" ;;
     generate-worker) printf '%s\n' 18082 ;;
-    taxonomy-worker) printf '%s\n' 18083 ;;
     server) printf '%s\n' 18086 ;;
     *) fail "unknown component: $1" ;;
   esac
@@ -114,7 +111,7 @@ health_port_for() {
 
 build_component() {
   case "$1" in
-    server|controller|generate-worker|taxonomy-worker) (cd "$ROOT_DIR" && make --no-print-directory build) ;;
+    server|controller|generate-worker) (cd "$ROOT_DIR" && make --no-print-directory build) ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -128,7 +125,6 @@ secret_value() {
 worker_identity_secret() {
   case "$1" in
     generate-worker) printf '%s\n' breakfix-generate-worker-identity ;;
-    taxonomy-worker) printf '%s\n' breakfix-taxonomy-worker-identity ;;
     *) fail "unknown worker identity: $1" ;;
   esac
 }
@@ -315,7 +311,6 @@ run_server() {
     BREAKFIX_DATABASE_URL="$(secret_value database_url)" \
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
     BREAKFIX_GENERATE_WORKER_API_KEY="$(worker_identity_key generate-worker)" \
-    BREAKFIX_TAXONOMY_WORKER_API_KEY="$(worker_identity_key taxonomy-worker)" \
     BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)" \
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
     BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
@@ -363,16 +358,6 @@ run_generate_worker() {
   replace_command generate-worker "$config" "$mount_root" env POD_NAME=telepresence-generate-worker
 }
 
-run_taxonomy_worker() {
-  local config
-  prepare_worker_replacement taxonomy-worker
-  config="$(prepare_config taxonomy-worker '' '')"
-  printf 'Replacing Taxonomy Worker locally.\n'
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key taxonomy-worker)"
-  export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
-  replace_command taxonomy-worker "$config" '' env POD_NAME=telepresence-taxonomy-worker
-}
-
 run_component() {
   local component="$1"
   local status
@@ -416,7 +401,7 @@ main() {
       ensure_prerequisites
       ensure_connected
       ;;
-    server|controller|generate-worker|taxonomy-worker)
+    server|controller|generate-worker)
       run_component "$command"
       ;;
     down)
@@ -424,7 +409,7 @@ main() {
         restore_all
       else
         case "$2" in
-          server|controller|generate-worker|taxonomy-worker) detach_component "$2" ;;
+          server|controller|generate-worker) detach_component "$2" ;;
           *) fail "unknown component: $2" ;;
         esac
       fi

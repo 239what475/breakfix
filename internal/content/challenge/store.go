@@ -164,7 +164,7 @@ func loadSpec(dir string) (*Spec, error) {
 }
 
 // artifactRevision covers every regular file in the published challenge
-// directory, not only challenge.yaml. Taxonomy mappings therefore become stale
+// directory, not only challenge.yaml. Roadmap bindings therefore become stale
 // when the problem, solution, checkpoint implementation, or runtime setup
 // changes even if manifest metadata stays identical.
 func artifactRevision(dir string) (string, error) {

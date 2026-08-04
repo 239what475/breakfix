@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
-import type { TaxonomyReference } from "../../api/types";
+import type { RoadmapReference } from "../../api/types";
 
 const props = defineProps<{
 	query: string;
@@ -8,7 +8,7 @@ const props = defineProps<{
 	runtimes: string[];
 	tags: string[];
 	statuses: string[];
-	availableTags: TaxonomyReference[];
+	availableTags: RoadmapReference[];
 	resultCount: number;
 	loggedIn: boolean;
 	open: boolean;

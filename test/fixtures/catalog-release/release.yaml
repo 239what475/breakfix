@@ -6,5 +6,5 @@ metadata:
 entries:
   - path: challenges/node-runtime-fixture
     contentRevision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
-taxonomy:
-  contentRevision: sha256:f47d2c4daba5544d57c9cf547bd91466297d8c9560c046e3aeae9e9a4d49fd1f
+roadmap:
+  contentRevision: sha256:d199fcc788375c3928a09199aa91e83790c13e897619cec6e72745a6827cd204

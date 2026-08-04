@@ -28,7 +28,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-primary-skill {
+.workspace-primary-topic {
   overflow: hidden;
   margin: 2px 0 0;
   color: var(--muted);
@@ -230,7 +230,7 @@
   padding: 28px clamp(22px, 4vw, 58px) 80px;
   color: #24312d;
 }
-.taxonomy-panel {
+.roadmap-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -240,33 +240,31 @@
   border: 1px solid #d9e2dc;
   background: #f6f9f6;
 }
-.taxonomy-group {
+.roadmap-group {
   min-width: 0;
 }
-.taxonomy-group .eyebrow {
+.roadmap-group .eyebrow {
   margin: 0 0 4px;
 }
-.taxonomy-group strong {
+.roadmap-group strong {
   display: block;
   font-size: 12px;
   line-height: 1.5;
 }
-.taxonomy-outcomes,
-.taxonomy-entry-skills {
+.roadmap-tags {
   display: grid;
   gap: 5px;
   margin: 7px 0 0;
   padding: 0;
   list-style: none;
 }
-.taxonomy-outcomes li,
-.taxonomy-entry-skills li,
-.taxonomy-entry-skills small {
+.roadmap-tags li,
+.roadmap-group small {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
 }
-.taxonomy-entry-skills small {
+.roadmap-group small {
   display: block;
   margin-top: 2px;
 }

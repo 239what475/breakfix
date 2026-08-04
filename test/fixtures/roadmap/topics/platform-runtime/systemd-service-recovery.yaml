@@ -1,0 +1,10 @@
+kind: Topic
+source_ref: platform-runtime/systemd-service-recovery
+title: systemd 服务恢复
+domain:
+  source_ref: platform-runtime
+  title: 平台运行时
+definition: 诊断并恢复由 systemd 管理的服务。
+scope: unit 状态、日志和服务重启。
+non_goals: 不覆盖容器编排。
+challenge_guidance: 题目唯一归属此主题，当修复目标是 systemd 管理的服务状态。

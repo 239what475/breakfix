@@ -1,6 +1,6 @@
 package postgres
 
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // currentSchemaStatements is the only database schema accepted by this
 // development-only, intentionally destructive runtime migration. Do not add
@@ -13,9 +13,8 @@ var currentSchemaStatements = schemaStatements(
 	schemaAuthoringRuntimeStatements,
 	schemaGenerationWorkspaceStatements,
 	schemaEnvironmentTerminalStatements,
+	schemaRoadmapStatements,
 	schemaGenerationStatements,
-	schemaTaxonomyStatements,
-	schemaCatalogStatements,
 )
 
 func schemaStatements(groups ...[]string) []string {

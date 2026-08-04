@@ -8,26 +8,6 @@ export type ErrorResponse = {
     error: string;
 };
 
-export type CatalogReleaseInstallRequest = {
-    /**
-     * Immutable OCI artifact reference in repository@sha256:digest form
-     */
-    bundle: string;
-};
-
-export type CatalogRelease = {
-    id: string;
-    name: string;
-    version: string;
-    bundle_digest: string;
-    taxonomy_content_revision: string;
-    state: 'Pending' | 'Installing' | 'Committing' | 'Ready' | 'CleaningUp' | 'Failed';
-    deadline_at?: string | null;
-    last_error?: string;
-    created_at: string;
-    updated_at: string;
-};
-
 export type RegisterRequest = {
     username: string;
     password: string;
@@ -115,7 +95,6 @@ export type MySpaceAuthoringDraft = {
 export type MySpacePublishedChallenge = {
     challenge: MySpaceChallenge;
     published_at: string;
-    taxonomy_status: 'mapped' | 'mapping' | 'retrying' | 'blocked';
     attempted_users: number;
     completed_users: number;
     pass_rate?: number | null;
@@ -140,8 +119,9 @@ export type ChallengeSummary = {
     title: string;
     runtime: 'node' | 'k8s';
     difficulty: 'easy' | 'medium' | 'hard';
-    tags: Array<TaxonomyReference>;
-    primary_outcome: TaxonomyReference;
+    domain: RoadmapReference;
+    topic: RoadmapReference;
+    tags: Array<RoadmapReference>;
     description: string;
     published_at: string;
     solved?: boolean;
@@ -158,29 +138,53 @@ export type ChallengeList = {
     challenges: Array<ChallengeSummary>;
 };
 
-export type TaxonomyReference = {
+export type RoadmapReference = {
     id: string;
+    source_ref: string;
     title: string;
 };
 
-export type ChallengeOutcome = {
+export type RoadmapDomain = {
     id: string;
+    source_ref: string;
     title: string;
-    primary: boolean;
+    definition: string;
+    scope: string;
+    non_goals: string;
 };
 
-export type ChallengeEntrySkill = {
+export type RoadmapTopic = {
     id: string;
+    source_ref: string;
     title: string;
-    requires: Array<TaxonomyReference>;
+    domain: RoadmapReference;
+    definition: string;
+    scope: string;
+    non_goals: string;
+    challenge_guidance: string;
 };
 
-export type ChallengeTaxonomy = {
+export type RoadmapTag = {
+    id: string;
+    source_ref: string;
+    title: string;
+    description: string;
+};
+
+export type RoadmapEdge = {
+    source: RoadmapReference;
+    target: RoadmapReference;
+    relation: 'precedes' | 'related';
+    reason: string;
+};
+
+export type ChallengeRoadmap = {
     revision: string;
-    tags: Array<TaxonomyReference>;
-    primary_outcome: TaxonomyReference;
-    outcomes: Array<ChallengeOutcome>;
-    entry_skills: Array<ChallengeEntrySkill>;
+    domain: RoadmapReference;
+    topic: RoadmapTopic;
+    tags: Array<RoadmapTag>;
+    topic_neighbors: Array<RoadmapEdge>;
+    challenge_neighbors: Array<RoadmapEdge>;
 };
 
 export type ChallengeCheckpoint = {
@@ -221,7 +225,7 @@ export type ChallengeContent = {
         [key: string]: string;
     };
     checkpoints: Array<ChallengeCheckpoint>;
-    taxonomy: ChallengeTaxonomy;
+    roadmap: ChallengeRoadmap;
 };
 
 export type ChallengeProgress = {
@@ -931,67 +935,3 @@ export type PublishAuthoringRevisionResponses = {
 };
 
 export type PublishAuthoringRevisionResponse = PublishAuthoringRevisionResponses[keyof PublishAuthoringRevisionResponses];
-
-export type InstallCatalogReleaseData = {
-    body: CatalogReleaseInstallRequest;
-    path?: never;
-    query?: never;
-    url: '/admin/catalog/releases';
-};
-
-export type InstallCatalogReleaseErrors = {
-    /**
-     * Error
-     */
-    400: ErrorResponse;
-    /**
-     * Error
-     */
-    403: ErrorResponse;
-    /**
-     * Error
-     */
-    409: ErrorResponse;
-};
-
-export type InstallCatalogReleaseError = InstallCatalogReleaseErrors[keyof InstallCatalogReleaseErrors];
-
-export type InstallCatalogReleaseResponses = {
-    /**
-     * Catalog release accepted for build and verification
-     */
-    202: CatalogRelease;
-};
-
-export type InstallCatalogReleaseResponse = InstallCatalogReleaseResponses[keyof InstallCatalogReleaseResponses];
-
-export type GetCatalogReleaseData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/catalog/releases/{id}';
-};
-
-export type GetCatalogReleaseErrors = {
-    /**
-     * Error
-     */
-    403: ErrorResponse;
-    /**
-     * Error
-     */
-    404: ErrorResponse;
-};
-
-export type GetCatalogReleaseError = GetCatalogReleaseErrors[keyof GetCatalogReleaseErrors];
-
-export type GetCatalogReleaseResponses = {
-    /**
-     * Catalog release state
-     */
-    200: CatalogRelease;
-};
-
-export type GetCatalogReleaseResponse = GetCatalogReleaseResponses[keyof GetCatalogReleaseResponses];

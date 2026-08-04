@@ -26,19 +26,14 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	if err := h.RecoverExpiredGenerationWorkflows(runCtx); err != nil {
 		return nil, err
 	}
-	if err := h.RecoverCatalogReleases(runCtx); err != nil {
-		return nil, err
-	}
 	if err := h.validateStartup(); err != nil {
 		return nil, err
 	}
-	h.StartTaxonomyWorkflowMaintenance(runCtx)
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
 	h.StartGeneratorWorkspaceCleanup(runCtx)
 	h.StartGenerationDeadlineRecovery(runCtx)
-	h.StartCatalogReleaseRecovery(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := middleware.JWTMiddleware(jwtSecret)
 	optionalJWTMW := middleware.OptionalJWTMiddleware(jwtSecret)
@@ -64,8 +59,6 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
 	router.POST("/api/auth/login", h.Login)
-	router.POST("/api/admin/catalog/releases", h.InstallCatalogRelease)
-	router.GET("/api/admin/catalog/releases/:id", h.GetCatalogRelease)
 	router.GET("/api/me/space", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -207,11 +200,6 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	router.POST("/api/internal/generation-workflows/:id/generator/files/write", h.InternalGeneratorWriteFile)
 	router.POST("/api/internal/generation-workflows/:id/generator/execute", h.InternalGeneratorExecute)
 	router.POST("/api/internal/generation-workflows/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
-	router.POST("/api/internal/taxonomy-workflows/claim", h.InternalClaimTaxonomyWorkflow)
-	router.POST("/api/internal/taxonomy-workflows/:id/renew", h.InternalRenewTaxonomyWorkflow)
-	router.POST("/api/internal/taxonomy-workflows/:id/context", h.InternalTaxonomyWorkflowContext)
-	router.POST("/api/internal/taxonomy-workflows/:id/agent-runs", h.InternalStartTaxonomyAgentRun)
-	router.POST("/api/internal/taxonomy-workflows/:id/phase", h.InternalTaxonomyWorkflowPhase)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)

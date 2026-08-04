@@ -47,7 +47,7 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", manifestScalar(spec["difficulty"])))
 	}
 	if _, exists := spec["tags"]; exists {
-		errs = append(errs, "challenge.yaml 不得包含 tags；分类由 taxonomy workflow 维护")
+		errs = append(errs, "challenge.yaml 不得包含 tags；分类由 Roadmap 维护")
 	}
 	if manifestScalar(spec["description"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 description")

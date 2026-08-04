@@ -1,0 +1,12 @@
+kind: Challenge
+challenge:
+  path: challenges/node-runtime-fixture
+  source_ref: platform-runtime/node-environment-validation/node-runtime-fixture
+  title: Node 运行时验收
+  content_revision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
+topic:
+  source_ref: platform-runtime/node-environment-validation
+  title: Node 环境验收
+tags:
+  - source_ref: runtime-fixture
+    title: 运行时验收

@@ -12,7 +12,7 @@ import (
 )
 
 func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
-	handler := newHandlerForTest(nil, nil, config.Config{
+	handler := newHandlerForTest(t, nil, nil, config.Config{
 		Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"},
 		Incus:    incus.Config{NamePrefix: "bf"},
 	})

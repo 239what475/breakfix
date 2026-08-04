@@ -14,7 +14,6 @@ resources:
   - deploy/manifests/server.yaml
   - deploy/manifests/controller.yaml
   - deploy/manifests/generate-worker.yaml
-  - deploy/manifests/taxonomy-worker.yaml
 
 configMapGenerator:
   - name: breakfix-config

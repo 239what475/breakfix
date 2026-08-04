@@ -19,7 +19,7 @@ var schemaGenerationWorkspaceStatements = []string{
 var schemaGenerationStatements = []string{
 	`CREATE TABLE candidate_revisions (
 		id TEXT PRIMARY KEY,
-		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
+		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),
 		source_ref TEXT NOT NULL,
 		source_revision TEXT NOT NULL,
 		generator_session_id TEXT REFERENCES agent_sessions(id) ON DELETE RESTRICT,
@@ -43,7 +43,7 @@ var schemaGenerationStatements = []string{
 	`CREATE INDEX candidate_revisions_source ON candidate_revisions(source_kind, source_ref, source_revision, created_at)`,
 	`CREATE TABLE generation_workflows (
 		id TEXT PRIMARY KEY,
-		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
+		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),
 		source_ref TEXT NOT NULL,
 		source_revision TEXT NOT NULL,
 		state TEXT NOT NULL CHECK (state IN ('Queued', 'Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'ChallengePublishing', 'CleaningUp', 'Completed', 'Failed', 'Cancelled')),

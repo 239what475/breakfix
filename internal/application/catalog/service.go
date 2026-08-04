@@ -6,89 +6,60 @@ import (
 	"fmt"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/content/taxonomy"
-	domain "github.com/breakfix/breakfix/internal/domain/taxonomy"
+	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
-// SnapshotReader is the immutable taxonomy projection used to decide which
-// challenge artifacts are visible in the catalog.
-type SnapshotReader interface {
-	LoadCurrent() (*domain.Snapshot, error)
-}
-
-// ReleaseGate makes the installation commit the sole catalog visibility
-// boundary. Files may exist while a release is being committed, but callers
-// must not observe them until the durable release state is Ready.
-type ReleaseGate interface {
-	HasReadyRelease(context.Context) (bool, error)
+// RoadmapStore is the sole runtime source of catalog classification and graph
+// data. Portable catalog sources are import/export inputs, never a second
+// read model for visible challenges.
+type RoadmapStore interface {
+	CurrentRoadmap(context.Context) (*roadmapdomain.Revision, error)
 }
 
 type PublishedChallenge struct {
-	Entry    challenge.Entry
-	Taxonomy ChallengeTaxonomy
+	Entry   challenge.Entry
+	Roadmap ChallengeRoadmap
 }
 
-type ChallengeTaxonomy struct {
-	Revision       string
-	Tags           []domain.Ref
-	PrimaryOutcome domain.Ref
-	Outcomes       []domain.OutcomeRef
-	EntrySkills    []EntrySkill
-}
-
-type EntrySkill struct {
-	Ref      domain.Ref
-	Requires []domain.Ref
+type ChallengeRoadmap struct {
+	Revision           string
+	Domain             roadmapdomain.Ref
+	Topic              roadmapdomain.Topic
+	Tags               []roadmapdomain.Tag
+	TopicNeighbors     []roadmapdomain.Edge
+	ChallengeNeighbors []roadmapdomain.Edge
 }
 
 type Service struct {
 	challengesDir string
-	snapshots     SnapshotReader
-	gate          ReleaseGate
+	roadmap       RoadmapStore
 }
 
-func NewService(challengesDir string, snapshots SnapshotReader, gate ReleaseGate) *Service {
-	return &Service{challengesDir: challengesDir, snapshots: snapshots, gate: gate}
+func NewService(challengesDir string, roadmap RoadmapStore) *Service {
+	return &Service{challengesDir: challengesDir, roadmap: roadmap}
 }
 
-// publishedChallenges reads the publicly visible catalog. A challenge is
-// public only after the current immutable taxonomy snapshot maps its exact
-// portable content revision; publishing the directory alone is not sufficient.
+// List exposes only challenge artifacts whose immutable content identity
+// matches a binding in the current RoadmapRevision.
 func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
-	if s == nil || s.snapshots == nil || s.gate == nil {
-		return nil, errors.New("catalog service dependencies are not configured")
+	if s == nil || s.roadmap == nil {
+		return nil, errors.New("catalog service roadmap is not configured")
 	}
-	ready, err := s.gate.HasReadyRelease(ctx)
+	revision, err := s.roadmap.CurrentRoadmap(ctx)
+	if errors.Is(err, roadmapdomain.ErrNoCurrentRevision) {
+		return []PublishedChallenge{}, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("read catalog release visibility: %w", err)
+		return nil, fmt.Errorf("load current roadmap: %w", err)
 	}
-	if !ready {
+	if revision == nil {
 		return []PublishedChallenge{}, nil
 	}
 	entries, err := challenge.List(s.challengesDir)
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := s.snapshots.LoadCurrent()
-	if errors.Is(err, domain.ErrNoCurrentRevision) {
-		return []PublishedChallenge{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load current taxonomy: %w", err)
-	}
-	index, err := taxonomy.NewCatalogIndex(*snapshot, entries)
-	if err != nil {
-		return nil, fmt.Errorf("build taxonomy catalog index: %w", err)
-	}
-	result := make([]PublishedChallenge, 0, len(entries))
-	for _, entry := range entries {
-		mapping, exists := index.Mapping(entry.ID)
-		if !exists {
-			continue
-		}
-		result = append(result, PublishedChallenge{Entry: entry, Taxonomy: projectChallengeTaxonomy(*snapshot, mapping)})
-	}
-	return result, nil
+	return projectPublishedChallenges(*revision, entries), nil
 }
 
 func (s *Service) Entry(ctx context.Context, id string) (*challenge.Entry, error) {
@@ -112,28 +83,53 @@ func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, err
 	return nil, challenge.ErrNotFound
 }
 
-func projectChallengeTaxonomy(snapshot domain.Snapshot, mapping domain.ChallengeMapping) ChallengeTaxonomy {
-	requires := make(map[string][]domain.Ref, len(snapshot.SkillMappings))
-	for _, skillMapping := range snapshot.SkillMappings {
-		requires[skillMapping.Source.ID] = append([]domain.Ref{}, skillMapping.Requires...)
+func projectPublishedChallenges(revision roadmapdomain.Revision, entries []challenge.Entry) []PublishedChallenge {
+	topics := make(map[string]roadmapdomain.Topic, len(revision.Topics))
+	for _, topic := range revision.Topics {
+		topics[topic.ID] = topic
 	}
-	projection := ChallengeTaxonomy{
-		Revision:    snapshot.Revision,
-		Tags:        append([]domain.Ref{}, mapping.Tags...),
-		Outcomes:    append([]domain.OutcomeRef{}, mapping.Outcomes...),
-		EntrySkills: make([]EntrySkill, 0, len(mapping.EntrySkills)),
+	tags := make(map[string]roadmapdomain.Tag, len(revision.Tags))
+	for _, tag := range revision.Tags {
+		tags[tag.ID] = tag
 	}
-	for _, outcome := range mapping.Outcomes {
-		if outcome.Primary {
-			projection.PrimaryOutcome = domain.Ref{ID: outcome.ID, Title: outcome.Title}
-			break
+	bindings := make(map[string]roadmapdomain.ChallengeBinding, len(revision.ChallengeBindings))
+	for _, binding := range revision.ChallengeBindings {
+		bindings[binding.Challenge.ID] = binding
+	}
+	result := make([]PublishedChallenge, 0, len(entries))
+	for _, entry := range entries {
+		binding, exists := bindings[entry.ID]
+		if !exists || binding.Challenge.Title != entry.Title || binding.Challenge.ContentRevision != entry.ContentRevision {
+			continue
+		}
+		topic, exists := topics[binding.Topic.ID]
+		if !exists {
+			continue
+		}
+		projection := ChallengeRoadmap{
+			Revision:           revision.Revision,
+			Domain:             topic.Domain,
+			Topic:              topic,
+			Tags:               make([]roadmapdomain.Tag, 0, len(binding.Tags)),
+			TopicNeighbors:     oneHopEdges(revision.TopicEdges, topic.ID),
+			ChallengeNeighbors: oneHopEdges(revision.ChallengeEdges, binding.Challenge.ID),
+		}
+		for _, reference := range binding.Tags {
+			if tag, exists := tags[reference.ID]; exists {
+				projection.Tags = append(projection.Tags, tag)
+			}
+		}
+		result = append(result, PublishedChallenge{Entry: entry, Roadmap: projection})
+	}
+	return result
+}
+
+func oneHopEdges(edges []roadmapdomain.Edge, id string) []roadmapdomain.Edge {
+	result := make([]roadmapdomain.Edge, 0)
+	for _, edge := range edges {
+		if edge.Source.ID == id || edge.Target.ID == id {
+			result = append(result, edge)
 		}
 	}
-	for _, entrySkill := range mapping.EntrySkills {
-		projection.EntrySkills = append(projection.EntrySkills, EntrySkill{
-			Ref:      entrySkill,
-			Requires: append([]domain.Ref{}, requires[entrySkill.ID]...),
-		})
-	}
-	return projection
+	return result
 }

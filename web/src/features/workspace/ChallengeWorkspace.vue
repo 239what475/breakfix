@@ -5,7 +5,7 @@ import type { AssistantTerminalContext, Challenge, ChallengeContent } from "../.
 import MarkdownDocument from "./MarkdownDocument.vue";
 import AssistantChat from "./AssistantChat.vue";
 import TerminalPane from "./TerminalPane.vue";
-import TaxonomyPanel from "./TaxonomyPanel.vue";
+import RoadmapPanel from "./RoadmapPanel.vue";
 import WorkspaceHeader from "./WorkspaceHeader.vue";
 import WorkspaceSidebar from "./WorkspaceSidebar.vue";
 import { useChallengeProgress } from "./useChallengeProgress";
@@ -188,7 +188,7 @@ onUnmounted(() => {
             :terminals="terminalContexts"
           />
           <template v-else>
-            <TaxonomyPanel v-if="view === 'problem' && content" :taxonomy="content.taxonomy" />
+            <RoadmapPanel v-if="view === 'problem' && content" :roadmap="content.roadmap" />
             <MarkdownDocument :source="documentSource" />
             <aside
               v-if="activeHint && content?.hints[activeHint]"

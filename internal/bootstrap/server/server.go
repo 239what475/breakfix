@@ -18,7 +18,6 @@ import (
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/buildinfo"
-	"github.com/breakfix/breakfix/internal/content/taxonomy"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -77,7 +76,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create OCI registry client: %w", err)
 	}
-	taxonomyStore := taxonomy.NewStore(cfg.DataDir)
 	var generatorSandbox *opensandbox.Client
 	var generatorWorkspace *appgeneration.Manager
 	if cfg.OpenSandbox.APIKey != "" {
@@ -115,7 +113,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		AssistantExecutor:  llm.NewAssistantExecutor(cfg.Agent),
 		AuthoringExecutor:  llm.NewAuthoringExecutor(cfg.Agent),
 		RegistryClient:     registryClient,
-		TaxonomyStore:      taxonomyStore,
 		GeneratorSandbox:   generatorSandbox,
 		GeneratorWorkspace: generatorWorkspace,
 	})

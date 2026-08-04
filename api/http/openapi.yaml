@@ -471,69 +471,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
-  /admin/catalog/releases:
-    post:
-      operationId: installCatalogRelease
-      summary: Install an immutable catalog release on an uninitialized platform
-      tags: [catalog-admin]
-      security:
-        - catalogAdminToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CatalogReleaseInstallRequest"
-      responses:
-        "202":
-          description: Catalog release accepted for build and verification
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CatalogRelease"
-        "400":
-          $ref: "#/components/responses/Error"
-        "403":
-          $ref: "#/components/responses/Error"
-        "409":
-          $ref: "#/components/responses/Error"
-
-  /admin/catalog/releases/{id}:
-    get:
-      operationId: getCatalogRelease
-      summary: Read an administrator-installed catalog release
-      tags: [catalog-admin]
-      security:
-        - catalogAdminToken: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Catalog release state
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CatalogRelease"
-        "403":
-          $ref: "#/components/responses/Error"
-        "404":
-          $ref: "#/components/responses/Error"
-
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-    catalogAdminToken:
-      type: apiKey
-      in: header
-      name: X-Breakfix-Catalog-Token
-
   responses:
     Error:
       description: Error
@@ -557,52 +500,6 @@ components:
       properties:
         error:
           type: string
-
-    CatalogReleaseInstallRequest:
-      type: object
-      required: [bundle]
-      properties:
-        bundle:
-          type: string
-          description: Immutable OCI artifact reference in repository@sha256:digest form
-
-    CatalogRelease:
-      type: object
-      required:
-        - id
-        - name
-        - version
-        - bundle_digest
-        - taxonomy_content_revision
-        - state
-        - created_at
-        - updated_at
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        version:
-          type: string
-        bundle_digest:
-          type: string
-        taxonomy_content_revision:
-          type: string
-        state:
-          type: string
-          enum: [Pending, Installing, Committing, Ready, CleaningUp, Failed]
-        deadline_at:
-          type: string
-          format: date-time
-          nullable: true
-        last_error:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
 
     RegisterRequest:
       type: object
@@ -786,16 +683,13 @@ components:
 
     MySpacePublishedChallenge:
       type: object
-      required: [challenge, published_at, taxonomy_status, attempted_users, completed_users]
+      required: [challenge, published_at, attempted_users, completed_users]
       properties:
         challenge:
           $ref: "#/components/schemas/MySpaceChallenge"
         published_at:
           type: string
           format: date-time
-        taxonomy_status:
-          type: string
-          enum: [mapped, mapping, retrying, blocked]
         attempted_users:
           type: integer
           minimum: 0
@@ -844,7 +738,7 @@ components:
 
     ChallengeSummary:
       type: object
-      required: [id, title, runtime, difficulty, tags, primary_outcome, description, published_at]
+      required: [id, title, runtime, difficulty, domain, topic, tags, description, published_at]
       properties:
         id:
           type: string
@@ -856,12 +750,14 @@ components:
         difficulty:
           type: string
           enum: [easy, medium, hard]
+        domain:
+          $ref: "#/components/schemas/RoadmapReference"
+        topic:
+          $ref: "#/components/schemas/RoadmapReference"
         tags:
           type: array
           items:
-            $ref: "#/components/schemas/TaxonomyReference"
-        primary_outcome:
-          $ref: "#/components/schemas/TaxonomyReference"
+            $ref: "#/components/schemas/RoadmapReference"
         description:
           type: string
         published_at:
@@ -894,59 +790,104 @@ components:
           items:
             $ref: "#/components/schemas/ChallengeSummary"
 
-    TaxonomyReference:
+    RoadmapReference:
       type: object
-      required: [id, title]
+      required: [id, source_ref, title]
       properties:
         id:
+          type: string
+        source_ref:
           type: string
         title:
           type: string
 
-    ChallengeOutcome:
+    RoadmapDomain:
       type: object
-      required: [id, title, primary]
+      required: [id, source_ref, title, definition, scope, non_goals]
       properties:
         id:
           type: string
+        source_ref:
+          type: string
         title:
           type: string
-        primary:
-          type: boolean
+        definition:
+          type: string
+        scope:
+          type: string
+        non_goals:
+          type: string
 
-    ChallengeEntrySkill:
+    RoadmapTopic:
       type: object
-      required: [id, title, requires]
+      required: [id, source_ref, title, domain, definition, scope, non_goals, challenge_guidance]
       properties:
         id:
           type: string
+        source_ref:
+          type: string
         title:
           type: string
-        requires:
-          type: array
-          items:
-            $ref: "#/components/schemas/TaxonomyReference"
+        domain:
+          $ref: "#/components/schemas/RoadmapReference"
+        definition:
+          type: string
+        scope:
+          type: string
+        non_goals:
+          type: string
+        challenge_guidance:
+          type: string
 
-    ChallengeTaxonomy:
+    RoadmapTag:
       type: object
-      required: [revision, tags, primary_outcome, outcomes, entry_skills]
+      required: [id, source_ref, title, description]
+      properties:
+        id:
+          type: string
+        source_ref:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+
+    RoadmapEdge:
+      type: object
+      required: [source, target, relation, reason]
+      properties:
+        source:
+          $ref: "#/components/schemas/RoadmapReference"
+        target:
+          $ref: "#/components/schemas/RoadmapReference"
+        relation:
+          type: string
+          enum: [precedes, related]
+        reason:
+          type: string
+
+    ChallengeRoadmap:
+      type: object
+      required: [revision, domain, topic, tags, topic_neighbors, challenge_neighbors]
       properties:
         revision:
           type: string
+        domain:
+          $ref: "#/components/schemas/RoadmapReference"
+        topic:
+          $ref: "#/components/schemas/RoadmapTopic"
         tags:
           type: array
           items:
-            $ref: "#/components/schemas/TaxonomyReference"
-        primary_outcome:
-          $ref: "#/components/schemas/TaxonomyReference"
-        outcomes:
+            $ref: "#/components/schemas/RoadmapTag"
+        topic_neighbors:
           type: array
           items:
-            $ref: "#/components/schemas/ChallengeOutcome"
-        entry_skills:
+            $ref: "#/components/schemas/RoadmapEdge"
+        challenge_neighbors:
           type: array
           items:
-            $ref: "#/components/schemas/ChallengeEntrySkill"
+            $ref: "#/components/schemas/RoadmapEdge"
 
     ChallengeCheckpoint:
       type: object
@@ -1003,7 +944,7 @@ components:
 
     ChallengeContent:
       type: object
-      required: [id, title, runtime, nodes, problem, solution, hints, checkpoints, taxonomy]
+      required: [id, title, runtime, nodes, problem, solution, hints, checkpoints, roadmap]
       properties:
         id:
           type: string
@@ -1028,8 +969,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChallengeCheckpoint"
-        taxonomy:
-          $ref: "#/components/schemas/ChallengeTaxonomy"
+        roadmap:
+          $ref: "#/components/schemas/ChallengeRoadmap"
 
     ChallengeProgress:
       type: object

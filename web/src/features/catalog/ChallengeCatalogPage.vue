@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { Challenge, TaxonomyReference } from "../../api/types";
+import type { Challenge, RoadmapReference } from "../../api/types";
 import CatalogFilters from "./CatalogFilters.vue";
 import ChallengeList from "./ChallengeList.vue";
 import { challengeStatus, toggleSelection, type CatalogSort } from "./catalog";
@@ -29,7 +29,7 @@ const filtersOpen = ref(false);
 const catalogPage = ref<HTMLElement>();
 
 const availableTags = computed(() => {
-	const tags = new Map<string, TaxonomyReference>();
+	const tags = new Map<string, RoadmapReference>();
 	for (const challenge of props.challenges) {
 		for (const tag of challenge.tags) tags.set(tag.id, tag);
 	}
@@ -41,7 +41,7 @@ const filteredChallenges = computed(() => {
 	const matches = props.challenges.filter((challenge) => {
 		if (
 			search &&
-			![challenge.title, challenge.description, challenge.primary_outcome.title, ...challenge.tags.map((tag) => tag.title)]
+			![challenge.title, challenge.description, challenge.domain.title, challenge.topic.title, ...challenge.tags.map((tag) => tag.title)]
 				.join(" ")
 				.toLowerCase()
 				.includes(search)
