@@ -10,7 +10,9 @@ import (
 	"time"
 
 	app "github.com/breakfix/breakfix/internal/application/generation"
+	roadmapapp "github.com/breakfix/breakfix/internal/application/roadmap"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
+	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
 // GenerationWorkflowClient is the Generate Worker's complete Server boundary. It intentionally
@@ -139,6 +141,91 @@ func (c *GenerationWorkflowClient) BuildArchive(ctx context.Context, claim domai
 		return nil, "", err
 	}
 	return response.Archive, response.SHA256, nil
+}
+
+// SearchClassificationTopics reads only the revision pinned on the claimed
+// workflow. The Worker never supplies a revision identifier to the Server.
+func (c *GenerationWorkflowClient) SearchClassificationTopics(ctx context.Context, claim domain.Claim, query roadmapapp.TopicSearch) ([]roadmapapp.TopicMatch, error) {
+	if !claim.Valid() || query.Validate() != nil {
+		return nil, errors.New("classification topic search requires a valid claim and query")
+	}
+	var response struct {
+		RoadmapRevision string                  `json:"roadmap_revision"`
+		Topics          []roadmapapp.TopicMatch `json:"topics"`
+	}
+	if err := c.post(ctx, generationWorkflowPath(claim.Workflow.ID, "classification/topics/search"), struct {
+		domain.LeaseCredential
+		Query    string `json:"query"`
+		DomainID string `json:"domain_id,omitempty"`
+		Limit    int    `json:"limit"`
+	}{LeaseCredential: claim.LeaseCredential, Query: query.Query, DomainID: query.DomainID, Limit: query.Limit}, &response); err != nil {
+		return nil, err
+	}
+	if response.RoadmapRevision != claim.Workflow.ClassificationRoadmapRevision {
+		return nil, errors.New("Server returned a classification topic search from a different roadmap revision")
+	}
+	return response.Topics, nil
+}
+
+func (c *GenerationWorkflowClient) ReadClassificationTopic(ctx context.Context, claim domain.Claim, id string) (*roadmapdomain.Topic, error) {
+	if !claim.Valid() || strings.TrimSpace(id) == "" {
+		return nil, errors.New("classification topic read requires a valid claim and id")
+	}
+	var response struct {
+		RoadmapRevision string              `json:"roadmap_revision"`
+		Topic           roadmapdomain.Topic `json:"topic"`
+	}
+	if err := c.post(ctx, generationWorkflowPath(claim.Workflow.ID, "classification/topics/read"), struct {
+		domain.LeaseCredential
+		ID string `json:"id"`
+	}{LeaseCredential: claim.LeaseCredential, ID: strings.TrimSpace(id)}, &response); err != nil {
+		return nil, err
+	}
+	if response.RoadmapRevision != claim.Workflow.ClassificationRoadmapRevision {
+		return nil, errors.New("Server returned a classification topic from a different roadmap revision")
+	}
+	return &response.Topic, nil
+}
+
+func (c *GenerationWorkflowClient) SearchClassificationTags(ctx context.Context, claim domain.Claim, query roadmapapp.TagSearch) ([]roadmapapp.TagMatch, error) {
+	if !claim.Valid() || query.Validate() != nil {
+		return nil, errors.New("classification tag search requires a valid claim and query")
+	}
+	var response struct {
+		RoadmapRevision string                `json:"roadmap_revision"`
+		Tags            []roadmapapp.TagMatch `json:"tags"`
+	}
+	if err := c.post(ctx, generationWorkflowPath(claim.Workflow.ID, "classification/tags/search"), struct {
+		domain.LeaseCredential
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}{LeaseCredential: claim.LeaseCredential, Query: query.Query, Limit: query.Limit}, &response); err != nil {
+		return nil, err
+	}
+	if response.RoadmapRevision != claim.Workflow.ClassificationRoadmapRevision {
+		return nil, errors.New("Server returned a classification tag search from a different roadmap revision")
+	}
+	return response.Tags, nil
+}
+
+func (c *GenerationWorkflowClient) ReadClassificationTag(ctx context.Context, claim domain.Claim, id string) (*roadmapdomain.Tag, error) {
+	if !claim.Valid() || strings.TrimSpace(id) == "" {
+		return nil, errors.New("classification tag read requires a valid claim and id")
+	}
+	var response struct {
+		RoadmapRevision string            `json:"roadmap_revision"`
+		Tag             roadmapdomain.Tag `json:"tag"`
+	}
+	if err := c.post(ctx, generationWorkflowPath(claim.Workflow.ID, "classification/tags/read"), struct {
+		domain.LeaseCredential
+		ID string `json:"id"`
+	}{LeaseCredential: claim.LeaseCredential, ID: strings.TrimSpace(id)}, &response); err != nil {
+		return nil, err
+	}
+	if response.RoadmapRevision != claim.Workflow.ClassificationRoadmapRevision {
+		return nil, errors.New("Server returned a classification tag from a different roadmap revision")
+	}
+	return &response.Tag, nil
 }
 
 func (c *GenerationWorkflowClient) ClaimResourceReap(ctx context.Context, workerID string, kind domain.ResourceReapKind, leaseTTL time.Duration) (*domain.ResourceReapClaim, error) {

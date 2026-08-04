@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,11 +13,13 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	app "github.com/breakfix/breakfix/internal/application/generation"
+	roadmapapp "github.com/breakfix/breakfix/internal/application/roadmap"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -45,6 +49,24 @@ type generationResourceReapClaimRequest struct {
 type generationResourceReapCompleteRequest struct {
 	Claim   generation.ResourceReapClaim `json:"claim"`
 	Failure string                       `json:"failure,omitempty"`
+}
+
+type generationClassificationTopicSearchRequest struct {
+	generation.LeaseCredential
+	Query    string `json:"query"`
+	DomainID string `json:"domain_id,omitempty"`
+	Limit    int    `json:"limit"`
+}
+
+type generationClassificationTagSearchRequest struct {
+	generation.LeaseCredential
+	Query string `json:"query"`
+	Limit int    `json:"limit"`
+}
+
+type generationClassificationReadRequest struct {
+	generation.LeaseCredential
+	ID string `json:"id"`
 }
 
 func (h *Handler) InternalClaimGenerationWorkflow(c *gin.Context) {
@@ -144,6 +166,90 @@ func (h *Handler) InternalGenerationContext(c *gin.Context) {
 	}{Context: *context})
 }
 
+func (h *Handler) InternalSearchGenerationClassificationTopics(c *gin.Context) {
+	var request generationClassificationTopicSearchRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	claim, retrieval, err := h.generationClassificationRetrieval(c, request.LeaseCredential)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	topics, err := retrieval.SearchTopics(roadmapapp.TopicSearch{Query: request.Query, DomainID: request.DomainID, Limit: request.Limit})
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		RoadmapRevision string                  `json:"roadmap_revision"`
+		Topics          []roadmapapp.TopicMatch `json:"topics"`
+	}{RoadmapRevision: claim.Workflow.ClassificationRoadmapRevision, Topics: topics})
+}
+
+func (h *Handler) InternalReadGenerationClassificationTopic(c *gin.Context) {
+	var request generationClassificationReadRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	claim, retrieval, err := h.generationClassificationRetrieval(c, request.LeaseCredential)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	topic, err := retrieval.ReadTopic(request.ID)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		RoadmapRevision string              `json:"roadmap_revision"`
+		Topic           roadmapdomain.Topic `json:"topic"`
+	}{RoadmapRevision: claim.Workflow.ClassificationRoadmapRevision, Topic: *topic})
+}
+
+func (h *Handler) InternalSearchGenerationClassificationTags(c *gin.Context) {
+	var request generationClassificationTagSearchRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	claim, retrieval, err := h.generationClassificationRetrieval(c, request.LeaseCredential)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	tags, err := retrieval.SearchTags(roadmapapp.TagSearch{Query: request.Query, Limit: request.Limit})
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		RoadmapRevision string                `json:"roadmap_revision"`
+		Tags            []roadmapapp.TagMatch `json:"tags"`
+	}{RoadmapRevision: claim.Workflow.ClassificationRoadmapRevision, Tags: tags})
+}
+
+func (h *Handler) InternalReadGenerationClassificationTag(c *gin.Context) {
+	var request generationClassificationReadRequest
+	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+		return
+	}
+	claim, retrieval, err := h.generationClassificationRetrieval(c, request.LeaseCredential)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	tag, err := retrieval.ReadTag(request.ID)
+	if err != nil {
+		h.writeInternalGenerationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		RoadmapRevision string            `json:"roadmap_revision"`
+		Tag             roadmapdomain.Tag `json:"tag"`
+	}{RoadmapRevision: claim.Workflow.ClassificationRoadmapRevision, Tag: *tag})
+}
+
 func (h *Handler) InternalStartGenerationAgentRun(c *gin.Context) {
 	var request app.StartAgentRunRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
@@ -213,6 +319,12 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 		err = h.db.Generation.FinalizeGenerationJudgement(c.Request.Context(), *claim, request.Judgement.RunID, request.Judgement.Approved, request.Judgement.Feedback, now)
 	case request.Classification != nil:
 		err = h.db.Generation.FinalizeGenerationClassification(c.Request.Context(), *claim, request.Classification.RunID, request.Classification.Output, now)
+	case request.ClassificationAdjustment != nil:
+		var contentFeedback *generation.ClassificationContentFeedback
+		contentFeedback, err = h.db.Generation.FinalizeGenerationClassificationAdjustment(c.Request.Context(), *claim, *request.ClassificationAdjustment, now)
+		if err == nil && contentFeedback != nil {
+			err = h.routeClassificationContentFeedback(c.Request.Context(), *contentFeedback)
+		}
 	case request.Build != nil:
 		err = h.completeGenerationBuild(c, *claim, *request.Build, now)
 	case request.ArtifactPublish != nil:
@@ -254,6 +366,27 @@ func (h *Handler) InternalGenerationPhase(c *gin.Context) {
 	c.JSON(http.StatusOK, struct {
 		Claim *generation.Claim `json:"claim,omitempty"`
 	}{Claim: refreshed})
+}
+
+// routeClassificationContentFeedback preserves the classification boundary:
+// the Classifying role only decides scope, while Authoring owns the private
+// Plan draft for a content change. The resulting conversation is durable even
+// though this internal Worker request has no user-facing stream.
+func (h *Handler) routeClassificationContentFeedback(ctx context.Context, feedback generation.ClassificationContentFeedback) error {
+	if h == nil || h.authoring == nil {
+		return errors.New("authoring runtime is unavailable for classification content feedback")
+	}
+	_, run, err := h.authoring.StartTurn(ctx, feedback.UserID, feedback.SessionID, feedback.Content)
+	if err != nil {
+		return fmt.Errorf("start authoring content feedback: %w", err)
+	}
+	if _, err := h.authoring.RunTurn(ctx, run.ID, nil); err != nil {
+		if failErr := h.authoring.FailTurn(context.Background(), run.ID, err.Error()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
+			slog.Error("finalize routed authoring content feedback", "run_id", run.ID, "err", errors.Join(err, failErr))
+		}
+		return fmt.Errorf("run authoring content feedback: %w", err)
+	}
+	return nil
 }
 
 func (h *Handler) InternalDownloadGenerationCandidateArchive(c *gin.Context) {
@@ -344,6 +477,36 @@ func (h *Handler) generationClaim(c *gin.Context, credential generation.LeaseCre
 		return nil, errors.New("valid generation workflow lease credentials are required")
 	}
 	return h.db.Generation.GetGenerationClaim(c.Request.Context(), c.Param("id"), credential, time.Now().UTC())
+}
+
+// generationClassificationRetrieval binds every tool call to the leased
+// classifier run and the workflow's immutable revision. No request field can
+// redirect a Worker to a newer or arbitrary RoadmapRevision.
+func (h *Handler) generationClassificationRetrieval(c *gin.Context, credential generation.LeaseCredential) (*generation.Claim, *roadmapapp.Retrieval, error) {
+	claim, err := h.generationClaim(c, credential)
+	if err != nil {
+		return nil, nil, err
+	}
+	if claim.Workflow.State != generation.StateClassifying || strings.TrimSpace(claim.Workflow.ActiveAgentRunID) == "" ||
+		strings.TrimSpace(claim.Workflow.ClassificationRoadmapRevision) == "" {
+		return nil, nil, generation.ErrCandidateInvalidState
+	}
+	run, err := h.db.Agent.GetRun(c.Request.Context(), claim.Workflow.ActiveAgentRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if run.Status != agent.RunRunning || run.Purpose != app.ClassifierPurpose || run.OwnerKind != "generation-workflow" || run.OwnerRef != claim.Workflow.ID {
+		return nil, nil, generation.ErrLeaseLost
+	}
+	revision, err := h.db.Roadmap.RoadmapRevision(c.Request.Context(), claim.Workflow.ClassificationRoadmapRevision)
+	if err != nil {
+		return nil, nil, err
+	}
+	retrieval, err := roadmapapp.NewRetrieval(*revision)
+	if err != nil {
+		return nil, nil, err
+	}
+	return claim, retrieval, nil
 }
 
 func (h *Handler) generationCandidateForClaim(c *gin.Context, credential generation.LeaseCredential) (*generation.Claim, *generation.Revision, error) {

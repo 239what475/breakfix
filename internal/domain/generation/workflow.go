@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	ExecutionDeadline    = time.Hour
-	MaxStateAttempts     = 10
+	ExecutionDeadline     = time.Hour
+	MaxStateAttempts      = 10
 	MaxCandidateRevisions = 10
 )
 
@@ -28,19 +28,19 @@ var (
 type WorkflowState string
 
 const (
-	StateGenerating          WorkflowState = "Generating"
-	StateJudging             WorkflowState = "Judging"
-	StateBuilding            WorkflowState = "Building"
-	StateArtifactPublishing  WorkflowState = "ArtifactPublishing"
-	StateVerifying           WorkflowState = "Verifying"
-	StateNeedsAuthorReview   WorkflowState = "NeedsAuthorReview"
-	StateClassifying         WorkflowState = "Classifying"
+	StateGenerating                WorkflowState = "Generating"
+	StateJudging                   WorkflowState = "Judging"
+	StateBuilding                  WorkflowState = "Building"
+	StateArtifactPublishing        WorkflowState = "ArtifactPublishing"
+	StateVerifying                 WorkflowState = "Verifying"
+	StateNeedsAuthorReview         WorkflowState = "NeedsAuthorReview"
+	StateClassifying               WorkflowState = "Classifying"
 	StateNeedsClassificationReview WorkflowState = "NeedsClassificationReview"
-	StateChallengePublishing WorkflowState = "ChallengePublishing"
-	StatePublished           WorkflowState = "Published"
-	StateFailed              WorkflowState = "Failed"
-	StateCancelled           WorkflowState = "Cancelled"
-	StateSuperseded          WorkflowState = "Superseded"
+	StateChallengePublishing       WorkflowState = "ChallengePublishing"
+	StatePublished                 WorkflowState = "Published"
+	StateFailed                    WorkflowState = "Failed"
+	StateCancelled                 WorkflowState = "Cancelled"
+	StateSuperseded                WorkflowState = "Superseded"
 )
 
 // StartConfirmation is the explicit, idempotent confirmation of one author
@@ -142,23 +142,26 @@ func (f Failure) Validate() error {
 // publication. StateAttempt counts continuous technical failures of State;
 // LeaseOwner is randomized for every claim and fences late worker reports.
 type Workflow struct {
-	ID                          string        `json:"id"`
-	Source                      Source        `json:"source"`
-	SourceRevision              string        `json:"source_revision"`
-	State                       WorkflowState `json:"state"`
-	ClassificationRoadmapRevision string      `json:"classification_roadmap_revision,omitempty"`
-	SupersededByWorkflowID      string        `json:"superseded_by_workflow_id,omitempty"`
-	CandidateRevisionID         string        `json:"candidate_revision_id,omitempty"`
-	ActiveAgentRunID            string        `json:"active_agent_run_id,omitempty"`
-	StateAttempt                int           `json:"state_attempt"`
-	LeaseOwner                  string        `json:"-"`
-	LeaseExpiresAt              *time.Time    `json:"lease_expires_at,omitempty"`
-	NextRunAt                   time.Time     `json:"next_run_at"`
-	DeadlineAt                  *time.Time    `json:"deadline_at,omitempty"`
-	DeadlinePausedAt            *time.Time    `json:"deadline_paused_at,omitempty"`
-	LastError                   string        `json:"last_error,omitempty"`
-	CreatedAt                   time.Time     `json:"created_at"`
-	UpdatedAt                   time.Time     `json:"updated_at"`
+	ID                            string        `json:"id"`
+	Source                        Source        `json:"source"`
+	SourceRevision                string        `json:"source_revision"`
+	State                         WorkflowState `json:"state"`
+	ClassificationRoadmapRevision string        `json:"classification_roadmap_revision,omitempty"`
+	// ClassificationFeedback is the one pending author message for a resumed
+	// Classifying run. It is private workflow input, never Roadmap content.
+	ClassificationFeedback string     `json:"classification_feedback,omitempty"`
+	SupersededByWorkflowID string     `json:"superseded_by_workflow_id,omitempty"`
+	CandidateRevisionID    string     `json:"candidate_revision_id,omitempty"`
+	ActiveAgentRunID       string     `json:"active_agent_run_id,omitempty"`
+	StateAttempt           int        `json:"state_attempt"`
+	LeaseOwner             string     `json:"-"`
+	LeaseExpiresAt         *time.Time `json:"lease_expires_at,omitempty"`
+	NextRunAt              time.Time  `json:"next_run_at"`
+	DeadlineAt             *time.Time `json:"deadline_at,omitempty"`
+	DeadlinePausedAt       *time.Time `json:"deadline_paused_at,omitempty"`
+	LastError              string     `json:"last_error,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 func (w Workflow) Valid() bool {

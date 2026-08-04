@@ -51,6 +51,7 @@ var schemaGenerationStatements = []string{
 		source_revision TEXT NOT NULL,
 		state TEXT NOT NULL CHECK (state IN ('Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'Classifying', 'NeedsClassificationReview', 'ChallengePublishing', 'Published', 'Failed', 'Cancelled', 'Superseded')),
 		classification_roadmap_revision TEXT NOT NULL DEFAULT '',
+		classification_feedback TEXT NOT NULL DEFAULT '',
 		superseded_by_workflow_id TEXT REFERENCES generation_workflows(id) ON DELETE RESTRICT,
 		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		active_agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,

@@ -19,7 +19,7 @@ import (
 
 var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
 
-const generationWorkflowColumns = `id, source_kind, source_ref, source_revision, state, classification_roadmap_revision,
+const generationWorkflowColumns = `id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
 	COALESCE(superseded_by_workflow_id, ''), COALESCE(candidate_revision_id, ''), COALESCE(active_agent_run_id, ''), state_attempt, lease_owner, lease_expires_at, next_run_at,
 	deadline_at, deadline_paused_at, last_error, created_at, updated_at`
 const generationWorkflowSelect = `SELECT ` + generationWorkflowColumns + ` FROM generation_workflows`
@@ -94,9 +94,9 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_workflows
-		(id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, superseded_by_workflow_id,
+		(id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback, superseded_by_workflow_id,
 		candidate_revision_id, active_agent_run_id, state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '', NULL, NULL, NULL, 0, '', ?, '', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, NULL, 0, '', ?, '', ?, ?)`,
 		workflow.ID, workflow.Source.Kind, workflow.Source.Ref, workflow.SourceRevision, workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("insert generation workflow: %w", err)
 	}
@@ -254,6 +254,9 @@ func (d *GenerationRepository) LoadGenerationContext(ctx context.Context, claim 
 	}
 	result.Plan = plan.Plan
 	result.GeneratorSession = generatorSession
+	if workflow.State == generation.StateClassifying {
+		result.ClassificationFeedback = workflow.ClassificationFeedback
+	}
 	if workflow.CandidateRevisionID != "" {
 		revision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ?`, workflow.CandidateRevisionID))
 		if err != nil {
@@ -665,7 +668,7 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 		return nil, err
 	}
 	deadline := resumeGenerationDeadline(*workflow, now)
-	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, classification_roadmap_revision = ?,
+	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, classification_roadmap_revision = ?, classification_feedback = '',
 		state_attempt = 0, lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL,
 		next_run_at = ?, last_error = '', updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
 		generation.StateClassifying, roadmapRevision.Revision, deadline, now.UTC(), now.UTC(), workflow.ID))
@@ -738,16 +741,93 @@ func (d *GenerationRepository) FinalizeGenerationClassification(ctx context.Cont
 		return fmt.Errorf("record generation classification proposal: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL, state_attempt = 0,
-		lease_owner = '', lease_expires_at = NULL, deadline_paused_at = ?, last_error = '', updated_at = ? WHERE id = ?`,
+		lease_owner = '', lease_expires_at = NULL, deadline_paused_at = ?, classification_feedback = '', last_error = '', updated_at = ? WHERE id = ?`,
 		generation.StateNeedsClassificationReview, now.UTC(), now.UTC(), workflow.ID); err != nil {
 		return fmt.Errorf("pause generation workflow for classification review: %w", err)
 	}
 	return tx.Commit()
 }
 
+// FinalizeGenerationClassificationAdjustment applies only a private proposal
+// change. Existing Roadmap definitions are resolved against the same immutable
+// revision pinned when this workflow first entered Classifying.
+func (d *GenerationRepository) FinalizeGenerationClassificationAdjustment(ctx context.Context, claim generation.Claim, result generation.ClassificationAdjustment, now time.Time) (*generation.ClassificationContentFeedback, error) {
+	if !claim.Valid() || result.Validate() != nil || now.IsZero() {
+		return nil, errors.New("generation classification adjustment finalization is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin generation classification adjustment finalization: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := lockGenerationClaimTx(ctx, tx, claim, generation.StateClassifying, now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	if workflow.ActiveAgentRunID != result.RunID || workflow.CandidateRevisionID == "" || strings.TrimSpace(workflow.ClassificationRoadmapRevision) == "" {
+		return nil, generationLeaseLost()
+	}
+	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	if err != nil {
+		return nil, err
+	}
+	if candidateRevision.Verification == nil || !candidateRevision.Verification.Passed || candidateRevision.Artifact == nil || candidateRevision.Classification == nil ||
+		candidateRevision.Classification.Result != generation.ClassificationProposed || candidateRevision.Classification.RoadmapRevision != workflow.ClassificationRoadmapRevision {
+		return nil, generation.ErrCandidateInvalidState
+	}
+	roadmapRevision, err := roadmapRevisionTx(ctx, tx, workflow.ClassificationRoadmapRevision)
+	if err != nil {
+		return nil, err
+	}
+	var contentFeedback *generation.ClassificationContentFeedback
+	lastError := ""
+	if result.ChangeScope == generation.ClassificationChangeClassification {
+		proposal := generation.ClassificationProposal{
+			Revision: candidateRevision.Classification.Revision + 1, CandidateRevisionID: candidateRevision.ID, RoadmapRevision: roadmapRevision.Revision,
+			Result: result.Output.Result, Topic: result.Output.Topic, Tags: append([]generation.TagProposal(nil), result.Output.Tags...), UpdatedAt: now.UTC(),
+		}
+		if _, _, _, err := resolveClassificationProposal(*roadmapRevision, proposal); err != nil {
+			return nil, err
+		}
+		encoded, err := marshalJSON(proposal)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET classification_proposal = ?::jsonb, updated_at = ? WHERE id = ?`, encoded, now.UTC(), candidateRevision.ID); err != nil {
+			return nil, fmt.Errorf("record adjusted generation classification proposal: %w", err)
+		}
+	}
+	if result.ChangeScope == generation.ClassificationChangeContent {
+		content := strings.TrimSpace(workflow.ClassificationFeedback)
+		if content == "" {
+			return nil, generation.ErrCandidateInvalidState
+		}
+		session, err := readAuthoringSessionTx(ctx, tx, workflow.Source.Ref, "")
+		if err != nil {
+			return nil, err
+		}
+		contentFeedback = &generation.ClassificationContentFeedback{SessionID: session.ID, UserID: session.UserID, Content: content}
+	}
+	if result.ChangeScope == generation.ClassificationChangeClarify {
+		lastError = "classification_clarification: " + strings.TrimSpace(result.Clarification)
+	}
+	if err := completeRunTx(ctx, tx, result.RunID, now.UTC()); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL, state_attempt = 0,
+		lease_owner = '', lease_expires_at = NULL, deadline_paused_at = ?, classification_feedback = '', last_error = ?, updated_at = ? WHERE id = ?`,
+		generation.StateNeedsClassificationReview, now.UTC(), lastError, now.UTC(), workflow.ID); err != nil {
+		return nil, fmt.Errorf("pause generation workflow for adjusted classification review: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return contentFeedback, nil
+}
+
 // ResumeGenerationClassification restarts only the classification role for a
 // verified candidate after classification feedback or a transient failure.
-func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Context, sessionID, userID string, now time.Time) (*generation.Workflow, error) {
+func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Context, sessionID, userID, feedback string, now time.Time) (*generation.Workflow, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || now.IsZero() {
 		return nil, errors.New("classification resume requires authoring session, user, and current time")
 	}
@@ -769,10 +849,17 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	if workflow.CandidateRevisionID == "" || workflow.DeadlinePausedAt == nil || workflow.DeadlineAt == nil || strings.TrimSpace(workflow.ClassificationRoadmapRevision) == "" {
 		return nil, authoring.ErrInvalidState
 	}
+	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	if err != nil {
+		return nil, err
+	}
+	if candidateRevision.Classification != nil && candidateRevision.Classification.Result == generation.ClassificationUnclassifiable && strings.TrimSpace(feedback) != "" {
+		return nil, authoring.ErrInvalidState
+	}
 	deadline := resumeGenerationDeadline(*workflow, now)
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0,
-		lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, last_error = '', updated_at = ?
-		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), now.UTC(), workflow.ID))
+		lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, classification_feedback = ?, last_error = '', updated_at = ?
+		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), now.UTC(), strings.TrimSpace(feedback), now.UTC(), workflow.ID))
 	if err != nil {
 		return nil, fmt.Errorf("resume generation classification: %w", err)
 	}
@@ -1575,7 +1662,7 @@ func ensureGeneratorSessionTx(ctx context.Context, tx *Tx, session *authoring.Se
 func scanGenerationWorkflow(row agentRow) (*generation.Workflow, error) {
 	var workflow generation.Workflow
 	var leaseExpiresAt, deadlineAt, pausedAt sql.NullTime
-	err := row.Scan(&workflow.ID, &workflow.Source.Kind, &workflow.Source.Ref, &workflow.SourceRevision, &workflow.State, &workflow.ClassificationRoadmapRevision,
+	err := row.Scan(&workflow.ID, &workflow.Source.Kind, &workflow.Source.Ref, &workflow.SourceRevision, &workflow.State, &workflow.ClassificationRoadmapRevision, &workflow.ClassificationFeedback,
 		&workflow.SupersededByWorkflowID, &workflow.CandidateRevisionID, &workflow.ActiveAgentRunID, &workflow.StateAttempt, &workflow.LeaseOwner, &leaseExpiresAt,
 		&workflow.NextRunAt, &deadlineAt, &pausedAt, &workflow.LastError, &workflow.CreatedAt, &workflow.UpdatedAt)
 	if err != nil {

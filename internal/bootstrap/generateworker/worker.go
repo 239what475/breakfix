@@ -57,6 +57,10 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create generator executor: %w", err)
 	}
+	classifierExecutor, err := agent.NewClassifier(cfg.Agent, workflowClient)
+	if err != nil {
+		return fmt.Errorf("create classification executor: %w", err)
+	}
 
 	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleGenerate)
 	if err != nil {
@@ -90,6 +94,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	runner, err := generate.New(
 		workflowClient,
 		generatorExecutor,
+		classifierExecutor,
 		build.NewExecutor(incusClient, cfg.Incus),
 		publisherExecutor,
 		verifierExecutor,

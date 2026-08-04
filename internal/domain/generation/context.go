@@ -42,11 +42,12 @@ func (f Feedback) Validate() error {
 // Candidate bytes are intentionally absent and must be fetched through the
 // corresponding lease-fenced artifact endpoint.
 type Context struct {
-	Workflow         Workflow       `json:"workflow"`
-	Plan             authoring.Plan `json:"plan"`
-	Candidate        *WorkerView    `json:"candidate,omitempty"`
-	Feedback         Feedback       `json:"feedback"`
-	GeneratorSession string         `json:"generator_session"`
+	Workflow               Workflow       `json:"workflow"`
+	Plan                   authoring.Plan `json:"plan"`
+	Candidate              *WorkerView    `json:"candidate,omitempty"`
+	Feedback               Feedback       `json:"feedback"`
+	ClassificationFeedback string         `json:"classification_feedback,omitempty"`
+	GeneratorSession       string         `json:"generator_session"`
 }
 
 // ArtifactError marks a deterministic defect in candidate content or its

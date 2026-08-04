@@ -38,6 +38,13 @@ type GeneratorExecutor interface {
 	Judge(context.Context, authoring.Plan, *app.Candidate) (app.Judgement, error)
 }
 
+// ClassifierExecutor owns only the independent Topic/Tag classification role.
+// It receives an already verified candidate and can read Roadmap definitions
+// only through its lease-fenced runtime client.
+type ClassifierExecutor interface {
+	Classify(context.Context, generation.Execution, *app.Candidate) (app.ClassificationCompletion, error)
+}
+
 type BuilderExecutor interface {
 	Execute(context.Context, generation.Execution, []byte, []byte) (generation.BuildResult, error)
 }
@@ -68,19 +75,20 @@ type Config struct {
 }
 
 type Worker struct {
-	store     Store
-	generator GeneratorExecutor
-	builder   BuilderExecutor
-	publisher PublisherExecutor
-	verifier  VerifierExecutor
-	reapStore ResourceReapStore
-	reaper    ResourceReapExecutor
-	config    Config
-	sleep     func(context.Context, time.Duration) error
+	store      Store
+	generator  GeneratorExecutor
+	classifier ClassifierExecutor
+	builder    BuilderExecutor
+	publisher  PublisherExecutor
+	verifier   VerifierExecutor
+	reapStore  ResourceReapStore
+	reaper     ResourceReapExecutor
+	config     Config
+	sleep      func(context.Context, time.Duration) error
 }
 
-func New(store Store, generatorExecutor GeneratorExecutor, builderExecutor BuilderExecutor, publisherExecutor PublisherExecutor, verifierExecutor VerifierExecutor, config Config) (*Worker, error) {
-	if store == nil || generatorExecutor == nil || builderExecutor == nil || publisherExecutor == nil || verifierExecutor == nil || strings.TrimSpace(config.WorkerID) == "" || strings.TrimSpace(config.Model) == "" {
+func New(store Store, generatorExecutor GeneratorExecutor, classifierExecutor ClassifierExecutor, builderExecutor BuilderExecutor, publisherExecutor PublisherExecutor, verifierExecutor VerifierExecutor, config Config) (*Worker, error) {
+	if store == nil || generatorExecutor == nil || classifierExecutor == nil || builderExecutor == nil || publisherExecutor == nil || verifierExecutor == nil || strings.TrimSpace(config.WorkerID) == "" || strings.TrimSpace(config.Model) == "" {
 		return nil, errors.New("generate worker requires Server client, all phase executors, worker id, and model")
 	}
 	if config.LeaseTTL <= 0 {
@@ -90,7 +98,7 @@ func New(store Store, generatorExecutor GeneratorExecutor, builderExecutor Build
 		config.PollEvery = time.Second
 	}
 	worker := &Worker{
-		store: store, generator: generatorExecutor, builder: builderExecutor, publisher: publisherExecutor, verifier: verifierExecutor,
+		store: store, generator: generatorExecutor, classifier: classifierExecutor, builder: builderExecutor, publisher: publisherExecutor, verifier: verifierExecutor,
 		config: config, sleep: sleepContext,
 	}
 	if reapStore, ok := store.(ResourceReapStore); ok {
@@ -293,6 +301,46 @@ func (w *Worker) executeState(ctx context.Context, execution generation.Executio
 		return w.store.Phase(ctx, claim, app.PhaseRequest{Judgement: &generation.Judgement{
 			RunID: run.Run.ID, Approved: judgement.Approved, Feedback: judgement.Feedback,
 		}})
+
+	case generation.StateClassifying:
+		run, err := w.store.StartAgentRun(ctx, claim, app.StartAgentRunRequest{
+			Purpose: app.ClassifierPurpose, Model: w.config.Model, PromptVersion: app.ClassifierPromptVersion,
+		})
+		if err != nil {
+			return nil, err
+		}
+		archive, _, err := w.store.CandidateArchive(ctx, claim)
+		if err != nil {
+			return nil, err
+		}
+		candidateValue, err := app.InspectCandidateArchive(archive)
+		if err != nil {
+			return nil, generation.NewArtifactError("CANDIDATE_INVALID", err.Error())
+		}
+		classifierExecution := execution
+		classifierExecution.Claim.Workflow.ActiveAgentRunID = run.Run.ID
+		classifierExecution.Context.Workflow.ActiveAgentRunID = run.Run.ID
+		completion, err := w.classifier.Classify(ctx, classifierExecution, candidateValue)
+		if err != nil {
+			return nil, err
+		}
+		if completion.Initial != nil {
+			if err := completion.Validate(); err != nil {
+				return nil, err
+			}
+			return w.store.Phase(ctx, claim, app.PhaseRequest{Classification: &generation.Classification{
+				RunID: run.Run.ID, Output: *completion.Initial,
+			}})
+		}
+		if completion.Adjustment == nil {
+			return nil, errors.New("classifier returned no completion")
+		}
+		adjustment := *completion.Adjustment
+		adjustment.RunID = run.Run.ID
+		if err := (app.ClassificationCompletion{Adjustment: &adjustment}).Validate(); err != nil {
+			return nil, err
+		}
+		return w.store.Phase(ctx, claim, app.PhaseRequest{ClassificationAdjustment: &adjustment})
 
 	case generation.StateBuilding:
 		archive, _, err := w.store.CandidateArchive(ctx, claim)

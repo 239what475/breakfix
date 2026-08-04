@@ -130,7 +130,7 @@ func TestGenerationClassificationTechnicalRetryPreservesVerifiedCandidate(t *tes
 	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), start); err != nil {
 		t.Fatalf("persist initial proposal: %v", err)
 	}
-	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, start.Add(time.Minute)); err != nil {
+	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, "", start.Add(time.Minute)); err != nil {
 		t.Fatalf("resume classification: %v", err)
 	}
 
@@ -163,6 +163,73 @@ func TestGenerationClassificationTechnicalRetryPreservesVerifiedCandidate(t *tes
 	}
 	if persisted.Classification == nil || persisted.Classification.Revision != 1 || persisted.Build == nil || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
 		t.Fatalf("candidate changed during classification retries = %#v", persisted)
+	}
+}
+
+func TestGenerationClassificationAdjustmentRetainsItsPinnedRoadmapRevision(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 10, 15, 0, 0, time.UTC)
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	classificationAt := now.Add(time.Minute)
+	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-adjustment",
+	}, classificationAt); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-initial", classificationAt)
+	run := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, classificationAt)
+	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), classificationAt); err != nil {
+		t.Fatalf("persist initial proposal: %v", err)
+	}
+
+	newerRoadmap := initialRoadmap.Clone()
+	newerRoadmap.Tags = append(newerRoadmap.Tags, roadmap.Tag{
+		ID: roadmap.RuntimeID(roadmap.KindTag, "later-added"), SourceRef: "later-added", Title: "Later added", Description: "A later unrelated Roadmap revision.",
+	})
+	currentRoadmap, err := database.Roadmap.PublishRoadmap(ctx, newerRoadmap, classificationAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("publish unrelated roadmap revision: %v", err)
+	}
+	if currentRoadmap.Revision == initialRoadmap.Revision {
+		t.Fatalf("unrelated roadmap publication did not create a new revision: %#v", currentRoadmap)
+	}
+
+	resumedAt := classificationAt.Add(2 * time.Minute)
+	resumed, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, "移除与题目无关的标签。", resumedAt)
+	if err != nil {
+		t.Fatalf("resume classification adjustment: %v", err)
+	}
+	if resumed.ClassificationRoadmapRevision != initialRoadmap.Revision || resumed.ClassificationFeedback != "移除与题目无关的标签。" {
+		t.Fatalf("resumed classification = %#v", resumed)
+	}
+
+	claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-adjustment", resumedAt)
+	run = startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, resumedAt)
+	output := existingClassification(initialRoadmap, candidate.ID)
+	output.Tags = nil
+	if _, err := database.Generation.FinalizeGenerationClassificationAdjustment(ctx, claim, generation.ClassificationAdjustment{
+		RunID: run.ID, ChangeScope: generation.ClassificationChangeClassification, Output: &output,
+	}, resumedAt); err != nil {
+		t.Fatalf("persist adjusted proposal: %v", err)
+	}
+
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("load adjusted candidate: %v", err)
+	}
+	if persisted.Classification == nil || persisted.Classification.Revision != 2 || persisted.Classification.RoadmapRevision != initialRoadmap.Revision || len(persisted.Classification.Tags) != 0 {
+		t.Fatalf("adjusted classification = %#v", persisted.Classification)
+	}
+	current, err := database.Roadmap.CurrentRoadmap(ctx)
+	if err != nil {
+		t.Fatalf("load current roadmap: %v", err)
+	}
+	if current.Revision != currentRoadmap.Revision {
+		t.Fatalf("private classification adjustment changed the global roadmap: got %q, want %q", current.Revision, currentRoadmap.Revision)
 	}
 }
 

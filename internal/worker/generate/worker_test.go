@@ -54,7 +54,7 @@ func TestWorkerRenewsLeaseDuringLongPhase(t *testing.T) {
 	store := newGenerationStore(t)
 	executors := newGenerationExecutors(t, store.archive)
 	executors.generateDelay = 1250 * time.Millisecond
-	worker, err := New(store, executors, executors.builder, executors.publisher, executors.verifier, Config{
+	worker, err := New(store, executors, executors, executors.builder, executors.publisher, executors.verifier, Config{
 		WorkerID: "generate-test", Model: "test-model", LeaseTTL: 3 * time.Second,
 	})
 	if err != nil {
@@ -131,6 +131,12 @@ func (e *generationExecutors) Judge(context.Context, authoring.Plan, *app.Candid
 	return app.Judgement{Approved: true}, nil
 }
 
+func (*generationExecutors) Classify(context.Context, generation.Execution, *app.Candidate) (app.ClassificationCompletion, error) {
+	return app.ClassificationCompletion{Initial: &generation.ClassificationOutput{
+		Result: generation.ClassificationUnclassifiable, UnclassifiableReason: "test classifier has no roadmap fixture", AdjustmentSuggestion: "provide a classification fixture",
+	}}, nil
+}
+
 type generationBuilder struct{ calls *atomic.Int32 }
 
 func (e *generationBuilder) Execute(context.Context, generation.Execution, []byte, []byte) (generation.BuildResult, error) {
@@ -197,7 +203,7 @@ func newGenerationStore(t *testing.T) *generationStore {
 
 func newTestWorker(t *testing.T, store *generationStore, executors *generationExecutors) *Worker {
 	t.Helper()
-	worker, err := New(store, executors, executors.builder, executors.publisher, executors.verifier, Config{WorkerID: "generate-test", Model: "test-model", LeaseTTL: time.Minute})
+	worker, err := New(store, executors, executors, executors.builder, executors.publisher, executors.verifier, Config{WorkerID: "generate-test", Model: "test-model", LeaseTTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

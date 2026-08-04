@@ -46,16 +46,17 @@ type PhaseRequest struct {
 	domain.LeaseCredential
 	ExpectedState domain.WorkflowState `json:"expected_state"`
 
-	GeneratedCandidate      *domain.GeneratedCandidate            `json:"generated_candidate,omitempty"`
-	Judgement               *domain.Judgement                     `json:"judgement,omitempty"`
-	Classification          *domain.Classification                `json:"classification,omitempty"`
-	Build                   *domain.BuildResult                   `json:"build,omitempty"`
-	ArtifactPublish         *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
-	VerificationEnvironment *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
-	Verification            *domain.VerificationResult            `json:"verification,omitempty"`
-	ChallengePublish        *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
-	InfrastructureFailure   *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
-	ArtifactFailure         *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
+	GeneratedCandidate       *domain.GeneratedCandidate            `json:"generated_candidate,omitempty"`
+	Judgement                *domain.Judgement                     `json:"judgement,omitempty"`
+	Classification           *domain.Classification                `json:"classification,omitempty"`
+	ClassificationAdjustment *domain.ClassificationAdjustment      `json:"classification_adjustment,omitempty"`
+	Build                    *domain.BuildResult                   `json:"build,omitempty"`
+	ArtifactPublish          *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
+	VerificationEnvironment  *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
+	Verification             *domain.VerificationResult            `json:"verification,omitempty"`
+	ChallengePublish         *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
+	InfrastructureFailure    *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
+	ArtifactFailure          *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
 }
 
 func (r PhaseRequest) ResultCount() int {
@@ -67,6 +68,9 @@ func (r PhaseRequest) ResultCount() int {
 		count++
 	}
 	if r.Classification != nil {
+		count++
+	}
+	if r.ClassificationAdjustment != nil {
 		count++
 	}
 	if r.Build != nil {
@@ -119,8 +123,14 @@ func (r PhaseRequest) Validate() error {
 			return errors.New("judging phase requires a valid judgement")
 		}
 	case domain.StateClassifying:
-		if r.Classification == nil || strings.TrimSpace(r.Classification.RunID) == "" || r.Classification.Output.Validate() != nil {
-			return errors.New("Classifying phase requires a valid classification output")
+		if r.Classification != nil {
+			if strings.TrimSpace(r.Classification.RunID) == "" || r.Classification.Output.Validate() != nil {
+				return errors.New("Classifying phase requires a valid initial classification output")
+			}
+			break
+		}
+		if r.ClassificationAdjustment == nil || r.ClassificationAdjustment.Validate() != nil {
+			return errors.New("Classifying phase requires a valid classification adjustment")
 		}
 	case domain.StateBuilding:
 		if r.Build == nil {
