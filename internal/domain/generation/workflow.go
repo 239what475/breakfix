@@ -66,6 +66,22 @@ func (c ContentConfirmation) Valid() bool {
 	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" && validIdempotencyKey(c.IdempotencyKey)
 }
 
+// ClassificationAdjustmentConfirmation requests one new private Classifying
+// run for the reviewed proposal. The proposal revision is the optimistic
+// concurrency fence; the author message itself is classified by the Agent.
+type ClassificationAdjustmentConfirmation struct {
+	WorkflowID          string `json:"workflow_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	ProposalRevision    int    `json:"proposal_revision"`
+	Feedback            string `json:"feedback"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+func (c ClassificationAdjustmentConfirmation) Valid() bool {
+	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" &&
+		c.ProposalRevision > 0 && strings.TrimSpace(c.Feedback) != "" && validIdempotencyKey(c.IdempotencyKey)
+}
+
 // PublicationConfirmation makes a reviewed private classification proposal
 // public. The proposal revision is the optimistic-concurrency fence.
 type PublicationConfirmation struct {

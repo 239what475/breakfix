@@ -188,6 +188,12 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.ConfirmAuthoringContent(c, c.Param("id"))
 		}
 	})
+	router.POST("/api/authoring/sessions/:id/classification-feedback", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.RequestAuthoringClassificationAdjustment(c, c.Param("id"))
+		}
+	})
 	router.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

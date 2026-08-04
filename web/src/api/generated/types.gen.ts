@@ -401,6 +401,14 @@ export type AuthoringContentConfirmationRequest = {
     idempotency_key: string;
 };
 
+export type AuthoringClassificationAdjustmentRequest = {
+    workflow_id: string;
+    candidate_revision_id: string;
+    proposal_revision: number;
+    feedback: string;
+    idempotency_key: string;
+};
+
 export type AuthoringClassificationPublicationRequest = {
     workflow_id: string;
     candidate_revision_id: string;
@@ -418,7 +426,7 @@ export type AuthoringClassificationNewTopic = {
 };
 
 export type AuthoringClassificationTopic = {
-    existing?: RoadmapReference;
+    existing?: RoadmapTopic;
     new?: AuthoringClassificationNewTopic;
     reason: string;
 };
@@ -429,7 +437,7 @@ export type AuthoringClassificationNewTag = {
 };
 
 export type AuthoringClassificationTag = {
-    existing?: RoadmapReference;
+    existing?: RoadmapTag;
     new?: AuthoringClassificationNewTag;
     reason: string;
 };
@@ -993,6 +1001,24 @@ export type ConfirmAuthoringContentResponses = {
 };
 
 export type ConfirmAuthoringContentResponse = ConfirmAuthoringContentResponses[keyof ConfirmAuthoringContentResponses];
+
+export type RequestAuthoringClassificationAdjustmentData = {
+    body: AuthoringClassificationAdjustmentRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/authoring/sessions/{id}/classification-feedback';
+};
+
+export type RequestAuthoringClassificationAdjustmentResponses = {
+    /**
+     * Private classification adjustment started
+     */
+    200: AuthoringSession;
+};
+
+export type RequestAuthoringClassificationAdjustmentResponse = RequestAuthoringClassificationAdjustmentResponses[keyof RequestAuthoringClassificationAdjustmentResponses];
 
 export type PublishAuthoringRevisionData = {
     body: AuthoringClassificationPublicationRequest;

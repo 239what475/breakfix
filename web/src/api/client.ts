@@ -1,5 +1,6 @@
 import type {
 	AuthoringSession,
+	AuthoringClassificationAdjustmentRequest,
 	AuthoringContentConfirmationRequest,
 	AuthoringGenerationRequest,
 	AuthoringClassificationPublicationRequest,
@@ -264,6 +265,8 @@ export const api = {
     ),
   confirmAuthoringContent: (id: string, body: AuthoringContentConfirmationRequest) =>
     request<AuthoringSession>("POST", `/authoring/sessions/${id}/classify`, body),
+	requestAuthoringClassificationAdjustment: (id: string, body: AuthoringClassificationAdjustmentRequest) =>
+		request<AuthoringSession>("POST", `/authoring/sessions/${id}/classification-feedback`, body),
   publishAuthoringRevision: (id: string, body: AuthoringClassificationPublicationRequest) =>
     request<AuthoringSession>("POST", `/authoring/sessions/${id}/publish`, body),
 };

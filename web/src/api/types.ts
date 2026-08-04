@@ -13,6 +13,7 @@ export type {
 	AuthoringChange,
 	AuthoringCheckpoint,
 	AuthoringCheckpointResult,
+	AuthoringClassificationAdjustmentRequest,
 	AuthoringClassificationNewTag,
 	AuthoringClassificationNewTopic,
 	AuthoringClassificationProposal,

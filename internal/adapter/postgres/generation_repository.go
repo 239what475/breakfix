@@ -826,42 +826,64 @@ func (d *GenerationRepository) FinalizeGenerationClassificationAdjustment(ctx co
 }
 
 // ResumeGenerationClassification restarts only the classification role for a
-// verified candidate after classification feedback or a transient failure.
-func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Context, sessionID, userID, feedback string, now time.Time) (*generation.Workflow, error) {
-	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || now.IsZero() {
-		return nil, errors.New("classification resume requires authoring session, user, and current time")
+// verified candidate after an author asks to adjust its private proposal.
+func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Context, sessionID, userID string, confirmation generation.ClassificationAdjustmentConfirmation, now time.Time) (*generation.Workflow, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !confirmation.Valid() || now.IsZero() {
+		return nil, errors.New("classification adjustment requires an authoring session, reviewed proposal, idempotency key, and current time")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin classification resume: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
+		return nil, err
+	}
 	if _, err := readAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ? AND state = ? FOR UPDATE`, generation.SourceAuthoring, sessionID, generation.StateNeedsClassificationReview))
+	if receipt, err := generationConfirmationReceiptTx(ctx, tx, sessionID, confirmationClassificationAdjustment, confirmation.IdempotencyKey); err != nil {
+		return nil, err
+	} else if receipt != nil {
+		if receipt.WorkflowID != confirmation.WorkflowID || receipt.CandidateRevisionID == nil || *receipt.CandidateRevisionID != confirmation.CandidateRevisionID ||
+			receipt.ProposalRevision == nil || *receipt.ProposalRevision != confirmation.ProposalRevision {
+			return nil, authoring.ErrVersionConflict
+		}
+		return generationWorkflowForReceiptTx(ctx, tx, receipt.WorkflowID)
+	}
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND source_kind = ? AND source_ref = ? AND state = ? FOR UPDATE`,
+		confirmation.WorkflowID, generation.SourceAuthoring, sessionID, generation.StateNeedsClassificationReview))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrInvalidState
 	}
 	if err != nil {
 		return nil, err
 	}
-	if workflow.CandidateRevisionID == "" || workflow.DeadlinePausedAt == nil || workflow.DeadlineAt == nil || strings.TrimSpace(workflow.ClassificationRoadmapRevision) == "" {
+	if workflow.CandidateRevisionID != confirmation.CandidateRevisionID || workflow.DeadlinePausedAt == nil || workflow.DeadlineAt == nil || strings.TrimSpace(workflow.ClassificationRoadmapRevision) == "" {
 		return nil, authoring.ErrInvalidState
 	}
 	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
 	if err != nil {
 		return nil, err
 	}
-	if candidateRevision.Classification != nil && candidateRevision.Classification.Result == generation.ClassificationUnclassifiable && strings.TrimSpace(feedback) != "" {
+	if candidateRevision.Verification == nil || !candidateRevision.Verification.Passed || candidateRevision.Artifact == nil || candidateRevision.Classification == nil ||
+		candidateRevision.Classification.Result != generation.ClassificationProposed || candidateRevision.Classification.Revision != confirmation.ProposalRevision ||
+		candidateRevision.Classification.RoadmapRevision != workflow.ClassificationRoadmapRevision {
 		return nil, authoring.ErrInvalidState
 	}
 	deadline := resumeGenerationDeadline(*workflow, now)
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_attempt = 0,
 		lease_owner = '', lease_expires_at = NULL, deadline_at = ?, deadline_paused_at = NULL, next_run_at = ?, classification_feedback = ?, last_error = '', updated_at = ?
-		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), now.UTC(), strings.TrimSpace(feedback), now.UTC(), workflow.ID))
+		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, deadline, now.UTC(), now.UTC(), strings.TrimSpace(confirmation.Feedback), now.UTC(), workflow.ID))
 	if err != nil {
 		return nil, fmt.Errorf("resume generation classification: %w", err)
+	}
+	if err := insertGenerationConfirmationReceiptTx(ctx, tx, generationConfirmationReceipt{
+		SessionID: sessionID, Action: confirmationClassificationAdjustment, IdempotencyKey: confirmation.IdempotencyKey,
+		WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
+		ProposalRevision: &confirmation.ProposalRevision, CreatedAt: now.UTC(),
+	}); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1700,9 +1722,10 @@ func authoringSourceRevision(workflow generation.Workflow) (int64, error) {
 type generationConfirmationAction string
 
 const (
-	confirmationStart       generationConfirmationAction = "start"
-	confirmationContent     generationConfirmationAction = "content"
-	confirmationPublication generationConfirmationAction = "publication"
+	confirmationStart                    generationConfirmationAction = "start"
+	confirmationContent                  generationConfirmationAction = "content"
+	confirmationClassificationAdjustment generationConfirmationAction = "classification-adjustment"
+	confirmationPublication              generationConfirmationAction = "publication"
 )
 
 type generationConfirmationReceipt struct {

@@ -16,6 +16,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
@@ -144,6 +145,33 @@ func (h *Handler) ConfirmAuthoringContent(c *gin.Context, sessionID string) {
 	h.writeAuthoringSession(c, user, sessionID)
 }
 
+// RequestAuthoringClassificationAdjustment starts another private Classifying
+// run for a reviewed proposal. The Agent, rather than the UI, decides whether
+// the author asked to adjust classification, content, or needs clarification.
+func (h *Handler) RequestAuthoringClassificationAdjustment(c *gin.Context, sessionID string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	var request api.AuthoringClassificationAdjustmentRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	_, err := h.db.Generation.ResumeGenerationClassification(c.Request.Context(), sessionID, user.ID, generation.ClassificationAdjustmentConfirmation{
+		WorkflowID:          request.WorkflowId,
+		CandidateRevisionID: request.CandidateRevisionId,
+		ProposalRevision:    request.ProposalRevision,
+		Feedback:            request.Feedback,
+		IdempotencyKey:      request.IdempotencyKey,
+	}, time.Now().UTC())
+	if err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	h.writeAuthoringSession(c, user, sessionID)
+}
+
 func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
 	user := h.requireUser(c)
 	if user == nil {
@@ -258,7 +286,12 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *postgres.User, ses
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, workflow, authoringTurnActive, messages, assets, diff, verified))
+	classification, err := h.authoringClassificationProposal(c.Request.Context(), classificationForVisibleCandidate(visibleCandidate, workflow))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, workflow, classification, authoringTurnActive, messages, assets, diff, verified))
 }
 
 func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*generation.Revision, []byte, error) {
@@ -273,14 +306,14 @@ func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*generat
 	return revision, archive, nil
 }
 
-func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoringdomain.Revision, visibleCandidate *generation.Revision, workflow *generation.Workflow, turnActive bool, messages []authoringdomain.Message, assets []appauthoring.Asset, diff []appauthoring.FileDiff, verified *authoringdomain.VerifiedChallenge) api.AuthoringSession {
+func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoringdomain.Revision, visibleCandidate *generation.Revision, workflow *generation.Workflow, classification *api.AuthoringClassificationProposal, turnActive bool, messages []authoringdomain.Message, assets []appauthoring.Asset, diff []appauthoring.FileDiff, verified *authoringdomain.VerifiedChallenge) api.AuthoringSession {
 	var verification *api.AuthoringVerificationReport
 	if visibleCandidate != nil {
 		verification = toAPIAuthoringVerificationReport(visibleCandidate.Verification)
 	}
 	return api.AuthoringSession{
 		Assets: assetsToAPI(assets), AuthoringTurnActive: turnActive, Candidate: toAPIAuthoringCandidate(visibleCandidate),
-		Classification: toAPIAuthoringClassificationProposal(classificationForVisibleCandidate(visibleCandidate, workflow)),
+		Classification: classification,
 		Diff:           toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
 		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
 		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
@@ -325,9 +358,27 @@ func classificationForVisibleCandidate(visible *generation.Revision, workflow *g
 	return visible.Classification
 }
 
-func toAPIAuthoringClassificationProposal(value *generation.ClassificationProposal) *api.AuthoringClassificationProposal {
+func (h *Handler) authoringClassificationProposal(ctx context.Context, value *generation.ClassificationProposal) (*api.AuthoringClassificationProposal, error) {
 	if value == nil {
-		return nil
+		return nil, nil
+	}
+	var source *roadmap.Revision
+	if value.Result == generation.ClassificationProposed {
+		if h == nil || h.db == nil {
+			return nil, errors.New("roadmap repository is unavailable for classification review")
+		}
+		var err error
+		source, err = h.db.Roadmap.RoadmapRevision(ctx, value.RoadmapRevision)
+		if err != nil {
+			return nil, fmt.Errorf("load classification roadmap revision: %w", err)
+		}
+	}
+	return toAPIAuthoringClassificationProposal(value, source)
+}
+
+func toAPIAuthoringClassificationProposal(value *generation.ClassificationProposal, source *roadmap.Revision) (*api.AuthoringClassificationProposal, error) {
+	if value == nil {
+		return nil, nil
 	}
 	result := &api.AuthoringClassificationProposal{
 		Revision:             value.Revision,
@@ -340,19 +391,31 @@ func toAPIAuthoringClassificationProposal(value *generation.ClassificationPropos
 		UpdatedAt:            value.UpdatedAt.UTC(),
 	}
 	if value.Topic != nil {
-		result.Topic = toAPIAuthoringClassificationTopic(*value.Topic)
+		topic, err := toAPIAuthoringClassificationTopic(*value.Topic, source)
+		if err != nil {
+			return nil, err
+		}
+		result.Topic = topic
 	}
 	for _, tag := range value.Tags {
-		result.Tags = append(result.Tags, toAPIAuthoringClassificationTag(tag))
+		converted, err := toAPIAuthoringClassificationTag(tag, source)
+		if err != nil {
+			return nil, err
+		}
+		result.Tags = append(result.Tags, converted)
 	}
-	return result
+	return result, nil
 }
 
-func toAPIAuthoringClassificationTopic(value generation.TopicProposal) *api.AuthoringClassificationTopic {
+func toAPIAuthoringClassificationTopic(value generation.TopicProposal, source *roadmap.Revision) (*api.AuthoringClassificationTopic, error) {
 	result := &api.AuthoringClassificationTopic{Reason: value.Reason}
 	if value.Existing != nil {
-		reference := toAPIRoadmapReference(*value.Existing)
-		result.Existing = &reference
+		topic, err := classificationTopicDefinition(source, *value.Existing)
+		if err != nil {
+			return nil, err
+		}
+		converted := toAPIRoadmapTopic(*topic)
+		result.Existing = &converted
 	}
 	if value.New != nil {
 		result.New = &api.AuthoringClassificationNewTopic{
@@ -364,19 +427,49 @@ func toAPIAuthoringClassificationTopic(value generation.TopicProposal) *api.Auth
 			ChallengeGuidance: value.New.ChallengeGuidance,
 		}
 	}
-	return result
+	return result, nil
 }
 
-func toAPIAuthoringClassificationTag(value generation.TagProposal) api.AuthoringClassificationTag {
+func toAPIAuthoringClassificationTag(value generation.TagProposal, source *roadmap.Revision) (api.AuthoringClassificationTag, error) {
 	result := api.AuthoringClassificationTag{Reason: value.Reason}
 	if value.Existing != nil {
-		reference := toAPIRoadmapReference(*value.Existing)
-		result.Existing = &reference
+		tag, err := classificationTagDefinition(source, *value.Existing)
+		if err != nil {
+			return api.AuthoringClassificationTag{}, err
+		}
+		converted := toAPIRoadmapTag(*tag)
+		result.Existing = &converted
 	}
 	if value.New != nil {
 		result.New = &api.AuthoringClassificationNewTag{Title: value.New.Title, Description: value.New.Description}
 	}
-	return result
+	return result, nil
+}
+
+func classificationTopicDefinition(source *roadmap.Revision, reference roadmap.Ref) (*roadmap.Topic, error) {
+	if source == nil {
+		return nil, errors.New("classification proposal has no roadmap revision")
+	}
+	for _, topic := range source.Topics {
+		if topic.ID == reference.ID && topic.SourceRef == reference.SourceRef && topic.Title == reference.Title {
+			value := topic
+			return &value, nil
+		}
+	}
+	return nil, fmt.Errorf("classification Topic %q is absent from revision %s", reference.SourceRef, source.Revision)
+}
+
+func classificationTagDefinition(source *roadmap.Revision, reference roadmap.Ref) (*roadmap.Tag, error) {
+	if source == nil {
+		return nil, errors.New("classification proposal has no roadmap revision")
+	}
+	for _, tag := range source.Tags {
+		if tag.ID == reference.ID && tag.SourceRef == reference.SourceRef && tag.Title == reference.Title {
+			value := tag
+			return &value, nil
+		}
+	}
+	return nil, fmt.Errorf("classification Tag %q is absent from revision %s", reference.SourceRef, source.Revision)
 }
 
 func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *api.AuthoringVerificationReport {

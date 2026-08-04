@@ -483,6 +483,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
+  /authoring/sessions/{id}/classification-feedback:
+    post:
+      operationId: requestAuthoringClassificationAdjustment
+      summary: Ask the classification Agent to adjust one private reviewed proposal
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthoringClassificationAdjustmentRequest"
+      responses:
+        "200":
+          description: Private classification adjustment started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+
   /authoring/sessions/{id}/publish:
     post:
       operationId: publishAuthoringRevision
@@ -1369,6 +1392,25 @@ components:
           minLength: 1
           maxLength: 200
 
+    AuthoringClassificationAdjustmentRequest:
+      type: object
+      required: [workflow_id, candidate_revision_id, proposal_revision, feedback, idempotency_key]
+      properties:
+        workflow_id:
+          type: string
+        candidate_revision_id:
+          type: string
+        proposal_revision:
+          type: integer
+          minimum: 1
+        feedback:
+          type: string
+          minLength: 1
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
     AuthoringClassificationPublicationRequest:
       type: object
       required: [workflow_id, candidate_revision_id, proposal_revision, idempotency_key]
@@ -1407,7 +1449,7 @@ components:
       required: [reason]
       properties:
         existing:
-          $ref: "#/components/schemas/RoadmapReference"
+          $ref: "#/components/schemas/RoadmapTopic"
         new:
           $ref: "#/components/schemas/AuthoringClassificationNewTopic"
         reason:
@@ -1427,7 +1469,7 @@ components:
       required: [reason]
       properties:
         existing:
-          $ref: "#/components/schemas/RoadmapReference"
+          $ref: "#/components/schemas/RoadmapTag"
         new:
           $ref: "#/components/schemas/AuthoringClassificationNewTag"
         reason:

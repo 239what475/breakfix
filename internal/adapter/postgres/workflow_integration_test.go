@@ -130,7 +130,10 @@ func TestGenerationClassificationTechnicalRetryPreservesVerifiedCandidate(t *tes
 	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), start); err != nil {
 		t.Fatalf("persist initial proposal: %v", err)
 	}
-	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, "", start.Add(time.Minute)); err != nil {
+	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, generation.ClassificationAdjustmentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: 1,
+		Feedback: "请重新检查当前分类提案。", IdempotencyKey: "retry-classification",
+	}, start.Add(time.Minute)); err != nil {
 		t.Fatalf("resume classification: %v", err)
 	}
 
@@ -199,12 +202,23 @@ func TestGenerationClassificationAdjustmentRetainsItsPinnedRoadmapRevision(t *te
 	}
 
 	resumedAt := classificationAt.Add(2 * time.Minute)
-	resumed, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, "移除与题目无关的标签。", resumedAt)
+	adjustment := generation.ClassificationAdjustmentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: 1,
+		Feedback: "移除与题目无关的标签。", IdempotencyKey: "adjust-classification",
+	}
+	resumed, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, adjustment, resumedAt)
 	if err != nil {
 		t.Fatalf("resume classification adjustment: %v", err)
 	}
 	if resumed.ClassificationRoadmapRevision != initialRoadmap.Revision || resumed.ClassificationFeedback != "移除与题目无关的标签。" {
 		t.Fatalf("resumed classification = %#v", resumed)
+	}
+	repeated, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, adjustment, resumedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("repeat classification adjustment: %v", err)
+	}
+	if repeated.ID != resumed.ID || repeated.State != generation.StateClassifying || repeated.ClassificationFeedback != adjustment.Feedback {
+		t.Fatalf("idempotent classification adjustment = %#v", repeated)
 	}
 
 	claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-adjustment", resumedAt)

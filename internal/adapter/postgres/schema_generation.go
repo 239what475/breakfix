@@ -72,7 +72,7 @@ var schemaGenerationStatements = []string{
 	`CREATE INDEX generation_workflows_deadline ON generation_workflows(deadline_at) WHERE deadline_at IS NOT NULL`,
 	`CREATE TABLE generation_confirmation_receipts (
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
-		action TEXT NOT NULL CHECK (action IN ('start', 'content', 'publication')),
+		action TEXT NOT NULL CHECK (action IN ('start', 'content', 'classification-adjustment', 'publication')),
 		idempotency_key TEXT NOT NULL,
 		workflow_id TEXT NOT NULL REFERENCES generation_workflows(id) ON DELETE RESTRICT,
 		plan_revision BIGINT,
@@ -83,7 +83,7 @@ var schemaGenerationStatements = []string{
 		CHECK (
 			(action = 'start' AND plan_revision IS NOT NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
 			(action = 'content' AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NULL) OR
-			(action = 'publication' AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
+			(action IN ('classification-adjustment', 'publication') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
 		)
 	)`,
 	`CREATE TABLE generation_resource_reaps (
