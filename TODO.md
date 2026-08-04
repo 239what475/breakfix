@@ -224,22 +224,29 @@ catalog/
 
 ### P0 提交计划
 
-P0 按下面顺序拆分提交。每个提交都必须能编译、通过其负责范围内的测试，并与前一提交的契约一致；不保留旧 schema、兼容读取路径或迁移拒绝测试。Prompt 只通过真实 Agent/协议行为验证，不写 prompt 文本单元测试。
+P0 按下面顺序实施，**每完成一个部分就立即提交**，不能把多个部分累积在同一个工作区。每项都定义了本次提交的交付目标和必须成立的验证结果；接口契约变化必须在所属提交内同步更新 OpenAPI、生成物与前端调用。每个提交都必须保持可编译、可测试，不保留旧 schema、兼容读取路径或迁移拒绝测试。Prompt 只通过 Agent 协议和应用行为验证，不写 prompt 文本断言。
 
 1. **`refactor(roadmap): replace taxonomy contracts`**
-   建立 `Domain`、`Topic`、`Tag`、`RoadmapRevision`、Challenge 唯一 Topic/Tag 绑定和两张关系图的 Go/SQL/portable source 契约；删除 `Skill`、旧 mapping 和 `requires` 的读写路径。加入 source 解析、规范化名称、确定性边校验和最小正向 fixture。
+   - **目标：** 用 `Domain`、`Topic`、`Tag`、immutable `RoadmapRevision`、Challenge 的唯一 Topic/Tag 绑定及两张关系图完整替换 Taxonomy；建立可读的 portable Roadmap source 布局和运行时读模型，同时删除 `Skill`、旧 mapping、`outcomes`、`requires` 及其 API、前端和部署术语。
+   - **验证：** 一个最小 portable Roadmap source 能被解析为确定性的 revision，Domain/Topic/Tag/source_ref、唯一 Topic 绑定和 `related`/无环 `precedes` 均在同一契约中成立；Catalog 的读取投影只依赖该 revision；旧 Taxonomy runtime、worker、部署、内部接口和 OpenAPI 术语均已移除。此提交之后不保留双读、双写或兼容转换路径。
 2. **`refactor(catalog): install portable releases into roadmap`**
-   重建 Catalog Release 安装状态和 entry 持久化，使构建、artifact publish、真实验证与 `RoadmapRevision` commit 使用同一写锁；实现 digest 幂等、崩溃恢复和整份 release 原子提交。移除 Catalog 对旧 Taxonomy Workflow 的依赖。
+   - **目标：** 将 Catalog Release 重建为可恢复的、追加式 portable 输入；Server 从配置指定的 immutable release reference 幂等初始化，不提供管理员安装 API。每个 entry 独立经历构建、artifact publish 和真实验证，全部就绪后与 `RoadmapRevision` 在同一写锁下原子安装，不创建 GenerationWorkflow 或 Roadmap task。
+   - **验证：** 最小 release 只有在全部 entry 已真实验证后才公开其 Challenge 与完整 RoadmapRevision；重复启动或重复安装同一 digest 不重复分配 Challenge 或重新执行已完成阶段；中断后能用同一 entry/commit identity 恢复，任一确定性 entry 失败不会留下部分公开题库；安装成功的 entry 已建立 Roadmap 已处理基线，不会触发维护请求。
 3. **`feat(generation): persist classification proposal lifecycle`**
-   增加 verified Candidate 的 `ClassificationProposal`、`Classifying`/`NeedsClassificationReview` 状态、作者确认动作、乐观并发和 publication intent；实现新 Topic/Tag/Challenge `source_ref` 的确定性分配与冲突路由。
+   - **目标：** 将 GenerationWorkflow 收敛为业务状态，并为 CandidateRevision 持久化 Plan、parent candidate、AgentRun、archive、构建/验证结果和外部资源记录；资源回收改为幂等 reaper，不再是 workflow 阶段。为 verified Candidate 增加私有 `ClassificationProposal`，把内容审核后的分类、分类审核和公开提交纳入 GenerationWorkflow；实现 `Classifying`、`NeedsClassificationReview`、`ChallengePublishing`、publication intent、乐观并发和新 Topic/Tag/Challenge 的确定性 `source_ref` 分配。
+   - **验证：** 内容确认后冻结同一 verified candidate 并进入分类链路，分类反馈不会重新 Build 或 Verify；作者的内容反馈仍只形成私有 Plan 草稿；审核态暂停 deadline，分类或发布技术耗尽回到分类审核并保留 candidate/proposal/intent；重复确认或旧标签页请求不会创建第二个 workflow、Challenge 或 promote；无关 revision 增量可确定性 rebase，而引用或规范化名称冲突会回到正确的内容或分类审核路径；分类发布成功时才以 copy-on-write 让定义、绑定和 Challenge 同时可见，取消、supersede 与失败后的资源由记录驱动回收且不改变业务终态。
 4. **`feat(generation): add retrieval-backed classification role`**
-   实现固定 `RoadmapRevision` 的 `search/read` 工具、初始分类结果、私有 `set_topic`/`set_tags` 调整工具和 typed `change_scope` 路由；工具错误、Barrier 和重试遵循文档契约。验证使用协议/应用行为测试，不断言 prompt 文本或 Markdown 具体输出。
+   - **目标：** 实现独立的 Classifying role：初始运行只可对固定 `RoadmapRevision` 使用 Topic/Tag 的 typed `search`/`read`，产生 `proposed` 或 `unclassifiable`；分类调整运行只额外拥有私有 `set_topic`、`set_tags`，并按 typed `change_scope` 路由内容与分类反馈。
+   - **验证：** 同一 Agent run 始终读取固定 revision，既有引用只能来自该 revision，新定义只停留在私有 proposal；setter 不会直接写入全局 Roadmap；`unclassifiable` 无法发布；工具、模型或 typed-result 失败只重试 Classifying；Roadmap barrier 活动时分类调整与确认发布均不会启动执行。
 5. **`feat(authoring): add classification review workspace`**
-   在作者工作台增加 Topic/Tags 两个审核 Tab、Markdown 展示、已有/新建标识、`unclassifiable` 视图、确认发布和 Barrier 只读状态；补充 API 集成测试和重复请求幂等测试。
+   - **目标：** 将 `NeedsClassificationReview` 做成作者工作台的持久化审核界面：Topic 与 Tags 独立 Tab，展示 Markdown 定义、绑定理由和“已有/新建”状态；支持 `unclassifiable` 结果、对话式调整、确认发布及 barrier 只读状态。
+   - **验证：** 作者重新打开会话仍能看到同一 candidate 和 proposal；Topic/Tags 作为一份 proposal 一次确认，不出现直接编辑全局定义或逐 Tag 提交；`unclassifiable` 只允许内容调整或取消；前端操作与 API 的 expected revision/idempotency 语义一致，Roadmap barrier 时界面与服务端均拒绝启动分类或发布。
 6. **`refactor(roadmap): make roadmap maintenance server-owned`**
-   删除 Taxonomy Worker deployment、独立 worker API 和通用 executor；实现 Server 内部的 `RoadmapWorkflow`、pending entry、20 题自动请求、调试手工触发、并发 task、三 Agent 委员会、每 Agent 五次调用、lease 接管和确定性边合并。删除旧 Taxonomy 运行时及其部署资源。
+   - **目标：** 在已完成的 Roadmap 基础契约上，由 Server 持久化并执行增量 `RoadmapWorkflow`、pending entry、20 题自动请求、调试手工触发、task lease 与三 Agent 委员会。Planner 获得固定 revision 的 Topic/Challenge typed `search`/`read`，每个 task 串行 Planner、并行双 Reviewer，每个 Agent 最多五次调用；不重新引入 worker deployment、通用 executor 或第二套后台队列。
+   - **验证：** 空闲窗口中 workflow 固定全部 pending entry 的快照，TopicTask 和 ChallengeTask 并发且只处理自己的 subject，Planner 无法遍历或写入全局快照；Server 重启或多副本竞争能通过 lease 接管；Accepted task 的边按稳定顺序合并，`related` 优先、反向 `precedes` 转为 `related`、成环候选被审计地忽略；Failed task 保持 pending 且不阻塞其他 task 或立即自旋重试；workflow 运行期间 Generation 执行阶段和 Catalog commit 被正确门控。
 7. **`feat(catalog): add catalog navigation and debug export`**
-   完成 Catalog 的 Domain/Topic/Tag 筛选、Challenge 列表和两张图分开的一跳关系展示；实现按 revision 流式导出完整 `.tar.gz` 的内部调试接口。补充 portable release 导入、导出、筛选和关系展示的正向集成测试，并同步正式 `docs/` 契约。
+   - **目标：** 让 Catalog 按 Challenge 的唯一 Topic 推导 Domain/Topic 筛选、按 Tag 横向筛选，并分别展示 Topic 图和 Challenge 图的一跳邻居；增加只读、仅调试的完整 RoadmapRevision `.tar.gz` 导出，不将该入口放入普通 Catalog UI，并同步正式文档契约。
+   - **验证：** Catalog 不再依赖多 Topic mapping 或 Taxonomy 状态，筛选与详情均来自当前 immutable revision；两张图不会混合或做传递闭包；同一 revision 的重复导出字节稳定，导出内容可作为完整 portable Catalog Release 再次读取，且不包含运行时 ID、镜像、验证报告、临时文件或宿主机路径。
 
 P0 完成标准是：旧 taxonomy 代码和部署已移除；一个最小 Catalog Release 能安装为 RoadmapRevision；一个 verified Candidate 能完成分类审核和发布；Roadmap 能在 Server 内增量维护两张关系图；Catalog 能筛选、展示邻居并导出可再次安装的 portable release。
 
