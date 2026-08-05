@@ -37,7 +37,7 @@ GET /internal/debug/roadmap-revisions/{revision_id}/export
 ```text
 POST /api/internal/runtime-actions/claim
 POST /api/internal/runtime-actions/:id/renew
-POST /api/internal/runtime-actions/:id/candidate/archive
+POST /api/internal/runtime-actions/:id/source/archive
 POST /api/internal/runtime-actions/:id/build/complete
 POST /api/internal/runtime-actions/:id/artifact-publish/complete
 POST /api/internal/runtime-actions/:id/verification/environment
@@ -52,8 +52,9 @@ POST /api/internal/runtime-resource-reaps/complete
 
 没有 AgentRun、Classifier retrieval、Generator workspace proxy、Kubernetes base image 或 build archive
 下载接口。所有 Runtime Action 请求使用严格 JSON 解码，携带稳定的
-`workflow_id + candidate_revision_id + state + state_version` identity 和 lease owner；`runtime_attempt`
-不会出现在资源 identity 中。Server 只接受当前 lease 的对应 typed result。Kubernetes 构建在 Worker
+`scope + parent_id + owner_id + candidate_id + state + state_version` identity 和 lease owner；`runtime_attempt`
+不会出现在资源 identity 中。`scope` 只允许 GenerationWorkflow、Catalog Entry 与 Catalog Commit，Server 只接受当前
+lease 的对应 typed result。Kubernetes 构建在 Worker
 直接写入 Registry 的 build-scoped immutable OCI reference，Server 只保存引用。
 
 ## 终端与流传输

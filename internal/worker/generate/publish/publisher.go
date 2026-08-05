@@ -13,7 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/generation"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 type Registry interface {
@@ -51,7 +51,7 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 		return domainexecution.ArtifactReference{}, fmt.Errorf("artifact publication execution work: %w", err)
 	}
 	if work.Build == nil {
-		return generation.ArtifactReference{}, errors.New("candidate has no build output")
+		return domainexecution.ArtifactReference{}, errors.New("candidate has no build output")
 	}
 	switch work.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
@@ -162,47 +162,37 @@ func (e *Executor) promoteOCI(ctx context.Context, source, target string) (strin
 // ReapCandidate removes candidate-scoped external resources after the Server
 // has durably determined that no active workflow needs them. It does not
 // mutate workflow state and is safe to repeat after a lost worker lease.
-func (e *Executor) ReapCandidate(ctx context.Context, reap generation.ResourceReap) error {
-	if !reap.Valid() {
+func (e *Executor) ReapResource(ctx context.Context, reap runtime.Reap) error {
+	if err := reap.Valid(); err != nil {
 		return errors.New("candidate resource reap is invalid")
 	}
 	switch reap.Kind {
-	case generation.ResourceReapNodeBuildImage:
-		return e.reapNodeBuildImage(ctx, reap.Candidate)
-	case generation.ResourceReapCandidateArtifact:
+	case runtime.ReapNodeBuildImage:
+		return e.reapNodeBuildImage(ctx, reap)
+	case runtime.ReapCandidateArtifact:
 		return e.reapCandidateArtifact(ctx, reap)
 	default:
 		return errors.New("runtime worker does not own this resource reap")
 	}
 }
 
-func (e *Executor) reapCandidateArtifact(ctx context.Context, reap generation.ResourceReap) error {
-	view := reap.Candidate
-	switch view.Snapshot.Runtime {
+func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap) error {
+	switch reap.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		if view.Build != nil && view.Build.OCIReference != "" {
-			if err := e.registry.DeleteImage(ctx, view.Build.OCIReference); err != nil {
+		if reap.Build != nil && reap.Build.OCIReference != "" {
+			if err := e.registry.DeleteImage(ctx, reap.Build.OCIReference); err != nil {
 				return fmt.Errorf("delete K8s build artifact: %w", err)
 			}
 		}
-		if reap.DeleteFinalArtifact && view.Publication != nil {
-			challengeImage, err := e.challengeImage(view.Publication.ChallengeID)
-			if err != nil {
-				return err
-			}
-			if err := e.registry.DeleteImage(ctx, challengeImage); err != nil {
+		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil {
+			if err := e.registry.DeleteImage(ctx, reap.FinalArtifact.OCIReference); err != nil {
 				return fmt.Errorf("delete uncommitted challenge OCI image: %w", err)
 			}
 		}
-		candidateImage, err := e.candidateImage(view.ID)
-		if err != nil {
-			return err
-		}
-		if view.Artifact != nil && view.Artifact.OCIReference != "" {
-			candidateImage = view.Artifact.OCIReference
-		}
-		if err := e.registry.DeleteImage(ctx, candidateImage); err != nil {
-			return fmt.Errorf("delete candidate OCI image: %w", err)
+		if reap.Artifact != nil && reap.Artifact.OCIReference != "" {
+			if err := e.registry.DeleteImage(ctx, reap.Artifact.OCIReference); err != nil {
+				return fmt.Errorf("delete candidate OCI image: %w", err)
+			}
 		}
 		return nil
 
@@ -210,25 +200,17 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap generation.Re
 		if e.node == nil {
 			return errors.New("node image publisher is unavailable")
 		}
-		if reap.DeleteFinalArtifact && view.Publication != nil {
-			fingerprint := view.Artifact
-			if view.Publication.Artifact != nil {
-				fingerprint = view.Publication.Artifact
-			}
-			if fingerprint != nil && fingerprint.IncusFingerprint != "" {
-				if err := e.node.DeleteChallengeNodeImage(ctx, view.Publication.ChallengeID, fingerprint.IncusFingerprint); err != nil {
-					return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
-				}
+		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil && reap.FinalArtifact.IncusFingerprint != "" {
+			if err := e.node.DeleteChallengeNodeImage(ctx, reap.ChallengeID, reap.FinalArtifact.IncusFingerprint); err != nil {
+				return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
 			}
 		}
 		fingerprint := ""
-		if view.Artifact != nil {
-			fingerprint = view.Artifact.IncusFingerprint
-		} else if view.Build != nil && view.Build.Incus != nil {
-			fingerprint = view.Build.Incus.Fingerprint
+		if reap.Artifact != nil {
+			fingerprint = reap.Artifact.IncusFingerprint
 		}
 		if fingerprint != "" {
-			if err := e.node.DeleteCandidateNodeImage(ctx, view.ID, fingerprint); err != nil {
+			if err := e.node.DeleteCandidateNodeImage(ctx, reap.ResourceID, fingerprint); err != nil {
 				return fmt.Errorf("delete candidate Node image: %w", err)
 			}
 		}
@@ -238,18 +220,18 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap generation.Re
 	}
 }
 
-func (e *Executor) reapNodeBuildImage(ctx context.Context, view generation.WorkerView) error {
-	if view.Snapshot.Runtime != challenge.RuntimeNode || view.Build == nil || view.Build.Incus == nil {
+func (e *Executor) reapNodeBuildImage(ctx context.Context, reap runtime.Reap) error {
+	if reap.Snapshot.Runtime != challenge.RuntimeNode || reap.Build == nil || reap.Build.Incus == nil {
 		return nil
 	}
 	if e.node == nil {
 		return errors.New("node image publisher is unavailable")
 	}
-	build, err := nodeBuildResult(view.Build)
+	build, err := nodeBuildResult(reap.Build)
 	if err != nil {
 		return err
 	}
-	if build.CandidateRevisionID != view.ID {
+	if build.CandidateRevisionID != reap.ResourceID {
 		return errors.New("candidate Node build does not belong to candidate revision")
 	}
 	if err := e.node.DeleteBuildNodeImage(ctx, build); err != nil {
@@ -263,7 +245,7 @@ func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve published OCI image: %w", err)
 	}
-	if err := (generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
+	if err := (domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
 		return "", fmt.Errorf("Registry returned an invalid immutable OCI reference: %w", err)
 	}
 	return immutable, nil
@@ -277,7 +259,7 @@ func (e *Executor) challengeImage(challengeID string) (string, error) {
 	return candidate.ChallengeOCIImageReference(e.registryRepository, challengeID)
 }
 
-func nodeBuildResult(build *generation.BuildOutput) (incus.BuildNodeImageResult, error) {
+func nodeBuildResult(build *domainexecution.BuildOutput) (incus.BuildNodeImageResult, error) {
 	if build == nil || build.Incus == nil {
 		return incus.BuildNodeImageResult{}, errors.New("candidate has no Node build identity")
 	}

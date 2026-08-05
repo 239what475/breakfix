@@ -18,7 +18,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/generation"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -127,15 +127,15 @@ func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, r
 // after the workflow has recorded a report or become inactive. A running
 // verification action never deletes its own Environment after recording it:
 // that would make recovery race report persistence with provider cleanup.
-func (e *Executor) ReapVerificationEnvironment(ctx context.Context, reap generation.ResourceReap) error {
-	if !reap.Valid() || reap.Kind != generation.ResourceReapVerificationEnvironment {
+func (e *Executor) ReapVerificationEnvironment(ctx context.Context, reap runtime.Reap) error {
+	if reap.Valid() != nil || reap.Kind != runtime.ReapVerificationEnvironment {
 		return errors.New("verification resource reap is invalid")
 	}
-	value := reap.Candidate.VerifyEnvironment
+	value := reap.VerificationEnvironment
 	if value == nil {
 		return nil
 	}
-	if err := value.Validate(reap.Candidate.Snapshot.Runtime); err != nil {
+	if err := value.Validate(reap.Snapshot.Runtime); err != nil {
 		return err
 	}
 	return e.deleteAndWait(ctx, environmentRef{

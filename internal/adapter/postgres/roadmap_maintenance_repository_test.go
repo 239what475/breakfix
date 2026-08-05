@@ -148,41 +148,6 @@ func TestRoadmapMaintenanceCreatesTopicAndChallengeTasksForNewTopic(t *testing.T
 	}
 }
 
-func TestRoadmapMaintenanceExpiresWorkflowBeforeOpeningTheNextIdleWindow(t *testing.T) {
-	database := newTestDB(t)
-	ctx := context.Background()
-	now := time.Date(2026, time.August, 4, 13, 45, 0, 0, time.UTC)
-	revision := publishMaintenanceRoadmap(t, database, now, 1)
-	recordMaintenanceEntries(t, database, revision, 0, 1, true, now)
-	if requested, err := database.Roadmap.RequestRoadmapMaintenance(ctx, now); err != nil || !requested {
-		t.Fatalf("request first maintenance = %v, %v", requested, err)
-	}
-	first, err := database.Roadmap.TryStartRoadmapWorkflow(ctx, now)
-	if err != nil || first == nil {
-		t.Fatalf("start first roadmap workflow = %#v, %v", first, err)
-	}
-	if _, err := database.conn.ExecContext(ctx, `UPDATE roadmap_workflows SET deadline_at = ? WHERE id = ?`, now.Add(-time.Second), first.ID); err != nil {
-		t.Fatalf("expire first roadmap workflow: %v", err)
-	}
-	if requested, err := database.Roadmap.RequestRoadmapMaintenance(ctx, now.Add(time.Second)); err != nil || !requested {
-		t.Fatalf("request replacement maintenance = %v, %v", requested, err)
-	}
-	second, err := database.Roadmap.TryStartRoadmapWorkflow(ctx, now.Add(2*time.Second))
-	if err != nil {
-		t.Fatalf("start after expiration: %v", err)
-	}
-	if second == nil || second.ID == first.ID {
-		t.Fatalf("replacement workflow = %#v, first = %#v", second, first)
-	}
-	expired, err := database.Roadmap.GetRoadmapWorkflow(ctx, first.ID)
-	if err != nil {
-		t.Fatalf("load expired workflow: %v", err)
-	}
-	if expired.State != roadmap.WorkflowFailed {
-		t.Fatalf("expired workflow state = %s, want %s", expired.State, roadmap.WorkflowFailed)
-	}
-}
-
 func TestRoadmapMaintenancePublishesAcceptedTasksAndRetainsFailedEntries(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()

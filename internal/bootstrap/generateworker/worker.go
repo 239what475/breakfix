@@ -44,7 +44,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err := cfg.ValidateGenerateWorker(); err != nil {
 		return fmt.Errorf("validate Generate Worker configuration: %w", err)
 	}
-	workflowClient, err := internalapi.NewGenerationWorkflowClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
+	workflowClient, err := internalapi.NewRuntimeActionClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		return fmt.Errorf("create generation workflow client: %w", err)
 	}

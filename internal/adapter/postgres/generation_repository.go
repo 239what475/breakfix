@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
@@ -328,7 +329,7 @@ func (d *GenerationRepository) LoadGenerationContext(ctx context.Context, claim 
 // LoadGenerationRuntimeAction returns the narrow, immutable input surface for
 // one leased Runtime Worker action. It intentionally does not expose authoring
 // Plan, feedback, workspace binding, or Server filesystem paths.
-func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, claim generation.Claim, now time.Time) (*generation.RuntimeActionContext, error) {
+func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, claim generation.Claim, now time.Time) (*runtime.Context, error) {
 	if !claim.Valid() || now.IsZero() || !claim.Workflow.State.RuntimeState() {
 		return nil, errors.New("generation runtime action requires a valid runtime claim")
 	}
@@ -348,11 +349,18 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	context := generation.RuntimeActionContext{
-		Claim:     generation.Claim{Workflow: *workflow, LeaseCredential: claim.LeaseCredential},
-		Candidate: revision.WorkerView(),
+	identity := runtime.Identity{
+		Scope: runtime.ScopeGenerationWorkflow, OwnerID: workflow.ID, CandidateID: revision.ID,
+		State: runtime.State(workflow.State), StateVersion: workflow.StateVersion,
 	}
-	context.Identity = generation.RuntimeActionIdentityFor(context.Claim, revision.ID)
+	context := runtime.Context{
+		Identity: identity, LeaseOwner: claim.LeaseOwner, ArchiveSHA256: revision.ArchiveSHA256,
+		Snapshot: revision.Snapshot, Build: revision.Build, Artifact: revision.Artifact,
+		VerificationEnvironment: revision.VerifyEnvironment,
+	}
+	if revision.Publication != nil {
+		context.ChallengeID = revision.Publication.ChallengeID
+	}
 	if err := context.Valid(); err != nil {
 		return nil, err
 	}

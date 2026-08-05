@@ -62,13 +62,15 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
 	router.POST("/api/auth/login", h.Login)
-	router.GET("/api/me/space", func(c *gin.Context) {
+	catalogRoutes := router.Group("/")
+	catalogRoutes.Use(h.requireCatalogReady)
+	catalogRoutes.GET("/api/me/space", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetMySpace(c)
 		}
 	})
-	router.GET("/api/me/space/learning", func(c *gin.Context) {
+	catalogRoutes.GET("/api/me/space/learning", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			limit := 0
@@ -105,50 +107,50 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 
 	// The catalog is public read-only. Starting, viewing full content, and every
 	// environment operation below remain bound to an authenticated user.
-	router.GET("/api/challenges", optionalJWTMW, h.ListChallenges)
-	router.POST("/api/challenges/:id/start", func(c *gin.Context) {
+	catalogRoutes.GET("/api/challenges", optionalJWTMW, h.ListChallenges)
+	catalogRoutes.POST("/api/challenges/:id/start", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.StartChallenge(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/challenges/:id/content", func(c *gin.Context) {
+	catalogRoutes.GET("/api/challenges/:id/content", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetChallengeContent(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/challenges/:id/progress", func(c *gin.Context) {
+	catalogRoutes.GET("/api/challenges/:id/progress", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetChallengeProgress(c, c.Param("id"))
 		}
 	})
-	router.GET("/api/challenges/:id/assistant", func(c *gin.Context) {
+	catalogRoutes.GET("/api/challenges/:id/assistant", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetChallengeAssistant(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/challenges/:id/assistant/messages", func(c *gin.Context) {
+	catalogRoutes.POST("/api/challenges/:id/assistant/messages", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.SendChallengeAssistantMessage(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/challenges/:id/reset", func(c *gin.Context) {
+	catalogRoutes.POST("/api/challenges/:id/reset", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.ResetChallenge(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/challenges/:id/stop", func(c *gin.Context) {
+	catalogRoutes.POST("/api/challenges/:id/stop", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.StopChallenge(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/challenges/:id/terminal-ticket", func(c *gin.Context) {
+	catalogRoutes.POST("/api/challenges/:id/terminal-ticket", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CreateTerminalTicket(c, c.Param("id"))
@@ -178,7 +180,7 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.SendAuthoringMessage(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/authoring/sessions/:id/generate", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/sessions/:id/generate", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.ConfirmAuthoringGeneration(c, c.Param("id"))
@@ -190,40 +192,40 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.CancelAuthoringGeneration(c, c.Param("id"), c.Param("workflow_id"))
 		}
 	})
-	router.POST("/api/authoring/sessions/:id/classify", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/sessions/:id/classify", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.ConfirmAuthoringContent(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/authoring/sessions/:id/classification-feedback", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/sessions/:id/classification-feedback", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.RequestAuthoringClassificationAdjustment(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.PublishAuthoringRevision(c, c.Param("id"))
 		}
 	})
-	router.POST("/api/internal/runtime-actions/claim", h.InternalClaimGenerationWorkflow)
-	router.POST("/api/internal/runtime-resource-reaps/claim", h.InternalClaimGenerationResourceReap)
-	router.POST("/api/internal/runtime-resource-reaps/complete", h.InternalCompleteGenerationResourceReap)
-	router.POST("/api/internal/runtime-actions/:id/renew", h.InternalRenewGenerationWorkflow)
-	router.POST("/api/internal/runtime-actions/:id/candidate/archive", h.InternalDownloadGenerationCandidateArchive)
-	router.POST("/api/internal/runtime-actions/:id/build/complete", h.InternalCompleteGenerationBuild)
-	router.POST("/api/internal/runtime-actions/:id/artifact-publish/complete", h.InternalCompleteGenerationArtifactPublish)
-	router.POST("/api/internal/runtime-actions/:id/verification/environment", h.InternalRecordGenerationVerificationEnvironment)
-	router.POST("/api/internal/runtime-actions/:id/verification/complete", h.InternalCompleteGenerationVerification)
-	router.POST("/api/internal/runtime-actions/:id/challenge-publish/complete", h.InternalRecordGenerationChallengePublication)
-	router.POST("/api/internal/runtime-actions/:id/failure/infrastructure", h.InternalReportGenerationInfrastructureFailure)
-	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportGenerationArtifactFailure)
+	router.POST("/api/internal/runtime-actions/claim", h.InternalClaimRuntimeAction)
+	router.POST("/api/internal/runtime-resource-reaps/claim", h.InternalClaimRuntimeResourceReap)
+	router.POST("/api/internal/runtime-resource-reaps/complete", h.InternalCompleteRuntimeResourceReap)
+	router.POST("/api/internal/runtime-actions/:id/renew", h.InternalRenewRuntimeAction)
+	router.POST("/api/internal/runtime-actions/:id/source/archive", h.InternalDownloadRuntimeArchive)
+	router.POST("/api/internal/runtime-actions/:id/build/complete", h.InternalCompleteRuntimeBuild)
+	router.POST("/api/internal/runtime-actions/:id/artifact-publish/complete", h.InternalCompleteRuntimeArtifactPublish)
+	router.POST("/api/internal/runtime-actions/:id/verification/environment", h.InternalRecordRuntimeVerificationEnvironment)
+	router.POST("/api/internal/runtime-actions/:id/verification/complete", h.InternalCompleteRuntimeVerification)
+	router.POST("/api/internal/runtime-actions/:id/challenge-publish/complete", h.InternalRecordRuntimeChallengePublication)
+	router.POST("/api/internal/runtime-actions/:id/failure/infrastructure", h.InternalReportRuntimeInfrastructureFailure)
+	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportRuntimeArtifactFailure)
 
 	// Terminal WebSocket
-	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)
-	router.DELETE("/api/challenges/:id/terminals/:window", func(c *gin.Context) {
+	catalogRoutes.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)
+	catalogRoutes.DELETE("/api/challenges/:id/terminals/:window", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CloseTerminalWindow(c, c.Param("id"), c.Param("window"))

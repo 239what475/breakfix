@@ -1,339 +1,461 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
 
 const (
 	internalGenerateRole = config.InternalWorkerGenerate
-	generationMinLease   = 5 * time.Second
-	generationMaxLease   = 2 * time.Minute
+	runtimeMinLease      = 5 * time.Second
+	runtimeMaxLease      = 2 * time.Minute
 )
 
-type generationClaimRequest struct {
+type runtimeClaimRequest struct {
 	WorkerID       string `json:"worker_id"`
 	LeaseTTLMillis int64  `json:"lease_ttl_millis"`
 }
 
-type generationRenewRequest struct {
-	generation.RuntimeActionCredential
+type runtimeRenewRequest struct {
+	runtime.Credential
 	LeaseTTLMillis int64 `json:"lease_ttl_millis"`
 }
 
-type generationBuildCompleteRequest struct {
-	generation.RuntimeActionCredential
-	Output generation.BuildOutput `json:"output"`
+type runtimeBuildCompleteRequest struct {
+	runtime.Credential
+	Output execution.BuildOutput `json:"output"`
 }
 
-type generationArtifactCompleteRequest struct {
-	generation.RuntimeActionCredential
-	Artifact generation.ArtifactReference `json:"artifact"`
+type runtimeArtifactCompleteRequest struct {
+	runtime.Credential
+	Artifact execution.ArtifactReference `json:"artifact"`
 }
 
-type generationVerificationEnvironmentRequest struct {
-	generation.RuntimeActionCredential
-	Environment generation.VerificationEnvironment `json:"environment"`
+type runtimeVerificationEnvironmentRequest struct {
+	runtime.Credential
+	Environment execution.VerificationEnvironment `json:"environment"`
 }
 
-type generationVerificationCompleteRequest struct {
-	generation.RuntimeActionCredential
-	Report generation.VerificationReport `json:"report"`
+type runtimeVerificationCompleteRequest struct {
+	runtime.Credential
+	Report execution.VerificationReport `json:"report"`
 }
 
-type generationArtifactFailureRequest struct {
-	generation.RuntimeActionCredential
-	Failure generation.Failure             `json:"failure"`
-	Report  *generation.VerificationReport `json:"report,omitempty"`
+type runtimeArtifactFailureRequest struct {
+	runtime.Credential
+	Failure runtime.Failure               `json:"failure"`
+	Report  *execution.VerificationReport `json:"report,omitempty"`
 }
 
-type generationInfrastructureFailureRequest struct {
-	generation.RuntimeActionCredential
-	Failure generation.Failure `json:"failure"`
+type runtimeInfrastructureFailureRequest struct {
+	runtime.Credential
+	Failure runtime.Failure `json:"failure"`
 }
 
-type generationResourceReapClaimRequest struct {
-	WorkerID       string                      `json:"worker_id"`
-	Kind           generation.ResourceReapKind `json:"kind"`
-	LeaseTTLMillis int64                       `json:"lease_ttl_millis"`
+type runtimeResourceReapClaimRequest struct {
+	WorkerID       string `json:"worker_id"`
+	LeaseTTLMillis int64  `json:"lease_ttl_millis"`
 }
 
-type generationResourceReapCompleteRequest struct {
-	Claim   generation.ResourceReapClaim `json:"claim"`
-	Failure string                       `json:"failure,omitempty"`
+type runtimeResourceReapCompleteRequest struct {
+	Claim   runtime.ReapClaim `json:"claim"`
+	Failure string            `json:"failure,omitempty"`
 }
 
-// InternalClaimGenerationWorkflow claims exactly one Runtime Worker action.
-// Despite the historical method name, it never returns Server Agent states.
-func (h *Handler) InternalClaimGenerationWorkflow(c *gin.Context) {
-	var request generationClaimRequest
+type claimedRuntimeAction struct {
+	Context         runtime.Context
+	generationClaim *generation.Claim
+}
+
+// InternalClaimRuntimeAction returns one fixed external action. Server Agent
+// phases are never visible here; Catalog and authoring candidates share this
+// closed Runtime Worker boundary without a string-dispatched task queue.
+func (h *Handler) InternalClaimRuntimeAction(c *gin.Context) {
+	var request runtimeClaimRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
-	if strings.TrimSpace(request.WorkerID) == "" || leaseTTL < generationMinLease || leaseTTL > generationMaxLease {
+	if strings.TrimSpace(request.WorkerID) == "" || leaseTTL < runtimeMinLease || leaseTTL > runtimeMaxLease {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
+		return
+	}
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runtime action store is unavailable"})
 		return
 	}
 	claim, err := h.db.Generation.ClaimGenerationWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	if claim == nil {
+	if claim != nil {
+		action, err := h.db.Generation.LoadGenerationRuntimeAction(c.Request.Context(), *claim, time.Now().UTC())
+		if err != nil {
+			h.writeInternalRuntimeError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, struct {
-			Action *generation.RuntimeActionContext `json:"action,omitempty"`
-		}{})
+			Action *runtime.Context `json:"action,omitempty"`
+		}{Action: action})
 		return
 	}
-	action, err := h.db.Generation.LoadGenerationRuntimeAction(c.Request.Context(), *claim, time.Now().UTC())
+	action, err := h.db.Catalog.ClaimCatalogRuntimeAction(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
-		Action *generation.RuntimeActionContext `json:"action,omitempty"`
+		Action *runtime.Context `json:"action,omitempty"`
 	}{Action: action})
 }
 
-func (h *Handler) InternalClaimGenerationResourceReap(c *gin.Context) {
-	var request generationResourceReapClaimRequest
+func (h *Handler) InternalClaimRuntimeResourceReap(c *gin.Context) {
+	var request runtimeResourceReapClaimRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
-	if strings.TrimSpace(request.WorkerID) == "" || request.Kind.Owner() != "runtime-worker" || leaseTTL < generationMinLease || leaseTTL > generationMaxLease {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id, a runtime-worker resource kind, and a lease between 5 seconds and 2 minutes are required"})
+	if strings.TrimSpace(request.WorkerID) == "" || leaseTTL < runtimeMinLease || leaseTTL > runtimeMaxLease {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
-	claim, err := h.db.Generation.ClaimGenerationResourceReap(c.Request.Context(), request.Kind, request.WorkerID, leaseTTL, time.Now().UTC())
+	claim, err := h.db.Generation.ClaimGenerationResourceReap(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
+	}
+	if claim == nil {
+		claim, err = h.db.Catalog.ClaimCatalogResourceReap(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
+		if err != nil {
+			h.writeInternalRuntimeError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, struct {
-		Claim *generation.ResourceReapClaim `json:"claim,omitempty"`
+		Claim *runtime.ReapClaim `json:"claim,omitempty"`
 	}{Claim: claim})
 }
 
-func (h *Handler) InternalCompleteGenerationResourceReap(c *gin.Context) {
-	var request generationResourceReapCompleteRequest
+func (h *Handler) InternalCompleteRuntimeResourceReap(c *gin.Context) {
+	var request runtimeResourceReapCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	if request.Claim.Valid() != nil || request.Claim.Kind.Owner() != "runtime-worker" {
+	if request.Claim.Valid() != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "runtime resource reap completion is invalid"})
 		return
 	}
-	if err := h.db.Generation.CompleteGenerationResourceReap(c.Request.Context(), request.Claim, request.Failure, time.Now().UTC()); err != nil {
-		h.writeInternalGenerationError(c, err)
+	var err error
+	switch request.Claim.Scope {
+	case runtime.ScopeGenerationWorkflow:
+		err = h.db.Generation.CompleteGenerationResourceReap(c.Request.Context(), request.Claim, request.Failure, time.Now().UTC())
+	case runtime.ScopeCatalogEntry:
+		err = h.db.Catalog.CompleteCatalogResourceReap(c.Request.Context(), request.Claim, request.Failure, time.Now().UTC())
+	default:
+		err = runtime.ErrActionNotFound
+	}
+	if err != nil {
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
 }
 
-func (h *Handler) InternalRenewGenerationWorkflow(c *gin.Context) {
-	var request generationRenewRequest
+func (h *Handler) InternalRenewRuntimeAction(c *gin.Context) {
+	var request runtimeRenewRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
-	if leaseTTL < generationMinLease || leaseTTL > generationMaxLease {
+	if leaseTTL < runtimeMinLease || leaseTTL > runtimeMaxLease {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "lease must be between 5 seconds and 2 minutes"})
 		return
 	}
-	action, err := h.runtimeAction(c, request.RuntimeActionCredential)
+	action, err := h.runtimeAction(c, request.Credential)
 	if err == nil {
-		err = h.db.Generation.RenewGenerationLease(c.Request.Context(), action.Claim, leaseTTL, time.Now().UTC())
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			err = h.db.Generation.RenewGenerationLease(c.Request.Context(), *action.generationClaim, leaseTTL, time.Now().UTC())
+		case runtime.ScopeCatalogEntry, runtime.ScopeCatalogCommit:
+			err = h.db.Catalog.RenewCatalogRuntimeLease(c.Request.Context(), request.Credential, leaseTTL, time.Now().UTC())
+		default:
+			err = runtime.ErrActionNotFound
+		}
 	}
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
 }
 
-func (h *Handler) InternalDownloadGenerationCandidateArchive(c *gin.Context) {
-	var credential generation.RuntimeActionCredential
+func (h *Handler) InternalDownloadRuntimeArchive(c *gin.Context) {
+	var credential runtime.Credential
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &credential) {
 		return
 	}
 	action, err := h.runtimeAction(c, credential)
+	if err == nil && action.Context.Identity.State != runtime.StateBuilding {
+		err = runtime.ErrLeaseLost
+	}
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	if action.Identity.State != generation.StateBuilding {
-		h.writeInternalGenerationError(c, generation.ErrCandidateInvalidState)
-		return
+	var archive []byte
+	switch action.Context.Identity.Scope {
+	case runtime.ScopeGenerationWorkflow:
+		revision, readErr := h.db.Generation.GetCandidateRevision(c.Request.Context(), action.Context.Identity.CandidateID)
+		if readErr != nil {
+			err = readErr
+		} else {
+			archive, err = candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+		}
+	case runtime.ScopeCatalogEntry:
+		entry, readErr := h.db.Catalog.Entry(c.Request.Context(), action.Context.Identity.OwnerID)
+		if readErr != nil {
+			err = readErr
+		} else {
+			archive, err = appcatalog.ReadStagedEntryArchive(h.dataDir, action.Context.Identity.ParentID, *entry)
+		}
+	default:
+		err = runtime.ErrActionNotFound
 	}
-	revision, err := h.db.Generation.GetCandidateRevision(c.Request.Context(), action.Candidate.ID)
 	if err != nil {
-		h.writeInternalGenerationError(c, err)
-		return
-	}
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
-	if err != nil {
-		h.writeInternalGenerationError(c, err)
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
 		Archive []byte `json:"archive"`
 		SHA256  string `json:"sha256"`
-	}{Archive: archive, SHA256: revision.ArchiveSHA256})
+	}{Archive: archive, SHA256: action.Context.ArchiveSHA256})
 }
 
-func (h *Handler) InternalCompleteGenerationBuild(c *gin.Context) {
-	var request generationBuildCompleteRequest
+func (h *Handler) InternalCompleteRuntimeBuild(c *gin.Context) {
+	var request runtimeBuildCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, generation.StateBuilding, func(action *generation.RuntimeActionContext) error {
-		if err := h.validateGenerationBuildOutput(*action, request.Output); err != nil {
-			return generation.NewArtifactError("BUILD_OUTPUT_INVALID", err.Error())
+	h.completeRuntimeAction(c, request.Credential, runtime.StateBuilding, func(action *claimedRuntimeAction) error {
+		if err := h.validateRuntimeBuildOutput(action.Context, request.Output); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "BUILD_OUTPUT_INVALID", Summary: err.Error()}, nil)
 		}
-		return h.db.Generation.CompleteGenerationBuild(c.Request.Context(), action.Claim, request.Output, time.Now().UTC())
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			return h.db.Generation.CompleteGenerationBuild(c.Request.Context(), *action.generationClaim, request.Output, time.Now().UTC())
+		case runtime.ScopeCatalogEntry:
+			return h.db.Catalog.CompleteCatalogBuild(c.Request.Context(), action.Context, request.Output, time.Now().UTC())
+		default:
+			return runtime.ErrActionNotFound
+		}
 	})
 }
 
-func (h *Handler) InternalCompleteGenerationArtifactPublish(c *gin.Context) {
-	var request generationArtifactCompleteRequest
+func (h *Handler) InternalCompleteRuntimeArtifactPublish(c *gin.Context) {
+	var request runtimeArtifactCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, generation.StateArtifactPublishing, func(action *generation.RuntimeActionContext) error {
-		if err := h.validateCandidateStagingArtifact(action.Candidate, request.Artifact); err != nil {
-			return generation.NewArtifactError("ARTIFACT_REFERENCE_INVALID", err.Error())
+	h.completeRuntimeAction(c, request.Credential, runtime.StateArtifactPublishing, func(action *claimedRuntimeAction) error {
+		if err := h.validateRuntimeStagingArtifact(action.Context, request.Artifact); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "ARTIFACT_REFERENCE_INVALID", Summary: err.Error()}, nil)
 		}
-		return h.db.Generation.CompleteGenerationArtifactPublish(c.Request.Context(), action.Claim, request.Artifact, time.Now().UTC())
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			return h.db.Generation.CompleteGenerationArtifactPublish(c.Request.Context(), *action.generationClaim, request.Artifact, time.Now().UTC())
+		case runtime.ScopeCatalogEntry:
+			return h.db.Catalog.CompleteCatalogArtifactPublish(c.Request.Context(), action.Context, request.Artifact, time.Now().UTC())
+		default:
+			return runtime.ErrActionNotFound
+		}
 	})
 }
 
-func (h *Handler) InternalRecordGenerationVerificationEnvironment(c *gin.Context) {
-	var request generationVerificationEnvironmentRequest
+func (h *Handler) InternalRecordRuntimeVerificationEnvironment(c *gin.Context) {
+	var request runtimeVerificationEnvironmentRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, generation.StateVerifying, func(action *generation.RuntimeActionContext) error {
-		if err := request.Environment.Validate(action.Candidate.Snapshot.Runtime); err != nil {
-			return generation.NewArtifactError("VERIFICATION_ENVIRONMENT_INVALID", err.Error())
+	h.completeRuntimeAction(c, request.Credential, runtime.StateVerifying, func(action *claimedRuntimeAction) error {
+		if err := request.Environment.Validate(action.Context.Snapshot.Runtime); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "VERIFICATION_ENVIRONMENT_INVALID", Summary: err.Error()}, nil)
 		}
-		return h.db.Generation.RecordGenerationVerificationEnvironment(c.Request.Context(), action.Claim, request.Environment, time.Now().UTC())
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			return h.db.Generation.RecordGenerationVerificationEnvironment(c.Request.Context(), *action.generationClaim, request.Environment, time.Now().UTC())
+		case runtime.ScopeCatalogEntry:
+			return h.db.Catalog.RecordCatalogVerificationEnvironment(c.Request.Context(), action.Context, request.Environment, time.Now().UTC())
+		default:
+			return runtime.ErrActionNotFound
+		}
 	})
 }
 
-func (h *Handler) InternalCompleteGenerationVerification(c *gin.Context) {
-	var request generationVerificationCompleteRequest
+func (h *Handler) InternalCompleteRuntimeVerification(c *gin.Context) {
+	var request runtimeVerificationCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, generation.StateVerifying, func(action *generation.RuntimeActionContext) error {
-		if err := request.Report.Validate(action.Candidate.Snapshot); err != nil {
-			return generation.NewArtifactError("VERIFICATION_REPORT_INVALID", err.Error())
+	h.completeRuntimeAction(c, request.Credential, runtime.StateVerifying, func(action *claimedRuntimeAction) error {
+		if err := request.Report.Validate(action.Context.Snapshot); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "VERIFICATION_REPORT_INVALID", Summary: err.Error()}, nil)
 		}
-		return h.db.Generation.CompleteGenerationVerification(c.Request.Context(), action.Claim, request.Report, time.Now().UTC())
+		if !request.Report.Passed {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "VERIFY_FAILED", Summary: request.Report.Summary}, &request.Report)
+		}
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			return h.db.Generation.CompleteGenerationVerification(c.Request.Context(), *action.generationClaim, request.Report, time.Now().UTC())
+		case runtime.ScopeCatalogEntry:
+			return h.db.Catalog.CompleteCatalogVerification(c.Request.Context(), action.Context, request.Report, time.Now().UTC())
+		default:
+			return runtime.ErrActionNotFound
+		}
 	})
 }
 
-func (h *Handler) InternalRecordGenerationChallengePublication(c *gin.Context) {
-	var request generationArtifactCompleteRequest
+func (h *Handler) InternalRecordRuntimeChallengePublication(c *gin.Context) {
+	var request runtimeArtifactCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, generation.StateChallengePublishing, func(action *generation.RuntimeActionContext) error {
-		if err := h.validateCandidateChallengeArtifact(action.Candidate, request.Artifact); err != nil {
-			return generation.NewArtifactError("CHALLENGE_ARTIFACT_INVALID", err.Error())
+	h.completeRuntimeAction(c, request.Credential, runtime.StateChallengePublishing, func(action *claimedRuntimeAction) error {
+		if err := h.validateRuntimeChallengeArtifact(action.Context, request.Artifact); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "CHALLENGE_ARTIFACT_INVALID", Summary: err.Error()}, nil)
 		}
-		return h.db.Generation.RecordGenerationChallengePublicationResult(c.Request.Context(), action.Claim, request.Artifact, time.Now().UTC())
+		switch action.Context.Identity.Scope {
+		case runtime.ScopeGenerationWorkflow:
+			return h.db.Generation.RecordGenerationChallengePublicationResult(c.Request.Context(), *action.generationClaim, request.Artifact, time.Now().UTC())
+		case runtime.ScopeCatalogCommit:
+			return h.db.Catalog.CompleteCatalogChallengePublication(c.Request.Context(), action.Context, request.Artifact, time.Now().UTC())
+		default:
+			return runtime.ErrActionNotFound
+		}
 	})
 }
 
-func (h *Handler) InternalReportGenerationInfrastructureFailure(c *gin.Context) {
-	var request generationInfrastructureFailureRequest
+func (h *Handler) InternalReportRuntimeInfrastructureFailure(c *gin.Context) {
+	var request runtimeInfrastructureFailureRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, request.Identity.State, func(action *generation.RuntimeActionContext) error {
-		if request.Failure.Class != generation.FailureInfrastructure || request.Failure.Validate() != nil {
+	h.completeRuntimeAction(c, request.Credential, request.Identity.State, func(action *claimedRuntimeAction) error {
+		if request.Failure.Class != runtime.FailureInfrastructure || request.Failure.Validate() != nil {
 			return errors.New("runtime infrastructure failure is invalid")
 		}
-		_, err := h.db.Generation.ReportGenerationInfrastructureFailure(c.Request.Context(), action.Claim, action.Identity.State, request.Failure, time.Now().UTC())
-		return err
+		return h.reportRuntimeInfrastructureFailure(c.Request.Context(), action, request.Failure)
 	})
 }
 
-func (h *Handler) InternalReportGenerationArtifactFailure(c *gin.Context) {
-	var request generationArtifactFailureRequest
+func (h *Handler) InternalReportRuntimeArtifactFailure(c *gin.Context) {
+	var request runtimeArtifactFailureRequest
 	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.RuntimeActionCredential, request.Identity.State, func(action *generation.RuntimeActionContext) error {
-		if request.Failure.Class != generation.FailureArtifact || request.Failure.Validate() != nil {
+	h.completeRuntimeAction(c, request.Credential, request.Identity.State, func(action *claimedRuntimeAction) error {
+		if request.Failure.Class != runtime.FailureArtifact || request.Failure.Validate() != nil {
 			return errors.New("runtime artifact failure is invalid")
 		}
-		return h.db.Generation.ReportGenerationArtifactFailure(c.Request.Context(), action.Claim, action.Identity.State, request.Failure, request.Report, time.Now().UTC())
+		return h.reportRuntimeArtifactFailure(c.Request.Context(), action, request.Failure, request.Report)
 	})
 }
 
-func (h *Handler) completeRuntimeAction(c *gin.Context, credential generation.RuntimeActionCredential, expected generation.WorkflowState, complete func(*generation.RuntimeActionContext) error) {
+func (h *Handler) completeRuntimeAction(c *gin.Context, credential runtime.Credential, expected runtime.State, complete func(*claimedRuntimeAction) error) {
 	action, err := h.runtimeAction(c, credential)
-	if err == nil && action.Identity.State != expected {
-		err = generation.ErrLeaseLost
+	if err == nil && action.Context.Identity.State != expected {
+		err = runtime.ErrLeaseLost
 	}
 	if err == nil {
 		err = complete(action)
 	}
-	if err == nil {
-		c.Status(http.StatusNoContent)
+	if err != nil {
+		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	var artifact *generation.ArtifactError
-	if action != nil && errors.As(err, &artifact) {
-		if reportErr := h.db.Generation.ReportGenerationArtifactFailure(c.Request.Context(), action.Claim, action.Identity.State, artifact.Failure, artifact.Report, time.Now().UTC()); reportErr == nil {
-			c.Status(http.StatusNoContent)
-			return
-		} else {
-			err = reportErr
-		}
-	}
-	h.writeInternalGenerationError(c, err)
+	c.Status(http.StatusNoContent)
 }
 
-func (h *Handler) runtimeAction(c *gin.Context, credential generation.RuntimeActionCredential) (*generation.RuntimeActionContext, error) {
-	if h.db == nil || !credential.Valid() || strings.TrimSpace(c.Param("id")) == "" || credential.Identity.WorkflowID != c.Param("id") {
+func (h *Handler) runtimeAction(c *gin.Context, credential runtime.Credential) (*claimedRuntimeAction, error) {
+	if h.db == nil || !credential.Valid() || strings.TrimSpace(c.Param("id")) == "" || credential.Identity.OwnerID != c.Param("id") {
 		return nil, errors.New("valid runtime action credentials are required")
 	}
-	claim, err := h.db.Generation.GetGenerationClaim(c.Request.Context(), c.Param("id"), credential.LeaseCredential, time.Now().UTC())
-	if err != nil {
-		return nil, err
+	now := time.Now().UTC()
+	switch credential.Identity.Scope {
+	case runtime.ScopeGenerationWorkflow:
+		claim, err := h.db.Generation.GetGenerationClaim(c.Request.Context(), credential.Identity.OwnerID, generation.LeaseCredential{
+			StateVersion: credential.Identity.StateVersion, LeaseOwner: credential.LeaseOwner,
+		}, now)
+		if err != nil {
+			return nil, err
+		}
+		action, err := h.db.Generation.LoadGenerationRuntimeAction(c.Request.Context(), *claim, now)
+		if err != nil {
+			return nil, err
+		}
+		if action.Identity != credential.Identity {
+			return nil, runtime.ErrLeaseLost
+		}
+		return &claimedRuntimeAction{Context: *action, generationClaim: claim}, nil
+	case runtime.ScopeCatalogEntry, runtime.ScopeCatalogCommit:
+		action, err := h.db.Catalog.GetCatalogRuntimeAction(c.Request.Context(), credential, now)
+		if err != nil {
+			return nil, err
+		}
+		return &claimedRuntimeAction{Context: *action}, nil
+	default:
+		return nil, runtime.ErrActionNotFound
 	}
-	action, err := h.db.Generation.LoadGenerationRuntimeAction(c.Request.Context(), *claim, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	if action.Identity != credential.Identity {
-		return nil, generation.ErrLeaseLost
-	}
-	return action, nil
 }
 
-func (h *Handler) validateGenerationBuildOutput(action generation.RuntimeActionContext, output generation.BuildOutput) error {
-	if err := output.Validate(action.Candidate.Snapshot.Runtime); err != nil {
+func (h *Handler) reportRuntimeInfrastructureFailure(ctx context.Context, action *claimedRuntimeAction, failure runtime.Failure) error {
+	switch action.Context.Identity.Scope {
+	case runtime.ScopeGenerationWorkflow:
+		_, err := h.db.Generation.ReportGenerationInfrastructureFailure(ctx, *action.generationClaim, generation.WorkflowState(action.Context.Identity.State), generation.Failure{
+			Class: generation.FailureInfrastructure, Code: failure.Code, Summary: failure.Summary,
+		}, time.Now().UTC())
+		return err
+	case runtime.ScopeCatalogEntry, runtime.ScopeCatalogCommit:
+		return h.db.Catalog.ReportCatalogRuntimeInfrastructureFailure(ctx, action.Context, failure, time.Now().UTC())
+	default:
+		return runtime.ErrActionNotFound
+	}
+}
+
+func (h *Handler) reportRuntimeArtifactFailure(ctx context.Context, action *claimedRuntimeAction, failure runtime.Failure, report *execution.VerificationReport) error {
+	switch action.Context.Identity.Scope {
+	case runtime.ScopeGenerationWorkflow:
+		return h.db.Generation.ReportGenerationArtifactFailure(ctx, *action.generationClaim, generation.WorkflowState(action.Context.Identity.State), generation.Failure{
+			Class: generation.FailureArtifact, Code: failure.Code, Summary: failure.Summary,
+		}, report, time.Now().UTC())
+	case runtime.ScopeCatalogEntry, runtime.ScopeCatalogCommit:
+		return h.db.Catalog.ReportCatalogRuntimeArtifactFailure(ctx, action.Context, failure, report, time.Now().UTC())
+	default:
+		return runtime.ErrActionNotFound
+	}
+}
+
+func (h *Handler) validateRuntimeBuildOutput(action runtime.Context, output execution.BuildOutput) error {
+	if err := output.Validate(action.Snapshot.Runtime); err != nil {
 		return err
 	}
-	switch action.Candidate.Snapshot.Runtime {
+	switch action.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		expected, err := candidate.BuildOCIRepository(h.registryRepository, action.Identity.WorkflowID, action.Candidate.ID, action.Identity.StateVersion)
+		expected, err := candidate.BuildOCIRepository(h.registryRepository, action.Identity.OwnerID, action.Identity.CandidateID, action.Identity.StateVersion)
 		if err != nil {
 			return err
 		}
@@ -346,23 +468,22 @@ func (h *Handler) validateGenerationBuildOutput(action generation.RuntimeActionC
 		}
 		return nil
 	case challenge.RuntimeNode:
-		if output.Incus == nil || output.Incus.Project != h.incusConfig.BuildProject ||
-			output.Incus.WorkflowID != action.Identity.WorkflowID || output.Incus.CandidateRevisionID != action.Candidate.ID ||
-			output.Incus.Attempt != action.Identity.StateVersion {
-			return errors.New("Node build output does not match its fenced runtime action")
+		if output.Incus == nil || output.Incus.Project != h.incusConfig.BuildProject || output.Incus.WorkflowID != action.Identity.OwnerID ||
+			output.Incus.CandidateRevisionID != action.Identity.CandidateID || output.Incus.Attempt != action.Identity.StateVersion {
+			return errors.New("node build output does not match its fenced runtime action")
 		}
 		return nil
 	default:
-		return generation.ErrCandidateInvalidState
+		return errors.New("runtime action has an unsupported build runtime")
 	}
 }
 
-func (h *Handler) writeInternalGenerationError(c *gin.Context, err error) {
+func (h *Handler) writeInternalRuntimeError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, generation.ErrWorkflowNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, generation.ErrWorkspaceNotFound):
+	case errors.Is(err, runtime.ErrActionNotFound), errors.Is(err, generation.ErrWorkflowNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, generation.ErrWorkspaceNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, generation.ErrLeaseLost):
+	case errors.Is(err, runtime.ErrLeaseLost), errors.Is(err, generation.ErrLeaseLost):
 		status = http.StatusConflict
 	case strings.Contains(err.Error(), "unavailable"):
 		status = http.StatusServiceUnavailable

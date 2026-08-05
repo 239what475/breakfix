@@ -184,8 +184,6 @@ func (s *MaintenanceService) runTask(parent context.Context, claim domain.TaskCl
 	if err != nil {
 		return fmt.Errorf("load roadmap task workflow: %w", err)
 	}
-	workflowContext, cancelWorkflow := context.WithDeadline(parent, workflow.DeadlineAt)
-	defer cancelWorkflow()
 	revision, err := s.repository.RoadmapRevision(parent, workflow.BaseRevision)
 	if err != nil {
 		return fmt.Errorf("load roadmap task revision: %w", err)
@@ -194,7 +192,7 @@ func (s *MaintenanceService) runTask(parent context.Context, claim domain.TaskCl
 	if err != nil {
 		return fmt.Errorf("create roadmap task retrieval: %w", err)
 	}
-	ctx, cancel := s.taskLeaseContext(workflowContext, claim)
+	ctx, cancel := s.taskLeaseContext(parent, claim)
 	defer cancel()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -241,7 +239,7 @@ func (s *MaintenanceService) runPlanner(ctx context.Context, claim domain.TaskCl
 		return s.recordAgentFailure(ctx, claim, run.ID, domain.AgentPlanner, err)
 	}
 	if err := changeSet.ValidateFor(claim.Task.Kind, claim.Task.Subject, revision); err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, domain.AgentPlanner, fmt.Errorf("Planner 返回的关系候选无效: %w", err))
+		return s.recordAgentFailure(ctx, claim, run.ID, domain.AgentPlanner, fmt.Errorf("planner 返回的关系候选无效: %w", err))
 	}
 	if _, err := s.repository.FinalizeRoadmapTaskPlanner(ctx, claim, run.ID, changeSet, s.currentTime()); err != nil {
 		if errors.Is(err, domain.ErrLeaseLost) {
@@ -307,7 +305,7 @@ func (s *MaintenanceService) runReviewer(ctx context.Context, claim domain.TaskC
 		return s.recordAgentFailure(ctx, claim, run.ID, role, err)
 	}
 	if err := review.Validate(); err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, role, fmt.Errorf("Reviewer 返回的结论无效: %w", err))
+		return s.recordAgentFailure(ctx, claim, run.ID, role, fmt.Errorf("reviewer 返回的结论无效: %w", err))
 	}
 	if _, err := s.repository.FinalizeRoadmapTaskReview(ctx, claim, run.ID, role, review, s.currentTime()); err != nil {
 		if errors.Is(err, domain.ErrLeaseLost) {

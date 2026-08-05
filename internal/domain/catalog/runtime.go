@@ -10,6 +10,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 type ReleaseState string
@@ -36,7 +37,6 @@ func (s ReleaseState) Terminal() bool { return s == ReleaseReady || s == Release
 type EntryState string
 
 const (
-	EntryPending            EntryState = "Pending"
 	EntryBuilding           EntryState = "Building"
 	EntryArtifactPublishing EntryState = "ArtifactPublishing"
 	EntryVerifying          EntryState = "Verifying"
@@ -46,7 +46,7 @@ const (
 
 func (s EntryState) Valid() bool {
 	switch s {
-	case EntryPending, EntryBuilding, EntryArtifactPublishing, EntryVerifying, EntryReadyToCommit, EntryFailed:
+	case EntryBuilding, EntryArtifactPublishing, EntryVerifying, EntryReadyToCommit, EntryFailed:
 		return true
 	default:
 		return false
@@ -56,7 +56,7 @@ func (s EntryState) Valid() bool {
 func (s EntryState) Terminal() bool { return s == EntryReadyToCommit || s == EntryFailed }
 
 func (s EntryState) Leaseable() bool {
-	return s == EntryPending || s == EntryBuilding || s == EntryArtifactPublishing || s == EntryVerifying
+	return s == EntryBuilding || s == EntryArtifactPublishing || s == EntryVerifying
 }
 
 type CommitState string
@@ -67,11 +67,12 @@ const (
 	CommitArtifactPublished CommitState = "ArtifactPublished"
 	CommitMaterialized      CommitState = "Materialized"
 	CommitCommitted         CommitState = "Committed"
+	CommitFailed            CommitState = "Failed"
 )
 
 func (s CommitState) Valid() bool {
 	switch s {
-	case CommitPending, CommitPrepared, CommitArtifactPublished, CommitMaterialized, CommitCommitted:
+	case CommitPending, CommitPrepared, CommitArtifactPublished, CommitMaterialized, CommitCommitted, CommitFailed:
 		return true
 	default:
 		return false
@@ -81,26 +82,22 @@ func (s CommitState) Valid() bool {
 // Release is a durable installation attempt for one immutable portable OCI
 // bundle. It has no user, Generator run, or authoring-session identity.
 type Release struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Version      string          `json:"version"`
-	BundleDigest BundleDigest    `json:"bundle_digest"`
-	SourceDigest ContentRevision `json:"source_digest"`
-	State        ReleaseState    `json:"state"`
-	DeadlineAt   time.Time       `json:"deadline_at"`
-	CommitID     string          `json:"commit_id,omitempty"`
-	LeaseOwner   string          `json:"-"`
-	LeaseExpires *time.Time      `json:"lease_expires_at,omitempty"`
-	LastError    string          `json:"last_error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Version       string          `json:"version"`
+	BundleDigest  BundleDigest    `json:"bundle_digest"`
+	SourceDigest  ContentRevision `json:"source_digest"`
+	State         ReleaseState    `json:"state"`
+	SourceAttempt int             `json:"source_attempt"`
+	NextRunAt     time.Time       `json:"next_run_at"`
+	CommitID      string          `json:"commit_id,omitempty"`
+	LastError     string          `json:"last_error,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 func (r Release) Valid() bool {
-	if strings.TrimSpace(r.ID) == "" || !r.BundleDigest.Valid() || !r.State.Valid() || r.DeadlineAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
-		return false
-	}
-	if (r.LeaseOwner == "") != (r.LeaseExpires == nil) {
+	if strings.TrimSpace(r.ID) == "" || !r.BundleDigest.Valid() || !r.State.Valid() || r.SourceAttempt < 0 || r.NextRunAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return false
 	}
 	initialized := strings.TrimSpace(r.Name) != "" || strings.TrimSpace(r.Version) != "" || r.SourceDigest != ""
@@ -131,7 +128,8 @@ type Entry struct {
 	ArchiveSHA256     string                             `json:"archive_sha256"`
 	Snapshot          execution.Snapshot                 `json:"snapshot"`
 	State             EntryState                         `json:"state"`
-	Attempt           int                                `json:"attempt"`
+	StateVersion      int64                              `json:"state_version"`
+	RuntimeAttempt    int                                `json:"runtime_attempt"`
 	LeaseOwner        string                             `json:"-"`
 	LeaseExpires      *time.Time                         `json:"lease_expires_at,omitempty"`
 	NextRunAt         time.Time                          `json:"next_run_at"`
@@ -146,7 +144,7 @@ type Entry struct {
 
 func (e Entry) Valid() bool {
 	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ReleaseID) == "" || !validSourcePath(e.SourcePath) || strings.TrimSpace(e.SourceRef) == "" || strings.TrimSpace(e.Title) == "" ||
-		!e.ContentRevision.Valid() || !execution.ValidSHA256(e.ArchiveSHA256) || !e.State.Valid() || e.Attempt < 0 || e.NextRunAt.IsZero() || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
+		!e.ContentRevision.Valid() || !execution.ValidSHA256(e.ArchiveSHA256) || !e.State.Valid() || e.StateVersion < 1 || e.RuntimeAttempt < 0 || e.NextRunAt.IsZero() || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
 		return false
 	}
 	if (e.LeaseOwner == "") != (e.LeaseExpires == nil) {
@@ -167,6 +165,13 @@ func (e Entry) Valid() bool {
 	if e.Verification != nil && e.Verification.Validate(e.Snapshot) != nil {
 		return false
 	}
+	if e.State.Leaseable() {
+		if e.RuntimeAttempt < 1 || e.RuntimeAttempt > runtime.MaxAttempts {
+			return false
+		}
+	} else if e.RuntimeAttempt != 0 {
+		return false
+	}
 	if e.State == EntryReadyToCommit {
 		return e.Build != nil && e.Artifact != nil && e.Verification != nil && e.Verification.Passed
 	}
@@ -183,6 +188,12 @@ type Commit struct {
 	ChallengeID    string                       `json:"challenge_id,omitempty"`
 	SourceSlug     string                       `json:"source_slug,omitempty"`
 	State          CommitState                  `json:"state"`
+	StateVersion   int64                        `json:"state_version"`
+	RuntimeAttempt int                          `json:"runtime_attempt"`
+	LeaseOwner     string                       `json:"-"`
+	LeaseExpires   *time.Time                   `json:"lease_expires_at,omitempty"`
+	NextRunAt      time.Time                    `json:"next_run_at"`
+	LastError      string                       `json:"last_error,omitempty"`
 	Artifact       *execution.ArtifactReference `json:"artifact,omitempty"`
 	MaterializedAt *time.Time                   `json:"materialized_at,omitempty"`
 	CommittedAt    *time.Time                   `json:"committed_at,omitempty"`
@@ -191,17 +202,26 @@ type Commit struct {
 }
 
 func (c Commit) Valid() bool {
-	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.ReleaseID) == "" || strings.TrimSpace(c.EntryID) == "" || !c.State.Valid() || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
+	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.ReleaseID) == "" || strings.TrimSpace(c.EntryID) == "" || !c.State.Valid() || c.StateVersion < 1 || c.RuntimeAttempt < 0 || c.NextRunAt.IsZero() || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
+		return false
+	}
+	if (c.LeaseOwner == "") != (c.LeaseExpires == nil) {
 		return false
 	}
 	if c.State == CommitPending {
-		return c.ChallengeID == "" && c.SourceSlug == "" && c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.ChallengeID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
 	if !challenge.ValidID(c.ChallengeID) || !challenge.ValidSourceSlug(c.SourceSlug) {
 		return false
 	}
 	if c.State == CommitPrepared {
-		return c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.RuntimeAttempt >= 1 && c.RuntimeAttempt <= runtime.MaxAttempts && c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+	}
+	if c.RuntimeAttempt != 0 {
+		return false
+	}
+	if c.State == CommitFailed {
+		return c.Artifact == nil || c.Artifact.Validate(c.Artifact.Runtime) == nil
 	}
 	if c.Artifact == nil || c.Artifact.Validate(c.Artifact.Runtime) != nil {
 		return false
@@ -224,7 +244,17 @@ type EntryClaim struct {
 }
 
 func (c EntryClaim) Valid() bool {
-	return c.Release.Valid() && c.Entry.Valid() && c.Entry.ReleaseID == c.Release.ID && c.Entry.LeaseOwner != ""
+	return c.Release.Valid() && c.Entry.Valid() && c.Entry.ReleaseID == c.Release.ID && c.Entry.State.Leaseable() && c.Entry.LeaseOwner != ""
+}
+
+type CommitClaim struct {
+	Release Release `json:"release"`
+	Entry   Entry   `json:"entry"`
+	Commit  Commit  `json:"commit"`
+}
+
+func (c CommitClaim) Valid() bool {
+	return c.Release.Valid() && c.Entry.Valid() && c.Commit.Valid() && c.Entry.ReleaseID == c.Release.ID && c.Commit.ReleaseID == c.Release.ID && c.Commit.EntryID == c.Entry.ID && c.Commit.State == CommitPrepared && c.Commit.LeaseOwner != ""
 }
 
 func ReleaseIDForBundle(digest BundleDigest) string {

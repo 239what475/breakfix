@@ -1,7 +1,7 @@
 # 工作流
 
-当前有两种持久化执行边界：作者题目的 `GenerationWorkflow`，以及 Server
-启动时恢复的 `CatalogRelease`。两者都由 PostgreSQL 保存状态、lease 和阶段结果；它们不是按字符串
+当前有三种持久化执行边界：作者题目的 `GenerationWorkflow`、Server 启动时恢复的
+`CatalogRelease`，以及 Server 内的 `RoadmapWorkflow`。它们都由 PostgreSQL 保存状态、lease 和阶段结果；不是按字符串
 `kind` 分发的通用任务。
 
 ## Generation Workflow
@@ -67,10 +67,21 @@ Release/Entry/Commit 状态恢复安装：
 Pending -> Installing -> Committing -> Ready | Failed
 ```
 
-每个 Entry 独立执行 Build、artifact publish 与真实 Verify。全部 Entry 成功后，Server 才在 release commit
-中 materialize 题目并原子公开一个 `RoadmapRevision`。同一 digest 的重启或 lease 接管只恢复未完成阶段，不能
-重复分配 challenge identity。
+Server stage immutable source 后，Runtime Worker 独立执行每个 Entry 的 Build、artifact publish 与真实 Verify；全部
+Entry 成功后 Server 写入 release commit intent，Runtime Worker 执行最终 artifact promotion，Server 再 materialize
+题目并原子公开一个 `RoadmapRevision`。同一 digest 的重启或 lease 接管只恢复未完成阶段，不能重复分配 challenge
+identity 或重复已成功的 promotion。source staging 与每个 Entry/Commit Runtime state 都有各自最多五次的基础设施
+attempt，lease 过期消耗同一 state 的预算。
 
 Catalog 成功提交时同时建立已处理 Roadmap baseline，因此不会触发关系维护工作。RoadmapRevision 是公开
-Catalog 的唯一课程读模型；portable release 只作为 immutable import source。完整契约见
+Catalog 的唯一课程读模型；portable release 只作为 immutable import source。配置了 immutable release 时，未 `Ready`
+的 release 会在应用层阻塞 Catalog 读取以及作者生成、分类和发布，但不会使 `/readyz` 失败。完整契约见
 [Catalog Release](catalog-release.md)。
+
+## Roadmap Maintenance
+
+Roadmap maintenance 是 Server 内的异步 Planner/双 Reviewer 流程，不创建独立 Deployment 或 Runtime Worker action。
+启动和运行期间保持 idle barrier：任何 Generation execution state 或 Catalog commit 都不能与其并行。每个 task 的
+Planner/Reviewer 各有最多五次技术调用；耗尽后该 task 作为当前 workflow 的 `Failed` 结果完成，源 entry 保持未处理，
+自然进入下一次由新增题目阈值或手工调试入口触发的 maintenance workflow。Reviewer reject 开启同一 task 的下一语义 round，
+不消耗技术调用语义。最终只有 Server 合并已接受的 ChangeSet 并发布新的 RoadmapRevision。

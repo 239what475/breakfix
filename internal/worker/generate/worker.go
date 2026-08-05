@@ -13,20 +13,20 @@ import (
 	"time"
 
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/generation"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 type Store interface {
-	Claim(context.Context, string, time.Duration) (*generation.RuntimeActionContext, error)
-	Renew(context.Context, generation.RuntimeActionCredential, time.Duration) error
-	CandidateArchive(context.Context, generation.RuntimeActionCredential) ([]byte, string, error)
-	CompleteBuild(context.Context, generation.RuntimeActionCredential, generation.BuildOutput) error
-	CompleteArtifactPublish(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error
-	RecordVerificationEnvironment(context.Context, generation.RuntimeActionCredential, generation.VerificationEnvironment) error
-	CompleteVerification(context.Context, generation.RuntimeActionCredential, generation.VerificationReport) error
-	RecordChallengePublication(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error
-	ReportInfrastructureFailure(context.Context, generation.RuntimeActionCredential, generation.Failure) error
-	ReportArtifactFailure(context.Context, generation.RuntimeActionCredential, generation.Failure, *generation.VerificationReport) error
+	Claim(context.Context, string, time.Duration) (*runtime.Context, error)
+	Renew(context.Context, runtime.Credential, time.Duration) error
+	Archive(context.Context, runtime.Credential) ([]byte, string, error)
+	CompleteBuild(context.Context, runtime.Credential, domainexecution.BuildOutput) error
+	CompleteArtifactPublish(context.Context, runtime.Credential, domainexecution.ArtifactReference) error
+	RecordVerificationEnvironment(context.Context, runtime.Credential, domainexecution.VerificationEnvironment) error
+	CompleteVerification(context.Context, runtime.Credential, domainexecution.VerificationReport) error
+	RecordChallengePublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error
+	ReportInfrastructureFailure(context.Context, runtime.Credential, runtime.Failure) error
+	ReportArtifactFailure(context.Context, runtime.Credential, runtime.Failure, *domainexecution.VerificationReport) error
 }
 
 type BuilderExecutor interface {
@@ -36,17 +36,17 @@ type BuilderExecutor interface {
 type PublisherExecutor interface {
 	PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error)
 	PublishChallengeWork(context.Context, domainexecution.Work, string) (domainexecution.ArtifactReference, error)
-	ReapCandidate(context.Context, generation.ResourceReap) error
+	ReapResource(context.Context, runtime.Reap) error
 }
 
 type VerifierExecutor interface {
 	ExecuteWork(context.Context, domainexecution.Work, func(context.Context, domainexecution.VerificationEnvironment) error) (domainexecution.VerificationReport, error)
-	ReapVerificationEnvironment(context.Context, generation.ResourceReap) error
+	ReapVerificationEnvironment(context.Context, runtime.Reap) error
 }
 
 type ResourceReapStore interface {
-	ClaimResourceReap(context.Context, string, generation.ResourceReapKind, time.Duration) (*generation.ResourceReapClaim, error)
-	CompleteResourceReap(context.Context, generation.ResourceReapClaim, string) error
+	ClaimResourceReap(context.Context, string, time.Duration) (*runtime.ReapClaim, error)
+	CompleteResourceReap(context.Context, runtime.ReapClaim, string) error
 }
 
 type Config struct {
@@ -138,13 +138,13 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 		return action != nil, err
 	}
 	if err := action.Valid(); err != nil {
-		return true, fmt.Errorf("Server returned invalid runtime action: %w", err)
+		return true, fmt.Errorf("server returned invalid runtime action: %w", err)
 	}
 	w.processAction(ctx, *action)
 	return true, nil
 }
 
-func (w *Worker) processAction(parent context.Context, action generation.RuntimeActionContext) {
+func (w *Worker) processAction(parent context.Context, action runtime.Context) {
 	started := time.Now()
 	credential := action.Credential()
 	deadline := domainexecution.NewActionDeadline(started)
@@ -161,7 +161,7 @@ func (w *Worker) processAction(parent context.Context, action generation.Runtime
 	close(done)
 	cancel()
 	if err != nil && !lease.lost.Load() && parent.Err() == nil {
-		if reportErr := w.reportError(parent, credential, err); reportErr != nil && !errors.Is(reportErr, generation.ErrLeaseLost) {
+		if reportErr := w.reportError(parent, credential, err); reportErr != nil && !errors.Is(reportErr, runtime.ErrLeaseLost) {
 			slog.Error("report runtime action failure", "action", action.Identity.String(), "err", reportErr)
 		}
 	}
@@ -177,13 +177,13 @@ func (w *Worker) processAction(parent context.Context, action generation.Runtime
 	slog.Info("runtime action completed", fields...)
 }
 
-func (w *Worker) executeAction(ctx context.Context, action generation.RuntimeActionContext, work domainexecution.Work, credential generation.RuntimeActionCredential, lease *actionLease) error {
+func (w *Worker) executeAction(ctx context.Context, action runtime.Context, work domainexecution.Work, credential runtime.Credential, lease *actionLease) error {
 	if lease.lost.Load() {
-		return generation.ErrLeaseLost
+		return runtime.ErrLeaseLost
 	}
 	switch action.Identity.State {
-	case generation.StateBuilding:
-		archive, digest, err := w.store.CandidateArchive(ctx, credential)
+	case runtime.StateBuilding:
+		archive, digest, err := w.store.Archive(ctx, credential)
 		if err != nil {
 			return err
 		}
@@ -195,24 +195,24 @@ func (w *Worker) executeAction(ctx context.Context, action generation.RuntimeAct
 			return err
 		}
 		if lease.lost.Load() {
-			return generation.ErrLeaseLost
+			return runtime.ErrLeaseLost
 		}
 		return w.store.CompleteBuild(ctx, credential, output)
 
-	case generation.StateArtifactPublishing:
+	case runtime.StateArtifactPublishing:
 		artifact, err := w.publisher.PublishArtifactWork(ctx, work)
 		if err != nil {
 			return err
 		}
 		if lease.lost.Load() {
-			return generation.ErrLeaseLost
+			return runtime.ErrLeaseLost
 		}
 		return w.store.CompleteArtifactPublish(ctx, credential, artifact)
 
-	case generation.StateVerifying:
+	case runtime.StateVerifying:
 		report, err := w.verifier.ExecuteWork(ctx, work, func(recordCtx context.Context, environment domainexecution.VerificationEnvironment) error {
 			if lease.lost.Load() {
-				return generation.ErrLeaseLost
+				return runtime.ErrLeaseLost
 			}
 			return w.store.RecordVerificationEnvironment(recordCtx, credential, environment)
 		})
@@ -220,17 +220,17 @@ func (w *Worker) executeAction(ctx context.Context, action generation.RuntimeAct
 			return err
 		}
 		if lease.lost.Load() {
-			return generation.ErrLeaseLost
+			return runtime.ErrLeaseLost
 		}
 		return w.store.CompleteVerification(ctx, credential, report)
 
-	case generation.StateChallengePublishing:
-		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.Candidate.Publication.ChallengeID)
+	case runtime.StateChallengePublishing:
+		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.ChallengeID)
 		if err != nil {
 			return err
 		}
 		if lease.lost.Load() {
-			return generation.ErrLeaseLost
+			return runtime.ErrLeaseLost
 		}
 		return w.store.RecordChallengePublication(ctx, credential, artifact)
 
@@ -239,26 +239,29 @@ func (w *Worker) executeAction(ctx context.Context, action generation.RuntimeAct
 	}
 }
 
-func (w *Worker) reportError(ctx context.Context, credential generation.RuntimeActionCredential, executionErr error) error {
-	if errors.Is(executionErr, generation.ErrLeaseLost) || ctx.Err() != nil {
-		return nil
+func (w *Worker) reportError(ctx context.Context, credential runtime.Credential, executionErr error) error {
+	if errors.Is(executionErr, runtime.ErrLeaseLost) {
+		return runtime.ErrLeaseLost
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	var artifact *domainexecution.ArtifactError
 	if errors.As(executionErr, &artifact) {
-		return w.store.ReportArtifactFailure(ctx, credential, generation.Failure{
-			Class: generation.FailureArtifact, Code: artifact.Code, Summary: artifact.Summary,
+		return w.store.ReportArtifactFailure(ctx, credential, runtime.Failure{
+			Class: runtime.FailureArtifact, Code: artifact.Code, Summary: artifact.Summary,
 		}, artifact.Report)
 	}
 	summary := strings.TrimSpace(executionErr.Error())
 	if summary == "" {
 		summary = "runtime action failed"
 	}
-	return w.store.ReportInfrastructureFailure(ctx, credential, generation.Failure{
-		Class: generation.FailureInfrastructure, Code: "RUNTIME_ACTION_FAILED", Summary: summary,
+	return w.store.ReportInfrastructureFailure(ctx, credential, runtime.Failure{
+		Class: runtime.FailureInfrastructure, Code: "RUNTIME_ACTION_FAILED", Summary: summary,
 	})
 }
 
-func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, credential generation.RuntimeActionCredential, lease *actionLease) {
+func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, credential runtime.Credential, lease *actionLease) {
 	interval := w.config.LeaseTTL / 3
 	if interval < time.Second {
 		interval = time.Second
@@ -290,34 +293,27 @@ func (w *Worker) reapOne(ctx context.Context) (bool, error) {
 	if w.reapStore == nil {
 		return false, nil
 	}
-	for _, kind := range []generation.ResourceReapKind{
-		generation.ResourceReapVerificationEnvironment,
-		generation.ResourceReapNodeBuildImage,
-		generation.ResourceReapCandidateArtifact,
-	} {
-		claim, err := w.reapStore.ClaimResourceReap(ctx, w.config.WorkerID, kind, w.config.LeaseTTL)
-		if err != nil {
-			return false, err
-		}
-		if claim == nil {
-			continue
-		}
-		failure := ""
-		switch claim.Kind {
-		case generation.ResourceReapVerificationEnvironment:
-			err = w.verifier.ReapVerificationEnvironment(ctx, claim.ResourceReap)
-		default:
-			err = w.publisher.ReapCandidate(ctx, claim.ResourceReap)
-		}
-		if err != nil {
-			failure = err.Error()
-		}
-		if err := w.reapStore.CompleteResourceReap(ctx, *claim, failure); err != nil {
-			return true, err
-		}
-		return true, nil
+	claim, err := w.reapStore.ClaimResourceReap(ctx, w.config.WorkerID, w.config.LeaseTTL)
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	if claim == nil {
+		return false, nil
+	}
+	failure := ""
+	switch claim.Kind {
+	case runtime.ReapVerificationEnvironment:
+		err = w.verifier.ReapVerificationEnvironment(ctx, claim.Reap)
+	default:
+		err = w.publisher.ReapResource(ctx, claim.Reap)
+	}
+	if err != nil {
+		failure = err.Error()
+	}
+	if err := w.reapStore.CompleteResourceReap(ctx, *claim, failure); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 type actionLease struct{ lost atomic.Bool }

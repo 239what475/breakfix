@@ -10,15 +10,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 const (
-	MaxRuntimeAttempts = 5
+	MaxRuntimeAttempts = runtime.MaxAttempts
 )
 
 var (
 	ErrWorkflowNotFound           = errors.New("generation workflow not found")
-	ErrLeaseLost                  = errors.New("generation workflow lease was lost")
+	ErrLeaseLost                  = runtime.ErrLeaseLost
 	ErrClassificationConflict     = errors.New("classification proposal conflicts with the current roadmap")
 	ErrChallengeSourceRefConflict = errors.New("challenge source reference conflicts with the current roadmap")
 )

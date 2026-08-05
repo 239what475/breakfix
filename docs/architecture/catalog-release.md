@@ -42,15 +42,17 @@ Catalog bundle 使用 OCI Image Spec artifact：一个 immutable manifest、空 
 
 ```text
 CatalogRelease: Pending -> Installing -> Committing -> Ready | Failed
-CatalogEntry:   Pending -> Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | Failed
+CatalogEntry:   Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | Failed
 Commit:         Prepared -> ArtifactPublished -> Materialized -> Committed
 ```
 
-Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Entry 独立执行真实 Build、artifact publish 与 Verify；它们不创建 `GenerationWorkflow`、Generator Run、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
+Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Generator Run、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
 
-只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent、发布最终 runtime artifact 并 materialize challenge source；最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
+只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent；Runtime Worker 发布最终 runtime artifact；Server 再以 hash 校验和幂等 materialization 写入 source。最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Worker promotion 成功后 Server 崩溃时只恢复 materialization/finalization，绝不重复 promotion。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
 
-source、Build 或 Verify 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。Registry、Kubernetes、Incus 或本地存储的基础设施错误在 release deadline 内仅重试当前阶段。相同 digest 可幂等恢复；后续 release 只能添加新的 `source_ref`，不能原地修改或删除已安装内容。
+source、Entry/Commit runtime 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。source staging 和每个 Runtime state 各自最多五次基础设施 attempt；lease 过期也消耗当前 state 的同一预算。重试不改变 `release_id + entry_or_commit_id + state + state_version` 的外部 identity，`runtime_attempt` 不参与命名。相同 digest 可幂等恢复；后续 release 只能添加新的 `source_ref`，不能原地修改或删除已安装内容。
+
+配置了 `catalog.release_reference` 时，Release 未达到 `Ready` 前，Server 在应用层拒绝题库读取以及作者的生成、分类和发布请求；`/readyz` 不依赖这个状态，Runtime Worker 可以继续通过内部 API 完成安装，避免启动死锁。
 
 ## 调试导出
 

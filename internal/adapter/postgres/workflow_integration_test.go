@@ -13,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
 )
 
@@ -677,12 +678,15 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
 	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
 
-	reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, generation.ResourceReapCandidateArtifact, "reaper", time.Minute, now)
+	reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, "reaper", time.Minute, now)
 	if err != nil {
-		t.Fatalf("claim active candidate artifact reap: %v", err)
+		t.Fatalf("claim active candidate verification-environment reap: %v", err)
 	}
-	if reapClaim != nil {
-		t.Fatalf("active verified candidate was eligible for artifact reap: %#v", reapClaim)
+	if reapClaim == nil || reapClaim.Scope != runtime.ScopeGenerationWorkflow || reapClaim.ResourceID != candidate.ID || reapClaim.Kind != runtime.ReapVerificationEnvironment {
+		t.Fatalf("active verified candidate verification-environment reap = %#v", reapClaim)
+	}
+	if err := database.Generation.CompleteGenerationResourceReap(ctx, *reapClaim, "", now); err != nil {
+		t.Fatalf("complete active candidate verification-environment reap: %v", err)
 	}
 	classificationAt := now.Add(30 * time.Second)
 	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
@@ -699,7 +703,7 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 	if err := database.Generation.FinalizeGenerationClassification(ctx, workflowClaim, run.ID, existingClassification(currentRoadmap, candidate.ID), classificationAt); err != nil {
 		t.Fatalf("persist classification proposal: %v", err)
 	}
-	reapClaim, err = database.Generation.ClaimGenerationResourceReap(ctx, generation.ResourceReapCandidateArtifact, "reaper", time.Minute, classificationAt.Add(time.Second))
+	reapClaim, err = database.Generation.ClaimGenerationResourceReap(ctx, "reaper", time.Minute, classificationAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("claim classification-review artifact reap: %v", err)
 	}
@@ -710,27 +714,24 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 	if _, err := database.Generation.CancelAuthoringGenerationWorkflow(ctx, sessionID, userID, workflow.ID, now.Add(time.Minute)); err != nil {
 		t.Fatalf("cancel generation workflow: %v", err)
 	}
-	for _, kind := range []generation.ResourceReapKind{
-		generation.ResourceReapVerificationEnvironment,
-		generation.ResourceReapCandidateArtifact,
-	} {
-		reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, kind, "reaper", time.Minute, now.Add(2*time.Minute))
+	for _, kind := range []runtime.ReapKind{runtime.ReapCandidateArtifact} {
+		reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, "reaper", time.Minute, now.Add(2*time.Minute))
 		if err != nil {
 			t.Fatalf("claim %s reap: %v", kind, err)
 		}
-		if reapClaim == nil || reapClaim.CandidateRevisionID != candidate.ID || reapClaim.Kind != kind || reapClaim.Candidate.ID != candidate.ID {
+		if reapClaim == nil || reapClaim.Scope != runtime.ScopeGenerationWorkflow || reapClaim.ResourceID != candidate.ID || reapClaim.Kind != kind {
 			t.Fatalf("claimed %s reap = %#v", kind, reapClaim)
 		}
 		if err := database.Generation.CompleteGenerationResourceReap(ctx, *reapClaim, "", now.Add(2*time.Minute)); err != nil {
 			t.Fatalf("complete %s reap: %v", kind, err)
 		}
-		repeated, err := database.Generation.ClaimGenerationResourceReap(ctx, kind, "reaper", time.Minute, now.Add(3*time.Minute))
-		if err != nil {
-			t.Fatalf("claim completed %s reap: %v", kind, err)
-		}
-		if repeated != nil {
-			t.Fatalf("completed %s reap was claimed again: %#v", kind, repeated)
-		}
+	}
+	repeated, err := database.Generation.ClaimGenerationResourceReap(ctx, "reaper", time.Minute, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("claim completed reaps: %v", err)
+	}
+	if repeated != nil {
+		t.Fatalf("completed reaps were claimed again: %#v", repeated)
 	}
 }
 

@@ -33,8 +33,7 @@ var schemaRoadmapStatements = []string{
 	`CREATE TABLE roadmap_workflows (
 		id TEXT PRIMARY KEY,
 		base_revision TEXT NOT NULL REFERENCES roadmap_revisions(id) ON DELETE RESTRICT,
-		state TEXT NOT NULL CHECK (state IN ('Queued', 'Running', 'Publishing', 'Completed', 'Failed')),
-		deadline_at TIMESTAMPTZ NOT NULL,
+		state TEXT NOT NULL CHECK (state IN ('Queued', 'Running', 'Publishing', 'Completed')),
 		publish_attempt INTEGER NOT NULL DEFAULT 0 CHECK (publish_attempt >= 0),
 		lease_owner TEXT NOT NULL DEFAULT '',
 		lease_version INTEGER NOT NULL DEFAULT 0 CHECK (lease_version >= 0),

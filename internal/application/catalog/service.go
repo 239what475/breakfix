@@ -33,10 +33,21 @@ type ChallengeRoadmap struct {
 type Service struct {
 	challengesDir string
 	roadmap       RoadmapStore
+	availability  *Availability
 }
 
-func NewService(challengesDir string, roadmap RoadmapStore) *Service {
-	return &Service{challengesDir: challengesDir, roadmap: roadmap}
+func NewService(challengesDir string, roadmap RoadmapStore, availability *Availability) *Service {
+	return &Service{challengesDir: challengesDir, roadmap: roadmap, availability: availability}
+}
+
+// Ready verifies the configured immutable release, when one exists. It is
+// deliberately independent from Server readiness: Runtime Worker needs the
+// Server while the configured release is still being installed.
+func (s *Service) Ready(ctx context.Context) error {
+	if s == nil {
+		return errors.New("catalog service is not configured")
+	}
+	return s.availability.Ready(ctx)
 }
 
 // List exposes only challenge artifacts whose immutable content identity
@@ -44,6 +55,9 @@ func NewService(challengesDir string, roadmap RoadmapStore) *Service {
 func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
 	if s == nil || s.roadmap == nil {
 		return nil, errors.New("catalog service roadmap is not configured")
+	}
+	if err := s.Ready(ctx); err != nil {
+		return nil, err
 	}
 	revision, err := s.roadmap.CurrentRoadmap(ctx)
 	if errors.Is(err, roadmapdomain.ErrNoCurrentRevision) {

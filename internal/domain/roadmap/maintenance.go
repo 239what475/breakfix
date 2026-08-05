@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	MaintenanceExecutionDeadline = time.Hour
-	MaxAgentCallsPerTask         = 5
-	AutomaticRequestThreshold    = 20
+	MaxAgentCallsPerTask      = 5
+	AutomaticRequestThreshold = 20
 )
 
 var (
@@ -33,21 +32,18 @@ const (
 	WorkflowRunning    WorkflowState = "Running"
 	WorkflowPublishing WorkflowState = "Publishing"
 	WorkflowCompleted  WorkflowState = "Completed"
-	WorkflowFailed     WorkflowState = "Failed"
 )
 
 func (s WorkflowState) Valid() bool {
 	switch s {
-	case WorkflowQueued, WorkflowRunning, WorkflowPublishing, WorkflowCompleted, WorkflowFailed:
+	case WorkflowQueued, WorkflowRunning, WorkflowPublishing, WorkflowCompleted:
 		return true
 	default:
 		return false
 	}
 }
 
-func (s WorkflowState) Terminal() bool {
-	return s == WorkflowCompleted || s == WorkflowFailed
-}
+func (s WorkflowState) Terminal() bool { return s == WorkflowCompleted }
 
 // TaskKind selects the independent graph that the task may change.
 type TaskKind string
@@ -188,7 +184,6 @@ type Workflow struct {
 	ID              string        `json:"id"`
 	BaseRevision    string        `json:"base_revision"`
 	State           WorkflowState `json:"state"`
-	DeadlineAt      time.Time     `json:"deadline_at"`
 	PublishAttempts int           `json:"publish_attempts"`
 	LeaseOwner      string        `json:"-"`
 	LeaseVersion    int           `json:"-"`
@@ -201,7 +196,7 @@ type Workflow struct {
 
 func (w Workflow) Valid() bool {
 	return strings.TrimSpace(w.ID) != "" && ValidRevision(w.BaseRevision) && w.State.Valid() &&
-		w.PublishAttempts >= 0 && w.LeaseVersion >= 0 && !w.DeadlineAt.IsZero() && !w.NextRunAt.IsZero() && !w.CreatedAt.IsZero() && !w.UpdatedAt.IsZero()
+		w.PublishAttempts >= 0 && w.LeaseVersion >= 0 && !w.NextRunAt.IsZero() && !w.CreatedAt.IsZero() && !w.UpdatedAt.IsZero()
 }
 
 type Task struct {

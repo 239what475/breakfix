@@ -57,22 +57,9 @@ type RegistryConfig struct {
 // or development catalog empty; there is no HTTP installation endpoint.
 type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
-	InstallDeadline  string `yaml:"install_deadline"`
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
-
-func (c CatalogConfig) Deadline() (time.Duration, error) {
-	value := strings.TrimSpace(c.InstallDeadline)
-	if value == "" {
-		return 0, fmt.Errorf("catalog install_deadline is required when release_reference is configured")
-	}
-	deadline, err := time.ParseDuration(value)
-	if err != nil || deadline <= 0 {
-		return 0, fmt.Errorf("catalog install_deadline must be a positive duration")
-	}
-	return deadline, nil
-}
 
 func (c CatalogConfig) Validate() error {
 	if !c.Enabled() {
@@ -81,8 +68,7 @@ func (c CatalogConfig) Validate() error {
 	if !immutableOCIReference(c.ReleaseReference) {
 		return fmt.Errorf("catalog release_reference must be an immutable OCI digest reference")
 	}
-	_, err := c.Deadline()
-	return err
+	return nil
 }
 
 func (c RegistryConfig) Validate() error {

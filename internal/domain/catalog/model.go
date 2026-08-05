@@ -6,6 +6,7 @@ package catalog
 import (
 	"errors"
 	"regexp"
+	"strings"
 )
 
 var contentRevisionPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
@@ -28,3 +29,15 @@ func (r ContentRevision) Validate() error {
 type BundleDigest string
 
 func (d BundleDigest) Valid() bool { return contentRevisionPattern.MatchString(string(d)) }
+
+// BundleDigestFromReference extracts the immutable OCI manifest digest from a
+// configured Catalog Release reference. The repository authority is deployment
+// configuration; the durable release identity is only its immutable digest.
+func BundleDigestFromReference(reference string) (BundleDigest, error) {
+	_, value, found := strings.Cut(strings.TrimSpace(reference), "@")
+	digest := BundleDigest(value)
+	if !found || !digest.Valid() {
+		return "", errors.New("catalog release must use an immutable OCI digest reference")
+	}
+	return digest, nil
+}

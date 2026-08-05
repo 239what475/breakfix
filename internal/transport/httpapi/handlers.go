@@ -61,14 +61,24 @@ type Dependencies struct {
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
 	var roadmap appcatalog.RoadmapStore
+	var availability *appcatalog.Availability
 	if database != nil {
 		roadmap = database.Roadmap
+		if cfg.Catalog.Enabled() {
+			var err error
+			availability, err = appcatalog.NewAvailability(cfg.Catalog.ReleaseReference, database.Catalog)
+			if err != nil {
+				return nil, fmt.Errorf("create catalog availability gate: %w", err)
+			}
+		}
+	} else if cfg.Catalog.Enabled() {
+		return nil, fmt.Errorf("configured catalog release requires a database")
 	}
 	handler := &Handler{
 		runtimeContext:     context.Background(),
 		db:                 database,
 		k8s:                client,
-		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap),
+		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability),
 		registryRepository: cfg.Registry.Repository,
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,

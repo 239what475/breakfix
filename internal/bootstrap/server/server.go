@@ -26,9 +26,6 @@ import (
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
-	"github.com/breakfix/breakfix/internal/worker/generate/build"
-	"github.com/breakfix/breakfix/internal/worker/generate/publish"
-	"github.com/breakfix/breakfix/internal/worker/generate/verify"
 )
 
 // Runtime owns process-scoped Server resources. Application and transport code
@@ -159,46 +156,16 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 
 	stopCatalogInstaller := func() {}
 	if cfg.Catalog.Enabled() {
-		deadline, err := cfg.Catalog.Deadline()
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("parse catalog install deadline: %w", err)
-		}
-		publisherExecutor, err := publish.NewExecutor(registryClient, incusClient, cfg.Registry.Repository)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create catalog publisher: %w", err)
-		}
-		verifierExecutor, err := verify.NewExecutor(k8sClient, incusClient, cfg.CRDNamespace)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create catalog verifier: %w", err)
-		}
-		builderExecutor, err := build.NewExecutor(incusClient, registryClient, cfg.Incus, cfg.Registry.Repository)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create catalog builder: %w", err)
-		}
 		installer, err := appcatalog.NewInstaller(appcatalog.InstallerConfig{
 			DataDir:          cfg.DataDir,
 			ChallengesDir:    cfg.ChallengesDir(),
 			ReleaseReference: cfg.Catalog.ReleaseReference,
-			InstallDeadline:  deadline,
-			LeaseTTL:         2 * time.Minute,
 			PollInterval:     2 * time.Second,
-			WorkerID:         catalogInstallerID(),
 			Snapshot:         runtimesnapshot.From(cfg.Runtime, cfg.Incus),
 			Puller:           registryClient,
 			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
 			Store:            database.Catalog,
 			Roadmap:          database.Roadmap,
-			Builder:          builderExecutor,
-			Publisher:        publisherExecutor,
-			Verifier:         verifierExecutor,
 		})
 		if err != nil {
 			incusClient.Close()

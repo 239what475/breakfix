@@ -11,6 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 var errCandidatePublicationInvariant = errors.New("candidate publication invariant breach")
@@ -32,7 +33,9 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 	if err := artifact.Validate(revision.Snapshot.Runtime); err != nil {
 		return nil, fmt.Errorf("%w: invalid final artifact: %v", errCandidatePublicationInvariant, err)
 	}
-	if err := h.validateCandidateChallengeArtifact(revision.WorkerView(), artifact); err != nil {
+	if err := h.validateRuntimeChallengeArtifact(runtime.Context{
+		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ChallengeID: publication.ChallengeID,
+	}, artifact); err != nil {
 		return nil, fmt.Errorf("%w: final artifact ownership: %v", errCandidatePublicationInvariant, err)
 	}
 	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)

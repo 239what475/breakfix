@@ -37,8 +37,8 @@ func seedTestRoadmap(database *postgres.Store, cfg config.Config) error {
 	tag := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTag, "test"), SourceRef: "test", Title: "Test"}
 	revision := roadmap.Revision{
 		Domains: []roadmap.Domain{{ID: domain.ID, SourceRef: domain.SourceRef, Title: domain.Title, Definition: "Test-only catalog domain.", Scope: "HTTP catalog behavior.", NonGoals: "Production curriculum."}},
-		Topics: []roadmap.Topic{{ID: topic.ID, SourceRef: topic.SourceRef, Title: topic.Title, Domain: domain, Definition: "Test-only repair topic.", Scope: "Published test challenges.", NonGoals: "Production curriculum.", ChallengeGuidance: "Use only for HTTP test fixtures."}},
-		Tags: []roadmap.Tag{{ID: tag.ID, SourceRef: tag.SourceRef, Title: tag.Title, Description: "Test fixture tag."}},
+		Topics:  []roadmap.Topic{{ID: topic.ID, SourceRef: topic.SourceRef, Title: topic.Title, Domain: domain, Definition: "Test-only repair topic.", Scope: "Published test challenges.", NonGoals: "Production curriculum.", ChallengeGuidance: "Use only for HTTP test fixtures."}},
+		Tags:    []roadmap.Tag{{ID: tag.ID, SourceRef: tag.SourceRef, Title: tag.Title, Description: "Test fixture tag."}},
 	}
 	for _, entry := range entries {
 		if entry.SourceSlug == "" {

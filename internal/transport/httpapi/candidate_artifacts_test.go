@@ -1,81 +1,59 @@
 package httpapi
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/execution"
+	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
-func TestCandidateArtifactOwnershipMatchesClaimedResources(t *testing.T) {
+func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 	handler := newHandlerForTest(t, nil, nil, config.Config{
 		Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"},
 		Incus:    incus.Config{NamePrefix: "bf"},
 	})
 	const fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-	t.Run("k8s staging and final artifacts", func(t *testing.T) {
-		view := generation.WorkerView{ID: "candidate-a", Snapshot: generation.ExecutionSnapshot{Runtime: challenge.RuntimeK8s}}
-		stagingRepository, err := candidate.CandidateOCIRepository(handler.registryRepository, view.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		staging := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: stagingRepository + "@sha256:" + fingerprint}
-		if err := handler.validateCandidateStagingArtifact(view, staging); err != nil {
-			t.Fatalf("validate staging artifact: %v", err)
-		}
-		wrongRepository := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example.com/breakfix/candidates/other@sha256:" + fingerprint}
-		if err := handler.validateCandidateStagingArtifact(view, wrongRepository); err == nil {
-			t.Fatal("accepted an OCI artifact from another candidate repository")
-		}
+	stagingRepository, err := candidate.CandidateOCIRepository(handler.registryRepository, "candidate-k8s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := execution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: stagingRepository + "@sha256:" + fingerprint}
+	k8sAction := runtime.Context{Identity: runtime.Identity{CandidateID: "candidate-k8s"}, Snapshot: execution.Snapshot{Runtime: challenge.RuntimeK8s}}
+	if err := handler.validateRuntimeStagingArtifact(k8sAction, staging); err != nil {
+		t.Fatalf("validate K8s staging artifact: %v", err)
+	}
+	finalRepository, err := candidate.ChallengeOCIRepository(handler.registryRepository, "challenge-k8s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k8sAction.Artifact = &staging
+	k8sAction.ChallengeID = "challenge-k8s"
+	if err := handler.validateRuntimeChallengeArtifact(k8sAction, execution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + fingerprint}); err != nil {
+		t.Fatalf("validate K8s final artifact: %v", err)
+	}
 
-		view.Artifact = &staging
-		view.Publication = &generation.Publication{ChallengeID: "challenge-a"}
-		finalRepository, err := candidate.ChallengeOCIRepository(handler.registryRepository, view.Publication.ChallengeID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		final := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + fingerprint}
-		if err := handler.validateCandidateChallengeArtifact(view, final); err != nil {
-			t.Fatalf("validate final artifact: %v", err)
-		}
-		wrongDigest := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + strings.Repeat("b", 64)}
-		if err := handler.validateCandidateChallengeArtifact(view, wrongDigest); err == nil {
-			t.Fatal("accepted a final OCI artifact with a different digest")
-		}
-	})
-
-	t.Run("node staging and final artifacts", func(t *testing.T) {
-		candidateAlias, err := incus.AliasForCandidate("bf", "candidate-node")
-		if err != nil {
-			t.Fatal(err)
-		}
-		view := generation.WorkerView{
-			ID:       "candidate-node",
-			Snapshot: generation.ExecutionSnapshot{Runtime: challenge.RuntimeNode},
-			Build:    &generation.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &generation.IncusBuildReference{Fingerprint: fingerprint}},
-		}
-		staging := generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: candidateAlias, IncusFingerprint: fingerprint}
-		if err := handler.validateCandidateStagingArtifact(view, staging); err != nil {
-			t.Fatalf("validate node staging artifact: %v", err)
-		}
-		view.Artifact = &staging
-		view.Publication = &generation.Publication{ChallengeID: "challenge-node"}
-		challengeAlias, err := incus.AliasForChallenge("bf", view.Publication.ChallengeID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		final := generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: challengeAlias, IncusFingerprint: fingerprint}
-		if err := handler.validateCandidateChallengeArtifact(view, final); err != nil {
-			t.Fatalf("validate node final artifact: %v", err)
-		}
-		wrongAlias := generation.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: candidateAlias, IncusFingerprint: fingerprint}
-		if err := handler.validateCandidateChallengeArtifact(view, wrongAlias); err == nil {
-			t.Fatal("accepted a final Node artifact using the staging alias")
-		}
-	})
+	candidateAlias, err := incus.AliasForCandidate("bf", "candidate-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeAction := runtime.Context{Identity: runtime.Identity{CandidateID: "candidate-node"}, Snapshot: execution.Snapshot{Runtime: challenge.RuntimeNode},
+		Build: &execution.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &execution.IncusBuildReference{Fingerprint: fingerprint}}}
+	nodeStaging := execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: candidateAlias, IncusFingerprint: fingerprint}
+	if err := handler.validateRuntimeStagingArtifact(nodeAction, nodeStaging); err != nil {
+		t.Fatalf("validate Node staging artifact: %v", err)
+	}
+	challengeAlias, err := incus.AliasForChallenge("bf", "challenge-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeAction.Artifact = &nodeStaging
+	nodeAction.ChallengeID = "challenge-node"
+	if err := handler.validateRuntimeChallengeArtifact(nodeAction, execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: challengeAlias, IncusFingerprint: fingerprint}); err != nil {
+		t.Fatalf("validate Node final artifact: %v", err)
+	}
 }

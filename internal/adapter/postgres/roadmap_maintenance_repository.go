@@ -22,7 +22,8 @@ var (
 	ErrRoadmapMaintenanceActive = errors.New("roadmap maintenance is active")
 )
 
-const roadmapWorkflowColumns = `id, base_revision, state, deadline_at, publish_attempt, lease_owner, lease_version, lease_expires_at,
+//nolint:gosec // This is a PostgreSQL column list, not a credential.
+const roadmapWorkflowColumns = `id, base_revision, state, publish_attempt, lease_owner, lease_version, lease_expires_at,
 	next_run_at, last_error, created_at, updated_at`
 const roadmapWorkflowSelect = `SELECT ` + roadmapWorkflowColumns + ` FROM roadmap_workflows`
 
@@ -87,9 +88,6 @@ func (d *RoadmapRepository) TryStartRoadmapWorkflow(ctx context.Context, now tim
 	}
 	defer func() { _ = tx.Rollback() }()
 	now = now.UTC()
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
 	revision, err := currentRoadmapForUpdateTx(ctx, tx)
 	if errors.Is(err, roadmap.ErrNoCurrentRevision) {
 		if err := tx.Commit(); err != nil {
@@ -154,15 +152,14 @@ func (d *RoadmapRepository) TryStartRoadmapWorkflow(ctx context.Context, now tim
 		ID:           roadmap.NewWorkflowID(),
 		BaseRevision: revision.Revision,
 		State:        roadmap.WorkflowQueued,
-		DeadlineAt:   now.Add(roadmap.MaintenanceExecutionDeadline),
 		NextRunAt:    now,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_workflows
-		(id, base_revision, state, deadline_at, publish_attempt, lease_owner, lease_version, lease_expires_at, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 0, '', 0, NULL, ?, '', ?, ?)`,
-		workflow.ID, workflow.BaseRevision, workflow.State, workflow.DeadlineAt, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
+		(id, base_revision, state, publish_attempt, lease_owner, lease_version, lease_expires_at, next_run_at, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, 0, '', 0, NULL, ?, '', ?, ?)`,
+		workflow.ID, workflow.BaseRevision, workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("create roadmap workflow: %w", err)
 	}
 	for _, entry := range entries {
@@ -291,9 +288,6 @@ func ensureRoadmapExecutionAllowedTx(ctx context.Context, tx *Tx, now time.Time)
 	if _, err := tx.ExecContext(ctx, `SELECT revision_id FROM roadmap_current WHERE singleton = TRUE FOR UPDATE`); err != nil {
 		return fmt.Errorf("lock roadmap execution barrier: %w", err)
 	}
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now.UTC()); err != nil {
-		return err
-	}
 	active, err := hasActiveRoadmapWorkflowTx(ctx, tx)
 	if err != nil {
 		return err
@@ -307,9 +301,6 @@ func ensureRoadmapExecutionAllowedTx(ctx context.Context, tx *Tx, now time.Time)
 func ensureRoadmapPublicationAllowedTx(ctx context.Context, tx *Tx, now time.Time) error {
 	if now.IsZero() {
 		return errors.New("roadmap publication barrier requires current time")
-	}
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now.UTC()); err != nil {
-		return err
 	}
 	active, err := hasActiveRoadmapWorkflowTx(ctx, tx)
 	if err != nil {
@@ -485,20 +476,16 @@ func (d *RoadmapRepository) ClaimRoadmapTasks(ctx context.Context, workerID stri
 	}
 	defer func() { _ = tx.Rollback() }()
 	now = now.UTC()
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
 	rows, err := tx.QueryContext(ctx, `SELECT task.id
 		FROM roadmap_tasks task
 		JOIN roadmap_workflows workflow ON workflow.id = task.workflow_id
 		WHERE workflow.state IN (?, ?)
-			AND workflow.deadline_at > ?
 			AND task.state IN (?, ?)
 			AND task.next_run_at <= ?
 			AND (task.lease_expires_at IS NULL OR task.lease_expires_at <= ?)
 		ORDER BY task.snapshot_order, task.kind, task.id
 		FOR UPDATE OF task SKIP LOCKED`,
-		roadmap.WorkflowQueued, roadmap.WorkflowRunning, now,
+		roadmap.WorkflowQueued, roadmap.WorkflowRunning,
 		roadmap.TaskPending, roadmap.TaskRunning, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("select roadmap task claims: %w", err)
@@ -558,9 +545,9 @@ func (d *RoadmapRepository) RenewRoadmapTaskLease(ctx context.Context, claim roa
 	result, err := d.conn.ExecContext(ctx, `UPDATE roadmap_tasks task SET lease_expires_at = ?, updated_at = ?
 		FROM roadmap_workflows workflow
 		WHERE task.id = ? AND task.workflow_id = workflow.id AND task.state = ? AND task.lease_owner = ?
-			AND task.lease_version = ? AND task.lease_expires_at > ? AND workflow.state = ? AND workflow.deadline_at > ?`,
+			AND task.lease_version = ? AND task.lease_expires_at > ? AND workflow.state = ?`,
 		now.UTC().Add(leaseTTL), now.UTC(), claim.Task.ID, roadmap.TaskRunning, claim.LeaseOwner, claim.LeaseVersion,
-		now.UTC(), roadmap.WorkflowRunning, now.UTC())
+		now.UTC(), roadmap.WorkflowRunning)
 	if err != nil {
 		return fmt.Errorf("renew roadmap task lease: %w", err)
 	}
@@ -825,7 +812,7 @@ func lockRoadmapTaskClaimTx(ctx context.Context, tx *Tx, claim roadmap.TaskClaim
 	if err != nil {
 		return nil, nil, fmt.Errorf("lock roadmap task workflow: %w", err)
 	}
-	if workflow.State != roadmap.WorkflowRunning || !workflow.DeadlineAt.After(now.UTC()) {
+	if workflow.State != roadmap.WorkflowRunning {
 		return nil, nil, roadmap.ErrLeaseLost
 	}
 	return task, workflow, nil
@@ -915,16 +902,13 @@ func (d *RoadmapRepository) ClaimRoadmapWorkflowPublication(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 	now = now.UTC()
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT workflow.id FROM roadmap_workflows workflow
-		WHERE workflow.state IN (?, ?) AND workflow.deadline_at > ? AND workflow.next_run_at <= ?
+		WHERE workflow.state IN (?, ?) AND workflow.next_run_at <= ?
 			AND (workflow.lease_expires_at IS NULL OR workflow.lease_expires_at <= ?)
 			AND NOT EXISTS (SELECT 1 FROM roadmap_tasks task WHERE task.workflow_id = workflow.id AND task.state NOT IN (?, ?))
 		ORDER BY workflow.created_at, workflow.id FOR UPDATE SKIP LOCKED LIMIT 1`,
-		roadmap.WorkflowRunning, roadmap.WorkflowPublishing, now, now, now, roadmap.TaskAccepted, roadmap.TaskFailed).Scan(&id)
+		roadmap.WorkflowRunning, roadmap.WorkflowPublishing, now, now, roadmap.TaskAccepted, roadmap.TaskFailed).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -958,8 +942,8 @@ func (d *RoadmapRepository) RenewRoadmapWorkflowLease(ctx context.Context, claim
 		return errors.New("roadmap workflow lease renewal is invalid")
 	}
 	result, err := d.conn.ExecContext(ctx, `UPDATE roadmap_workflows SET lease_expires_at = ?, updated_at = ?
-		WHERE id = ? AND state = ? AND lease_owner = ? AND lease_version = ? AND lease_expires_at > ? AND deadline_at > ?`,
-		now.UTC().Add(leaseTTL), now.UTC(), claim.Workflow.ID, roadmap.WorkflowPublishing, claim.LeaseOwner, claim.LeaseVersion, now.UTC(), now.UTC())
+		WHERE id = ? AND state = ? AND lease_owner = ? AND lease_version = ? AND lease_expires_at > ?`,
+		now.UTC().Add(leaseTTL), now.UTC(), claim.Workflow.ID, roadmap.WorkflowPublishing, claim.LeaseOwner, claim.LeaseVersion, now.UTC())
 	if err != nil {
 		return fmt.Errorf("renew roadmap workflow lease: %w", err)
 	}
@@ -981,9 +965,6 @@ func (d *RoadmapRepository) CompleteRoadmapWorkflow(ctx context.Context, claim r
 		return nil, fmt.Errorf("begin roadmap workflow completion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := expireRoadmapWorkflowsTx(ctx, tx, now.UTC()); err != nil {
-		return nil, err
-	}
 	workflow, err := lockRoadmapWorkflowClaimTx(ctx, tx, claim, now.UTC())
 	if err != nil {
 		return nil, err
@@ -1066,9 +1047,9 @@ func (d *RoadmapRepository) CompleteRoadmapWorkflow(ctx context.Context, claim r
 }
 
 // ReportRoadmapWorkflowInfrastructureFailure releases only the publication
-// lease. Task results stay intact and Server can retry the same fixed snapshot
-// until its deadline; the deadline terminal state releases the generation and
-// Catalog barrier while preserving all source entries as pending.
+// lease. Task results stay intact and Server retries the same fixed snapshot
+// with bounded backoff; the Roadmap barrier remains held until publication
+// eventually succeeds or Server stops.
 func (d *RoadmapRepository) ReportRoadmapWorkflowInfrastructureFailure(ctx context.Context, claim roadmap.WorkflowClaim, message string, now time.Time) (*roadmap.Workflow, error) {
 	if !claim.Valid() || strings.TrimSpace(message) == "" || now.IsZero() {
 		return nil, errors.New("roadmap workflow infrastructure failure is invalid")
@@ -1085,10 +1066,6 @@ func (d *RoadmapRepository) ReportRoadmapWorkflowInfrastructureFailure(ctx conte
 	attempt := workflow.PublishAttempts + 1
 	state := roadmap.WorkflowRunning
 	nextRun := roadmap.RetryAt(attempt, now.UTC())
-	if !workflow.DeadlineAt.After(now.UTC()) {
-		state = roadmap.WorkflowFailed
-		nextRun = now.UTC()
-	}
 	updated, err := scanRoadmapWorkflow(tx.QueryRowContext(ctx, `UPDATE roadmap_workflows SET state = ?, publish_attempt = ?, lease_owner = '',
 		lease_expires_at = NULL, next_run_at = ?, last_error = ?, updated_at = ? WHERE id = ? RETURNING `+roadmapWorkflowColumns,
 		state, attempt, nextRun, strings.TrimSpace(message), now.UTC(), workflow.ID))
@@ -1140,31 +1117,7 @@ func lockRoadmapWorkflowClaimTx(ctx context.Context, tx *Tx, claim roadmap.Workf
 	if err != nil {
 		return nil, fmt.Errorf("lock roadmap workflow claim: %w", err)
 	}
-	if !workflow.DeadlineAt.After(now.UTC()) {
-		return nil, roadmap.ErrLeaseLost
-	}
 	return workflow, nil
-}
-
-func expireRoadmapWorkflowsTx(ctx context.Context, tx *Tx, now time.Time) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs run SET status = ?, last_error =
-		CASE WHEN run.last_error = '' THEN 'roadmap workflow execution deadline exceeded' ELSE run.last_error END,
-		completed_at = ?, updated_at = ?
-		FROM roadmap_tasks task
-		JOIN roadmap_workflows workflow ON workflow.id = task.workflow_id
-		WHERE run.owner_kind = ? AND run.owner_ref = task.id AND run.status = ?
-			AND workflow.state IN (?, ?, ?) AND workflow.deadline_at <= ?`,
-		agent.RunFailed, now.UTC(), now.UTC(), "roadmap-task", agent.RunRunning,
-		roadmap.WorkflowQueued, roadmap.WorkflowRunning, roadmap.WorkflowPublishing, now.UTC()); err != nil {
-		return fmt.Errorf("fail expired roadmap task agent runs: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_workflows SET state = ?, lease_owner = '', lease_expires_at = NULL,
-		last_error = CASE WHEN last_error = '' THEN 'roadmap workflow execution deadline exceeded' ELSE last_error END, updated_at = ?
-		WHERE state IN (?, ?, ?) AND deadline_at <= ?`, roadmap.WorkflowFailed, now.UTC(),
-		roadmap.WorkflowQueued, roadmap.WorkflowRunning, roadmap.WorkflowPublishing, now.UTC()); err != nil {
-		return fmt.Errorf("expire roadmap workflows: %w", err)
-	}
-	return nil
 }
 
 func listRoadmapTasksForUpdateTx(ctx context.Context, tx *Tx, workflowID string) ([]roadmap.Task, error) {
@@ -1254,7 +1207,6 @@ func scanRoadmapWorkflow(row scanner) (*roadmap.Workflow, error) {
 		&value.ID,
 		&value.BaseRevision,
 		&value.State,
-		&value.DeadlineAt,
 		&value.PublishAttempts,
 		&value.LeaseOwner,
 		&value.LeaseVersion,
@@ -1270,7 +1222,6 @@ func scanRoadmapWorkflow(row scanner) (*roadmap.Workflow, error) {
 		at := leaseExpiresAt.Time.UTC()
 		value.LeaseExpiresAt = &at
 	}
-	value.DeadlineAt = value.DeadlineAt.UTC()
 	value.NextRunAt = value.NextRunAt.UTC()
 	value.CreatedAt = value.CreatedAt.UTC()
 	value.UpdatedAt = value.UpdatedAt.UTC()

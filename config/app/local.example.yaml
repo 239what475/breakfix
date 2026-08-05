@@ -27,7 +27,6 @@ registry:
 # nonempty value must use a digest such as registry.example.com/breakfix/catalog@sha256:...
 catalog:
   release_reference: ""
-  install_deadline: 1h
 
 # vcluster command and chart source.
 vcluster_binary: vcluster

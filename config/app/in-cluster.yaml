@@ -16,7 +16,6 @@ registry:
 # always an immutable OCI digest and is installed by Server without an API.
 catalog:
   release_reference: ${BREAKFIX_CATALOG_RELEASE_REFERENCE}
-  install_deadline: 1h
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh
