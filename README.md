@@ -10,8 +10,8 @@ Breakfix 是一个提供真实、可回收运维实验环境的练习平台。�
   Agent Runtime；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
 - **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
   回收真实环境。
-- **Runtime Worker**：一次领取一个 fenced Runtime Action，只执行构建、artifact promotion、
-  验证 Environment、正式发布和 runtime resource reaping。
+- **Runtime Worker**：独立运行 Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行构建、artifact
+  promotion、验证 Environment 和正式发布，后者只执行 runtime resource reaping。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
   GenerationWorkflow 和 RoadmapRevision 的权威存储。
 - **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是

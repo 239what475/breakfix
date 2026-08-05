@@ -56,7 +56,7 @@ func TestWorkerRenewsActionLeaseBeforeCompletingLongBuild(t *testing.T) {
 	}
 }
 
-func TestWorkerRunsResourceReapingOnlyAfterRuntimeActionCompletes(t *testing.T) {
+func TestWorkerRunsResourceReapingWhileRuntimeActionIsRunning(t *testing.T) {
 	base := newRuntimeStore()
 	store := &runtimeReapStore{
 		runtimeStore: base,
@@ -82,15 +82,10 @@ func TestWorkerRunsResourceReapingOnlyAfterRuntimeActionCompletes(t *testing.T) 
 	<-builder.started
 	select {
 	case <-store.reapClaimed:
-		t.Fatal("resource reap started while the runtime action was still running")
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
+		t.Fatal("resource reap did not run while the runtime action was still running")
 	}
 	close(builder.release)
-	select {
-	case <-store.reapClaimed:
-	case <-time.After(time.Second):
-		t.Fatal("resource reap did not run after the runtime action completed")
-	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("worker run = %v", err)

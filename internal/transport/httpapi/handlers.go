@@ -38,6 +38,8 @@ type Handler struct {
 	terminals          *terminalConnectionTracker
 	serverInstance     string
 	runtimeConfig      config.RuntimeConfig
+	runtimeActions     runtimeClaimArbiter
+	runtimeReaps       runtimeClaimArbiter
 	incusConfig        incus.Config
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness

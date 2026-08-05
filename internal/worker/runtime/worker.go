@@ -86,8 +86,31 @@ func New(store Store, builder BuilderExecutor, publisher PublisherExecutor, veri
 }
 
 func (w *Worker) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	loops := 1
+	results := make(chan error, 2)
+	go func() { results <- w.runActionLoop(runCtx) }()
+	if w.reapStore != nil {
+		loops++
+		go func() { results <- w.runReaperLoop(runCtx) }()
+	}
+
+	var result error
+	for completed := 0; completed < loops; completed++ {
+		if err := <-results; err != nil && ctx.Err() == nil && result == nil {
+			result = err
+			cancel()
+		}
+	}
+	return result
+}
+
+// runActionLoop owns only normal runtime state transitions. Resource cleanup
+// has its own loop so a full action backlog cannot starve reaping.
+func (w *Worker) runActionLoop(ctx context.Context) error {
 	actionClaimFailures := 0
-	reapFailures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -108,21 +131,38 @@ func (w *Worker) Run(ctx context.Context) error {
 		if processed {
 			continue
 		}
-		if w.reapStore != nil {
-			reaped, reapErr := w.reapOne(ctx)
-			if reapErr != nil {
-				reapFailures++
-				delay := retryDelay(reapFailures)
-				slog.Warn("reap runtime resources", "worker_id", w.config.WorkerID, "retry_in", delay, "err", reapErr)
-				if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
-					return err
-				}
-				continue
+		if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
+			return err
+		}
+	}
+}
+
+// runReaperLoop owns only idempotent provider cleanup. It intentionally does
+// not participate in runtime action ordering or business-state transitions.
+func (w *Worker) runReaperLoop(ctx context.Context) error {
+	if w.reapStore == nil {
+		return nil
+	}
+	reapFailures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		reaped, err := w.reapOne(ctx)
+		if err != nil {
+			reapFailures++
+			delay := retryDelay(reapFailures)
+			slog.Warn("reap runtime resources", "worker_id", w.config.WorkerID, "retry_in", delay, "err", err)
+			if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
+				return err
 			}
-			reapFailures = 0
-			if reaped {
-				continue
-			}
+			continue
+		}
+		reapFailures = 0
+		if reaped {
+			continue
 		}
 		if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
 			return err
@@ -299,6 +339,9 @@ func (w *Worker) reapOne(ctx context.Context) (bool, error) {
 	}
 	if claim == nil {
 		return false, nil
+	}
+	if err := claim.Valid(); err != nil {
+		return true, fmt.Errorf("server returned invalid runtime resource reap claim: %w", err)
 	}
 	failure := ""
 	switch claim.Kind {

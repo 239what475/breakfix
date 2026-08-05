@@ -98,23 +98,9 @@ func (h *Handler) InternalClaimRuntimeAction(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runtime action store is unavailable"})
 		return
 	}
-	claim, err := h.db.Generation.ClaimGenerationWorkflow(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
-	if err != nil {
-		h.writeInternalRuntimeError(c, err)
-		return
-	}
-	if claim != nil {
-		action, err := h.db.Generation.LoadGenerationRuntimeAction(c.Request.Context(), *claim, time.Now().UTC())
-		if err != nil {
-			h.writeInternalRuntimeError(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, struct {
-			Action *runtime.Context `json:"action,omitempty"`
-		}{Action: action})
-		return
-	}
-	action, err := h.db.Catalog.ClaimCatalogRuntimeAction(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
+	action, err := claimFirstAvailable(&h.runtimeActions, func(lane runtimeClaimLane) (*runtime.Context, error) {
+		return h.claimRuntimeAction(c.Request.Context(), lane, request.WorkerID, leaseTTL, time.Now().UTC())
+	})
 	if err != nil {
 		h.writeInternalRuntimeError(c, err)
 		return
@@ -134,21 +120,46 @@ func (h *Handler) InternalClaimRuntimeResourceReap(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
-	claim, err := h.db.Generation.ClaimGenerationResourceReap(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runtime resource reap store is unavailable"})
+		return
+	}
+	claim, err := claimFirstAvailable(&h.runtimeReaps, func(lane runtimeClaimLane) (*runtime.ReapClaim, error) {
+		return h.claimRuntimeResourceReap(c.Request.Context(), lane, request.WorkerID, leaseTTL, time.Now().UTC())
+	})
 	if err != nil {
 		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	if claim == nil {
-		claim, err = h.db.Catalog.ClaimCatalogResourceReap(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
-		if err != nil {
-			h.writeInternalRuntimeError(c, err)
-			return
-		}
-	}
 	c.JSON(http.StatusOK, struct {
 		Claim *runtime.ReapClaim `json:"claim,omitempty"`
 	}{Claim: claim})
+}
+
+func (h *Handler) claimRuntimeAction(ctx context.Context, lane runtimeClaimLane, workerID string, leaseTTL time.Duration, now time.Time) (*runtime.Context, error) {
+	switch lane {
+	case runtimeClaimGeneration:
+		claim, err := h.db.Generation.ClaimGenerationWorkflow(ctx, workerID, leaseTTL, now)
+		if err != nil || claim == nil {
+			return nil, err
+		}
+		return h.db.Generation.LoadGenerationRuntimeAction(ctx, *claim, now)
+	case runtimeClaimCatalog:
+		return h.db.Catalog.ClaimCatalogRuntimeAction(ctx, workerID, leaseTTL, now)
+	default:
+		return nil, runtime.ErrActionNotFound
+	}
+}
+
+func (h *Handler) claimRuntimeResourceReap(ctx context.Context, lane runtimeClaimLane, workerID string, leaseTTL time.Duration, now time.Time) (*runtime.ReapClaim, error) {
+	switch lane {
+	case runtimeClaimGeneration:
+		return h.db.Generation.ClaimGenerationResourceReap(ctx, workerID, leaseTTL, now)
+	case runtimeClaimCatalog:
+		return h.db.Catalog.ClaimCatalogResourceReap(ctx, workerID, leaseTTL, now)
+	default:
+		return nil, runtime.ErrActionNotFound
+	}
 }
 
 func (h *Handler) InternalCompleteRuntimeResourceReap(c *gin.Context) {
@@ -158,6 +169,10 @@ func (h *Handler) InternalCompleteRuntimeResourceReap(c *gin.Context) {
 	}
 	if request.Claim.Valid() != nil {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "runtime resource reap completion is invalid"})
+		return
+	}
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runtime resource reap store is unavailable"})
 		return
 	}
 	var err error

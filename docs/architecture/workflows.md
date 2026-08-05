@@ -57,6 +57,11 @@ Worker 的异步 reaper 只删除该 Environment；删除失败只重试删除�
 也先持久化 promotion result，Server 重启时只重试 materialization/finalization，绝不重复已经成功的
 Worker promotion。
 
+每个 Runtime Worker 进程独立运行 Action Loop 与 Reaper Loop：前者只领取 Build、artifact publish、Verify
+和 challenge publish，后者只领取已有的幂等资源清理。两条 loop 各自一次只处理一个 lease-fenced action，进程
+退出时随同一取消信号停止。Server 对 action 和 cleanup 分别在 Generation 与 Catalog 之间轮换首选 claim；首选侧
+没有到期工作时立即尝试另一侧，避免任一侧的持续积压饿死另一侧。
+
 ## Catalog Release
 
 Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Generator AgentRun、Authoring Session
