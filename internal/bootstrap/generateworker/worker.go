@@ -15,7 +15,6 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/transport/health"
 	"github.com/breakfix/breakfix/internal/worker/generate"
-	"github.com/breakfix/breakfix/internal/worker/generate/agent"
 	"github.com/breakfix/breakfix/internal/worker/generate/build"
 	"github.com/breakfix/breakfix/internal/worker/generate/publish"
 	"github.com/breakfix/breakfix/internal/worker/generate/verify"
@@ -49,19 +48,6 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create generation workflow client: %w", err)
 	}
-	workspaceClient, err := internalapi.NewGeneratorWorkspaceClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
-	if err != nil {
-		return fmt.Errorf("create generator workspace client: %w", err)
-	}
-	generatorExecutor, err := agent.NewExecutor(cfg.Agent, workspaceClient)
-	if err != nil {
-		return fmt.Errorf("create generator executor: %w", err)
-	}
-	classifierExecutor, err := agent.NewClassifier(cfg.Agent, workflowClient)
-	if err != nil {
-		return fmt.Errorf("create classification executor: %w", err)
-	}
-
 	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleGenerate)
 	if err != nil {
 		return fmt.Errorf("create Generate Worker Incus client: %w", err)
@@ -93,12 +79,10 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	}
 	runner, err := generate.New(
 		workflowClient,
-		generatorExecutor,
-		classifierExecutor,
 		build.NewExecutor(incusClient, cfg.Incus),
 		publisherExecutor,
 		verifierExecutor,
-		generate.Config{WorkerID: workerID, Model: cfg.Agent.Model},
+		generate.Config{WorkerID: workerID},
 	)
 	if err != nil {
 		return fmt.Errorf("create Generate Worker: %w", err)

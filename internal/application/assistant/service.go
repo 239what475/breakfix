@@ -99,40 +99,73 @@ func (s *Service) StartTurn(ctx context.Context, request Request, content string
 }
 
 // RunTurn loads the durable conversation, delegates model execution to its
-// adapter, then atomically persists the final assistant message.
+// adapter, then atomically persists the final assistant message. A known
+// technical error starts a fresh Eino instance for the same AgentRun, bounded
+// by the Run's five-attempt budget. Server shutdown leaves the Run running so
+// startup recovery can replace it from durable conversation facts.
 func (s *Service) RunTurn(ctx context.Context, sessionID, runID string, request Request, emit func(StreamEvent)) (Message, error) {
 	if s == nil || s.repo == nil || s.executor == nil {
 		return Message{}, errors.New("assistant turn executor is required")
 	}
-	history, err := s.repo.ListMessages(ctx, sessionID)
+	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil {
 		return Message{}, err
 	}
-	result, err := s.executor.Run(ctx, request, history, emit)
-	if err != nil {
-		return Message{}, err
+	if run.SessionID != sessionID || run.Purpose != "assistant" || run.OwnerKind != "environment" || run.Status != agent.RunRunning {
+		return Message{}, agent.ErrRunActive
 	}
-	metadata, err := json.Marshal(struct {
-		Evidence []Evidence `json:"evidence"`
-	}{Evidence: result.Evidence})
-	if err != nil {
-		return Message{}, fmt.Errorf("encode assistant evidence: %w", err)
+	for {
+		history, err := s.repo.ListMessages(ctx, sessionID)
+		if err != nil {
+			return Message{}, err
+		}
+		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
+		result, err := s.executor.Run(attemptCtx, request, history, emit)
+		var message agent.Message
+		var completed Message
+		if err == nil {
+			metadata, encodeErr := json.Marshal(struct {
+				Evidence []Evidence `json:"evidence"`
+			}{Evidence: result.Evidence})
+			if encodeErr != nil {
+				err = fmt.Errorf("encode assistant evidence: %w", encodeErr)
+			} else {
+				now := time.Now().UTC()
+				message = agent.Message{
+					ID: NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata, CreatedAt: now,
+				}
+				err = s.repo.CompleteRunWithMessage(attemptCtx, run.ID, message, now)
+				if err == nil {
+					completed = Message{ID: message.ID, Role: message.Role, Content: message.Content, Evidence: result.Evidence, CreatedAt: now}
+				}
+			}
+		}
+		cancel()
+		if err == nil {
+			return completed, nil
+		}
+		if ctx.Err() != nil {
+			return Message{}, err
+		}
+		next, retryErr := s.repo.RetryRun(ctx, run.ID, run.Attempt, err.Error(), time.Now().UTC())
+		if retryErr != nil {
+			return Message{}, retryErr
+		}
+		if next == nil {
+			return Message{}, err
+		}
+		run = next
 	}
-	now := time.Now().UTC()
-	message := agent.Message{
-		ID: NewID("assistant-message"), SessionID: sessionID, Role: "assistant", Content: result.Content, Metadata: metadata, CreatedAt: now,
-	}
-	if err := s.repo.CompleteRunWithMessage(ctx, runID, message, now); err != nil {
-		return Message{}, err
-	}
-	return Message{ID: message.ID, Role: message.Role, Content: message.Content, Evidence: result.Evidence, CreatedAt: now}, nil
 }
 
-func (s *Service) FailTurn(ctx context.Context, runID, message string) error {
+// RestartInterruptedTurn records the abandoned Server execution and creates a
+// replacement Run with the same immutable browser workspace input. The caller
+// reconstructs the read-only Environment reader from the current environment.
+func (s *Service) RestartInterruptedTurn(ctx context.Context, runID, reason string) (*agent.Run, error) {
 	if s == nil || s.repo == nil {
-		return errors.New("assistant runtime repository is required")
+		return nil, errors.New("assistant runtime repository is required")
 	}
-	return s.repo.FailRun(ctx, runID, message, time.Now().UTC())
+	return s.repo.RestartRun(ctx, runID, reason, time.Now().UTC())
 }
 
 // DeleteEnvironment fences a potentially running assistant before an

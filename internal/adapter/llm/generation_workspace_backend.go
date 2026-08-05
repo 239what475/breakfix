@@ -1,4 +1,4 @@
-package agent
+package llm
 
 import (
 	"context"
@@ -20,10 +20,10 @@ import (
 // sandbox identifier or lifecycle credential.
 type OpenSandboxBackend struct {
 	claim  generation.Claim
-	client RuntimeClient
+	client GeneratorWorkspaceRuntime
 }
 
-func NewOpenSandboxBackend(claim generation.Claim, client RuntimeClient) (*OpenSandboxBackend, error) {
+func NewOpenSandboxBackend(claim generation.Claim, client GeneratorWorkspaceRuntime) (*OpenSandboxBackend, error) {
 	if !claim.Valid() || client == nil {
 		return nil, errors.New("opensandbox backend requires an active workflow claim and runtime client")
 	}

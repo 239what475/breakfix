@@ -15,7 +15,6 @@ import (
 const (
 	ExecutionDeadline     = time.Hour
 	MaxStateAttempts      = 10
-	MaxCandidateRevisions = 10
 )
 
 var (
@@ -40,7 +39,6 @@ const (
 	StatePublished                 WorkflowState = "Published"
 	StateFailed                    WorkflowState = "Failed"
 	StateCancelled                 WorkflowState = "Cancelled"
-	StateSuperseded                WorkflowState = "Superseded"
 )
 
 // StartConfirmation is the explicit, idempotent confirmation of one author
@@ -104,7 +102,7 @@ func (s WorkflowState) Valid() bool {
 	switch s {
 	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
 		StateVerifying, StateNeedsAuthorReview, StateClassifying, StateNeedsClassificationReview,
-		StateChallengePublishing, StatePublished, StateFailed, StateCancelled, StateSuperseded:
+		StateChallengePublishing, StatePublished, StateFailed, StateCancelled:
 		return true
 	default:
 		return false
@@ -112,7 +110,7 @@ func (s WorkflowState) Valid() bool {
 }
 
 func (s WorkflowState) Terminal() bool {
-	return s == StatePublished || s == StateFailed || s == StateCancelled || s == StateSuperseded
+	return s == StatePublished || s == StateFailed || s == StateCancelled
 }
 
 func (s WorkflowState) Leaseable() bool {
@@ -166,7 +164,6 @@ type Workflow struct {
 	// ClassificationFeedback is the one pending author message for a resumed
 	// Classifying run. It is private workflow input, never Roadmap content.
 	ClassificationFeedback string     `json:"classification_feedback,omitempty"`
-	SupersededByWorkflowID string     `json:"superseded_by_workflow_id,omitempty"`
 	CandidateRevisionID    string     `json:"candidate_revision_id,omitempty"`
 	ActiveAgentRunID       string     `json:"active_agent_run_id,omitempty"`
 	StateAttempt           int        `json:"state_attempt"`
@@ -199,6 +196,14 @@ func (c LeaseCredential) Valid() bool {
 type Claim struct {
 	Workflow Workflow `json:"workflow"`
 	LeaseCredential
+}
+
+// InterruptedAgentRun records the durable owner boundary recovered after a
+// Server interruption. The replacement AgentRun is created by the owning
+// Server runner from persisted workflow facts, never by replaying model state.
+type InterruptedAgentRun struct {
+	WorkflowID string
+	State      WorkflowState
 }
 
 func (c Claim) Valid() bool {

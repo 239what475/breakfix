@@ -23,7 +23,11 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	if err != nil {
 		return nil, err
 	}
+	h.setRuntimeContext(runCtx)
 	if err := h.RecoverExpiredGenerationWorkflows(runCtx); err != nil {
+		return nil, err
+	}
+	if err := h.RecoverInteractiveAgentRuns(runCtx); err != nil {
 		return nil, err
 	}
 	if err := h.validateStartup(); err != nil {
@@ -32,7 +36,6 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
-	h.StartGeneratorWorkspaceCleanup(runCtx)
 	h.StartGenerationDeadlineRecovery(runCtx)
 	h.StartGenerationResourceReaper(runCtx)
 	h.StartRoadmapMaintenance(runCtx)
@@ -185,6 +188,12 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.ConfirmAuthoringGeneration(c, c.Param("id"))
 		}
 	})
+	router.POST("/api/authoring/sessions/:id/generation/:workflow_id/cancel", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CancelAuthoringGeneration(c, c.Param("id"), c.Param("workflow_id"))
+		}
+	})
 	router.POST("/api/authoring/sessions/:id/classify", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
@@ -208,20 +217,10 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	router.POST("/api/internal/generation-resource-reaps/complete", h.InternalCompleteGenerationResourceReap)
 	router.POST("/api/internal/generation-workflows/:id/renew", h.InternalRenewGenerationWorkflow)
 	router.POST("/api/internal/generation-workflows/:id/context", h.InternalGenerationContext)
-	router.POST("/api/internal/generation-workflows/:id/agent-runs", h.InternalStartGenerationAgentRun)
 	router.POST("/api/internal/generation-workflows/:id/phase", h.InternalGenerationPhase)
-	router.POST("/api/internal/generation-workflows/:id/classification/topics/search", h.InternalSearchGenerationClassificationTopics)
-	router.POST("/api/internal/generation-workflows/:id/classification/topics/read", h.InternalReadGenerationClassificationTopic)
-	router.POST("/api/internal/generation-workflows/:id/classification/tags/search", h.InternalSearchGenerationClassificationTags)
-	router.POST("/api/internal/generation-workflows/:id/classification/tags/read", h.InternalReadGenerationClassificationTag)
 	router.POST("/api/internal/generation-workflows/:id/candidate/archive", h.InternalDownloadGenerationCandidateArchive)
 	router.POST("/api/internal/generation-workflows/:id/k8s/base", h.InternalDownloadGenerationK8sBase)
 	router.POST("/api/internal/generation-workflows/:id/build/archive", h.InternalDownloadGenerationBuildArchive)
-	router.POST("/api/internal/generation-workflows/:id/generator/context", h.InternalGeneratorContext)
-	router.POST("/api/internal/generation-workflows/:id/generator/files/read", h.InternalGeneratorReadFile)
-	router.POST("/api/internal/generation-workflows/:id/generator/files/write", h.InternalGeneratorWriteFile)
-	router.POST("/api/internal/generation-workflows/:id/generator/execute", h.InternalGeneratorExecute)
-	router.POST("/api/internal/generation-workflows/:id/generator/archive", h.InternalGeneratorArchiveWorkspace)
 
 	// Terminal WebSocket
 	router.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)

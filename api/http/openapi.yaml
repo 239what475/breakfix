@@ -460,6 +460,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
+  /authoring/sessions/{id}/generation/{workflow_id}/cancel:
+    post:
+      operationId: cancelAuthoringGeneration
+      summary: Explicitly cancel one unfinished authoring generation workflow
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AuthoringSessionID"
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Generation workflow cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /authoring/sessions/{id}/classify:
     post:
       operationId: confirmAuthoringContent
@@ -734,7 +758,7 @@ components:
           enum: [DraftConversation, IntentReview]
         workflow_state:
           type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled, Superseded]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
         updated_at:
           type: string
           format: date-time
@@ -1245,7 +1269,7 @@ components:
           type: string
         state:
           type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled, Superseded]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
         state_attempt:
           type: integer
           minimum: 0

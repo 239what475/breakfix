@@ -88,7 +88,7 @@ export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
     state: 'DraftConversation' | 'IntentReview';
-    workflow_state?: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled' | 'Superseded';
+    workflow_state?: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
     updated_at: string;
 };
 
@@ -330,7 +330,7 @@ export type AuthoringCandidate = {
 
 export type AuthoringGenerationWorkflow = {
     id: string;
-    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled' | 'Superseded';
+    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
     state_attempt: number;
     candidate_revision_id?: string;
     classification_roadmap_revision?: string;
@@ -983,6 +983,34 @@ export type ConfirmAuthoringGenerationResponses = {
 };
 
 export type ConfirmAuthoringGenerationResponse = ConfirmAuthoringGenerationResponses[keyof ConfirmAuthoringGenerationResponses];
+
+export type CancelAuthoringGenerationData = {
+    body?: never;
+    path: {
+        id: string;
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/authoring/sessions/{id}/generation/{workflow_id}/cancel';
+};
+
+export type CancelAuthoringGenerationErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type CancelAuthoringGenerationError = CancelAuthoringGenerationErrors[keyof CancelAuthoringGenerationErrors];
+
+export type CancelAuthoringGenerationResponses = {
+    /**
+     * Generation workflow cancelled
+     */
+    200: AuthoringSession;
+};
+
+export type CancelAuthoringGenerationResponse = CancelAuthoringGenerationResponses[keyof CancelAuthoringGenerationResponses];
 
 export type ConfirmAuthoringContentData = {
     body: AuthoringContentConfirmationRequest;

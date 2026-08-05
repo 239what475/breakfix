@@ -12,7 +12,7 @@ make verify-generated
 
 - 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
 - Catalog 与题目：浏览当前 RoadmapRevision 中可见的 challenge、读取 problem/solution/hint、开始或停止学习环境。
-- Authoring：创建和读取会话、发送自然语言消息、确认生成、读取只读候选、确认发布。
+- Authoring：创建和读取会话、发送自然语言消息、确认生成、显式取消未完成 workflow、读取只读候选、确认发布。
 - Assistant：在活动学习环境中发送消息并读取持久对话与工具证据。
 - 终端：先经 JWT 保护的 HTTP 接口签发一次性 ticket，再由 WebSocket 消费。
 
@@ -32,22 +32,29 @@ GET /internal/debug/roadmap-revisions/{revision_id}/export
 
 ## 内部 Worker HTTP
 
-内部 API 不属于 OpenAPI 公开契约。当前它们只供 Generate Worker 调用，并使用独立 role key：
+内部 API 不属于 OpenAPI 公开契约。当前它们只供 Runtime Worker 调用，并使用独立 role key：
 
 ```text
 POST /api/internal/generation-workflows/claim
 POST /api/internal/generation-workflows/:id/renew
 POST /api/internal/generation-workflows/:id/context
-POST /api/internal/generation-workflows/:id/agent-runs
 POST /api/internal/generation-workflows/:id/phase
+POST /api/internal/generation-workflows/:id/candidate/archive
+POST /api/internal/generation-workflows/:id/k8s/base
+POST /api/internal/generation-workflows/:id/build/archive
+POST /api/internal/generation-resource-reaps/claim
+POST /api/internal/generation-resource-reaps/complete
 
 ```
 
-Generate Worker 的 artifact/workspace 子接口同样要求 generation lease。所有请求使用严格 JSON 解码，
-携带 Workflow ID、lease owner、state attempt 与 expected state；Server 只接受当前 lease 的 typed 结果。
+没有 AgentRun、Classifier retrieval 或 Generator workspace proxy 接口。所有请求使用严格 JSON 解码，
+携带 Workflow ID、lease owner、state attempt 与 expected state；Server 只接受当前 lease 的 typed result。
 
 ## 终端与流传输
 
 终端 WebSocket 使用一次性 ticket，不接受 URL JWT。Server 验证 ticket 的用户、Environment、challenge、
 窗口和过期时间，并要求浏览器 Origin 与配置的 `ui_origin` 完全一致。terminal connection 与 usage
 session 被持久化，因此 Server 重启或 WebSocket 断开后，环境清理仍能按活动状态收敛。
+
+Authoring 与 Assistant 的 SSE 只订阅已持久化的 Server AgentRun。浏览器断开不会取消该 Run；完成结果
+原子写入会话后，浏览器可通过普通读取接口重新取得对话或题意更新，不回放未完成 token。

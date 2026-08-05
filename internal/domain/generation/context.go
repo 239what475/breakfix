@@ -47,7 +47,6 @@ type Context struct {
 	Candidate              *WorkerView    `json:"candidate,omitempty"`
 	Feedback               Feedback       `json:"feedback"`
 	ClassificationFeedback string         `json:"classification_feedback,omitempty"`
-	GeneratorSession       string         `json:"generator_session"`
 }
 
 // ArtifactError marks a deterministic defect in candidate content or its

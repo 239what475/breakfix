@@ -2,43 +2,9 @@ package generation
 
 import (
 	"errors"
-	"strings"
 
-	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
-
-type StartAgentRunRequest struct {
-	domain.LeaseCredential
-	ExpectedState domain.WorkflowState `json:"expected_state"`
-	Purpose       string               `json:"purpose"`
-	Model         string               `json:"model"`
-	PromptVersion string               `json:"prompt_version"`
-}
-
-func (r StartAgentRunRequest) Validate(workflowID string) error {
-	if !r.Valid() || !r.ExpectedState.Valid() || strings.TrimSpace(r.Purpose) == "" ||
-		strings.TrimSpace(r.Model) == "" || strings.TrimSpace(r.PromptVersion) == "" || strings.TrimSpace(workflowID) == "" {
-		return errors.New("generation agent run request is incomplete")
-	}
-	if r.Purpose == GeneratorPurpose && r.ExpectedState != domain.StateGenerating {
-		return errors.New("generator run requires Generating state")
-	}
-	if r.Purpose == JudgePurpose && r.ExpectedState != domain.StateJudging {
-		return errors.New("judge run requires Judging state")
-	}
-	if r.Purpose == ClassifierPurpose && r.ExpectedState != domain.StateClassifying {
-		return errors.New("classifier run requires Classifying state")
-	}
-	if r.Purpose != GeneratorPurpose && r.Purpose != JudgePurpose && r.Purpose != ClassifierPurpose {
-		return errors.New("unknown generation agent purpose")
-	}
-	return nil
-}
-
-type StartAgentRunResponse struct {
-	Run agent.Run `json:"run"`
-}
 
 // PhaseRequest is a closed, typed union. Exactly one result is legal for the
 // expected state, so workers cannot route arbitrary JSON through the Server.
@@ -46,33 +12,17 @@ type PhaseRequest struct {
 	domain.LeaseCredential
 	ExpectedState domain.WorkflowState `json:"expected_state"`
 
-	GeneratedCandidate       *domain.GeneratedCandidate            `json:"generated_candidate,omitempty"`
-	Judgement                *domain.Judgement                     `json:"judgement,omitempty"`
-	Classification           *domain.Classification                `json:"classification,omitempty"`
-	ClassificationAdjustment *domain.ClassificationAdjustment      `json:"classification_adjustment,omitempty"`
-	Build                    *domain.BuildResult                   `json:"build,omitempty"`
-	ArtifactPublish          *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
-	VerificationEnvironment  *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
-	Verification             *domain.VerificationResult            `json:"verification,omitempty"`
-	ChallengePublish         *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
-	InfrastructureFailure    *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
-	ArtifactFailure          *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
+	Build                   *domain.BuildResult                   `json:"build,omitempty"`
+	ArtifactPublish         *domain.ArtifactPublishResult         `json:"artifact_publish,omitempty"`
+	VerificationEnvironment *domain.VerificationEnvironmentResult `json:"verification_environment,omitempty"`
+	Verification            *domain.VerificationResult            `json:"verification,omitempty"`
+	ChallengePublish        *domain.ChallengePublishResult        `json:"challenge_publish,omitempty"`
+	InfrastructureFailure   *domain.InfrastructureFailureResult   `json:"infrastructure_failure,omitempty"`
+	ArtifactFailure         *domain.ArtifactFailureResult         `json:"artifact_failure,omitempty"`
 }
 
 func (r PhaseRequest) ResultCount() int {
 	count := 0
-	if r.GeneratedCandidate != nil {
-		count++
-	}
-	if r.Judgement != nil {
-		count++
-	}
-	if r.Classification != nil {
-		count++
-	}
-	if r.ClassificationAdjustment != nil {
-		count++
-	}
 	if r.Build != nil {
 		count++
 	}
@@ -114,24 +64,6 @@ func (r PhaseRequest) Validate() error {
 		return r.ArtifactFailure.Failure.Validate()
 	}
 	switch r.ExpectedState {
-	case domain.StateGenerating:
-		if r.GeneratedCandidate == nil || strings.TrimSpace(r.GeneratedCandidate.RunID) == "" || len(r.GeneratedCandidate.Archive) == 0 {
-			return errors.New("generating phase requires a generated candidate")
-		}
-	case domain.StateJudging:
-		if r.Judgement == nil || strings.TrimSpace(r.Judgement.RunID) == "" || (!r.Judgement.Approved && strings.TrimSpace(r.Judgement.Feedback) == "") || (r.Judgement.Approved && r.Judgement.Feedback != "") {
-			return errors.New("judging phase requires a valid judgement")
-		}
-	case domain.StateClassifying:
-		if r.Classification != nil {
-			if strings.TrimSpace(r.Classification.RunID) == "" || r.Classification.Output.Validate() != nil {
-				return errors.New("Classifying phase requires a valid initial classification output")
-			}
-			break
-		}
-		if r.ClassificationAdjustment == nil || r.ClassificationAdjustment.Validate() != nil {
-			return errors.New("Classifying phase requires a valid classification adjustment")
-		}
 	case domain.StateBuilding:
 		if r.Build == nil {
 			return errors.New("building phase requires build output")

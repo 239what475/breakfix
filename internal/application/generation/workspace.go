@@ -19,6 +19,7 @@ type SandboxManager interface {
 	FindWorkspace(context.Context, string) (string, bool, error)
 	CreateWorkspace(context.Context, string, string) (string, error)
 	WaitWorkspace(context.Context, string) error
+	ResetWorkspace(context.Context, string, []byte) error
 	DeleteWorkspace(context.Context, string) error
 }
 
@@ -56,78 +57,113 @@ func NewManager(repo WorkspaceRepository, pvcs PVCManager, sandboxes SandboxMana
 	}, nil
 }
 
-// Ensure creates or resumes the one workspace belonging to a Generator Run.
+// Ensure creates or resumes the current workspace belonging to a workflow.
 // A pending record makes PVC cleanup durable if provisioning cannot complete.
-func (m *Manager) Ensure(ctx context.Context, generatorRunID string) (*domain.Workspace, error) {
+func (m *Manager) Ensure(ctx context.Context, workflowID string, seed []byte) (*domain.Workspace, error) {
+	record, _, err := m.EnsureFresh(ctx, workflowID, seed)
+	return record, err
+}
+
+// EnsureFresh additionally reports whether this call allocated a new durable
+// workspace record. The caller may seed a newly created workspace from the
+// latest candidate archive; existing workspaces are intentionally untouched.
+func (m *Manager) EnsureFresh(ctx context.Context, workflowID string, seed []byte) (*domain.Workspace, bool, error) {
 	if m == nil {
-		return nil, errors.New("workspace manager is not configured")
+		return nil, false, errors.New("workspace manager is not configured")
 	}
-	generatorRunID = strings.TrimSpace(generatorRunID)
-	if generatorRunID == "" {
-		return nil, errors.New("generator run id is required")
+	workflowID = strings.TrimSpace(workflowID)
+	if workflowID == "" {
+		return nil, false, errors.New("generation workflow id is required")
 	}
-	record, err := m.repo.GetGeneratorWorkspace(ctx, generatorRunID)
+	record, err := m.repo.GetCurrentGeneratorWorkspace(ctx, workflowID)
+	created := false
 	if errors.Is(err, domain.ErrWorkspaceNotFound) {
 		now := m.now()
+		workspaceID := domain.NewID("generator-workspace")
 		record, err = m.repo.CreateGeneratorWorkspace(ctx, domain.Workspace{
-			GeneratorRunID:    generatorRunID,
+			ID:                workspaceID,
+			WorkflowID:        workflowID,
 			Namespace:         m.namespace,
-			PVCName:           domain.NewWorkspacePVCName(generatorRunID),
+			PVCName:           domain.NewWorkspacePVCName(workspaceID),
 			State:             domain.WorkspacePending,
 			ProvisionDeadline: now.Add(m.provisionTimeout),
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		})
+		created = err == nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if record.State == domain.WorkspaceDeleted || record.State == domain.WorkspaceDeleting {
-		return nil, fmt.Errorf("generator workspace is %s", record.State)
+		return nil, false, fmt.Errorf("generator workspace is %s", record.State)
 	}
 	provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
 	defer cancel()
-	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.GeneratorRunID, m.storage); err != nil {
-		return nil, fmt.Errorf("ensure generator workspace pvc: %w", err)
+	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.WorkflowID, m.storage); err != nil {
+		return nil, false, fmt.Errorf("ensure generator workspace pvc: %w", err)
 	}
 	if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
-		return record, nil
+		return record, created, nil
 	}
 	if strings.TrimSpace(record.SandboxID) == "" {
-		sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.GeneratorRunID)
+		sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.ID)
 		if err != nil {
-			return nil, fmt.Errorf("find generator sandbox: %w", err)
+			return nil, false, fmt.Errorf("find generator sandbox: %w", err)
 		}
 		if !found {
-			sandboxID, err = m.sandboxes.CreateWorkspace(provisionCtx, record.PVCName, record.GeneratorRunID)
+			sandboxID, err = m.sandboxes.CreateWorkspace(provisionCtx, record.PVCName, record.ID)
 			if err != nil {
-				return nil, fmt.Errorf("create generator sandbox: %w", err)
+				return nil, false, fmt.Errorf("create generator sandbox: %w", err)
 			}
 		}
-		if err := m.repo.RecordGeneratorWorkspaceSandbox(provisionCtx, record.GeneratorRunID, sandboxID, m.now()); err != nil {
+		if err := m.repo.RecordGeneratorWorkspaceSandbox(provisionCtx, record.ID, sandboxID, m.now()); err != nil {
 			_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
-			return nil, fmt.Errorf("record generator sandbox: %w", err)
+			return nil, false, fmt.Errorf("record generator sandbox: %w", err)
 		}
-		record, err = m.repo.GetGeneratorWorkspace(provisionCtx, record.GeneratorRunID)
+		record, err = m.repo.GetGeneratorWorkspace(provisionCtx, record.ID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := m.sandboxes.WaitWorkspace(provisionCtx, record.SandboxID); err != nil {
-		return nil, fmt.Errorf("wait for generator sandbox: %w", err)
+		return nil, false, fmt.Errorf("wait for generator sandbox: %w", err)
 	}
-	if err := m.repo.ActivateGeneratorWorkspace(provisionCtx, record.GeneratorRunID, record.SandboxID, m.now()); err != nil {
+	// Pending means no model can yet observe the workspace. Seed it before the
+	// durable transition to active so a retried provision repeats this exact
+	// initialization instead of exposing a partially restored repair context.
+	if record.State == domain.WorkspacePending {
+		if err := m.sandboxes.ResetWorkspace(provisionCtx, record.SandboxID, seed); err != nil {
+			return nil, false, fmt.Errorf("seed generator workspace: %w", err)
+		}
+	}
+	if err := m.repo.ActivateGeneratorWorkspace(provisionCtx, record.ID, record.SandboxID, m.now()); err != nil {
 		_ = m.sandboxes.DeleteWorkspace(context.Background(), record.SandboxID)
-		return nil, fmt.Errorf("record generator sandbox: %w", err)
+		return nil, false, fmt.Errorf("record generator sandbox: %w", err)
 	}
-	return m.repo.GetGeneratorWorkspace(ctx, record.GeneratorRunID)
+	record, err = m.repo.GetGeneratorWorkspace(ctx, record.ID)
+	return record, created, err
 }
 
-func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
+func (m *Manager) Retire(ctx context.Context, workflowID string) error {
 	if m == nil {
 		return errors.New("workspace manager is not configured")
 	}
-	record, err := m.repo.BeginGeneratorWorkspaceCleanup(ctx, generatorRunID, m.now())
+	_, err := m.repo.RetireCurrentGeneratorWorkspace(ctx, strings.TrimSpace(workflowID), m.now())
+	if errors.Is(err, domain.ErrWorkspaceNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) Cleanup(ctx context.Context, workspaceID string) error {
+	if m == nil {
+		return errors.New("workspace manager is not configured")
+	}
+	record, err := m.repo.BeginGeneratorWorkspaceCleanup(ctx, workspaceID, m.now())
 	if errors.Is(err, domain.ErrWorkspaceNotFound) || (err == nil && record.State == domain.WorkspaceDeleted) {
 		return nil
 	}
@@ -137,7 +173,7 @@ func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
 	sandboxID := strings.TrimSpace(record.SandboxID)
 	if sandboxID == "" {
 		var found bool
-		sandboxID, found, err = m.sandboxes.FindWorkspace(ctx, record.GeneratorRunID)
+		sandboxID, found, err = m.sandboxes.FindWorkspace(ctx, record.ID)
 		if err != nil {
 			return fmt.Errorf("find generator sandbox for cleanup: %w", err)
 		}
@@ -153,7 +189,7 @@ func (m *Manager) Cleanup(ctx context.Context, generatorRunID string) error {
 	if err := m.pvcs.DeleteWorkspacePVC(ctx, record.Namespace, record.PVCName); err != nil {
 		return fmt.Errorf("delete generator workspace pvc: %w", err)
 	}
-	return m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.GeneratorRunID, m.now())
+	return m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.ID, m.now())
 }
 
 func (m *Manager) CleanupDue(ctx context.Context) error {
@@ -173,7 +209,7 @@ func (m *Manager) CleanupDue(ctx context.Context) error {
 		return err
 	}
 	for _, record := range append(append(pending, deleting...), terminal...) {
-		if err := m.Cleanup(ctx, record.GeneratorRunID); err != nil {
+		if err := m.Cleanup(ctx, record.ID); err != nil {
 			return err
 		}
 	}

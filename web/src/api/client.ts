@@ -263,6 +263,11 @@ export const api = {
       `/authoring/sessions/${id}/generate`,
 			body,
     ),
+  cancelAuthoringGeneration: (id: string, workflowID: string) =>
+    request<AuthoringSession>(
+      "POST",
+      `/authoring/sessions/${id}/generation/${workflowID}/cancel`,
+    ),
   confirmAuthoringContent: (id: string, body: AuthoringContentConfirmationRequest) =>
     request<AuthoringSession>("POST", `/authoring/sessions/${id}/classify`, body),
 	requestAuthoringClassificationAdjustment: (id: string, body: AuthoringClassificationAdjustmentRequest) =>

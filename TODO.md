@@ -1,254 +1,268 @@
 # TODO: 领域化运维与 SRE 题库
 
-> 题库不按零散技术名词扩张。先确定少数稳定的运维领域，再逐个把每个领域做成完整、可验证、可复用的学习内容。本文是下一阶段的内容、分类与 Roadmap 迁移计划；平台长期契约仍以 [`docs/`](docs/README.md) 为准。
+> 题库不按零散技术名词扩张。先确定少数稳定的运维领域，再逐个把每个领域做成完整、可验证、可复用的学习内容。本文记录当前平台重构和后续内容建设；长期已确认的契约以 [docs/](docs/README.md) 为准。
 
-## P0：Roadmap 与 Catalog 迁移
+## P0：统一 Agent Runtime 与 Runtime Worker
 
-题目的课程归属和题库路线是两件不同的事，必须由不同阶段维护，不能让一个后置 workflow 既重写题目分类又维护全局关系。
+Roadmap 与 Catalog 迁移已经完成；其内容模型、portable release 和关系图契约保留在 [Catalog Release](docs/architecture/catalog-release.md)、[工作流](docs/architecture/workflows.md) 与 [系统架构](docs/architecture/system-architecture.md)。当前 P0 不再维护另一份 Roadmap 设计，而是重构执行边界：**所有 Eino Agent 都在 Server 中运行；唯一的 Runtime Worker 只执行 candidate runtime 的确定性外部资源操作。** Agent workspace 的 OpenSandbox/PVC 生命周期仍属于 Server 的受限工具服务。
 
-```text
-Generate + 作者审核
-  Challenge --belongs_to--> Topic       # 恰有一个
-  Challenge --has_tag--> Tag            # 零到多个
+模型不直接持有 Kubernetes、Incus、Registry 或 OpenSandbox 凭据。Agent 只能调用 Server 提供的、按会话或 workflow 围栏的 typed tool；Server 再以相应角色的远程客户端操作外部系统。AgentRun 是一次完整、可审计的逻辑 Agent 执行，内部可以包含多轮模型 HTTP 请求和工具调用；它不是常驻内存中的 Agent 进程。已知技术错误可以重试同一 AgentRun；Server 崩溃、重启或 lease 丢失时，必须终止中断运行，并从持久化边界创建新的 AgentRun，绝不恢复其未完成上下文。
 
-Roadmap Workflow
-  Topic --roadmap edge--> Topic
-  Challenge --roadmap edge--> Challenge
-```
+### 目标架构
 
-### Roadmap 内容检索
+~~~text
+Browser
+  |
+  v
+Server
+  |- public API, SSE, sessions, PostgreSQL writes, Server data PVC
+  |- Agent Runtime: Authoring, Assistant, Generator, Judge, Classifier,
+  |                 Roadmap Planner and Reviewers
+  |- remote tool gateway: OpenSandbox workspace, read-only learning evidence,
+  |                       Roadmap Retrieval and private authoring/classification setters
+  |
+  +--> PostgreSQL
+  +--> Controller --> NodeEnvironment / VK8sEnvironment
+  +--> Runtime Worker
+           |- Building
+           |- ArtifactPublishing
+           |- Verifying
+           |- ChallengePublishing
+           +- runtime resource reaping
 
-`Domain`、`Topic` 和 `Tag` 都属于同一份可版本化的 Roadmap 内容；遗留 `Skill` 和第二套分类模型均不再存在。Server 持有一份 immutable `RoadmapRevision`，其中同时包含定义、Challenge 的 Topic/Tag 绑定以及 Topic/Challenge 关系图。分类 Agent 不能把完整词表作为隐式上下文猜测，也不能直接读写 revision；它通过只读 Roadmap Retrieval 查询当前 revision，并在一次 Agent run 内固定同一个 `roadmap_revision`。这样候选引用始终可复现，也避免定义在运行中变化造成前后不一致。
+Runtime Worker --> Incus / OCI Registry / verification Environment
+~~~
 
-- Classifying Agent 的首次分类运行只提供四个 typed、只读工具：`search_topics(query, domain_id?, limit)`、`read_topic(id)`、`search_tags(query, limit)` 与 `read_tag(id)`。搜索结果只返回足够比较的 `id`、`title`、摘要、Domain 和匹配原因；需要完整定义时再显式读取。
-- Roadmap Planner 的 task input 只携带当前 subject；它只使用四个 typed、只读工具：`search_topics(query, domain_id?, limit)`、`read_topic(id)`、`search_challenges(query, topic_id?, limit)` 与 `read_challenge(id)`。两种 search 均在固定 revision 的全部已发布实体中检索，Server 自动排除当前 subject；搜索结果只返回足够比较的紧凑索引，需要完整定义或题目内容时再显式读取。固定快照只定义本次需要处理和最终合并的 entry，不是给模型遍历的另一份目录。
-- Server 在 RoadmapRevision 发布时建立检索索引，并为工具调用返回所固定的 revision。Classifying Agent 只能引用该 revision 中存在的既有定义，或提出等待作者审核的新 Topic/Tag 候选；Roadmap Planner 只能提出已发布实体之间的关系；两者都没有写入全局 Roadmap 的工具。
-- 初始排序先保证精确 `id` 和 title 的命中优先，再使用字段加权的 BM25F 排序 `title`、`definition`、`scope`、`challenge_guidance` 与 Tag description。中文正文采用字符二元组，英文技术词、命令、缩写和 slug 保持独立 token。
-- Topic 的规范化 title 在同一 Domain 内唯一，允许不同 Domain 使用自然但相同的 title；Tag 的规范化 title 在全局唯一。Server 在发布时执行这些确定性冲突检查。
-- 不在首个题库阶段引入 Elasticsearch、OpenSearch、向量数据库、embedding 同步链路或混合检索。它们只有在真实题库扩大后，且 BM25F 的召回缺口被可复现案例证明时才讨论。
+固定 Deployment 为 Server、Controller、PostgreSQL 和 Runtime Worker。生产 Registry 仍由部署者提供，Environment 仍是按需创建的 CRD 与动态资源。Generate Worker 不再是一个长期概念或 Deployment。
 
-### Generate、内容审核与分类审核
+### Agent 上下文绑定
 
-Generate 不把题目内容审核和课程分类混在同一轮。先让作者审核一份完整、已真实验证的题目；只有作者确认内容后，才对冻结的 candidate 做 Topic/Tag 分类。这样分类不会随着题目内容的多次生成、修复和作者修改反复失效，也不需要重新 Build 或 Verify。
+“给 Agent 绑定工作空间”指为每个 AgentRun 持久化最小、可审计的执行边界，而不是为每种 Agent 强行创建同一种 workspace。
 
-```text
-AuthoringSession -> PlanRevision n
-  -> Generating -> Judging -> Building -> ArtifactPublishing -> Verifying
+| Agent role | 持久化绑定 | 可用远程上下文 |
+| --- | --- | --- |
+| Authoring | AuthoringSession、私有 Plan stage | 无 workspace；只能修改私有 Plan。 |
+| Assistant | Assistant session、用户、Environment UID、终端窗口快照 | 当前学习 Environment 的只读证据工具；不能执行命令、修改文件或触发 checkpoint。 |
+| Generator | GenerationWorkflow、PlanRevision、CandidateRevision | workflow-scoped OpenSandbox workspace；Server 创建、异常替换和回收。 |
+| Judge | GenerationWorkflow、PlanRevision、CandidateRevision/archive | 只读 candidate 与题意；不需要学习或验证 Environment。 |
+| Classifier | verified CandidateRevision、immutable RoadmapRevision | Roadmap Retrieval；调整时仅能修改私有 ClassificationProposal。 |
+| Roadmap Planner / Reviewer | RoadmapTask、固定 revision、当前 subject | Roadmap search/read 与 typed ChangeSet/Review；不直接写 Roadmap。 |
+
+- Generator workspace 归属于 GenerationWorkflow，不是某个 Server Pod、模型进程或 AgentRun。正常情况下，它是同一 workflow 的持久修复上下文：同一 Generator AgentRun 的已知技术重试，以及 Judge、Build 或 Verify 打回后启动的下一次 Generator AgentRun，都继续使用同一套 Sandbox/PVC。Server 中断后的确定性事实是已提交的 PlanRevision、CandidateRevision archive 和反馈；workspace 文件与模型内存都不承担恢复承诺。
+- Assistant 绑定的是用户正在使用的 Environment，不是可写 Generator workspace。其工具继续保持只读、按用户和 Environment 围栏。
+- Classifier 与 Roadmap Agent 绑定的是 immutable revision，不需要沙箱。Authoring 同样不应为了抽象统一而创建无意义 workspace。
+- 所有 Agent role 保持独立 prompt、typed result 和工具集。迁移不能把 Authoring、Classification 或 Roadmap prompt 混成一段通用指令。
+
+#### Generator workspace PVC
+
+Generator 的工作空间是平台管理的持久资源，不是某次模型调用的临时目录，也不是 OpenSandbox 自动创建的 PVC。正常情况下，一个 workflow 只有一套当前工作空间：
+
+~~~text
+一个 GenerationWorkflow
+  -> 一条当前工作空间记录
+  -> 一个稳定、由 Server 创建和标记的 RWO PVC
+  -> 一个 OpenSandbox Sandbox（挂载该 PVC）
+~~~
+
+- 工作空间记录拥有独立的 `workspace_id`，以 `workflow_id` 为归属，保存 namespace、PVC 名称、Sandbox ID 和生命周期状态。一个 workflow 只指向一条当前工作空间记录；替代工作空间使用新的记录和新的 PVC 名称，旧记录进入待回收状态。workspace 不保存 `GeneratorRunID`、PVC UID 或存储代次。
+- Server 通过 Kubernetes API 创建 PVC；OpenSandbox 只挂载已存在的 PVC，始终使用 `CreateIfNotExists=false`。PVC 不指定 StorageClass，由集群默认 StorageClass 供应；它的标签和所有权必须指向 GenerationWorkflow，而不是某个 Server Pod、AgentRun 或 Sandbox。
+- 同一 Generator AgentRun 的五次 attempt 均复用当前工作空间；Judge、Build 或 Verify 的确定性失败返回 `Generating` 后，下一次 Generator AgentRun 也复用它。此时 Generator 已成功产生过可审计 candidate，现有文件与反馈正是修复上下文，不能为了抽象一致而重置或删除。
+- Generator `execute` 命令的非零退出码是普通 typed tool result，由 Agent 在同一 Run 内决定如何处理；workspace tool 的超时或传输错误是当前 AgentRun 的已知技术错误，最多五次且仍复用当前工作空间。它们都不单独触发 workspace 替换。
+- Server 崩溃、重启和 lease 丢失后的统一处理见“中断恢复”一节。控制面暂时不可访问不等于资源已丢失；在 Server 仍持有有效运行归属时，不擅自替换当前工作空间。确认 Sandbox 或 PVC 已丢失时，直接按同一中断恢复契约替代当前 Generator Run 和工作空间。
+- Generator AgentRun 耗尽五次 attempt、workflow 进入 Published、Cancelled 或 Failed 等终态后，Server 后台清理当前和所有待回收工作空间的 Sandbox，再删除对应 PVC。Candidate archive、业务 revision 和报告仍由 Server data PVC/数据库保留，不依赖工作空间存活。Runtime Worker 的 reaper 只处理 build image/archive、staging/final artifact 和 verification Environment 等 runtime 资源，覆盖作者 workflow 和失败或完成的 Catalog Release。所有回收都是幂等的后台工作，不新增可见 workflow state：candidate archive、报告和已接受的业务 revision 永久保留；未发布或被替代的 build/staging/final artifact 与验证 Environment 可被回收，已 Published 的 final artifact 保留。
+
+### Agent Runtime 内部结构
+
+Agent Runtime 是 **Server 进程内的执行边界**，不是新的 Deployment、通用 Agent framework、通用 task queue 或第二套 workflow。它只提供三项共用能力：持久化一次完整 Agent 执行、按 role 组装不可变上下文、在写入业务状态前校验 typed result。哪个 Agent 可以何时运行，仍由 AuthoringSession、GenerationWorkflow 或 RoadmapWorkflow 自己决定。
+
+~~~text
+HTTP request / 可领取的业务 state
+  -> owning application service
+  -> transaction: create AgentRun or retry a known technical error + bind fixed input/revision + acquire execution fence
+  -> role-specific Eino executor + role-specific typed tools
+  -> typed result
+  -> transaction: validate result + write owning aggregate + complete AgentRun + advance state
+~~~
+
+- application 层保留 role-specific port 和 runner：Authoring/Assistant 直接处理用户回合；GenerationAgentRunner 只处理 `Generating`、`Judging`、`Classifying`；Roadmap 保留自己的 Planner/Reviewer task 流程。它们不经由按字符串 `kind` 分发的通用 executor。
+- `internal/adapter/llm/` 只实现 Eino role executor 和工具适配器。它不得拥有 workflow 调度、数据库写入、Registry、Incus 或 Kubernetes 控制面权限；transport 层只调用 application service。
+- `AgentRun` 的固定事实为 closed role、owner、可选 session、固定 input revision/引用、实际使用的 model/prompt version、状态、错误、时间、独立 deadline 和单调递增的 `attempt`。model/prompt version 只记录实际使用值用于审计。状态包含终态 `Interrupted`，用于记录被 Server 中断而废弃的运行。每个 AgentRun 最多执行五次已知技术错误的 attempt；一次 attempt 可以包含多轮模型 HTTP 请求和工具调用。`attempt` 只围栏同一运行内过期的 Eino 实例，不创建 `AgentAttempt` 表，也不改变 Run 的逻辑身份。它不保存模型推理过程，也不复制业务 typed result；候选 archive、Judgement、ClassificationProposal、Roadmap ChangeSet/Review 等仍由所属 aggregate 持久化并成为结果权威。
+- 只有 Authoring 和 Assistant 需要持久 AgentSession。它们的围栏是 `session_id + active_run_id + attempt + fixed input revision`；Authoring 的 staged write 额外校验 Plan stage revision。它们不使用 workflow lease 或 `server_instance_id`。Generator、Judge、Classifier 以及 Roadmap Planner/Reviewer 都从固定输入开始，不创建额外会话；Generator 的修复上下文由 workspace、PlanRevision、CandidateRevision archive 和反馈提供。
+- 同一用户消息、同一 GenerationWorkflow phase 或同一 Roadmap task/round 在正常执行时只创建一个逻辑 AgentRun。模型传输错误或 typed-result 校验错误以新的 Eino 实例执行该 Run 的下一次 attempt。Server 中断后的替代 Run 规则统一见“中断恢复”一节。新的用户消息、新的生成修复轮、分类反馈或新的 Roadmap round 同样创建新的逻辑 AgentRun。
+- 交互式 run 的 SSE 只观察 Server-owned 执行；浏览器断开只解除订阅，不能取消已持久化 run。最终 assistant message 或 Authoring stage 在完成时原子落库；不持久化不完整的流式文本。
+- Agent tool 只有三类可见副作用：只读查询；私有、可校验的 Plan/ClassificationProposal staged write；Generator 在其 workflow-scoped workspace 内的文件/命令操作。所有正式发布、镜像提升、Incus 操作、验证 Environment 创建和回收都必须先变成业务 state，再由 Runtime Worker 执行。
+- 模型调用、传输错误或 typed-result 校验错误只消耗当前 AgentRun 的五次技术重试预算；耗尽后的业务状态由 role 的固定规则处理。迟到结果由 Run ID、attempt、lease/state version 和 input revision 拒绝。
+
+#### 重试与阶段围栏
+
+- 删除 `GenerationWorkflow.StateAttempt`、`MaxStateAttempts` 和 workflow 级 deadline。已知技术错误的重试次数与 deadline 只属于 AgentRun，固定最多五次；deadline 只用于避免一个不再返回的模型或工具执行永久占用该 Run 的 claim，不跨替代 Run 继承。`Interrupted` 是基础设施中断记录，不伪装为第六次 attempt；同一业务阶段随后创建的替代 Run 从确定性边界开始，并使用新的五次预算和新的 deadline。`state_version` 只围栏 workflow state，不承载重试或 deadline。
+- GenerationWorkflow 保留单调递增的 `state_version`，它只在 workflow 进入新 state 时递增，不表示重试次数。claim 使用 `workflow_id + state_version + randomized lease_owner`；同一 state 的重新领取更换 lease owner，但不增加 state version。
+- Runtime Worker 不拥有 AgentRun，也不能直接写入 `runtime_attempt`。每个 GenerationWorkflow Runtime state 只保留一个 `runtime_attempt`，进入该 state 时由 Server 初始化为 `1`；Worker 只报告基础设施失败，或由 Server 发现其 lease 已过期时，Server 才在受 state version 和 lease owner 围栏的事务中处理。当前值小于 `5` 时递增后重新领取同一 state；当前值已经是 `5` 时 workflow 进入 `Failed`，不产生第六次执行。重新领取继续使用同一 `workflow_id + candidate_revision_id + state + state_version` 外部身份 create-or-get；`runtime_attempt` 绝不进入资源名称或外部 identity。成功进入下一 state 时自然清零。Server 重启不改变正在执行的 runtime action，也不改变 `runtime_attempt`。单次 Provider 调用、Job 或 Incus 操作仍使用自己的局部超时，但不再有跨重试的 Runtime deadline。迟到报告由 state version 和 lease owner 拒绝。
+- `NeedsClassificationReview` 是唯一的持久化分类审核态。一次合法的 Classifier 结果必须携带私有 `ClassificationProposal` 进入该状态，供作者审核、调整或确认发布；其中 `unclassifiable` 是合法诊断结果，但不能确认发布，作者必须取消 workflow、修改 Plan 后重新提交。Classifier 的 RoadmapRevision 是创建 Run 时固定的 immutable input，必须随 proposal 持久化；确认发布时只能比较该 revision 与 current revision，绝不能静默改写 proposal。二者不同即保留冲突并重新 Classifying，新的 Run 绑定最新 revision。Classifier 的五次 AgentRun 技术错误耗尽时，同样进入该状态，但保留 verified candidate 和失败说明；Server 在创建 publication intent 时发现确定性的分类冲突时，也回到该状态并保留 proposal 与冲突说明。三种情况不增加新的 workflow state。Building、ArtifactPublishing 或 Verifying 发现 candidate 的确定性内容错误时直接回到 `Generating` 修复，不消耗 `runtime_attempt`；ChallengePublishing 只接收已验证、已确认分类的 publication intent，因此只产生成功或基础设施失败，五次耗尽同样进入 `Failed`。
+- Catalog Release 删除 release 级 deadline。Server 在 `Pending` 拉取和 stage immutable source 时维护独立的 `source_attempt`：确定性 source/OCI 契约错误立即使 Release `Failed`，基础设施错误从 `1` 开始最多执行五次，值为 `5` 的失败同样使 Release `Failed`。Catalog Entry 的 Building、ArtifactPublishing、Verifying 与 Commit 的最终 artifact promotion 都使用和 GenerationWorkflow 相同的当前 state `runtime_attempt` 规则；Entry 或 Commit 的五次基础设施失败使整份未公开 Release `Failed`，不公开部分内容。Catalog 的 source pull、Entry 和 Commit 都只使用局部调用超时，不保留任何 aggregate deadline。
+- Catalog source pull 的外部读取身份是 immutable bundle digest；Entry action 的外部 identity 是 `release_id + entry_id + state + state_version`，Commit action 的外部 identity 是 `commit_id + state + state_version`。它们在同一 state 的五次执行中不变，`runtime_attempt` 从不参与命名。Runtime Worker 只能按 identity create-or-get，并校验资源标签、固定输入 digest 和已有引用一致；不一致即报告确定性契约错误。Server 只在 Release 仍可执行、Entry/Commit state 与 lease 相符时接受结果；Release 进入 `Failed` 后不再领取新动作，遗留 runtime 资源交给 reaper 回收。
+
+#### 中断恢复：重建上下文，不恢复 Eino 执行
+
+P0 **不接入 Eino `CheckPointStore` 或 `Resume`** 作为应用恢复机制。Eino checkpoint 解决的是显式 `Interrupt` 后恢复同一 Agent/Graph 的内部执行状态；它要求另一份持久化存储，并隐含工具节点及其结果的恢复语义。Breakfix 已有更清晰的业务事实来源，不能再引入一份 opaque 的 Agent runtime snapshot 作为第二权威。
+
+- `context.Context`、模型内存推理、不完整 SSE 文本和 Generator 的历史对话都不持久化。Server 只保存 AgentRun 的固定输入引用、Authoring/Assistant 的完整 session message、Plan/Candidate/Proposal/Task 等业务状态以及当前 workspace binding。
+- 模型调用、workspace tool 传输/超时错误或 typed-result 校验错误时，同一 AgentRun 以新的 Eino 实例重试，最多五次；普通 Generator 重试以及 Judge、Build 或 Verify 打回后的修复继续使用当前 workspace。每个会修改私有 Plan、ClassificationProposal 或 Generator workspace 的 tool 都携带当前 AgentRun、`attempt` 和所属 stage/workflow 围栏；取消、attempt 更新或 lease 失效后，旧实例不能再写入或提交结果。只有本节定义的 Server 中断、lease 丢失或确认 Sandbox/PVC 丢失才替换 workspace。
+- **Server 崩溃、重启或 lease 丢失是唯一的中断恢复分支。** 接管者先在事务中把所有受影响的 active AgentRun 标记为 `Interrupted` 并解除旧 claim，再在原业务阶段创建替代 Run。替代 Run 的 `attempt` 从一开始，拥有新的独立 deadline，只从持久化输入和已提交 revision 重建上下文；它绝不读取旧 Run 的模型内存、未完成消息或工具状态。
+- 单副本 Server 在自身变为 ready 前完成启动恢复。对每个仍由 AuthoringSession 或 Assistant session 指向的 active Run，Server 在同一事务中将旧 Run 标为 `Interrupted`、创建绑定相同固定输入 revision 的替代 Run（`attempt = 1`、重新计时）并更新 `active_run_id`；后台 Agent state 同样解除旧 claim 后由其 runner 创建替代 Run。这样浏览器只会看到新的 active Run，不会与旧执行并存。
+- 对 Authoring 与 Assistant，替代 Run 自动执行。浏览器重新打开页面后读取新的 active Run 并重新订阅；不回放旧 token。若旧 Run 已经原子提交最终消息或 stage，它不再是 active Run，也不会产生替代 Run。
+- 对 Generator，只要被中断 Run 已绑定 Sandbox，Server 无条件立即解除 workflow 的当前 workspace binding，将该 workspace 记录标为待回收；后台 reaper 必须删除旧 Sandbox 和 PVC。替代 Run 不等待删除完成，创建新的 workspace 记录、新 PVC 和新 Sandbox，并从最新 immutable candidate archive、已提交反馈和冻结 PlanRevision 开始。没有 candidate archive 时从 Plan 初态开始。Judge、Classifier 与 Roadmap 均从各自固定 revision/输入开始替代 Run。
+- Runtime Worker 不属于本节：Server 中断不重置或重启正在执行的 runtime action；它继续通过 action identity、state version、lease 和幂等 create-or-get 处理自身恢复。
+- 未来若确实出现“显式暂停等待人类输入，再在同一 Agent 图中继续”的独立产品需求，可以单独评估 Eino checkpoint；它不能反向替代本节的业务恢复契约。
+
+### 状态与执行归属
+
+GenerationWorkflow 继续是作者题目的唯一持久流程，但 active state 按能力固定分配，不再由一个混合 Worker 跨越全部阶段领取。
+
+#### 作者提交与失败重启
+
+Authoring 是讨论和编辑私有 Plan 的交互式阶段，不是隐式的提交流程。Authoring Agent 只能修改当前会话的私有 Plan stage，不能创建、提交或重启 `GenerationWorkflow`。
+
+1. 作者与 Authoring Agent 讨论并修改 Plan。
+2. 作者显式确认一个 Plan revision，并提交新的确认 idempotency key。
+3. Server 校验作者、会话、Plan revision 和 idempotency key；校验通过后原子冻结该 `PlanRevision` 并创建一个新的 `GenerationWorkflow`。
+4. 只有这个已创建的 workflow 才可进入 `Generating`，由 Generator Agent 开始执行。
+
+同一确认请求的重复投递只返回原有 workflow，不能生成重复题目。`Failed` 是终态，没有恢复或继续执行旧 workflow 的接口。作者可以修改 Plan 后再次确认，也可以不修改 Plan 而以新的确认 idempotency key 再次确认；两种情况都创建新的 workflow ID、全新的 AgentRuns 与新的 Generator workspace。旧的失败 workflow、candidate 和报告仅作为审计记录保留，绝不被新的 workflow 续跑或复用其 workspace。
+
+每个 `AuthoringSession` 同时最多只能有一个非终态 workflow。提交后对应 `PlanRevision` 永远冻结；在 workflow 仍运行或等待审核时，Server 拒绝新的 Plan stage 写入和新的 Plan 确认，也不自动替换旧 workflow。`NeedsAuthorReview` 中的作者反馈只修复已冻结题意下的 candidate，回到同一 workflow 的 `Generating` 并复用其 workspace；若作者要改变题目意图，必须先显式取消当前 workflow，再回到私有 Plan stage 修改并确认新的 revision。`Cancelled` 和 `Failed` 后都可以继续编辑 Plan 并创建新的 workflow；`Published` 则关闭该 AuthoringSession，新题目必须创建新的会话。删除 `Superseded` state、`superseded_by_workflow_id` 和一切自动 supersede 行为。
+
+~~~text
+AuthoringSession
+  -> Server: Generating -> Judging
+  -> Runtime Worker: Building -> ArtifactPublishing -> Verifying
   -> NeedsAuthorReview
-       | 内容反馈
-       v
-     Plan 草稿 --确认重新生成--> PlanRevision n+1 -> 新 GenerationWorkflow
+  -> Server: Classifying
+  -> NeedsClassificationReview
+  -> Runtime Worker: ChallengePublishing
+  -> Server: materialize Challenge + publish RoadmapRevision -> Published
+~~~
 
-       | 确认题目内容
-       v
-     Classifying -> NeedsClassificationReview
-       | 分类反馈
-       v
-     Classifying
+状态机不增加“内容错误”“发布完成待提交”之类的中间 state；它们是当前 state 中由持久化事实区分的固定分支：
 
-       | 确认分类并发布
-       v
-     ChallengePublishing -> Published
+| 事件 | 固定处理 |
+| --- | --- |
+| Building、ArtifactPublishing 或 Verifying 发现 candidate 的确定性内容错误 | 回到 `Generating`，保留 candidate、报告和当前 workspace 作为修复上下文。 |
+| Classifier 的 RoadmapRevision 已过期，或确认发布时发现 Roadmap revision 冲突 | 回到 `NeedsClassificationReview`，保留 proposal 与冲突说明；重新 Classifying 必须绑定最新 immutable RoadmapRevision。 |
+| Challenge source 或 title 的身份冲突 | 回到 `NeedsAuthorReview`，由作者决定修复题意或取消后重提。 |
+| Runtime state 的第五次基础设施失败、或 Catalog source/Entry/Commit 的第五次基础设施失败 | 进入 `Failed`；不会转入分类审核。 |
+| ChallengePublishing 的外部 promotion 已成功但 Server materialize/commit 失败 | 保留已成功的 publication result 和 durable publication intent；恢复时只重试 Server finalizer，不再重新领取或重复 Worker promotion。 |
 
-任一未发布 workflow
-  -- 作者取消 --> Cancelled
-  -- 被已确认的新 PlanRevision 替代 --> Superseded
-  -- candidate 尚未验证时不可恢复的执行失败 --> Failed
-```
+| 所有者 | 工作 |
+| --- | --- |
+| Server 的交互式 Agent Runtime | Authoring 和 Assistant 的用户回合，可向浏览器流式输出。 |
+| Server 的持久化后台 Agent Runtime | Generating、Judging、Classifying，以及 Server-owned RoadmapWorkflow 的 Planner/Reviewer。 |
+| Runtime Worker | Building、ArtifactPublishing、Verifying、ChallengePublishing 和 Runtime resource reaping。 |
+| Server workspace service | Generator workspace 的 Sandbox/PVC 创建、异常替换和终态回收；不是 Agent，也不是第二个 Worker。 |
+| Server 的业务提交 | 状态迁移、AgentRun、CandidateRevision、ClassificationProposal、publication intent、challenge 目录物化和 RoadmapRevision copy-on-write。 |
+| Controller | Environment CRD 的调和、status 与生命周期回收。 |
 
-- 一个确认的 `PlanRevision` 对应一个独立 `GenerationWorkflow` 与 workflow-scoped Generator session。自动修复只在同一 workflow 内复用该 session 并产生多个 CandidateRevision；作者改变题目内容则创建新的 PlanRevision 和 workflow。一个 AuthoringSession 同时最多有一个产生或等待作者决策的 workflow；旧 workflow 在新 PlanRevision 确认时直接持久化 `superseded_by_workflow_id` 并进入 `Superseded` 终态，不等待外部资源回收。
-- 每个 CandidateRevision 固定关联输入 PlanRevision、可选 `parent_candidate_revision_id`、repair reason、Generator/Judge AgentRun、archive digest、构建产物和验证报告。所有 candidate source archive、失败原因和验证报告都保留为审计血缘；只清理可重建的 build output、验证环境和 staging 资源。
-- `Judging` 只阻断有明确契约依据的问题：candidate archive 结构、Plan 与题目 metadata/checkpoint 的一致性、必要资产缺失、检查脚本与题意的可解释矛盾。教学价值、难度、文案和开放式改进建议属于作者审核，不能成为隐藏的自动修复理由。
-- `NeedsAuthorReview` 只审核题目内容：作者看到完整、只读的 problem、solution、hints、runtime 脚本、检查脚本和真实验证报告。未通过真实验证的 candidate 只保留内部诊断，不对作者展示。
-- 在 `NeedsAuthorReview` 中，作者的自然语言内容反馈先由 Authoring Agent 形成私有 Plan 草稿、`change_scope=content` 和面向作者的变更摘要；它不会立刻创建 workflow 或消耗构建资源。只有作者显式确认“重新生成”时，草稿才 materialize 为新的 PlanRevision，旧 workflow 才被 supersede，并创建新的完整 GenerationWorkflow。
-- 作者确认题目内容后，`Classifying` Agent 读取这个冻结的 verified candidate，并通过 Roadmap Retrieval 查询当前 immutable Domain、Topic、Tag 定义。它是 Generate Worker 中的一个独立 role/state，不是新的 deployment、worklist 或 Roadmap Workflow。
-- Classifying Agent 的初始 typed result 是 `proposed` 或 `unclassifiable`。`proposed` 对每题提出恰有一个已有 Topic 或新 Topic 候选，以及零到多个已有 Tag 或新 Tag 候选，并为每项绑定给出理由；`unclassifiable` 只返回原因与建议的内容调整，不能发布，也不能创建 Domain。每份 ClassificationProposal 固定 `candidate_revision_id` 与 `roadmap_revision`。模型输出、传输或 typed-result 校验失败只重试 `Classifying`，不回到 Build 或 Verify。
-- 首次分类运行只拥有上述四个只读工具，并以 typed result 创建私有 ClassificationProposal。只有在 `NeedsClassificationReview`、Roadmap barrier 未活动且作者要求调整既有提案时，分类调整运行才额外获得 `set_topic` 与 `set_tags`。前四者只读当前固定 RoadmapRevision。`set_topic` 替换私有 ClassificationProposal 的唯一 Topic 及其理由，输入必须是已有稳定引用或包含 Domain、title、definition、scope、non_goals、challenge_guidance 的完整新 Topic 候选；`set_tags` 原子替换完整 Tag 列表及理由，每项是已有稳定引用或包含 title、description 的完整新 Tag 候选。Server 校验既有引用、Domain、必填字段和 Tag 去重；最终提案必须恰有一个 Topic。
-- 这两个 setter 只修改当前 workflow 的**私有** ClassificationProposal，绝不创建、修改或删除全局 Topic/Tag，也不分配 source_ref、运行时 ID 或 Challenge ID。新定义可在私有 proposal 中反复修改；已发布 Topic/Tag 只能被选择和读取，不能被一道题的作者改写。确认发布后，Server 才一次性分配可读、不可变的 `source_ref`、默认 source filename 与运行时稳定 ID，并把新定义、最终绑定和 Challenge 原子写入下一份 RoadmapRevision；Agent 和作者不维护另一份 key 或平台身份。
-- 在 `NeedsClassificationReview` 中，作者仍然只能通过自然语言让 Agent 调整。分类反馈由同一个 Classifying role 搜索/读取定义后调用 `set_topic` 或 `set_tags`；两个审核态都先产生 typed `change_scope`：`content` 一律形成私有 Plan 草稿并等待“确认重新生成”，`classification` 才保留同一个 verified candidate 并只回到 `Classifying`；无法明确归类的反馈继续对话澄清，不得隐式选择较便宜的分类路径。`unclassifiable` 结果继续停留在该审核态，作者只能修改内容并重新生成，或取消 workflow。分类审核的显式“确认发布”是唯一公开动作。
+NeedsAuthorReview 与 NeedsClassificationReview 是持久化的作者等待态，不属于任何执行器。前者中，作者确认 verified candidate 后 Server 启动 `Classifying`；作者提交 candidate 修复反馈后 Server 启动同一 workflow 的下一次 `Generating`。后者总是展示正常 proposal、失败说明或 publication 冲突之一：`proposed` proposal 可提交分类反馈以启动新的 `Classifying`，或确认无冲突的 proposal 发布；`unclassifiable` proposal 只能取消后回到 Plan 修改；Classifier 耗尽且没有 proposal 时，只提供显式“重新分类”，由 Server 以同一 verified candidate 和固定 RoadmapRevision 创建新的 Classifying AgentRun，不自动循环，也不允许直接写全局 Topic/Tag。确认发布后，Server 创建 publication intent，Runtime Worker 异步完成正式 artifact 提升，Server 最后 materialize 并公开结果。
 
-#### 分类审核界面
+AgentRun 耗尽五次已知技术重试后不再由各调用点临时决定：`Generating` 或 `Judging` 使 workflow 进入 `Failed` 并保留 Plan、candidate 与错误；正常的 `Classifying` 以 proposal 进入 `NeedsClassificationReview`，耗尽时也进入该状态并保留 verified candidate 与失败说明；Authoring 与 Assistant 只使当前用户回合失败，等待用户显式重试；Roadmap task 保留为待处理项，等待下一次 maintenance workflow。
 
-`NeedsClassificationReview` 本身就是持久化的作者审核请求，不另建通知对象或第二份待办数据。作者离开后重新打开会话，仍能看到同一 candidate、当前 ClassificationProposal 或 `unclassifiable` 结果和审核状态。
+Runtime Worker 的结果同样有固定去向：Building、ArtifactPublishing 或 Verifying 的 candidate 内容错误回到 `Generating`；任一 GenerationWorkflow Runtime state 的五次基础设施失败进入 `Failed`；Catalog Entry/Commit 的五次基础设施失败使未公开的 Catalog Release 进入 `Failed`。`NeedsClassificationReview` 不承接 Runtime Worker 失败。
 
-- 沿用作者工作台现有的左侧内容 Tab 与右侧对话。已验证题目的概览、检查点、文件、Diff 和验证 Tab 保持不变；`proposed` 结果额外显示相邻的“Topic”与“Tags”两个 Tab，并在首次进入 `NeedsClassificationReview` 时自动选中“Topic”。
-- “Topic”Tab 将唯一 Topic 的 title、Domain、definition、scope、non_goals、challenge_guidance 和绑定理由渲染为 Markdown；“Tags”Tab 将每个 Tag 的 title、description 和使用理由分别渲染为 Markdown。两个 Tab 都清晰标记“已有”或“新建”，让作者一眼区分本题引用了什么与将要新增什么。
-- Topic 与全部 Tag 仍作为同一份 ClassificationProposal 审核，不为每个 Tag 设置独立确认按钮。作者要调整 Topic、Tag 或新定义内容时在右侧对话说明，Agent 分别调用 `set_topic` 或 `set_tags` 更新私有 proposal；作者不能在面板中直接编辑字段。
-- `unclassifiable` 没有 Topic/Tags 提案，改为显示单个“分类结果”Tab，以 Markdown 呈现无法分类的原因和建议的内容调整；不显示“确认分类并发布”，作者只能提出内容修改并确认重新生成，或取消 workflow。
-- `NeedsAuthorReview` 的主操作是“确认题目内容，进入分类审核”，不再直接发布 Challenge；`NeedsClassificationReview` 的主操作才是“确认分类并发布”。Roadmap barrier 活动时，Topic/Tags 仍可只读浏览，但禁用分类调整与确认发布，不创建等待执行的分类请求；Barrier 结束后作者再发起分类调整或确认。Server 对竞态请求返回可重试冲突。
-- 发布是分类审核的显式确认，也是 Challenge 唯一的公开提交点。Server 在公开提交前以最新 RoadmapRevision 重新校验 proposal 的既有引用和新 Topic/Tag 的规范化名称与 `source_ref`。无关的 revision 增量不阻塞发布：若所有引用仍存在且 immutable、所有新定义仍无冲突，Server 将 proposal rebase 到最新 revision；只有引用失效，或新 Topic/Tag 的 `source_ref`、规范化 title 发生确定性冲突时才回到 `Classifying`。若 Challenge 由其 title 派生的 `source_ref` 与既有 Challenge 冲突，则回到 `NeedsAuthorReview`，由内容调整形成新的 PlanRevision，分类 Agent 不得借此改写题目内容。Server 不判断不同名称定义是否语义重复，绝不静默合并语义冲突的提案。校验成功后，Server 才以 copy-on-write 方式生成包含新 Topic/Tag 定义和 Challenge 绑定的下一份 RoadmapRevision，并 materialize 正式 Challenge。Domain 从唯一 Topic 推导；不保存 `related_topics`，也不在 Challenge 上重复保存 Domain。
-- 发布 intent 在首次“确认发布”时创建并固定 candidate artifact digest；确定性冲突校验成功后，它才一次性保留 Challenge ID 与 Challenge `source_ref`。Server 先将正式内容写入 staging，再以可重试、幂等的 promote 完成文件物化，最后用数据库事务一次标记 Topic、Tag、Challenge 和关系为公开；它不是虚假的跨数据库、文件系统和 artifact store 事务。崩溃恢复只复用同一 intent，继续或清理该次 promote，绝不分配第二个 Challenge 或替换已验证 artifact。
-- 资源回收不是 workflow state。验证 Environment 在报告持久化后立即删除；Generator workspace 在对应 AgentRun 结束时释放；被修复、失败、取消、supersede 或已发布的 candidate 的 OCI/Incus staging artifact 和 build intermediate 都成为可回收资源。正式 runtime artifact、candidate source archive、失败原因和验证报告保留。资源以 workflow/candidate ID 标识归属，Controller 与 Generate Worker 对各自资源执行幂等 reaper；回收失败记录资源错误并持续重试，不改变 Challenge 的业务状态，也不阻塞新 workflow 或 `Published`。
-- 每个活动 state 最多允许十次连续技术重试；同一 workflow 最多产生十个 CandidateRevision（含首次）。模型、传输或 typed-result 错误只消耗当前 state 的技术重试；Judge、构建或真实验证的 artifact failure 消耗 CandidateRevision 预算并回到 `Generating`。candidate 尚未验证时，任一预算或总 execution deadline 耗尽后直接进入 `Failed`，不向作者展示失败 candidate。verified candidate 之后的 `Classifying` 或 `ChallengePublishing` 若耗尽技术重试，则保留 candidate、ClassificationProposal 与 publication intent，释放 worker 并回到 `NeedsClassificationReview`，以 `classification_unavailable` 或 `publication_unavailable` 说明可重试的基础设施状态；重试只恢复对应阶段，不重新 Build 或 Verify。
-- `NeedsAuthorReview` 与 `NeedsClassificationReview` 都暂停 execution deadline。新的 PlanRevision 创建新 workflow 并获得新的完整执行预算；从任一审核态恢复 `Classifying` 或 `ChallengePublishing` 时也开始新的执行窗口，作者等待时间永不消耗 Worker deadline。
-- `Failed` 与 `Cancelled` 只终止对应 GenerationWorkflow，不终止 AuthoringSession。Server 保留最后一份 Plan 与结构化失败摘要；作者可继续对话、形成新的 Plan 草稿并确认新的 PlanRevision。失败 candidate 始终只作为内部诊断，不进入作者审核界面。
-- 本流程只创建新 Challenge。已发布 Challenge 的内容编辑、重新验证、重新分类和版本升级不隐式复用 AuthoringSession，留作后续独立设计。
-- Topic 是唯一课程归属，Tag 是横向检索面，二者不要求名称互斥。`systemd` 可以作为 Tag，但仅在题目的诊断或修复实质依赖 systemd 时使用；`linux`、`kubernetes` 同样表达学习场景而非底层镜像或 Provider 实现。没有筛选价值的偶然技术细节不创建 Tag。
-- Roadmap Workflow 只维护关系边，不审查、不改写也不产出分类意见。Challenge 的内容或最终分类发布变更只在同一事务中标记 Roadmap pending，等待下一次空闲窗口中的增量维护处理。
+ChallengePublishing 不是交互式 Agent 工作。K8s runtime 需要在 Registry 中将验证过的 staging image 提升为 challenge-scoped immutable image；Node runtime 需要在 Incus 中提升正式 image/alias。两者都与构建、验证共享外部资源身份和幂等语义，必须归 Runtime Worker。
 
-### Roadmap Workflow
+### 持久化、恢复与并发
 
-RoadmapWorkflow 是 Server 内部拥有的、持久化的异步增量 workflow，不单独部署 Roadmap Worker，也不引入通用 executor、slot 或第二套后台调度。PostgreSQL 持久化 workflow、其固定 entry 快照、TopicTask/ChallengeTask、每个 Agent 的调用次数、结果和 lease；Server 创建或接管 workflow 后直接并发运行 task。Server 重启或多副本竞争时，workflow/task lease 只允许一个实例恢复同一项工作。
+Server 内执行 Agent 不等于把后台生成绑在浏览器 HTTP 请求上。
 
-```text
-RoadmapWorkflow: Queued -> Running -> Publishing -> Completed | Failed
-RoadmapTask:     Pending -> Running -> Accepted | Failed
-```
+- Authoring 与 Assistant 同一 session 至多有一个 active AgentRun；不同 session 可以并发。它们使用 Server lifecycle context 执行，而不是浏览器 request context，因此 SSE 断开不会让已持久化的会话、消息和 AgentRun 消失；Server 中断后的自动替代与重新订阅遵循“中断恢复”契约。
+- Generating、Judging 和初始/调整 Classifying 都由 Server 的持久化后台 runner 领取。runner 只领取明确的 Agent state，不引入通用 kind、通用 executor、持久 slot、用户配额或第二套任务模型。
+- Server 在事务中创建或续租 Agent phase claim、创建 AgentRun 或启动已知技术重试、读取固定输入，并只接受同一 Run ID、attempt、lease/state version 的 typed 结果。Server 中断后的 Run、workspace 与交互式订阅处理只遵循“中断恢复”契约，不重放已完成的外部资源阶段。
+- Runtime Worker 只领取 Runtime state；一个 Pod 同时处理一个已声明的 runtime action，Deployment replica 数量就是显式的外部资源并发上限。不引入 Worker slot 或按字符串 kind 分发的通用队列。
+- 一次 state 成功后释放当前执行器的 lease；下一个 state 由其固定所有者重新领取。GenerationWorkflow 只保留状态机、`state_version`、无数量上限的 CandidateRevision 审计记录和显式取消语义。每个已接受的 CandidateRevision 均永久保留；技术重试不会凭空创建 revision。审核态没有正在执行的 AgentRun deadline，Server 中断也不重置 Runtime Worker 的 action。
+- 当前 Server 使用 RWO data PVC，以单副本运行。P0 要求其 Agent runner 在重启后能从持久化边界重新开始，不把“单副本”当成内存状态永久可靠的理由；未来多副本仍需先解决共享 artifact 存储和流式连接，不在本次伪装支持。
 
-每个已发布 Challenge 都有一个 Roadmap entry。entry 至少包含 Challenge 关系是否已处理；若该 Challenge 首次引入了一个 Topic，还包含该 Topic 关系是否已处理。entry 只有在它所需的 task 均 `Accepted` 后才不再 pending。TopicTask 失败时，其来源 Challenge entry 仍保持 pending；下一次只重建这个未完成的 TopicTask，不重复已成功的 ChallengeTask。
+### 权限与远程工具边界
 
-Roadmap 维护只在题库没有任何 Generation 执行阶段运行的空闲窗口启动，不等待 drain。这里的执行阶段包括 `Generating`、`Judging`、`Building`、`ArtifactPublishing`、`Verifying`、`Classifying` 和 `ChallengePublishing`；`NeedsAuthorReview` 与 `NeedsClassificationReview` 是等待状态，不阻塞 Roadmap 启动。每累计 20 道**新发布** Challenge，Server 只创建一个持久化的 `roadmap_requested` 请求；20 只是自动触发阈值，不切分 pending entry，也不是一次 workflow 的任务上限。请求已存在时，后续新题只继续进入 pending，不额外排队。仅供调试的内部手工触发可在任意 pending entry 存在时创建同一种请求；它不是前端功能、不引入用户角色，也不作为常规业务流程。两种触发都必须先确认没有执行中的 GenerationWorkflow，才允许创建唯一的 RoadmapWorkflow。
+- Server 持有模型 API 凭据、OpenSandbox 生命周期权限、Server data PVC、PostgreSQL 和仅完成业务所需的远程读取能力。Assistant 的 Environment 读取继续经受限工具执行，而不是把原始集群凭据交给模型。Catalog source 拉取可保留最小 Registry 只读权限。
+- Runtime Worker 持有 Registry 写入、Incus build/publish 和验证 Environment 所需的 Kubernetes/Incus 角色凭据；它不持有模型 API key、OpenSandbox 管理凭据、PostgreSQL DSN 或 Server data PVC。
+- Runtime Worker 的唯一输入是由 Server 领取并围栏的具体 runtime action。Server 只在 action 的 `owner + state_version + lease` 仍有效时，向 Worker 提供不可变 `RuntimeActionContext`，并通过同一内部 API 流式提供该 action 对应的 candidate archive 或 Catalog entry source。Context 至少固定 archive/source、base artifact digest、验证 Environment snapshot/spec、已有 artifact reference、目标 artifact reference、action identity、state version 和 lease；Worker 不直接挂载、读取或写入 Server data PVC，不使用预签名对象存储，也不获得任意 workflow 或 release 的查询能力。完成或失败报告继续携带同一 action identity。这个协议只服务 Building、ArtifactPublishing、Verifying 和 ChallengePublishing 等固定 Runtime state，不是通用任务队列。
+- Server 不再在进程内执行 Catalog entry 的 Build、artifact publish、Verify 或最终 runtime artifact 提升。它保留 source staging、release 协调、commit intent、challenge materialization 和 RoadmapRevision 事务。
+- Worker 到 Server 的内部 API 使用独立 runtime role key、owner、state version 和 lease 围栏。Agent 因为在 Server 内执行，不再经过 Generate Worker 的 workspace/classification HTTP 代理；这些旧内部接口和凭据必须删除，不保留兼容路径。
 
-```text
-Challenge 发布 -> 创建或更新其 Roadmap entry
-  -> 累计 20 道新发布 Challenge 后标记 roadmap_requested
-  -> 无活动 GenerationWorkflow 时，原子创建 Queued RoadmapWorkflow 并消费请求
-  -> 固定此刻全部 pending entry
-  -> 并发 TopicTask 与 ChallengeTask -> 合并 -> Publishing -> Completed
-```
+### Runtime action 交接、租约与回收
 
-- 同一时刻最多存在一个非终态 RoadmapWorkflow。Server 在同一数据库事务中检查没有执行中的 GenerationWorkflow，并创建 `Queued` RoadmapWorkflow；这个已持久化的 workflow 就是唯一的执行门控，不另设 `Draining` 或 barrier state。RoadmapWorkflow 创建后，任何 Generation 执行阶段都不得启动：新的 PlanRevision 确认、从内容审核进入或重跑 `Classifying`、`ChallengePublishing` 以及 Catalog Release commit 都必须等待其终止；Authoring 对话和内容 Plan 草稿仍可继续，但 `NeedsClassificationReview` 中的 Topic/Tag 调整及其确认必须保持只读，不创建等待执行的分类请求。审核确认请求在此期间不创建新的执行 workflow，界面可禁用确认，竞态请求由 Server 以可重试冲突拒绝。
-- Generation 执行态仅指 `Generating`、`Judging`、`Building`、`ArtifactPublishing`、`Verifying`、`Classifying` 或 `ChallengePublishing`。`NeedsAuthorReview`、`NeedsClassificationReview`、`Failed`、`Cancelled`、`Superseded` 与 `Published` 均不阻塞 Roadmap 启动。每次 workflow 进入或离开执行态、每次 Challenge 发布以及每次内部手工请求后，Server 都尝试满足上述原子启动条件。
-- 一个 workflow 固定启动时的**全部** pending entry；它们可以远多于 20。快照建立后才发布的 Challenge 留在 pending，进入下一次 workflow，绝不改变正在执行的 task 输入。每个 entry 只为尚未完成的部分创建 task：TopicTask 规划该 entry 首次引入的 Topic 与其他已发布 Topic 的关系；ChallengeTask 规划该 Challenge 与其他已发布 Challenge 的关系。Tag 不是路线图节点，不创建 TagTask。
-- TopicTask 与 ChallengeTask 没有数据依赖，全部并发执行。每个 task 的输入只有一个 subject；Planner 通过 Roadmap Retrieval 在固定 revision 的全部其他已发布实体中搜索候选并按需读取详情，不遍历快照，也不把快照内实体作为特殊输入。ChallengeTask 可以读取 Challenge 的既有唯一 Topic 作为描述元数据，但不读取 TopicTask 结果，也不建立 Topic 边。每个 task 内部始终串行：Roadmap Planner 先提出 typed ChangeSet，Curriculum Reviewer 与 SRE Reviewer 随后并发审查；任一 reject 把两份意见交回 Planner 进入下一轮。Planner 每次产生新的 ChangeSet 后，两位 Reviewer 都必须重新审查该版本，不能复用上一轮的通过结论。
-- Roadmap Planner、Curriculum Reviewer 与 SRE Reviewer 各自在一个 task 内最多调用五次。模型、传输、工具或 typed-result 错误只消耗对应 Agent 的调用次数，并重试同一阶段；reviewer reject 触发下一次 Planner 调用，也消耗 Planner 的次数。没有独立的 task retry 预算。任一必要 Agent 耗尽调用次数时，task 进入 `Failed`，来源 entry 保持 pending，等待下一次自动或内部手工 RoadmapWorkflow；它不阻塞其他 task。
-- 所有 task 达到 `Accepted` 或 `Failed` 后，Server 分别合并 Topic 图和 Challenge 图的 Accepted ChangeSet。`related` 按无向规范化键去重，并优先于同一对实体的任何 `precedes`：只要现有边或本次 ChangeSet 提出 `related`，就保留一条 `related`，删除或忽略该对的 `precedes` 并记录原因。同一对实体只出现反向 `precedes` 时，也以一条 `related` 替换两条有向边。若一条方向已存在于当前 revision、另一条由当前快照提出，且该对至少一端属于当前快照 entry，也同样按上述规则处理，不改写两端均为历史实体的边。
-- 合并剩余 `precedes` 时，Server 按 entry 在固定快照中的稳定顺序和 edge 的稳定 ID 处理，绝不依赖并发 task 的完成时序。每次插入前检查 target 是否已可达 source；会形成环的当前候选边直接忽略，已合并的边保持不变。每条合并、转换或忽略的边都记录确定性原因；这些都是 `Accepted` task 的正常结果，不使 task 失败。
-- 合并后的有效增量边以 copy-on-write 方式发布为一份新的 RoadmapRevision。成功 entry 标记为已处理；含 Failed task 的 entry 自然保持 pending，不创建额外的失败队列或重试项。task failure 不会使整个 workflow 失败，也不会立即创建下一次请求；下次自动运行必须再有 20 道新发布 Challenge，内部手工触发可提前重试。RoadmapWorkflow 的 `Failed` 只表示其自身的持久化或 revision 发布在基础设施重试与 deadline 内仍无法完成；Agent task failure、进程重启和 lease 过期都不直接导致 workflow Failed。进入该终态后保留全部 pending entry 并释放执行门控。
-- RoadmapWorkflow 创建快照/门控、Roadmap publish 与 Catalog Release commit 在同一 RoadmapRevision 写锁上串行。若 Catalog 已进入 `Committing`，它先完成安装，随后 Server 再重新判断是否可创建 RoadmapWorkflow；一旦 RoadmapWorkflow 已 `Queued`，新的 Catalog commit 必须等待其终止。Catalog source 自带完整关系图，commit 后将其安装的 entry 标为已处理，不创建 Roadmap task 或 `roadmap_requested`。
+Runtime action 是挂在 GenerationWorkflow、Catalog Entry 或 Catalog Commit 的固定 state 上的持久化外部动作，不是第二套通用队列。Server 负责创建、领取、续租和状态提交；Runtime Worker 只按不可变 context 执行并报告结果。
 
-- **Topic 图**维护课程级路线。例如“网络地址与路由”在“DNS 与名称解析”之前。
-- **Challenge 图**维护有明确教学意义的局部路线。例如 SSH 密钥认证题在 ProxyJump 题之前；允许跨 Topic 连边。
-- 初期关系只有两类：有向 `precedes`，表示 source 推荐先于 target 学习；无向 `related`，表示有直接的横向学习关联。`precedes` 图必须无环，`related` 以唯一规范化边存储。
-- 所有关系只用于目录、学习路径和下一题推荐，绝不锁定题目、阻止用户开始题目，或规定 checkpoint 完成顺序。
-- 题目详情将两张图分开展示：先经其唯一 Topic 找到 Topic 图的一跳邻居，并展示“推荐先学”“建议后续”和“相关主题”；Challenge 图另行展示直接的“推荐先学题目”“建议后续题目”和“相关题目”。两者都不得默认做传递闭包，否则远端节点会被误显示为直接相关。
-- Topic 边不会自动展开成其题目之间的笛卡尔积。Challenge 边必须由 Roadmap Workflow 单独提出并说明理由；没有合理边是合法结果。
-- Challenge 内容、唯一 Topic 或 Tags 发生发布变更时，Server 在同一事务中标记 Roadmap pending。每个新增 Topic/Challenge 由自己的 task 规划增量关系；Roadmap Planner 不能重算或改写历史节点之间的边。Curriculum Reviewer 与 SRE Reviewer 只审查当前 task 的题目递进、技术前置、关系理由和局部图一致性。
-- 当前阶段不支持已发布 Challenge、Topic 或 Tag 的编辑。未来若引入这些 revision，它们同样只标记 Roadmap pending；历史关系图的全量重审属于后续显式设计，不混入日常增量 workflow。
+- **Build 输出不能依赖 Worker 本地文件或 Server PVC 路径。** K8s Build 必须写入 Registry 中 build-scoped 的 immutable OCI artifact，Node Build 必须产出 Incus build image reference。Server 只持久化 provider-side reference 与 digest；`ArtifactPublishing` 再将该 build artifact 提升为 candidate staging artifact。作者 workflow 与 Catalog Entry 使用同一条交接链路。
+- Worker 在执行期间必须续租 action。续租失败后立即停止本地操作，且不得提交结果。Server 重启不主动重置 action；lease 到期后由接管者沿用同一 external identity create-or-get。取消 workflow 时，Server 撤销 lease 并推进 state/version，之后的迟到报告一律拒绝，外部残留资源交给 reaper 异步回收。
+- 同一 action 的外部 identity 由 aggregate、entry/candidate、state 和 `state_version` 派生，永不包含 `runtime_attempt`。同一 state 的全部重试必须 create-or-get 同一个外部资源，并校验标签、输入 digest 和已有 reference；不能因重试产生另一套 Build Job、Incus image 或 Registry artifact。
+- Server 持有学习用 Environment 的 spec；Runtime Worker 只创建、读取和删除 `purpose=verification` 的 Environment，Controller 始终负责 CRD reconcile 与 status。验证报告一经持久化，验证 Environment 即由 reaper 回收；删除失败只重试删除，绝不重新验证。
+- ChallengePublishing 与 Catalog Commit 都先由 Server 写入 durable publication intent。Worker promotion 成功后，Server 必须先持久化该 immutable result/reference；随后才以确定路径、hash 校验和幂等物化 source，最后在事务中公开 Challenge/RoadmapRevision 或 Catalog Release。重启恢复时只重试 Server finalizer，不重复已成功的 Worker promotion。
+- Runtime Worker 的 readiness 按其可执行的 provider 类型报告；某一个 provider 不可用不能让其他类型 action 的领取与执行整体停摆。
 
-Roadmap 是全局课程内容的不可变投影；用户完成记录属于运行时数据。Server 基于当前 roadmap 和用户进度计算推荐的下一题，不把用户特定的 `next` 写回 catalog。
+### Catalog Release 的同一执行边界
 
-### 内容模型
+Catalog Release 没有 Agent，但必须使用同一 Runtime Worker，否则 Server 仍会隐式承担构建和发布职责。
 
-```text
-Domain -> Topic -> Challenge
-                  -> independent Checkpoints
-```
+~~~text
+Server: pull and stage immutable Catalog source; persist Release/Entry/Commit state
+  -> Runtime Worker: Entry Building -> ArtifactPublishing -> Verifying
+  -> Server: create durable commit intents
+  -> Runtime Worker: promote each final runtime artifact
+  -> Server: materialize source and atomically publish RoadmapRevision
+~~~
 
-- **Domain** 是稳定的学习与内容边界，有明确受众、范围、非范围、运行时适配性和完成标准。例如“Linux 系统与网络运维”是一个领域。
-- **Topic** 是读者能自然理解的学习主题，例如“systemd 与服务管理”“DNS 与名称解析”或“SSH 与远程运维”。它用于组织内容、浏览题库和给出推荐学习路径，不是抽象的原子能力模型。
-- **Challenge** 是一个可运行的故障场景。每题唯一归属一个 Topic；复合题的跨主题学习关系由 Roadmap 的 Topic 图和 Challenge 图表达，而不是给题目附加多个 Topic。
-- **Tag** 只表达横向场景属性，例如 `linux`、`kubernetes`、`systemd`、`multi-node`、`incident`、`least-privilege` 和 `configuration-drift`。它可以与 Topic 使用相同技术词汇，但必须提供跨 Topic 的实际筛选价值，不能只是偶然出现的命令或底层实现细节。
-- **Checkpoint** 只验证可观察的最终状态，彼此独立；它不代表 Topic，也不规定学习者的操作顺序。
+Catalog Release 仍不创建 AuthoringSession、GenerationWorkflow 或 Generator run。它保留可恢复 identity 与原子公开契约，但删除 release aggregate deadline：Server-owned source staging 使用独立 `source_attempt`，Entry 和 Commit 的外部动作使用当前 state `runtime_attempt`，两者均固定最多五次。变化不仅是 external runtime action 的执行者从 Server 移到 Runtime Worker，也包括将其重试语义统一为 P0 的有限、按状态计数模型。
 
-Topic 不要求覆盖固定数量的题，也不要求每个 Topic 都拆成多个细小的“能力”。例如 DNS 可以自然包含 hosts、resolver、搜索域和权威记录相关的不同场景；若某个主题暂时只有一题有价值的场景，就保留一题或延后发布，不能为了凑数量制造变体题。
+#### Catalog 启动门槛
 
-Topic 间的推荐顺序由 Roadmap Workflow 的有向 `precedes` 边维护，例如“网络地址与路由”在“DNS 与名称解析”之前。它们只用于导览和学习路径，不锁定题目。引用始终同时保留稳定 `id` 和可读 `title`。
+- 正常部署必须提供 immutable `catalog_release_reference`。Server 先原子拉取、stage 并 digest 校验该 release source；不能将部分 source 暴露为可读取 catalog。
+- Catalog 尚未 `Ready` 时，Server 在应用层拒绝 catalog-dependent 的读取、生成、分类和发布请求。Kubernetes readiness 不依赖 Catalog Ready，避免 Runtime Worker 或恢复中的 Catalog Release 因 Server 未就绪而形成启动死锁。
+- Catalog `Failed` 是终态。修复只能提交一个新的 immutable bundle identity 并创建新的 Release；不得原地自动无限重试旧 bundle。
+
+### Roadmap maintenance 的执行边界
+
+Roadmap workflow 是 Server 内的异步维护流程，不创建新的 Deployment，也不使用 Runtime Worker。它的 Planner/Reviewer 继续各自持有 role-specific prompt 与 typed tool，只有 Server 合并通过审查的 ChangeSet 并写入新的 RoadmapRevision。
+
+- 删除旧 `MaintenanceExecutionDeadline`。每个 Planner/Reviewer AgentRun 仍各自最多五次技术重试；一个 Roadmap task 的语义 round、Planner/Reviewer 的调用上限和 AgentRun 的技术 attempt 是三套不同概念，不能互相消耗或混写。
+- Roadmap 启动与运行期间保持 idle barrier：开始时不得有题目处于生成、判断、构建、发布、验证或分类等执行 state；Roadmap 活跃期间也不得进入新的这些执行 state。作者等待审核不算执行 state，但新的作者确认、分类确认或发布确认必须等待 Roadmap 完成。
+- 单个 task 的 AgentRun 技术失败不创建额外失败 state，也不自动循环；task 保持待处理，留给下一次 maintenance workflow。这样不会把临时模型或传输故障伪装成 Roadmap 语义结论。
 
 ### 迁移清单
 
-P0 已无兼容地完成遗留 `Skill`、`Tag`、challenge mapping 和 `Skill requires` 模型的迁移。`RoadmapRevision` 是唯一的全局课程数据版本：Domain、Topic、Tag、Challenge 绑定和两张关系图始终由同一个 revision 一起读取、校验和发布，不能再并存另一份分类读模型。
-
-- [x] 删除遗留 `Skill` 模型、`skills/` 布局、`entry_skills`、`outcomes`、`requires` 及相关 API/前端术语，不保留兼容读取路径。
-- [x] 定义 immutable `RoadmapRevision` 的完整内容：Domain、Topic、Tag、`Challenge -> Topic`、`Challenge -> Tag`、`topic_edges` 与 `challenge_edges`。它是分类、目录、筛选和学习路径唯一的读模型；发布 Challenge 分类或路线关系时，均以 copy-on-write 生成下一份 revision。
-- [x] Catalog Release 安装后，数据库中的 RoadmapRevision 是运行时唯一事实来源。`catalog/` 与 portable release 只作为 immutable import/export source，Server 不回写 Git 工作区，也不做双向同步。
-- [x] portable source 使用可读、不可变的 `source_ref` 和 `title`，不携带平台 Challenge ID、镜像或发布时间。Domain `source_ref` 全局唯一；Topic 使用 `domain/topic`；Tag 全局唯一；Challenge 使用 `domain/topic/challenge`。对于作者确认发布的新 Topic、Tag 和 Challenge，Server 只在首次发布时从规范化英文 title 分配 `source_ref`：Topic 为 `<domain-source-ref>/<title>`，Tag 为 `<title>`，Challenge 为 `<topic-source-ref>/<title>`。新 Topic/Tag 的规范化冲突拒绝发布并回到分类调整；Challenge 的规范化冲突回到内容审核并形成新的 PlanRevision；两者都绝不追加随机后缀。成功后永久保存，title 或 source filename 改名也不得重算。source filename 可默认采用 source_ref 的末段，但不承担身份。安装时 Server 将 source_ref 解析为运行时稳定 ID；运行时绑定与边同时保留 ID 和 title 快照，保证机器可引用、人可审查。
-- [x] 增加 immutable `Domain` 定义：`source_ref`、`title`、`definition`、`scope`、`non_goals` 与可读 source filename。Domain 不直接映射 Challenge，也不参与关系边。
-- [x] 增加 immutable `Topic` 定义：`source_ref`、`title`、`domain: {source_ref, title}`、`definition`、`scope`、`non_goals`、`challenge_guidance` 与可读 source filename。Topic title 在同一 Domain 内规范化唯一；`challenge_guidance` 用自然语言说明什么样的题唯一归属该 Topic，避免分类只靠名称猜测。
-- [x] 增加 immutable `Tag` 定义：`source_ref`、`title`、`description` 与可读 source filename。Tag title 在全局规范化唯一；没有跨 Topic 筛选价值的偶然命令或底层 Provider 细节不创建 Tag。
-- [x] 将 GenerationWorkflow 收敛为业务状态：`Generating`、`Judging`、`Building`、`ArtifactPublishing`、`Verifying`、`NeedsAuthorReview`、`Classifying`、`NeedsClassificationReview`、`ChallengePublishing`、`Published`、`Failed`、`Cancelled`、`Superseded`。删除 `CleaningUp`、`CleanupIntent` 及所有把资源回收作为 workflow 阶段的协议/API；supersede、取消和 candidate 尚未验证的不可恢复失败直接进入各自终态，但不终止 AuthoringSession。
-- [x] 为 CandidateRevision 持久化输入 PlanRevision、parent candidate、repair reason、AgentRun、archive digest、构建/验证结果和外部资源记录。每条资源记录至少有类型、外部身份、归属 workflow/candidate、创建时间、回收状态、最近错误和下次重试时间；保留 source archive、失败原因和报告。Controller 与 Generate Worker 基于这些记录执行幂等 reaper，回收 verification Environment、workspace、candidate OCI/Incus staging artifact 和 build intermediate，而不改变 workflow state。
-- [x] 为 verified CandidateRevision 增加独立的 ClassificationProposal：结果为 `proposed` 或 `unclassifiable`。`proposed` 恰有一个 Topic 与零到多个 Tags，既有定义按稳定引用选择，新定义只保留作者可读的候选字段；`unclassifiable` 只带原因和内容调整建议，不能发布。提案固定 candidate 与 `roadmap_revision`，不改写已真实验证的 runtime archive；发布后才成为 Challenge 的最终分类事实。删除 `primary_topic`、`related_topics` 和所有由 Roadmap Workflow 生成的分类字段，Challenge 不重复保存 Domain。
-- [x] 在 GenerationWorkflow 中增加 `Classifying -> NeedsClassificationReview`：内容审核确认后才由独立分类 Agent 读取冻结 candidate 和当前 RoadmapRevision。两个审核态均通过 typed `change_scope` 路由自然语言反馈：内容变更先形成私有 Plan 草稿并经作者确认后创建新 workflow，分类变更才只重跑 `Classifying`。分类变更不重新 Build 或 Verify。
-- [x] 定义阶段敏感的失败恢复：candidate 尚未验证时，技术/资源预算耗尽进入 `Failed`；verified candidate 之后，`Classifying` 或 `ChallengePublishing` 的技术耗尽返回 `NeedsClassificationReview` 并保留 candidate、proposal 与 publication intent，以可重试的 `classification_unavailable` 或 `publication_unavailable` 表达，不重新 Build 或 Verify。
-- [x] 所有内容、分类和发布确认 API 均使用乐观并发：请求绑定 `workflow_id`、Plan draft/revision、candidate revision 或 publication intent 的 expected revision，并带 idempotency key。旧标签页与重复点击不得创建第二个 workflow、Challenge 或 promote。
-- [x] Server 只判断 ID/source_ref 引用、规范化 title 和关系图的确定性约束；无向 `related` 去重并优先于同对的 `precedes`，反向 `precedes` 规范化为 `related`，按稳定顺序跳过会成环的候选 `precedes`。这些归并结果必须留下审计原因；“语义是否重复”仍由 Agent 与作者审核，不能伪装为 Server 自动判断。
-- [x] 发布时允许无关 RoadmapRevision 增量的确定性 rebase，只在已引用定义失效，或新 Topic/Tag 的 `source_ref`、规范化 title 冲突时重跑 `Classifying`。Challenge 由 title 派生的 `source_ref` 冲突则回到 `NeedsAuthorReview`，不得由分类调整掩盖内容冲突。Server 不判断语义重复。首次确认发布分配唯一 publication intent，staging/promote、数据库可见性提交和崩溃恢复都复用该 intent。
-- [x] 让两个审核态暂停 Worker deadline；新 PlanRevision 和每次由审核态恢复的 `Classifying`/`ChallengePublishing` 都开始新的执行窗口。每个活动 state 最多十次连续技术重试，每个 workflow 最多十个 CandidateRevision（含首次）。
-- [x] 实现 Server-owned、只读的 Roadmap Retrieval：按 immutable `roadmap_revision` 提供 Topic/Tag/Challenge 的 typed search/read 工具，以精确 ID/title 匹配加 BM25F 作为初始检索策略。分类 Agent 只经此接口读取定义，并通过 typed result 提出既有引用或新定义候选；Roadmap Planner 以单个 subject 为中心，在固定 revision 的全部其他已发布 Topic 或 Challenge 中按需搜索和读取关系候选，不提供快照遍历工具。作者对内容和分类的两次显式确认是这些候选进入公开 Roadmap 的唯一入口。
-- [x] 增加 immutable `topic_edges` 和 `challenge_edges`：`precedes` 是有向无环边，`related` 是无向规范化边；每条边保存稳定 source/target 引用、title 快照和面向审查的理由。
-- [x] 将现有 Taxonomy Workflow 迁移为 Server-owned 的增量 `RoadmapWorkflow`：不保留独立 deployment、通用 executor、slot 或全量关系规划。Server 在 PostgreSQL 中持久化 `roadmap_requested`、启动时全部 pending entry 的固定快照、TopicTask/ChallengeTask、每个 Agent 的调用次数、结果和 lease，并直接异步并发执行 task；Server 重启或多副本竞争时通过 lease 接管。每累计 20 道新发布 Challenge 只创建一个自动请求；20 只是触发阈值，请求存在时新题继续累积，workflow 启动时固定全部 pending entry 并消费请求。仅供调试的内部手工触发可在任意 pending entry 存在时创建同一种请求，不暴露给普通用户或 Catalog UI。两种触发均只在没有执行中的 GenerationWorkflow 时，才以同一事务创建唯一的 `Queued` RoadmapWorkflow；Roadmap 运行期间所有 Generation 执行阶段和 Catalog Release commit 都必须等待。每个 entry 只重建尚未完成的 TopicTask/ChallengeTask；两类 task 全部并发，每个 task 内 Planner 串行驱动、两位 Reviewer 并发审查，三种 Agent 各自最多五次调用；每次 Planner 修订后两位 Reviewer 都重新审查。task 只有 `Accepted` 或 `Failed`：失败 entry 自然保留为 pending，在下一次自动或调试手工 workflow 的完整快照中重试，不立即循环，也不产生额外重试项。Server 将 `related` 优先于同对的 `precedes`，将反向 `precedes` 合并为 `related`，再按稳定顺序忽略成环候选边，最后一次发布有效增量；这些合并结果不导致 task 失败。Catalog 安装以同一 RoadmapRevision 写锁建立已处理基线。它不产出或修改分类、Domain、Topic 或 Tag。
-- [x] 将 portable Roadmap source、运行时 RoadmapRevision、内容校验、Catalog 安装、API/前端筛选和测试 fixture 全部升级为同一契约。当前没有正式题库，因此不保留旧 schema。
-- [x] 增加只读、仅调试的 RoadmapRevision `.tar.gz` 导出接口：使用标准库流式生成完整 portable Catalog Release，固定归档顺序和元数据，不写 Git、不创建临时文件、不导出运行时资源，也不提供 UI 或子集导出。
-- [x] 将 source 布局改为可读的领域分组，并让 reader/writer 保留相对 source 路径：
-
-```text
-roadmap/
-  domains/
-    linux-system-network-operations.yaml
-    kubernetes-workload-service-operations.yaml
-    sre-reliability-operations.yaml
-  topics/
-    linux-system-network-operations/
-      systemd-and-services.yaml
-      dns-and-name-resolution.yaml
-    kubernetes-workload-service-operations/
-      workloads-and-rollouts.yaml
-  tags/
-  challenge-bindings/
-  topic-edges.yaml
-  challenge-edges.yaml
-```
-
-- [x] Catalog 的领域和主题筛选只从 Challenge 的唯一 Topic 推导；跨 Topic 发现由 Topic 图和 Challenge 图提供，不使用多 Topic mapping。
-- [x] 初期禁止 Generate Agent、Classifying Agent 或 Roadmap Workflow 创建或合并 Domain。Domain 是人工维护的课程边界；Classifying Agent 只能提出 Topic/Tag 候选并等待作者确认。全局领域调整属于后续 maintenance workflow。
-
-### Catalog Release 契约
-
-P0 只定义可打包、可安装的 `releases/<name>/` portable root；实际的内容工作区和 Domain/Topic 导读属于 P1：
-
-```text
-catalog/
-  releases/
-    foundation-linux-system-network/
-      release.yaml
-      challenges/linux-system-network/<readable-source>/
-      roadmap/
-        domains/
-        topics/
-        tags/
-        challenge-bindings/
-        topic-edges.yaml
-        challenge-edges.yaml
-```
-
-- challenge 继续遵循 [`题目内容格式`](docs/reference/challenge-format.md)：`problem.md`、`solution.md`、`hints/`、`generate.sh`、`answer.sh` 和 `checks.sh`。目录使用可读 source 名称；发布后才获得与题意无关的 opaque challenge ID。
-- Catalog Release 是基础题库的初始化输入，不进入 Generate、Judge、Classifying、作者审核或 Roadmap Workflow。它不是用户角色、用户提交入口、Agent 对话或 function-tool 场景；每个 Challenge 的唯一 Topic、Tags 和两张关系图都必须已经写在 portable Roadmap source 中，Server 只做确定性契约校验、构建、验证和安装。其 `Committing` 阶段与 Roadmap publish 竞争同一份 RoadmapRevision 写锁；成功安装的 Challenge entry 直接标记为已处理，不创建 Roadmap task 或自动请求。
-- Catalog 不复用 GenerationWorkflow，但必须是可恢复的长期确定性任务。`CatalogRelease` 持久化 immutable source digest、release state、entry state/attempt、构建产物、验证报告、外部资源身份和一次性的 commit intent；Server 重启或 worker lease 过期后只恢复未完成的 release/entry 阶段，并以同一外部资源身份 create-or-get，不能重复分配 Challenge 或重新验证已通过 entry。
-- 采用最小的 release 状态：`Pending -> Installing -> Committing -> Ready | Failed`。`Installing` 内每个 CatalogEntry 独立推进 `Pending -> Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | Failed`；release 只在全部 entry 就绪后进入 `Committing`。资源回收由幂等 reaper 完成，不引入 `CleaningUp` 业务状态，也不阻塞 `Ready` 或 `Failed`。
-- 原子安装只有在该 source digest 的结构校验、全部 entry 的构建、artifact publish 和真实验证均成功时才执行。确定性的 source/build/verify failure 直接使整份 release `Failed`，不发布部分题库，也不创建 Generator run 或自动修复；基础设施失败只在 release deadline 内重试当前阶段。source 一旦变化，旧 digest 的报告不能复用，必须针对新 digest 创建新的 CatalogRelease。
-- P0 的 Catalog Release 是 immutable、追加式内容输入：同一 digest 的安装幂等；后续 release 只能添加未出现过的 source_ref，不能原地修改或删除已发布内容。内容替换、删除和 release upgrade 留作后续独立设计。
-- P0 提供仅供调试的 `GET /internal/debug/roadmap-revisions/{revision_id}/export`。它按指定 immutable RoadmapRevision 直接流式返回 `breakfix-roadmap-r{revision_id}.tar.gz`，不创建临时文件、不写回 Git 工作区，也不进入 Catalog UI。归档根目录是一个完整 portable Catalog Release，包含 `release.yaml`、全部 `roadmap/` 定义、绑定和两张关系图，以及该 revision 中全部 Challenge 的 source；不包含数据库/运行时 ID、镜像、构建中间产物、验证报告或宿主机路径。
-- 导出只支持整个 revision，不做单题、Domain 或任意子集导出，避免输出缺失 Topic/Tag/关系依赖的断裂 release。Server 使用 Go 标准库 `archive/tar` 与 `compress/gzip`；写入路径按字典序，文件 mode、owner、tar mtime 和 gzip mtime 固定，保证同一 revision 重复导出得到字节稳定的归档，并保留题目脚本的执行位。
-- `test/fixtures/catalog-release/` 始终只是安装链路 fixture，不能作为正式基础题库内容。
+- [x] 将 Eino 的 Generator、Judge 和 Classifier 从 Generate Worker 移入 Server Agent Runtime；Authoring、Assistant 与 Roadmap 保持同一 Server 运行边界，但保留独立 application port、role、prompt 和 typed tool。删除 Generator AgentSession 与所有以 Agent 为中心的 Worker 内部代理。
+- [x] 明确作者提交、AgentRun 与 workspace 的恢复边界：Authoring Agent 只能修改私有 Plan stage；只有作者显式确认 Plan revision 后，Server 才能以确认 idempotency key 原子创建 GenerationWorkflow。每个 AuthoringSession 同时只允许一个非终态 workflow，期间冻结 Plan；`Failed` workflow 不提供 resume，删除 `Superseded` 及自动替换路径。Server 中断、重启或 Agent lease 丢失时，旧 Run 标记为 `Interrupted`，替代 Run 从持久化事实重新开始；被中断的 Generator workspace 无条件解除 binding、异步回收并以新 PVC/Sandbox 替换。
+- [ ] 将 GenerationWorkflow claim 拆为固定的 Server Agent state 集与 Runtime state 集；补全既有 state 的转移与冲突分类，不新增状态。`runtime_attempt` 仅由 Server 在基础设施失败或 lease 过期时递增，进入 state 为 `1`、最多五次、成功转移后清零；它不进入外部资源 identity。CandidateRevision 不设数量上限，已接受 revision 永久保留审计；技术重试不产生 revision。删除 `generation_repository` 在确认发布时将 proposal RoadmapRevision 静默覆盖为 current revision 的行为，revision 冲突必须回到 `NeedsClassificationReview`。
+- [x] 将 Generator workspace tool 改为 Server 内的受限 workspace service，以 workflow-owned `workspace_id` 管理当前与待回收工作空间。命令非零、workspace tool 超时/传输错误和 Judge/Build/Verify 的正常修复继续复用当前 workspace；只有 Server 中断、lease 丢失或确认资源丢失时替换。Generator 不得直接取得 OpenSandbox 凭据。
+- [ ] 新建唯一的 Runtime Worker，迁移 Building、ArtifactPublishing、Verifying、ChallengePublishing 与作者 workflow/Catalog 的 runtime resource reaper。Build 交接必须使用 provider-side durable reference：K8s 使用 build-scoped immutable OCI artifact，Node 使用 Incus build image reference；Server 仅持久化 reference/digest，ArtifactPublishing 再提升为 staging artifact。Worker 不读写 PostgreSQL、Server data PVC 或 OpenSandbox，也不直接修改 `runtime_attempt`。
+- [ ] 实现 action-scoped Server API 和 external identity 围栏。RuntimeActionContext 必须固定 archive/source、base artifact digest、验证 snapshot/spec、artifact refs、state/version、identity 与 lease；Worker 只能取得已 claim action 的输入。Worker 必须续租，失败即停止且不提交；Server 重启不重置 action，接管者沿用同一 identity create-or-get 并校验标签、digest/reference，迟到结果拒绝。取消撤销 lease、推进 version，残留资源交给 reaper。
+- [ ] 统一验证与发布的所有权和恢复：Server 管理学习 Environment spec，Worker 只管理 `purpose=verification` Environment，Controller 负责 reconcile/status；报告持久化后仅异步删除环境，不重做验证。ChallengePublishing/Catalog Commit 先持久化 publication intent，Worker promotion 成功报告由 Server 持久化 result，Server 以 hash 校验、幂等 source materialization 和事务性 Roadmap/release 公开完成 finalizer；恢复时不重复 promotion。
+- [ ] 将 Catalog Release entry 与 commit 的 Build、Publish、Verify、final artifact promotion 迁移到 Runtime Worker；Server 保留 source staging、release 协调和 materialize/commit。正常部署要求 immutable `catalog_release_reference`；source staging 必须原子且 digest 校验。Catalog 未 Ready 时只在应用层拒绝 catalog-dependent 请求，不能把 Kubernetes readiness 绑定到 Catalog；失败 release 仅可由新的 immutable bundle identity 重试。
+- [ ] 将 Roadmap maintenance 保持在 Server 内，删除 `MaintenanceExecutionDeadline`；区分 task 的语义 round 与 Planner/Reviewer AgentRun 的五次技术 attempt。实现 idle barrier 和失败 task 留待下一轮的语义，不创建新的 Worker、通用队列或额外失败 state。
+- [ ] 更新 Deployment、镜像、ServiceAccount、Secret、配置、Telepresence、health/readiness、内部 API、测试 fixture 和正式文档；Runtime Worker readiness 必须按 provider 类型隔离故障。删除 generate-worker、其模型凭据、workspace/classification proxy 和任何旧命名，不保留兼容运行路径。
+- [ ] 完成聚焦验证：状态/lease 围栏、AgentRun 中断恢复、action 幂等接管、Node/K8s runtime smoke、Catalog fixture install、Server recovery，以及 workspace/runtime resource reaper。不得恢复大型不稳定 E2E；不写 prompt 文本、渲染断言或迁移拒绝测试。
 
 ### P0 提交计划
 
-P0 按下面顺序实施，**每完成一个部分就立即提交**，不能把多个部分累积在同一个工作区。每项都定义了本次提交的交付目标和必须成立的验证结果；接口契约变化必须在所属提交内同步更新 OpenAPI、生成物与前端调用。每个提交都必须保持可编译、可测试，不保留旧 schema、兼容读取路径或迁移拒绝测试。Prompt 只通过 Agent 协议和应用行为验证，不写 prompt 文本断言。
+P0 按以下顺序实施，**每完成一个部分就立即提交**。每个提交都必须可编译、通过对应的单元和集成验证；接口或部署契约变化在所属提交内同步更新生成物、前端调用和正式文档。不保留旧 Worker、旧内部接口或兼容转换；不写 prompt 文本断言、模型输出渲染断言或迁移拒绝测试。
 
-1. **`refactor(roadmap): replace taxonomy contracts`**
-   - **目标：** 用 `Domain`、`Topic`、`Tag`、immutable `RoadmapRevision`、Challenge 的唯一 Topic/Tag 绑定及两张关系图完整替换 Taxonomy；建立可读的 portable Roadmap source 布局和运行时读模型，同时删除 `Skill`、旧 mapping、`outcomes`、`requires` 及其 API、前端和部署术语。
-   - **验证：** 一个最小 portable Roadmap source 能被解析为确定性的 revision，Domain/Topic/Tag/source_ref、唯一 Topic 绑定和 `related`/无环 `precedes` 均在同一契约中成立；Catalog 的读取投影只依赖该 revision；旧 Taxonomy runtime、worker、部署、内部接口和 OpenAPI 术语均已移除。此提交之后不保留双读、双写或兼容转换路径。
-2. **`refactor(catalog): install portable releases into roadmap`**
-   - **目标：** 将 Catalog Release 重建为可恢复的、追加式 portable 输入；Server 从配置指定的 immutable release reference 幂等初始化，不提供管理员安装 API。每个 entry 独立经历构建、artifact publish 和真实验证，全部就绪后与 `RoadmapRevision` 在同一写锁下原子安装，不创建 GenerationWorkflow 或 Roadmap task。
-   - **验证：** 最小 release 只有在全部 entry 已真实验证后才公开其 Challenge 与完整 RoadmapRevision；重复启动或重复安装同一 digest 不重复分配 Challenge 或重新执行已完成阶段；中断后能用同一 entry/commit identity 恢复，任一确定性 entry 失败不会留下部分公开题库；安装成功的 entry 已建立 Roadmap 已处理基线，不会触发维护请求。
-3. **`feat(generation): persist classification proposal lifecycle`**
-   - **目标：** 将 GenerationWorkflow 收敛为业务状态，并为 CandidateRevision 持久化 Plan、parent candidate、AgentRun、archive、构建/验证结果和外部资源记录；资源回收改为幂等 reaper，不再是 workflow 阶段。为 verified Candidate 增加私有 `ClassificationProposal`，把内容审核后的分类、分类审核和公开提交纳入 GenerationWorkflow；实现 `Classifying`、`NeedsClassificationReview`、`ChallengePublishing`、publication intent、乐观并发和新 Topic/Tag/Challenge 的确定性 `source_ref` 分配。
-   - **验证：** 内容确认后冻结同一 verified candidate 并进入分类链路，分类反馈不会重新 Build 或 Verify；作者的内容反馈仍只形成私有 Plan 草稿；审核态暂停 deadline，分类或发布技术耗尽回到分类审核并保留 candidate/proposal/intent；重复确认或旧标签页请求不会创建第二个 workflow、Challenge 或 promote；无关 revision 增量可确定性 rebase，而引用或规范化名称冲突会回到正确的内容或分类审核路径；分类发布成功时才以 copy-on-write 让定义、绑定和 Challenge 同时可见，取消、supersede 与失败后的资源由记录驱动回收且不改变业务终态。
-4. **`feat(generation): add retrieval-backed classification role`**
-   - **目标：** 实现独立的 Classifying role：初始运行只可对固定 `RoadmapRevision` 使用 Topic/Tag 的 typed `search`/`read`，产生 `proposed` 或 `unclassifiable`；分类调整运行只额外拥有私有 `set_topic`、`set_tags`，并按 typed `change_scope` 路由内容与分类反馈。
-   - **验证：** 同一 Agent run 始终读取固定 revision，既有引用只能来自该 revision，新定义只停留在私有 proposal；setter 不会直接写入全局 Roadmap；`unclassifiable` 无法发布；工具、模型或 typed-result 失败只重试 Classifying；Roadmap barrier 活动时分类调整与确认发布均不会启动执行。
-5. **`feat(authoring): add classification review workspace`**
-   - **目标：** 将 `NeedsClassificationReview` 做成作者工作台的持久化审核界面：Topic 与 Tags 独立 Tab，展示 Markdown 定义、绑定理由和“已有/新建”状态；支持 `unclassifiable` 结果、对话式调整、确认发布及 barrier 只读状态。
-   - **验证：** 作者重新打开会话仍能看到同一 candidate 和 proposal；Topic/Tags 作为一份 proposal 一次确认，不出现直接编辑全局定义或逐 Tag 提交；`unclassifiable` 只允许内容调整或取消；前端操作与 API 的 expected revision/idempotency 语义一致，Roadmap barrier 时界面与服务端均拒绝启动分类或发布。
-6. **`refactor(roadmap): make roadmap maintenance server-owned`**
-   - **目标：** 在已完成的 Roadmap 基础契约上，由 Server 持久化并执行增量 `RoadmapWorkflow`、pending entry、20 题自动请求、调试手工触发、task lease 与三 Agent 委员会。Planner 获得固定 revision 的 Topic/Challenge typed `search`/`read`，每个 task 串行 Planner、并行双 Reviewer，每个 Agent 最多五次调用；不重新引入 worker deployment、通用 executor 或第二套后台队列。
-   - **验证：** 空闲窗口中 workflow 固定全部 pending entry 的快照，TopicTask 和 ChallengeTask 并发且只处理自己的 subject，Planner 无法遍历或写入全局快照；Server 重启或多副本竞争能通过 lease 接管；Accepted task 的边按稳定顺序合并，`related` 优先、反向 `precedes` 转为 `related`、成环候选被审计地忽略；Failed task 保持 pending 且不阻塞其他 task 或立即自旋重试；workflow 运行期间 Generation 执行阶段和 Catalog commit 被正确门控。
-7. **`feat(catalog): add catalog navigation and debug export`**
-   - **目标：** 让 Catalog 按 Challenge 的唯一 Topic 推导 Domain/Topic 筛选、按 Tag 横向筛选，并分别展示 Topic 图和 Challenge 图的一跳邻居；增加只读、仅调试的完整 RoadmapRevision `.tar.gz` 导出，不将该入口放入普通 Catalog UI，并同步正式文档契约。
-   - **验证：** Catalog 不再依赖多 Topic mapping 或 Taxonomy 状态，筛选与详情均来自当前 immutable revision；两张图不会混合或做传递闭包；同一 revision 的重复导出字节稳定，导出内容可作为完整 portable Catalog Release 再次读取，且不包含运行时 ID、镜像、验证报告、临时文件或宿主机路径。
+1. **refactor(agent-runtime): centralize model execution in server**
+   - **目标：** 将 Generator、Judge、Classifier 作为 Server 的独立 Agent role 运行，删除 Generator AgentSession 和 Worker 侧 Agent proxy；实现 Authoring 显式确认创建 workflow、Plan 冻结、`Failed` 不恢复和显式取消语义。实现 AgentRun 的五次技术重试与中断恢复，不接入 Eino checkpoint、工具结果 replay 或第二份 Agent 状态存储。
+   - **验证：** 每种 Agent 只能取得其声明的上下文和工具；同一确认幂等、非终态 workflow 阻止 Plan 修改、旧 workflow 不会自动 supersede。Server 中断后旧 Run 成为 `Interrupted`，替代 Run 只使用已提交事实和新的预算；被中断的 Generator 换新 PVC/Sandbox，正常技术重试和内容修复仍复用当前 workspace。
+2. **refactor(generation-state): fence state, revision and runtime actions**
+   - **目标：** 固定 Server Agent state 与 Runtime state 的领取边界，补全状态转移、冲突处理和 `runtime_attempt` 规则。实现 action lease、state/version 围栏、取消与相同 external identity 的 create-or-get；移除确认发布时静默覆盖 ClassificationProposal RoadmapRevision 的旧行为。CandidateRevision 无上限且不由技术重试产生。
+   - **验证：** 只有 Server 执行 Generating/Judging/Classifying，`runtime_attempt` 只由 Server 管理且第五次基础设施失败进入 `Failed`。内容错误、Roadmap revision 冲突、source/title 冲突和已成功 promotion 后的 Server finalizer 重试均落入规定分支；过期 lease、取消和迟到报告无法改变结果或重复创建外部资源。
+3. **refactor(runtime-worker): move durable external operations**
+   - **目标：** 创建唯一的 Runtime Worker，迁移 Build、ArtifactPublishing、Verifying、ChallengePublishing 和 runtime reaper。实现 action-scoped Context、provider-side Build 输出交接、验证 Environment 所有权、durable publication intent 与幂等 finalization；收紧 Server、Worker、Controller 的权限和 provider-aware health。
+   - **验证：** Node/K8s candidate 都经 immutable build artifact/reference、staging、真实验证和最终 promotion 完成；Worker 只能取得已 claim action 的固定输入且不具备模型、OpenSandbox、数据库或 Server PVC 权限。验证报告持久化后只回收 Environment，不重做验证；promotion 成功后的恢复不会再执行 Worker action，reaper 可幂等清理未发布资源。
+4. **refactor(catalog-roadmap): share runtime boundary and restore startup rules**
+   - **目标：** 将 Catalog Entry/Commit 的外部 Build、Publish、Verify 和 final promotion 移入 Runtime Worker，保留 Server source staging、atomic commit 与 Catalog 启动 gate；删除 release 和 maintenance aggregate deadline。将 Roadmap maintenance 固定为 Server 内 Planner/Reviewer 流程，落实 idle barrier、语义 round 与技术 attempt 分离。
+   - **验证：** immutable Catalog fixture 在 source/Entry/Commit 的重试、lease 接管和 Server finalizer 恢复中保持原子，失败 release 不公开且必须用新 bundle identity 重试。Catalog 未 Ready 只在应用层拒绝依赖请求，不阻塞 Kubernetes readiness；Roadmap 不能与题目执行 state 并行，暂时失败 task 保留到下一轮。
+5. **refactor(deploy-test): remove the old boundary and verify recovery**
+   - **目标：** 删除 Generate Worker 二进制、Deployment、镜像、模型凭据、HTTP proxy、旧 API/测试辅助和文档术语；更新 Deployment、ServiceAccount、Secret、Telepresence、生成物和正式文档，形成 Server、Controller、PostgreSQL、Runtime Worker 的唯一部署契约。
+   - **验证：** 完整 Go、生成物和前端构建通过；状态/lease 围栏、AgentRun 中断恢复、action 幂等接管、Node/K8s runtime smoke、Catalog fixture install、Server recovery 和两类 reaper 均通过。保持聚焦测试，不恢复大型不稳定 E2E，也不添加 prompt/渲染/迁移拒绝断言。
 
-P0 完成标准是：旧 taxonomy 代码和部署已移除；一个最小 Catalog Release 能安装为 RoadmapRevision；一个 verified Candidate 能完成分类审核和发布；Roadmap 能在 Server 内增量维护两张关系图；Catalog 能筛选、展示邻居并导出可再次安装的 portable release。
+P0 完成标准是：Server 是全部 Agent 的唯一执行位置；Generator 不再拥有 AgentSession 或 run-scoped workspace 身份；每个 AuthoringSession 只有一个非终态 workflow，`Superseded` 和自动替换路径均不存在；CandidateRevision 无数量上限且永久保留已接受 revision；Server 中断时 AgentRun 与 Generator workspace 按“中断恢复”契约替换；Runtime Worker 是唯一的 Build/Publish/Verify 执行位置，只能通过 action-scoped Server API 读取不可变输入，并以可接管的 identity 完成外部动作；Catalog 与作者题目共享该 runtime 边界，且所有已成功 promotion 都只由 Server finalizer 继续提交；仓库中不再存在 Generate Worker 兼容路径。
 
 ## P1：题库内容建设
 

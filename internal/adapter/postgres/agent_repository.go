@@ -12,6 +12,8 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 )
 
+const defaultAgentRunDeadline = 15 * time.Minute
+
 func (d *AgentRepository) CreateSession(ctx context.Context, session agent.Session) (*agent.Session, error) {
 	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.Purpose) == "" || strings.TrimSpace(session.OwnerKind) == "" || strings.TrimSpace(session.OwnerRef) == "" {
 		return nil, errors.New("agent session requires id, purpose, owner kind, and owner ref")
@@ -296,6 +298,122 @@ func (d *AgentRepository) FailRun(ctx context.Context, runID, message string, no
 	return nil
 }
 
+// RetryRun records a known technical failure and fences the prior Eino
+// instance before the caller constructs a fresh one for the same logical run.
+// A nil Run means the fifth attempt or the Run deadline has been exhausted and
+// the logical Run is now Failed. It never creates an AgentAttempt aggregate or
+// changes the business owner.
+func (d *AgentRepository) RetryRun(ctx context.Context, runID string, expectedAttempt int, message string, now time.Time) (*agent.Run, error) {
+	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || strings.TrimSpace(message) == "" || now.IsZero() {
+		return nil, errors.New("retry agent run requires id, attempt, error, and current time")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin agent run retry: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE id = ? FOR UPDATE`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, agent.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if run.Status != agent.RunRunning || run.Attempt != expectedAttempt {
+		return nil, agent.ErrRunActive
+	}
+	if run.Attempt < agent.MaxAttempts && run.DeadlineAt.After(now.UTC()) {
+		next, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs
+			SET attempt = attempt + 1, last_error = ?, updated_at = ?
+			WHERE id = ? AND status = ? AND attempt = ?
+			RETURNING `+agentRunColumns,
+			strings.TrimSpace(message), now.UTC(), runID, agent.RunRunning, expectedAttempt))
+		if err != nil {
+			return nil, fmt.Errorf("advance agent run attempt: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return next, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ? AND attempt = ?`, agent.RunFailed, strings.TrimSpace(message), now.UTC(), now.UTC(), runID, agent.RunRunning, expectedAttempt); err != nil {
+		return nil, fmt.Errorf("fail exhausted agent run: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// InterruptRun records a process or lease interruption. It deliberately does
+// not turn the event into a sixth technical attempt: the owner creates a new
+// AgentRun from its durable business inputs when it is ready to continue.
+func (d *AgentRepository) InterruptRun(ctx context.Context, runID, reason string, now time.Time) error {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(reason) == "" || now.IsZero() {
+		return errors.New("interrupt agent run requires id, reason, and current time")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agent.RunInterrupted, strings.TrimSpace(reason), now.UTC(), now.UTC(), runID, agent.RunRunning)
+	if err != nil {
+		return fmt.Errorf("interrupt agent run: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return agent.ErrRunActive
+	}
+	return nil
+}
+
+// RestartRun atomically records a Server interruption and creates a fresh
+// logical Run from the same durable session input. It is only for interactive
+// sessions; workflow-owned roles create their replacement through their own
+// aggregate so they can re-establish their state fence in the same transaction.
+func (d *AgentRepository) RestartRun(ctx context.Context, runID, reason string, now time.Time) (*agent.Run, error) {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(reason) == "" || now.IsZero() {
+		return nil, errors.New("restart agent run requires id, reason, and current time")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin agent run restart: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	prior, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE id = ? FOR UPDATE`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, agent.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if prior.Status != agent.RunRunning || strings.TrimSpace(prior.SessionID) == "" {
+		return nil, agent.ErrRunActive
+	}
+	if err := lockAgentSessionTx(ctx, tx, prior.SessionID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, agent.RunInterrupted, strings.TrimSpace(reason), now.UTC(), now.UTC(), prior.ID, agent.RunRunning); err != nil {
+		return nil, fmt.Errorf("interrupt prior agent run: %w", err)
+	}
+	replacement, err := createRunTx(ctx, tx, agent.CreateRun{
+		ID:            agent.NewID(prior.Purpose + "-run"),
+		SessionID:     prior.SessionID,
+		Purpose:       prior.Purpose,
+		OwnerKind:     prior.OwnerKind,
+		OwnerRef:      prior.OwnerRef,
+		InputRevision: prior.InputRevision,
+		Input:         prior.Input,
+		Model:         prior.Model,
+		PromptVersion: prior.PromptVersion,
+	}, now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return replacement, nil
+}
+
 func (d *AgentRepository) CancelRunsForOwner(ctx context.Context, purpose, ownerKind, ownerRef, reason string, now time.Time) (int64, error) {
 	if strings.TrimSpace(purpose) == "" || strings.TrimSpace(ownerKind) == "" || strings.TrimSpace(ownerRef) == "" || strings.TrimSpace(reason) == "" {
 		return 0, errors.New("cancel agent runs requires owner and reason")
@@ -310,6 +428,13 @@ func (d *AgentRepository) CancelRunsForOwner(ctx context.Context, purpose, owner
 }
 
 func lockActiveSessionTx(ctx context.Context, tx *Tx, sessionID string) error {
+	if err := lockAgentSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	return ensureNoActiveSessionRun(ctx, tx, sessionID)
+}
+
+func lockAgentSessionTx(ctx context.Context, tx *Tx, sessionID string) error {
 	var status agent.SessionStatus
 	err := tx.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE id = ? FOR UPDATE`, sessionID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -321,7 +446,7 @@ func lockActiveSessionTx(ctx context.Context, tx *Tx, sessionID string) error {
 	if status != agent.SessionActive {
 		return errors.New("agent session is not active")
 	}
-	return ensureNoActiveSessionRun(ctx, tx, sessionID)
+	return nil
 }
 
 func ensureNoActiveSessionRun(ctx context.Context, tx *Tx, sessionID string) error {
@@ -336,12 +461,16 @@ func ensureNoActiveSessionRun(ctx context.Context, tx *Tx, sessionID string) err
 }
 
 func createRunTx(ctx context.Context, tx *Tx, input agent.CreateRun, now time.Time) (*agent.Run, error) {
+	deadline := input.DeadlineAt.UTC()
+	if deadline.IsZero() {
+		deadline = now.UTC().Add(defaultAgentRunDeadline)
+	}
 	row := tx.QueryRowContext(ctx, `INSERT INTO agent_runs
-		(id, session_id, purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version, created_at, updated_at)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
+		(id, session_id, purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version, attempt, deadline_at, created_at, updated_at)
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 1, ?, ?, ?)
 		RETURNING `+agentRunColumns,
 		input.ID, input.SessionID, input.Purpose, input.OwnerKind, input.OwnerRef, input.InputRevision, agentRunInput(input.Input),
-		agent.RunRunning, input.Model, input.PromptVersion, now, now)
+		agent.RunRunning, input.Model, input.PromptVersion, deadline, now, now)
 	run, err := scanAgentRun(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert agent run: %w", err)
@@ -377,7 +506,7 @@ func agentMessageMetadata(value []byte) string {
 }
 
 const agentRunColumns = `id, COALESCE(session_id, ''), purpose, owner_kind, owner_ref, input_revision, input_json, status, model, prompt_version,
-	last_error, created_at, updated_at, completed_at`
+	attempt, deadline_at, last_error, created_at, updated_at, completed_at`
 const agentRunSelect = `SELECT ` + agentRunColumns + ` FROM agent_runs`
 
 type agentRow interface{ Scan(...any) error }
@@ -386,7 +515,7 @@ func scanAgentRun(row agentRow) (*agent.Run, error) {
 	var run agent.Run
 	var completedAt sql.NullTime
 	err := row.Scan(&run.ID, &run.SessionID, &run.Purpose, &run.OwnerKind, &run.OwnerRef, &run.InputRevision, &run.Input, &run.Status,
-		&run.Model, &run.PromptVersion, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
+		&run.Model, &run.PromptVersion, &run.Attempt, &run.DeadlineAt, &run.LastError, &run.CreatedAt, &run.UpdatedAt, &completedAt)
 	if err != nil {
 		return nil, err
 	}

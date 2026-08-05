@@ -1,4 +1,4 @@
-package agent
+package llm
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/adapter/llm"
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
@@ -21,14 +20,17 @@ import (
 
 const generatorMaxIterations = 40
 
-type Executor struct {
+// GeneratorExecutor is the Server-side Eino implementation of the Generator
+// role. Its only mutable capability is the workflow-fenced workspace runtime.
+type GeneratorExecutor struct {
 	config config.AgentConfig
-	client RuntimeClient
+	client GeneratorWorkspaceRuntime
 }
 
-// RuntimeClient is the narrow Server proxy used by the Generator's sandbox
-// tools. Every request is fenced by the enclosing GenerationWorkflow lease.
-type RuntimeClient interface {
+// GeneratorWorkspaceRuntime is the narrow Server-owned workspace surface used
+// by Generator tools. The model never receives Sandbox, PVC, or provider
+// credentials; every call remains fenced by the enclosing workflow claim.
+type GeneratorWorkspaceRuntime interface {
 	LoadWorkspace(context.Context, generation.Claim) (app.WorkspaceContext, error)
 	ReadFile(context.Context, generation.Claim, string, int, int) (app.FileReadResponse, error)
 	WriteFile(context.Context, generation.Claim, string, string) error
@@ -36,17 +38,17 @@ type RuntimeClient interface {
 	ArchiveWorkspace(context.Context, generation.Claim) (app.ArchiveResponse, error)
 }
 
-func NewExecutor(cfg config.AgentConfig, client RuntimeClient) (*Executor, error) {
+func NewGeneratorExecutor(cfg config.AgentConfig, client GeneratorWorkspaceRuntime) (*GeneratorExecutor, error) {
 	if client == nil {
 		return nil, errors.New("generator executor requires a Server runtime client")
 	}
-	return &Executor{config: cfg, client: client}, nil
+	return &GeneratorExecutor{config: cfg, client: client}, nil
 }
 
 // Generate executes exactly the Generator phase. It intentionally does not
 // inspect, judge, persist, or report the archive; those boundaries belong to
-// the Generate Worker and Server phase protocol.
-func (e *Executor) Generate(ctx context.Context, execution generation.Execution) ([]byte, error) {
+// the owning Server application service.
+func (e *GeneratorExecutor) Generate(ctx context.Context, execution generation.Execution) ([]byte, error) {
 	if !execution.Valid() || execution.Claim.Workflow.State != generation.StateGenerating {
 		return nil, errors.New("generator requires a Generating workflow")
 	}
@@ -80,7 +82,7 @@ func (e *Executor) Generate(ctx context.Context, execution generation.Execution)
 	return archive.Archive, nil
 }
 
-func (e *Executor) Judge(ctx context.Context, plan authoring.Plan, candidate *app.Candidate) (app.Judgement, error) {
+func (e *GeneratorExecutor) Judge(ctx context.Context, plan authoring.Plan, candidate *app.Candidate) (app.Judgement, error) {
 	return judgeCandidate(ctx, e.config, plan, candidate)
 }
 
@@ -97,7 +99,7 @@ func sameFeedback(left, right generation.Feedback) bool {
 }
 
 func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSandboxBackend, plan authoring.Plan, feedback generation.Feedback) error {
-	chat, err := llm.NewChatModel(ctx, cfg)
+	chat, err := NewChatModel(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -114,7 +116,7 @@ func runDeepAgent(ctx context.Context, cfg config.AgentConfig, backend *OpenSand
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return llm.IsTransientTransportError(err)
+				return IsTransientTransportError(err)
 			},
 		},
 	})
@@ -154,11 +156,11 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 	if candidate == nil {
 		return app.Judgement{}, errors.New("judge candidate is required")
 	}
-	chat, err := llm.NewChatModel(ctx, cfg)
+	chat, err := NewChatModel(ctx, cfg)
 	if err != nil {
 		return app.Judgement{}, err
 	}
-	resultTool, err := llm.NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
+	resultTool, err := NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
 	if err != nil {
 		return app.Judgement{}, err
 	}
@@ -174,7 +176,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return llm.IsTransientTransportError(err)
+				return IsTransientTransportError(err)
 			},
 		},
 	})

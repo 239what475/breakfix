@@ -1,31 +1,68 @@
 # Agent Runtime
 
-Breakfix 使用 Eino、PostgreSQL AgentRun 和远程 OpenSandbox workspace 运行模型能力。系统不保留
-Claude Code CLI、`eino-claude-code` 或另一套 Agent SDK 的兼容路径。
+Breakfix uses Eino, PostgreSQL `AgentRun` records, and a Server-managed remote
+OpenSandbox workspace for model capabilities. It has no Claude Code CLI,
+`eino-claude-code`, or alternate Agent SDK compatibility path.
 
-## 两类执行边界
+## Execution Boundaries
 
-| 场景 | 执行者 | 持久化 | 调度方式 |
+| Role | Executor | Durable boundary | Scheduling |
 | --- | --- | --- | --- |
-| Authoring 对话 | Server | AuthoringSession、消息、AgentRun、stage | 同一会话串行，直接执行。 |
-| 学习 Assistant | Server | Assistant session、消息、AgentRun、工具证据 | 同一会话串行，直接执行。 |
-| Generator / Judge | Generate Worker | GenerationWorkflow、AgentRun、CandidateRevision | 持有一个 Workflow lease。 |
+| Authoring | Server | AuthoringSession, messages, AgentRun, private Plan stage | One active run per session. |
+| Learning Assistant | Server | Assistant session, messages, AgentRun, read-only evidence | One active run per session. |
+| Generator | Server | GenerationWorkflow, PlanRevision, CandidateRevision, workflow workspace | Server claims `Generating`. |
+| Judge | Server | GenerationWorkflow, PlanRevision, CandidateRevision | Server claims `Judging`. |
+| Classifier | Server | GenerationWorkflow, verified CandidateRevision, immutable RoadmapRevision | Server claims `Classifying`. |
+| Roadmap planner and reviewers | Server | RoadmapTask, fixed RoadmapRevision, ChangeSet/Review | Server maintenance workflow. |
+| Build, artifact publish, verification, challenge publish, reaping | Runtime Worker | A lease-fenced runtime action | Runtime Worker only. |
 
-`AgentRun` 只记录一次模型调用的 session、输入、结构化结果和执行状态；它不拥有 lease，也不是
-调度任务。当前后台 Agent 调度与恢复的权威是 `GenerationWorkflow`。
+`AgentRun` is one complete, auditable logical execution. It may issue multiple
+model HTTP requests and tool calls, but is not a resident process or a generic
+queue task. A known technical error may create a fresh Eino instance for the
+same run up to five times. The durable business aggregate remains authoritative
+for its typed result.
 
-## Generate Worker
+## Recovery
 
-Generate Worker 只通过 Server 内部 API 领取 `GenerationWorkflow`。一次 lease 可以跨越所有活动
-state；每次阶段成功后 Server 返回刷新后的 lease credential。进入作者审核、终态或基础设施重试时
-lease 被释放。
+Server execution does not use Eino checkpoint/resume, replay tool results, or a
+second runtime state store. The Server persists only fixed input references,
+business revisions, AgentRun metadata, Authoring/Assistant messages, and the
+current Generator workspace binding.
 
-Generator 与 Judge 的输出使用 typed result。候选 archive、构建产物、artifact reference 与验证报告
-均由 Server 再做确定性校验；模型输出不满足协议时不会用默认值、模糊文本或兼容分支放行。
+On a Server restart or Generation Agent lease loss, the old running AgentRun is
+marked `Interrupted`, its claim is released, and the Server starts a new run
+from committed facts with a new five-attempt budget. Active Authoring and
+Assistant runs are replaced before readiness and automatically continue from
+their durable user message and fixed input; an Authoring replacement discards
+the old private stage. A stale Authoring tool call is fenced by both Run attempt
+and stage revision. A Generator interruption retires the workflow's current
+workspace; the replacement run receives a new PVC and Sandbox. Ordinary
+Generator technical retries and content repair keep the current workspace so
+the candidate and feedback remain available.
 
-Generator workspace 由 Server 通过 OpenSandbox 生命周期 API 创建和回收。Generate Worker 可以在
-Server 许可的 workspace 中执行生成工具，但不拥有 OpenSandbox 管理凭据，也不直接读取 Server data
-目录。
+SSE observes a Server-owned interactive run. Losing the browser connection only
+ends that subscription: it neither cancels the AgentRun nor persists partial
+stream text. The final Assistant message or Authoring revision is committed
+atomically and is available after the page reconnects.
 
-每个 Worker 只知道自己的 Server API key，不知道 PostgreSQL DSN 或 Server data PVC。内部 API 以角色密钥、
-Workflow ID、lease credential 与 expected state 共同围栏结果。
+Each AuthoringSession has at most one nonterminal GenerationWorkflow. Explicit
+Plan confirmation is idempotent and freezes that Plan revision. The author can
+only modify the Plan after the workflow reaches a terminal state or is
+explicitly cancelled; cancellation is owner-scoped and retires its workspace in
+the background. `Failed` is terminal and never resumes automatically.
+
+## Tools And Privileges
+
+Agent roles retain separate prompts, typed outputs, and typed tools. The model
+does not receive Kubernetes, Incus, Registry, OpenSandbox, PostgreSQL, or Server
+data PVC credentials.
+
+Generator workspace tools run in Server and are fenced by the current workflow
+claim. They can read and write only that workspace and execute commands there.
+Classifier tools can read only their pinned RoadmapRevision. Authoring tools can
+only update a private Plan stage. Assistant tools are read-only against the
+current learning Environment.
+
+Formal external effects first become business state and are then executed by
+the Runtime Worker. The Worker has no model API key, OpenSandbox credential,
+PostgreSQL DSN, or Server data PVC access.

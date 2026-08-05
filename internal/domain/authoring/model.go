@@ -141,12 +141,9 @@ type Message struct {
 }
 
 type Session struct {
-	ID               string `json:"id"`
-	UserID           string `json:"user_id"`
-	RuntimeSessionID string `json:"-"`
-	// GeneratorSessionID is reused by automatic generator repairs in one
-	// authoring session. It is distinct from the interactive authoring session.
-	GeneratorSessionID string       `json:"-"`
+	ID                 string       `json:"id"`
+	UserID             string       `json:"user_id"`
+	RuntimeSessionID   string       `json:"-"`
 	State              SessionState `json:"state"`
 	CurrentRevision    int64        `json:"current_revision"`
 	VisibleRevision    int64        `json:"visible_revision"`
@@ -163,6 +160,7 @@ type Stage struct {
 	SessionID     string    `json:"session_id"`
 	BaseRevision  int64     `json:"base_revision"`
 	StageRevision int64     `json:"stage_revision"`
+	RunAttempt    int       `json:"run_attempt"`
 	Plan          Plan      `json:"plan"`
 	Changes       []Change  `json:"changes"`
 	CreatedAt     time.Time `json:"created_at"`

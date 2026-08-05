@@ -24,10 +24,11 @@ type Classification struct {
 	Output ClassificationOutput `json:"output"`
 }
 
-// ClassificationChangeScope is a typed routing decision for feedback received
-// while an author reviews a private classification proposal. The model may
-// only alter the proposal for Classification; Content is handed back to the
-// Authoring flow, while Clarify keeps both proposal and content unchanged.
+// ClassificationChangeScope is a typed decision for feedback received while
+// an author reviews a private classification proposal. The model may only
+// alter the proposal for Classification; Content tells the author that the
+// frozen challenge needs a new explicit Plan revision, while Clarify keeps
+// both proposal and content unchanged.
 type ClassificationChangeScope string
 
 const (
@@ -44,15 +45,6 @@ type ClassificationAdjustment struct {
 	ChangeScope   ClassificationChangeScope `json:"change_scope"`
 	Output        *ClassificationOutput     `json:"output,omitempty"`
 	Clarification string                    `json:"clarification,omitempty"`
-}
-
-// ClassificationContentFeedback is returned to the Server after a typed
-// content-scope decision. The Server then sends the original author message
-// through the existing Authoring Agent; it is not a Roadmap write.
-type ClassificationContentFeedback struct {
-	SessionID string
-	UserID    string
-	Content   string
 }
 
 func (r ClassificationAdjustment) Validate() error {

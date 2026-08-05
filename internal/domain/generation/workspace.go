@@ -20,10 +20,12 @@ const (
 	WorkspaceDeleted  WorkspaceState = "deleted"
 )
 
-// Workspace is the durable identity and lifecycle of one Generator Run's
-// sandbox workspace. Provider implementations only realize this record.
+// Workspace is the durable identity and lifecycle of one GenerationWorkflow's
+// sandbox workspace. A normal AgentRun retry or content repair reuses it. A
+// Server interruption retires the record and creates a replacement workspace.
 type Workspace struct {
-	GeneratorRunID    string
+	ID                string
+	WorkflowID        string
 	Namespace         string
 	PVCName           string
 	SandboxID         string
@@ -34,16 +36,17 @@ type Workspace struct {
 	DeletedAt         *time.Time
 }
 
-// NewPVCName derives a stable Kubernetes-safe PVC name from the opaque Agent
-// Run ID. The ID is intentionally never exposed to the model.
-func NewWorkspacePVCName(generatorRunID string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(generatorRunID)))
+// NewWorkspacePVCName derives a stable Kubernetes-safe PVC name from the
+// opaque workspace identity. It intentionally does not use the workflow ID:
+// an interrupted workflow needs a new PVC while the old one is reaped.
+func NewWorkspacePVCName(workspaceID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(workspaceID)))
 	return "breakfix-workspace-" + hex.EncodeToString(sum[:16])
 }
 
 func ValidateWorkspace(record Workspace) error {
-	if strings.TrimSpace(record.GeneratorRunID) == "" || strings.TrimSpace(record.Namespace) == "" || strings.TrimSpace(record.PVCName) == "" {
-		return errors.New("generator workspace requires run id, namespace, and pvc name")
+	if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.WorkflowID) == "" || strings.TrimSpace(record.Namespace) == "" || strings.TrimSpace(record.PVCName) == "" {
+		return errors.New("generator workspace requires id, workflow id, namespace, and pvc name")
 	}
 	if record.State == "" {
 		record.State = WorkspacePending

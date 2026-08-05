@@ -27,7 +27,8 @@
 .authoring-status[data-state="Published"] i { background: var(--green); }
 .authoring-status[data-state="Failed"] i { background: #b8504c; }
 .authoring-plan-actions { justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
-.authoring-primary-action { flex: none; }
+.authoring-primary-action,
+.authoring-cancel-action { flex: none; }
 .authoring-narrow-tabs { display: none; }
 .authoring-body { display: grid; grid-template-columns: minmax(420px, 1.12fr) minmax(380px, 0.88fr); min-width: 0; min-height: 0; overflow: hidden; }
 .authoring-plan-pane,
@@ -90,5 +91,6 @@
   .authoring-body > .narrow-hidden { display: none; }
   .authoring-plan-actions .authoring-status,
   .authoring-plan-actions .authoring-meta,
-  .authoring-plan-actions .authoring-primary-action { display: none; }
+  .authoring-plan-actions .authoring-primary-action,
+  .authoring-plan-actions .authoring-cancel-action { display: none; }
 }

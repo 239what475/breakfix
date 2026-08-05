@@ -85,17 +85,19 @@ func (h *Handler) streamAuthoringTurn(c *gin.Context, runID string) {
 	c.Status(http.StatusOK)
 	stream.WriteSSE(c, "ready", authoringStreamEvent{RunID: runID})
 
-	content, err := h.authoring.RunTurn(c.Request.Context(), runID, func(event appauthoring.StreamEvent) {
-		stream.WriteSSE(c, "delta", authoringStreamEvent{RunID: runID, Content: event.Content})
+	requestCtx := c.Request.Context()
+	content, err := h.authoring.RunTurn(h.agentRuntimeContext(), runID, func(event appauthoring.StreamEvent) {
+		if requestCtx.Err() == nil {
+			stream.WriteSSE(c, "delta", authoringStreamEvent{RunID: runID, Content: event.Content})
+		}
 	})
 	if err == nil {
-		stream.WriteSSE(c, "complete", authoringStreamEvent{RunID: runID, Content: content})
+		if requestCtx.Err() == nil {
+			stream.WriteSSE(c, "complete", authoringStreamEvent{RunID: runID, Content: content})
+		}
 		return
 	}
-	if failErr := h.authoring.FailTurn(context.Background(), runID, err.Error()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
-		slog.Error("finalize direct authoring turn", "run_id", runID, "err", errors.Join(err, failErr))
-	}
-	if c.Request.Context().Err() == nil {
+	if requestCtx.Err() == nil {
 		stream.WriteSSE(c, "error", authoringStreamEvent{RunID: runID, Content: err.Error()})
 	}
 }
@@ -119,6 +121,36 @@ func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
 		return
 	}
 	h.writeAuthoringSession(c, user, sessionID)
+}
+
+// CancelAuthoringGeneration relinquishes the currently confirmed Plan. The
+// workflow transition is synchronous and ownership-fenced; remote workspace
+// cleanup is deliberately asynchronous and idempotent.
+func (h *Handler) CancelAuthoringGeneration(c *gin.Context, sessionID, workflowID string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	workflow, err := h.db.Generation.CancelAuthoringGenerationWorkflow(c.Request.Context(), sessionID, user.ID, workflowID, time.Now().UTC())
+	if err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	h.retireGeneratorWorkspace(workflow.ID)
+	h.writeAuthoringSession(c, user, sessionID)
+}
+
+func (h *Handler) retireGeneratorWorkspace(workflowID string) {
+	if h == nil || h.generatorWorkspace == nil || strings.TrimSpace(workflowID) == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.generatorWorkspace.Retire(ctx, workflowID); err != nil {
+			slog.Warn("retire cancelled generator workspace", "workflow_id", workflowID, "err", err)
+		}
+	}()
 }
 
 // ConfirmAuthoringContent moves the frozen verified candidate into the

@@ -203,7 +203,7 @@ func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficul
 	if err := mutate(&plan); err != nil {
 		return "", invalidToolInput(err)
 	}
-	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.StageRevision, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
+	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.RunAttempt, c.stage.StageRevision, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
 	if err != nil {
 		return "", err
 	}

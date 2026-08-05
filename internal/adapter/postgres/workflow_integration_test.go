@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -225,7 +226,7 @@ func TestGenerationClassificationAdjustmentRetainsItsPinnedRoadmapRevision(t *te
 	run = startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, resumedAt)
 	output := existingClassification(initialRoadmap, candidate.ID)
 	output.Tags = nil
-	if _, err := database.Generation.FinalizeGenerationClassificationAdjustment(ctx, claim, generation.ClassificationAdjustment{
+	if err := database.Generation.FinalizeGenerationClassificationAdjustment(ctx, claim, generation.ClassificationAdjustment{
 		RunID: run.ID, ChangeScope: generation.ClassificationChangeClassification, Output: &output,
 	}, resumedAt); err != nil {
 		t.Fatalf("persist adjusted proposal: %v", err)
@@ -319,14 +320,34 @@ func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
 	}
 }
 
-func TestConfirmedPlanSupersedesOnlyAReviewWorkflow(t *testing.T) {
+func TestConfirmedPlanRequiresCancellationOfThePriorWorkflow(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 4, 11, 0, 0, 0, time.UTC)
 	publishWorkflowRoadmap(t, database, now)
 	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
 	advanceToVerifiedCandidate(t, database, workflow.ID, now)
+	repeated, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
+		PlanRevision: 1, IdempotencyKey: "start-workflow",
+	}, now.Add(30*time.Second))
+	if err != nil {
+		t.Fatalf("repeat confirmed workflow: %v", err)
+	}
+	if repeated.ID != workflow.ID {
+		t.Fatalf("repeat confirmation created workflow %q, want %q", repeated.ID, workflow.ID)
+	}
+	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, generationTestPlan(), authoring.StateIntentReview); !errors.Is(err, authoring.ErrInvalidState) {
+		t.Fatalf("replace plan while workflow is active = %v, want invalid state", err)
+	}
 
+	if _, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
+		PlanRevision: 2, IdempotencyKey: "start-replacement",
+	}, now.Add(time.Minute)); !errors.Is(err, authoring.ErrInvalidState) {
+		t.Fatalf("start replacement without cancellation = %v, want invalid state", err)
+	}
+	if _, err := database.Generation.CancelAuthoringGenerationWorkflow(ctx, sessionID, userID, workflow.ID, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("cancel prior workflow: %v", err)
+	}
 	plan := generationTestPlan()
 	plan.Overview = "A replacement authoring plan creates a separate workflow."
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, plan, authoring.StateIntentReview); err != nil {
@@ -334,28 +355,213 @@ func TestConfirmedPlanSupersedesOnlyAReviewWorkflow(t *testing.T) {
 	}
 	replacement, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
 		PlanRevision: 2, IdempotencyKey: "start-replacement",
-	}, now.Add(time.Minute))
+	}, now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("start replacement workflow: %v", err)
 	}
 	if replacement.ID == workflow.ID || replacement.SourceRevision != "2" || replacement.State != generation.StateGenerating {
 		t.Fatalf("replacement workflow = %#v", replacement)
 	}
-	old, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+}
+
+func TestGenerationConfirmationWaitsForActiveAuthoringRun(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 13, 0, 0, 0, time.UTC)
+	userID := authoring.NewID("active-authoring-user")
+	if _, err := database.Identity.CreateUserWithAuth(userID, userID, "", ""); err != nil {
+		t.Fatalf("create workflow author: %v", err)
+	}
+	plan := generationTestPlan()
+	session, err := database.Authoring.CreateAuthoringSession(ctx, authoring.Session{ID: authoring.NewID("active-authoring"), UserID: userID}, plan)
 	if err != nil {
-		t.Fatalf("load superseded workflow: %v", err)
+		t.Fatalf("create authoring session: %v", err)
 	}
-	if old.State != generation.StateSuperseded || old.SupersededByWorkflowID != replacement.ID {
-		t.Fatalf("superseded workflow = %#v", old)
+	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, session.ID, session.UserID, 0, plan, authoring.StateIntentReview); err != nil {
+		t.Fatalf("confirm authoring plan: %v", err)
 	}
-	repeated, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
-		PlanRevision: 2, IdempotencyKey: "start-replacement",
-	}, now.Add(2*time.Minute))
+	if _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
+		Model: "test-model", PromptVersion: "authoring-v1",
+	}); err != nil {
+		t.Fatalf("start authoring run: %v", err)
+	}
+	if _, err := database.Generation.CreateGenerationWorkflow(ctx, session.ID, session.UserID, generation.StartConfirmation{
+		PlanRevision: 1, IdempotencyKey: "wait-for-authoring-run",
+	}, now); !errors.Is(err, authoring.ErrInvalidState) {
+		t.Fatalf("confirm generation during authoring run = %v, want invalid state", err)
+	}
+}
+
+func TestAuthoringRunRecoveryReplacesPrivateStageAndFencesOldAttempt(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	userID := authoring.NewID("authoring-recovery-user")
+	if _, err := database.Identity.CreateUserWithAuth(userID, userID, "", ""); err != nil {
+		t.Fatalf("create author: %v", err)
+	}
+	plan := generationTestPlan()
+	session, err := database.Authoring.CreateAuthoringSession(ctx, authoring.Session{ID: authoring.NewID("authoring-recovery"), UserID: userID}, plan)
 	if err != nil {
-		t.Fatalf("repeat replacement confirmation: %v", err)
+		t.Fatalf("create authoring session: %v", err)
 	}
-	if repeated.ID != replacement.ID {
-		t.Fatalf("idempotent replacement confirmation created %q, want %q", repeated.ID, replacement.ID)
+	stage, run, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
+		Model: "test-model", PromptVersion: "authoring-v1",
+	})
+	if err != nil {
+		t.Fatalf("start authoring run: %v", err)
+	}
+	next, err := database.Authoring.RetryAuthoringRun(ctx, run.ID, run.Attempt, "model transport unavailable", time.Now().UTC())
+	if err != nil || next == nil || next.Attempt != 2 {
+		t.Fatalf("retry authoring run = %#v, err=%v", next, err)
+	}
+	if _, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, stage.Plan, authoring.Change{
+		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
+	}); !errors.Is(err, agent.ErrRunActive) {
+		t.Fatalf("old attempt stage write = %v, want active-run fence", err)
+	}
+	replacement, err := database.Authoring.RestartInterruptedAuthoringRun(ctx, run.ID, "server restarted", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("restart authoring run: %v", err)
+	}
+	if replacement == nil || replacement.ID == run.ID || replacement.Attempt != 1 || replacement.DeadlineAt.IsZero() {
+		t.Fatalf("replacement authoring run = %#v", replacement)
+	}
+	interrupted, err := database.Agent.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("read interrupted authoring run: %v", err)
+	}
+	if interrupted.Status != agent.RunInterrupted {
+		t.Fatalf("interrupted authoring run = %#v", interrupted)
+	}
+	if _, err := database.Authoring.GetAuthoringStage(ctx, run.ID); !errors.Is(err, authoring.ErrNotFound) {
+		t.Fatalf("old private stage still exists: %v", err)
+	}
+	replacementStage, err := database.Authoring.GetAuthoringStage(ctx, replacement.ID)
+	if err != nil {
+		t.Fatalf("read replacement stage: %v", err)
+	}
+	if replacementStage.RunAttempt != 1 || replacementStage.BaseRevision != session.CurrentRevision || replacementStage.Plan.Metadata.Title != plan.Metadata.Title {
+		t.Fatalf("replacement stage = %#v", replacementStage)
+	}
+	messages, err := database.Authoring.ListMessages(ctx, session.RuntimeSessionID)
+	if err != nil {
+		t.Fatalf("read authoring messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Role != "user" {
+		t.Fatalf("restart rewrote authoring conversation: %#v", messages)
+	}
+}
+
+func TestInteractiveAssistantRunRecoveryCreatesFreshBudget(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	session, err := database.Agent.CreateSession(ctx, agent.Session{
+		ID: agent.NewID("assistant-session"), Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one", UserRef: "user-one",
+	})
+	if err != nil {
+		t.Fatalf("create assistant session: %v", err)
+	}
+	run, err := database.Agent.CreateMessageAndRun(ctx, agent.Message{
+		ID: agent.NewID("assistant-message"), SessionID: session.ID, Role: "user", Content: "请分析当前故障。",
+	}, agent.CreateRun{
+		ID: agent.NewID("assistant-run"), SessionID: session.ID, Purpose: "assistant", OwnerKind: "environment", OwnerRef: "environment-one",
+		InputRevision: "environment-one", Input: []byte(`{"current_window":"shell-1"}`), Model: "test-model", PromptVersion: "assistant-v1",
+	})
+	if err != nil {
+		t.Fatalf("start assistant run: %v", err)
+	}
+	replacement, err := database.Agent.RestartRun(ctx, run.ID, "server restarted", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("restart assistant run: %v", err)
+	}
+	if replacement.ID == run.ID || replacement.Attempt != 1 || replacement.DeadlineAt.IsZero() || string(replacement.Input) != string(run.Input) {
+		t.Fatalf("replacement assistant run = %#v", replacement)
+	}
+	interrupted, err := database.Agent.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("read interrupted assistant run: %v", err)
+	}
+	if interrupted.Status != agent.RunInterrupted {
+		t.Fatalf("interrupted assistant run = %#v", interrupted)
+	}
+	messages, err := database.Agent.ListMessages(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("read assistant messages: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Content != "请分析当前故障。" {
+		t.Fatalf("restart rewrote assistant conversation: %#v", messages)
+	}
+}
+
+func TestGenerationAgentRunInterruptionCreatesReplacementWithNewBudget(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 13, 15, 0, 0, time.UTC)
+	publishWorkflowRoadmap(t, database, now)
+	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "server-before-restart", now)
+	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
+
+	interrupted, err := database.Generation.InterruptActiveGenerationAgentRuns(ctx, "server restarted", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("interrupt active generation runs: %v", err)
+	}
+	if len(interrupted) != 1 || interrupted[0].WorkflowID != workflow.ID || interrupted[0].State != generation.StateGenerating {
+		t.Fatalf("interrupted runs = %#v", interrupted)
+	}
+	stored, err := database.Agent.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("read interrupted run: %v", err)
+	}
+	if stored.Status != agent.RunInterrupted {
+		t.Fatalf("interrupted run status = %s, want %s", stored.Status, agent.RunInterrupted)
+	}
+	replacementClaim := claimGenerationWorkflow(t, database, workflow.ID, "server-after-restart", now.Add(time.Minute))
+	replacement := startGenerationRun(t, database, replacementClaim, generationapp.GeneratorPurpose, now.Add(time.Minute))
+	if replacement.ID == run.ID || replacement.Attempt != 1 {
+		t.Fatalf("replacement run = %#v, interrupted = %#v", replacement, run)
+	}
+}
+
+func TestGenerationAgentRunUsesFiveTechnicalAttempts(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 13, 30, 0, 0, time.UTC)
+	publishWorkflowRoadmap(t, database, now)
+	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "server-retry", now)
+	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
+	for attempt := 1; attempt <= agent.MaxAttempts; attempt++ {
+		next, err := database.Generation.RetryGenerationAgentRun(ctx, claim, run.ID, "model transport unavailable", now.Add(time.Duration(attempt)*time.Second))
+		if err != nil {
+			t.Fatalf("record technical failure %d: %v", attempt, err)
+		}
+		if attempt < agent.MaxAttempts {
+			if next == nil || next.ID != run.ID || next.Attempt != attempt+1 {
+				t.Fatalf("retry %d = %#v", attempt, next)
+			}
+			run = next
+			continue
+		}
+		if next != nil {
+			t.Fatalf("exhausted retry returned another attempt: %#v", next)
+		}
+	}
+	stored, err := database.Agent.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("read exhausted run: %v", err)
+	}
+	if stored.Status != agent.RunFailed || stored.Attempt != agent.MaxAttempts {
+		t.Fatalf("exhausted agent run = %#v", stored)
+	}
+	exhausted, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("read exhausted workflow: %v", err)
+	}
+	if exhausted.State != generation.StateFailed {
+		t.Fatalf("exhausted workflow state = %s, want %s", exhausted.State, generation.StateFailed)
 	}
 }
 
@@ -397,7 +603,7 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 		t.Fatalf("classification-review candidate was eligible for artifact reap: %#v", reapClaim)
 	}
 
-	if err := database.Generation.CancelGenerationWorkflow(ctx, workflow.ID, "author cancelled generation", now.Add(time.Minute)); err != nil {
+	if _, err := database.Generation.CancelAuthoringGenerationWorkflow(ctx, sessionID, userID, workflow.ID, now.Add(time.Minute)); err != nil {
 		t.Fatalf("cancel generation workflow: %v", err)
 	}
 	for _, kind := range []generation.ResourceReapKind{
@@ -514,7 +720,16 @@ func generationTestPlan() authoring.Plan {
 
 func claimGenerationWorkflow(t *testing.T, database *Store, workflowID, workerID string, now time.Time) generation.Claim {
 	t.Helper()
-	claim, err := database.Generation.ClaimGenerationWorkflow(context.Background(), workerID, time.Minute, now)
+	workflow, err := database.Generation.GetGenerationWorkflow(context.Background(), workflowID)
+	if err != nil {
+		t.Fatalf("read generation workflow before claim: %v", err)
+	}
+	var claim *generation.Claim
+	if workflow.State == generation.StateGenerating || workflow.State == generation.StateJudging || workflow.State == generation.StateClassifying {
+		claim, err = database.Generation.ClaimGenerationAgentWorkflow(context.Background(), workerID, time.Minute, now)
+	} else {
+		claim, err = database.Generation.ClaimGenerationWorkflow(context.Background(), workerID, time.Minute, now)
+	}
 	if err != nil {
 		t.Fatalf("claim generation workflow: %v", err)
 	}
@@ -558,14 +773,13 @@ func finalizeGeneratedCandidate(t *testing.T, database *Store, claim generation.
 	t.Helper()
 	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
 	revision := generation.Revision{
-		ID:                 generation.IDForGeneratorRun(run.ID),
-		Source:             claim.Workflow.Source,
-		SourceRevision:     claim.Workflow.SourceRevision,
-		GeneratorSessionID: run.SessionID,
-		GeneratorRunID:     run.ID,
-		ArchivePath:        "/tmp/generated-candidate-" + string(rune('0'+sequence)) + ".tar.gz",
-		ArchiveSHA256:      workflowTestDigest,
-		Snapshot:           generationTestSnapshot(),
+		ID:             generation.IDForGeneratorRun(run.ID),
+		Source:         claim.Workflow.Source,
+		SourceRevision: claim.Workflow.SourceRevision,
+		GeneratorRunID: run.ID,
+		ArchivePath:    "/tmp/generated-candidate-" + string(rune('0'+sequence)) + ".tar.gz",
+		ArchiveSHA256:  workflowTestDigest,
+		Snapshot:       generationTestSnapshot(),
 	}
 	if err := database.Generation.FinalizeGeneratedCandidate(context.Background(), claim, run.ID, revision, now); err != nil {
 		t.Fatalf("finalize generated candidate %d: %v", sequence, err)

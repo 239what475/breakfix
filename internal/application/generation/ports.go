@@ -12,9 +12,11 @@ import (
 type WorkspaceRepository interface {
 	CreateGeneratorWorkspace(context.Context, generation.Workspace) (*generation.Workspace, error)
 	GetGeneratorWorkspace(context.Context, string) (*generation.Workspace, error)
+	GetCurrentGeneratorWorkspace(context.Context, string) (*generation.Workspace, error)
 	RecordGeneratorWorkspaceSandbox(context.Context, string, string, time.Time) error
 	ActivateGeneratorWorkspace(context.Context, string, string, time.Time) error
 	BeginGeneratorWorkspaceCleanup(context.Context, string, time.Time) (*generation.Workspace, error)
+	RetireCurrentGeneratorWorkspace(context.Context, string, time.Time) (*generation.Workspace, error)
 	MarkGeneratorWorkspaceDeleted(context.Context, string, time.Time) error
 	ListExpiredPendingGeneratorWorkspaces(context.Context, time.Time) ([]generation.Workspace, error)
 	ListDeletingGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)

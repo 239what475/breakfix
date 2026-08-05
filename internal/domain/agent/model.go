@@ -28,11 +28,17 @@ const (
 type RunStatus string
 
 const (
-	RunRunning   RunStatus = "running"
-	RunSucceeded RunStatus = "succeeded"
-	RunFailed    RunStatus = "failed"
-	RunCancelled RunStatus = "cancelled"
+	RunRunning     RunStatus = "running"
+	RunSucceeded   RunStatus = "succeeded"
+	RunFailed      RunStatus = "failed"
+	RunCancelled   RunStatus = "cancelled"
+	RunInterrupted RunStatus = "interrupted"
 )
+
+// MaxAttempts is the bounded retry budget for one logical AgentRun. A retry
+// reuses the same durable run identity while creating a fresh Eino instance.
+// An interrupted process creates a replacement AgentRun with a new budget.
+const MaxAttempts = 5
 
 type Session struct {
 	ID        string        `json:"id"`
@@ -66,6 +72,8 @@ type Run struct {
 	Status        RunStatus       `json:"status"`
 	Model         string          `json:"model"`
 	PromptVersion string          `json:"prompt_version"`
+	Attempt       int             `json:"attempt"`
+	DeadlineAt    time.Time       `json:"deadline_at"`
 	LastError     string          `json:"last_error,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
@@ -82,6 +90,9 @@ type CreateRun struct {
 	Input         json.RawMessage
 	Model         string
 	PromptVersion string
+	// DeadlineAt is an execution bound for this logical run. A zero value lets
+	// the repository apply its standard bounded deadline.
+	DeadlineAt time.Time
 }
 
 // Repository is deliberately limited to durable conversation data. Workflow
@@ -100,6 +111,9 @@ type Repository interface {
 	CompleteRunWithMessage(context.Context, string, Message, time.Time) error
 	CompleteRun(context.Context, string, time.Time) error
 	FailRun(context.Context, string, string, time.Time) error
+	RetryRun(context.Context, string, int, string, time.Time) (*Run, error)
+	InterruptRun(context.Context, string, string, time.Time) error
+	RestartRun(context.Context, string, string, time.Time) (*Run, error)
 	CancelRunsForOwner(context.Context, string, string, string, string, time.Time) (int64, error)
 }
 
@@ -118,6 +132,9 @@ func ValidateCreateRun(run CreateRun) error {
 	}
 	if strings.TrimSpace(run.Model) == "" || strings.TrimSpace(run.PromptVersion) == "" {
 		return errors.New("agent run requires model and prompt version")
+	}
+	if !run.DeadlineAt.IsZero() && !run.DeadlineAt.After(time.Now().UTC()) {
+		return errors.New("agent run deadline must be in the future")
 	}
 	if len(run.Input) > 0 && !json.Valid(run.Input) {
 		return errors.New("agent run input must be valid JSON")

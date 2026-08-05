@@ -139,11 +139,12 @@ func newMaintenanceTestRepository(now time.Time) *maintenanceTestRepository {
 	revision := roadmaptest.RuntimeRevision()
 	revision.Revision = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	subject := revision.Topics[0]
+	runtimeDeadline := time.Now().UTC().Add(time.Hour)
 	return &maintenanceTestRepository{
 		revision: revision,
 		workflow: domain.Workflow{
 			ID: "roadmap-workflow-test", BaseRevision: revision.Revision, State: domain.WorkflowRunning,
-			DeadlineAt: now.Add(time.Hour), NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+			DeadlineAt: runtimeDeadline, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		},
 		task: domain.Task{
 			ID: "roadmap-task-test", WorkflowID: "roadmap-workflow-test", EntryChallengeID: "challenge-node-runtime",

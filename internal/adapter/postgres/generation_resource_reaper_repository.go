@@ -132,7 +132,7 @@ func (d *GenerationRepository) EnsureGenerationResourceReaps(ctx context.Context
 	inactive := `NOT EXISTS (
 		SELECT 1 FROM generation_workflows workflow
 		WHERE workflow.candidate_revision_id = candidate_revisions.id
-		AND workflow.state NOT IN ('Generating', 'Published', 'Failed', 'Cancelled', 'Superseded')
+		AND workflow.state NOT IN ('Generating', 'Published', 'Failed', 'Cancelled')
 	)`
 	queries := []struct {
 		kind  generation.ResourceReapKind

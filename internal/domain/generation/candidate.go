@@ -225,45 +225,44 @@ func (p Publication) validateCommon() error {
 }
 
 type Revision struct {
-	ID                 string                    `json:"id"`
-	Source             Source                    `json:"source"`
-	SourceRevision     string                    `json:"source_revision"`
-	GeneratorSessionID string                    `json:"generator_session_id,omitempty"`
-	GeneratorRunID     string                    `json:"generator_run_id,omitempty"`
-	JudgeRunID         string                    `json:"judge_run_id,omitempty"`
-	ParentCandidateID  string                    `json:"parent_candidate_id,omitempty"`
-	RepairReason       string                    `json:"repair_reason,omitempty"`
-	ArchivePath        string                    `json:"-"`
-	ArchiveSHA256      string                    `json:"archive_sha256"`
-	Snapshot           ExecutionSnapshot         `json:"snapshot"`
-	Build              *BuildOutput              `json:"build,omitempty"`
-	Artifact           *ArtifactReference        `json:"artifact,omitempty"`
-	VerifyEnvironment  *VerificationEnvironment  `json:"verify_environment,omitempty"`
-	Verification       *VerificationReport       `json:"verification,omitempty"`
-	Failure            *Failure                  `json:"failure,omitempty"`
-	Classification     *ClassificationProposal   `json:"classification,omitempty"`
-	Publication        *Publication              `json:"publication,omitempty"`
-	CreatedAt          time.Time                 `json:"created_at"`
-	UpdatedAt          time.Time                 `json:"updated_at"`
-	VerifiedAt         *time.Time                `json:"verified_at,omitempty"`
-	PublishedAt        *time.Time                `json:"published_at,omitempty"`
+	ID                string                   `json:"id"`
+	Source            Source                   `json:"source"`
+	SourceRevision    string                   `json:"source_revision"`
+	GeneratorRunID    string                   `json:"generator_run_id,omitempty"`
+	JudgeRunID        string                   `json:"judge_run_id,omitempty"`
+	ParentCandidateID string                   `json:"parent_candidate_id,omitempty"`
+	RepairReason      string                   `json:"repair_reason,omitempty"`
+	ArchivePath       string                   `json:"-"`
+	ArchiveSHA256     string                   `json:"archive_sha256"`
+	Snapshot          ExecutionSnapshot        `json:"snapshot"`
+	Build             *BuildOutput             `json:"build,omitempty"`
+	Artifact          *ArtifactReference       `json:"artifact,omitempty"`
+	VerifyEnvironment *VerificationEnvironment `json:"verify_environment,omitempty"`
+	Verification      *VerificationReport      `json:"verification,omitempty"`
+	Failure           *Failure                 `json:"failure,omitempty"`
+	Classification    *ClassificationProposal  `json:"classification,omitempty"`
+	Publication       *Publication             `json:"publication,omitempty"`
+	CreatedAt         time.Time                `json:"created_at"`
+	UpdatedAt         time.Time                `json:"updated_at"`
+	VerifiedAt        *time.Time               `json:"verified_at,omitempty"`
+	PublishedAt       *time.Time               `json:"published_at,omitempty"`
 }
 
 // WorkerView deliberately excludes ArchivePath. Workers access candidate
 // bytes only through attempt-fenced Server endpoints and never learn the
 // Server volume layout.
 type WorkerView struct {
-	ID                string                    `json:"id"`
-	SourceRevision    string                    `json:"source_revision"`
-	ArchiveSHA256     string                    `json:"archive_sha256"`
-	Snapshot          ExecutionSnapshot         `json:"snapshot"`
-	Build             *BuildOutput              `json:"build,omitempty"`
-	Artifact          *ArtifactReference        `json:"artifact,omitempty"`
-	VerifyEnvironment *VerificationEnvironment  `json:"verification_environment,omitempty"`
-	Verification      *VerificationReport       `json:"verification,omitempty"`
-	Failure           *Failure                  `json:"failure,omitempty"`
-	Classification    *ClassificationProposal   `json:"classification,omitempty"`
-	Publication       *Publication              `json:"publication,omitempty"`
+	ID                string                   `json:"id"`
+	SourceRevision    string                   `json:"source_revision"`
+	ArchiveSHA256     string                   `json:"archive_sha256"`
+	Snapshot          ExecutionSnapshot        `json:"snapshot"`
+	Build             *BuildOutput             `json:"build,omitempty"`
+	Artifact          *ArtifactReference       `json:"artifact,omitempty"`
+	VerifyEnvironment *VerificationEnvironment `json:"verification_environment,omitempty"`
+	Verification      *VerificationReport      `json:"verification,omitempty"`
+	Failure           *Failure                 `json:"failure,omitempty"`
+	Classification    *ClassificationProposal  `json:"classification,omitempty"`
+	Publication       *Publication             `json:"publication,omitempty"`
 }
 
 func (r Revision) WorkerView() WorkerView {
@@ -296,7 +295,7 @@ func (r Revision) ValidateForCreate() error {
 	if strings.TrimSpace(r.ID) == "" || !r.Source.Valid() || strings.TrimSpace(r.SourceRevision) == "" {
 		return errors.New("candidate revision requires identity and source revision")
 	}
-	if r.Source.Kind == SourceAuthoring && (strings.TrimSpace(r.GeneratorSessionID) == "" || strings.TrimSpace(r.GeneratorRunID) == "") {
+	if r.Source.Kind == SourceAuthoring && strings.TrimSpace(r.GeneratorRunID) == "" {
 		return errors.New("authoring candidate revision requires generator lineage")
 	}
 	if strings.TrimSpace(r.ArchivePath) == "" || !ValidSHA256(r.ArchiveSHA256) {

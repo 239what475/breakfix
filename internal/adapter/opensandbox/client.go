@@ -19,7 +19,7 @@ const workspaceMountPath = "/workspace"
 
 const workspaceArchivePath = "/tmp/breakfix-generator-candidate.tar.gz"
 
-const workspaceRunMetadataKey = "breakfix.generator_run_id"
+const workspaceIDMetadataKey = "breakfix.generator_workspace_id"
 
 type Client struct {
 	connection sdk.ConnectionConfig
@@ -54,14 +54,14 @@ func New(cfg config.OpenSandboxConfig) (*Client, error) {
 }
 
 // FindWorkspace returns the one Sandbox that Server previously created for a
-// Generator Run. Metadata recovery closes the narrow window where OpenSandbox
+// Generator workspace. Metadata recovery closes the narrow window where OpenSandbox
 // accepted a create request but Server crashed before it persisted the ID.
-func (c *Client) FindWorkspace(ctx context.Context, generatorRunID string) (string, bool, error) {
-	if c == nil || c.lifecycle == nil || strings.TrimSpace(generatorRunID) == "" {
-		return "", false, errors.New("opensandbox workspace client and generator run id are required")
+func (c *Client) FindWorkspace(ctx context.Context, workspaceID string) (string, bool, error) {
+	if c == nil || c.lifecycle == nil || strings.TrimSpace(workspaceID) == "" {
+		return "", false, errors.New("opensandbox workspace client and workspace id are required")
 	}
 	result, err := c.lifecycle.ListSandboxes(ctx, sdk.ListOptions{
-		Metadata: map[string]string{workspaceRunMetadataKey: strings.TrimSpace(generatorRunID)},
+		Metadata: map[string]string{workspaceIDMetadataKey: strings.TrimSpace(workspaceID)},
 		Page:     1,
 		PageSize: 2,
 	})
@@ -69,7 +69,7 @@ func (c *Client) FindWorkspace(ctx context.Context, generatorRunID string) (stri
 		return "", false, fmt.Errorf("list generator workspaces: %w", err)
 	}
 	if result.Pagination.TotalItems > 1 || len(result.Items) > 1 {
-		return "", false, fmt.Errorf("generator run %q owns multiple opensandbox workspaces", generatorRunID)
+		return "", false, fmt.Errorf("generator workspace %q owns multiple opensandbox sandboxes", workspaceID)
 	}
 	if len(result.Items) == 0 {
 		return "", false, nil
@@ -83,16 +83,16 @@ func (c *Client) FindWorkspace(ctx context.Context, generatorRunID string) (stri
 // CreateWorkspace creates a Sandbox but deliberately does not wait for it to
 // become ready. Server persists the returned ID before waiting, so a worker
 // retry resumes the same Sandbox instead of creating a duplicate.
-func (c *Client) CreateWorkspace(ctx context.Context, pvcName, generatorRunID string) (string, error) {
-	if c == nil || c.lifecycle == nil || strings.TrimSpace(pvcName) == "" || strings.TrimSpace(generatorRunID) == "" {
-		return "", errors.New("opensandbox workspace client, pvc name, and generator run id are required")
+func (c *Client) CreateWorkspace(ctx context.Context, pvcName, workspaceID string) (string, error) {
+	if c == nil || c.lifecycle == nil || strings.TrimSpace(pvcName) == "" || strings.TrimSpace(workspaceID) == "" {
+		return "", errors.New("opensandbox workspace client, pvc name, and workspace id are required")
 	}
 	createIfMissing := false
 	sandbox, err := c.lifecycle.CreateSandbox(ctx, sdk.CreateSandboxRequest{
 		Image:          &sdk.ImageSpec{URI: c.image},
 		Entrypoint:     []string{"sh", "-c", "while true; do sleep 3600; done"},
 		ResourceLimits: sdk.ResourceLimits{"cpu": c.cpu, "memory": c.memory},
-		Metadata:       map[string]string{workspaceRunMetadataKey: strings.TrimSpace(generatorRunID)},
+		Metadata:       map[string]string{workspaceIDMetadataKey: strings.TrimSpace(workspaceID)},
 		NetworkPolicy:  &sdk.NetworkPolicy{DefaultAction: "deny"},
 		Volumes: []sdk.Volume{{
 			Name:      "workspace",
@@ -265,6 +265,17 @@ func (c *Client) Execute(ctx context.Context, sandboxID, command, cwd string, on
 		return Execution{}, errors.New("opensandbox command returned no exit code")
 	}
 	return Execution{ExitCode: *result.ExitCode, Output: result.Text()}, nil
+}
+
+// ExecuteWorkspace is the application-facing shape of Execute. It keeps the
+// OpenSandbox SDK result type inside this adapter while exposing only the
+// typed command result required by the Server workspace service.
+func (c *Client) ExecuteWorkspace(ctx context.Context, sandboxID, command, cwd string, onStdout func(string) error) (int, string, error) {
+	result, err := c.Execute(ctx, sandboxID, command, cwd, onStdout)
+	if err != nil {
+		return 0, "", err
+	}
+	return result.ExitCode, result.Output, nil
 }
 
 func (c *Client) connect(ctx context.Context, sandboxID string) (*sdk.Sandbox, error) {

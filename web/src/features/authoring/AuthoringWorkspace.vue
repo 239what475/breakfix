@@ -44,7 +44,6 @@ const workflowStateLabel: Record<string, string> = {
   Published: "已发布",
   Failed: "基础设施失败",
   Cancelled: "已取消",
-  Superseded: "已替代",
 };
 
 const usingVerifiedRevision = computed(() => !!session.value?.verified);
@@ -179,6 +178,15 @@ const canPublishClassification = computed(
     !!session.value?.candidate &&
     session.value?.verification?.passed === true,
 );
+const canCancelGeneration = computed(() => {
+  const workflow = session.value?.workflow;
+  return (
+    !!workflow &&
+    !busy.value &&
+    !session.value?.authoring_turn_active &&
+    !["Published", "Failed", "Cancelled"].includes(workflow.state)
+  );
+});
 const actionLabel = computed(() => {
   if (canGenerate.value) return "生成并验证题目";
   if (canConfirmContent.value) return "确认题目内容";
@@ -260,7 +268,7 @@ function shouldPoll() {
   return (
     session.value?.authoring_turn_active ||
     (!!currentWorkflow &&
-      !["NeedsAuthorReview", "NeedsClassificationReview", "Published", "Failed", "Cancelled", "Superseded"].includes(
+      !["NeedsAuthorReview", "NeedsClassificationReview", "Published", "Failed", "Cancelled"].includes(
         currentWorkflow.state,
       ))
   );
@@ -432,6 +440,22 @@ async function confirmAction() {
     schedulePoll();
   }
 }
+async function cancelGeneration() {
+  const current = session.value;
+  const workflow = current?.workflow;
+  if (!current || !workflow || !canCancelGeneration.value) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    session.value = await api.cancelAuthoringGeneration(current.id, workflow.id);
+    syncSelections();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "取消生成失败";
+  } finally {
+    busy.value = false;
+    schedulePoll();
+  }
+}
 function authoringIdempotencyKey() {
 	return globalThis.crypto?.randomUUID?.() ?? `authoring-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -465,6 +489,7 @@ onScopeDispose(() => {
       <button :class="{ active: narrowPane === 'plan' }" @click="narrowPane = 'plan'">内容</button>
       <button :class="{ active: narrowPane === 'chat' }" @click="narrowPane = 'chat'">对话</button>
       <button v-if="actionLabel" class="authoring-narrow-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
+      <button v-if="canCancelGeneration" class="authoring-narrow-cancel" :disabled="busy" @click="cancelGeneration">取消</button>
     </nav>
 
     <div class="authoring-body">
@@ -474,6 +499,7 @@ onScopeDispose(() => {
           <div class="authoring-plan-actions">
             <div v-if="session" class="authoring-status" :data-state="displayState"><i></i><span>{{ displayStateLabel }}</span><span>{{ session.candidate ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.workflow">{{ session.workflow.state }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
             <div v-if="session" class="authoring-meta"><span>{{ displayMetadata?.runtime || "runtime 待定" }}</span><span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span></div>
+            <button v-if="canCancelGeneration" class="secondary-button authoring-cancel-action" :disabled="busy" @click="cancelGeneration">取消生成</button>
             <button v-if="actionLabel" class="primary-button authoring-primary-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
           </div>
         </header>

@@ -35,6 +35,8 @@ var schemaAgentStatements = []string{
 		status TEXT NOT NULL,
 		model TEXT NOT NULL,
 		prompt_version TEXT NOT NULL,
+		attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1 AND attempt <= 5),
+		deadline_at TIMESTAMPTZ NOT NULL,
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,

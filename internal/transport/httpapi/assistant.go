@@ -2,9 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +11,6 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
 )
@@ -98,17 +95,19 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 	c.Status(http.StatusOK)
 	stream.WriteSSE(c, "ready", assistantStreamEvent{RunID: runID})
 
-	message, err := h.assistant.RunTurn(c.Request.Context(), sessionID, runID, request, func(event assistant.StreamEvent) {
-		stream.WriteSSE(c, event.Type, assistantStreamEvent{RunID: runID, Content: event.Content, Tool: event.Tool})
+	requestCtx := c.Request.Context()
+	message, err := h.assistant.RunTurn(h.agentRuntimeContext(), sessionID, runID, request, func(event assistant.StreamEvent) {
+		if requestCtx.Err() == nil {
+			stream.WriteSSE(c, event.Type, assistantStreamEvent{RunID: runID, Content: event.Content, Tool: event.Tool})
+		}
 	})
 	if err == nil {
-		stream.WriteSSE(c, "complete", assistantStreamComplete{RunID: runID, Message: message})
+		if requestCtx.Err() == nil {
+			stream.WriteSSE(c, "complete", assistantStreamComplete{RunID: runID, Message: message})
+		}
 		return
 	}
-	if failErr := h.assistant.FailTurn(context.Background(), runID, err.Error()); failErr != nil && !errors.Is(failErr, agent.ErrRunActive) {
-		slog.Error("finalize direct assistant turn", "run_id", runID, "err", errors.Join(err, failErr))
-	}
-	if c.Request.Context().Err() == nil {
+	if requestCtx.Err() == nil {
 		stream.WriteSSE(c, "error", assistantStreamEvent{RunID: runID, Content: err.Error()})
 	}
 }
@@ -122,14 +121,29 @@ func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, cha
 	if err != nil {
 		return assistant.Request{}, fmt.Errorf("no active environment for this challenge")
 	}
+	return h.assistantRequestForEnvironment(ctx, user.ID, entry, env, input)
+}
+
+// assistantRequestForEnvironment turns a previously resolved learning
+// Environment into the assistant's fixed read-only tool boundary. Startup
+// recovery uses the same path after resolving the Environment by its durable
+// UID instead of by the browser route's challenge id.
+func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID string, entry *challenge.Entry, env *activeEnvironment, input assistant.RunInput) (assistant.Request, error) {
+	if entry == nil || env == nil || strings.TrimSpace(userID) == "" {
+		return assistant.Request{}, fmt.Errorf("assistant environment context is incomplete")
+	}
+	if env.ChallengeRef != entry.ID {
+		return assistant.Request{}, fmt.Errorf("assistant environment challenge does not match the requested challenge")
+	}
 	if env.Phase == breakfixv1.EnvironmentDraining {
 		if err := h.resumeEnvironment(ctx, env); err != nil {
 			return assistant.Request{}, fmt.Errorf("resume environment: %w", err)
 		}
-		env, err = h.getEnvironment(ctx, env.Runtime, env.Name)
+		refreshed, err := h.getEnvironment(ctx, env.Runtime, env.Name)
 		if err != nil {
 			return assistant.Request{}, err
 		}
+		env = refreshed
 	}
 	if env.Phase != breakfixv1.EnvironmentReady || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		return assistant.Request{}, fmt.Errorf("environment is not ready for assistant context")
@@ -143,7 +157,7 @@ func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, cha
 		return assistant.Request{}, err
 	}
 	return assistant.Request{
-		UserID:           user.ID,
+		UserID:           userID,
 		EnvironmentUID:   env.UID,
 		EnvironmentName:  env.Name,
 		Runtime:          env.Runtime,

@@ -13,8 +13,8 @@ func TestGenerationStateClassification(t *testing.T) {
 		StateNeedsClassificationReview.Leaseable() || StateNeedsClassificationReview.DeadlineActive() {
 		t.Fatal("author review states must not hold a lease or consume execution time")
 	}
-	if !StatePublished.Terminal() || StatePublished.Leaseable() || !StateSuperseded.Terminal() {
-		t.Fatal("published and superseded workflows must be terminal")
+	if !StatePublished.Terminal() || StatePublished.Leaseable() || !StateCancelled.Terminal() {
+		t.Fatal("published and cancelled workflows must be terminal")
 	}
 }
 

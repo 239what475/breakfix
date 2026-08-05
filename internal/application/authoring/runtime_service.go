@@ -27,9 +27,12 @@ type RuntimeRepository interface {
 	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
 	StartAuthoringRun(context.Context, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, error)
 	ListMessages(context.Context, string) ([]agent.Message, error)
+	GetRun(context.Context, string) (*agent.Run, error)
 	LoadAuthoringExecution(context.Context, string) (*domain.Stage, []agent.Message, error)
-	UpdateAuthoringStage(context.Context, string, int64, domain.Plan, domain.Change) (*domain.Stage, error)
-	FinalizeAuthoringRun(context.Context, string, string, time.Time) (*domain.Revision, error)
+	UpdateAuthoringStage(context.Context, string, int, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+	FinalizeAuthoringRun(context.Context, string, int, string, time.Time) (*domain.Revision, error)
+	RetryAuthoringRun(context.Context, string, int, string, time.Time) (*agent.Run, error)
+	RestartInterruptedAuthoringRun(context.Context, string, string, time.Time) (*agent.Run, error)
 }
 
 // Executor owns the model call for one interactive authoring run. The Eino
@@ -39,7 +42,7 @@ type Executor interface {
 }
 
 type StageUpdater interface {
-	UpdateAuthoringStage(context.Context, string, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+	UpdateAuthoringStage(context.Context, string, int, int64, domain.Plan, domain.Change) (*domain.Stage, error)
 }
 
 type StreamEvent struct {
@@ -50,13 +53,12 @@ type StreamEvent struct {
 // completion. It delegates model execution through Executor.
 type RuntimeService struct {
 	repo     RuntimeRepository
-	failures agent.Repository
 	model    string
 	executor Executor
 }
 
-func NewRuntimeService(repo RuntimeRepository, failures agent.Repository, model string, executor Executor) *RuntimeService {
-	return &RuntimeService{repo: repo, failures: failures, model: strings.TrimSpace(model), executor: executor}
+func NewRuntimeService(repo RuntimeRepository, model string, executor Executor) *RuntimeService {
+	return &RuntimeService{repo: repo, model: strings.TrimSpace(model), executor: executor}
 }
 
 func (s *RuntimeService) Create(ctx context.Context, userID string) (*domain.Session, error) {
@@ -164,25 +166,52 @@ func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(St
 	if s == nil || s.repo == nil || s.executor == nil {
 		return "", errors.New("authoring turn executor is required")
 	}
-	stage, history, err := s.repo.LoadAuthoringExecution(ctx, runID)
+	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil {
 		return "", err
 	}
-	content, err := s.executor.Run(ctx, runID, *stage, history, s.repo, emit)
-	if err != nil {
-		return "", err
+	if run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.Status != agent.RunRunning {
+		return "", agent.ErrRunActive
 	}
-	if _, err := s.repo.FinalizeAuthoringRun(ctx, runID, content, time.Now().UTC()); err != nil {
-		return "", err
+	for {
+		stage, history, err := s.repo.LoadAuthoringExecution(ctx, run.ID)
+		if err != nil {
+			return "", err
+		}
+		if stage.RunAttempt != run.Attempt {
+			return "", agent.ErrRunActive
+		}
+		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
+		content, err := s.executor.Run(attemptCtx, run.ID, *stage, history, s.repo, emit)
+		if err == nil {
+			_, err = s.repo.FinalizeAuthoringRun(attemptCtx, run.ID, run.Attempt, content, time.Now().UTC())
+		}
+		cancel()
+		if err == nil {
+			return content, nil
+		}
+		if ctx.Err() != nil {
+			return "", err
+		}
+		next, retryErr := s.repo.RetryAuthoringRun(ctx, run.ID, run.Attempt, err.Error(), time.Now().UTC())
+		if retryErr != nil {
+			return "", retryErr
+		}
+		if next == nil {
+			return "", err
+		}
+		run = next
 	}
-	return content, nil
 }
 
-func (s *RuntimeService) FailTurn(ctx context.Context, runID, message string) error {
-	if s == nil || s.failures == nil {
-		return errors.New("authoring failure repository is required")
+// RestartInterruptedTurn replaces a Server-interrupted interactive execution
+// with a fresh Run. Its private stage is reconstructed from the committed Plan
+// and durable user message rather than resumed from prior model memory.
+func (s *RuntimeService) RestartInterruptedTurn(ctx context.Context, runID, reason string) (*agent.Run, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("authoring runtime repository is required")
 	}
-	return s.failures.FailRun(ctx, runID, message, time.Now().UTC())
+	return s.repo.RestartInterruptedAuthoringRun(ctx, runID, reason, time.Now().UTC())
 }
 
 func projectRuntimeMessages(values []agent.Message) ([]domain.Message, error) {

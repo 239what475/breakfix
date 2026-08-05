@@ -1,4 +1,4 @@
-package agent
+package llm
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/adapter/llm"
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	roadmapapp "github.com/breakfix/breakfix/internal/application/roadmap"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
@@ -67,7 +66,7 @@ func (e *Classifier) Classify(ctx context.Context, execution generation.Executio
 }
 
 func (e *Classifier) classifyInitial(ctx context.Context, conversation *classificationConversation, candidate *app.Candidate) (app.ClassificationCompletion, error) {
-	resultTool, err := llm.NewResultTool[classificationInitialResult]("submit_classification", "提交本题的 Topic 和 Tag 分类提案。", func(value classificationInitialResult) error {
+	resultTool, err := NewResultTool[classificationInitialResult]("submit_classification", "提交本题的 Topic 和 Tag 分类提案。", func(value classificationInitialResult) error {
 		_, err := conversation.initialOutput(value)
 		return err
 	})
@@ -91,7 +90,7 @@ func (e *Classifier) classifyInitial(ctx context.Context, conversation *classifi
 }
 
 func (e *Classifier) classifyAdjustment(ctx context.Context, conversation *classificationConversation, candidate *app.Candidate, feedback string) (app.ClassificationCompletion, error) {
-	resultTool, err := llm.NewResultTool[classificationAdjustmentResult]("submit_classification_adjustment", "提交分类反馈的处理结果。", func(value classificationAdjustmentResult) error {
+	resultTool, err := NewResultTool[classificationAdjustmentResult]("submit_classification_adjustment", "提交分类反馈的处理结果。", func(value classificationAdjustmentResult) error {
 		_, err := conversation.adjustment(value, feedback)
 		return err
 	})
@@ -116,7 +115,7 @@ func (e *Classifier) classifyAdjustment(ctx context.Context, conversation *class
 }
 
 func runClassificationAgent(ctx context.Context, cfg config.AgentConfig, instruction, prompt string, values []tool.InvokableTool) error {
-	chat, err := llm.NewChatModel(ctx, cfg)
+	chat, err := NewChatModel(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -137,7 +136,7 @@ func runClassificationAgent(ctx context.Context, cfg config.AgentConfig, instruc
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
 			IsRetryAble: func(_ context.Context, err error) bool {
-				return llm.IsTransientTransportError(err)
+				return IsTransientTransportError(err)
 			},
 		},
 	})
