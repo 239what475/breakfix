@@ -1314,8 +1314,9 @@ func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx con
 // FinalizeGenerationChallengePublication makes one already-promoted artifact
 // visible after Server has idempotently materialized its source directory. It
 // never calls a provider and is safe to retry after a Server interruption.
-func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision string, now time.Time) error {
-	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" || !roadmap.ValidRevision(contentRevision) || now.IsZero() {
+func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision, materializedRevision string, now time.Time) error {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" ||
+		!roadmap.ValidRevision(contentRevision) || !roadmap.ValidRevision(materializedRevision) || now.IsZero() {
 		return errors.New("generation challenge publication finalization is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -1355,7 +1356,7 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	if err != nil {
 		return err
 	}
-	nextRoadmap, topicWasNew, err := applyClassificationPublication(*current, *candidateRevision.Classification, publication)
+	nextRoadmap, topicWasNew, err := applyClassificationPublication(*current, *candidateRevision.Classification, publication, materializedRevision)
 	if err != nil {
 		return err
 	}
@@ -1466,8 +1467,11 @@ func prepareClassificationPublication(current roadmap.Revision, proposal generat
 	return publication, topicWasNew, nil
 }
 
-func applyClassificationPublication(current roadmap.Revision, proposal generation.ClassificationProposal, publication generation.Publication) (roadmap.Revision, bool, error) {
+func applyClassificationPublication(current roadmap.Revision, proposal generation.ClassificationProposal, publication generation.Publication, materializedRevision string) (roadmap.Revision, bool, error) {
 	if proposal.Result != generation.ClassificationProposed || publication.ClassificationRevision != proposal.Revision || publication.CandidateRevisionID != proposal.CandidateRevisionID {
+		return roadmap.Revision{}, false, generation.ErrClassificationConflict
+	}
+	if !roadmap.ValidRevision(materializedRevision) {
 		return roadmap.Revision{}, false, generation.ErrClassificationConflict
 	}
 	next := current.Clone()
@@ -1507,7 +1511,8 @@ func applyClassificationPublication(current roadmap.Revision, proposal generatio
 	}
 	next.ChallengeBindings = append(next.ChallengeBindings, roadmap.ChallengeBinding{
 		Challenge: roadmap.ChallengeRef{
-			ID: publication.ChallengeID, SourceRef: publication.ChallengeSourceRef, Title: publication.ChallengeTitle, ContentRevision: publication.ContentRevision,
+			ID: publication.ChallengeID, SourceRef: publication.ChallengeSourceRef, Title: publication.ChallengeTitle,
+			ContentRevision: publication.ContentRevision, SourceSlug: publication.SourceSlug, MaterializedRevision: materializedRevision,
 		},
 		Topic: topic,
 		Tags:  tags,

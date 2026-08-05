@@ -55,22 +55,15 @@ func PrepareRoadmapRevisionExport(revision roadmapdomain.Revision, challengesDir
 		return nil, fmt.Errorf("roadmap revision %q has no challenges to export", revision.Revision)
 	}
 
-	entries, err := challenge.List(challengesDir)
+	entries, err := materializedChallengeIndex(revision, challengesDir)
 	if err != nil {
-		return nil, fmt.Errorf("list materialized challenges: %w", err)
-	}
-	entriesByID := make(map[string]challenge.Entry, len(entries))
-	for _, entry := range entries {
-		entriesByID[entry.ID] = entry
+		return nil, fmt.Errorf("validate materialized challenges for export: %w", err)
 	}
 	exportedChallenges := make(map[string]exportedChallenge, len(revision.ChallengeBindings))
 	for _, binding := range revision.ChallengeBindings {
-		entry, exists := entriesByID[binding.Challenge.ID]
+		entry, exists := entries[binding.Challenge.ID]
 		if !exists {
 			return nil, fmt.Errorf("roadmap challenge %q is not materialized", binding.Challenge.SourceRef)
-		}
-		if entry.Title != binding.Challenge.Title || entry.ContentRevision != binding.Challenge.ContentRevision {
-			return nil, fmt.Errorf("materialized challenge %q does not match roadmap revision", binding.Challenge.SourceRef)
 		}
 		value, err := exportChallengeSource(binding, entry)
 		if err != nil {

@@ -3,28 +3,46 @@ package httpapi
 import (
 	"context"
 	"fmt"
-
-	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
-// validateStartup keeps the catalog in strict mode: a malformed published
-// directory prevents Server startup instead of making unrelated catalog
-// entries disappear or failing individual requests unpredictably.
+// validateStartup keeps the catalog in strict mode: a Roadmap binding that no
+// longer matches its materialized source prevents Server startup instead of
+// making the damaged challenge silently disappear from reads.
 func (h *Handler) validateStartup() error {
 	if h == nil {
 		return fmt.Errorf("server handler is not configured")
 	}
-	if _, err := challenge.List(h.challengesDir); err != nil {
+	if h.db == nil {
+		return nil
+	}
+	if h.catalog == nil {
+		return fmt.Errorf("catalog service is not configured")
+	}
+	if err := h.catalog.CheckIntegrity(context.Background()); err != nil {
 		return fmt.Errorf("validate challenge catalog: %w", err)
 	}
 	return nil
 }
 
 // validateReadiness defines the Server's core Kubernetes readiness boundary.
-// A live Node provider is deliberately not part of it: Incus being unavailable
-// must not withdraw catalog, authoring, or VK8s traffic from the Service.
-func (h *Handler) validateReadiness(_ context.Context) error {
-	return h.validateStartup()
+// It reuses the full materialized Catalog integrity check without waiting for a
+// configured release to become available, so a first Catalog bootstrap cannot
+// deadlock Server and Runtime Worker startup. A live Node provider is likewise
+// not part of this boundary.
+func (h *Handler) validateReadiness(ctx context.Context) error {
+	if h == nil {
+		return fmt.Errorf("server handler is not configured")
+	}
+	if h.db == nil {
+		return nil
+	}
+	if h.catalog == nil {
+		return fmt.Errorf("catalog service is not configured")
+	}
+	if err := h.catalog.Readiness(ctx); err != nil {
+		return fmt.Errorf("validate challenge catalog readiness: %w", err)
+	}
+	return nil
 }
 
 // validateNodeProviderCapability exposes the live Node provider contract

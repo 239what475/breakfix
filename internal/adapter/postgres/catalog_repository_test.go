@@ -117,7 +117,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	}
 
 	revision, err := roadmap.CompilePortable(portable, map[string]roadmap.ChallengeRef{
-		binding.Challenge.Path: {ID: challengeID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: binding.Challenge.ContentRevision},
+		binding.Challenge.Path: {ID: challengeID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: binding.Challenge.ContentRevision, SourceSlug: intent.SourceSlug, MaterializedRevision: "sha256:" + strings.Repeat("f", 64)},
 	})
 	if err != nil {
 		t.Fatalf("compile catalog roadmap revision: %v", err)

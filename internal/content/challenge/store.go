@@ -1,17 +1,15 @@
 package challenge
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	contentrevision "github.com/breakfix/breakfix/internal/content/revision"
 	"gopkg.in/yaml.v3"
 )
 
@@ -164,43 +162,15 @@ func loadSpec(dir string) (*Spec, error) {
 }
 
 // artifactRevision covers every regular file in the published challenge
-// directory, not only challenge.yaml. Roadmap bindings therefore become stale
-// when the problem, solution, checkpoint implementation, or runtime setup
-// changes even if manifest metadata stays identical.
+// directory, including the executable bit. Roadmap bindings therefore become
+// stale when the problem, solution, checkpoint implementation, runtime setup,
+// or executable mode changes even if manifest metadata stays identical.
 func artifactRevision(dir string) (string, error) {
-	files := make([]string, 0)
-	if err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
-			return fmt.Errorf("challenge revision does not allow non-regular file %s", path)
-		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		files = append(files, filepath.ToSlash(rel))
-		return nil
-	}); err != nil {
-		return "", fmt.Errorf("walk challenge artifact for revision: %w", err)
+	revision, err := contentrevision.Directory(dir)
+	if err != nil {
+		return "", fmt.Errorf("hash challenge artifact: %w", err)
 	}
-	slices.Sort(files)
-	hash := sha256.New()
-	for _, rel := range files {
-		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
-		if err != nil {
-			return "", fmt.Errorf("read challenge artifact for revision: %w", err)
-		}
-		_, _ = hash.Write([]byte(rel))
-		_, _ = hash.Write([]byte{0})
-		_, _ = hash.Write(data)
-		_, _ = hash.Write([]byte{0})
-	}
-	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+	return revision, nil
 }
 
 func entryFromSpec(dir string, spec *Spec) *Entry {

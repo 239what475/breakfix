@@ -40,7 +40,9 @@ k8s/checks.sh
 发布目录必须有合法的发布字段、非空标题/描述、`easy|medium|hard` 难度和至少一个 checkpoint。`runtime: node` 的 `image` 必须是完整的 64 位小写 Incus fingerprint；`runtime: k8s` 的 `image` 必须是完整的 `repository@sha256:<64 位小写摘要>` OCI 引用。Node manifest 还必须声明唯一逻辑节点；每个 checkpoint 必须声明执行节点，节点名称不能泄漏 Provider 实现。K8s checkpoint 没有节点字段。checkpoint 数组顺序只决定 UI 展示，不表达依赖或必须通过的先后顺序。
 
 Server 只在验证成功后为已发布目录写入平台托管字段；作者流程在 `ChallengePublishing` 写入，Catalog Release 在所有 entry
-验证完成后的原子 commit 写入。它不会改写已验证 candidate archive。
+验证完成后的原子 commit 写入。运行时 Roadmap binding 同时记录该目录的 `source_slug` 和
+`materialized_revision`；后者只属于平台运行时投影，不会写入 portable candidate 或 Catalog Release。
+它不会改写已验证 candidate archive。
 
 发布后的课程归属和横向筛选信息不属于 `challenge.yaml`。Catalog Release 在最终 commit 时将 Domain、Topic、Tag、Challenge binding 和关系图一并写入 immutable RoadmapRevision；只有与当前 revision 精确绑定的题目才进入公开 Catalog。
 

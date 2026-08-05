@@ -254,6 +254,7 @@ func publishMaintenanceRoadmap(t *testing.T, database *Store, now time.Time, cou
 			Challenge: roadmap.ChallengeRef{
 				ID: "challenge-" + segment, SourceRef: topic.SourceRef + "/" + segment,
 				Title: fmt.Sprintf("Roadmap maintenance %02d", index+1), ContentRevision: roadmapMaintenanceTestDigest,
+				SourceSlug: segment, MaterializedRevision: roadmapMaintenanceTestDigest,
 			},
 			Topic: topic, Tags: []roadmap.Ref{tag},
 		})

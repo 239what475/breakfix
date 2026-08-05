@@ -65,10 +65,12 @@ type Tag struct {
 }
 
 type ChallengeRef struct {
-	ID              string `yaml:"id" json:"id"`
-	SourceRef       string `yaml:"source_ref" json:"source_ref"`
-	Title           string `yaml:"title" json:"title"`
-	ContentRevision string `yaml:"content_revision" json:"content_revision"`
+	ID                   string `yaml:"id" json:"id"`
+	SourceRef            string `yaml:"source_ref" json:"source_ref"`
+	Title                string `yaml:"title" json:"title"`
+	ContentRevision      string `yaml:"content_revision" json:"content_revision"`
+	SourceSlug           string `yaml:"source_slug" json:"source_slug"`
+	MaterializedRevision string `yaml:"materialized_revision" json:"materialized_revision"`
 }
 
 type ChallengeBinding struct {

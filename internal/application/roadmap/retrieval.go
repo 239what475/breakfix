@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"slices"
 	"strings"
 	"unicode"
@@ -330,11 +331,12 @@ type FilesystemChallengeReader struct {
 }
 
 func (r FilesystemChallengeReader) ReadRoadmapChallenge(_ context.Context, binding domain.ChallengeBinding) (ChallengeContent, error) {
-	entry, err := challenge.Get(r.Root, binding.Challenge.ID)
+	entry, err := challenge.ValidateDir(filepath.Join(r.Root, binding.Challenge.SourceSlug))
 	if err != nil {
 		return ChallengeContent{}, fmt.Errorf("read roadmap challenge %q: %w", binding.Challenge.ID, err)
 	}
-	if entry.Title != binding.Challenge.Title || entry.ContentRevision != binding.Challenge.ContentRevision {
+	if entry.ID != binding.Challenge.ID || entry.Title != binding.Challenge.Title || entry.ContentRevision != binding.Challenge.ContentRevision ||
+		entry.SourceSlug != binding.Challenge.SourceSlug || entry.Revision != binding.Challenge.MaterializedRevision {
 		return ChallengeContent{}, fmt.Errorf("roadmap challenge %q no longer matches its fixed revision", binding.Challenge.ID)
 	}
 	content, err := challenge.ReadContent(entry)

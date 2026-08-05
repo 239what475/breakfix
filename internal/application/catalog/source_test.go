@@ -331,6 +331,7 @@ func writeCatalogFile(t *testing.T, path string, content []byte, mode os.FileMod
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G703 -- test paths are always constructed below a test-owned temporary root.
 	if err := os.WriteFile(path, content, mode); err != nil {
 		t.Fatal(err)
 	}

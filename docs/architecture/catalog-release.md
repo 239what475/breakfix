@@ -50,6 +50,23 @@ Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并�
 
 只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent；Runtime Worker 发布最终 runtime artifact；Server 再以 hash 校验和幂等 materialization 写入 source。最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Worker promotion 成功后 Server 崩溃时只恢复 materialization/finalization，绝不重复 promotion。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
 
+## 物化完整性
+
+运行时 `RoadmapRevision` 的每个 `ChallengeRef` 除 `content_revision` 外还保存
+`source_slug` 和 `materialized_revision`。`content_revision` 是 portable source 的身份；
+`materialized_revision` 是 Server data volume 上最终题目目录的身份，按规范化排序后的相对路径、
+文件内容和可执行位计算。它不属于 `PortableChallengeRef`，不会进入 Catalog Release。
+
+Catalog 读取以当前 Roadmap binding 为准，逐项找到对应的 materialized directory，并严格核对
+`id`、`title`、`content_revision`、`source_slug`、目录路径和 `materialized_revision`。目录缺失、
+路径改变、文件内容改变、可执行位改变或元数据不一致都会返回明确的 materialized integrity error，
+不会把题目静默过滤掉。未被当前 Roadmap 引用的额外目录允许存在，以覆盖物化先于 Roadmap 原子提交的
+正常窗口；它们不成为公开题目，也不参与完整性投影。
+
+Server 启动和 `/readyz` 使用同一完整性检查；`/readyz` 使用短超时并绕过 configured release
+availability gate。没有当前 Roadmap 时，缺失的题目根目录是合法的 bootstrap 状态，避免首次 Catalog
+安装时 Server 与 Runtime Worker 互相等待。
+
 source、Entry/Commit runtime 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。source staging 和每个 Runtime state 各自最多五次基础设施 attempt；lease 过期也消耗当前 state 的同一预算。重试不改变 `release_id + entry_or_commit_id + state + state_version` 的外部 identity，`runtime_attempt` 不参与命名。相同 digest 可幂等恢复；后续 release 只能添加新的 `source_ref`，不能原地修改或删除已安装内容。
 
 配置了 `catalog.release_reference` 时，Release 未达到 `Ready` 前，Server 在应用层拒绝题库读取以及作者的生成、分类和发布请求；`/readyz` 不依赖这个状态，Runtime Worker 可以继续通过内部 API 完成安装，避免启动死锁。
@@ -72,8 +89,8 @@ POST /internal/debug/roadmap-maintenance
 它按指定 immutable `RoadmapRevision` 流式返回
 `breakfix-roadmap-r{revision_id}.tar.gz`。归档根目录是完整的 portable Catalog Release：
 `release.yaml`、所有 `roadmap/` 定义、Challenge binding、Topic/Challenge 两张关系图，以及该 revision
-中每一道题的 portable source。Server 在开始写响应前读取并核对每个 materialized Challenge 的 title 和
-content revision；发布 manifest 中的 `id`、`source_slug`、`image`、`content_revision` 与
+中每一道题的 portable source。Server 在开始写响应前读取并核对每个 materialized Challenge 的 title、source slug、
+content revision 和 materialized revision；发布 manifest 中的 `id`、`source_slug`、`image`、`content_revision` 与
 `published_at` 会被移除。
 
 导出不包含数据库或运行时 ID、OCI/Incus artifact、构建中间产物、验证报告、临时文件或宿主机路径。

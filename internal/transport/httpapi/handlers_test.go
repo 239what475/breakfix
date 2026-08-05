@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
@@ -19,6 +21,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+func TestReadinessUsesMaterializedCatalogIntegrity(t *testing.T) {
+	root := t.TempDir()
+	writeTestChallenge(t, root)
+	handler := newHandlerForTest(t, testpostgres.New(t), nil, config.Config{DataDir: root})
+	if err := handler.validateReadiness(context.Background()); err != nil {
+		t.Fatalf("valid catalog readiness = %v", err)
+	}
+	writeTestFile(t, filepath.Join(root, "challenges", "demo", "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
+	if err := handler.validateReadiness(context.Background()); err == nil || !errors.Is(err, appcatalog.ErrMaterializedIntegrity) {
+		t.Fatalf("changed catalog readiness error = %v", err)
+	}
+}
 
 func TestGetChallengeProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)

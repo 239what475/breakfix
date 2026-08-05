@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/breakfix/breakfix/internal/content/challenge"
 )
 
 var sourceSegmentPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -129,6 +131,8 @@ func validateTags(values []Tag) (map[string]Ref, error) {
 
 func validateBindings(values []ChallengeBinding, topics, tags map[string]Ref) (map[string]Ref, error) {
 	result := make(map[string]Ref, len(values))
+	ids := make(map[string]struct{}, len(values))
+	slugs := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		challenge := value.Challenge
 		if !validRuntimeChallenge(challenge) || !validChallengeSourceRef(challenge.SourceRef, topics) {
@@ -141,10 +145,18 @@ func validateBindings(values []ChallengeBinding, topics, tags map[string]Ref) (m
 		if _, exists := result[challenge.SourceRef]; exists {
 			return nil, fmt.Errorf("duplicate challenge source_ref %q", challenge.SourceRef)
 		}
+		if _, exists := ids[challenge.ID]; exists {
+			return nil, fmt.Errorf("duplicate challenge id %q", challenge.ID)
+		}
+		if _, exists := slugs[challenge.SourceSlug]; exists {
+			return nil, fmt.Errorf("duplicate challenge source_slug %q", challenge.SourceSlug)
+		}
 		if err := validateTagRefs(value.Tags, tags); err != nil {
 			return nil, fmt.Errorf("challenge %q tags: %w", challenge.SourceRef, err)
 		}
 		result[challenge.SourceRef] = Ref{ID: challenge.ID, SourceRef: challenge.SourceRef, Title: challenge.Title}
+		ids[challenge.ID] = struct{}{}
+		slugs[challenge.SourceSlug] = struct{}{}
 	}
 	return result, nil
 }
@@ -390,7 +402,8 @@ func validChallengeSourceRefForTopic(value, topic string) bool {
 }
 
 func validRuntimeChallenge(value ChallengeRef) bool {
-	return strings.TrimSpace(value.ID) != "" && validText(value.Title) && ValidRevision(value.ContentRevision)
+	return strings.TrimSpace(value.ID) != "" && validText(value.Title) && challenge.ValidSourceSlug(value.SourceSlug) &&
+		ValidRevision(value.ContentRevision) && ValidRevision(value.MaterializedRevision)
 }
 
 func validPortableChallenge(value PortableChallengeRef) bool {

@@ -14,9 +14,9 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 	topicTwo := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTopic, "linux/services"), SourceRef: "linux/services", Title: "Services"}
 	topicThree := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTopic, "linux/networking"), SourceRef: "linux/networking", Title: "Networking"}
 	tag := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTag, "systemd"), SourceRef: "systemd", Title: "systemd"}
-	challengeOne := roadmap.ChallengeRef{ID: "chal-files", SourceRef: "linux/files/permissions", Title: "Repair file permissions", ContentRevision: catalogTestRevision('a')}
-	challengeTwo := roadmap.ChallengeRef{ID: "chal-services", SourceRef: "linux/services/restart", Title: "Restart a service", ContentRevision: catalogTestRevision('b')}
-	challengeThree := roadmap.ChallengeRef{ID: "chal-networking", SourceRef: "linux/networking/dns", Title: "Repair DNS", ContentRevision: catalogTestRevision('c')}
+	challengeOne := roadmap.ChallengeRef{ID: "chal-files", SourceRef: "linux/files/permissions", Title: "Repair file permissions", ContentRevision: catalogTestRevision('a'), SourceSlug: "repair-file-permissions", MaterializedRevision: catalogTestRevision('f')}
+	challengeTwo := roadmap.ChallengeRef{ID: "chal-services", SourceRef: "linux/services/restart", Title: "Restart a service", ContentRevision: catalogTestRevision('b'), SourceSlug: "restart-service", MaterializedRevision: catalogTestRevision('g')}
+	challengeThree := roadmap.ChallengeRef{ID: "chal-networking", SourceRef: "linux/networking/dns", Title: "Repair DNS", ContentRevision: catalogTestRevision('c'), SourceSlug: "repair-dns", MaterializedRevision: catalogTestRevision('h')}
 	revision := roadmap.Revision{
 		Revision: catalogTestRevision('d'),
 		Domains:  []roadmap.Domain{{ID: domain.ID, SourceRef: domain.SourceRef, Title: domain.Title, Definition: "Operate Linux systems.", Scope: "Operations.", NonGoals: "Kernel development."}},
@@ -40,11 +40,11 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 			{Source: roadmap.Ref{ID: challengeTwo.ID, SourceRef: challengeTwo.SourceRef, Title: challengeTwo.Title}, Target: roadmap.Ref{ID: challengeThree.ID, SourceRef: challengeThree.SourceRef, Title: challengeThree.Title}, Relation: roadmap.RelationPrecedes, Reason: "Restart the service first."},
 		},
 	}
-	entries := []challenge.Entry{
-		{ID: challengeOne.ID, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision},
-		{ID: challengeTwo.ID, Title: challengeTwo.Title, ContentRevision: challengeTwo.ContentRevision},
-		{ID: challengeThree.ID, Title: challengeThree.Title, ContentRevision: challengeThree.ContentRevision},
-		{ID: "chal-stale", Title: "Stale challenge", ContentRevision: catalogTestRevision('e')},
+	entries := map[string]challenge.Entry{
+		challengeOne.ID:   {ID: challengeOne.ID, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision, SourceSlug: challengeOne.SourceSlug, Revision: challengeOne.MaterializedRevision},
+		challengeTwo.ID:   {ID: challengeTwo.ID, Title: challengeTwo.Title, ContentRevision: challengeTwo.ContentRevision, SourceSlug: challengeTwo.SourceSlug, Revision: challengeTwo.MaterializedRevision},
+		challengeThree.ID: {ID: challengeThree.ID, Title: challengeThree.Title, ContentRevision: challengeThree.ContentRevision, SourceSlug: challengeThree.SourceSlug, Revision: challengeThree.MaterializedRevision},
+		"chal-stale":      {ID: "chal-stale", Title: "Stale challenge", ContentRevision: catalogTestRevision('e')},
 	}
 
 	projected := projectPublishedChallenges(revision, entries)

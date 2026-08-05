@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
@@ -36,6 +37,8 @@ type Service struct {
 	availability  *Availability
 }
 
+const readinessCheckTimeout = 2 * time.Second
+
 func NewService(challengesDir string, roadmap RoadmapStore, availability *Availability) *Service {
 	return &Service{challengesDir: challengesDir, roadmap: roadmap, availability: availability}
 }
@@ -50,28 +53,35 @@ func (s *Service) Ready(ctx context.Context) error {
 	return s.availability.Ready(ctx)
 }
 
+// CheckIntegrity validates the current runtime Roadmap against the published
+// source directories. It deliberately does not consult Availability: Server
+// readiness must remain usable while an optional configured release is still
+// being installed for the first time.
+func (s *Service) CheckIntegrity(ctx context.Context) error {
+	_, _, err := s.currentMaterialized(ctx)
+	return err
+}
+
+// Readiness applies a short database deadline to the full materialized
+// integrity check. It intentionally bypasses the configured release gate.
+func (s *Service) Readiness(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, readinessCheckTimeout)
+	defer cancel()
+	return s.CheckIntegrity(ctx)
+}
+
 // List exposes only challenge artifacts whose immutable content identity
 // matches a binding in the current RoadmapRevision.
 func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
-	if s == nil || s.roadmap == nil {
-		return nil, errors.New("catalog service roadmap is not configured")
-	}
 	if err := s.Ready(ctx); err != nil {
 		return nil, err
 	}
-	revision, err := s.roadmap.CurrentRoadmap(ctx)
-	if errors.Is(err, roadmapdomain.ErrNoCurrentRevision) {
-		return []PublishedChallenge{}, nil
-	}
+	revision, entries, err := s.currentMaterialized(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load current roadmap: %w", err)
+		return nil, err
 	}
 	if revision == nil {
 		return []PublishedChallenge{}, nil
-	}
-	entries, err := challenge.List(s.challengesDir)
-	if err != nil {
-		return nil, err
 	}
 	return projectPublishedChallenges(*revision, entries), nil
 }
@@ -97,7 +107,28 @@ func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, err
 	return nil, challenge.ErrNotFound
 }
 
-func projectPublishedChallenges(revision roadmapdomain.Revision, entries []challenge.Entry) []PublishedChallenge {
+func (s *Service) currentMaterialized(ctx context.Context) (*roadmapdomain.Revision, map[string]challenge.Entry, error) {
+	if s == nil || s.roadmap == nil {
+		return nil, nil, errors.New("catalog service roadmap is not configured")
+	}
+	revision, err := s.roadmap.CurrentRoadmap(ctx)
+	if errors.Is(err, roadmapdomain.ErrNoCurrentRevision) {
+		return nil, map[string]challenge.Entry{}, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("load current roadmap: %w", err)
+	}
+	if revision == nil {
+		return nil, map[string]challenge.Entry{}, nil
+	}
+	entries, err := materializedChallengeIndex(*revision, s.challengesDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return revision, entries, nil
+}
+
+func projectPublishedChallenges(revision roadmapdomain.Revision, entries map[string]challenge.Entry) []PublishedChallenge {
 	topics := make(map[string]roadmapdomain.Topic, len(revision.Topics))
 	for _, topic := range revision.Topics {
 		topics[topic.ID] = topic
@@ -106,20 +137,10 @@ func projectPublishedChallenges(revision roadmapdomain.Revision, entries []chall
 	for _, tag := range revision.Tags {
 		tags[tag.ID] = tag
 	}
-	bindings := make(map[string]roadmapdomain.ChallengeBinding, len(revision.ChallengeBindings))
+	result := make([]PublishedChallenge, 0, len(revision.ChallengeBindings))
 	for _, binding := range revision.ChallengeBindings {
-		bindings[binding.Challenge.ID] = binding
-	}
-	result := make([]PublishedChallenge, 0, len(entries))
-	for _, entry := range entries {
-		binding, exists := bindings[entry.ID]
-		if !exists || binding.Challenge.Title != entry.Title || binding.Challenge.ContentRevision != entry.ContentRevision {
-			continue
-		}
-		topic, exists := topics[binding.Topic.ID]
-		if !exists {
-			continue
-		}
+		entry := entries[binding.Challenge.ID]
+		topic := topics[binding.Topic.ID]
 		projection := ChallengeRoadmap{
 			Revision:           revision.Revision,
 			Domain:             topic.Domain,

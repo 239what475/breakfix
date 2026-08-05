@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
@@ -56,6 +57,47 @@ func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) 
 	commit := store.commits[0]
 	if commit.State != catalogdomain.CommitPrepared || commit.StateVersion != 1 || commit.RuntimeAttempt != 1 || commit.EntryID != entry.ID || commit.ChallengeID == "" {
 		t.Fatalf("commit intent = %#v", commit)
+	}
+}
+
+func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
+	sourceRoot := filepath.Join("..", "..", "..", "test", "fixtures", "catalog-release")
+	source, err := LoadPortableSource(sourceRoot)
+	if err != nil {
+		t.Fatalf("load fixture source: %v", err)
+	}
+	binding := source.Roadmap.ChallengeBindings[0]
+	entry := catalogdomain.Entry{
+		ID: "catalog-entry-materialized", ReleaseID: "catalog-release-materialized", SourcePath: source.Challenges[0].Path,
+		SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: source.Challenges[0].ContentRevision,
+	}
+	commit := catalogdomain.Commit{
+		ID: "catalog-commit-materialized", ReleaseID: entry.ReleaseID, EntryID: entry.ID, ChallengeID: "chal-materialized",
+		SourceSlug: challenge.SourceSlugFor(entry.Title, "chal-materialized"), State: catalogdomain.CommitMaterialized,
+		Artifact: &execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "catalog-materialized", IncusFingerprint: strings.Repeat("a", 64)},
+	}
+	installer, err := NewInstaller(InstallerConfig{
+		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
+		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: &installerStore{}, Roadmap: installerRoadmap{},
+	})
+	if err != nil {
+		t.Fatalf("create installer: %v", err)
+	}
+	installer.now = func() time.Time { return time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC) }
+	if err := installer.materializeCommit(source, entry, commit); err != nil {
+		t.Fatalf("materialize catalog commit: %v", err)
+	}
+	compiled, err := installer.compileRevision(context.Background(), source, catalogdomain.Release{ID: entry.ReleaseID}, []catalogdomain.Entry{entry}, []catalogdomain.Commit{commit})
+	if err != nil {
+		t.Fatalf("compile catalog revision: %v", err)
+	}
+	published, err := challenge.ValidateDir(filepath.Join(installer.challengesDir, commit.SourceSlug))
+	if err != nil {
+		t.Fatalf("read materialized challenge: %v", err)
+	}
+	got := compiled.ChallengeBindings[0].Challenge
+	if got.SourceSlug != published.SourceSlug || got.MaterializedRevision != published.Revision {
+		t.Fatalf("compiled materialized identity = %#v, published = %#v", got, published)
 	}
 }
 

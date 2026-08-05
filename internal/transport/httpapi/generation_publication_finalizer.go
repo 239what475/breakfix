@@ -42,7 +42,7 @@ func (h *Handler) finalizePendingGenerationPublications(ctx context.Context) err
 			slog.Warn("materialize promoted generation candidate", "workflow_id", value.Workflow.ID, "candidate_revision_id", value.Candidate.ID, "err", materializeErr)
 			continue
 		}
-		if err := h.db.Generation.FinalizeGenerationChallengePublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, time.Now().UTC()); err != nil {
+		if err := h.db.Generation.FinalizeGenerationChallengePublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, entry.Revision, time.Now().UTC()); err != nil {
 			slog.Warn("finalize promoted generation candidate", "workflow_id", value.Workflow.ID, "candidate_revision_id", value.Candidate.ID, "err", err)
 		}
 	}

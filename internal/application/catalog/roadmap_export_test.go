@@ -46,8 +46,8 @@ func TestRoadmapRevisionExportIsPortableAndByteStable(t *testing.T) {
 		},
 		Tags: []roadmap.Tag{{ID: tag.ID, SourceRef: tag.SourceRef, Title: tag.Title, Description: "The task materially depends on shell behavior."}},
 		ChallengeBindings: []roadmap.ChallengeBinding{
-			{Challenge: roadmap.ChallengeRef{ID: published.ID, SourceRef: "linux/shell-files/cleanup-logs", Title: published.Title, ContentRevision: published.ContentRevision}, Topic: topic, Tags: []roadmap.Ref{tag}},
-			{Challenge: roadmap.ChallengeRef{ID: publishedSecond.ID, SourceRef: "linux/services/cleanup-logs", Title: publishedSecond.Title, ContentRevision: publishedSecond.ContentRevision}, Topic: secondTopic},
+			{Challenge: roadmap.ChallengeRef{ID: published.ID, SourceRef: "linux/shell-files/cleanup-logs", Title: published.Title, ContentRevision: published.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision}, Topic: topic, Tags: []roadmap.Ref{tag}},
+			{Challenge: roadmap.ChallengeRef{ID: publishedSecond.ID, SourceRef: "linux/services/cleanup-logs", Title: publishedSecond.Title, ContentRevision: publishedSecond.ContentRevision, SourceSlug: publishedSecond.SourceSlug, MaterializedRevision: publishedSecond.Revision}, Topic: secondTopic},
 		},
 		TopicEdges: []roadmap.Edge{{Source: topic, Target: secondTopic, Relation: roadmap.RelationPrecedes, Reason: "Shell state provides useful operational context."}},
 		ChallengeEdges: []roadmap.Edge{{
@@ -91,6 +91,20 @@ func TestRoadmapRevisionExportIsPortableAndByteStable(t *testing.T) {
 	}
 	if got := source.Roadmap.ChallengeBindings[0].Challenge.ContentRevision; got != string(source.Challenges[0].ContentRevision) {
 		t.Fatalf("exported binding content revision = %q, want %q", got, source.Challenges[0].ContentRevision)
+	}
+	bindingDir := filepath.Join(extracted, "roadmap", "challenge-bindings")
+	bindingFiles, err := os.ReadDir(bindingDir)
+	if err != nil {
+		t.Fatalf("read exported challenge bindings: %v", err)
+	}
+	for _, bindingFile := range bindingFiles {
+		data, err := os.ReadFile(filepath.Join(bindingDir, bindingFile.Name()))
+		if err != nil {
+			t.Fatalf("read exported challenge binding: %v", err)
+		}
+		if bytes.Contains(data, []byte("materialized_revision")) || bytes.Contains(data, []byte("source_slug")) {
+			t.Fatalf("portable export retained runtime integrity fields: %s", data)
+		}
 	}
 	if len(source.Roadmap.TopicEdges) != 1 || len(source.Roadmap.ChallengeEdges) != 1 {
 		t.Fatalf("exported roadmap edges = %#v %#v", source.Roadmap.TopicEdges, source.Roadmap.ChallengeEdges)

@@ -102,7 +102,7 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	if len(pendingFinalizations) != 1 || pendingFinalizations[0].Workflow.ID != workflow.ID {
 		t.Fatalf("pending publication finalizations = %#v", pendingFinalizations)
 	}
-	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", publishAt); err != nil {
+	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", publishAt); err != nil {
 		t.Fatalf("finalize classification publication: %v", err)
 	}
 	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx)
@@ -128,6 +128,14 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	}
 	if !hasChallengeBinding(current, "platform-runtime/systemd-service-recovery/workflow-lifecycle") {
 		t.Fatalf("published roadmap omitted generated challenge binding: %#v", current.ChallengeBindings)
+	}
+	for _, binding := range current.ChallengeBindings {
+		if binding.Challenge.SourceRef != "platform-runtime/systemd-service-recovery/workflow-lifecycle" {
+			continue
+		}
+		if binding.Challenge.SourceSlug == "" || binding.Challenge.MaterializedRevision != "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
+			t.Fatalf("generated binding omitted materialized identity: %#v", binding.Challenge)
+		}
 	}
 }
 

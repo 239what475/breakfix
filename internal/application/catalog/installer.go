@@ -510,11 +510,18 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	if err != nil {
 		return err
 	}
-	published, err := challenge.Get(i.challengesDir, commit.ChallengeID)
+	target := filepath.Join(i.challengesDir, commit.SourceSlug)
+	if _, err := os.Lstat(target); err != nil {
+		if os.IsNotExist(err) {
+			return challenge.ErrNotFound
+		}
+		return err
+	}
+	published, err := challenge.ValidateDir(target)
 	if err != nil {
 		return err
 	}
-	if published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
+	if published.ID != commit.ChallengeID || published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
 		return errors.New("materialized catalog challenge conflicts with its durable commit")
 	}
 	return nil
@@ -553,9 +560,17 @@ func (i *Installer) compileRevision(ctx context.Context, source *PortableSource,
 		if !found || commit.State != catalogdomain.CommitMaterialized {
 			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("roadmap binding %q has no materialized catalog commit", binding.Challenge.Path))
 		}
+		published, err := challenge.ValidateDir(filepath.Join(i.challengesDir, commit.SourceSlug))
+		if err != nil {
+			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("read materialized catalog challenge %q: %w", binding.Challenge.Path, err))
+		}
+		if published.ID != commit.ChallengeID || published.SourceSlug != commit.SourceSlug || published.Title != binding.Challenge.Title ||
+			published.ContentRevision != binding.Challenge.ContentRevision {
+			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("materialized catalog challenge %q does not match its roadmap binding", binding.Challenge.Path))
+		}
 		values[binding.Challenge.Path] = roadmap.ChallengeRef{
 			ID: commit.ChallengeID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title,
-			ContentRevision: binding.Challenge.ContentRevision,
+			ContentRevision: binding.Challenge.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision,
 		}
 	}
 	compiled, err := roadmap.CompilePortable(source.Roadmap, values)
