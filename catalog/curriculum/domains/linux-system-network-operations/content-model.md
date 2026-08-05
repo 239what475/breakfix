@@ -2,7 +2,7 @@
 
 **状态：**课程内容契约，不是运行时 schema。
 
-本文件规定 Linux Domain 的教学信息如何进入 Topic 导读和场景卡。它不新增 `Skill`、`Concept` 或其他 taxonomy 层级：目录和筛选仍以 `Domain -> Topic -> Challenge` 为准；“考点”只是读者可理解的学习目标文本。
+本文件规定 Linux Domain 的教学信息如何进入 Topic 导读和场景卡。目录和筛选仍以 `Domain -> Topic -> Challenge` 为准；“考点”只是读者可理解的学习目标文本，不是新的目录层级或稳定关系键。
 
 ## 读者看到的三层内容
 

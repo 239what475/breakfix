@@ -100,60 +100,7 @@ Roadmap：
 
 P0 重构后的主边界是合理的：模型执行统一在 Server，确定性外部操作统一在 Runtime Worker，环境生命周期由 Controller 调和，PostgreSQL state machine 和 lease 代替了额外消息队列。当前复杂度主要来自真实环境、跨 provider 发布和可恢复工作流，而不是无意义的 Deployment 或数据库表。
 
-因此不建议再次做大范围组件合并。当前应先修正少数已经确认的安全、完整性和活性问题，再补齐题目修订生命周期。否则开始积累少量实验题没有问题，但直接积累上百道题后再补内容修订和恢复会明显更贵。
-
-## P0：当前应修正
-
-### 1. `VK8sEnvironment` 没有学习者网络隔离
-
-`NodeEnvironment` 会通过 Incus ACL 阻断题目节点访问平台私网，但 `VK8sEnvironment` 没有对应边界。当前 `buildVK8sValues` 只启用了 vcluster 的 ResourceQuota 和 LimitRange，没有启用或创建 NetworkPolicy；vcluster chart 的 `policies.networkPolicy.enabled` 默认又是 `false`。部署清单中唯一的 NetworkPolicy 只约束 Runtime Worker。
-
-因此，题目中由学习者控制的 Pod 可能访问宿主集群内的 Server 内部接口、PostgreSQL、OpenSandbox、Registry、Kubernetes API 或云厂商 metadata，实际可达范围取决于 CNI 和底层路由。这不仅是数据泄漏风险：结合当前未鉴权的调试接口，还可能直接触发控制面操作和导出非公开题目内容。
-
-建议：优先启用 vcluster chart 自带的 `policies.networkPolicy`，由它分别约束 control plane 与 workload；Breakfix 只补充 chart 不负责的 management terminal 策略和集群特定 CIDR。学习者 workload 只放行同一 Environment 内必要流量、DNS 和明确的公网出口；私网、Service/Pod CIDR、link-local、metadata、宿主 Kubernetes API 与平台 namespace 默认不可达。不要重复维护一整套与 vcluster chart 重叠的策略模板。必须从真实学习者 workload 发起隔离探测；Kind 默认网络若不执行 NetworkPolicy，只能验证资源渲染，不能作为安全验收。
-
-### 2. 调试接口没有形成安全边界
-
-`internal/transport/httpapi/server.go` 将下面两个接口直接注册在公开 Router 上，既没有 JWT，也没有内部 Worker key：
-
-- `POST /internal/debug/roadmap-maintenance`
-- `GET /internal/debug/roadmap-revisions/:revision_id/export`
-
-第二个接口会导出 portable Roadmap 和 challenge source，其中包含题解、检查脚本等非公开内容；第一个接口可以触发有模型成本、并会建立全局 Roadmap barrier 的维护流程。URL 中含有 `internal/debug` 不能提供任何隔离。
-
-建议：生产默认不注册调试路由；显式启用时使用独立内部凭据，不能复用用户 JWT 或 Runtime Worker 身份。部署入口也必须明确不把调试路由暴露到公网。
-
-### 3. 已发布题库损坏可能被静默隐藏
-
-当前读取从文件系统开始：`challenge.List` 在 challenges 根目录不存在时返回空列表，`catalog.Service` 再把现有文件投影到当前 Roadmap。它不会反向确认 Roadmap 中的每个 Challenge 都有对应文件。`/readyz` 也只调用同一个文件列表校验。
-
-因此存在以下真实故障语义：
-
-- Server data PVC 全部丢失时，PostgreSQL 中的 Release 仍是 `Ready`、Roadmap 仍有题目，但 `/readyz` 可以成功，Catalog 返回空列表。
-- 单个 challenge 目录丢失时，该题会被静默过滤，而不是报告 Catalog 损坏。
-- 未进入 Roadmap 的孤立目录可能继续留在 PVC 中，当前也没有一致性报告。
-
-建议：发布物化完成后计算覆盖全部文件路径、内容和可执行位的 `materialized_revision`，并把它写入运行时 Roadmap challenge binding；它是平台完整性字段，不进入 portable Catalog Release，原有 `content_revision` 继续表示 portable source。Catalog 投影再执行严格的单向检查：先按 ID 索引 materialized 文件，再遍历当前 Roadmap 的全部 binding；任何 binding 缺少文件，或 `id/title/content_revision/source_slug/materialized_revision` 不匹配，都返回明确的 Catalog integrity error，不能静默过滤。公开 `catalog.Service.List` 在通过现有 release availability gate 后使用该检查；`/readyz` 在短超时内复用检查逻辑，但必须绕过 configured release 的 `Ready` gate，否则初始安装期间会形成 Server 与 Runtime Worker 的启动死锁。该检查读取当前 Roadmap，因此同时验证 PostgreSQL 与 Server data PVC，不需要再增加独立 ping、周期扫描器或缓存。Roadmap 外的额外目录不能使 readiness 失败，因为“先物化文件、再提交 Roadmap”的正常发布窗口就会短暂产生这类目录；它们保持不可见，并在超过宽限期后由诊断和回收流程处理。
-
-### 4. Runtime Worker 的异步 Reaper 实际依赖 Action 队列空闲
-
-设计上，verification Environment、Node 临时构建镜像和 candidate staging artifact 应由后台 Reaper 异步回收。当前“异步”只表示清理不阻塞业务状态推进，并没有独立的后台执行循环：Worker 每轮先调用 `ProcessOne`，只要领取到 Build、Publish 或 Verify action 就立即进入下一轮；只有没有普通 action 时才调用 `reapOne`。
-
-因此，只要普通 action 持续存在，待清理资源就可能无限期积压。Server 在两个领取入口内又都固定先查 Generation、再查 Catalog，所以即使 Reaper 得到运行机会，持续的 Generation cleanup 仍可能让 Catalog cleanup 长期等待；普通 action 也存在相同的 scope 偏序。
-
-建议保持一个 Runtime Worker Deployment，但在每个进程中运行两个独立循环：`Action Loop` 专门领取 Build/Publish/Verify，`Reaper Loop` 专门领取资源清理。两者继续使用现有 lease，各自一次只执行一个任务；Server 的两个 claim 入口都在 Generation 与 Catalog 之间轮换，有任务的一侧为空时再领取另一侧。这样清理才是真正的后台工作，不需要增加 Deployment、通用队列或新的业务状态。
-
-### 5. Roadmap 尚未真正遵守统一 AgentRun 契约
-
-其他 Agent role 会在同一个逻辑 `AgentRun` 内单调增加 `attempt`，最多五次。Roadmap 当前每次 Planner/Reviewer 调用都会新建一个 AgentRun；一次技术失败就结束该 Run，再由 task call counter 创建下一个 Run。Server 重启时，Roadmap 的旧 Run 也不是启动前统一标记为 `Interrupted`，而是等 task lease 过期后被标成 `Failed`。
-
-这把三层不同概念混在了一起：一个 role 在一个语义 round 中的一次调用对应一个 AgentRun；同一 AgentRun 内最多五次 `attempt` 只处理模型传输、工具或 typed-result 等技术错误；Reviewer reject 是一次成功的语义结论，完成当前 Run 后才进入下一 round，并创建下一组 AgentRun。现有 Planner/Reviewer call counter 可以继续限制语义调用次数，但不能充当技术重试次数。Server 启动恢复时还应显式把未完成的 Roadmap Run 标记为 `Interrupted`、释放旧 task claim，并只从已持久化的 Planner/Reviewer 边界创建替代 Run；替代 Run 不增加 round 或 call counter。
-
-### 6. `NEXT.md` 已与实际领域模型冲突
-
-`NEXT.md` 仍以 Skill、TaxonomyWorkflow、mapping 和 taxonomy snapshot 描述后续题库；当前实现已经是 `Domain -> Topic -> Challenge`、Classification 和 RoadmapWorkflow。继续保留两套术语会直接误导下一阶段实现。
-
-建议：删除已完成的旧 Taxonomy 方案，只保留尚未实现的产品方向，并链接当前 `docs/architecture/` 契约。`TODO.md` 中已经完成的 P0 设计也应在本轮审查完成后归档，避免继续充当第二份正式架构文档。
+因此不建议再次做大范围组件合并。P0 的安全、完整性和活性问题已经完成修正；下一步应在积累大量题目之前补齐题目修订生命周期。否则开始积累少量实验题没有问题，但直接积累上百道题后再补内容修订和恢复会明显更贵。
 
 ## P1：扩大题库前补齐
 
@@ -218,6 +165,6 @@ Node/VK8s Controller 每四秒通过 Incus exec 或 Kubernetes exec 运行检查
 
 ## 建议顺序
 
-1. 先修 VK8s 网络隔离、调试接口、Catalog 完整性/readiness、Runtime 公平性和 Roadmap AgentRun 契约，并同步清理 `NEXT.md`。
-2. 在批量生产题目前设计 Challenge immutable revision/deprecation，并写清 PostgreSQL + PVC 的备份恢复契约。
-3. 用 5--10 道真实题验证完整内容生命周期和指标；只有观察到排队、checkpoint lag 或可用性瓶颈后，再做 P2 扩容。
+1. 在批量生产题目前设计 Challenge immutable revision/deprecation，并写清 PostgreSQL + PVC 的备份恢复契约。
+2. 用 5--10 道真实题验证完整内容生命周期和指标。
+3. 只有观察到排队、checkpoint lag 或可用性瓶颈后，再做 P2 扩容。
