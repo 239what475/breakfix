@@ -86,7 +86,14 @@ Catalog 的唯一课程读模型；portable release 只作为 immutable import s
 ## Roadmap Maintenance
 
 Roadmap maintenance 是 Server 内的异步 Planner/双 Reviewer 流程，不创建独立 Deployment 或 Runtime Worker action。
-启动和运行期间保持 idle barrier：任何 Generation execution state 或 Catalog commit 都不能与其并行。每个 task 的
-Planner/Reviewer 各有最多五次技术调用；耗尽后该 task 作为当前 workflow 的 `Failed` 结果完成，源 entry 保持未处理，
-自然进入下一次由新增题目阈值或手工调试入口触发的 maintenance workflow。Reviewer reject 开启同一 task 的下一语义 round，
-不消耗技术调用语义。最终只有 Server 合并已接受的 ChangeSet 并发布新的 RoadmapRevision。
+启动和运行期间保持 idle barrier：任何 Generation execution state 或 Catalog commit 都不能与其并行。一个 task 的一个
+Planner 规划或一个 Reviewer 审查是一次 semantic role call，并且恰好对应一个 `AgentRun`。该 Run 内的模型传输、工具调用
+或 typed-result 校验技术错误最多重试五次，只递增 `AgentRun.attempt`；task 的 role-call counter 只统计 semantic call。
+五次 attempt 或 Run deadline 耗尽后，该 Run 和 task 作为当前 workflow 的 `Failed` 结果完成，源 entry 保持未处理，自然进入
+下一次由新增题目阈值或手工调试入口触发的 maintenance workflow。Reviewer reject 是成功持久化的语义结果：两份 review 完成后
+才开启同一 task 的下一 semantic round，并创建新的 Planner/Reviewer Run。最终只有 Server 合并已接受的 ChangeSet 并发布新的
+RoadmapRevision。
+
+Server 启动和 task lease 接管都会先将旧的未完成 Roadmap Run 标记为 `Interrupted`。任务 lease 被释放后，系统依据已持久化的
+ChangeSet 和 review 创建替代 Run：缺少 ChangeSet 时只替代 Planner；已有 ChangeSet 时只替代尚未有 review 的角色。替代 Run
+不增加 semantic round 或 role-call counter，也不恢复未完成的模型上下文或工具执行。

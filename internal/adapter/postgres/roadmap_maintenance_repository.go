@@ -465,7 +465,9 @@ func (d *RoadmapRepository) RoadmapWorkflowEntries(ctx context.Context, workflow
 // snapshots. There is deliberately no arbitrary batch size: the workflow
 // snapshot, rather than a scheduler-side page, defines the complete unit of
 // incremental maintenance. Individual task leases permit Server replicas to
-// share that work without another worker queue or a process-local lock.
+// share that work without another worker queue or a process-local lock. An
+// expired owner never turns its unfinished model call into a failure: its Run
+// is interrupted and replaced from the task's committed boundary.
 func (d *RoadmapRepository) ClaimRoadmapTasks(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) ([]roadmap.TaskClaim, error) {
 	if strings.TrimSpace(workerID) == "" || leaseTTL <= 0 || now.IsZero() {
 		return nil, errors.New("roadmap task claim requires server identity, lease ttl, and current time")
@@ -512,10 +514,10 @@ func (d *RoadmapRepository) ClaimRoadmapTasks(ctx context.Context, workerID stri
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-			WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agent.RunFailed,
-			"roadmap task lease replaced before agent call completed", now, now, "roadmap-task", task.ID, agent.RunRunning); err != nil {
-			return nil, fmt.Errorf("abandon stale roadmap task agent runs: %w", err)
+		if task.State == roadmap.TaskRunning {
+			if err := interruptRoadmapTaskAgentRunsTx(ctx, tx, *task, "roadmap task lease expired before agent completion", now); err != nil {
+				return nil, err
+			}
 		}
 		owner := roadmap.NewLeaseOwner(workerID)
 		leaseVersion := task.LeaseVersion + 1
@@ -536,6 +538,63 @@ func (d *RoadmapRepository) ClaimRoadmapTasks(ctx context.Context, workerID stri
 		return nil, fmt.Errorf("commit roadmap task claims: %w", err)
 	}
 	return claims, nil
+}
+
+// RecoverInterruptedRoadmapAgentRuns is the Server startup recovery boundary
+// for Roadmap model execution. It only changes tasks that were actively leased
+// when the prior Server stopped. The committed ChangeSet and reviews decide
+// which interrupted role is replaced; no model execution is resumed.
+func (d *RoadmapRepository) RecoverInterruptedRoadmapAgentRuns(ctx context.Context, reason string, now time.Time) error {
+	if strings.TrimSpace(reason) == "" || now.IsZero() {
+		return errors.New("roadmap agent interruption requires reason and current time")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin roadmap agent interruption: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now = now.UTC()
+	rows, err := tx.QueryContext(ctx, `SELECT task.id
+		FROM roadmap_tasks task
+		JOIN roadmap_workflows workflow ON workflow.id = task.workflow_id
+		WHERE task.state = ? AND workflow.state = ?
+		FOR UPDATE OF task`, roadmap.TaskRunning, roadmap.WorkflowRunning)
+	if err != nil {
+		return fmt.Errorf("list active roadmap tasks for recovery: %w", err)
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan active roadmap task for recovery: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate active roadmap tasks for recovery: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close active roadmap tasks for recovery: %w", err)
+	}
+	for _, id := range ids {
+		task, err := scanRoadmapTask(tx.QueryRowContext(ctx, roadmapTaskSelect+` WHERE id = ? FOR UPDATE`, id))
+		if err != nil {
+			return err
+		}
+		if err := interruptRoadmapTaskAgentRunsTx(ctx, tx, *task, strings.TrimSpace(reason), now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE roadmap_tasks SET state = ?, lease_owner = '', lease_expires_at = NULL,
+			next_run_at = ?, updated_at = ? WHERE id = ?`, roadmap.TaskPending, now, now, task.ID); err != nil {
+			return fmt.Errorf("release recovered roadmap task claim: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *RoadmapRepository) RenewRoadmapTaskLease(ctx context.Context, claim roadmap.TaskClaim, leaseTTL time.Duration, now time.Time) error {
@@ -572,9 +631,9 @@ func (d *RoadmapRepository) GetRoadmapTaskClaim(ctx context.Context, taskID stri
 	return &roadmap.TaskClaim{Task: *task, LeaseCredential: credential}, nil
 }
 
-// StartRoadmapTaskAgentRun records a durable call before any model work
-// starts. The task lease fences the record, and a later owner marks an
-// unfinished call failed before it resumes the same task state.
+// StartRoadmapTaskAgentRun records one durable semantic call before model work
+// starts. A recovery replacement remains Running and is returned here under a
+// new task lease, so it never consumes another semantic role call.
 func (d *RoadmapRepository) StartRoadmapTaskAgentRun(ctx context.Context, claim roadmap.TaskClaim, role roadmap.AgentRole, model string, now time.Time) (*agent.Run, error) {
 	if !claim.Valid() || !role.Valid() || strings.TrimSpace(model) == "" || now.IsZero() {
 		return nil, errors.New("roadmap task agent run is invalid")
@@ -587,6 +646,19 @@ func (d *RoadmapRepository) StartRoadmapTaskAgentRun(ctx context.Context, claim 
 	task, workflow, err := lockRoadmapTaskClaimTx(ctx, tx, claim, now.UTC())
 	if err != nil {
 		return nil, err
+	}
+	if !roadmapTaskRoleRequired(*task, role) {
+		return nil, roadmap.ErrLeaseLost
+	}
+	active, err := activeRoadmapTaskAgentRunForRoleTx(ctx, tx, task.ID, role)
+	if err != nil {
+		return nil, err
+	}
+	if active != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return active, nil
 	}
 	calls := taskCallsForRole(*task, role)
 	if calls >= roadmap.MaxAgentCallsPerTask {
@@ -730,43 +802,60 @@ func (d *RoadmapRepository) FinalizeRoadmapTaskReview(ctx context.Context, claim
 	return updated, nil
 }
 
-// FailRoadmapTaskAgentRun consumes only the failed role's own five-call
-// budget. A successful peer review remains durable while the missing reviewer
-// is retried; once a role exhausts its budget the task becomes Failed.
-func (d *RoadmapRepository) FailRoadmapTaskAgentRun(ctx context.Context, claim roadmap.TaskClaim, runID string, role roadmap.AgentRole, message string, now time.Time) (*roadmap.Task, error) {
-	if !claim.Valid() || strings.TrimSpace(runID) == "" || !role.Valid() || strings.TrimSpace(message) == "" || now.IsZero() {
-		return nil, errors.New("roadmap task agent failure is invalid")
+// RetryRoadmapTaskAgentRun records a technical error within one logical
+// semantic call. A nil Run means the fifth attempt or the deadline has been
+// exhausted; that Run and its task are then terminally Failed together.
+func (d *RoadmapRepository) RetryRoadmapTaskAgentRun(ctx context.Context, claim roadmap.TaskClaim, runID string, role roadmap.AgentRole, expectedAttempt int, message string, now time.Time) (*agent.Run, error) {
+	if !claim.Valid() || strings.TrimSpace(runID) == "" || !role.Valid() || expectedAttempt < 1 || strings.TrimSpace(message) == "" || now.IsZero() {
+		return nil, errors.New("roadmap task agent retry is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin roadmap task agent failure: %w", err)
+		return nil, fmt.Errorf("begin roadmap task agent retry: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	task, _, err := lockRoadmapTaskClaimTx(ctx, tx, claim, now.UTC())
 	if err != nil {
 		return nil, err
 	}
-	if err := failRoadmapTaskAgentRunTx(ctx, tx, runID, task.ID, role, strings.TrimSpace(message), now.UTC()); err != nil {
+	run, err := lockRoadmapTaskAgentRunTx(ctx, tx, runID, task.ID, role)
+	if err != nil {
 		return nil, err
 	}
-	state := roadmap.TaskRunning
-	leaseOwner := task.LeaseOwner
-	var leaseExpiresAt any = task.LeaseExpiresAt
-	if taskCallsForRole(*task, role) >= roadmap.MaxAgentCallsPerTask {
-		state = roadmap.TaskFailed
-		leaseOwner = ""
-		leaseExpiresAt = nil
+	if run.Attempt != expectedAttempt {
+		return nil, roadmap.ErrLeaseLost
 	}
-	updated, err := scanRoadmapTask(tx.QueryRowContext(ctx, `UPDATE roadmap_tasks SET state = ?, lease_owner = ?, lease_expires_at = ?,
-		next_run_at = ?, last_error = ?, updated_at = ? WHERE id = ? RETURNING `+roadmapTaskColumns,
-		state, leaseOwner, leaseExpiresAt, now.UTC(), strings.TrimSpace(message), now.UTC(), task.ID))
-	if err != nil {
-		return nil, fmt.Errorf("record roadmap task agent failure: %w", err)
+	if run.Attempt < agent.MaxAttempts && run.DeadlineAt.After(now.UTC()) {
+		next, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs SET attempt = attempt + 1, last_error = ?, updated_at = ?
+			WHERE id = ? AND status = ? AND attempt = ? RETURNING `+agentRunColumns,
+			strings.TrimSpace(message), now.UTC(), run.ID, agent.RunRunning, expectedAttempt))
+		if err != nil {
+			return nil, fmt.Errorf("advance roadmap task agent attempt: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE roadmap_tasks SET last_error = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(message), now.UTC(), task.ID); err != nil {
+			return nil, fmt.Errorf("record roadmap task technical error: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return next, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND status = ? AND attempt = ?`, agent.RunFailed, strings.TrimSpace(message), now.UTC(), now.UTC(), run.ID, agent.RunRunning, expectedAttempt); err != nil {
+		return nil, fmt.Errorf("fail exhausted roadmap task agent run: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+		WHERE owner_kind = ? AND owner_ref = ? AND status = ?`, agent.RunFailed, strings.TrimSpace(message), now.UTC(), now.UTC(), "roadmap-task", task.ID, agent.RunRunning); err != nil {
+		return nil, fmt.Errorf("fail peer roadmap task agent runs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_tasks SET state = ?, lease_owner = '', lease_expires_at = NULL,
+		next_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?`, roadmap.TaskFailed, now.UTC(), strings.TrimSpace(message), now.UTC(), task.ID); err != nil {
+		return nil, fmt.Errorf("fail exhausted roadmap task: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return updated, nil
+	return nil, nil
 }
 
 func (d *RoadmapRepository) FailRoadmapTask(ctx context.Context, claim roadmap.TaskClaim, message string, now time.Time) (*roadmap.Task, error) {
@@ -796,6 +885,113 @@ func (d *RoadmapRepository) FailRoadmapTask(ctx context.Context, claim roadmap.T
 		return nil, err
 	}
 	return updated, nil
+}
+
+func roadmapTaskRoleRequired(task roadmap.Task, role roadmap.AgentRole) bool {
+	if task.ChangeSet == nil {
+		return role == roadmap.AgentPlanner
+	}
+	switch role {
+	case roadmap.AgentCurriculumReviewer:
+		return task.CurriculumReview == nil
+	case roadmap.AgentSREReviewer:
+		return task.SREReview == nil
+	default:
+		return false
+	}
+}
+
+func activeRoadmapTaskAgentRunForRoleTx(ctx context.Context, tx *Tx, taskID string, role roadmap.AgentRole) (*agent.Run, error) {
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE purpose = ? AND owner_kind = ? AND owner_ref = ?
+		AND status = ? ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`, role.Purpose(), "roadmap-task", taskID, agent.RunRunning))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load active roadmap %s run: %w", role, err)
+	}
+	return run, nil
+}
+
+func activeRoadmapTaskAgentRunsForUpdateTx(ctx context.Context, tx *Tx, taskID string) ([]agent.Run, error) {
+	rows, err := tx.QueryContext(ctx, agentRunSelect+` WHERE owner_kind = ? AND owner_ref = ? AND status = ?
+		ORDER BY created_at, id FOR UPDATE`, "roadmap-task", taskID, agent.RunRunning)
+	if err != nil {
+		return nil, fmt.Errorf("list active roadmap task agent runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	runs := make([]agent.Run, 0)
+	for rows.Next() {
+		run, err := scanAgentRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active roadmap task agent runs: %w", err)
+	}
+	return runs, nil
+}
+
+func lockRoadmapTaskAgentRunTx(ctx context.Context, tx *Tx, runID, taskID string, role roadmap.AgentRole) (*agent.Run, error) {
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE id = ? FOR UPDATE`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, agent.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load roadmap task agent run: %w", err)
+	}
+	if run.Purpose != role.Purpose() || run.OwnerKind != "roadmap-task" || run.OwnerRef != taskID || run.Status != agent.RunRunning {
+		return nil, roadmap.ErrLeaseLost
+	}
+	return run, nil
+}
+
+func interruptRoadmapTaskAgentRunsTx(ctx context.Context, tx *Tx, task roadmap.Task, reason string, now time.Time) error {
+	runs, err := activeRoadmapTaskAgentRunsForUpdateTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	if len(runs) == 0 {
+		return nil
+	}
+	priorByRole := make(map[roadmap.AgentRole]agent.Run, len(runs))
+	for _, run := range runs {
+		for _, role := range []roadmap.AgentRole{roadmap.AgentPlanner, roadmap.AgentCurriculumReviewer, roadmap.AgentSREReviewer} {
+			if run.Purpose == role.Purpose() && roadmapTaskRoleRequired(task, role) {
+				priorByRole[role] = run
+				break
+			}
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
+			WHERE id = ? AND status = ?`, agent.RunInterrupted, reason, now.UTC(), now.UTC(), run.ID, agent.RunRunning)
+		if err != nil {
+			return fmt.Errorf("interrupt roadmap task agent run: %w", err)
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return roadmap.ErrLeaseLost
+		}
+	}
+	for _, role := range []roadmap.AgentRole{roadmap.AgentPlanner, roadmap.AgentCurriculumReviewer, roadmap.AgentSREReviewer} {
+		prior, exists := priorByRole[role]
+		if !exists {
+			continue
+		}
+		if _, err := createRunTx(ctx, tx, agent.CreateRun{
+			ID:            agent.NewID("roadmap-agent-run"),
+			Purpose:       prior.Purpose,
+			OwnerKind:     prior.OwnerKind,
+			OwnerRef:      prior.OwnerRef,
+			InputRevision: prior.InputRevision,
+			Input:         prior.Input,
+			Model:         prior.Model,
+			PromptVersion: prior.PromptVersion,
+		}, now.UTC()); err != nil {
+			return fmt.Errorf("create replacement roadmap %s run: %w", role, err)
+		}
+	}
+	return nil
 }
 
 func lockRoadmapTaskClaimTx(ctx context.Context, tx *Tx, claim roadmap.TaskClaim, now time.Time) (*roadmap.Task, *roadmap.Workflow, error) {
@@ -850,43 +1046,10 @@ func setTaskCallsTx(ctx context.Context, tx *Tx, taskID string, role roadmap.Age
 }
 
 func completeRoadmapTaskAgentRunTx(ctx context.Context, tx *Tx, runID, taskID string, role roadmap.AgentRole, now time.Time) error {
-	var purpose, ownerKind, ownerRef string
-	var status agent.RunStatus
-	err := tx.QueryRowContext(ctx, `SELECT purpose, owner_kind, owner_ref, status FROM agent_runs WHERE id = ? FOR UPDATE`, runID).Scan(&purpose, &ownerKind, &ownerRef, &status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return agent.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("load roadmap task agent run: %w", err)
-	}
-	if purpose != role.Purpose() || ownerKind != "roadmap-task" || ownerRef != taskID || status != agent.RunRunning {
-		return roadmap.ErrLeaseLost
+	if _, err := lockRoadmapTaskAgentRunTx(ctx, tx, runID, taskID, role); err != nil {
+		return err
 	}
 	return completeRunTx(ctx, tx, runID, now.UTC())
-}
-
-func failRoadmapTaskAgentRunTx(ctx context.Context, tx *Tx, runID, taskID string, role roadmap.AgentRole, message string, now time.Time) error {
-	var purpose, ownerKind, ownerRef string
-	var status agent.RunStatus
-	err := tx.QueryRowContext(ctx, `SELECT purpose, owner_kind, owner_ref, status FROM agent_runs WHERE id = ? FOR UPDATE`, runID).Scan(&purpose, &ownerKind, &ownerRef, &status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return agent.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("load failed roadmap task agent run: %w", err)
-	}
-	if purpose != role.Purpose() || ownerKind != "roadmap-task" || ownerRef != taskID || status != agent.RunRunning {
-		return roadmap.ErrLeaseLost
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ?`, agent.RunFailed, message, now.UTC(), now.UTC(), runID, agent.RunRunning)
-	if err != nil {
-		return fmt.Errorf("fail roadmap task agent run: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return roadmap.ErrLeaseLost
-	}
-	return nil
 }
 
 // ClaimRoadmapWorkflowPublication acquires the one workflow-level lease only

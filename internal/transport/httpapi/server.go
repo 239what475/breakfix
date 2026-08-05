@@ -28,6 +28,9 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	if err := h.RecoverInteractiveAgentRuns(runCtx); err != nil {
 		return nil, err
 	}
+	if err := h.RecoverRoadmapAgentRuns(runCtx); err != nil {
+		return nil, err
+	}
 	if err := h.validateStartup(); err != nil {
 		return nil, err
 	}

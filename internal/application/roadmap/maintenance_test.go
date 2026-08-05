@@ -31,7 +31,7 @@ func TestMaintenanceServiceRevisesRejectedChangeSetWithBothReviewers(t *testing.
 	}
 }
 
-func TestMaintenanceServiceFailsOnlyAfterTheRoleExhaustsItsFiveCalls(t *testing.T) {
+func TestMaintenanceServiceRetriesOnePlannerRunBeforeExhaustion(t *testing.T) {
 	now := time.Date(2026, time.August, 4, 15, 15, 0, 0, time.UTC)
 	repository := newMaintenanceTestRepository(now)
 	executor := &maintenanceTestExecutor{plannerError: errors.New("model transport failed")}
@@ -41,11 +41,15 @@ func TestMaintenanceServiceFailsOnlyAfterTheRoleExhaustsItsFiveCalls(t *testing.
 		t.Fatalf("run failing roadmap maintenance: %v", err)
 	}
 	task := repository.taskSnapshot()
-	if task.State != domain.TaskFailed || task.PlannerCalls != domain.MaxAgentCallsPerTask || task.CurriculumCalls != 0 || task.SRECalls != 0 {
+	if task.State != domain.TaskFailed || task.PlannerCalls != 1 || task.CurriculumCalls != 0 || task.SRECalls != 0 {
 		t.Fatalf("failed roadmap task = %#v", task)
 	}
 	if executor.plannerCallCount() != domain.MaxAgentCallsPerTask {
 		t.Fatalf("planner calls = %d, want %d", executor.plannerCallCount(), domain.MaxAgentCallsPerTask)
+	}
+	run := repository.runSnapshot("roadmap-agent-run-1")
+	if repository.runCount != 1 || run.Status != agent.RunFailed || run.Attempt != agent.MaxAttempts {
+		t.Fatalf("planner technical retries = run_count:%d run:%#v", repository.runCount, run)
 	}
 }
 
@@ -133,6 +137,7 @@ type maintenanceTestRepository struct {
 	task     domain.Task
 	claimed  bool
 	runCount int
+	runs     map[string]agent.Run
 }
 
 func newMaintenanceTestRepository(now time.Time) *maintenanceTestRepository {
@@ -151,6 +156,7 @@ func newMaintenanceTestRepository(now time.Time) *maintenanceTestRepository {
 			Subject: domain.Subject{Ref: domain.Ref{ID: subject.ID, SourceRef: subject.SourceRef, Title: subject.Title}},
 			State:   domain.TaskPending, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		},
+		runs: make(map[string]agent.Run),
 	}
 }
 
@@ -231,8 +237,15 @@ func (r *maintenanceTestRepository) StartRoadmapTaskAgentRun(_ context.Context, 
 		return nil, domain.ErrLeaseLost
 	}
 	r.runCount++
+	run := agent.Run{
+		ID:         fmt.Sprintf("roadmap-agent-run-%d", r.runCount),
+		Status:     agent.RunRunning,
+		Attempt:    1,
+		DeadlineAt: now.Add(time.Hour),
+	}
+	r.runs[run.ID] = run
 	r.task.UpdatedAt = now
-	return &agent.Run{ID: fmt.Sprintf("roadmap-agent-run-%d", r.runCount), Status: agent.RunRunning}, nil
+	return &run, nil
 }
 
 func (r *maintenanceTestRepository) FinalizeRoadmapTaskPlanner(_ context.Context, claim domain.TaskClaim, _ string, changes domain.ChangeSet, now time.Time) (*domain.Task, error) {
@@ -280,19 +293,31 @@ func (r *maintenanceTestRepository) FinalizeRoadmapTaskReview(_ context.Context,
 	return &result, nil
 }
 
-func (r *maintenanceTestRepository) FailRoadmapTaskAgentRun(_ context.Context, claim domain.TaskClaim, _ string, role domain.AgentRole, message string, now time.Time) (*domain.Task, error) {
+func (r *maintenanceTestRepository) RetryRoadmapTaskAgentRun(_ context.Context, claim domain.TaskClaim, runID string, role domain.AgentRole, expectedAttempt int, message string, now time.Time) (*agent.Run, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.requireTaskClaim(claim); err != nil {
 		return nil, err
 	}
-	if taskCallsForRole(r.task, role) >= domain.MaxAgentCallsPerTask {
-		r.task.State = domain.TaskFailed
+	run, exists := r.runs[runID]
+	if !exists || run.Status != agent.RunRunning || run.Attempt != expectedAttempt {
+		return nil, domain.ErrLeaseLost
 	}
+	if run.Attempt >= agent.MaxAttempts {
+		run.Status = agent.RunFailed
+		run.LastError = message
+		r.runs[run.ID] = run
+		r.task.State = domain.TaskFailed
+		r.task.LastError = message
+		r.task.UpdatedAt = now
+		return nil, nil
+	}
+	run.Attempt++
+	run.LastError = message
+	r.runs[run.ID] = run
 	r.task.LastError = message
 	r.task.UpdatedAt = now
-	result := cloneMaintenanceTestTask(r.task)
-	return &result, nil
+	return &run, nil
 }
 
 func (r *maintenanceTestRepository) FailRoadmapTask(_ context.Context, claim domain.TaskClaim, message string, now time.Time) (*domain.Task, error) {
@@ -337,6 +362,12 @@ func (r *maintenanceTestRepository) taskSnapshot() domain.Task {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return cloneMaintenanceTestTask(r.task)
+}
+
+func (r *maintenanceTestRepository) runSnapshot(id string) agent.Run {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runs[id]
 }
 
 func cloneMaintenanceTestTask(value domain.Task) domain.Task {

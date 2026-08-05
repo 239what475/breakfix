@@ -35,7 +35,7 @@ type MaintenanceRepository interface {
 	StartRoadmapTaskAgentRun(context.Context, domain.TaskClaim, domain.AgentRole, string, time.Time) (*agent.Run, error)
 	FinalizeRoadmapTaskPlanner(context.Context, domain.TaskClaim, string, domain.ChangeSet, time.Time) (*domain.Task, error)
 	FinalizeRoadmapTaskReview(context.Context, domain.TaskClaim, string, domain.AgentRole, domain.Review, time.Time) (*domain.Task, error)
-	FailRoadmapTaskAgentRun(context.Context, domain.TaskClaim, string, domain.AgentRole, string, time.Time) (*domain.Task, error)
+	RetryRoadmapTaskAgentRun(context.Context, domain.TaskClaim, string, domain.AgentRole, int, string, time.Time) (*agent.Run, error)
 	FailRoadmapTask(context.Context, domain.TaskClaim, string, time.Time) (*domain.Task, error)
 	ClaimRoadmapWorkflowPublication(context.Context, string, time.Duration, time.Time) (*domain.WorkflowClaim, error)
 	RenewRoadmapWorkflowLease(context.Context, domain.WorkflowClaim, time.Duration, time.Time) error
@@ -221,9 +221,6 @@ func (s *MaintenanceService) runTask(parent context.Context, claim domain.TaskCl
 }
 
 func (s *MaintenanceService) runPlanner(ctx context.Context, claim domain.TaskClaim, revision domain.Revision, retrieval *Retrieval) error {
-	if claim.Task.PlannerCalls >= domain.MaxAgentCallsPerTask {
-		return s.failTaskIfOwned(ctx, claim, "Roadmap Planner 已耗尽调用次数")
-	}
 	run, err := s.repository.StartRoadmapTaskAgentRun(ctx, claim, domain.AgentPlanner, s.model, s.currentTime())
 	if errors.Is(err, domain.ErrAgentCallLimit) {
 		return s.failTaskIfOwned(ctx, claim, "Roadmap Planner 已耗尽调用次数")
@@ -234,20 +231,35 @@ func (s *MaintenanceService) runPlanner(ctx context.Context, claim domain.TaskCl
 	if err != nil {
 		return fmt.Errorf("start roadmap planner run: %w", err)
 	}
-	changeSet, err := s.executor.Plan(ctx, PlannerRequest{Task: claim.Task, Revision: revision, Retrieval: retrieval})
-	if err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, domain.AgentPlanner, err)
-	}
-	if err := changeSet.ValidateFor(claim.Task.Kind, claim.Task.Subject, revision); err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, domain.AgentPlanner, fmt.Errorf("planner 返回的关系候选无效: %w", err))
-	}
-	if _, err := s.repository.FinalizeRoadmapTaskPlanner(ctx, claim, run.ID, changeSet, s.currentTime()); err != nil {
-		if errors.Is(err, domain.ErrLeaseLost) {
-			return nil
+	for {
+		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
+		changeSet, executeErr := s.executor.Plan(attemptCtx, PlannerRequest{Task: claim.Task, Revision: revision, Retrieval: retrieval})
+		cancel()
+		if executeErr == nil {
+			executeErr = changeSet.ValidateFor(claim.Task.Kind, claim.Task.Subject, revision)
+			if executeErr != nil {
+				executeErr = fmt.Errorf("planner 返回的关系候选无效: %w", executeErr)
+			}
 		}
-		return fmt.Errorf("persist roadmap planner result: %w", err)
+		if executeErr != nil {
+			if taskContextStopped(ctx) {
+				return nil
+			}
+			next, retryErr := s.retryAgentRun(ctx, claim, run, domain.AgentPlanner, executeErr)
+			if retryErr != nil || next == nil {
+				return retryErr
+			}
+			run = next
+			continue
+		}
+		if _, err := s.repository.FinalizeRoadmapTaskPlanner(ctx, claim, run.ID, changeSet, s.currentTime()); err != nil {
+			if errors.Is(err, domain.ErrLeaseLost) {
+				return nil
+			}
+			return fmt.Errorf("persist roadmap planner result: %w", err)
+		}
+		return nil
 	}
-	return nil
 }
 
 func (s *MaintenanceService) runOutstandingReviews(ctx context.Context, claim domain.TaskClaim, revision domain.Revision, retrieval *Retrieval) error {
@@ -260,11 +272,6 @@ func (s *MaintenanceService) runOutstandingReviews(ctx context.Context, claim do
 	}
 	if len(roles) == 0 {
 		return nil
-	}
-	for _, role := range roles {
-		if taskCallsForRole(claim.Task, role) >= domain.MaxAgentCallsPerTask {
-			return s.failTaskIfOwned(ctx, claim, string(role)+" 已耗尽调用次数")
-		}
 	}
 	var group sync.WaitGroup
 	errs := make(chan error, len(roles))
@@ -298,33 +305,48 @@ func (s *MaintenanceService) runReviewer(ctx context.Context, claim domain.TaskC
 	if err != nil {
 		return fmt.Errorf("start roadmap %s run: %w", role, err)
 	}
-	review, err := s.executor.Review(ctx, ReviewerRequest{
-		Role: role, Task: claim.Task, Revision: revision, ChangeSet: claim.Task.ChangeSet.Clone(), Retrieval: retrieval,
-	})
-	if err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, role, err)
-	}
-	if err := review.Validate(); err != nil {
-		return s.recordAgentFailure(ctx, claim, run.ID, role, fmt.Errorf("reviewer 返回的结论无效: %w", err))
-	}
-	if _, err := s.repository.FinalizeRoadmapTaskReview(ctx, claim, run.ID, role, review, s.currentTime()); err != nil {
-		if errors.Is(err, domain.ErrLeaseLost) {
-			return nil
+	for {
+		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
+		review, executeErr := s.executor.Review(attemptCtx, ReviewerRequest{
+			Role: role, Task: claim.Task, Revision: revision, ChangeSet: claim.Task.ChangeSet.Clone(), Retrieval: retrieval,
+		})
+		cancel()
+		if executeErr == nil {
+			executeErr = review.Validate()
+			if executeErr != nil {
+				executeErr = fmt.Errorf("reviewer 返回的结论无效: %w", executeErr)
+			}
 		}
-		return fmt.Errorf("persist roadmap %s result: %w", role, err)
-	}
-	return nil
-}
-
-func (s *MaintenanceService) recordAgentFailure(ctx context.Context, claim domain.TaskClaim, runID string, role domain.AgentRole, cause error) error {
-	_, err := s.repository.FailRoadmapTaskAgentRun(ctx, claim, runID, role, maintenanceErrorSummary(cause), s.currentTime())
-	if errors.Is(err, domain.ErrLeaseLost) {
+		if executeErr != nil {
+			if taskContextStopped(ctx) {
+				return nil
+			}
+			next, retryErr := s.retryAgentRun(ctx, claim, run, role, executeErr)
+			if retryErr != nil || next == nil {
+				return retryErr
+			}
+			run = next
+			continue
+		}
+		if _, err := s.repository.FinalizeRoadmapTaskReview(ctx, claim, run.ID, role, review, s.currentTime()); err != nil {
+			if errors.Is(err, domain.ErrLeaseLost) {
+				return nil
+			}
+			return fmt.Errorf("persist roadmap %s result: %w", role, err)
+		}
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("record roadmap %s failure: %w", role, err)
+}
+
+func (s *MaintenanceService) retryAgentRun(ctx context.Context, claim domain.TaskClaim, run *agent.Run, role domain.AgentRole, cause error) (*agent.Run, error) {
+	next, err := s.repository.RetryRoadmapTaskAgentRun(ctx, claim, run.ID, role, run.Attempt, maintenanceErrorSummary(cause), s.currentTime())
+	if errors.Is(err, domain.ErrLeaseLost) {
+		return nil, nil
 	}
-	return nil
+	if err != nil {
+		return nil, fmt.Errorf("retry roadmap %s run: %w", role, err)
+	}
+	return next, nil
 }
 
 func (s *MaintenanceService) failTaskIfOwned(ctx context.Context, claim domain.TaskClaim, message string) error {
@@ -414,16 +436,12 @@ func leaseRenewalInterval(leaseTTL time.Duration) time.Duration {
 	return interval
 }
 
-func taskCallsForRole(task domain.Task, role domain.AgentRole) int {
-	switch role {
-	case domain.AgentPlanner:
-		return task.PlannerCalls
-	case domain.AgentCurriculumReviewer:
-		return task.CurriculumCalls
-	case domain.AgentSREReviewer:
-		return task.SRECalls
+func taskContextStopped(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
 	default:
-		return 0
+		return false
 	}
 }
 

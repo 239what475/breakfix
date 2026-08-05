@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
@@ -100,6 +101,10 @@ func TestRoadmapMaintenanceWaitsForGenerationIdleWindowAndLeasesTasks(t *testing
 	if len(claims) != 1 {
 		t.Fatalf("task claims = %#v", claims)
 	}
+	run, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentPlanner, "test-model", now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("start planner before lease takeover: %v", err)
+	}
 	if repeated, err := database.Roadmap.ClaimRoadmapTasks(ctx, "server-b", time.Minute, now.Add(4*time.Second)); err != nil || len(repeated) != 0 {
 		t.Fatalf("second server claimed active task = %#v, %v", repeated, err)
 	}
@@ -109,6 +114,179 @@ func TestRoadmapMaintenanceWaitsForGenerationIdleWindowAndLeasesTasks(t *testing
 	}
 	if len(takenOver) != 1 || takenOver[0].Task.ID != claims[0].Task.ID || takenOver[0].LeaseVersion <= claims[0].LeaseVersion || takenOver[0].LeaseOwner == claims[0].LeaseOwner {
 		t.Fatalf("task lease takeover = %#v, first = %#v", takenOver, claims)
+	}
+	runs, err := database.Agent.ListRunsForOwner(ctx, "roadmap-task", claims[0].Task.ID)
+	if err != nil {
+		t.Fatalf("list runs after lease takeover: %v", err)
+	}
+	if len(runs) != 2 || runs[0].ID != run.ID || runs[0].Status != agent.RunInterrupted || runs[1].Status != agent.RunRunning || runs[1].Attempt != 1 {
+		t.Fatalf("lease takeover runs = %#v", runs)
+	}
+	resumed, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, takenOver[0], roadmap.AgentPlanner, "other-model", now.Add(64*time.Second))
+	if err != nil {
+		t.Fatalf("resume replacement planner run: %v", err)
+	}
+	if resumed.ID != runs[1].ID || resumed.Model != run.Model {
+		t.Fatalf("resumed replacement = %#v, prior = %#v", resumed, run)
+	}
+	tasks, err := database.Roadmap.RoadmapTasks(ctx, workflow.ID)
+	if err != nil || len(tasks) != 1 || tasks[0].PlannerCalls != 1 {
+		t.Fatalf("task semantic planner calls after takeover = %#v, %v", tasks, err)
+	}
+}
+
+func TestRoadmapTaskAgentRunRetriesWithinOneSemanticCall(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 9, 0, 0, 0, time.UTC)
+	workflow, claim := startSingleMaintenanceTask(t, database, now)
+	run, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claim, roadmap.AgentPlanner, "test-model", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("start planner run: %v", err)
+	}
+	for attempt := 1; attempt < agent.MaxAttempts; attempt++ {
+		next, err := database.Roadmap.RetryRoadmapTaskAgentRun(ctx, claim, run.ID, roadmap.AgentPlanner, run.Attempt, "model transport failed", now.Add(time.Duration(attempt+1)*time.Second))
+		if err != nil {
+			t.Fatalf("retry planner attempt %d: %v", attempt, err)
+		}
+		if next == nil || next.ID != run.ID || next.Attempt != attempt+1 {
+			t.Fatalf("planner retry %d = %#v", attempt, next)
+		}
+		run = next
+	}
+	if exhausted, err := database.Roadmap.RetryRoadmapTaskAgentRun(ctx, claim, run.ID, roadmap.AgentPlanner, run.Attempt, "model transport failed", now.Add(6*time.Second)); err != nil || exhausted != nil {
+		t.Fatalf("exhaust planner run = %#v, %v", exhausted, err)
+	}
+	tasks, err := database.Roadmap.RoadmapTasks(ctx, workflow.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("load exhausted roadmap task = %#v, %v", tasks, err)
+	}
+	if tasks[0].State != roadmap.TaskFailed || tasks[0].PlannerCalls != 1 || tasks[0].CurriculumCalls != 0 || tasks[0].SRECalls != 0 {
+		t.Fatalf("exhausted task = %#v", tasks[0])
+	}
+	runs, err := database.Agent.ListRunsForOwner(ctx, "roadmap-task", claim.Task.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("load exhausted planner run = %#v, %v", runs, err)
+	}
+	if runs[0].Status != agent.RunFailed || runs[0].Attempt != agent.MaxAttempts {
+		t.Fatalf("exhausted planner run = %#v", runs[0])
+	}
+}
+
+func TestRoadmapRecoveryReplacementDoesNotConsumeOrBypassSemanticLimit(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 9, 30, 0, 0, time.UTC)
+	_, claim := startSingleMaintenanceTask(t, database, now)
+	run, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claim, roadmap.AgentPlanner, "pinned-model", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("start planner before recovery: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `UPDATE roadmap_tasks SET planner_calls = ? WHERE id = ?`, roadmap.MaxAgentCallsPerTask, claim.Task.ID); err != nil {
+		t.Fatalf("set planner semantic call limit: %v", err)
+	}
+	if err := database.Roadmap.RecoverInterruptedRoadmapAgentRuns(ctx, "server restarted", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("recover planner at semantic limit: %v", err)
+	}
+	claims, err := database.Roadmap.ClaimRoadmapTasks(ctx, "server-b", time.Minute, now.Add(3*time.Second))
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim recovered planner at semantic limit = %#v, %v", claims, err)
+	}
+	replacement, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentPlanner, "new-model", now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("reuse planner replacement at semantic limit: %v", err)
+	}
+	if replacement.ID == run.ID || replacement.Model != run.Model {
+		t.Fatalf("planner replacement at semantic limit = %#v", replacement)
+	}
+	tasks, err := database.Roadmap.RoadmapTasks(ctx, claims[0].Task.WorkflowID)
+	if err != nil || len(tasks) != 1 || tasks[0].PlannerCalls != roadmap.MaxAgentCallsPerTask {
+		t.Fatalf("semantic planner call limit after replacement = %#v, %v", tasks, err)
+	}
+}
+
+func TestRoadmapRecoveryReplacesOnlyUnfinishedRoles(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 5, 10, 0, 0, 0, time.UTC)
+	workflow, claim := startSingleMaintenanceTask(t, database, now)
+	planner, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claim, roadmap.AgentPlanner, "pinned-model", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("start planner before recovery: %v", err)
+	}
+	if err := database.Roadmap.RecoverInterruptedRoadmapAgentRuns(ctx, "server restarted", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("recover interrupted planner: %v", err)
+	}
+	tasks, err := database.Roadmap.RoadmapTasks(ctx, workflow.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("load recovered task = %#v, %v", tasks, err)
+	}
+	if tasks[0].State != roadmap.TaskPending || tasks[0].LeaseOwner != "" || tasks[0].PlannerCalls != 1 || tasks[0].Round != 0 {
+		t.Fatalf("recovered planner task = %#v", tasks[0])
+	}
+	runs, err := database.Agent.ListRunsForOwner(ctx, "roadmap-task", claim.Task.ID)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("load recovered planner runs = %#v, %v", runs, err)
+	}
+	if runs[0].ID != planner.ID || runs[0].Status != agent.RunInterrupted || runs[1].Status != agent.RunRunning || runs[1].Model != planner.Model || runs[1].PromptVersion != planner.PromptVersion || runs[1].Attempt != 1 {
+		t.Fatalf("recovered planner runs = %#v", runs)
+	}
+	claims, err := database.Roadmap.ClaimRoadmapTasks(ctx, "server-b", time.Minute, now.Add(3*time.Second))
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim recovered task = %#v, %v", claims, err)
+	}
+	plannerReplacement, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentPlanner, "new-model", now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("reuse recovered planner replacement: %v", err)
+	}
+	if plannerReplacement.ID != runs[1].ID || plannerReplacement.Model != planner.Model {
+		t.Fatalf("planner replacement = %#v", plannerReplacement)
+	}
+	if _, err := database.Roadmap.FinalizeRoadmapTaskPlanner(ctx, claims[0], plannerReplacement.ID, roadmap.ChangeSet{}, now.Add(5*time.Second)); err != nil {
+		t.Fatalf("finalize recovered planner replacement: %v", err)
+	}
+	curriculum, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentCurriculumReviewer, "pinned-model", now.Add(6*time.Second))
+	if err != nil {
+		t.Fatalf("start curriculum reviewer: %v", err)
+	}
+	if _, err := database.Roadmap.FinalizeRoadmapTaskReview(ctx, claims[0], curriculum.ID, roadmap.AgentCurriculumReviewer, roadmap.Review{Decision: roadmap.ReviewApproved}, now.Add(7*time.Second)); err != nil {
+		t.Fatalf("finalize curriculum reviewer: %v", err)
+	}
+	sre, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentSREReviewer, "pinned-model", now.Add(8*time.Second))
+	if err != nil {
+		t.Fatalf("start SRE reviewer before recovery: %v", err)
+	}
+	if err := database.Roadmap.RecoverInterruptedRoadmapAgentRuns(ctx, "server restarted", now.Add(9*time.Second)); err != nil {
+		t.Fatalf("recover interrupted reviewer: %v", err)
+	}
+	tasks, err = database.Roadmap.RoadmapTasks(ctx, workflow.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("load reviewer recovery task = %#v, %v", tasks, err)
+	}
+	if tasks[0].State != roadmap.TaskPending || tasks[0].ChangeSet == nil || tasks[0].CurriculumReview == nil || tasks[0].SREReview != nil ||
+		tasks[0].PlannerCalls != 1 || tasks[0].CurriculumCalls != 1 || tasks[0].SRECalls != 1 || tasks[0].Round != 0 {
+		t.Fatalf("recovered reviewer task = %#v", tasks[0])
+	}
+	runs, err = database.Agent.ListRunsForOwner(ctx, "roadmap-task", claim.Task.ID)
+	if err != nil || len(runs) != 5 {
+		t.Fatalf("load reviewer recovery runs = %#v, %v", runs, err)
+	}
+	if runs[3].ID != sre.ID || runs[3].Status != agent.RunInterrupted || runs[4].Status != agent.RunRunning || runs[4].Purpose != roadmap.AgentSREReviewer.Purpose() {
+		t.Fatalf("recovered reviewer runs = %#v", runs)
+	}
+	claims, err = database.Roadmap.ClaimRoadmapTasks(ctx, "server-c", time.Minute, now.Add(10*time.Second))
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim reviewer recovery task = %#v, %v", claims, err)
+	}
+	sreReplacement, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentSREReviewer, "new-model", now.Add(11*time.Second))
+	if err != nil {
+		t.Fatalf("reuse recovered reviewer replacement: %v", err)
+	}
+	if sreReplacement.ID != runs[4].ID || sreReplacement.Model != sre.Model {
+		t.Fatalf("SRE replacement = %#v", sreReplacement)
+	}
+	if _, err := database.Roadmap.StartRoadmapTaskAgentRun(ctx, claims[0], roadmap.AgentPlanner, "new-model", now.Add(11*time.Second)); err != roadmap.ErrLeaseLost {
+		t.Fatalf("planner after committed result error = %v, want lease lost", err)
 	}
 }
 
@@ -283,6 +461,25 @@ func recordMaintenanceEntries(t *testing.T, database *Store, revision *roadmap.R
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit roadmap entries: %v", err)
 	}
+}
+
+func startSingleMaintenanceTask(t *testing.T, database *Store, now time.Time) (*roadmap.Workflow, roadmap.TaskClaim) {
+	t.Helper()
+	ctx := context.Background()
+	revision := publishMaintenanceRoadmap(t, database, now, 1)
+	recordMaintenanceEntries(t, database, revision, 0, 1, true, now)
+	if requested, err := database.Roadmap.RequestRoadmapMaintenance(ctx, now); err != nil || !requested {
+		t.Fatalf("request roadmap maintenance = %v, %v", requested, err)
+	}
+	workflow, err := database.Roadmap.TryStartRoadmapWorkflow(ctx, now)
+	if err != nil || workflow == nil {
+		t.Fatalf("start roadmap maintenance workflow = %#v, %v", workflow, err)
+	}
+	claims, err := database.Roadmap.ClaimRoadmapTasks(ctx, "server-a", time.Minute, now)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim roadmap maintenance task = %#v, %v", claims, err)
+	}
+	return workflow, claims[0]
 }
 
 func acceptRoadmapTask(t *testing.T, database *Store, claim roadmap.TaskClaim, now time.Time, changes roadmap.ChangeSet) {

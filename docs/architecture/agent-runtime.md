@@ -13,7 +13,7 @@ OpenSandbox workspace for model capabilities. It has no Claude Code CLI,
 | Generator | Server | GenerationWorkflow, PlanRevision, CandidateRevision, workflow workspace | Server claims `Generating`. |
 | Judge | Server | GenerationWorkflow, PlanRevision, CandidateRevision | Server claims `Judging`. |
 | Classifier | Server | GenerationWorkflow, verified CandidateRevision, immutable RoadmapRevision | Server claims `Classifying`. |
-| Roadmap planner and reviewers | Server | RoadmapTask, fixed RoadmapRevision, ChangeSet/Review | Server maintenance workflow. |
+| Roadmap planner and reviewers | Server | RoadmapTask, fixed RoadmapRevision, ChangeSet/Review, AgentRun | Server maintenance workflow. |
 | Build, artifact publish, verification, challenge publish, reaping | Runtime Worker | A lease-fenced runtime action | Runtime Worker only. |
 
 `AgentRun` is one complete, auditable logical execution. It may issue multiple
@@ -39,6 +39,14 @@ and stage revision. A Generator interruption retires the workflow's current
 workspace; the replacement run receives a new PVC and Sandbox. Ordinary
 Generator technical retries and content repair keep the current workspace so
 the candidate and feedback remain available.
+
+Roadmap recovery follows the same interruption rule, but its replacement is
+selected from the task's committed semantic boundary. If the Planner result is
+absent, only an interrupted Planner Run is replaced; once a ChangeSet exists,
+only reviewers without a persisted review are replaced. The replacement keeps
+the original model input and starts with attempt one. It does not change the
+task's semantic round or role-call counter, and does not resume model context
+or tool execution. Lease takeover uses the identical rule.
 
 SSE observes a Server-owned interactive run. Losing the browser connection only
 ends that subscription: it neither cancels the AgentRun nor persists partial

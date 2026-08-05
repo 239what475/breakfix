@@ -11,6 +11,8 @@ import (
 )
 
 const (
+	// MaxAgentCallsPerTask bounds semantic Planner/Reviewer calls for one task
+	// role. Technical execution retries use agent.MaxAttempts inside one call.
 	MaxAgentCallsPerTask      = 5
 	AutomaticRequestThreshold = 20
 )

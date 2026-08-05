@@ -2,12 +2,27 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
+
+const roadmapRunInterruptionReason = "server restarted before roadmap agent completion"
+
+// RecoverRoadmapAgentRuns establishes the same startup fence as the other
+// Server-owned AgentRun roles before maintenance starts claiming tasks.
+func (h *Handler) RecoverRoadmapAgentRuns(ctx context.Context) error {
+	if h == nil || h.db == nil {
+		return nil
+	}
+	if err := h.db.Roadmap.RecoverInterruptedRoadmapAgentRuns(ctx, roadmapRunInterruptionReason, time.Now().UTC()); err != nil {
+		return fmt.Errorf("recover roadmap agent runs: %w", err)
+	}
+	return nil
+}
 
 // StartRoadmapMaintenance starts the one Server-owned incremental Roadmap
 // loop. Its PostgreSQL workflow/task leases make this safe in every Server
