@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
@@ -56,8 +57,12 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 		c.Status(http.StatusOK)
 	})
 	router.GET("/metrics", h.WorkflowMetrics)
-	router.POST("/internal/debug/roadmap-maintenance", h.RequestRoadmapMaintenance)
-	router.GET("/internal/debug/roadmap-revisions/:revision_id/export", h.ExportRoadmapRevision)
+	if cfg.Debug.Enabled {
+		debugRoutes := router.Group("/internal/debug")
+		debugRoutes.Use(middleware.DebugCredentialMiddleware(cfg.Debug.Credential))
+		debugRoutes.POST("/roadmap-maintenance", h.RequestRoadmapMaintenance)
+		debugRoutes.GET("/roadmap-revisions/:revision_id/export", h.ExportRoadmapRevision)
+	}
 
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
@@ -235,6 +240,10 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	// Serve embedded frontend SPA
 	if frontendFS != nil {
 		router.NoRoute(func(c *gin.Context) {
+			if c.Request.URL.Path == "/internal/debug" || strings.HasPrefix(c.Request.URL.Path, "/internal/debug/") {
+				c.Status(http.StatusNotFound)
+				return
+			}
 			path := c.Request.URL.Path
 			if len(path) > 0 && path[0] == '/' {
 				path = path[1:]

@@ -27,6 +27,11 @@ crd_namespace: breakfix-system
 cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
+# Remote debugging is deliberately absent from the production surface unless
+# this flag is explicitly changed and the separate debug Secret is provisioned.
+debug:
+  enabled: false
+  credential_env: BREAKFIX_DEBUG_CREDENTIAL
 internal_workers:
   runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 

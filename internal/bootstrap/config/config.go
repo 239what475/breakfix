@@ -31,6 +31,7 @@ type Config struct {
 	CRDNamespace         string             `yaml:"crd_namespace"`
 	CooldownMinutes      int                `yaml:"cooldown_minutes"`
 	JWTSecret            string             `yaml:"jwt_secret"`
+	Debug                DebugConfig        `yaml:"debug"`
 	InternalWorkers      InternalWorkerKeys `yaml:"internal_workers"`
 	Worker               WorkerConfig       `yaml:"worker"`
 	Agent                AgentConfig        `yaml:"agent"`
@@ -57,6 +58,31 @@ type RegistryConfig struct {
 // or development catalog empty; there is no HTTP installation endpoint.
 type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
+}
+
+// DebugConfig controls the deliberately opt-in remote debugging boundary.
+// The credential is read from a separate environment variable and never from
+// the user or worker authentication configuration.
+type DebugConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	CredentialEnv string `yaml:"credential_env"`
+	Credential    string `yaml:"-"`
+}
+
+func (c DebugConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(c.CredentialEnv) == "" {
+		return fmt.Errorf("debug credential_env is required when debug is enabled")
+	}
+	if strings.TrimSpace(c.Credential) == "" {
+		return fmt.Errorf("debug credential is required when debug is enabled")
+	}
+	if strings.TrimSpace(c.Credential) != c.Credential {
+		return fmt.Errorf("debug credential must not have leading or trailing whitespace")
+	}
+	return nil
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
@@ -313,6 +339,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
+	cfg.Debug.Credential = os.Getenv(cfg.Debug.CredentialEnv)
 	cfg.InternalWorkers.Runtime = os.ExpandEnv(cfg.InternalWorkers.Runtime)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
 	cfg.Registry.Repository = os.ExpandEnv(cfg.Registry.Repository)
@@ -377,6 +404,9 @@ func (c Config) ValidateServer() error {
 	if strings.TrimSpace(c.JWTSecret) == "" {
 		return fmt.Errorf("server jwt_secret is required")
 	}
+	if err := c.validateDebug(); err != nil {
+		return fmt.Errorf("server %w", err)
+	}
 	if err := c.InternalWorkers.Validate(); err != nil {
 		return fmt.Errorf("server %w", err)
 	}
@@ -406,6 +436,33 @@ func (c Config) ValidateServer() error {
 	}
 	if err := c.Catalog.Validate(); err != nil {
 		return fmt.Errorf("server catalog: %w", err)
+	}
+	return nil
+}
+
+func (c Config) validateDebug() error {
+	if err := c.Debug.Validate(); err != nil {
+		return err
+	}
+	if !c.Debug.Enabled {
+		return nil
+	}
+	identities := []struct {
+		name  string
+		value string
+	}{
+		{name: "jwt_secret", value: c.JWTSecret},
+		{name: "internal_workers.runtime", value: c.InternalWorkers.Runtime},
+		{name: "worker.api_key", value: c.Worker.APIKey},
+		{name: "agent api key", value: c.Agent.APIKey},
+		{name: "opensandbox api key", value: c.OpenSandbox.APIKey},
+		{name: "registry username", value: c.Registry.Username},
+		{name: "registry password", value: c.Registry.Password},
+	}
+	for _, identity := range identities {
+		if identity.value != "" && c.Debug.Credential == identity.value {
+			return fmt.Errorf("debug credential must not reuse %s", identity.name)
+		}
 	}
 	return nil
 }

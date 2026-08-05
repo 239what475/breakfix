@@ -48,6 +48,12 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: jwt_secret
+            - name: BREAKFIX_DEBUG_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-debug
+                  key: credential
+                  optional: true
             - name: BREAKFIX_RUNTIME_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:

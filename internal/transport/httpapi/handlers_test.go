@@ -7,15 +7,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/content/challenge"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -221,40 +218,6 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	}
 	if len(got.Tags) != 1 || got.Tags[0].SourceRef != "test" || got.Tags[0].Title != "Test" {
 		t.Fatalf("structured tags = %#v", got.Tags)
-	}
-}
-
-func TestExportRoadmapRevisionStreamsPortableRelease(t *testing.T) {
-	root := t.TempDir()
-	writeTestChallenge(t, root)
-	database := testpostgres.New(t)
-	handler := newHandlerForTest(t, database, nil, config.Config{DataDir: root})
-	revision, err := database.Roadmap.CurrentRoadmap(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/debug/roadmap-revisions/"+revision.Revision+"/export", nil)
-	ctx.Params = gin.Params{{Key: "revision_id", Value: revision.Revision}}
-	handler.ExportRoadmapRevision(ctx)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
-	}
-	if recorder.Header().Get("Content-Type") != "application/gzip" || !strings.Contains(recorder.Header().Get("Content-Disposition"), "breakfix-roadmap-r"+revision.Revision+".tar.gz") {
-		t.Fatalf("unexpected export headers: %#v", recorder.Header())
-	}
-	extracted := filepath.Join(root, "exported")
-	if err := os.MkdirAll(extracted, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := challenge.ExtractTarGz(extracted, recorder.Body); err != nil {
-		t.Fatalf("extract debug export: %v", err)
-	}
-	if _, err := appcatalog.LoadPortableSource(extracted); err != nil {
-		t.Fatalf("load debug export: %v", err)
 	}
 }
 

@@ -56,10 +56,17 @@ source、Entry/Commit runtime 的确定性错误会使整份 Release 进入 `Fai
 
 ## 调试导出
 
-Server 提供一个不属于 OpenAPI 或浏览器 UI 的只读调试接口：
+Server 在显式启用 `debug.enabled` 并配置独立 `breakfix-debug` Secret 后，提供一个不属于 OpenAPI 或浏览器 UI 的只读调试接口：
 
 ```text
 GET /internal/debug/roadmap-revisions/{revision_id}/export
+```
+
+调用必须携带 `X-Breakfix-Debug-Key`。默认配置不注册该路由；用户 JWT、Runtime Worker identity 和其他业务凭据
+不能替代 debug credential。Roadmap maintenance 请求使用同一调试边界，接口为：
+
+```text
+POST /internal/debug/roadmap-maintenance
 ```
 
 它按指定 immutable `RoadmapRevision` 流式返回

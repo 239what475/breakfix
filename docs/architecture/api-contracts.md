@@ -21,14 +21,20 @@ make verify-generated
 
 ## 调试 HTTP
 
-下列接口同样不进入 OpenAPI，也不由浏览器调用：
+下列接口不进入 OpenAPI，也不由浏览器调用：
 
 ```text
+POST /internal/debug/roadmap-maintenance
 GET /internal/debug/roadmap-revisions/{revision_id}/export
 ```
 
-它导出一个指定 immutable RoadmapRevision 对应的完整 portable Catalog Release `.tar.gz`，用于本地检查和
-内容迁移调试；详细的内容边界与确定性归档规则见 [Catalog Release](catalog-release.md)。
+默认 `debug.enabled=false` 时这两个路由根本不会注册。部署者只有在显式启用该开关、并由单独的
+`breakfix-debug` Secret 提供 `credential` 后才能远程调用；请求必须携带 `X-Breakfix-Debug-Key`。用户 JWT、
+Runtime Worker identity 和其他业务凭据都不能作为该 credential。
+
+maintenance 用于请求一次仍受 idle-window 约束的 Roadmap maintenance；export 导出指定 immutable
+RoadmapRevision 对应的完整 portable Catalog Release `.tar.gz`，用于本地检查和内容迁移调试。详细的内容边界与
+确定性归档规则见 [Catalog Release](catalog-release.md)。
 
 ## 内部 Worker HTTP
 

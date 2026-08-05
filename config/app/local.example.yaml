@@ -41,6 +41,12 @@ cooldown_minutes: 5
 
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
+# Keep remote debugging disabled unless it is needed for local investigation.
+# When enabled, provide BREAKFIX_DEBUG_CREDENTIAL separately from all other
+# application and worker credentials.
+debug:
+  enabled: false
+  credential_env: BREAKFIX_DEBUG_CREDENTIAL
 internal_workers:
   runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 # Internal endpoint and identity environment used by fixed workers. Production
