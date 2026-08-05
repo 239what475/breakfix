@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
@@ -35,13 +36,13 @@ func NewExecutor(node NodeImageBuilder, config incus.Config) *Executor {
 // Execute preserves the GenerationWorker adapter while the implementation
 // itself consumes the neutral execution contract below.
 func (e *Executor) Execute(ctx context.Context, value generation.Execution, archive, base []byte) (generation.BuildResult, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateBuilding || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateBuilding || value.Context.Candidate == nil {
 		return generation.BuildResult{}, errors.New("builder requires a Building generation workflow with a candidate")
 	}
 	work := domainexecution.Work{
 		OwnerID: value.Claim.Workflow.ID, CandidateID: value.Context.Candidate.ID,
 		ArchiveSHA256: value.Context.Candidate.ArchiveSHA256, Snapshot: value.Context.Candidate.Snapshot,
-		Attempt: int64(value.Claim.StateAttempt + 1), DeadlineAt: value.Claim.Workflow.DeadlineAt.UTC(),
+		Attempt: value.Claim.StateVersion, DeadlineAt: domainexecution.NewActionDeadline(time.Now()),
 	}
 	output, built, err := e.ExecuteWork(ctx, work, archive, base)
 	if err != nil {

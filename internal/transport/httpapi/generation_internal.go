@@ -316,7 +316,7 @@ func (h *Handler) refreshGenerationClaim(c *gin.Context, prior generation.Claim)
 	if workflow.State.Terminal() || workflow.State.Review() || strings.TrimSpace(workflow.LeaseOwner) == "" {
 		return nil, nil
 	}
-	return h.db.Generation.RefreshGenerationClaim(c.Request.Context(), workflow.ID, prior.LeaseOwner, time.Now().UTC())
+	return h.db.Generation.RefreshGenerationClaim(c.Request.Context(), prior, time.Now().UTC())
 }
 
 func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim, result generation.BuildResult, now time.Time) error {
@@ -333,7 +333,7 @@ func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim
 		if err := validateGenerationOCIArchiveBytes(result.Archive); err != nil {
 			return generation.NewArtifactError("BUILD_ARCHIVE_INVALID", err.Error())
 		}
-		path, digest, err := candidate.SaveBuildArchiveAtomic(h.dataDir, revision.ID, claim.Workflow.ID, int64(claim.StateAttempt+1), result.Archive)
+		path, digest, err := candidate.SaveBuildArchiveAtomic(h.dataDir, revision.ID, claim.Workflow.ID, claim.StateVersion, result.Archive)
 		if err != nil {
 			return err
 		}
@@ -341,7 +341,7 @@ func (h *Handler) completeGenerationBuild(c *gin.Context, claim generation.Claim
 		output.OCIArchiveSHA256 = digest
 	case challenge.RuntimeNode:
 		if len(result.Archive) != 0 || output.Incus == nil || output.Incus.Project != h.incusConfig.BuildProject ||
-			output.Incus.WorkflowID != claim.Workflow.ID || output.Incus.CandidateRevisionID != revision.ID || output.Incus.Attempt != int64(claim.StateAttempt+1) {
+			output.Incus.WorkflowID != claim.Workflow.ID || output.Incus.CandidateRevisionID != revision.ID || output.Incus.Attempt != claim.StateVersion {
 			return generation.NewArtifactError("BUILD_OUTPUT_INVALID", "node build output does not match its fenced generation attempt")
 		}
 	default:

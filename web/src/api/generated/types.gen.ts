@@ -331,10 +331,10 @@ export type AuthoringCandidate = {
 export type AuthoringGenerationWorkflow = {
     id: string;
     state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
-    state_attempt: number;
+    state_version: number;
+    runtime_attempt: number;
     candidate_revision_id?: string;
     classification_roadmap_revision?: string;
-    deadline_at?: string | null;
     last_error?: string | null;
     created_at: string;
     updated_at: string;

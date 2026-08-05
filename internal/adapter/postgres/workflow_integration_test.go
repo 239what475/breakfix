@@ -34,7 +34,7 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 		t.Fatalf("confirm verified content: %v", err)
 	}
 	if classified.State != generation.StateClassifying || classified.CandidateRevisionID != candidate.ID ||
-		classified.ClassificationRoadmapRevision != initialRoadmap.Revision || classified.DeadlinePausedAt != nil || classified.DeadlineAt == nil {
+		classified.ClassificationRoadmapRevision != initialRoadmap.Revision || classified.RuntimeAttempt != 0 {
 		t.Fatalf("classification start = %#v", classified)
 	}
 	repeatedContent, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
@@ -56,7 +56,7 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	if err != nil {
 		t.Fatalf("load classification review workflow: %v", err)
 	}
-	if awaitingReview.State != generation.StateNeedsClassificationReview || awaitingReview.DeadlinePausedAt == nil || awaitingReview.LeaseOwner != "" {
+	if awaitingReview.State != generation.StateNeedsClassificationReview || awaitingReview.RuntimeAttempt != 0 || awaitingReview.LeaseOwner != "" {
 		t.Fatalf("classification review workflow = %#v", awaitingReview)
 	}
 	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
@@ -75,7 +75,7 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	if err != nil {
 		t.Fatalf("begin classification publication: %v", err)
 	}
-	if publishing.State != generation.StateChallengePublishing || publishing.DeadlinePausedAt != nil || publishing.CandidateRevisionID != candidate.ID {
+	if publishing.State != generation.StateChallengePublishing || publishing.RuntimeAttempt != 1 || publishing.CandidateRevisionID != candidate.ID {
 		t.Fatalf("publication workflow = %#v", publishing)
 	}
 	repeatedPublication, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
@@ -139,26 +139,25 @@ func TestGenerationClassificationTechnicalRetryPreservesVerifiedCandidate(t *tes
 	}
 
 	attemptAt := start.Add(time.Minute)
-	for attempt := 0; attempt < generation.MaxStateAttempts; attempt++ {
-		claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-retry", attemptAt)
-		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateClassifying, generation.Failure{
-			Class: generation.FailureInfrastructure, Code: "MODEL_UNAVAILABLE", Summary: "classification service is unavailable",
-		}, attemptAt)
+	claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-retry", attemptAt)
+	run = startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, attemptAt)
+	for attempt := 1; attempt <= agent.MaxAttempts; attempt++ {
+		next, err := database.Generation.RetryGenerationAgentRun(ctx, claim, run.ID, "classification service is unavailable", attemptAt.Add(time.Duration(attempt)*time.Second))
 		if err != nil {
-			t.Fatalf("record classification retry %d: %v", attempt+1, err)
+			t.Fatalf("record classification retry %d: %v", attempt, err)
 		}
-		if attempt < generation.MaxStateAttempts-1 {
-			if updated.State != generation.StateClassifying || updated.StateAttempt != attempt+1 {
-				t.Fatalf("classification retry %d = %#v", attempt+1, updated)
+		if attempt < agent.MaxAttempts {
+			if next == nil || next.ID != run.ID || next.Attempt != attempt+1 {
+				t.Fatalf("classification retry %d = %#v", attempt, next)
 			}
-			attemptAt = updated.NextRunAt
+			run = next
 		}
 	}
 	paused, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
 	if err != nil {
 		t.Fatalf("load exhausted classification workflow: %v", err)
 	}
-	if paused.State != generation.StateNeedsClassificationReview || paused.DeadlinePausedAt == nil || !strings.HasPrefix(paused.LastError, "classification_unavailable:") {
+	if paused.State != generation.StateNeedsClassificationReview || paused.RuntimeAttempt != 0 || !strings.HasPrefix(paused.LastError, "classification_unavailable:") {
 		t.Fatalf("exhausted classification workflow = %#v", paused)
 	}
 	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
@@ -248,7 +247,61 @@ func TestGenerationClassificationAdjustmentRetainsItsPinnedRoadmapRevision(t *te
 	}
 }
 
-func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
+func TestGenerationPublicationRejectsStaleClassificationRoadmapRevision(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 10, 20, 0, 0, time.UTC)
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+
+	classificationAt := now.Add(time.Minute)
+	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-stale-roadmap",
+	}, classificationAt); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-stale-roadmap", classificationAt)
+	run := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, classificationAt)
+	if err := database.Generation.FinalizeGenerationClassification(ctx, claim, run.ID, existingClassification(initialRoadmap, candidate.ID), classificationAt); err != nil {
+		t.Fatalf("persist classification proposal: %v", err)
+	}
+	before, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("load classification review workflow: %v", err)
+	}
+
+	newerRoadmap := initialRoadmap.Clone()
+	newerRoadmap.Tags = append(newerRoadmap.Tags, roadmap.Tag{
+		ID: roadmap.RuntimeID(roadmap.KindTag, "stale-roadmap-tag"), SourceRef: "stale-roadmap-tag", Title: "Stale roadmap tag", Description: "Creates a distinct current Roadmap revision.",
+	})
+	if _, err := database.Roadmap.PublishRoadmap(ctx, newerRoadmap, classificationAt.Add(time.Minute)); err != nil {
+		t.Fatalf("publish newer roadmap: %v", err)
+	}
+
+	_, err = database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: 1, IdempotencyKey: "confirm-stale-roadmap-publication",
+	}, classificationAt.Add(2*time.Minute))
+	if !errors.Is(err, generation.ErrClassificationConflict) {
+		t.Fatalf("publish stale classification = %v, want roadmap conflict", err)
+	}
+	after, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("load stale classification workflow: %v", err)
+	}
+	if after.State != generation.StateNeedsClassificationReview || after.StateVersion != before.StateVersion || after.LastError != generation.ErrClassificationConflict.Error() {
+		t.Fatalf("stale classification workflow = %#v", after)
+	}
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("load stale classification candidate: %v", err)
+	}
+	if persisted.Classification == nil || persisted.Classification.RoadmapRevision != initialRoadmap.Revision || persisted.Publication != nil {
+		t.Fatalf("stale classification proposal was changed or published: %#v", persisted)
+	}
+}
+
+func TestGenerationPublicationFailsAfterFiveRuntimeAttempts(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 4, 10, 30, 0, 0, time.UTC)
@@ -279,17 +332,17 @@ func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
 	}
 
 	attemptAt := publishingAt
-	for attempt := 0; attempt < generation.MaxStateAttempts; attempt++ {
+	for attempt := 1; attempt <= generation.MaxRuntimeAttempts; attempt++ {
 		claim = claimGenerationWorkflow(t, database, workflow.ID, "publisher-retry", attemptAt)
 		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateChallengePublishing, generation.Failure{
 			Class: generation.FailureInfrastructure, Code: "REGISTRY_UNAVAILABLE", Summary: "registry is unavailable",
 		}, attemptAt)
 		if err != nil {
-			t.Fatalf("record publication retry %d: %v", attempt+1, err)
+			t.Fatalf("record publication retry %d: %v", attempt, err)
 		}
-		if attempt < generation.MaxStateAttempts-1 {
-			if updated.State != generation.StateChallengePublishing || updated.StateAttempt != attempt+1 {
-				t.Fatalf("publication retry %d = %#v", attempt+1, updated)
+		if attempt < generation.MaxRuntimeAttempts {
+			if updated.State != generation.StateChallengePublishing || updated.RuntimeAttempt != attempt+1 {
+				t.Fatalf("publication retry %d = %#v", attempt, updated)
 			}
 			attemptAt = updated.NextRunAt
 		}
@@ -298,18 +351,8 @@ func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load exhausted publication workflow: %v", err)
 	}
-	if paused.State != generation.StateNeedsClassificationReview || paused.DeadlinePausedAt == nil || !strings.HasPrefix(paused.LastError, "publication_unavailable:") {
+	if paused.State != generation.StateFailed || paused.RuntimeAttempt != 0 || paused.LastError != "registry is unavailable" {
 		t.Fatalf("exhausted publication workflow = %#v", paused)
-	}
-
-	resumed, err := database.Generation.BeginClassificationPublication(ctx, sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
-		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: classified.Classification.Revision, IdempotencyKey: "resume-publication",
-	}, attemptAt.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("resume publication: %v", err)
-	}
-	if resumed.State != generation.StateChallengePublishing || resumed.CandidateRevisionID != candidate.ID || resumed.DeadlinePausedAt != nil || resumed.StateAttempt != 0 {
-		t.Fatalf("resumed publication workflow = %#v", resumed)
 	}
 	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
 	if err != nil {
@@ -317,6 +360,39 @@ func TestGenerationPublicationTechnicalRetryResumesTheSameIntent(t *testing.T) {
 	}
 	if persisted.Publication == nil || persisted.Publication.ChallengeID == "" || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
 		t.Fatalf("publication retry changed candidate = %#v", persisted)
+	}
+}
+
+func TestGenerationRuntimeLeaseTakeoverRetainsActionVersion(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 10, 45, 0, 0, time.UTC)
+	publishWorkflowRoadmap(t, database, now)
+	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "generator-takeover", now)
+	finalizeGeneratedCandidate(t, database, claim, 1, now)
+	claim = claimGenerationWorkflow(t, database, workflow.ID, "judge-takeover", now)
+	approveGenerationJudgement(t, database, claim, now)
+
+	first, err := database.Generation.ClaimGenerationWorkflow(ctx, "runtime-before-takeover", time.Second, now)
+	if err != nil || first == nil {
+		t.Fatalf("claim initial runtime action = %#v, %v", first, err)
+	}
+	if first.Workflow.State != generation.StateBuilding || first.Workflow.RuntimeAttempt != 1 {
+		t.Fatalf("initial runtime claim = %#v", first)
+	}
+	takenOver, err := database.Generation.ClaimGenerationWorkflow(ctx, "runtime-after-takeover", time.Minute, now.Add(2*time.Second))
+	if err != nil || takenOver == nil {
+		t.Fatalf("take over expired runtime action = %#v, %v", takenOver, err)
+	}
+	if takenOver.Workflow.State != generation.StateBuilding || takenOver.StateVersion != first.StateVersion || takenOver.Workflow.RuntimeAttempt != 2 ||
+		takenOver.LeaseOwner == first.LeaseOwner {
+		t.Fatalf("runtime takeover changed action identity: first=%#v taken_over=%#v", first, takenOver)
+	}
+	if _, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, *first, generation.StateBuilding, generation.Failure{
+		Class: generation.FailureInfrastructure, Code: "LATE_REPORT", Summary: "late runtime report",
+	}, now.Add(2*time.Second)); !errors.Is(err, generation.ErrLeaseLost) {
+		t.Fatalf("late report after takeover = %v, want lease lost", err)
 	}
 }
 
@@ -644,11 +720,11 @@ func advanceToVerifiedCandidate(t *testing.T, database *Store, workflowID string
 	t.Helper()
 	claim := claimGenerationWorkflow(t, database, workflowID, "generator-a", now)
 	candidate := finalizeGeneratedCandidate(t, database, claim, 1, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
+	claim = claimGenerationWorkflow(t, database, workflowID, "judge-a", now)
 	approveGenerationJudgement(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
+	claim = claimGenerationWorkflow(t, database, workflowID, "builder-a", now)
 	advanceGenerationBuildAndArtifact(t, database, claim, now)
-	claim = refreshGenerationClaim(t, database, claim, now)
+	claim = claimGenerationWorkflow(t, database, workflowID, "verifier-a", now)
 	if err := database.Generation.RecordGenerationVerificationEnvironment(context.Background(), claim, verificationEnvironment(claim), now); err != nil {
 		t.Fatalf("record verification environment: %v", err)
 	}
@@ -739,15 +815,6 @@ func claimGenerationWorkflow(t *testing.T, database *Store, workflowID, workerID
 	return *claim
 }
 
-func refreshGenerationClaim(t *testing.T, database *Store, claim generation.Claim, now time.Time) generation.Claim {
-	t.Helper()
-	refreshed, err := database.Generation.RefreshGenerationClaim(context.Background(), claim.Workflow.ID, claim.LeaseOwner, now)
-	if err != nil {
-		t.Fatalf("refresh generation claim: %v", err)
-	}
-	return *refreshed
-}
-
 func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, purpose string, now time.Time) *agent.Run {
 	t.Helper()
 	promptVersions := map[string]string{
@@ -802,7 +869,7 @@ func advanceGenerationBuildAndArtifact(t *testing.T, database *Store, claim gene
 	}, now); err != nil {
 		t.Fatalf("complete generation build: %v", err)
 	}
-	claim = refreshGenerationClaim(t, database, claim, now)
+	claim = claimGenerationWorkflow(t, database, claim.Workflow.ID, "publisher-a", now)
 	if err := database.Generation.CompleteGenerationArtifactPublish(context.Background(), claim, artifactReference(), now); err != nil {
 		t.Fatalf("complete artifact publication: %v", err)
 	}
@@ -833,7 +900,7 @@ func artifactReference() generation.ArtifactReference {
 func verificationEnvironment(claim generation.Claim) generation.VerificationEnvironment {
 	return generation.VerificationEnvironment{
 		Runtime: challenge.RuntimeK8s, Name: "verify-environment", UID: "verify-uid", WorkflowID: claim.Workflow.ID,
-		Attempt: int64(claim.StateAttempt + 1),
+		Attempt: claim.StateVersion,
 	}
 }
 

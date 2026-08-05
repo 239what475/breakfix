@@ -13,8 +13,7 @@ import (
 )
 
 const (
-	ExecutionDeadline     = time.Hour
-	MaxStateAttempts      = 10
+	MaxRuntimeAttempts = 5
 )
 
 var (
@@ -113,18 +112,26 @@ func (s WorkflowState) Terminal() bool {
 	return s == StatePublished || s == StateFailed || s == StateCancelled
 }
 
-func (s WorkflowState) Leaseable() bool {
+// AgentState reports states whose only active executor is the Server-owned
+// Agent Runtime. Runtime Worker identities can never claim these states.
+func (s WorkflowState) AgentState() bool {
 	switch s {
-	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
-		StateVerifying, StateClassifying, StateChallengePublishing:
+	case StateGenerating, StateJudging, StateClassifying:
 		return true
 	default:
 		return false
 	}
 }
 
-func (s WorkflowState) DeadlineActive() bool {
-	return s.Leaseable()
+// RuntimeState reports states whose external side effects are performed by
+// Runtime Worker. A Runtime state always has one Server-managed attempt.
+func (s WorkflowState) RuntimeState() bool {
+	switch s {
+	case StateBuilding, StateArtifactPublishing, StateVerifying, StateChallengePublishing:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s WorkflowState) Review() bool {
@@ -153,8 +160,10 @@ func (f Failure) Validate() error {
 }
 
 // Workflow is the sole durable state machine for candidate generation and
-// publication. StateAttempt counts continuous technical failures of State;
-// LeaseOwner is randomized for every claim and fences late worker reports.
+// publication. StateVersion changes only when State changes. RuntimeAttempt
+// is meaningful only while State is a RuntimeState and is incremented by
+// Server after an infrastructure failure or expired Runtime Worker lease.
+// LeaseOwner is randomized for every claim and fences late reports.
 type Workflow struct {
 	ID                            string        `json:"id"`
 	Source                        Source        `json:"source"`
@@ -166,31 +175,37 @@ type Workflow struct {
 	ClassificationFeedback string     `json:"classification_feedback,omitempty"`
 	CandidateRevisionID    string     `json:"candidate_revision_id,omitempty"`
 	ActiveAgentRunID       string     `json:"active_agent_run_id,omitempty"`
-	StateAttempt           int        `json:"state_attempt"`
+	StateVersion           int64      `json:"state_version"`
+	RuntimeAttempt         int        `json:"runtime_attempt"`
 	LeaseOwner             string     `json:"-"`
 	LeaseExpiresAt         *time.Time `json:"lease_expires_at,omitempty"`
 	NextRunAt              time.Time  `json:"next_run_at"`
-	DeadlineAt             *time.Time `json:"deadline_at,omitempty"`
-	DeadlinePausedAt       *time.Time `json:"deadline_paused_at,omitempty"`
 	LastError              string     `json:"last_error,omitempty"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 func (w Workflow) Valid() bool {
-	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || strings.TrimSpace(w.SourceRevision) == "" || !w.State.Valid() || w.StateAttempt < 0 {
+	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || strings.TrimSpace(w.SourceRevision) == "" || !w.State.Valid() ||
+		w.StateVersion < 1 || w.RuntimeAttempt < 0 || w.RuntimeAttempt > MaxRuntimeAttempts {
+		return false
+	}
+	if w.State.RuntimeState() {
+		return w.RuntimeAttempt >= 1
+	}
+	if w.RuntimeAttempt != 0 {
 		return false
 	}
 	return true
 }
 
 type LeaseCredential struct {
-	StateAttempt int    `json:"state_attempt"`
+	StateVersion int64  `json:"state_version"`
 	LeaseOwner   string `json:"lease_owner"`
 }
 
 func (c LeaseCredential) Valid() bool {
-	return c.StateAttempt >= 0 && strings.TrimSpace(c.LeaseOwner) != ""
+	return c.StateVersion >= 1 && strings.TrimSpace(c.LeaseOwner) != ""
 }
 
 type Claim struct {
@@ -207,12 +222,13 @@ type InterruptedAgentRun struct {
 }
 
 func (c Claim) Valid() bool {
-	return c.Workflow.Valid() && c.LeaseCredential.Valid()
+	return c.Workflow.Valid() && c.LeaseCredential.Valid() && c.StateVersion == c.Workflow.StateVersion
 }
 
-// Execution is the complete leased view used by a Generate Worker. The
-// workflow remains the scheduling authority; Context only carries immutable
-// authoring input and recorded candidate outputs for its current state.
+// Execution is the complete leased view consumed by one fixed state owner.
+// The workflow remains the scheduling authority; Context only carries
+// immutable authoring input and recorded candidate outputs for its current
+// state.
 type Execution struct {
 	Claim   Claim   `json:"claim"`
 	Context Context `json:"context"`

@@ -13,6 +13,15 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/environment"
 )
 
+// DefaultActionDeadline bounds one provider-side runtime action. It is derived
+// when a worker starts an action and is never persisted on a workflow or
+// inherited by a retry.
+const DefaultActionDeadline = time.Hour
+
+func NewActionDeadline(now time.Time) time.Time {
+	return now.UTC().Add(DefaultActionDeadline)
+}
+
 type CheckpointSnapshot struct {
 	ID   string `json:"id"`
 	Node string `json:"node,omitempty"`
@@ -126,11 +135,13 @@ type VerificationReport struct {
 // authoring workflow, so Catalog Release installation can use the same
 // runtime mechanics without creating a GenerationWorkflow.
 type Work struct {
-	OwnerID                 string                   `json:"owner_id"`
-	CandidateID             string                   `json:"candidate_id"`
-	ArchiveSHA256           string                   `json:"archive_sha256"`
-	Snapshot                Snapshot                 `json:"snapshot"`
-	Attempt                 int64                    `json:"attempt"`
+	OwnerID       string   `json:"owner_id"`
+	CandidateID   string   `json:"candidate_id"`
+	ArchiveSHA256 string   `json:"archive_sha256"`
+	Snapshot      Snapshot `json:"snapshot"`
+	Attempt       int64    `json:"attempt"`
+	// DeadlineAt is local to this one action attempt. It is not an aggregate
+	// workflow deadline and retries receive a new value.
 	DeadlineAt              time.Time                `json:"deadline_at"`
 	Build                   *BuildOutput             `json:"build,omitempty"`
 	Artifact                *ArtifactReference       `json:"artifact,omitempty"`

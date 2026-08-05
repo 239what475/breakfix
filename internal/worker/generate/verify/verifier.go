@@ -74,7 +74,7 @@ type environmentRef struct {
 // Execute preserves the GenerationWorker adapter while the verification
 // mechanics consume the neutral execution contract below.
 func (e *Executor) Execute(ctx context.Context, value generation.Execution, recordEnvironment func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateVerifying || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateVerifying || value.Context.Candidate == nil {
 		return generation.VerificationReport{}, errors.New("verifier requires a Verifying generation workflow with a candidate")
 	}
 	work, err := workFromGeneration(value)
@@ -550,8 +550,8 @@ func (e *Executor) removePreviousEnvironment(ctx context.Context, work domainexe
 }
 
 func workFromGeneration(value generation.Execution) (domainexecution.Work, error) {
-	if value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
-		return domainexecution.Work{}, errors.New("generation execution has no candidate or deadline")
+	if value.Context.Candidate == nil {
+		return domainexecution.Work{}, errors.New("generation execution has no candidate")
 	}
 	view := value.Context.Candidate
 	if view.Artifact == nil {
@@ -559,7 +559,7 @@ func workFromGeneration(value generation.Execution) (domainexecution.Work, error
 	}
 	return domainexecution.Work{
 		OwnerID: value.Claim.Workflow.ID, CandidateID: view.ID, ArchiveSHA256: view.ArchiveSHA256,
-		Snapshot: view.Snapshot, Attempt: int64(value.Claim.StateAttempt + 1), DeadlineAt: value.Claim.Workflow.DeadlineAt.UTC(),
+		Snapshot: view.Snapshot, Attempt: value.Claim.StateVersion, DeadlineAt: domainexecution.NewActionDeadline(time.Now()),
 		Build: view.Build, Artifact: view.Artifact, VerificationEnvironment: view.VerifyEnvironment,
 	}, nil
 }

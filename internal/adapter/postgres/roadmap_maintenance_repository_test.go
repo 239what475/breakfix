@@ -68,8 +68,8 @@ func TestRoadmapMaintenanceWaitsForGenerationIdleWindowAndLeasesTasks(t *testing
 	}
 	if _, err := database.conn.ExecContext(ctx, `INSERT INTO generation_workflows
 		(id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
-		candidate_revision_id, active_agent_run_id, state_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, 0, '', ?, '', ?, ?)`,
+		candidate_revision_id, active_agent_run_id, state_version, runtime_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, 1, 0, '', ?, '', ?, ?)`,
 		"roadmap-blocking-generation", generation.SourceAuthoring, "roadmap-blocking-session", "1", generation.StateGenerating,
 		now, now, now); err != nil {
 		t.Fatalf("insert active generation workflow: %v", err)
@@ -82,8 +82,8 @@ func TestRoadmapMaintenanceWaitsForGenerationIdleWindowAndLeasesTasks(t *testing
 		t.Fatalf("workflow started while Generation was executing: %#v", workflow)
 	}
 	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows
-		SET state = ?, deadline_paused_at = ?, updated_at = ? WHERE id = ?`,
-		generation.StateNeedsAuthorReview, now.Add(time.Second), now.Add(time.Second), "roadmap-blocking-generation"); err != nil {
+		SET state = ?, state_version = state_version + 1, runtime_attempt = 0, updated_at = ? WHERE id = ?`,
+		generation.StateNeedsAuthorReview, now.Add(time.Second), "roadmap-blocking-generation"); err != nil {
 		t.Fatalf("pause generation workflow: %v", err)
 	}
 	workflow, err = database.Roadmap.TryStartRoadmapWorkflow(ctx, now.Add(2*time.Second))

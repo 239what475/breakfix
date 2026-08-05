@@ -1263,24 +1263,24 @@ components:
 
     AuthoringGenerationWorkflow:
       type: object
-      required: [id, state, state_attempt, created_at, updated_at]
+      required: [id, state, state_version, runtime_attempt, created_at, updated_at]
       properties:
         id:
           type: string
         state:
           type: string
           enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
-        state_attempt:
+        state_version:
+          type: integer
+          format: int64
+          minimum: 1
+        runtime_attempt:
           type: integer
           minimum: 0
         candidate_revision_id:
           type: string
         classification_roadmap_revision:
           type: string
-        deadline_at:
-          type: string
-          format: date-time
-          nullable: true
         last_error:
           type: string
           nullable: true

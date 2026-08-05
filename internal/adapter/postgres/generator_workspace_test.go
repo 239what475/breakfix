@@ -51,7 +51,7 @@ func TestListTerminalGeneratorWorkspacesIncludesWorkflowWorkspace(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("create pending workspace: %v", err)
 	}
-	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET state = ? WHERE id = ?`, generation.StateFailed, workflow.ID); err != nil {
+	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1, runtime_attempt = 0 WHERE id = ?`, generation.StateFailed, workflow.ID); err != nil {
 		t.Fatalf("finish generation workflow: %v", err)
 	}
 	workspaces, err := database.Generation.ListTerminalGeneratorWorkspaces(ctx)

@@ -24,9 +24,6 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 		return nil, err
 	}
 	h.setRuntimeContext(runCtx)
-	if err := h.RecoverExpiredGenerationWorkflows(runCtx); err != nil {
-		return nil, err
-	}
 	if err := h.RecoverInteractiveAgentRuns(runCtx); err != nil {
 		return nil, err
 	}
@@ -36,7 +33,6 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 	h.StartLearningCleanup(runCtx)
 	h.StartEnvironmentStatusProjector(runCtx)
 	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
-	h.StartGenerationDeadlineRecovery(runCtx)
 	h.StartGenerationResourceReaper(runCtx)
 	h.StartRoadmapMaintenance(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)

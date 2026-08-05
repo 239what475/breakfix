@@ -39,21 +39,22 @@ var schemaGenerationStatements = []string{
 		classification_feedback TEXT NOT NULL DEFAULT '',
 		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		active_agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,
-		state_attempt INTEGER NOT NULL DEFAULT 0 CHECK (state_attempt >= 0),
+		state_version BIGINT NOT NULL DEFAULT 1 CHECK (state_version >= 1),
+		runtime_attempt INTEGER NOT NULL DEFAULT 0 CHECK (runtime_attempt >= 0 AND runtime_attempt <= 5),
 		lease_owner TEXT NOT NULL DEFAULT '',
 		lease_expires_at TIMESTAMPTZ,
 		next_run_at TIMESTAMPTZ NOT NULL,
-		deadline_at TIMESTAMPTZ,
-		deadline_paused_at TIMESTAMPTZ,
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
-		CHECK ((state IN ('NeedsAuthorReview', 'NeedsClassificationReview')) = (deadline_paused_at IS NOT NULL)),
+		CHECK (
+			(state IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt BETWEEN 1 AND 5) OR
+			(state NOT IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt = 0)
+		),
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
 	`CREATE UNIQUE INDEX generation_workflows_active_source ON generation_workflows(source_kind, source_ref) WHERE state NOT IN ('Published', 'Failed', 'Cancelled')`,
 	`CREATE INDEX generation_workflows_claim ON generation_workflows(state, next_run_at, lease_expires_at, created_at, id)`,
-	`CREATE INDEX generation_workflows_deadline ON generation_workflows(deadline_at) WHERE deadline_at IS NOT NULL`,
 	`CREATE TABLE generation_confirmation_receipts (
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
 		action TEXT NOT NULL CHECK (action IN ('start', 'content', 'classification-adjustment', 'publication')),

@@ -17,7 +17,7 @@ func TestAgentRunnerRetriesKnownTechnicalErrorWithinOneRun(t *testing.T) {
 	workflow := testAgentWorkflow("workflow-retry", domain.StateGenerating)
 	store := &agentRunnerStore{claim: domain.Claim{
 		Workflow:        workflow,
-		LeaseCredential: domain.LeaseCredential{StateAttempt: 0, LeaseOwner: "server-lease"},
+		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
 	}}
 	runner := newTestAgentRunner(t, store, &failingGeneratorExecutor{calls: &store.generatorCalls})
 	runner.now = func() time.Time { return now }
@@ -201,6 +201,7 @@ func testAgentWorkflow(id string, state domain.WorkflowState) domain.Workflow {
 		Source:         domain.Source{Kind: domain.SourceAuthoring, Ref: "authoring-session"},
 		SourceRevision: "1",
 		State:          state,
+		StateVersion:   1,
 		NextRunAt:      time.Now().UTC(),
 	}
 }

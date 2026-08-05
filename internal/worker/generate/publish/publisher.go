@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
@@ -47,7 +48,7 @@ func NewExecutor(registryClient Registry, node NodeImagePublisher, registryRepos
 }
 
 func (e *Executor) PublishArtifact(ctx context.Context, value generation.Execution, buildArchive []byte) (generation.ArtifactReference, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateArtifactPublishing || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateArtifactPublishing || value.Context.Candidate == nil {
 		return generation.ArtifactReference{}, errors.New("artifact publication requires an ArtifactPublishing workflow with a candidate")
 	}
 	work, err := workFromGeneration(value)
@@ -119,7 +120,7 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 }
 
 func (e *Executor) PublishChallenge(ctx context.Context, value generation.Execution) (generation.ArtifactReference, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateChallengePublishing || value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
+	if !value.Valid() || value.Claim.Workflow.State != generation.StateChallengePublishing || value.Context.Candidate == nil {
 		return generation.ArtifactReference{}, errors.New("challenge publication requires a ChallengePublishing workflow with a candidate")
 	}
 	if value.Context.Candidate.Publication == nil {
@@ -177,13 +178,13 @@ func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecutio
 }
 
 func workFromGeneration(value generation.Execution) (domainexecution.Work, error) {
-	if value.Context.Candidate == nil || value.Claim.Workflow.DeadlineAt == nil {
-		return domainexecution.Work{}, errors.New("generation execution has no candidate or deadline")
+	if value.Context.Candidate == nil {
+		return domainexecution.Work{}, errors.New("generation execution has no candidate")
 	}
 	view := value.Context.Candidate
 	return domainexecution.Work{
 		OwnerID: value.Claim.Workflow.ID, CandidateID: view.ID, ArchiveSHA256: view.ArchiveSHA256,
-		Snapshot: view.Snapshot, Attempt: int64(value.Claim.StateAttempt + 1), DeadlineAt: value.Claim.Workflow.DeadlineAt.UTC(),
+		Snapshot: view.Snapshot, Attempt: value.Claim.StateVersion, DeadlineAt: domainexecution.NewActionDeadline(time.Now()),
 		Build: view.Build, Artifact: view.Artifact,
 	}, nil
 }

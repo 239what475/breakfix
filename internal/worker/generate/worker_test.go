@@ -28,12 +28,7 @@ func TestWorkerExecutesOnlyRuntimeStates(t *testing.T) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	want := []generation.WorkflowState{
-		generation.StateBuilding,
-		generation.StateArtifactPublishing,
-		generation.StateVerifying,
-		generation.StateVerifying,
-	}
+	want := []generation.WorkflowState{generation.StateBuilding}
 	if len(store.phaseStates) != len(want) {
 		t.Fatalf("runtime states = %#v, want %#v", store.phaseStates, want)
 	}
@@ -42,10 +37,10 @@ func TestWorkerExecutesOnlyRuntimeStates(t *testing.T) {
 			t.Fatalf("runtime state %d = %s, want %s", index, store.phaseStates[index], want[index])
 		}
 	}
-	if store.current.Workflow.State != generation.StateNeedsAuthorReview {
-		t.Fatalf("workflow state = %s, want NeedsAuthorReview", store.current.Workflow.State)
+	if store.current.Workflow.State != generation.StateArtifactPublishing {
+		t.Fatalf("workflow state = %s, want ArtifactPublishing", store.current.Workflow.State)
 	}
-	if builder.calls.Load() != 1 || publisher.artifactCalls.Load() != 1 || verifier.calls.Load() != 1 {
+	if builder.calls.Load() != 1 || publisher.artifactCalls.Load() != 0 || verifier.calls.Load() != 0 {
 		t.Fatalf("runtime executor calls = build %d publish %d verify %d", builder.calls.Load(), publisher.artifactCalls.Load(), verifier.calls.Load())
 	}
 }
@@ -74,14 +69,13 @@ type runtimeStore struct {
 }
 
 func newRuntimeStore() *runtimeStore {
-	deadline := time.Now().UTC().Add(time.Hour)
 	return &runtimeStore{current: generation.Claim{
 		Workflow: generation.Workflow{
 			ID: "generation-workflow-0123456789abcdef", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"},
-			SourceRevision: "0", State: generation.StateBuilding, StateAttempt: 0, LeaseOwner: "runtime-lease", NextRunAt: time.Now().UTC(), DeadlineAt: &deadline,
+			SourceRevision: "0", State: generation.StateBuilding, StateVersion: 1, RuntimeAttempt: 1, LeaseOwner: "runtime-lease", NextRunAt: time.Now().UTC(),
 			CandidateRevisionID: "candidate-0123456789abcdef",
 		},
-		LeaseCredential: generation.LeaseCredential{StateAttempt: 0, LeaseOwner: "runtime-lease"},
+		LeaseCredential: generation.LeaseCredential{StateVersion: 1, LeaseOwner: "runtime-lease"},
 	}}
 }
 
@@ -120,6 +114,12 @@ func (s *runtimeStore) Phase(_ context.Context, claim generation.Claim, request 
 	switch {
 	case request.Build != nil:
 		s.current.Workflow.State = generation.StateArtifactPublishing
+		s.current.Workflow.StateVersion++
+		s.current.Workflow.RuntimeAttempt = 1
+		s.current.Workflow.LeaseOwner = ""
+		s.current.Workflow.LeaseExpiresAt = nil
+		s.current.LeaseOwner = ""
+		return nil, nil
 	case request.ArtifactPublish != nil:
 		s.current.Workflow.State = generation.StateVerifying
 	case request.VerificationEnvironment != nil:
@@ -151,7 +151,7 @@ func (*runtimeStore) BuildArchive(context.Context, generation.Claim) ([]byte, st
 func (s *runtimeStore) currentClaimLocked() *generation.Claim {
 	claim := s.current
 	claim.Workflow.LeaseOwner = s.current.LeaseOwner
-	claim.StateAttempt = claim.Workflow.StateAttempt
+	claim.StateVersion = claim.Workflow.StateVersion
 	return &claim
 }
 
@@ -189,7 +189,7 @@ type runtimeVerifier struct{ calls atomic.Int32 }
 
 func (v *runtimeVerifier) Execute(ctx context.Context, execution generation.Execution, record func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
 	v.calls.Add(1)
-	if err := record(ctx, generation.VerificationEnvironment{Runtime: "node", Name: "verification", UID: "uid", WorkflowID: execution.Claim.Workflow.ID, Attempt: 1}); err != nil {
+	if err := record(ctx, generation.VerificationEnvironment{Runtime: "node", Name: "verification", UID: "uid", WorkflowID: execution.Claim.Workflow.ID, Attempt: execution.Claim.StateVersion}); err != nil {
 		return generation.VerificationReport{}, err
 	}
 	return generation.VerificationReport{}, nil

@@ -189,7 +189,7 @@ func (w *Worker) reapOne(ctx context.Context) (bool, error) {
 func (w *Worker) processClaim(parent context.Context, initial generation.Claim) {
 	started := time.Now()
 	lease := newLease(initial)
-	execCtx, cancel := workflowContext(parent, initial.Workflow.DeadlineAt)
+	execCtx, cancel := context.WithCancel(parent)
 	defer cancel()
 	done := make(chan struct{})
 	go w.renew(execCtx, cancel, done, lease)
@@ -217,7 +217,11 @@ func (w *Worker) processClaim(parent context.Context, initial generation.Claim) 
 			}
 			break
 		}
-		next, err := w.executeState(execCtx, execution, lease)
+		// A runtime action has its own local timeout. It is never persisted on
+		// the workflow and a replacement attempt receives a fresh budget.
+		actionCtx, actionCancel := context.WithTimeout(execCtx, domainexecution.DefaultActionDeadline)
+		next, err := w.executeState(actionCtx, execution, lease)
+		actionCancel()
 		if err != nil {
 			next, reportErr := w.reportError(parent, lease, claim, err)
 			if reportErr != nil {
@@ -394,13 +398,6 @@ func (l *workflowLease) set(claim generation.Claim) {
 	l.mu.Lock()
 	l.claim = claim
 	l.mu.Unlock()
-}
-
-func workflowContext(parent context.Context, deadline *time.Time) (context.Context, context.CancelFunc) {
-	if deadline != nil {
-		return context.WithDeadline(parent, *deadline)
-	}
-	return context.WithCancel(parent)
 }
 
 func retryDelay(attempt int) time.Duration {

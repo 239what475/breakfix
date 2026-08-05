@@ -365,18 +365,13 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 	if workflow == nil {
 		return nil
 	}
-	var deadline *time.Time
-	if workflow.DeadlineAt != nil {
-		value := workflow.DeadlineAt.UTC()
-		deadline = &value
-	}
 	return &api.AuthoringGenerationWorkflow{
 		Id:                            workflow.ID,
 		State:                         api.AuthoringGenerationWorkflowState(workflow.State),
-		StateAttempt:                  workflow.StateAttempt,
+		StateVersion:                  workflow.StateVersion,
+		RuntimeAttempt:                workflow.RuntimeAttempt,
 		CandidateRevisionId:           optionalString(workflow.CandidateRevisionID),
 		ClassificationRoadmapRevision: optionalString(workflow.ClassificationRoadmapRevision),
-		DeadlineAt:                    deadline,
 		LastError:                     optionalString(workflow.LastError),
 		CreatedAt:                     workflow.CreatedAt.UTC(),
 		UpdatedAt:                     workflow.UpdatedAt.UTC(),
