@@ -225,6 +225,10 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 								QuotaCPU:                 resources.QuotaCPU, QuotaMemory: resources.QuotaMemory,
 								QuotaEphemeralStorage: resources.QuotaEphemeralStorage,
 							},
+							Network: breakfixv1.VK8sNetworkSnapshot{
+								PublicEgressCIDR: h.runtimeConfig.K8s.Network.PublicEgressCIDR,
+								ProtectedCIDRs:   append([]string(nil), h.runtimeConfig.K8s.Network.ProtectedCIDRs...),
+							},
 						},
 					},
 				}

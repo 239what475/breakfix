@@ -6,6 +6,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -37,6 +38,10 @@ func From(runtime config.RuntimeConfig, incusConfig incus.Config) appexecution.S
 				QuotaCPU:                     resources.QuotaCPU,
 				QuotaMemory:                  resources.QuotaMemory,
 				QuotaEphemeralStorage:        resources.QuotaEphemeralStorage,
+			},
+			Network: environment.VK8sNetwork{
+				PublicEgressCIDR: runtime.K8s.Network.PublicEgressCIDR,
+				ProtectedCIDRs:   append([]string(nil), runtime.K8s.Network.ProtectedCIDRs...),
 			},
 		},
 	}

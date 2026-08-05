@@ -5,7 +5,8 @@ Breakfix 的固定控制面是 Server、Controller、Runtime Worker 和 PostgreS
 ## 前置条件
 
 - 可访问的 PostgreSQL。
-- 已安装 Breakfix CRD 的 Kubernetes 集群和能执行所需 NetworkPolicy 的 CNI。
+- 已安装 Breakfix CRD 的 Kubernetes 集群和能执行所需 NetworkPolicy 的 CNI。`runtime.k8s.network.protected_cidrs`
+  必须显式覆盖该集群的 Service/Pod CIDR、平台私网和 metadata/link-local 地址。
 - OpenSandbox native Kubernetes provider，用于 Server 管理 Generator workspace。
 - 一个 HTTPS OCI Registry；使用私有 Registry 时，每个会拉取镜像的 node 都必须信任其 CA、解析并访问配置的稳定域名。
 - Node runtime 还需要私网可访问的 Incus cluster 与 role-specific mTLS 证书。

@@ -1,0 +1,28 @@
+policies:
+  podSecurityStandard: baseline
+  networkPolicy:
+    enabled: true
+    controlPlane:
+      ingress:
+        - from:
+            - podSelector:
+                matchLabels:
+                  breakfix.dev/component: vk8s-management-terminal
+          ports:
+            - protocol: TCP
+              port: 8443
+    workload:
+      publicEgress:
+        enabled: true
+        cidr: 0.0.0.0/0
+        except:
+          - 10.0.0.0/8
+          - 100.64.0.0/10
+          - 127.0.0.0/8
+          - 169.254.0.0/16
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+sync:
+  toHost:
+    networkPolicies:
+      enabled: false

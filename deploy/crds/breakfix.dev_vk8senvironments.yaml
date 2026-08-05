@@ -113,6 +113,18 @@ spec:
                     type: string
                   managementTerminalImage:
                     type: string
+                  network:
+                    properties:
+                      protectedCidrs:
+                        items:
+                          type: string
+                        type: array
+                      publicEgressCidr:
+                        type: string
+                    required:
+                    - protectedCidrs
+                    - publicEgressCidr
+                    type: object
                   profileRevision:
                     type: string
                   resources:
@@ -151,6 +163,7 @@ spec:
                 required:
                 - imageDigest
                 - managementTerminalImage
+                - network
                 - profileRevision
                 - resources
                 - version

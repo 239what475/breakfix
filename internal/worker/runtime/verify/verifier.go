@@ -222,6 +222,10 @@ func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.W
 						QuotaCPU:                 snapshot.Resources.QuotaCPU, QuotaMemory: snapshot.Resources.QuotaMemory,
 						QuotaEphemeralStorage: snapshot.Resources.QuotaEphemeralStorage,
 					},
+					Network: breakfixv1.VK8sNetworkSnapshot{
+						PublicEgressCIDR: snapshot.Network.PublicEgressCIDR,
+						ProtectedCIDRs:   append([]string(nil), snapshot.Network.ProtectedCIDRs...),
+					},
 				},
 			},
 		})

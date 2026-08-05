@@ -187,6 +187,10 @@ func validVK8sEnvironment(name string, purpose breakfixv1.EnvironmentPurpose) *b
 					WorkloadCPU: "250m", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "2Gi",
 					QuotaCPU: "2", QuotaMemory: "2Gi", QuotaEphemeralStorage: "8Gi",
 				},
+				Network: breakfixv1.VK8sNetworkSnapshot{
+					PublicEgressCIDR: "0.0.0.0/0",
+					ProtectedCIDRs:   []string{"10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"},
+				},
 			},
 		},
 	}

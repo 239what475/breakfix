@@ -194,12 +194,18 @@ type VK8sResourceSnapshot struct {
 	QuotaEphemeralStorage        string `json:"quotaEphemeralStorage"`
 }
 
+type VK8sNetworkSnapshot struct {
+	PublicEgressCIDR string   `json:"publicEgressCidr"`
+	ProtectedCIDRs   []string `json:"protectedCidrs"`
+}
+
 type VK8sRuntimeSnapshot struct {
 	ImageDigest             string               `json:"imageDigest"`
 	ProfileRevision         string               `json:"profileRevision"`
 	Version                 string               `json:"version"`
 	ManagementTerminalImage string               `json:"managementTerminalImage"`
 	Resources               VK8sResourceSnapshot `json:"resources"`
+	Network                 VK8sNetworkSnapshot  `json:"network"`
 }
 
 type VK8sEnvironmentSpec struct {

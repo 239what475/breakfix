@@ -94,6 +94,17 @@ runtime:
       quota_cpu: "3"
       quota_memory: 3Gi
       quota_ephemeral_storage: 30Gi
+    # This list is copied into each Environment. Keep the concrete Service and
+    # Pod CIDRs for the target cluster here, even when they fall outside RFC1918.
+    network:
+      public_egress_cidr: 0.0.0.0/0
+      protected_cidrs:
+        - 10.0.0.0/8
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+        - 169.254.0.0/16
+        - 172.16.0.0/12
+        - 192.168.0.0/16
 
 # Incus system-container provider. Applications use these explicit mTLS files;
 # they never read the developer's Incus CLI remote or ~/.config/incus.

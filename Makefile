@@ -1,5 +1,5 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
-	test-unit lint catalog-package test-e2e
+	test-unit lint catalog-package test-e2e test-vk8s-network
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -105,3 +105,6 @@ catalog-package:
 
 test-e2e: test-deps
 	npm run test:e2e --prefix $(TEST_DIR)
+
+test-vk8s-network:
+	./scripts/kind/verify-vk8s-network-isolation.sh

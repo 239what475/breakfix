@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: breakfix-network-platform
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: platform
+  namespace: breakfix-network-platform
+  labels:
+    app: platform
+spec:
+  containers:
+    - name: platform
+      image: breakfix-test/vk8s-network:1
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - mkdir -p /www && printf ok > /www/index.html && exec httpd -f -p 8080 -h /www
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform
+  namespace: breakfix-network-platform
+spec:
+  selector:
+    app: platform
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: breakfix-vk8s-terminal
+  namespace: breakfix-vk8s-network
+spec:
+  podSelector:
+    matchLabels:
+      breakfix.dev/component: vk8s-management-terminal
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              release: acceptance-vc
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: terminal
+  namespace: breakfix-vk8s-network
+  labels:
+    breakfix.dev/component: vk8s-management-terminal
+spec:
+  containers:
+    - name: terminal
+      image: breakfix-test/vk8s-network:1
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+        - "900"

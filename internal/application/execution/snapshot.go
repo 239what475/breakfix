@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	domain "github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -32,6 +33,7 @@ type K8sRuntimeConfig struct {
 	Version                 string
 	ManagementTerminalImage string
 	Resources               domain.K8sResources
+	Network                 environment.VK8sNetwork
 }
 
 // Freeze creates the complete runtime contract before any external build
@@ -67,6 +69,7 @@ func Freeze(entry challenge.Entry, config SnapshotConfig) (domain.Snapshot, erro
 			Version:                 config.K8s.Version,
 			ManagementTerminalImage: config.K8s.ManagementTerminalImage,
 			Resources:               config.K8s.Resources,
+			Network:                 config.K8s.Network,
 		}
 	default:
 		return domain.Snapshot{}, fmt.Errorf("unsupported candidate runtime %q", entry.Runtime)

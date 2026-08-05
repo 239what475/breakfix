@@ -233,6 +233,10 @@ func vk8sProviderRequest(environment *breakfixv1.VK8sEnvironment, identity envir
 				QuotaCPU:                 environment.Spec.Runtime.Resources.QuotaCPU, QuotaMemory: environment.Spec.Runtime.Resources.QuotaMemory,
 				QuotaEphemeralStorage: environment.Spec.Runtime.Resources.QuotaEphemeralStorage,
 			},
+			Network: environmentdomain.VK8sNetwork{
+				PublicEgressCIDR: environment.Spec.Runtime.Network.PublicEgressCIDR,
+				ProtectedCIDRs:   append([]string(nil), environment.Spec.Runtime.Network.ProtectedCIDRs...),
+			},
 		},
 	}
 }
@@ -258,6 +262,12 @@ func validateVK8sEnvironmentSpec(environment *breakfixv1.VK8sEnvironment) error 
 	}
 	if strings.TrimSpace(runtime.ProfileRevision) == "" || strings.TrimSpace(runtime.Version) == "" {
 		return fmt.Errorf("VK8s profile revision and version are required")
+	}
+	if err := (environmentdomain.VK8sNetwork{
+		PublicEgressCIDR: runtime.Network.PublicEgressCIDR,
+		ProtectedCIDRs:   runtime.Network.ProtectedCIDRs,
+	}).Validate(); err != nil {
+		return fmt.Errorf("VK8s network: %w", err)
 	}
 	if err := (environmentdomain.VK8sResources{
 		ControlPlaneCPU: runtime.Resources.ControlPlaneCPU, ControlPlaneMemory: runtime.Resources.ControlPlaneMemory,

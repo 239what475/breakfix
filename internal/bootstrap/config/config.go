@@ -118,6 +118,14 @@ type K8sRuntimeConfig struct {
 	Version                 string            `yaml:"version"`
 	ManagementTerminalImage string            `yaml:"management_terminal_image"`
 	Resources               K8sResourceConfig `yaml:"resources"`
+	Network                 K8sNetworkConfig  `yaml:"network"`
+}
+
+// K8sNetworkConfig is deployment-owned network data copied into every VK8s
+// runtime snapshot. Operators must include their actual Service and Pod CIDRs.
+type K8sNetworkConfig struct {
+	PublicEgressCIDR string   `yaml:"public_egress_cidr"`
+	ProtectedCIDRs   []string `yaml:"protected_cidrs"`
 }
 
 type K8sResourceConfig struct {
@@ -270,6 +278,12 @@ func (c RuntimeConfig) Validate() error {
 	}).Validate(); err != nil {
 		return fmt.Errorf("runtime k8s resources: %w", err)
 	}
+	if err := (environment.VK8sNetwork{
+		PublicEgressCIDR: c.K8s.Network.PublicEgressCIDR,
+		ProtectedCIDRs:   c.K8s.Network.ProtectedCIDRs,
+	}).Validate(); err != nil {
+		return fmt.Errorf("runtime k8s network: %w", err)
+	}
 	return nil
 }
 
@@ -315,6 +329,10 @@ func Load(path string) (Config, error) {
 	cfg.Incus.TLS.ClientKeyFile = os.ExpandEnv(cfg.Incus.TLS.ClientKeyFile)
 	cfg.Runtime.K8s.BaseImageDigest = os.ExpandEnv(cfg.Runtime.K8s.BaseImageDigest)
 	cfg.Runtime.K8s.ManagementTerminalImage = os.ExpandEnv(cfg.Runtime.K8s.ManagementTerminalImage)
+	cfg.Runtime.K8s.Network.PublicEgressCIDR = os.ExpandEnv(cfg.Runtime.K8s.Network.PublicEgressCIDR)
+	for index := range cfg.Runtime.K8s.Network.ProtectedCIDRs {
+		cfg.Runtime.K8s.Network.ProtectedCIDRs[index] = os.ExpandEnv(cfg.Runtime.K8s.Network.ProtectedCIDRs[index])
+	}
 	cfg.Kubeconfig = expandKubeconfigPath(os.ExpandEnv(cfg.Kubeconfig))
 	cfg.Agent.APIKey = os.Getenv(cfg.Agent.APIKeyEnv)
 	cfg.OpenSandbox.APIKey = os.Getenv(cfg.OpenSandbox.APIKeyEnv)

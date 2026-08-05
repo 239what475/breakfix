@@ -106,6 +106,7 @@ type VK8sRuntime struct {
 	Version                 string
 	ManagementTerminalImage string
 	Resources               VK8sRuntimeResources
+	Network                 VK8sNetwork
 }
 
 type VK8sEnvironmentIdentity struct {

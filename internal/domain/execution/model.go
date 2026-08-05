@@ -48,11 +48,12 @@ type NodeResources struct {
 }
 
 type K8sRuntimeSnapshot struct {
-	BaseImageDigest         string       `json:"base_image_digest"`
-	ProfileRevision         string       `json:"profile_revision"`
-	Version                 string       `json:"version"`
-	ManagementTerminalImage string       `json:"management_terminal_image"`
-	Resources               K8sResources `json:"resources"`
+	BaseImageDigest         string                  `json:"base_image_digest"`
+	ProfileRevision         string                  `json:"profile_revision"`
+	Version                 string                  `json:"version"`
+	ManagementTerminalImage string                  `json:"management_terminal_image"`
+	Resources               K8sResources            `json:"resources"`
+	Network                 environment.VK8sNetwork `json:"network"`
 }
 
 type K8sResources struct {
@@ -374,6 +375,9 @@ func (s Snapshot) Validate() error {
 	} else {
 		if strings.TrimSpace(s.K8s.ProfileRevision) == "" || strings.TrimSpace(s.K8s.Version) == "" || !strings.Contains(s.K8s.ManagementTerminalImage, "@sha256:") {
 			return errors.New("k8s candidate resource snapshot is incomplete")
+		}
+		if err := s.K8s.Network.Validate(); err != nil {
+			return fmt.Errorf("k8s candidate network snapshot: %w", err)
 		}
 		if err := (environment.VK8sResources{
 			ControlPlaneCPU: s.K8s.Resources.ControlPlaneCPU, ControlPlaneMemory: s.K8s.Resources.ControlPlaneMemory,

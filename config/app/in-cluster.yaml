@@ -71,6 +71,17 @@ runtime:
       quota_cpu: "3"
       quota_memory: 3Gi
       quota_ephemeral_storage: 30Gi
+    # Operators must add the concrete Service and Pod CIDRs when their cluster
+    # uses ranges outside these protected private/link-local defaults.
+    network:
+      public_egress_cidr: 0.0.0.0/0
+      protected_cidrs:
+        - 10.0.0.0/8
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+        - 169.254.0.0/16
+        - 172.16.0.0/12
+        - 192.168.0.0/16
 
 incus:
   endpoint: ${BREAKFIX_INCUS_ENDPOINT}

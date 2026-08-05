@@ -10,9 +10,12 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
@@ -23,6 +26,9 @@ const (
 	vk8sEnvironmentRevisionAnnotation = "breakfix.dev/source-revision"
 	vk8sRuntimeLabel                  = "breakfix.dev/runtime"
 	vk8sRuntimeLabelValue             = "k8s"
+	vk8sTerminalComponentLabel        = "breakfix.dev/component"
+	vk8sTerminalComponentValue        = "vk8s-management-terminal"
+	vk8sTerminalNetworkPolicyName     = "breakfix-vk8s-terminal"
 	vk8sRuntimeServiceAccount         = "breakfix-runtime"
 	vk8sInitSentinel                  = "/var/lib/breakfix/.initialized"
 	vk8sChallengeRoot                 = "/opt/breakfix/challenge/k8s"
@@ -104,6 +110,9 @@ func (p *vk8sEnvironmentProvider) Provision(ctx context.Context, request environ
 		}
 	}
 	if err := p.ensureVCluster(ctx, request); err != nil {
+		return environment.VK8sEnvironmentObservation{}, err
+	}
+	if err := p.ensureTerminalNetworkPolicy(ctx, request); err != nil {
 		return environment.VK8sEnvironmentObservation{}, err
 	}
 
@@ -226,10 +235,18 @@ func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request environment.V
 
 func (p *vk8sEnvironmentProvider) ensureVCluster(ctx context.Context, request environment.VK8sProvisionRequest) error {
 	_, err := p.k8s.Clientset().AppsV1().StatefulSets(request.Identity.Namespace).Get(ctx, request.Identity.VClusterName, metav1.GetOptions{})
+	upgrade := false
 	if err == nil {
-		return nil
+		matched, checkErr := p.vclusterNetworkPoliciesMatch(ctx, request)
+		if checkErr != nil {
+			return checkErr
+		}
+		if matched {
+			return nil
+		}
+		upgrade = true
 	}
-	if !k8serrors.IsNotFound(err) {
+	if err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("get vcluster StatefulSet: %w", err)
 	}
 	valuesFile, err := writeVK8sValuesFile(request.Runtime)
@@ -239,13 +256,100 @@ func (p *vk8sEnvironmentProvider) ensureVCluster(ctx context.Context, request en
 	defer func() { _ = os.Remove(valuesFile) }()
 	_, err = p.vcluster.Create(ctx, vcluster.CreateOptions{
 		Name: request.Identity.VClusterName, Namespace: request.Identity.Namespace,
-		Connect: false, BackgroundProxy: false, ChartRepo: p.chartRepo,
+		Connect: false, BackgroundProxy: false, Upgrade: upgrade, ChartRepo: p.chartRepo,
 		ChartVersion: p.chartVersion, ValuesFiles: []string{valuesFile},
 	})
-	if err != nil && !vcluster.IsCode(err, vcluster.ErrAlreadyExists) {
-		return fmt.Errorf("create vcluster: %w", err)
+	if err != nil {
+		if !upgrade && vcluster.IsCode(err, vcluster.ErrAlreadyExists) {
+			return nil
+		}
+		return fmt.Errorf("create or upgrade vcluster: %w", err)
 	}
 	return nil
+}
+
+// vclusterNetworkPoliciesMatch checks the stable chart contract that protects
+// synced workload Pods. Existing virtual clusters are upgraded when their
+// workload policy is missing or has a different public-egress boundary.
+func (p *vk8sEnvironmentProvider) vclusterNetworkPoliciesMatch(ctx context.Context, request environment.VK8sProvisionRequest) (bool, error) {
+	if err := request.Runtime.Network.Validate(); err != nil {
+		return false, fmt.Errorf("validate VK8s network policy: %w", err)
+	}
+	policies := p.k8s.Clientset().NetworkingV1().NetworkPolicies(request.Identity.Namespace)
+	controlPlane, err := policies.Get(ctx, "vc-cp-"+request.Identity.VClusterName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get vcluster control-plane network policy: %w", err)
+	}
+	if !vclusterControlPlaneNetworkPolicyMatches(controlPlane, request.Identity.VClusterName) {
+		return false, nil
+	}
+	workload, err := policies.Get(ctx, "vc-work-"+request.Identity.VClusterName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get vcluster workload network policy: %w", err)
+	}
+	return vclusterWorkloadNetworkPolicyMatches(workload, request.Identity.VClusterName, request.Runtime.Network), nil
+}
+
+func vclusterControlPlaneNetworkPolicyMatches(policy *networkingv1.NetworkPolicy, releaseName string) bool {
+	if policy == nil || policy.Spec.PodSelector.MatchLabels["release"] != releaseName {
+		return false
+	}
+	for _, rule := range policy.Spec.Ingress {
+		for _, peer := range rule.From {
+			if peer.PodSelector == nil || peer.PodSelector.MatchLabels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue {
+				continue
+			}
+			for _, port := range rule.Ports {
+				if port.Protocol != nil && *port.Protocol != corev1.ProtocolTCP {
+					continue
+				}
+				if port.Port != nil && port.Port.IntValue() == 8443 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func vclusterWorkloadNetworkPolicyMatches(policy *networkingv1.NetworkPolicy, releaseName string, network environment.VK8sNetwork) bool {
+	if policy == nil || policy.Spec.PodSelector.MatchLabels["vcluster.loft.sh/managed-by"] != releaseName {
+		return false
+	}
+	for _, rule := range policy.Spec.Egress {
+		for _, peer := range rule.To {
+			if peer.IPBlock == nil || peer.IPBlock.CIDR != network.PublicEgressCIDR || !sameStringSet(peer.IPBlock.Except, network.ProtectedCIDRs) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	values := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		values[value] = struct{}{}
+	}
+	if len(values) != len(right) {
+		return false
+	}
+	for _, value := range right {
+		if _, ok := values[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *vk8sEnvironmentProvider) controlPlaneReady(ctx context.Context, identity environment.VK8sEnvironmentIdentity) (bool, error) {
@@ -328,7 +432,7 @@ func (p *vk8sEnvironmentProvider) ensureTerminal(ctx context.Context, request en
 	pods := p.k8s.Clientset().CoreV1().Pods(request.Identity.Namespace)
 	pod, err := pods.Get(ctx, request.Identity.TerminalPodName, metav1.GetOptions{})
 	if err == nil {
-		if pod.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || pod.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || pod.Spec.ServiceAccountName != vk8sRuntimeServiceAccount || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != request.Runtime.ImageDigest {
+		if pod.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || pod.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || pod.Labels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue || pod.Spec.ServiceAccountName != vk8sRuntimeServiceAccount || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != request.Runtime.ImageDigest {
 			return fmt.Errorf("VK8s terminal pod differs from immutable runtime snapshot")
 		}
 		return nil
@@ -348,12 +452,101 @@ func (p *vk8sEnvironmentProvider) ensureTerminal(ctx context.Context, request en
 	return nil
 }
 
+func (p *vk8sEnvironmentProvider) ensureTerminalNetworkPolicy(ctx context.Context, request environment.VK8sProvisionRequest) error {
+	desired, err := newVK8sTerminalNetworkPolicy(request)
+	if err != nil {
+		return err
+	}
+	policies := p.k8s.Clientset().NetworkingV1().NetworkPolicies(request.Identity.Namespace)
+	existing, err := policies.Get(ctx, desired.Name, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		if _, createErr := policies.Create(ctx, desired, metav1.CreateOptions{}); createErr != nil && !k8serrors.IsAlreadyExists(createErr) {
+			return fmt.Errorf("create VK8s terminal network policy: %w", createErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get VK8s terminal network policy: %w", err)
+	}
+	if err := verifyVK8sTerminalNetworkPolicy(existing, request); err != nil {
+		return err
+	}
+	if !apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+		return fmt.Errorf("VK8s terminal network policy differs from immutable runtime snapshot")
+	}
+	return nil
+}
+
+func newVK8sTerminalNetworkPolicy(request environment.VK8sProvisionRequest) (*networkingv1.NetworkPolicy, error) {
+	if err := request.Runtime.Network.Validate(); err != nil {
+		return nil, fmt.Errorf("validate VK8s terminal network policy: %w", err)
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vk8sTerminalNetworkPolicyName,
+			Namespace: request.Identity.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/part-of": "breakfix",
+				vk8sRuntimeLabel:            vk8sRuntimeLabelValue,
+				vk8sTerminalComponentLabel:  vk8sTerminalComponentValue,
+			},
+			Annotations: map[string]string{
+				vk8sEnvironmentUIDAnnotation:      request.EnvironmentUID,
+				vk8sEnvironmentRevisionAnnotation: request.Revision,
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{vk8sTerminalComponentLabel: vk8sTerminalComponentValue}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				{
+					To: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"release": request.Identity.VClusterName}}}},
+					Ports: []networkingv1.NetworkPolicyPort{
+						networkPolicyPort(corev1.ProtocolTCP, 443),
+						networkPolicyPort(corev1.ProtocolTCP, 8443),
+					},
+				},
+				{
+					To: []networkingv1.NetworkPolicyPeer{{
+						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+					}},
+					Ports: []networkingv1.NetworkPolicyPort{
+						networkPolicyPort(corev1.ProtocolUDP, 53),
+						networkPolicyPort(corev1.ProtocolTCP, 53),
+					},
+				},
+				{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{
+					CIDR: request.Runtime.Network.PublicEgressCIDR, Except: append([]string(nil), request.Runtime.Network.ProtectedCIDRs...),
+				}}}},
+			},
+		},
+	}, nil
+}
+
+func verifyVK8sTerminalNetworkPolicy(policy *networkingv1.NetworkPolicy, request environment.VK8sProvisionRequest) error {
+	if policy == nil || policy.Namespace != request.Identity.Namespace || policy.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || policy.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || policy.Labels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue {
+		return fmt.Errorf("VK8s terminal network policy has different ownership metadata")
+	}
+	return nil
+}
+
+func networkPolicyPort(protocol corev1.Protocol, port int) networkingv1.NetworkPolicyPort {
+	protocolValue := protocol
+	portValue := intstr.FromInt(port)
+	return networkingv1.NetworkPolicyPort{Protocol: &protocolValue, Port: &portValue}
+}
+
 func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources corev1.ResourceRequirements, kubeconfigMode int32) *corev1.Pod {
 	automount := false
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: request.Identity.TerminalPodName, Namespace: request.Identity.Namespace,
-			Labels:      map[string]string{"app.kubernetes.io/part-of": "breakfix", vk8sRuntimeLabel: vk8sRuntimeLabelValue},
+			Labels: map[string]string{
+				"app.kubernetes.io/part-of": "breakfix",
+				vk8sRuntimeLabel:            vk8sRuntimeLabelValue,
+				vk8sTerminalComponentLabel:  vk8sTerminalComponentValue,
+			},
 			Annotations: map[string]string{vk8sEnvironmentUIDAnnotation: request.EnvironmentUID, vk8sEnvironmentRevisionAnnotation: request.Revision},
 		},
 		Spec: corev1.PodSpec{
@@ -454,6 +647,9 @@ func vk8sWorkloadResources(snapshot environment.VK8sRuntimeResources) (corev1.Re
 }
 
 func writeVK8sValuesFile(runtime environment.VK8sRuntime) (string, error) {
+	if err := runtime.Network.Validate(); err != nil {
+		return "", fmt.Errorf("validate VK8s network policy: %w", err)
+	}
 	data, err := yaml.Marshal(buildVK8sValues(runtime))
 	if err != nil {
 		return "", fmt.Errorf("marshal vcluster values: %w", err)
@@ -498,6 +694,22 @@ func buildVK8sValues(runtime environment.VK8sRuntime) map[string]any {
 		setNestedValue(values, runtime.Resources.WorkloadMemory, "policies", "limitRange", target, "memory")
 		setNestedValue(values, runtime.Resources.WorkloadEphemeralStorage, "policies", "limitRange", target, "ephemeral-storage")
 	}
+	setNestedValue(values, true, "policies", "networkPolicy", "enabled")
+	setNestedValue(values, []any{map[string]any{
+		"from": []any{map[string]any{"podSelector": map[string]any{"matchLabels": map[string]string{
+			vk8sTerminalComponentLabel: vk8sTerminalComponentValue,
+		}}}},
+		"ports": []any{map[string]any{"protocol": string(corev1.ProtocolTCP), "port": 8443}},
+	}}, "policies", "networkPolicy", "controlPlane", "ingress")
+	// Baseline rejects host-networked and privileged learner workloads. Without
+	// it, a workload could bypass the host-side NetworkPolicy entirely.
+	setNestedValue(values, "baseline", "policies", "podSecurityStandard")
+	// Learners can describe virtual NetworkPolicies for their own workloads,
+	// but must never be allowed to replace the host-side isolation boundary.
+	setNestedValue(values, false, "sync", "toHost", "networkPolicies", "enabled")
+	setNestedValue(values, true, "policies", "networkPolicy", "workload", "publicEgress", "enabled")
+	setNestedValue(values, runtime.Network.PublicEgressCIDR, "policies", "networkPolicy", "workload", "publicEgress", "cidr")
+	setNestedValue(values, append([]string(nil), runtime.Network.ProtectedCIDRs...), "policies", "networkPolicy", "workload", "publicEgress", "except")
 	return values
 }
 

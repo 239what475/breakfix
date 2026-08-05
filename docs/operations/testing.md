@@ -28,6 +28,20 @@ make catalog-package \
 
 将 archive 推送到测试 Registry 后，把得到的 immutable digest 写入测试环境 `breakfix-runtime` Secret 的 `catalog_release_reference`，然后重启 Server。`make test-e2e` 会复用 `test/node_modules`；只有测试锁文件变化或依赖缺失时才重新执行 `npm ci`。
 
+## VK8s 网络隔离验收
+
+```bash
+make test-vk8s-network
+```
+
+该命令不是默认单元或浏览器测试。它会创建独立的 Kind cluster、安装 Calico `v3.31.3`、创建 vcluster `0.35.1`，并验证
+真实 learner workload 与 management terminal 的策略资源、内部 DNS/Service、允许的非受保护出口，以及对平台 Service、
+宿主 API、私网和 metadata 的拒绝。脚本会拉取测试镜像和 chart，并在完成后删除整个临时 cluster；失败定位时设置
+`BREAKFIX_KEEP_VK8S_NETWORK_CLUSTER=1` 保留资源。
+
+该验收使用 `198.18.0.0/24` 的临时 Docker network 模拟可达但不受保护的外部地址，因此不把真实公网连通性作为断言。
+它验证 vcluster chart 的策略语义和 CNI 执行结果，不替代部署者在其实际 Service/Pod CIDR 配置上的验收。
+
 ## 已部署运行时验收
 
 ```bash

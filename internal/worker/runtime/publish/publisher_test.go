@@ -9,6 +9,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -83,6 +84,10 @@ func publishTestWork() domainexecution.Work {
 					ControlPlaneCPU: "1", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
 					WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",
 					QuotaCPU: "3", QuotaMemory: "3Gi", QuotaEphemeralStorage: "30Gi",
+				},
+				Network: environment.VK8sNetwork{
+					PublicEgressCIDR: "0.0.0.0/0",
+					ProtectedCIDRs:   []string{"10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"},
 				},
 			},
 		},
