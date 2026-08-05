@@ -8,12 +8,12 @@ resources:
   - deploy/crds/breakfix.dev_vk8senvironments.yaml
   - deploy/manifests/namespace.yaml
   - deploy/manifests/rbac.yaml
-  - deploy/manifests/worker-network-policy.yaml
+  - deploy/manifests/runtime-worker-network-policy.yaml
   - deploy/manifests/postgresql.yaml
   - deploy/manifests/server-data.yaml
   - deploy/manifests/server.yaml
   - deploy/manifests/controller.yaml
-  - deploy/manifests/generate-worker.yaml
+  - deploy/manifests/runtime-worker.yaml
 
 configMapGenerator:
   - name: breakfix-config

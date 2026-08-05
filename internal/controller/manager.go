@@ -49,7 +49,7 @@ func Setup(manager ctrl.Manager, k8sClient *kubernetes.Client, options Options, 
 		}
 		vk8sProvider = kubernetes.NewVK8sEnvironmentProvider(k8sClient, vclusterClient, kubernetes.VK8sEnvironmentProviderConfig{
 			NamespacePrefix: options.Namespace, ControlNamespace: options.CRDNamespace,
-			RegistryPullSecret: options.RegistryPullSecret, VerificationServiceAccount: "breakfix-generate-worker",
+			RegistryPullSecret: options.RegistryPullSecret, VerificationServiceAccount: "breakfix-runtime-worker",
 			ChartRepo: options.VClusterChartRepo, ChartVersion: options.VClusterChartVersion,
 		})
 	}

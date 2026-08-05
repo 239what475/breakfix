@@ -1,5 +1,5 @@
-// Package publish publishes and cleans immutable candidate artifacts for a
-// GenerationWorkflow phase. It does not schedule work or mutate Server state.
+// Package publish promotes and cleans immutable artifacts for a Runtime
+// Action. It does not schedule work or mutate Server state.
 package publish
 
 import (

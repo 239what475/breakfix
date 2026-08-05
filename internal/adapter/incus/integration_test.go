@@ -27,7 +27,7 @@ func TestPreflightAgainstIncus(t *testing.T) {
 	for _, role := range []incus.Role{
 		incus.RoleController,
 		incus.RoleServer,
-		incus.RoleGenerate,
+		incus.RoleRuntime,
 	} {
 		t.Run(string(role), func(t *testing.T) {
 			client, err := incus.Connect(ctx, integrationConfig(t, endpoint, role))
@@ -54,12 +54,12 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 	config := integrationConfig(t, endpoint, incus.RoleController)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	builderClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleGenerate))
+	builderClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleRuntime))
 	if err != nil {
 		t.Fatalf("create Incus builder client: %v", err)
 	}
 	defer builderClient.Close()
-	publisherClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleGenerate))
+	publisherClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleRuntime))
 	if err != nil {
 		t.Fatalf("create Incus publisher client: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestNodeBuildSlotsAreCandidateScopedAgainstIncus(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	client, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleGenerate))
+	client, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleRuntime))
 	if err != nil {
 		t.Fatalf("create Incus build client: %v", err)
 	}
@@ -210,12 +210,12 @@ func TestNodeReverseProxyAgainstIncus(t *testing.T) {
 	config := integrationConfig(t, endpoint, incus.RoleController)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	builderClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleGenerate))
+	builderClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleRuntime))
 	if err != nil {
 		t.Fatalf("create Incus builder client: %v", err)
 	}
 	defer builderClient.Close()
-	publisherClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleGenerate))
+	publisherClient, err := incus.Connect(ctx, integrationConfig(t, endpoint, incus.RoleRuntime))
 	if err != nil {
 		t.Fatalf("create Incus publisher client: %v", err)
 	}

@@ -22,7 +22,7 @@ Commands:
   connect                  Install/connect the Traffic Manager for the current cluster.
   server                   Replace Server with a local foreground process.
   controller               Replace Controller with a local foreground process.
-  generate-worker          Replace the Generate Worker pool locally.
+  runtime-worker          Replace the Runtime Worker pool locally.
   down [name]              Restore one component or all components.
   status                   Show Telepresence and Breakfix runtime status.
   disconnect               Restore all components and stop local Telepresence daemons.
@@ -69,12 +69,12 @@ ensure_connected() {
 }
 
 all_components() {
-  printf '%s\n' server controller generate-worker
+  printf '%s\n' server controller runtime-worker
 }
 
 is_worker() {
   case "$1" in
-    generate-worker) return 0 ;;
+    runtime-worker) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -83,7 +83,7 @@ workload_for() {
   case "$1" in
     server) printf '%s\n' breakfix-server ;;
     controller) printf '%s\n' breakfix-controller ;;
-    generate-worker) printf '%s\n' breakfix-generate-worker ;;
+    runtime-worker) printf '%s\n' breakfix-runtime-worker ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -91,7 +91,7 @@ workload_for() {
 container_for() {
   case "$1" in
     server|controller) printf '%s\n' "$1" ;;
-    generate-worker) printf '%s\n' "$1" ;;
+    runtime-worker) printf '%s\n' "$1" ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -103,7 +103,7 @@ binary_for() {
 health_port_for() {
   case "$1" in
     controller) printf '%s\n' "$TP_CONTROLLER_HEALTH_PORT" ;;
-    generate-worker) printf '%s\n' 18082 ;;
+    runtime-worker) printf '%s\n' 18082 ;;
     server) printf '%s\n' 18086 ;;
     *) fail "unknown component: $1" ;;
   esac
@@ -111,7 +111,7 @@ health_port_for() {
 
 build_component() {
   case "$1" in
-    server|controller|generate-worker) (cd "$ROOT_DIR" && make --no-print-directory build) ;;
+    server|controller|runtime-worker) (cd "$ROOT_DIR" && make --no-print-directory build) ;;
     *) fail "unknown component: $1" ;;
   esac
 }
@@ -124,7 +124,7 @@ secret_value() {
 
 worker_identity_secret() {
   case "$1" in
-    generate-worker) printf '%s\n' breakfix-generate-worker-identity ;;
+    runtime-worker) printf '%s\n' breakfix-runtime-worker-identity ;;
     *) fail "unknown worker identity: $1" ;;
   esac
 }
@@ -311,7 +311,7 @@ run_server() {
   env \
     BREAKFIX_DATABASE_URL="$(secret_value database_url)" \
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
-    BREAKFIX_GENERATE_WORKER_API_KEY="$(worker_identity_key generate-worker)" \
+    BREAKFIX_RUNTIME_WORKER_API_KEY="$(worker_identity_key runtime-worker)" \
     BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)" \
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \
     BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)" \
@@ -341,23 +341,22 @@ run_controller() {
   replace_command controller "$config" "$mount_root" env HOME="$STATE_DIR/controller-data"
 }
 
-run_generate_worker() {
+run_runtime_worker() {
   local kubeconfig config mount_root registry_trust_bundle_file
-  prepare_worker_replacement generate-worker
-  mount_root="$STATE_DIR/mount-generate-worker"
-  kubeconfig="$(create_service_account_kubeconfig generate-worker)"
-  config="$(prepare_config generate-worker "$kubeconfig" "$mount_root")"
+  prepare_worker_replacement runtime-worker
+  mount_root="$STATE_DIR/mount-runtime-worker"
+  kubeconfig="$(create_service_account_kubeconfig runtime-worker)"
+  config="$(prepare_config runtime-worker "$kubeconfig" "$mount_root")"
   registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
-  printf 'Replacing Generate Worker locally.\n'
-  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key generate-worker)"
-  export DEEPSEEK_API_KEY="$(secret_value deepseek_api_key)"
+  printf 'Replacing Runtime Worker locally.\n'
+  export BREAKFIX_WORKER_API_KEY="$(worker_identity_key runtime-worker)"
   export BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)"
   export BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)"
   export BREAKFIX_REGISTRY_PASSWORD="$(secret_value registry_password)"
   export BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file"
   export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
   export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
-  replace_command generate-worker "$config" "$mount_root" env POD_NAME=telepresence-generate-worker
+  replace_command runtime-worker "$config" "$mount_root" env POD_NAME=telepresence-runtime-worker
 }
 
 run_component() {
@@ -403,7 +402,7 @@ main() {
       ensure_prerequisites
       ensure_connected
       ;;
-    server|controller|generate-worker)
+    server|controller|runtime-worker)
       run_component "$command"
       ;;
     down)
@@ -411,7 +410,7 @@ main() {
         restore_all
       else
         case "$2" in
-          server|controller|generate-worker) detach_component "$2" ;;
+          server|controller|runtime-worker) detach_component "$2" ;;
           *) fail "unknown component: $2" ;;
         esac
       fi

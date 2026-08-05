@@ -80,7 +80,7 @@ func (s CommitState) Valid() bool {
 }
 
 // Release is a durable installation attempt for one immutable portable OCI
-// bundle. It has no user, Generator run, or authoring-session identity.
+// bundle. It has no user, Generator AgentRun, or authoring-session identity.
 type Release struct {
 	ID            string          `json:"id"`
 	Name          string          `json:"name"`

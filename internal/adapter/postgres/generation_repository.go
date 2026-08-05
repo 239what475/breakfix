@@ -1696,7 +1696,7 @@ func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Conte
 		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET active_agent_run_id = NULL, runtime_attempt = 0,
 			lease_owner = '', lease_expires_at = NULL, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
 			failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("release rejected generator run: %w", err)
+			return fmt.Errorf("release rejected Generator AgentRun: %w", err)
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL,

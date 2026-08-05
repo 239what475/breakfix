@@ -48,10 +48,10 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: jwt_secret
-            - name: BREAKFIX_GENERATE_WORKER_API_KEY
+            - name: BREAKFIX_RUNTIME_WORKER_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: breakfix-generate-worker-identity
+                  name: breakfix-runtime-worker-identity
                   key: worker_api_key
             - name: DEEPSEEK_API_KEY
               valueFrom:

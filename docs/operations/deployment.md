@@ -1,6 +1,6 @@
 # 部署与运行
 
-Breakfix 的固定控制面是 Server、Controller、Generate Worker 和 PostgreSQL。Catalog 安装器在 Server 进程内运行；Environment 由 Controller 按需创建，不是固定 Deployment。生产根 Kustomize 包不部署 Registry，Registry 由运营方提供并通过 runtime Secret 配置。
+Breakfix 的固定控制面是 Server、Controller、Runtime Worker 和 PostgreSQL。Catalog 安装器在 Server 进程内运行；Environment 由 Controller 按需创建，不是固定 Deployment。生产根 Kustomize 包不部署 Registry，Registry 由运营方提供并通过 runtime Secret 配置。
 
 ## 前置条件
 
@@ -14,7 +14,7 @@ Breakfix 的固定控制面是 Server、Controller、Generate Worker 和 Postgre
 
 ## Registry
 
-生产部署要求运营方提供一个所有 Kubernetes node 与平台 Pod 都能解析、访问并信任的 HTTPS OCI Registry。运行时 Secret 的 `registry_repository` 是 image reference 的 repository root，例如 `registry.example.com/breakfix`；其 authority 由 kubelet、Server 和 Generate Worker 原样共享。同步配置可选的 `registry_pull_secret`、构建推送凭据和内部 CA bundle；Breakfix 不部署或管理 Registry，也不修改 node DNS、`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc` 名称不能作为 kubelet/containerd 的最终镜像 authority。
+生产部署要求运营方提供一个所有 Kubernetes node 与平台 Pod 都能解析、访问并信任的 HTTPS OCI Registry。运行时 Secret 的 `registry_repository` 是 image reference 的 repository root，例如 `registry.example.com/breakfix`；其 authority 由 kubelet、Server 和 Runtime Worker 原样共享。同步配置可选的 `registry_pull_secret`、构建推送凭据和内部 CA bundle；Breakfix 不部署或管理 Registry，也不修改 node DNS、`/etc/hosts`、containerd 或 CA 信任库。Kubernetes CoreDNS 的 `.svc` 名称不能作为 kubelet/containerd 的最终镜像 authority。
 
 Kind Registry 的 NodePort、开发 CA 和镜像加载流程属于[本地开发](development.md)，生产不使用它。
 
@@ -24,14 +24,14 @@ Kind Registry 的 NodePort、开发 CA 和镜像加载流程属于[本地开发]
 make verify-generated
 make images TARGETOS=linux TARGETARCH=amd64 \
   RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev
-for component in server controller generate-worker; do
+for component in server controller runtime-worker; do
   docker push "ghcr.io/acme/breakfix-${component}:dev"
 done
 kubectl apply -k .
 kubectl -n breakfix-system get deployments,pods
 ```
 
-`make images` 只把已编译二进制打入 Server、Controller 与 Generate Worker 的 distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go 依赖或编译源码。
+`make images` 只把已编译二进制打入 Server、Controller 与 Runtime Worker 的 distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go 依赖或编译源码。
 
 ## Catalog 基线
 
@@ -53,13 +53,15 @@ make catalog-package \
 
 ## 身份和最小权限
 
-Server 持有 `internal_workers.generate` 密钥；Generate Worker 只挂载该密钥，不持有 PostgreSQL DSN。Generate Worker 拥有构建、Registry、验证 Environment 与其 Incus 角色凭据；该 Incus 身份必须能够访问 Controller 为验证和学习动态创建的 NodeEnvironment project，不能只限定为 build/image 两个静态 project。
+Server 持有 `internal_workers.runtime` 密钥；Runtime Worker 只挂载该密钥，不持有 PostgreSQL DSN 或模型凭据。Runtime Worker 拥有构建、Registry、验证 Environment 与其 Incus 角色凭据；该 Incus 身份必须能够访问 Controller 为验证和学习动态创建的 NodeEnvironment project，不能只限定为 build/image 两个静态 project。
 
 Controller 是唯一有权限调和 Environment CRD 的组件。Server 创建和更新 Environment `spec`，Controller 写 `status`。生产 CNI 必须真正执行 NetworkPolicy；Kind 的默认网络行为不能当作隔离验收。
 
+Runtime Worker 的 `/healthz` 与 `/readyz` 只表示进程和 action loop 可用，不能因一个 provider 故障而让它停止领取其他 runtime 的 action。Registry、Kubernetes API 和 Incus 分别通过 `/capabilities/registry`、`/capabilities/kubernetes-api`、`/capabilities/node-provider` 暴露独立探针，并同时写入 capability metrics，供部署者告警和排障。
+
 ## Incus
 
-Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/bootstrap.sh` 准备。脚本将证书写入被忽略的 `.local/incus/<role>/`，并输出 `base_image_fingerprint`；部署者再将 `server`、`controller` 和 `generate` 三套证书创建为 `breakfix-incus-*` Secret，并把该 fingerprint 写入 `breakfix-runtime` 的 `incus_base_image_fingerprint`。
+Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/bootstrap.sh` 准备。脚本将证书写入被忽略的 `.local/incus/<role>/`，并输出 `base_image_fingerprint`；部署者再将 `server`、`controller` 和 `runtime` 三套证书创建为 `breakfix-incus-*` Secret，并把该 fingerprint 写入 `breakfix-runtime` 的 `incus_base_image_fingerprint`。
 
 ## 验收
 

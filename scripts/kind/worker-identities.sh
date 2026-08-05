@@ -23,12 +23,12 @@ read_identity() {
     jq -r '.data.worker_api_key // "" | @base64d'
 }
 
-generate_worker_api_key=$(read_identity generate-worker || true)
+runtime_worker_api_key=$(read_identity runtime-worker || true)
 
-# The Server validates the fixed Generate Worker identity before exposing its
+# The Server validates the fixed Runtime Worker identity before exposing its
 # internal workflow API.
-if [ -z "$generate_worker_api_key" ]; then
-  generate_worker_api_key=$(new_key)
+if [ -z "$runtime_worker_api_key" ]; then
+  runtime_worker_api_key=$(new_key)
 fi
 
 apply_identity() {
@@ -44,6 +44,6 @@ apply_identity() {
   }
 }
 
-apply_identity generate-worker "$generate_worker_api_key"
+apply_identity runtime-worker "$runtime_worker_api_key"
 
-printf 'Verified Generate Worker identity Secret in %s.\n' "$namespace"
+printf 'Verified Runtime Worker identity Secret in %s.\n' "$namespace"

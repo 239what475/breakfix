@@ -42,7 +42,7 @@ type Config struct {
 
 // RegistryConfig identifies the only OCI repository root used by the platform.
 // Its authority is embedded in immutable image references and is also used by
-// Server and Generate Worker HTTPS clients, so it must be reachable and trusted
+// Server and Runtime Worker HTTPS clients, so it must be reachable and trusted
 // by both Kubernetes nodes and control-plane Pods.
 type RegistryConfig struct {
 	Repository      string `yaml:"repository"`
@@ -152,19 +152,19 @@ type WorkerConfig struct {
 type InternalWorkerRole string
 
 const (
-	InternalWorkerGenerate InternalWorkerRole = "generate"
+	InternalWorkerRuntime InternalWorkerRole = "runtime"
 )
 
 // InternalWorkerKeys are read only by Server. Every fixed worker receives its
 // own API key through WorkerConfig.APIKeyEnv instead of this complete set.
 type InternalWorkerKeys struct {
-	Generate string `yaml:"generate"`
+	Runtime string `yaml:"runtime"`
 }
 
 func (k InternalWorkerKeys) Key(role InternalWorkerRole) string {
 	switch role {
-	case InternalWorkerGenerate:
-		return k.Generate
+	case InternalWorkerRuntime:
+		return k.Runtime
 	default:
 		return ""
 	}
@@ -175,7 +175,7 @@ func (k InternalWorkerKeys) Validate() error {
 		role InternalWorkerRole
 		key  string
 	}{
-		{InternalWorkerGenerate, k.Generate},
+		{InternalWorkerRuntime, k.Runtime},
 	}
 	seen := make(map[string]InternalWorkerRole, len(keys))
 	for _, item := range keys {
@@ -192,7 +192,7 @@ func (k InternalWorkerKeys) Validate() error {
 }
 
 // OpenSandboxConfig describes the Server-owned Generator workspace plane.
-// Its lifecycle key intentionally never appears in a Generate Worker config.
+// Its lifecycle key intentionally never appears in a Runtime Worker config.
 type OpenSandboxConfig struct {
 	BaseURL                   string `yaml:"base_url"`
 	APIKeyEnv                 string `yaml:"api_key_env"`
@@ -299,7 +299,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.DatabaseURL = os.ExpandEnv(cfg.DatabaseURL)
 	cfg.JWTSecret = os.ExpandEnv(cfg.JWTSecret)
-	cfg.InternalWorkers.Generate = os.ExpandEnv(cfg.InternalWorkers.Generate)
+	cfg.InternalWorkers.Runtime = os.ExpandEnv(cfg.InternalWorkers.Runtime)
 	cfg.Worker.ServerURL = os.ExpandEnv(cfg.Worker.ServerURL)
 	cfg.Registry.Repository = os.ExpandEnv(cfg.Registry.Repository)
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
@@ -351,7 +351,7 @@ func expandKubeconfigPath(value string) string {
 
 // ValidateServer checks the complete dependency contract of the Server
 // process. Other processes intentionally validate only the configuration they
-// consume, so a Generate Worker never needs a Kubernetes or OpenSandbox secret.
+// consume, so a Runtime Worker never needs a Kubernetes or OpenSandbox secret.
 func (c Config) ValidateServer() error {
 	if c.Port <= 0 || strings.TrimSpace(c.DataDir) == "" || strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("server port, data_dir, and database_url are required")
@@ -411,7 +411,7 @@ func (c Config) ValidateController() error {
 	return nil
 }
 
-func (c Config) ValidateGenerateWorker() error {
+func (c Config) ValidateRuntimeWorker() error {
 	if err := c.validateWorker(); err != nil {
 		return fmt.Errorf("runtime worker: %w", err)
 	}

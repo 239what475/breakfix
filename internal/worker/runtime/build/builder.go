@@ -1,5 +1,5 @@
-// Package build builds an immutable candidate for one GenerationWorkflow
-// phase. It owns no queue, lease, or Server mutation.
+// Package build builds an immutable artifact for one Runtime Action. It owns
+// no queue, lease, or Server mutation.
 package build
 
 import (

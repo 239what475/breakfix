@@ -8,12 +8,12 @@ health_port: 8081
 # Persistent server state: artifacts and the filesystem challenge catalog.
 data_dir: ./data
 # PostgreSQL is the only relational database. The Server data directory is not
-# a database volume and must not be shared with the Controller or Generate Worker.
+# a database volume and must not be shared with the Controller or Runtime Worker.
 database_url: ${BREAKFIX_DATABASE_URL}
 kubeconfig: ~/.kube/config
 
 # Registry repository includes the namespace used for challenge images. Its
-# authority is used unchanged by Kubernetes nodes, Server, and Generate Worker.
+# authority is used unchanged by Kubernetes nodes, Server, and Runtime Worker.
 # Production always uses an operator-provided OCI Registry such as Harbor or a
 # cloud Registry; every consumer must independently trust and reach it.
 registry:
@@ -42,11 +42,11 @@ cooldown_minutes: 5
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
 internal_workers:
-  generate: ${BREAKFIX_GENERATE_WORKER_API_KEY}
+  runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 # Internal endpoint and identity environment used by fixed workers. Production
 # workers receive only BREAKFIX_WORKER_API_KEY from their role-specific Secret.
 worker:
-  server_url: http://breakfix-server
+  server_url: http://breakfix-server:9090
   api_key_env: BREAKFIX_WORKER_API_KEY
 
 # Agent workflow (DeepSeek Chat Completions API).
@@ -57,9 +57,10 @@ agent:
   request_timeout: 2m
 
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
-# lifecycle API key is only present in the Server process, never a Generate Worker.
-# Each Generator Run creates one ManualCleanup Sandbox and Server deletes the
-# Sandbox and PVC when that Run reaches a terminal state.
+# lifecycle API key is only present in the Server process, never a Runtime Worker.
+# Each GenerationWorkflow owns one current workspace and reuses it across
+# ordinary retries and content repair. Server interruption, lease loss, or
+# confirmed resource loss retires it and creates a replacement PVC/Sandbox.
 opensandbox:
   base_url: http://opensandbox-server.opensandbox.svc.cluster.local
   api_key_env: OPEN_SANDBOX_API_KEY

@@ -13,7 +13,7 @@ const execFile = promisify(execFileCallback);
 const namespace = "breakfix-system";
 const serverDeployment = "breakfix-server";
 const controllerDeployment = "breakfix-controller";
-const workerDeployments = ["generate-worker"] as const;
+const workerDeployments = ["runtime-worker"] as const;
 // The browser origin must match Server's configured UI origin so its terminal
 // WebSocket upgrade passes the same-origin check.
 const serverURL = process.env.BREAKFIX_E2E_BASE_URL ?? "http://localhost:9090";

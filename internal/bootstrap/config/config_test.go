@@ -23,7 +23,7 @@ func TestExampleConfigLoads(t *testing.T) {
 
 func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
-	t.Setenv("BREAKFIX_TEST_GENERATE_WORKER", "generate-from-environment")
+	t.Setenv("BREAKFIX_TEST_RUNTIME_WORKER", "runtime-from-environment")
 	t.Setenv("BREAKFIX_TEST_WORKER_KEY", "worker-from-environment")
 	t.Setenv("BREAKFIX_TEST_SANDBOX_URL", "http://opensandbox.test.svc.cluster.local")
 	t.Setenv("BREAKFIX_TEST_SANDBOX_NAMESPACE", "opensandbox-test")
@@ -35,7 +35,7 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_REGISTRY_CA", "/run/config/registry-ca.crt")
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	content := "jwt_secret: ${BREAKFIX_TEST_JWT}\n" +
-		"internal_workers:\n  generate: ${BREAKFIX_TEST_GENERATE_WORKER}\n" +
+		"internal_workers:\n  runtime: ${BREAKFIX_TEST_RUNTIME_WORKER}\n" +
 		"worker:\n  api_key_env: BREAKFIX_TEST_WORKER_KEY\n" +
 		"registry:\n  repository: ${BREAKFIX_TEST_REGISTRY_REPOSITORY}\n  pull_secret: ${BREAKFIX_TEST_REGISTRY_PULL_SECRET}\n  trust_bundle_file: ${BREAKFIX_TEST_REGISTRY_CA}\n" +
 		"opensandbox:\n  base_url: ${BREAKFIX_TEST_SANDBOX_URL}\n  namespace: ${BREAKFIX_TEST_SANDBOX_NAMESPACE}\n" +
@@ -49,7 +49,7 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalWorkers.Generate != "generate-from-environment" || cfg.Worker.APIKey != "worker-from-environment" {
+	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalWorkers.Runtime != "runtime-from-environment" || cfg.Worker.APIKey != "worker-from-environment" {
 		t.Fatalf("runtime secret expansion = jwt %q, workers %#v, worker key %q", cfg.JWTSecret, cfg.InternalWorkers, cfg.Worker.APIKey)
 	}
 	if cfg.OpenSandbox.BaseURL != "http://opensandbox.test.svc.cluster.local" || cfg.OpenSandbox.Namespace != "opensandbox-test" {
@@ -75,8 +75,8 @@ func TestProcessConfigurationsValidate(t *testing.T) {
 	if err := cfg.ValidateController(); err != nil {
 		t.Fatalf("validate controller configuration: %v", err)
 	}
-	if err := cfg.ValidateGenerateWorker(); err != nil {
-		t.Fatalf("validate generate worker configuration: %v", err)
+	if err := cfg.ValidateRuntimeWorker(); err != nil {
+		t.Fatalf("validate runtime worker configuration: %v", err)
 	}
 }
 
@@ -114,7 +114,7 @@ func validProcessConfig() Config {
 		CRDNamespace:         "breakfix-system",
 		CooldownMinutes:      5,
 		JWTSecret:            "jwt",
-		InternalWorkers:      InternalWorkerKeys{Generate: "generate-internal"},
+		InternalWorkers:      InternalWorkerKeys{Runtime: "runtime-internal"},
 		Worker:               WorkerConfig{ServerURL: "http://breakfix-server:9090", APIKeyEnv: "BREAKFIX_TEST_WORKER_KEY", APIKey: "worker-internal"},
 		Agent: AgentConfig{
 			BaseURL:        "https://api.example",

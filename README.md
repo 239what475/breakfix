@@ -6,12 +6,12 @@ Breakfix 是一个提供真实、可回收运维实验环境的练习平台。�
 
 ## 架构
 
-- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、作者对话与 Assistant
-  对话；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
+- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、Authoring、Assistant、Generator、Judge、Classifier 与 Roadmap
+  Agent Runtime；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
 - **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
   回收真实环境。
-- **Generate Worker**：一次领取一个 `GenerationWorkflow`，顺序执行生成、Judge、构建、
-  staging artifact、真实验证、正式发布和 cleanup。
+- **Runtime Worker**：一次领取一个 fenced Runtime Action，只执行构建、artifact promotion、
+  验证 Environment、正式发布和 runtime resource reaping。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
   GenerationWorkflow 和 RoadmapRevision 的权威存储。
 - **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是

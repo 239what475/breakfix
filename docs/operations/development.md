@@ -25,7 +25,7 @@ make deploy-kind
 ```
 
 该命令构建本地镜像、加载 Server/Controller/Worker image、准备 Kind Registry，再按顺序应用生产根包和 Kind Registry
-overlay。Kind Registry 使用固定 `NodePort 30443`；kubelet、Server 和 Generate Worker 共享同一个 Kind node
+overlay。Kind Registry 使用固定 `NodePort 30443`；kubelet、Server 和 Runtime Worker 共享同一个 Kind node
 IP authority。生产部署不能复用该地址。
 
 需要重新清理本地运行时状态时：
@@ -39,11 +39,11 @@ Node runtime 的 Incus project、桥接网络、基础 system-container image �
 
 ## Telepresence
 
-Telepresence 用于保留集群依赖的同时，在本机运行一个 Breakfix 组件。支持 Server、Controller 和 Generate Worker；
+Telepresence 用于保留集群依赖的同时，在本机运行一个 Breakfix 组件。支持 Server、Controller 和 Runtime Worker；
 被接管组件的日志直接出现在本机终端，适合与 Playwright 或真实运行时验收并排观察。
 
 前置条件：已连接目标 Kubernetes context 和 Traffic Manager，本机具备 `telepresence`、`kubectl`、Go、Node.js 及项目依赖；
-目标集群已部署当前版本，Generate Worker 的本地进程还能访问模型 API、Incus 与 Registry。
+目标集群已部署当前版本，Runtime Worker 的本地进程还能访问 Kubernetes API、Incus 与 Registry。
 
 ```bash
 scripts/dev/telepresence.sh connect
@@ -51,7 +51,7 @@ scripts/dev/telepresence.sh status
 
 scripts/dev/telepresence.sh server
 scripts/dev/telepresence.sh controller
-scripts/dev/telepresence.sh generate-worker
+scripts/dev/telepresence.sh runtime-worker
 ```
 
 脚本读取集群配置、准备最小身份和 kubeconfig，并在本机构建对应二进制。接管 Worker 时会缩容目标 Deployment，避免两个副本

@@ -28,7 +28,7 @@ cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
 internal_workers:
-  generate: ${BREAKFIX_GENERATE_WORKER_API_KEY}
+  runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 
 worker:
   server_url: http://breakfix-server:9090

@@ -13,7 +13,7 @@ import (
 
 const verificationWorkspaceRoleName = "breakfix-verification-workspace"
 
-// EnsureVerificationWorkspaceExecAccess grants the Generate Worker only
+// EnsureVerificationWorkspaceExecAccess grants the Runtime Worker only
 // pods/exec access within one verification environment namespace. Verification
 // environments are dynamically named, so this binding is created per namespace.
 func (c *Client) EnsureVerificationWorkspaceExecAccess(namespace, serviceAccountNamespace, serviceAccountName string) error {

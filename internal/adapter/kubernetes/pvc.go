@@ -13,14 +13,14 @@ import (
 )
 
 // EnsureWorkspacePVC creates the Server-owned BYO claim OpenSandbox mounts.
-// A pre-existing claim is accepted only when it belongs to the same workspace.
-func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, workspaceID, storage string) error {
+// A pre-existing claim is accepted only when it belongs to the same workflow.
+func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, workflowID, storage string) error {
 	namespace = strings.TrimSpace(namespace)
 	name = strings.TrimSpace(name)
-	workspaceID = strings.TrimSpace(workspaceID)
+	workflowID = strings.TrimSpace(workflowID)
 	quantity, err := resource.ParseQuantity(strings.TrimSpace(storage))
-	if namespace == "" || name == "" || workspaceID == "" || err != nil || quantity.Sign() <= 0 {
-		return fmt.Errorf("workspace pvc requires namespace, name, workspace id, and positive storage")
+	if namespace == "" || name == "" || workflowID == "" || err != nil || quantity.Sign() <= 0 {
+		return fmt.Errorf("workspace pvc requires namespace, name, workflow id, and positive storage")
 	}
 	claims := c.clientset.CoreV1().PersistentVolumeClaims(namespace)
 	current, err := claims.Get(ctx, name, metav1.GetOptions{})
@@ -31,7 +31,7 @@ func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, worksp
 				Namespace: namespace,
 				Labels: map[string]string{
 					"app.kubernetes.io/part-of": "breakfix",
-					"breakfix.dev/workspace":    workspaceID,
+					"breakfix.dev/workflow":     workflowID,
 				},
 			},
 			Spec: corev1.PersistentVolumeClaimSpec{
@@ -44,8 +44,8 @@ func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, worksp
 	if err != nil {
 		return fmt.Errorf("get workspace pvc: %w", err)
 	}
-	if current.Labels["breakfix.dev/workspace"] != workspaceID {
-		return fmt.Errorf("workspace pvc %s is not owned by generator run", name)
+	if current.Labels["breakfix.dev/workflow"] != workflowID {
+		return fmt.Errorf("workspace pvc %s is not owned by generation workflow", name)
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ func (h *Handler) internalWorkerRole(value string) (config.InternalWorkerRole, b
 		return "", false
 	}
 	matches := make([]config.InternalWorkerRole, 0, 1)
-	for _, role := range []config.InternalWorkerRole{config.InternalWorkerGenerate} {
+	for _, role := range []config.InternalWorkerRole{config.InternalWorkerRuntime} {
 		key := h.internalWorkers.Key(role)
 		if key != "" && subtle.ConstantTimeCompare([]byte(value), []byte(key)) == 1 {
 			matches = append(matches, role)

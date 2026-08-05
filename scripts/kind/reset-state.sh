@@ -47,13 +47,13 @@ wait_for_pods() {
 
 # The current schema deliberately has no migration from the former development
 # database. Stop every process that can hold either RWO volume before removal.
-for deployment in breakfix-server breakfix-generate-worker; do
+for deployment in breakfix-server breakfix-runtime-worker; do
   scale_down deployment "$deployment"
 done
 scale_down statefulset breakfix-postgresql
 
 wait_for_pods app.kubernetes.io/name=breakfix-server
-wait_for_pods app.kubernetes.io/name=breakfix-generate-worker
+wait_for_pods app.kubernetes.io/name=breakfix-runtime-worker
 wait_for_pods app.kubernetes.io/name=breakfix-postgresql
 
 # Runtime test Pods can retain the Server RWO claim after a previous
@@ -66,7 +66,7 @@ kubectl -n "$namespace" delete pod -l app.kubernetes.io/name=breakfix-runtime-ca
 # resource and its explicitly labeled PVCs after stopping every Breakfix
 # process, otherwise interrupted live tests pollute the next baseline.
 if kubectl get namespace "$workspace_namespace" >/dev/null 2>&1; then
-  kubectl -n "$workspace_namespace" delete batchsandboxes -l breakfix.generator_run_id \
+  kubectl -n "$workspace_namespace" delete batchsandboxes -l breakfix.generator_workspace_id \
     --ignore-not-found --wait=true >/dev/null
   kubectl -n "$workspace_namespace" delete persistentvolumeclaims -l app.kubernetes.io/part-of=breakfix \
     --ignore-not-found --wait=true >/dev/null

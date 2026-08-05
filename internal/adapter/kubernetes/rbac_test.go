@@ -11,7 +11,7 @@ import (
 func TestEnsureVerificationWorkspaceExecAccessIsNamespaceLocalAndIdempotent(t *testing.T) {
 	client := &Client{clientset: fake.NewSimpleClientset()}
 	for range 2 {
-		if err := client.EnsureVerificationWorkspaceExecAccess("breakfix-u-example", "breakfix-system", "breakfix-generate-worker"); err != nil {
+		if err := client.EnsureVerificationWorkspaceExecAccess("breakfix-u-example", "breakfix-system", "breakfix-runtime-worker"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -31,7 +31,7 @@ func TestEnsureVerificationWorkspaceExecAccessIsNamespaceLocalAndIdempotent(t *t
 		t.Fatalf("workspace role binding = %#v", binding)
 	}
 	subject := binding.Subjects[0]
-	if subject.Kind != "ServiceAccount" || subject.Namespace != "breakfix-system" || subject.Name != "breakfix-generate-worker" {
+	if subject.Kind != "ServiceAccount" || subject.Namespace != "breakfix-system" || subject.Name != "breakfix-runtime-worker" {
 		t.Fatalf("workspace role binding subject = %#v", subject)
 	}
 }

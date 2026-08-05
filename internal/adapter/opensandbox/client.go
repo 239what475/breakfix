@@ -200,7 +200,7 @@ func providerFileMode(mode int) int {
 
 // ResetWorkspace atomically replaces the sandbox's visible workspace with the
 // supplied immutable artifact. The archive transfer and shell operations stay
-// Server-side, so the Generate Worker never receives a Sandbox connection.
+// Server-side, so the Runtime Worker never receives a Sandbox connection.
 func (c *Client) ResetWorkspace(ctx context.Context, sandboxID string, archive []byte) error {
 	if _, err := c.Execute(ctx, sandboxID, "rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*; mkdir -p /workspace", "/workspace", nil); err != nil {
 		return fmt.Errorf("clear generator workspace: %w", err)

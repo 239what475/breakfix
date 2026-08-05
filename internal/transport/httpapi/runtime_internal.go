@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	internalGenerateRole = config.InternalWorkerGenerate
-	runtimeMinLease      = 5 * time.Second
-	runtimeMaxLease      = 2 * time.Minute
+	internalRuntimeRole = config.InternalWorkerRuntime
+	runtimeMinLease     = 5 * time.Second
+	runtimeMaxLease     = 2 * time.Minute
 )
 
 type runtimeClaimRequest struct {
@@ -86,7 +86,7 @@ type claimedRuntimeAction struct {
 // closed Runtime Worker boundary without a string-dispatched task queue.
 func (h *Handler) InternalClaimRuntimeAction(c *gin.Context) {
 	var request runtimeClaimRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
@@ -126,7 +126,7 @@ func (h *Handler) InternalClaimRuntimeAction(c *gin.Context) {
 
 func (h *Handler) InternalClaimRuntimeResourceReap(c *gin.Context) {
 	var request runtimeResourceReapClaimRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
@@ -153,7 +153,7 @@ func (h *Handler) InternalClaimRuntimeResourceReap(c *gin.Context) {
 
 func (h *Handler) InternalCompleteRuntimeResourceReap(c *gin.Context) {
 	var request runtimeResourceReapCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	if request.Claim.Valid() != nil {
@@ -178,7 +178,7 @@ func (h *Handler) InternalCompleteRuntimeResourceReap(c *gin.Context) {
 
 func (h *Handler) InternalRenewRuntimeAction(c *gin.Context) {
 	var request runtimeRenewRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
@@ -206,7 +206,7 @@ func (h *Handler) InternalRenewRuntimeAction(c *gin.Context) {
 
 func (h *Handler) InternalDownloadRuntimeArchive(c *gin.Context) {
 	var credential runtime.Credential
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &credential) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &credential) {
 		return
 	}
 	action, err := h.runtimeAction(c, credential)
@@ -248,7 +248,7 @@ func (h *Handler) InternalDownloadRuntimeArchive(c *gin.Context) {
 
 func (h *Handler) InternalCompleteRuntimeBuild(c *gin.Context) {
 	var request runtimeBuildCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, runtime.StateBuilding, func(action *claimedRuntimeAction) error {
@@ -268,7 +268,7 @@ func (h *Handler) InternalCompleteRuntimeBuild(c *gin.Context) {
 
 func (h *Handler) InternalCompleteRuntimeArtifactPublish(c *gin.Context) {
 	var request runtimeArtifactCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, runtime.StateArtifactPublishing, func(action *claimedRuntimeAction) error {
@@ -288,7 +288,7 @@ func (h *Handler) InternalCompleteRuntimeArtifactPublish(c *gin.Context) {
 
 func (h *Handler) InternalRecordRuntimeVerificationEnvironment(c *gin.Context) {
 	var request runtimeVerificationEnvironmentRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, runtime.StateVerifying, func(action *claimedRuntimeAction) error {
@@ -308,7 +308,7 @@ func (h *Handler) InternalRecordRuntimeVerificationEnvironment(c *gin.Context) {
 
 func (h *Handler) InternalCompleteRuntimeVerification(c *gin.Context) {
 	var request runtimeVerificationCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, runtime.StateVerifying, func(action *claimedRuntimeAction) error {
@@ -331,7 +331,7 @@ func (h *Handler) InternalCompleteRuntimeVerification(c *gin.Context) {
 
 func (h *Handler) InternalRecordRuntimeChallengePublication(c *gin.Context) {
 	var request runtimeArtifactCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, runtime.StateChallengePublishing, func(action *claimedRuntimeAction) error {
@@ -351,7 +351,7 @@ func (h *Handler) InternalRecordRuntimeChallengePublication(c *gin.Context) {
 
 func (h *Handler) InternalReportRuntimeInfrastructureFailure(c *gin.Context) {
 	var request runtimeInfrastructureFailureRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, request.Identity.State, func(action *claimedRuntimeAction) error {
@@ -364,7 +364,7 @@ func (h *Handler) InternalReportRuntimeInfrastructureFailure(c *gin.Context) {
 
 func (h *Handler) InternalReportRuntimeArtifactFailure(c *gin.Context) {
 	var request runtimeArtifactFailureRequest
-	if !h.decodeInternalWorkerRequest(c, internalGenerateRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
 	h.completeRuntimeAction(c, request.Credential, request.Identity.State, func(action *claimedRuntimeAction) error {

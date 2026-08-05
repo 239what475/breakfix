@@ -46,7 +46,7 @@ CatalogEntry:   Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | F
 Commit:         Prepared -> ArtifactPublished -> Materialized -> Committed
 ```
 
-Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Generator Run、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
+Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Generator AgentRun、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
 
 只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent；Runtime Worker 发布最终 runtime artifact；Server 再以 hash 校验和幂等 materialization 写入 source。最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Worker promotion 成功后 Server 崩溃时只恢复 materialization/finalization，绝不重复 promotion。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
 

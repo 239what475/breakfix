@@ -1,5 +1,5 @@
-// Package generateworker assembles the Generate Worker process.
-package generateworker
+// Package runtimeworker assembles the Runtime Worker process.
+package runtimeworker
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/transport/health"
-	"github.com/breakfix/breakfix/internal/worker/generate"
-	"github.com/breakfix/breakfix/internal/worker/generate/build"
-	"github.com/breakfix/breakfix/internal/worker/generate/publish"
-	"github.com/breakfix/breakfix/internal/worker/generate/verify"
+	runtimeexecutor "github.com/breakfix/breakfix/internal/worker/runtime"
+	"github.com/breakfix/breakfix/internal/worker/runtime/build"
+	"github.com/breakfix/breakfix/internal/worker/runtime/publish"
+	"github.com/breakfix/breakfix/internal/worker/runtime/verify"
 )
 
 // DefaultWorkerID derives a stable local identity when Kubernetes has not
@@ -29,28 +29,28 @@ func DefaultWorkerID() string {
 	if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
 		return host
 	}
-	return "breakfix-generate-worker"
+	return "breakfix-runtime-worker"
 }
 
-// Run owns Generate Worker dependency assembly and lifecycle.
+// Run owns Runtime Worker dependency assembly and lifecycle.
 func Run(ctx context.Context, configPath, workerID string) error {
 	if strings.TrimSpace(workerID) == "" {
-		return errors.New("generate worker ID is required")
+		return errors.New("runtime worker ID is required")
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
-	if err := cfg.ValidateGenerateWorker(); err != nil {
-		return fmt.Errorf("validate Generate Worker configuration: %w", err)
+	if err := cfg.ValidateRuntimeWorker(); err != nil {
+		return fmt.Errorf("validate Runtime Worker configuration: %w", err)
 	}
 	workflowClient, err := internalapi.NewRuntimeActionClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
-		return fmt.Errorf("create generation workflow client: %w", err)
+		return fmt.Errorf("create runtime action client: %w", err)
 	}
-	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleGenerate)
+	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleRuntime)
 	if err != nil {
-		return fmt.Errorf("create Generate Worker Incus client: %w", err)
+		return fmt.Errorf("create Runtime Worker Incus client: %w", err)
 	}
 	defer incusClient.Close()
 	registryAuthority, err := oci.AuthorityForReference(cfg.Registry.Repository)
@@ -81,19 +81,19 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create runtime builder: %w", err)
 	}
-	runner, err := generate.New(
+	runner, err := runtimeexecutor.New(
 		workflowClient,
 		builderExecutor,
 		publisherExecutor,
 		verifierExecutor,
-		generate.Config{WorkerID: workerID},
+		runtimeexecutor.Config{WorkerID: workerID},
 	)
 	if err != nil {
-		return fmt.Errorf("create Generate Worker: %w", err)
+		return fmt.Errorf("create Runtime Worker: %w", err)
 	}
 
 	return health.Run(ctx, health.Config{
-		Port: cfg.HealthPort, Component: "generate",
+		Port: cfg.HealthPort, Component: "runtime-worker",
 		Capabilities: []health.Capability{
 			{Name: "registry", Ready: func(probeCtx context.Context) error { return registryClient.Ping(probeCtx) }},
 			{Name: "kubernetes-api", Ready: func(probeCtx context.Context) error {

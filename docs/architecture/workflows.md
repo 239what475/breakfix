@@ -59,7 +59,7 @@ Worker promotion。
 
 ## Catalog Release
 
-Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Generator Run、Authoring Session
+Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Generator AgentRun、Authoring Session
 或 Agent 调用。Server 根据 `catalog.release_reference` 选择一个 immutable OCI digest，并使用独立的 durable
 Release/Entry/Commit 状态恢复安装：
 

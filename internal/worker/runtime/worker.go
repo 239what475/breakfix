@@ -1,7 +1,7 @@
-// Package generate executes one durable runtime action at a time. It has no
+// Package runtimeworker executes one durable runtime action at a time. It has no
 // model, OpenSandbox, PostgreSQL, or Server-volume dependency; Server exposes
 // only lease-fenced immutable action inputs through its internal API.
-package generate
+package runtimeworker
 
 import (
 	"context"

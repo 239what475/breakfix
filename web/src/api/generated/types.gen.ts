@@ -977,7 +977,7 @@ export type ConfirmAuthoringGenerationData = {
 
 export type ConfirmAuthoringGenerationResponses = {
     /**
-     * Generator Run and verification started
+     * Generation workflow started
      */
     200: AuthoringSession;
 };

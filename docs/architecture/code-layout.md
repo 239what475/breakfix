@@ -34,7 +34,7 @@ internal/
   domain/        Workflow、Environment、Catalog、Authoring、Roadmap 的状态与不变量
   testkit/       仅供测试使用的 PostgreSQL 等基础设施
   transport/     HTTP API、WebSocket/SSE、嵌入式 UI 和健康检查
-  worker/        Generate Workflow 的阶段执行器
+  worker/        Runtime Action 的确定性外部操作执行器
 ```
 
 `content` 是共享的文件内容边界：它处理 portable challenge source、已发布题目目录、candidate archive 和 Roadmap
@@ -46,8 +46,8 @@ source，但不拥有数据库状态、Kubernetes SDK 或 Worker lease。`domain
 
 - `domain` 不依赖 HTTP、PostgreSQL、Kubernetes、Incus、OCI、OpenSandbox 或模型 SDK。
 - `adapter` 实现具体 I/O；SDK 类型不得泄漏到 `domain` 的公开模型。
-- `worker` 只通过 `adapter/internalapi` 与 Server 领取 lease、读取上下文和报告阶段；它不持有 PostgreSQL DSN 或
-  Server data PVC。
+- `worker` 只通过 `adapter/internalapi` 与 Server 领取 Runtime Action lease、读取不可变上下文和报告结果；它不持有
+  PostgreSQL DSN、模型凭据、OpenSandbox 凭据或 Server data PVC。
 - `controller` 只调和 Environment CRD 与 provider，不读取 Workflow、HTTP transport 或数据库 repository。
 - `cmd/*/main.go` 只解析 flag、安装信号处理并调用相应 bootstrap；业务装配不回流到 `cmd`。
 

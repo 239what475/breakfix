@@ -3,7 +3,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
-generate_worker_replicas=${BREAKFIX_KIND_GENERATE_WORKER_REPLICAS:-1}
+runtime_worker_replicas=${BREAKFIX_KIND_RUNTIME_WORKER_REPLICAS:-1}
 root_manifest=${BREAKFIX_KIND_ROOT_MANIFEST:-$repo_root}
 kind_overlay=${BREAKFIX_KIND_OVERLAY_MANIFEST:-$repo_root/deploy/overlays/kind}
 registry_node_port=30443
@@ -117,9 +117,9 @@ if [ -n "$registry_trust_bundle_file" ]; then
   }
 fi
 
-case "$generate_worker_replicas" in
+case "$runtime_worker_replicas" in
   '' | *[!0-9]*)
-    printf 'BREAKFIX_KIND_GENERATE_WORKER_REPLICAS must be a non-negative integer\n' >&2
+    printf 'BREAKFIX_KIND_RUNTIME_WORKER_REPLICAS must be a non-negative integer\n' >&2
     exit 2
     ;;
 esac
@@ -154,7 +154,7 @@ actual_registry_node_port=$(kubectl -n "$namespace" get service breakfix-registr
   printf 'Kind Registry Service must expose NodePort %s, got %s\n' "$registry_node_port" "$actual_registry_node_port" >&2
   exit 1
 }
-kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
+kubectl -n "$namespace" get networkpolicy breakfix-runtime-worker -o json |
   jq --argjson incus_port "$incus_port" --argjson registry_node_port "$registry_node_port" '
     .spec.egress |= map(
       if any(.to[]?; has("ipBlock")) then
@@ -177,24 +177,24 @@ kubectl -n "$namespace" get networkpolicy breakfix-generate-worker -o json |
       )
   ' | kubectl replace -f - >/dev/null
 
-kubectl -n "$namespace" scale deployment/breakfix-generate-worker \
-  --replicas="$generate_worker_replicas" >/dev/null
+kubectl -n "$namespace" scale deployment/breakfix-runtime-worker \
+  --replicas="$runtime_worker_replicas" >/dev/null
 
 # Secret-backed environment variables are read only when a Pod starts. This
 # development entry point applies an administrator-owned Secret and must make
 # every local control-plane process observe its current values.
 kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
-for deployment in server controller generate-worker; do
+for deployment in server controller runtime-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
-for deployment in server controller generate-worker; do
-  if [ "$deployment" = generate-worker ] && [ "$generate_worker_replicas" -eq 0 ]; then
+for deployment in server controller runtime-worker; do
+  if [ "$deployment" = runtime-worker ] && [ "$runtime_worker_replicas" -eq 0 ]; then
     continue
   fi
   kubectl -n "$namespace" rollout status deployment/"breakfix-$deployment" --timeout=3m >/dev/null
 done
 
-printf 'Applied Kind runtime with %s Generate Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
-	"$generate_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
+printf 'Applied Kind runtime with %s Runtime Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
+	"$runtime_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
 printf 'Kind nodes trust the Registry CA through their system trust store; no custom DNS or /etc/hosts entry is required.\n'

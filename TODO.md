@@ -33,7 +33,7 @@ Server
 Runtime Worker --> Incus / OCI Registry / verification Environment
 ~~~
 
-固定 Deployment 为 Server、Controller、PostgreSQL 和 Runtime Worker。生产 Registry 仍由部署者提供，Environment 仍是按需创建的 CRD 与动态资源。Generate Worker 不再是一个长期概念或 Deployment。
+固定 Deployment 为 Server、Controller、PostgreSQL 和 Runtime Worker。生产 Registry 仍由部署者提供，Environment 仍是按需创建的 CRD 与动态资源。不存在独立的 Agent Worker Deployment。
 
 ### Agent 上下文绑定
 
@@ -187,7 +187,7 @@ Server 内执行 Agent 不等于把后台生成绑在浏览器 HTTP 请求上。
 - Runtime Worker 持有 Registry 写入、Incus build/publish 和验证 Environment 所需的 Kubernetes/Incus 角色凭据；它不持有模型 API key、OpenSandbox 管理凭据、PostgreSQL DSN 或 Server data PVC。
 - Runtime Worker 的唯一输入是由 Server 领取并围栏的具体 runtime action。Server 只在 action 的 `owner + state_version + lease` 仍有效时，向 Worker 提供不可变 `RuntimeActionContext`，并通过同一内部 API 流式提供该 action 对应的 candidate archive 或 Catalog entry source。Context 至少固定 archive/source、base artifact digest、验证 Environment snapshot/spec、已有 artifact reference、目标 artifact reference、action identity、state version 和 lease；Worker 不直接挂载、读取或写入 Server data PVC，不使用预签名对象存储，也不获得任意 workflow 或 release 的查询能力。完成或失败报告继续携带同一 action identity。这个协议只服务 Building、ArtifactPublishing、Verifying 和 ChallengePublishing 等固定 Runtime state，不是通用任务队列。
 - Server 不再在进程内执行 Catalog entry 的 Build、artifact publish、Verify 或最终 runtime artifact 提升。它保留 source staging、release 协调、commit intent、challenge materialization 和 RoadmapRevision 事务。
-- Worker 到 Server 的内部 API 使用独立 runtime role key、owner、state version 和 lease 围栏。Agent 因为在 Server 内执行，不再经过 Generate Worker 的 workspace/classification HTTP 代理；这些旧内部接口和凭据必须删除，不保留兼容路径。
+- Worker 到 Server 的内部 API 使用独立 runtime role key、owner、state version 和 lease 围栏。Agent 因为在 Server 内执行，不再经过旧 Worker-side workspace/classification HTTP 代理；这些旧内部接口和凭据必须删除，不保留兼容路径。
 
 ### Runtime action 交接、租约与回收
 
@@ -230,17 +230,17 @@ Roadmap workflow 是 Server 内的异步维护流程，不创建新的 Deploymen
 
 ### 迁移清单
 
-- [x] 将 Eino 的 Generator、Judge 和 Classifier 从 Generate Worker 移入 Server Agent Runtime；Authoring、Assistant 与 Roadmap 保持同一 Server 运行边界，但保留独立 application port、role、prompt 和 typed tool。删除 Generator AgentSession 与所有以 Agent 为中心的 Worker 内部代理。
+- [x] 将 Eino 的 Generator、Judge 和 Classifier 从独立 Agent worker 移入 Server Agent Runtime；Authoring、Assistant 与 Roadmap 保持同一 Server 运行边界，但保留独立 application port、role、prompt 和 typed tool。删除 Generator AgentSession 与所有以 Agent 为中心的 Worker 内部代理。
 - [x] 明确作者提交、AgentRun 与 workspace 的恢复边界：Authoring Agent 只能修改私有 Plan stage；只有作者显式确认 Plan revision 后，Server 才能以确认 idempotency key 原子创建 GenerationWorkflow。每个 AuthoringSession 同时只允许一个非终态 workflow，期间冻结 Plan；`Failed` workflow 不提供 resume，删除 `Superseded` 及自动替换路径。Server 中断、重启或 Agent lease 丢失时，旧 Run 标记为 `Interrupted`，替代 Run 从持久化事实重新开始；被中断的 Generator workspace 无条件解除 binding、异步回收并以新 PVC/Sandbox 替换。
 - [x] 将 GenerationWorkflow claim 拆为固定的 Server Agent state 集与 Runtime state 集；补全既有 state 的转移与冲突分类，不新增状态。`runtime_attempt` 仅由 Server 在基础设施失败或 lease 过期时递增，进入 state 为 `1`、最多五次、成功转移后清零；它不进入外部资源 identity。CandidateRevision 不设数量上限，已接受 revision 永久保留审计；技术重试不产生 revision。删除 `generation_repository` 在确认发布时将 proposal RoadmapRevision 静默覆盖为 current revision 的行为，revision 冲突必须回到 `NeedsClassificationReview`。
 - [x] 将 Generator workspace tool 改为 Server 内的受限 workspace service，以 workflow-owned `workspace_id` 管理当前与待回收工作空间。命令非零、workspace tool 超时/传输错误和 Judge/Build/Verify 的正常修复继续复用当前 workspace；只有 Server 中断、lease 丢失或确认资源丢失时替换。Generator 不得直接取得 OpenSandbox 凭据。
-- [ ] 新建唯一的 Runtime Worker，迁移 Building、ArtifactPublishing、Verifying、ChallengePublishing 与作者 workflow/Catalog 的 runtime resource reaper。Build 交接必须使用 provider-side durable reference：K8s 使用 build-scoped immutable OCI artifact，Node 使用 Incus build image reference；Server 仅持久化 reference/digest，ArtifactPublishing 再提升为 staging artifact。Worker 不读写 PostgreSQL、Server data PVC 或 OpenSandbox，也不直接修改 `runtime_attempt`。
-- [ ] 实现 action-scoped Server API 和 external identity 围栏。RuntimeActionContext 必须固定 archive/source、base artifact digest、验证 snapshot/spec、artifact refs、state/version、identity 与 lease；Worker 只能取得已 claim action 的输入。Worker 必须续租，失败即停止且不提交；Server 重启不重置 action，接管者沿用同一 identity create-or-get 并校验标签、digest/reference，迟到结果拒绝。取消撤销 lease、推进 version，残留资源交给 reaper。
-- [ ] 统一验证与发布的所有权和恢复：Server 管理学习 Environment spec，Worker 只管理 `purpose=verification` Environment，Controller 负责 reconcile/status；报告持久化后仅异步删除环境，不重做验证。ChallengePublishing/Catalog Commit 先持久化 publication intent，Worker promotion 成功报告由 Server 持久化 result，Server 以 hash 校验、幂等 source materialization 和事务性 Roadmap/release 公开完成 finalizer；恢复时不重复 promotion。
-- [ ] 将 Catalog Release entry 与 commit 的 Build、Publish、Verify、final artifact promotion 迁移到 Runtime Worker；Server 保留 source staging、release 协调和 materialize/commit。正常部署要求 immutable `catalog_release_reference`；source staging 必须原子且 digest 校验。Catalog 未 Ready 时只在应用层拒绝 catalog-dependent 请求，不能把 Kubernetes readiness 绑定到 Catalog；失败 release 仅可由新的 immutable bundle identity 重试。
-- [ ] 将 Roadmap maintenance 保持在 Server 内，删除 `MaintenanceExecutionDeadline`；区分 task 的语义 round 与 Planner/Reviewer AgentRun 的五次技术 attempt。实现 idle barrier 和失败 task 留待下一轮的语义，不创建新的 Worker、通用队列或额外失败 state。
-- [ ] 更新 Deployment、镜像、ServiceAccount、Secret、配置、Telepresence、health/readiness、内部 API、测试 fixture 和正式文档；Runtime Worker readiness 必须按 provider 类型隔离故障。删除 generate-worker、其模型凭据、workspace/classification proxy 和任何旧命名，不保留兼容运行路径。
-- [ ] 完成聚焦验证：状态/lease 围栏、AgentRun 中断恢复、action 幂等接管、Node/K8s runtime smoke、Catalog fixture install、Server recovery，以及 workspace/runtime resource reaper。不得恢复大型不稳定 E2E；不写 prompt 文本、渲染断言或迁移拒绝测试。
+- [x] 新建唯一的 Runtime Worker，迁移 Building、ArtifactPublishing、Verifying、ChallengePublishing 与作者 workflow/Catalog 的 runtime resource reaper。Build 交接必须使用 provider-side durable reference：K8s 使用 build-scoped immutable OCI artifact，Node 使用 Incus build image reference；Server 仅持久化 reference/digest，ArtifactPublishing 再提升为 staging artifact。Worker 不读写 PostgreSQL、Server data PVC 或 OpenSandbox，也不直接修改 `runtime_attempt`。
+- [x] 实现 action-scoped Server API 和 external identity 围栏。RuntimeActionContext 必须固定 archive/source、base artifact digest、验证 snapshot/spec、artifact refs、state/version、identity 与 lease；Worker 只能取得已 claim action 的输入。Worker 必须续租，失败即停止且不提交；Server 重启不重置 action，接管者沿用同一 identity create-or-get 并校验标签、digest/reference，迟到结果拒绝。取消撤销 lease、推进 version，残留资源交给 reaper。
+- [x] 统一验证与发布的所有权和恢复：Server 管理学习 Environment spec，Worker 只管理 `purpose=verification` Environment，Controller 负责 reconcile/status；报告持久化后仅异步删除环境，不重做验证。ChallengePublishing/Catalog Commit 先持久化 publication intent，Worker promotion 成功报告由 Server 持久化 result，Server 以 hash 校验、幂等 source materialization 和事务性 Roadmap/release 公开完成 finalizer；恢复时不重复 promotion。
+- [x] 将 Catalog Release entry 与 commit 的 Build、Publish、Verify、final artifact promotion 迁移到 Runtime Worker；Server 保留 source staging、release 协调和 materialize/commit。正常部署要求 immutable `catalog_release_reference`；source staging 必须原子且 digest 校验。Catalog 未 Ready 时只在应用层拒绝 catalog-dependent 请求，不能把 Kubernetes readiness 绑定到 Catalog；失败 release 仅可由新的 immutable bundle identity 重试。
+- [x] 将 Roadmap maintenance 保持在 Server 内，删除 `MaintenanceExecutionDeadline`；区分 task 的语义 round 与 Planner/Reviewer AgentRun 的五次技术 attempt。实现 idle barrier 和失败 task 留待下一轮的语义，不创建新的 Worker、通用队列或额外失败 state。
+- [x] 更新 Deployment、镜像、ServiceAccount、Secret、配置、Telepresence、health/readiness、内部 API、测试 fixture 和正式文档；Runtime Worker readiness 必须按 provider 类型隔离故障。删除旧 Agent worker、其模型凭据、workspace/classification proxy 和任何旧命名，不保留兼容运行路径。
+- [x] 完成聚焦验证：状态/lease 围栏、AgentRun 中断恢复、action 幂等接管、Node/K8s runtime smoke、Catalog fixture install、Server recovery，以及 workspace/runtime resource reaper。不得恢复大型不稳定 E2E；不写 prompt 文本、渲染断言或迁移拒绝测试。
 
 ### P0 提交计划
 
@@ -259,10 +259,10 @@ P0 按以下顺序实施，**每完成一个部分就立即提交**。每个提�
    - **目标：** 将 Catalog Entry/Commit 的外部 Build、Publish、Verify 和 final promotion 移入 Runtime Worker，保留 Server source staging、atomic commit 与 Catalog 启动 gate；删除 release 和 maintenance aggregate deadline。将 Roadmap maintenance 固定为 Server 内 Planner/Reviewer 流程，落实 idle barrier、语义 round 与技术 attempt 分离。
    - **验证：** immutable Catalog fixture 在 source/Entry/Commit 的重试、lease 接管和 Server finalizer 恢复中保持原子，失败 release 不公开且必须用新 bundle identity 重试。Catalog 未 Ready 只在应用层拒绝依赖请求，不阻塞 Kubernetes readiness；Roadmap 不能与题目执行 state 并行，暂时失败 task 保留到下一轮。
 5. **refactor(deploy-test): remove the old boundary and verify recovery**
-   - **目标：** 删除 Generate Worker 二进制、Deployment、镜像、模型凭据、HTTP proxy、旧 API/测试辅助和文档术语；更新 Deployment、ServiceAccount、Secret、Telepresence、生成物和正式文档，形成 Server、Controller、PostgreSQL、Runtime Worker 的唯一部署契约。
+   - **目标：** 删除旧 Agent worker 二进制、Deployment、镜像、模型凭据、HTTP proxy、旧 API/测试辅助和文档术语；更新 Deployment、ServiceAccount、Secret、Telepresence、生成物和正式文档，形成 Server、Controller、PostgreSQL、Runtime Worker 的唯一部署契约。
    - **验证：** 完整 Go、生成物和前端构建通过；状态/lease 围栏、AgentRun 中断恢复、action 幂等接管、Node/K8s runtime smoke、Catalog fixture install、Server recovery 和两类 reaper 均通过。保持聚焦测试，不恢复大型不稳定 E2E，也不添加 prompt/渲染/迁移拒绝断言。
 
-P0 完成标准是：Server 是全部 Agent 的唯一执行位置；Generator 不再拥有 AgentSession 或 run-scoped workspace 身份；每个 AuthoringSession 只有一个非终态 workflow，`Superseded` 和自动替换路径均不存在；CandidateRevision 无数量上限且永久保留已接受 revision；Server 中断时 AgentRun 与 Generator workspace 按“中断恢复”契约替换；Runtime Worker 是唯一的 Build/Publish/Verify 执行位置，只能通过 action-scoped Server API 读取不可变输入，并以可接管的 identity 完成外部动作；Catalog 与作者题目共享该 runtime 边界，且所有已成功 promotion 都只由 Server finalizer 继续提交；仓库中不再存在 Generate Worker 兼容路径。
+P0 完成标准是：Server 是全部 Agent 的唯一执行位置；Generator 不再拥有 AgentSession 或 run-scoped workspace 身份；每个 AuthoringSession 只有一个非终态 workflow，`Superseded` 和自动替换路径均不存在；CandidateRevision 无数量上限且永久保留已接受 revision；Server 中断时 AgentRun 与 Generator workspace 按“中断恢复”契约替换；Runtime Worker 是唯一的 Build/Publish/Verify 执行位置，只能通过 action-scoped Server API 读取不可变输入，并以可接管的 identity 完成外部动作；Catalog 与作者题目共享该 runtime 边界，且所有已成功 promotion 都只由 Server finalizer 继续提交；仓库中不再存在旧 Agent worker 兼容路径。
 
 ## P1：题库内容建设
 

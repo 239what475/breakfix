@@ -177,11 +177,11 @@ ensure_project "$image_project"
 
 trust_certificate server ""
 trust_certificate controller ""
-# Generate Worker owns the complete GenerationWorkflow, including execution in
-# short-lived NodeEnvironment projects created by Controller. Those projects
-# do not exist when this identity is provisioned, so a static project allowlist
+# Runtime Worker builds and verifies provider-side artifacts, including work in
+# short-lived NodeEnvironment projects created by Controller. Those projects do
+# not exist when this identity is provisioned, so a static project allowlist
 # cannot express the required verification access.
-trust_certificate generate ""
+trust_certificate runtime ""
 
 if ! incus network show "$remote:$network" --project default >/dev/null 2>&1; then
   incus network create "$remote:$network" --project default --type bridge \

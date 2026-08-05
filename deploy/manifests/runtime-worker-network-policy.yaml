@@ -1,11 +1,11 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: breakfix-generate-worker
+  name: breakfix-runtime-worker
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: breakfix-generate-worker
+      app.kubernetes.io/name: breakfix-runtime-worker
   policyTypes: [Ingress, Egress]
   ingress: []
   egress:

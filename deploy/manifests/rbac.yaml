@@ -11,7 +11,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: breakfix-generate-worker
+  name: breakfix-runtime-worker
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -103,13 +103,13 @@ rules:
     resources: ["poddisruptionbudgets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ---
-# Generate Worker owns verification Environment CRDs and the verification
+# Runtime Worker owns verification Environment CRDs and the verification
 # terminal exec call. The Controller grants its namespace-local workspace Role
 # when it creates a VK8s verification environment.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: breakfix-generate-worker
+  name: breakfix-runtime-worker
 rules:
   - apiGroups: ["breakfix.dev"]
     resources: ["nodeenvironments", "vk8senvironments"]
@@ -124,14 +124,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: breakfix-generate-worker
+  name: breakfix-runtime-worker
 subjects:
   - kind: ServiceAccount
-    name: breakfix-generate-worker
+    name: breakfix-runtime-worker
     namespace: breakfix-system
 roleRef:
   kind: Role
-  name: breakfix-generate-worker
+  name: breakfix-runtime-worker
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
