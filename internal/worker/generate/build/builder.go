@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
@@ -17,74 +17,69 @@ import (
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 type NodeImageBuilder interface {
 	BuildNodeImage(context.Context, incus.BuildNodeImageRequest) (incus.BuildNodeImageResult, error)
 }
 
+type Registry interface {
+	PullOCIArchive(context.Context, string, string) error
+	PushOCIArchive(context.Context, string, string) error
+	ResolveImmutableReference(context.Context, string) (string, error)
+}
+
 type Executor struct {
-	node   NodeImageBuilder
-	config incus.Config
+	node               NodeImageBuilder
+	registry           Registry
+	config             incus.Config
+	registryRepository string
 }
 
-func NewExecutor(node NodeImageBuilder, config incus.Config) *Executor {
-	return &Executor{node: node, config: config}
-}
-
-// Execute preserves the GenerationWorker adapter while the implementation
-// itself consumes the neutral execution contract below.
-func (e *Executor) Execute(ctx context.Context, value generation.Execution, archive, base []byte) (generation.BuildResult, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateBuilding || value.Context.Candidate == nil {
-		return generation.BuildResult{}, errors.New("builder requires a Building generation workflow with a candidate")
+func NewExecutor(node NodeImageBuilder, registry Registry, config incus.Config, registryRepository string) (*Executor, error) {
+	if registry == nil || strings.TrimSpace(registryRepository) == "" {
+		return nil, errors.New("builder requires Registry client and Registry repository")
 	}
-	work := domainexecution.Work{
-		OwnerID: value.Claim.Workflow.ID, CandidateID: value.Context.Candidate.ID,
-		ArchiveSHA256: value.Context.Candidate.ArchiveSHA256, Snapshot: value.Context.Candidate.Snapshot,
-		Attempt: value.Claim.StateVersion, DeadlineAt: domainexecution.NewActionDeadline(time.Now()),
-	}
-	output, built, err := e.ExecuteWork(ctx, work, archive, base)
-	if err != nil {
-		return generation.BuildResult{}, err
-	}
-	return generation.BuildResult{Output: output, Archive: built}, nil
+	return &Executor{
+		node: node, registry: registry, config: config, registryRepository: strings.TrimRight(strings.TrimSpace(registryRepository), "/"),
+	}, nil
 }
 
 // ExecuteWork builds one portable candidate without assuming who owns the
-// execution. The caller persists output and controls retries/leases.
-func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, archive, base []byte) (domainexecution.BuildOutput, []byte, error) {
+// execution. The caller persists output and controls retries/leases. K8s build
+// output is written directly to a build-scoped immutable Registry artifact;
+// no output archive crosses the Server boundary.
+func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, archive []byte) (domainexecution.BuildOutput, error) {
 	if err := work.Validate(); err != nil {
-		return domainexecution.BuildOutput{}, nil, fmt.Errorf("builder execution work: %w", err)
+		return domainexecution.BuildOutput{}, fmt.Errorf("builder execution work: %w", err)
 	}
 	if candidate.Digest(archive) != work.ArchiveSHA256 {
-		return domainexecution.BuildOutput{}, nil, domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_DIGEST_MISMATCH", "candidate archive digest does not match its immutable revision")
+		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_DIGEST_MISMATCH", "candidate archive digest does not match its immutable revision")
 	}
 	if _, err := app.InspectCandidateArchive(archive); err != nil {
-		return domainexecution.BuildOutput{}, nil, domainexecution.NewArtifactError("CANDIDATE_INVALID", err.Error())
+		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
 	root, err := os.MkdirTemp("", "breakfix-builder-")
 	if err != nil {
-		return domainexecution.BuildOutput{}, nil, err
+		return domainexecution.BuildOutput{}, err
 	}
 	defer func() { _ = os.RemoveAll(root) }()
 	bundle := filepath.Join(root, "challenge")
 	if err := os.MkdirAll(bundle, 0o750); err != nil {
-		return domainexecution.BuildOutput{}, nil, err
+		return domainexecution.BuildOutput{}, err
 	}
 	if err := challenge.ExtractTarGz(bundle, bytes.NewReader(archive)); err != nil {
-		return domainexecution.BuildOutput{}, nil, domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_INVALID", err.Error())
+		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_INVALID", err.Error())
 	}
 
 	switch work.Snapshot.Runtime {
 	case challenge.RuntimeNode:
 		output, err := e.buildNode(ctx, work, bundle)
-		return output, nil, err
+		return output, err
 	case challenge.RuntimeK8s:
-		output, built, err := e.buildK8s(bundle, root, base)
-		return output, built, err
+		return e.buildK8s(ctx, work, bundle, root)
 	default:
-		return domainexecution.BuildOutput{}, nil, domainexecution.NewArtifactError("CANDIDATE_RUNTIME_INVALID", "candidate runtime is unsupported")
+		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_RUNTIME_INVALID", "candidate runtime is unsupported")
 	}
 }
 
@@ -113,21 +108,43 @@ func (e *Executor) buildNode(ctx context.Context, work domainexecution.Work, bun
 	return output, nil
 }
 
-func (e *Executor) buildK8s(bundle, root string, base []byte) (domainexecution.BuildOutput, []byte, error) {
-	if len(base) == 0 {
-		return domainexecution.BuildOutput{}, nil, errors.New("trusted K8s base archive is unavailable")
+func (e *Executor) buildK8s(ctx context.Context, work domainexecution.Work, bundle, root string) (domainexecution.BuildOutput, error) {
+	if e.registry == nil || work.Snapshot.K8s == nil {
+		return domainexecution.BuildOutput{}, errors.New("trusted K8s base artifact is unavailable")
 	}
 	basePath := filepath.Join(root, "base.oci.tar")
 	outputPath := filepath.Join(root, "candidate.oci.tar")
-	if err := os.WriteFile(basePath, base, 0o400); err != nil {
-		return domainexecution.BuildOutput{}, nil, err
+	if err := e.registry.PullOCIArchive(ctx, work.Snapshot.K8s.BaseImageDigest, basePath); err != nil {
+		return domainexecution.BuildOutput{}, fmt.Errorf("pull trusted K8s base image: %w", err)
 	}
-	if _, err := oci.AppendChallengeLayer(basePath, bundle, outputPath); err != nil {
-		return domainexecution.BuildOutput{}, nil, fmt.Errorf("append deterministic K8s challenge layer: %w", err)
-	}
-	archive, err := os.ReadFile(outputPath)
+	manifestDigest, err := oci.AppendChallengeLayer(basePath, bundle, outputPath)
 	if err != nil {
-		return domainexecution.BuildOutput{}, nil, err
+		return domainexecution.BuildOutput{}, fmt.Errorf("append deterministic K8s challenge layer: %w", err)
 	}
-	return domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIArchiveSHA256: candidate.Digest(archive)}, archive, nil
+	if err := oci.ValidateOCIArchive(outputPath); err != nil {
+		return domainexecution.BuildOutput{}, fmt.Errorf("validate K8s build OCI archive: %w", err)
+	}
+	target, err := candidate.BuildOCIImageReference(e.registryRepository, work.OwnerID, work.CandidateID, work.Attempt)
+	if err != nil {
+		return domainexecution.BuildOutput{}, err
+	}
+	if existing, resolveErr := e.registry.ResolveImmutableReference(ctx, target); resolveErr == nil {
+		if digest, digestErr := candidate.OCIDigest(existing); digestErr != nil || digest != manifestDigest {
+			return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("BUILD_ARTIFACT_CONFLICT", "existing K8s build artifact does not match this immutable action")
+		}
+		return domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: existing}, nil
+	} else if !errors.Is(resolveErr, oci.ErrReferenceNotFound) {
+		return domainexecution.BuildOutput{}, fmt.Errorf("resolve existing K8s build artifact: %w", resolveErr)
+	}
+	if err := e.registry.PushOCIArchive(ctx, target, outputPath); err != nil {
+		return domainexecution.BuildOutput{}, fmt.Errorf("publish K8s build artifact: %w", err)
+	}
+	immutable, err := e.registry.ResolveImmutableReference(ctx, target)
+	if err != nil {
+		return domainexecution.BuildOutput{}, fmt.Errorf("resolve K8s build artifact: %w", err)
+	}
+	if digest, digestErr := candidate.OCIDigest(immutable); digestErr != nil || digest != manifestDigest {
+		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("BUILD_ARTIFACT_CONFLICT", "published K8s build artifact digest does not match this immutable action")
+	}
+	return domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
 }

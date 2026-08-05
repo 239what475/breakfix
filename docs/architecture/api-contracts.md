@@ -35,20 +35,26 @@ GET /internal/debug/roadmap-revisions/{revision_id}/export
 内部 API 不属于 OpenAPI 公开契约。当前它们只供 Runtime Worker 调用，并使用独立 role key：
 
 ```text
-POST /api/internal/generation-workflows/claim
-POST /api/internal/generation-workflows/:id/renew
-POST /api/internal/generation-workflows/:id/context
-POST /api/internal/generation-workflows/:id/phase
-POST /api/internal/generation-workflows/:id/candidate/archive
-POST /api/internal/generation-workflows/:id/k8s/base
-POST /api/internal/generation-workflows/:id/build/archive
-POST /api/internal/generation-resource-reaps/claim
-POST /api/internal/generation-resource-reaps/complete
+POST /api/internal/runtime-actions/claim
+POST /api/internal/runtime-actions/:id/renew
+POST /api/internal/runtime-actions/:id/candidate/archive
+POST /api/internal/runtime-actions/:id/build/complete
+POST /api/internal/runtime-actions/:id/artifact-publish/complete
+POST /api/internal/runtime-actions/:id/verification/environment
+POST /api/internal/runtime-actions/:id/verification/complete
+POST /api/internal/runtime-actions/:id/challenge-publish/complete
+POST /api/internal/runtime-actions/:id/failure/infrastructure
+POST /api/internal/runtime-actions/:id/failure/artifact
+POST /api/internal/runtime-resource-reaps/claim
+POST /api/internal/runtime-resource-reaps/complete
 
 ```
 
-没有 AgentRun、Classifier retrieval 或 Generator workspace proxy 接口。所有请求使用严格 JSON 解码，
-携带 Workflow ID、lease owner、state attempt 与 expected state；Server 只接受当前 lease 的 typed result。
+没有 AgentRun、Classifier retrieval、Generator workspace proxy、Kubernetes base image 或 build archive
+下载接口。所有 Runtime Action 请求使用严格 JSON 解码，携带稳定的
+`workflow_id + candidate_revision_id + state + state_version` identity 和 lease owner；`runtime_attempt`
+不会出现在资源 identity 中。Server 只接受当前 lease 的对应 typed result。Kubernetes 构建在 Worker
+直接写入 Registry 的 build-scoped immutable OCI reference，Server 只保存引用。
 
 ## 终端与流传输
 

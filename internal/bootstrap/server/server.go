@@ -177,6 +177,12 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("create catalog verifier: %w", err)
 		}
+		builderExecutor, err := build.NewExecutor(incusClient, registryClient, cfg.Incus, cfg.Registry.Repository)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create catalog builder: %w", err)
+		}
 		installer, err := appcatalog.NewInstaller(appcatalog.InstallerConfig{
 			DataDir:          cfg.DataDir,
 			ChallengesDir:    cfg.ChallengesDir(),
@@ -190,7 +196,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
 			Store:            database.Catalog,
 			Roadmap:          database.Roadmap,
-			Builder:          build.NewExecutor(incusClient, cfg.Incus),
+			Builder:          builderExecutor,
 			Publisher:        publisherExecutor,
 			Verifier:         verifierExecutor,
 		})
@@ -224,7 +230,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		AssistantExecutor:  llm.NewAssistantExecutor(cfg.Agent),
 		AuthoringExecutor:  llm.NewAuthoringExecutor(cfg.Agent),
 		RoadmapExecutor:    llm.NewRoadmapExecutor(cfg.Agent),
-		RegistryClient:     registryClient,
 		GeneratorWorkspace: generatorWorkspace,
 	})
 	if err != nil {

@@ -77,10 +77,9 @@ type Snapshot struct {
 }
 
 type BuildOutput struct {
-	Runtime          string               `json:"runtime"`
-	OCIArchivePath   string               `json:"oci_archive_path,omitempty"`
-	OCIArchiveSHA256 string               `json:"oci_archive_sha256,omitempty"`
-	Incus            *IncusBuildReference `json:"incus,omitempty"`
+	Runtime      string               `json:"runtime"`
+	OCIReference string               `json:"oci_reference,omitempty"`
+	Incus        *IncusBuildReference `json:"incus,omitempty"`
 }
 
 type IncusBuildReference struct {
@@ -161,7 +160,8 @@ func (w Work) Validate() error {
 			return errors.New("execution work build output runtime is invalid")
 		}
 		if w.Snapshot.Runtime == challenge.RuntimeK8s {
-			if !ValidSHA256(w.Build.OCIArchiveSHA256) || w.Build.Incus != nil {
+			if w.Build.OCIReference == "" || w.Build.Incus != nil ||
+				(ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: w.Build.OCIReference}).Validate(challenge.RuntimeK8s) != nil {
 				return errors.New("execution work k8s build output is invalid")
 			}
 		} else if w.Build.Validate(w.Snapshot.Runtime) != nil {
@@ -278,12 +278,12 @@ func (o BuildOutput) Validate(runtime string) error {
 		return errors.New("build output runtime does not match candidate")
 	}
 	if runtime == challenge.RuntimeK8s {
-		if strings.TrimSpace(o.OCIArchivePath) == "" || !ValidSHA256(o.OCIArchiveSHA256) || o.Incus != nil {
+		if o.Incus != nil || (ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: o.OCIReference}).Validate(challenge.RuntimeK8s) != nil {
 			return errors.New("k8s build output is incomplete")
 		}
 		return nil
 	}
-	if o.OCIArchivePath != "" || o.OCIArchiveSHA256 != "" || o.Incus == nil || o.Incus.Validate() != nil {
+	if o.OCIReference != "" || o.Incus == nil || o.Incus.Validate() != nil {
 		return errors.New("node build output is incomplete")
 	}
 	return nil

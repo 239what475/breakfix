@@ -7,7 +7,6 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
@@ -26,7 +25,6 @@ type Handler struct {
 	catalog            *appcatalog.Service
 	assistant          *appassistant.Service
 	registryRepository string
-	registryClient     oci.Client
 	namespace          string
 	crdNamespace       string
 	challengesDir      string
@@ -57,7 +55,6 @@ type Dependencies struct {
 	NodeTerminal       NodeTerminalProvider
 	AssistantExecutor  appassistant.Executor
 	AuthoringExecutor  appauthoring.Executor
-	RegistryClient     oci.Client
 	GeneratorWorkspace GeneratorWorkspaceRetirer
 	RoadmapExecutor    approadmap.CommitteeExecutor
 }
@@ -73,7 +70,6 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		k8s:                client,
 		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap),
 		registryRepository: cfg.Registry.Repository,
-		registryClient:     dependencies.RegistryClient,
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,
 		challengesDir:      cfg.ChallengesDir(),

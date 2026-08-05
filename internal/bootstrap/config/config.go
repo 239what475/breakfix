@@ -427,22 +427,16 @@ func (c Config) ValidateController() error {
 
 func (c Config) ValidateGenerateWorker() error {
 	if err := c.validateWorker(); err != nil {
-		return fmt.Errorf("generate worker: %w", err)
-	}
-	if strings.TrimSpace(c.Agent.BaseURL) == "" || strings.TrimSpace(c.Agent.APIKeyEnv) == "" || strings.TrimSpace(c.Agent.APIKey) == "" || strings.TrimSpace(c.Agent.Model) == "" {
-		return fmt.Errorf("generate worker base_url, api_key_env, API key, and model are required")
-	}
-	if _, err := c.Agent.Timeout(); err != nil {
-		return err
+		return fmt.Errorf("runtime worker: %w", err)
 	}
 	if err := c.Registry.Validate(); err != nil {
-		return fmt.Errorf("generate worker registry: %w", err)
+		return fmt.Errorf("runtime worker registry: %w", err)
 	}
 	if strings.TrimSpace(c.CRDNamespace) == "" {
-		return fmt.Errorf("generate worker crd_namespace is required")
+		return fmt.Errorf("runtime worker crd_namespace is required")
 	}
 	if err := c.Incus.Validate(); err != nil {
-		return fmt.Errorf("generate worker incus: %w", err)
+		return fmt.Errorf("runtime worker incus: %w", err)
 	}
 	return nil
 }

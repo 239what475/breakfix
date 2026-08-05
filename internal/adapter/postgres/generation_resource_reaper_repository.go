@@ -18,7 +18,7 @@ const (
 )
 
 // ClaimGenerationResourceReap discovers due work from durable candidate
-// records, then gives exactly one Server or Generate Worker an expiring lease.
+// records, then gives exactly one Runtime Worker an expiring lease.
 // It is intentionally independent from GenerationWorkflow state transitions.
 func (d *GenerationRepository) ClaimGenerationResourceReap(ctx context.Context, kind generation.ResourceReapKind, owner string, leaseTTL time.Duration, now time.Time) (*generation.ResourceReapClaim, error) {
 	if !kind.Valid() || strings.TrimSpace(owner) == "" || leaseTTL <= 0 || now.IsZero() {
@@ -139,7 +139,6 @@ func (d *GenerationRepository) EnsureGenerationResourceReaps(ctx context.Context
 		where string
 	}{
 		{generation.ResourceReapVerificationEnvironment, `verify_environment IS NOT NULL AND (verification_report IS NOT NULL OR ` + inactive + `)`},
-		{generation.ResourceReapBuildArchive, `build_output IS NOT NULL AND execution_snapshot->>'runtime' = 'k8s' AND ` + inactive},
 		{generation.ResourceReapNodeBuildImage, `build_output IS NOT NULL AND execution_snapshot->>'runtime' = 'node' AND ` + inactive},
 		{generation.ResourceReapCandidateArtifact, `(artifact_reference IS NOT NULL OR build_output IS NOT NULL OR publication IS NOT NULL) AND ` + inactive},
 	}

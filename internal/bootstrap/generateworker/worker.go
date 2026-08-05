@@ -77,9 +77,13 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create verifier executor: %w", err)
 	}
+	builderExecutor, err := build.NewExecutor(incusClient, registryClient, cfg.Incus, cfg.Registry.Repository)
+	if err != nil {
+		return fmt.Errorf("create runtime builder: %w", err)
+	}
 	runner, err := generate.New(
 		workflowClient,
-		build.NewExecutor(incusClient, cfg.Incus),
+		builderExecutor,
 		publisherExecutor,
 		verifierExecutor,
 		generate.Config{WorkerID: workerID},

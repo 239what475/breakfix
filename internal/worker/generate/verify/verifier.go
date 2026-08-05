@@ -71,19 +71,6 @@ type environmentRef struct {
 	vk8s    *breakfixv1.VK8sEnvironment
 }
 
-// Execute preserves the GenerationWorker adapter while the verification
-// mechanics consume the neutral execution contract below.
-func (e *Executor) Execute(ctx context.Context, value generation.Execution, recordEnvironment func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
-	if !value.Valid() || value.Claim.Workflow.State != generation.StateVerifying || value.Context.Candidate == nil {
-		return generation.VerificationReport{}, errors.New("verifier requires a Verifying generation workflow with a candidate")
-	}
-	work, err := workFromGeneration(value)
-	if err != nil {
-		return generation.VerificationReport{}, err
-	}
-	return e.ExecuteWork(ctx, work, recordEnvironment)
-}
-
 // ExecuteWork verifies one immutable artifact without assuming that its
 // owner is a GenerationWorkflow. The callback is the only persistence hook.
 func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, recordEnvironment func(context.Context, domainexecution.VerificationEnvironment) error) (domainexecution.VerificationReport, error) {
@@ -104,9 +91,9 @@ func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, r
 	if err != nil {
 		return domainexecution.VerificationReport{}, err
 	}
-	cleaned := false
+	recorded := false
 	defer func() {
-		if cleaned {
+		if recorded {
 			return
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
@@ -123,23 +110,39 @@ func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, r
 	if err := recordEnvironment(ctx, identity); err != nil {
 		return domainexecution.VerificationReport{}, err
 	}
+	recorded = true
 	ready, err := e.waitReady(ctx, *environment)
 	if err != nil {
-		if cleanupErr := e.deleteAndWait(ctx, *environment); cleanupErr == nil {
-			cleaned = true
-		}
 		return domainexecution.VerificationReport{}, err
 	}
 
 	report, verificationErr := e.runVerification(ctx, work, ready)
-	if err := e.deleteAndWait(ctx, ready); err != nil {
-		return domainexecution.VerificationReport{}, fmt.Errorf("delete verification environment: %w", err)
-	}
-	cleaned = true
 	if verificationErr != nil {
 		return report, verificationErr
 	}
 	return report, nil
+}
+
+// ReapVerificationEnvironment removes a persisted verification Environment
+// after the workflow has recorded a report or become inactive. A running
+// verification action never deletes its own Environment after recording it:
+// that would make recovery race report persistence with provider cleanup.
+func (e *Executor) ReapVerificationEnvironment(ctx context.Context, reap generation.ResourceReap) error {
+	if !reap.Valid() || reap.Kind != generation.ResourceReapVerificationEnvironment {
+		return errors.New("verification resource reap is invalid")
+	}
+	value := reap.Candidate.VerifyEnvironment
+	if value == nil {
+		return nil
+	}
+	if err := value.Validate(reap.Candidate.Snapshot.Runtime); err != nil {
+		return err
+	}
+	return e.deleteAndWait(ctx, environmentRef{
+		runtime: value.Runtime,
+		name:    value.Name,
+		uid:     types.UID(value.UID),
+	})
 }
 
 func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.Work, name string) (*environmentRef, error) {
@@ -547,21 +550,6 @@ func (e *Executor) removePreviousEnvironment(ctx context.Context, work domainexe
 		return errors.New("existing verification environment has different ownership metadata")
 	}
 	return e.deleteAndWait(ctx, *ref)
-}
-
-func workFromGeneration(value generation.Execution) (domainexecution.Work, error) {
-	if value.Context.Candidate == nil {
-		return domainexecution.Work{}, errors.New("generation execution has no candidate")
-	}
-	view := value.Context.Candidate
-	if view.Artifact == nil {
-		return domainexecution.Work{}, errors.New("generation execution has no verified artifact")
-	}
-	return domainexecution.Work{
-		OwnerID: value.Claim.Workflow.ID, CandidateID: view.ID, ArchiveSHA256: view.ArchiveSHA256,
-		Snapshot: view.Snapshot, Attempt: value.Claim.StateVersion, DeadlineAt: domainexecution.NewActionDeadline(time.Now()),
-		Build: view.Build, Artifact: view.Artifact, VerificationEnvironment: view.VerifyEnvironment,
-	}, nil
 }
 
 func (e *Executor) findEnvironment(ctx context.Context, runtime, name string) (*environmentRef, error) {

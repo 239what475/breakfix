@@ -37,9 +37,9 @@ runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状�
 检查点没有人为 Submit。Controller 按题目定义运行对应的检查脚本、写入结构化 checkpoint 状态，并将首次
 通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
 
-Generate Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init、运行
-`answer.sh`、收集相同检查点的结构化结果，再删除该 Environment。验证报告属于 CandidateRevision，
-Workflow 只保存当前阶段和 lease。
+Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init、运行
+`answer.sh` 并收集相同检查点的结构化结果。Environment identity 会先持久化到 CandidateRevision；验证报告
+持久化后由 Runtime Worker 的异步 reaper 删除该 Environment。删除失败只重试清理，不会重新执行验证。
 
 ## 网络与镜像
 

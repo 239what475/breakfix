@@ -71,8 +71,7 @@ func (r ClassificationAdjustment) Validate() error {
 }
 
 type BuildResult struct {
-	Output  BuildOutput `json:"output"`
-	Archive []byte      `json:"archive,omitempty"`
+	Output BuildOutput `json:"output"`
 }
 
 type ArtifactPublishResult struct {

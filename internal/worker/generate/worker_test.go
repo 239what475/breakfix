@@ -2,16 +2,20 @@ package generate
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	app "github.com/breakfix/breakfix/internal/application/generation"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
-func TestWorkerExecutesOnlyRuntimeStates(t *testing.T) {
+func TestWorkerProcessesOneClaimedRuntimeState(t *testing.T) {
 	store := newRuntimeStore()
 	builder := &runtimeBuilder{}
 	publisher := &runtimePublisher{}
@@ -20,32 +24,21 @@ func TestWorkerExecutesOnlyRuntimeStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	processed, err := worker.ProcessOne(context.Background())
 	if err != nil || !processed {
 		t.Fatalf("process runtime action = %v, %v", processed, err)
 	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	want := []generation.WorkflowState{generation.StateBuilding}
-	if len(store.phaseStates) != len(want) {
-		t.Fatalf("runtime states = %#v, want %#v", store.phaseStates, want)
-	}
-	for index := range want {
-		if store.phaseStates[index] != want[index] {
-			t.Fatalf("runtime state %d = %s, want %s", index, store.phaseStates[index], want[index])
-		}
-	}
-	if store.current.Workflow.State != generation.StateArtifactPublishing {
-		t.Fatalf("workflow state = %s, want ArtifactPublishing", store.current.Workflow.State)
-	}
 	if builder.calls.Load() != 1 || publisher.artifactCalls.Load() != 0 || verifier.calls.Load() != 0 {
 		t.Fatalf("runtime executor calls = build %d publish %d verify %d", builder.calls.Load(), publisher.artifactCalls.Load(), verifier.calls.Load())
 	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.completedStates) != 1 || store.completedStates[0] != generation.StateBuilding {
+		t.Fatalf("completed runtime states = %#v", store.completedStates)
+	}
 }
 
-func TestWorkerRenewsLeaseDuringRuntimeAction(t *testing.T) {
+func TestWorkerRenewsActionLeaseBeforeCompletingLongBuild(t *testing.T) {
 	store := newRuntimeStore()
 	builder := &runtimeBuilder{delay: 1250 * time.Millisecond}
 	worker, err := New(store, builder, &runtimePublisher{}, &runtimeVerifier{}, Config{WorkerID: "runtime-test", LeaseTTL: 3 * time.Second})
@@ -58,101 +51,152 @@ func TestWorkerRenewsLeaseDuringRuntimeAction(t *testing.T) {
 	if store.renewCalls.Load() == 0 {
 		t.Fatal("runtime worker did not renew its action lease")
 	}
+	if store.completeBuildCalls.Load() != 1 {
+		t.Fatalf("build completion calls = %d, want 1", store.completeBuildCalls.Load())
+	}
+}
+
+func TestWorkerRunsResourceReapingOnlyAfterRuntimeActionCompletes(t *testing.T) {
+	base := newRuntimeStore()
+	store := &runtimeReapStore{
+		runtimeStore: base,
+		reapClaim: generation.ResourceReapClaim{
+			ResourceReap: generation.ResourceReap{
+				CandidateRevisionID: base.action.Candidate.ID,
+				Kind:                generation.ResourceReapCandidateArtifact,
+				Candidate:           base.action.Candidate,
+			},
+			ResourceReapCredential: generation.ResourceReapCredential{LeaseOwner: "runtime-reap-lease"},
+		},
+		reapClaimed: make(chan struct{}),
+	}
+	builder := &blockingRuntimeBuilder{started: make(chan struct{}), release: make(chan struct{})}
+	worker, err := New(store, builder, &runtimePublisher{}, &runtimeVerifier{}, Config{WorkerID: "runtime-test", LeaseTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	<-builder.started
+	select {
+	case <-store.reapClaimed:
+		t.Fatal("resource reap started while the runtime action was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(builder.release)
+	select {
+	case <-store.reapClaimed:
+	case <-time.After(time.Second):
+		t.Fatal("resource reap did not run after the runtime action completed")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("worker run = %v", err)
+	}
 }
 
 type runtimeStore struct {
-	mu            sync.Mutex
-	current       generation.Claim
-	phaseStates   []generation.WorkflowState
-	claimReturned bool
-	renewCalls    atomic.Int32
+	mu                 sync.Mutex
+	action             generation.RuntimeActionContext
+	claimed            bool
+	completedStates    []generation.WorkflowState
+	renewCalls         atomic.Int32
+	completeBuildCalls atomic.Int32
 }
 
 func newRuntimeStore() *runtimeStore {
-	return &runtimeStore{current: generation.Claim{
-		Workflow: generation.Workflow{
-			ID: "generation-workflow-0123456789abcdef", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"},
-			SourceRevision: "0", State: generation.StateBuilding, StateVersion: 1, RuntimeAttempt: 1, LeaseOwner: "runtime-lease", NextRunAt: time.Now().UTC(),
-			CandidateRevisionID: "candidate-0123456789abcdef",
+	now := time.Now().UTC()
+	archive := []byte("candidate")
+	archiveDigest := sha256.Sum256(archive)
+	digest := "sha256:" + fmt.Sprintf("%x", archiveDigest[:])
+	workflow := generation.Workflow{
+		ID: "generation-workflow-runtime-test", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "authoring-session"},
+		SourceRevision: "1", State: generation.StateBuilding, StateVersion: 1, RuntimeAttempt: 1,
+		LeaseOwner: "runtime-lease", LeaseExpiresAt: ptrTime(now.Add(time.Minute)), NextRunAt: now,
+		CreatedAt: now, UpdatedAt: now, CandidateRevisionID: "candidate-runtime-test",
+	}
+	claim := generation.Claim{Workflow: workflow, LeaseCredential: generation.LeaseCredential{StateVersion: 1, LeaseOwner: workflow.LeaseOwner}}
+	snapshot := generation.ExecutionSnapshot{
+		Runtime:     challenge.RuntimeNode,
+		Checkpoints: []generation.CheckpointSnapshot{{ID: "ready", Node: "host"}},
+		Node: &generation.NodeRuntimeSnapshot{
+			BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "profile-v1", NetworkPolicyRevision: "network-v1",
+			Nodes:     []generation.NodeSnapshot{{Name: "host", Title: "Host"}},
+			Resources: generation.NodeResources{CPU: "1", Memory: "512Mi", Processes: 128, RootDisk: "5Gi"},
 		},
-		LeaseCredential: generation.LeaseCredential{StateVersion: 1, LeaseOwner: "runtime-lease"},
-	}}
+	}
+	action := generation.RuntimeActionContext{
+		Claim: claim, Identity: generation.RuntimeActionIdentityFor(claim, workflow.CandidateRevisionID),
+		Candidate: generation.WorkerView{ID: workflow.CandidateRevisionID, SourceRevision: "1", ArchiveSHA256: digest, Snapshot: snapshot},
+	}
+	return &runtimeStore{action: action}
 }
 
-func (s *runtimeStore) Claim(context.Context, string, time.Duration) (*generation.Claim, error) {
+func (s *runtimeStore) Claim(context.Context, string, time.Duration) (*generation.RuntimeActionContext, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.claimReturned || s.current.Workflow.State == generation.StateNeedsAuthorReview {
+	if s.claimed {
 		return nil, nil
 	}
-	s.claimReturned = true
-	claim := s.current
-	return &claim, nil
+	s.claimed = true
+	action := s.action
+	return &action, nil
 }
 
-func (s *runtimeStore) Renew(context.Context, generation.Claim, time.Duration) error {
+func (s *runtimeStore) Renew(context.Context, generation.RuntimeActionCredential, time.Duration) error {
 	s.renewCalls.Add(1)
 	return nil
 }
 
-func (s *runtimeStore) Context(_ context.Context, claim generation.Claim) (*generation.Context, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	workflow := s.current.Workflow
-	workflow.State = claim.Workflow.State
-	return &generation.Context{Workflow: workflow, Candidate: &generation.WorkerView{
-		ID:       workflow.CandidateRevisionID,
-		Snapshot: generation.ExecutionSnapshot{Runtime: "node", Checkpoints: []generation.CheckpointSnapshot{{ID: "ready", Node: "host"}}, Node: &generation.NodeRuntimeSnapshot{Nodes: []generation.NodeSnapshot{{Name: "host", Title: "Host"}}}},
-	}}, nil
+func (s *runtimeStore) CandidateArchive(context.Context, generation.RuntimeActionCredential) ([]byte, string, error) {
+	archive := []byte("candidate")
+	digest := sha256.Sum256(archive)
+	return archive, "sha256:" + fmt.Sprintf("%x", digest[:]), nil
 }
 
-func (s *runtimeStore) Phase(_ context.Context, claim generation.Claim, request app.PhaseRequest) (*generation.Claim, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.phaseStates = append(s.phaseStates, claim.Workflow.State)
-	s.current.Workflow.State = claim.Workflow.State
-	switch {
-	case request.Build != nil:
-		s.current.Workflow.State = generation.StateArtifactPublishing
-		s.current.Workflow.StateVersion++
-		s.current.Workflow.RuntimeAttempt = 1
-		s.current.Workflow.LeaseOwner = ""
-		s.current.Workflow.LeaseExpiresAt = nil
-		s.current.LeaseOwner = ""
-		return nil, nil
-	case request.ArtifactPublish != nil:
-		s.current.Workflow.State = generation.StateVerifying
-	case request.VerificationEnvironment != nil:
-		return s.currentClaimLocked(), nil
-	case request.Verification != nil:
-		s.current.Workflow.State = generation.StateNeedsAuthorReview
-		s.current.Workflow.LeaseOwner = ""
-		s.current.Workflow.LeaseExpiresAt = nil
-		s.current.LeaseOwner = ""
-		return nil, nil
-	default:
-		return nil, nil
+func (s *runtimeStore) CompleteBuild(_ context.Context, _ generation.RuntimeActionCredential, output generation.BuildOutput) error {
+	if err := output.Validate(challenge.RuntimeNode); err != nil {
+		return err
 	}
-	return s.currentClaimLocked(), nil
+	s.completeBuildCalls.Add(1)
+	s.mu.Lock()
+	s.completedStates = append(s.completedStates, generation.StateBuilding)
+	s.mu.Unlock()
+	return nil
 }
 
-func (*runtimeStore) CandidateArchive(context.Context, generation.Claim) ([]byte, string, error) {
-	return []byte("candidate"), "", nil
+func (s *runtimeStore) CompleteArtifactPublish(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error {
+	s.mu.Lock()
+	s.completedStates = append(s.completedStates, generation.StateArtifactPublishing)
+	s.mu.Unlock()
+	return nil
 }
 
-func (*runtimeStore) K8sBase(context.Context, generation.Claim) ([]byte, string, error) {
-	return nil, "", nil
+func (s *runtimeStore) RecordVerificationEnvironment(context.Context, generation.RuntimeActionCredential, generation.VerificationEnvironment) error {
+	return nil
 }
 
-func (*runtimeStore) BuildArchive(context.Context, generation.Claim) ([]byte, string, error) {
-	return nil, "", nil
+func (s *runtimeStore) CompleteVerification(context.Context, generation.RuntimeActionCredential, generation.VerificationReport) error {
+	s.mu.Lock()
+	s.completedStates = append(s.completedStates, generation.StateVerifying)
+	s.mu.Unlock()
+	return nil
 }
 
-func (s *runtimeStore) currentClaimLocked() *generation.Claim {
-	claim := s.current
-	claim.Workflow.LeaseOwner = s.current.LeaseOwner
-	claim.StateVersion = claim.Workflow.StateVersion
-	return &claim
+func (s *runtimeStore) RecordChallengePublication(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error {
+	s.mu.Lock()
+	s.completedStates = append(s.completedStates, generation.StateChallengePublishing)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *runtimeStore) ReportInfrastructureFailure(context.Context, generation.RuntimeActionCredential, generation.Failure) error {
+	return nil
+}
+
+func (s *runtimeStore) ReportArtifactFailure(context.Context, generation.RuntimeActionCredential, generation.Failure, *generation.VerificationReport) error {
+	return nil
 }
 
 type runtimeBuilder struct {
@@ -160,37 +204,85 @@ type runtimeBuilder struct {
 	delay time.Duration
 }
 
-func (b *runtimeBuilder) Execute(ctx context.Context, _ generation.Execution, _ []byte, _ []byte) (generation.BuildResult, error) {
+type blockingRuntimeBuilder struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingRuntimeBuilder) ExecuteWork(ctx context.Context, work domainexecution.Work, archive []byte) (domainexecution.BuildOutput, error) {
+	close(b.started)
+	select {
+	case <-ctx.Done():
+		return domainexecution.BuildOutput{}, ctx.Err()
+	case <-b.release:
+	}
+	return (&runtimeBuilder{}).ExecuteWork(ctx, work, archive)
+}
+
+func (b *runtimeBuilder) ExecuteWork(ctx context.Context, work domainexecution.Work, _ []byte) (domainexecution.BuildOutput, error) {
 	b.calls.Add(1)
 	if b.delay > 0 {
 		timer := time.NewTimer(b.delay)
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			return generation.BuildResult{}, ctx.Err()
+			return domainexecution.BuildOutput{}, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return generation.BuildResult{}, nil
+	return domainexecution.BuildOutput{Runtime: work.Snapshot.Runtime, Incus: &domainexecution.IncusBuildReference{
+		Project: "build", WorkflowID: work.OwnerID, CandidateRevisionID: work.CandidateID, Attempt: work.Attempt,
+		InstanceName: "build-instance", Alias: "build-alias", Fingerprint: strings.Repeat("b", 64),
+	}}, nil
 }
 
-type runtimePublisher struct{ artifactCalls atomic.Int32 }
+type runtimePublisher struct {
+	artifactCalls atomic.Int32
+}
 
-func (p *runtimePublisher) PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error) {
+func (p *runtimePublisher) PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error) {
 	p.artifactCalls.Add(1)
-	return generation.ArtifactReference{}, nil
+	return domainexecution.ArtifactReference{}, nil
 }
 
-func (*runtimePublisher) PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error) {
-	return generation.ArtifactReference{}, nil
+func (*runtimePublisher) PublishChallengeWork(context.Context, domainexecution.Work, string) (domainexecution.ArtifactReference, error) {
+	return domainexecution.ArtifactReference{}, nil
 }
+
+func (*runtimePublisher) ReapCandidate(context.Context, generation.ResourceReap) error { return nil }
 
 type runtimeVerifier struct{ calls atomic.Int32 }
 
-func (v *runtimeVerifier) Execute(ctx context.Context, execution generation.Execution, record func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error) {
+func (v *runtimeVerifier) ExecuteWork(context.Context, domainexecution.Work, func(context.Context, domainexecution.VerificationEnvironment) error) (domainexecution.VerificationReport, error) {
 	v.calls.Add(1)
-	if err := record(ctx, generation.VerificationEnvironment{Runtime: "node", Name: "verification", UID: "uid", WorkflowID: execution.Claim.Workflow.ID, Attempt: execution.Claim.StateVersion}); err != nil {
-		return generation.VerificationReport{}, err
-	}
-	return generation.VerificationReport{}, nil
+	return domainexecution.VerificationReport{}, nil
 }
+
+func (*runtimeVerifier) ReapVerificationEnvironment(context.Context, generation.ResourceReap) error {
+	return nil
+}
+
+type runtimeReapStore struct {
+	*runtimeStore
+	reapClaim   generation.ResourceReapClaim
+	reapClaimed chan struct{}
+	reaped      atomic.Bool
+}
+
+func (s *runtimeReapStore) ClaimResourceReap(_ context.Context, _ string, kind generation.ResourceReapKind, _ time.Duration) (*generation.ResourceReapClaim, error) {
+	if kind != s.reapClaim.Kind {
+		return nil, nil
+	}
+	if !s.reaped.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	close(s.reapClaimed)
+	claim := s.reapClaim
+	return &claim, nil
+}
+
+func (*runtimeReapStore) CompleteResourceReap(context.Context, generation.ResourceReapClaim, string) error {
+	return nil
+}
+
+func ptrTime(value time.Time) *time.Time { return &value }

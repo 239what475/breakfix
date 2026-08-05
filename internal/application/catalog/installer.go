@@ -33,11 +33,11 @@ type SourceLayerReader interface {
 }
 
 type RuntimeBuilder interface {
-	ExecuteWork(context.Context, execution.Work, []byte, []byte) (execution.BuildOutput, []byte, error)
+	ExecuteWork(context.Context, execution.Work, []byte) (execution.BuildOutput, error)
 }
 
 type RuntimePublisher interface {
-	PublishArtifactWork(context.Context, execution.Work, []byte) (execution.ArtifactReference, error)
+	PublishArtifactWork(context.Context, execution.Work) (execution.ArtifactReference, error)
 	PublishChallengeWork(context.Context, execution.Work, string) (execution.ArtifactReference, error)
 }
 
@@ -348,39 +348,15 @@ func (i *Installer) runEntry(ctx context.Context, source *PortableSource, claim 
 	}
 	switch claim.Entry.State {
 	case catalogdomain.EntryBuilding:
-		base, err := i.k8sBase(leaseCtx, work)
-		if err != nil {
-			return i.retryEntry(leaseCtx, claim, err)
-		}
-		output, built, err := i.builder.ExecuteWork(leaseCtx, work, archive, base)
+		output, err := i.builder.ExecuteWork(leaseCtx, work, archive)
 		if err != nil {
 			return i.handleEntryError(leaseCtx, claim, err)
-		}
-		if work.Snapshot.Runtime == challenge.RuntimeK8s {
-			path, digest, saveErr := saveCatalogBuildArchive(i.dataDir, claim.Entry.ID, int64(claim.Entry.Attempt), built)
-			if saveErr != nil {
-				return i.retryEntry(leaseCtx, claim, saveErr)
-			}
-			if digest != output.OCIArchiveSHA256 {
-				return i.failEntry(leaseCtx, claim, errors.New("catalog K8s build archive digest does not match builder output"), nil)
-			}
-			output.OCIArchivePath = path
 		}
 		_, err = i.store.CompleteEntryBuild(leaseCtx, claim, output, i.now().UTC())
 		return err
 
 	case catalogdomain.EntryArtifactPublishing:
-		var buildArchive []byte
-		if work.Snapshot.Runtime == challenge.RuntimeK8s {
-			if claim.Entry.Build == nil {
-				return i.failEntry(leaseCtx, claim, errors.New("catalog K8s entry has no durable build output"), nil)
-			}
-			buildArchive, err = readCatalogBuildArchive(*claim.Entry.Build)
-			if err != nil {
-				return i.failEntry(leaseCtx, claim, err, nil)
-			}
-		}
-		artifact, err := i.publisher.PublishArtifactWork(leaseCtx, work, buildArchive)
+		artifact, err := i.publisher.PublishArtifactWork(leaseCtx, work)
 		if err != nil {
 			return i.handleEntryError(leaseCtx, claim, err)
 		}
@@ -918,70 +894,6 @@ func artifactImage(value execution.ArtifactReference) (string, error) {
 	default:
 		return "", errors.New("catalog artifact has unsupported runtime")
 	}
-}
-
-func saveCatalogBuildArchive(dataDir, entryID string, attempt int64, data []byte) (string, string, error) {
-	if !challenge.ValidID(entryID) || attempt <= 0 || len(data) == 0 {
-		return "", "", errors.New("catalog build archive identity is invalid")
-	}
-	digest := candidate.Digest(data)
-	path := filepath.Join(dataDir, "catalog-releases", "builds", entryID, fmt.Sprintf("%d.oci.tar", attempt))
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return "", "", err
-	}
-	if existing, err := os.ReadFile(path); err == nil {
-		if candidate.Digest(existing) != digest {
-			return "", "", candidate.ErrArchiveConflict
-		}
-		return path, digest, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", "", err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".build-*.tmp")
-	if err != nil {
-		return "", "", err
-	}
-	temporaryPath := temporary.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return "", "", err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return "", "", err
-	}
-	if err := temporary.Chmod(0o440); err != nil {
-		_ = temporary.Close()
-		return "", "", err
-	}
-	if err := temporary.Close(); err != nil {
-		return "", "", err
-	}
-	if err := os.Link(temporaryPath, path); err != nil {
-		if !errors.Is(err, os.ErrExist) {
-			return "", "", err
-		}
-		existing, readErr := os.ReadFile(path)
-		if readErr != nil || candidate.Digest(existing) != digest {
-			return "", "", candidate.ErrArchiveConflict
-		}
-	}
-	return path, digest, nil
-}
-
-func readCatalogBuildArchive(output execution.BuildOutput) ([]byte, error) {
-	if output.Runtime != challenge.RuntimeK8s || strings.TrimSpace(output.OCIArchivePath) == "" || !execution.ValidSHA256(output.OCIArchiveSHA256) {
-		return nil, errors.New("catalog K8s build output is incomplete")
-	}
-	data, err := os.ReadFile(output.OCIArchivePath)
-	if err != nil {
-		return nil, err
-	}
-	if candidate.Digest(data) != output.OCIArchiveSHA256 {
-		return nil, candidate.ErrArchiveConflict
-	}
-	return data, nil
 }
 
 func catalogRetryAt(attempt int, now time.Time) time.Time {

@@ -149,9 +149,14 @@ func (d *GenerationRepository) ClaimGenerationWorkflow(ctx context.Context, work
 		WHERE state IN (?, ?, ?, ?)
 		AND next_run_at <= ?
 		AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+		AND NOT (state = ? AND EXISTS (
+			SELECT 1 FROM candidate_revisions candidate
+			WHERE candidate.id = generation_workflows.candidate_revision_id
+			AND candidate.publication -> 'artifact' IS NOT NULL
+		))
 		ORDER BY next_run_at, created_at, id
 		FOR UPDATE SKIP LOCKED LIMIT 1`, generation.StateBuilding, generation.StateArtifactPublishing,
-		generation.StateVerifying, generation.StateChallengePublishing, now, now).Scan(&id)
+		generation.StateVerifying, generation.StateChallengePublishing, now, now, generation.StateChallengePublishing).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit generation recovery: %w", err)
@@ -318,6 +323,43 @@ func (d *GenerationRepository) LoadGenerationContext(ctx context.Context, claim 
 		return nil, fmt.Errorf("commit generation context: %w", err)
 	}
 	return result, nil
+}
+
+// LoadGenerationRuntimeAction returns the narrow, immutable input surface for
+// one leased Runtime Worker action. It intentionally does not expose authoring
+// Plan, feedback, workspace binding, or Server filesystem paths.
+func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, claim generation.Claim, now time.Time) (*generation.RuntimeActionContext, error) {
+	if !claim.Valid() || now.IsZero() || !claim.Workflow.State.RuntimeState() {
+		return nil, errors.New("generation runtime action requires a valid runtime claim")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin generation runtime action: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := lockGenerationClaimTx(ctx, tx, claim, claim.Workflow.State, now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	if workflow.CandidateRevisionID == "" {
+		return nil, generation.ErrCandidateInvalidState
+	}
+	revision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ?`, workflow.CandidateRevisionID))
+	if err != nil {
+		return nil, err
+	}
+	context := generation.RuntimeActionContext{
+		Claim:     generation.Claim{Workflow: *workflow, LeaseCredential: claim.LeaseCredential},
+		Candidate: revision.WorkerView(),
+	}
+	context.Identity = generation.RuntimeActionIdentityFor(context.Claim, revision.ID)
+	if err := context.Valid(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit generation runtime action: %w", err)
+	}
+	return &context, nil
 }
 
 func (d *GenerationRepository) RenewGenerationLease(ctx context.Context, claim generation.Claim, leaseTTL time.Duration, now time.Time) error {
@@ -1179,15 +1221,17 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	return updated, nil
 }
 
-// CompleteGenerationChallengePublish records the final runtime artifact and
-// makes its materialized source and Roadmap binding visible together.
-func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, contentRevision string, now time.Time) error {
-	if !claim.Valid() || !roadmap.ValidRevision(contentRevision) || now.IsZero() {
-		return errors.New("generation challenge publication finalization is invalid")
+// RecordGenerationChallengePublicationResult durably stores a successful
+// provider promotion before Server materializes source or updates Roadmap. The
+// Runtime Worker lease is released without changing state, so a later Server
+// finalizer can recover without repeating promotion.
+func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
+	if !claim.Valid() || now.IsZero() {
+		return errors.New("generation challenge promotion result is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin challenge publication finalization: %w", err)
+		return fmt.Errorf("begin generation challenge promotion result: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	workflow, err := lockGenerationClaimTx(ctx, tx, claim, generation.StateChallengePublishing, now.UTC())
@@ -1205,8 +1249,97 @@ func (d *GenerationRepository) CompleteGenerationChallengePublish(ctx context.Co
 	if publication.StagingArtifact == nil || candidateRevision.Artifact == nil || *publication.StagingArtifact != *candidateRevision.Artifact || publication.Runtime != candidateRevision.Snapshot.Runtime {
 		return generation.ErrCandidateInvalidState
 	}
-	publication.ContentRevision = contentRevision
+	if publication.Artifact != nil && *publication.Artifact != artifact {
+		return generation.ErrCandidateInvalidState
+	}
 	publication.Artifact = &artifact
+	if err := publication.ValidatePromotionResult(); err != nil {
+		return err
+	}
+	encodedPublication, err := marshalJSON(publication)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), candidateRevision.ID); err != nil {
+		return fmt.Errorf("record generation challenge promotion result: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET lease_owner = '', lease_expires_at = NULL, last_error = '', updated_at = ?
+		WHERE id = ? AND state = ? AND state_version = ?`, now.UTC(), workflow.ID, generation.StateChallengePublishing, workflow.StateVersion); err != nil {
+		return fmt.Errorf("release generation challenge promotion lease: %w", err)
+	}
+	return tx.Commit()
+}
+
+// PendingGenerationPublicationFinalizations returns only promotion results
+// that still need Server-owned source materialization and transactional
+// Roadmap publication. No Runtime Worker action is returned for these rows.
+func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx context.Context) ([]generation.PublicationFinalization, error) {
+	rows, err := d.conn.QueryContext(ctx, generationWorkflowSelect+` WHERE state = ?
+		AND EXISTS (
+			SELECT 1 FROM candidate_revisions candidate
+			WHERE candidate.id = generation_workflows.candidate_revision_id
+			AND candidate.publication -> 'artifact' IS NOT NULL
+			AND candidate.published_at IS NULL
+		) ORDER BY updated_at, id`, generation.StateChallengePublishing)
+	if err != nil {
+		return nil, fmt.Errorf("list pending generation publication finalizers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	result := make([]generation.PublicationFinalization, 0)
+	for rows.Next() {
+		workflow, err := scanGenerationWorkflow(rows)
+		if err != nil {
+			return nil, err
+		}
+		revision, err := d.GetCandidateRevision(ctx, workflow.CandidateRevisionID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, generation.PublicationFinalization{Workflow: *workflow, Candidate: *revision})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending generation publication finalizers: %w", err)
+	}
+	return result, nil
+}
+
+// FinalizeGenerationChallengePublication makes one already-promoted artifact
+// visible after Server has idempotently materialized its source directory. It
+// never calls a provider and is safe to retry after a Server interruption.
+func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision string, now time.Time) error {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" || !roadmap.ValidRevision(contentRevision) || now.IsZero() {
+		return errors.New("generation challenge publication finalization is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin challenge publication finalization: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND state = ? FOR UPDATE`, workflowID, generation.StateChallengePublishing))
+	if errors.Is(err, sql.ErrNoRows) {
+		return generation.ErrCandidateInvalidState
+	}
+	if err != nil {
+		return err
+	}
+	if workflow.CandidateRevisionID != candidateRevisionID {
+		return generation.ErrCandidateInvalidState
+	}
+	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	if err != nil {
+		return err
+	}
+	if candidateRevision.Publication == nil || candidateRevision.Classification == nil || candidateRevision.PublishedAt != nil {
+		return generation.ErrCandidateInvalidState
+	}
+	publication := *candidateRevision.Publication
+	if publication.StagingArtifact == nil || candidateRevision.Artifact == nil || *publication.StagingArtifact != *candidateRevision.Artifact || publication.Runtime != candidateRevision.Snapshot.Runtime {
+		return generation.ErrCandidateInvalidState
+	}
+	if err := publication.ValidatePromotionResult(); err != nil {
+		return err
+	}
+	publication.ContentRevision = contentRevision
 	if err := publication.ValidateFinal(); err != nil {
 		return err
 	}

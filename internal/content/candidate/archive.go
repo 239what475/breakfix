@@ -20,10 +20,6 @@ func ArchivePath(root, id string) string {
 	return filepath.Join(root, "candidates", id, "candidate.tar.gz")
 }
 
-func BuildArchivePath(root, candidateID, workflowID string, attempt int64) string {
-	return filepath.Join(root, "candidates", candidateID, "builds", fmt.Sprintf("%s-%d.oci.tar", workflowID, attempt))
-}
-
 // SaveArchiveAtomic stores exactly one immutable archive for a revision. A
 // retry is accepted only when the existing bytes have the same digest.
 func SaveArchiveAtomic(root, id string, data []byte) (string, string, error) {
@@ -89,68 +85,6 @@ func ReadArchive(path, expectedDigest string) ([]byte, error) {
 		return nil, ErrArchiveConflict
 	}
 	return data, nil
-}
-
-// SaveBuildArchiveAtomic persists only the exact output of one fenced build
-// attempt. A later attempt gets a different path and therefore cannot be
-// overwritten by a delayed worker response.
-func SaveBuildArchiveAtomic(root, candidateID, workflowID string, attempt int64, data []byte) (string, string, error) {
-	if !challenge.ValidID(candidateID) || !challenge.ValidID(workflowID) || attempt <= 0 {
-		return "", "", errors.New("build archive requires valid candidate, workflow, and attempt identities")
-	}
-	if len(data) == 0 {
-		return "", "", errors.New("build archive is empty")
-	}
-	digest := Digest(data)
-	path := BuildArchivePath(root, candidateID, workflowID, attempt)
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return "", "", fmt.Errorf("create build archive directory: %w", err)
-	}
-	if err := verifyExistingArchive(path, digest); err == nil {
-		return path, digest, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", "", err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".build-*.tmp")
-	if err != nil {
-		return "", "", fmt.Errorf("create build archive temporary file: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath) //nolint:errcheck
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return "", "", fmt.Errorf("write build archive: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return "", "", fmt.Errorf("sync build archive: %w", err)
-	}
-	if err := temporary.Chmod(0o440); err != nil {
-		_ = temporary.Close()
-		return "", "", fmt.Errorf("protect build archive: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return "", "", fmt.Errorf("close build archive: %w", err)
-	}
-	if err := os.Link(temporaryPath, path); err == nil {
-		return path, digest, nil
-	} else if !errors.Is(err, os.ErrExist) {
-		return "", "", fmt.Errorf("publish build archive: %w", err)
-	}
-	if err := verifyExistingArchive(path, digest); err != nil {
-		return "", "", err
-	}
-	return path, digest, nil
-}
-
-func RemoveBuildArchives(root, candidateID string) error {
-	if !challenge.ValidID(candidateID) {
-		return fmt.Errorf("invalid candidate revision id %q", candidateID)
-	}
-	if err := os.RemoveAll(filepath.Join(root, "candidates", candidateID, "builds")); err != nil {
-		return fmt.Errorf("remove candidate build archives: %w", err)
-	}
-	return nil
 }
 
 func Digest(data []byte) string {

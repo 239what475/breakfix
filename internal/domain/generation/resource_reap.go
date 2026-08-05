@@ -11,14 +11,13 @@ type ResourceReapKind string
 
 const (
 	ResourceReapVerificationEnvironment ResourceReapKind = "verification-environment"
-	ResourceReapBuildArchive            ResourceReapKind = "build-archive"
 	ResourceReapNodeBuildImage          ResourceReapKind = "node-build-image"
 	ResourceReapCandidateArtifact       ResourceReapKind = "candidate-artifact"
 )
 
 func (k ResourceReapKind) Valid() bool {
 	switch k {
-	case ResourceReapVerificationEnvironment, ResourceReapBuildArchive, ResourceReapNodeBuildImage, ResourceReapCandidateArtifact:
+	case ResourceReapVerificationEnvironment, ResourceReapNodeBuildImage, ResourceReapCandidateArtifact:
 		return true
 	default:
 		return false
@@ -27,10 +26,8 @@ func (k ResourceReapKind) Valid() bool {
 
 func (k ResourceReapKind) Owner() string {
 	switch k {
-	case ResourceReapVerificationEnvironment, ResourceReapBuildArchive:
-		return "server"
-	case ResourceReapNodeBuildImage, ResourceReapCandidateArtifact:
-		return "generate-worker"
+	case ResourceReapVerificationEnvironment, ResourceReapNodeBuildImage, ResourceReapCandidateArtifact:
+		return "runtime-worker"
 	default:
 		return ""
 	}
@@ -51,7 +48,7 @@ func (r ResourceReap) Valid() bool {
 }
 
 // ResourceReapCredential fences a reaper report after another Server or
-// Generate Worker takes over an expired infrastructure lease.
+// Runtime Worker takes over an expired infrastructure lease.
 type ResourceReapCredential struct {
 	Attempt    int    `json:"attempt"`
 	LeaseOwner string `json:"lease_owner"`

@@ -1,7 +1,6 @@
-// Package generate executes the durable external runtime actions of one
-// GenerationWorkflow. Model execution lives in Server; this process has no
-// PostgreSQL dependency and receives only lease-fenced runtime inputs through
-// the Server's internal API.
+// Package generate executes one durable runtime action at a time. It has no
+// model, OpenSandbox, PostgreSQL, or Server-volume dependency; Server exposes
+// only lease-fenced immutable action inputs through its internal API.
 package generate
 
 import (
@@ -10,45 +9,44 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
-	app "github.com/breakfix/breakfix/internal/application/generation"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 type Store interface {
-	Claim(context.Context, string, time.Duration) (*generation.Claim, error)
-	Renew(context.Context, generation.Claim, time.Duration) error
-	Context(context.Context, generation.Claim) (*generation.Context, error)
-	Phase(context.Context, generation.Claim, app.PhaseRequest) (*generation.Claim, error)
-	CandidateArchive(context.Context, generation.Claim) ([]byte, string, error)
-	K8sBase(context.Context, generation.Claim) ([]byte, string, error)
-	BuildArchive(context.Context, generation.Claim) ([]byte, string, error)
+	Claim(context.Context, string, time.Duration) (*generation.RuntimeActionContext, error)
+	Renew(context.Context, generation.RuntimeActionCredential, time.Duration) error
+	CandidateArchive(context.Context, generation.RuntimeActionCredential) ([]byte, string, error)
+	CompleteBuild(context.Context, generation.RuntimeActionCredential, generation.BuildOutput) error
+	CompleteArtifactPublish(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error
+	RecordVerificationEnvironment(context.Context, generation.RuntimeActionCredential, generation.VerificationEnvironment) error
+	CompleteVerification(context.Context, generation.RuntimeActionCredential, generation.VerificationReport) error
+	RecordChallengePublication(context.Context, generation.RuntimeActionCredential, generation.ArtifactReference) error
+	ReportInfrastructureFailure(context.Context, generation.RuntimeActionCredential, generation.Failure) error
+	ReportArtifactFailure(context.Context, generation.RuntimeActionCredential, generation.Failure, *generation.VerificationReport) error
 }
 
 type BuilderExecutor interface {
-	Execute(context.Context, generation.Execution, []byte, []byte) (generation.BuildResult, error)
+	ExecuteWork(context.Context, domainexecution.Work, []byte) (domainexecution.BuildOutput, error)
 }
 
 type PublisherExecutor interface {
-	PublishArtifact(context.Context, generation.Execution, []byte) (generation.ArtifactReference, error)
-	PublishChallenge(context.Context, generation.Execution) (generation.ArtifactReference, error)
+	PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error)
+	PublishChallengeWork(context.Context, domainexecution.Work, string) (domainexecution.ArtifactReference, error)
+	ReapCandidate(context.Context, generation.ResourceReap) error
+}
+
+type VerifierExecutor interface {
+	ExecuteWork(context.Context, domainexecution.Work, func(context.Context, domainexecution.VerificationEnvironment) error) (domainexecution.VerificationReport, error)
+	ReapVerificationEnvironment(context.Context, generation.ResourceReap) error
 }
 
 type ResourceReapStore interface {
 	ClaimResourceReap(context.Context, string, generation.ResourceReapKind, time.Duration) (*generation.ResourceReapClaim, error)
 	CompleteResourceReap(context.Context, generation.ResourceReapClaim, string) error
-}
-
-type ResourceReapExecutor interface {
-	ReapCandidate(context.Context, generation.ResourceReap) error
-}
-
-type VerifierExecutor interface {
-	Execute(context.Context, generation.Execution, func(context.Context, generation.VerificationEnvironment) error) (generation.VerificationReport, error)
 }
 
 type Config struct {
@@ -63,13 +61,12 @@ type Worker struct {
 	publisher PublisherExecutor
 	verifier  VerifierExecutor
 	reapStore ResourceReapStore
-	reaper    ResourceReapExecutor
 	config    Config
 	sleep     func(context.Context, time.Duration) error
 }
 
-func New(store Store, builderExecutor BuilderExecutor, publisherExecutor PublisherExecutor, verifierExecutor VerifierExecutor, config Config) (*Worker, error) {
-	if store == nil || builderExecutor == nil || publisherExecutor == nil || verifierExecutor == nil || strings.TrimSpace(config.WorkerID) == "" {
+func New(store Store, builder BuilderExecutor, publisher PublisherExecutor, verifier VerifierExecutor, config Config) (*Worker, error) {
+	if store == nil || builder == nil || publisher == nil || verifier == nil || strings.TrimSpace(config.WorkerID) == "" {
 		return nil, errors.New("runtime worker requires Server client, runtime executors, and worker id")
 	}
 	if config.LeaseTTL <= 0 {
@@ -79,276 +76,189 @@ func New(store Store, builderExecutor BuilderExecutor, publisherExecutor Publish
 		config.PollEvery = time.Second
 	}
 	worker := &Worker{
-		store: store, builder: builderExecutor, publisher: publisherExecutor, verifier: verifierExecutor,
+		store: store, builder: builder, publisher: publisher, verifier: verifier,
 		config: config, sleep: sleepContext,
 	}
 	if reapStore, ok := store.(ResourceReapStore); ok {
-		if reaper, ok := publisherExecutor.(ResourceReapExecutor); ok {
-			worker.reapStore = reapStore
-			worker.reaper = reaper
-		}
+		worker.reapStore = reapStore
 	}
 	return worker, nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if w.reapStore != nil && w.reaper != nil {
-		go w.runResourceReaper(ctx)
-	}
-	claimFailures := 0
+	actionClaimFailures := 0
+	reapFailures := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
-		claim, err := w.store.Claim(ctx, w.config.WorkerID, w.config.LeaseTTL)
+		processed, err := w.ProcessOne(ctx)
 		if err != nil {
-			claimFailures++
-			delay := retryDelay(claimFailures)
-			slog.Warn("claim generation workflow", "worker_id", w.config.WorkerID, "retry_in", delay, "err", err)
+			actionClaimFailures++
+			delay := retryDelay(actionClaimFailures)
+			slog.Warn("claim runtime action", "worker_id", w.config.WorkerID, "retry_in", delay, "err", err)
 			if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
 				return err
 			}
 			continue
 		}
-		claimFailures = 0
-		if claim == nil {
-			if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
-				return err
-			}
+		actionClaimFailures = 0
+		if processed {
 			continue
 		}
-		w.processClaim(ctx, *claim)
+		if w.reapStore != nil {
+			reaped, reapErr := w.reapOne(ctx)
+			if reapErr != nil {
+				reapFailures++
+				delay := retryDelay(reapFailures)
+				slog.Warn("reap runtime resources", "worker_id", w.config.WorkerID, "retry_in", delay, "err", reapErr)
+				if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
+					return err
+				}
+				continue
+			}
+			reapFailures = 0
+			if reaped {
+				continue
+			}
+		}
+		if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
+			return err
+		}
 	}
 }
 
+// ProcessOne claims and executes exactly one runtime state. A state advance
+// releases the lease, and a later loop iteration claims the next action.
 func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
-	claim, err := w.store.Claim(ctx, w.config.WorkerID, w.config.LeaseTTL)
-	if err != nil || claim == nil {
-		return claim != nil, err
+	action, err := w.store.Claim(ctx, w.config.WorkerID, w.config.LeaseTTL)
+	if err != nil || action == nil {
+		return action != nil, err
 	}
-	w.processClaim(ctx, *claim)
+	if err := action.Valid(); err != nil {
+		return true, fmt.Errorf("Server returned invalid runtime action: %w", err)
+	}
+	w.processAction(ctx, *action)
 	return true, nil
 }
 
-func (w *Worker) runResourceReaper(ctx context.Context) {
-	failures := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		processed, err := w.reapOne(ctx)
-		if err != nil {
-			failures++
-			delay := retryDelay(failures)
-			slog.Warn("reap generation resources", "worker_id", w.config.WorkerID, "retry_in", delay, "err", err)
-			if err := w.sleep(ctx, delay); err != nil && ctx.Err() == nil {
-				slog.Error("wait to retry generation resource reap", "worker_id", w.config.WorkerID, "err", err)
-			}
-			continue
-		}
-		failures = 0
-		if !processed {
-			if err := w.sleep(ctx, w.config.PollEvery); err != nil && ctx.Err() == nil {
-				slog.Error("wait for generation resource reap", "worker_id", w.config.WorkerID, "err", err)
-			}
-		}
-	}
-}
-
-func (w *Worker) reapOne(ctx context.Context) (bool, error) {
-	if w.reapStore == nil || w.reaper == nil {
-		return false, nil
-	}
-	for _, kind := range []generation.ResourceReapKind{
-		generation.ResourceReapNodeBuildImage,
-		generation.ResourceReapCandidateArtifact,
-	} {
-		claim, err := w.reapStore.ClaimResourceReap(ctx, w.config.WorkerID, kind, w.config.LeaseTTL)
-		if err != nil {
-			return false, err
-		}
-		if claim == nil {
-			continue
-		}
-		failure := ""
-		if err := w.reaper.ReapCandidate(ctx, claim.ResourceReap); err != nil {
-			failure = err.Error()
-		}
-		if err := w.reapStore.CompleteResourceReap(ctx, *claim, failure); err != nil {
-			return true, err
-		}
-		return true, nil
-	}
-	return false, nil
-}
-
-func (w *Worker) processClaim(parent context.Context, initial generation.Claim) {
+func (w *Worker) processAction(parent context.Context, action generation.RuntimeActionContext) {
 	started := time.Now()
-	lease := newLease(initial)
-	execCtx, cancel := context.WithCancel(parent)
+	credential := action.Credential()
+	deadline := domainexecution.NewActionDeadline(started)
+	execCtx, cancel := context.WithDeadline(parent, deadline)
 	defer cancel()
 	done := make(chan struct{})
-	go w.renew(execCtx, cancel, done, lease)
+	lease := &actionLease{}
+	go w.renew(execCtx, cancel, done, credential, lease)
 
-	for {
-		claim := lease.current()
-		if lease.lost.Load() || execCtx.Err() != nil {
-			break
-		}
-		contextSnapshot, err := w.store.Context(execCtx, claim)
-		if err != nil {
-			next, reportErr := w.reportError(parent, lease, claim, err)
-			if reportErr == nil && next != nil {
-				lease.set(*next)
-				continue
-			}
-			break
-		}
-		execution := generation.Execution{Claim: claim, Context: *contextSnapshot}
-		if !execution.Valid() {
-			next, reportErr := w.reportError(parent, lease, claim, errors.New("server returned inconsistent generation execution"))
-			if reportErr == nil && next != nil {
-				lease.set(*next)
-				continue
-			}
-			break
-		}
-		// A runtime action has its own local timeout. It is never persisted on
-		// the workflow and a replacement attempt receives a fresh budget.
-		actionCtx, actionCancel := context.WithTimeout(execCtx, domainexecution.DefaultActionDeadline)
-		next, err := w.executeState(actionCtx, execution, lease)
-		actionCancel()
-		if err != nil {
-			next, reportErr := w.reportError(parent, lease, claim, err)
-			if reportErr != nil {
-				break
-			}
-			if next == nil {
-				break
-			}
-			lease.set(*next)
-			continue
-		}
-		if next == nil {
-			break
-		}
-		lease.set(*next)
+	work, err := action.Work(deadline)
+	if err == nil {
+		err = w.executeAction(execCtx, action, work, credential, lease)
 	}
 	close(done)
 	cancel()
-	fields := []any{"workflow_id", initial.Workflow.ID, "worker_id", w.config.WorkerID, "duration_seconds", time.Since(started).Seconds()}
-	if lease.lost.Load() {
-		slog.Info("generation workflow lease ended", fields...)
-	} else {
-		slog.Info("generation workflow execution ended", fields...)
+	if err != nil && !lease.lost.Load() && parent.Err() == nil {
+		if reportErr := w.reportError(parent, credential, err); reportErr != nil && !errors.Is(reportErr, generation.ErrLeaseLost) {
+			slog.Error("report runtime action failure", "action", action.Identity.String(), "err", reportErr)
+		}
 	}
+	fields := []any{"action", action.Identity.String(), "worker_id", w.config.WorkerID, "duration_seconds", time.Since(started).Seconds()}
+	if lease.lost.Load() {
+		slog.Info("runtime action lease ended", fields...)
+		return
+	}
+	if err != nil {
+		slog.Info("runtime action execution ended", append(fields, "err", err)...)
+		return
+	}
+	slog.Info("runtime action completed", fields...)
 }
 
-func (w *Worker) executeState(ctx context.Context, execution generation.Execution, lease *workflowLease) (*generation.Claim, error) {
-	claim := execution.Claim
-	switch claim.Workflow.State {
+func (w *Worker) executeAction(ctx context.Context, action generation.RuntimeActionContext, work domainexecution.Work, credential generation.RuntimeActionCredential, lease *actionLease) error {
+	if lease.lost.Load() {
+		return generation.ErrLeaseLost
+	}
+	switch action.Identity.State {
 	case generation.StateBuilding:
-		archive, _, err := w.store.CandidateArchive(ctx, claim)
+		archive, digest, err := w.store.CandidateArchive(ctx, credential)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		var base []byte
-		if execution.Context.Candidate != nil && execution.Context.Candidate.Snapshot.Runtime == "k8s" {
-			base, _, err = w.store.K8sBase(ctx, claim)
-			if err != nil {
-				return nil, err
-			}
+		if digest != work.ArchiveSHA256 {
+			return domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_DIGEST_MISMATCH", "Server returned a candidate archive with a different immutable digest")
 		}
-		result, err := w.builder.Execute(ctx, execution, archive, base)
+		output, err := w.builder.ExecuteWork(ctx, work, archive)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return w.store.Phase(ctx, claim, app.PhaseRequest{Build: &result})
+		if lease.lost.Load() {
+			return generation.ErrLeaseLost
+		}
+		return w.store.CompleteBuild(ctx, credential, output)
 
 	case generation.StateArtifactPublishing:
-		var archive []byte
-		var err error
-		if execution.Context.Candidate != nil && execution.Context.Candidate.Snapshot.Runtime == "k8s" {
-			archive, _, err = w.store.BuildArchive(ctx, claim)
-			if err != nil {
-				return nil, err
-			}
-		}
-		artifact, err := w.publisher.PublishArtifact(ctx, execution, archive)
+		artifact, err := w.publisher.PublishArtifactWork(ctx, work)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return w.store.Phase(ctx, claim, app.PhaseRequest{ArtifactPublish: &generation.ArtifactPublishResult{Artifact: artifact}})
+		if lease.lost.Load() {
+			return generation.ErrLeaseLost
+		}
+		return w.store.CompleteArtifactPublish(ctx, credential, artifact)
 
 	case generation.StateVerifying:
-		report, err := w.verifier.Execute(ctx, execution, func(recordCtx context.Context, environment generation.VerificationEnvironment) error {
-			next, phaseErr := w.store.Phase(recordCtx, lease.current(), app.PhaseRequest{
-				VerificationEnvironment: &generation.VerificationEnvironmentResult{Environment: environment},
-			})
-			if phaseErr == nil && next != nil {
-				lease.set(*next)
+		report, err := w.verifier.ExecuteWork(ctx, work, func(recordCtx context.Context, environment domainexecution.VerificationEnvironment) error {
+			if lease.lost.Load() {
+				return generation.ErrLeaseLost
 			}
-			return phaseErr
+			return w.store.RecordVerificationEnvironment(recordCtx, credential, environment)
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return w.store.Phase(ctx, lease.current(), app.PhaseRequest{Verification: &generation.VerificationResult{Report: report}})
+		if lease.lost.Load() {
+			return generation.ErrLeaseLost
+		}
+		return w.store.CompleteVerification(ctx, credential, report)
 
 	case generation.StateChallengePublishing:
-		artifact, err := w.publisher.PublishChallenge(ctx, execution)
+		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.Candidate.Publication.ChallengeID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return w.store.Phase(ctx, claim, app.PhaseRequest{ChallengePublish: &generation.ChallengePublishResult{Artifact: artifact}})
+		if lease.lost.Load() {
+			return generation.ErrLeaseLost
+		}
+		return w.store.RecordChallengePublication(ctx, credential, artifact)
 
 	default:
-		return nil, fmt.Errorf("generate worker cannot execute workflow state %s", claim.Workflow.State)
+		return fmt.Errorf("runtime worker cannot execute workflow state %s", action.Identity.State)
 	}
 }
 
-func (w *Worker) reportError(ctx context.Context, lease *workflowLease, claim generation.Claim, executionErr error) (*generation.Claim, error) {
-	if lease.lost.Load() || errors.Is(executionErr, generation.ErrLeaseLost) {
-		return nil, nil
+func (w *Worker) reportError(ctx context.Context, credential generation.RuntimeActionCredential, executionErr error) error {
+	if errors.Is(executionErr, generation.ErrLeaseLost) || ctx.Err() != nil {
+		return nil
 	}
-	select {
-	case <-ctx.Done():
-		return nil, nil
-	default:
-	}
-	request := app.PhaseRequest{}
-	var artifact *generation.ArtifactError
-	var sharedArtifact *domainexecution.ArtifactError
+	var artifact *domainexecution.ArtifactError
 	if errors.As(executionErr, &artifact) {
-		request.ArtifactFailure = &generation.ArtifactFailureResult{Failure: artifact.Failure, Report: artifact.Report}
-	} else if errors.As(executionErr, &sharedArtifact) {
-		request.ArtifactFailure = &generation.ArtifactFailureResult{Failure: generation.Failure{
-			Class: generation.FailureArtifact, Code: sharedArtifact.Code, Summary: sharedArtifact.Summary,
-		}, Report: sharedArtifact.Report}
-	} else {
-		summary := strings.TrimSpace(executionErr.Error())
-		if summary == "" {
-			summary = "generation workflow phase failed"
-		}
-		request.InfrastructureFailure = &generation.InfrastructureFailureResult{Failure: generation.Failure{
-			Class: generation.FailureInfrastructure, Code: "PHASE_EXECUTION_FAILED", Summary: summary,
-		}}
+		return w.store.ReportArtifactFailure(ctx, credential, generation.Failure{
+			Class: generation.FailureArtifact, Code: artifact.Code, Summary: artifact.Summary,
+		}, artifact.Report)
 	}
-	next, err := w.store.Phase(ctx, claim, request)
-	if err != nil && !errors.Is(err, generation.ErrLeaseLost) {
-		slog.Error("report generation workflow failure", "workflow_id", claim.Workflow.ID, "state", claim.Workflow.State, "err", err)
+	summary := strings.TrimSpace(executionErr.Error())
+	if summary == "" {
+		summary = "runtime action failed"
 	}
-	if errors.Is(err, generation.ErrLeaseLost) {
-		return nil, nil
-	}
-	return next, err
+	return w.store.ReportInfrastructureFailure(ctx, credential, generation.Failure{
+		Class: generation.FailureInfrastructure, Code: "RUNTIME_ACTION_FAILED", Summary: summary,
+	})
 }
 
-func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, lease *workflowLease) {
+func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, done <-chan struct{}, credential generation.RuntimeActionCredential, lease *actionLease) {
 	interval := w.config.LeaseTTL / 3
 	if interval < time.Second {
 		interval = time.Second
@@ -363,42 +273,54 @@ func (w *Worker) renew(ctx context.Context, cancel context.CancelFunc, done <-ch
 			return
 		case <-ticker.C:
 			requestCtx, requestCancel := context.WithTimeout(ctx, minDuration(w.config.LeaseTTL/2, 10*time.Second))
-			err := w.store.Renew(requestCtx, lease.current(), w.config.LeaseTTL)
+			err := w.store.Renew(requestCtx, credential, w.config.LeaseTTL)
 			requestCancel()
-			if err != nil {
-				select {
-				case <-done:
-					return
-				default:
-				}
-				lease.lost.Store(true)
-				cancel()
-				slog.Warn("generation workflow lease renewal failed", "workflow_id", lease.current().Workflow.ID, "err", err)
-				return
+			if err == nil {
+				continue
 			}
+			lease.lost.Store(true)
+			cancel()
+			slog.Warn("runtime action lease renewal failed", "action", credential.Identity.String(), "err", err)
+			return
 		}
 	}
 }
 
-type workflowLease struct {
-	mu    sync.RWMutex
-	claim generation.Claim
-	lost  atomic.Bool
+func (w *Worker) reapOne(ctx context.Context) (bool, error) {
+	if w.reapStore == nil {
+		return false, nil
+	}
+	for _, kind := range []generation.ResourceReapKind{
+		generation.ResourceReapVerificationEnvironment,
+		generation.ResourceReapNodeBuildImage,
+		generation.ResourceReapCandidateArtifact,
+	} {
+		claim, err := w.reapStore.ClaimResourceReap(ctx, w.config.WorkerID, kind, w.config.LeaseTTL)
+		if err != nil {
+			return false, err
+		}
+		if claim == nil {
+			continue
+		}
+		failure := ""
+		switch claim.Kind {
+		case generation.ResourceReapVerificationEnvironment:
+			err = w.verifier.ReapVerificationEnvironment(ctx, claim.ResourceReap)
+		default:
+			err = w.publisher.ReapCandidate(ctx, claim.ResourceReap)
+		}
+		if err != nil {
+			failure = err.Error()
+		}
+		if err := w.reapStore.CompleteResourceReap(ctx, *claim, failure); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
-func newLease(claim generation.Claim) *workflowLease { return &workflowLease{claim: claim} }
-
-func (l *workflowLease) current() generation.Claim {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.claim
-}
-
-func (l *workflowLease) set(claim generation.Claim) {
-	l.mu.Lock()
-	l.claim = claim
-	l.mu.Unlock()
-}
+type actionLease struct{ lost atomic.Bool }
 
 func retryDelay(attempt int) time.Duration {
 	if attempt < 1 {

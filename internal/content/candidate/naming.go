@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -39,6 +40,28 @@ func ChallengeOCIImageReference(registryRoot, challengeID string) (string, error
 		return "", err
 	}
 	return repository + ":published", nil
+}
+
+// BuildOCIRepository is the durable Registry scope for one concrete K8s build
+// action. Its opaque identity includes the owner, candidate and state version,
+// but intentionally excludes a runtime retry attempt so every takeover reaches
+// the same provider-side resource.
+func BuildOCIRepository(registryRoot, ownerID, candidateRevisionID string, stateVersion int64) (string, error) {
+	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(candidateRevisionID) == "" || stateVersion < 1 {
+		return "", errors.New("OCI build repository requires owner, candidate, and state version")
+	}
+	identity := strings.TrimSpace(ownerID) + "\x00" + strings.TrimSpace(candidateRevisionID) + "\x00build\x00" + fmt.Sprintf("%d", stateVersion)
+	return ociRepository(registryRoot, "builds", identity)
+}
+
+// BuildOCIImageReference is the stable tagged handle used to create or get a
+// build-scoped immutable OCI artifact before it is promoted to staging.
+func BuildOCIImageReference(registryRoot, ownerID, candidateRevisionID string, stateVersion int64) (string, error) {
+	repository, err := BuildOCIRepository(registryRoot, ownerID, candidateRevisionID, stateVersion)
+	if err != nil {
+		return "", err
+	}
+	return repository + ":artifact", nil
 }
 
 // OCIRepository returns the repository portion of a validated immutable OCI

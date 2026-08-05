@@ -24,6 +24,11 @@ const (
 	ociIndexMediaType    = "application/vnd.oci.image.index.v1+json"
 )
 
+// ErrReferenceNotFound distinguishes an absent named manifest from a Registry
+// transport failure. Build create-or-get uses it to avoid overwriting a stable
+// action identity when the provider is unavailable.
+var ErrReferenceNotFound = errors.New("OCI reference not found")
+
 type ociDescriptor struct {
 	MediaType   string            `json:"mediaType"`
 	Digest      string            `json:"digest"`
@@ -47,8 +52,8 @@ type ociManifest struct {
 }
 
 // PullOCIArchive copies a trusted Registry image into a local OCI archive.
-// Server uses it to hand the fixed platform base image to an untrusted Builder
-// without giving the Builder a Registry credential.
+// Runtime builders and Server-owned Catalog source staging both use the same
+// verified Registry transport.
 func (c Client) PullOCIArchive(ctx context.Context, imageName, destination string) error {
 	if err := c.Credentials.Validate(); err != nil {
 		return err
@@ -411,6 +416,9 @@ func (c Client) ResolveImmutableReference(ctx context.Context, imageName string)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusNotFound {
+			return "", ErrReferenceNotFound
+		}
 		return "", fmt.Errorf("resolve image manifest: status %d", response.StatusCode)
 	}
 	digest := strings.TrimSpace(response.Header.Get("Docker-Content-Digest"))

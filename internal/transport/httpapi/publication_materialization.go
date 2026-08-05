@@ -16,8 +16,8 @@ import (
 var errCandidatePublicationInvariant = errors.New("candidate publication invariant breach")
 
 // materializeCandidatePublication is the Server-owned final filesystem write.
-// Generate Worker only publishes the immutable runtime artifact and reports it
-// under its GenerationWorkflow lease.
+// Runtime Worker only publishes the immutable runtime artifact and reports it
+// under its fenced action lease.
 func (h *Handler) materializeCandidatePublication(revision *generation.Revision) (*challenge.Entry, error) {
 	if revision == nil || revision.Publication == nil || revision.Publication.Artifact == nil {
 		return nil, generation.ErrCandidateInvalidState

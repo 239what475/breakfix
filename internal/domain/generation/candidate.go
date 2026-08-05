@@ -200,6 +200,19 @@ func (p Publication) ValidateFinal() error {
 	return nil
 }
 
+// ValidatePromotionResult accepts the durable result reported by a Runtime
+// Worker after external promotion has succeeded. Server materialization has not
+// happened yet, so ContentRevision is intentionally still absent.
+func (p Publication) ValidatePromotionResult() error {
+	if err := p.validateCommon(); err != nil {
+		return err
+	}
+	if p.Artifact == nil || p.Artifact.Validate(p.Runtime) != nil || p.ContentRevision != "" {
+		return errors.New("challenge publication promotion result is incomplete")
+	}
+	return nil
+}
+
 func (p Publication) validateCommon() error {
 	if strings.TrimSpace(p.CandidateRevisionID) == "" || strings.TrimSpace(p.ChallengeTitle) == "" ||
 		(p.Runtime != challenge.RuntimeNode && p.Runtime != challenge.RuntimeK8s) || p.IntentRevision < 1 || p.ClassificationRevision < 1 ||
@@ -269,7 +282,6 @@ func (r Revision) WorkerView() WorkerView {
 	var build *BuildOutput
 	if r.Build != nil {
 		copy := *r.Build
-		copy.OCIArchivePath = ""
 		build = &copy
 	}
 	var failure *Failure

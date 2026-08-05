@@ -90,8 +90,25 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 
 	claim = claimGenerationWorkflow(t, database, workflow.ID, "publisher-a", publishAt)
 	finalArtifact := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/challenge@" + workflowTestDigest}
-	if err := database.Generation.CompleteGenerationChallengePublish(ctx, claim, finalArtifact, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", publishAt); err != nil {
-		t.Fatalf("complete classification publication: %v", err)
+	if err := database.Generation.RecordGenerationChallengePublicationResult(ctx, claim, finalArtifact, publishAt); err != nil {
+		t.Fatalf("record classification promotion: %v", err)
+	}
+	pendingFinalizations, err := database.Generation.PendingGenerationPublicationFinalizations(ctx)
+	if err != nil {
+		t.Fatalf("list pending publication finalizations: %v", err)
+	}
+	if len(pendingFinalizations) != 1 || pendingFinalizations[0].Workflow.ID != workflow.ID {
+		t.Fatalf("pending publication finalizations = %#v", pendingFinalizations)
+	}
+	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", publishAt); err != nil {
+		t.Fatalf("finalize classification publication: %v", err)
+	}
+	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx)
+	if err != nil {
+		t.Fatalf("list finalized publication finalizations: %v", err)
+	}
+	if len(pendingFinalizations) != 0 {
+		t.Fatalf("finalized publication remains pending: %#v", pendingFinalizations)
 	}
 	published, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
 	if err != nil {
@@ -381,6 +398,10 @@ func TestGenerationRuntimeLeaseTakeoverRetainsActionVersion(t *testing.T) {
 	if first.Workflow.State != generation.StateBuilding || first.Workflow.RuntimeAttempt != 1 {
 		t.Fatalf("initial runtime claim = %#v", first)
 	}
+	firstAction, err := database.Generation.LoadGenerationRuntimeAction(ctx, *first, now)
+	if err != nil {
+		t.Fatalf("load initial runtime action: %v", err)
+	}
 	takenOver, err := database.Generation.ClaimGenerationWorkflow(ctx, "runtime-after-takeover", time.Minute, now.Add(2*time.Second))
 	if err != nil || takenOver == nil {
 		t.Fatalf("take over expired runtime action = %#v, %v", takenOver, err)
@@ -388,6 +409,13 @@ func TestGenerationRuntimeLeaseTakeoverRetainsActionVersion(t *testing.T) {
 	if takenOver.Workflow.State != generation.StateBuilding || takenOver.StateVersion != first.StateVersion || takenOver.Workflow.RuntimeAttempt != 2 ||
 		takenOver.LeaseOwner == first.LeaseOwner {
 		t.Fatalf("runtime takeover changed action identity: first=%#v taken_over=%#v", first, takenOver)
+	}
+	takenOverAction, err := database.Generation.LoadGenerationRuntimeAction(ctx, *takenOver, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("load taken-over runtime action: %v", err)
+	}
+	if takenOverAction.Identity != firstAction.Identity {
+		t.Fatalf("runtime takeover changed external action identity: first=%#v taken_over=%#v", firstAction.Identity, takenOverAction.Identity)
 	}
 	if _, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, *first, generation.StateBuilding, generation.Failure{
 		Class: generation.FailureInfrastructure, Code: "LATE_REPORT", Summary: "late runtime report",
@@ -684,7 +712,6 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 	}
 	for _, kind := range []generation.ResourceReapKind{
 		generation.ResourceReapVerificationEnvironment,
-		generation.ResourceReapBuildArchive,
 		generation.ResourceReapCandidateArtifact,
 	} {
 		reapClaim, err := database.Generation.ClaimGenerationResourceReap(ctx, kind, "reaper", time.Minute, now.Add(2*time.Minute))
@@ -865,7 +892,7 @@ func approveGenerationJudgement(t *testing.T, database *Store, claim generation.
 func advanceGenerationBuildAndArtifact(t *testing.T, database *Store, claim generation.Claim, now time.Time) {
 	t.Helper()
 	if err := database.Generation.CompleteGenerationBuild(context.Background(), claim, generation.BuildOutput{
-		Runtime: challenge.RuntimeK8s, OCIArchivePath: "/tmp/generation.oci.tar", OCIArchiveSHA256: workflowTestDigest,
+		Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/build@" + workflowTestDigest,
 	}, now); err != nil {
 		t.Fatalf("complete generation build: %v", err)
 	}

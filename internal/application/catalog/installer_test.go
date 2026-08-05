@@ -13,6 +13,7 @@ import (
 	"time"
 
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
+	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
@@ -318,33 +319,39 @@ func (r *fakeCatalogRuntime) calls() runtimeCalls {
 
 type fakeBuilder struct{ runtime *fakeCatalogRuntime }
 
-func (b fakeBuilder) ExecuteWork(_ context.Context, work execution.Work, _ []byte, _ []byte) (execution.BuildOutput, []byte, error) {
+func (b fakeBuilder) ExecuteWork(_ context.Context, work execution.Work, _ []byte) (execution.BuildOutput, error) {
 	if err := work.Validate(); err != nil {
-		return execution.BuildOutput{}, nil, err
+		return execution.BuildOutput{}, err
 	}
 	b.runtime.mu.Lock()
 	b.runtime.counters.build++
 	err := b.runtime.buildErr
 	b.runtime.mu.Unlock()
 	if err != nil {
-		return execution.BuildOutput{}, nil, err
+		return execution.BuildOutput{}, err
+	}
+	if work.Snapshot.Runtime == challenge.RuntimeK8s {
+		return execution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/build@sha256:" + strings.Repeat("b", 64)}, nil
 	}
 	return execution.BuildOutput{Runtime: work.Snapshot.Runtime, Incus: &execution.IncusBuildReference{
 		Project: "catalog-build", WorkflowID: work.OwnerID, CandidateRevisionID: work.CandidateID, Attempt: work.Attempt,
 		InstanceName: "build-" + work.CandidateID, Alias: "build-" + work.CandidateID,
 		Fingerprint: strings.Repeat("b", 64),
-	}}, nil, nil
+	}}, nil
 }
 
 type fakePublisher struct{ runtime *fakeCatalogRuntime }
 
-func (p fakePublisher) PublishArtifactWork(_ context.Context, work execution.Work, _ []byte) (execution.ArtifactReference, error) {
+func (p fakePublisher) PublishArtifactWork(_ context.Context, work execution.Work) (execution.ArtifactReference, error) {
 	if err := work.Validate(); err != nil {
 		return execution.ArtifactReference{}, err
 	}
 	p.runtime.mu.Lock()
 	p.runtime.counters.artifact++
 	p.runtime.mu.Unlock()
+	if work.Snapshot.Runtime == challenge.RuntimeK8s {
+		return execution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/candidate@sha256:" + strings.Repeat("c", 64)}, nil
+	}
 	return execution.ArtifactReference{Runtime: work.Snapshot.Runtime, IncusAlias: "candidate-" + work.CandidateID, IncusFingerprint: strings.Repeat("c", 64)}, nil
 }
 

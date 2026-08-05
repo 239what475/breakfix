@@ -257,13 +257,7 @@ func validSourcePath(value string) bool {
 }
 
 func validBuild(output execution.BuildOutput, runtime string) bool {
-	if output.Runtime != runtime {
-		return false
-	}
-	if runtime == challenge.RuntimeK8s {
-		return output.Incus == nil && strings.TrimSpace(output.OCIArchivePath) != "" && execution.ValidSHA256(output.OCIArchiveSHA256)
-	}
-	return output.OCIArchivePath == "" && output.OCIArchiveSHA256 == "" && output.Incus != nil && output.Incus.Validate() == nil
+	return output.Validate(runtime) == nil
 }
 
 var ErrReleaseNotFound = errors.New("catalog release not found")

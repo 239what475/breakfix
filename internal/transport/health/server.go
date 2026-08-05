@@ -22,7 +22,7 @@ type Config struct {
 
 // Capability is a live, task-specific dependency check. Capabilities are not
 // Kubernetes readiness gates: a Node provider outage must not prevent the
-// Generate Worker from processing an unrelated K8s GenerationWorkflow.
+// Runtime Worker from processing an unrelated K8s runtime action.
 type Capability struct {
 	Name  string
 	Ready ReadyProbe
