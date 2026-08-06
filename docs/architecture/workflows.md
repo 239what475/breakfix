@@ -48,6 +48,15 @@ Classifying -> NeedsClassificationReview
 | `ChallengePublishing` | Runtime Worker | 最终 immutable artifact 的 durable promotion result。 |
 | `Published` | Server finalizer | 幂等 materialize 的 challenge source 与新的 RoadmapRevision。 |
 
+`Published` 的结果不是覆盖旧题目。首次发布会创建稳定 `Challenge` identity 和 revision；对已有 author-owned
+Challenge，`ChallengePublishing` 创建新的 immutable revision，要求其 `BaseActiveRevisionID` 仍等于作者开始修订时的
+active pointer。Server 在同一事务中保存新 revision、将旧 revision 标为 `superseded`、切换 active pointer、更新
+Roadmap binding，并把 workflow 标为 `Published`。如果 fence 已变化，workflow 进入 `Failed`，旧 active revision 不受影响。
+
+弃用不是 Generation state。作者通过独立生命周期 API 请求后，Server 在锁定 Challenge 和当前 Roadmap 的事务中删除
+该题 binding/关系边并将 Challenge 标为 `deprecated`；历史 revision、artifact、Environment 和学习记录不删除。正常
+Catalog 和新 Environment 只看 active Roadmap，因此 deprecated Challenge 不会重新进入学习入口。
+
 Generator、Judge 和 Classifier 的已知技术错误属于各自 `AgentRun`，一个逻辑 Run 最多五次；它们不会产生
 新的 CandidateRevision。Runtime state 的基础设施错误则由 Server 管理当前 state 的 `runtime_attempt`：进入
 state 时为一，最多五次。接管同一 state 时 external identity 保持
@@ -59,6 +68,10 @@ state 时为一，最多五次。接管同一 state 时 external identity 保持
 Worker 的异步 reaper 只删除该 Environment；删除失败只重试删除，绝不重新验证。ChallengePublishing
 也先持久化 promotion result，Server 重启时只重试 materialization/finalization，绝不重复已经成功的
 Worker promotion。
+
+学习 Environment 和学习记录保存创建时的 `challenge_revision_id`。任何历史读取（包括 Progress、Assistant、Terminal
+上下文和 My Space 学习记录）都按该 revision 读取；它们不能因为 active pointer 改变而显示新题目。启动新 Environment
+只解析当前 Catalog 的 active revision，不能复用旧 revision 的 Environment。
 
 每个 Runtime Worker 进程独立运行 Action Loop 与 Reaper Loop：前者只领取 Build、artifact publish、Verify
 和 challenge publish，后者只领取已有的幂等资源清理。两条 loop 各自一次只处理一个 lease-fenced action，进程

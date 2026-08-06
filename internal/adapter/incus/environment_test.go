@@ -8,7 +8,7 @@ import (
 func TestEnvironmentNetworkUsesConfiguredGatewayCIDR(t *testing.T) {
 	request := ProvisionNodeEnvironmentRequest{
 		EnvironmentUID:        "environment-550e8400-e29b-41d4-a716-446655440000",
-		Revision:              "sha256:test",
+		Revision:              "chrev-aaaaaaaaaaaaaaaa",
 		NetworkPolicyRevision: "node-network-v1",
 		Identity:              NodeEnvironmentIdentity{Network: "bf-n-test", ACL: "bf-a-test"},
 	}

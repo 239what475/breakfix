@@ -402,7 +402,7 @@ func validChallengeSourceRefForTopic(value, topic string) bool {
 }
 
 func validRuntimeChallenge(value ChallengeRef) bool {
-	return strings.TrimSpace(value.ID) != "" && validText(value.Title) && challenge.ValidSourceSlug(value.SourceSlug) &&
+	return challenge.ValidID(value.ID) && challenge.ValidRevisionID(value.RevisionID) && validText(value.Title) && challenge.ValidSourceSlug(value.SourceSlug) &&
 		ValidRevision(value.ContentRevision) && ValidRevision(value.MaterializedRevision)
 }
 

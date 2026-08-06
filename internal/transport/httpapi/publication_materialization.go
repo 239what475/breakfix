@@ -34,7 +34,7 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 		return nil, fmt.Errorf("%w: invalid final artifact: %v", errCandidatePublicationInvariant, err)
 	}
 	if err := h.validateRuntimeChallengeArtifact(runtime.Context{
-		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ChallengeID: publication.ChallengeID,
+		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ChallengeID: publication.ChallengeID, ChallengeRevisionID: publication.ChallengeRevisionID,
 	}, artifact); err != nil {
 		return nil, fmt.Errorf("%w: final artifact ownership: %v", errCandidatePublicationInvariant, err)
 	}
@@ -62,7 +62,8 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 	if err != nil {
 		return nil, fmt.Errorf("hash verified candidate source: %w", err)
 	}
-	if challenge.SourceSlugFor(candidateEntry.Title, publication.ChallengeID) != publication.SourceSlug {
+	if (publication.BaseActiveRevisionID == "" && challenge.SourceSlugFor(candidateEntry.Title, publication.ChallengeID) != publication.SourceSlug) ||
+		challenge.MaterializedPath(publication.SourceSlug, publication.ChallengeRevisionID) != publication.TargetPath {
 		return nil, fmt.Errorf("%w: intent does not match immutable archive", errCandidatePublicationInvariant)
 	}
 	image := artifact.IncusFingerprint
@@ -70,7 +71,7 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 		image = artifact.OCIReference
 	}
 	expectedRoot := filepath.Join(root, "expected")
-	expected, err := challenge.PromoteDirectoryAt(expectedRoot, source, publication.ChallengeID, image, string(contentRevision), publication.RequestedAt)
+	expected, err := challenge.PromoteDirectoryAt(expectedRoot, source, publication.ChallengeID, publication.ChallengeRevisionID, publication.SourceSlug, image, string(contentRevision), publication.RequestedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +80,7 @@ func (h *Handler) materializeCandidatePublication(revision *generation.Revision)
 		return existing, err
 	}
 
-	materialized, err := challenge.MaterializeWithSlug(h.challengesDir, expected.ID, expected.SourceSlug, func(destination string) error {
+	materialized, err := challenge.MaterializeWithPath(h.challengesDir, expected.ID, expected.RevisionID, publication.TargetPath, func(destination string) error {
 		return challenge.CopyRegularFiles(expected.Dir, destination)
 	})
 	if err == nil {
@@ -106,7 +107,7 @@ func validateExistingCandidatePublication(target string, expected *challenge.Ent
 	if err != nil {
 		return nil, true, fmt.Errorf("%w: invalid target: %v", errCandidatePublicationInvariant, err)
 	}
-	if expected == nil || existing.ID != expected.ID || existing.SourceSlug != expected.SourceSlug ||
+	if expected == nil || existing.ID != expected.ID || existing.RevisionID != expected.RevisionID || existing.SourceSlug != expected.SourceSlug ||
 		existing.Image != expected.Image || existing.Revision != expected.Revision {
 		return nil, true, fmt.Errorf("%w: target conflicts with publication intent", errCandidatePublicationInvariant)
 	}

@@ -36,6 +36,21 @@ roadmap:
 
 `challenge.yaml` 仍是 portable candidate 语义，不能携带平台生成的 challenge ID、目录 slug、runtime artifact、发布时间或已发布 content revision。`source_ref` 与 title 位于 Roadmap source：Domain 全局唯一，Topic 使用 `domain/topic`，Tag 全局唯一，Challenge 使用 `domain/topic/challenge`。运行时 opaque challenge ID 只在最终 commit 时分配。
 
+## Challenge 生命周期
+
+平台为每道题分配一个稳定的 `Challenge.id`，并为每次经过完整
+`Generate -> Build -> ArtifactPublish -> Verify` 链路的发布结果分配一个不可变的
+`ChallengeRevision.id`。Challenge 只保存当前 `active_revision_id` 指针；切换指针不会改写旧目录、artifact
+或学习记录。作者修订沿用稳定 Challenge ID 和 `source_slug`，但必须以新的 revision 重新验证后才原子切换指针。
+
+作者可以弃用自己的 Challenge。弃用会从当前 Roadmap 删除 binding 和关系边，将 Challenge 标记为
+`deprecated`，但保留所有 revision、materialized source、artifact、Environment 和学习记录；弃用题目不再出现在
+公开 Catalog，也不能创建新的学习 Environment。Catalog Release 创建的 Challenge 是 immutable 基线，不能通过作者入口修订或弃用。
+
+Environment、checkpoint evidence 和学习 attempt 都保存创建时的 `challenge_revision_id`。读取这些历史记录时必须按
+`Challenge.id + challenge_revision_id` 解析 durable revision，不能跟随当前 active pointer；因此旧 Environment 在作者发布新
+revision 或弃用 Challenge 后仍然使用原来的题目内容。当前 Catalog 读取则只使用当前 Roadmap 精确绑定的 active revision。
+
 Catalog bundle 使用 OCI Image Spec artifact：一个 immutable manifest、空 config 与 portable source layer。它是 OCI Registry 中的内容对象，不是可运行镜像。
 
 ## 安装与可见性
@@ -56,6 +71,9 @@ Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并�
 `source_slug` 和 `materialized_revision`。`content_revision` 是 portable source 的身份；
 `materialized_revision` 是 Server data volume 上最终题目目录的身份，按规范化排序后的相对路径、
 文件内容和可执行位计算。它不属于 `PortableChallengeRef`，不会进入 Catalog Release。
+
+每个 immutable Challenge revision 的物化目录都是独立路径：`data_dir/challenges/<source_slug>/<challenge_revision_id>/`。
+旧 revision 目录不得被覆盖或复用；目录保留是历史 Environment 可恢复读取的前提。
 
 Catalog 读取以当前 Roadmap binding 为准，逐项找到对应的 materialized directory，并严格核对
 `id`、`title`、`content_revision`、`source_slug`、目录路径和 `materialized_revision`。目录缺失、

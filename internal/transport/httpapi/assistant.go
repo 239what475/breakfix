@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -113,12 +114,11 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 }
 
 func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
-	entry, err := h.catalog.Entry(ctx, challengeID)
+	entry, env, err := h.resolveEnvironmentChallenge(ctx, user.ID, challengeID, false)
 	if err != nil {
-		return assistant.Request{}, err
-	}
-	env, err := h.findEnvironment(ctx, user.ID, entry)
-	if err != nil {
+		if errors.Is(err, errAmbiguousEnvironment) {
+			return assistant.Request{}, challengeEnvironmentError(err)
+		}
 		return assistant.Request{}, fmt.Errorf("no active environment for this challenge")
 	}
 	return h.assistantRequestForEnvironment(ctx, user.ID, entry, env, input)

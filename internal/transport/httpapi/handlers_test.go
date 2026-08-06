@@ -29,7 +29,7 @@ func TestReadinessUsesMaterializedCatalogIntegrity(t *testing.T) {
 	if err := handler.validateReadiness(context.Background()); err != nil {
 		t.Fatalf("valid catalog readiness = %v", err)
 	}
-	writeTestFile(t, filepath.Join(root, "challenges", "demo", "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
+	writeTestFile(t, filepath.Join(root, "challenges", "demo", testPublishedChallengeRevisionID, "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
 	if err := handler.validateReadiness(context.Background()); err == nil || !errors.Is(err, appcatalog.ErrMaterializedIntegrity) {
 		t.Fatalf("changed catalog readiness error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
-	challengeDir := filepath.Join(challengesDir, "demo")
+	challengeDir := filepath.Join(challengesDir, "demo", testPublishedChallengeRevisionID)
 	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
@@ -185,12 +185,12 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 
 	root := t.TempDir()
 	challengesDir := filepath.Join(root, "challenges")
-	challengeDir := filepath.Join(challengesDir, "demo")
+	challengeDir := filepath.Join(challengesDir, "demo", testPublishedChallengeRevisionID)
 	if err := os.MkdirAll(challengeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nrevision_id: "+testPublishedChallengeRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
@@ -242,7 +242,7 @@ func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) 
 			ID: "complete", Passed: true, Summary: "done",
 		}}}),
 	})
-	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", testPublishedChallengeRevisionID, "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,7 +302,7 @@ func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T
 
 func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", testPublishedChallengeRevisionID, "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -384,7 +384,7 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 
 func writeTestChallenge(t *testing.T, root string) {
 	t.Helper()
-	challengeDir := filepath.Join(root, "challenges", "demo")
+	challengeDir := filepath.Join(root, "challenges", "demo", testPublishedChallengeRevisionID)
 	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
@@ -394,8 +394,10 @@ func writeTestChallenge(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }
 
+const testPublishedChallengeRevisionID = "chrev-aaaaaaaaaaaaaaaa"
+
 func nodeTestManifest(title string) string {
-	return "id: demo\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return "id: demo\nrevision_id: " + testPublishedChallengeRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {
@@ -403,7 +405,7 @@ func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpo
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{"breakfix.dev/user": "u-demo", "breakfix.dev/challenge": "demo"}},
 		Spec: breakfixv1.NodeEnvironmentSpec{Environment: breakfixv1.EnvironmentSpec{
 			Purpose: breakfixv1.EnvironmentPurposeLearning,
-			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "demo", Revision: "sha256:test"},
+			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "demo", Revision: testPublishedChallengeRevisionID},
 			UserRef: "u-demo",
 		}},
 		Status: breakfixv1.NodeEnvironmentStatus{Environment: breakfixv1.EnvironmentStatus{Phase: phase, Checkpoints: checkpoints}},

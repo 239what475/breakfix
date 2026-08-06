@@ -17,6 +17,7 @@ var ErrNotFound = errors.New("challenge not found")
 
 type Entry struct {
 	ID              string
+	RevisionID      string
 	SourceSlug      string
 	Title           string
 	Runtime         string
@@ -33,6 +34,7 @@ type Entry struct {
 
 type Spec struct {
 	ID              string       `yaml:"id"`
+	RevisionID      string       `yaml:"revision_id,omitempty"`
 	SourceSlug      string       `yaml:"source_slug,omitempty"`
 	Title           string       `yaml:"title"`
 	Runtime         string       `yaml:"runtime"`
@@ -43,6 +45,11 @@ type Spec struct {
 	PublishedAt     time.Time    `yaml:"published_at,omitempty"`
 	Nodes           []Node       `yaml:"nodes,omitempty"`
 	Checkpoints     []Checkpoint `yaml:"checkpoints"`
+}
+
+// ValidRevision validates a portable content or materialization digest.
+func ValidRevision(value string) bool {
+	return contentRevisionPattern.MatchString(strings.TrimSpace(value))
 }
 
 type Node struct {
@@ -61,7 +68,7 @@ type Checkpoint struct {
 }
 
 func List(root string) ([]Entry, error) {
-	entries, err := os.ReadDir(root)
+	sources, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -69,48 +76,52 @@ func List(root string) ([]Entry, error) {
 		return nil, fmt.Errorf("read challenges dir: %w", err)
 	}
 
-	challenges := make([]Entry, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "base" || strings.HasPrefix(entry.Name(), ".") {
+	challenges := make([]Entry, 0, len(sources))
+	for _, source := range sources {
+		if !source.IsDir() || source.Name() == "base" || strings.HasPrefix(source.Name(), ".") || !ValidSourceSlug(source.Name()) {
 			continue
 		}
-
-		challenge, err := ValidateDir(filepath.Join(root, entry.Name()))
+		revisions, err := os.ReadDir(filepath.Join(root, source.Name()))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read challenge source directory %q: %w", source.Name(), err)
 		}
-		if challenge.SourceSlug != entry.Name() {
-			return nil, fmt.Errorf("challenge source slug mismatch: directory %q has %q", entry.Name(), challenge.SourceSlug)
+		for _, revision := range revisions {
+			if !revision.IsDir() || strings.HasPrefix(revision.Name(), ".") || !ValidRevisionID(revision.Name()) {
+				continue
+			}
+			challenge, err := ValidateDir(filepath.Join(root, source.Name(), revision.Name()))
+			if err != nil {
+				return nil, err
+			}
+			if challenge.SourceSlug != source.Name() || challenge.RevisionID != revision.Name() {
+				return nil, fmt.Errorf("challenge materialized path mismatch: directory %q has source_slug %q and revision_id %q", filepath.ToSlash(filepath.Join(source.Name(), revision.Name())), challenge.SourceSlug, challenge.RevisionID)
+			}
+			challenges = append(challenges, *challenge)
 		}
-		challenges = append(challenges, *challenge)
 	}
 
 	slices.SortFunc(challenges, func(a, b Entry) int {
-		return strings.Compare(a.ID, b.ID)
+		if result := strings.Compare(a.ID, b.ID); result != 0 {
+			return result
+		}
+		return strings.Compare(a.RevisionID, b.RevisionID)
 	})
 	return challenges, nil
 }
 
-func Get(root, id string) (*Entry, error) {
-	if id == "" {
+// Get returns one exact immutable materialized challenge revision. The content
+// package intentionally has no notion of an active revision; that pointer is
+// owned by the durable Challenge lifecycle.
+func Get(root, id, revisionID string) (*Entry, error) {
+	if !ValidID(id) || !ValidRevisionID(revisionID) {
 		return nil, ErrNotFound
 	}
-
-	if direct, err := ValidateDir(filepath.Join(root, id)); err == nil {
-		if direct.SourceSlug != id {
-			return nil, ErrNotFound
-		}
-		if direct.ID == id {
-			return direct, nil
-		}
-	}
-
 	challenges, err := List(root)
 	if err != nil {
 		return nil, err
 	}
 	for i := range challenges {
-		if challenges[i].ID == id {
+		if challenges[i].ID == id && challenges[i].RevisionID == revisionID {
 			challenge := challenges[i]
 			return &challenge, nil
 		}
@@ -125,6 +136,9 @@ func LoadDir(dir string) (*Entry, error) {
 	}
 	if strings.TrimSpace(spec.ID) == "" {
 		return nil, fmt.Errorf("challenge id is required")
+	}
+	if !ValidRevisionID(spec.RevisionID) {
+		return nil, fmt.Errorf("challenge revision_id is required")
 	}
 	entry := entryFromSpec(dir, spec)
 	if entry.PublishedAt.IsZero() {
@@ -177,7 +191,7 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 	spec.Runtime = NormalizeRuntime(spec.Runtime)
 
 	return &Entry{
-		ID:              spec.ID,
+		ID: spec.ID, RevisionID: spec.RevisionID,
 		SourceSlug:      spec.SourceSlug,
 		Title:           spec.Title,
 		Runtime:         spec.Runtime,

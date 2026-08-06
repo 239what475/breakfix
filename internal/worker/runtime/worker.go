@@ -35,7 +35,7 @@ type BuilderExecutor interface {
 
 type PublisherExecutor interface {
 	PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error)
-	PublishChallengeWork(context.Context, domainexecution.Work, string) (domainexecution.ArtifactReference, error)
+	PublishChallengeWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error)
 	ReapResource(context.Context, runtime.Reap) error
 }
 
@@ -265,7 +265,7 @@ func (w *Worker) executeAction(ctx context.Context, action runtime.Context, work
 		return w.store.CompleteVerification(ctx, credential, report)
 
 	case runtime.StateChallengePublishing:
-		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.ChallengeID)
+		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.ChallengeID, action.ChallengeRevisionID)
 		if err != nil {
 			return err
 		}

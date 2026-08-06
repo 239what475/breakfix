@@ -5,19 +5,20 @@ import "testing"
 func TestCandidateAndChallengeOCIReferencesUseDistinctOpaqueScopes(t *testing.T) {
 	candidateID := "candidate-3efac8f8"
 	challengeID := "challenge-b8caf76c"
+	challengeRevisionID := "chrev-0123456789abcdef"
 
 	candidateRef, err := CandidateOCIImageReference("registry.example.com/breakfix", candidateID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	challengeRef, err := ChallengeOCIImageReference("registry.example.com/breakfix", challengeID)
+	challengeRef, err := ChallengeOCIImageReference("registry.example.com/breakfix", challengeID, challengeRevisionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if candidateRef != "registry.example.com/breakfix/candidates/"+OpaqueName(candidateID)+":artifact" {
 		t.Fatalf("candidate image reference = %q", candidateRef)
 	}
-	if challengeRef != "registry.example.com/breakfix/challenges/"+OpaqueName(challengeID)+":published" {
+	if challengeRef != "registry.example.com/breakfix/challenges/"+OpaqueName(challengeID+"\x00"+challengeRevisionID)+":published" {
 		t.Fatalf("challenge image reference = %q", challengeRef)
 	}
 	if candidateRef == challengeRef {

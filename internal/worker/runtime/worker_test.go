@@ -236,7 +236,7 @@ func (p *runtimePublisher) PublishArtifactWork(context.Context, domainexecution.
 	return domainexecution.ArtifactReference{}, nil
 }
 
-func (*runtimePublisher) PublishChallengeWork(context.Context, domainexecution.Work, string) (domainexecution.ArtifactReference, error) {
+func (*runtimePublisher) PublishChallengeWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error) {
 	return domainexecution.ArtifactReference{}, nil
 }
 

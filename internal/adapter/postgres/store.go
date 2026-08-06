@@ -19,6 +19,7 @@ type Store struct {
 	Agent       *AgentRepository
 	Authoring   *AuthoringRepository
 	Catalog     *CatalogRepository
+	Challenge   *ChallengeRepository
 	Environment *EnvironmentRepository
 	Generation  *GenerationRepository
 	Identity    *IdentityRepository
@@ -66,6 +67,7 @@ func newStore(conn *Conn) *Store {
 		Agent:       &AgentRepository{conn: conn},
 		Authoring:   &AuthoringRepository{conn: conn},
 		Catalog:     &CatalogRepository{conn: conn},
+		Challenge:   &ChallengeRepository{conn: conn},
 		Environment: &EnvironmentRepository{conn: conn},
 		Generation:  &GenerationRepository{conn: conn},
 		Identity:    &IdentityRepository{conn: conn},

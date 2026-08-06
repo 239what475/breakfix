@@ -22,7 +22,7 @@ func learningProjection(uid, runtime string, readyAt time.Time) environmentProje
 		UID: uid, Name: uid, Runtime: runtime,
 		Spec: &breakfixv1.EnvironmentSpec{
 			Purpose: breakfixv1.EnvironmentPurposeLearning,
-			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "chal-r7m4x2q9v6kp", Revision: "sha256:revision"},
+			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "chal-r7m4x2q9v6kp", Revision: "chrev-aaaaaaaaaaaaaaaa"},
 			UserRef: "u-demo",
 		},
 		Status: &breakfixv1.EnvironmentStatus{Phase: breakfixv1.EnvironmentReady, ReadyAt: &ready},
@@ -98,7 +98,7 @@ func TestEnvironmentStatusProjectionRecordsCheckpointFirstPassOnce(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := events[projection.UID]; len(got) != 1 || got[0].ChallengeRevision != "sha256:revision" || got[0].CheckpointID != "proxy-ready" {
+	if got := events[projection.UID]; len(got) != 1 || got[0].ChallengeRevision != "chrev-aaaaaaaaaaaaaaaa" || got[0].CheckpointID != "proxy-ready" {
 		t.Fatalf("checkpoint events = %#v", got)
 	}
 }

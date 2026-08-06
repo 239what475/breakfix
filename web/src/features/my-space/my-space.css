@@ -443,9 +443,19 @@
   font: 700 14px "DM Mono", monospace;
 }
 
+.published-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .published-card .text-button {
   justify-self: start;
   padding-left: 0;
+}
+
+.published-card .danger-text {
+  color: #a1463f;
 }
 
 .mobile-tabs {

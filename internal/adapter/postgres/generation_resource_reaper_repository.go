@@ -71,6 +71,7 @@ func (d *GenerationRepository) ClaimGenerationResourceReap(ctx context.Context, 
 	}
 	if candidate.Publication != nil {
 		reap.ChallengeID = candidate.Publication.ChallengeID
+		reap.ChallengeRevisionID = candidate.Publication.ChallengeRevisionID
 		reap.FinalArtifact = candidate.Publication.Artifact
 	}
 	if err := reap.Valid(); err != nil {

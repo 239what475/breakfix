@@ -13,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
+	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
@@ -360,6 +361,7 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 	}
 	if revision.Publication != nil {
 		context.ChallengeID = revision.Publication.ChallengeID
+		context.ChallengeRevisionID = revision.Publication.ChallengeRevisionID
 	}
 	if err := context.Valid(); err != nil {
 		return nil, err
@@ -831,7 +833,8 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if _, err := readAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
+	session, err := readAuthoringSessionTx(ctx, tx, sessionID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if receipt, err := generationConfirmationReceiptTx(ctx, tx, sessionID, confirmationContent, confirmation.IdempotencyKey); err != nil {
@@ -866,6 +869,40 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	roadmapRevision, err := currentRoadmapForUpdateTx(ctx, tx)
 	if err != nil {
 		return nil, err
+	}
+	if session.RevisionChallengeID != "" {
+		binding, err := revisionChallengeBindingTx(ctx, tx, *session, *roadmapRevision)
+		if err != nil {
+			return nil, err
+		}
+		proposal, err := inheritedRevisionClassification(*roadmapRevision, binding, candidateRevision.ID, now.UTC())
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := marshalJSON(proposal)
+		if err != nil {
+			return nil, err
+		}
+		updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, classification_roadmap_revision = ?, classification_feedback = '',
+			state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
+			next_run_at = ?, last_error = '', updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
+			generation.StateNeedsClassificationReview, roadmapRevision.Revision, now.UTC(), now.UTC(), workflow.ID))
+		if err != nil {
+			return nil, fmt.Errorf("prepare inherited revision classification: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET classification_proposal = ?::jsonb, updated_at = ? WHERE id = ?`, encoded, now.UTC(), candidateRevision.ID); err != nil {
+			return nil, fmt.Errorf("store inherited revision classification: %w", err)
+		}
+		if err := insertGenerationConfirmationReceiptTx(ctx, tx, generationConfirmationReceipt{
+			SessionID: sessionID, Action: confirmationContent, IdempotencyKey: confirmation.IdempotencyKey,
+			WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID, CreatedAt: now.UTC(),
+		}); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return updated, nil
 	}
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, classification_roadmap_revision = ?, classification_feedback = '',
 		state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
@@ -1038,7 +1075,8 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if _, err := readAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
+	session, err := readAuthoringSessionTx(ctx, tx, sessionID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if receipt, err := generationConfirmationReceiptTx(ctx, tx, sessionID, confirmationClassificationAdjustment, confirmation.IdempotencyKey); err != nil {
@@ -1073,6 +1111,9 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
+	if session.RevisionChallengeID != "" {
+		return nil, authoring.ErrInvalidState
+	}
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
 		runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, classification_feedback = ?, last_error = '', updated_at = ?
 		WHERE id = ? RETURNING `+generationWorkflowColumns, generation.StateClassifying, now.UTC(), strings.TrimSpace(confirmation.Feedback), now.UTC(), workflow.ID))
@@ -1106,7 +1147,8 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if _, err := readAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
+	session, err := readAuthoringSessionTx(ctx, tx, sessionID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if receipt, err := generationConfirmationReceiptTx(ctx, tx, sessionID, confirmationPublication, confirmation.IdempotencyKey); err != nil {
@@ -1187,6 +1229,9 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 		return nil, generation.ErrClassificationConflict
 	}
 	publication, _, err := prepareClassificationPublication(*current, proposal, candidateRevision, challengeTitle, now.UTC())
+	if session.RevisionChallengeID != "" {
+		publication, err = prepareRevisionClassificationPublicationTx(ctx, tx, *current, proposal, candidateRevision, challengeTitle, *session, now.UTC())
+	}
 	if err != nil {
 		if errors.Is(err, generation.ErrChallengeSourceRefConflict) {
 			if _, updateErr := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
@@ -1331,14 +1376,15 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	if err != nil {
 		return err
 	}
-	if workflow.CandidateRevisionID != candidateRevisionID {
+	if workflow.CandidateRevisionID != candidateRevisionID || workflow.Source.Kind != generation.SourceAuthoring {
 		return generation.ErrCandidateInvalidState
 	}
 	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
 	if err != nil {
 		return err
 	}
-	if candidateRevision.Publication == nil || candidateRevision.Classification == nil || candidateRevision.PublishedAt != nil {
+	if candidateRevision.Source != workflow.Source || candidateRevision.SourceRevision != workflow.SourceRevision ||
+		candidateRevision.Publication == nil || candidateRevision.Classification == nil || candidateRevision.PublishedAt != nil {
 		return generation.ErrCandidateInvalidState
 	}
 	publication := *candidateRevision.Publication
@@ -1352,11 +1398,75 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	if err := publication.ValidateFinal(); err != nil {
 		return err
 	}
+	session, err := readAuthoringSessionTx(ctx, tx, workflow.Source.Ref, "")
+	if err != nil {
+		return err
+	}
 	current, err := currentRoadmapForUpdateTx(ctx, tx)
 	if err != nil {
 		return err
 	}
-	nextRoadmap, topicWasNew, err := applyClassificationPublication(*current, *candidateRevision.Classification, publication, materializedRevision)
+
+	var nextRoadmap roadmap.Revision
+	topicWasNew := false
+	if session.RevisionChallengeID == "" {
+		nextRoadmap, topicWasNew, err = applyClassificationPublication(*current, *candidateRevision.Classification, publication, materializedRevision)
+		if err == nil {
+			stable := challengedomain.Challenge{
+				ID: publication.ChallengeID, SourceKind: challengedomain.SourceAuthoring, SourceRef: workflow.Source.Ref,
+				OwnerUserID: session.UserID, State: challengedomain.StateActive, ActiveRevisionID: publication.ChallengeRevisionID,
+				SourceSlug: publication.SourceSlug, CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
+			}
+			published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, publication.ContentRevision, materializedRevision,
+				*publication.Artifact, publication.ChallengeRevisionID, publication.ChallengeID, workflow.Source.Ref, workflow.SourceRevision,
+				"", publication.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now.UTC())
+			if err = insertPersistedChallengeTx(ctx, tx, stable); err == nil {
+				err = insertPersistedChallengeRevisionTx(ctx, tx, published)
+			}
+		}
+	} else {
+		if publication.ChallengeID != session.RevisionChallengeID || publication.BaseActiveRevisionID != session.RevisionBaseActiveRevisionID {
+			err = challengedomain.ErrRevisionConflict
+		} else {
+			target, targetErr := lockPersistedChallengeTx(ctx, tx, session.RevisionChallengeID)
+			if targetErr != nil {
+				err = targetErr
+			} else if target.SourceKind != challengedomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != challengedomain.StateActive ||
+				target.ActiveRevisionID != session.RevisionBaseActiveRevisionID || target.SourceSlug != publication.SourceSlug {
+				err = challengedomain.ErrRevisionConflict
+			} else {
+				previous, previousErr := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+				if previousErr != nil {
+					err = previousErr
+				} else if previous.ChallengeID != target.ID || previous.State != challengedomain.RevisionActive || previous.Runtime != publication.Runtime {
+					err = generation.ErrCandidateInvalidState
+				} else {
+					nextRoadmap, err = applyRevisionClassificationPublication(*current, *candidateRevision.Classification, publication, materializedRevision)
+					if err == nil {
+						published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, publication.ContentRevision, materializedRevision,
+							*publication.Artifact, publication.ChallengeRevisionID, target.ID, workflow.Source.Ref, workflow.SourceRevision,
+							target.ActiveRevisionID, target.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now.UTC())
+						if _, updateErr := tx.ExecContext(ctx, `UPDATE challenge_revisions SET state = ? WHERE id = ? AND state = ?`,
+							challengedomain.RevisionSuperseded, previous.ID, challengedomain.RevisionActive); updateErr != nil {
+							err = fmt.Errorf("supersede challenge revision: %w", updateErr)
+						} else if err = insertPersistedChallengeRevisionTx(ctx, tx, published); err == nil {
+							result, updateErr := tx.ExecContext(ctx, `UPDATE challenges SET active_revision_id = ?, updated_at = ?
+								WHERE id = ? AND active_revision_id = ? AND state = ?`, publication.ChallengeRevisionID, now.UTC(), target.ID,
+								target.ActiveRevisionID, challengedomain.StateActive)
+							if updateErr != nil {
+								err = fmt.Errorf("switch active challenge revision: %w", updateErr)
+							} else if changed, _ := result.RowsAffected(); changed != 1 {
+								err = challengedomain.ErrRevisionConflict
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if errors.Is(err, challengedomain.ErrRevisionConflict) {
+		return failStaleRevisionPublicationTx(ctx, tx, workflow, candidateRevision, session, err, now.UTC())
+	}
 	if err != nil {
 		return err
 	}
@@ -1374,7 +1484,11 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_current SET revision_id = ?, updated_at = ? WHERE singleton = TRUE`, revisionID, now.UTC()); err != nil {
 		return fmt.Errorf("publish generation roadmap revision: %w", err)
 	}
-	if err := recordRoadmapEntryTx(ctx, tx, publication.ChallengeID, roadmap.RuntimeID(roadmap.KindTopic, publication.TopicSourceRef), !topicWasNew, now.UTC()); err != nil {
+	if session.RevisionChallengeID == "" {
+		if err := recordRoadmapEntryTx(ctx, tx, publication.ChallengeID, roadmap.RuntimeID(roadmap.KindTopic, publication.TopicSourceRef), !topicWasNew, now.UTC()); err != nil {
+			return err
+		}
+	} else if err := requeueRoadmapChallengeTx(ctx, tx, publication.ChallengeID, roadmap.RuntimeID(roadmap.KindTopic, publication.TopicSourceRef), now.UTC()); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, published_at = ?, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), now.UTC(), candidateRevision.ID); err != nil {
@@ -1389,6 +1503,34 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 		return fmt.Errorf("complete generation publication: %w", err)
 	}
 	_ = canonical
+	return tx.Commit()
+}
+
+// failStaleRevisionPublicationTx ends only a stale revision workflow. Its
+// stable Challenge and active revision remain untouched, while the author can
+// see the conflict and begin a new revision session from the current active
+// state. Leaving this workflow in ChallengePublishing would make a known
+// optimistic-concurrency conflict retry forever.
+func failStaleRevisionPublicationTx(ctx context.Context, tx *Tx, workflow *generation.Workflow, candidate *generation.Revision, session *authoring.Session, cause error, now time.Time) error {
+	if workflow == nil || candidate == nil || session == nil {
+		return generation.ErrCandidateInvalidState
+	}
+	summary := strings.TrimSpace(cause.Error())
+	failure, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: "REVISION_CONFLICT", Summary: summary})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, failure, now.UTC(), candidate.ID); err != nil {
+		return fmt.Errorf("record stale revision publication failure: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET last_error = ?, updated_at = ? WHERE id = ?`, summary, nowText(now), session.ID); err != nil {
+		return fmt.Errorf("record stale revision authoring error: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
+		runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL, active_agent_run_id = NULL,
+		last_error = ?, updated_at = ? WHERE id = ?`, generation.StateFailed, summary, now.UTC(), workflow.ID); err != nil {
+		return fmt.Errorf("fail stale revision workflow: %w", err)
+	}
 	return tx.Commit()
 }
 
@@ -1436,6 +1578,7 @@ func prepareClassificationPublication(current roadmap.Revision, proposal generat
 		return generation.Publication{}, false, generation.ErrChallengeSourceRefConflict
 	}
 	challengeID := challenge.NewID()
+	challengeRevisionID := challenge.NewRevisionID()
 	for _, binding := range current.ChallengeBindings {
 		if binding.Challenge.SourceRef == challengeSourceRef || binding.Challenge.ID == challengeID {
 			return generation.Publication{}, false, generation.ErrChallengeSourceRefConflict
@@ -1450,9 +1593,10 @@ func prepareClassificationPublication(current roadmap.Revision, proposal generat
 		CandidateRevisionID:    candidate.ID,
 		IntentRevision:         1,
 		ChallengeID:            challengeID,
+		ChallengeRevisionID:    challengeRevisionID,
 		ChallengeSourceRef:     challengeSourceRef,
 		SourceSlug:             challenge.SourceSlugFor(challengeTitle, challengeID),
-		TargetPath:             challenge.SourceSlugFor(challengeTitle, challengeID),
+		TargetPath:             challenge.MaterializedPath(challenge.SourceSlugFor(challengeTitle, challengeID), challengeRevisionID),
 		ChallengeTitle:         challengeTitle,
 		Runtime:                candidate.Snapshot.Runtime,
 		TopicSourceRef:         topic.SourceRef,
@@ -1465,6 +1609,194 @@ func prepareClassificationPublication(current roadmap.Revision, proposal generat
 		return generation.Publication{}, false, err
 	}
 	return publication, topicWasNew, nil
+}
+
+// revisionChallengeBindingTx verifies that a revision session still points at
+// the active, author-owned Challenge it was opened from. The Roadmap binding
+// is part of the same fence: a revision may change content, but it cannot move
+// the Challenge to another Topic or replace its Tags.
+func revisionChallengeBindingTx(ctx context.Context, tx *Tx, session authoring.Session, current roadmap.Revision) (roadmap.ChallengeBinding, error) {
+	if session.RevisionChallengeID == "" || session.RevisionBaseActiveRevisionID == "" {
+		return roadmap.ChallengeBinding{}, authoring.ErrInvalidState
+	}
+	target, err := lockPersistedChallengeTx(ctx, tx, session.RevisionChallengeID)
+	if err != nil {
+		return roadmap.ChallengeBinding{}, err
+	}
+	if target.SourceKind != challengedomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != challengedomain.StateActive {
+		return roadmap.ChallengeBinding{}, authoring.ErrInvalidState
+	}
+	if target.ActiveRevisionID != session.RevisionBaseActiveRevisionID {
+		return roadmap.ChallengeBinding{}, challengedomain.ErrRevisionConflict
+	}
+	active, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+	if err != nil {
+		return roadmap.ChallengeBinding{}, err
+	}
+	if active.ChallengeID != target.ID || active.State != challengedomain.RevisionActive || active.SourceSlug != target.SourceSlug {
+		return roadmap.ChallengeBinding{}, generation.ErrClassificationConflict
+	}
+	for _, binding := range current.ChallengeBindings {
+		if binding.Challenge.ID != target.ID {
+			continue
+		}
+		if binding.Challenge.RevisionID != target.ActiveRevisionID || binding.Challenge.SourceSlug != target.SourceSlug {
+			return roadmap.ChallengeBinding{}, generation.ErrClassificationConflict
+		}
+		return binding, nil
+	}
+	return roadmap.ChallengeBinding{}, generation.ErrClassificationConflict
+}
+
+// inheritedRevisionClassification makes the current curriculum ownership
+// visible for review without involving a Classifier Agent. Revision sessions
+// are intentionally unable to propose a different Topic or Tag set.
+func inheritedRevisionClassification(current roadmap.Revision, binding roadmap.ChallengeBinding, candidateRevisionID string, now time.Time) (generation.ClassificationProposal, error) {
+	if current.Validate() != nil || strings.TrimSpace(candidateRevisionID) == "" || now.IsZero() {
+		return generation.ClassificationProposal{}, generation.ErrClassificationConflict
+	}
+	proposal := generation.ClassificationProposal{
+		Revision: 1, CandidateRevisionID: candidateRevisionID, RoadmapRevision: current.Revision,
+		Result:    generation.ClassificationProposed,
+		Topic:     &generation.TopicProposal{Existing: cloneRoadmapRef(binding.Topic), Reason: "retain current challenge topic"},
+		Tags:      make([]generation.TagProposal, 0, len(binding.Tags)),
+		UpdatedAt: now.UTC(),
+	}
+	for _, tag := range binding.Tags {
+		proposal.Tags = append(proposal.Tags, generation.TagProposal{Existing: cloneRoadmapRef(tag), Reason: "retain current challenge tag"})
+	}
+	if !revisionClassificationMatches(current, binding, proposal) {
+		return generation.ClassificationProposal{}, generation.ErrClassificationConflict
+	}
+	return proposal, nil
+}
+
+func cloneRoadmapRef(value roadmap.Ref) *roadmap.Ref {
+	copy := value
+	return &copy
+}
+
+func revisionClassificationMatches(current roadmap.Revision, binding roadmap.ChallengeBinding, proposal generation.ClassificationProposal) bool {
+	if proposal.Validate() != nil || proposal.Result != generation.ClassificationProposed || proposal.RoadmapRevision != current.Revision ||
+		proposal.Topic == nil || proposal.Topic.Existing == nil || proposal.Topic.New != nil || *proposal.Topic.Existing != binding.Topic || len(proposal.Tags) != len(binding.Tags) {
+		return false
+	}
+	for index, tag := range proposal.Tags {
+		if tag.Existing == nil || tag.New != nil || *tag.Existing != binding.Tags[index] {
+			return false
+		}
+	}
+	resolvedTopic, resolvedTags, _, err := resolveClassificationProposal(current, proposal)
+	if err != nil || resolvedTopic != binding.Topic || len(resolvedTags) != len(binding.Tags) {
+		return false
+	}
+	for index := range resolvedTags {
+		if resolvedTags[index] != binding.Tags[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// prepareRevisionClassificationPublicationTx allocates only a new immutable
+// Challenge revision. The stable Challenge identity, readable source slug,
+// Roadmap source reference, Topic, and Tags all remain anchored to the active
+// base revision that the author explicitly selected.
+func prepareRevisionClassificationPublicationTx(ctx context.Context, tx *Tx, current roadmap.Revision, proposal generation.ClassificationProposal, candidate *generation.Revision, challengeTitle string, session authoring.Session, now time.Time) (generation.Publication, error) {
+	if candidate == nil || candidate.Artifact == nil || candidate.Verification == nil || !candidate.Verification.Passed ||
+		proposal.CandidateRevisionID != candidate.ID || strings.TrimSpace(challengeTitle) == "" {
+		return generation.Publication{}, generation.ErrCandidateInvalidState
+	}
+	binding, err := revisionChallengeBindingTx(ctx, tx, session, current)
+	if err != nil {
+		return generation.Publication{}, err
+	}
+	if !revisionClassificationMatches(current, binding, proposal) {
+		return generation.Publication{}, generation.ErrClassificationConflict
+	}
+	target, err := lockPersistedChallengeTx(ctx, tx, session.RevisionChallengeID)
+	if err != nil {
+		return generation.Publication{}, err
+	}
+	active, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+	if err != nil {
+		return generation.Publication{}, err
+	}
+	if target.ActiveRevisionID != session.RevisionBaseActiveRevisionID || active.Runtime != candidate.Snapshot.Runtime ||
+		active.ChallengeID != target.ID || active.State != challengedomain.RevisionActive {
+		if target.ActiveRevisionID != session.RevisionBaseActiveRevisionID {
+			return generation.Publication{}, challengedomain.ErrRevisionConflict
+		}
+		return generation.Publication{}, generation.ErrCandidateInvalidState
+	}
+	staging := *candidate.Artifact
+	publication := generation.Publication{
+		CandidateRevisionID:    candidate.ID,
+		IntentRevision:         1,
+		ChallengeID:            target.ID,
+		ChallengeRevisionID:    challenge.NewRevisionID(),
+		BaseActiveRevisionID:   target.ActiveRevisionID,
+		ChallengeSourceRef:     binding.Challenge.SourceRef,
+		SourceSlug:             target.SourceSlug,
+		ChallengeTitle:         challengeTitle,
+		Runtime:                candidate.Snapshot.Runtime,
+		TopicSourceRef:         binding.Topic.SourceRef,
+		ClassificationRevision: proposal.Revision,
+		RequestedAt:            now.UTC(),
+		StagingArtifact:        &staging,
+	}
+	// Keep one generated ID for both the manifest and its immutable path.
+	publication.TargetPath = challenge.MaterializedPath(publication.SourceSlug, publication.ChallengeRevisionID)
+	publication.TagSourceRefs = make([]string, 0, len(binding.Tags))
+	for _, tag := range binding.Tags {
+		publication.TagSourceRefs = append(publication.TagSourceRefs, tag.SourceRef)
+	}
+	if err := publication.ValidateIntent(); err != nil {
+		return generation.Publication{}, err
+	}
+	return publication, nil
+}
+
+func applyRevisionClassificationPublication(current roadmap.Revision, proposal generation.ClassificationProposal, publication generation.Publication, materializedRevision string) (roadmap.Revision, error) {
+	if !roadmap.ValidRevision(materializedRevision) || publication.BaseActiveRevisionID == "" || !roadmap.ValidRevision(publication.ContentRevision) {
+		return roadmap.Revision{}, generation.ErrClassificationConflict
+	}
+	next := current.Clone()
+	for index := range next.ChallengeBindings {
+		binding := next.ChallengeBindings[index]
+		if binding.Challenge.ID != publication.ChallengeID {
+			continue
+		}
+		if binding.Challenge.RevisionID != publication.BaseActiveRevisionID || binding.Challenge.SourceRef != publication.ChallengeSourceRef ||
+			binding.Challenge.SourceSlug != publication.SourceSlug || binding.Topic.SourceRef != publication.TopicSourceRef ||
+			!revisionClassificationMatches(current, binding, proposal) || len(binding.Tags) != len(publication.TagSourceRefs) {
+			return roadmap.Revision{}, generation.ErrClassificationConflict
+		}
+		for tagIndex, tag := range binding.Tags {
+			if tag.SourceRef != publication.TagSourceRefs[tagIndex] {
+				return roadmap.Revision{}, generation.ErrClassificationConflict
+			}
+		}
+		next.ChallengeBindings[index].Challenge = roadmap.ChallengeRef{
+			ID: publication.ChallengeID, RevisionID: publication.ChallengeRevisionID, SourceRef: binding.Challenge.SourceRef,
+			Title: publication.ChallengeTitle, ContentRevision: publication.ContentRevision, SourceSlug: publication.SourceSlug,
+			MaterializedRevision: materializedRevision,
+		}
+		for edgeIndex := range next.ChallengeEdges {
+			edge := &next.ChallengeEdges[edgeIndex]
+			if edge.Source.ID == publication.ChallengeID {
+				edge.Source.Title = publication.ChallengeTitle
+			}
+			if edge.Target.ID == publication.ChallengeID {
+				edge.Target.Title = publication.ChallengeTitle
+			}
+		}
+		if err := next.Validate(); err != nil {
+			return roadmap.Revision{}, fmt.Errorf("%w: %v", generation.ErrClassificationConflict, err)
+		}
+		return next, nil
+	}
+	return roadmap.Revision{}, generation.ErrClassificationConflict
 }
 
 func applyClassificationPublication(current roadmap.Revision, proposal generation.ClassificationProposal, publication generation.Publication, materializedRevision string) (roadmap.Revision, bool, error) {
@@ -1511,7 +1843,7 @@ func applyClassificationPublication(current roadmap.Revision, proposal generatio
 	}
 	next.ChallengeBindings = append(next.ChallengeBindings, roadmap.ChallengeBinding{
 		Challenge: roadmap.ChallengeRef{
-			ID: publication.ChallengeID, SourceRef: publication.ChallengeSourceRef, Title: publication.ChallengeTitle,
+			ID: publication.ChallengeID, RevisionID: publication.ChallengeRevisionID, SourceRef: publication.ChallengeSourceRef, Title: publication.ChallengeTitle,
 			ContentRevision: publication.ContentRevision, SourceSlug: publication.SourceSlug, MaterializedRevision: materializedRevision,
 		},
 		Topic: topic,

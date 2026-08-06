@@ -118,7 +118,7 @@ func removePublishedFields(data []byte) ([]byte, error) {
 
 func isPublishedField(value string) bool {
 	switch value {
-	case "id", "source_slug", "image", "content_revision", "published_at":
+	case "id", "revision_id", "source_slug", "image", "content_revision", "published_at":
 		return true
 	default:
 		return false

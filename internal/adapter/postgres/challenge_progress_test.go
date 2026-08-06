@@ -10,10 +10,10 @@ func TestChallengeCompletionPersistsFirstCompletion(t *testing.T) {
 	database := newTestDB(t)
 
 	first := time.Date(2026, time.July, 24, 9, 30, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-a", first); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "chrev-aaaaaaaaaaaaaaaa", "environment-a", first); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "environment-b", first.Add(time.Hour)); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(context.Background(), "user-a", "challenge-a", "chrev-aaaaaaaaaaaaaaaa", "environment-b", first.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 

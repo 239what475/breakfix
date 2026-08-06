@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
+	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
@@ -33,6 +34,40 @@ func (h *Handler) CreateAuthoringSession(c *gin.Context) {
 		return
 	}
 	h.writeAuthoringSession(c, user, session.ID)
+}
+
+// CreateAuthoringChallengeRevision opens a fresh authoring conversation for
+// an already published Challenge. The new session is only a proposal; it must
+// complete the same generation and verification lifecycle before activation.
+func (h *Handler) CreateAuthoringChallengeRevision(c *gin.Context, challengeID string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	session, err := h.authoring.CreateRevision(c.Request.Context(), user.ID, challengeID)
+	if err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	h.writeAuthoringSession(c, user, session.ID)
+}
+
+// DeprecateAuthoringChallenge hides an author-owned Challenge from the active
+// Catalog and rejects new Environments without deleting its immutable history.
+func (h *Handler) DeprecateAuthoringChallenge(c *gin.Context, challengeID string) {
+	user := h.requireUser(c)
+	if user == nil {
+		return
+	}
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "challenge lifecycle is unavailable"})
+		return
+	}
+	if _, err := h.db.Challenge.DeprecateAuthoringChallenge(c.Request.Context(), user.ID, challengeID, time.Now().UTC()); err != nil {
+		h.writeAuthoringError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) GetAuthoringSession(c *gin.Context, sessionID string) {
@@ -349,6 +384,7 @@ func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoring
 		Diff:           toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
 		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
 		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
+		RevisionChallengeId: optionalString(session.RevisionChallengeID), RevisionBaseActiveRevisionId: optionalString(session.RevisionBaseActiveRevisionID),
 		UpdatedAt: session.UpdatedAt.UTC(), Verification: verification, Verified: toAPIVerifiedChallenge(verified), VisibleRevision: int(revision.Number),
 		Workflow: toAPIAuthoringGenerationWorkflow(workflow),
 	}
@@ -581,10 +617,11 @@ func optionalSlice[T any](values []T) *[]T {
 
 func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
+	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, challengedomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
 	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState),
-		errors.Is(err, generation.ErrClassificationConflict), errors.Is(err, generation.ErrChallengeSourceRefConflict):
+		errors.Is(err, generation.ErrClassificationConflict), errors.Is(err, generation.ErrChallengeSourceRefConflict),
+		errors.Is(err, challengedomain.ErrRevisionConflict), errors.Is(err, challengedomain.ErrNotMutable):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})

@@ -66,6 +66,7 @@ type Tag struct {
 
 type ChallengeRef struct {
 	ID                   string `yaml:"id" json:"id"`
+	RevisionID           string `yaml:"revision_id" json:"revision_id"`
 	SourceRef            string `yaml:"source_ref" json:"source_ref"`
 	Title                string `yaml:"title" json:"title"`
 	ContentRevision      string `yaml:"content_revision" json:"content_revision"`

@@ -28,7 +28,7 @@ type NodeImagePublisher interface {
 	PublishChallengeNodeImage(context.Context, incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
 	DeleteBuildNodeImage(context.Context, incus.BuildNodeImageResult) error
-	DeleteChallengeNodeImage(context.Context, string, string) error
+	DeleteChallengeNodeImage(context.Context, string, string, string) error
 }
 
 type Executor struct {
@@ -89,16 +89,16 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 
 // PublishChallengeWork promotes a verified staging artifact to a final,
 // challenge-scoped artifact. The caller owns materialization and visibility.
-func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecution.Work, challengeID string) (domainexecution.ArtifactReference, error) {
+func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecution.Work, challengeID, challengeRevisionID string) (domainexecution.ArtifactReference, error) {
 	if err := work.Validate(); err != nil {
 		return domainexecution.ArtifactReference{}, fmt.Errorf("challenge publication execution work: %w", err)
 	}
-	if work.Artifact == nil || !challenge.ValidID(challengeID) {
-		return domainexecution.ArtifactReference{}, errors.New("challenge publication requires a verified artifact and challenge identity")
+	if work.Artifact == nil || !challenge.ValidID(challengeID) || !challenge.ValidRevisionID(challengeRevisionID) {
+		return domainexecution.ArtifactReference{}, errors.New("challenge publication requires a verified artifact and immutable challenge identity")
 	}
 	switch work.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		target, err := e.challengeImage(challengeID)
+		target, err := e.challengeImage(challengeID, challengeRevisionID)
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
 		}
@@ -115,6 +115,7 @@ func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecutio
 		published, err := e.node.PublishChallengeNodeImage(ctx, incus.PublishChallengeNodeImageRequest{
 			CandidateRevisionID: work.CandidateID,
 			ChallengeID:         challengeID,
+			ChallengeRevisionID: challengeRevisionID,
 			Staging: incus.PublishNodeImageResult{
 				Alias: work.Artifact.IncusAlias, Fingerprint: work.Artifact.IncusFingerprint,
 			},
@@ -201,7 +202,7 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap)
 			return errors.New("node image publisher is unavailable")
 		}
 		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil && reap.FinalArtifact.IncusFingerprint != "" {
-			if err := e.node.DeleteChallengeNodeImage(ctx, reap.ChallengeID, reap.FinalArtifact.IncusFingerprint); err != nil {
+			if err := e.node.DeleteChallengeNodeImage(ctx, reap.ChallengeID, reap.ChallengeRevisionID, reap.FinalArtifact.IncusFingerprint); err != nil {
 				return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
 			}
 		}
@@ -255,8 +256,8 @@ func (e *Executor) candidateImage(candidateID string) (string, error) {
 	return candidate.CandidateOCIImageReference(e.registryRepository, candidateID)
 }
 
-func (e *Executor) challengeImage(challengeID string) (string, error) {
-	return candidate.ChallengeOCIImageReference(e.registryRepository, challengeID)
+func (e *Executor) challengeImage(challengeID, challengeRevisionID string) (string, error) {
+	return candidate.ChallengeOCIImageReference(e.registryRepository, challengeID, challengeRevisionID)
 }
 
 func nodeBuildResult(build *domainexecution.BuildOutput) (incus.BuildNodeImageResult, error) {

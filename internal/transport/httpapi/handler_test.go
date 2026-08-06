@@ -45,7 +45,7 @@ func seedTestRoadmap(database *postgres.Store, cfg config.Config) error {
 			return fmt.Errorf("test challenge %q has no source slug", entry.ID)
 		}
 		revision.ChallengeBindings = append(revision.ChallengeBindings, roadmap.ChallengeBinding{
-			Challenge: roadmap.ChallengeRef{ID: entry.ID, SourceRef: topic.SourceRef + "/" + entry.SourceSlug, Title: entry.Title, ContentRevision: entry.ContentRevision, SourceSlug: entry.SourceSlug, MaterializedRevision: entry.Revision},
+			Challenge: roadmap.ChallengeRef{ID: entry.ID, RevisionID: entry.RevisionID, SourceRef: topic.SourceRef + "/" + entry.SourceSlug, Title: entry.Title, ContentRevision: entry.ContentRevision, SourceSlug: entry.SourceSlug, MaterializedRevision: entry.Revision},
 			Topic:     topic,
 			Tags:      []roadmap.Ref{tag},
 		})

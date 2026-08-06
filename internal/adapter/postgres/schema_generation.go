@@ -29,6 +29,43 @@ var schemaGenerationStatements = []string{
 		UNIQUE(generator_run_id)
 	)`,
 	`CREATE INDEX candidate_revisions_source ON candidate_revisions(source_kind, source_ref, source_revision, created_at)`,
+	`CREATE TABLE challenges (
+		id TEXT PRIMARY KEY,
+		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
+		source_ref TEXT NOT NULL,
+		owner_user_id TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL CHECK (state IN ('active', 'deprecated')),
+		active_revision_id TEXT NOT NULL,
+		source_slug TEXT NOT NULL UNIQUE,
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL,
+		UNIQUE(source_kind, source_ref),
+		CHECK ((source_kind = 'authoring' AND owner_user_id <> '') OR (source_kind = 'release' AND owner_user_id = ''))
+	)`,
+	`CREATE TABLE challenge_revisions (
+		id TEXT PRIMARY KEY,
+		challenge_id TEXT NOT NULL REFERENCES challenges(id) ON DELETE RESTRICT,
+		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
+		source_ref TEXT NOT NULL,
+		source_revision_id TEXT NOT NULL,
+		base_active_revision_id TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL,
+		runtime TEXT NOT NULL CHECK (runtime IN ('node', 'k8s')),
+		content_revision TEXT NOT NULL,
+		source_slug TEXT NOT NULL,
+		materialized_path TEXT NOT NULL UNIQUE,
+		materialized_revision TEXT NOT NULL,
+		artifact_reference JSONB NOT NULL,
+		state TEXT NOT NULL CHECK (state IN ('active', 'superseded')),
+		published_at TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL,
+		UNIQUE(challenge_id, content_revision, materialized_revision)
+	)`,
+	`CREATE INDEX challenge_revisions_challenge ON challenge_revisions(challenge_id, published_at DESC)`,
+	`CREATE UNIQUE INDEX challenge_revisions_one_active ON challenge_revisions(challenge_id) WHERE state = 'active'`,
+	`ALTER TABLE challenge_revisions ADD CONSTRAINT challenge_revisions_id_challenge_key UNIQUE (id, challenge_id)`,
+	`ALTER TABLE challenges ADD CONSTRAINT challenges_active_revision_fk FOREIGN KEY (active_revision_id, id)
+		REFERENCES challenge_revisions (id, challenge_id) DEFERRABLE INITIALLY DEFERRED`,
 	`CREATE TABLE generation_workflows (
 		id TEXT PRIMARY KEY,
 		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),

@@ -141,16 +141,18 @@ type Message struct {
 }
 
 type Session struct {
-	ID                 string       `json:"id"`
-	UserID             string       `json:"user_id"`
-	RuntimeSessionID   string       `json:"-"`
-	State              SessionState `json:"state"`
-	CurrentRevision    int64        `json:"current_revision"`
-	VisibleRevision    int64        `json:"visible_revision"`
-	PublishChallengeID string       `json:"publish_challenge_id,omitempty"`
-	LastError          string       `json:"last_error,omitempty"`
-	CreatedAt          time.Time    `json:"created_at"`
-	UpdatedAt          time.Time    `json:"updated_at"`
+	ID                           string       `json:"id"`
+	UserID                       string       `json:"user_id"`
+	RuntimeSessionID             string       `json:"-"`
+	State                        SessionState `json:"state"`
+	CurrentRevision              int64        `json:"current_revision"`
+	VisibleRevision              int64        `json:"visible_revision"`
+	PublishChallengeID           string       `json:"publish_challenge_id,omitempty"`
+	RevisionChallengeID          string       `json:"revision_challenge_id,omitempty"`
+	RevisionBaseActiveRevisionID string       `json:"revision_base_active_revision_id,omitempty"`
+	LastError                    string       `json:"last_error,omitempty"`
+	CreatedAt                    time.Time    `json:"created_at"`
+	UpdatedAt                    time.Time    `json:"updated_at"`
 }
 
 // Stage is a private, attempt-resumable Plan draft. It becomes a public

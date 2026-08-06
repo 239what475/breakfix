@@ -430,7 +430,7 @@ func publishMaintenanceRoadmap(t *testing.T, database *Store, now time.Time, cou
 		segment := fmt.Sprintf("roadmap-maintenance-%02d", index+1)
 		value.ChallengeBindings = append(value.ChallengeBindings, roadmap.ChallengeBinding{
 			Challenge: roadmap.ChallengeRef{
-				ID: "challenge-" + segment, SourceRef: topic.SourceRef + "/" + segment,
+				ID: "challenge-" + segment, RevisionID: fmt.Sprintf("chrev-%016x", index+1), SourceRef: topic.SourceRef + "/" + segment,
 				Title: fmt.Sprintf("Roadmap maintenance %02d", index+1), ContentRevision: roadmapMaintenanceTestDigest,
 				SourceSlug: segment, MaterializedRevision: roadmapMaintenanceTestDigest,
 			},

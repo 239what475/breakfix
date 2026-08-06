@@ -20,24 +20,39 @@ var (
 
 const MaxChallengeNodes = 4
 
-// MaterializeWithSlug promotes a published challenge into a human-readable
-// source directory while keeping its opaque identity in challenge.yaml.
-func MaterializeWithSlug(root, id, sourceSlug string, populate func(dst string) error) (*Entry, error) {
-	if !ValidSourceSlug(sourceSlug) {
-		return nil, fmt.Errorf("invalid challenge source slug %q", sourceSlug)
+// MaterializeWithPath promotes one immutable revision into a relative path.
+// The path is never reused by a later revision.
+func MaterializeWithPath(root, id, revisionID, relativePath string, populate func(dst string) error) (*Entry, error) {
+	if !ValidRevisionID(revisionID) || !validMaterializedRelativePath(relativePath) {
+		return nil, fmt.Errorf("invalid materialized challenge path %q", relativePath)
 	}
-	return materialize(root, id, sourceSlug, populate)
+	return materializeAt(root, id, revisionID, relativePath, populate)
 }
 
-func materialize(root, id, directoryName string, populate func(dst string) error) (*Entry, error) {
+func validMaterializedRelativePath(value string) bool {
+	if strings.TrimSpace(value) == "" || filepath.IsAbs(value) || filepath.ToSlash(filepath.Clean(value)) != value {
+		return false
+	}
+	for _, component := range strings.Split(value, "/") {
+		if component == "" || component == "." || component == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func materializeAt(root, id, revisionID, relativePath string, populate func(dst string) error) (*Entry, error) {
 	if !ValidID(id) {
 		return nil, fmt.Errorf("invalid challenge id %q", id)
+	}
+	if !validMaterializedRelativePath(relativePath) {
+		return nil, fmt.Errorf("invalid materialized challenge path %q", relativePath)
 	}
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return nil, fmt.Errorf("create challenges dir: %w", err)
 	}
 
-	staging := filepath.Join(root, ".tmp-"+directoryName+"-"+randomSuffix())
+	staging := filepath.Join(root, ".tmp-"+strings.ReplaceAll(relativePath, "/", "-")+"-"+randomSuffix())
 	if err := os.MkdirAll(staging, 0755); err != nil {
 		return nil, fmt.Errorf("create staging dir: %w", err)
 	}
@@ -60,11 +75,18 @@ func materialize(root, id, directoryName string, populate func(dst string) error
 	if challenge.ID != id {
 		return nil, fmt.Errorf("challenge id mismatch: expected %s got %s", id, challenge.ID)
 	}
-	if challenge.SourceSlug != directoryName {
-		return nil, fmt.Errorf("challenge source slug mismatch: expected %s got %s", directoryName, challenge.SourceSlug)
+	actualPath := filepath.ToSlash(filepath.Join(challenge.SourceSlug, challenge.RevisionID))
+	if actualPath != relativePath {
+		return nil, fmt.Errorf("challenge materialized path mismatch: expected %s got %s", relativePath, actualPath)
+	}
+	if challenge.RevisionID != revisionID {
+		return nil, fmt.Errorf("challenge revision mismatch: expected %s got %s", revisionID, challenge.RevisionID)
 	}
 
-	target := filepath.Join(root, directoryName)
+	target := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return nil, fmt.Errorf("create challenge parent: %w", err)
+	}
 	if _, err := os.Stat(target); err == nil {
 		return nil, fmt.Errorf("challenge %s already exists", id)
 	} else if !os.IsNotExist(err) {
@@ -86,6 +108,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	}
 	if !ValidID(challenge.ID) {
 		return nil, fmt.Errorf("invalid challenge id %q", challenge.ID)
+	}
+	if !ValidRevisionID(challenge.RevisionID) {
+		return nil, fmt.Errorf("invalid challenge revision id %q", challenge.RevisionID)
 	}
 	if !ValidSourceSlug(challenge.SourceSlug) {
 		return nil, fmt.Errorf("invalid challenge source slug %q", challenge.SourceSlug)

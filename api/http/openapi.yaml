@@ -376,6 +376,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
+  /authoring/challenges/{id}/revisions:
+    post:
+      operationId: createAuthoringChallengeRevision
+      summary: Start a new authoring session for an author-owned Challenge revision
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Challenge revision authoring session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringSession"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /authoring/challenges/{id}/deprecate:
+    post:
+      operationId: deprecateAuthoringChallenge
+      summary: Remove an author-owned Challenge from the active Catalog
+      tags: [authoring]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Challenge deprecated
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
   /authoring/sessions/current:
     get:
       operationId: getCurrentAuthoringSession
@@ -765,10 +811,15 @@ components:
 
     MySpacePublishedChallenge:
       type: object
-      required: [challenge, published_at, attempted_users, completed_users]
+      required: [challenge, revision_id, state, published_at, attempted_users, completed_users]
       properties:
         challenge:
           $ref: "#/components/schemas/MySpaceChallenge"
+        revision_id:
+          type: string
+        state:
+          type: string
+          enum: [active, deprecated]
         published_at:
           type: string
           format: date-time
@@ -1544,6 +1595,10 @@ components:
         visible_revision:
           type: integer
         publish_challenge_id:
+          type: string
+        revision_challenge_id:
+          type: string
+        revision_base_active_revision_id:
           type: string
         workflow:
           $ref: "#/components/schemas/AuthoringGenerationWorkflow"

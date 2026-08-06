@@ -14,9 +14,9 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 	topicTwo := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTopic, "linux/services"), SourceRef: "linux/services", Title: "Services"}
 	topicThree := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTopic, "linux/networking"), SourceRef: "linux/networking", Title: "Networking"}
 	tag := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTag, "systemd"), SourceRef: "systemd", Title: "systemd"}
-	challengeOne := roadmap.ChallengeRef{ID: "chal-files", SourceRef: "linux/files/permissions", Title: "Repair file permissions", ContentRevision: catalogTestRevision('a'), SourceSlug: "repair-file-permissions", MaterializedRevision: catalogTestRevision('f')}
-	challengeTwo := roadmap.ChallengeRef{ID: "chal-services", SourceRef: "linux/services/restart", Title: "Restart a service", ContentRevision: catalogTestRevision('b'), SourceSlug: "restart-service", MaterializedRevision: catalogTestRevision('g')}
-	challengeThree := roadmap.ChallengeRef{ID: "chal-networking", SourceRef: "linux/networking/dns", Title: "Repair DNS", ContentRevision: catalogTestRevision('c'), SourceSlug: "repair-dns", MaterializedRevision: catalogTestRevision('h')}
+	challengeOne := roadmap.ChallengeRef{ID: "chal-files", RevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceRef: "linux/files/permissions", Title: "Repair file permissions", ContentRevision: catalogTestRevision('a'), SourceSlug: "repair-file-permissions", MaterializedRevision: catalogTestRevision('f')}
+	challengeTwo := roadmap.ChallengeRef{ID: "chal-services", RevisionID: "chrev-bbbbbbbbbbbbbbbb", SourceRef: "linux/services/restart", Title: "Restart a service", ContentRevision: catalogTestRevision('b'), SourceSlug: "restart-service", MaterializedRevision: catalogTestRevision('g')}
+	challengeThree := roadmap.ChallengeRef{ID: "chal-networking", RevisionID: "chrev-cccccccccccccccc", SourceRef: "linux/networking/dns", Title: "Repair DNS", ContentRevision: catalogTestRevision('c'), SourceSlug: "repair-dns", MaterializedRevision: catalogTestRevision('h')}
 	revision := roadmap.Revision{
 		Revision: catalogTestRevision('d'),
 		Domains:  []roadmap.Domain{{ID: domain.ID, SourceRef: domain.SourceRef, Title: domain.Title, Definition: "Operate Linux systems.", Scope: "Operations.", NonGoals: "Kernel development."}},
@@ -41,9 +41,9 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 		},
 	}
 	entries := map[string]challenge.Entry{
-		challengeOne.ID:   {ID: challengeOne.ID, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision, SourceSlug: challengeOne.SourceSlug, Revision: challengeOne.MaterializedRevision},
-		challengeTwo.ID:   {ID: challengeTwo.ID, Title: challengeTwo.Title, ContentRevision: challengeTwo.ContentRevision, SourceSlug: challengeTwo.SourceSlug, Revision: challengeTwo.MaterializedRevision},
-		challengeThree.ID: {ID: challengeThree.ID, Title: challengeThree.Title, ContentRevision: challengeThree.ContentRevision, SourceSlug: challengeThree.SourceSlug, Revision: challengeThree.MaterializedRevision},
+		challengeOne.ID:   {ID: challengeOne.ID, RevisionID: challengeOne.RevisionID, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision, SourceSlug: challengeOne.SourceSlug, Revision: challengeOne.MaterializedRevision},
+		challengeTwo.ID:   {ID: challengeTwo.ID, RevisionID: challengeTwo.RevisionID, Title: challengeTwo.Title, ContentRevision: challengeTwo.ContentRevision, SourceSlug: challengeTwo.SourceSlug, Revision: challengeTwo.MaterializedRevision},
+		challengeThree.ID: {ID: challengeThree.ID, RevisionID: challengeThree.RevisionID, Title: challengeThree.Title, ContentRevision: challengeThree.ContentRevision, SourceSlug: challengeThree.SourceSlug, Revision: challengeThree.MaterializedRevision},
 		"chal-stale":      {ID: "chal-stale", Title: "Stale challenge", ContentRevision: catalogTestRevision('e')},
 	}
 

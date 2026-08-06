@@ -106,7 +106,7 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 		return false, fmt.Errorf("environment %q has no uid", projection.Name)
 	}
 	if projection.Status.ReadyAt != nil && !projection.Status.ReadyAt.IsZero() {
-		if err := h.db.Environment.RecordChallengeAttempt(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.UID, projection.Runtime, projection.Status.ReadyAt.UTC()); err != nil {
+		if err := h.db.Environment.RecordChallengeAttempt(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.Spec.Source.Revision, projection.UID, projection.Runtime, projection.Status.ReadyAt.UTC()); err != nil {
 			return false, fmt.Errorf("record environment attempt: %w", err)
 		}
 	}
@@ -127,7 +127,7 @@ func (h *Handler) projectEnvironmentRecord(ctx context.Context, projection envir
 
 	switch projection.Status.Phase {
 	case breakfixv1.EnvironmentCompleted:
-		if err := h.db.Environment.RecordChallengeCompletion(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.UID, lifecycleTime(projection.Status.CompletedAt)); err != nil {
+		if err := h.db.Environment.RecordChallengeCompletion(ctx, projection.Spec.UserRef, projection.Spec.Source.Ref, projection.Spec.Source.Revision, projection.UID, lifecycleTime(projection.Status.CompletedAt)); err != nil {
 			return false, fmt.Errorf("record environment completion: %w", err)
 		}
 	case breakfixv1.EnvironmentDestroyed, breakfixv1.EnvironmentFailed:

@@ -166,6 +166,8 @@ type Publication struct {
 	CandidateRevisionID    string             `json:"candidate_revision_id"`
 	IntentRevision         int                `json:"intent_revision"`
 	ChallengeID            string             `json:"challenge_id,omitempty"`
+	ChallengeRevisionID    string             `json:"challenge_revision_id,omitempty"`
+	BaseActiveRevisionID   string             `json:"base_active_revision_id,omitempty"`
 	ChallengeSourceRef     string             `json:"challenge_source_ref,omitempty"`
 	SourceSlug             string             `json:"source_slug,omitempty"`
 	TargetPath             string             `json:"target_path,omitempty"`
@@ -219,9 +221,12 @@ func (p Publication) validateCommon() error {
 		p.RequestedAt.IsZero() || p.StagingArtifact == nil || p.StagingArtifact.Validate(p.Runtime) != nil {
 		return errors.New("challenge publication intent is incomplete")
 	}
-	if !challenge.ValidID(p.ChallengeID) || !challenge.ValidSourceSlug(p.SourceSlug) ||
-		p.TargetPath != p.SourceSlug || strings.TrimSpace(p.ChallengeSourceRef) == "" {
+	if !challenge.ValidID(p.ChallengeID) || !challenge.ValidRevisionID(p.ChallengeRevisionID) || !challenge.ValidSourceSlug(p.SourceSlug) ||
+		challenge.ValidateMaterializedPath(p.TargetPath, p.SourceSlug, p.ChallengeRevisionID) != nil || strings.TrimSpace(p.ChallengeSourceRef) == "" {
 		return errors.New("allocated challenge publication intent is incomplete")
+	}
+	if p.BaseActiveRevisionID != "" && !challenge.ValidRevisionID(p.BaseActiveRevisionID) {
+		return errors.New("challenge publication base active revision is invalid")
 	}
 	seen := make(map[string]struct{}, len(p.TagSourceRefs))
 	for _, sourceRef := range p.TagSourceRefs {

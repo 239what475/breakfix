@@ -122,7 +122,7 @@ func (h *Handler) recoveredAssistantRequest(ctx context.Context, session agent.S
 	if err != nil {
 		return appassistant.Request{}, err
 	}
-	entry, err := h.catalog.Entry(ctx, environment.ChallengeRef)
+	entry, err := h.entryForEnvironment(ctx, environment)
 	if err != nil {
 		return appassistant.Request{}, err
 	}

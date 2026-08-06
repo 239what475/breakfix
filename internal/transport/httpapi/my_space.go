@@ -93,8 +93,8 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 		if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
 			continue
 		}
-		entry, ok := catalog[env.ChallengeRef]
-		if !ok {
+		entry, err := h.entryForChallengeRevision(ctx, catalog, env.ChallengeRef, env.SourceRevision)
+		if err != nil {
 			continue
 		}
 		var expiresAt *time.Time
@@ -104,7 +104,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 		}
 		active = append(active, api.MySpaceActiveEnvironment{
 			EnvironmentId:      env.Name,
-			Challenge:          mySpaceChallenge(entry),
+			Challenge:          mySpaceChallenge(*entry),
 			Runtime:            api.MySpaceActiveEnvironmentRuntime(env.Runtime),
 			Phase:              string(env.Phase),
 			CheckpointProgress: checkpointProgressSummary(env.Checkpoints, len(entry.Checkpoints)),
@@ -116,7 +116,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 	if err != nil {
 		return api.MySpace{}, err
 	}
-	authoringView, authoringCount, publishedCount, err := h.mySpaceAuthoring(ctx, user.ID, catalog)
+	authoringView, authoringCount, publishedCount, err := h.mySpaceAuthoring(ctx, user.ID)
 	if err != nil {
 		return api.MySpace{}, err
 	}
@@ -181,10 +181,9 @@ func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *po
 }
 
 func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int, now time.Time, catalog map[string]challenge.Entry) (api.MySpaceLearningPage, error) {
-	filter.ChallengeIDs = make([]string, 0, len(catalog))
-	for challengeID := range catalog {
-		filter.ChallengeIDs = append(filter.ChallengeIDs, challengeID)
-	}
+	// Do not filter by the current Catalog. Deprecated Challenges and older
+	// revisions remain valid learning history and are resolved below through
+	// their durable challenge revision.
 	items, err := h.db.Environment.ListLearningHistory(ctx, userID, filter, limit+1, cursor, now)
 	if err != nil {
 		return api.MySpaceLearningPage{}, err
@@ -204,7 +203,10 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 		return api.MySpaceLearningPage{}, err
 	}
 	for _, item := range items {
-		entry := catalog[item.ChallengeID]
+		entry, err := h.entryForChallengeRevision(ctx, catalog, item.ChallengeID, item.ChallengeRevision)
+		if err != nil {
+			return api.MySpaceLearningPage{}, fmt.Errorf("resolve learning challenge %q revision %q: %w", item.ChallengeID, item.ChallengeRevision, err)
+		}
 		events := firstPasses[item.EnvironmentUID]
 		checkpointFirstPasses := make([]api.CheckpointFirstPass, 0, len(events))
 		for _, event := range events {
@@ -215,7 +217,7 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 			})
 		}
 		page.Items = append(page.Items, api.MySpaceLearningHistory{
-			Challenge:             mySpaceChallenge(entry),
+			Challenge:             mySpaceChallenge(*entry),
 			CheckpointFirstPasses: checkpointFirstPasses,
 			ReadyAt:               item.ReadyAt,
 			CompletedAt:           item.CompletedAt,
@@ -276,15 +278,18 @@ func mySpaceLearningFilter(params api.GetMySpaceLearningParams) (postgres.Learni
 	return filter, nil
 }
 
-func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog map[string]challenge.Entry) (api.MySpaceAuthoring, int, int, error) {
+func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySpaceAuthoring, int, int, error) {
 	sessions, err := h.db.Reporting.ListAuthoringSpaceSessions(ctx, userID)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
 	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedChallenge, 0)}
 	type authoredPublished struct {
-		session postgres.AuthoringSpaceSession
-		entry   challenge.Entry
+		challengeID string
+		revisionID  string
+		state       string
+		entry       challenge.Entry
+		publishedAt time.Time
 	}
 	published := make([]authoredPublished, 0)
 	for _, session := range sessions {
@@ -308,28 +313,39 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string, catalog m
 			})
 			continue
 		}
-		if session.PublishChallengeID == "" {
-			continue
+	}
+	challenges, err := h.db.Challenge.ListAuthoringChallenges(ctx, userID)
+	if err != nil {
+		return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("list authored challenges: %w", err)
+	}
+	for _, authored := range challenges {
+		revision, err := h.db.Challenge.GetChallengeRevision(ctx, authored.ID, authored.ActiveRevisionID)
+		if err != nil {
+			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored challenge %q revision: %w", authored.ID, err)
 		}
-		entry, ok := catalog[session.PublishChallengeID]
-		if !ok {
-			continue
+		entry, err := h.catalog.HistoricalEntry(ctx, authored.ID, authored.ActiveRevisionID)
+		if err != nil {
+			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored challenge %q content: %w", authored.ID, err)
 		}
-		published = append(published, authoredPublished{session: session, entry: entry})
+		published = append(published, authoredPublished{
+			challengeID: authored.ID, revisionID: revision.ID, state: string(authored.State), entry: *entry, publishedAt: revision.PublishedAt,
+		})
 	}
 	challengeIDs := make([]string, 0, len(published))
 	for _, item := range published {
-		challengeIDs = append(challengeIDs, item.session.PublishChallengeID)
+		challengeIDs = append(challengeIDs, item.challengeID)
 	}
 	counts, err := h.db.Reporting.ChallengeAudienceCounts(ctx, challengeIDs)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
 	for _, item := range published {
-		count := counts[item.session.PublishChallengeID]
+		count := counts[item.challengeID]
 		card := api.MySpacePublishedChallenge{
 			Challenge:      mySpaceChallenge(item.entry),
-			PublishedAt:    item.entry.PublishedAt,
+			RevisionId:     item.revisionID,
+			State:          api.MySpacePublishedChallengeState(item.state),
+			PublishedAt:    item.publishedAt,
 			AttemptedUsers: count.AttemptedUsers,
 			CompletedUsers: count.CompletedUsers,
 		}

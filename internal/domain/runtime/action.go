@@ -116,6 +116,7 @@ type Context struct {
 	Artifact                *execution.ArtifactReference       `json:"artifact,omitempty"`
 	VerificationEnvironment *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
 	ChallengeID             string                             `json:"challenge_id,omitempty"`
+	ChallengeRevisionID     string                             `json:"challenge_revision_id,omitempty"`
 }
 
 func (c Context) Credential() Credential {
@@ -137,19 +138,19 @@ func (c Context) Valid() error {
 	}
 	switch c.Identity.State {
 	case StateBuilding:
-		if c.Build != nil || c.Artifact != nil || c.ChallengeID != "" {
+		if c.Build != nil || c.Artifact != nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
 			return errors.New("build action has unexpected runtime output")
 		}
 	case StateArtifactPublishing:
-		if c.Build == nil || c.Artifact != nil || c.ChallengeID != "" {
+		if c.Build == nil || c.Artifact != nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
 			return errors.New("artifact publication action has invalid build input")
 		}
 	case StateVerifying:
-		if c.Artifact == nil || c.ChallengeID != "" {
+		if c.Artifact == nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
 			return errors.New("verification action has invalid staging input")
 		}
 	case StateChallengePublishing:
-		if c.Artifact == nil || !challenge.ValidID(c.ChallengeID) {
+		if c.Artifact == nil || !challenge.ValidID(c.ChallengeID) || !challenge.ValidRevisionID(c.ChallengeRevisionID) {
 			return errors.New("challenge publication action has invalid input")
 		}
 	default:

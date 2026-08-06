@@ -55,7 +55,7 @@ func (h *Handler) validateRuntimeStagingArtifact(action runtime.Context, artifac
 // content identity. Publishing must not turn a candidate artifact into a
 // different image merely because both values are valid immutable references.
 func (h *Handler) validateRuntimeChallengeArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.ChallengeID == "" {
+	if action.Artifact == nil || action.ChallengeID == "" || action.ChallengeRevisionID == "" {
 		return errors.New("runtime action has no challenge publication input")
 	}
 	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
@@ -63,7 +63,7 @@ func (h *Handler) validateRuntimeChallengeArtifact(action runtime.Context, artif
 	}
 	switch action.Snapshot.Runtime {
 	case challenge.RuntimeK8s:
-		expected, err := candidate.ChallengeOCIRepository(h.registryRepository, action.ChallengeID)
+		expected, err := candidate.ChallengeOCIRepository(h.registryRepository, action.ChallengeID, action.ChallengeRevisionID)
 		if err != nil {
 			return fmt.Errorf("derive challenge OCI repository: %w", err)
 		}
@@ -88,7 +88,7 @@ func (h *Handler) validateRuntimeChallengeArtifact(action runtime.Context, artif
 		return nil
 
 	case challenge.RuntimeNode:
-		expected, err := incus.AliasForChallenge(h.incusConfig.NamePrefix, action.ChallengeID)
+		expected, err := incus.AliasForChallenge(h.incusConfig.NamePrefix, action.ChallengeID, action.ChallengeRevisionID)
 		if err != nil {
 			return fmt.Errorf("derive challenge Incus alias: %w", err)
 		}

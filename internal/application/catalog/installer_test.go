@@ -72,7 +72,7 @@ func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
 		SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: source.Challenges[0].ContentRevision,
 	}
 	commit := catalogdomain.Commit{
-		ID: "catalog-commit-materialized", ReleaseID: entry.ReleaseID, EntryID: entry.ID, ChallengeID: "chal-materialized",
+		ID: "catalog-commit-materialized", ReleaseID: entry.ReleaseID, EntryID: entry.ID, ChallengeID: "chal-materialized", ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa",
 		SourceSlug: challenge.SourceSlugFor(entry.Title, "chal-materialized"), State: catalogdomain.CommitMaterialized,
 		Artifact: &execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "catalog-materialized", IncusFingerprint: strings.Repeat("a", 64)},
 	}
@@ -91,7 +91,7 @@ func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile catalog revision: %v", err)
 	}
-	published, err := challenge.ValidateDir(filepath.Join(installer.challengesDir, commit.SourceSlug))
+	published, err := challenge.ValidateDir(filepath.Join(installer.challengesDir, commit.SourceSlug, commit.ChallengeRevisionID))
 	if err != nil {
 		t.Fatalf("read materialized challenge: %v", err)
 	}

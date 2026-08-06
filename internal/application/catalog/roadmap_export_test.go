@@ -22,13 +22,13 @@ func TestRoadmapRevisionExportIsPortableAndByteStable(t *testing.T) {
 	}
 	challengesDir := filepath.Join(root, "materialized")
 	published, err := challenge.PromoteDirectoryAt(
-		challengesDir, candidate, "chal-export-one", strings.Repeat("a", 64), string(contentRevision), time.Date(2026, time.August, 4, 0, 0, 0, 0, time.UTC),
+		challengesDir, candidate, "chal-export-one", "chrev-aaaaaaaaaaaaaaaa", "cleanup-logs-one", strings.Repeat("a", 64), string(contentRevision), time.Date(2026, time.August, 4, 0, 0, 0, 0, time.UTC),
 	)
 	if err != nil {
 		t.Fatalf("materialize challenge: %v", err)
 	}
 	publishedSecond, err := challenge.PromoteDirectoryAt(
-		challengesDir, candidate, "chal-export-two", strings.Repeat("b", 64), string(contentRevision), time.Date(2026, time.August, 4, 0, 0, 0, 0, time.UTC),
+		challengesDir, candidate, "chal-export-two", "chrev-bbbbbbbbbbbbbbbb", "cleanup-logs-two", strings.Repeat("b", 64), string(contentRevision), time.Date(2026, time.August, 4, 0, 0, 0, 0, time.UTC),
 	)
 	if err != nil {
 		t.Fatalf("materialize second challenge: %v", err)
@@ -46,8 +46,8 @@ func TestRoadmapRevisionExportIsPortableAndByteStable(t *testing.T) {
 		},
 		Tags: []roadmap.Tag{{ID: tag.ID, SourceRef: tag.SourceRef, Title: tag.Title, Description: "The task materially depends on shell behavior."}},
 		ChallengeBindings: []roadmap.ChallengeBinding{
-			{Challenge: roadmap.ChallengeRef{ID: published.ID, SourceRef: "linux/shell-files/cleanup-logs", Title: published.Title, ContentRevision: published.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision}, Topic: topic, Tags: []roadmap.Ref{tag}},
-			{Challenge: roadmap.ChallengeRef{ID: publishedSecond.ID, SourceRef: "linux/services/cleanup-logs", Title: publishedSecond.Title, ContentRevision: publishedSecond.ContentRevision, SourceSlug: publishedSecond.SourceSlug, MaterializedRevision: publishedSecond.Revision}, Topic: secondTopic},
+			{Challenge: roadmap.ChallengeRef{ID: published.ID, RevisionID: published.RevisionID, SourceRef: "linux/shell-files/cleanup-logs", Title: published.Title, ContentRevision: published.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision}, Topic: topic, Tags: []roadmap.Ref{tag}},
+			{Challenge: roadmap.ChallengeRef{ID: publishedSecond.ID, RevisionID: publishedSecond.RevisionID, SourceRef: "linux/services/cleanup-logs", Title: publishedSecond.Title, ContentRevision: publishedSecond.ContentRevision, SourceSlug: publishedSecond.SourceSlug, MaterializedRevision: publishedSecond.Revision}, Topic: secondTopic},
 		},
 		TopicEdges: []roadmap.Edge{{Source: topic, Target: secondTopic, Relation: roadmap.RelationPrecedes, Reason: "Shell state provides useful operational context."}},
 		ChallengeEdges: []roadmap.Edge{{

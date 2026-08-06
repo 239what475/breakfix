@@ -13,6 +13,7 @@ var schemaEnvironmentLearningStatements = []string{
 		environment_uid TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
 		challenge_id TEXT NOT NULL,
+		challenge_revision TEXT NOT NULL,
 		runtime TEXT NOT NULL DEFAULT '',
 		ready_at TEXT NOT NULL,
 		ended_at TEXT NOT NULL DEFAULT '',

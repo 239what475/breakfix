@@ -37,9 +37,6 @@ type PublishNodeImageResult struct {
 type PublishChallengeNodeImageRequest struct {
 	CandidateRevisionID string
 	ChallengeID         string
+	ChallengeRevisionID string
 	Staging             PublishNodeImageResult
-	// ExpectedCurrentFingerprint permits an explicit image replacement.
-	// Normal ChallengePublish leaves it empty and therefore never repoints an
-	// existing formal alias.
-	ExpectedCurrentFingerprint string
 }

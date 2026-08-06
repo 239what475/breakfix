@@ -22,6 +22,7 @@ const (
 // the mutable stage and finalization methods for direct authoring turns.
 type RuntimeRepository interface {
 	CreateAuthoringSession(context.Context, domain.Session, domain.Plan) (*domain.Session, error)
+	CreateChallengeRevisionSession(context.Context, string, string) (*domain.Session, error)
 	GetAuthoringSession(context.Context, string, string) (*domain.Session, error)
 	GetLatestOpenAuthoringSession(context.Context, string) (*domain.Session, error)
 	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
@@ -69,6 +70,19 @@ func (s *RuntimeService) Create(ctx context.Context, userID string) (*domain.Ses
 		return nil, errors.New("authoring session requires a user")
 	}
 	return s.repo.CreateAuthoringSession(ctx, domain.Session{ID: domain.NewID("author"), UserID: userID}, domain.Plan{})
+}
+
+// CreateRevision starts a new authoring conversation from the current active
+// revision of an author-owned Challenge. The repository records the base
+// revision fence; publishing still uses the complete generation pipeline.
+func (s *RuntimeService) CreateRevision(ctx context.Context, userID, challengeID string) (*domain.Session, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("authoring runtime repository is required")
+	}
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(challengeID) == "" {
+		return nil, errors.New("challenge revision session requires user and challenge")
+	}
+	return s.repo.CreateChallengeRevisionSession(ctx, userID, challengeID)
 }
 
 func (s *RuntimeService) Get(ctx context.Context, userID, sessionID string) (*domain.Session, *domain.Revision, []domain.Message, error) {

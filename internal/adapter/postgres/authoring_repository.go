@@ -11,6 +11,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
+	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -19,38 +20,16 @@ func (d *AuthoringRepository) CreateAuthoringSession(ctx context.Context, sessio
 		return nil, errors.New("authoring session requires id and user")
 	}
 	now := time.Now().UTC()
-	session.State = authoring.StateDraftConversation
-	session.CurrentRevision = 0
-	session.VisibleRevision = 0
-	session.CreatedAt = now
-	session.UpdatedAt = now
-	if session.RuntimeSessionID == "" {
-		session.RuntimeSessionID = agent.NewID("authoring-session")
-	}
-	planJSON, err := marshalJSON(plan)
-	if err != nil {
-		return nil, fmt.Errorf("encode initial authoring plan: %w", err)
-	}
+	session.RevisionChallengeID = ""
+	session.RevisionBaseActiveRevisionID = ""
+	prepareNewAuthoringSession(&session, now)
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin authoring session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
-		(id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at)
-		VALUES (?, 'authoring', 'authoring-session', ?, ?, ?, ?, ?)`,
-		session.RuntimeSessionID, session.ID, session.UserID, agent.SessionActive, now, now); err != nil {
-		return nil, fmt.Errorf("create authoring agent session: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
-		(id, user_id, runtime_session_id, state, current_revision, visible_revision, publish_challenge_id, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 0, 0, '', '', ?, ?)`,
-		session.ID, session.UserID, session.RuntimeSessionID, session.State, nowText(now), nowText(now)); err != nil {
-		return nil, fmt.Errorf("create authoring session: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
-		VALUES (?, 0, ?::jsonb, '', ?)`, session.ID, planJSON, nowText(now)); err != nil {
-		return nil, fmt.Errorf("create initial authoring revision: %w", err)
+	if err := insertNewAuthoringSessionTx(ctx, tx, session, plan); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit authoring session: %w", err)
@@ -58,27 +37,120 @@ func (d *AuthoringRepository) CreateAuthoringSession(ctx context.Context, sessio
 	return &session, nil
 }
 
+// CreateChallengeRevisionSession starts a fresh authoring conversation for an
+// author-owned active Challenge. The copied plan is only a discussion seed;
+// every resulting candidate still runs the complete generation and verification
+// lifecycle before it can move the active revision pointer.
+func (d *AuthoringRepository) CreateChallengeRevisionSession(ctx context.Context, userID, challengeID string) (*authoring.Session, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(challengeID) == "" {
+		return nil, errors.New("challenge revision session requires user and challenge")
+	}
+	now := time.Now().UTC()
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin challenge revision session: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	target, err := lockPersistedChallengeTx(ctx, tx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	if target.SourceKind != challengedomain.SourceAuthoring || target.OwnerUserID != userID || target.State != challengedomain.StateActive {
+		return nil, authoring.ErrInvalidState
+	}
+	active, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+	if err != nil {
+		return nil, err
+	}
+	if active.ChallengeID != target.ID || active.State != challengedomain.RevisionActive {
+		return nil, authoring.ErrInvalidState
+	}
+	var sourceNumber int64
+	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM authoring_sessions WHERE id = ? FOR UPDATE`, target.SourceRef).Scan(&sourceNumber); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, authoring.ErrNotFound
+		}
+		return nil, fmt.Errorf("read original authoring session: %w", err)
+	}
+	sourcePlan, err := readAuthoringRevisionTx(ctx, tx, target.SourceRef, sourceNumber)
+	if err != nil {
+		return nil, err
+	}
+	session := authoring.Session{
+		ID: authoring.NewID("author"), UserID: userID,
+		RevisionChallengeID: target.ID, RevisionBaseActiveRevisionID: target.ActiveRevisionID,
+	}
+	prepareNewAuthoringSession(&session, now)
+	if err := insertNewAuthoringSessionTx(ctx, tx, session, sourcePlan.Plan.Clone()); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit challenge revision session: %w", err)
+	}
+	return &session, nil
+}
+
+func prepareNewAuthoringSession(session *authoring.Session, now time.Time) {
+	session.State = authoring.StateDraftConversation
+	session.CurrentRevision = 0
+	session.VisibleRevision = 0
+	session.PublishChallengeID = ""
+	session.LastError = ""
+	session.CreatedAt = now.UTC()
+	session.UpdatedAt = now.UTC()
+	if session.RuntimeSessionID == "" {
+		session.RuntimeSessionID = agent.NewID("authoring-session")
+	}
+}
+
+func insertNewAuthoringSessionTx(ctx context.Context, tx *Tx, session authoring.Session, plan authoring.Plan) error {
+	planJSON, err := marshalJSON(plan)
+	if err != nil {
+		return fmt.Errorf("encode initial authoring plan: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_sessions
+		(id, purpose, owner_kind, owner_ref, user_ref, status, created_at, updated_at)
+		VALUES (?, 'authoring', 'authoring-session', ?, ?, ?, ?, ?)`,
+		session.RuntimeSessionID, session.ID, session.UserID, agent.SessionActive, session.CreatedAt.UTC(), session.UpdatedAt.UTC()); err != nil {
+		return fmt.Errorf("create authoring agent session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_sessions
+		(id, user_id, runtime_session_id, state, current_revision, visible_revision, publish_challenge_id,
+		revision_challenge_id, revision_base_active_revision_id, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 0, 0, '', ?, ?, '', ?, ?)`,
+		session.ID, session.UserID, session.RuntimeSessionID, session.State, session.RevisionChallengeID,
+		session.RevisionBaseActiveRevisionID, nowText(session.CreatedAt), nowText(session.UpdatedAt)); err != nil {
+		return fmt.Errorf("create authoring session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
+		VALUES (?, 0, ?::jsonb, '', ?)`, session.ID, planJSON, nowText(session.CreatedAt)); err != nil {
+		return fmt.Errorf("create initial authoring revision: %w", err)
+	}
+	return nil
+}
+
 func (d *AuthoringRepository) GetAuthoringSession(ctx context.Context, id, userID string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
+		publish_challenge_id, revision_challenge_id, revision_base_active_revision_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ? AND user_id = ?`, id, userID)
 }
 
 func (d *AuthoringRepository) GetLatestOpenAuthoringSession(ctx context.Context, userID string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions
+		publish_challenge_id, revision_challenge_id, revision_base_active_revision_id, last_error, created_at, updated_at FROM authoring_sessions
 		WHERE user_id = ? AND state <> ? ORDER BY updated_at DESC, id DESC LIMIT 1`, userID, authoring.StatePublished)
 }
 
 func (d *AuthoringRepository) GetAuthoringSessionInternal(ctx context.Context, id string) (*authoring.Session, error) {
 	return d.readAuthoringSession(ctx, `SELECT id, user_id, runtime_session_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`, id)
+		publish_challenge_id, revision_challenge_id, revision_base_active_revision_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`, id)
 }
 
 func (d *AuthoringRepository) readAuthoringSession(ctx context.Context, query string, args ...any) (*authoring.Session, error) {
 	var session authoring.Session
 	var state, createdAt, updatedAt string
 	err := d.conn.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID,
-		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
+		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.RevisionChallengeID,
+		&session.RevisionBaseActiveRevisionID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}
@@ -549,7 +621,7 @@ func (d *AuthoringRepository) ReplaceAuthoringPlan(ctx context.Context, sessionI
 
 func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {
 	query := `SELECT id, user_id, runtime_session_id, state, current_revision, visible_revision,
-		publish_challenge_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
+		publish_challenge_id, revision_challenge_id, revision_base_active_revision_id, last_error, created_at, updated_at FROM authoring_sessions WHERE id = ?`
 	args := []any{id}
 	if userID != "" {
 		query += ` AND user_id = ?`
@@ -558,7 +630,8 @@ func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*au
 	var session authoring.Session
 	var state, createdAt, updatedAt string
 	err := tx.QueryRowContext(ctx, query, args...).Scan(&session.ID, &session.UserID, &session.RuntimeSessionID,
-		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.LastError, &createdAt, &updatedAt)
+		&state, &session.CurrentRevision, &session.VisibleRevision, &session.PublishChallengeID, &session.RevisionChallengeID,
+		&session.RevisionBaseActiveRevisionID, &session.LastError, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authoring.ErrNotFound
 	}

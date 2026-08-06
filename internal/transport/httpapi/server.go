@@ -170,6 +170,18 @@ func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *ku
 			h.CreateAuthoringSession(c)
 		}
 	})
+	catalogRoutes.POST("/api/authoring/challenges/:id/revisions", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.CreateAuthoringChallengeRevision(c, c.Param("id"))
+		}
+	})
+	catalogRoutes.POST("/api/authoring/challenges/:id/deprecate", func(c *gin.Context) {
+		jwtMW(c)
+		if !c.IsAborted() {
+			h.DeprecateAuthoringChallenge(c, c.Param("id"))
+		}
+	})
 	router.GET("/api/authoring/sessions/current", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

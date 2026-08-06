@@ -9,12 +9,15 @@ import (
 
 // RecordChallengeCompletion stores the user's first successful completion of
 // a challenge. Repeated controller reconciliations must not overwrite it.
-func (d *EnvironmentRepository) RecordChallengeCompletion(ctx context.Context, userID, challengeID, environmentUID string, completedAt time.Time) error {
+func (d *EnvironmentRepository) RecordChallengeCompletion(ctx context.Context, userID, challengeID, challengeRevision, environmentUID string, completedAt time.Time) error {
 	if strings.TrimSpace(userID) == "" {
 		return fmt.Errorf("completion user id is required")
 	}
 	if strings.TrimSpace(challengeID) == "" {
 		return fmt.Errorf("completion challenge id is required")
+	}
+	if strings.TrimSpace(challengeRevision) == "" {
+		return fmt.Errorf("completion challenge revision is required")
 	}
 	if strings.TrimSpace(environmentUID) == "" {
 		return fmt.Errorf("completion environment uid is required")
@@ -41,10 +44,10 @@ func (d *EnvironmentRepository) RecordChallengeCompletion(ctx context.Context, u
 	// pre-existing environments created before activity tracking was enabled.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO user_challenge_attempts
-			(environment_uid, user_id, challenge_id, runtime, ready_at, ended_at, outcome)
-		VALUES (?, ?, ?, '', ?, ?, ?)
+			(environment_uid, user_id, challenge_id, challenge_revision, runtime, ready_at, ended_at, outcome)
+		VALUES (?, ?, ?, ?, '', ?, ?, ?)
 		ON CONFLICT(environment_uid) DO NOTHING
-	`, environmentUID, userID, challengeID, completedAt.UTC().Format(time.RFC3339Nano), completedAt.UTC().Format(time.RFC3339Nano), AttemptCompleted); err != nil {
+	`, environmentUID, userID, challengeID, challengeRevision, completedAt.UTC().Format(time.RFC3339Nano), completedAt.UTC().Format(time.RFC3339Nano), AttemptCompleted); err != nil {
 		return fmt.Errorf("backfill completed challenge attempt: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

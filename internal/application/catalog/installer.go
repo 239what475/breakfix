@@ -300,9 +300,10 @@ func (i *Installer) prepareCommit(ctx context.Context, release *catalogdomain.Re
 	intents := make([]catalogdomain.Commit, 0, len(entries))
 	for _, entry := range entries {
 		challengeID := challenge.NewID()
+		challengeRevisionID := challenge.NewRevisionID()
 		intents = append(intents, catalogdomain.Commit{
 			ID: catalogdomain.EntryCommitIDFor(release.ID, entry.ID), ReleaseID: release.ID, EntryID: entry.ID,
-			ChallengeID: challengeID, SourceSlug: challenge.SourceSlugFor(entry.Title, challengeID),
+			ChallengeID: challengeID, ChallengeRevisionID: challengeRevisionID, SourceSlug: challenge.SourceSlugFor(entry.Title, challengeID),
 			State: catalogdomain.CommitPrepared, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		})
 	}
@@ -492,7 +493,7 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 		return deterministicCatalogFailure(err)
 	}
 	sourceDir := filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath))
-	published, err := challenge.PromoteDirectoryAt(i.challengesDir, sourceDir, commit.ChallengeID, image, string(entry.ContentRevision), i.now().UTC())
+	published, err := challenge.PromoteDirectoryAt(i.challengesDir, sourceDir, commit.ChallengeID, commit.ChallengeRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
 	if err != nil {
 		return fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err)
 	}
@@ -510,7 +511,7 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(i.challengesDir, commit.SourceSlug)
+	target := filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID))
 	if _, err := os.Lstat(target); err != nil {
 		if os.IsNotExist(err) {
 			return challenge.ErrNotFound
@@ -521,7 +522,7 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	if err != nil {
 		return err
 	}
-	if published.ID != commit.ChallengeID || published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
+	if published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
 		return errors.New("materialized catalog challenge conflicts with its durable commit")
 	}
 	return nil
@@ -560,16 +561,16 @@ func (i *Installer) compileRevision(ctx context.Context, source *PortableSource,
 		if !found || commit.State != catalogdomain.CommitMaterialized {
 			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("roadmap binding %q has no materialized catalog commit", binding.Challenge.Path))
 		}
-		published, err := challenge.ValidateDir(filepath.Join(i.challengesDir, commit.SourceSlug))
+		published, err := challenge.ValidateDir(filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID)))
 		if err != nil {
 			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("read materialized catalog challenge %q: %w", binding.Challenge.Path, err))
 		}
-		if published.ID != commit.ChallengeID || published.SourceSlug != commit.SourceSlug || published.Title != binding.Challenge.Title ||
+		if published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug || published.Title != binding.Challenge.Title ||
 			published.ContentRevision != binding.Challenge.ContentRevision {
 			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("materialized catalog challenge %q does not match its roadmap binding", binding.Challenge.Path))
 		}
 		values[binding.Challenge.Path] = roadmap.ChallengeRef{
-			ID: commit.ChallengeID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title,
+			ID: commit.ChallengeID, RevisionID: commit.ChallengeRevisionID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title,
 			ContentRevision: binding.Challenge.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision,
 		}
 	}

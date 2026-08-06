@@ -209,6 +209,38 @@ func recordRoadmapEntryTx(ctx context.Context, tx *Tx, challengeID, topicID stri
 	if inserted != 1 {
 		return nil
 	}
+	return noteRoadmapChallengePendingTx(ctx, tx, now)
+}
+
+// requeueRoadmapChallengeTx marks one already-visible Challenge for another
+// challenge-edge review after an immutable content revision becomes active.
+// Topic ownership is intentionally retained, so only the challenge task is
+// made pending.
+func requeueRoadmapChallengeTx(ctx context.Context, tx *Tx, challengeID, topicID string, now time.Time) error {
+	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(topicID) == "" || now.IsZero() {
+		return errors.New("roadmap challenge requeue requires challenge, topic, and current time")
+	}
+	var storedTopicID string
+	var pending bool
+	if err := tx.QueryRowContext(ctx, `SELECT topic_id, NOT challenge_processed FROM roadmap_entries WHERE challenge_id = ? FOR UPDATE`, challengeID).Scan(&storedTopicID, &pending); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return generation.ErrClassificationConflict
+		}
+		return fmt.Errorf("lock roadmap challenge entry: %w", err)
+	}
+	if storedTopicID != topicID {
+		return generation.ErrClassificationConflict
+	}
+	if pending {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_entries SET challenge_processed = FALSE WHERE challenge_id = ?`, challengeID); err != nil {
+		return fmt.Errorf("requeue roadmap challenge entry: %w", err)
+	}
+	return noteRoadmapChallengePendingTx(ctx, tx, now)
+}
+
+func noteRoadmapChallengePendingTx(ctx context.Context, tx *Tx, now time.Time) error {
 	control, err := lockRoadmapMaintenanceControlTx(ctx, tx)
 	if err != nil {
 		return err

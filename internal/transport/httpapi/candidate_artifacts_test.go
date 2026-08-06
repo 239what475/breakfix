@@ -27,12 +27,13 @@ func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 	if err := handler.validateRuntimeStagingArtifact(k8sAction, staging); err != nil {
 		t.Fatalf("validate K8s staging artifact: %v", err)
 	}
-	finalRepository, err := candidate.ChallengeOCIRepository(handler.registryRepository, "challenge-k8s")
+	finalRepository, err := candidate.ChallengeOCIRepository(handler.registryRepository, "challenge-k8s", "chrev-aaaaaaaaaaaaaaaa")
 	if err != nil {
 		t.Fatal(err)
 	}
 	k8sAction.Artifact = &staging
 	k8sAction.ChallengeID = "challenge-k8s"
+	k8sAction.ChallengeRevisionID = "chrev-aaaaaaaaaaaaaaaa"
 	if err := handler.validateRuntimeChallengeArtifact(k8sAction, execution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + fingerprint}); err != nil {
 		t.Fatalf("validate K8s final artifact: %v", err)
 	}
@@ -47,12 +48,13 @@ func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 	if err := handler.validateRuntimeStagingArtifact(nodeAction, nodeStaging); err != nil {
 		t.Fatalf("validate Node staging artifact: %v", err)
 	}
-	challengeAlias, err := incus.AliasForChallenge("bf", "challenge-node")
+	challengeAlias, err := incus.AliasForChallenge("bf", "challenge-node", "chrev-bbbbbbbbbbbbbbbb")
 	if err != nil {
 		t.Fatal(err)
 	}
 	nodeAction.Artifact = &nodeStaging
 	nodeAction.ChallengeID = "challenge-node"
+	nodeAction.ChallengeRevisionID = "chrev-bbbbbbbbbbbbbbbb"
 	if err := handler.validateRuntimeChallengeArtifact(nodeAction, execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: challengeAlias, IncusFingerprint: fingerprint}); err != nil {
 		t.Fatalf("validate Node final artifact: %v", err)
 	}

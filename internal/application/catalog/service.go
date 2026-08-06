@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
@@ -15,6 +17,14 @@ import (
 // read model for visible challenges.
 type RoadmapStore interface {
 	CurrentRoadmap(context.Context) (*roadmapdomain.Revision, error)
+}
+
+// ChallengeLifecycleStore resolves immutable historical content through the
+// durable Challenge lifecycle. Current Catalog reads remain a Roadmap
+// projection; historical callers must not follow the mutable active pointer.
+type ChallengeLifecycleStore interface {
+	GetChallenge(context.Context, string) (*challengedomain.Challenge, error)
+	GetChallengeRevision(context.Context, string, string) (*challengedomain.Revision, error)
 }
 
 type PublishedChallenge struct {
@@ -35,12 +45,13 @@ type Service struct {
 	challengesDir string
 	roadmap       RoadmapStore
 	availability  *Availability
+	lifecycle     ChallengeLifecycleStore
 }
 
 const readinessCheckTimeout = 2 * time.Second
 
-func NewService(challengesDir string, roadmap RoadmapStore, availability *Availability) *Service {
-	return &Service{challengesDir: challengesDir, roadmap: roadmap, availability: availability}
+func NewService(challengesDir string, roadmap RoadmapStore, availability *Availability, lifecycle ChallengeLifecycleStore) *Service {
+	return &Service{challengesDir: challengesDir, roadmap: roadmap, availability: availability, lifecycle: lifecycle}
 }
 
 // Ready verifies the configured immutable release, when one exists. It is
@@ -105,6 +116,42 @@ func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, err
 		}
 	}
 	return nil, challenge.ErrNotFound
+}
+
+// HistoricalEntry resolves the exact revision fixed in an existing
+// Environment or learning record. It never follows Challenge.ActiveRevisionID
+// and accepts superseded or deprecated revisions while verifying that the
+// immutable materialized directory still matches the durable publication.
+func (s *Service) HistoricalEntry(ctx context.Context, challengeID, revisionID string) (*challenge.Entry, error) {
+	if s == nil || s.lifecycle == nil {
+		return nil, challenge.ErrNotFound
+	}
+	stable, err := s.lifecycle.GetChallenge(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	revision, err := s.lifecycle.GetChallengeRevision(ctx, stable.ID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	if revision.ChallengeID != stable.ID || revision.SourceKind != stable.SourceKind || revision.SourceSlug != stable.SourceSlug ||
+		challenge.ValidateMaterializedPath(revision.MaterializedPath, revision.SourceSlug, revision.ID) != nil {
+		return nil, materializedIntegrity(roadmapdomain.ChallengeRef{ID: stable.ID, RevisionID: revisionID, SourceSlug: stable.SourceSlug}, "historical revision identity conflicts with its durable lifecycle")
+	}
+	entry, err := challenge.ValidateDir(filepath.Join(s.challengesDir, filepath.FromSlash(revision.MaterializedPath)))
+	if err != nil {
+		return nil, materializedIntegrity(roadmapdomain.ChallengeRef{ID: stable.ID, RevisionID: revision.ID, SourceSlug: revision.SourceSlug}, "invalid historical materialized source: %v", err)
+	}
+	expectedImage := revision.Artifact.IncusFingerprint
+	if revision.Runtime == challenge.RuntimeK8s {
+		expectedImage = revision.Artifact.OCIReference
+	}
+	if entry.ID != revision.ChallengeID || entry.RevisionID != revision.ID || entry.SourceSlug != revision.SourceSlug ||
+		entry.Title != revision.Title || entry.Runtime != revision.Runtime || entry.ContentRevision != revision.ContentRevision ||
+		entry.Revision != revision.MaterializedRevision || entry.Image != expectedImage {
+		return nil, materializedIntegrity(roadmapdomain.ChallengeRef{ID: stable.ID, RevisionID: revision.ID, SourceSlug: revision.SourceSlug}, "historical materialized source does not match its durable revision")
+	}
+	return entry, nil
 }
 
 func (s *Service) currentMaterialized(ctx context.Context) (*roadmapdomain.Revision, map[string]challenge.Entry, error) {

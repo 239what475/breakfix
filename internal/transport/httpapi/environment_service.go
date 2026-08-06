@@ -88,6 +88,9 @@ func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]
 }
 
 func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+	if entry == nil {
+		return nil, errNoMatchingEnvironment
+	}
 	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
@@ -98,11 +101,11 @@ func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *cha
 		return nil, err
 	}
 	for index := range environments {
-		if isLiveEnvironmentPhase(environments[index].Phase) {
+		if environments[index].SourceRevision == entry.RevisionID && isLiveEnvironmentPhase(environments[index].Phase) {
 			return &environments[index], nil
 		}
 	}
-	return nil, errors.New("no active environment")
+	return nil, errNoMatchingEnvironment
 }
 
 func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, environmentUID string) (*activeEnvironment, error) {
@@ -119,6 +122,9 @@ func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, enviro
 }
 
 func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+	if entry == nil {
+		return nil, errNoMatchingEnvironment
+	}
 	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
@@ -129,16 +135,16 @@ func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, en
 		return nil, err
 	}
 	for index := range environments {
-		if isLiveEnvironmentPhase(environments[index].Phase) {
+		if environments[index].SourceRevision == entry.RevisionID && isLiveEnvironmentPhase(environments[index].Phase) {
 			return &environments[index], nil
 		}
 	}
 	for index := range environments {
-		if environments[index].Phase == breakfixv1.EnvironmentCompleted {
+		if environments[index].SourceRevision == entry.RevisionID && environments[index].Phase == breakfixv1.EnvironmentCompleted {
 			return &environments[index], nil
 		}
 	}
-	return nil, errors.New("no environment with checkpoint status")
+	return nil, errNoMatchingEnvironment
 }
 
 func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, entry *challenge.Entry) (*activeEnvironment, error) {

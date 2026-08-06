@@ -9,6 +9,8 @@ var schemaAuthoringCoreStatements = []string{
 		current_revision BIGINT NOT NULL DEFAULT 0,
 		visible_revision BIGINT NOT NULL DEFAULT 0,
 		publish_challenge_id TEXT NOT NULL DEFAULT '',
+		revision_challenge_id TEXT NOT NULL DEFAULT '',
+		revision_base_active_revision_id TEXT NOT NULL DEFAULT '',
 		last_error TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL

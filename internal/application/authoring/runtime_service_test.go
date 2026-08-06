@@ -63,6 +63,10 @@ func (r *runtimeServiceRepository) CreateAuthoringSession(context.Context, autho
 	return nil, errors.New("unexpected CreateAuthoringSession")
 }
 
+func (r *runtimeServiceRepository) CreateChallengeRevisionSession(context.Context, string, string) (*authoringdomain.Session, error) {
+	return nil, errors.New("unexpected CreateChallengeRevisionSession")
+}
+
 func (r *runtimeServiceRepository) GetAuthoringSession(context.Context, string, string) (*authoringdomain.Session, error) {
 	return nil, errors.New("unexpected GetAuthoringSession")
 }

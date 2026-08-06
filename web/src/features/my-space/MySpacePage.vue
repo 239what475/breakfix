@@ -6,6 +6,7 @@ import AuthoringOverview from "./AuthoringOverview.vue";
 import LearningHistory from "./LearningHistory.vue";
 import MySpaceSummary from "./MySpaceSummary.vue";
 import { useMySpace, type LearningRuntimeFilter, type LearningStateFilter } from "./useMySpace";
+import { api } from "../../api/client";
 import "./my-space.css";
 
 const props = defineProps<{ active: boolean; loggedIn: boolean; refreshRequest: number }>();
@@ -19,6 +20,25 @@ const { space, history, nextCursor, loading, loadingLearning, loadingMore, error
 const initials = computed(() => space.value?.profile.name.slice(0, 1).toUpperCase() || "?");
 const heading = computed(() => ({ overview: "Your learning space", learning: "Learning history", authoring: "Challenge authoring" })[tab.value]);
 const compactViewport = window.matchMedia("(max-width: 760px)");
+
+async function reviseChallenge(id: string) {
+  try {
+    const session = await api.createAuthoringChallengeRevision(id);
+    emit("studio", session.id);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Unable to start the challenge revision";
+  }
+}
+
+async function deprecateChallenge(id: string) {
+  if (!window.confirm("Deprecate this challenge? Existing learning history will remain available.")) return;
+  try {
+    await api.deprecateAuthoringChallenge(id);
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Unable to deprecate the challenge";
+  }
+}
 
 function syncCompactWorkspace() {
   if (compactViewport.matches && tab.value === "authoring") tab.value = "overview";
@@ -55,7 +75,7 @@ watch(
           <p v-if="error" class="space-inline-error">{{ error }}</p>
           <template v-if="tab === 'overview'"><ActiveEnvironmentList :environments="space.active_environments" @start="emit('start', $event)" /><LearningHistory :items="space.recent_learning.slice(0, 5)" :loading="false" :loading-more="false" :has-more="false" /></template>
           <LearningHistory v-else-if="tab === 'learning'" :items="history" :loading="loadingLearning" :loading-more="loadingMore" :has-more="!!nextCursor" show-filters :state-filter="learningState" :runtime-filter="learningRuntime" @update:state-filter="learningState = $event" @update:runtime-filter="learningRuntime = $event" @more="loadMore" />
-          <AuthoringOverview v-else :authoring="space.authoring" @authoring="emit('studio', $event)" @catalog="emit('catalog', $event)" />
+          <AuthoringOverview v-else :authoring="space.authoring" @authoring="emit('studio', $event)" @catalog="emit('catalog', $event)" @revision="reviseChallenge" @deprecate="deprecateChallenge" />
         </template>
       </main>
     </div>

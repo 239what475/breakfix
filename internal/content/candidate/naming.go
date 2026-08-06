@@ -22,8 +22,13 @@ func CandidateOCIRepository(registryRoot, candidateRevisionID string) (string, e
 	return ociRepository(registryRoot, "candidates", candidateRevisionID)
 }
 
-func ChallengeOCIRepository(registryRoot, challengeID string) (string, error) {
-	return ociRepository(registryRoot, "challenges", challengeID)
+// ChallengeOCIRepository is scoped to one immutable published Challenge
+// revision. A later revision must never overwrite a prior runtime artifact.
+func ChallengeOCIRepository(registryRoot, challengeID, challengeRevisionID string) (string, error) {
+	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeRevisionID) == "" {
+		return "", errors.New("challenge OCI repository requires a challenge and revision")
+	}
+	return ociRepository(registryRoot, "challenges", challengeID+"\x00"+challengeRevisionID)
 }
 
 func CandidateOCIImageReference(registryRoot, candidateRevisionID string) (string, error) {
@@ -34,8 +39,8 @@ func CandidateOCIImageReference(registryRoot, candidateRevisionID string) (strin
 	return repository + ":artifact", nil
 }
 
-func ChallengeOCIImageReference(registryRoot, challengeID string) (string, error) {
-	repository, err := ChallengeOCIRepository(registryRoot, challengeID)
+func ChallengeOCIImageReference(registryRoot, challengeID, challengeRevisionID string) (string, error) {
+	repository, err := ChallengeOCIRepository(registryRoot, challengeID, challengeRevisionID)
 	if err != nil {
 		return "", err
 	}

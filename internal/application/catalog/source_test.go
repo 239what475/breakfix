@@ -297,6 +297,7 @@ checkpoints:
 `
 	if published {
 		manifest = `id: chal-example
+revision_id: chrev-aaaaaaaaaaaaaaaa
 source_slug: cleanup-logs
 runtime: node
 title: Cleanup logs

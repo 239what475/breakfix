@@ -253,6 +253,11 @@ export const api = {
 	},
   createAuthoringSession: () =>
     request<AuthoringSession>("POST", "/authoring/sessions"),
+	createAuthoringChallengeRevision: (id: string) =>
+		request<AuthoringSession>("POST", `/authoring/challenges/${id}/revisions`),
+	deprecateAuthoringChallenge: async (id: string) => {
+		await request<unknown>("POST", `/authoring/challenges/${id}/deprecate`);
+	},
   getCurrentAuthoringSession: () =>
     request<AuthoringSession>("GET", "/authoring/sessions/current"),
   getAuthoringSession: (id: string) =>

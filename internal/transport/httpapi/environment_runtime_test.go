@@ -15,7 +15,7 @@ import (
 func TestNewEnvironmentSpecCreatesPublishedLearningSnapshot(t *testing.T) {
 	handler := &Handler{cooldownMin: 1}
 	spec, err := handler.newEnvironmentSpec("u-demo", &challenge.Entry{
-		ID: "chal-r7m4x2q9v6kp", Revision: "sha256:abc", Runtime: challenge.RuntimeNode,
+		ID: "chal-r7m4x2q9v6kp", RevisionID: "chrev-aaaaaaaaaaaaaaaa", Revision: "sha256:abc", Runtime: challenge.RuntimeNode,
 		Checkpoints: []challenge.Checkpoint{
 			{ID: "proxy-listens", Node: "proxy"},
 			{ID: "client-reaches-app", Node: "client"},
@@ -27,7 +27,7 @@ func TestNewEnvironmentSpecCreatesPublishedLearningSnapshot(t *testing.T) {
 	if spec.Purpose != breakfixv1.EnvironmentPurposeLearning || spec.Source.Kind != breakfixv1.EnvironmentSourcePublished {
 		t.Fatalf("unexpected environment purpose/source: %#v", spec)
 	}
-	if spec.Source.Ref != "chal-r7m4x2q9v6kp" || spec.Source.Revision != "sha256:abc" || spec.UserRef != "u-demo" {
+	if spec.Source.Ref != "chal-r7m4x2q9v6kp" || spec.Source.Revision != "chrev-aaaaaaaaaaaaaaaa" || spec.UserRef != "u-demo" {
 		t.Fatalf("unexpected published source snapshot: %#v", spec)
 	}
 	if len(spec.Checkpoints) != 2 || spec.Checkpoints[0].Node != "proxy" || spec.Checkpoints[1].Node != "client" {

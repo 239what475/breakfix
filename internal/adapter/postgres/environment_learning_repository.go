@@ -17,14 +17,15 @@ const (
 )
 
 type ChallengeAttempt struct {
-	EnvironmentUID  string
-	UserID          string
-	ChallengeID     string
-	Runtime         string
-	ReadyAt         time.Time
-	EndedAt         *time.Time
-	Outcome         string
-	LearningSeconds int64
+	EnvironmentUID    string
+	UserID            string
+	ChallengeID       string
+	ChallengeRevision string
+	Runtime           string
+	ReadyAt           time.Time
+	EndedAt           *time.Time
+	Outcome           string
+	LearningSeconds   int64
 }
 
 type TerminalConnection struct {
@@ -49,15 +50,16 @@ type EnvironmentUsageSession struct {
 // LearningHistoryItem is a durable user-facing attempt. Learning time is
 // derived from environment usage sessions rather than duplicated on attempts.
 type LearningHistoryItem struct {
-	EnvironmentUID  string
-	ChallengeID     string
-	Runtime         string
-	ReadyAt         time.Time
-	CompletedAt     *time.Time
-	EndedAt         *time.Time
-	Outcome         string
-	LearningSeconds int64
-	LastActivityAt  time.Time
+	EnvironmentUID    string
+	ChallengeID       string
+	ChallengeRevision string
+	Runtime           string
+	ReadyAt           time.Time
+	CompletedAt       *time.Time
+	EndedAt           *time.Time
+	Outcome           string
+	LearningSeconds   int64
+	LastActivityAt    time.Time
 }
 
 // LearningHistoryCursor identifies an attempt in the same order used by the
@@ -68,8 +70,10 @@ type LearningHistoryCursor struct {
 	EnvironmentUID string
 }
 
-// LearningHistoryFilter limits history to challenge directories that are
-// still present in the catalog and optionally to a user-facing state/runtime.
+// LearningHistoryFilter optionally limits history to stable Challenge IDs and
+// to a user-facing state/runtime. An empty ChallengeIDs slice deliberately
+// means every durable attempt: published Challenges may later be deprecated
+// while their learning history remains visible.
 type LearningHistoryFilter struct {
 	ChallengeIDs []string
 	State        string
@@ -100,9 +104,9 @@ func requiredLearningValue(name, value string) error {
 
 // RecordChallengeAttempt persists the point at which a user received a Ready
 // environment. Reconciliation retries must not produce a second attempt.
-func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, userID, challengeID, environmentUID, runtime string, readyAt time.Time) error {
+func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, userID, challengeID, challengeRevision, environmentUID, runtime string, readyAt time.Time) error {
 	for name, value := range map[string]string{
-		"user id": userID, "challenge id": challengeID, "environment uid": environmentUID,
+		"user id": userID, "challenge id": challengeID, "challenge revision": challengeRevision, "environment uid": environmentUID,
 	} {
 		if err := requiredLearningValue(name, value); err != nil {
 			return err
@@ -113,10 +117,10 @@ func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, user
 	}
 	_, err := d.conn.ExecContext(ctx, `
 		INSERT INTO user_challenge_attempts
-			(environment_uid, user_id, challenge_id, runtime, ready_at, outcome)
-		VALUES (?, ?, ?, ?, ?, ?)
+			(environment_uid, user_id, challenge_id, challenge_revision, runtime, ready_at, outcome)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(environment_uid) DO NOTHING
-	`, environmentUID, userID, challengeID, runtime, nowText(readyAt.UTC()), AttemptActive)
+	`, environmentUID, userID, challengeID, challengeRevision, runtime, nowText(readyAt.UTC()), AttemptActive)
 	if err != nil {
 		return fmt.Errorf("record challenge attempt: %w", err)
 	}
@@ -395,18 +399,16 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 	if err := validateLearningHistoryFilter(filter); err != nil {
 		return nil, err
 	}
-	if len(filter.ChallengeIDs) == 0 {
-		return []LearningHistoryItem{}, nil
-	}
-
 	args := []any{nowText(now.UTC()), nowText(now.UTC()), userID}
 	whereParts := []string{"a.user_id = ?"}
-	challengePlaceholders := make([]string, 0, len(filter.ChallengeIDs))
-	for _, challengeID := range filter.ChallengeIDs {
-		challengePlaceholders = append(challengePlaceholders, "?")
-		args = append(args, challengeID)
+	if len(filter.ChallengeIDs) > 0 {
+		challengePlaceholders := make([]string, 0, len(filter.ChallengeIDs))
+		for _, challengeID := range filter.ChallengeIDs {
+			challengePlaceholders = append(challengePlaceholders, "?")
+			args = append(args, challengeID)
+		}
+		whereParts = append(whereParts, "a.challenge_id IN ("+strings.Join(challengePlaceholders, ",")+")")
 	}
-	whereParts = append(whereParts, "a.challenge_id IN ("+strings.Join(challengePlaceholders, ",")+")")
 	switch filter.State {
 	case "active", "completed":
 		whereParts = append(whereParts, "a.outcome = ?")
@@ -428,7 +430,7 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 	}
 	args = append(args, limit)
 	rows, err := d.conn.QueryContext(ctx, `
-		SELECT a.environment_uid, a.challenge_id, a.runtime, a.ready_at, a.ended_at, a.outcome,
+		SELECT a.environment_uid, a.challenge_id, a.challenge_revision, a.runtime, a.ready_at, a.ended_at, a.outcome,
 			CASE WHEN a.outcome = 'completed' AND a.ended_at != '' THEN a.ended_at END AS completed_at,
 			COALESCE(SUM(CASE WHEN s.ended_at = '' THEN GREATEST(0, EXTRACT(EPOCH FROM (?::timestamptz - s.started_at::timestamptz))::BIGINT)
 				ELSE GREATEST(0, EXTRACT(EPOCH FROM (s.ended_at::timestamptz - s.started_at::timestamptz))::BIGINT) END), 0)::BIGINT AS learning_seconds,
@@ -450,7 +452,7 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 		var item LearningHistoryItem
 		var readyAt, endedAt, lastActivityAt string
 		var completedAt sql.NullString
-		if err := rows.Scan(&item.EnvironmentUID, &item.ChallengeID, &item.Runtime, &readyAt, &endedAt, &item.Outcome, &completedAt, &item.LearningSeconds, &lastActivityAt); err != nil {
+		if err := rows.Scan(&item.EnvironmentUID, &item.ChallengeID, &item.ChallengeRevision, &item.Runtime, &readyAt, &endedAt, &item.Outcome, &completedAt, &item.LearningSeconds, &lastActivityAt); err != nil {
 			return nil, fmt.Errorf("scan learning history: %w", err)
 		}
 		item.ReadyAt = parseLearningTime(readyAt)

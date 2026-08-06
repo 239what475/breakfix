@@ -63,9 +63,11 @@ type Dependencies struct {
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
 	var roadmap appcatalog.RoadmapStore
+	var lifecycle appcatalog.ChallengeLifecycleStore
 	var availability *appcatalog.Availability
 	if database != nil {
 		roadmap = database.Roadmap
+		lifecycle = database.Challenge
 		if cfg.Catalog.Enabled() {
 			var err error
 			availability, err = appcatalog.NewAvailability(cfg.Catalog.ReleaseReference, database.Catalog)
@@ -80,7 +82,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		runtimeContext:     context.Background(),
 		db:                 database,
 		k8s:                client,
-		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability),
+		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability, lifecycle),
 		registryRepository: cfg.Registry.Repository,
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,

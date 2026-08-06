@@ -10,13 +10,13 @@ func TestChallengeAttemptCompletionNeverOverwritesTerminalOutcome(t *testing.T) 
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	readyAt := time.Date(2026, time.July, 24, 1, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-one", "node", readyAt); err != nil {
+	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Environment.FinishChallengeAttempt(ctx, "environment-one", AttemptStopped, readyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "environment-one", readyAt.Add(2*time.Minute)); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", readyAt.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 4, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-one", "node", started); err != nil {
+	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", started); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Environment.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
@@ -141,7 +141,7 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	if _, err := database.Environment.FinishTerminalUsageSession(ctx, "environment-one", started.Add(90*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "environment-one", started.Add(2*time.Minute)); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", started.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +165,7 @@ func TestLearningHistoryIncludesUncompletedAttempt(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	readyAt := time.Date(2026, time.July, 24, 5, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-one", "node", readyAt); err != nil {
+	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
 		t.Fatal(err)
 	}
 	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: []string{"challenge-one"}}, 10, nil, readyAt.Add(time.Minute))
@@ -181,14 +181,14 @@ func TestLearningHistoryPreservesAttemptOutcomeAfterEarlierCompletion(t *testing
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	firstReadyAt := time.Date(2026, time.July, 24, 5, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-first", "node", firstReadyAt); err != nil {
+	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", "node", firstReadyAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "environment-first", firstReadyAt.Add(time.Minute)); err != nil {
+	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", firstReadyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	secondReadyAt := firstReadyAt.Add(2 * time.Hour)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "environment-second", "node", secondReadyAt); err != nil {
+	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-second", "node", secondReadyAt); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Environment.FinishChallengeAttempt(ctx, "environment-second", AttemptStopped, secondReadyAt.Add(time.Minute)); err != nil {
@@ -223,7 +223,7 @@ func TestLearningHistoryFiltersAndPaginatesSameTimestampAttempts(t *testing.T) {
 		{"environment-b", "challenge-k8s", "k8s"},
 		{"environment-a", "challenge-ended", "node"},
 	} {
-		if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", attempt.challengeID, attempt.environmentUID, attempt.runtime, readyAt); err != nil {
+		if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", attempt.challengeID, "chrev-aaaaaaaaaaaaaaaa", attempt.environmentUID, attempt.runtime, readyAt); err != nil {
 			t.Fatal(err)
 		}
 	}

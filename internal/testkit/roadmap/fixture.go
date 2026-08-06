@@ -16,6 +16,8 @@ const (
 	SystemdSourceSlug           = "systemd-service-recovery"
 	NodeMaterializedRevision    = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	SystemdMaterializedRevision = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	NodeChallengeRevisionID     = "chrev-1111111111111111"
+	SystemdChallengeRevisionID  = "chrev-2222222222222222"
 )
 
 func PortableRevision() roadmap.PortableRevision {
@@ -44,8 +46,8 @@ func PortableRevision() roadmap.PortableRevision {
 
 func RuntimeRevision() roadmap.Revision {
 	value, err := roadmap.CompilePortable(PortableRevision(), map[string]roadmap.ChallengeRef{
-		NodeChallengePath:    {ID: "challenge-node-runtime", SourceRef: "platform-runtime/node-environment-validation/node-runtime-fixture", Title: "节点运行时验证", ContentRevision: NodeContentRevision, SourceSlug: NodeSourceSlug, MaterializedRevision: NodeMaterializedRevision},
-		SystemdChallengePath: {ID: "challenge-systemd-recovery", SourceRef: "platform-runtime/systemd-service-recovery/systemd-service-recovery", Title: "修复 systemd 服务", ContentRevision: SystemdContentRevision, SourceSlug: SystemdSourceSlug, MaterializedRevision: SystemdMaterializedRevision},
+		NodeChallengePath:    {ID: "challenge-node-runtime", RevisionID: NodeChallengeRevisionID, SourceRef: "platform-runtime/node-environment-validation/node-runtime-fixture", Title: "节点运行时验证", ContentRevision: NodeContentRevision, SourceSlug: NodeSourceSlug, MaterializedRevision: NodeMaterializedRevision},
+		SystemdChallengePath: {ID: "challenge-systemd-recovery", RevisionID: SystemdChallengeRevisionID, SourceRef: "platform-runtime/systemd-service-recovery/systemd-service-recovery", Title: "修复 systemd 服务", ContentRevision: SystemdContentRevision, SourceSlug: SystemdSourceSlug, MaterializedRevision: SystemdMaterializedRevision},
 	})
 	if err != nil {
 		panic(err)

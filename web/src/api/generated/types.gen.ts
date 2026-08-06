@@ -94,6 +94,8 @@ export type MySpaceAuthoringDraft = {
 
 export type MySpacePublishedChallenge = {
     challenge: MySpaceChallenge;
+    revision_id: string;
+    state: 'active' | 'deprecated';
     published_at: string;
     attempted_users: number;
     completed_users: number;
@@ -464,6 +466,8 @@ export type AuthoringSession = {
     intent_revision: number;
     visible_revision: number;
     publish_challenge_id?: string;
+    revision_challenge_id?: string;
+    revision_base_active_revision_id?: string;
     workflow?: AuthoringGenerationWorkflow;
     last_error?: string;
     updated_at: string;
@@ -886,6 +890,68 @@ export type CreateAuthoringSessionResponses = {
 };
 
 export type CreateAuthoringSessionResponse = CreateAuthoringSessionResponses[keyof CreateAuthoringSessionResponses];
+
+export type CreateAuthoringChallengeRevisionData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/authoring/challenges/{id}/revisions';
+};
+
+export type CreateAuthoringChallengeRevisionErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type CreateAuthoringChallengeRevisionError = CreateAuthoringChallengeRevisionErrors[keyof CreateAuthoringChallengeRevisionErrors];
+
+export type CreateAuthoringChallengeRevisionResponses = {
+    /**
+     * Challenge revision authoring session created
+     */
+    200: AuthoringSession;
+};
+
+export type CreateAuthoringChallengeRevisionResponse = CreateAuthoringChallengeRevisionResponses[keyof CreateAuthoringChallengeRevisionResponses];
+
+export type DeprecateAuthoringChallengeData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/authoring/challenges/{id}/deprecate';
+};
+
+export type DeprecateAuthoringChallengeErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type DeprecateAuthoringChallengeError = DeprecateAuthoringChallengeErrors[keyof DeprecateAuthoringChallengeErrors];
+
+export type DeprecateAuthoringChallengeResponses = {
+    /**
+     * Challenge deprecated
+     */
+    204: void;
+};
+
+export type DeprecateAuthoringChallengeResponse = DeprecateAuthoringChallengeResponses[keyof DeprecateAuthoringChallengeResponses];
 
 export type GetCurrentAuthoringSessionData = {
     body?: never;

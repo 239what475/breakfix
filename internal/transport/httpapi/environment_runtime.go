@@ -30,7 +30,7 @@ func (h *Handler) newEnvironmentSpec(userID string, entry *challenge.Entry) (bre
 	if entry.Runtime != challenge.RuntimeNode && entry.Runtime != challenge.RuntimeK8s {
 		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has unsupported runtime %q", entry.ID, entry.Runtime)
 	}
-	if strings.TrimSpace(userID) == "" || strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Revision) == "" {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(entry.ID) == "" || !challenge.ValidRevisionID(entry.RevisionID) {
 		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has an incomplete published identity", entry.ID)
 	}
 
@@ -57,7 +57,7 @@ func (h *Handler) newEnvironmentSpec(userID string, entry *challenge.Entry) (bre
 	return breakfixv1.EnvironmentSpec{
 		Purpose: breakfixv1.EnvironmentPurposeLearning,
 		Source: breakfixv1.EnvironmentSourceSpec{
-			Kind: breakfixv1.EnvironmentSourcePublished, Ref: entry.ID, Revision: entry.Revision,
+			Kind: breakfixv1.EnvironmentSourcePublished, Ref: entry.ID, Revision: entry.RevisionID,
 		},
 		UserRef:     userID,
 		Checkpoints: checkpoints,

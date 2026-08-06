@@ -91,7 +91,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	challengeID := challenge.NewID()
 	intent := catalogdomain.Commit{
 		ID: catalogdomain.EntryCommitIDFor(initializedRelease.ID, entry.ID), ReleaseID: initializedRelease.ID, EntryID: entry.ID,
-		ChallengeID: challengeID, SourceSlug: challenge.SourceSlugFor(binding.Challenge.Title, challengeID),
+		ChallengeID: challengeID, ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceSlug: challenge.SourceSlugFor(binding.Challenge.Title, challengeID),
 		State: catalogdomain.CommitPrepared, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	committing, commits, err := database.Catalog.PrepareReleaseCommit(ctx, initializedRelease.ID, []catalogdomain.Commit{intent}, now)
@@ -117,7 +117,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	}
 
 	revision, err := roadmap.CompilePortable(portable, map[string]roadmap.ChallengeRef{
-		binding.Challenge.Path: {ID: challengeID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: binding.Challenge.ContentRevision, SourceSlug: intent.SourceSlug, MaterializedRevision: "sha256:" + strings.Repeat("f", 64)},
+		binding.Challenge.Path: {ID: challengeID, RevisionID: intent.ChallengeRevisionID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: binding.Challenge.ContentRevision, SourceSlug: intent.SourceSlug, MaterializedRevision: "sha256:" + strings.Repeat("f", 64)},
 	})
 	if err != nil {
 		t.Fatalf("compile catalog roadmap revision: %v", err)

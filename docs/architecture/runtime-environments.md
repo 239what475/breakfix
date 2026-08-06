@@ -11,9 +11,13 @@ Server 写 `spec`，Controller 调和实际资源并写 `status`。Controller �
 | `NodeEnvironment` | `node` | 可以进入题目声明的所有节点 | Incus system containers 与每环境隔离网络。 |
 | `VK8sEnvironment` | `k8s` | 进入管理 terminal，通过 kubeconfig 操作 vcluster | vcluster、管理 terminal 和题目工作负载。 |
 
-环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自已发布 challenge；
+环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自当前 active challenge revision；
 验证环境来自 immutable CandidateRevision artifact。两者都复制运行时 profile、challenge revision、
 checkpoint 定义和 artifact reference，因此后续配置或题目修改不会改变已运行环境。
+
+Environment 的 `spec.environment.source` 同时保存稳定 `challenge_id` 和不可变 `challenge_revision_id`。作者发布新
+revision 或弃用 Challenge 后，已有 Environment、Progress、Assistant 和 Terminal 仍按这个 revision 读取；只有新建
+Environment 才解析当前 Catalog。Deprecated Challenge 不出现在公开 Catalog，也不能创建新的学习 Environment。
 
 ## 生命周期
 

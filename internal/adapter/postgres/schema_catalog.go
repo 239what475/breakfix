@@ -50,6 +50,7 @@ var schemaCatalogStatements = []string{
 		release_id TEXT NOT NULL REFERENCES catalog_releases(id) ON DELETE RESTRICT,
 		entry_id TEXT NOT NULL UNIQUE REFERENCES catalog_release_entries(id) ON DELETE RESTRICT,
 		challenge_id TEXT NOT NULL UNIQUE,
+		challenge_revision_id TEXT NOT NULL UNIQUE,
 		source_slug TEXT NOT NULL UNIQUE,
 		state TEXT NOT NULL CHECK (state IN ('Pending', 'Prepared', 'ArtifactPublished', 'Materialized', 'Committed', 'Failed')),
 		state_version BIGINT NOT NULL CHECK (state_version >= 1),

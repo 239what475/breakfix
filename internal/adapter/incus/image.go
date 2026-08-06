@@ -262,7 +262,7 @@ func (c *Client) PublishChallengeNodeImage(ctx context.Context, request PublishC
 	if err != nil {
 		return PublishNodeImageResult{}, err
 	}
-	challengeAlias, err := AliasForChallenge(c.config.NamePrefix, request.ChallengeID)
+	challengeAlias, err := AliasForChallenge(c.config.NamePrefix, request.ChallengeID, request.ChallengeRevisionID)
 	if err != nil {
 		return PublishNodeImageResult{}, err
 	}
@@ -287,12 +287,10 @@ func (c *Client) PublishChallengeNodeImage(ctx context.Context, request PublishC
 	if err := validateEnvironmentImage(image, request.Staging.Fingerprint); err != nil {
 		return PublishNodeImageResult{}, err
 	}
-	formal, etag, err := server.GetImageAlias(challengeAlias)
+	formal, _, err := server.GetImageAlias(challengeAlias)
 	if err == nil {
 		if formal.Target != request.Staging.Fingerprint {
-			if err := c.replaceChallengeNodeImage(ctx, server, challengeAlias, formal, etag, request); err != nil {
-				return PublishNodeImageResult{}, err
-			}
+			return PublishNodeImageResult{}, fmt.Errorf("%w: challenge image alias %q points to another immutable revision", ErrInvariant, challengeAlias)
 		}
 		return PublishNodeImageResult{Alias: challengeAlias, Fingerprint: request.Staging.Fingerprint}, nil
 	}
@@ -309,77 +307,6 @@ func (c *Client) PublishChallengeNodeImage(ctx context.Context, request PublishC
 		return PublishNodeImageResult{}, classify("create challenge image alias", challengeAlias, err)
 	}
 	return PublishNodeImageResult{Alias: challengeAlias, Fingerprint: request.Staging.Fingerprint}, nil
-}
-
-// FindChallengeNodeImage returns an already-published formal image only when
-// it was built from the requested immutable bundle revision. Catalog seeding
-// uses this before building so repeating a successful seed does not create a
-// new image merely because Incus publish timestamps differ.
-func (c *Client) FindChallengeNodeImage(ctx context.Context, challengeID, revision string) (PublishNodeImageResult, bool, error) {
-	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(revision) == "" {
-		return PublishNodeImageResult{}, false, fmt.Errorf("%w: challenge ID and revision are required", ErrInvalid)
-	}
-	aliasName, err := AliasForChallenge(c.config.NamePrefix, challengeID)
-	if err != nil {
-		return PublishNodeImageResult{}, false, err
-	}
-	server, err := c.scoped(ctx, c.config.ImageProject)
-	if err != nil {
-		return PublishNodeImageResult{}, false, err
-	}
-	alias, _, err := server.GetImageAlias(aliasName)
-	if err != nil {
-		classified := classify("get challenge image alias", aliasName, err)
-		if errors.Is(classified, ErrNotFound) {
-			return PublishNodeImageResult{}, false, nil
-		}
-		return PublishNodeImageResult{}, false, classified
-	}
-	if !fullFingerprintPattern.MatchString(alias.Target) {
-		return PublishNodeImageResult{}, false, fmt.Errorf("%w: challenge image alias %q has an invalid target", ErrInvariant, aliasName)
-	}
-	image, _, err := server.GetImage(alias.Target)
-	if err != nil {
-		return PublishNodeImageResult{}, false, classify("get challenge image", alias.Target, err)
-	}
-	if image == nil || image.Public || image.Type != string(api.InstanceTypeContainer) || !image.ExpiresAt.IsZero() || image.Properties[revisionKey] != revision {
-		return PublishNodeImageResult{}, false, nil
-	}
-	return PublishNodeImageResult{Alias: aliasName, Fingerprint: alias.Target}, true, nil
-}
-
-func (c *Client) replaceChallengeNodeImage(ctx context.Context, server incus.InstanceServer, challengeAlias string, formal *api.ImageAliasesEntry, etag string, request PublishChallengeNodeImageRequest) error {
-	expected := strings.TrimSpace(request.ExpectedCurrentFingerprint)
-	if !fullFingerprintPattern.MatchString(expected) || formal.Target != expected {
-		return fmt.Errorf("%w: challenge image alias %q points to another image", ErrInvariant, challengeAlias)
-	}
-	if expected == c.config.BaseImageFingerprint {
-		return fmt.Errorf("%w: refusing to replace the configured Node base image", ErrInvariant)
-	}
-	previous, _, err := server.GetImage(expected)
-	if err != nil {
-		return classify("get replaced challenge image", expected, err)
-	}
-	if previous == nil || previous.Public || previous.Type != string(api.InstanceTypeContainer) || len(previous.Aliases) != 1 || previous.Aliases[0].Name != challengeAlias {
-		return fmt.Errorf("%w: replaced challenge image is not an unused private container image", ErrInvariant)
-	}
-	if err := server.UpdateImageAlias(challengeAlias, api.ImageAliasesEntryPut{
-		Target: request.Staging.Fingerprint, Description: "Breakfix published challenge image",
-	}, etag); err != nil {
-		return classify("replace challenge image alias", challengeAlias, err)
-	}
-	aliases, err := server.GetImageAliases()
-	if err != nil {
-		return classify("list challenge image aliases after replacement", expected, err)
-	}
-	if slices.ContainsFunc(aliases, func(alias api.ImageAliasesEntry) bool { return alias.Target == expected }) {
-		return nil
-	}
-	op, err := server.DeleteImage(expected)
-	if err != nil {
-		return classify("delete replaced challenge image", expected, err)
-	}
-	return waitOperation(ctx, "delete replaced challenge image", expected, op)
 }
 
 func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevisionID, fingerprint string) error {
@@ -399,8 +326,8 @@ func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevision
 	})
 }
 
-func (c *Client) DeleteChallengeNodeImage(ctx context.Context, challengeID, fingerprint string) error {
-	expectedAlias, err := AliasForChallenge(c.config.NamePrefix, challengeID)
+func (c *Client) DeleteChallengeNodeImage(ctx context.Context, challengeID, challengeRevisionID, fingerprint string) error {
+	expectedAlias, err := AliasForChallenge(c.config.NamePrefix, challengeID, challengeRevisionID)
 	if err != nil {
 		return err
 	}

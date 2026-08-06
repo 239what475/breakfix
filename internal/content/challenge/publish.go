@@ -11,18 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PromoteDirectory atomically turns a verified CandidateRevision directory into a
-// catalog challenge. The source directory is never modified: platform-owned
-// identity and image metadata are written only to Materialize's staging copy.
-func PromoteDirectory(challengesDir, sourceDir, challengeID, image, contentRevision string) (*Entry, error) {
-	return PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, contentRevision, time.Now().UTC())
-}
-
-// PromoteDirectoryAt has the same publication behavior as PromoteDirectory,
-// with an explicit platform publication time for deterministic callers.
-func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, contentRevision string, publishedAt time.Time) (*Entry, error) {
+// PromoteDirectoryAt atomically turns one verified source directory into a
+// materialized immutable Challenge revision. The source directory is never
+// modified: platform-owned identity and artifact metadata are written only to
+// Materialize's staging copy.
+func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, revisionID, sourceSlug, image, contentRevision string, publishedAt time.Time) (*Entry, error) {
 	if !ValidID(challengeID) {
 		return nil, fmt.Errorf("invalid challenge id %q", challengeID)
+	}
+	if !ValidRevisionID(revisionID) {
+		return nil, fmt.Errorf("invalid challenge revision id %q", revisionID)
 	}
 	if strings.TrimSpace(image) == "" {
 		return nil, fmt.Errorf("published image is empty")
@@ -37,16 +35,22 @@ func PromoteDirectoryAt(challengesDir, sourceDir, challengeID, image, contentRev
 	if err != nil {
 		return nil, fmt.Errorf("validate verified artifact: %w", err)
 	}
-	sourceSlug := SourceSlugFor(source.Title, challengeID)
-	return MaterializeWithSlug(challengesDir, challengeID, sourceSlug, func(staging string) error {
+	if sourceSlug == "" {
+		sourceSlug = SourceSlugFor(source.Title, challengeID)
+	}
+	if !ValidSourceSlug(sourceSlug) {
+		return nil, fmt.Errorf("invalid challenge source slug %q", sourceSlug)
+	}
+	directoryName := MaterializedPath(sourceSlug, revisionID)
+	return MaterializeWithPath(challengesDir, challengeID, revisionID, directoryName, func(staging string) error {
 		if err := CopyRegularFiles(sourceDir, staging); err != nil {
 			return err
 		}
-		return writePublishedManifest(staging, challengeID, sourceSlug, image, contentRevision, publishedAt)
+		return writePublishedManifest(staging, challengeID, revisionID, sourceSlug, image, contentRevision, publishedAt)
 	})
 }
 
-func writePublishedManifest(dir, challengeID, sourceSlug, image, contentRevision string, publishedAt time.Time) error {
+func writePublishedManifest(dir, challengeID, revisionID, sourceSlug, image, contentRevision string, publishedAt time.Time) error {
 	manifestPath := filepath.Join(dir, "challenge.yaml")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -57,6 +61,7 @@ func writePublishedManifest(dir, challengeID, sourceSlug, image, contentRevision
 		return fmt.Errorf("parse challenge manifest: %w", err)
 	}
 	manifest.ID = challengeID
+	manifest.RevisionID = revisionID
 	manifest.SourceSlug = sourceSlug
 	manifest.Image = image
 	manifest.ContentRevision = contentRevision

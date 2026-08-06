@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,14 +99,12 @@ func (h *Handler) StopChallenge(c *gin.Context, id string) {
 		return
 	}
 
-	challengeEntry, err := h.catalog.Entry(c.Request.Context(), id)
+	challengeEntry, env, err := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
 	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
-
-	env, err := h.findProgressEnvironment(c.Request.Context(), user.ID, challengeEntry)
-	if err != nil {
+		if errors.Is(err, errAmbiguousEnvironment) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(err).Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}
@@ -148,13 +147,12 @@ func (h *Handler) CreateTerminalTicket(c *gin.Context, challengeID string) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	challengeEntry, err := h.catalog.Entry(c.Request.Context(), challengeID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, challengeEntry)
+	_, env, err := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, challengeID, false)
 	if err != nil || env.UID == "" || !terminalEnvironmentReady(env, h.nodeTerminal) {
+		if errors.Is(err, errAmbiguousEnvironment) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(err).Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}
@@ -194,23 +192,22 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusForbidden, api.ErrorResponse{Error: "terminal origin is not allowed"})
 		return
 	}
-	challengeEntry, err := h.catalog.Entry(c.Request.Context(), challengeID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
 	ticket, err := h.db.Environment.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), challengeID, c.Query("window"), time.Now().UTC())
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "terminal ticket is invalid or expired"})
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), ticket.UserID, challengeEntry)
+	env, err := h.findActiveEnvironmentByUID(c.Request.Context(), ticket.UserID, ticket.EnvironmentUID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}
-	if env.UID != ticket.EnvironmentUID {
+	if env.UID != ticket.EnvironmentUID || env.ChallengeRef != challengeID {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
+		return
+	}
+	if _, err := h.entryForEnvironment(c.Request.Context(), env); err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge revision is unavailable"})
 		return
 	}
 	if !terminalEnvironmentReady(env, h.nodeTerminal) {
@@ -300,13 +297,12 @@ func (h *Handler) CloseTerminalWindow(c *gin.Context, challengeID, windowName st
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	entry, err := h.catalog.Entry(c.Request.Context(), challengeID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, entry)
+	_, env, err := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, challengeID, false)
 	if err != nil || !terminalEnvironmentReady(env, h.nodeTerminal) {
+		if errors.Is(err, errAmbiguousEnvironment) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(err).Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}

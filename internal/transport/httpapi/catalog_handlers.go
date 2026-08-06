@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -98,31 +99,70 @@ func (h *Handler) catalogEntries(ctx context.Context) (map[string]challenge.Entr
 }
 
 func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
-	if h.requireUser(c) == nil {
+	user := h.requireUser(c)
+	if user == nil {
 		return
 	}
+	var (
+		entry            *challenge.Entry
+		challengeRoadmap appcatalog.ChallengeRoadmap
+	)
 	published, err := h.catalog.Find(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+	if err == nil {
+		entry = &published.Entry
+		challengeRoadmap = published.Roadmap
+		// Prefer the revision pinned by an existing Environment. If there is
+		// no Environment, the public current revision remains readable without
+		// requiring a user to start one first.
+		if h.k8s != nil {
+				fixedEntry, _, environmentErr := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
+			switch {
+			case environmentErr == nil:
+				entry = fixedEntry
+			case errors.Is(environmentErr, errNoMatchingEnvironment):
+			case errors.Is(environmentErr, errAmbiguousEnvironment):
+				c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(environmentErr).Error()})
+				return
+			default:
+				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: environmentErr.Error()})
+				return
+			}
+		}
+	} else if errors.Is(err, challenge.ErrNotFound) {
+		entry, _, err = h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
+		if err != nil {
+			if errors.Is(err, errAmbiguousEnvironment) {
+				c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(err).Error()})
+				return
+			}
+			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
+			return
+		}
+		// A deprecated Challenge has no current Roadmap binding. Its durable
+		// content remains readable for an existing Environment, but there is
+		// no current classification to expose as if it were still published.
+		challengeRoadmap = appcatalog.ChallengeRoadmap{Tags: []roadmap.Tag{}, TopicNeighbors: []roadmap.Edge{}, ChallengeNeighbors: []roadmap.Edge{}}
+	} else {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	content, err := challenge.ReadContent(&published.Entry)
+	content, err := challenge.ReadContent(entry)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	checkpoints := toAPICheckpoints(published.Entry.Checkpoints)
+	checkpoints := toAPICheckpoints(entry.Checkpoints)
 	hints := content.Hints
 	c.JSON(http.StatusOK, api.ChallengeContent{
-		Id:          published.Entry.ID,
-		Title:       published.Entry.Title,
-		Runtime:     api.ChallengeContentRuntime(published.Entry.Runtime),
-		Nodes:       toAPIChallengeNodes(published.Entry.Nodes),
+		Id:          entry.ID,
+		Title:       entry.Title,
+		Runtime:     api.ChallengeContentRuntime(entry.Runtime),
+		Nodes:       toAPIChallengeNodes(entry.Nodes),
 		Problem:     content.Problem,
 		Solution:    content.Solution,
 		Hints:       hints,
 		Checkpoints: checkpoints,
-		Roadmap:     toAPIChallengeRoadmap(published.Roadmap),
+		Roadmap:     toAPIChallengeRoadmap(challengeRoadmap),
 	})
 }
 
@@ -176,13 +216,12 @@ func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {
 	if user == nil {
 		return
 	}
-	entry, err := h.catalog.Entry(c.Request.Context(), id)
+	_, env, err := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
 	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
-		return
-	}
-	env, err := h.findProgressEnvironment(c.Request.Context(), user.ID, entry)
-	if err != nil {
+		if errors.Is(err, errAmbiguousEnvironment) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: challengeEnvironmentError(err).Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this challenge"})
 		return
 	}

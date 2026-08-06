@@ -11,15 +11,16 @@ const (
 	testNodeImageFingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testK8sImageDigest       = "registry.example/breakfix/k8s@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	testContentRevision      = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	testChallengeRevisionID  = "chrev-1111111111111111"
 )
 
 func TestListAndGet(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "demo-task-source")
+	dir := filepath.Join(root, "demo-task-source", testChallengeRevisionID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: demo-task\nsource_slug: demo-task-source\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: demo-task\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: demo-task-source\ntitle: Demo\npublished_at: 2026-07-23T07:33:11Z\n"))
 	writeChallengeAssets(t, dir)
 
 	challenges, err := List(root)
@@ -36,7 +37,7 @@ func TestListAndGet(t *testing.T) {
 		t.Fatalf("unexpected published time %s", got)
 	}
 
-	challenge, err := Get(root, "demo-task")
+	challenge, err := Get(root, "demo-task", testChallengeRevisionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +51,8 @@ func TestListAndGet(t *testing.T) {
 
 func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 	root := t.TempDir()
-	_, err := MaterializeWithSlug(root, "fresh-task", "fresh-task-source", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: fresh-task\nsource_slug: fresh-task-source\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
+	_, err := MaterializeWithPath(root, "fresh-task", testChallengeRevisionID, "fresh-task-source/"+testChallengeRevisionID, func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: fresh-task\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: fresh-task-source\ntitle: Fresh\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeChallengeAssets(t, dst)
 		writeFile(t, filepath.Join(dst, "notes.txt"), "hello\n")
 		return nil
@@ -60,15 +61,15 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "fresh-task-source", "challenge.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "fresh-task-source", testChallengeRevisionID, "challenge.yaml")); err != nil {
 		t.Fatalf("expected finalized challenge, stat failed: %v", err)
 	}
 }
 
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
-	_, err := MaterializeWithSlug(root, "broken-task", "broken-task-source", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nsource_slug: broken-task-source\ntitle: Broken\nruntime: node\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
+	_, err := MaterializeWithPath(root, "broken-task", testChallengeRevisionID, "broken-task-source/"+testChallengeRevisionID, func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: broken-task-source\ntitle: Broken\nruntime: node\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
@@ -92,7 +93,7 @@ func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 
 func TestValidateDirAcceptsK8sRuntime(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), validPublishedK8sManifest("id: k8s-demo\nsource_slug: k8s-demo\ntitle: Kubernetes Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validPublishedK8sManifest("id: k8s-demo\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: k8s-demo\ntitle: Kubernetes Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
 	writeK8sChallengeAssets(t, root)
 
 	entry, err := ValidateDir(root)
@@ -115,7 +116,7 @@ func TestLoadDirRejectsMissingPublishedTime(t *testing.T) {
 
 func TestChallengeRevisionCoversAllArtifactFiles(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("id: revision-demo\ntitle: Revision Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
+	writeFile(t, filepath.Join(root, "challenge.yaml"), validManifest("id: revision-demo\nrevision_id: "+testChallengeRevisionID+"\ntitle: Revision Demo\npublished_at: 2026-07-24T08:00:00Z\n"))
 	writeChallengeAssets(t, root)
 
 	first, err := LoadDir(root)
@@ -157,14 +158,15 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	}
 
 	publishedAt := time.Date(2026, time.July, 24, 8, 15, 0, 0, time.UTC)
-	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", testNodeImageFingerprint, testContentRevision, publishedAt)
+	const sourceSlug = "verified-source-opaque-c"
+	published, err := PromoteDirectoryAt(filepath.Join(root, "challenges"), source, "opaque-challenge", testChallengeRevisionID, sourceSlug, testNodeImageFingerprint, testContentRevision, publishedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if published.ID != "opaque-challenge" || published.Image != testNodeImageFingerprint {
 		t.Fatalf("unexpected published entry: %#v", published)
 	}
-	if published.SourceSlug != "verified-source-opaque-c" || filepath.Base(published.Dir) != published.SourceSlug {
+	if published.SourceSlug != sourceSlug || filepath.Base(published.Dir) != testChallengeRevisionID || filepath.Base(filepath.Dir(published.Dir)) != sourceSlug {
 		t.Fatalf("published source slug = %q at %q", published.SourceSlug, published.Dir)
 	}
 	if !published.PublishedAt.Equal(publishedAt) {
@@ -185,22 +187,54 @@ func TestPromoteDirectoryKeepsVerifiedArtifactImmutable(t *testing.T) {
 	}
 }
 
-func TestMaterializeWithSlugSeparatesOpaqueIDFromReadableDirectory(t *testing.T) {
+func TestMaterializeWithPathSeparatesOpaqueIDFromReadableDirectory(t *testing.T) {
 	root := t.TempDir()
-	entry, err := MaterializeWithSlug(root, "chal-4m6q8r2t9v3x", "示例节点题-4m6q8r2", func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: 示例节点题-4m6q8r2\ntitle: 示例节点题\npublished_at: 2026-07-24T08:00:00Z\n"))
+	entry, err := MaterializeWithPath(root, "chal-4m6q8r2t9v3x", testChallengeRevisionID, "示例节点题-4m6q8r2/"+testChallengeRevisionID, func(dst string) error {
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: 示例节点题-4m6q8r2\ntitle: 示例节点题\npublished_at: 2026-07-24T08:00:00Z\n"))
 		writeChallengeAssets(t, dst)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.ID != "chal-4m6q8r2t9v3x" || filepath.Base(entry.Dir) != "示例节点题-4m6q8r2" {
+	if entry.ID != "chal-4m6q8r2t9v3x" || filepath.Base(entry.Dir) != testChallengeRevisionID || filepath.Base(filepath.Dir(entry.Dir)) != "示例节点题-4m6q8r2" {
 		t.Fatalf("opaque ID and source directory were not separated: %#v", entry)
 	}
-	loaded, err := Get(root, entry.ID)
+	loaded, err := Get(root, entry.ID, entry.RevisionID)
 	if err != nil || loaded.Dir != entry.Dir {
 		t.Fatalf("lookup by opaque ID through source directory = %#v, %v", loaded, err)
+	}
+}
+
+func TestMaterializeWithPathKeepsRevisionsInSeparateDirectories(t *testing.T) {
+	root := t.TempDir()
+	sourceSlug := "revision-history"
+	firstRevision := testChallengeRevisionID
+	secondRevision := "chrev-2222222222222222"
+	for _, revisionID := range []string{firstRevision, secondRevision} {
+		_, err := MaterializeWithPath(root, "chal-history", revisionID, sourceSlug+"/"+revisionID, func(dst string) error {
+			writeFile(t, filepath.Join(dst, "challenge.yaml"), validPublishedNodeManifest("id: chal-history\nrevision_id: "+revisionID+"\nsource_slug: "+sourceSlug+"\ntitle: Historical\npublished_at: 2026-07-24T08:00:00Z\n"))
+			writeChallengeAssets(t, dst)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("materialize revision %s: %v", revisionID, err)
+		}
+	}
+	for _, revisionID := range []string{firstRevision, secondRevision} {
+		if _, err := os.Stat(filepath.Join(root, sourceSlug, revisionID, "challenge.yaml")); err != nil {
+			t.Fatalf("revision %s was not retained: %v", revisionID, err)
+		}
+	}
+}
+
+func TestMaterializeWithPathRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	if _, err := MaterializeWithPath(root, "chal-traversal", testChallengeRevisionID, "../outside", func(string) error {
+		t.Fatal("populate called for invalid path")
+		return nil
+	}); err == nil {
+		t.Fatal("expected path traversal to be rejected")
 	}
 }
 
@@ -212,8 +246,8 @@ func TestSourceSlugForDoesNotEndWithTruncatedIdentifierSeparator(t *testing.T) {
 
 func TestListRejectsPublishedChallengeWithoutMatchingSourceSlug(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "readable-directory")
-	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nsource_slug: another-directory\ntitle: Mismatch\npublished_at: 2026-07-24T08:00:00Z\n"))
+	dir := filepath.Join(root, "readable-directory", testChallengeRevisionID)
+	writeFile(t, filepath.Join(dir, "challenge.yaml"), validPublishedNodeManifest("id: chal-4m6q8r2t9v3x\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: another-directory\ntitle: Mismatch\npublished_at: 2026-07-24T08:00:00Z\n"))
 	writeChallengeAssets(t, dir)
 
 	if _, err := List(root); err == nil {
