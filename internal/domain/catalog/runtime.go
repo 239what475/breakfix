@@ -10,6 +10,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
@@ -82,18 +83,22 @@ func (s CommitState) Valid() bool {
 // Release is a durable installation attempt for one immutable portable OCI
 // bundle. It has no user, Generator AgentRun, or authoring-session identity.
 type Release struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Version       string          `json:"version"`
-	BundleDigest  BundleDigest    `json:"bundle_digest"`
-	SourceDigest  ContentRevision `json:"source_digest"`
-	State         ReleaseState    `json:"state"`
-	SourceAttempt int             `json:"source_attempt"`
-	NextRunAt     time.Time       `json:"next_run_at"`
-	CommitID      string          `json:"commit_id,omitempty"`
-	LastError     string          `json:"last_error,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID                       string               `json:"id"`
+	Name                     string               `json:"name"`
+	Version                  string               `json:"version"`
+	BundleDigest             BundleDigest         `json:"bundle_digest"`
+	SourceDigest             ContentRevision      `json:"source_digest"`
+	State                    ReleaseState         `json:"state"`
+	SourceAttempt            int                  `json:"source_attempt"`
+	NextRunAt                time.Time            `json:"next_run_at"`
+	CommitID                 string               `json:"commit_id,omitempty"`
+	LastError                string               `json:"last_error,omitempty"`
+	FinalizerErrorCategory   publication.Category `json:"finalizer_error_category,omitempty"`
+	FinalizerLastError       string               `json:"finalizer_last_error,omitempty"`
+	FinalizerLastAttemptedAt *time.Time           `json:"finalizer_last_attempted_at,omitempty"`
+	FinalizerNextRetryAt     *time.Time           `json:"finalizer_next_retry_at,omitempty"`
+	CreatedAt                time.Time            `json:"created_at"`
+	UpdatedAt                time.Time            `json:"updated_at"`
 }
 
 func (r Release) Valid() bool {
@@ -102,6 +107,9 @@ func (r Release) Valid() bool {
 	}
 	initialized := strings.TrimSpace(r.Name) != "" || strings.TrimSpace(r.Version) != "" || r.SourceDigest != ""
 	if initialized && (strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.Version) == "" || !r.SourceDigest.Valid()) {
+		return false
+	}
+	if !r.validFinalizerDiagnostic() {
 		return false
 	}
 	if !initialized && r.State != ReleasePending && r.State != ReleaseFailed {
@@ -114,6 +122,22 @@ func (r Release) Valid() bool {
 		return r.CommitID == "" || strings.TrimSpace(r.CommitID) == CommitIDForRelease(r.ID)
 	}
 	return r.CommitID == ""
+}
+
+func (r Release) validFinalizerDiagnostic() bool {
+	if r.FinalizerErrorCategory == publication.CategoryUnknown {
+		return r.FinalizerLastError == "" && r.FinalizerLastAttemptedAt == nil && r.FinalizerNextRetryAt == nil
+	}
+	lastAttempted := time.Time{}
+	if r.FinalizerLastAttemptedAt != nil {
+		lastAttempted = *r.FinalizerLastAttemptedAt
+	}
+	return (publication.Diagnostic{
+		Category:        r.FinalizerErrorCategory,
+		LastError:       r.FinalizerLastError,
+		LastAttemptedAt: lastAttempted,
+		NextRetryAt:     r.FinalizerNextRetryAt,
+	}).Validate() == nil
 }
 
 // Entry records every durable output needed to resume a single source path.

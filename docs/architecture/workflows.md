@@ -53,6 +53,26 @@ Challenge，`ChallengePublishing` 创建新的 immutable revision，要求其 `B
 active pointer。Server 在同一事务中保存新 revision、将旧 revision 标为 `superseded`、切换 active pointer、更新
 Roadmap binding，并把 workflow 标为 `Published`。如果 fence 已变化，workflow 进入 `Failed`，旧 active revision 不受影响。
 
+### 发布 finalizer 诊断
+
+`ChallengePublishing` 的 Worker promotion 成功后，Server 仍要完成 source materialization 和 Roadmap 的事务性公开。
+这段尾部操作的失败不只写日志，而是持久化在 `GenerationWorkflow` 的四个字段中：
+
+- `finalizer_error_category`：`deterministic` 或 `transient`；为空表示没有待处理诊断。
+- `finalizer_last_error`：经过清理和长度限制的最近一次错误摘要。
+- `finalizer_last_attempted_at`：最近一次 finalizer 尝试时间。
+- `finalizer_next_retry_at`：瞬时错误的下一次尝试时间；确定性错误为空。
+
+物化结果、发布 intent 和这些诊断在同一数据库边界内更新。内容冲突、revision/invariant 不一致和不可接受的
+物化结果属于确定性错误：保留 candidate 与失败证据，把 workflow 置为现有 `Failed`，不再盲目重试。
+数据库、Server data PVC 或 provider I/O 等确实可能自行恢复的错误属于瞬时错误：workflow 保持
+`ChallengePublishing`，只在持久化的 `finalizer_next_retry_at` 到期后再次领取。Server 重启直接读取这组字段，
+不会丢失诊断，也不会提前执行重试；没有第二个内存队列或恢复权威。
+
+finalizer 成功完成 materialization 和 Roadmap 发布时，在同一事务中原子清空四个诊断字段。因而日志只是排障
+上下文，接口读取到的 workflow 诊断才是发布状态的权威记录。若 finalizer 在中途留下未被当前 Roadmap 引用的
+目录，它不会被公开读取，并由现有异步资源回收路径处理。
+
 弃用不是 Generation state。作者通过独立生命周期 API 请求后，Server 在锁定 Challenge 和当前 Roadmap 的事务中删除
 该题 binding/关系边并将 Challenge 标为 `deprecated`；历史 revision、artifact、Environment 和学习记录不删除。正常
 Catalog 和新 Environment 只看 active Roadmap，因此 deprecated Challenge 不会重新进入学习入口。

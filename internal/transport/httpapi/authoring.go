@@ -401,6 +401,11 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 	if workflow == nil {
 		return nil
 	}
+	var finalizerCategory *api.AuthoringGenerationWorkflowFinalizerErrorCategory
+	if workflow.FinalizerErrorCategory.Valid() {
+		value := api.AuthoringGenerationWorkflowFinalizerErrorCategory(workflow.FinalizerErrorCategory)
+		finalizerCategory = &value
+	}
 	return &api.AuthoringGenerationWorkflow{
 		Id:                            workflow.ID,
 		State:                         api.AuthoringGenerationWorkflowState(workflow.State),
@@ -409,6 +414,10 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 		CandidateRevisionId:           optionalString(workflow.CandidateRevisionID),
 		ClassificationRoadmapRevision: optionalString(workflow.ClassificationRoadmapRevision),
 		LastError:                     optionalString(workflow.LastError),
+		FinalizerErrorCategory:        finalizerCategory,
+		FinalizerLastError:            optionalString(workflow.FinalizerLastError),
+		FinalizerLastAttemptedAt:      workflow.FinalizerLastAttemptedAt,
+		FinalizerNextRetryAt:          workflow.FinalizerNextRetryAt,
 		CreatedAt:                     workflow.CreatedAt.UTC(),
 		UpdatedAt:                     workflow.UpdatedAt.UTC(),
 	}

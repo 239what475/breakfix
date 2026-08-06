@@ -79,18 +79,18 @@ func insertChallengeLifecycleFixture(t *testing.T, database *Store, sourceKind c
 	t.Helper()
 	index := strings.TrimPrefix(challenge.NewID(), "chal-")[:8]
 	challengeID := "chal-" + index
-	revisionID := "chrev-" + strings.Repeat(string(index[0]), 16)
+	revisionID := challenge.NewRevisionID()
 	sourceSlug := "lifecycle-" + index
 	contentRevision := "sha256:" + strings.Repeat("a", 64)
 	materializedRevision := "sha256:" + strings.Repeat("b", 64)
 	artifact := execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "lifecycle-" + index, IncusFingerprint: strings.Repeat("c", 64)}
 	fixture := challengeLifecycleFixture{
 		challenge: challengedomain.Challenge{
-			ID: challengeID, SourceKind: sourceKind, SourceRef: "source-" + index, OwnerUserID: owner,
+			ID: challengeID, SourceKind: sourceKind, SourceRef: "lifecycle/topic/" + index, OwnerUserID: owner,
 			State: challengedomain.StateActive, ActiveRevisionID: revisionID, SourceSlug: sourceSlug, CreatedAt: now, UpdatedAt: now,
 		},
 		revision: challengedomain.Revision{
-			ID: revisionID, ChallengeID: challengeID, SourceKind: sourceKind, SourceRef: "source-" + index, SourceRevisionID: "1",
+			ID: revisionID, ChallengeID: challengeID, SourceKind: sourceKind, SourceRef: "lifecycle/topic/" + index, SourceRevisionID: "1",
 			Title: "Lifecycle challenge " + index, Runtime: challenge.RuntimeNode, ContentRevision: contentRevision, SourceSlug: sourceSlug,
 			MaterializedPath: challenge.MaterializedPath(sourceSlug, revisionID), MaterializedRevision: materializedRevision, Artifact: artifact,
 			State: challengedomain.RevisionActive, PublishedAt: now, CreatedAt: now,

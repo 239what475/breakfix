@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
@@ -23,7 +24,7 @@ var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
 
 const generationWorkflowColumns = `id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
 	COALESCE(candidate_revision_id, ''), COALESCE(active_agent_run_id, ''), state_version, runtime_attempt, lease_owner, lease_expires_at,
-	next_run_at, last_error, created_at, updated_at`
+	next_run_at, last_error, finalizer_error_category, finalizer_last_error, finalizer_last_attempted_at, finalizer_next_retry_at, created_at, updated_at`
 const generationWorkflowSelect = `SELECT ` + generationWorkflowColumns + ` FROM generation_workflows`
 
 func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, sessionID, userID string, confirmation generation.StartConfirmation, now time.Time) (*generation.Workflow, error) {
@@ -1316,7 +1317,8 @@ func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx co
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), candidateRevision.ID); err != nil {
 		return fmt.Errorf("record generation challenge promotion result: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET lease_owner = '', lease_expires_at = NULL, last_error = '', updated_at = ?
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET lease_owner = '', lease_expires_at = NULL, last_error = '',
+		finalizer_error_category = '', finalizer_last_error = '', finalizer_last_attempted_at = NULL, finalizer_next_retry_at = NULL, updated_at = ?
 		WHERE id = ? AND state = ? AND state_version = ?`, now.UTC(), workflow.ID, generation.StateChallengePublishing, workflow.StateVersion); err != nil {
 		return fmt.Errorf("release generation challenge promotion lease: %w", err)
 	}
@@ -1326,14 +1328,18 @@ func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx co
 // PendingGenerationPublicationFinalizations returns only promotion results
 // that still need Server-owned source materialization and transactional
 // Roadmap publication. No Runtime Worker action is returned for these rows.
-func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx context.Context) ([]generation.PublicationFinalization, error) {
+func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx context.Context, now time.Time) ([]generation.PublicationFinalization, error) {
+	if now.IsZero() {
+		return nil, errors.New("generation publication finalizer listing requires current time")
+	}
 	rows, err := d.conn.QueryContext(ctx, generationWorkflowSelect+` WHERE state = ?
+		AND (finalizer_next_retry_at IS NULL OR finalizer_next_retry_at <= ?)
 		AND EXISTS (
 			SELECT 1 FROM candidate_revisions candidate
 			WHERE candidate.id = generation_workflows.candidate_revision_id
 			AND candidate.publication -> 'artifact' IS NOT NULL
 			AND candidate.published_at IS NULL
-		) ORDER BY updated_at, id`, generation.StateChallengePublishing)
+		) ORDER BY updated_at, id`, generation.StateChallengePublishing, now.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("list pending generation publication finalizers: %w", err)
 	}
@@ -1354,6 +1360,79 @@ func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx con
 		return nil, fmt.Errorf("iterate pending generation publication finalizers: %w", err)
 	}
 	return result, nil
+}
+
+// RecordGenerationPublicationFinalizerFailure persists the Server-owned
+// materialization outcome after Runtime Worker promotion has already been
+// recorded. Transient failures keep ChallengePublishing and its retry time;
+// deterministic failures close the workflow without touching the published
+// artifact intent.
+func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx context.Context, workflowID, candidateRevisionID string, diagnostic publication.Diagnostic) (*generation.Workflow, error) {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" || diagnostic.Validate() != nil {
+		return nil, errors.New("generation publication finalizer diagnostic is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin generation publication finalizer failure: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND state = ? FOR UPDATE`,
+		strings.TrimSpace(workflowID), generation.StateChallengePublishing))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, generation.ErrCandidateInvalidState
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock generation publication finalizer workflow: %w", err)
+	}
+	if workflow.CandidateRevisionID != strings.TrimSpace(candidateRevisionID) {
+		return nil, generation.ErrCandidateInvalidState
+	}
+	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	if err != nil {
+		return nil, err
+	}
+	if candidateRevision.Publication == nil || candidateRevision.PublishedAt != nil {
+		return nil, generation.ErrCandidateInvalidState
+	}
+	if diagnostic.Category == publication.CategoryDeterministic {
+		failure, marshalErr := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: "PUBLICATION_FINALIZER", Summary: diagnostic.LastError})
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, failure, diagnostic.LastAttemptedAt.UTC(), candidateRevision.ID); err != nil {
+			return nil, fmt.Errorf("record generation publication finalizer evidence: %w", err)
+		}
+	}
+	var nextRunAt any = diagnostic.LastAttemptedAt.UTC()
+	if diagnostic.NextRetryAt != nil {
+		nextRunAt = diagnostic.NextRetryAt.UTC()
+	}
+	state := generation.StateChallengePublishing
+	stateVersion := workflow.StateVersion
+	runtimeAttempt := workflow.RuntimeAttempt
+	if diagnostic.Category == publication.CategoryDeterministic {
+		state = generation.StateFailed
+		stateVersion++
+		runtimeAttempt = 0
+	}
+	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = ?, runtime_attempt = ?,
+		lease_owner = '', lease_expires_at = NULL, next_run_at = ?, last_error = ?, finalizer_error_category = ?, finalizer_last_error = ?,
+		finalizer_last_attempted_at = ?, finalizer_next_retry_at = ?, updated_at = ?
+		WHERE id = ? AND state = ? RETURNING `+generationWorkflowColumns,
+		state, stateVersion, runtimeAttempt, nextRunAt, diagnostic.LastError, diagnostic.Category, diagnostic.LastError,
+		diagnostic.LastAttemptedAt.UTC(), func() any {
+			if diagnostic.NextRetryAt == nil {
+				return nil
+			}
+			return diagnostic.NextRetryAt.UTC()
+		}(), diagnostic.LastAttemptedAt.UTC(), workflow.ID, generation.StateChallengePublishing))
+	if err != nil {
+		return nil, fmt.Errorf("persist generation publication finalizer failure: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit generation publication finalizer failure: %w", err)
+	}
+	return updated, nil
 }
 
 // FinalizeGenerationChallengePublication makes one already-promoted artifact
@@ -1499,7 +1578,8 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
 		runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL, active_agent_run_id = NULL,
-		last_error = '', updated_at = ? WHERE id = ?`, generation.StatePublished, now.UTC(), workflow.ID); err != nil {
+		last_error = '', finalizer_error_category = '', finalizer_last_error = '', finalizer_last_attempted_at = NULL,
+		finalizer_next_retry_at = NULL, updated_at = ? WHERE id = ?`, generation.StatePublished, now.UTC(), workflow.ID); err != nil {
 		return fmt.Errorf("complete generation publication: %w", err)
 	}
 	_ = canonical
@@ -2257,16 +2337,25 @@ func workflowRuntimeTx(ctx context.Context, tx *Tx, candidateID string) (string,
 
 func scanGenerationWorkflow(row agentRow) (*generation.Workflow, error) {
 	var workflow generation.Workflow
-	var leaseExpiresAt sql.NullTime
+	var leaseExpiresAt, finalizerLastAttemptedAt, finalizerNextRetryAt sql.NullTime
 	err := row.Scan(&workflow.ID, &workflow.Source.Kind, &workflow.Source.Ref, &workflow.SourceRevision, &workflow.State, &workflow.ClassificationRoadmapRevision, &workflow.ClassificationFeedback,
 		&workflow.CandidateRevisionID, &workflow.ActiveAgentRunID, &workflow.StateVersion, &workflow.RuntimeAttempt, &workflow.LeaseOwner, &leaseExpiresAt,
-		&workflow.NextRunAt, &workflow.LastError, &workflow.CreatedAt, &workflow.UpdatedAt)
+		&workflow.NextRunAt, &workflow.LastError, &workflow.FinalizerErrorCategory, &workflow.FinalizerLastError, &finalizerLastAttemptedAt, &finalizerNextRetryAt,
+		&workflow.CreatedAt, &workflow.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	if leaseExpiresAt.Valid {
 		value := leaseExpiresAt.Time.UTC()
 		workflow.LeaseExpiresAt = &value
+	}
+	if finalizerLastAttemptedAt.Valid {
+		value := finalizerLastAttemptedAt.Time.UTC()
+		workflow.FinalizerLastAttemptedAt = &value
+	}
+	if finalizerNextRetryAt.Valid {
+		value := finalizerNextRetryAt.Time.UTC()
+		workflow.FinalizerNextRetryAt = &value
 	}
 	workflow.NextRunAt = workflow.NextRunAt.UTC()
 	workflow.CreatedAt = workflow.CreatedAt.UTC()

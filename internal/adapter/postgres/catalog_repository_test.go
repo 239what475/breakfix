@@ -10,6 +10,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
@@ -122,9 +123,30 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err != nil {
 		t.Fatalf("compile catalog roadmap revision: %v", err)
 	}
+	diagnostic, err := publication.NewDiagnostic(publication.Transient(errors.New("temporary materialization filesystem failure")), now)
+	if err != nil {
+		t.Fatalf("create catalog publication diagnostic: %v", err)
+	}
+	transient, err := database.Catalog.RecordCatalogFinalizerFailure(ctx, initializedRelease.ID, diagnostic)
+	if err != nil {
+		t.Fatalf("record catalog publication diagnostic: %v", err)
+	}
+	if transient.State != catalogdomain.ReleaseCommitting || transient.FinalizerErrorCategory != publication.CategoryTransient || transient.FinalizerNextRetryAt == nil {
+		t.Fatalf("catalog transient publication state = %#v", transient)
+	}
+	reloaded, err := database.Catalog.Release(ctx, initializedRelease.ID)
+	if err != nil {
+		t.Fatalf("reload catalog publication diagnostic: %v", err)
+	}
+	if reloaded.FinalizerLastError != "temporary materialization filesystem failure" || reloaded.FinalizerNextRetryAt == nil {
+		t.Fatalf("reloaded catalog publication diagnostic = %#v", reloaded)
+	}
 	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, revision, now)
 	if err != nil || ready.State != catalogdomain.ReleaseReady {
 		t.Fatalf("complete catalog release = %#v, err=%v", ready, err)
+	}
+	if ready.FinalizerErrorCategory != publication.CategoryUnknown || ready.FinalizerLastError != "" || ready.FinalizerLastAttemptedAt != nil || ready.FinalizerNextRetryAt != nil {
+		t.Fatalf("ready catalog release retained finalizer diagnostic = %#v", ready)
 	}
 	current, err := database.Roadmap.CurrentRoadmap(ctx)
 	if err != nil || len(current.ChallengeBindings) != 1 || current.ChallengeBindings[0].Challenge.ID != challengeID {
@@ -209,6 +231,48 @@ func TestCatalogSourceAndEntryRuntimeRetriesAreStateScoped(t *testing.T) {
 			t.Fatalf("read renewed entry lease = %#v, err=%v", stored, err)
 		}
 		expiredAt = stored.LeaseExpires.Add(time.Second)
+	}
+}
+
+func TestCatalogDeterministicFinalizerFailureIsTerminal(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 15, 0, 0, 0, time.UTC)
+	digest := catalogdomain.BundleDigest("sha256:" + strings.Repeat("c", 64))
+	release := catalogdomain.Release{
+		ID: catalogdomain.ReleaseIDForBundle(digest), BundleDigest: digest, State: catalogdomain.ReleasePending,
+		SourceAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	created, inserted, err := database.Catalog.CreateOrGetRelease(ctx, release)
+	if err != nil || !inserted {
+		t.Fatalf("create catalog finalizer release = %#v, inserted=%v, err=%v", created, inserted, err)
+	}
+	portable := roadmaptest.PortableRevision()
+	entry := catalogRepositoryEntry(created.ID, portable.ChallengeBindings[0], now)
+	initialized := *created
+	initialized.Name = "catalog-finalizer"
+	initialized.Version = "2026.08.04"
+	initialized.SourceDigest = catalogdomain.ContentRevision("sha256:" + strings.Repeat("d", 64))
+	if _, err := database.Catalog.InitializeRelease(ctx, initialized, []catalogdomain.Entry{entry}, now); err != nil {
+		t.Fatalf("initialize catalog finalizer release: %v", err)
+	}
+	diagnostic, err := publication.NewDiagnostic(publication.Deterministic(errors.New("catalog commit does not match immutable source")), now)
+	if err != nil {
+		t.Fatalf("create deterministic catalog diagnostic: %v", err)
+	}
+	failed, err := database.Catalog.RecordCatalogFinalizerFailure(ctx, initialized.ID, diagnostic)
+	if err != nil {
+		t.Fatalf("record deterministic catalog diagnostic: %v", err)
+	}
+	if failed.State != catalogdomain.ReleaseFailed || failed.FinalizerErrorCategory != publication.CategoryDeterministic || failed.FinalizerNextRetryAt != nil {
+		t.Fatalf("failed catalog release = %#v", failed)
+	}
+	reloaded, err := database.Catalog.Release(ctx, initialized.ID)
+	if err != nil {
+		t.Fatalf("reload failed catalog release: %v", err)
+	}
+	if reloaded.FinalizerLastError != "catalog commit does not match immutable source" || reloaded.FinalizerLastAttemptedAt == nil {
+		t.Fatalf("reloaded failed catalog diagnostic = %#v", reloaded)
 	}
 }
 

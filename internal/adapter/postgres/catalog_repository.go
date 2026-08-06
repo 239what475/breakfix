@@ -15,6 +15,7 @@ import (
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
@@ -27,7 +28,7 @@ var (
 )
 
 const catalogReleaseColumns = `id, name, version, bundle_digest, source_digest, state, source_attempt, next_run_at, commit_id,
-	last_error, created_at, updated_at`
+	last_error, finalizer_error_category, finalizer_last_error, finalizer_last_attempted_at, finalizer_next_retry_at, created_at, updated_at`
 const catalogReleaseSelect = `SELECT ` + catalogReleaseColumns + ` FROM catalog_releases`
 
 const catalogEntryColumns = `id, release_id, source_path, source_ref, title, content_revision, archive_sha256,
@@ -203,6 +204,55 @@ func (d *CatalogRepository) FailPendingRelease(ctx context.Context, releaseID, s
 
 func (d *CatalogRepository) FailRelease(ctx context.Context, releaseID, summary string, now time.Time) (*catalogdomain.Release, error) {
 	return d.failReleaseState(ctx, releaseID, []catalogdomain.ReleaseState{catalogdomain.ReleasePending, catalogdomain.ReleaseInstalling, catalogdomain.ReleaseCommitting}, summary, now)
+}
+
+// RecordCatalogFinalizerFailure persists the Server-owned Catalog commit
+// finalizer outcome. A transient failure keeps the release in Committing (or
+// Installing for a source-side finalizer) and schedules the next pass from the
+// durable timestamp. A deterministic failure closes the release as Failed.
+func (d *CatalogRepository) RecordCatalogFinalizerFailure(ctx context.Context, releaseID string, diagnostic publication.Diagnostic) (*catalogdomain.Release, error) {
+	if strings.TrimSpace(releaseID) == "" || diagnostic.Validate() != nil {
+		return nil, errors.New("catalog finalizer diagnostic is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin catalog finalizer failure: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	release, err := scanCatalogRelease(tx.QueryRowContext(ctx, catalogReleaseSelect+` WHERE id = ? FOR UPDATE`, strings.TrimSpace(releaseID)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCatalogReleaseNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock catalog finalizer release: %w", err)
+	}
+	if release.State != catalogdomain.ReleaseInstalling && release.State != catalogdomain.ReleaseCommitting {
+		return nil, ErrCatalogLeaseLost
+	}
+	state := release.State
+	nextRunAt := diagnostic.LastAttemptedAt.UTC()
+	if diagnostic.NextRetryAt != nil {
+		nextRunAt = diagnostic.NextRetryAt.UTC()
+	}
+	if diagnostic.Category == publication.CategoryDeterministic {
+		state = catalogdomain.ReleaseFailed
+	}
+	updated, err := scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, next_run_at = ?, last_error = ?,
+		finalizer_error_category = ?, finalizer_last_error = ?, finalizer_last_attempted_at = ?, finalizer_next_retry_at = ?, updated_at = ?
+		WHERE id = ? AND state IN (?, ?) RETURNING `+catalogReleaseColumns,
+		state, nextRunAt, diagnostic.LastError, diagnostic.Category, diagnostic.LastError, diagnostic.LastAttemptedAt.UTC(), func() any {
+			if diagnostic.NextRetryAt == nil {
+				return nil
+			}
+			return diagnostic.NextRetryAt.UTC()
+		}(), diagnostic.LastAttemptedAt.UTC(), release.ID, catalogdomain.ReleaseInstalling, catalogdomain.ReleaseCommitting))
+	if err != nil {
+		return nil, fmt.Errorf("persist catalog finalizer failure: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit catalog finalizer failure: %w", err)
+	}
+	return updated, nil
 }
 
 func (d *CatalogRepository) failReleaseState(ctx context.Context, releaseID string, allowed []catalogdomain.ReleaseState, summary string, now time.Time) (*catalogdomain.Release, error) {
@@ -729,7 +779,8 @@ func (d *CatalogRepository) PrepareReleaseCommit(ctx context.Context, releaseID 
 	if entryCount != intentCount || entryCount != len(intents) {
 		return nil, nil, errors.New("catalog release commit intents do not cover every entry")
 	}
-	release, err = scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, commit_id = ?, last_error = '', updated_at = ?
+	release, err = scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, commit_id = ?, last_error = '',
+		finalizer_error_category = '', finalizer_last_error = '', finalizer_last_attempted_at = NULL, finalizer_next_retry_at = NULL, updated_at = ?
 		WHERE id = ? RETURNING `+catalogReleaseColumns, catalogdomain.ReleaseCommitting, catalogdomain.CommitIDForRelease(release.ID), now.UTC(), release.ID))
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin catalog release commit: %w", err)
@@ -873,7 +924,8 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 		WHERE release_id = ? AND state = ?`, catalogdomain.CommitCommitted, now.UTC(), now.UTC(), release.ID, catalogdomain.CommitMaterialized); err != nil {
 		return nil, fmt.Errorf("complete catalog entry commits: %w", err)
 	}
-	updated, err := scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = '', updated_at = ?
+	updated, err := scanCatalogRelease(tx.QueryRowContext(ctx, `UPDATE catalog_releases SET state = ?, last_error = '',
+		finalizer_error_category = '', finalizer_last_error = '', finalizer_last_attempted_at = NULL, finalizer_next_retry_at = NULL, updated_at = ?
 		WHERE id = ? RETURNING `+catalogReleaseColumns, catalogdomain.ReleaseReady, now.UTC(), release.ID))
 	if err != nil {
 		return nil, err
@@ -1220,12 +1272,22 @@ func scanCatalogCommits(rows *sql.Rows) ([]catalogdomain.Commit, error) {
 func scanCatalogRelease(row scanner) (*catalogdomain.Release, error) {
 	var value catalogdomain.Release
 	var digest, sourceDigest string
+	var finalizerLastAttemptedAt, finalizerNextRetryAt sql.NullTime
 	if err := row.Scan(&value.ID, &value.Name, &value.Version, &digest, &sourceDigest, &value.State, &value.SourceAttempt, &value.NextRunAt,
-		&value.CommitID, &value.LastError, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		&value.CommitID, &value.LastError, &value.FinalizerErrorCategory, &value.FinalizerLastError, &finalizerLastAttemptedAt, &finalizerNextRetryAt,
+		&value.CreatedAt, &value.UpdatedAt); err != nil {
 		return nil, err
 	}
 	value.BundleDigest = catalogdomain.BundleDigest(digest)
 	value.SourceDigest = catalogdomain.ContentRevision(sourceDigest)
+	if finalizerLastAttemptedAt.Valid {
+		at := finalizerLastAttemptedAt.Time.UTC()
+		value.FinalizerLastAttemptedAt = &at
+	}
+	if finalizerNextRetryAt.Valid {
+		at := finalizerNextRetryAt.Time.UTC()
+		value.FinalizerNextRetryAt = &at
+	}
 	value.NextRunAt = value.NextRunAt.UTC()
 	value.CreatedAt = value.CreatedAt.UTC()
 	value.UpdatedAt = value.UpdatedAt.UTC()

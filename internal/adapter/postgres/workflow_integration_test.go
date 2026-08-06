@@ -13,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
@@ -95,17 +96,49 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	if err := database.Generation.RecordGenerationChallengePublicationResult(ctx, claim, finalArtifact, publishAt); err != nil {
 		t.Fatalf("record classification promotion: %v", err)
 	}
-	pendingFinalizations, err := database.Generation.PendingGenerationPublicationFinalizations(ctx)
+	pendingFinalizations, err := database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt)
 	if err != nil {
 		t.Fatalf("list pending publication finalizations: %v", err)
 	}
 	if len(pendingFinalizations) != 1 || pendingFinalizations[0].Workflow.ID != workflow.ID {
 		t.Fatalf("pending publication finalizations = %#v", pendingFinalizations)
 	}
+	diagnostic, err := publication.NewDiagnostic(publication.Transient(errors.New("temporary PVC write failure")), publishAt)
+	if err != nil {
+		t.Fatalf("create publication diagnostic: %v", err)
+	}
+	transient, err := database.Generation.RecordGenerationPublicationFinalizerFailure(ctx, workflow.ID, candidate.ID, diagnostic)
+	if err != nil {
+		t.Fatalf("record transient publication diagnostic: %v", err)
+	}
+	if transient.State != generation.StateChallengePublishing || transient.FinalizerErrorCategory != publication.CategoryTransient || transient.FinalizerNextRetryAt == nil {
+		t.Fatalf("transient publication workflow = %#v", transient)
+	}
+	restarted, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("reload transient publication workflow: %v", err)
+	}
+	if restarted.FinalizerLastError != "temporary PVC write failure" || restarted.FinalizerNextRetryAt == nil || !restarted.FinalizerNextRetryAt.Equal(*transient.FinalizerNextRetryAt) {
+		t.Fatalf("reloaded publication diagnostic = %#v", restarted)
+	}
+	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("list early publication retry: %v", err)
+	}
+	if len(pendingFinalizations) != 0 {
+		t.Fatalf("publication retried before durable retry time: %#v", pendingFinalizations)
+	}
+	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx, *transient.FinalizerNextRetryAt)
+	if err != nil {
+		t.Fatalf("list due publication retry: %v", err)
+	}
+	if len(pendingFinalizations) != 1 {
+		t.Fatalf("due publication retry count = %d", len(pendingFinalizations))
+	}
 	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", publishAt); err != nil {
 		t.Fatalf("finalize classification publication: %v", err)
 	}
-	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx)
+	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt)
 	if err != nil {
 		t.Fatalf("list finalized publication finalizations: %v", err)
 	}
@@ -118,6 +151,9 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	}
 	if published.State != generation.StatePublished || !published.State.Terminal() || published.CandidateRevisionID != candidate.ID {
 		t.Fatalf("published workflow = %#v", published)
+	}
+	if published.FinalizerErrorCategory != publication.CategoryUnknown || published.FinalizerLastError != "" || published.FinalizerLastAttemptedAt != nil || published.FinalizerNextRetryAt != nil {
+		t.Fatalf("published workflow retained finalizer diagnostic = %#v", published)
 	}
 	current, err := database.Roadmap.CurrentRoadmap(ctx)
 	if err != nil {
@@ -136,6 +172,38 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 		if binding.Challenge.SourceSlug == "" || binding.Challenge.MaterializedRevision != "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
 			t.Fatalf("generated binding omitted materialized identity: %#v", binding.Challenge)
 		}
+	}
+}
+
+func TestGenerationPublicationDeterministicFinalizerFailureEndsWorkflow(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 4, 16, 0, 0, 0, time.UTC)
+	workflow, candidate, publishAt := prepareGenerationPublication(t, database, now)
+	diagnostic, err := publication.NewDiagnostic(publication.Deterministic(errors.New("materialized revision conflicts with publication intent")), publishAt)
+	if err != nil {
+		t.Fatalf("create deterministic publication diagnostic: %v", err)
+	}
+	failed, err := database.Generation.RecordGenerationPublicationFinalizerFailure(ctx, workflow.ID, candidate.ID, diagnostic)
+	if err != nil {
+		t.Fatalf("record deterministic publication diagnostic: %v", err)
+	}
+	if failed.State != generation.StateFailed || failed.FinalizerErrorCategory != publication.CategoryDeterministic || failed.FinalizerNextRetryAt != nil {
+		t.Fatalf("failed publication workflow = %#v", failed)
+	}
+	persisted, err := database.Generation.GetCandidateRevision(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("load failed publication candidate: %v", err)
+	}
+	if persisted.Failure == nil || persisted.Failure.Code != "PUBLICATION_FINALIZER" || persisted.PublishedAt != nil {
+		t.Fatalf("failed publication candidate = %#v", persisted)
+	}
+	pending, err := database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("list failed publication finalizers: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("failed publication remained claimable: %#v", pending)
 	}
 }
 
@@ -751,6 +819,41 @@ func publishWorkflowRoadmap(t *testing.T, database *Store, now time.Time) *roadm
 		t.Fatalf("publish workflow roadmap fixture: %v", err)
 	}
 	return value
+}
+
+func prepareGenerationPublication(t *testing.T, database *Store, now time.Time) (*generation.Workflow, generation.Revision, time.Time) {
+	t.Helper()
+	initialRoadmap := publishWorkflowRoadmap(t, database, now)
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	candidate := advanceToVerifiedCandidate(t, database, workflow.ID, now)
+	classificationAt := now.Add(10 * time.Minute)
+	if _, err := database.Generation.ConfirmGenerationContent(context.Background(), sessionID, userID, generation.ContentConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "prepare-content",
+	}, classificationAt); err != nil {
+		t.Fatalf("start classification: %v", err)
+	}
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "classifier-prepare", classificationAt)
+	run := startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, classificationAt)
+	if err := database.Generation.FinalizeGenerationClassification(context.Background(), claim, run.ID, existingClassification(initialRoadmap, candidate.ID), classificationAt); err != nil {
+		t.Fatalf("persist classification: %v", err)
+	}
+	persisted, err := database.Generation.GetCandidateRevision(context.Background(), candidate.ID)
+	if err != nil {
+		t.Fatalf("load classified candidate: %v", err)
+	}
+	publishAt := classificationAt.Add(10 * time.Minute)
+	if _, err := database.Generation.BeginClassificationPublication(context.Background(), sessionID, userID, generationTestPlan().Metadata.Title, generation.PublicationConfirmation{
+		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, ProposalRevision: persisted.Classification.Revision, IdempotencyKey: "prepare-publication",
+	}, publishAt); err != nil {
+		t.Fatalf("begin publication: %v", err)
+	}
+	claim = claimGenerationWorkflow(t, database, workflow.ID, "publisher-prepare", publishAt)
+	if err := database.Generation.RecordGenerationChallengePublicationResult(context.Background(), claim, generation.ArtifactReference{
+		Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/challenge@" + workflowTestDigest,
+	}, publishAt); err != nil {
+		t.Fatalf("record promotion: %v", err)
+	}
+	return workflow, candidate, publishAt
 }
 
 func advanceToVerifiedCandidate(t *testing.T, database *Store, workflowID string, now time.Time) generation.Revision {

@@ -65,6 +65,22 @@ Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并�
 
 只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent；Runtime Worker 发布最终 runtime artifact；Server 再以 hash 校验和幂等 materialization 写入 source。最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Worker promotion 成功后 Server 崩溃时只恢复 materialization/finalization，绝不重复 promotion。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
 
+### Finalizer 诊断与恢复
+
+`Installing` 或 `Committing` 期间由 Server 执行的 source 检查、题目物化和最终提交，属于 Catalog finalizer。
+每次 finalizer 失败都会写入 `catalog_releases` 的持久诊断：`finalizer_error_category`、清理后的
+`finalizer_last_error`、`finalizer_last_attempted_at` 和 `finalizer_next_retry_at`。空类别和空字段表示没有未完成的
+诊断；这组字段不是日志的替代显示，而是重启后继续工作的唯一状态依据。
+
+确定性内容或完整性错误（例如 source digest 改变、commit 与 source 不一致、物化结果不符合 intent）将 Release
+置为现有 `Failed`，保留错误摘要，不再反复安装同一损坏提交。瞬时数据库、Server data PVC 或文件系统 I/O
+错误保留当前 `Installing`/`Committing` 状态，并把 `next_run_at` 与 `finalizer_next_retry_at` 设为持久化的下一次
+尝试时间；安装器在该时间之前直接返回，不进行提前轮询。进程重启后仍遵守数据库中的时间，成功恢复后在完成
+Roadmap 原子提交的同一事务中清空诊断字段。
+
+物化过程是幂等的：已经存在且与 commit 完全匹配的目录会被复用，冲突目录会被视为确定性失败；未被当前
+Roadmap 引用的中间目录不会进入公开 Catalog，并由现有清理路径回收。Catalog 不增加新的状态、队列或恢复服务。
+
 ## 物化完整性
 
 运行时 `RoadmapRevision` 的每个 `ChallengeRef` 除 `content_revision` 外还保存

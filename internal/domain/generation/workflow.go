@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
@@ -174,17 +175,21 @@ type Workflow struct {
 	ClassificationRoadmapRevision string        `json:"classification_roadmap_revision,omitempty"`
 	// ClassificationFeedback is the one pending author message for a resumed
 	// Classifying run. It is private workflow input, never Roadmap content.
-	ClassificationFeedback string     `json:"classification_feedback,omitempty"`
-	CandidateRevisionID    string     `json:"candidate_revision_id,omitempty"`
-	ActiveAgentRunID       string     `json:"active_agent_run_id,omitempty"`
-	StateVersion           int64      `json:"state_version"`
-	RuntimeAttempt         int        `json:"runtime_attempt"`
-	LeaseOwner             string     `json:"-"`
-	LeaseExpiresAt         *time.Time `json:"lease_expires_at,omitempty"`
-	NextRunAt              time.Time  `json:"next_run_at"`
-	LastError              string     `json:"last_error,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
+	ClassificationFeedback   string               `json:"classification_feedback,omitempty"`
+	CandidateRevisionID      string               `json:"candidate_revision_id,omitempty"`
+	ActiveAgentRunID         string               `json:"active_agent_run_id,omitempty"`
+	StateVersion             int64                `json:"state_version"`
+	RuntimeAttempt           int                  `json:"runtime_attempt"`
+	LeaseOwner               string               `json:"-"`
+	LeaseExpiresAt           *time.Time           `json:"lease_expires_at,omitempty"`
+	NextRunAt                time.Time            `json:"next_run_at"`
+	LastError                string               `json:"last_error,omitempty"`
+	FinalizerErrorCategory   publication.Category `json:"finalizer_error_category,omitempty"`
+	FinalizerLastError       string               `json:"finalizer_last_error,omitempty"`
+	FinalizerLastAttemptedAt *time.Time           `json:"finalizer_last_attempted_at,omitempty"`
+	FinalizerNextRetryAt     *time.Time           `json:"finalizer_next_retry_at,omitempty"`
+	CreatedAt                time.Time            `json:"created_at"`
+	UpdatedAt                time.Time            `json:"updated_at"`
 }
 
 func (w Workflow) Valid() bool {
@@ -198,7 +203,23 @@ func (w Workflow) Valid() bool {
 	if w.RuntimeAttempt != 0 {
 		return false
 	}
-	return true
+	if w.FinalizerErrorCategory == publication.CategoryUnknown {
+		return w.FinalizerLastError == "" && w.FinalizerLastAttemptedAt == nil && w.FinalizerNextRetryAt == nil
+	}
+	diagnostic := publication.Diagnostic{
+		Category:        w.FinalizerErrorCategory,
+		LastError:       w.FinalizerLastError,
+		LastAttemptedAt: valueOrZero(w.FinalizerLastAttemptedAt),
+		NextRetryAt:     w.FinalizerNextRetryAt,
+	}
+	return diagnostic.Validate() == nil
+}
+
+func valueOrZero(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
 }
 
 type LeaseCredential struct {

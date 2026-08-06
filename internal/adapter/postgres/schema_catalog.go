@@ -12,9 +12,18 @@ var schemaCatalogStatements = []string{
 		next_run_at TIMESTAMPTZ NOT NULL,
 		commit_id TEXT NOT NULL DEFAULT '',
 		last_error TEXT NOT NULL DEFAULT '',
+		finalizer_error_category TEXT NOT NULL DEFAULT '' CHECK (finalizer_error_category IN ('', 'deterministic', 'transient')),
+		finalizer_last_error TEXT NOT NULL DEFAULT '',
+		finalizer_last_attempted_at TIMESTAMPTZ,
+		finalizer_next_retry_at TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
-		CHECK ((state NOT IN ('Committing', 'Ready')) OR commit_id <> '')
+		CHECK ((state NOT IN ('Committing', 'Ready')) OR commit_id <> ''),
+		CHECK (
+			(finalizer_error_category = '' AND finalizer_last_error = '' AND finalizer_last_attempted_at IS NULL AND finalizer_next_retry_at IS NULL) OR
+			(finalizer_error_category = 'deterministic' AND finalizer_last_error <> '' AND finalizer_last_attempted_at IS NOT NULL AND finalizer_next_retry_at IS NULL) OR
+			(finalizer_error_category = 'transient' AND finalizer_last_error <> '' AND finalizer_last_attempted_at IS NOT NULL AND finalizer_next_retry_at IS NOT NULL)
+		)
 	)`,
 	`CREATE INDEX catalog_releases_recovery ON catalog_releases(state, next_run_at, created_at, id)`,
 	`CREATE TABLE catalog_release_entries (

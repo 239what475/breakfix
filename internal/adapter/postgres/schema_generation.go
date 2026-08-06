@@ -82,13 +82,22 @@ var schemaGenerationStatements = []string{
 		lease_expires_at TIMESTAMPTZ,
 		next_run_at TIMESTAMPTZ NOT NULL,
 		last_error TEXT NOT NULL DEFAULT '',
+		finalizer_error_category TEXT NOT NULL DEFAULT '' CHECK (finalizer_error_category IN ('', 'deterministic', 'transient')),
+		finalizer_last_error TEXT NOT NULL DEFAULT '',
+		finalizer_last_attempted_at TIMESTAMPTZ,
+		finalizer_next_retry_at TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		CHECK (
 			(state IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt BETWEEN 1 AND 5) OR
 			(state NOT IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt = 0)
 		),
-		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
+		CHECK ((lease_owner = '') = (lease_expires_at IS NULL)),
+		CHECK (
+			(finalizer_error_category = '' AND finalizer_last_error = '' AND finalizer_last_attempted_at IS NULL AND finalizer_next_retry_at IS NULL) OR
+			(finalizer_error_category = 'deterministic' AND finalizer_last_error <> '' AND finalizer_last_attempted_at IS NOT NULL AND finalizer_next_retry_at IS NULL) OR
+			(finalizer_error_category = 'transient' AND finalizer_last_error <> '' AND finalizer_last_attempted_at IS NOT NULL AND finalizer_next_retry_at IS NOT NULL)
+		)
 	)`,
 	`CREATE UNIQUE INDEX generation_workflows_active_source ON generation_workflows(source_kind, source_ref) WHERE state NOT IN ('Published', 'Failed', 'Cancelled')`,
 	`CREATE INDEX generation_workflows_claim ON generation_workflows(state, next_run_at, lease_expires_at, created_at, id)`,

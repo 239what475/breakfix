@@ -91,10 +91,13 @@ func (d *ChallengeRepository) DeprecateAuthoringChallenge(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	if target.SourceKind != challengedomain.SourceAuthoring {
+		return nil, challengedomain.ErrNotMutable
+	}
 	if target.OwnerUserID != strings.TrimSpace(userID) {
 		return nil, challengedomain.ErrNotFound
 	}
-	if target.SourceKind != challengedomain.SourceAuthoring || target.State != challengedomain.StateActive {
+	if target.State != challengedomain.StateActive {
 		return nil, challengedomain.ErrNotMutable
 	}
 	active, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)

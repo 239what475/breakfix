@@ -18,6 +18,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
@@ -41,6 +42,7 @@ type ReleaseStore interface {
 	ReportSourceInfrastructureFailure(context.Context, string, string, time.Time) (*catalogdomain.Release, error)
 	FailPendingRelease(context.Context, string, string, time.Time) (*catalogdomain.Release, error)
 	FailRelease(context.Context, string, string, time.Time) (*catalogdomain.Release, error)
+	RecordCatalogFinalizerFailure(context.Context, string, publication.Diagnostic) (*catalogdomain.Release, error)
 	ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error)
 	Entries(context.Context, string) ([]catalogdomain.Entry, error)
 	InstalledEntries(context.Context) ([]catalogdomain.Entry, error)
@@ -84,24 +86,33 @@ type Installer struct {
 	mu            sync.Mutex
 }
 
-// deterministicCatalogError marks malformed immutable content. Transport,
-// Registry availability and local storage errors remain ordinary errors so a
-// Pending release can consume its own bounded source retry budget.
-type deterministicCatalogError struct{ err error }
-
-func (e *deterministicCatalogError) Error() string { return e.err.Error() }
-func (e *deterministicCatalogError) Unwrap() error { return e.err }
-
 func deterministicCatalogFailure(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &deterministicCatalogError{err: err}
+	return publication.Deterministic(err)
 }
 
 func isDeterministicCatalogError(err error) bool {
-	var value *deterministicCatalogError
-	return errors.As(err, &value)
+	return publication.IsDeterministic(err)
+}
+
+// Unclassified finalizer errors are operational by default. Content and
+// invariant checks mark their own errors deterministic before reaching this
+// boundary.
+func catalogFinalizerFailure(err error) error {
+	if err == nil || publication.CategoryOf(err).Valid() {
+		return err
+	}
+	return publication.Transient(err)
+}
+
+func catalogContentFailure(err error) error {
+	if err == nil || publication.CategoryOf(err).Valid() {
+		return err
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return publication.Transient(err)
+	}
+	return publication.Deterministic(err)
 }
 
 func NewInstaller(config InstallerConfig) (*Installer, error) {
@@ -231,16 +242,23 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 		}
 		return initialized, source, nil
 	}
+	if release.FinalizerNextRetryAt != nil && release.FinalizerNextRetryAt.After(i.now().UTC()) {
+		return release, nil, nil
+	}
 	source, sourceDigest, err := i.loadOrStageSource(ctx, *release)
 	if err != nil {
-		return nil, nil, err
+		updated, recordErr := i.recordFinalizerError(ctx, *release, catalogFinalizerFailure(err))
+		if recordErr != nil {
+			return nil, nil, recordErr
+		}
+		return updated, nil, nil
 	}
 	if sourceDigest != release.SourceDigest {
-		failed, failErr := i.store.FailRelease(ctx, release.ID, "staged catalog source digest does not match its durable release", i.now().UTC())
-		if failErr != nil {
-			return nil, nil, failErr
+		updated, recordErr := i.recordFinalizerError(ctx, *release, deterministicCatalogFailure(errors.New("staged catalog source digest does not match its durable release")))
+		if recordErr != nil {
+			return nil, nil, recordErr
 		}
-		return failed, nil, nil
+		return updated, nil, nil
 	}
 	return release, source, nil
 }
@@ -314,7 +332,7 @@ func (i *Installer) prepareCommit(ctx context.Context, release *catalogdomain.Re
 func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, release catalogdomain.Release) error {
 	entries, err := i.store.Entries(ctx, release.ID)
 	if err != nil {
-		return err
+		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
 	byID := make(map[string]catalogdomain.Entry, len(entries))
 	for _, entry := range entries {
@@ -322,13 +340,13 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 	}
 	commits, err := i.store.Commits(ctx, release.ID)
 	if err != nil {
-		return err
+		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
 	allMaterialized := true
 	for _, commit := range commits {
 		entry, exists := byID[commit.EntryID]
 		if !exists {
-			return fmt.Errorf("catalog commit %q has no entry", commit.ID)
+			return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(fmt.Errorf("catalog commit %q has no entry", commit.ID)))
 		}
 		switch commit.State {
 		case catalogdomain.CommitPrepared:
@@ -339,18 +357,18 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 				return i.handleFinalizerError(ctx, release, err)
 			}
 			if _, err := i.store.MarkCommitMaterialized(ctx, release.ID, commit.ID, i.now().UTC()); err != nil {
-				return err
+				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 			}
 			allMaterialized = false
 		case catalogdomain.CommitMaterialized:
 			if err := i.ensureMaterialized(entry, commit); err != nil {
-				return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(err))
+				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 			}
 		case catalogdomain.CommitCommitted:
 		case catalogdomain.CommitFailed:
 			return nil
 		default:
-			return fmt.Errorf("catalog commit %q has unsupported state %s", commit.ID, commit.State)
+			return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(fmt.Errorf("catalog commit %q has unsupported state %s", commit.ID, commit.State)))
 		}
 	}
 	if !allMaterialized {
@@ -358,22 +376,34 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 	}
 	commits, err = i.store.Commits(ctx, release.ID)
 	if err != nil {
-		return err
+		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
 	compiled, err := i.compileRevision(ctx, source, release, entries, commits)
 	if err != nil {
 		return i.handleFinalizerError(ctx, release, err)
 	}
 	_, err = i.store.CompleteReleaseCommit(ctx, release.ID, compiled, i.now().UTC())
-	return err
+	if err != nil {
+		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
+	}
+	return nil
 }
 
 func (i *Installer) handleFinalizerError(ctx context.Context, release catalogdomain.Release, err error) error {
-	if !isDeterministicCatalogError(err) {
-		return err
+	_, recordErr := i.recordFinalizerError(ctx, release, catalogFinalizerFailure(err))
+	return recordErr
+}
+
+func (i *Installer) recordFinalizerError(ctx context.Context, release catalogdomain.Release, err error) (*catalogdomain.Release, error) {
+	diagnostic, diagnosticErr := publication.NewDiagnostic(err, i.now().UTC())
+	if diagnosticErr != nil {
+		return nil, diagnosticErr
 	}
-	_, failErr := i.store.FailRelease(ctx, release.ID, errorSummary(err), i.now().UTC())
-	return failErr
+	updated, err := i.store.RecordCatalogFinalizerFailure(ctx, release.ID, diagnostic)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (i *Installer) stageSource(ctx context.Context, releaseID string) (*PortableSource, catalogdomain.ContentRevision, error) {
@@ -381,7 +411,7 @@ func (i *Installer) stageSource(ctx context.Context, releaseID string) (*Portabl
 	if _, err := os.Lstat(root); err == nil {
 		source, digest, loadErr := loadSourceAt(root)
 		if loadErr != nil {
-			return nil, "", deterministicCatalogFailure(fmt.Errorf("read persisted catalog source: %w", loadErr))
+			return nil, "", catalogContentFailure(fmt.Errorf("read persisted catalog source: %w", loadErr))
 		}
 		return source, digest, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -439,7 +469,7 @@ func (i *Installer) loadOrStageSource(ctx context.Context, release catalogdomain
 	if _, err := os.Lstat(root); err == nil {
 		source, digest, loadErr := loadSourceAt(root)
 		if loadErr != nil {
-			return nil, "", deterministicCatalogFailure(fmt.Errorf("read persisted catalog source: %w", loadErr))
+			return nil, "", catalogContentFailure(fmt.Errorf("read persisted catalog source: %w", loadErr))
 		}
 		return source, digest, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -483,7 +513,7 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 	if err := i.ensureMaterialized(entry, commit); err == nil {
 		return nil
 	} else if !errors.Is(err, challenge.ErrNotFound) {
-		return deterministicCatalogFailure(err)
+		return catalogFinalizerFailure(err)
 	}
 	if commit.Artifact == nil {
 		return deterministicCatalogFailure(errors.New("catalog materialization has no final artifact"))
@@ -493,9 +523,12 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 		return deterministicCatalogFailure(err)
 	}
 	sourceDir := filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath))
+	if _, err := challenge.ValidateCandidateDir(sourceDir); err != nil {
+		return catalogContentFailure(fmt.Errorf("validate catalog challenge %q: %w", entry.SourcePath, err))
+	}
 	published, err := challenge.PromoteDirectoryAt(i.challengesDir, sourceDir, commit.ChallengeID, commit.ChallengeRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
 	if err != nil {
-		return fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err)
+		return catalogFinalizerFailure(fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err))
 	}
 	if published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image {
 		return deterministicCatalogFailure(errors.New("materialized catalog challenge does not match its commit intent"))
@@ -505,25 +538,25 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 
 func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalogdomain.Commit) error {
 	if commit.Artifact == nil {
-		return errors.New("catalog commit has no final artifact")
+		return deterministicCatalogFailure(errors.New("catalog commit has no final artifact"))
 	}
 	image, err := artifactImage(*commit.Artifact)
 	if err != nil {
-		return err
+		return deterministicCatalogFailure(err)
 	}
 	target := filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID))
 	if _, err := os.Lstat(target); err != nil {
 		if os.IsNotExist(err) {
 			return challenge.ErrNotFound
 		}
-		return err
+		return catalogFinalizerFailure(err)
 	}
 	published, err := challenge.ValidateDir(target)
 	if err != nil {
-		return err
+		return catalogContentFailure(fmt.Errorf("validate materialized catalog challenge: %w", err))
 	}
 	if published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
-		return errors.New("materialized catalog challenge conflicts with its durable commit")
+		return deterministicCatalogFailure(errors.New("materialized catalog challenge conflicts with its durable commit"))
 	}
 	return nil
 }

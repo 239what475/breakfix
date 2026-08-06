@@ -11,6 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/publication"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
@@ -141,6 +142,16 @@ func (s *installerStore) FailPendingRelease(context.Context, string, string, tim
 }
 func (s *installerStore) FailRelease(context.Context, string, string, time.Time) (*catalogdomain.Release, error) {
 	s.release.State = catalogdomain.ReleaseFailed
+	return &s.release, nil
+}
+func (s *installerStore) RecordCatalogFinalizerFailure(_ context.Context, _ string, diagnostic publication.Diagnostic) (*catalogdomain.Release, error) {
+	s.release.FinalizerErrorCategory = diagnostic.Category
+	s.release.FinalizerLastError = diagnostic.LastError
+	s.release.FinalizerLastAttemptedAt = &diagnostic.LastAttemptedAt
+	s.release.FinalizerNextRetryAt = diagnostic.NextRetryAt
+	if diagnostic.Category == publication.CategoryDeterministic {
+		s.release.State = catalogdomain.ReleaseFailed
+	}
 	return &s.release, nil
 }
 func (s *installerStore) ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error) {

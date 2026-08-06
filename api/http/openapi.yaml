@@ -1335,6 +1335,21 @@ components:
         last_error:
           type: string
           nullable: true
+        finalizer_error_category:
+          type: string
+          enum: [deterministic, transient]
+          nullable: true
+        finalizer_last_error:
+          type: string
+          nullable: true
+        finalizer_last_attempted_at:
+          type: string
+          format: date-time
+          nullable: true
+        finalizer_next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time

@@ -338,6 +338,10 @@ export type AuthoringGenerationWorkflow = {
     candidate_revision_id?: string;
     classification_roadmap_revision?: string;
     last_error?: string | null;
+    finalizer_error_category?: 'deterministic' | 'transient';
+    finalizer_last_error?: string | null;
+    finalizer_last_attempted_at?: string | null;
+    finalizer_next_retry_at?: string | null;
     created_at: string;
     updated_at: string;
 };
