@@ -3,6 +3,7 @@ package generation
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,60 @@ func TestAgentRunnerRetriesKnownTechnicalErrorWithinOneRun(t *testing.T) {
 	}
 	if store.run.Attempt != agent.MaxAttempts {
 		t.Fatalf("final logical run attempt = %d, want %d", store.run.Attempt, agent.MaxAttempts)
+	}
+}
+
+func TestAgentRunnerDispatchesIndependentWorkflowsConcurrently(t *testing.T) {
+	claims := []domain.Claim{
+		{Workflow: testAgentWorkflow("workflow-a", domain.StateGenerating), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-a"}},
+		{Workflow: testAgentWorkflow("workflow-b", domain.StateGenerating), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-b"}},
+	}
+	store := &dispatchStore{
+		agentRunnerStore: &agentRunnerStore{},
+		claims:           claims,
+		started:          make(chan string, len(claims)),
+		finished:         make(chan string, len(claims)),
+	}
+	executor := &blockingGeneratorExecutor{started: store.started, finished: store.finished}
+	runner := newTestAgentRunner(t, store, executor)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- runner.Run(ctx) }()
+
+	seen := make(map[string]bool, len(claims))
+	for range claims {
+		select {
+		case workflowID := <-store.started:
+			seen[workflowID] = true
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatalf("timed out waiting for independent workflows to start")
+		}
+	}
+	if len(seen) != len(claims) {
+		cancel()
+		t.Fatalf("started workflow IDs = %#v, want both workflows", seen)
+	}
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("generation runner returned error after cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("generation runner did not wait for dispatched workflows to finish")
+	}
+	if store.retryCalls != 0 {
+		t.Fatalf("cancellation consumed technical retries = %d, want 0", store.retryCalls)
+	}
+	for range claims {
+		select {
+		case <-store.finished:
+		case <-time.After(2 * time.Second):
+			t.Fatal("dispatched workflow did not finish before runner returned")
+		}
 	}
 }
 
@@ -78,12 +133,12 @@ func TestAgentRunnerRecoveryReplacesInterruptedGeneratorWorkspace(t *testing.T) 
 	}
 }
 
-func newTestAgentRunner(t *testing.T, store *agentRunnerStore, executor GeneratorRoleExecutor) *AgentRunner {
+func newTestAgentRunner(t *testing.T, store GenerationAgentStore, executor GeneratorRoleExecutor) *AgentRunner {
 	t.Helper()
 	return newTestAgentRunnerWithWorkspace(t, store, executor, newWorkspaceManager(t, &memoryWorkspaceRepository{}, &memoryWorkspacePVCs{}, &memoryWorkspaceSandboxes{}, new(time.Time)))
 }
 
-func newTestAgentRunnerWithWorkspace(t *testing.T, store *agentRunnerStore, executor GeneratorRoleExecutor, workspace *Manager) *AgentRunner {
+func newTestAgentRunnerWithWorkspace(t *testing.T, store GenerationAgentStore, executor GeneratorRoleExecutor, workspace *Manager) *AgentRunner {
 	t.Helper()
 	runner, err := NewAgentRunner(store, executor, stubClassifierExecutor{}, workspace, AgentRunnerConfig{
 		ServerID: "server-test",
@@ -125,6 +180,59 @@ type agentRunnerStore struct {
 	generatorCalls int
 	retryCalls     int
 	interrupted    []domain.InterruptedAgentRun
+}
+
+type dispatchStore struct {
+	*agentRunnerStore
+	mu       sync.Mutex
+	claims   []domain.Claim
+	started  chan string
+	finished chan string
+}
+
+func (s *dispatchStore) ClaimGenerationAgentWorkflow(context.Context, string, time.Duration, time.Time) (*domain.Claim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.claims) == 0 {
+		return nil, nil
+	}
+	claim := s.claims[0]
+	s.claims = s.claims[1:]
+	return &claim, nil
+}
+
+func (s *dispatchStore) LoadGenerationContext(_ context.Context, claim domain.Claim, _ time.Time) (*domain.Context, error) {
+	return &domain.Context{Workflow: claim.Workflow, Plan: authoring.Plan{}}, nil
+}
+
+func (s *dispatchStore) StartGenerationAgentRun(_ context.Context, claim domain.Claim, input agent.CreateRun, now time.Time) (*agent.Run, error) {
+	return &agent.Run{
+		ID: input.ID, Purpose: input.Purpose, OwnerKind: input.OwnerKind, OwnerRef: claim.Workflow.ID,
+		Status: agent.RunRunning, Attempt: 1, DeadlineAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (s *dispatchStore) RetryGenerationAgentRun(context.Context, domain.Claim, string, string, time.Time) (*agent.Run, error) {
+	s.mu.Lock()
+	s.retryCalls++
+	s.mu.Unlock()
+	return nil, nil
+}
+
+type blockingGeneratorExecutor struct {
+	started  chan string
+	finished chan string
+}
+
+func (e *blockingGeneratorExecutor) Generate(ctx context.Context, execution domain.Execution) ([]byte, error) {
+	e.started <- execution.Claim.Workflow.ID
+	defer func() { e.finished <- execution.Claim.Workflow.ID }()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (*blockingGeneratorExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
+	return Judgement{}, errors.New("unexpected judge execution")
 }
 
 func (s *agentRunnerStore) ClaimGenerationAgentWorkflow(context.Context, string, time.Duration, time.Time) (*domain.Claim, error) {

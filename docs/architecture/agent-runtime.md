@@ -10,9 +10,9 @@ OpenSandbox workspace for model capabilities. It has no Claude Code CLI,
 | --- | --- | --- | --- |
 | Authoring | Server | AuthoringSession, messages, AgentRun, private Plan stage | One active run per session. |
 | Learning Assistant | Server | Assistant session, messages, AgentRun, read-only evidence | One active run per session. |
-| Generator | Server | GenerationWorkflow, PlanRevision, CandidateRevision, workflow workspace | Server claims `Generating`. |
-| Judge | Server | GenerationWorkflow, PlanRevision, CandidateRevision | Server claims `Judging`. |
-| Classifier | Server | GenerationWorkflow, verified CandidateRevision, immutable RoadmapRevision | Server claims `Classifying`. |
+| Generator | Server | GenerationWorkflow, PlanRevision, CandidateRevision, workflow workspace | Server independently claims each `Generating` workflow. |
+| Judge | Server | GenerationWorkflow, PlanRevision, CandidateRevision | Server independently claims each `Judging` workflow. |
+| Classifier | Server | GenerationWorkflow, verified CandidateRevision, immutable RoadmapRevision | Server independently claims each `Classifying` workflow. |
 | Roadmap planner and reviewers | Server | RoadmapTask, fixed RoadmapRevision, ChangeSet/Review, AgentRun | Server maintenance workflow. |
 | Build, artifact publish, verification, challenge publish, reaping | Runtime Worker | A lease-fenced runtime action | Runtime Worker only. |
 
@@ -58,6 +58,15 @@ Plan confirmation is idempotent and freezes that Plan revision. The author can
 only modify the Plan after the workflow reaches a terminal state or is
 explicitly cancelled; cancellation is owner-scoped and retires its workspace in
 the background. `Failed` is terminal and never resumes automatically.
+
+Each author-started generate request owns one independent GenerationWorkflow
+row. The Server dispatches all currently claimable workflow rows independently
+and does not introduce a fixed concurrency value, slot, pool, or second queue.
+A dispatched execution ends after its current phase commits a state transition;
+review and Runtime Worker states do not hold a Server agent execution open. On
+shutdown, dispatched executions receive cancellation and are awaited;
+cancellation is not recorded as a technical AgentRun retry, and startup
+recovery handles the interrupted durable runs.
 
 ## Tools And Privileges
 

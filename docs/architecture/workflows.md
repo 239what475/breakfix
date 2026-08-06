@@ -7,7 +7,10 @@
 ## Generation Workflow
 
 作者先在 `AuthoringSession` 中和 Agent 讨论题意、运行时、检查点与教学内容。作者确认 Plan revision
-后，Server 创建一个 `GenerationWorkflow`；它是从 candidate 生成到正式发布的唯一持久身份。
+后，每次 generate 请求创建一条独立的 `GenerationWorkflow`；它是这一项生成任务从 candidate 生成到正式发布的唯一持久身份。
+`generation_workflows` 同时是这些独立任务的数据库 worklist，不存在一个集中处理所有作者任务的统一 workflow 或额外 worklist 表。
+
+Server 的 Agent Runtime 从数据库逐条领取当前可执行的 workflow。领取成功后立即异步推进该 workflow 的当前阶段，随后继续领取其他 workflow；因此不同作者的 workflow 可以同时运行。一个阶段完成并持久化状态转移后，当前执行结束，后续阶段由下一次领取自然推进。数据库 lease 和状态版本只负责防止重复领取和拒绝过期结果，不构成固定并发上限。
 
 ```text
 Server Agent Runtime                         Runtime Worker

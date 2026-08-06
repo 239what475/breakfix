@@ -69,8 +69,9 @@ type AgentRunnerConfig struct {
 }
 
 // AgentRunner is the Server's durable background Agent Runtime for exactly
-// Generating, Judging, and Classifying. It is not a worker pool or a generic
-// task executor: the GenerationWorkflow remains the scheduling authority.
+// Generating, Judging, and Classifying. Each claimed GenerationWorkflow phase
+// is dispatched independently; the database workflow remains the scheduling
+// authority and there is no separate in-memory work queue or capacity policy.
 type AgentRunner struct {
 	store      GenerationAgentStore
 	generator  GeneratorRoleExecutor
@@ -125,6 +126,11 @@ func (r *AgentRunner) Run(ctx context.Context) error {
 	if r == nil {
 		return errors.New("generation agent runner is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var active sync.WaitGroup
+	defer active.Wait()
 	failures := 0
 	for {
 		select {
@@ -132,37 +138,56 @@ func (r *AgentRunner) Run(ctx context.Context) error {
 			return nil
 		default:
 		}
-		processed, err := r.ProcessOne(ctx)
+		claim, err := r.claimOne(ctx)
 		if err != nil {
 			failures++
 			delay := domain.NextRetry(failures, r.now()).Sub(r.now())
 			slog.Warn("run generation agent", "server_id", r.config.ServerID, "retry_in", delay, "err", err)
-			if err := r.sleep(ctx, delay); err != nil && ctx.Err() == nil {
-				return err
+			if waitErr := r.sleep(ctx, delay); waitErr != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return waitErr
 			}
 			continue
 		}
 		failures = 0
-		if !processed {
-			if err := r.sleep(ctx, r.config.PollEvery); err != nil && ctx.Err() == nil {
-				return err
+		if claim == nil {
+			if waitErr := r.sleep(ctx, r.config.PollEvery); waitErr != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return waitErr
 			}
+			continue
 		}
+		active.Add(1)
+		go func(value domain.Claim) {
+			defer active.Done()
+			_ = r.processClaim(ctx, value)
+		}(*claim)
 	}
 }
 
 // ProcessOne is intentionally exposed for focused tests and local Server
-// assembly. It performs at most one phase claim and never touches runtime
-// states such as Build or Verify.
+// assembly. It performs one claim and waits for that phase; the background
+// Run method dispatches the same phase asynchronously.
 func (r *AgentRunner) ProcessOne(ctx context.Context) (bool, error) {
 	if r == nil {
 		return false, errors.New("generation agent runner is required")
 	}
-	claim, err := r.store.ClaimGenerationAgentWorkflow(ctx, r.config.ServerID, r.config.LeaseTTL, r.now())
+	claim, err := r.claimOne(ctx)
 	if err != nil || claim == nil {
 		return claim != nil, err
 	}
 	return true, r.processClaim(ctx, *claim)
+}
+
+func (r *AgentRunner) claimOne(ctx context.Context) (*domain.Claim, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return r.store.ClaimGenerationAgentWorkflow(ctx, r.config.ServerID, r.config.LeaseTTL, r.now())
 }
 
 func (r *AgentRunner) processClaim(parent context.Context, claim domain.Claim) error {
@@ -186,6 +211,9 @@ func (r *AgentRunner) processClaim(parent context.Context, claim domain.Claim) e
 }
 
 func (r *AgentRunner) executeClaim(ctx context.Context, lease *agentLease) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	claim := lease.current()
 	workflowContext, err := r.store.LoadGenerationContext(ctx, claim, r.now())
 	if err != nil {
@@ -218,6 +246,9 @@ func (r *AgentRunner) executeClaim(ctx context.Context, lease *agentLease) error
 		cancel()
 		if err == nil || errors.Is(err, domain.ErrLeaseLost) || lease.lost.Load() {
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		var artifact *domain.ArtifactError
 		if errors.As(err, &artifact) {
