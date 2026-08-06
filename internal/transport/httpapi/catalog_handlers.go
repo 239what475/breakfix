@@ -115,7 +115,7 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 		// no Environment, the public current revision remains readable without
 		// requiring a user to start one first.
 		if h.k8s != nil {
-				fixedEntry, _, environmentErr := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
+			fixedEntry, _, environmentErr := h.resolveEnvironmentChallenge(c.Request.Context(), user.ID, id, true)
 			switch {
 			case environmentErr == nil:
 				entry = fixedEntry

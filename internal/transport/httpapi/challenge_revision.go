@@ -114,10 +114,6 @@ func (h *Handler) findUniqueHistoricalEnvironment(ctx context.Context, userID, c
 	return nil, errNoMatchingEnvironment
 }
 
-func challengeEnvironmentNotFound(err error) bool {
-	return errors.Is(err, errNoMatchingEnvironment) || errors.Is(err, challenge.ErrNotFound)
-}
-
 func challengeEnvironmentError(err error) error {
 	if errors.Is(err, errAmbiguousEnvironment) {
 		return fmt.Errorf("challenge has multiple active revisions; choose an environment from My Space")

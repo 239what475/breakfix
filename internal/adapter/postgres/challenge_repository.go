@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	contentchallenge "github.com/breakfix/breakfix/internal/content/challenge"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
@@ -306,8 +305,4 @@ func challengeRevisionFromPublication(publicationTitle, runtime, contentRevision
 		SourceSlug: sourceSlug, MaterializedPath: materializedPath, MaterializedRevision: materializedRevision,
 		Artifact: publicationArtifact, State: challengedomain.RevisionActive, PublishedAt: publishedAt.UTC(), CreatedAt: publishedAt.UTC(),
 	}
-}
-
-func challengeContentRevisionValid(value string) bool {
-	return contentchallenge.ValidRevision(value)
 }
