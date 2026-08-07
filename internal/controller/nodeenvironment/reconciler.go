@@ -11,6 +11,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,9 +123,9 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 
 	markNodeReady(&environment, r.now())
 	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
-		results, checkErr := r.runNodeCheckpoints(ctx, &environment, identity)
-		recordNodeCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
-		if checkErr == nil && environmentdomain.AllCheckpointsPassed(results) {
+		report, checkErr := r.runNodeCheckpoints(ctx, &environment, identity)
+		recordNodeCheckpointStatus(&environment.Status.Environment, report, checkErr, r.now())
+		if checkErr == nil && report.Passed() {
 			markRuntimeEnvironmentCompleted(&environment.Status.Environment, environment.Generation, r.now())
 		}
 	}
@@ -445,12 +446,12 @@ func nodeEnvironmentRequeue(environment *breakfixv1.NodeEnvironment, now time.Ti
 	return ctrl.Result{RequeueAfter: next}
 }
 
-func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity environmentdomain.NodeEnvironmentIdentity) ([]environmentdomain.CheckpointResult, error) {
+func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, environment *breakfixv1.NodeEnvironment, identity environmentdomain.NodeEnvironmentIdentity) (checkpoint.Report, error) {
 	byNode := make(map[string][]string)
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		byNode[checkpoint.Node] = append(byNode[checkpoint.Node], checkpoint.ID)
 	}
-	all := make(map[string]environmentdomain.CheckpointResult, len(environment.Spec.Environment.Checkpoints))
+	all := make(map[string]checkpoint.Result, len(environment.Spec.Environment.Checkpoints))
 	for _, node := range environment.Spec.Runtime.Nodes {
 		expected := byNode[node.Name]
 		if len(expected) == 0 {
@@ -464,28 +465,28 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 		})
 		cancel()
 		if err != nil {
-			return nil, fmt.Errorf("execute checkpoints on node %s: %w", node.Name, err)
+			return checkpoint.Report{}, fmt.Errorf("execute checkpoints on node %s: %w", node.Name, err)
 		}
 		if result.ExitCode != 0 {
-			return nil, fmt.Errorf("checkpoint runner on node %s exited with %d: %s", node.Name, result.ExitCode, strings.TrimSpace(result.Stderr))
+			return checkpoint.Report{}, fmt.Errorf("checkpoint runner on node %s exited with %d: %s", node.Name, result.ExitCode, strings.TrimSpace(result.Stderr))
 		}
-		parsed, err := environmentdomain.ParseCheckpointReport(result.Stdout, expected)
+		report, err := checkpoint.Parse(result.Stdout, expected)
 		if err != nil {
-			return nil, fmt.Errorf("invalid checkpoint report from node %s: %w", node.Name, err)
+			return checkpoint.Report{}, fmt.Errorf("invalid checkpoint report from node %s: %w", node.Name, err)
 		}
-		for _, item := range parsed {
+		for _, item := range report.Checks {
 			all[item.ID] = item
 		}
 	}
-	ordered := make([]environmentdomain.CheckpointResult, 0, len(environment.Spec.Environment.Checkpoints))
-	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
-		result, ok := all[checkpoint.ID]
+	ordered := make([]checkpoint.Result, 0, len(environment.Spec.Environment.Checkpoints))
+	for _, expected := range environment.Spec.Environment.Checkpoints {
+		result, ok := all[expected.ID]
 		if !ok {
-			return nil, fmt.Errorf("checkpoint %q has no result", checkpoint.ID)
+			return checkpoint.Report{}, fmt.Errorf("checkpoint %q has no result", expected.ID)
 		}
 		ordered = append(ordered, result)
 	}
-	return ordered, nil
+	return checkpoint.Report{Checks: ordered}, nil
 }
 
 func (r *NodeEnvironmentReconciler) nodeProvider() environmentdomain.NodeProvider {
@@ -495,8 +496,8 @@ func (r *NodeEnvironmentReconciler) nodeProvider() environmentdomain.NodeProvide
 	return UnavailableProvider(nil)
 }
 
-func recordNodeCheckpointStatus(status *breakfixv1.EnvironmentStatus, results []environmentdomain.CheckpointResult, checkErr error, now time.Time) {
-	next, changed := environmentdomain.RecordCheckpointStatus(nodeCheckpointStatusFromAPI(status.Checkpoints), results, checkErr, now)
+func recordNodeCheckpointStatus(status *breakfixv1.EnvironmentStatus, report checkpoint.Report, checkErr error, now time.Time) {
+	next, changed := environmentdomain.RecordCheckpointStatus(nodeCheckpointStatusFromAPI(status.Checkpoints), report, checkErr, now)
 	if !changed {
 		return
 	}
@@ -512,12 +513,12 @@ func nodeCheckpointStatusFromAPI(status *breakfixv1.CheckpointStatus) *environme
 		checked := status.CheckedAt.Time
 		result.CheckedAt = &checked
 	}
-	for index, checkpoint := range status.Results {
-		recorded := environmentdomain.RecordedCheckpointResult{CheckpointResult: environmentdomain.CheckpointResult{
-			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+	for index, value := range status.Results {
+		recorded := environmentdomain.RecordedCheckpointResult{Result: checkpoint.Result{
+			ID: value.ID, Passed: value.Passed, Summary: value.Summary, Details: value.Details,
 		}}
-		if checkpoint.FirstPassedAt != nil {
-			firstPassed := checkpoint.FirstPassedAt.Time
+		if value.FirstPassedAt != nil {
+			firstPassed := value.FirstPassedAt.Time
 			recorded.FirstPassedAt = &firstPassed
 		}
 		result.Results[index] = recorded

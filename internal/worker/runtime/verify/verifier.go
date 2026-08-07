@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 
@@ -438,11 +439,11 @@ type checkpointProtocolError struct{ message string }
 func (e *checkpointProtocolError) Error() string { return e.message }
 
 func parseCheckpointResults(raw string, snapshots []domainexecution.CheckpointSnapshot) ([]domainexecution.CheckpointResult, error) {
-	expected := make([]challenge.Checkpoint, len(snapshots))
-	for index, checkpoint := range snapshots {
-		expected[index] = challenge.Checkpoint{ID: checkpoint.ID, Node: checkpoint.Node}
+	expected := make([]string, len(snapshots))
+	for index, value := range snapshots {
+		expected[index] = value.ID
 	}
-	report, err := challenge.ParseCheckReport(raw, expected)
+	report, err := checkpoint.Parse(raw, expected)
 	if err != nil {
 		return nil, err
 	}

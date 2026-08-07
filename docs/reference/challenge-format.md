@@ -72,7 +72,7 @@ Server 只在验证成功后为已发布目录写入平台托管字段；作者�
 
 脚本必须恰好报告该执行位置 manifest 声明的每个 checkpoint ID 一次。未通过是有效的检查结果：输出 `passed: false` 且退出 0；脚本、解析或协议错误才以非零退出。`summary` 必须非空，`details` 用于诊断。
 
-Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 在验证环境的 answer 后单次执行它。检查器必须只观察环境，不能修改环境或依赖用户必须输入的命令、唯一编辑路径或底层平台资源。
+Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 在验证环境的 answer 后单次执行它。两者共享唯一的 checkpoint report 解析与完整性校验，Node 各节点和 VK8s 管理终端没有独立格式。检查器必须只观察环境，不能修改环境或依赖用户必须输入的命令、唯一编辑路径或底层平台资源。
 
 ## 教学资产
 

@@ -31,7 +31,7 @@ internal/
   buildinfo/     由 ldflags 写入的版本信息
   content/       portable challenge、发布 materialization 和 Roadmap source 文件契约
   controller/    NodeEnvironment 与 VK8sEnvironment reconciler
-  domain/        Workflow、Environment、Catalog、Authoring、Roadmap 的状态与不变量
+  domain/        Workflow、Environment、Catalog、Authoring、Roadmap 和共享 checkpoint 协议的状态与不变量
   testkit/       仅供测试使用的 PostgreSQL 等基础设施
   transport/     HTTP API、WebSocket/SSE、嵌入式 UI 和健康检查
   worker/        Runtime Action 的确定性外部操作执行器

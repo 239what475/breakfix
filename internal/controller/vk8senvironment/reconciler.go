@@ -10,6 +10,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -105,9 +106,9 @@ func (r *VK8sEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 
 	markVK8sReady(&environment, r.now())
 	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
-		results, checkErr := r.runCheckpoints(ctx, &environment, providerRequest)
-		recordVK8sCheckpointStatus(&environment.Status.Environment, results, checkErr, r.now())
-		if checkErr == nil && environmentdomain.AllCheckpointsPassed(results) {
+		report, checkErr := r.runCheckpoints(ctx, &environment, providerRequest)
+		recordVK8sCheckpointStatus(&environment.Status.Environment, report, checkErr, r.now())
+		if checkErr == nil && report.Passed() {
 			markRuntimeEnvironmentCompleted(&environment.Status.Environment, environment.Generation, r.now())
 		}
 	}
@@ -400,7 +401,7 @@ func vk8sEnvironmentRequeue(environment *breakfixv1.VK8sEnvironment, now time.Ti
 	return ctrl.Result{RequeueAfter: next}
 }
 
-func (r *VK8sEnvironmentReconciler) runCheckpoints(ctx context.Context, environment *breakfixv1.VK8sEnvironment, request environmentdomain.VK8sProvisionRequest) ([]environmentdomain.CheckpointResult, error) {
+func (r *VK8sEnvironmentReconciler) runCheckpoints(ctx context.Context, environment *breakfixv1.VK8sEnvironment, request environmentdomain.VK8sProvisionRequest) (checkpoint.Report, error) {
 	expected := make([]string, 0, len(environment.Spec.Environment.Checkpoints))
 	for _, checkpoint := range environment.Spec.Environment.Checkpoints {
 		expected = append(expected, checkpoint.ID)
@@ -409,20 +410,20 @@ func (r *VK8sEnvironmentReconciler) runCheckpoints(ctx context.Context, environm
 	defer cancel()
 	result, err := r.Provider.ExecuteTerminal(checkCtx, request, []string{"/bin/bash", vk8sCheckpointRoot + "/checks.sh"})
 	if err != nil {
-		return nil, fmt.Errorf("execute VK8s checkpoints: %w", err)
+		return checkpoint.Report{}, fmt.Errorf("execute VK8s checkpoints: %w", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("VK8s checkpoint runner exited with %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		return checkpoint.Report{}, fmt.Errorf("VK8s checkpoint runner exited with %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
-	results, err := environmentdomain.ParseCheckpointReport(result.Stdout, expected)
+	report, err := checkpoint.Parse(result.Stdout, expected)
 	if err != nil {
-		return nil, fmt.Errorf("invalid VK8s checkpoint report: %w", err)
+		return checkpoint.Report{}, fmt.Errorf("invalid VK8s checkpoint report: %w", err)
 	}
-	return results, nil
+	return report, nil
 }
 
-func recordVK8sCheckpointStatus(status *breakfixv1.EnvironmentStatus, results []environmentdomain.CheckpointResult, checkErr error, now time.Time) {
-	next, changed := environmentdomain.RecordCheckpointStatus(vk8sCheckpointStatusFromAPI(status.Checkpoints), results, checkErr, now)
+func recordVK8sCheckpointStatus(status *breakfixv1.EnvironmentStatus, report checkpoint.Report, checkErr error, now time.Time) {
+	next, changed := environmentdomain.RecordCheckpointStatus(vk8sCheckpointStatusFromAPI(status.Checkpoints), report, checkErr, now)
 	if !changed {
 		return
 	}
@@ -438,12 +439,12 @@ func vk8sCheckpointStatusFromAPI(status *breakfixv1.CheckpointStatus) *environme
 		checked := status.CheckedAt.Time
 		result.CheckedAt = &checked
 	}
-	for index, checkpoint := range status.Results {
-		recorded := environmentdomain.RecordedCheckpointResult{CheckpointResult: environmentdomain.CheckpointResult{
-			ID: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: checkpoint.Details,
+	for index, value := range status.Results {
+		recorded := environmentdomain.RecordedCheckpointResult{Result: checkpoint.Result{
+			ID: value.ID, Passed: value.Passed, Summary: value.Summary, Details: value.Details,
 		}}
-		if checkpoint.FirstPassedAt != nil {
-			firstPassed := checkpoint.FirstPassedAt.Time
+		if value.FirstPassedAt != nil {
+			firstPassed := value.FirstPassedAt.Time
 			recorded.FirstPassedAt = &firstPassed
 		}
 		result.Results[index] = recorded

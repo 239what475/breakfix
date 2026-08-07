@@ -10,7 +10,7 @@
 - PostgreSQL 保存 workflow、lease、AgentRun、revision 和学习事实。
 - Registry、Incus 与 OpenSandbox 分别提供 immutable artifact、Node runtime 和 Generator workspace。
 
-这些边界与当前实现基本一致，不需要再次拆分 Deployment、引入通用任务队列，或合并领域表。当前还剩两个代码和文档整洁性问题。
+这些边界与当前实现基本一致，不需要再次拆分 Deployment、引入通用任务队列，或合并领域表。当前只剩工作文档的完成态收口问题。
 
 ## P1：代码与文档整洁性
 
@@ -19,15 +19,6 @@
 已完成的“E2E 分层与可丢弃验收基线”曾长期以 P0 和提交计划的形式保留在 [`TODO.md`](TODO.md)，旧 REVIEW 也混有已经实现的 revision、恢复、finalizer 和并发问题。这说明工作文档没有在实现提交完成时同步收口，会直接误导下一阶段判断。
 
 当前 P0 规划已经替换旧 E2E 内容，但该问题只有在后续每个实现提交同步删除对应 REVIEW 条目、最终再从 TODO 删除完成的 P0 后才闭环。稳定契约只进入 [`docs/`](docs/README.md)，TODO 与 REVIEW 不保存已完成方案。
-
-### 2. Checkpoint JSON 协议存在两套解析实现
-
-相同的 `{"checks":[...]}` 协议分别由以下代码解析：
-
-- [`internal/domain/environment/checkpoints.go`](internal/domain/environment/checkpoints.go)
-- [`internal/content/challenge/checkpoints.go`](internal/content/challenge/checkpoints.go)
-
-两者当前行为基本一致，但字段、空值、重复 ID 或完整性校验以后容易发生漂移。应提取一个不依赖 Kubernetes、数据库或 HTTP 的共享 checkpoint report 协议，由 challenge 验证和 Environment status 解析共同使用。
 
 ## 当前不需要处理
 
@@ -40,4 +31,3 @@
 ## 建议顺序
 
 1. 清理已完成的 TODO 和对应错误文档描述。
-2. 合并 checkpoint report 协议。

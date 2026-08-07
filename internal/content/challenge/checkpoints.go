@@ -1,71 +1,11 @@
 package challenge
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
-
-// CheckResult is one current-state result emitted by a runtime checks.sh.
-type CheckResult struct {
-	ID      string `json:"id"`
-	Passed  bool   `json:"passed"`
-	Summary string `json:"summary"`
-	Details string `json:"details"`
-}
-
-// CheckReport is the only completion result for a challenge. The challenge is
-// complete when every declared checkpoint in this report passes.
-type CheckReport struct {
-	Checks []CheckResult `json:"checks"`
-}
-
-func (r CheckReport) Passed() bool {
-	return len(r.Checks) > 0 && !slices.ContainsFunc(r.Checks, func(check CheckResult) bool {
-		return !check.Passed
-	})
-}
-
-func ParseCheckReport(raw string, checkpoints []Checkpoint) (*CheckReport, error) {
-	var report CheckReport
-	if err := json.Unmarshal([]byte(raw), &report); err != nil {
-		return nil, fmt.Errorf("parse checkpoint report: %w", err)
-	}
-	if len(report.Checks) == 0 {
-		return nil, fmt.Errorf("checkpoint report contains no checks")
-	}
-
-	expected := make(map[string]Checkpoint, len(checkpoints))
-	for _, checkpoint := range checkpoints {
-		expected[checkpoint.ID] = checkpoint
-	}
-	seen := make(map[string]struct{}, len(report.Checks))
-	for i := range report.Checks {
-		check := &report.Checks[i]
-		check.ID = strings.TrimSpace(check.ID)
-		check.Summary = strings.TrimSpace(check.Summary)
-		check.Details = strings.TrimSpace(check.Details)
-		if _, ok := expected[check.ID]; !ok {
-			return nil, fmt.Errorf("checkpoint report contains unknown id %q", check.ID)
-		}
-		if _, ok := seen[check.ID]; ok {
-			return nil, fmt.Errorf("checkpoint report contains duplicate id %q", check.ID)
-		}
-		if check.Summary == "" {
-			return nil, fmt.Errorf("checkpoint report has empty summary for %q", check.ID)
-		}
-		seen[check.ID] = struct{}{}
-	}
-	for id := range expected {
-		if _, ok := seen[id]; !ok {
-			return nil, fmt.Errorf("checkpoint report is missing id %q", id)
-		}
-	}
-	return &report, nil
-}
 
 type Content struct {
 	Problem  string            `json:"problem"`

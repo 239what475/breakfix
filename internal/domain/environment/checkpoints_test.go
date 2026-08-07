@@ -3,11 +3,13 @@ package environment
 import (
 	"testing"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 )
 
 func TestRecordCheckpointStatusPreservesFirstPassAcrossPollsAndRestart(t *testing.T) {
 	now := time.Date(2020, 7, 30, 8, 0, 0, 0, time.UTC)
-	failed := []CheckpointResult{{ID: "repair", Passed: false, Summary: "not ready"}}
+	failed := checkpoint.Report{Checks: []checkpoint.Result{{ID: "repair", Passed: false, Summary: "not ready"}}}
 	status, changed := RecordCheckpointStatus(nil, failed, nil, now)
 	if !changed {
 		t.Fatal("initial checkpoint status was not recorded")
@@ -16,7 +18,7 @@ func TestRecordCheckpointStatusPreservesFirstPassAcrossPollsAndRestart(t *testin
 		t.Fatalf("failed checkpoint recorded first pass: %#v", status.Results[0])
 	}
 
-	passed := []CheckpointResult{{ID: "repair", Passed: true, Summary: "ready"}}
+	passed := checkpoint.Report{Checks: []checkpoint.Result{{ID: "repair", Passed: true, Summary: "ready"}}}
 	status, changed = RecordCheckpointStatus(status, passed, nil, now.Add(time.Second))
 	if !changed {
 		t.Fatal("passing checkpoint status was not recorded")
@@ -50,13 +52,13 @@ func TestRecordCheckpointStatusPreservesFirstPassAcrossPollsAndRestart(t *testin
 
 func TestRecordCheckpointStatusKeepsFirstPassThroughRunnerError(t *testing.T) {
 	now := time.Date(2020, 7, 30, 8, 0, 0, 0, time.UTC)
-	passed := []CheckpointResult{{ID: "repair", Passed: true, Summary: "ready"}}
+	passed := checkpoint.Report{Checks: []checkpoint.Result{{ID: "repair", Passed: true, Summary: "ready"}}}
 	status, _ := RecordCheckpointStatus(nil, passed, nil, now)
 	first := status.Results[0].FirstPassedAt
 	if first == nil {
 		t.Fatal("initial pass did not set first pass time")
 	}
-	status, _ = RecordCheckpointStatus(status, nil, assertCheckpointError{}, now.Add(time.Second))
+	status, _ = RecordCheckpointStatus(status, checkpoint.Report{}, assertCheckpointError{}, now.Add(time.Second))
 	if got := status.Results[0].FirstPassedAt; got == nil || !got.Equal(*first) {
 		t.Fatalf("runner error lost first pass: got %v want %v", got, first)
 	}

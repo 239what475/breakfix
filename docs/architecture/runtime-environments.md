@@ -38,8 +38,9 @@ Controller 根据 CRD finalizer、用户停止、完成、空闲时间和 drain 
 runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 challenge bundle 可以
 在学习与验证环境使用一致的初始化语义。
 
-检查点没有人为 Submit。Controller 按题目定义运行对应的检查脚本、写入结构化 checkpoint 状态，并将首次
-通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
+检查点没有人为 Submit。`internal/domain/checkpoint` 是 `checks.sh` JSON report 的唯一协议实现；Controller 与
+Runtime Worker Verifier 都用它校验字段、expected ID 完整性和整体通过状态。Controller 只额外把共享 Result 转换为
+包含 `FirstPassedAt` 的 Environment status，并将首次通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
 
 Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init、运行
 `answer.sh` 并收集相同检查点的结构化结果。Environment identity 会先持久化到 CandidateRevision；验证报告
