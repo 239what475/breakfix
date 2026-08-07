@@ -2,119 +2,127 @@
 
 > 题库不按零散技术名词扩张。先确定少数稳定的运维领域，再逐个把每个领域做成完整、可验证、可复用的学习内容。本文记录当前平台重构和后续内容建设；长期已确认的契约以 [docs/](docs/README.md) 为准。
 
-## P0：E2E 分层与可丢弃验收基线
+## P0：当前架构闭环与代码边界
 
-当前 E2E 把平台准备、Catalog 安装、浏览器行为、真实 Environment、Kubernetes 重启和模型调用混在同一套测试中，导致失败边界不清晰、准备时间过长、失败现场难以复现。本 P0 只重构测试边界，不修改产品工作流语义，也不新增测试专用服务或通用调度器。
+上一阶段的 E2E 分层与可丢弃验收基线已经完成，稳定契约只保留在 [`docs/operations/testing.md`](docs/operations/testing.md)。本 P0 只处理 [`REVIEW.md`](REVIEW.md) 当前确认的五个问题，不扩展产品功能，不增加 Deployment、通用任务队列、兼容层或第二套恢复权威。
 
-E2E 只验证少量真实的用户或平台承诺。单元测试、前端逻辑测试、PostgreSQL/OCI/Incus 集成测试和 Controller 测试负责各自的内部行为；模型自然语言、prompt 文案、工具调用次数和完整故障矩阵不属于日常 E2E。
+### 1. 回收发布失败留下的孤立物化目录
 
-### 1. 测试分层与责任边界
+**现状：** Generation 与 Catalog 都先把 challenge source 物化到 Server data PVC，再通过 PostgreSQL 事务公开 ChallengeRevision 和 RoadmapRevision。revision fence 冲突、Catalog 部分 commit 后失败，或者 Server 在 materialize-before-commit 窗口崩溃时，可能留下不属于任何已发布历史的目录。Runtime Worker reaper 无权访问 Server PVC，当前也没有 Server-owned 清理路径。
 
-P0 只保留四类清晰的测试层级，不把它们统称为一套必须同时运行的 E2E：
-
-| 层级 | 负责验证 | 运行方式 |
-| --- | --- | --- |
-| 快速测试 | Go 领域逻辑、前端纯逻辑和稳定的 API 行为 | 默认测试 |
-| 集成测试 | PostgreSQL、OCI/Catalog、Incus provider 和外部适配器契约 | 按各自依赖运行 |
-| 平台验收 | 真实 Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量跨组件主路径 | 独立入口 |
-| Live Agent 验收 | 真实模型、OpenSandbox 和 Authoring 全链路 | 显式手工运行 |
-
-Controller 需要真实 Kubernetes API 语义时可以使用 `envtest`，但它没有 kubelet、Controller Manager 或真实节点，不能代替 Kind/Incus 平台验收。本 P0 不引入 `k8s-sigs/e2e-framework`，避免为 TypeScript 浏览器、Incus 和模型测试增加第二套编排框架。
-
-E2E 场景遵循“一条场景只证明一个产品承诺”：不在同一个测试中同时验证 Catalog bootstrap、UI 导航、Environment 创建、checkpoint、Agent 工作流和重启恢复。发布冲突、finalizer 重试、revision 并发和数据库边界继续由已有单元/集成测试覆盖。
-
-### 2. 明确可丢弃的 Kind E2E 平台
-
-**目标行为：** 增加显式的 `make e2e-prepare` 与 `make e2e-reset`。二者只接受 `kind-*` context，且只操作专用的 E2E 目标。`prepare` 负责从干净状态部署当前工作树、通过正常 OCI digest 路径安装固定 fixture Catalog，并等待公开投影完成；它结束后不自动运行 Playwright。测试入口只连接已经准备好的目标。
+**目标行为：** Server data PVC 中只长期保留已经发布的历史 ChallengeRevision，以及非终态 publication/finalizer 仍需要的目录。确定性发布失败和进程崩溃留下的孤立目录最终都由 Server 精确回收。
 
 **实现边界：**
 
-- 只使用 `test/fixtures/catalog-release/`，不读取 `catalog/` 课程工作区，不向 PVC 复制文件，不直接写数据库，也不调用隐藏安装 API。
-- 复用现有 Kind、Registry、Runtime Worker identity 和部署定义，不新增测试专用 Deployment 或第二套 provider 实现。
-- prepare 先做只读 preflight，再清理专用目标、部署当前工作树、发布 fixture digest 并等待公开 Catalog projection。它不能携带上一次的 release reference 或旧题目状态。
-- 前置条件是明确的 Kind target、现有 Registry/Incus 凭据和可用的 Node base image；普通基线不调用模型或 OpenSandbox。
-- Node artifact 使用专用 E2E Incus build/image project 和 `e2e` 名称前缀；运行时配置由同一份配置注入 Server、Controller 和 Runtime Worker。不得清理共享的 `breakfix-build`、`breakfix-images` 或 `bf` 资源。
-- `incus.build_project`、`incus.image_project` 和 `incus.name_prefix` 必须由既有运行时配置注入，prepare 只能操作这组 E2E identity，不按宽泛前缀清理共享 project。
-- fixture 必须经过与产品相同的 Registry 认证、信任和 immutable digest 路径发布；不得退回为 `docker load`、节点文件复制、insecure Registry 或修改集群 DNS。
-- prepare/reset 只管理明确的 E2E target；非 Kind context 必须拒绝，共享 Incus project、base image、网络、OpenSandbox 安装和外部 Registry 不得被修改。
-- reset 先停止会写入数据的 Server、Runtime Worker 和 Registry，保留 Controller 删除并等待 E2E 目标内的 `NodeEnvironment`、`VK8sEnvironment` finalizer；再清理专用 Incus project、OpenSandbox workspace、Registry/Server/PostgreSQL 数据和 release reference。provider 清理失败时保留资源标识并报告失败，不能先删除数据库状态掩盖泄漏。
-- Catalog 安装等待属于 prepare 的有界阶段，并在失败时输出 release/entry 诊断；Playwright setup 只做短连接检查，不能用长时间轮询掩盖平台未准备。
-- prepare 通过公开 Catalog 校验 fixture 的数量、runtime、Topic 和 Tag；测试不能只按标题查找而把旧 fixture 当成成功。
-- 只有公开 projection、immutable digest 和精确 UI Origin 全部校验成功后，prepare 才创建带 target identity 的 prepared marker；测试入口必须验证这个 marker，准备中断或准备失败的目标不能运行 Playwright。
-- 基线浏览器与 Node runtime 不调用模型；真实模型与 OpenSandbox 只由 Live Agent 验收检查。
+- Server 根据 PostgreSQL 中的 ChallengeRevision、Generation publication intent、Catalog release/commit state 派生保留集合；文件系统不是判断业务状态的权威。
+- active、superseded 和 deprecated Challenge 的全部已发布 revision 都属于历史事实，不能清理。
+- 非终态 Generation finalizer 与非终态 Catalog commit 的目标目录在恢复完成前必须保留。
+- Generation 确定性 finalizer 失败后清理本次 intent 的目录；Catalog Release 进入终态 Failed 后清理只属于该失败 release 的目录。
+- Server-owned materialization reconciler 在启动恢复期间先扫描一次，随后低频周期扫描规范目录；每次都从数据库重新派生保留集合，不保存第二份 cleanup worklist。
+- 扫描处理崩溃窗口和遗留 staging，不得把额外目录当成公开 Catalog；删除失败留给下一次扫描重试，不回滚已经确定的业务终态，也不交给 Runtime Worker。
+- 不增加新的 workflow state、通用 cleanup queue 或额外 Deployment；清理是 Server-owned publication lifecycle 的一部分。
 
-**必须验证：** 从空的专用目标完成 prepare 后，当前 control plane 健康且公开 Catalog 只包含当前 fixture；reset 后专用 PVC、Incus project、Sandbox 和 Environment finalizer 不残留，共享 provider 资源不受影响。准备失败时不运行测试；清理失败时保留资源标识并报告失败。
+**必须验证：** 并发 revision 中落败的一方、部分物化后失败的 Catalog Release 和 materialize 后崩溃三条路径都能最终清理；当前、superseded、deprecated 历史 revision 以及待恢复 finalizer 的目录保持不变；Catalog 完整性读取仍只检查当前 Roadmap 精确引用。
 
-### 3. 浏览器与 Node runtime 平台验收
+### 2. 将 Catalog Release 收敛为一次性 baseline bootstrap
 
-**现状问题：** 当前浏览器测试、Node 运行时测试和恢复测试共享长 global setup；恢复场景还自行管理 port-forward 和 Deployment，导致测试之间的责任边界不清楚。部分 helper 维护手写状态快照，容易与 OpenAPI 和当前状态机漂移。
+**现状：** 系统架构把 Catalog Release 定义为初始化流程，但 installer、availability gate 和文档仍支持后续 append-only Release。已有可用 Catalog 时切换到一个未完成或失败的新 digest，会让旧题库进入 503。
 
-**目标行为：** 将平台验收拆成三个独立入口：轻量浏览器 UI、Node 学习主路径、平台恢复。每个入口只消费已准备好的 fixture target；浏览器测试不创建 Environment，Node 主路径只验证一次完整学习闭环，恢复测试不承担浏览器 UI 回归。
+**目标行为：** Catalog Release 只在尚未建立内容基线的空平台安装一次。后续题目、新 Topic/Tag 和题目修订全部通过 Authoring、Generation、Classification 与 Roadmap 流程产生。
 
 **实现边界：**
 
-- 保留 `make test-e2e` 作为轻量浏览器入口，增加独立的 `make test-e2e-node` 和 `make test-e2e-recovery`；它们不在同一 Playwright 项目中混跑。Node 和 recovery 套件可以较慢，但不能拖慢 UI 回归。
-- prepare 为每个可丢弃 target 选择一个动态空闲端口，并将同一个精确 `ui_origin` 写入 Server 配置，以保持终端 WebSocket 的 Origin 校验。每次测试入口只有一个 Server connection/port-forward 所有者，显式使用该 target-local base URL；测试不能依赖开发者遗留的 `localhost:9090`，Server 重启后的重新连接也由同一个入口 helper 管理。
-- UI 套件只通过用户可见的 role、label、文本和明确的 test id 交互；API 或 Kubernetes 状态断言放在 Node/recovery 套件。禁止伪造 workflow 完成、直接 patch 数据库、把 fixture 解压到 PVC，或按宽泛前缀清理共享资源。
-- 所有 helper 与当前 OpenAPI 字段、当前 `GenerationWorkflow` state 和实际 Deployment 名称对齐；删除过期的手写状态枚举和旧架构兼容分支。
-- fixture 保持一个确定性 Node 场景：无模型、无公网依赖、一个节点、一个可观察 checkpoint。内容改变时必须重新生成 release 和 roadmap content revision，不能手改 hash。
-- 每个测试使用独立用户和精确登记的资源 identity。正常结束只回收自己创建的 Environment；失败时保留 workflow、Environment 和组件日志 identity，整套 target 由显式 `e2e-reset` 回收。
-- UI 用例可以依赖隔离的 BrowserContext 并行运行；Node、recovery 和 Live 套件在同一个 E2E target 上串行且独占执行，因为它们会创建真实 Environment 或重启 Deployment。这是资源所有权，不新增 slot、pool 或测试调度器。
+- 没有已发布 Challenge 且没有 Ready Catalog baseline 时，可以配置一个 immutable digest 作为首次 release。
+- 首次 release 未成功且没有发布任何 Challenge 时，可以在清理失败 release 资源后改用另一个 digest。
+- 已有 Ready Catalog baseline 时，只允许相同 digest 的幂等启动与恢复；不同 digest 是启动配置冲突，不能进入安装或 availability gate。
+- 已经通过 Authoring 发布内容的平台不能再导入首次 Catalog Release。
+- 未建立题库且 `catalog.release_reference` 为空仍是合法的空平台启动方式。
+- 删除基于现有 Roadmap 追加 source_ref 的 installer 分支、repository surface 和文档语义，不保留旧行为兼容。
+- 初次安装期间 Catalog-dependent API 继续等待该 release；已有 baseline 不会因为另一个配置 digest 进入 503。
+- 不引入 `desired release / active release`、管理员安装 API 或新的发布工作流。
 
-**场景范围：**
+**必须验证：** 空平台首次安装、安装中断后同 digest 恢复、失败且无公开内容时更换 digest、Ready baseline 同 digest 重启均符合契约；Ready baseline 或 Authoring 内容存在时不同 digest 在启动边界被拒绝，旧 Catalog 不进入等待新 release 的状态；固定 fixture E2E 仍能从空目标完成 bootstrap。
 
-- **UI：** Guest 浏览 Catalog，认证用户进入 My Space 并完成一个响应式导航 smoke；排序、过滤等纯前端细节下沉到前端测试，不为它们启动真实 Incus 环境。
-- **Node：** 注册用户、启动固定 Node challenge、连接终端、执行 `answer.sh`、完成 checkpoint，并在同一场景中确认学习记录可见。需要切换页面的行为作为该场景的一步，不拆成依赖前一个测试的串行用例。
-- **Recovery：** 独立验证已有 NodeEnvironment 经 Server 重启和 Controller 重启后仍可继续收敛并完成 checkpoint；它可以使用 API 和 Kubernetes 观察，不承担 UI 导航断言。
+### 3. 让 Server bootstrap 显式拥有全部后台生命周期
 
-Playwright 默认不自动重试平台场景。异步状态只使用有界的 web-first assertion 或状态轮询，不用固定 sleep 掩盖问题；失败时保留 trace、截图、Server/Controller/Runtime Worker 日志和资源 identity。
+**现状：** `httpapi.SetupRouter` 在构造路由时执行 AgentRun 恢复，并隐式启动 learning cleanup、Environment projection、Assistant lease maintenance、Generation finalizer 和 Roadmap maintenance。Server 关闭只显式等待其中一部分后台执行，transport 因而同时承担路由、业务编排和进程生命周期。
 
-**必须验证：** prepared target 上 UI 和 Node 主路径分别通过；recovery 套件分别通过 Server restart 与 Controller restart 场景。每个套件都能单独运行，不依赖其他用例的用户、Environment、端口或状态。
-
-### 4. 保留一次真实 Node authoring 验收，而非把模型变成门禁
-
-**现状问题：** 真实模型、OpenSandbox、Incus 和 Registry 的 Authoring 主路径尚未在当前架构上验收。把模型调用、K8s Authoring、Assistant 和 soak 混入日常 E2E 会使结果不可重复、反馈过慢。
-
-**目标行为：** 提供显式的 `test-acceptance-node` 入口，串行执行一次 Node Authoring -> 发布 -> 学习环境主路径。它是人工 Live 验收，不是 `make test-e2e` 或日常 CI 门禁。
+**目标行为：** HTTP transport 只构造 Handler 和 Router。所有启动恢复、后台循环、取消、等待和依赖关闭顺序由 Server bootstrap 显式拥有。
 
 **实现边界：**
 
-- 测试只断言持久化状态、公开 challenge、Environment 和 checkpoint 的可观察结果，不对模型自然语言、工具调用次数或 prompt 文案做渲染或文本断言。
-- live 测试使用全新的 prepared target；它会产生不可变 authoring Challenge，不能在测试结束后原地删除或伪造回滚。测试的 `finally` 只回收自己创建的 Environment，整套 target 由显式 reset 丢弃。
-- Node live 验收失败时保留该 target 以及 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment 和 Worker 日志的标识，供定位；不自动重跑掩盖问题。
-- K8s authoring live、Assistant live 和 Assistant soak 保留为单独手工验收入口，本轮不把它们纳入 P0 完成门槛。它们开始前必须先有真实 VK8s 或 Assistant 需求和相应的稳定性预算。
+- `SetupRouter` 不启动 goroutine、不执行启动恢复，也不持有进程级 Context 副作用。
+- Generation publication finalizer 归入 Generation application；Roadmap 继续使用现有 application service；learning cleanup、Environment projection 和 Assistant lease maintenance 分别放回相应 application 边界；第一项新增的 materialization reconciler 同样由 bootstrap 启动和等待。
+- 每个后台服务暴露阻塞的 `Run(ctx)` 或等价的显式生命周期；bootstrap 按已知服务逐个装配，不设计通用 executor、slot 或内存 worklist。
+- 启动恢复在 Server 对外 ready 前完成；后台服务启动失败必须阻止错误实例继续服务。
+- 停止接收请求后取消并等待全部 Server-owned Agent 和后台循环，再关闭 Incus client 与 PostgreSQL。
+- Router 单元测试不因构造路由而修改数据库、领取 lease 或产生后台 goroutine。
 
-**必须验证：** 在真实模型与 provider 凭据可用时，Node live 验收从新的 AuthoringSession 到学习环境答案通过一次；随后重置该 Kind target，确认不会将生成出的测试 Challenge 作为题库内容保留。
+**必须验证：** Router 构造无后台副作用；启动恢复仍发生在 readiness 之前；取消 Server 后所有循环和已派发 Generation phase 都可结束并被等待；数据库和 provider 只在后台服务退出后关闭；Server restart recovery 验收继续通过。
+
+### 4. 建立工作文档的完成态收口规则
+
+**现状：** 已完成的 E2E P0 曾继续以当前提交计划保留在 TODO，旧 REVIEW 也混有已经实现的 revision、恢复和并发问题。当前规划虽然替换了这些内容，但还需要固定每个实现提交和整个 P0 完成时的收口规则，避免同样的问题再次发生。
+
+**目标行为：** TODO 只记录当前可执行工作，REVIEW 只记录当前仍成立的问题，`docs/` 保存已经实现的长期契约。
+
+**实现边界：**
+
+- 本 P0 规划提交删除旧 E2E P0，只引用现有测试运维文档。
+- 每个实现提交同时更新对应长期文档和 REVIEW 条目，不把文档修复集中到最后。
+- P0 全部完成后，从 TODO 删除本节并从 REVIEW 删除已解决问题，让题库内容建设重新成为顶部任务。
+- 不在 TODO 或 REVIEW 复制 OpenAPI、CRD、状态枚举和完整架构文档。
+
+**必须验证：** TODO、REVIEW、README 与 `docs/` 不再同时陈述不同的 Catalog、publication cleanup、Server lifecycle 或 checkpoint 契约；所有链接有效，已完成提交不再以待办形式出现。
+
+### 5. 合并 Checkpoint JSON 协议
+
+**现状：** challenge 内容验证和 Environment 运行时状态分别维护一套 `{"checks":[...]}` 类型与解析器。两者当前接近一致，但字段清理、expected ID、重复 ID 和缺失项校验可以独立漂移。
+
+**目标行为：** 平台只有一个与 Kubernetes、数据库和 HTTP 无关的 checkpoint report 协议实现；内容验证与运行时投影共享它，各自只保留自己的业务状态转换。
+
+**实现边界：**
+
+- 在 `internal/domain/checkpoint` 定义共享的 Report、Result、JSON 解析、expected ID 完整性和 `Passed` 语义。
+- challenge 验证使用共享 Report，不再维护第二套 wire type 和 parser。
+- Environment 只负责把共享 Result 转换为带 `FirstPassedAt` 的持久状态，不重复解析协议。
+- 保持现有 JSON 结构、summary/details 语义和 checkpoint 无顺序要求；这是内部收敛，不新增格式版本或兼容分支。
+- 删除重复私有类型和重复校验，测试以共享协议为权威。
+
+**必须验证：** 合法、未知 ID、重复 ID、缺失 ID、空 summary、无 checks 和非法 JSON 只由共享协议测试一次；challenge 与 Environment 分别验证发布内容约束和 `FirstPassedAt` 保留逻辑；Node/VK8s checkpoint 消费结果不变。
 
 ### P0 迁移清单
 
-1. 建立专用 Kind/Incus E2E target 的 prepare/reset 生命周期，明确资源所有权和失败清理边界。
-2. 发布确定性的 immutable fixture Catalog，并让准备阶段独立验证 control plane 和公开 Catalog projection。
-3. 拆分 UI、Node 主路径和 recovery 三个验收入口，移除长 global setup、固定端口和跨套件状态依赖。
-4. 将真实 Node Authoring 保留为显式 Live 验收，模型、OpenSandbox、K8s Authoring 和 Assistant 不进入日常 E2E。
-5. 更新测试运行与故障诊断文档，完成快速测试、集成测试、平台验收和 Live 验收的边界核对。
+1. 建立 Server-owned 物化引用扫描与确定性失败清理，覆盖 Generation 和 Catalog。
+2. 删除 Catalog 的持续追加语义，将 release reference 固定为一次性 baseline bootstrap。
+3. 将启动恢复、现有五个后台循环和新增的 materialization reconciler 统一移到 application/bootstrap，并补齐关闭等待。
+4. 用本轮规划替换已完成的 E2E TODO，并在每个提交中同步清理 REVIEW 与长期文档。
+5. 合并 checkpoint report 类型、解析和校验，删除两套实现。
 
 ### P0 提交计划
 
-P0 按以下五个提交实施。每一项的实现、对应测试、生成物和必要文档必须在该项验证通过后一起提交，再开始下一项；不能先堆积多项修改，也不能把验证集中成最后的独立提交。
+P0 按以下六个提交实施。每个实现提交必须同时包含该项代码、针对性测试和必要长期文档，并在验证通过后立即提交，再开始下一项；不能积累多项修改后一次提交，也不能把实现验证集中到最后。
 
-1. **`test(e2e): define disposable target lifecycle`**
-   - **目标：** 建立 Kind-only 的 E2E target identity、专用 Incus project 与精确 reset 语义，明确 Environment finalizer、Sandbox、Registry、Server 和 PostgreSQL 数据的清理顺序。
-   - **验证：** 在专用 target 上完成 reset，确认受管资源全部清理且共享 Incus project/base image 不受影响；非 Kind context 被拒绝，provider 清理失败不会被数据库删除掩盖。
-2. **`test(e2e): prepare deterministic catalog target`**
-   - **目标：** 建立 `e2e-prepare`，从当前工作树部署平台，经真实 Registry 发布固定 fixture Catalog，并以公开 projection 而非旧状态确认准备完成。
-   - **验证：** 从空 target 成功准备当前 control plane 和 fixture；验证 digest、Catalog runtime/Topic/Tag projection 以及准备失败诊断，确认不依赖模型、PVC 文件复制或旧 Catalog。
-3. **`test(e2e): split browser and node acceptance`**
-   - **目标：** 移除长 global setup 与固定端口假设，建立单一连接所有者；将 UI smoke 与 Node 学习主路径拆成可独立运行的套件，并收敛重复的 runtime 场景。
-   - **验证：** UI 套件与 Node 主路径可分别在同一 prepared target 上通过；每个用例的用户、Environment、端口和 cleanup 独立，失败时能得到 trace、日志和资源 identity。
-4. **`test(e2e): isolate platform recovery acceptance`**
-   - **目标：** 将 Server restart 和 Controller restart 从浏览器基线移为独立 recovery 套件，使用共享连接 helper 和真实 Environment 状态，不保留测试专用数据库或 CRD patch。
-   - **验证：** 两个重启场景分别证明已有 NodeEnvironment 可以继续收敛、重连并完成 checkpoint；UI 与 Node 主路径不因 recovery 套件的 Deployment 操作而受影响。
-5. **`test(acceptance): isolate node authoring live validation`**
-   - **目标：** 提供显式 Node Authoring Live 验收与运行文档，保持模型、OpenSandbox、K8s Authoring、Assistant 和 soak 与日常 E2E 隔离。
-   - **验证：** 真实凭据可用时完成一次从 Authoring 到学习环境完成的主路径；失败现场可保留并由 reset 丢弃，且不对模型文本、prompt 或工具调用次数做断言。
+1. **`docs: plan current architecture corrections`**
+   - **目标：** 用当前五个问题替换已完成的 E2E P0，重写 REVIEW 为当前事实，并明确本轮边界、顺序和完成标准。
+   - **验证：** TODO 与 REVIEW 不再包含已经实现的 revision、恢复、并发或 E2E 待办；长期 E2E 契约仍可从 operations testing 文档完整找到。
+2. **`fix(publication): reclaim orphaned materializations`**
+   - **目标：** 增加 Server-owned 物化保留集合、启动扫描和终态失败清理，同时修正 Catalog/Workflow 文档中的虚假回收描述。
+   - **验证：** Generation 冲突、Catalog 部分失败和崩溃恢复均清理孤立目录；所有已发布历史及非终态 publication 保持不变；针对性 PostgreSQL/文件系统测试通过。
+3. **`refactor(catalog): enforce bootstrap-only release`**
+   - **目标：** 删除 append-only 后续安装路径，在启动边界固定首次 baseline 与 digest 规则，并同步部署、Catalog 和 Workflow 文档。
+   - **验证：** 首次安装和同 digest 恢复通过；无公开内容的失败安装可更换 digest；已有 baseline 或 Authoring 内容时不同 digest 不进入 installer/gate；固定 Catalog prepare 与公开投影验收通过。
+4. **`refactor(server): own background service lifecycle`**
+   - **目标：** 让 application 服务承载后台用例，让 bootstrap 显式启动、取消和等待全部服务，使 Router 构造恢复为纯 transport 装配。
+   - **验证：** Router 无后台副作用，启动恢复与关闭顺序测试通过，Generation 并发和 Roadmap lease 语义不变，Server restart recovery 验收通过。
+5. **`refactor(checkpoint): share report protocol`**
+   - **目标：** 建立唯一 checkpoint report 协议，迁移 challenge 与 Environment consumer，删除重复类型和解析器。
+   - **验证：** 协议完整性矩阵、challenge 内容校验、Environment 首次通过时间和现有 Controller 测试通过；Node 学习主路径仍完成同一 checkpoint。
+6. **`docs: close current architecture corrections`**
+   - **目标：** 在前五项全部完成后删除本 P0 和 REVIEW 中已解决条目，只保留题库内容建设及仍真实存在的问题；核对所有长期架构与运维文档。
+   - **验证：** TODO 顶部回到题库建设，REVIEW 不保留已解决问题，README/docs 与代码所有权和运行行为一致；全量快速测试、lint、生成物和两套 Kustomize 渲染通过。
 
-P0 完成标准是：任何开发者都能在明确的 Kind E2E target 上从空状态准备固定 Catalog，并分别运行 UI、Node 主路径和 recovery 验收；真实 Node Authoring 主路径在显式 Live 验收中至少通过一次。达到该标准后，才开始将 Linux 领域场景制作成真实可发布题目。
+P0 完成标准是：失败发布不遗留孤立物化目录；Catalog Release 只有一次性 bootstrap 语义；Server bootstrap 可确定地启动和等待全部后台服务；checkpoint report 只有一个权威实现；TODO、REVIEW 与长期文档只描述各自负责的当前事实。完成后再继续把 Linux 领域场景制作成真实 Catalog Release。
 
 ## 后续：题库内容建设
 
