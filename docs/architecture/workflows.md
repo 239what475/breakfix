@@ -70,8 +70,9 @@ Roadmap binding，并把 workflow 标为 `Published`。如果 fence 已变化，
 不会丢失诊断，也不会提前执行重试；没有第二个内存队列或恢复权威。
 
 finalizer 成功完成 materialization 和 Roadmap 发布时，在同一事务中原子清空四个诊断字段。因而日志只是排障
-上下文，接口读取到的 workflow 诊断才是发布状态的权威记录。若 finalizer 在中途留下未被当前 Roadmap 引用的
-目录，它不会被公开读取，并由现有异步资源回收路径处理。
+上下文，接口读取到的 workflow 诊断才是发布状态的权威记录。若 finalizer 在中途留下未被任何已发布 revision
+或非终态 publication intent 引用的目录，它不会被公开读取，并由 Server-owned materialization reconciler 从
+PostgreSQL 权威状态重新派生后回收；Runtime Worker 的 provider reaper 不访问 Server data PVC。
 
 弃用不是 Generation state。作者通过独立生命周期 API 请求后，Server 在锁定 Challenge 和当前 Roadmap 的事务中删除
 该题 binding/关系边并将 Challenge 标为 `deprecated`；历史 revision、artifact、Environment 和学习记录不删除。正常

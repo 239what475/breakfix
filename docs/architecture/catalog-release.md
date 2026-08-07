@@ -79,7 +79,10 @@ Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并�
 Roadmap 原子提交的同一事务中清空诊断字段。
 
 物化过程是幂等的：已经存在且与 commit 完全匹配的目录会被复用，冲突目录会被视为确定性失败；未被当前
-Roadmap 引用的中间目录不会进入公开 Catalog，并由现有清理路径回收。Catalog 不增加新的状态、队列或恢复服务。
+Roadmap 引用的中间目录不会进入公开 Catalog。Server 启动时和运行期间会从 PostgreSQL 重新派生物化保留集合：
+所有已发布 Challenge revision，以及仍处于 `Committing` 的 commit intent 都会保留；终态 `Failed` release
+独占的目录和崩溃遗留 staging 会被 Server data PVC reconciler 回收。它不保存额外 worklist，也不把 Server PVC
+交给 Runtime Worker。
 
 ## 物化完整性
 
@@ -95,7 +98,8 @@ Catalog 读取以当前 Roadmap binding 为准，逐项找到对应的 materiali
 `id`、`title`、`content_revision`、`source_slug`、目录路径和 `materialized_revision`。目录缺失、
 路径改变、文件内容改变、可执行位改变或元数据不一致都会返回明确的 materialized integrity error，
 不会把题目静默过滤掉。未被当前 Roadmap 引用的额外目录允许存在，以覆盖物化先于 Roadmap 原子提交的
-正常窗口；它们不成为公开题目，也不参与完整性投影。
+正常窗口；它们不成为公开题目，也不参与完整性投影。没有任何发布 revision 或非终态 intent 引用的规范目录
+最终会由 Server 回收；当前、superseded 和 deprecated revision 始终作为历史事实保留。
 
 Server 启动和 `/readyz` 使用同一完整性检查；`/readyz` 使用短超时并绕过 configured release
 availability gate。没有当前 Roadmap 时，缺失的题目根目录是合法的 bootstrap 状态，避免首次 Catalog

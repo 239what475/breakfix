@@ -10,36 +10,11 @@
 - PostgreSQL 保存 workflow、lease、AgentRun、revision 和学习事实。
 - Registry、Incus 与 OpenSandbox 分别提供 immutable artifact、Node runtime 和 Generator workspace。
 
-这些边界与当前实现基本一致，不需要再次拆分 Deployment、引入通用任务队列，或合并领域表。当前仍有两个需要优先闭环的设计问题，以及三个代码和文档整洁性问题。
+这些边界与当前实现基本一致，不需要再次拆分 Deployment、引入通用任务队列，或合并领域表。当前仍有一个需要优先闭环的设计问题，以及三个代码和文档整洁性问题。
 
 ## P0：发布与 Catalog 契约
 
-### 1. 发布失败会遗留孤立的物化目录
-
-Generation 发布尾部当前按以下顺序执行：
-
-1. Server 将 Candidate 物化到 `data_dir/challenges/<source_slug>/<challenge_revision_id>/`。
-2. Server 再在 PostgreSQL 事务中创建或切换 ChallengeRevision，并发布新的 RoadmapRevision。
-
-相关实现位于：
-
-- [`internal/transport/httpapi/publication_materialization.go`](internal/transport/httpapi/publication_materialization.go)
-- [`internal/transport/httpapi/generation_publication_finalizer.go`](internal/transport/httpapi/generation_publication_finalizer.go)
-- [`internal/adapter/postgres/generation_repository.go`](internal/adapter/postgres/generation_repository.go)
-
-两个修订基于同一个 active revision 并发发布时，第一个可以成功，第二个会在目录已经物化后才发现 revision fence 冲突。失败 workflow 的 Registry/Incus artifact 会进入现有 Runtime Worker reaper，但 Server PVC 上的目录没有对应的清理类型，也没有 ChallengeRevision 权威记录。
-
-Catalog Release 在部分 commit 已物化、后续确定性失败时也可能留下同类目录。目前 [`docs/architecture/catalog-release.md`](docs/architecture/catalog-release.md) 声称这些目录会被“现有清理路径”回收，但实现中不存在该路径。
-
-建议保持现有组件边界：
-
-- Server 负责清理 Server data PVC，Runtime Worker 不应获得该 PVC。
-- 只清理不属于已发布 ChallengeRevision、也不被非终态 Catalog commit 或待完成 finalizer 使用的物化目录；失败 Catalog Release 的终态 commit 不能永久阻止回收。
-- revision 冲突等确定性失败应清理本次 publication intent 的目标目录。
-- Server 崩溃形成的 materialize-before-commit 窗口由启动后的完整性扫描补齐。
-- 不增加通用队列、额外 Deployment 或新的业务 workflow state。
-
-### 2. Catalog Release 同时存在“初始化”与“持续追加”两套契约
+### 1. Catalog Release 同时存在“初始化”与“持续追加”两套契约
 
 [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) 将 CatalogRelease 定义为空平台的初始化流程，但当前详细文档和实现允许切换到后续 append-only Release：
 
@@ -60,7 +35,7 @@ Catalog Release 在部分 commit 已物化、后续确定性失败时也可能�
 
 ## P1：代码与文档整洁性
 
-### 3. Server 后台生命周期被隐藏在 HTTP transport 中
+### 2. Server 后台生命周期被隐藏在 HTTP transport 中
 
 [`internal/transport/httpapi/server.go`](internal/transport/httpapi/server.go) 的 `SetupRouter` 在创建 Gin Router 时同时执行启动恢复，并启动以下后台循环：
 
@@ -76,13 +51,13 @@ Catalog Release 在部分 commit 已物化、后续确定性失败时也可能�
 
 建议把这些循环的启动、取消和等待收回 Server bootstrap/application lifecycle。HTTP Handler 只保留路由方法及其依赖，不新增进程或 Deployment。
 
-### 4. TODO 与 REVIEW 缺少完成态收口规则
+### 3. TODO 与 REVIEW 缺少完成态收口规则
 
 已完成的“E2E 分层与可丢弃验收基线”曾长期以 P0 和提交计划的形式保留在 [`TODO.md`](TODO.md)，旧 REVIEW 也混有已经实现的 revision、恢复、finalizer 和并发问题。这说明工作文档没有在实现提交完成时同步收口，会直接误导下一阶段判断。
 
 当前 P0 规划已经替换旧 E2E 内容，但该问题只有在后续每个实现提交同步删除对应 REVIEW 条目、最终再从 TODO 删除完成的 P0 后才闭环。稳定契约只进入 [`docs/`](docs/README.md)，TODO 与 REVIEW 不保存已完成方案。
 
-### 5. Checkpoint JSON 协议存在两套解析实现
+### 4. Checkpoint JSON 协议存在两套解析实现
 
 相同的 `{"checks":[...]}` 协议分别由以下代码解析：
 
@@ -101,8 +76,7 @@ Catalog Release 在部分 commit 已物化、后续确定性失败时也可能�
 
 ## 建议顺序
 
-1. 补齐 Server PVC 物化目录的精确清理闭环。
-2. 将 Catalog Release 明确并实现为一次性 bootstrap。
-3. 清理已完成的 TODO 和对应错误文档描述。
-4. 收回 Server 后台生命周期。
-5. 合并 checkpoint report 协议。
+1. 将 Catalog Release 明确并实现为一次性 bootstrap。
+2. 清理已完成的 TODO 和对应错误文档描述。
+3. 收回 Server 后台生命周期。
+4. 合并 checkpoint report 协议。

@@ -19,6 +19,7 @@ import (
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
+	apppublication "github.com/breakfix/breakfix/internal/application/publication"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
@@ -84,6 +85,19 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("create OCI registry client: %w", err)
+	}
+	materializations, err := apppublication.NewMaterializationReconciler(database.Publication, apppublication.MaterializationReconcilerConfig{
+		ChallengesDir: cfg.ChallengesDir(),
+	})
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("create challenge materialization reconciler: %w", err)
+	}
+	if err := materializations.Recover(ctx); err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("recover challenge materializations: %w", err)
 	}
 	var generatorSandbox *opensandbox.Client
 	var generatorWorkspace *appgeneration.Manager
@@ -206,6 +220,18 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("setup HTTP API: %w", err)
 	}
 	stopGeneratorWorkspaceCleanup := startGeneratorWorkspaceCleanup(ctx, generatorWorkspace)
+	materializationCtx, cancelMaterializations := context.WithCancel(ctx)
+	materializationDone := make(chan struct{})
+	go func() {
+		defer close(materializationDone)
+		if err := materializations.Run(materializationCtx); err != nil && materializationCtx.Err() == nil {
+			slog.Error("challenge materialization reconciler stopped", "err", err)
+		}
+	}()
+	stopMaterializations := func() {
+		cancelMaterializations()
+		<-materializationDone
+	}
 	stopGenerationAgents := func() {}
 	if generationAgents != nil {
 		agentCtx, cancelAgents := context.WithCancel(ctx)
@@ -233,6 +259,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			stopGenerationAgents()
 			stopGeneratorWorkspaceCleanup()
 			stopCatalogInstaller()
+			stopMaterializations()
 			incusClient.Close()
 			cleanupDatabase()
 		},

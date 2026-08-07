@@ -30,7 +30,7 @@ Catalog installer 是 Server 内的可恢复协调器，不是另一个 Deployme
 | 数据或副作用 | 权威所有者 | 其他组件的边界 |
 | --- | --- | --- |
 | 用户、作者会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、RoadmapRevision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
-| challenge 目录和持久化 Catalog source | Server data PVC，经 Server 写入 | Worker 只提交 typed 结果，不写文件系统。 |
+| challenge 目录和持久化 Catalog source | Server data PVC，经 Server 写入和回收 | Server 从 PostgreSQL 的 revision 与非终态 publication intent 派生保留集合；Worker 只提交 typed 结果，不访问该 PVC。 |
 | `NodeEnvironment`、`VK8sEnvironment` spec/status | Server 写 spec，Controller 写 status | Server 不直接写 status。 |
 | Node image | Incus image project | Runtime Worker 构建/发布；Controller 只消费正式 artifact。 |
 | K8s image | 运营方提供的 OCI Registry；Kind 开发环境使用 NodePort Registry | Runtime Worker 和节点都使用 `registry_repository` 的同一 authority。 |

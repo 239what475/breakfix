@@ -26,7 +26,7 @@ web/        Vue 应用、Node 配置和 TypeScript 生成 client
 ```text
 internal/
   adapter/       Kubernetes、Incus、OCI、OpenSandbox、LLM、PostgreSQL 和内部 HTTP 的具体实现
-  application/   作者、生成、catalog、学习和执行快照用例
+  application/   作者、生成、catalog、publication、学习和执行快照用例
   bootstrap/     各进程的配置加载、依赖装配和生命周期
   buildinfo/     由 ldflags 写入的版本信息
   content/       portable challenge、发布 materialization 和 Roadmap source 文件契约

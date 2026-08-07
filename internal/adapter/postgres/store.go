@@ -23,6 +23,7 @@ type Store struct {
 	Environment *EnvironmentRepository
 	Generation  *GenerationRepository
 	Identity    *IdentityRepository
+	Publication *PublicationRepository
 	Roadmap     *RoadmapRepository
 	Reporting   *ReportingRepository
 }
@@ -71,6 +72,7 @@ func newStore(conn *Conn) *Store {
 		Environment: &EnvironmentRepository{conn: conn},
 		Generation:  &GenerationRepository{conn: conn},
 		Identity:    &IdentityRepository{conn: conn},
+		Publication: &PublicationRepository{conn: conn},
 		Roadmap:     &RoadmapRepository{conn: conn},
 		Reporting:   &ReportingRepository{conn: conn},
 	}
