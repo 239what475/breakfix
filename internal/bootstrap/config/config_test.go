@@ -30,6 +30,9 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_SANDBOX_NAMESPACE", "opensandbox-test")
 	t.Setenv("BREAKFIX_TEST_INCUS_ENDPOINT", "https://incus.test.example:8443")
 	t.Setenv("BREAKFIX_TEST_INCUS_FINGERPRINT", strings.Repeat("a", 64))
+	t.Setenv("BREAKFIX_INCUS_BUILD_PROJECT", "breakfix-e2e-build")
+	t.Setenv("BREAKFIX_INCUS_IMAGE_PROJECT", "breakfix-e2e-images")
+	t.Setenv("BREAKFIX_INCUS_NAME_PREFIX", "e2e")
 	t.Setenv("BREAKFIX_TEST_K8S_IMAGE", "registry.test.example/breakfix/k8s-base@sha256:"+strings.Repeat("b", 64))
 	t.Setenv("BREAKFIX_TEST_REGISTRY_REPOSITORY", "registry.test.example/breakfix")
 	t.Setenv("BREAKFIX_TEST_REGISTRY_PULL_SECRET", "breakfix-registry-pull")
@@ -57,8 +60,9 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	if cfg.OpenSandbox.BaseURL != "http://opensandbox.test.svc.cluster.local" || cfg.OpenSandbox.Namespace != "opensandbox-test" {
 		t.Fatalf("opensandbox runtime expansion = url %q, namespace %q", cfg.OpenSandbox.BaseURL, cfg.OpenSandbox.Namespace)
 	}
-	if cfg.Incus.Endpoint != "https://incus.test.example:8443" || cfg.Incus.BaseImageFingerprint != strings.Repeat("a", 64) {
-		t.Fatalf("incus runtime expansion = endpoint %q, fingerprint %q", cfg.Incus.Endpoint, cfg.Incus.BaseImageFingerprint)
+	if cfg.Incus.Endpoint != "https://incus.test.example:8443" || cfg.Incus.BaseImageFingerprint != strings.Repeat("a", 64) ||
+		cfg.Incus.BuildProject != "breakfix-e2e-build" || cfg.Incus.ImageProject != "breakfix-e2e-images" || cfg.Incus.NamePrefix != "e2e" {
+		t.Fatalf("incus runtime expansion = %#v", cfg.Incus)
 	}
 	if cfg.Runtime.K8s.BaseImageDigest != "registry.test.example/breakfix/k8s-base@sha256:"+strings.Repeat("b", 64) ||
 		cfg.Runtime.K8s.ManagementTerminalImage != cfg.Runtime.K8s.BaseImageDigest {

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+	activeEnvironmentName,
 	expectTerminalConnected,
 	registerAndLogin,
 	runTerminalCommand,
@@ -7,15 +8,19 @@ import {
 	stopChallenge,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
+import { attachNodeEnvironmentIdentity, waitForNodeEnvironmentDeletion } from "../support/e2e-platform";
 
 const soakTest = process.env.RUN_AGENT_SOAK_E2E === "1" ? test : test.skip;
 
-soakTest("assistant completes twenty real runs in one durable conversation", async ({ page }) => {
+soakTest("assistant completes twenty real runs in one durable conversation", async ({ page }, testInfo) => {
 	test.setTimeout(30 * 60_000);
+	let environmentName = "";
+	let completed = false;
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
 	const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
 	await expectTerminalConnected(page);
+	environmentName = await activeEnvironmentName(page, challenge.id);
 
 	const marker = `BREAKFIX_ASSISTANT_SOAK_${Date.now()}`;
 	await runTerminalCommand(page, `printf '%s\\n' '${marker}'`);
@@ -45,7 +50,12 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 				await expect(reply.locator(".assistant-evidence span").filter({ hasText: "参考解答" })).toBeVisible({ timeout: 30_000 });
 			}
 		}
+		completed = true;
 	} finally {
-		await stopChallenge(page, challenge.id);
+		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
+		if (completed) {
+			await stopChallenge(page, challenge.id);
+			await waitForNodeEnvironmentDeletion(environmentName);
+		}
 	}
 });

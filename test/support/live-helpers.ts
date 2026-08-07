@@ -6,6 +6,11 @@ export type StartedChallenge = {
 	title: string;
 };
 
+type ActiveEnvironment = {
+	environment_id: string;
+	challenge: { id: string };
+};
+
 async function totpCode(page: Page, secret: string): Promise<string> {
   return page.evaluate(async (value: string) => {
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -73,13 +78,11 @@ export async function registerAndLogin(page: Page, openRegistration = true) {
 }
 
 export function challengeCard(page: Page, title: string) {
-  return page.locator("article.challenge-card", {
-    has: page.getByRole("heading", { name: title, exact: true }),
-  });
+	return page.getByRole("article", { name: `Challenge: ${title}`, exact: true });
 }
 
 export function challengeCardByID(page: Page, challengeID: string) {
-  return page.locator(`article.challenge-card[data-challenge-id="${challengeID}"]`);
+	return page.getByTestId(`catalog-challenge-${challengeID}`);
 }
 
 export async function startChallengeFromCatalog(page: Page, title: string): Promise<StartedChallenge> {
@@ -90,43 +93,46 @@ export async function startChallengeFromCatalog(page: Page, title: string): Prom
 	return { id, title };
 }
 
+export async function activeEnvironmentName(page: Page, challengeID: string): Promise<string> {
+	const read = () =>
+		page.evaluate(async (id) => {
+			const response = await fetch("/api/me/space", {
+				headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+			});
+			if (!response.ok) throw new Error(await response.text());
+			const body = (await response.json()) as { active_environments: ActiveEnvironment[] };
+			return body.active_environments.find((environment) => environment.challenge.id === id)?.environment_id ?? "";
+		}, challengeID);
+	await expect.poll(read, { timeout: 90_000, intervals: [500, 1_000, 2_000, 5_000] }).not.toBe("");
+	return read();
+}
+
 export async function expectTerminalConnected(page: Page) {
-	await expect(page.getByText("Connected", { exact: true })).toBeVisible({
+	await expect(page.locator(".terminal-status").getByText("Connected", { exact: true })).toBeVisible({
 		timeout: 90_000,
 	});
 }
 
-const screenshotDir = process.env.CAPTURE_E2E_SCREENSHOTS;
+export async function reconnectTerminal(page: Page) {
+	const status = page.locator(".terminal-status");
+	const connected = status.getByText("Connected", { exact: true });
+	const overlayReconnect = page
+		.locator(".terminal-disconnected")
+		.getByRole("button", { name: "Reconnect", exact: true });
+	const statusReconnect = status.getByRole("button", { name: "Reconnect", exact: true });
 
-export async function captureWorkspace(page: Page, name: string) {
-	if (!screenshotDir) return;
-	await page.screenshot({ path: `${screenshotDir}/${name}.png` });
-}
-
-export async function expectViewportWithoutPageOverflow(page: Page) {
-	const viewport = await page.evaluate(() => ({
-		scrollHeight: document.documentElement.scrollHeight,
-		innerHeight: window.innerHeight,
-		scrollWidth: document.documentElement.scrollWidth,
-		innerWidth: window.innerWidth,
-	}));
-	expect(viewport.scrollHeight).toBeLessThanOrEqual(viewport.innerHeight);
-	expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.innerWidth);
-}
-
-export async function expectElementsWithinViewport(page: Page, selector: string) {
-	const bounds = await page.locator(selector).evaluateAll((elements) =>
-		elements.map((element) => {
-			const rect = element.getBoundingClientRect();
-			return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-		}),
-	);
-	for (const bound of bounds) {
-		expect(bound.left).toBeGreaterThanOrEqual(0);
-		expect(bound.right).toBeLessThanOrEqual(await page.evaluate(() => innerWidth));
-		expect(bound.top).toBeGreaterThanOrEqual(0);
-		expect(bound.bottom).toBeLessThanOrEqual(await page.evaluate(() => innerHeight));
-	}
+	await expect.poll(async () => {
+		if (await connected.isVisible().catch(() => false)) return true;
+		if (await overlayReconnect.isVisible().catch(() => false)) {
+			await overlayReconnect.click();
+		} else if (await statusReconnect.isVisible().catch(() => false)) {
+			await statusReconnect.click();
+		}
+		return connected.isVisible().catch(() => false);
+	}, {
+		timeout: 90_000,
+		intervals: [250, 500, 1_000, 2_000, 5_000],
+	}).toBe(true);
 }
 
 export async function runTerminalCommand(page: Page, command: string) {
@@ -151,6 +157,6 @@ export async function stopChallenge(page: Page, challengeID: string) {
 
 export async function waitForVerifiedRevision(page: Page) {
 	await expect(
-		page.getByRole("button", { name: "发布挑战", exact: true }),
+		page.getByRole("button", { name: "确认题目内容", exact: true }),
 	).toBeVisible({ timeout: 50 * 60_000 });
 }

@@ -1,5 +1,6 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
-	test-unit lint catalog-package test-e2e test-vk8s-network
+	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
+	test-e2e-recovery test-acceptance-node test-vk8s-network
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -104,7 +105,24 @@ catalog-package:
 	go run ./cmd/catalog-release -source "$(CATALOG_SOURCE)" -output "$(CATALOG_ARCHIVE)" $(if $(CATALOG_REFERENCE),-reference "$(CATALOG_REFERENCE)") $(if $(CATALOG_TRUST_BUNDLE_FILE),-trust-bundle-file "$(CATALOG_TRUST_BUNDLE_FILE)")
 
 test-e2e: test-deps
-	npm run test:e2e --prefix $(TEST_DIR)
+	./scripts/kind/run-e2e.sh ui
+
+e2e-prepare:
+	./scripts/kind/e2e-prepare.sh
+
+e2e-reset:
+	./scripts/kind/e2e-target.sh reset
+
+test-e2e-node: test-deps
+	./scripts/kind/run-e2e.sh node
+
+test-e2e-recovery: test-deps
+	./scripts/kind/run-e2e.sh recovery
+
+test-acceptance-node: test-deps
+	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live Node acceptance" >&2; exit 2; }
+	$(MAKE) --no-print-directory e2e-prepare
+	RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-node
 
 test-vk8s-network:
 	./scripts/kind/verify-vk8s-network-isolation.sh

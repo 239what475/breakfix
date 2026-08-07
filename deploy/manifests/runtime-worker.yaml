@@ -71,6 +71,24 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: incus_base_image_fingerprint
+            - name: BREAKFIX_INCUS_BUILD_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_build_project
+                  optional: true
+            - name: BREAKFIX_INCUS_IMAGE_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_image_project
+                  optional: true
+            - name: BREAKFIX_INCUS_NAME_PREFIX
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: incus_name_prefix
+                  optional: true
           volumeMounts:
             - name: config
               mountPath: /etc/breakfix

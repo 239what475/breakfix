@@ -22,20 +22,24 @@ func ValidRevision(value string) bool {
 	return revisionPattern.MatchString(strings.TrimSpace(value))
 }
 
-// SourceRefSegment turns a title into the stable portable segment used by
-// author-created roadmap entities. A new source_ref is intentionally derived
-// only from its normalized English title: callers must reject an empty result
-// rather than append an opaque identifier or a random suffix.
+// SourceRefSegment turns a title into a stable portable ASCII segment used by
+// author-created roadmap entities. ASCII titles retain their readable form.
+// Titles that include non-ASCII letters or numbers receive a deterministic
+// digest suffix, so a display title never makes a portable source_ref empty or
+// accidentally collide with the ASCII portion of another title.
 func SourceRefSegment(title string) string {
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(title)), " "))
 	var builder strings.Builder
 	separator := true
-	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+	needsDigest := false
+	for _, r := range normalized {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			builder.WriteRune(r)
 			separator = false
 			continue
 		}
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			needsDigest = true
 			continue
 		}
 		if !separator {
@@ -43,7 +47,16 @@ func SourceRefSegment(title string) string {
 			separator = true
 		}
 	}
-	return strings.Trim(builder.String(), "-")
+	segment := strings.Trim(builder.String(), "-")
+	if segment == "" {
+		segment = "item"
+		needsDigest = true
+	}
+	if !needsDigest {
+		return segment
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return segment + "-" + hex.EncodeToString(sum[:8])
 }
 
 func NewTopicSourceRef(domainSourceRef, title string) string {

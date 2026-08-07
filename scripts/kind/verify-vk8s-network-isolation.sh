@@ -15,6 +15,7 @@ port_forward_port=${BREAKFIX_VK8S_NETWORK_PORT_FORWARD_PORT:-18443}
 keep_cluster=${BREAKFIX_KEEP_VK8S_NETWORK_CLUSTER:-0}
 work_dir=$(mktemp -d)
 port_forward_pid=
+previous_context=$(kubectl config current-context 2>/dev/null || true)
 
 fail() {
   printf 'vk8s network acceptance: %s\n' "$*" >&2
@@ -52,6 +53,9 @@ cleanup() {
     kind delete cluster --name "$cluster" >/dev/null 2>&1 || true
     docker rm -f "$egress_server" >/dev/null 2>&1 || true
     docker network rm "$egress_network" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$previous_context" ]; then
+    kubectl config use-context "$previous_context" >/dev/null 2>&1 || true
   fi
   rm -rf "$work_dir"
   exit "$result"

@@ -11,7 +11,12 @@ const emit = defineEmits<{ start: [id: string] }>();
 </script>
 
 <template>
-<article class="challenge-card" :data-challenge-id="challenge.id">
+<article
+	class="challenge-card"
+	:data-challenge-id="challenge.id"
+	:data-testid="`catalog-challenge-${challenge.id}`"
+	:aria-label="`Challenge: ${challenge.title}`"
+>
 		<div class="challenge-card-main">
 			<div class="challenge-card-topline">
 				<div class="challenge-pills">

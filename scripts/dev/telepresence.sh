@@ -14,6 +14,7 @@ TP_RUNTIME_SECRET="${BREAKFIX_TELEPRESENCE_RUNTIME_SECRET:-breakfix-runtime}"
 TP_DEBUG_SECRET="${BREAKFIX_TELEPRESENCE_DEBUG_SECRET:-breakfix-debug}"
 TP_SERVER_PORT="${BREAKFIX_TELEPRESENCE_SERVER_PORT:-19091}"
 TP_CONTROLLER_HEALTH_PORT="${BREAKFIX_TELEPRESENCE_CONTROLLER_HEALTH_PORT:-18081}"
+TP_WORKSPACE_IMAGE="${BREAKFIX_TELEPRESENCE_WORKSPACE_IMAGE:-}"
 
 usage() {
   cat <<'EOF'
@@ -31,7 +32,9 @@ Commands:
 Replacement commands remain in the foreground so their logs are visible during
 E2E runs. Worker replacement requires
 BREAKFIX_TELEPRESENCE_ALLOW_WORKER_REPLACE=1. The script records and restores
-the original Deployment replica count.
+the original Deployment replica count. Set
+BREAKFIX_TELEPRESENCE_WORKSPACE_IMAGE when the local OpenSandbox provider cannot
+pull the configured workspace image.
 EOF
 }
 
@@ -200,6 +203,10 @@ prepare_config() {
     -e "s|^    client_key_file:.*|    client_key_file: $mount_root/var/run/secrets/breakfix-incus/client.key|" \
     "$CONFIG_SOURCE" > "$output"
 
+  if test -n "$TP_WORKSPACE_IMAGE"; then
+    sed -i "s|^  workspace_image:.*|  workspace_image: $TP_WORKSPACE_IMAGE|" "$output"
+  fi
+
   if test "$component" = controller; then
     local vcluster_binary
     vcluster_binary="$(command -v vcluster || true)"
@@ -292,11 +299,20 @@ replace_command() {
 }
 
 registry_trust_bundle_for_mount() {
-  local mount_root="$1"
+  local component="$1"
+  local mount_root="$2"
   local configured
   configured="$(secret_value registry_trust_bundle_file)"
   if test -n "$configured"; then
-    printf '%s\n' "$mount_root/var/run/config/breakfix-registry-ca/ca.crt"
+    # Telepresence mounts PVCs and some projected volumes, but does not expose
+    # every ConfigMap projection to the local process. Keep the same CA bytes
+    # in the disposable local debug state instead of weakening TLS verification.
+    local output="$STATE_DIR/$component.registry-ca.crt"
+    kubectl -n "$TP_NAMESPACE" get configmap breakfix-registry-ca \
+      -o 'jsonpath={.data.ca\.crt}' > "$output"
+    test -s "$output" || fail "Registry CA ConfigMap is empty or unavailable"
+    chmod 600 "$output"
+    printf '%s\n' "$output"
     return
   fi
   printf '%s\n' ''
@@ -312,7 +328,10 @@ run_server() {
   sandbox_namespace="$(deployment_env_value breakfix-server server BREAKFIX_OPENSANDBOX_NAMESPACE)"
   test -n "$base_url" && test -n "$sandbox_namespace" || \
     fail "Server Deployment is missing OpenSandbox environment values"
-  registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
+  registry_trust_bundle_file="$(registry_trust_bundle_for_mount server "$mount_root")"
+  if test -n "$registry_trust_bundle_file"; then
+    sed -i "s|^  trust_bundle_file:.*|  trust_bundle_file: $registry_trust_bundle_file|" "$config"
+  fi
   catalog_release_reference="$(secret_value catalog_release_reference)"
   debug_credential="$(optional_secret_value "$TP_DEBUG_SECRET" credential)"
 
@@ -329,6 +348,9 @@ run_server() {
     BREAKFIX_CATALOG_RELEASE_REFERENCE="$catalog_release_reference" \
     BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)" \
     BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)" \
+    BREAKFIX_INCUS_BUILD_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_build_project)" \
+    BREAKFIX_INCUS_IMAGE_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_image_project)" \
+    BREAKFIX_INCUS_NAME_PREFIX="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_name_prefix)" \
     BREAKFIX_K8S_BASE_IMAGE_DIGEST="$(secret_value k8s_base_image_digest)" \
     OPEN_SANDBOX_API_KEY="$(secret_value opensandbox_api_key)" \
     BREAKFIX_OPENSANDBOX_BASE_URL="$base_url" \
@@ -346,6 +368,9 @@ run_controller() {
   printf 'Replacing Controller locally; readiness is at http://127.0.0.1:%s/readyz.\n' "$TP_CONTROLLER_HEALTH_PORT"
   export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
   export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  export BREAKFIX_INCUS_BUILD_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_build_project)"
+  export BREAKFIX_INCUS_IMAGE_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_image_project)"
+  export BREAKFIX_INCUS_NAME_PREFIX="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_name_prefix)"
   export BREAKFIX_K8S_BASE_IMAGE_DIGEST="$(secret_value k8s_base_image_digest)"
   export BREAKFIX_REGISTRY_PULL_SECRET="$(secret_value registry_pull_secret)"
   replace_command controller "$config" "$mount_root" env HOME="$STATE_DIR/controller-data"
@@ -357,7 +382,10 @@ run_runtime_worker() {
   mount_root="$STATE_DIR/mount-runtime-worker"
   kubeconfig="$(create_service_account_kubeconfig runtime-worker)"
   config="$(prepare_config runtime-worker "$kubeconfig" "$mount_root")"
-  registry_trust_bundle_file="$(registry_trust_bundle_for_mount "$mount_root")"
+  registry_trust_bundle_file="$(registry_trust_bundle_for_mount runtime-worker "$mount_root")"
+  if test -n "$registry_trust_bundle_file"; then
+    sed -i "s|^  trust_bundle_file:.*|  trust_bundle_file: $registry_trust_bundle_file|" "$config"
+  fi
   printf 'Replacing Runtime Worker locally.\n'
   export BREAKFIX_WORKER_API_KEY="$(worker_identity_key runtime-worker)"
   export BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)"
@@ -366,6 +394,9 @@ run_runtime_worker() {
   export BREAKFIX_REGISTRY_TRUST_BUNDLE_FILE="$registry_trust_bundle_file"
   export BREAKFIX_INCUS_ENDPOINT="$(secret_value incus_endpoint)"
   export BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT="$(secret_value incus_base_image_fingerprint)"
+  export BREAKFIX_INCUS_BUILD_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_build_project)"
+  export BREAKFIX_INCUS_IMAGE_PROJECT="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_image_project)"
+  export BREAKFIX_INCUS_NAME_PREFIX="$(optional_secret_value "$TP_RUNTIME_SECRET" incus_name_prefix)"
   replace_command runtime-worker "$config" "$mount_root" env POD_NAME=telepresence-runtime-worker
 }
 

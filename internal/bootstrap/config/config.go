@@ -354,6 +354,13 @@ func Load(path string) (Config, error) {
 	cfg.Incus.TLS.ServerCertificateFile = os.ExpandEnv(cfg.Incus.TLS.ServerCertificateFile)
 	cfg.Incus.TLS.ClientCertificateFile = os.ExpandEnv(cfg.Incus.TLS.ClientCertificateFile)
 	cfg.Incus.TLS.ClientKeyFile = os.ExpandEnv(cfg.Incus.TLS.ClientKeyFile)
+	// Deployment-specific Incus identities are intentionally optional. The
+	// checked-in configuration remains the production default, while a
+	// disposable target can inject a distinct build/image project pair without
+	// producing a second configuration file.
+	cfg.Incus.BuildProject = environmentOverride("BREAKFIX_INCUS_BUILD_PROJECT", cfg.Incus.BuildProject)
+	cfg.Incus.ImageProject = environmentOverride("BREAKFIX_INCUS_IMAGE_PROJECT", cfg.Incus.ImageProject)
+	cfg.Incus.NamePrefix = environmentOverride("BREAKFIX_INCUS_NAME_PREFIX", cfg.Incus.NamePrefix)
 	cfg.Runtime.K8s.BaseImageDigest = os.ExpandEnv(cfg.Runtime.K8s.BaseImageDigest)
 	cfg.Runtime.K8s.ManagementTerminalImage = os.ExpandEnv(cfg.Runtime.K8s.ManagementTerminalImage)
 	cfg.Runtime.K8s.Network.PublicEgressCIDR = os.ExpandEnv(cfg.Runtime.K8s.Network.PublicEgressCIDR)
@@ -392,6 +399,14 @@ func expandKubeconfigPath(value string) string {
 		return home
 	}
 	return filepath.Join(home, strings.TrimPrefix(value, "~/"))
+}
+
+func environmentOverride(name, fallback string) string {
+	value, found := os.LookupEnv(name)
+	if !found || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }
 
 // ValidateServer checks the complete dependency contract of the Server

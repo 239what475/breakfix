@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+	activeEnvironmentName,
 	challengeCardByID,
 	expectTerminalConnected,
 	registerAndLogin,
@@ -7,15 +8,24 @@ import {
 	stopChallenge,
 	waitForVerifiedRevision,
 } from "../support/live-helpers";
-import { waitForEnvironmentDeletion } from "../support/runtime-cleanup";
-import { waitForCatalogChallenge, waitForPublishedChallenge, waitForVerifiedCandidate } from "./authoring-live-helpers";
+import {
+	attachNodeEnvironmentIdentity,
+	waitForNodeEnvironmentDeletion,
+} from "../support/e2e-platform";
+import {
+	waitForCatalogChallenge,
+	waitForClassificationReview,
+	waitForPublishedChallenge,
+	waitForVerifiedCandidate,
+} from "./authoring-live-helpers";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
-agentLiveTest("generator verifies, publishes, and runs a node challenge", async ({ page }) => {
+agentLiveTest("generator verifies, publishes, and runs a node challenge", async ({ page }, testInfo) => {
 	test.setTimeout(50 * 60_000);
 	let challengeID = "";
 	let environmentName = "";
+	let completed = false;
 	try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await registerAndLogin(page);
@@ -43,8 +53,10 @@ agentLiveTest("generator verifies, publishes, and runs a node challenge", async 
 		const session = (await (await generation).json()) as { id: string };
 		await waitForVerifiedCandidate(page, session.id);
 		await waitForVerifiedRevision(page);
+		await page.getByRole("button", { name: "确认题目内容", exact: true }).click();
+		await waitForClassificationReview(page, session.id);
 
-		await page.getByRole("button", { name: "发布挑战", exact: true }).click();
+		await page.getByRole("button", { name: "确认分类并发布", exact: true }).click();
 		challengeID = await waitForPublishedChallenge(page, session.id);
 		await waitForCatalogChallenge(page, challengeID);
 
@@ -56,26 +68,12 @@ agentLiveTest("generator verifies, publishes, and runs a node challenge", async 
 		environmentName = await activeEnvironmentName(page, challengeID);
 		await runTerminalCommand(page, "/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
 		await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
+		completed = true;
 	} finally {
-		if (environmentName && challengeID) {
-			await stopChallenge(page, challengeID).catch(() => undefined);
-			await waitForEnvironmentDeletion("nodeenvironment", environmentName).catch(() => undefined);
+		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
+		if (completed && environmentName && challengeID) {
+			await stopChallenge(page, challengeID);
+			await waitForNodeEnvironmentDeletion(environmentName);
 		}
 	}
 });
-
-async function activeEnvironmentName(page: import("@playwright/test").Page, challengeID: string): Promise<string> {
-	const read = () =>
-		page.evaluate(async (id) => {
-			const response = await fetch("/api/me/space", {
-				headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
-			});
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as {
-				active_environments: Array<{ environment_id: string; challenge: { id: string } }>;
-			};
-			return body.active_environments.find((item) => item.challenge.id === id)?.environment_id ?? "";
-		}, challengeID);
-	await expect.poll(read, { timeout: 30_000 }).not.toBe("");
-	return read();
-}

@@ -1,8 +1,97 @@
 # 测试与真实验收
 
-日常测试必须短、可重复，并只证明一个明确边界。模型、OpenSandbox、Registry、Incus、vcluster、浏览器和真实 Environment 的完整链路仍要验收，但不能伪装成稳定的单条单元测试。
+Breakfix 将测试按依赖和失败边界分层。日常测试不启动模型、不创建真实学习环境；平台验收只在一个专用、可丢弃的 Kind 目标上运行。失败时保留现场，使用显式的 reset 丢弃整套目标。
 
-## 确定性验证
+## 测试分层
+
+| 层级 | 证明的内容 | 入口 |
+| --- | --- | --- |
+| 快速测试 | Go 领域逻辑、API、前端纯逻辑和 Controller 决策 | `make test-unit`、前端测试 |
+| 集成测试 | PostgreSQL、OCI/Catalog、Incus 和外部适配器契约 | 按依赖显式运行 |
+| 平台验收 | Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量真实主路径 | `make test-e2e`、`make test-e2e-node`、`make test-e2e-recovery` |
+| Live Agent 验收 | 真实模型、OpenSandbox 和 Authoring 全链路 | `make test-acceptance-node` 或手工 Live 入口 |
+
+平台验收不替代快速测试；Controller 使用 `envtest` 的测试也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go 单元/集成测试覆盖，不塞进浏览器场景。
+
+## 可丢弃的 Kind 目标
+
+E2E 只接受明确的 Kind context。默认目标是 `kind-breakfix-e2e`，即 Kind 集群名 `breakfix-e2e`；可以通过 `BREAKFIX_E2E_KIND_CLUSTER` 显式指定另一个专用目标。当前 kubeconfig context 必须精确等于 `kind-<目标名>`，不能在普通开发或生产集群上运行这些脚本。
+
+目标还使用两个带所有权标记的 Incus project：`breakfix-e2e-build` 和 `breakfix-e2e-images`，以及 `e2e` 实例名前缀。它们从共享的基础镜像和 bootstrap profile 复制内容，但不修改共享的 `breakfix-build`、`breakfix-images`、`bf` 网络或 OpenSandbox 安装。Server、Controller 和 Runtime Worker 通过同一个 `breakfix-runtime` Secret 读取这组 E2E Incus identity。
+
+首次使用前，集群中需要已有正常运行时 Secret、Registry/Incus 凭据、共享 Incus base image 和当前工作树可构建的本地工具。脚本不会创建 Kind 集群，也不会替用户生成凭据。
+
+```bash
+kind create cluster --name breakfix-e2e
+kubectl config use-context kind-breakfix-e2e
+
+make e2e-prepare
+```
+
+`e2e-prepare` 的顺序是：只读 preflight、构建当前工作树的运行时镜像、标记目标、准备专用 Incus project、将 target 的 Catalog 配置显式置空后部署当前工作树、清理该目标、重新标记以创建本轮的恢复快照，再次部署干净目标，通过 Kind Registry 发布 `test/fixtures/catalog-release/` 的 immutable OCI digest，写入该 digest 并等待公开 Catalog projection。镜像构建发生在 target preflight 之后、任何 target 状态改变之前。prepare 不调用模型、不把文件复制到 PVC、不直接写数据库，也不自动运行 Playwright。准备阶段会检查 Catalog 中只有当前 fixture，并核对 runtime、Domain、Topic 和 Tag；所有检查成功后才写入 prepared marker。
+
+准备完成后分别运行测试：
+
+```bash
+make test-e2e           # 轻量浏览器 UI
+make test-e2e-node      # Node 学习主路径
+make test-e2e-recovery  # Server restart 与 Controller restart
+```
+
+`e2e-prepare` 会为这个 target 选择一个动态的 `127.0.0.1` 端口，将它记录在 `.local/e2e/<target>/ui-origin-port`，并把同一精确 Origin 写入 Server 配置。这样终端 WebSocket 仍保持严格 Origin 校验，而不依赖开发者遗留的 `localhost:9090`。每个测试入口由 `scripts/kind/run-e2e.sh` 独占该端口的 Server port-forward；Server rollout 重启导致连接断开时，运行器会在同一端口重新建立转发。测试代码不能自行启动 port-forward。
+
+## 三套平台场景
+
+### UI
+
+`make test-e2e` 只验证未登录用户浏览固定 Catalog、搜索/空结果和已登录用户的 My Space 响应式导航。它不创建 Environment，不检查 Kubernetes/Incus 状态，不调用模型。
+
+### Node 学习主路径
+
+`make test-e2e-node` 使用独立用户启动固定 Node fixture，等待终端连接，执行 fixture 的 `answer.sh`，确认唯一 checkpoint 完成、Environment 进入 `Completed`，并在 Learning history 中看到 `Completed`。只有场景成功后才删除该场景自己登记的 Environment；失败时保留 Environment identity 和 Playwright 附件，整套目标由 `e2e-reset` 清理。
+
+### 平台恢复
+
+`make test-e2e-recovery` 包含两个独立场景：
+
+- Server restart 后，已有 NodeEnvironment 保持同一 identity，终端重新连接并完成 checkpoint。
+- Controller restart 后，已有 NodeEnvironment 继续调和，终端可用并完成 checkpoint。
+
+恢复测试只执行真实 Deployment rollout，不 patch CRD 的 TTL、不写数据库、不创建测试专用 Service 或调度器。它们与 UI、Node 主路径分开运行，不能依赖其他测试创建的用户或 Environment。
+
+## 失败现场与清理
+
+Playwright 配置在失败时保留 trace、截图和 video。`run-e2e.sh` 还会在 `.local/e2e/<target>/<suite>-failure-<timestamp>/` 保存 Deployment/Pod/PVC/Environment、事件、各组件日志、PostgreSQL 日志和 Incus 目标 project 实例列表。失败路径不会删除 workflow、Environment 或 provider 资源，便于定位真实 identity。
+
+确认现场已记录后执行：
+
+```bash
+make e2e-reset
+```
+
+reset 只接受同一个已标记 Kind target，先停止会写入数据的 Server、Runtime Worker 和 Registry，让 Controller 完成 Environment finalizer，再按 PostgreSQL 中的 workspace identity 通过 OpenSandbox Lifecycle API 删除 sandbox（没有持久化 ID 时按 workspace metadata 唯一查询），确认其进入终态后删除对应 PVC，再清理专用 Incus project。最后用 prepare 创建的受管 Secret 快照恢复运行时 Secret 的全部 key 数据，并删除快照和 E2E marker。共享 Incus project、base image、网络和外部 Registry 不在清理范围内。清理失败时保留资源标识并返回失败，不用删除数据库状态掩盖泄漏；没有完整快照时不会继续破坏性清理。
+
+## Live Agent 验收
+
+真实 Node Authoring 是显式的人工验收，不属于日常门禁。它会先准备一个新的 E2E target，然后执行 Authoring -> 生成/真实验证 -> 作者确认题目 -> 分类确认 -> 发布 -> Node 学习环境的主路径：
+
+```bash
+RUN_AGENT_LIVE_E2E=1 make test-acceptance-node
+```
+
+该入口只断言持久化状态、公开 challenge、Environment 和 checkpoint 的结果，不断言模型措辞、prompt、工具调用次数或 Markdown 渲染。失败时保留 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment 和 Worker 日志，之后用 `make e2e-reset` 丢弃目标。
+
+其他真实验收保持独立，必须先手工准备目标并显式启用对应开关：
+
+```bash
+RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
+RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh agent-assistant
+RUN_AGENT_SOAK_E2E=1 ./scripts/kind/run-e2e.sh agent-soak
+```
+
+这些场景需要相应的真实模型、OpenSandbox 或 VK8s 能力；本 P0 不把它们纳入日常 E2E 完成门槛。
+
+## 其他验证
 
 ```bash
 make test-unit
@@ -11,62 +100,7 @@ make build
 make verify-generated
 kubectl kustomize .
 kubectl kustomize deploy/overlays/kind
-make test-e2e
-```
-
-Go 测试覆盖 archive、portable challenge/roadmap source、运行时快照、检查点 JSON、Provider 请求、API 输入输出、Catalog Release 的阶段恢复与原子提交，以及 Controller 的状态和清理决策。Prompt 文案不是单元测试对象；测试验证 typed result、工具参数和领域状态，不伪造模型输出来证明自然语言 prompt。
-
-默认 `make test-e2e` 只覆盖快速浏览器页面流程，不调用模型，也不人为写入数据库伪造后台流程。测试 Server 必须在启动前通过 `catalog.release_reference` 配置 immutable fixture release。global setup 只等待公开 Catalog 出现 fixture；它不调用管理员 API，不复制 challenge 或 Roadmap 文件到 Server data directory。
-
-先生成本地 fixture archive：
-
-```bash
-make catalog-package \
-  CATALOG_SOURCE=test/fixtures/catalog-release \
-  CATALOG_ARCHIVE=dist/e2e-catalog.oci.tar
-```
-
-将 archive 推送到测试 Registry 后，把得到的 immutable digest 写入测试环境 `breakfix-runtime` Secret 的 `catalog_release_reference`，然后重启 Server。`make test-e2e` 会复用 `test/node_modules`；只有测试锁文件变化或依赖缺失时才重新执行 `npm ci`。
-
-## VK8s 网络隔离验收
-
-```bash
 make test-vk8s-network
 ```
 
-该命令不是默认单元或浏览器测试。它会创建独立的 Kind cluster、安装 Calico `v3.31.3`、创建 vcluster `0.35.1`，并验证
-真实 learner workload 与 management terminal 的策略资源、内部 DNS/Service、允许的非受保护出口，以及对平台 Service、
-宿主 API、私网和 metadata 的拒绝。脚本会拉取测试镜像和 chart，并在完成后删除整个临时 cluster；失败定位时设置
-`BREAKFIX_KEEP_VK8S_NETWORK_CLUSTER=1` 保留资源。
-
-该验收使用 `198.18.0.0/24` 的临时 Docker network 模拟可达但不受保护的外部地址，因此不把真实公网连通性作为断言。
-它验证 vcluster chart 的策略语义和 CNI 执行结果，不替代部署者在其实际 Service/Pod CIDR 配置上的验收。
-
-## 已部署运行时验收
-
-```bash
-RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
-BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test
-```
-
-`e2e-runtime-browser` 与 `e2e-server-recovery` 只在专用测试平台运行。该平台也必须预先配置
-`test/fixtures/catalog-release/` 对应的 immutable release；测试从 Catalog 动态读取 fixture 的发布 ID，不依赖生产题目的身份。前者验证终端、自动检查点、完成投影与停止，后者验证 Server 或 Controller 重启后环境生命周期仍可收敛。
-
-## 模型驱动验收
-
-```bash
-RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:node --prefix test
-RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:k8s --prefix test
-RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:assistant --prefix test
-RUN_AGENT_SOAK_E2E=1 npm run test:agent-live:soak --prefix test
-```
-
-这些入口需要显式环境变量和已部署的当前架构。Node/K8s 作者验收从自然语言题意开始，经过 Server 内的 Authoring、Generator、Judge 和 Classifier Agent Runtime，再由 Runtime Worker 完成构建、真实验证与正式发布，最后启动学习环境运行答案。它们是完整流程验收，必须串行运行并在失败时保留 Workflow、AgentRun、CandidateRevision、Environment 和 Worker 日志用于定位，不能自动重跑掩盖问题。
-
-Assistant 验收验证真实终端上下文、工具调用和 Markdown 渲染；soak 验收验证同一持久对话的连续调用。它们不替代题目生成验证。
-
-## 原则
-
-- 实际 E2E 只删除自身精确登记的 Environment 和临时资源，不能按宽泛前缀清理。
-- 未部署当前 `breakfix-runtime-worker` 时，不能将旧 Deployment 的结果视为本次架构验收。
-- Telepresence 接管时，将本地日志与测试输出并排观察；以 Workflow ID、state、attempt 和 Environment UID 定位，而不是使用旧 `kind` 路由术语。
+`test-vk8s-network` 是独立的网络隔离验收，会创建并销毁自己的临时 Kind 集群，不属于上述 E2E target。它的失败现场由脚本的 `BREAKFIX_KEEP_VK8S_NETWORK_CLUSTER=1` 选项保留。

@@ -45,7 +45,7 @@ make build
 make test-unit
 make verify-generated
 kubectl kustomize .
-make test-e2e
+# 先在专用 Kind target 上执行 make e2e-prepare，再运行平台验收
 ```
 
 真实 Kubernetes 与模型验收需要显式启用，见[测试与真实验收](docs/operations/testing.md)。

@@ -34,7 +34,7 @@ roadmap:
   contentRevision: sha256:...
 ```
 
-`challenge.yaml` 仍是 portable candidate 语义，不能携带平台生成的 challenge ID、目录 slug、runtime artifact、发布时间或已发布 content revision。`source_ref` 与 title 位于 Roadmap source：Domain 全局唯一，Topic 使用 `domain/topic`，Tag 全局唯一，Challenge 使用 `domain/topic/challenge`。运行时 opaque challenge ID 只在最终 commit 时分配。
+`challenge.yaml` 仍是 portable candidate 语义，不能携带平台生成的 challenge ID、目录 slug、runtime artifact、发布时间或已发布 content revision。`source_ref` 与 title 位于 Roadmap source：Domain 全局唯一，Topic 使用 `domain/topic`，Tag 全局唯一，Challenge 使用 `domain/topic/challenge`。Release 作者显式维护 ASCII `source_ref`；Authoring 创建的实体从显示标题导出稳定 ASCII 引用，非 ASCII 标题使用确定性摘要段。运行时 opaque challenge ID 只在最终 commit 时分配。
 
 ## Challenge 生命周期
 
@@ -143,4 +143,7 @@ make catalog-package \
 # 输出 registry.example.com/breakfix/catalog/foundation@sha256:...
 ```
 
-浏览器 E2E 也使用这条启动路径。将 `test/fixtures/catalog-release/` 打包、推送并作为测试 Server 的 `catalog_release_reference` 配置后，global setup 只轮询公开 Catalog，等待 fixture 出现；测试不会安装 release、复制文件或调用内部管理 API。
+平台验收也使用这条启动路径。`make e2e-prepare` 在专用、可丢弃的 Kind target 上将
+`test/fixtures/catalog-release/` 打包、推送并作为 Server 的 `catalog_release_reference` 配置，然后有界地等待公开 Catalog
+出现 fixture。Playwright global setup 只检查准备好的 Server 连接；测试不会安装 release、复制文件或调用内部管理 API。完整的
+target 生命周期和运行入口见[测试与真实验收](../operations/testing.md)。

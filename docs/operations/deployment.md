@@ -85,9 +85,9 @@ Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/boot
 make test-unit
 make lint
 make build
-make test-e2e
-RUN_RUNTIME_E2E=1 npm run test:runtime:browser --prefix test
-BREAKFIX_E2E_BASE_URL=http://localhost:9090 RUN_SERVER_RECOVERY_E2E=1 npm run test:recovery --prefix test
+make verify-generated
+kubectl kustomize .
+kubectl kustomize deploy/overlays/kind
 ```
 
-模型驱动的端到端验收显式运行：`RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:node --prefix test`、`RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:k8s --prefix test` 和 `RUN_AGENT_LIVE_E2E=1 npm run test:agent-live:assistant --prefix test`。Kind 验收要求 Kind overlay、固定 NodePort Registry、OpenSandbox 和对应环境 provider；完整边界见[测试与真实验收](testing.md)。
+Kind 平台验收必须先在专用 `kind-breakfix-e2e` 目标执行 `make e2e-prepare`，再分别执行 `make test-e2e`、`make test-e2e-node` 和 `make test-e2e-recovery`；完成后用 `make e2e-reset` 丢弃目标。它们使用动态 port-forward，不使用固定的 `localhost:9090`。真实模型验收只通过 `RUN_AGENT_LIVE_E2E=1 make test-acceptance-node` 或测试文档中的独立 Live 入口运行。完整边界见[测试与真实验收](testing.md)。

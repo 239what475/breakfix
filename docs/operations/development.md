@@ -57,6 +57,8 @@ scripts/dev/telepresence.sh runtime-worker
 脚本读取集群配置、准备最小身份和 kubeconfig，并在本机构建对应二进制。接管 Worker 时会缩容目标 Deployment，避免两个副本
 同时领取一个 Workflow；lease fencing 仍会拒绝迟到结果，但不能代替对外部副作用的运维判断。
 
+接管专用 E2E target 时，脚本也会读取 `breakfix-runtime` 中的可选 Incus build/image project 与 name prefix override，确保本地进程和集群中的 Server、Controller、Runtime Worker 操作同一组可丢弃资源。
+
 结束接管：
 
 ```bash
