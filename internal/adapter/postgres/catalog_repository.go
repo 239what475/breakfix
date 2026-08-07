@@ -298,6 +298,41 @@ func (d *CatalogRepository) Release(ctx context.Context, id string) (*catalogdom
 	return release, nil
 }
 
+// CatalogBootstrapState returns the complete baseline decision input. It does
+// not infer cleanup from provider fields: Runtime Worker must have completed
+// every discovered reap before a failed bootstrap stops blocking a new
+// digest.
+func (d *CatalogRepository) CatalogBootstrapState(ctx context.Context) (catalogdomain.BootstrapState, error) {
+	rows, err := d.conn.QueryContext(ctx, catalogReleaseSelect+` ORDER BY created_at, id`)
+	if err != nil {
+		return catalogdomain.BootstrapState{}, fmt.Errorf("list catalog bootstrap releases: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	releases := make([]catalogdomain.Release, 0)
+	for rows.Next() {
+		release, scanErr := scanCatalogRelease(rows)
+		if scanErr != nil {
+			return catalogdomain.BootstrapState{}, fmt.Errorf("scan catalog bootstrap release: %w", scanErr)
+		}
+		releases = append(releases, *release)
+	}
+	if err := rows.Err(); err != nil {
+		return catalogdomain.BootstrapState{}, fmt.Errorf("iterate catalog bootstrap releases: %w", err)
+	}
+	state := catalogdomain.BootstrapState{Releases: releases}
+	if err := d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM challenges`).Scan(&state.PublishedChallengeCount); err != nil {
+		return catalogdomain.BootstrapState{}, fmt.Errorf("count published challenges for catalog bootstrap: %w", err)
+	}
+	if err := d.conn.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM catalog_runtime_resource_reaps reap
+		JOIN catalog_releases release ON release.id = reap.release_id
+		WHERE release.state = ? AND reap.state <> ?
+	)`, catalogdomain.ReleaseFailed, resourceReapCompleted).Scan(&state.FailedCleanupPending); err != nil {
+		return catalogdomain.BootstrapState{}, fmt.Errorf("read failed catalog cleanup state: %w", err)
+	}
+	return state, nil
+}
+
 func (d *CatalogRepository) Entries(ctx context.Context, releaseID string) ([]catalogdomain.Entry, error) {
 	return listCatalogEntries(ctx, d.conn, releaseID)
 }
@@ -311,15 +346,6 @@ func (d *CatalogRepository) Entry(ctx context.Context, id string) (*catalogdomai
 		return nil, fmt.Errorf("read catalog entry: %w", err)
 	}
 	return entry, nil
-}
-
-func (d *CatalogRepository) InstalledEntries(ctx context.Context) ([]catalogdomain.Entry, error) {
-	rows, err := d.conn.QueryContext(ctx, catalogEntrySelect+` WHERE release_id IN (SELECT id FROM catalog_releases WHERE state = ?) ORDER BY source_ref, release_id`, catalogdomain.ReleaseReady)
-	if err != nil {
-		return nil, fmt.Errorf("list installed catalog entries: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanCatalogEntries(rows)
 }
 
 // ClaimCatalogRuntimeAction exposes exactly one lease-fenced Catalog Entry or
@@ -855,6 +881,21 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	}
 	if err := ensureRoadmapPublicationAllowedTx(ctx, tx, now); err != nil {
 		return nil, err
+	}
+	var publishedChallenges int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM challenges`).Scan(&publishedChallenges); err != nil {
+		return nil, fmt.Errorf("count challenges before catalog baseline commit: %w", err)
+	}
+	if publishedChallenges != 0 {
+		return nil, catalogdomain.ErrBaselineEstablished
+	}
+	var otherReadyReleases int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_releases WHERE state = ? AND id <> ?`,
+		catalogdomain.ReleaseReady, release.ID).Scan(&otherReadyReleases); err != nil {
+		return nil, fmt.Errorf("count existing catalog baselines: %w", err)
+	}
+	if otherReadyReleases != 0 {
+		return nil, catalogdomain.ErrBaselineEstablished
 	}
 	commits, err := listCatalogCommitsTx(ctx, tx, release.ID)
 	if err != nil {

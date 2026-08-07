@@ -44,7 +44,7 @@ func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) 
 	}, entries: []catalogdomain.Entry{entry}}
 	installer, err := NewInstaller(InstallerConfig{
 		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
-		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: store, Roadmap: installerRoadmap{},
+		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: store,
 	})
 	if err != nil {
 		t.Fatalf("create installer: %v", err)
@@ -79,7 +79,7 @@ func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
 	}
 	installer, err := NewInstaller(InstallerConfig{
 		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
-		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: &installerStore{}, Roadmap: installerRoadmap{},
+		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: &installerStore{},
 	})
 	if err != nil {
 		t.Fatalf("create installer: %v", err)
@@ -88,7 +88,7 @@ func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
 	if err := installer.materializeCommit(source, entry, commit); err != nil {
 		t.Fatalf("materialize catalog commit: %v", err)
 	}
-	compiled, err := installer.compileRevision(context.Background(), source, catalogdomain.Release{ID: entry.ReleaseID}, []catalogdomain.Entry{entry}, []catalogdomain.Commit{commit})
+	compiled, err := installer.compileRevision(source, []catalogdomain.Entry{entry}, []catalogdomain.Commit{commit})
 	if err != nil {
 		t.Fatalf("compile catalog revision: %v", err)
 	}
@@ -99,6 +99,73 @@ func TestInstallerCompileRevisionCapturesMaterializedIdentity(t *testing.T) {
 	got := compiled.ChallengeBindings[0].Challenge
 	if got.SourceSlug != published.SourceSlug || got.MaterializedRevision != published.Revision {
 		t.Fatalf("compiled materialized identity = %#v, published = %#v", got, published)
+	}
+}
+
+func TestCatalogBootstrapSelectsOnlyTheInitialBaseline(t *testing.T) {
+	digestA := catalogdomain.BundleDigest("sha256:" + strings.Repeat("a", 64))
+	digestB := catalogdomain.BundleDigest("sha256:" + strings.Repeat("b", 64))
+	release := func(digest catalogdomain.BundleDigest, state catalogdomain.ReleaseState) catalogdomain.Release {
+		return catalogdomain.Release{ID: catalogdomain.ReleaseIDForBundle(digest), BundleDigest: digest, State: state}
+	}
+	tests := []struct {
+		name      string
+		state     catalogdomain.BootstrapState
+		digest    catalogdomain.BundleDigest
+		wantState catalogdomain.ReleaseState
+		wantWait  bool
+		wantErr   bool
+	}{
+		{name: "empty platform", digest: digestA},
+		{name: "resume active digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseInstalling)}}, digest: digestA, wantState: catalogdomain.ReleaseInstalling},
+		{name: "reject changed active digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseInstalling)}}, digest: digestB, wantErr: true},
+		{name: "restart ready baseline", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedChallengeCount: 4}, digest: digestA, wantState: catalogdomain.ReleaseReady},
+		{name: "reject changed ready digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedChallengeCount: 4}, digest: digestB, wantErr: true},
+		{name: "reject authoring content", state: catalogdomain.BootstrapState{PublishedChallengeCount: 1}, digest: digestA, wantErr: true},
+		{name: "wait for failed release cleanup", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}, FailedCleanupPending: true}, digest: digestB, wantWait: true},
+		{name: "replace cleaned failed release", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}}, digest: digestB},
+		{name: "retain failed configured digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}, FailedCleanupPending: true}, digest: digestA, wantState: catalogdomain.ReleaseFailed},
+		{name: "reject multiple active attempts", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleasePending), release(digestB, catalogdomain.ReleaseInstalling)}}, digest: digestA, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			selected, wait, err := selectBootstrapRelease(test.state, test.digest)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("select bootstrap error = %v, want error %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				if !errors.Is(err, ErrBootstrapConflict) {
+					t.Fatalf("bootstrap error = %v, want conflict", err)
+				}
+				return
+			}
+			if wait != test.wantWait {
+				t.Fatalf("cleanup wait = %v, want %v", wait, test.wantWait)
+			}
+			if test.wantState == "" {
+				if selected != nil {
+					t.Fatalf("selected release = %#v, want none", selected)
+				}
+				return
+			}
+			if selected == nil || selected.State != test.wantState {
+				t.Fatalf("selected release = %#v, want state %s", selected, test.wantState)
+			}
+		})
+	}
+}
+
+func TestInstallerValidateBootstrapRejectsPublishedAuthoringPlatform(t *testing.T) {
+	store := &installerStore{publishedChallenges: 1}
+	installer, err := NewInstaller(InstallerConfig{
+		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
+		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.ValidateBootstrap(context.Background()); !errors.Is(err, ErrBootstrapConflict) {
+		t.Fatalf("validate authoring platform bootstrap = %v, want conflict", err)
 	}
 }
 
@@ -119,12 +186,19 @@ func readyFixtureEntry(t *testing.T, entry catalogdomain.Entry, now time.Time) c
 }
 
 type installerStore struct {
-	release catalogdomain.Release
-	entries []catalogdomain.Entry
-	commits []catalogdomain.Commit
+	release              catalogdomain.Release
+	otherReleases        []catalogdomain.Release
+	entries              []catalogdomain.Entry
+	commits              []catalogdomain.Commit
+	publishedChallenges  int
+	failedCleanupPending bool
 }
 
-func (s *installerStore) CreateOrGetRelease(context.Context, catalogdomain.Release) (*catalogdomain.Release, bool, error) {
+func (s *installerStore) CreateOrGetRelease(_ context.Context, release catalogdomain.Release) (*catalogdomain.Release, bool, error) {
+	if s.release.ID == "" {
+		s.release = release
+		return &s.release, true, nil
+	}
 	return &s.release, false, nil
 }
 func (s *installerStore) InitializeRelease(_ context.Context, release catalogdomain.Release, entries []catalogdomain.Entry, _ time.Time) (*catalogdomain.Release, error) {
@@ -154,14 +228,18 @@ func (s *installerStore) RecordCatalogFinalizerFailure(_ context.Context, _ stri
 	}
 	return &s.release, nil
 }
-func (s *installerStore) ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error) {
-	return nil, catalogdomain.ErrReleaseNotFound
+func (s *installerStore) CatalogBootstrapState(context.Context) (catalogdomain.BootstrapState, error) {
+	releases := append([]catalogdomain.Release(nil), s.otherReleases...)
+	if s.release.ID != "" {
+		releases = append(releases, s.release)
+	}
+	return catalogdomain.BootstrapState{
+		Releases: releases, PublishedChallengeCount: s.publishedChallenges, FailedCleanupPending: s.failedCleanupPending,
+	}, nil
 }
+func (*installerStore) EnsureCatalogResourceReaps(context.Context, time.Time) error { return nil }
 func (s *installerStore) Entries(context.Context, string) ([]catalogdomain.Entry, error) {
 	return append([]catalogdomain.Entry(nil), s.entries...), nil
-}
-func (*installerStore) InstalledEntries(context.Context) ([]catalogdomain.Entry, error) {
-	return nil, nil
 }
 func (s *installerStore) PrepareReleaseCommit(_ context.Context, _ string, intents []catalogdomain.Commit, _ time.Time) (*catalogdomain.Release, []catalogdomain.Commit, error) {
 	s.release.State = catalogdomain.ReleaseCommitting
@@ -189,10 +267,4 @@ type installerLayerReader struct{}
 
 func (installerLayerReader) ReadSourceLayer(string) ([]byte, error) {
 	return nil, errors.New("not used by this test")
-}
-
-type installerRoadmap struct{}
-
-func (installerRoadmap) CurrentRoadmap(context.Context) (*roadmap.Revision, error) {
-	return nil, roadmap.ErrNoCurrentRevision
 }

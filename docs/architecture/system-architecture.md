@@ -23,7 +23,7 @@ NodeEnvironment / VK8sEnvironment
 
 Catalog installer 是 Server 内的可恢复协调器，不是另一个 Deployment。Registry 保存 K8s OCI artifact，Incus 保存 Node system-container image；两者都是运行时依赖，不是浏览器 API 的一部分。
 
-空平台的题库基线由 Server 启动配置中的 immutable Catalog Release 安装。它的 portable source、真实验证和原子公开语义见 [Catalog Release](catalog-release.md)。
+空平台的题库基线由 Server 启动配置中的 immutable Catalog Release 一次性安装。baseline 建立后不再导入后续 release；新增和修订内容走 Authoring、Generation、Classification 与 Roadmap。portable source、真实验证和原子公开语义见 [Catalog Release](catalog-release.md)。
 
 ## 所有权
 

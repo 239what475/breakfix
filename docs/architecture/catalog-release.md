@@ -1,7 +1,7 @@
 # Catalog Release
 
-Catalog Release 是平台基线的 immutable、追加式输入。它由 Server 的
-`catalog.release_reference` 配置指定，必须是 OCI digest reference；Server 启动后自行恢复安装。没有管理员安装 HTTP API、用户入口或 Git 工作区回写。
+Catalog Release 是空平台建立题库基线时的一次性 immutable bootstrap 输入。它由 Server 的
+`catalog.release_reference` 配置指定，必须是 OCI digest reference；Server 启动后自行恢复首次安装。没有管理员安装 HTTP API、用户入口、Git 工作区回写或后续 release 更新入口。
 
 ## Portable Source
 
@@ -63,6 +63,8 @@ Commit:         Prepared -> ArtifactPublished -> Materialized -> Committed
 
 Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Generator AgentRun、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
 
+启动边界只允许以下情况：空平台安装首次 digest；首次安装中断后以同一 digest 恢复；`Ready` baseline 以同一 digest 重启；以及没有配置 release 的空平台。已有 `Ready` baseline 时配置另一个 digest、已有 Authoring 发布内容但没有 baseline 时再配置 release，都会作为配置冲突拒绝启动。失败且没有公开任何 Challenge 的首次安装可以改用新 digest，但 Server 会先删除旧 staged source，并等待 Runtime Worker 完成旧 release 的 provider resource reap，之后才创建新 Release。
+
 只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 先持久化每题的 commit intent；Runtime Worker 发布最终 runtime artifact；Server 再以 hash 校验和幂等 materialization 写入 source。最后在同一数据库事务中公开新的 immutable `RoadmapRevision`、标记所有 commit 为 `Committed`、将 Release 置为 `Ready`，并建立 Roadmap 已处理基线。Worker promotion 成功后 Server 崩溃时只恢复 materialization/finalization，绝不重复 promotion。Catalog 读取只依赖当前 RoadmapRevision，因此 materialization 早于最终事务也不会暴露部分题库。
 
 ### Finalizer 诊断与恢复
@@ -105,9 +107,9 @@ Server 启动和 `/readyz` 使用同一完整性检查；`/readyz` 使用短超�
 availability gate。没有当前 Roadmap 时，缺失的题目根目录是合法的 bootstrap 状态，避免首次 Catalog
 安装时 Server 与 Runtime Worker 互相等待。
 
-source、Entry/Commit runtime 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。source staging 和每个 Runtime state 各自最多五次基础设施 attempt；lease 过期也消耗当前 state 的同一预算。重试不改变 `release_id + entry_or_commit_id + state + state_version` 的外部 identity，`runtime_attempt` 不参与命名。相同 digest 可幂等恢复；后续 release 只能添加新的 `source_ref`，不能原地修改或删除已安装内容。
+source、Entry/Commit runtime 的确定性错误会使整份 Release 进入 `Failed`，不会发布部分内容，也不会启动 Agent 修复。source staging 和每个 Runtime state 各自最多五次基础设施 attempt；lease 过期也消耗当前 state 的同一预算。重试不改变 `release_id + entry_or_commit_id + state + state_version` 的外部 identity，`runtime_attempt` 不参与命名。相同 digest 只负责首次安装的幂等恢复；baseline 建立后，所有新增题目、题目 revision、Topic 和 Tag 都通过 Authoring、Generation、Classification 与 Roadmap 流程发布。
 
-配置了 `catalog.release_reference` 时，Release 未达到 `Ready` 前，Server 在应用层拒绝题库读取以及作者的生成、分类和发布请求；`/readyz` 不依赖这个状态，Runtime Worker 可以继续通过内部 API 完成安装，避免启动死锁。
+配置了 `catalog.release_reference` 且首次 Release 未达到 `Ready` 时，Server 在应用层拒绝题库读取以及作者的生成、分类和发布请求；`/readyz` 不依赖这个状态，Runtime Worker 可以继续通过内部 API 完成安装或失败 release 的资源回收，避免启动死锁。已有 baseline 不会等待另一个配置 digest，因为这种配置会在启动时直接拒绝。
 
 ## 调试导出
 
@@ -137,7 +139,7 @@ content revision 和 materialized revision；发布 manifest 中的 `id`、`sour
 
 ## 配置与测试
 
-部署者先打包并推送 source，获得 immutable digest，然后将它写入 Server runtime Secret 的 `catalog_release_reference`。更新 Secret 后重启或 rollout Server，安装器会从该配置恢复。
+部署者只在空平台初始化时打包并推送 source，获得 immutable digest，然后将它写入 Server runtime Secret 的 `catalog_release_reference`。更新 Secret 后重启或 rollout Server，安装器会从该配置建立或恢复首次 baseline。
 
 ```bash
 make catalog-package \

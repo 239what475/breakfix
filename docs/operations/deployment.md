@@ -46,9 +46,9 @@ make catalog-package \
 # 输出 registry.example.com/breakfix/catalog/foundation@sha256:...
 ```
 
-将这个 digest 写入 runtime Secret 的 `catalog_release_reference`，应用 Secret 并 rollout Server。Server 在启动时创建或恢复对应的 CatalogRelease；没有管理员安装 API，也不允许从 Server data PVC 或 Git 工作区直接复制题目。空字符串表示刻意启动空 Catalog。
+将这个 digest 写入 runtime Secret 的 `catalog_release_reference`，应用 Secret 并 rollout Server。Server 在启动时创建或恢复首次 CatalogRelease；没有管理员安装 API，也不允许从 Server data PVC 或 Git 工作区直接复制题目。尚未建立题库时，空字符串表示刻意启动空 Catalog。
 
-同一 digest 可幂等恢复。后续 release 只能新增 source_ref，不能修改或删除已安装内容；失败的 release 保留诊断且不会公开部分 Catalog。完整安装状态和原子可见性见 [Catalog Release](../architecture/catalog-release.md)。Kind 开发时可为 `catalog-package` 提供 `CATALOG_TRUST_BUNDLE_FILE=.local/kind-registry/ca.crt`。
+同一 digest 可幂等恢复。Ready baseline 不接受另一个 release；后续内容通过作者工作流发布。失败的首次 release 保留诊断且不会公开部分 Catalog；切换 digest 前必须完成旧 release 的外部资源回收。完整安装状态和原子可见性见 [Catalog Release](../architecture/catalog-release.md)。Kind 开发时可为 `catalog-package` 提供 `CATALOG_TRUST_BUNDLE_FILE=.local/kind-registry/ca.crt`。
 
 本次数据库 schema 是开发阶段的破坏性基线。检测到不匹配 schema 时 Server 会拒绝启动，必须重建开发数据库；不提供历史数据库的兼容迁移。
 

@@ -14,6 +14,8 @@ import (
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
+var ErrBaselineEstablished = errors.New("catalog baseline is already established")
+
 type ReleaseState string
 
 const (
@@ -99,6 +101,16 @@ type Release struct {
 	FinalizerNextRetryAt     *time.Time           `json:"finalizer_next_retry_at,omitempty"`
 	CreatedAt                time.Time            `json:"created_at"`
 	UpdatedAt                time.Time            `json:"updated_at"`
+}
+
+// BootstrapState is the complete durable view needed to decide whether one
+// configured release may establish the platform's initial Catalog baseline.
+// Failed releases remain as diagnostics; they do not become additional
+// baselines.
+type BootstrapState struct {
+	Releases                []Release
+	PublishedChallengeCount int
+	FailedCleanupPending    bool
 }
 
 func (r Release) Valid() bool {

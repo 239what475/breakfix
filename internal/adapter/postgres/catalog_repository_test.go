@@ -141,6 +141,25 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if reloaded.FinalizerLastError != "temporary materialization filesystem failure" || reloaded.FinalizerNextRetryAt == nil {
 		t.Fatalf("reloaded catalog publication diagnostic = %#v", reloaded)
 	}
+	authoring := insertChallengeLifecycleFixture(t, database, "authoring", "catalog-race-author", false, now.Add(time.Second))
+	if _, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, revision, now); !errors.Is(err, catalogdomain.ErrBaselineEstablished) {
+		t.Fatalf("catalog commit over authoring content = %v, want baseline established", err)
+	}
+	tx, err := database.conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM challenge_revisions WHERE challenge_id = ?`, authoring.challenge.ID); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("remove catalog race challenge revision: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM challenges WHERE id = ?`, authoring.challenge.ID); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("remove catalog race challenge: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit catalog race cleanup: %v", err)
+	}
 	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, revision, now)
 	if err != nil || ready.State != catalogdomain.ReleaseReady {
 		t.Fatalf("complete catalog release = %#v, err=%v", ready, err)
@@ -155,6 +174,57 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	storedCommits, err := database.Catalog.Commits(ctx, initializedRelease.ID)
 	if err != nil || len(storedCommits) != 1 || storedCommits[0].State != catalogdomain.CommitCommitted {
 		t.Fatalf("stored catalog commits = %#v, err=%v", storedCommits, err)
+	}
+	bootstrap, err := database.Catalog.CatalogBootstrapState(ctx)
+	if err != nil || len(bootstrap.Releases) != 1 || bootstrap.Releases[0].State != catalogdomain.ReleaseReady || bootstrap.PublishedChallengeCount != 1 {
+		t.Fatalf("ready catalog bootstrap state = %#v, err=%v", bootstrap, err)
+	}
+}
+
+func TestCatalogBootstrapWaitsForFailedReleaseResourceCleanup(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 7, 10, 0, 0, 0, time.UTC)
+	_, entry := createCatalogRuntimeFixture(t, database, now)
+	action, err := database.Catalog.ClaimCatalogRuntimeAction(ctx, "catalog-cleanup-worker", time.Minute, now)
+	if err != nil || action == nil {
+		t.Fatalf("claim failed bootstrap build = %#v, err=%v", action, err)
+	}
+	build := execution.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &execution.IncusBuildReference{
+		Project: "catalog-failed-build", WorkflowID: entry.ID, CandidateRevisionID: entry.ID, Attempt: action.Identity.StateVersion,
+		InstanceName: "catalog-failed-node", Alias: "catalog-failed-node", Fingerprint: strings.Repeat("d", 64),
+	}}
+	if err := database.Catalog.CompleteCatalogBuild(ctx, *action, build, now); err != nil {
+		t.Fatalf("complete failed bootstrap build: %v", err)
+	}
+	action = claimCatalogRuntimeAction(t, database, now)
+	if err := database.Catalog.ReportCatalogRuntimeArtifactFailure(ctx, *action, runtime.Failure{
+		Class: runtime.FailureArtifact, Code: "BROKEN_ARTIFACT", Summary: "catalog artifact is invalid",
+	}, nil, now); err != nil {
+		t.Fatalf("fail catalog bootstrap artifact: %v", err)
+	}
+	if err := database.Catalog.EnsureCatalogResourceReaps(ctx, now); err != nil {
+		t.Fatalf("discover failed bootstrap cleanup: %v", err)
+	}
+	state, err := database.Catalog.CatalogBootstrapState(ctx)
+	if err != nil || !state.FailedCleanupPending || state.PublishedChallengeCount != 0 {
+		t.Fatalf("failed bootstrap state before cleanup = %#v, err=%v", state, err)
+	}
+	for {
+		claim, err := database.Catalog.ClaimCatalogResourceReap(ctx, "catalog-cleanup-worker", time.Minute, now)
+		if err != nil {
+			t.Fatalf("claim failed bootstrap cleanup: %v", err)
+		}
+		if claim == nil {
+			break
+		}
+		if err := database.Catalog.CompleteCatalogResourceReap(ctx, *claim, "", now); err != nil {
+			t.Fatalf("complete failed bootstrap cleanup: %v", err)
+		}
+	}
+	state, err = database.Catalog.CatalogBootstrapState(ctx)
+	if err != nil || state.FailedCleanupPending {
+		t.Fatalf("failed bootstrap state after cleanup = %#v, err=%v", state, err)
 	}
 }
 

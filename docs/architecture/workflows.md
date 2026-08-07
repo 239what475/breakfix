@@ -102,8 +102,8 @@ Worker promotion。
 ## Catalog Release
 
 Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Generator AgentRun、Authoring Session
-或 Agent 调用。Server 根据 `catalog.release_reference` 选择一个 immutable OCI digest，并使用独立的 durable
-Release/Entry/Commit 状态恢复安装：
+或 Agent 调用。它只在空平台根据 `catalog.release_reference` 选择一个 immutable OCI digest，并使用独立的 durable
+Release/Entry/Commit 状态建立一次题库 baseline：
 
 ```text
 Pending -> Installing -> Committing -> Ready | Failed
@@ -116,8 +116,8 @@ identity 或重复已成功的 promotion。source staging 与每个 Entry/Commit
 attempt，lease 过期消耗同一 state 的预算。
 
 Catalog 成功提交时同时建立已处理 Roadmap baseline，因此不会触发关系维护工作。RoadmapRevision 是公开
-Catalog 的唯一课程读模型；portable release 只作为 immutable import source。配置了 immutable release 时，未 `Ready`
-的 release 会在应用层阻塞 Catalog 读取以及作者生成、分类和发布，但不会使 `/readyz` 失败。完整契约见
+Catalog 的唯一课程读模型；portable release 只作为一次性 immutable bootstrap source。配置了首次 release 时，未 `Ready`
+的 release 会在应用层阻塞 Catalog 读取以及作者生成、分类和发布，但不会使 `/readyz` 失败。Ready 后新增和修订内容只走作者与 Roadmap 流程；不同 digest 不构成第二次安装。完整契约见
 [Catalog Release](catalog-release.md)。
 
 ## Roadmap Maintenance

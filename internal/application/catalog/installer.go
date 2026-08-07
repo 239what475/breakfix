@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,17 +42,13 @@ type ReleaseStore interface {
 	FailPendingRelease(context.Context, string, string, time.Time) (*catalogdomain.Release, error)
 	FailRelease(context.Context, string, string, time.Time) (*catalogdomain.Release, error)
 	RecordCatalogFinalizerFailure(context.Context, string, publication.Diagnostic) (*catalogdomain.Release, error)
-	ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error)
+	CatalogBootstrapState(context.Context) (catalogdomain.BootstrapState, error)
+	EnsureCatalogResourceReaps(context.Context, time.Time) error
 	Entries(context.Context, string) ([]catalogdomain.Entry, error)
-	InstalledEntries(context.Context) ([]catalogdomain.Entry, error)
 	PrepareReleaseCommit(context.Context, string, []catalogdomain.Commit, time.Time) (*catalogdomain.Release, []catalogdomain.Commit, error)
 	Commits(context.Context, string) ([]catalogdomain.Commit, error)
 	MarkCommitMaterialized(context.Context, string, string, time.Time) (*catalogdomain.Commit, error)
 	CompleteReleaseCommit(context.Context, string, roadmap.Revision, time.Time) (*catalogdomain.Release, error)
-}
-
-type RoadmapReader interface {
-	CurrentRoadmap(context.Context) (*roadmap.Revision, error)
 }
 
 type InstallerConfig struct {
@@ -65,7 +60,6 @@ type InstallerConfig struct {
 	Puller           BundlePuller
 	LayerReader      SourceLayerReader
 	Store            ReleaseStore
-	Roadmap          RoadmapReader
 }
 
 // Installer is a Server-owned coordinator for configured Catalog Releases.
@@ -75,12 +69,12 @@ type Installer struct {
 	dataDir       string
 	challengesDir string
 	reference     string
+	digest        catalogdomain.BundleDigest
 	pollInterval  time.Duration
 	snapshot      appexecution.SnapshotConfig
 	puller        BundlePuller
 	layerReader   SourceLayerReader
 	store         ReleaseStore
-	roadmap       RoadmapReader
 	now           func() time.Time
 	sleep         func(context.Context, time.Duration) error
 	mu            sync.Mutex
@@ -117,18 +111,80 @@ func catalogContentFailure(err error) error {
 
 func NewInstaller(config InstallerConfig) (*Installer, error) {
 	if strings.TrimSpace(config.DataDir) == "" || strings.TrimSpace(config.ChallengesDir) == "" ||
-		config.PollInterval <= 0 || config.Puller == nil || config.LayerReader == nil || config.Store == nil || config.Roadmap == nil {
-		return nil, errors.New("catalog installer requires data paths, source adapters, durable store, and roadmap reader")
+		config.PollInterval <= 0 || config.Puller == nil || config.LayerReader == nil || config.Store == nil {
+		return nil, errors.New("catalog installer requires data paths, source adapters, and a durable store")
 	}
-	if _, err := catalogdomain.BundleDigestFromReference(config.ReleaseReference); err != nil {
+	digest, err := catalogdomain.BundleDigestFromReference(config.ReleaseReference)
+	if err != nil {
 		return nil, err
 	}
 	return &Installer{
 		dataDir: filepath.Clean(config.DataDir), challengesDir: filepath.Clean(config.ChallengesDir), reference: strings.TrimSpace(config.ReleaseReference),
-		pollInterval: config.PollInterval,
-		snapshot:     config.Snapshot, puller: config.Puller, layerReader: config.LayerReader, store: config.Store, roadmap: config.Roadmap,
+		digest: digest, pollInterval: config.PollInterval,
+		snapshot: config.Snapshot, puller: config.Puller, layerReader: config.LayerReader, store: config.Store,
 		now: func() time.Time { return time.Now().UTC() }, sleep: sleepContext,
 	}, nil
+}
+
+var ErrBootstrapConflict = errors.New("catalog baseline bootstrap conflicts with durable platform state")
+
+// ValidateBootstrap rejects configuration changes that would reinterpret an
+// existing baseline or import a baseline into an authoring-created platform.
+// Failed empty-platform attempts are allowed here so Server and Runtime Worker
+// can finish their cleanup before a replacement digest starts.
+func (i *Installer) ValidateBootstrap(ctx context.Context) error {
+	state, err := i.store.CatalogBootstrapState(ctx)
+	if err != nil {
+		return err
+	}
+	_, _, err = selectBootstrapRelease(state, i.digest)
+	return err
+}
+
+func selectBootstrapRelease(state catalogdomain.BootstrapState, digest catalogdomain.BundleDigest) (*catalogdomain.Release, bool, error) {
+	var ready []*catalogdomain.Release
+	var active []*catalogdomain.Release
+	var configured *catalogdomain.Release
+	for index := range state.Releases {
+		release := &state.Releases[index]
+		if release.BundleDigest == digest {
+			configured = release
+		}
+		switch release.State {
+		case catalogdomain.ReleaseReady:
+			ready = append(ready, release)
+		case catalogdomain.ReleasePending, catalogdomain.ReleaseInstalling, catalogdomain.ReleaseCommitting:
+			active = append(active, release)
+		}
+	}
+	if len(ready) > 1 {
+		return nil, false, fmt.Errorf("%w: multiple Ready Catalog baselines exist", ErrBootstrapConflict)
+	}
+	if len(ready) == 1 {
+		if ready[0].BundleDigest != digest {
+			return nil, false, fmt.Errorf("%w: configured digest %s differs from Ready baseline %s", ErrBootstrapConflict, digest, ready[0].BundleDigest)
+		}
+		if len(active) != 0 {
+			return nil, false, fmt.Errorf("%w: an active release exists after the baseline became Ready", ErrBootstrapConflict)
+		}
+		return ready[0], false, nil
+	}
+	if state.PublishedChallengeCount != 0 {
+		return nil, false, fmt.Errorf("%w: %d challenges were published without a Ready Catalog baseline", ErrBootstrapConflict, state.PublishedChallengeCount)
+	}
+	if len(active) > 1 {
+		return nil, false, fmt.Errorf("%w: multiple Catalog bootstrap attempts are active", ErrBootstrapConflict)
+	}
+	if len(active) == 1 {
+		if active[0].BundleDigest != digest {
+			return nil, false, fmt.Errorf("%w: configured digest %s differs from active bootstrap %s", ErrBootstrapConflict, digest, active[0].BundleDigest)
+		}
+		return active[0], false, nil
+	}
+	if configured != nil {
+		return configured, false, nil
+	}
+	return nil, state.FailedCleanupPending, nil
 }
 
 // Run continuously resumes the configured immutable release. A transient
@@ -159,6 +215,9 @@ func (i *Installer) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if release == nil {
+		return nil
+	}
 	if release.State == catalogdomain.ReleaseReady || release.State == catalogdomain.ReleaseFailed {
 		if err := i.removeTerminalSource(release.ID); err != nil {
 			return err
@@ -178,19 +237,32 @@ func (i *Installer) RunOnce(ctx context.Context) error {
 }
 
 func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, *PortableSource, error) {
-	digest, err := catalogdomain.BundleDigestFromReference(i.reference)
+	now := i.now().UTC()
+	if err := i.store.EnsureCatalogResourceReaps(ctx, now); err != nil {
+		return nil, nil, err
+	}
+	state, err := i.store.CatalogBootstrapState(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	release, err := i.store.ReleaseByDigest(ctx, digest)
-	if err != nil && !errors.Is(err, catalogdomain.ErrReleaseNotFound) {
+	for _, failed := range state.Releases {
+		if failed.State == catalogdomain.ReleaseFailed {
+			if err := i.removeTerminalSource(failed.ID); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	release, waitForCleanup, err := selectBootstrapRelease(state, i.digest)
+	if err != nil {
 		return nil, nil, err
 	}
-	if errors.Is(err, catalogdomain.ErrReleaseNotFound) {
-		id := catalogdomain.ReleaseIDForBundle(digest)
-		now := i.now().UTC()
+	if waitForCleanup {
+		return nil, nil, nil
+	}
+	if release == nil {
+		id := catalogdomain.ReleaseIDForBundle(i.digest)
 		seed := catalogdomain.Release{
-			ID: id, BundleDigest: digest, State: catalogdomain.ReleasePending,
+			ID: id, BundleDigest: i.digest, State: catalogdomain.ReleasePending,
 			SourceAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		}
 		release, _, err = i.store.CreateOrGetRelease(ctx, seed)
@@ -202,7 +274,6 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 		return release, nil, nil
 	}
 	if release.State == catalogdomain.ReleasePending {
-		now := i.now().UTC()
 		if release.NextRunAt.After(now) {
 			return release, nil, nil
 		}
@@ -221,14 +292,7 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 			}
 			return updated, nil, nil
 		}
-		if err := i.validateAppendOnly(ctx, source); err != nil {
-			failed, failErr := i.store.FailPendingRelease(ctx, release.ID, errorSummary(err), now)
-			if failErr != nil {
-				return nil, nil, failErr
-			}
-			return failed, nil, nil
-		}
-		entries, err := i.newEntries(ctx, release.ID, source)
+		entries, err := i.newEntries(release.ID, source)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -263,15 +327,7 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 	return release, source, nil
 }
 
-func (i *Installer) newEntries(ctx context.Context, releaseID string, source *PortableSource) ([]catalogdomain.Entry, error) {
-	installed, err := i.store.InstalledEntries(ctx)
-	if err != nil {
-		return nil, err
-	}
-	known := make(map[string]catalogdomain.Entry, len(installed))
-	for _, entry := range installed {
-		known[entry.SourceRef] = entry
-	}
+func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]catalogdomain.Entry, error) {
 	bindings := portableBindingsByPath(source.Roadmap)
 	now := i.now().UTC()
 	entries := make([]catalogdomain.Entry, 0, len(source.Challenges))
@@ -279,12 +335,6 @@ func (i *Installer) newEntries(ctx context.Context, releaseID string, source *Po
 		binding, exists := bindings[sourceChallenge.Path]
 		if !exists {
 			return nil, fmt.Errorf("catalog source %q has no roadmap binding", sourceChallenge.Path)
-		}
-		if prior, exists := known[binding.Challenge.SourceRef]; exists {
-			if prior.Title != sourceChallenge.Entry.Title || prior.ContentRevision != sourceChallenge.ContentRevision {
-				return nil, fmt.Errorf("catalog source_ref %q changes an installed challenge", binding.Challenge.SourceRef)
-			}
-			continue
 		}
 		archive, err := archiveSourceCandidate(filepath.Join(source.Root, filepath.FromSlash(sourceChallenge.Path)))
 		if err != nil {
@@ -378,12 +428,15 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 	if err != nil {
 		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
-	compiled, err := i.compileRevision(ctx, source, release, entries, commits)
+	compiled, err := i.compileRevision(source, entries, commits)
 	if err != nil {
 		return i.handleFinalizerError(ctx, release, err)
 	}
 	_, err = i.store.CompleteReleaseCommit(ctx, release.ID, compiled, i.now().UTC())
 	if err != nil {
+		if errors.Is(err, catalogdomain.ErrBaselineEstablished) {
+			return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(err))
+		}
 		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
 	return nil
@@ -561,17 +614,7 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	return nil
 }
 
-func (i *Installer) compileRevision(ctx context.Context, source *PortableSource, release catalogdomain.Release, entries []catalogdomain.Entry, commits []catalogdomain.Commit) (roadmap.Revision, error) {
-	current, err := i.roadmap.CurrentRoadmap(ctx)
-	if err != nil && !errors.Is(err, roadmap.ErrNoCurrentRevision) {
-		return roadmap.Revision{}, err
-	}
-	currentBySource := make(map[string]roadmap.ChallengeRef)
-	if current != nil {
-		for _, binding := range current.ChallengeBindings {
-			currentBySource[binding.Challenge.SourceRef] = binding.Challenge
-		}
-	}
+func (i *Installer) compileRevision(source *PortableSource, entries []catalogdomain.Entry, commits []catalogdomain.Commit) (roadmap.Revision, error) {
 	entryByPath := make(map[string]catalogdomain.Entry, len(entries))
 	for _, entry := range entries {
 		entryByPath[entry.SourcePath] = entry
@@ -582,10 +625,6 @@ func (i *Installer) compileRevision(ctx context.Context, source *PortableSource,
 	}
 	values := make(map[string]roadmap.ChallengeRef, len(source.Roadmap.ChallengeBindings))
 	for _, binding := range source.Roadmap.ChallengeBindings {
-		if existing, found := currentBySource[binding.Challenge.SourceRef]; found {
-			values[binding.Challenge.Path] = existing
-			continue
-		}
 		entry, found := entryByPath[binding.Challenge.Path]
 		if !found {
 			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("roadmap binding %q has no catalog entry", binding.Challenge.Path))
@@ -614,112 +653,12 @@ func (i *Installer) compileRevision(ctx context.Context, source *PortableSource,
 	return compiled, nil
 }
 
-func (i *Installer) validateAppendOnly(ctx context.Context, source *PortableSource) error {
-	current, err := i.roadmap.CurrentRoadmap(ctx)
-	if errors.Is(err, roadmap.ErrNoCurrentRevision) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if current == nil {
-		return nil
-	}
-	domains := make(map[string]roadmap.PortableDomain, len(source.Roadmap.Domains))
-	for _, value := range source.Roadmap.Domains {
-		domains[value.SourceRef] = value
-	}
-	for _, value := range current.Domains {
-		portable, exists := domains[value.SourceRef]
-		if !exists || portable.Title != value.Title || portable.Definition != value.Definition || portable.Scope != value.Scope || portable.NonGoals != value.NonGoals {
-			return fmt.Errorf("catalog release changes or removes installed domain %q", value.SourceRef)
-		}
-	}
-	topics := make(map[string]roadmap.PortableTopic, len(source.Roadmap.Topics))
-	for _, value := range source.Roadmap.Topics {
-		topics[value.SourceRef] = value
-	}
-	for _, value := range current.Topics {
-		portable, exists := topics[value.SourceRef]
-		if !exists || portable.Title != value.Title || portable.Domain.SourceRef != value.Domain.SourceRef || portable.Domain.Title != value.Domain.Title ||
-			portable.Definition != value.Definition || portable.Scope != value.Scope || portable.NonGoals != value.NonGoals || portable.ChallengeGuidance != value.ChallengeGuidance {
-			return fmt.Errorf("catalog release changes or removes installed topic %q", value.SourceRef)
-		}
-	}
-	tags := make(map[string]roadmap.PortableTag, len(source.Roadmap.Tags))
-	for _, value := range source.Roadmap.Tags {
-		tags[value.SourceRef] = value
-	}
-	for _, value := range current.Tags {
-		portable, exists := tags[value.SourceRef]
-		if !exists || portable.Title != value.Title || portable.Description != value.Description {
-			return fmt.Errorf("catalog release changes or removes installed tag %q", value.SourceRef)
-		}
-	}
-	bindings := portableBindingsBySourceRef(source.Roadmap)
-	for _, value := range current.ChallengeBindings {
-		portable, exists := bindings[value.Challenge.SourceRef]
-		if !exists || portable.Challenge.Title != value.Challenge.Title || portable.Challenge.ContentRevision != value.Challenge.ContentRevision ||
-			portable.Topic.SourceRef != value.Topic.SourceRef || portable.Topic.Title != value.Topic.Title || !samePortableTags(portable.Tags, value.Tags) {
-			return fmt.Errorf("catalog release changes or removes installed challenge %q", value.Challenge.SourceRef)
-		}
-	}
-	if err := requireExistingEdges(current.TopicEdges, source.Roadmap.TopicEdges); err != nil {
-		return fmt.Errorf("catalog topic graph: %w", err)
-	}
-	if err := requireExistingEdges(current.ChallengeEdges, source.Roadmap.ChallengeEdges); err != nil {
-		return fmt.Errorf("catalog challenge graph: %w", err)
-	}
-	return nil
-}
-
 func portableBindingsByPath(value roadmap.PortableRevision) map[string]roadmap.PortableChallengeBinding {
 	result := make(map[string]roadmap.PortableChallengeBinding, len(value.ChallengeBindings))
 	for _, binding := range value.ChallengeBindings {
 		result[binding.Challenge.Path] = binding
 	}
 	return result
-}
-
-func portableBindingsBySourceRef(value roadmap.PortableRevision) map[string]roadmap.PortableChallengeBinding {
-	result := make(map[string]roadmap.PortableChallengeBinding, len(value.ChallengeBindings))
-	for _, binding := range value.ChallengeBindings {
-		result[binding.Challenge.SourceRef] = binding
-	}
-	return result
-}
-
-func samePortableTags(portable []roadmap.PortableRef, runtime []roadmap.Ref) bool {
-	if len(portable) != len(runtime) {
-		return false
-	}
-	left := append([]roadmap.PortableRef(nil), portable...)
-	right := append([]roadmap.Ref(nil), runtime...)
-	slices.SortFunc(left, func(a, b roadmap.PortableRef) int { return strings.Compare(a.SourceRef, b.SourceRef) })
-	slices.SortFunc(right, func(a, b roadmap.Ref) int { return strings.Compare(a.SourceRef, b.SourceRef) })
-	for index := range left {
-		if left[index].SourceRef != right[index].SourceRef || left[index].Title != right[index].Title {
-			return false
-		}
-	}
-	return true
-}
-
-func requireExistingEdges(existing []roadmap.Edge, candidate []roadmap.PortableEdge) error {
-	values := make(map[string]struct{}, len(candidate))
-	for _, edge := range candidate {
-		values[portableEdgeKey(edge.Source.SourceRef, edge.Target.SourceRef, edge.Relation, edge.Reason)] = struct{}{}
-	}
-	for _, edge := range existing {
-		if _, exists := values[portableEdgeKey(edge.Source.SourceRef, edge.Target.SourceRef, edge.Relation, edge.Reason)]; !exists {
-			return fmt.Errorf("changes or removes edge %q -> %q", edge.Source.SourceRef, edge.Target.SourceRef)
-		}
-	}
-	return nil
-}
-
-func portableEdgeKey(source, target string, relation roadmap.Relation, reason string) string {
-	return source + "\x00" + target + "\x00" + string(relation) + "\x00" + reason
 }
 
 func sourceArchive(source *PortableSource, entry catalogdomain.Entry) ([]byte, error) {

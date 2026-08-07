@@ -179,12 +179,16 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			Puller:           registryClient,
 			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
 			Store:            database.Catalog,
-			Roadmap:          database.Roadmap,
 		})
 		if err != nil {
 			incusClient.Close()
 			cleanupDatabase()
 			return nil, fmt.Errorf("create catalog installer: %w", err)
+		}
+		if err := installer.ValidateBootstrap(ctx); err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("validate catalog bootstrap: %w", err)
 		}
 		installerCtx, cancelInstaller := context.WithCancel(ctx)
 		installerDone := make(chan struct{})
