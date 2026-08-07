@@ -26,6 +26,7 @@ const (
 // Roadmap maintenance loop. It intentionally exposes only Roadmap workflow
 // methods, not a general database or job-executor API.
 type MaintenanceRepository interface {
+	RecoverInterruptedRoadmapAgentRuns(context.Context, string, time.Time) error
 	TryStartRoadmapWorkflow(context.Context, time.Time) (*domain.Workflow, error)
 	GetRoadmapWorkflow(context.Context, string) (*domain.Workflow, error)
 	RoadmapRevision(context.Context, string) (*domain.Revision, error)
@@ -42,6 +43,8 @@ type MaintenanceRepository interface {
 	CompleteRoadmapWorkflow(context.Context, domain.WorkflowClaim, time.Time) (*domain.Revision, error)
 	ReportRoadmapWorkflowInfrastructureFailure(context.Context, domain.WorkflowClaim, string, time.Time) (*domain.Workflow, error)
 }
+
+const roadmapRunInterruptionReason = "server restarted before roadmap agent completion"
 
 // CommitteeExecutor owns model execution only. The application service owns
 // every durable transition and creates the AgentRun before calling it.
@@ -112,12 +115,24 @@ func NewMaintenanceService(config MaintenanceConfig) (*MaintenanceService, error
 	}, nil
 }
 
+// Recover establishes the startup fence before this Server starts claiming
+// Roadmap tasks. Durable task state chooses the replacement role afterwards.
+func (s *MaintenanceService) Recover(ctx context.Context) error {
+	if s == nil || s.repository == nil {
+		return errors.New("roadmap maintenance service is not configured")
+	}
+	if err := s.repository.RecoverInterruptedRoadmapAgentRuns(ctx, roadmapRunInterruptionReason, s.currentTime()); err != nil {
+		return fmt.Errorf("recover roadmap agent runs: %w", err)
+	}
+	return nil
+}
+
 // Run keeps attempting to start or resume work until the Server stops. A
 // failed task is a durable expected result, so only infrastructure errors are
 // logged here; those leave the lease/state available for a later pass.
-func (s *MaintenanceService) Run(ctx context.Context) {
+func (s *MaintenanceService) Run(ctx context.Context) error {
 	if s == nil {
-		return
+		return errors.New("roadmap maintenance service is not configured")
 	}
 	for {
 		if err := s.RunOnce(ctx); err != nil && ctx.Err() == nil {
@@ -127,7 +142,7 @@ func (s *MaintenanceService) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			return nil
 		case <-timer.C:
 		}
 	}

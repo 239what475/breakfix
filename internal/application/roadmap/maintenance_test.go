@@ -140,6 +140,10 @@ type maintenanceTestRepository struct {
 	runs     map[string]agent.Run
 }
 
+func (r *maintenanceTestRepository) RecoverInterruptedRoadmapAgentRuns(context.Context, string, time.Time) error {
+	return nil
+}
+
 func newMaintenanceTestRepository(now time.Time) *maintenanceTestRepository {
 	revision := roadmaptest.RuntimeRevision()
 	revision.Revision = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

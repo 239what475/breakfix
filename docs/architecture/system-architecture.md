@@ -45,6 +45,12 @@ Server 是业务状态的唯一写者。每个 Worker 请求都携带 lease owne
 
 Authoring 对话和学习 Assistant 不属于后台 Workflow。Server 直接运行模型调用、保存会话与 AgentRun，并向浏览器提供对话结果；同一会话同时只允许一轮运行，不同会话可并发。
 
+### Server 生命周期
+
+`internal/bootstrap/server` 是 Server 进程生命周期的唯一所有者。它先完成 materialization、Generator workspace、Generation/interactive AgentRun、Roadmap、学习投影、Assistant lease 和 publication finalizer 的恢复，再构造 HTTP Handler 和 Router。`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
+
+bootstrap 显式启动 Catalog installer、materialization reconciler、Generation AgentRunner、Generator workspace reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、Roadmap maintenance 和已恢复的 interactive AgentRun。停止时先停止接收 HTTP 请求，再取消并等待这些服务，最后关闭 Incus 与 PostgreSQL；没有通用 executor、内存 worklist 或额外 Deployment。
+
 ## 部署边界
 
 固定 Deployment 为 Server、Controller、Runtime Worker 和 PostgreSQL。生产 Registry 由运营方独立提供；只有 Kind 开发 overlay 会额外部署 Registry。Environment 是按用户或验证需求创建的 CRD 与动态资源，不是常驻 Deployment。

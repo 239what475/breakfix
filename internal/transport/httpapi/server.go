@@ -1,44 +1,27 @@
 package httpapi
 
 import (
-	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/middleware"
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(runCtx context.Context, database *postgres.Store, k8sClient *kubernetes.Client, cfg config.Config, frontendFS fs.FS, dependencies Dependencies) (*gin.Engine, error) {
+// SetupRouter only registers HTTP routes. Server bootstrap owns Handler
+// construction, startup recovery, and every process-scoped background service.
+func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, error) {
+	if h == nil {
+		return nil, fmt.Errorf("HTTP handler is required")
+	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-
-	h, err := NewHandlerWithDependencies(database, k8sClient, cfg, dependencies)
-	if err != nil {
-		return nil, err
-	}
-	h.setRuntimeContext(runCtx)
-	if err := h.RecoverInteractiveAgentRuns(runCtx); err != nil {
-		return nil, err
-	}
-	if err := h.RecoverRoadmapAgentRuns(runCtx); err != nil {
-		return nil, err
-	}
-	if err := h.validateStartup(); err != nil {
-		return nil, err
-	}
-	h.StartLearningCleanup(runCtx)
-	h.StartEnvironmentStatusProjector(runCtx)
-	h.StartAssistantEnvironmentLeaseMaintainer(runCtx)
-	h.StartGenerationPublicationFinalizer(runCtx)
-	h.StartRoadmapMaintenance(runCtx)
 	jwtSecret := []byte(cfg.JWTSecret)
 	jwtMW := middleware.JWTMiddleware(jwtSecret)
 	optionalJWTMW := middleware.OptionalJWTMiddleware(jwtSecret)

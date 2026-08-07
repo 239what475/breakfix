@@ -48,6 +48,12 @@ the original model input and starts with attempt one. It does not change the
 task's semantic round or role-call counter, and does not resume model context
 or tool execution. Lease takeover uses the identical rule.
 
+Server bootstrap completes this durable recovery before it exposes HTTP
+readiness. Recovered Authoring and Assistant replacements run under an
+explicit application lifecycle, while direct browser turns remain active HTTP
+requests. Shutdown first stops HTTP intake, then cancels and waits for all
+Server-owned Agent execution before closing shared providers.
+
 SSE observes a Server-owned interactive run. Losing the browser connection only
 ends that subscription: it neither cancels the AgentRun nor persists partial
 stream text. The final Assistant message or Authoring revision is committed

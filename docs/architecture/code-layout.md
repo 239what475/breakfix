@@ -39,8 +39,7 @@ internal/
 
 `content` 是共享的文件内容边界：它处理 portable challenge source、已发布题目目录、candidate archive 和 Roadmap
 source，但不拥有数据库状态、Kubernetes SDK 或 Worker lease。`domain` 保持 SDK 无关；`adapter` 是唯一直接依赖外部
-服务 SDK 的层。`application` 编排用例，`transport` 只做认证、输入输出和流传输，`bootstrap` 是唯一可以同时连接多个
-层的位置。
+服务 SDK 的层。`application` 编排用例并为可恢复后台服务暴露阻塞 `Run(ctx)`；`transport` 只构造 Handler、认证、输入输出和流传输，不能在 Router 构造时恢复状态或启动 goroutine；`bootstrap` 是唯一可以同时连接多个层并启动、取消、等待进程级服务的位置。
 
 ## 依赖方向
 

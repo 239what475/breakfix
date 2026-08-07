@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +11,11 @@ import (
 )
 
 func TestEnvironmentAndAssistantRoutesRegistered(t *testing.T) {
-	router, err := SetupRouter(context.Background(), nil, nil, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, nil, Dependencies{})
+	handler, err := NewHandlerWithDependencies(nil, nil, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := SetupRouter(handler, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +63,11 @@ func TestDebugRoutesRegisterOnlyWhenExplicitlyEnabled(t *testing.T) {
 		InternalWorkers: config.InternalWorkerKeys{Runtime: "runtime-worker-key"},
 		Debug:           config.DebugConfig{Enabled: true, CredentialEnv: "BREAKFIX_DEBUG_CREDENTIAL", Credential: "debug-only-credential"},
 	}
-	router, err := SetupRouter(context.Background(), nil, nil, cfg, nil, Dependencies{})
+	handler, err := NewHandlerWithDependencies(nil, nil, cfg, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := SetupRouter(handler, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,9 +118,13 @@ func TestDebugRoutesRegisterOnlyWhenExplicitlyEnabled(t *testing.T) {
 }
 
 func TestDisabledDebugPathDoesNotFallThroughToFrontend(t *testing.T) {
-	router, err := SetupRouter(context.Background(), nil, nil, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, fstest.MapFS{
+	handler, err := NewHandlerWithDependencies(nil, nil, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := SetupRouter(handler, config.Config{Registry: config.RegistryConfig{Repository: "registry.example.com/breakfix"}}, fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("frontend")},
-	}, Dependencies{})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,9 +30,11 @@ func TestDebugRoutesRequireIndependentCredentialAndKeepRoadmapToolsAvailable(t *
 	if err := seedTestRoadmap(database, cfg); err != nil {
 		t.Fatal(err)
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	router, err := SetupRouter(runCtx, database, nil, cfg, nil, Dependencies{})
+	handler, err := NewHandlerWithDependencies(database, nil, cfg, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := SetupRouter(handler, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

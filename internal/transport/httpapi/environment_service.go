@@ -14,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var errNoActiveAssistantEnvironment = errors.New("no active environment for assistant run")
+
 type activeEnvironment struct {
 	UID            string
 	Runtime        string
@@ -118,7 +120,7 @@ func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, enviro
 			return &environments[index], nil
 		}
 	}
-	return nil, errors.New("no active environment for assistant run")
+	return nil, errNoActiveAssistantEnvironment
 }
 
 func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {

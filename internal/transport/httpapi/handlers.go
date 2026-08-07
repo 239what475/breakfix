@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
@@ -11,7 +13,6 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
-	approadmap "github.com/breakfix/breakfix/internal/application/roadmap"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 )
 
@@ -44,7 +45,6 @@ type Handler struct {
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness
 	generatorWorkspace GeneratorWorkspaceRetirer
-	roadmapMaintenance *approadmap.MaintenanceService
 }
 
 // GeneratorWorkspaceRetirer is the sole authoring-facing lifecycle operation
@@ -54,35 +54,44 @@ type GeneratorWorkspaceRetirer interface {
 }
 
 type Dependencies struct {
-	NodeTerminal       NodeTerminalProvider
-	AssistantExecutor  appassistant.Executor
-	AuthoringExecutor  appauthoring.Executor
-	GeneratorWorkspace GeneratorWorkspaceRetirer
-	RoadmapExecutor    approadmap.CommitteeExecutor
+	NodeTerminal        NodeTerminalProvider
+	Assistant           *appassistant.Service
+	Authoring           *appauthoring.RuntimeService
+	Catalog             *appcatalog.Service
+	AgentRuntimeContext context.Context
+	GeneratorWorkspace  GeneratorWorkspaceRetirer
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
-	var roadmap appcatalog.RoadmapStore
-	var lifecycle appcatalog.ChallengeLifecycleStore
-	var availability *appcatalog.Availability
-	if database != nil {
-		roadmap = database.Roadmap
-		lifecycle = database.Challenge
-		if cfg.Catalog.Enabled() {
-			var err error
-			availability, err = appcatalog.NewAvailability(cfg.Catalog.ReleaseReference, database.Catalog)
-			if err != nil {
-				return nil, fmt.Errorf("create catalog availability gate: %w", err)
+	catalogService := dependencies.Catalog
+	if catalogService == nil {
+		var roadmap appcatalog.RoadmapStore
+		var lifecycle appcatalog.ChallengeLifecycleStore
+		var availability *appcatalog.Availability
+		if database != nil {
+			roadmap = database.Roadmap
+			lifecycle = database.Challenge
+			if cfg.Catalog.Enabled() {
+				var err error
+				availability, err = appcatalog.NewAvailability(cfg.Catalog.ReleaseReference, database.Catalog)
+				if err != nil {
+					return nil, fmt.Errorf("create catalog availability gate: %w", err)
+				}
 			}
+		} else if cfg.Catalog.Enabled() {
+			return nil, fmt.Errorf("configured catalog release requires a database")
 		}
-	} else if cfg.Catalog.Enabled() {
-		return nil, fmt.Errorf("configured catalog release requires a database")
+		catalogService = appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability, lifecycle)
+	}
+	agentRuntimeContext := dependencies.AgentRuntimeContext
+	if agentRuntimeContext == nil {
+		agentRuntimeContext = context.Background()
 	}
 	handler := &Handler{
-		runtimeContext:     context.Background(),
+		runtimeContext:     agentRuntimeContext,
 		db:                 database,
 		k8s:                client,
-		catalog:            appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability, lifecycle),
+		catalog:            catalogService,
 		registryRepository: cfg.Registry.Repository,
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,
@@ -101,23 +110,21 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		nodeTerminal:       dependencies.NodeTerminal,
 		generatorWorkspace: dependencies.GeneratorWorkspace,
 	}
-	if database != nil {
-		handler.authoring = appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, dependencies.AuthoringExecutor)
-		handler.assistant = appassistant.NewService(database.Agent, cfg.Agent.Model, dependencies.AssistantExecutor)
-		if dependencies.RoadmapExecutor != nil {
-			maintenance, err := approadmap.NewMaintenanceService(approadmap.MaintenanceConfig{
-				Repository: database.Roadmap, Executor: dependencies.RoadmapExecutor,
-				ChallengeReader: approadmap.FilesystemChallengeReader{Root: cfg.ChallengesDir()},
-				Model:           cfg.Agent.Model, ServerID: handler.serverInstance,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("create roadmap maintenance service: %w", err)
-			}
-			handler.roadmapMaintenance = maintenance
+	handler.authoring = dependencies.Authoring
+	handler.assistant = dependencies.Assistant
+	if handler.authoring == nil {
+		if database != nil {
+			handler.authoring = appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, nil)
+		} else {
+			handler.authoring = appauthoring.NewRuntimeService(nil, cfg.Agent.Model, nil)
 		}
-	} else {
-		handler.authoring = appauthoring.NewRuntimeService(nil, cfg.Agent.Model, dependencies.AuthoringExecutor)
-		handler.assistant = appassistant.NewService(nil, cfg.Agent.Model, dependencies.AssistantExecutor)
+	}
+	if handler.assistant == nil {
+		if database != nil {
+			handler.assistant = appassistant.NewService(database.Agent, cfg.Agent.Model, nil)
+		} else {
+			handler.assistant = appassistant.NewService(nil, cfg.Agent.Model, nil)
+		}
 	}
 	if ready, ok := dependencies.NodeTerminal.(NodeProviderReadiness); ok {
 		handler.nodeProviderReady = ready
@@ -128,19 +135,17 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	return handler, nil
 }
 
-func (h *Handler) setRuntimeContext(ctx context.Context) {
-	if h == nil {
-		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	h.runtimeContext = ctx
-}
-
 func (h *Handler) agentRuntimeContext() context.Context {
 	if h == nil || h.runtimeContext == nil {
 		return context.Background()
 	}
 	return h.runtimeContext
+}
+
+func newServerInstanceID() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "server"
+	}
+	return fmt.Sprintf("%s-%d", hostname, time.Now().UnixNano())
 }
