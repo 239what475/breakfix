@@ -189,6 +189,10 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	generatorRoutes.GET("/workflows", h.ListActiveGenerations)
 	generatorRoutes.POST("/workflows", h.ConfirmGeneration)
 	generatorRoutes.GET("/workflows/:workflow_id", func(c *gin.Context) { h.GetGeneration(c, c.Param("workflow_id")) })
+	generatorRoutes.GET("/workflows/:workflow_id/review-bundle", func(c *gin.Context) {
+		kind := api.GetGeneratorReviewBundleParamsKind(c.Query("kind"))
+		h.GetGeneratorReviewBundle(c, c.Param("workflow_id"), api.GetGeneratorReviewBundleParams{Kind: kind})
+	})
 	generatorRoutes.POST("/workflows/:workflow_id/workspace/turn", func(c *gin.Context) { h.StartGeneratorWorkspaceTurn(c, c.Param("workflow_id")) })
 	generatorRoutes.POST("/workflows/:workflow_id/workspace/turn/end", func(c *gin.Context) { h.EndGeneratorWorkspaceTurn(c, c.Param("workflow_id")) })
 	generatorRoutes.GET("/workflows/:workflow_id/workspace/files", func(c *gin.Context) {

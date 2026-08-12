@@ -4,7 +4,6 @@ go 1.26.3
 
 require (
 	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.0.5
-	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/cloudwego/eino v0.9.13
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.7
 	github.com/cohesion-org/deepseek-go v1.3.4
@@ -15,6 +14,7 @@ require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/lxc/incus/v7 v7.0.1
+	github.com/modelcontextprotocol/go-sdk v1.0.0
 	github.com/oapi-codegen/runtime v1.4.2
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/pquerna/otp v1.5.0
@@ -77,6 +77,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
+	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
@@ -130,6 +131,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zitadel/logging v0.7.0 // indirect
 	github.com/zitadel/oidc/v3 v3.47.7 // indirect
 	github.com/zitadel/schema v1.3.2 // indirect

@@ -561,6 +561,33 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /generator/workflows/{workflow_id}/review-bundle:
+    get:
+      operationId: getGeneratorReviewBundle
+      summary: Download one immutable author review bundle
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [content, classification]
+      responses:
+        "200":
+          description: Version-bound review manifest and deterministic tar.gz payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorReviewBundle"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
   /generator/workflows/{workflow_id}/workspace/turn:
     post:
       operationId: startGeneratorWorkspaceTurn
@@ -1822,6 +1849,45 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AuthoringFileDiff"
+
+    GeneratorReviewBundle:
+      type: object
+      required: [manifest, payload]
+      properties:
+        manifest:
+          $ref: "#/components/schemas/GeneratorReviewManifest"
+        payload:
+          type: string
+          description: Base64-encoded deterministic tar.gz review payload. The payload never contains the manifest.
+
+    GeneratorReviewManifest:
+      type: object
+      required: [schema_version, kind, workflow_id, workflow_state, candidate_revision_id, candidate_archive_sha256, proposal_revision, payload_sha256, exported_at]
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [content, classification]
+        workflow_id:
+          type: string
+        workflow_state:
+          type: string
+        candidate_revision_id:
+          type: string
+        candidate_archive_sha256:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        proposal_revision:
+          type: integer
+          minimum: 0
+        payload_sha256:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        exported_at:
+          type: string
+          format: date-time
 
     GeneratorWorkspaceTurn:
       type: object

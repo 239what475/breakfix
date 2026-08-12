@@ -429,6 +429,26 @@ export type GeneratorGeneration = {
     diff: Array<AuthoringFileDiff>;
 };
 
+export type GeneratorReviewBundle = {
+    manifest: GeneratorReviewManifest;
+    /**
+     * Base64-encoded deterministic tar.gz review payload. The payload never contains the manifest.
+     */
+    payload: string;
+};
+
+export type GeneratorReviewManifest = {
+    schema_version: number;
+    kind: 'content' | 'classification';
+    workflow_id: string;
+    workflow_state: string;
+    candidate_revision_id: string;
+    candidate_archive_sha256: string;
+    proposal_revision: number;
+    payload_sha256: string;
+    exported_at: string;
+};
+
 export type GeneratorWorkspaceTurn = {
     workflow_id: string;
     turn_id: string;
@@ -1218,6 +1238,39 @@ export type GetGenerationResponses = {
 };
 
 export type GetGenerationResponse = GetGenerationResponses[keyof GetGenerationResponses];
+
+export type GetGeneratorReviewBundleData = {
+    body?: never;
+    path: {
+        workflow_id: string;
+    };
+    query: {
+        kind: 'content' | 'classification';
+    };
+    url: '/generator/workflows/{workflow_id}/review-bundle';
+};
+
+export type GetGeneratorReviewBundleErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type GetGeneratorReviewBundleError = GetGeneratorReviewBundleErrors[keyof GetGeneratorReviewBundleErrors];
+
+export type GetGeneratorReviewBundleResponses = {
+    /**
+     * Version-bound review manifest and deterministic tar.gz payload
+     */
+    200: GeneratorReviewBundle;
+};
+
+export type GetGeneratorReviewBundleResponse = GetGeneratorReviewBundleResponses[keyof GetGeneratorReviewBundleResponses];
 
 export type StartGeneratorWorkspaceTurnData = {
     body: GeneratorWorkspaceTurnRequest;

@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,6 +146,142 @@ func TestGeneratorHTTPAPIProjectsSafeGenerationReview(t *testing.T) {
 		if strings.Contains(response.Body.String(), sensitive) {
 			t.Fatalf("safe review projection leaked %q: %s", sensitive, response.Body.String())
 		}
+	}
+}
+
+func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
+	service := newGeneratorHTTPService()
+	archive := generatorHTTPReviewArchive(t)
+	archivePath := filepath.Join(t.TempDir(), "private", "candidate.tar.gz")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workflow := generatorHTTPWorkflow("workflow-review-bundle", "session-one", 2)
+	workflow.State = generation.StateNeedsAuthorReview
+	workflow.LastError = "Judge approved this candidate."
+	service.generation = &appgeneration.GenerationView{
+		Workflow: workflow,
+		Candidate: &generation.Revision{
+			ID: "candidate-review-bundle", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
+			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
+		},
+	}
+	router, cfg := newGeneratorHTTPRouter(t, service)
+
+	response := generatorHTTPRequest(t, router, cfg, http.MethodGet, "/api/generator/workflows/workflow-review-bundle/review-bundle?kind=content", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("get review bundle status = %d: %s", response.Code, response.Body.String())
+	}
+	var bundle api.GeneratorReviewBundle
+	decodeGeneratorHTTPResponse(t, response, &bundle)
+	if bundle.Manifest.SchemaVersion != reviewBundleSchemaVersion || bundle.Manifest.Kind != api.GeneratorReviewManifestKindContent ||
+		bundle.Manifest.WorkflowId != workflow.ID || bundle.Manifest.CandidateRevisionId != service.generation.Candidate.ID ||
+		bundle.Manifest.WorkflowState != string(generation.StateNeedsAuthorReview) || bundle.Manifest.ProposalRevision != 0 ||
+		bundle.Manifest.CandidateArchiveSha256 != service.generation.Candidate.ArchiveSHA256 || bundle.Manifest.PayloadSha256 == "" {
+		t.Fatalf("review bundle manifest = %#v", bundle.Manifest)
+	}
+	payload, err := base64.StdEncoding.DecodeString(bundle.Payload)
+	if err != nil {
+		t.Fatalf("decode review payload: %v", err)
+	}
+	if bundle.Manifest.PayloadSha256 != candidate.Digest(payload) {
+		t.Fatalf("review payload digest = %s, manifest = %s", candidate.Digest(payload), bundle.Manifest.PayloadSha256)
+	}
+	entries := generatorHTTPReviewBundleEntries(t, payload)
+	for _, required := range []string{
+		"overview.md", "judge.md", "verification.md", "checkpoints/ready.md", "candidate/problem.md", "candidate/nodes/host/checks.sh",
+	} {
+		if _, found := entries[required]; !found {
+			t.Fatalf("review bundle is missing %q: %#v", required, entries)
+		}
+	}
+	if _, found := entries["manifest.json"]; found {
+		t.Fatalf("review payload must not contain manifest.json: %#v", entries)
+	}
+	joined := response.Body.String() + "\n" + string(payload)
+	for _, sensitive := range []string{"archive_path", archivePath, "sandbox_id", "pvc_name", "generator-http-jwt-secret"} {
+		if strings.Contains(joined, sensitive) {
+			t.Fatalf("review bundle leaked %q", sensitive)
+		}
+	}
+}
+
+func TestGeneratorHTTPAPIExportsImmutableClassificationReviewBundle(t *testing.T) {
+	service := newGeneratorHTTPService()
+	archive := generatorHTTPReviewArchive(t)
+	archivePath := filepath.Join(t.TempDir(), "private", "candidate.tar.gz")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workflow := generatorHTTPWorkflow("workflow-classification-bundle", "session-one", 2)
+	workflow.State = generation.StateNeedsClassificationReview
+	workflow.ClassificationRoadmapRevision = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	service.generation = &appgeneration.GenerationView{
+		Workflow: workflow,
+		Candidate: &generation.Revision{
+			ID: "candidate-classification-bundle", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
+			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
+			Classification: &generation.ClassificationProposal{
+				Revision: 2, CandidateRevisionID: "candidate-classification-bundle", RoadmapRevision: workflow.ClassificationRoadmapRevision,
+				Result: generation.ClassificationUnclassifiable, UnclassifiableReason: "当前 Roadmap 没有匹配 Topic。", AdjustmentSuggestion: "请补充 Topic。", UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	router, cfg := newGeneratorHTTPRouter(t, service)
+
+	response := generatorHTTPRequest(t, router, cfg, http.MethodGet, "/api/generator/workflows/workflow-classification-bundle/review-bundle?kind=classification", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("get classification review bundle status = %d: %s", response.Code, response.Body.String())
+	}
+	var bundle api.GeneratorReviewBundle
+	decodeGeneratorHTTPResponse(t, response, &bundle)
+	if bundle.Manifest.Kind != api.GeneratorReviewManifestKindClassification || bundle.Manifest.WorkflowState != string(generation.StateNeedsClassificationReview) ||
+		bundle.Manifest.ProposalRevision != 2 || bundle.Manifest.CandidateRevisionId != service.generation.Candidate.ID {
+		t.Fatalf("classification review manifest = %#v", bundle.Manifest)
+	}
+	payload, err := base64.StdEncoding.DecodeString(bundle.Payload)
+	if err != nil {
+		t.Fatalf("decode classification review payload: %v", err)
+	}
+	entries := generatorHTTPReviewBundleEntries(t, payload)
+	for _, required := range []string{"topic.md", "tags.md", "classification.md"} {
+		if _, found := entries[required]; !found {
+			t.Fatalf("classification review bundle is missing %q: %#v", required, entries)
+		}
+	}
+	if strings.Contains(response.Body.String()+"\n"+string(payload), archivePath) {
+		t.Fatalf("classification review bundle leaked archive path %q", archivePath)
+	}
+}
+
+func generatorHTTPReviewBundleEntries(t *testing.T, payload []byte) map[string]string {
+	t.Helper()
+	gzipReader, err := gzip.NewReader(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("open review gzip: %v", err)
+	}
+	defer func() { _ = gzipReader.Close() }()
+	tarReader := tar.NewReader(gzipReader)
+	entries := map[string]string{}
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			return entries
+		}
+		if err != nil {
+			t.Fatalf("read review entry: %v", err)
+		}
+		data, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatalf("read review entry %s: %v", header.Name, err)
+		}
+		entries[header.Name] = string(data)
 	}
 }
 
