@@ -13,7 +13,10 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
+	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
+	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
@@ -44,13 +47,30 @@ type Handler struct {
 	incusConfig        incus.Config
 	nodeTerminal       NodeTerminalProvider
 	nodeProviderReady  NodeProviderReadiness
-	generatorWorkspace GeneratorWorkspaceRetirer
+	generator          generatorApplication
 }
 
-// GeneratorWorkspaceRetirer is the sole authoring-facing lifecycle operation
-// for a Server-owned Generator workspace. It cannot expose a sandbox or PVC.
-type GeneratorWorkspaceRetirer interface {
-	Retire(context.Context, string) error
+// generatorApplication is the HTTP consumer's view of GeneratorService. The
+// transport boundary receives only safe application operations, never a
+// Sandbox, PVC, archive path, or provider lifecycle dependency.
+type generatorApplication interface {
+	SetGenerationPlan(context.Context, string, string, int64, string, authoringdomain.Plan) (*authoringdomain.Session, *authoringdomain.Revision, error)
+	ConfirmGeneration(context.Context, string, string, generationdomain.StartConfirmation) (*generationdomain.Workflow, error)
+	GetGeneration(context.Context, string, string) (*appgeneration.GenerationView, error)
+	GetGenerationWorkflow(context.Context, string, string) (*generationdomain.Workflow, error)
+	ListActiveGenerations(context.Context, string) ([]generationdomain.Workflow, error)
+	StartWorkspaceTurn(context.Context, string, generationdomain.WorkspaceTurn) error
+	EndWorkspaceTurn(context.Context, string, generationdomain.WorkspaceTurn) error
+	ListWorkspaceFiles(context.Context, string, generationdomain.WorkspaceTurn) ([]generationdomain.WorkspaceFile, error)
+	ReadWorkspaceFile(context.Context, string, generationdomain.WorkspaceTurn, string, int, int) (appgeneration.FileReadResponse, error)
+	WriteWorkspaceFile(context.Context, string, generationdomain.WorkspaceTurn, string, string) error
+	ExecuteWorkspaceCommand(context.Context, string, generationdomain.WorkspaceTurn, string) (int, string, error)
+	SubmitCandidate(context.Context, string, generationdomain.CandidateSubmission) (*generationdomain.Revision, error)
+	ConfirmContent(context.Context, string, generationdomain.ContentConfirmation) (*generationdomain.Workflow, error)
+	RequestContentChanges(context.Context, string, generationdomain.ContentChangeRequest) (*generationdomain.Workflow, error)
+	RequestClassificationChanges(context.Context, string, generationdomain.ClassificationAdjustmentConfirmation) (*generationdomain.Workflow, error)
+	ConfirmClassificationAndPublish(context.Context, string, generationdomain.PublicationConfirmation) (*generationdomain.Workflow, error)
+	CancelGeneration(context.Context, string, generationdomain.Cancellation) (*generationdomain.Workflow, error)
 }
 
 type Dependencies struct {
@@ -59,7 +79,7 @@ type Dependencies struct {
 	Authoring           *appauthoring.RuntimeService
 	Catalog             *appcatalog.Service
 	AgentRuntimeContext context.Context
-	GeneratorWorkspace  GeneratorWorkspaceRetirer
+	Generator           generatorApplication
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
@@ -108,7 +128,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		runtimeConfig:      cfg.Runtime,
 		incusConfig:        cfg.Incus,
 		nodeTerminal:       dependencies.NodeTerminal,
-		generatorWorkspace: dependencies.GeneratorWorkspace,
+		generator:          dependencies.Generator,
 	}
 	handler.authoring = dependencies.Authoring
 	handler.assistant = dependencies.Assistant

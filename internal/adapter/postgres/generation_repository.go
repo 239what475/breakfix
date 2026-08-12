@@ -107,19 +107,6 @@ func (d *GenerationRepository) GetGenerationWorkflow(ctx context.Context, id str
 	return workflow, nil
 }
 
-func (d *GenerationRepository) GetActiveGenerationWorkflow(ctx context.Context, sessionID string) (*generation.Workflow, error) {
-	workflow, err := scanGenerationWorkflow(d.conn.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ?
-		AND state NOT IN (?, ?, ?) ORDER BY created_at DESC LIMIT 1`, generation.SourceAuthoring, sessionID,
-		generation.StatePublished, generation.StateFailed, generation.StateCancelled))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrGenerationWorkflowNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get active generation workflow: %w", err)
-	}
-	return workflow, nil
-}
-
 // GetGenerationWorkflowForUser is the ownership-fenced read used by the
 // shared GeneratorService. The public workflow ID is not an authorization
 // credential.
@@ -2416,24 +2403,6 @@ func (d *GenerationRepository) GetCandidateRevision(ctx context.Context, id stri
 		return nil, fmt.Errorf("get candidate revision: %w", err)
 	}
 	return revision, nil
-}
-
-// FindLatestCandidateBefore returns the newest immutable candidate from an
-// earlier authoring revision. It is only a presentation helper for the
-// authoring diff; workflow state never derives from this query.
-func (d *GenerationRepository) FindLatestCandidateBefore(ctx context.Context, sessionID string, revision int64) (*generation.Revision, error) {
-	value, err := scanCandidateRevision(d.conn.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = (
-		SELECT candidate_revision_id FROM authoring_revisions
-		WHERE session_id = ? AND revision < ? AND candidate_revision_id <> ''
-		ORDER BY revision DESC LIMIT 1
-	)`, strings.TrimSpace(sessionID), revision))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find prior candidate revision: %w", err)
-	}
-	return value, nil
 }
 
 func insertCandidateRevisionTx(ctx context.Context, tx *Tx, revision generation.Revision) error {

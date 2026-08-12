@@ -116,6 +116,16 @@ var schemaGenerationStatements = []string{
 			(action IN ('request-classification-changes', 'confirm-classification-and-publish') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
 		)
 	)`,
+	`CREATE TABLE generation_plan_receipts (
+		user_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
+		expected_revision BIGINT NOT NULL CHECK (expected_revision >= 0),
+		plan_revision BIGINT NOT NULL CHECK (plan_revision >= 1),
+		plan_sha256 TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (user_id, idempotency_key)
+	)`,
 	`CREATE TABLE generation_resource_reaps (
 		candidate_revision_id TEXT NOT NULL REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		kind TEXT NOT NULL CHECK (kind IN ('verification-environment', 'build-archive', 'node-build-image', 'candidate-artifact')),

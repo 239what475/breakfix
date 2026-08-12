@@ -47,12 +47,6 @@ function openAuth(mode: "login" | "register") {
 async function startWorkspace(id: string) {
 	if (await startChallenge(id, () => openAuth("login"))) notice.value = null;
 }
-function onPublished() {
-	notify("Challenge published.");
-	closeAuthoring();
-	void loadChallenges();
-}
-
 function openAuthoring(sessionId?: string) {
   notice.value = null;
   authoringSessionId.value = sessionId;
@@ -140,7 +134,6 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
       <AuthoringWorkspace
       v-else-if="authoringOpen"
       :initial-session-id="authoringSessionId"
-      @published="onPublished"
       />
 		</main>
     <AuthDialog

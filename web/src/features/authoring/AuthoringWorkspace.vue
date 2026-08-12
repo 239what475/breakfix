@@ -5,15 +5,18 @@ import { APIError, api, streamAuthoringMessage } from "../../api/client";
 import type {
   AuthoringAsset,
   AuthoringFileDiff,
-	AuthoringMessage,
+  AuthoringMessage,
   AuthoringSession,
+  GeneratorGeneration,
+  GeneratorWorkflow,
 } from "../../api/types";
 import MarkdownDocument from "../workspace/MarkdownDocument.vue";
 import "./authoring.css";
 
 const props = defineProps<{ initialSessionId?: string }>();
-const emit = defineEmits<{ published: [challengeId: string] }>();
 const session = ref<AuthoringSession>();
+const generation = ref<GeneratorGeneration>();
+const selectedWorkflowID = ref("");
 const message = ref("");
 const busy = ref(false);
 const error = ref("");
@@ -28,16 +31,16 @@ let displayedClassificationReview = "";
 
 const sessionStateLabel: Record<string, string> = {
   DraftConversation: "等待题意",
-  IntentReview: "题意约定待确认",
+  IntentReview: "题意约定",
   Published: "已发布",
 };
 const workflowStateLabel: Record<string, string> = {
-  Generating: "正在生成",
+  Generating: "等待生成回合",
   Judging: "正在审查",
   Building: "正在构建",
   ArtifactPublishing: "正在发布候选产物",
   Verifying: "正在真实验证",
-  NeedsAuthorReview: "等待作者审核",
+  NeedsAuthorReview: "等待内容审核",
   Classifying: "正在分类",
   NeedsClassificationReview: "等待分类审核",
   ChallengePublishing: "正在发布挑战",
@@ -46,13 +49,28 @@ const workflowStateLabel: Record<string, string> = {
   Cancelled: "已取消",
 };
 
-const usingVerifiedRevision = computed(() => !!session.value?.verified);
+const workflows = computed(() => session.value?.workflows ?? []);
+const selectedWorkflow = computed<GeneratorWorkflow | undefined>(() =>
+  workflows.value.find((workflow) => workflow.id === selectedWorkflowID.value) ?? workflows.value[0],
+);
+const activeWorkflow = computed<GeneratorWorkflow | undefined>(() => {
+  const reviewed = generation.value?.workflow;
+  if (reviewed && reviewed.id === selectedWorkflowID.value) return reviewed;
+  return selectedWorkflow.value;
+});
+const candidate = computed(() => generation.value?.candidate);
+const verified = computed(() => generation.value?.verified);
+const verification = computed(() => generation.value?.verification);
+const classification = computed(() => generation.value?.classification);
+const assets = computed(() => generation.value?.assets ?? []);
+const diff = computed(() => generation.value?.diff ?? []);
+const usingVerifiedRevision = computed(() => !!verified.value);
 const displayMetadata = computed(
-  () => session.value?.verified?.metadata ?? session.value?.intent.metadata,
+  () => verified.value?.metadata ?? session.value?.intent.metadata,
 );
 const checkpoints = computed(() => {
-  if (session.value?.verified) {
-    return session.value.verified.checkpoints.map((checkpoint, index) => ({
+  if (verified.value) {
+    return verified.value.checkpoints.map((checkpoint, index) => ({
       id: checkpoint.id,
       title: checkpoint.title,
       markdown: `${checkpoint.description}${checkpoint.hint ? `\n\n提示文件：\`${checkpoint.hint}\`` : ""}${checkpoint.node ? `\n\n执行节点：\`${checkpoint.node}\`` : ""}`,
@@ -71,14 +89,12 @@ const tabs = computed(() => {
       label: `检查点 ${index + 1}`,
     })),
   ];
-  if (session.value?.candidate) {
+  if (candidate.value) {
     entries.push({ id: "assets", label: "Assets" });
     entries.push({ id: "diff", label: "Diff" });
   }
-  if (session.value?.verification) {
-    entries.push({ id: "verification", label: "验证" });
-  }
-  if (session.value?.classification) {
+  if (verification.value) entries.push({ id: "verification", label: "验证" });
+  if (classification.value) {
     entries.push({ id: "topic", label: "Topic" });
     entries.push({ id: "tags", label: "Tags" });
   }
@@ -87,9 +103,7 @@ const tabs = computed(() => {
 const overview = computed(() => {
   const metadata = displayMetadata.value;
   if (!metadata) return "";
-  const problem = session.value?.assets.find(
-    (asset) => asset.path === "problem.md",
-  )?.content;
+  const problem = assets.value.find((asset) => asset.path === "problem.md")?.content;
   const body = usingVerifiedRevision.value
     ? problem || "已验证题目未包含可展示的 problem.md。"
     : session.value?.intent.overview || "等待 agent 写入题意约定。";
@@ -99,101 +113,24 @@ const activeCheckpoint = computed(() => {
   const id = activeTab.value.replace("checkpoint:", "");
   return checkpoints.value.find((checkpoint) => checkpoint.id === id);
 });
-const selectedAsset = computed<AuthoringAsset | undefined>(() => {
-  const assets = session.value?.assets ?? [];
-  return assets.find((asset) => asset.path === activeAsset.value) ?? assets[0];
+const selectedAsset = computed<AuthoringAsset | undefined>(() =>
+  assets.value.find((asset) => asset.path === activeAsset.value) ?? assets.value[0],
+);
+const selectedDiff = computed<AuthoringFileDiff | undefined>(() =>
+  diff.value.find((entry) => entry.path === activeDiff.value) ?? diff.value[0],
+);
+const workflowState = computed(() => activeWorkflow.value?.state);
+const displayState = computed(() => workflowState.value ?? session.value?.state ?? "");
+const displayStateLabel = computed(() =>
+  workflowState.value
+    ? workflowStateLabel[workflowState.value]
+    : sessionStateLabel[session.value?.state ?? ""],
+);
+const canCompose = computed(() => {
+  const current = session.value;
+  return !!current && !busy.value && !current.authoring_turn_active && current.state !== "Published";
 });
-const selectedDiff = computed<AuthoringFileDiff | undefined>(() => {
-  const diffs = session.value?.diff ?? [];
-  return diffs.find((entry) => entry.path === activeDiff.value) ?? diffs[0];
-});
-const classification = computed(() => session.value?.classification);
-const classificationInReview = computed(
-  () =>
-    session.value?.workflow?.state === "NeedsClassificationReview" &&
-    !!classification.value,
-);
-const classificationProposed = computed(
-  () => classificationInReview.value && classification.value?.result === "proposed",
-);
-const classificationUnclassifiable = computed(
-  () =>
-    classificationInReview.value &&
-    classification.value?.result === "unclassifiable",
-);
-const workflowState = computed(() => session.value?.workflow?.state);
-const displayState = computed(
-  () => workflowState.value ?? session.value?.state ?? "",
-);
-const displayStateLabel = computed(
-  () =>
-    workflowState.value
-      ? workflowStateLabel[workflowState.value]
-      : sessionStateLabel[session.value?.state ?? ""],
-);
-const canCompose = computed(
-  () => {
-    const current = session.value;
-    if (!current || busy.value || current.authoring_turn_active || current.state === "Published") {
-      return false;
-    }
-    if (classificationProposed.value || classificationUnclassifiable.value) {
-      return true;
-    }
-    return !current.workflow || ["NeedsAuthorReview", "Failed", "Cancelled"].includes(current.workflow.state);
-  },
-);
-const canSend = computed(
-  () => canCompose.value && message.value.trim().length > 0,
-);
-const canGenerate = computed(
-  () =>
-    !session.value?.authoring_turn_active &&
-    session.value?.state === "IntentReview" &&
-    (!session.value.workflow ||
-      ["Failed", "Cancelled"].includes(session.value.workflow.state) ||
-      (session.value.workflow.state === "NeedsClassificationReview" &&
-        session.value.intent_revision !== session.value.visible_revision)) &&
-    checkpoints.value.length > 0,
-);
-const canConfirmContent = computed(
-  () =>
-    !session.value?.authoring_turn_active &&
-    session.value?.workflow?.state === "NeedsAuthorReview" &&
-    session.value.intent_revision === session.value.visible_revision &&
-    !!session.value.candidate &&
-    session.value.verification?.passed === true,
-);
-const canOpenPublished = computed(
-  () =>
-    session.value?.state === "Published" &&
-    !!session.value.publish_challenge_id,
-);
-const canPublishClassification = computed(
-  () =>
-    classificationProposed.value &&
-    !session.value?.authoring_turn_active &&
-    session.value?.intent_revision === session.value?.visible_revision &&
-    !!session.value?.workflow &&
-    !!session.value?.candidate &&
-    session.value?.verification?.passed === true,
-);
-const canCancelGeneration = computed(() => {
-  const workflow = session.value?.workflow;
-  return (
-    !!workflow &&
-    !busy.value &&
-    !session.value?.authoring_turn_active &&
-    !["Published", "Failed", "Cancelled"].includes(workflow.state)
-  );
-});
-const actionLabel = computed(() => {
-  if (canGenerate.value) return "生成并验证题目";
-  if (canConfirmContent.value) return "确认题目内容";
-  if (canPublishClassification.value) return "确认分类并发布";
-  if (canOpenPublished.value) return "查看已发布题目";
-  return "";
-});
+const canSend = computed(() => canCompose.value && message.value.trim().length > 0);
 const topicMarkdown = computed(() => {
   const proposal = classification.value;
   if (!proposal) return "";
@@ -232,66 +169,77 @@ const tagsMarkdown = computed(() => {
   });
   return `# Tags\n\n${sections.join("\n\n")}`;
 });
-const chatTitle = computed(() => {
-  if (classificationProposed.value) return "分类调整";
-  if (classificationUnclassifiable.value) return "内容调整";
-  return "题意讨论";
-});
-const chatDescription = computed(() => {
-  if (classificationProposed.value) return "agent 只调整当前私有分类提案";
-  if (classificationUnclassifiable.value) return "需要调整题目内容，不能直接发布";
-  return "agent 仅通过受控函数修改题意约定";
-});
-const composerPlaceholder = computed(() => {
-  if (classificationProposed.value) return "说明希望如何调整 Topic 或 Tags…";
-  if (classificationUnclassifiable.value) return "说明如何调整题目内容以便可靠分类…";
-  return "描述题目想法，或说明希望 agent 如何修改题意约定…";
-});
-const composerNote = computed(() => {
-  if (busy.value || session.value?.authoring_turn_active) return "agent 正在处理这条消息…";
-  if (classificationProposed.value) return "反馈会由分类 agent 判断并只修改私有分类提案。";
-  if (classificationUnclassifiable.value) return "此结果只能通过调整题目内容解决。";
-  if (canSend.value) return "通过自然语言指导 agent；左侧内容保持只读。";
-  return "生成、验证或发布期间不能修改题意约定。";
-});
 const displayMessages = computed(() => [
-	...(session.value?.messages ?? []),
-	...pendingMessages.value,
+  ...(session.value?.messages ?? []),
+  ...pendingMessages.value,
 ]);
 
 function clearPoll() {
   if (pollTimer !== undefined) window.clearTimeout(pollTimer);
   pollTimer = undefined;
 }
+
 function shouldPoll() {
-  const currentWorkflow = session.value?.workflow;
-  return (
-    session.value?.authoring_turn_active ||
-    (!!currentWorkflow &&
-      !["NeedsAuthorReview", "NeedsClassificationReview", "Published", "Failed", "Cancelled"].includes(
-        currentWorkflow.state,
-      ))
-  );
+  if (session.value?.authoring_turn_active) return true;
+  return workflows.value.some((workflow) => [
+    "Judging",
+    "Building",
+    "ArtifactPublishing",
+    "Verifying",
+    "Classifying",
+    "ChallengePublishing",
+  ].includes(workflow.state));
 }
+
 function schedulePoll() {
   clearPoll();
   if (!shouldPoll() || !session.value) return;
   pollTimer = window.setTimeout(() => void refresh(), 3000);
 }
+
+function syncWorkflowSelection() {
+  const selected = selectedWorkflow.value;
+  const nextID = selected?.id ?? "";
+  if (nextID === selectedWorkflowID.value) return;
+  selectedWorkflowID.value = nextID;
+  generation.value = undefined;
+  activeAsset.value = "";
+  activeDiff.value = "";
+}
+
+async function refreshGeneration() {
+  const workflowID = selectedWorkflowID.value;
+  if (!workflowID) {
+    generation.value = undefined;
+    return;
+  }
+  try {
+    const value = await api.getGeneration(workflowID);
+    if (selectedWorkflowID.value === workflowID) generation.value = value;
+  } catch (cause) {
+    if (selectedWorkflowID.value === workflowID) {
+      error.value = cause instanceof Error ? cause.message : "读取生成审核失败";
+    }
+  }
+}
+
 async function refresh(force = false) {
-	if (!session.value || (!force && busy.value)) return;
+  if (!session.value || (!force && busy.value)) return;
   try {
     session.value = await api.getAuthoringSession(session.value.id);
+    syncWorkflowSelection();
+    await refreshGeneration();
     syncSelections();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "读取作者会话失败";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "读取作者会话失败";
   } finally {
     schedulePoll();
   }
 }
+
 function syncSelections() {
-  const currentClassification = session.value?.classification;
-  const currentWorkflow = session.value?.workflow;
+  const currentWorkflow = activeWorkflow.value;
+  const currentClassification = classification.value;
   const classificationReview =
     currentWorkflow?.state === "NeedsClassificationReview" && currentClassification
       ? `${currentWorkflow.id}:${currentClassification.revision}`
@@ -302,13 +250,18 @@ function syncSelections() {
   displayedClassificationReview = classificationReview;
   const currentTabs = new Set(tabs.value.map((entry) => entry.id));
   if (!currentTabs.has(activeTab.value)) activeTab.value = "overview";
-  if (!activeAsset.value && session.value?.assets[0]) {
-    activeAsset.value = session.value.assets[0].path;
-  }
-  if (!activeDiff.value && session.value?.diff[0]) {
-    activeDiff.value = session.value.diff[0].path;
-  }
+  if (!activeAsset.value && assets.value[0]) activeAsset.value = assets.value[0].path;
+  if (!activeDiff.value && diff.value[0]) activeDiff.value = diff.value[0].path;
 }
+
+async function selectWorkflow() {
+  generation.value = undefined;
+  activeAsset.value = "";
+  activeDiff.value = "";
+  await refreshGeneration();
+  syncSelections();
+}
+
 async function createOrResume() {
   busy.value = true;
   error.value = "";
@@ -318,24 +271,25 @@ async function createOrResume() {
     } else {
       try {
         session.value = await api.getCurrentAuthoringSession();
-      } catch (err) {
-        if (!(err instanceof APIError) || err.status !== 404) {
-          throw err;
-        }
+      } catch (cause) {
+        if (!(cause instanceof APIError) || cause.status !== 404) throw cause;
         session.value = await api.createAuthoringSession();
       }
     }
+    syncWorkflowSelection();
+    await refreshGeneration();
     syncSelections();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "读取作者会话失败";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "读取作者会话失败";
   } finally {
     busy.value = false;
+    schedulePoll();
   }
 }
+
 async function send() {
   if (!session.value || !canSend.value) return;
-  const current = session.value;
-  const sessionID = current.id;
+  const sessionID = session.value.id;
   const content = message.value.trim();
   const createdAt = new Date().toISOString();
   const userMessage: AuthoringMessage = {
@@ -350,30 +304,11 @@ async function send() {
     content: "",
     created_at: createdAt,
   };
-  const workflow = current.workflow;
-  const candidate = current.candidate;
-  const proposal = current.classification;
-  const adjustsClassification =
-    classificationProposed.value &&
-    !!workflow &&
-    !!candidate &&
-    !!proposal;
-  pendingMessages.value = adjustsClassification ? [userMessage] : [userMessage, agentMessage];
+  pendingMessages.value = [userMessage, agentMessage];
   message.value = "";
   busy.value = true;
   error.value = "";
   try {
-    if (adjustsClassification && workflow && candidate && proposal) {
-      session.value = await api.requestAuthoringClassificationAdjustment(sessionID, {
-        workflow_id: workflow.id,
-        candidate_revision_id: candidate.id,
-        proposal_revision: proposal.revision,
-        feedback: content,
-        idempotency_key: authoringIdempotencyKey(),
-      });
-      syncSelections();
-      return;
-    }
     const controller = new AbortController();
     streamController = controller;
     await streamAuthoringMessage(
@@ -387,15 +322,15 @@ async function send() {
           }
         },
         onComplete() {},
-        onError(message) {
-          error.value = message;
+        onError(value) {
+          error.value = value;
         },
       },
       controller.signal,
     );
-  } catch (err) {
-		if (err instanceof DOMException && err.name === "AbortError") return;
-    error.value = err instanceof Error ? err.message : "发送消息失败";
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") return;
+    error.value = cause instanceof Error ? cause.message : "发送消息失败";
   } finally {
     streamController = undefined;
     busy.value = false;
@@ -404,67 +339,11 @@ async function send() {
     schedulePoll();
   }
 }
-async function confirmAction() {
-  if (!session.value || busy.value) return;
-  busy.value = true;
-  error.value = "";
-  try {
-    if (canOpenPublished.value && session.value.publish_challenge_id) {
-      emit("published", session.value.publish_challenge_id);
-      return;
-    }
-    if (canGenerate.value) {
-      session.value = await api.confirmAuthoringGeneration(session.value.id, {
-        plan_revision: session.value.intent_revision,
-        idempotency_key: authoringIdempotencyKey(),
-      });
-    } else if (canConfirmContent.value && session.value.workflow && session.value.candidate) {
-      session.value = await api.confirmAuthoringContent(session.value.id, {
-        workflow_id: session.value.workflow.id,
-        candidate_revision_id: session.value.candidate.id,
-        idempotency_key: authoringIdempotencyKey(),
-      });
-		} else if (canPublishClassification.value && session.value.workflow && session.value.candidate && session.value.classification) {
-			session.value = await api.publishAuthoringRevision(session.value.id, {
-				workflow_id: session.value.workflow.id,
-				candidate_revision_id: session.value.candidate.id,
-				proposal_revision: session.value.classification.revision,
-				idempotency_key: authoringIdempotencyKey(),
-			});
-    }
-    syncSelections();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "确认操作失败";
-  } finally {
-    busy.value = false;
-    schedulePoll();
-  }
+
+function focusChange() {
+  activeTab.value = candidate.value ? "diff" : "overview";
 }
-async function cancelGeneration() {
-  const current = session.value;
-  const workflow = current?.workflow;
-  if (!current || !workflow || !canCancelGeneration.value) return;
-  busy.value = true;
-  error.value = "";
-  try {
-    session.value = await api.cancelAuthoringGeneration(current.id, workflow.id);
-    syncSelections();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "取消生成失败";
-  } finally {
-    busy.value = false;
-    schedulePoll();
-  }
-}
-function authoringIdempotencyKey() {
-	return globalThis.crypto?.randomUUID?.() ?? `authoring-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-function focusChange(revision: number) {
-  activeTab.value =
-    revision === session.value?.visible_revision && session.value?.candidate
-      ? "diff"
-      : "overview";
-}
+
 function messageLabel(role: string) {
   if (role === "user") return "你";
   if (role === "agent") return "Breakfix agent";
@@ -473,13 +352,14 @@ function messageLabel(role: string) {
 }
 
 watch(
-  () => `${session.value?.state ?? ""}:${session.value?.workflow?.state ?? ""}:${session.value?.authoring_turn_active ?? false}`,
+  () => `${session.value?.state ?? ""}:${session.value?.authoring_turn_active ?? false}:${workflows.value.map((workflow) => `${workflow.id}:${workflow.state}:${workflow.updated_at}`).join(",")}`,
   () => schedulePoll(),
 );
+
 onMounted(() => void createOrResume());
 onScopeDispose(() => {
-	clearPoll();
-	streamController?.abort();
+  clearPoll();
+  streamController?.abort();
 });
 </script>
 
@@ -488,22 +368,37 @@ onScopeDispose(() => {
     <nav class="authoring-narrow-tabs" aria-label="作者工作区视图">
       <button :class="{ active: narrowPane === 'plan' }" @click="narrowPane = 'plan'">内容</button>
       <button :class="{ active: narrowPane === 'chat' }" @click="narrowPane = 'chat'">对话</button>
-      <button v-if="actionLabel" class="authoring-narrow-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
-      <button v-if="canCancelGeneration" class="authoring-narrow-cancel" :disabled="busy" @click="cancelGeneration">取消</button>
     </nav>
 
     <div class="authoring-body">
       <section class="authoring-plan-pane" :class="{ 'narrow-hidden': narrowPane !== 'plan' }">
         <header class="authoring-plan-heading">
-          <div><p class="eyebrow">{{ session?.classification ? "Classification proposal" : session?.candidate ? "Verified revision" : "Intent revision" }}</p><h1>{{ session?.classification ? "分类审核" : session?.candidate ? "已验证题目" : "题意约定" }}</h1></div>
+          <div>
+            <p class="eyebrow">{{ classification ? "Classification proposal" : candidate ? "Candidate review" : "Intent revision" }}</p>
+            <h1>{{ classification ? "分类审核" : candidate ? "题目审核" : "题意约定" }}</h1>
+          </div>
           <div class="authoring-plan-actions">
-            <div v-if="session" class="authoring-status" :data-state="displayState"><i></i><span>{{ displayStateLabel }}</span><span>{{ session.candidate ? "已验证" : "题意" }} r{{ session.visible_revision }}</span><span v-if="session.workflow">{{ session.workflow.state }}</span><span v-if="session.intent_revision !== session.visible_revision">题意 r{{ session.intent_revision }}</span><span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span></div>
-            <div v-if="session" class="authoring-meta"><span>{{ displayMetadata?.runtime || "runtime 待定" }}</span><span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span></div>
-            <button v-if="canCancelGeneration" class="secondary-button authoring-cancel-action" :disabled="busy" @click="cancelGeneration">取消生成</button>
-            <button v-if="actionLabel" class="primary-button authoring-primary-action" :disabled="busy" @click="confirmAction">{{ actionLabel }}</button>
+            <div v-if="session" class="authoring-status" :data-state="displayState">
+              <i></i><span>{{ displayStateLabel }}</span>
+              <span v-if="activeWorkflow">Plan r{{ activeWorkflow.plan_revision }}</span>
+              <span v-else>Plan r{{ session.intent_revision }}</span>
+              <span v-if="session.updated_at">{{ new Date(session.updated_at).toLocaleTimeString() }}</span>
+            </div>
+            <label v-if="workflows.length" class="authoring-workflow-picker">
+              <span>任务</span>
+              <select v-model="selectedWorkflowID" aria-label="生成任务" @change="selectWorkflow">
+                <option v-for="workflow in workflows" :key="workflow.id" :value="workflow.id">
+                  r{{ workflow.plan_revision }} · {{ workflowStateLabel[workflow.state] || workflow.state }}
+                </option>
+              </select>
+            </label>
+            <div v-if="session" class="authoring-meta">
+              <span>{{ displayMetadata?.runtime || "runtime 待定" }}</span>
+              <span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span>
+            </div>
           </div>
         </header>
-        <nav class="authoring-tabs" aria-label="Authoring plan tabs">
+        <nav class="authoring-tabs" aria-label="Authoring review tabs">
           <button v-for="tab in tabs" :key="tab.id" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
             {{ tab.label }}
           </button>
@@ -515,52 +410,52 @@ onScopeDispose(() => {
           <MarkdownDocument v-else-if="activeTab === 'topic'" :source="topicMarkdown" />
           <MarkdownDocument v-else-if="activeTab === 'tags'" :source="tagsMarkdown" />
           <div v-else-if="activeTab === 'assets'" class="authoring-code-view">
-            <select v-if="session.assets.length" v-model="activeAsset" aria-label="已验证文件">
-              <option v-for="asset in session.assets" :key="asset.path" :value="asset.path">{{ asset.path }}</option>
+            <select v-if="assets.length" v-model="activeAsset" aria-label="候选文件">
+              <option v-for="asset in assets" :key="asset.path" :value="asset.path">{{ asset.path }}</option>
             </select>
-            <div v-else class="authoring-empty"><strong>已验证文件仍在准备</strong></div>
+            <div v-else class="authoring-empty"><strong>候选文件仍在准备</strong></div>
             <pre v-if="selectedAsset"><code>{{ selectedAsset.content }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'diff'" class="authoring-code-view">
-            <select v-if="session.diff.length" v-model="activeDiff" aria-label="已验证差异文件">
-              <option v-for="entry in session.diff" :key="entry.path" :value="entry.path">{{ entry.path }}</option>
+            <select v-if="diff.length" v-model="activeDiff" aria-label="候选差异文件">
+              <option v-for="entry in diff" :key="entry.path" :value="entry.path">{{ entry.path }}</option>
             </select>
-            <div v-else class="authoring-empty"><strong>当前 revision 没有可显示的文件差异</strong></div>
+            <div v-else class="authoring-empty"><strong>当前 candidate 没有可显示的文件差异</strong></div>
             <pre v-if="selectedDiff"><code>{{ selectedDiff.diff }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'verification'" class="authoring-verification">
-            <strong>{{ session.verification?.passed ? "真实验证已通过" : "真实验证未通过" }}</strong>
-            <p>{{ session.verification?.summary || session.last_error || "验证没有返回摘要" }}</p>
+            <strong>{{ verification?.passed ? "真实验证已通过" : "真实验证未通过" }}</strong>
+            <p>{{ verification?.summary || activeWorkflow?.last_error || "验证没有返回摘要" }}</p>
             <dl>
-              <div><dt>生成工作流</dt><dd>{{ session.workflow?.state || "-" }}</dd></div>
-              <div><dt>标准解答</dt><dd>{{ session.verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ session.verification?.answers.length || 0 }}</dd></div>
-              <div><dt>检查点</dt><dd>{{ session.verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ session.verification?.checkpoints.length || 0 }}</dd></div>
+              <div><dt>生成工作流</dt><dd>{{ activeWorkflow?.state || "-" }}</dd></div>
+              <div><dt>标准解答</dt><dd>{{ verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ verification?.answers.length || 0 }}</dd></div>
+              <div><dt>检查点</dt><dd>{{ verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ verification?.checkpoints.length || 0 }}</dd></div>
             </dl>
           </div>
         </div>
       </section>
 
       <section class="authoring-chat-pane" :class="{ 'narrow-hidden': narrowPane !== 'chat' }">
-        <header class="authoring-chat-heading"><strong><MessageSquareText :size="15" /> {{ chatTitle }}</strong><span>{{ chatDescription }}</span></header>
+        <header class="authoring-chat-heading"><strong><MessageSquareText :size="15" /> 题目讨论</strong><span>{{ activeWorkflow ? workflowStateLabel[activeWorkflow.state] : "题意约定" }}</span></header>
         <p v-if="error" class="authoring-alert">{{ error }}</p>
         <div class="authoring-timeline">
           <div v-if="session && !displayMessages.length" class="authoring-empty">
-            <FileCode2 :size="22" /><strong>{{ classificationProposed ? "说明希望如何调整当前分类" : classificationUnclassifiable ? "说明如何调整题目内容" : "描述你希望学习者解决的真实场景" }}</strong>
+            <FileCode2 :size="22" /><strong>描述你希望学习者解决的真实场景</strong>
           </div>
           <article v-for="entry in displayMessages" :key="entry.id" class="authoring-message" :class="entry.role">
             <span class="authoring-message-label">{{ messageLabel(entry.role) }}</span>
             <div class="authoring-bubble">{{ entry.content }}</div>
             <div v-for="change in entry.changes" :key="`${entry.id}-${change.revision}-${change.kind}`" class="authoring-change-card">
               <span>revision {{ change.revision }} · {{ change.kind }}</span>
-              <button @click="focusChange(change.revision)">{{ change.summary || '查看题意变更' }}</button>
+              <button type="button" @click="focusChange">{{ change.summary || "查看题意变更" }}</button>
               <span class="authoring-change-impact">难度影响：{{ change.difficulty_impact }}</span>
             </div>
           </article>
         </div>
         <form class="authoring-composer" @submit.prevent="send">
-          <textarea v-model="message" :disabled="!canCompose" rows="2" :placeholder="composerPlaceholder"></textarea>
+          <textarea v-model="message" :disabled="!canCompose" rows="2" placeholder="继续讨论题意、生成、审核、调整或取消…"></textarea>
           <button type="submit" title="发送消息" aria-label="发送消息" :disabled="!canSend"><Send :size="16" /></button>
-          <p class="authoring-composer-note">{{ composerNote }}</p>
+          <p class="authoring-composer-note">{{ busy || session?.authoring_turn_active ? "agent 正在处理这条消息…" : session?.state === "Published" ? "该作者会话已经发布。" : "通过对话继续当前题目。" }}</p>
         </form>
       </section>
     </div>

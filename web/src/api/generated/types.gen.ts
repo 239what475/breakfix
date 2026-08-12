@@ -88,7 +88,6 @@ export type MySpaceAuthoringDraft = {
     session_id: string;
     title: string;
     state: 'DraftConversation' | 'IntentReview';
-    workflow_state?: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
     updated_at: string;
 };
 
@@ -329,8 +328,10 @@ export type AuthoringCandidate = {
     archive_sha256: string;
 };
 
-export type AuthoringGenerationWorkflow = {
+export type GeneratorWorkflow = {
     id: string;
+    session_id: string;
+    plan_revision: number;
     state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
     state_version: number;
     runtime_attempt: number;
@@ -395,29 +396,121 @@ export type AuthoringMessageRequest = {
     content: string;
 };
 
-export type AuthoringGenerationRequest = {
+export type GeneratorPlanRequest = {
+    session_id?: string;
+    expected_revision: number;
+    idempotency_key: string;
+    plan: AuthoringPlan;
+};
+
+export type GeneratorPlanResponse = {
+    session_id: string;
+    plan_revision: number;
+    plan: AuthoringPlan;
+};
+
+export type GeneratorGenerationConfirmationRequest = {
+    session_id: string;
     plan_revision: number;
     idempotency_key: string;
 };
 
-export type AuthoringContentConfirmationRequest = {
+export type GeneratorWorkflowList = {
+    workflows: Array<GeneratorWorkflow>;
+};
+
+export type GeneratorGeneration = {
+    workflow: GeneratorWorkflow;
+    candidate?: AuthoringCandidate;
+    verified?: VerifiedChallenge;
+    verification?: AuthoringVerificationReport;
+    classification?: AuthoringClassificationProposal;
+    assets: Array<AuthoringAsset>;
+    diff: Array<AuthoringFileDiff>;
+};
+
+export type GeneratorWorkspaceTurn = {
     workflow_id: string;
+    turn_id: string;
+};
+
+export type GeneratorWorkspaceTurnRequest = {
+    turn_id: string;
+};
+
+export type GeneratorWorkspaceFile = {
+    path: string;
+    directory: boolean;
+    size: number;
+};
+
+export type GeneratorWorkspaceFileList = {
+    workflow_id: string;
+    turn_id: string;
+    files: Array<GeneratorWorkspaceFile>;
+};
+
+export type GeneratorWorkspaceFileRead = {
+    workflow_id: string;
+    turn_id: string;
+    path: string;
+    content: string;
+};
+
+export type GeneratorWorkspaceFileWriteRequest = {
+    turn_id: string;
+    path: string;
+    content: string;
+};
+
+export type GeneratorWorkspaceCommandRequest = {
+    turn_id: string;
+    command: string;
+};
+
+export type GeneratorWorkspaceCommandResult = {
+    workflow_id: string;
+    turn_id: string;
+    exit_code: number;
+    output: string;
+};
+
+export type GeneratorCandidateSubmissionRequest = {
+    turn_id: string;
+    idempotency_key: string;
+};
+
+export type GeneratorContentConfirmationRequest = {
     candidate_revision_id: string;
     idempotency_key: string;
 };
 
-export type AuthoringClassificationAdjustmentRequest = {
-    workflow_id: string;
+export type GeneratorContentChangeRequest = {
+    candidate_revision_id: string;
+    feedback: string;
+    idempotency_key: string;
+};
+
+export type GeneratorClassificationReview = {
+    workflow: GeneratorWorkflow;
+    candidate: AuthoringCandidate;
+    classification: AuthoringClassificationProposal;
+};
+
+export type GeneratorClassificationChangeRequest = {
     candidate_revision_id: string;
     proposal_revision: number;
     feedback: string;
     idempotency_key: string;
 };
 
-export type AuthoringClassificationPublicationRequest = {
-    workflow_id: string;
+export type GeneratorClassificationPublicationRequest = {
     candidate_revision_id: string;
     proposal_revision: number;
+    idempotency_key: string;
+};
+
+export type GeneratorCancellationRequest = {
     idempotency_key: string;
 };
 
@@ -471,20 +564,18 @@ export type AuthoringSession = {
     publish_challenge_id?: string;
     revision_challenge_id?: string;
     revision_base_active_revision_id?: string;
-    workflow?: AuthoringGenerationWorkflow;
+    workflows: Array<GeneratorWorkflow>;
     last_error?: string;
     updated_at: string;
     intent: AuthoringPlan;
-    candidate?: AuthoringCandidate;
-    verified?: VerifiedChallenge;
-    verification?: AuthoringVerificationReport;
-    classification?: AuthoringClassificationProposal;
     messages: Array<AuthoringMessage>;
-    assets: Array<AuthoringAsset>;
-    diff: Array<AuthoringFileDiff>;
 };
 
 export type AuthoringSessionId = string;
+
+export type GeneratorWorkflowId = string;
+
+export type GeneratorTurnId = string;
 
 export type RegisterData = {
     body: RegisterRequest;
@@ -1035,102 +1126,453 @@ export type SendAuthoringMessageResponses = {
 
 export type SendAuthoringMessageResponse = SendAuthoringMessageResponses[keyof SendAuthoringMessageResponses];
 
-export type ConfirmAuthoringGenerationData = {
-    body: AuthoringGenerationRequest;
-    path: {
-        id: string;
-    };
+export type SetGenerationPlanData = {
+    body: GeneratorPlanRequest;
+    path?: never;
     query?: never;
-    url: '/authoring/sessions/{id}/generate';
+    url: '/generator/plans';
 };
 
-export type ConfirmAuthoringGenerationResponses = {
+export type SetGenerationPlanErrors = {
     /**
-     * Generation workflow started
+     * Error
      */
-    200: AuthoringSession;
+    409: ErrorResponse;
 };
 
-export type ConfirmAuthoringGenerationResponse = ConfirmAuthoringGenerationResponses[keyof ConfirmAuthoringGenerationResponses];
+export type SetGenerationPlanError = SetGenerationPlanErrors[keyof SetGenerationPlanErrors];
 
-export type CancelAuthoringGenerationData = {
+export type SetGenerationPlanResponses = {
+    /**
+     * Persisted plan revision
+     */
+    200: GeneratorPlanResponse;
+};
+
+export type SetGenerationPlanResponse = SetGenerationPlanResponses[keyof SetGenerationPlanResponses];
+
+export type ListActiveGenerationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/generator/workflows';
+};
+
+export type ListActiveGenerationsResponses = {
+    /**
+     * Unfinished generation workflows
+     */
+    200: GeneratorWorkflowList;
+};
+
+export type ListActiveGenerationsResponse = ListActiveGenerationsResponses[keyof ListActiveGenerationsResponses];
+
+export type ConfirmGenerationData = {
+    body: GeneratorGenerationConfirmationRequest;
+    path?: never;
+    query?: never;
+    url: '/generator/workflows';
+};
+
+export type ConfirmGenerationErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ConfirmGenerationError = ConfirmGenerationErrors[keyof ConfirmGenerationErrors];
+
+export type ConfirmGenerationResponses = {
+    /**
+     * Generation workflow created or returned from its idempotency receipt
+     */
+    200: GeneratorWorkflow;
+};
+
+export type ConfirmGenerationResponse = ConfirmGenerationResponses[keyof ConfirmGenerationResponses];
+
+export type GetGenerationData = {
     body?: never;
     path: {
-        id: string;
         workflow_id: string;
     };
     query?: never;
-    url: '/authoring/sessions/{id}/generation/{workflow_id}/cancel';
+    url: '/generator/workflows/{workflow_id}';
 };
 
-export type CancelAuthoringGenerationErrors = {
+export type GetGenerationErrors = {
     /**
      * Error
      */
     404: ErrorResponse;
 };
 
-export type CancelAuthoringGenerationError = CancelAuthoringGenerationErrors[keyof CancelAuthoringGenerationErrors];
+export type GetGenerationError = GetGenerationErrors[keyof GetGenerationErrors];
 
-export type CancelAuthoringGenerationResponses = {
+export type GetGenerationResponses = {
     /**
-     * Generation workflow cancelled
+     * Generator workflow and current candidate
      */
-    200: AuthoringSession;
+    200: GeneratorGeneration;
 };
 
-export type CancelAuthoringGenerationResponse = CancelAuthoringGenerationResponses[keyof CancelAuthoringGenerationResponses];
+export type GetGenerationResponse = GetGenerationResponses[keyof GetGenerationResponses];
 
-export type ConfirmAuthoringContentData = {
-    body: AuthoringContentConfirmationRequest;
+export type StartGeneratorWorkspaceTurnData = {
+    body: GeneratorWorkspaceTurnRequest;
     path: {
-        id: string;
+        workflow_id: string;
     };
     query?: never;
-    url: '/authoring/sessions/{id}/classify';
+    url: '/generator/workflows/{workflow_id}/workspace/turn';
 };
 
-export type ConfirmAuthoringContentResponses = {
+export type StartGeneratorWorkspaceTurnErrors = {
     /**
-     * Verified revision entered classification
+     * Error
      */
-    200: AuthoringSession;
+    409: ErrorResponse;
 };
 
-export type ConfirmAuthoringContentResponse = ConfirmAuthoringContentResponses[keyof ConfirmAuthoringContentResponses];
+export type StartGeneratorWorkspaceTurnError = StartGeneratorWorkspaceTurnErrors[keyof StartGeneratorWorkspaceTurnErrors];
 
-export type RequestAuthoringClassificationAdjustmentData = {
-    body: AuthoringClassificationAdjustmentRequest;
+export type StartGeneratorWorkspaceTurnResponses = {
+    /**
+     * Workspace turn is bound
+     */
+    200: GeneratorWorkspaceTurn;
+};
+
+export type StartGeneratorWorkspaceTurnResponse = StartGeneratorWorkspaceTurnResponses[keyof StartGeneratorWorkspaceTurnResponses];
+
+export type EndGeneratorWorkspaceTurnData = {
+    body: GeneratorWorkspaceTurnRequest;
     path: {
-        id: string;
+        workflow_id: string;
     };
     query?: never;
-    url: '/authoring/sessions/{id}/classification-feedback';
+    url: '/generator/workflows/{workflow_id}/workspace/turn/end';
 };
 
-export type RequestAuthoringClassificationAdjustmentResponses = {
+export type EndGeneratorWorkspaceTurnErrors = {
     /**
-     * Private classification adjustment started
+     * Error
      */
-    200: AuthoringSession;
+    409: ErrorResponse;
 };
 
-export type RequestAuthoringClassificationAdjustmentResponse = RequestAuthoringClassificationAdjustmentResponses[keyof RequestAuthoringClassificationAdjustmentResponses];
+export type EndGeneratorWorkspaceTurnError = EndGeneratorWorkspaceTurnErrors[keyof EndGeneratorWorkspaceTurnErrors];
 
-export type PublishAuthoringRevisionData = {
-    body: AuthoringClassificationPublicationRequest;
+export type EndGeneratorWorkspaceTurnResponses = {
+    /**
+     * Workspace turn released
+     */
+    204: void;
+};
+
+export type EndGeneratorWorkspaceTurnResponse = EndGeneratorWorkspaceTurnResponses[keyof EndGeneratorWorkspaceTurnResponses];
+
+export type ListGeneratorWorkspaceFilesData = {
+    body?: never;
     path: {
-        id: string;
+        workflow_id: string;
+    };
+    query: {
+        turn_id: string;
+    };
+    url: '/generator/workflows/{workflow_id}/workspace/files';
+};
+
+export type ListGeneratorWorkspaceFilesErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ListGeneratorWorkspaceFilesError = ListGeneratorWorkspaceFilesErrors[keyof ListGeneratorWorkspaceFilesErrors];
+
+export type ListGeneratorWorkspaceFilesResponses = {
+    /**
+     * Safe relative workspace file entries
+     */
+    200: GeneratorWorkspaceFileList;
+};
+
+export type ListGeneratorWorkspaceFilesResponse = ListGeneratorWorkspaceFilesResponses[keyof ListGeneratorWorkspaceFilesResponses];
+
+export type WriteGeneratorWorkspaceFileData = {
+    body: GeneratorWorkspaceFileWriteRequest;
+    path: {
+        workflow_id: string;
     };
     query?: never;
-    url: '/authoring/sessions/{id}/publish';
+    url: '/generator/workflows/{workflow_id}/workspace/files';
 };
 
-export type PublishAuthoringRevisionResponses = {
+export type WriteGeneratorWorkspaceFileErrors = {
     /**
-     * Verified revision published
+     * Error
      */
-    200: AuthoringSession;
+    409: ErrorResponse;
 };
 
-export type PublishAuthoringRevisionResponse = PublishAuthoringRevisionResponses[keyof PublishAuthoringRevisionResponses];
+export type WriteGeneratorWorkspaceFileError = WriteGeneratorWorkspaceFileErrors[keyof WriteGeneratorWorkspaceFileErrors];
+
+export type WriteGeneratorWorkspaceFileResponses = {
+    /**
+     * Workspace file written
+     */
+    204: void;
+};
+
+export type WriteGeneratorWorkspaceFileResponse = WriteGeneratorWorkspaceFileResponses[keyof WriteGeneratorWorkspaceFileResponses];
+
+export type ReadGeneratorWorkspaceFileData = {
+    body?: never;
+    path: {
+        workflow_id: string;
+    };
+    query: {
+        turn_id: string;
+        path: string;
+        offset?: number;
+        limit?: number;
+    };
+    url: '/generator/workflows/{workflow_id}/workspace/file';
+};
+
+export type ReadGeneratorWorkspaceFileErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ReadGeneratorWorkspaceFileError = ReadGeneratorWorkspaceFileErrors[keyof ReadGeneratorWorkspaceFileErrors];
+
+export type ReadGeneratorWorkspaceFileResponses = {
+    /**
+     * Selected workspace file content
+     */
+    200: GeneratorWorkspaceFileRead;
+};
+
+export type ReadGeneratorWorkspaceFileResponse = ReadGeneratorWorkspaceFileResponses[keyof ReadGeneratorWorkspaceFileResponses];
+
+export type RunGeneratorWorkspaceCommandData = {
+    body: GeneratorWorkspaceCommandRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/workspace/commands';
+};
+
+export type RunGeneratorWorkspaceCommandErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type RunGeneratorWorkspaceCommandError = RunGeneratorWorkspaceCommandErrors[keyof RunGeneratorWorkspaceCommandErrors];
+
+export type RunGeneratorWorkspaceCommandResponses = {
+    /**
+     * Command exit code and output
+     */
+    200: GeneratorWorkspaceCommandResult;
+};
+
+export type RunGeneratorWorkspaceCommandResponse = RunGeneratorWorkspaceCommandResponses[keyof RunGeneratorWorkspaceCommandResponses];
+
+export type SubmitGeneratorCandidateData = {
+    body: GeneratorCandidateSubmissionRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/candidate';
+};
+
+export type SubmitGeneratorCandidateErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type SubmitGeneratorCandidateError = SubmitGeneratorCandidateErrors[keyof SubmitGeneratorCandidateErrors];
+
+export type SubmitGeneratorCandidateResponses = {
+    /**
+     * Candidate submission accepted or returned from its idempotency receipt
+     */
+    200: GeneratorGeneration;
+};
+
+export type SubmitGeneratorCandidateResponse = SubmitGeneratorCandidateResponses[keyof SubmitGeneratorCandidateResponses];
+
+export type ConfirmGeneratorContentData = {
+    body: GeneratorContentConfirmationRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/content/confirm';
+};
+
+export type ConfirmGeneratorContentErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ConfirmGeneratorContentError = ConfirmGeneratorContentErrors[keyof ConfirmGeneratorContentErrors];
+
+export type ConfirmGeneratorContentResponses = {
+    /**
+     * Workflow advanced to classification
+     */
+    200: GeneratorWorkflow;
+};
+
+export type ConfirmGeneratorContentResponse = ConfirmGeneratorContentResponses[keyof ConfirmGeneratorContentResponses];
+
+export type RequestGeneratorContentChangesData = {
+    body: GeneratorContentChangeRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/content/changes';
+};
+
+export type RequestGeneratorContentChangesErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type RequestGeneratorContentChangesError = RequestGeneratorContentChangesErrors[keyof RequestGeneratorContentChangesErrors];
+
+export type RequestGeneratorContentChangesResponses = {
+    /**
+     * Workflow returned to generating
+     */
+    200: GeneratorWorkflow;
+};
+
+export type RequestGeneratorContentChangesResponse = RequestGeneratorContentChangesResponses[keyof RequestGeneratorContentChangesResponses];
+
+export type GetGeneratorClassificationData = {
+    body?: never;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/classification';
+};
+
+export type GetGeneratorClassificationErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetGeneratorClassificationError = GetGeneratorClassificationErrors[keyof GetGeneratorClassificationErrors];
+
+export type GetGeneratorClassificationResponses = {
+    /**
+     * Candidate-bound classification proposal
+     */
+    200: GeneratorClassificationReview;
+};
+
+export type GetGeneratorClassificationResponse = GetGeneratorClassificationResponses[keyof GetGeneratorClassificationResponses];
+
+export type RequestGeneratorClassificationChangesData = {
+    body: GeneratorClassificationChangeRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/classification/changes';
+};
+
+export type RequestGeneratorClassificationChangesErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type RequestGeneratorClassificationChangesError = RequestGeneratorClassificationChangesErrors[keyof RequestGeneratorClassificationChangesErrors];
+
+export type RequestGeneratorClassificationChangesResponses = {
+    /**
+     * Workflow advanced to classification
+     */
+    200: GeneratorWorkflow;
+};
+
+export type RequestGeneratorClassificationChangesResponse = RequestGeneratorClassificationChangesResponses[keyof RequestGeneratorClassificationChangesResponses];
+
+export type ConfirmGeneratorClassificationAndPublishData = {
+    body: GeneratorClassificationPublicationRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/classification/publish';
+};
+
+export type ConfirmGeneratorClassificationAndPublishErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ConfirmGeneratorClassificationAndPublishError = ConfirmGeneratorClassificationAndPublishErrors[keyof ConfirmGeneratorClassificationAndPublishErrors];
+
+export type ConfirmGeneratorClassificationAndPublishResponses = {
+    /**
+     * Workflow advanced to challenge publication
+     */
+    200: GeneratorWorkflow;
+};
+
+export type ConfirmGeneratorClassificationAndPublishResponse = ConfirmGeneratorClassificationAndPublishResponses[keyof ConfirmGeneratorClassificationAndPublishResponses];
+
+export type CancelGenerationData = {
+    body: GeneratorCancellationRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/generator/workflows/{workflow_id}/cancel';
+};
+
+export type CancelGenerationErrors = {
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type CancelGenerationError = CancelGenerationErrors[keyof CancelGenerationErrors];
+
+export type CancelGenerationResponses = {
+    /**
+     * Workflow cancelled
+     */
+    200: GeneratorWorkflow;
+};
+
+export type CancelGenerationResponse = CancelGenerationResponses[keyof CancelGenerationResponses];

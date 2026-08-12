@@ -1,9 +1,5 @@
 import type {
-	AuthoringSession,
-	AuthoringClassificationAdjustmentRequest,
-	AuthoringContentConfirmationRequest,
-	AuthoringGenerationRequest,
-	AuthoringClassificationPublicationRequest,
+  AuthoringSession,
 	AuthoringStreamComplete,
 	AuthoringStreamEvent,
 	AssistantConversation,
@@ -11,6 +7,7 @@ import type {
 	AssistantStreamComplete,
 	AssistantStreamEvent,
 	ChallengeContent,
+	GeneratorGeneration,
 	MySpace,
 	MySpaceLearningPage,
 } from "./types";
@@ -262,21 +259,6 @@ export const api = {
     request<AuthoringSession>("GET", "/authoring/sessions/current"),
   getAuthoringSession: (id: string) =>
     request<AuthoringSession>("GET", `/authoring/sessions/${id}`),
-  confirmAuthoringGeneration: (id: string, body: AuthoringGenerationRequest) =>
-    request<AuthoringSession>(
-      "POST",
-      `/authoring/sessions/${id}/generate`,
-			body,
-    ),
-  cancelAuthoringGeneration: (id: string, workflowID: string) =>
-    request<AuthoringSession>(
-      "POST",
-      `/authoring/sessions/${id}/generation/${workflowID}/cancel`,
-    ),
-  confirmAuthoringContent: (id: string, body: AuthoringContentConfirmationRequest) =>
-    request<AuthoringSession>("POST", `/authoring/sessions/${id}/classify`, body),
-	requestAuthoringClassificationAdjustment: (id: string, body: AuthoringClassificationAdjustmentRequest) =>
-		request<AuthoringSession>("POST", `/authoring/sessions/${id}/classification-feedback`, body),
-  publishAuthoringRevision: (id: string, body: AuthoringClassificationPublicationRequest) =>
-    request<AuthoringSession>("POST", `/authoring/sessions/${id}/publish`, body),
+  getGeneration: (workflowID: string) =>
+    request<GeneratorGeneration>("GET", `/generator/workflows/${workflowID}`),
 };

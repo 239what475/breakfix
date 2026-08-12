@@ -49,8 +49,5 @@ type GeneratorStore interface {
 // clients. The web Authoring Agent already owns a session, while MCP can
 // create and revise one through this same service.
 type GeneratorPlanStore interface {
-	CreateAuthoringSession(context.Context, authoring.Session, authoring.Plan) (*authoring.Session, error)
-	GetAuthoringSession(context.Context, string, string) (*authoring.Session, error)
-	GetAuthoringRevision(context.Context, string, int64) (*authoring.Revision, error)
-	ReplaceAuthoringPlan(context.Context, string, string, int64, authoring.Plan, authoring.SessionState) (*authoring.Revision, error)
+	SaveGenerationPlan(context.Context, string, string, string, int64, string, authoring.Plan) (*authoring.Session, *authoring.Revision, error)
 }

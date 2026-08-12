@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
-	generationapp "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
@@ -137,163 +135,6 @@ func (h *Handler) streamAuthoringTurn(c *gin.Context, runID string) {
 	}
 }
 
-func (h *Handler) ConfirmAuthoringGeneration(c *gin.Context, sessionID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	var request api.AuthoringGenerationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	_, err := h.db.Generation.CreateGenerationWorkflow(c.Request.Context(), sessionID, user.ID, generation.StartConfirmation{
-		PlanRevision:   int64(request.PlanRevision),
-		IdempotencyKey: request.IdempotencyKey,
-	}, time.Now().UTC())
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	h.writeAuthoringSession(c, user, sessionID)
-}
-
-// CancelAuthoringGeneration relinquishes the currently confirmed Plan. The
-// workflow transition is synchronous and ownership-fenced; remote workspace
-// cleanup is deliberately asynchronous and idempotent.
-func (h *Handler) CancelAuthoringGeneration(c *gin.Context, sessionID, workflowID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	workflow, err := h.db.Generation.CancelGenerationWorkflow(c.Request.Context(), sessionID, user.ID, generation.Cancellation{
-		WorkflowID:     workflowID,
-		IdempotencyKey: "authoring-cancel-" + workflowID,
-	}, time.Now().UTC())
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	h.retireGeneratorWorkspace(workflow.ID)
-	h.writeAuthoringSession(c, user, sessionID)
-}
-
-func (h *Handler) retireGeneratorWorkspace(workflowID string) {
-	if h == nil || h.generatorWorkspace == nil || strings.TrimSpace(workflowID) == "" {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := h.generatorWorkspace.Retire(ctx, workflowID); err != nil {
-			slog.Warn("retire cancelled generator workspace", "workflow_id", workflowID, "err", err)
-		}
-	}()
-}
-
-// ConfirmAuthoringContent moves the frozen verified candidate into the
-// separate classification lifecycle. It does not publish a Challenge.
-func (h *Handler) ConfirmAuthoringContent(c *gin.Context, sessionID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	var request api.AuthoringContentConfirmationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	_, err := h.db.Generation.ConfirmGenerationContent(c.Request.Context(), sessionID, user.ID, generation.ContentConfirmation{
-		WorkflowID:          request.WorkflowId,
-		CandidateRevisionID: request.CandidateRevisionId,
-		IdempotencyKey:      request.IdempotencyKey,
-	}, time.Now().UTC())
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	h.writeAuthoringSession(c, user, sessionID)
-}
-
-// RequestAuthoringClassificationAdjustment starts another private Classifying
-// run for a reviewed proposal. The Agent, rather than the UI, decides whether
-// the author asked to adjust classification, content, or needs clarification.
-func (h *Handler) RequestAuthoringClassificationAdjustment(c *gin.Context, sessionID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	var request api.AuthoringClassificationAdjustmentRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	_, err := h.db.Generation.ResumeGenerationClassification(c.Request.Context(), sessionID, user.ID, generation.ClassificationAdjustmentConfirmation{
-		WorkflowID:          request.WorkflowId,
-		CandidateRevisionID: request.CandidateRevisionId,
-		ProposalRevision:    request.ProposalRevision,
-		Feedback:            request.Feedback,
-		IdempotencyKey:      request.IdempotencyKey,
-	}, time.Now().UTC())
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	h.writeAuthoringSession(c, user, sessionID)
-}
-
-func (h *Handler) PublishAuthoringRevision(c *gin.Context, sessionID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	var request api.AuthoringClassificationPublicationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	session, _, _, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	workflow, err := h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	if workflow.ID != request.WorkflowId || workflow.State != generation.StateNeedsClassificationReview || workflow.CandidateRevisionID != request.CandidateRevisionId {
-		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
-		return
-	}
-	revision, archive, err := h.readCandidateArchive(c.Request.Context(), workflow.CandidateRevisionID)
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	if revision.Verification == nil || !revision.Verification.Passed || revision.Artifact == nil || revision.Classification == nil {
-		h.writeAuthoringError(c, authoringdomain.ErrInvalidState)
-		return
-	}
-	inspected, err := generationapp.InspectCandidateArchive(archive)
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	now := time.Now().UTC()
-	_, err = h.db.Generation.BeginClassificationPublication(c.Request.Context(), session.ID, user.ID, inspected.Entry.Title, generation.PublicationConfirmation{
-		WorkflowID:          request.WorkflowId,
-		CandidateRevisionID: request.CandidateRevisionId,
-		ProposalRevision:    request.ProposalRevision,
-		IdempotencyKey:      request.IdempotencyKey,
-	}, now)
-	if err != nil {
-		h.writeAuthoringError(c, err)
-		return
-	}
-	h.writeAuthoringSession(c, user, sessionID)
-}
-
 func (h *Handler) writeAuthoringSession(c *gin.Context, user *postgres.User, sessionID string) {
 	session, revision, messages, err := h.authoring.Get(c.Request.Context(), user.ID, sessionID)
 	if err != nil {
@@ -308,88 +149,29 @@ func (h *Handler) writeAuthoringSession(c *gin.Context, user *postgres.User, ses
 		return
 	}
 
-	var workflow *generation.Workflow
-	workflow, err = h.db.Generation.GetActiveGenerationWorkflow(c.Request.Context(), session.ID)
-	if errors.Is(err, postgres.ErrGenerationWorkflowNotFound) {
-		workflow = nil
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read generation workflow: %v", err)})
-		return
-	}
-
-	var visibleCandidate *generation.Revision
-	var archive []byte
-	if revision.CandidateRevisionID != "" {
-		visibleCandidate, archive, err = h.readCandidateArchive(c.Request.Context(), revision.CandidateRevisionID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+	workflows := make([]api.GeneratorWorkflow, 0)
+	if h.generator != nil {
+		values, listErr := h.generator.ListActiveGenerations(c.Request.Context(), user.ID)
+		if listErr != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("list authoring workflows: %v", listErr)})
 			return
 		}
-	}
-	assets, err := appauthoring.ReadAssets(archive)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	var previousArchive []byte
-	if revision.Number > 0 {
-		previous, err := h.db.Generation.FindLatestCandidateBefore(c.Request.Context(), session.ID, revision.Number)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-			return
-		}
-		if previous != nil {
-			previousArchive, err = candidate.ReadArchive(previous.ArchivePath, previous.ArchiveSHA256)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-				return
+		for _, workflow := range values {
+			if workflow.Source.Ref == session.ID {
+				workflows = append(workflows, toAPIGeneratorWorkflow(workflow))
 			}
 		}
 	}
-	diff, err := appauthoring.DiffAssets(archive, previousArchive)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	verified, err := appauthoring.ReadVerifiedChallenge(archive)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	classification, err := h.authoringClassificationProposal(c.Request.Context(), classificationForVisibleCandidate(visibleCandidate, workflow))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, visibleCandidate, workflow, classification, authoringTurnActive, messages, assets, diff, verified))
+	c.JSON(http.StatusOK, toAPIAuthoringSession(session, revision, authoringTurnActive, messages, workflows))
 }
 
-func (h *Handler) readCandidateArchive(ctx context.Context, id string) (*generation.Revision, []byte, error) {
-	revision, err := h.db.Generation.GetCandidateRevision(ctx, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
-	if err != nil {
-		return nil, nil, err
-	}
-	return revision, archive, nil
-}
-
-func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoringdomain.Revision, visibleCandidate *generation.Revision, workflow *generation.Workflow, classification *api.AuthoringClassificationProposal, turnActive bool, messages []authoringdomain.Message, assets []appauthoring.Asset, diff []appauthoring.FileDiff, verified *authoringdomain.VerifiedChallenge) api.AuthoringSession {
-	var verification *api.AuthoringVerificationReport
-	if visibleCandidate != nil {
-		verification = toAPIAuthoringVerificationReport(visibleCandidate.Verification)
-	}
+func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoringdomain.Revision, turnActive bool, messages []authoringdomain.Message, workflows []api.GeneratorWorkflow) api.AuthoringSession {
 	return api.AuthoringSession{
-		Assets: assetsToAPI(assets), AuthoringTurnActive: turnActive, Candidate: toAPIAuthoringCandidate(visibleCandidate),
-		Classification: classification,
-		Diff:           toAPIAuthoringFileDiffs(diff), Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
+		AuthoringTurnActive: turnActive, Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
 		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
 		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
 		RevisionChallengeId: optionalString(session.RevisionChallengeID), RevisionBaseActiveRevisionId: optionalString(session.RevisionBaseActiveRevisionID),
-		UpdatedAt: session.UpdatedAt.UTC(), Verification: verification, Verified: toAPIVerifiedChallenge(verified), VisibleRevision: int(revision.Number),
-		Workflow: toAPIAuthoringGenerationWorkflow(workflow),
+		UpdatedAt: session.UpdatedAt.UTC(), VisibleRevision: int(revision.Number), Workflows: workflows,
 	}
 }
 
@@ -400,18 +182,17 @@ func toAPIAuthoringCandidate(revision *generation.Revision) *api.AuthoringCandid
 	return &api.AuthoringCandidate{Id: revision.ID, ArchiveSha256: revision.ArchiveSHA256}
 }
 
-func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.AuthoringGenerationWorkflow {
-	if workflow == nil {
-		return nil
-	}
-	var finalizerCategory *api.AuthoringGenerationWorkflowFinalizerErrorCategory
+func toAPIGeneratorWorkflow(workflow generation.Workflow) api.GeneratorWorkflow {
+	var finalizerCategory *api.GeneratorWorkflowFinalizerErrorCategory
 	if workflow.FinalizerErrorCategory.Valid() {
-		value := api.AuthoringGenerationWorkflowFinalizerErrorCategory(workflow.FinalizerErrorCategory)
+		value := api.GeneratorWorkflowFinalizerErrorCategory(workflow.FinalizerErrorCategory)
 		finalizerCategory = &value
 	}
-	return &api.AuthoringGenerationWorkflow{
+	return api.GeneratorWorkflow{
 		Id:                            workflow.ID,
-		State:                         api.AuthoringGenerationWorkflowState(workflow.State),
+		SessionId:                     workflow.Source.Ref,
+		PlanRevision:                  generatorPlanRevision(workflow.SourceRevision),
+		State:                         api.GeneratorWorkflowState(workflow.State),
 		StateVersion:                  workflow.StateVersion,
 		RuntimeAttempt:                workflow.RuntimeAttempt,
 		CandidateRevisionId:           optionalString(workflow.CandidateRevisionID),
@@ -426,11 +207,12 @@ func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.Author
 	}
 }
 
-func classificationForVisibleCandidate(visible *generation.Revision, workflow *generation.Workflow) *generation.ClassificationProposal {
-	if visible == nil || workflow == nil || workflow.CandidateRevisionID != visible.ID {
-		return nil
+func generatorPlanRevision(value string) int64 {
+	revision, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || revision < 0 {
+		return 0
 	}
-	return visible.Classification
+	return revision
 }
 
 func (h *Handler) authoringClassificationProposal(ctx context.Context, value *generation.ClassificationProposal) (*api.AuthoringClassificationProposal, error) {
@@ -593,22 +375,6 @@ func toAPIAuthoringMessages(messages []authoringdomain.Message) []api.AuthoringM
 			changes = append(changes, api.AuthoringChange{DifficultyImpact: change.DifficultyImpact, Kind: change.Kind, Revision: int(change.Revision), Summary: change.Summary})
 		}
 		result = append(result, api.AuthoringMessage{Changes: optionalSlice(changes), Content: message.Content, CreatedAt: message.CreatedAt.UTC(), Id: message.ID, Role: api.AuthoringMessageRole(message.Role)})
-	}
-	return result
-}
-
-func assetsToAPI(assets []appauthoring.Asset) []api.AuthoringAsset {
-	result := make([]api.AuthoringAsset, 0, len(assets))
-	for _, asset := range assets {
-		result = append(result, api.AuthoringAsset{Content: asset.Content, Path: asset.Path})
-	}
-	return result
-}
-
-func toAPIAuthoringFileDiffs(diff []appauthoring.FileDiff) []api.AuthoringFileDiff {
-	result := make([]api.AuthoringFileDiff, 0, len(diff))
-	for _, entry := range diff {
-		result = append(result, api.AuthoringFileDiff{Diff: entry.Diff, Path: entry.Path})
 	}
 	return result
 }

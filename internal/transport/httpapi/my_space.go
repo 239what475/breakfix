@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -294,22 +293,11 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 	published := make([]authoredPublished, 0)
 	for _, session := range sessions {
 		if session.State != authoring.StatePublished {
-			var workflowState *api.MySpaceAuthoringDraftWorkflowState
-			workflow, workflowErr := h.db.Generation.GetActiveGenerationWorkflow(ctx, session.ID)
-			switch {
-			case errors.Is(workflowErr, postgres.ErrGenerationWorkflowNotFound):
-			case workflowErr != nil:
-				return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authoring generation workflow: %w", workflowErr)
-			default:
-				state := api.MySpaceAuthoringDraftWorkflowState(workflow.State)
-				workflowState = &state
-			}
 			view.Drafts = append(view.Drafts, api.MySpaceAuthoringDraft{
-				SessionId:     session.ID,
-				Title:         authoringSessionTitle(session.Title),
-				State:         api.MySpaceAuthoringDraftState(session.State),
-				UpdatedAt:     session.UpdatedAt,
-				WorkflowState: workflowState,
+				SessionId: session.ID,
+				Title:     authoringSessionTitle(session.Title),
+				State:     api.MySpaceAuthoringDraftState(session.State),
+				UpdatedAt: session.UpdatedAt,
 			})
 			continue
 		}

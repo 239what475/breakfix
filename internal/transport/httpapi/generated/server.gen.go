@@ -59,72 +59,6 @@ func (e AuthoringClassificationProposalResult) Valid() bool {
 	}
 }
 
-// Defines values for AuthoringGenerationWorkflowFinalizerErrorCategory.
-const (
-	Deterministic AuthoringGenerationWorkflowFinalizerErrorCategory = "deterministic"
-	Transient     AuthoringGenerationWorkflowFinalizerErrorCategory = "transient"
-)
-
-// Valid indicates whether the value is a known member of the AuthoringGenerationWorkflowFinalizerErrorCategory enum.
-func (e AuthoringGenerationWorkflowFinalizerErrorCategory) Valid() bool {
-	switch e {
-	case Deterministic:
-		return true
-	case Transient:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AuthoringGenerationWorkflowState.
-const (
-	AuthoringGenerationWorkflowStateArtifactPublishing        AuthoringGenerationWorkflowState = "ArtifactPublishing"
-	AuthoringGenerationWorkflowStateBuilding                  AuthoringGenerationWorkflowState = "Building"
-	AuthoringGenerationWorkflowStateCancelled                 AuthoringGenerationWorkflowState = "Cancelled"
-	AuthoringGenerationWorkflowStateChallengePublishing       AuthoringGenerationWorkflowState = "ChallengePublishing"
-	AuthoringGenerationWorkflowStateClassifying               AuthoringGenerationWorkflowState = "Classifying"
-	AuthoringGenerationWorkflowStateFailed                    AuthoringGenerationWorkflowState = "Failed"
-	AuthoringGenerationWorkflowStateGenerating                AuthoringGenerationWorkflowState = "Generating"
-	AuthoringGenerationWorkflowStateJudging                   AuthoringGenerationWorkflowState = "Judging"
-	AuthoringGenerationWorkflowStateNeedsAuthorReview         AuthoringGenerationWorkflowState = "NeedsAuthorReview"
-	AuthoringGenerationWorkflowStateNeedsClassificationReview AuthoringGenerationWorkflowState = "NeedsClassificationReview"
-	AuthoringGenerationWorkflowStatePublished                 AuthoringGenerationWorkflowState = "Published"
-	AuthoringGenerationWorkflowStateVerifying                 AuthoringGenerationWorkflowState = "Verifying"
-)
-
-// Valid indicates whether the value is a known member of the AuthoringGenerationWorkflowState enum.
-func (e AuthoringGenerationWorkflowState) Valid() bool {
-	switch e {
-	case AuthoringGenerationWorkflowStateArtifactPublishing:
-		return true
-	case AuthoringGenerationWorkflowStateBuilding:
-		return true
-	case AuthoringGenerationWorkflowStateCancelled:
-		return true
-	case AuthoringGenerationWorkflowStateChallengePublishing:
-		return true
-	case AuthoringGenerationWorkflowStateClassifying:
-		return true
-	case AuthoringGenerationWorkflowStateFailed:
-		return true
-	case AuthoringGenerationWorkflowStateGenerating:
-		return true
-	case AuthoringGenerationWorkflowStateJudging:
-		return true
-	case AuthoringGenerationWorkflowStateNeedsAuthorReview:
-		return true
-	case AuthoringGenerationWorkflowStateNeedsClassificationReview:
-		return true
-	case AuthoringGenerationWorkflowStatePublished:
-		return true
-	case AuthoringGenerationWorkflowStateVerifying:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AuthoringMessageRole.
 const (
 	AuthoringMessageRoleAgent  AuthoringMessageRole = "agent"
@@ -266,6 +200,72 @@ func (e ChallengeSummaryRuntime) Valid() bool {
 	}
 }
 
+// Defines values for GeneratorWorkflowFinalizerErrorCategory.
+const (
+	Deterministic GeneratorWorkflowFinalizerErrorCategory = "deterministic"
+	Transient     GeneratorWorkflowFinalizerErrorCategory = "transient"
+)
+
+// Valid indicates whether the value is a known member of the GeneratorWorkflowFinalizerErrorCategory enum.
+func (e GeneratorWorkflowFinalizerErrorCategory) Valid() bool {
+	switch e {
+	case Deterministic:
+		return true
+	case Transient:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GeneratorWorkflowState.
+const (
+	GeneratorWorkflowStateArtifactPublishing        GeneratorWorkflowState = "ArtifactPublishing"
+	GeneratorWorkflowStateBuilding                  GeneratorWorkflowState = "Building"
+	GeneratorWorkflowStateCancelled                 GeneratorWorkflowState = "Cancelled"
+	GeneratorWorkflowStateChallengePublishing       GeneratorWorkflowState = "ChallengePublishing"
+	GeneratorWorkflowStateClassifying               GeneratorWorkflowState = "Classifying"
+	GeneratorWorkflowStateFailed                    GeneratorWorkflowState = "Failed"
+	GeneratorWorkflowStateGenerating                GeneratorWorkflowState = "Generating"
+	GeneratorWorkflowStateJudging                   GeneratorWorkflowState = "Judging"
+	GeneratorWorkflowStateNeedsAuthorReview         GeneratorWorkflowState = "NeedsAuthorReview"
+	GeneratorWorkflowStateNeedsClassificationReview GeneratorWorkflowState = "NeedsClassificationReview"
+	GeneratorWorkflowStatePublished                 GeneratorWorkflowState = "Published"
+	GeneratorWorkflowStateVerifying                 GeneratorWorkflowState = "Verifying"
+)
+
+// Valid indicates whether the value is a known member of the GeneratorWorkflowState enum.
+func (e GeneratorWorkflowState) Valid() bool {
+	switch e {
+	case GeneratorWorkflowStateArtifactPublishing:
+		return true
+	case GeneratorWorkflowStateBuilding:
+		return true
+	case GeneratorWorkflowStateCancelled:
+		return true
+	case GeneratorWorkflowStateChallengePublishing:
+		return true
+	case GeneratorWorkflowStateClassifying:
+		return true
+	case GeneratorWorkflowStateFailed:
+		return true
+	case GeneratorWorkflowStateGenerating:
+		return true
+	case GeneratorWorkflowStateJudging:
+		return true
+	case GeneratorWorkflowStateNeedsAuthorReview:
+		return true
+	case GeneratorWorkflowStateNeedsClassificationReview:
+		return true
+	case GeneratorWorkflowStatePublished:
+		return true
+	case GeneratorWorkflowStateVerifying:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MySpaceActiveEnvironmentRuntime.
 const (
 	MySpaceActiveEnvironmentRuntimeK8s  MySpaceActiveEnvironmentRuntime = "k8s"
@@ -296,54 +296,6 @@ func (e MySpaceAuthoringDraftState) Valid() bool {
 	case DraftConversation:
 		return true
 	case IntentReview:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for MySpaceAuthoringDraftWorkflowState.
-const (
-	ArtifactPublishing        MySpaceAuthoringDraftWorkflowState = "ArtifactPublishing"
-	Building                  MySpaceAuthoringDraftWorkflowState = "Building"
-	Cancelled                 MySpaceAuthoringDraftWorkflowState = "Cancelled"
-	ChallengePublishing       MySpaceAuthoringDraftWorkflowState = "ChallengePublishing"
-	Classifying               MySpaceAuthoringDraftWorkflowState = "Classifying"
-	Failed                    MySpaceAuthoringDraftWorkflowState = "Failed"
-	Generating                MySpaceAuthoringDraftWorkflowState = "Generating"
-	Judging                   MySpaceAuthoringDraftWorkflowState = "Judging"
-	NeedsAuthorReview         MySpaceAuthoringDraftWorkflowState = "NeedsAuthorReview"
-	NeedsClassificationReview MySpaceAuthoringDraftWorkflowState = "NeedsClassificationReview"
-	Published                 MySpaceAuthoringDraftWorkflowState = "Published"
-	Verifying                 MySpaceAuthoringDraftWorkflowState = "Verifying"
-)
-
-// Valid indicates whether the value is a known member of the MySpaceAuthoringDraftWorkflowState enum.
-func (e MySpaceAuthoringDraftWorkflowState) Valid() bool {
-	switch e {
-	case ArtifactPublishing:
-		return true
-	case Building:
-		return true
-	case Cancelled:
-		return true
-	case ChallengePublishing:
-		return true
-	case Classifying:
-		return true
-	case Failed:
-		return true
-	case Generating:
-		return true
-	case Judging:
-		return true
-	case NeedsAuthorReview:
-		return true
-	case NeedsClassificationReview:
-		return true
-	case Published:
-		return true
-	case Verifying:
 		return true
 	default:
 		return false
@@ -545,15 +497,6 @@ type AuthoringCheckpointResult struct {
 	Summary string  `json:"summary"`
 }
 
-// AuthoringClassificationAdjustmentRequest defines model for AuthoringClassificationAdjustmentRequest.
-type AuthoringClassificationAdjustmentRequest struct {
-	CandidateRevisionId string `json:"candidate_revision_id"`
-	Feedback            string `json:"feedback"`
-	IdempotencyKey      string `json:"idempotency_key"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	WorkflowId          string `json:"workflow_id"`
-}
-
 // AuthoringClassificationNewTag defines model for AuthoringClassificationNewTag.
 type AuthoringClassificationNewTag struct {
 	Description string `json:"description"`
@@ -586,14 +529,6 @@ type AuthoringClassificationProposal struct {
 // AuthoringClassificationProposalResult defines model for AuthoringClassificationProposal.Result.
 type AuthoringClassificationProposalResult string
 
-// AuthoringClassificationPublicationRequest defines model for AuthoringClassificationPublicationRequest.
-type AuthoringClassificationPublicationRequest struct {
-	CandidateRevisionId string `json:"candidate_revision_id"`
-	IdempotencyKey      string `json:"idempotency_key"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	WorkflowId          string `json:"workflow_id"`
-}
-
 // AuthoringClassificationTag defines model for AuthoringClassificationTag.
 type AuthoringClassificationTag struct {
 	Existing *RoadmapTag                    `json:"existing,omitempty"`
@@ -606,13 +541,6 @@ type AuthoringClassificationTopic struct {
 	Existing *RoadmapTopic                    `json:"existing,omitempty"`
 	New      *AuthoringClassificationNewTopic `json:"new,omitempty"`
 	Reason   string                           `json:"reason"`
-}
-
-// AuthoringContentConfirmationRequest defines model for AuthoringContentConfirmationRequest.
-type AuthoringContentConfirmationRequest struct {
-	CandidateRevisionId string `json:"candidate_revision_id"`
-	IdempotencyKey      string `json:"idempotency_key"`
-	WorkflowId          string `json:"workflow_id"`
 }
 
 // AuthoringExecutionResult defines model for AuthoringExecutionResult.
@@ -628,35 +556,6 @@ type AuthoringFileDiff struct {
 	Diff string `json:"diff"`
 	Path string `json:"path"`
 }
-
-// AuthoringGenerationRequest defines model for AuthoringGenerationRequest.
-type AuthoringGenerationRequest struct {
-	IdempotencyKey string `json:"idempotency_key"`
-	PlanRevision   int    `json:"plan_revision"`
-}
-
-// AuthoringGenerationWorkflow defines model for AuthoringGenerationWorkflow.
-type AuthoringGenerationWorkflow struct {
-	CandidateRevisionId           *string                                            `json:"candidate_revision_id,omitempty"`
-	ClassificationRoadmapRevision *string                                            `json:"classification_roadmap_revision,omitempty"`
-	CreatedAt                     time.Time                                          `json:"created_at"`
-	FinalizerErrorCategory        *AuthoringGenerationWorkflowFinalizerErrorCategory `json:"finalizer_error_category,omitempty"`
-	FinalizerLastAttemptedAt      *time.Time                                         `json:"finalizer_last_attempted_at,omitempty"`
-	FinalizerLastError            *string                                            `json:"finalizer_last_error,omitempty"`
-	FinalizerNextRetryAt          *time.Time                                         `json:"finalizer_next_retry_at,omitempty"`
-	Id                            string                                             `json:"id"`
-	LastError                     *string                                            `json:"last_error,omitempty"`
-	RuntimeAttempt                int                                                `json:"runtime_attempt"`
-	State                         AuthoringGenerationWorkflowState                   `json:"state"`
-	StateVersion                  int64                                              `json:"state_version"`
-	UpdatedAt                     time.Time                                          `json:"updated_at"`
-}
-
-// AuthoringGenerationWorkflowFinalizerErrorCategory defines model for AuthoringGenerationWorkflow.FinalizerErrorCategory.
-type AuthoringGenerationWorkflowFinalizerErrorCategory string
-
-// AuthoringGenerationWorkflowState defines model for AuthoringGenerationWorkflow.State.
-type AuthoringGenerationWorkflowState string
 
 // AuthoringMessage defines model for AuthoringMessage.
 type AuthoringMessage struct {
@@ -698,27 +597,20 @@ type AuthoringPlan struct {
 
 // AuthoringSession defines model for AuthoringSession.
 type AuthoringSession struct {
-	Assets []AuthoringAsset `json:"assets"`
-
 	// AuthoringTurnActive Whether the durable authoring Agent Run is pending or running. While true, the plan is being updated privately and author actions are unavailable.
-	AuthoringTurnActive          bool                             `json:"authoring_turn_active"`
-	Candidate                    *AuthoringCandidate              `json:"candidate,omitempty"`
-	Classification               *AuthoringClassificationProposal `json:"classification,omitempty"`
-	Diff                         []AuthoringFileDiff              `json:"diff"`
-	Id                           string                           `json:"id"`
-	Intent                       AuthoringPlan                    `json:"intent"`
-	IntentRevision               int                              `json:"intent_revision"`
-	LastError                    *string                          `json:"last_error,omitempty"`
-	Messages                     []AuthoringMessage               `json:"messages"`
-	PublishChallengeId           *string                          `json:"publish_challenge_id,omitempty"`
-	RevisionBaseActiveRevisionId *string                          `json:"revision_base_active_revision_id,omitempty"`
-	RevisionChallengeId          *string                          `json:"revision_challenge_id,omitempty"`
-	State                        AuthoringSessionState            `json:"state"`
-	UpdatedAt                    time.Time                        `json:"updated_at"`
-	Verification                 *AuthoringVerificationReport     `json:"verification,omitempty"`
-	Verified                     *VerifiedChallenge               `json:"verified,omitempty"`
-	VisibleRevision              int                              `json:"visible_revision"`
-	Workflow                     *AuthoringGenerationWorkflow     `json:"workflow,omitempty"`
+	AuthoringTurnActive          bool                  `json:"authoring_turn_active"`
+	Id                           string                `json:"id"`
+	Intent                       AuthoringPlan         `json:"intent"`
+	IntentRevision               int                   `json:"intent_revision"`
+	LastError                    *string               `json:"last_error,omitempty"`
+	Messages                     []AuthoringMessage    `json:"messages"`
+	PublishChallengeId           *string               `json:"publish_challenge_id,omitempty"`
+	RevisionBaseActiveRevisionId *string               `json:"revision_base_active_revision_id,omitempty"`
+	RevisionChallengeId          *string               `json:"revision_challenge_id,omitempty"`
+	State                        AuthoringSessionState `json:"state"`
+	UpdatedAt                    time.Time             `json:"updated_at"`
+	VisibleRevision              int                   `json:"visible_revision"`
+	Workflows                    []GeneratorWorkflow   `json:"workflows"`
 }
 
 // AuthoringSessionState defines model for AuthoringSession.State.
@@ -832,6 +724,169 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// GeneratorCancellationRequest defines model for GeneratorCancellationRequest.
+type GeneratorCancellationRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// GeneratorCandidateSubmissionRequest defines model for GeneratorCandidateSubmissionRequest.
+type GeneratorCandidateSubmissionRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	TurnId         string `json:"turn_id"`
+}
+
+// GeneratorClassificationChangeRequest defines model for GeneratorClassificationChangeRequest.
+type GeneratorClassificationChangeRequest struct {
+	CandidateRevisionId string `json:"candidate_revision_id"`
+	Feedback            string `json:"feedback"`
+	IdempotencyKey      string `json:"idempotency_key"`
+	ProposalRevision    int    `json:"proposal_revision"`
+}
+
+// GeneratorClassificationPublicationRequest defines model for GeneratorClassificationPublicationRequest.
+type GeneratorClassificationPublicationRequest struct {
+	CandidateRevisionId string `json:"candidate_revision_id"`
+	IdempotencyKey      string `json:"idempotency_key"`
+	ProposalRevision    int    `json:"proposal_revision"`
+}
+
+// GeneratorClassificationReview defines model for GeneratorClassificationReview.
+type GeneratorClassificationReview struct {
+	Candidate      AuthoringCandidate              `json:"candidate"`
+	Classification AuthoringClassificationProposal `json:"classification"`
+	Workflow       GeneratorWorkflow               `json:"workflow"`
+}
+
+// GeneratorContentChangeRequest defines model for GeneratorContentChangeRequest.
+type GeneratorContentChangeRequest struct {
+	CandidateRevisionId string `json:"candidate_revision_id"`
+	Feedback            string `json:"feedback"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+// GeneratorContentConfirmationRequest defines model for GeneratorContentConfirmationRequest.
+type GeneratorContentConfirmationRequest struct {
+	CandidateRevisionId string `json:"candidate_revision_id"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+// GeneratorGeneration defines model for GeneratorGeneration.
+type GeneratorGeneration struct {
+	Assets         []AuthoringAsset                 `json:"assets"`
+	Candidate      *AuthoringCandidate              `json:"candidate,omitempty"`
+	Classification *AuthoringClassificationProposal `json:"classification,omitempty"`
+	Diff           []AuthoringFileDiff              `json:"diff"`
+	Verification   *AuthoringVerificationReport     `json:"verification,omitempty"`
+	Verified       *VerifiedChallenge               `json:"verified,omitempty"`
+	Workflow       GeneratorWorkflow                `json:"workflow"`
+}
+
+// GeneratorGenerationConfirmationRequest defines model for GeneratorGenerationConfirmationRequest.
+type GeneratorGenerationConfirmationRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	PlanRevision   int64  `json:"plan_revision"`
+	SessionId      string `json:"session_id"`
+}
+
+// GeneratorPlanRequest defines model for GeneratorPlanRequest.
+type GeneratorPlanRequest struct {
+	ExpectedRevision int64         `json:"expected_revision"`
+	IdempotencyKey   string        `json:"idempotency_key"`
+	Plan             AuthoringPlan `json:"plan"`
+	SessionId        *string       `json:"session_id,omitempty"`
+}
+
+// GeneratorPlanResponse defines model for GeneratorPlanResponse.
+type GeneratorPlanResponse struct {
+	Plan         AuthoringPlan `json:"plan"`
+	PlanRevision int64         `json:"plan_revision"`
+	SessionId    string        `json:"session_id"`
+}
+
+// GeneratorWorkflow defines model for GeneratorWorkflow.
+type GeneratorWorkflow struct {
+	CandidateRevisionId           *string                                  `json:"candidate_revision_id,omitempty"`
+	ClassificationRoadmapRevision *string                                  `json:"classification_roadmap_revision,omitempty"`
+	CreatedAt                     time.Time                                `json:"created_at"`
+	FinalizerErrorCategory        *GeneratorWorkflowFinalizerErrorCategory `json:"finalizer_error_category,omitempty"`
+	FinalizerLastAttemptedAt      *time.Time                               `json:"finalizer_last_attempted_at,omitempty"`
+	FinalizerLastError            *string                                  `json:"finalizer_last_error,omitempty"`
+	FinalizerNextRetryAt          *time.Time                               `json:"finalizer_next_retry_at,omitempty"`
+	Id                            string                                   `json:"id"`
+	LastError                     *string                                  `json:"last_error,omitempty"`
+	PlanRevision                  int64                                    `json:"plan_revision"`
+	RuntimeAttempt                int                                      `json:"runtime_attempt"`
+	SessionId                     string                                   `json:"session_id"`
+	State                         GeneratorWorkflowState                   `json:"state"`
+	StateVersion                  int64                                    `json:"state_version"`
+	UpdatedAt                     time.Time                                `json:"updated_at"`
+}
+
+// GeneratorWorkflowFinalizerErrorCategory defines model for GeneratorWorkflow.FinalizerErrorCategory.
+type GeneratorWorkflowFinalizerErrorCategory string
+
+// GeneratorWorkflowState defines model for GeneratorWorkflow.State.
+type GeneratorWorkflowState string
+
+// GeneratorWorkflowList defines model for GeneratorWorkflowList.
+type GeneratorWorkflowList struct {
+	Workflows []GeneratorWorkflow `json:"workflows"`
+}
+
+// GeneratorWorkspaceCommandRequest defines model for GeneratorWorkspaceCommandRequest.
+type GeneratorWorkspaceCommandRequest struct {
+	Command string `json:"command"`
+	TurnId  string `json:"turn_id"`
+}
+
+// GeneratorWorkspaceCommandResult defines model for GeneratorWorkspaceCommandResult.
+type GeneratorWorkspaceCommandResult struct {
+	ExitCode   int    `json:"exit_code"`
+	Output     string `json:"output"`
+	TurnId     string `json:"turn_id"`
+	WorkflowId string `json:"workflow_id"`
+}
+
+// GeneratorWorkspaceFile defines model for GeneratorWorkspaceFile.
+type GeneratorWorkspaceFile struct {
+	Directory bool   `json:"directory"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+}
+
+// GeneratorWorkspaceFileList defines model for GeneratorWorkspaceFileList.
+type GeneratorWorkspaceFileList struct {
+	Files      []GeneratorWorkspaceFile `json:"files"`
+	TurnId     string                   `json:"turn_id"`
+	WorkflowId string                   `json:"workflow_id"`
+}
+
+// GeneratorWorkspaceFileRead defines model for GeneratorWorkspaceFileRead.
+type GeneratorWorkspaceFileRead struct {
+	Content    string `json:"content"`
+	Path       string `json:"path"`
+	TurnId     string `json:"turn_id"`
+	WorkflowId string `json:"workflow_id"`
+}
+
+// GeneratorWorkspaceFileWriteRequest defines model for GeneratorWorkspaceFileWriteRequest.
+type GeneratorWorkspaceFileWriteRequest struct {
+	Content string `json:"content"`
+	Path    string `json:"path"`
+	TurnId  string `json:"turn_id"`
+}
+
+// GeneratorWorkspaceTurn defines model for GeneratorWorkspaceTurn.
+type GeneratorWorkspaceTurn struct {
+	TurnId     string `json:"turn_id"`
+	WorkflowId string `json:"workflow_id"`
+}
+
+// GeneratorWorkspaceTurnRequest defines model for GeneratorWorkspaceTurnRequest.
+type GeneratorWorkspaceTurnRequest struct {
+	TurnId string `json:"turn_id"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -879,18 +934,14 @@ type MySpaceAuthoring struct {
 
 // MySpaceAuthoringDraft defines model for MySpaceAuthoringDraft.
 type MySpaceAuthoringDraft struct {
-	SessionId     string                              `json:"session_id"`
-	State         MySpaceAuthoringDraftState          `json:"state"`
-	Title         string                              `json:"title"`
-	UpdatedAt     time.Time                           `json:"updated_at"`
-	WorkflowState *MySpaceAuthoringDraftWorkflowState `json:"workflow_state,omitempty"`
+	SessionId string                     `json:"session_id"`
+	State     MySpaceAuthoringDraftState `json:"state"`
+	Title     string                     `json:"title"`
+	UpdatedAt time.Time                  `json:"updated_at"`
 }
 
 // MySpaceAuthoringDraftState defines model for MySpaceAuthoringDraft.State.
 type MySpaceAuthoringDraftState string
-
-// MySpaceAuthoringDraftWorkflowState defines model for MySpaceAuthoringDraft.WorkflowState.
-type MySpaceAuthoringDraftWorkflowState string
 
 // MySpaceChallenge defines model for MySpaceChallenge.
 type MySpaceChallenge struct {
@@ -1060,6 +1111,12 @@ type VerifiedCheckpoint struct {
 // AuthoringSessionID defines model for AuthoringSessionID.
 type AuthoringSessionID = string
 
+// GeneratorTurnID defines model for GeneratorTurnID.
+type GeneratorTurnID = string
+
+// GeneratorWorkflowID defines model for GeneratorWorkflowID.
+type GeneratorWorkflowID = string
+
 // Error defines model for Error.
 type Error = ErrorResponse
 
@@ -1069,6 +1126,19 @@ type bearerAuthContextKey string
 // CloseTerminalWindowParams defines parameters for CloseTerminalWindow.
 type CloseTerminalWindowParams struct {
 	Node *string `form:"node,omitempty" json:"node,omitempty"`
+}
+
+// ReadGeneratorWorkspaceFileParams defines parameters for ReadGeneratorWorkspaceFile.
+type ReadGeneratorWorkspaceFileParams struct {
+	TurnId GeneratorTurnID `form:"turn_id" json:"turn_id"`
+	Path   string          `form:"path" json:"path"`
+	Offset *int            `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int            `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListGeneratorWorkspaceFilesParams defines parameters for ListGeneratorWorkspaceFiles.
+type ListGeneratorWorkspaceFilesParams struct {
+	TurnId GeneratorTurnID `form:"turn_id" json:"turn_id"`
 }
 
 // GetMySpaceLearningParams defines parameters for GetMySpaceLearning.
@@ -1096,26 +1166,50 @@ type LoginJSONRequestBody = LoginRequest
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
 
-// RequestAuthoringClassificationAdjustmentJSONRequestBody defines body for RequestAuthoringClassificationAdjustment for application/json ContentType.
-type RequestAuthoringClassificationAdjustmentJSONRequestBody = AuthoringClassificationAdjustmentRequest
-
-// ConfirmAuthoringContentJSONRequestBody defines body for ConfirmAuthoringContent for application/json ContentType.
-type ConfirmAuthoringContentJSONRequestBody = AuthoringContentConfirmationRequest
-
-// ConfirmAuthoringGenerationJSONRequestBody defines body for ConfirmAuthoringGeneration for application/json ContentType.
-type ConfirmAuthoringGenerationJSONRequestBody = AuthoringGenerationRequest
-
 // SendAuthoringMessageJSONRequestBody defines body for SendAuthoringMessage for application/json ContentType.
 type SendAuthoringMessageJSONRequestBody = AuthoringMessageRequest
-
-// PublishAuthoringRevisionJSONRequestBody defines body for PublishAuthoringRevision for application/json ContentType.
-type PublishAuthoringRevisionJSONRequestBody = AuthoringClassificationPublicationRequest
 
 // SendChallengeAssistantMessageJSONRequestBody defines body for SendChallengeAssistantMessage for application/json ContentType.
 type SendChallengeAssistantMessageJSONRequestBody = AssistantMessageRequest
 
 // CreateTerminalTicketJSONRequestBody defines body for CreateTerminalTicket for application/json ContentType.
 type CreateTerminalTicketJSONRequestBody = TerminalTicketRequest
+
+// SetGenerationPlanJSONRequestBody defines body for SetGenerationPlan for application/json ContentType.
+type SetGenerationPlanJSONRequestBody = GeneratorPlanRequest
+
+// ConfirmGenerationJSONRequestBody defines body for ConfirmGeneration for application/json ContentType.
+type ConfirmGenerationJSONRequestBody = GeneratorGenerationConfirmationRequest
+
+// CancelGenerationJSONRequestBody defines body for CancelGeneration for application/json ContentType.
+type CancelGenerationJSONRequestBody = GeneratorCancellationRequest
+
+// SubmitGeneratorCandidateJSONRequestBody defines body for SubmitGeneratorCandidate for application/json ContentType.
+type SubmitGeneratorCandidateJSONRequestBody = GeneratorCandidateSubmissionRequest
+
+// RequestGeneratorClassificationChangesJSONRequestBody defines body for RequestGeneratorClassificationChanges for application/json ContentType.
+type RequestGeneratorClassificationChangesJSONRequestBody = GeneratorClassificationChangeRequest
+
+// ConfirmGeneratorClassificationAndPublishJSONRequestBody defines body for ConfirmGeneratorClassificationAndPublish for application/json ContentType.
+type ConfirmGeneratorClassificationAndPublishJSONRequestBody = GeneratorClassificationPublicationRequest
+
+// RequestGeneratorContentChangesJSONRequestBody defines body for RequestGeneratorContentChanges for application/json ContentType.
+type RequestGeneratorContentChangesJSONRequestBody = GeneratorContentChangeRequest
+
+// ConfirmGeneratorContentJSONRequestBody defines body for ConfirmGeneratorContent for application/json ContentType.
+type ConfirmGeneratorContentJSONRequestBody = GeneratorContentConfirmationRequest
+
+// RunGeneratorWorkspaceCommandJSONRequestBody defines body for RunGeneratorWorkspaceCommand for application/json ContentType.
+type RunGeneratorWorkspaceCommandJSONRequestBody = GeneratorWorkspaceCommandRequest
+
+// WriteGeneratorWorkspaceFileJSONRequestBody defines body for WriteGeneratorWorkspaceFile for application/json ContentType.
+type WriteGeneratorWorkspaceFileJSONRequestBody = GeneratorWorkspaceFileWriteRequest
+
+// StartGeneratorWorkspaceTurnJSONRequestBody defines body for StartGeneratorWorkspaceTurn for application/json ContentType.
+type StartGeneratorWorkspaceTurnJSONRequestBody = GeneratorWorkspaceTurnRequest
+
+// EndGeneratorWorkspaceTurnJSONRequestBody defines body for EndGeneratorWorkspaceTurn for application/json ContentType.
+type EndGeneratorWorkspaceTurnJSONRequestBody = GeneratorWorkspaceTurnRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1140,24 +1234,9 @@ type ServerInterface interface {
 	// Read the current authoring revision, conversation, assets, and diff
 	// (GET /authoring/sessions/{id})
 	GetAuthoringSession(c *gin.Context, id AuthoringSessionID)
-	// Ask the classification Agent to adjust one private reviewed proposal
-	// (POST /authoring/sessions/{id}/classification-feedback)
-	RequestAuthoringClassificationAdjustment(c *gin.Context, id AuthoringSessionID)
-	// Freeze the verified candidate and start its private classification review
-	// (POST /authoring/sessions/{id}/classify)
-	ConfirmAuthoringContent(c *gin.Context, id AuthoringSessionID)
-	// Explicitly start generation and real verification for the current intent revision
-	// (POST /authoring/sessions/{id}/generate)
-	ConfirmAuthoringGeneration(c *gin.Context, id AuthoringSessionID)
-	// Explicitly cancel one unfinished authoring generation workflow
-	// (POST /authoring/sessions/{id}/generation/{workflow_id}/cancel)
-	CancelAuthoringGeneration(c *gin.Context, id AuthoringSessionID, workflowId string)
 	// Send one natural-language instruction to the authoring agent
 	// (POST /authoring/sessions/{id}/messages)
 	SendAuthoringMessage(c *gin.Context, id AuthoringSessionID)
-	// Explicitly publish the current verified authoring revision
-	// (POST /authoring/sessions/{id}/publish)
-	PublishAuthoringRevision(c *gin.Context, id AuthoringSessionID)
 	// List all challenges
 	// (GET /challenges)
 	ListChallenges(c *gin.Context)
@@ -1188,6 +1267,57 @@ type ServerInterface interface {
 	// Close one terminal tab in the current challenge environment
 	// (DELETE /challenges/{id}/terminals/{window})
 	CloseTerminalWindow(c *gin.Context, id string, window string, params CloseTerminalWindowParams)
+	// Create or revise one user-owned generation plan
+	// (POST /generator/plans)
+	SetGenerationPlan(c *gin.Context)
+	// List the authenticated user's unfinished generation workflows
+	// (GET /generator/workflows)
+	ListActiveGenerations(c *gin.Context)
+	// Confirm one persisted plan revision and create its workflow
+	// (POST /generator/workflows)
+	ConfirmGeneration(c *gin.Context)
+	// Read one user-owned workflow and its safe candidate review projection
+	// (GET /generator/workflows/{workflow_id})
+	GetGeneration(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Cancel one unfinished generation workflow
+	// (POST /generator/workflows/{workflow_id}/cancel)
+	CancelGeneration(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Submit the archive from one bound workspace turn as an immutable candidate
+	// (POST /generator/workflows/{workflow_id}/candidate)
+	SubmitGeneratorCandidate(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Read the current private classification proposal for one workflow
+	// (GET /generator/workflows/{workflow_id}/classification)
+	GetGeneratorClassification(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Ask the Server classifier to revise one private proposal
+	// (POST /generator/workflows/{workflow_id}/classification/changes)
+	RequestGeneratorClassificationChanges(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Confirm one private classification proposal and begin challenge publication
+	// (POST /generator/workflows/{workflow_id}/classification/publish)
+	ConfirmGeneratorClassificationAndPublish(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Return a reviewed candidate to generating with user feedback
+	// (POST /generator/workflows/{workflow_id}/content/changes)
+	RequestGeneratorContentChanges(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Confirm a verified candidate and begin classification
+	// (POST /generator/workflows/{workflow_id}/content/confirm)
+	ConfirmGeneratorContent(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Run one command inside a bound generator workspace turn
+	// (POST /generator/workflows/{workflow_id}/workspace/commands)
+	RunGeneratorWorkspaceCommand(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Read a relative file from one bound generator workspace turn
+	// (GET /generator/workflows/{workflow_id}/workspace/file)
+	ReadGeneratorWorkspaceFile(c *gin.Context, workflowId GeneratorWorkflowID, params ReadGeneratorWorkspaceFileParams)
+	// List files in one bound generator workspace turn
+	// (GET /generator/workflows/{workflow_id}/workspace/files)
+	ListGeneratorWorkspaceFiles(c *gin.Context, workflowId GeneratorWorkflowID, params ListGeneratorWorkspaceFilesParams)
+	// Write one relative file in a bound generator workspace turn
+	// (PUT /generator/workflows/{workflow_id}/workspace/files)
+	WriteGeneratorWorkspaceFile(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Bind one explicit generator turn to a workflow workspace
+	// (POST /generator/workflows/{workflow_id}/workspace/turn)
+	StartGeneratorWorkspaceTurn(c *gin.Context, workflowId GeneratorWorkflowID)
+	// Release one explicit generator workspace turn
+	// (POST /generator/workflows/{workflow_id}/workspace/turn/end)
+	EndGeneratorWorkspaceTurn(c *gin.Context, workflowId GeneratorWorkflowID)
 	// Get the authenticated user's learning space
 	// (GET /me/space)
 	GetMySpace(c *gin.Context)
@@ -1342,123 +1472,6 @@ func (siw *ServerInterfaceWrapper) GetAuthoringSession(c *gin.Context) {
 	siw.Handler.GetAuthoringSession(c, id)
 }
 
-// RequestAuthoringClassificationAdjustment operation middleware
-func (siw *ServerInterfaceWrapper) RequestAuthoringClassificationAdjustment(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id AuthoringSessionID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.RequestAuthoringClassificationAdjustment(c, id)
-}
-
-// ConfirmAuthoringContent operation middleware
-func (siw *ServerInterfaceWrapper) ConfirmAuthoringContent(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id AuthoringSessionID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ConfirmAuthoringContent(c, id)
-}
-
-// ConfirmAuthoringGeneration operation middleware
-func (siw *ServerInterfaceWrapper) ConfirmAuthoringGeneration(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id AuthoringSessionID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ConfirmAuthoringGeneration(c, id)
-}
-
-// CancelAuthoringGeneration operation middleware
-func (siw *ServerInterfaceWrapper) CancelAuthoringGeneration(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id AuthoringSessionID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Path parameter "workflow_id" -------------
-	var workflowId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CancelAuthoringGeneration(c, id, workflowId)
-}
-
 // SendAuthoringMessage operation middleware
 func (siw *ServerInterfaceWrapper) SendAuthoringMessage(c *gin.Context) {
 
@@ -1484,33 +1497,6 @@ func (siw *ServerInterfaceWrapper) SendAuthoringMessage(c *gin.Context) {
 	}
 
 	siw.Handler.SendAuthoringMessage(c, id)
-}
-
-// PublishAuthoringRevision operation middleware
-func (siw *ServerInterfaceWrapper) PublishAuthoringRevision(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id AuthoringSessionID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PublishAuthoringRevision(c, id)
 }
 
 // ListChallenges operation middleware
@@ -1789,6 +1775,475 @@ func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
 	siw.Handler.CloseTerminalWindow(c, id, window, params)
 }
 
+// SetGenerationPlan operation middleware
+func (siw *ServerInterfaceWrapper) SetGenerationPlan(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SetGenerationPlan(c)
+}
+
+// ListActiveGenerations operation middleware
+func (siw *ServerInterfaceWrapper) ListActiveGenerations(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListActiveGenerations(c)
+}
+
+// ConfirmGeneration operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmGeneration(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ConfirmGeneration(c)
+}
+
+// GetGeneration operation middleware
+func (siw *ServerInterfaceWrapper) GetGeneration(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGeneration(c, workflowId)
+}
+
+// CancelGeneration operation middleware
+func (siw *ServerInterfaceWrapper) CancelGeneration(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CancelGeneration(c, workflowId)
+}
+
+// SubmitGeneratorCandidate operation middleware
+func (siw *ServerInterfaceWrapper) SubmitGeneratorCandidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SubmitGeneratorCandidate(c, workflowId)
+}
+
+// GetGeneratorClassification operation middleware
+func (siw *ServerInterfaceWrapper) GetGeneratorClassification(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetGeneratorClassification(c, workflowId)
+}
+
+// RequestGeneratorClassificationChanges operation middleware
+func (siw *ServerInterfaceWrapper) RequestGeneratorClassificationChanges(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RequestGeneratorClassificationChanges(c, workflowId)
+}
+
+// ConfirmGeneratorClassificationAndPublish operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmGeneratorClassificationAndPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ConfirmGeneratorClassificationAndPublish(c, workflowId)
+}
+
+// RequestGeneratorContentChanges operation middleware
+func (siw *ServerInterfaceWrapper) RequestGeneratorContentChanges(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RequestGeneratorContentChanges(c, workflowId)
+}
+
+// ConfirmGeneratorContent operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmGeneratorContent(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ConfirmGeneratorContent(c, workflowId)
+}
+
+// RunGeneratorWorkspaceCommand operation middleware
+func (siw *ServerInterfaceWrapper) RunGeneratorWorkspaceCommand(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RunGeneratorWorkspaceCommand(c, workflowId)
+}
+
+// ReadGeneratorWorkspaceFile operation middleware
+func (siw *ServerInterfaceWrapper) ReadGeneratorWorkspaceFile(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReadGeneratorWorkspaceFileParams
+
+	// ------------- Required query parameter "turn_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "turn_id", c.Request.URL.Query(), &params.TurnId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter turn_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", c.Request.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter path: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ReadGeneratorWorkspaceFile(c, workflowId, params)
+}
+
+// ListGeneratorWorkspaceFiles operation middleware
+func (siw *ServerInterfaceWrapper) ListGeneratorWorkspaceFiles(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListGeneratorWorkspaceFilesParams
+
+	// ------------- Required query parameter "turn_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "turn_id", c.Request.URL.Query(), &params.TurnId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter turn_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListGeneratorWorkspaceFiles(c, workflowId, params)
+}
+
+// WriteGeneratorWorkspaceFile operation middleware
+func (siw *ServerInterfaceWrapper) WriteGeneratorWorkspaceFile(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.WriteGeneratorWorkspaceFile(c, workflowId)
+}
+
+// StartGeneratorWorkspaceTurn operation middleware
+func (siw *ServerInterfaceWrapper) StartGeneratorWorkspaceTurn(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StartGeneratorWorkspaceTurn(c, workflowId)
+}
+
+// EndGeneratorWorkspaceTurn operation middleware
+func (siw *ServerInterfaceWrapper) EndGeneratorWorkspaceTurn(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "workflow_id" -------------
+	var workflowId GeneratorWorkflowID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.EndGeneratorWorkspaceTurn(c, workflowId)
+}
+
 // GetMySpace operation middleware
 func (siw *ServerInterfaceWrapper) GetMySpace(c *gin.Context) {
 
@@ -1891,12 +2346,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/authoring/sessions", wrapper.CreateAuthoringSession)
 	router.GET(options.BaseURL+"/authoring/sessions/current", wrapper.GetCurrentAuthoringSession)
 	router.GET(options.BaseURL+"/authoring/sessions/:id", wrapper.GetAuthoringSession)
-	router.POST(options.BaseURL+"/authoring/sessions/:id/classification-feedback", wrapper.RequestAuthoringClassificationAdjustment)
-	router.POST(options.BaseURL+"/authoring/sessions/:id/classify", wrapper.ConfirmAuthoringContent)
-	router.POST(options.BaseURL+"/authoring/sessions/:id/generate", wrapper.ConfirmAuthoringGeneration)
-	router.POST(options.BaseURL+"/authoring/sessions/:id/generation/:workflow_id/cancel", wrapper.CancelAuthoringGeneration)
 	router.POST(options.BaseURL+"/authoring/sessions/:id/messages", wrapper.SendAuthoringMessage)
-	router.POST(options.BaseURL+"/authoring/sessions/:id/publish", wrapper.PublishAuthoringRevision)
 	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
 	router.GET(options.BaseURL+"/challenges/:id/assistant", wrapper.GetChallengeAssistant)
 	router.POST(options.BaseURL+"/challenges/:id/assistant/messages", wrapper.SendChallengeAssistantMessage)
@@ -1907,6 +2357,23 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
 	router.POST(options.BaseURL+"/challenges/:id/terminal-ticket", wrapper.CreateTerminalTicket)
 	router.DELETE(options.BaseURL+"/challenges/:id/terminals/:window", wrapper.CloseTerminalWindow)
+	router.POST(options.BaseURL+"/generator/plans", wrapper.SetGenerationPlan)
+	router.GET(options.BaseURL+"/generator/workflows", wrapper.ListActiveGenerations)
+	router.POST(options.BaseURL+"/generator/workflows", wrapper.ConfirmGeneration)
+	router.GET(options.BaseURL+"/generator/workflows/:workflow_id", wrapper.GetGeneration)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/cancel", wrapper.CancelGeneration)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/candidate", wrapper.SubmitGeneratorCandidate)
+	router.GET(options.BaseURL+"/generator/workflows/:workflow_id/classification", wrapper.GetGeneratorClassification)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/classification/changes", wrapper.RequestGeneratorClassificationChanges)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/classification/publish", wrapper.ConfirmGeneratorClassificationAndPublish)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/content/changes", wrapper.RequestGeneratorContentChanges)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/content/confirm", wrapper.ConfirmGeneratorContent)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/workspace/commands", wrapper.RunGeneratorWorkspaceCommand)
+	router.GET(options.BaseURL+"/generator/workflows/:workflow_id/workspace/file", wrapper.ReadGeneratorWorkspaceFile)
+	router.GET(options.BaseURL+"/generator/workflows/:workflow_id/workspace/files", wrapper.ListGeneratorWorkspaceFiles)
+	router.PUT(options.BaseURL+"/generator/workflows/:workflow_id/workspace/files", wrapper.WriteGeneratorWorkspaceFile)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/workspace/turn", wrapper.StartGeneratorWorkspaceTurn)
+	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/workspace/turn/end", wrapper.EndGeneratorWorkspaceTurn)
 	router.GET(options.BaseURL+"/me/space", wrapper.GetMySpace)
 	router.GET(options.BaseURL+"/me/space/learning", wrapper.GetMySpaceLearning)
 }
@@ -1916,87 +2383,103 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"5D1dc+Q2cn8FxVxVHkLtaH3OVay3tbx27NqzFWlzenBtpiCyZwZeDkAD4Ei6Lf33FPFFkAQ45MxQKyUv",
+	"W7MiCfQ3uhuNxpckY9uSUaBSJBdfkhJzvAUJXP3vXSU3jBO6vgEhCKM//1D/ldDkIimx3CRpQvEWkouE",
+	"5EmacPizIhzy5ELyCtJEZBvY4voL+VjWbwlZj5U8PaXJT0CBY8n4x4r7w/5ZAX9sxpUVp8vDB79l/POq",
+	"YPdRuO/NC1PneKpfFiWjAhSh3nPOeP0jY1QClfVPXJYFybAkjC7+EIzWf2tG/AuHVXKR/Muiof9CPxUL",
+	"Ndq1GV/PloPIOCnrwZILM139d/OJYpYQREhM5SWjO+AC65e/JCVnJXBJNKjZBhcF0DXUOPdRS5PIn7cg",
+	"BF7rMYiErdiHhYPn7/rLehAzKuYcPyaaipbkv2shaoHnzfrJfczu/oBM1qO5Gd7vSA40gz62nwkNo1Pg",
+	"OyjC4uPDpL63bw/CYLHsE7wRiR4UGQcsIV/i8GPw8JpGc0eRHtGjDOasUBMBrbY16pUAnqQJtkN66EeI",
+	"pZWoHiZ1WLdwHEPAa/izAiEn0rHiHKhcUpZrDmApgdeq8j+/47N/fqr/OT/77uzTl/P0r2+f/pKk8THu",
+	"Cc3Z/aGjSOBbQnFxgJ58NJ9e1og+yL364pG4DboPxSDJuzP2aH4MPTUwbTocRNEhGthJgmja1eudEDBR",
+	"oNQysdc6mMXEDjQIxCWmOcmxDFgIzLMN2cFSbPA3//638UY5pH6dsYZB2mAaslg5Wa1IVhXycUm2Jc7C",
+	"JIqaVg47IszaYx4SKmENvH4qqu0W88fRpte+nwbA8ubagyhkn0tGaEAKYssd5p9zdk/D0sEEkVEMJZHa",
+	"ko5gl37Xm84bfCRK1yCqIoBYDhITbYfGrvElFgL8R3eMFYDpJL4pvMxIzWfDyBT1KrMy3tKvcP8Rr0MI",
+	"eT5QAPqRdLck94ebCB0rSTbkWa0rkmOzbvfAzGFFKIlikbMtJnTfonHNcL7F5TWsgNt1njK6XDMcYbnI",
+	"WAnH0M0AlnoEdIjY4X0g0hBBJhD6irOSCVwE7GX+RyXktl7xRLVeg4gSM7NGd2kNRczr5U6LrP9TqvmV",
+	"EFc0M6DhuwICjlDb6G0JJdt6kLdpwDxwzbplwEx6PMHrCR5EmIC1EgXcP2ml95Ah1bdPXYosOWARwaQq",
+	"c8/FXTG+rX8l9R/PJNlCss+rdHSKsTNAUsdPQ8kWGBNkMGiH4IEIWUM6TkcNGyjcH0h0Yw8VWSJk7pFM",
+	"vTcF0bBJm4qqFY/jkLWjnBLd9w+QVfUEseUSHohcZsbf7WttwTIcNTNC5sB57BGr5H4c3PipB8kgRj+S",
+	"An4gq1XYfzveq1WjDEIQD3mVY3mIAdMeacBqjY+ix5iYyUHwWgda4lFI2NY82sF8EXGHvgdExJFIcc9s",
+	"EudY4umOV+OY+6QDLB5VBicnVU2yDeZ5eOmsqOKS962KO9Pk83+I4BdTPb0Gvrbb18w9SJmrAgcTadYD",
+	"P0jQXUQSEPatx4pRwznePaUJ2wHfEW2Ah+njpvE+Slt4DZLFJIUD/pl9Y6nytziTZAc9QUpuNyA3wJHc",
+	"AMorXjsSyH2K3tUqh64riohAJdC8/iPjiFeUErp+g243pACkMrVqiLLA6t07qN806z0qOdlhCcUjwjQ3",
+	"w6MaIkYFwhxQRfEOk6Ke/U1jKLzAJ5Ymdbo3ikNKhtxny+EYucBCLsHmlE+Qiu1a7IDMldVdQcRmuTc/",
+	"7FyvOyzAMHeEe22e7x1eSJMjsbbgB45X7Zx2mvysqHgNRmSvNOwQti/TPdA0qaHVju0Qn+z2wXhO9LYm",
+	"xmXFNVHSiGb1pSqAQIsOTnw9YfLRGdT7fwB37to1lIwHliZMxb3ZRJomoV0/LeQKnMbwxic4SRrEZUAs",
+	"KdqAD2dGLq2WDGWu9i3LGxLxlyKaR9vO7+TltpXQ2pddaTBsnJjj19cQ3QIM3thBcZ6rBAYurlpzx5LQ",
+	"DfwDNDwA3F9r0ockkbO7ArYRV1XFXKPnMDHaYR6XYEV1bOKtJR8WBEuyBldvMsuprupY1AcF6wMJ+sz2",
+	"8QFcujEau3djppljEMJf7e5Ke88Fb49SQ/W9fXtw/ivO1hyEiOjeFArtM6o9CqnxB6G7buQ7lmelQNab",
+	"OzZhnTGDvs/DTtDhydfTZfPaaaODsnfddIz66NTUiqfpmkyxAsDl4LpgpEFWDgrFTbP8dhwOF2T01+yZ",
+	"49fDhSa2DePp5Ti1s5rsWajS+sST/N6DVoZdzFk6RO5bBOpJf8QETtMLb4pxS1Q7gRCR7nZioUX+sEhb",
+	"5v1IuJBXOGqH1UuxcGlVf7zUzuYkTo92ZNsw9Gfc58nGZLSHbON2uw2U89AGimRS7woNvRbzxvXHw5Ae",
+	"sqM6lg+0KlSuwdaYvdCt2XYJWj9ZHslNdObTr4XGd3HwJaYZFIUJJiOJTpLDtmQSaPa4/AwK0S1++AB0",
+	"LTfJxTfn52ktC/b/b/dnZdvD7QNQ7zndVHdbojJes8GZuoLH/blNVxk5DZvWZotOt8fzy6N3T1cA+R3O",
+	"PhutHMLweBqVZmN4OXbPtWvQIruI/XE9xI6is8pPZcMyPp7Yr4uCR5DN5PfipBqf9XFfPKVJ1prkwH1K",
+	"V53gpQEPSP51y9nsA2+vO+lBPExCnU95jao9UsoO1klDGUZXpF6ZX4Y2jkR6EqbmR3hzRgg4JHGqiyhD",
+	"6dgXpo1293saem43PYDhzkt4jx4wkCV3Q2lHbmiYf5j3XOA7m50x8jCw3x8Qq1E6dIJ1qsC0tUY5l5pQ",
+	"+bdvk3RPqZXQO5SjHCrv3e7EE7XvqsBxosBDCZmEfCRawQDoNISdvHU5hZp9NPtgGzBG0DIWhhyExosR",
+	"qv3Y33oKf+j61Lavy1HVh4cU1KwIxQX5J3C9cb3MsIQ1462UWg76YAIRUmdOOKaCmMqUvZFxM4PaH8dS",
+	"wraUR4bbnUFdYDvhQwoPcslB8sc5Av+JYE2Q7qBtMUkvS9392ZhBdQhs59tFhK6TNPmlytf61/cVKXL9",
+	"8x2XZIUzaXb19R/Vgviof/8KkAut164EwPgD/hvBYMLf/vDHb0oI0uRHTAr1wyQnInUFCrXlDviBhuTo",
+	"ylhdGjBkYmzdQBvUPpdbKr+3WLZnn8Jbbc9RHTFcstAaT5Q4g0u23WKaD5TUqefhFPP03IwdbiJwB1Wo",
+	"skqWlZwIedo6ArsXs/Z52QbPBjQHxziUa7c7VMDKIZOsldL08p2RMtY0EeSfMNnmxapfLQhm2PH4hLVh",
+	"RQo4UBMaSoW2RObmrQZ8PPrXgPOTHLZ7BtxGHOALI3nLiTzsqOoByEbNy0Hgf6x4IC0wM6nHgxYl6mT6",
+	"hOb8wNYkPkWJhbhnPGL+mSy75tcrMhTAI5UbHfDcm2kznz/6ANixOCheMsI+A+1X3v5y+xHhLAMhkH4j",
+	"DSM0jtxmBPuBaa4QQuPvjzc1m2O790ugO8IZ3cKUmi8z6Ds1xPtmhJCxdPWTYwd17+us+cosVyM+vTJv",
+	"K2plQOWyAMypmXsKZh/Md/9JhFqQAnh1ZtAhSVZxMTJq8HYQRwDkqgy6S6dB2T+0G+JsnyLDGPh8GxCr",
+	"vgTES4dGYtpKv3kb4Sep0PBoErO88FASDuKouLLcYBG2DlOLPbo5njb8XjVPq3hCzx8m3xA3fVXtuIcc",
+	"rw4wEHZAVVA+UAKvs7NThnbBY0teBgMXg4M/6RhiaNh7FJkahO+tqZ9y6uYEkWwriLX1NzZ43RON9lR1",
+	"oJ/BlHLo2Y4l7S8yGkDTM2//VbHQaa0tftCxTjtzE7ETfgCZZVVJ9lfgdNBxn6Vu6gH4u4vZbCbaK8g5",
+	"pJC1KcoKHkbclgUcm3p0a52AjNFc7M+1ccD547Qqr67muyMjDgelaawsQbfAEiATu/Dk+xeBls234AVw",
+	"a9Q5xqMRQnMVPG3qOHtip2qaE9VVcgXLAE5XjTfZUYDTnWYdF5A0Pvveo6nx9a7v0rv0fB0YjBDu4xTf",
+	"aeTI2WqhW3KjHI7Iq4Ip8Y3wmlbbO/P5YdW1e/Zq4tqaQ8khq1kzVSX9IgKrgi3o0x6r+uQckIV4RbYb",
+	"NWMVHbGT0BxuG/lBA+XID3yP9U+7eo4Qtd6iqw5yOjfWj27GgtKwYOQHtqXXcuqy0TsL3iZa2mPUPtyG",
+	"YOlzsY9qiA8hAbuGNRES+Kh0jbfh/bd0OD3jvfpNekCyZhjWWI5GJXgEZBxkPL1U8WJMwqUZyfsuDJYA",
+	"GYepOX4x0nXtfhCc0zs00ptxoFEMh8JV2DQ9eCADfTxMPY7txLGKZ3DQAQPM1yCPPjdgAHDjedikQ+1J",
+	"egOPbU+mJ1wqmI88kecNNXRqzDuWNPkk6ldBYv8Z1NYxqRfXzit6wvSwLl+zE9seizlVW7Abiflz264b",
+	"ycpjpmxCqcDGZddmuKBrDGS2VedHkn2uTXpkSTy+YedhXwfbco5CJLpequdjmryo94amulXQXBZMwABz",
+	"CyZG8c28GJqwX7V5klPtzbAzNY2J94XZ1wwmANr/pT4Fqr4pqziRjzc1+TRCd4A58JqOzf9+tAHgL7cf",
+	"E9OXW0mRetoozEbKUrf0JnTF+ltzN9fvFz/A7rdSoNqDV015UMnrQDBTPW5kHWo6BC6S7zngzyvygN5d",
+	"/ZyoAmNdjpS8fXP+5lzl9UqguCTJRfLXN+dv/mr2jRUmi9pbXxRsrZeokmmbUnNPeS8/58mF3nw07dFB",
+	"yO9Z/niyVuet/dinNqfq0LvbaP2b8/NTzx1vs65eQKJSO6WrqkgRB1lxKtAvtx/NzulTmnx7/jY2lYN9",
+	"4bVstwGzGf+eyA2ywQX6N/Txt49X9lTpxe8qnko+1R9qZnETacT5ZWORmVjWDctGce3tDNPHGfffAjiy",
+	"hIJcM+n8MCbZ+RBGFO6RaQgX4Y6yq4um/8PiC8mfFi55E+fZD/YVvxWey+L4tzL8fooLGD71GPRt3xQ5",
+	"CJCXfVKk/HY0Keu3v5tEeGNuFaK+of39Uw21z5ct2wHC1DT1OmP3FHLUAL3ibKsag+kkGrrEEhds3WGe",
+	"2VXew0GbRhNxDl6qzGmffddewff8bDyddey1eQvoWUNsSyCvgZvZ00MmpfxyJEcFFkad++CuGB8QKq+2",
+	"dr8UmSHHC40l9Vdm67s4D6fQWSOHMNpUW0zPuNpZhhw55epTfxJZF+bagxplk8RpU/cnkJf6lZdGYQMW",
+	"qmgdK4sN5AFaTFSYacZTVFtQ1rHAEsQwJEon6nczC3Z/EdzDqtqKDvEpwKCOtQzRoHllEbiq6OubR0Ou",
+	"Z2YtzlvMama3xitFmVf6kSJ9BDBVHTLVKcDJrF34LSnDpu4GaN7rQ3kyLp/ezY114T0oSJHwIBeqZ/CZ",
+	"kBzwtg1H4HqpTlQIfAf8THT5ifPHFOVQSFzzVG/saD6qE0NITSnmFLearYhRQBTLiuPirMB0XeE1IEKF",
+	"5JXqtIok056YA902VI7JWbtNW9BqfCBCXjavzajr7ZZyg35Qod9oRXlESISLAmU+sBZxv1dcB3OtWc39",
+	"S0PLnP3IXe3z6tzN4O1lobvPmr3DM5VdzpEjUcuuvaRQBeeIceNFaU0IguwWWhOyNJ6St2Pqa01zN9ew",
+	"7Iy0z30xihrqE0nTDHY7cp/Y17fbjuVCYlmJFEnGitHm+3ySIL+IOKteGjAyoufWgK5oN3SpEeeQQf38",
+	"5ua9RX+8vHuc22spL107/ldlJ3vwDy5HdsoZHYCfQHrMNE1cU2R7uKZItXDVUt3sJiBvj2H0UuhX3e/l",
+	"r2tu+loZ7BAYiCw8guoLb8QLW/VUIMKo5KwowKZTMge9k9MGD0FxKTbMX+Zah0fCoqHrVgdS4sITjdcm",
+	"Eu0qnj15ONOlZ8bMQUvhJUNqtx8XyFYXTmCbkJgPsE1l6l4t29oFDMOurI7lZg3UVNaTcWUotoDwXu9y",
+	"FP9YOcQ+Vr5i7nmlIIM6Zws5ZmUeK1tJnRPwzhZxnjWVFkNJ6nbdxisKCMKVM8+81xypegmFDBvG5VlB",
+	"dqDyKqqWHFleIcOrGUXNZe2bydWcemOkgeQW7m6YEYUDpE4svugioSe98ViHPgHRK5iAdhnPHJKXhi+H",
+	"t/PFBzqkUCp80705WnbU0J+eQYBDtVQBKbavI01EZIqm5pTbegaViWyUBd8hQo+1m2vbpmBRFpgOZlBk",
+	"0yFPdRubx6AFG809sz0LN2gLCMIV8Dpmh1zfz+X2T2cMPIwFU67OjhihqIQLP9aOSQomj/uO1T3Wt3oZ",
+	"RdPR+gR6IwSzZqXDXZhC1TDN1p6HeoPRJOKqbLbN5QOVRJWFKPL+q/B3EYNThUmdxhwP3WXS62Y6s0IN",
+	"N7j8WirmdfHs8fanPpXtZr1WAFnxWuZVMQyRAnlNGHWurZSz6qKmo1LBMmwKdGZI62wNodebdIJeLr54",
+	"jWcGt5pb4jRt+7HHkrl3mUMdfeNSwHgjBIqodtHz++3Ouu/csbQtaGreCryCBhykS0JQydkfkMl2/cdk",
+	"ni8y1a1vII5Rz2dh/4w2KXRBwku0RLfO/LimiXPaFTWJlrfBNedYiWpaW0ecvupuS2T/tohXI1yxyy2+",
+	"lowNWzoHMBIOYtXKqnwpK54WCO0i8WxDdqYStRbVO1ZRbRVVuzNUg4qwQJgist1WUl2B6zf+P0J0e23V",
+	"96yH3csXXtHiGGz0OiQ8Z5oRbRqh0msi/2zVWeZ+4hgsKutSi85p7FlrkoV3TXts20TZgsHbY8QrsXQD",
+	"F9+86OUU57t6rcuRZB0hmdOKvROflZjqAgY3MfAaDC+stuLrdOeE4mn6Bgw4dK34sMvjdzQ3fUpeo4QG",
+	"rgx6PWLalAM0WDxblLnHoNahyB2sCY2AeZQAa7ofYFj9S3tei0UNXTT0omXU+YaSuVBBnxydrwZCu3io",
+	"OfzgHNgWEPoUYB06I+96oxNIotaMCTY0Vhb1kkXwlSTrvvKabq0kRvYWIk8aPbPYDQMOl0IX6SxMI/wh",
+	"k1jRaEf81yGNsUsGvqYoBu4VCAVG+gUED0SijOVaHEwj/znNY0XVmm2kAxEqSD25CZTXrbRmEzKfSCZt",
+	"+71gYFwHapEm/CcRxnT8Zx8rTs0noZ1js2k9fbe7Mw5brXTvx+bL4Sshw8MUZEsmjPLpWTXB3U8QrNUu",
+	"1JVVnrDVEtKuoZ2xVLJ2EgqsiqPVvJ2s0TMow/DmZpia4qupw/NLTmyD9QavoGFeR3yASk5AzCk+ak9W",
+	"MRARerjIpIm5P6bNe3XVxZym8NnW5d7FHaNW5kBnhNs2i+85kRJm9d0U2Iq1bSNB6HOtltJeGxKv1I3c",
+	"NfK6hMS/g+Sre26KfpFIwttCIELLwJwS+D0xBz3hocaPSE/gFBCSIdzs+DrBOaH4LUDfzBUWwfc0//8p",
+	"gIMGSrGGQwFYzLsje63niInIaJu0hYWwl8TEtqzsPTIz6qKdItQWyjS9RRvdOzy1Z9r84kF94Mk7+d/c",
+	"+zG1X9SUk1jRyizbqRd1ldI0eG7RfuFfVbOHCR+aO1w6Wtam2m8l/rNS+16Cce3cYlRy2BFWCVTqQ6ah",
+	"gMJdAjM5oumHIjmssLpb75vz5raCi7fmxtzBWKeNzY+kUD2hdOtkge4ea9IT7vb1GnqbUzEhAN31jA7A",
+	"wTb9QPNI/+8R4IF/2MRdOhGCqnnah2v4fphP8ytk6yqAgHL+RkEJE2Krhgebpsn/XMpXw4Pyiqst/O7E",
+	"zbnunmqGNFHNy3dhPfrAMlygHHZJmqh20aql4MViUdQPNkzIi+/Ovztf4JIkT5+e/jcAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

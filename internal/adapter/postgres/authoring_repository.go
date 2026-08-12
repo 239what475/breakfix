@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -595,6 +597,102 @@ func (d *AuthoringRepository) ReplaceAuthoringPlan(ctx context.Context, sessionI
 		return nil, err
 	}
 	return &authoring.Revision{Number: next, Plan: plan, CreatedAt: now}, nil
+}
+
+// SaveGenerationPlan persists an external Generator client's complete Plan
+// request with a user-scoped receipt. A lost response for the first request
+// can therefore return the same newly created AuthoringSession on retry.
+func (d *AuthoringRepository) SaveGenerationPlan(ctx context.Context, userID, sessionID, newSessionID string, expected int64, idempotencyKey string, plan authoring.Plan) (*authoring.Session, *authoring.Revision, error) {
+	userID = strings.TrimSpace(userID)
+	sessionID = strings.TrimSpace(sessionID)
+	newSessionID = strings.TrimSpace(newSessionID)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if userID == "" || expected < 0 || idempotencyKey == "" || len(idempotencyKey) > 200 {
+		return nil, nil, errors.New("generation plan requires user, non-negative expected revision, and idempotency key")
+	}
+	if sessionID == "" && (expected != 0 || newSessionID == "") {
+		return nil, nil, authoring.ErrVersionConflict
+	}
+	if err := plan.ValidateForGeneration(); err != nil {
+		return nil, nil, err
+	}
+	planJSON, err := marshalJSON(plan)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode generation plan: %w", err)
+	}
+	digest := sha256.Sum256([]byte(planJSON))
+	planSHA256 := hex.EncodeToString(digest[:])
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin generation plan: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var receiptSessionID, receiptSHA256 string
+	var receiptExpected, receiptRevision int64
+	err = tx.QueryRowContext(ctx, `SELECT session_id, expected_revision, plan_revision, plan_sha256
+		FROM generation_plan_receipts WHERE user_id = ? AND idempotency_key = ? FOR UPDATE`, userID, idempotencyKey).
+		Scan(&receiptSessionID, &receiptExpected, &receiptRevision, &receiptSHA256)
+	if err == nil {
+		if receiptExpected != expected || receiptSHA256 != planSHA256 || (sessionID != "" && sessionID != receiptSessionID) {
+			return nil, nil, authoring.ErrVersionConflict
+		}
+		session, err := readAuthoringSessionTx(ctx, tx, receiptSessionID, userID)
+		if err != nil {
+			return nil, nil, err
+		}
+		revision, err := readAuthoringRevisionTx(ctx, tx, receiptSessionID, receiptRevision)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, nil, err
+		}
+		return session, revision, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, fmt.Errorf("read generation plan receipt: %w", err)
+	}
+
+	var session *authoring.Session
+	now := time.Now().UTC()
+	if sessionID == "" {
+		session = &authoring.Session{ID: newSessionID, UserID: userID}
+		prepareNewAuthoringSession(session, now)
+		if err := insertNewAuthoringSessionTx(ctx, tx, *session, authoring.Plan{}); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		session, err = lockAuthoringPlanSessionTx(ctx, tx, sessionID, userID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if session.CurrentRevision != expected {
+		return nil, nil, authoring.ErrVersionConflict
+	}
+	next := expected + 1
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_revisions (session_id, revision, plan_json, candidate_revision_id, created_at)
+		VALUES (?, ?, ?::jsonb, '', ?)`, session.ID, next, planJSON, nowText(now)); err != nil {
+		return nil, nil, fmt.Errorf("persist generation plan revision: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET current_revision = ?, state = ?, last_error = '', updated_at = ? WHERE id = ? AND user_id = ?`,
+		next, authoring.StateIntentReview, nowText(now), session.ID, userID); err != nil {
+		return nil, nil, fmt.Errorf("advance generation plan revision: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_plan_receipts
+		(user_id, idempotency_key, session_id, expected_revision, plan_revision, plan_sha256, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, userID, idempotencyKey, session.ID, expected, next, planSHA256, now.UTC()); err != nil {
+		return nil, nil, fmt.Errorf("record generation plan receipt: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit generation plan: %w", err)
+	}
+	session.CurrentRevision = next
+	session.State = authoring.StateIntentReview
+	session.LastError = ""
+	session.UpdatedAt = now
+	return session, &authoring.Revision{Number: next, Plan: plan, CreatedAt: now}, nil
 }
 
 func readAuthoringSessionTx(ctx context.Context, tx *Tx, id, userID string) (*authoring.Session, error) {

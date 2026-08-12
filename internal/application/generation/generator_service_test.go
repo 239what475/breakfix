@@ -21,7 +21,7 @@ func TestGeneratorServiceCreatesPlanRevisionForExternalClient(t *testing.T) {
 	plans := &generatorServicePlans{}
 	service := newGeneratorServiceForTest(t, store, plans, &generatorServiceTools{})
 
-	session, revision, err := service.SetGenerationPlan(context.Background(), "user-one", "", 0, generatorServicePlan())
+	session, revision, err := service.SetGenerationPlan(context.Background(), "user-one", "", 0, "plan-one", generatorServicePlan())
 	if err != nil {
 		t.Fatalf("set external generation plan: %v", err)
 	}
@@ -288,52 +288,50 @@ type generatorServicePlans struct {
 	replaced  int
 	sessions  map[string]authoring.Session
 	revisions map[string]map[int64]authoring.Revision
+	receipts  map[string]generatorServicePlanReceipt
 }
 
-func (s *generatorServicePlans) CreateAuthoringSession(_ context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
+type generatorServicePlanReceipt struct {
+	sessionID string
+	expected  int64
+	revision  int64
+}
+
+func (s *generatorServicePlans) SaveGenerationPlan(_ context.Context, userID, sessionID, newSessionID string, expected int64, idempotencyKey string, plan authoring.Plan) (*authoring.Session, *authoring.Revision, error) {
 	if s.sessions == nil {
 		s.sessions = make(map[string]authoring.Session)
 		s.revisions = make(map[string]map[int64]authoring.Revision)
+		s.receipts = make(map[string]generatorServicePlanReceipt)
 	}
-	s.created++
-	session.State = authoring.StateDraftConversation
-	session.CurrentRevision = 0
-	s.sessions[session.ID] = session
-	s.revisions[session.ID] = map[int64]authoring.Revision{0: {Number: 0, Plan: plan}}
-	return &session, nil
-}
-
-func (s *generatorServicePlans) GetAuthoringSession(_ context.Context, sessionID, userID string) (*authoring.Session, error) {
+	if receipt, ok := s.receipts[idempotencyKey]; ok {
+		if receipt.expected != expected || (sessionID != "" && receipt.sessionID != sessionID) {
+			return nil, nil, authoring.ErrVersionConflict
+		}
+		session := s.sessions[receipt.sessionID]
+		revision := s.revisions[receipt.sessionID][receipt.revision]
+		return &session, &revision, nil
+	}
+	if sessionID == "" {
+		s.created++
+		sessionID = newSessionID
+		s.sessions[sessionID] = authoring.Session{ID: sessionID, UserID: userID, State: authoring.StateDraftConversation}
+		s.revisions[sessionID] = map[int64]authoring.Revision{0: {Number: 0, Plan: authoring.Plan{}}}
+	}
 	session, ok := s.sessions[sessionID]
 	if !ok || session.UserID != userID {
-		return nil, authoring.ErrNotFound
-	}
-	return &session, nil
-}
-
-func (s *generatorServicePlans) GetAuthoringRevision(_ context.Context, sessionID string, revision int64) (*authoring.Revision, error) {
-	value, ok := s.revisions[sessionID][revision]
-	if !ok {
-		return nil, authoring.ErrNotFound
-	}
-	return &value, nil
-}
-
-func (s *generatorServicePlans) ReplaceAuthoringPlan(_ context.Context, sessionID, userID string, expected int64, plan authoring.Plan, state authoring.SessionState) (*authoring.Revision, error) {
-	session, ok := s.sessions[sessionID]
-	if !ok || session.UserID != userID {
-		return nil, authoring.ErrNotFound
+		return nil, nil, authoring.ErrNotFound
 	}
 	if session.CurrentRevision != expected {
-		return nil, authoring.ErrVersionConflict
+		return nil, nil, authoring.ErrVersionConflict
 	}
 	s.replaced++
 	revision := authoring.Revision{Number: expected + 1, Plan: plan, CreatedAt: time.Now().UTC()}
 	s.revisions[sessionID][revision.Number] = revision
 	session.CurrentRevision = revision.Number
-	session.State = state
+	session.State = authoring.StateIntentReview
 	s.sessions[sessionID] = session
-	return &revision, nil
+	s.receipts[idempotencyKey] = generatorServicePlanReceipt{sessionID: sessionID, expected: expected, revision: revision.Number}
+	return &session, &revision, nil
 }
 
 type generatorServiceTools struct {

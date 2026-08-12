@@ -183,36 +183,46 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 			h.SendAuthoringMessage(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/authoring/sessions/:id/generate", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.ConfirmAuthoringGeneration(c, c.Param("id"))
-		}
+	generatorRoutes := router.Group("/api/generator")
+	generatorRoutes.Use(jwtMW)
+	generatorRoutes.POST("/plans", h.SetGenerationPlan)
+	generatorRoutes.GET("/workflows", h.ListActiveGenerations)
+	generatorRoutes.POST("/workflows", h.ConfirmGeneration)
+	generatorRoutes.GET("/workflows/:workflow_id", func(c *gin.Context) { h.GetGeneration(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/workspace/turn", func(c *gin.Context) { h.StartGeneratorWorkspaceTurn(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/workspace/turn/end", func(c *gin.Context) { h.EndGeneratorWorkspaceTurn(c, c.Param("workflow_id")) })
+	generatorRoutes.GET("/workflows/:workflow_id/workspace/files", func(c *gin.Context) {
+		h.ListGeneratorWorkspaceFiles(c, c.Param("workflow_id"), api.ListGeneratorWorkspaceFilesParams{TurnId: c.Query("turn_id")})
 	})
-	router.POST("/api/authoring/sessions/:id/generation/:workflow_id/cancel", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.CancelAuthoringGeneration(c, c.Param("id"), c.Param("workflow_id"))
+	generatorRoutes.PUT("/workflows/:workflow_id/workspace/files", func(c *gin.Context) { h.WriteGeneratorWorkspaceFile(c, c.Param("workflow_id")) })
+	generatorRoutes.GET("/workflows/:workflow_id/workspace/file", func(c *gin.Context) {
+		params := api.ReadGeneratorWorkspaceFileParams{TurnId: c.Query("turn_id"), Path: c.Query("path")}
+		if raw := c.Query("offset"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid workspace file offset"})
+				return
+			}
+			params.Offset = &value
 		}
-	})
-	catalogRoutes.POST("/api/authoring/sessions/:id/classify", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.ConfirmAuthoringContent(c, c.Param("id"))
+		if raw := c.Query("limit"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid workspace file limit"})
+				return
+			}
+			params.Limit = &value
 		}
+		h.ReadGeneratorWorkspaceFile(c, c.Param("workflow_id"), params)
 	})
-	catalogRoutes.POST("/api/authoring/sessions/:id/classification-feedback", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.RequestAuthoringClassificationAdjustment(c, c.Param("id"))
-		}
-	})
-	catalogRoutes.POST("/api/authoring/sessions/:id/publish", func(c *gin.Context) {
-		jwtMW(c)
-		if !c.IsAborted() {
-			h.PublishAuthoringRevision(c, c.Param("id"))
-		}
-	})
+	generatorRoutes.POST("/workflows/:workflow_id/workspace/commands", func(c *gin.Context) { h.RunGeneratorWorkspaceCommand(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/candidate", func(c *gin.Context) { h.SubmitGeneratorCandidate(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/content/confirm", func(c *gin.Context) { h.ConfirmGeneratorContent(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/content/changes", func(c *gin.Context) { h.RequestGeneratorContentChanges(c, c.Param("workflow_id")) })
+	generatorRoutes.GET("/workflows/:workflow_id/classification", func(c *gin.Context) { h.GetGeneratorClassification(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/classification/changes", func(c *gin.Context) { h.RequestGeneratorClassificationChanges(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/classification/publish", func(c *gin.Context) { h.ConfirmGeneratorClassificationAndPublish(c, c.Param("workflow_id")) })
+	generatorRoutes.POST("/workflows/:workflow_id/cancel", func(c *gin.Context) { h.CancelGeneration(c, c.Param("workflow_id")) })
 	router.POST("/api/internal/runtime-actions/claim", h.InternalClaimRuntimeAction)
 	router.POST("/api/internal/runtime-resource-reaps/claim", h.InternalClaimRuntimeResourceReap)
 	router.POST("/api/internal/runtime-resource-reaps/complete", h.InternalCompleteRuntimeResourceReap)

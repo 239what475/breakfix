@@ -286,7 +286,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		Authoring:           authoringService,
 		Catalog:             catalogService,
 		AgentRuntimeContext: serviceContext,
-		GeneratorWorkspace:  generatorWorkspace,
+		Generator:           generatorService,
 	})
 	if err != nil {
 		services.stop()

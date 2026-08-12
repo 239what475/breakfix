@@ -483,121 +483,397 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /authoring/sessions/{id}/generate:
+  /generator/plans:
     post:
-      operationId: confirmAuthoringGeneration
-      summary: Explicitly start generation and real verification for the current intent revision
-      tags: [authoring]
+      operationId: setGenerationPlan
+      summary: Create or revise one user-owned generation plan
+      tags: [generator]
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/AuthoringSessionID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AuthoringGenerationRequest"
+              $ref: "#/components/schemas/GeneratorPlanRequest"
       responses:
         "200":
-          description: Generation workflow started
+          description: Persisted plan revision
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthoringSession"
+                $ref: "#/components/schemas/GeneratorPlanResponse"
+        "409":
+          $ref: "#/components/responses/Error"
 
-  /authoring/sessions/{id}/generation/{workflow_id}/cancel:
+  /generator/workflows:
+    get:
+      operationId: listActiveGenerations
+      summary: List the authenticated user's unfinished generation workflows
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Unfinished generation workflows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflowList"
     post:
-      operationId: cancelAuthoringGeneration
-      summary: Explicitly cancel one unfinished authoring generation workflow
-      tags: [authoring]
+      operationId: confirmGeneration
+      summary: Confirm one persisted plan revision and create its workflow
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorGenerationConfirmationRequest"
+      responses:
+        "200":
+          description: Generation workflow created or returned from its idempotency receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}:
+    get:
+      operationId: getGeneration
+      summary: Read one user-owned workflow and its safe candidate review projection
+      tags: [generator]
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/AuthoringSessionID"
-        - name: workflow_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
       responses:
         "200":
-          description: Generation workflow cancelled
+          description: Generator workflow and current candidate
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthoringSession"
+                $ref: "#/components/schemas/GeneratorGeneration"
         "404":
           $ref: "#/components/responses/Error"
 
-  /authoring/sessions/{id}/classify:
+  /generator/workflows/{workflow_id}/workspace/turn:
     post:
-      operationId: confirmAuthoringContent
-      summary: Freeze the verified candidate and start its private classification review
-      tags: [authoring]
+      operationId: startGeneratorWorkspaceTurn
+      summary: Bind one explicit generator turn to a workflow workspace
+      tags: [generator]
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/AuthoringSessionID"
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AuthoringContentConfirmationRequest"
+              $ref: "#/components/schemas/GeneratorWorkspaceTurnRequest"
       responses:
         "200":
-          description: Verified revision entered classification
+          description: Workspace turn is bound
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthoringSession"
+                $ref: "#/components/schemas/GeneratorWorkspaceTurn"
+        "409":
+          $ref: "#/components/responses/Error"
 
-  /authoring/sessions/{id}/classification-feedback:
+  /generator/workflows/{workflow_id}/workspace/turn/end:
     post:
-      operationId: requestAuthoringClassificationAdjustment
-      summary: Ask the classification Agent to adjust one private reviewed proposal
-      tags: [authoring]
+      operationId: endGeneratorWorkspaceTurn
+      summary: Release one explicit generator workspace turn
+      tags: [generator]
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/AuthoringSessionID"
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AuthoringClassificationAdjustmentRequest"
+              $ref: "#/components/schemas/GeneratorWorkspaceTurnRequest"
       responses:
-        "200":
-          description: Private classification adjustment started
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuthoringSession"
+        "204":
+          description: Workspace turn released
+        "409":
+          $ref: "#/components/responses/Error"
 
-  /authoring/sessions/{id}/publish:
-    post:
-      operationId: publishAuthoringRevision
-      summary: Explicitly publish the current verified authoring revision
-      tags: [authoring]
+  /generator/workflows/{workflow_id}/workspace/files:
+    get:
+      operationId: listGeneratorWorkspaceFiles
+      summary: List files in one bound generator workspace turn
+      tags: [generator]
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/AuthoringSessionID"
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+        - $ref: "#/components/parameters/GeneratorTurnID"
+      responses:
+        "200":
+          description: Safe relative workspace file entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkspaceFileList"
+        "409":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: writeGeneratorWorkspaceFile
+      summary: Write one relative file in a bound generator workspace turn
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AuthoringClassificationPublicationRequest"
+              $ref: "#/components/schemas/GeneratorWorkspaceFileWriteRequest"
+      responses:
+        "204":
+          description: Workspace file written
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/workspace/file:
+    get:
+      operationId: readGeneratorWorkspaceFile
+      summary: Read a relative file from one bound generator workspace turn
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+        - $ref: "#/components/parameters/GeneratorTurnID"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
-          description: Verified revision published
+          description: Selected workspace file content
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthoringSession"
+                $ref: "#/components/schemas/GeneratorWorkspaceFileRead"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/workspace/commands:
+    post:
+      operationId: runGeneratorWorkspaceCommand
+      summary: Run one command inside a bound generator workspace turn
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorWorkspaceCommandRequest"
+      responses:
+        "200":
+          description: Command exit code and output
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkspaceCommandResult"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/candidate:
+    post:
+      operationId: submitGeneratorCandidate
+      summary: Submit the archive from one bound workspace turn as an immutable candidate
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorCandidateSubmissionRequest"
+      responses:
+        "200":
+          description: Candidate submission accepted or returned from its idempotency receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorGeneration"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/content/confirm:
+    post:
+      operationId: confirmGeneratorContent
+      summary: Confirm a verified candidate and begin classification
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorContentConfirmationRequest"
+      responses:
+        "200":
+          description: Workflow advanced to classification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/content/changes:
+    post:
+      operationId: requestGeneratorContentChanges
+      summary: Return a reviewed candidate to generating with user feedback
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorContentChangeRequest"
+      responses:
+        "200":
+          description: Workflow returned to generating
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/classification:
+    get:
+      operationId: getGeneratorClassification
+      summary: Read the current private classification proposal for one workflow
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      responses:
+        "200":
+          description: Candidate-bound classification proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorClassificationReview"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/classification/changes:
+    post:
+      operationId: requestGeneratorClassificationChanges
+      summary: Ask the Server classifier to revise one private proposal
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorClassificationChangeRequest"
+      responses:
+        "200":
+          description: Workflow advanced to classification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/classification/publish:
+    post:
+      operationId: confirmGeneratorClassificationAndPublish
+      summary: Confirm one private classification proposal and begin challenge publication
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorClassificationPublicationRequest"
+      responses:
+        "200":
+          description: Workflow advanced to challenge publication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /generator/workflows/{workflow_id}/cancel:
+    post:
+      operationId: cancelGeneration
+      summary: Cancel one unfinished generation workflow
+      tags: [generator]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GeneratorWorkflowID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratorCancellationRequest"
+      responses:
+        "200":
+          description: Workflow cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorWorkflow"
+        "409":
+          $ref: "#/components/responses/Error"
 
 components:
   securitySchemes:
@@ -617,6 +893,18 @@ components:
     AuthoringSessionID:
       name: id
       in: path
+      required: true
+      schema:
+        type: string
+    GeneratorWorkflowID:
+      name: workflow_id
+      in: path
+      required: true
+      schema:
+        type: string
+    GeneratorTurnID:
+      name: turn_id
+      in: query
       required: true
       schema:
         type: string
@@ -802,9 +1090,6 @@ components:
         state:
           type: string
           enum: [DraftConversation, IntentReview]
-        workflow_state:
-          type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
         updated_at:
           type: string
           format: date-time
@@ -1310,12 +1595,18 @@ components:
         archive_sha256:
           type: string
 
-    AuthoringGenerationWorkflow:
+    GeneratorWorkflow:
       type: object
-      required: [id, state, state_version, runtime_attempt, created_at, updated_at]
+      required: [id, session_id, plan_revision, state, state_version, runtime_attempt, created_at, updated_at]
       properties:
         id:
           type: string
+        session_id:
+          type: string
+        plan_revision:
+          type: integer
+          format: int64
+          minimum: 0
         state:
           type: string
           enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
@@ -1455,24 +1746,186 @@ components:
         content:
           type: string
 
-    AuthoringGenerationRequest:
+    GeneratorPlanRequest:
       type: object
-      required: [plan_revision, idempotency_key]
+      required: [expected_revision, idempotency_key, plan]
       properties:
-        plan_revision:
+        session_id:
+          type: string
+        expected_revision:
           type: integer
+          format: int64
           minimum: 0
         idempotency_key:
           type: string
           minLength: 1
           maxLength: 200
+        plan:
+          $ref: "#/components/schemas/AuthoringPlan"
 
-    AuthoringContentConfirmationRequest:
+    GeneratorPlanResponse:
       type: object
-      required: [workflow_id, candidate_revision_id, idempotency_key]
+      required: [session_id, plan_revision, plan]
+      properties:
+        session_id:
+          type: string
+        plan_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        plan:
+          $ref: "#/components/schemas/AuthoringPlan"
+
+    GeneratorGenerationConfirmationRequest:
+      type: object
+      required: [session_id, plan_revision, idempotency_key]
+      properties:
+        session_id:
+          type: string
+        plan_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    GeneratorWorkflowList:
+      type: object
+      required: [workflows]
+      properties:
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/GeneratorWorkflow"
+
+    GeneratorGeneration:
+      type: object
+      required: [workflow, assets, diff]
+      properties:
+        workflow:
+          $ref: "#/components/schemas/GeneratorWorkflow"
+        candidate:
+          $ref: "#/components/schemas/AuthoringCandidate"
+        verified:
+          $ref: "#/components/schemas/VerifiedChallenge"
+        verification:
+          $ref: "#/components/schemas/AuthoringVerificationReport"
+        classification:
+          $ref: "#/components/schemas/AuthoringClassificationProposal"
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringAsset"
+        diff:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringFileDiff"
+
+    GeneratorWorkspaceTurn:
+      type: object
+      required: [workflow_id, turn_id]
       properties:
         workflow_id:
           type: string
+        turn_id:
+          type: string
+
+    GeneratorWorkspaceTurnRequest:
+      type: object
+      required: [turn_id]
+      properties:
+        turn_id:
+          type: string
+
+    GeneratorWorkspaceFile:
+      type: object
+      required: [path, directory, size]
+      properties:
+        path:
+          type: string
+        directory:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+
+    GeneratorWorkspaceFileList:
+      type: object
+      required: [workflow_id, turn_id, files]
+      properties:
+        workflow_id:
+          type: string
+        turn_id:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/GeneratorWorkspaceFile"
+
+    GeneratorWorkspaceFileRead:
+      type: object
+      required: [workflow_id, turn_id, path, content]
+      properties:
+        workflow_id:
+          type: string
+        turn_id:
+          type: string
+        path:
+          type: string
+        content:
+          type: string
+
+    GeneratorWorkspaceFileWriteRequest:
+      type: object
+      required: [turn_id, path, content]
+      properties:
+        turn_id:
+          type: string
+        path:
+          type: string
+        content:
+          type: string
+
+    GeneratorWorkspaceCommandRequest:
+      type: object
+      required: [turn_id, command]
+      properties:
+        turn_id:
+          type: string
+        command:
+          type: string
+
+    GeneratorWorkspaceCommandResult:
+      type: object
+      required: [workflow_id, turn_id, exit_code, output]
+      properties:
+        workflow_id:
+          type: string
+        turn_id:
+          type: string
+        exit_code:
+          type: integer
+        output:
+          type: string
+
+    GeneratorCandidateSubmissionRequest:
+      type: object
+      required: [turn_id, idempotency_key]
+      properties:
+        turn_id:
+          type: string
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    GeneratorContentConfirmationRequest:
+      type: object
+      required: [candidate_revision_id, idempotency_key]
+      properties:
         candidate_revision_id:
           type: string
         idempotency_key:
@@ -1480,12 +1933,35 @@ components:
           minLength: 1
           maxLength: 200
 
-    AuthoringClassificationAdjustmentRequest:
+    GeneratorContentChangeRequest:
       type: object
-      required: [workflow_id, candidate_revision_id, proposal_revision, feedback, idempotency_key]
+      required: [candidate_revision_id, feedback, idempotency_key]
       properties:
-        workflow_id:
+        candidate_revision_id:
           type: string
+        feedback:
+          type: string
+          minLength: 1
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    GeneratorClassificationReview:
+      type: object
+      required: [workflow, candidate, classification]
+      properties:
+        workflow:
+          $ref: "#/components/schemas/GeneratorWorkflow"
+        candidate:
+          $ref: "#/components/schemas/AuthoringCandidate"
+        classification:
+          $ref: "#/components/schemas/AuthoringClassificationProposal"
+
+    GeneratorClassificationChangeRequest:
+      type: object
+      required: [candidate_revision_id, proposal_revision, feedback, idempotency_key]
+      properties:
         candidate_revision_id:
           type: string
         proposal_revision:
@@ -1499,17 +1975,24 @@ components:
           minLength: 1
           maxLength: 200
 
-    AuthoringClassificationPublicationRequest:
+    GeneratorClassificationPublicationRequest:
       type: object
-      required: [workflow_id, candidate_revision_id, proposal_revision, idempotency_key]
+      required: [candidate_revision_id, proposal_revision, idempotency_key]
       properties:
-        workflow_id:
-          type: string
         candidate_revision_id:
           type: string
         proposal_revision:
           type: integer
           minimum: 1
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    GeneratorCancellationRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
         idempotency_key:
           type: string
           minLength: 1
@@ -1593,7 +2076,7 @@ components:
 
     AuthoringSession:
       type: object
-      required: [id, state, authoring_turn_active, intent_revision, visible_revision, updated_at, intent, messages, assets, diff]
+      required: [id, state, authoring_turn_active, intent_revision, visible_revision, updated_at, intent, messages, workflows]
       properties:
         id:
           type: string
@@ -1613,8 +2096,10 @@ components:
           type: string
         revision_base_active_revision_id:
           type: string
-        workflow:
-          $ref: "#/components/schemas/AuthoringGenerationWorkflow"
+        workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/GeneratorWorkflow"
         last_error:
           type: string
         updated_at:
@@ -1622,23 +2107,7 @@ components:
           format: date-time
         intent:
           $ref: "#/components/schemas/AuthoringPlan"
-        candidate:
-          $ref: "#/components/schemas/AuthoringCandidate"
-        verified:
-          $ref: "#/components/schemas/VerifiedChallenge"
-        verification:
-          $ref: "#/components/schemas/AuthoringVerificationReport"
-        classification:
-          $ref: "#/components/schemas/AuthoringClassificationProposal"
         messages:
           type: array
           items:
             $ref: "#/components/schemas/AuthoringMessage"
-        assets:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringAsset"
-        diff:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringFileDiff"

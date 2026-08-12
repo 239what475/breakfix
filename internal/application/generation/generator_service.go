@@ -71,41 +71,28 @@ func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspa
 // SetGenerationPlan is used by clients that do not already own a web
 // Authoring conversation. A missing session ID creates a normal Authoring
 // session first; all later revisions use the usual optimistic Plan boundary.
-func (s *GeneratorService) SetGenerationPlan(ctx context.Context, userID, sessionID string, expectedRevision int64, plan authoring.Plan) (*authoring.Session, *authoring.Revision, error) {
+func (s *GeneratorService) SetGenerationPlan(ctx context.Context, userID, sessionID string, expectedRevision int64, idempotencyKey string, plan authoring.Plan) (*authoring.Session, *authoring.Revision, error) {
 	if s == nil || s.store == nil || s.plans == nil {
 		return nil, nil, errors.New("generator service is not configured")
 	}
-	if strings.TrimSpace(userID) == "" || expectedRevision < 0 {
-		return nil, nil, errors.New("generation plan requires user and non-negative expected revision")
+	if strings.TrimSpace(userID) == "" || expectedRevision < 0 || strings.TrimSpace(idempotencyKey) == "" || len(strings.TrimSpace(idempotencyKey)) > 200 {
+		return nil, nil, errors.New("generation plan requires user, non-negative expected revision, and idempotency key")
 	}
 	if err := plan.ValidateForGeneration(); err != nil {
 		return nil, nil, err
 	}
-	var session *authoring.Session
-	var err error
-	if strings.TrimSpace(sessionID) == "" {
-		if expectedRevision != 0 {
-			return nil, nil, authoring.ErrVersionConflict
-		}
-		session, err = s.plans.CreateAuthoringSession(ctx, authoring.Session{ID: authoring.NewID("author"), UserID: userID}, authoring.Plan{})
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		session, err = s.plans.GetAuthoringSession(ctx, strings.TrimSpace(sessionID), userID)
-		if err != nil {
-			return nil, nil, err
-		}
+	if strings.TrimSpace(sessionID) == "" && expectedRevision != 0 {
+		return nil, nil, authoring.ErrVersionConflict
 	}
-	revision, err := s.plans.ReplaceAuthoringPlan(ctx, session.ID, userID, expectedRevision, plan, authoring.StateIntentReview)
-	if err != nil {
-		return nil, nil, err
-	}
-	updated, err := s.plans.GetAuthoringSession(ctx, session.ID, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return updated, revision, nil
+	return s.plans.SaveGenerationPlan(
+		ctx,
+		strings.TrimSpace(userID),
+		strings.TrimSpace(sessionID),
+		authoring.NewID("author"),
+		expectedRevision,
+		strings.TrimSpace(idempotencyKey),
+		plan,
+	)
 }
 
 func (s *GeneratorService) ConfirmGeneration(ctx context.Context, userID, sessionID string, confirmation domain.StartConfirmation) (*domain.Workflow, error) {
