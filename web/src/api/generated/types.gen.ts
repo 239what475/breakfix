@@ -326,7 +326,6 @@ export type VerifiedChallenge = {
 
 export type AuthoringCandidate = {
     id: string;
-    generator_run_id: string;
     archive_sha256: string;
 };
 

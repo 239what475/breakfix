@@ -502,7 +502,7 @@ func TestGenerationRuntimeLeaseTakeoverRetainsActionVersion(t *testing.T) {
 	}
 }
 
-func TestConfirmedPlanRequiresCancellationOfThePriorWorkflow(t *testing.T) {
+func TestConfirmedPlanRevisionsOwnIndependentWorkflows(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 4, 11, 0, 0, 0, time.UTC)
@@ -518,18 +518,6 @@ func TestConfirmedPlanRequiresCancellationOfThePriorWorkflow(t *testing.T) {
 	if repeated.ID != workflow.ID {
 		t.Fatalf("repeat confirmation created workflow %q, want %q", repeated.ID, workflow.ID)
 	}
-	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, generationTestPlan(), authoring.StateIntentReview); !errors.Is(err, authoring.ErrInvalidState) {
-		t.Fatalf("replace plan while workflow is active = %v, want invalid state", err)
-	}
-
-	if _, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
-		PlanRevision: 2, IdempotencyKey: "start-replacement",
-	}, now.Add(time.Minute)); !errors.Is(err, authoring.ErrInvalidState) {
-		t.Fatalf("start replacement without cancellation = %v, want invalid state", err)
-	}
-	if _, err := database.Generation.CancelAuthoringGenerationWorkflow(ctx, sessionID, userID, workflow.ID, now.Add(2*time.Minute)); err != nil {
-		t.Fatalf("cancel prior workflow: %v", err)
-	}
 	plan := generationTestPlan()
 	plan.Overview = "A replacement authoring plan creates a separate workflow."
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, plan, authoring.StateIntentReview); err != nil {
@@ -537,7 +525,7 @@ func TestConfirmedPlanRequiresCancellationOfThePriorWorkflow(t *testing.T) {
 	}
 	replacement, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
 		PlanRevision: 2, IdempotencyKey: "start-replacement",
-	}, now.Add(3*time.Minute))
+	}, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("start replacement workflow: %v", err)
 	}
@@ -788,7 +776,9 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 		t.Fatalf("classification-review candidate was eligible for artifact reap: %#v", reapClaim)
 	}
 
-	if _, err := database.Generation.CancelAuthoringGenerationWorkflow(ctx, sessionID, userID, workflow.ID, now.Add(time.Minute)); err != nil {
+	if _, err := database.Generation.CancelGenerationWorkflow(ctx, sessionID, userID, generation.Cancellation{
+		WorkflowID: workflow.ID, IdempotencyKey: "cancel-resource-reaper",
+	}, now.Add(time.Minute)); err != nil {
 		t.Fatalf("cancel generation workflow: %v", err)
 	}
 	for _, kind := range []runtime.ReapKind{runtime.ReapCandidateArtifact} {
@@ -980,10 +970,9 @@ func finalizeGeneratedCandidate(t *testing.T, database *Store, claim generation.
 	t.Helper()
 	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
 	revision := generation.Revision{
-		ID:             generation.IDForGeneratorRun(run.ID),
+		ID:             generation.NewID("candidate-revision"),
 		Source:         claim.Workflow.Source,
 		SourceRevision: claim.Workflow.SourceRevision,
-		GeneratorRunID: run.ID,
 		ArchivePath:    "/tmp/generated-candidate-" + string(rune('0'+sequence)) + ".tar.gz",
 		ArchiveSHA256:  workflowTestDigest,
 		Snapshot:       generationTestSnapshot(),

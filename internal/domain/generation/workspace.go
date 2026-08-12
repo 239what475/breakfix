@@ -9,7 +9,11 @@ import (
 	"time"
 )
 
-var ErrWorkspaceNotFound = errors.New("generator workspace not found")
+var (
+	ErrWorkspaceNotFound = errors.New("generator workspace not found")
+	ErrWorkspaceBusy     = errors.New("generator workspace is already bound to another turn")
+	ErrWorkspaceTurnLost = errors.New("generator workspace turn binding was lost")
+)
 
 type WorkspaceState string
 
@@ -29,11 +33,33 @@ type Workspace struct {
 	Namespace         string
 	PVCName           string
 	SandboxID         string
+	ActiveTurnID      string
 	State             WorkspaceState
 	ProvisionDeadline time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+}
+
+// WorkspaceTurn identifies one explicit Generator client turn. Web authoring
+// uses its Authoring AgentRun ID; an MCP client supplies an opaque turn ID.
+// The workspace record, rather than an in-memory client connection, owns the
+// single-writer fence.
+type WorkspaceTurn struct {
+	WorkflowID string `json:"workflow_id"`
+	ID         string `json:"id"`
+}
+
+func (t WorkspaceTurn) Valid() bool {
+	return strings.TrimSpace(t.WorkflowID) != "" && strings.TrimSpace(t.ID) != ""
+}
+
+// WorkspaceFile is the safe, relative projection of one workspace entry.
+// Provider paths, ownership, and sandbox identities never leave the Server.
+type WorkspaceFile struct {
+	Path      string `json:"path"`
+	Directory bool   `json:"directory"`
+	Size      int64  `json:"size"`
 }
 
 // NewWorkspacePVCName derives a stable Kubernetes-safe PVC name from the

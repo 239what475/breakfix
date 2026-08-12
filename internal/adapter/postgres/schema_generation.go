@@ -8,7 +8,6 @@ var schemaGenerationStatements = []string{
 		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),
 		source_ref TEXT NOT NULL,
 		source_revision TEXT NOT NULL,
-		generator_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,
 		judge_run_id TEXT NOT NULL DEFAULT '',
 		parent_candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		repair_reason TEXT NOT NULL DEFAULT '',
@@ -25,8 +24,7 @@ var schemaGenerationStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		verified_at TIMESTAMPTZ,
-		published_at TIMESTAMPTZ,
-		UNIQUE(generator_run_id)
+		published_at TIMESTAMPTZ
 	)`,
 	`CREATE INDEX candidate_revisions_source ON candidate_revisions(source_kind, source_ref, source_revision, created_at)`,
 	`CREATE TABLE challenges (
@@ -99,11 +97,11 @@ var schemaGenerationStatements = []string{
 			(finalizer_error_category = 'transient' AND finalizer_last_error <> '' AND finalizer_last_attempted_at IS NOT NULL AND finalizer_next_retry_at IS NOT NULL)
 		)
 	)`,
-	`CREATE UNIQUE INDEX generation_workflows_active_source ON generation_workflows(source_kind, source_ref) WHERE state NOT IN ('Published', 'Failed', 'Cancelled')`,
+	`CREATE UNIQUE INDEX generation_workflows_source_revision ON generation_workflows(source_kind, source_ref, source_revision)`,
 	`CREATE INDEX generation_workflows_claim ON generation_workflows(state, next_run_at, lease_expires_at, created_at, id)`,
-	`CREATE TABLE generation_confirmation_receipts (
+	`CREATE TABLE generation_action_receipts (
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
-		action TEXT NOT NULL CHECK (action IN ('start', 'content', 'classification-adjustment', 'publication')),
+		action TEXT NOT NULL CHECK (action IN ('confirm-generation', 'submit-candidate', 'confirm-content', 'request-classification-changes', 'confirm-classification-and-publish', 'request-content-changes', 'cancel-generation')),
 		idempotency_key TEXT NOT NULL,
 		workflow_id TEXT NOT NULL REFERENCES generation_workflows(id) ON DELETE RESTRICT,
 		plan_revision BIGINT,
@@ -112,9 +110,10 @@ var schemaGenerationStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (session_id, action, idempotency_key),
 		CHECK (
-			(action = 'start' AND plan_revision IS NOT NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
-			(action = 'content' AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NULL) OR
-			(action IN ('classification-adjustment', 'publication') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
+			(action = 'confirm-generation' AND plan_revision IS NOT NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
+			(action IN ('submit-candidate', 'confirm-content', 'request-content-changes') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NULL) OR
+			(action = 'cancel-generation' AND plan_revision IS NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
+			(action IN ('request-classification-changes', 'confirm-classification-and-publish') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
 		)
 	)`,
 	`CREATE TABLE generation_resource_reaps (
@@ -140,6 +139,7 @@ var schemaGenerationStatements = []string{
 		namespace TEXT NOT NULL,
 		pvc_name TEXT NOT NULL UNIQUE,
 		sandbox_id TEXT NOT NULL DEFAULT '',
+		active_turn_id TEXT NOT NULL DEFAULT '',
 		state TEXT NOT NULL CHECK (state IN ('pending', 'active', 'deleting', 'deleted')),
 		provision_deadline TIMESTAMPTZ NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL,

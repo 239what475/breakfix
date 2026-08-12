@@ -166,7 +166,10 @@ func (h *Handler) CancelAuthoringGeneration(c *gin.Context, sessionID, workflowI
 	if user == nil {
 		return
 	}
-	workflow, err := h.db.Generation.CancelAuthoringGenerationWorkflow(c.Request.Context(), sessionID, user.ID, workflowID, time.Now().UTC())
+	workflow, err := h.db.Generation.CancelGenerationWorkflow(c.Request.Context(), sessionID, user.ID, generation.Cancellation{
+		WorkflowID:     workflowID,
+		IdempotencyKey: "authoring-cancel-" + workflowID,
+	}, time.Now().UTC())
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
@@ -394,7 +397,7 @@ func toAPIAuthoringCandidate(revision *generation.Revision) *api.AuthoringCandid
 	if revision == nil {
 		return nil
 	}
-	return &api.AuthoringCandidate{Id: revision.ID, GeneratorRunId: revision.GeneratorRunID, ArchiveSha256: revision.ArchiveSHA256}
+	return &api.AuthoringCandidate{Id: revision.ID, ArchiveSha256: revision.ArchiveSHA256}
 }
 
 func toAPIAuthoringGenerationWorkflow(workflow *generation.Workflow) *api.AuthoringGenerationWorkflow {

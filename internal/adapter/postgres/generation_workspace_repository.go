@@ -26,22 +26,92 @@ func (d *GenerationRepository) CreateGeneratorWorkspace(ctx context.Context, rec
 		record.UpdatedAt = now
 	}
 	_, err := d.conn.ExecContext(ctx, `INSERT INTO generator_workspaces
-		(workspace_id, workflow_id, namespace, pvc_name, sandbox_id, state, provision_deadline, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (workspace_id) DO NOTHING`,
-		record.ID, record.WorkflowID, record.Namespace, record.PVCName, record.SandboxID, record.State,
+		(workspace_id, workflow_id, namespace, pvc_name, sandbox_id, active_turn_id, state, provision_deadline, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
+		record.ID, record.WorkflowID, record.Namespace, record.PVCName, record.SandboxID, record.ActiveTurnID, record.State,
 		record.ProvisionDeadline, record.CreatedAt, record.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create generator workspace: %w", err)
 	}
 	existing, err := d.GetGeneratorWorkspace(ctx, record.ID)
+	matchedRequestedIdentity := err == nil
+	if errors.Is(err, generation.ErrWorkspaceNotFound) {
+		existing, err = d.GetCurrentGeneratorWorkspace(ctx, record.WorkflowID)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if existing.WorkflowID != record.WorkflowID || existing.Namespace != record.Namespace || existing.PVCName != record.PVCName {
+	if existing.WorkflowID != record.WorkflowID || existing.Namespace != record.Namespace || (matchedRequestedIdentity && existing.PVCName != record.PVCName) {
 		return nil, fmt.Errorf("generator workspace already has different ownership")
 	}
 	return existing, nil
+}
+
+func (d *GenerationRepository) GetGeneratorWorkspaceForTurn(ctx context.Context, turn generation.WorkspaceTurn) (*generation.Workspace, error) {
+	if !turn.Valid() {
+		return nil, generation.ErrWorkspaceTurnLost
+	}
+	record, err := scanGeneratorWorkspace(d.conn.QueryRowContext(ctx, generatorWorkspaceSelect+` WHERE workflow_id = ? AND state = ? AND active_turn_id = ?
+		ORDER BY created_at DESC, workspace_id DESC LIMIT 1`, turn.WorkflowID, generation.WorkspaceActive, turn.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, generation.ErrWorkspaceTurnLost
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get generator workspace turn: %w", err)
+	}
+	return record, nil
+}
+
+// AcquireGeneratorWorkspaceTurn is the authoritative single-writer fence for
+// Generator workspace tools. The same explicit turn may resume after a
+// retried request; a different turn cannot modify the workspace concurrently.
+func (d *GenerationRepository) AcquireGeneratorWorkspaceTurn(ctx context.Context, turn generation.WorkspaceTurn, now time.Time) (*generation.Workspace, error) {
+	if !turn.Valid() || now.IsZero() {
+		return nil, generation.ErrWorkspaceTurnLost
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin acquire generator workspace turn: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	record, err := scanGeneratorWorkspace(tx.QueryRowContext(ctx, generatorWorkspaceSelect+` WHERE workflow_id = ? AND state = ?
+		ORDER BY created_at DESC, workspace_id DESC LIMIT 1 FOR UPDATE`, turn.WorkflowID, generation.WorkspaceActive))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, generation.ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock generator workspace turn: %w", err)
+	}
+	if record.ActiveTurnID != "" && record.ActiveTurnID != turn.ID {
+		return nil, generation.ErrWorkspaceBusy
+	}
+	if record.ActiveTurnID == "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET active_turn_id = ?, updated_at = ? WHERE workspace_id = ?`, turn.ID, now.UTC(), record.ID); err != nil {
+			return nil, fmt.Errorf("bind generator workspace turn: %w", err)
+		}
+		record.ActiveTurnID = turn.ID
+		record.UpdatedAt = now.UTC()
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit generator workspace turn: %w", err)
+	}
+	return record, nil
+}
+
+func (d *GenerationRepository) ReleaseGeneratorWorkspaceTurn(ctx context.Context, turn generation.WorkspaceTurn, now time.Time) error {
+	if !turn.Valid() || now.IsZero() {
+		return generation.ErrWorkspaceTurnLost
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE generator_workspaces SET active_turn_id = '', updated_at = ?
+		WHERE workflow_id = ? AND state = ? AND active_turn_id = ?`, now.UTC(), turn.WorkflowID, generation.WorkspaceActive, turn.ID)
+	if err != nil {
+		return fmt.Errorf("release generator workspace turn: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed == 1 {
+		return nil
+	}
+	return generation.ErrWorkspaceTurnLost
 }
 
 func (d *GenerationRepository) GetGeneratorWorkspace(ctx context.Context, workspaceID string) (*generation.Workspace, error) {
@@ -132,10 +202,11 @@ func (d *GenerationRepository) BeginGeneratorWorkspaceCleanup(ctx context.Contex
 		return nil, fmt.Errorf("lock generator workspace cleanup: %w", err)
 	}
 	if record.State != generation.WorkspaceDeleted && record.State != generation.WorkspaceDeleting {
-		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, updated_at = ? WHERE workspace_id = ?`, generation.WorkspaceDeleting, now.UTC(), workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, active_turn_id = '', updated_at = ? WHERE workspace_id = ?`, generation.WorkspaceDeleting, now.UTC(), workspaceID); err != nil {
 			return nil, fmt.Errorf("mark generator workspace deleting: %w", err)
 		}
 		record.State = generation.WorkspaceDeleting
+		record.ActiveTurnID = ""
 		record.UpdatedAt = now.UTC()
 	}
 	if err := tx.Commit(); err != nil {
@@ -161,15 +232,54 @@ func (d *GenerationRepository) RetireCurrentGeneratorWorkspace(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("lock current generator workspace: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, updated_at = ? WHERE workspace_id = ?`, generation.WorkspaceDeleting, now.UTC(), record.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, active_turn_id = '', updated_at = ? WHERE workspace_id = ?`, generation.WorkspaceDeleting, now.UTC(), record.ID); err != nil {
 		return nil, fmt.Errorf("retire generator workspace: %w", err)
 	}
 	record.State = generation.WorkspaceDeleting
+	record.ActiveTurnID = ""
 	record.UpdatedAt = now.UTC()
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit retire generator workspace: %w", err)
 	}
 	return record, nil
+}
+
+// RetireIncompleteGeneratorWorkspaces is startup recovery. Server never
+// resumes a partially completed Generator call, so every non-terminal
+// workspace is made eligible for asynchronous Sandbox/PVC cleanup.
+func (d *GenerationRepository) RetireIncompleteGeneratorWorkspaces(ctx context.Context, now time.Time) ([]generation.Workspace, error) {
+	if now.IsZero() {
+		return nil, errors.New("current time is required")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin retire incomplete generator workspaces: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	records, err := listGeneratorWorkspaces(ctx, tx, `SELECT w.workspace_id, w.workflow_id, w.namespace, w.pvc_name, w.sandbox_id, w.active_turn_id, w.state,
+		w.provision_deadline, w.created_at, w.updated_at, w.deleted_at
+		FROM generator_workspaces w
+		JOIN generation_workflows workflow ON workflow.id = w.workflow_id
+		WHERE w.state IN (?, ?) AND workflow.state NOT IN (?, ?, ?)
+		ORDER BY w.created_at, w.workspace_id FOR UPDATE`,
+		generation.WorkspacePending, generation.WorkspaceActive,
+		generation.StatePublished, generation.StateFailed, generation.StateCancelled)
+	if err != nil {
+		return nil, err
+	}
+	for index := range records {
+		if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET state = ?, active_turn_id = '', updated_at = ? WHERE workspace_id = ?`,
+			generation.WorkspaceDeleting, now.UTC(), records[index].ID); err != nil {
+			return nil, fmt.Errorf("retire incomplete generator workspace: %w", err)
+		}
+		records[index].State = generation.WorkspaceDeleting
+		records[index].ActiveTurnID = ""
+		records[index].UpdatedAt = now.UTC()
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit retire incomplete generator workspaces: %w", err)
+	}
+	return records, nil
 }
 
 func (d *GenerationRepository) MarkGeneratorWorkspaceDeleted(ctx context.Context, workspaceID string, now time.Time) error {
@@ -201,7 +311,7 @@ func (d *GenerationRepository) ListDeletingGeneratorWorkspaces(ctx context.Conte
 }
 
 func (d *GenerationRepository) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
-	return listGeneratorWorkspaces(ctx, d.conn, `SELECT w.workspace_id, w.workflow_id, w.namespace, w.pvc_name, w.sandbox_id, w.state,
+	return listGeneratorWorkspaces(ctx, d.conn, `SELECT w.workspace_id, w.workflow_id, w.namespace, w.pvc_name, w.sandbox_id, w.active_turn_id, w.state,
 		w.provision_deadline, w.created_at, w.updated_at, w.deleted_at
 		FROM generator_workspaces w
 		JOIN generation_workflows workflow ON workflow.id = w.workflow_id
@@ -211,7 +321,7 @@ func (d *GenerationRepository) ListTerminalGeneratorWorkspaces(ctx context.Conte
 		generation.StatePublished, generation.StateFailed, generation.StateCancelled)
 }
 
-const generatorWorkspaceSelect = `SELECT workspace_id, workflow_id, namespace, pvc_name, sandbox_id, state, provision_deadline, created_at, updated_at, deleted_at FROM generator_workspaces`
+const generatorWorkspaceSelect = `SELECT workspace_id, workflow_id, namespace, pvc_name, sandbox_id, active_turn_id, state, provision_deadline, created_at, updated_at, deleted_at FROM generator_workspaces`
 
 type generatorWorkspaceQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -244,7 +354,7 @@ type generatorWorkspaceScanner interface {
 func scanGeneratorWorkspace(row generatorWorkspaceScanner) (*generation.Workspace, error) {
 	var record generation.Workspace
 	var deletedAt sql.NullTime
-	if err := row.Scan(&record.ID, &record.WorkflowID, &record.Namespace, &record.PVCName, &record.SandboxID, &record.State,
+	if err := row.Scan(&record.ID, &record.WorkflowID, &record.Namespace, &record.PVCName, &record.SandboxID, &record.ActiveTurnID, &record.State,
 		&record.ProvisionDeadline, &record.CreatedAt, &record.UpdatedAt, &deletedAt); err != nil {
 		return nil, err
 	}

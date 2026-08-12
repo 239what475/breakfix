@@ -12,7 +12,6 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
-	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 func (d *AuthoringRepository) CreateAuthoringSession(ctx context.Context, session authoring.Session, plan authoring.Plan) (*authoring.Session, error) {
@@ -235,9 +234,6 @@ func (d *AuthoringRepository) StartAuthoringRun(ctx context.Context, sessionID, 
 		run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.OwnerRef != session.ID {
 		return nil, nil, authoring.ErrInvalidState
 	}
-	if err := ensureAuthoringPlanMutableTx(ctx, tx, session.ID); err != nil {
-		return nil, nil, err
-	}
 	if err := lockActiveSessionTx(ctx, tx, run.SessionID); err != nil {
 		return nil, nil, err
 	}
@@ -322,9 +318,6 @@ func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID st
 	if _, err := lockAuthoringPlanSessionTx(ctx, tx, stage.SessionID, ""); err != nil {
 		return nil, err
 	}
-	if err := ensureAuthoringPlanMutableTx(ctx, tx, stage.SessionID); err != nil {
-		return nil, err
-	}
 	planJSON, err := marshalJSON(plan)
 	if err != nil {
 		return nil, err
@@ -378,9 +371,6 @@ func (d *AuthoringRepository) FinalizeAuthoringRun(ctx context.Context, runID st
 	}
 	if session.CurrentRevision != stage.BaseRevision || !authoring.AllowsAgentPlanStage(session.State) {
 		return nil, authoring.ErrInvalidState
-	}
-	if err := ensureAuthoringPlanMutableTx(ctx, tx, stage.SessionID); err != nil {
-		return nil, err
 	}
 	revision := &authoring.Revision{Number: session.CurrentRevision, Plan: stage.Plan, CreatedAt: now.UTC()}
 	if len(stage.Changes) > 0 {
@@ -535,15 +525,6 @@ func (d *AuthoringRepository) RestartInterruptedAuthoringRun(ctx context.Context
 		}
 		return nil, nil
 	}
-	if err := ensureAuthoringPlanMutableTx(ctx, tx, session.ID); err != nil {
-		if errors.Is(err, authoring.ErrInvalidState) {
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
-			return nil, nil
-		}
-		return nil, err
-	}
 	base, err := readAuthoringRevisionTx(ctx, tx, session.ID, session.CurrentRevision)
 	if err != nil {
 		return nil, err
@@ -599,9 +580,6 @@ func (d *AuthoringRepository) ReplaceAuthoringPlan(ctx context.Context, sessionI
 	}
 	if session.CurrentRevision != expected {
 		return nil, authoring.ErrVersionConflict
-	}
-	if err := ensureAuthoringPlanMutableTx(ctx, tx, session.ID); err != nil {
-		return nil, err
 	}
 	next := expected + 1
 	now := time.Now().UTC()
@@ -662,23 +640,6 @@ func lockAuthoringPlanSessionTx(ctx context.Context, tx *Tx, id, userID string) 
 		return nil, fmt.Errorf("lock authoring plan session: %w", err)
 	}
 	return readAuthoringSessionTx(ctx, tx, id, userID)
-}
-
-// ensureAuthoringPlanMutableTx is the cross-aggregate ownership fence: a
-// confirmed workflow owns its source Plan until it reaches a terminal state or
-// the author explicitly cancels it.
-func ensureAuthoringPlanMutableTx(ctx context.Context, tx *Tx, sessionID string) error {
-	var active bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM generation_workflows
-		WHERE source_kind = ? AND source_ref = ? AND state NOT IN (?, ?, ?)
-	)`, generation.SourceAuthoring, sessionID, generation.StatePublished, generation.StateFailed, generation.StateCancelled).Scan(&active); err != nil {
-		return fmt.Errorf("check active generation workflow for authoring plan: %w", err)
-	}
-	if active {
-		return authoring.ErrInvalidState
-	}
-	return nil
 }
 
 func ensureNoActiveAuthoringRunTx(ctx context.Context, tx *Tx, runtimeSessionID string) error {

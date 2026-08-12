@@ -1,7 +1,6 @@
 package generation
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -246,7 +245,6 @@ type Revision struct {
 	ID                string                   `json:"id"`
 	Source            Source                   `json:"source"`
 	SourceRevision    string                   `json:"source_revision"`
-	GeneratorRunID    string                   `json:"generator_run_id,omitempty"`
 	JudgeRunID        string                   `json:"judge_run_id,omitempty"`
 	ParentCandidateID string                   `json:"parent_candidate_id,omitempty"`
 	RepairReason      string                   `json:"repair_reason,omitempty"`
@@ -264,6 +262,20 @@ type Revision struct {
 	UpdatedAt         time.Time                `json:"updated_at"`
 	VerifiedAt        *time.Time               `json:"verified_at,omitempty"`
 	PublishedAt       *time.Time               `json:"published_at,omitempty"`
+}
+
+// CandidateSubmission is the idempotent boundary that freezes the current
+// Generator workspace into one immutable CandidateRevision. The Server assigns
+// the revision ID while processing this request; clients never derive it from
+// an AgentRun or local session identifier.
+type CandidateSubmission struct {
+	WorkflowID     string `json:"workflow_id"`
+	TurnID         string `json:"turn_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (s CandidateSubmission) Valid() bool {
+	return strings.TrimSpace(s.WorkflowID) != "" && strings.TrimSpace(s.TurnID) != "" && validIdempotencyKey(s.IdempotencyKey)
 }
 
 // WorkerView deliberately excludes ArchivePath. Workers access candidate
@@ -301,19 +313,9 @@ func (r Revision) WorkerView() WorkerView {
 	}
 }
 
-// IDForGeneratorRun is stable across a lost HTTP response while remaining
-// opaque to users and independent of challenge content.
-func IDForGeneratorRun(runID string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(runID)))
-	return "candidate-" + fmt.Sprintf("%x", sum[:12])
-}
-
 func (r Revision) ValidateForCreate() error {
 	if strings.TrimSpace(r.ID) == "" || !r.Source.Valid() || strings.TrimSpace(r.SourceRevision) == "" {
 		return errors.New("candidate revision requires identity and source revision")
-	}
-	if r.Source.Kind == SourceAuthoring && strings.TrimSpace(r.GeneratorRunID) == "" {
-		return errors.New("authoring candidate revision requires generator lineage")
 	}
 	if strings.TrimSpace(r.ArchivePath) == "" || !ValidSHA256(r.ArchiveSHA256) {
 		return errors.New("candidate revision requires an immutable archive")

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
@@ -53,11 +52,6 @@ type GeneratorRoleExecutor interface {
 type ClassifierRoleExecutor interface {
 	Classify(context.Context, domain.Execution, *Candidate) (ClassificationCompletion, error)
 }
-
-// ExecutionSnapshotter freezes the runtime facts that an accepted candidate
-// will use later. It is injected from Server assembly so this package does not
-// receive registry, Incus, or Kubernetes clients.
-type ExecutionSnapshotter func(challenge.Entry) (domain.ExecutionSnapshot, error)
 
 type AgentRunnerConfig struct {
 	ServerID        string
@@ -325,14 +319,14 @@ func (r *AgentRunner) finalizeGeneratedCandidate(ctx context.Context, claim doma
 	if err != nil {
 		return domain.NewArtifactError("CANDIDATE_RUNTIME_INVALID", err.Error())
 	}
-	id := domain.IDForGeneratorRun(run.ID)
+	id := domain.NewID("candidate-revision")
 	path, digest, err := candidate.SaveArchiveAtomic(r.config.DataDir, id, inspected.Archive)
 	if err != nil {
 		return fmt.Errorf("persist generated candidate archive: %w", err)
 	}
 	revision := domain.Revision{
 		ID: id, Source: claim.Workflow.Source, SourceRevision: claim.Workflow.SourceRevision,
-		GeneratorRunID: run.ID, ArchivePath: path, ArchiveSHA256: digest, Snapshot: snapshot,
+		ArchivePath: path, ArchiveSHA256: digest, Snapshot: snapshot,
 	}
 	return r.store.FinalizeGeneratedCandidate(ctx, claim, run.ID, revision, r.now())
 }

@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	sdk "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 const workspaceMountPath = "/workspace"
@@ -173,6 +175,38 @@ func (c *Client) ReadFile(ctx context.Context, sandboxID, path string) ([]byte, 
 		return nil, fmt.Errorf("close sandbox file reader: %w", closeErr)
 	}
 	return content, nil
+}
+
+// ListWorkspaceFiles returns the provider's visible workspace tree without
+// exposing its absolute paths or metadata. The Server remains responsible for
+// deciding which workflow and turn may use the Sandbox.
+func (c *Client) ListWorkspaceFiles(ctx context.Context, sandboxID string) ([]generation.WorkspaceFile, error) {
+	sandbox, err := c.connect(ctx, sandboxID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := sandbox.ListDirectoryWithDepth(ctx, workspaceMountPath, 32)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]generation.WorkspaceFile, 0, len(entries))
+	for _, entry := range entries {
+		path := strings.TrimPrefix(strings.TrimSpace(entry.Path), workspaceMountPath+"/")
+		if path == "" || path == strings.TrimSpace(entry.Path) {
+			return nil, fmt.Errorf("workspace provider returned an invalid path %q", entry.Path)
+		}
+		if err := ValidateWorkspacePath(path); err != nil {
+			return nil, fmt.Errorf("workspace provider returned an invalid path %q: %w", entry.Path, err)
+		}
+		kind := strings.ToLower(strings.TrimSpace(entry.Type))
+		files = append(files, generation.WorkspaceFile{
+			Path:      path,
+			Directory: kind == "directory" || kind == "dir",
+			Size:      entry.Size,
+		})
+	}
+	sort.Slice(files, func(left, right int) bool { return files[left].Path < files[right].Path })
+	return files, nil
 }
 
 func (c *Client) WriteFile(ctx context.Context, sandboxID, path string, content []byte, mode int) error {

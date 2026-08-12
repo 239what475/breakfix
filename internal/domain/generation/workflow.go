@@ -66,6 +66,33 @@ func (c ContentConfirmation) Valid() bool {
 	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" && validIdempotencyKey(c.IdempotencyKey)
 }
 
+// ContentChangeRequest returns one reviewed candidate to Generating. The
+// request keeps the existing workspace and records the author's concrete
+// change request as the next Generator turn's feedback.
+type ContentChangeRequest struct {
+	WorkflowID          string `json:"workflow_id"`
+	CandidateRevisionID string `json:"candidate_revision_id"`
+	Feedback            string `json:"feedback"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+func (c ContentChangeRequest) Valid() bool {
+	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" &&
+		strings.TrimSpace(c.Feedback) != "" && validIdempotencyKey(c.IdempotencyKey)
+}
+
+// Cancellation is the explicit, idempotent request to stop one unfinished
+// workflow. Cleanup remains asynchronous; this request only changes the
+// durable workflow authority.
+type Cancellation struct {
+	WorkflowID     string `json:"workflow_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+func (c Cancellation) Valid() bool {
+	return strings.TrimSpace(c.WorkflowID) != "" && validIdempotencyKey(c.IdempotencyKey)
+}
+
 // ClassificationAdjustmentConfirmation requests one new private Classifying
 // run for the reviewed proposal. The proposal revision is the optimistic
 // concurrency fence; the author message itself is classified by the Agent.

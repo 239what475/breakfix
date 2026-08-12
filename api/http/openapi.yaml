@@ -1303,11 +1303,9 @@ components:
 
     AuthoringCandidate:
       type: object
-      required: [id, generator_run_id, archive_sha256]
+      required: [id, archive_sha256]
       properties:
         id:
-          type: string
-        generator_run_id:
           type: string
         archive_sha256:
           type: string

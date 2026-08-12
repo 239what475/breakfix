@@ -27,7 +27,11 @@ func (r *WorkspaceReaper) Recover(ctx context.Context) error {
 	if r == nil || r.manager == nil {
 		return errors.New("generator workspace reaper is not configured")
 	}
-	return r.manager.CleanupDue(ctx)
+	// A Server restart never resumes a remotely executing Generator turn.
+	// Retire records first; Run performs the provider cleanup asynchronously so
+	// the next user turn can allocate a distinct PVC/Sandbox immediately.
+	_, err := r.manager.repo.RetireIncompleteGeneratorWorkspaces(ctx, r.manager.now())
+	return err
 }
 
 func (r *WorkspaceReaper) Run(ctx context.Context) error {
