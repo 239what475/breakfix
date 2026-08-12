@@ -642,22 +642,6 @@ func lockAuthoringPlanSessionTx(ctx context.Context, tx *Tx, id, userID string) 
 	return readAuthoringSessionTx(ctx, tx, id, userID)
 }
 
-func ensureNoActiveAuthoringRunTx(ctx context.Context, tx *Tx, runtimeSessionID string) error {
-	if strings.TrimSpace(runtimeSessionID) == "" {
-		return authoring.ErrInvalidState
-	}
-	var active bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM agent_runs WHERE session_id = ? AND status = ?
-	)`, runtimeSessionID, agent.RunRunning).Scan(&active); err != nil {
-		return fmt.Errorf("check active authoring run: %w", err)
-	}
-	if active {
-		return authoring.ErrInvalidState
-	}
-	return nil
-}
-
 func createAuthoringStageTx(ctx context.Context, tx *Tx, sessionID string, base *authoring.Revision, run agent.Run, now time.Time) (*authoring.Stage, error) {
 	if base == nil || run.Attempt < 1 {
 		return nil, errors.New("authoring stage requires a base revision and active run")

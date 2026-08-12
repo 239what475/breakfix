@@ -116,13 +116,34 @@ func (s *GeneratorService) ConfirmGeneration(ctx context.Context, userID, sessio
 }
 
 func (s *GeneratorService) GetGeneration(ctx context.Context, userID, workflowID string) (*GenerationView, error) {
-	workflow, err := s.ownedWorkflow(ctx, userID, workflowID)
+	workflow, err := s.GetGenerationWorkflow(ctx, userID, workflowID)
 	if err != nil {
 		return nil, err
 	}
 	view := &GenerationView{Workflow: *workflow}
+	candidateRevision, err := s.GetGenerationCandidate(ctx, userID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	view.Candidate = candidateRevision
+	return view, nil
+}
+
+// GetGenerationWorkflow returns one user-owned workflow without exposing a
+// provider, archive path, or workspace identity.
+func (s *GeneratorService) GetGenerationWorkflow(ctx context.Context, userID, workflowID string) (*domain.Workflow, error) {
+	return s.ownedWorkflow(ctx, userID, workflowID)
+}
+
+// GetGenerationCandidate returns the current immutable candidate for an owned
+// workflow. A workflow that has not received a submission has no candidate.
+func (s *GeneratorService) GetGenerationCandidate(ctx context.Context, userID, workflowID string) (*domain.Revision, error) {
+	workflow, err := s.ownedWorkflow(ctx, userID, workflowID)
+	if err != nil {
+		return nil, err
+	}
 	if workflow.CandidateRevisionID == "" {
-		return view, nil
+		return nil, nil
 	}
 	candidateRevision, err := s.store.GetCandidateRevision(ctx, workflow.CandidateRevisionID)
 	if err != nil {
@@ -131,8 +152,7 @@ func (s *GeneratorService) GetGeneration(ctx context.Context, userID, workflowID
 	if candidateRevision.Source != workflow.Source || candidateRevision.SourceRevision != workflow.SourceRevision {
 		return nil, errors.New("generation candidate does not belong to workflow")
 	}
-	view.Candidate = candidateRevision
-	return view, nil
+	return candidateRevision, nil
 }
 
 func (s *GeneratorService) ListActiveGenerations(ctx context.Context, userID string) ([]domain.Workflow, error) {
@@ -202,6 +222,17 @@ func (s *GeneratorService) ReadWorkspaceFile(ctx context.Context, userID string,
 	return FileReadResponse{Content: selectWorkspaceLines(string(content), offset, limit)}, nil
 }
 
+// ReadWorkspaceContent is the narrow string result used by interactive Agent
+// tools. It keeps the line-selection policy in GeneratorService rather than
+// asking an adapter to reconstruct a provider file read.
+func (s *GeneratorService) ReadWorkspaceContent(ctx context.Context, userID string, turn domain.WorkspaceTurn, path string, offset, limit int) (string, error) {
+	value, err := s.ReadWorkspaceFile(ctx, userID, turn, path, offset, limit)
+	if err != nil {
+		return "", err
+	}
+	return value.Content, nil
+}
+
 func (s *GeneratorService) WriteWorkspaceFile(ctx context.Context, userID string, turn domain.WorkspaceTurn, path, content string) error {
 	record, err := s.generatingWorkspace(ctx, userID, turn)
 	if err != nil {
@@ -251,6 +282,25 @@ func (s *GeneratorService) RunWorkspaceCommand(ctx context.Context, userID strin
 		return err
 	}
 	return nil
+}
+
+// ExecuteWorkspaceCommand collects one command's streamed and final output
+// for a function tool response. The provider execution remains inside
+// GeneratorService and the caller never receives a sandbox identity.
+func (s *GeneratorService) ExecuteWorkspaceCommand(ctx context.Context, userID string, turn domain.WorkspaceTurn, command string) (int, string, error) {
+	var output strings.Builder
+	exitCode := 0
+	err := s.RunWorkspaceCommand(ctx, userID, turn, command, func(event ExecuteEvent) error {
+		output.WriteString(event.Content)
+		if event.ExitCode != nil {
+			exitCode = *event.ExitCode
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	return exitCode, output.String(), nil
 }
 
 // ArchiveWorkspace keeps archive bytes inside the Server application boundary.

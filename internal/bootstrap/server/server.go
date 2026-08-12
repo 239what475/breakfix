@@ -20,6 +20,7 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
+	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
@@ -28,6 +29,8 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
+	"github.com/breakfix/breakfix/internal/content/challenge"
+	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -106,6 +109,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	var generatorSandbox *opensandbox.Client
 	var generatorWorkspace *appgeneration.Manager
+	var generatorService *appgeneration.GeneratorService
 	var generationAgents *appgeneration.AgentRunner
 	var workspaceReaper *appgeneration.WorkspaceReaper
 	if cfg.OpenSandbox.APIKey != "" {
@@ -130,6 +134,23 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			incusClient.Close()
 			cleanupDatabase()
 			return nil, fmt.Errorf("create generator workspace manager: %w", err)
+		}
+		generatorService, err = appgeneration.NewGeneratorService(
+			database.Generation,
+			database.Authoring,
+			generatorWorkspace,
+			generatorSandbox,
+			appgeneration.GeneratorServiceConfig{
+				DataDir: cfg.DataDir,
+				FreezeExecution: func(entry challenge.Entry) (generationdomain.ExecutionSnapshot, error) {
+					return appexecution.Freeze(entry, runtimesnapshot.From(cfg.Runtime, cfg.Incus))
+				},
+			},
+		)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create generator service: %w", err)
 		}
 		classificationRuntime, err := appgeneration.NewClassificationRuntime(database.Generation, database.Agent, database.Roadmap)
 		if err != nil {
@@ -208,7 +229,12 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("validate challenge catalog: %w", err)
 	}
 
-	authoringService := appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, llm.NewAuthoringExecutor(cfg.Agent))
+	if generatorService == nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, errors.New("generator service is required for authoring")
+	}
+	authoringService := appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, llm.NewAuthoringExecutor(cfg.Agent, generatorService))
 	assistantService := appassistant.NewService(database.Agent, cfg.Agent.Model, llm.NewAssistantExecutor(cfg.Agent))
 	roadmapMaintenance, err := approadmap.NewMaintenanceService(approadmap.MaintenanceConfig{
 		Repository: database.Roadmap, Executor: llm.NewRoadmapExecutor(cfg.Agent),

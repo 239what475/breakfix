@@ -71,6 +71,10 @@ func (r *runtimeServiceRepository) GetAuthoringSession(context.Context, string, 
 	return nil, errors.New("unexpected GetAuthoringSession")
 }
 
+func (r *runtimeServiceRepository) GetAuthoringSessionInternal(context.Context, string) (*authoringdomain.Session, error) {
+	return &authoringdomain.Session{ID: r.run.OwnerRef, UserID: "authoring-user", RuntimeSessionID: r.run.SessionID}, nil
+}
+
 func (r *runtimeServiceRepository) GetLatestOpenAuthoringSession(context.Context, string) (*authoringdomain.Session, error) {
 	return nil, errors.New("unexpected GetLatestOpenAuthoringSession")
 }
@@ -124,13 +128,13 @@ func (r *runtimeServiceRepository) RestartInterruptedAuthoringRun(context.Contex
 
 type failingRuntimeExecutor struct{ calls int }
 
-func (e *failingRuntimeExecutor) Run(context.Context, string, authoringdomain.Stage, []agent.Message, StageUpdater, func(StreamEvent)) (string, error) {
+func (e *failingRuntimeExecutor) Run(context.Context, Execution, StageUpdater, func(StreamEvent)) (string, error) {
 	e.calls++
 	return "", errors.New("model transport unavailable")
 }
 
 type contextRuntimeExecutor struct{}
 
-func (contextRuntimeExecutor) Run(ctx context.Context, _ string, _ authoringdomain.Stage, _ []agent.Message, _ StageUpdater, _ func(StreamEvent)) (string, error) {
+func (contextRuntimeExecutor) Run(ctx context.Context, _ Execution, _ StageUpdater, _ func(StreamEvent)) (string, error) {
 	return "", ctx.Err()
 }

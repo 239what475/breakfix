@@ -13,6 +13,7 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	domain "github.com/breakfix/breakfix/internal/domain/authoring"
+	generation "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -22,26 +23,31 @@ import (
 // AuthoringExecutor is the Eino implementation of the interactive authoring
 // application port. It owns model setup and tool execution only.
 type AuthoringExecutor struct {
-	config config.AgentConfig
+	config    config.AgentConfig
+	generator appauthoring.GeneratorOperations
 }
 
-func NewAuthoringExecutor(cfg config.AgentConfig) *AuthoringExecutor {
-	return &AuthoringExecutor{config: cfg}
+func NewAuthoringExecutor(cfg config.AgentConfig, generator appauthoring.GeneratorOperations) *AuthoringExecutor {
+	return &AuthoringExecutor{config: cfg, generator: generator}
 }
 
-func (e *AuthoringExecutor) Run(ctx context.Context, runID string, stage domain.Stage, history []agent.Message, updater appauthoring.StageUpdater, emit func(appauthoring.StreamEvent)) (string, error) {
-	if strings.TrimSpace(runID) == "" || updater == nil {
-		return "", errors.New("authoring execution requires run and Server stage updater")
+func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Execution, updater appauthoring.StageUpdater, emit func(appauthoring.StreamEvent)) (string, error) {
+	if strings.TrimSpace(execution.RunID) == "" || strings.TrimSpace(execution.UserID) == "" || strings.TrimSpace(execution.SessionID) == "" || updater == nil || e.generator == nil {
+		return "", errors.New("authoring execution requires a trusted run, user, session, stage updater, and generator service")
 	}
-	if len(history) == 0 || history[len(history)-1].Role != "user" {
+	if len(execution.History) == 0 || execution.History[len(execution.History)-1].Role != "user" {
 		return "", errors.New("authoring execution requires a latest user message")
 	}
 	chat, err := NewChatModel(ctx, e.config)
 	if err != nil {
 		return "", err
 	}
-	conversation := &runtimeConversation{runID: runID, updater: updater, stage: stage}
-	inputs, err := authoringInputs(conversation, history)
+	conversation := &runtimeConversation{
+		runID: execution.RunID, userID: execution.UserID, sessionID: execution.SessionID, userMessageID: execution.UserMessageID,
+		updater: updater, generator: e.generator, stage: execution.Stage,
+	}
+	defer conversation.releaseWorkspaceTurn()
+	inputs, err := authoringInputs(conversation, execution.History)
 	if err != nil {
 		return "", err
 	}
@@ -149,9 +155,14 @@ func toBaseAuthoringTools(values []tool.InvokableTool) []tool.BaseTool {
 }
 
 type runtimeConversation struct {
-	runID   string
-	updater appauthoring.StageUpdater
-	stage   domain.Stage
+	runID         string
+	userID        string
+	sessionID     string
+	userMessageID string
+	updater       appauthoring.StageUpdater
+	generator     appauthoring.GeneratorOperations
+	stage         domain.Stage
+	turn          *generation.WorkspaceTurn
 }
 
 func (c *runtimeConversation) prompt(userMessage string) (string, error) {
@@ -192,6 +203,60 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 			"ids":    {Type: schema.Array, ElemInfo: &schema.ParameterInfo{Type: schema.String}, Required: true},
 			"reason": {Type: schema.String, Desc: "排序理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
 		}, run: c.reorderCheckpoints},
+		&authoringTool{name: "confirm_generation", desc: "在作者已明确确认一个已持久化的 Plan revision 后创建生成任务。当前回合修改过 Plan 时不能调用，必须等该回合结束后由作者在新消息中确认。", params: map[string]*schema.ParameterInfo{
+			"plan_revision": {Type: schema.Integer, Desc: "作者明确确认的当前 Plan revision", Required: true},
+		}, run: c.confirmGeneration},
+		&authoringTool{name: "list_active_generations", desc: "列出当前作者尚未结束的生成任务及其状态。", params: map[string]*schema.ParameterInfo{}, run: c.listActiveGenerations},
+		&authoringTool{name: "get_generation", desc: "读取一个生成任务的状态、当前 candidate 和可供下一步处理的反馈。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "生成任务 ID", Required: true},
+		}, run: c.getGeneration},
+		&authoringTool{name: "list_workspace_files", desc: "列出一个 Generating 任务远程工作区中的文件。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
+		}, run: c.listWorkspaceFiles},
+		&authoringTool{name: "read_workspace_file", desc: "读取一个 Generating 任务远程工作区中的相对路径文件。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
+			"path":        {Type: schema.String, Desc: "工作区相对路径", Required: true},
+			"offset":      {Type: schema.Integer, Desc: "从 1 开始的行号；省略时从第一行开始", Required: false},
+			"limit":       {Type: schema.Integer, Desc: "最多读取的行数；省略时读取剩余内容", Required: false},
+		}, run: c.readWorkspaceFile},
+		&authoringTool{name: "write_workspace_file", desc: "完整写入一个 Generating 任务远程工作区中的相对路径文件。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
+			"path":        {Type: schema.String, Desc: "工作区相对路径", Required: true},
+			"content":     {Type: schema.String, Desc: "文件完整内容", Required: true},
+		}, run: c.writeWorkspaceFile},
+		&authoringTool{name: "run_workspace_command", desc: "在一个 Generating 任务远程工作区中执行命令，并返回退出码和输出。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
+			"command":     {Type: schema.String, Desc: "在工作区中执行的命令", Required: true},
+		}, run: c.runWorkspaceCommand},
+		&authoringTool{name: "submit_candidate", desc: "归档并提交当前 Generating 任务的工作区，进入 Server 内部审核。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
+		}, run: c.submitCandidate},
+		&authoringTool{name: "confirm_content", desc: "作者已审阅当前已验证 candidate 后，确认内容并启动 Server 内部分类。", params: map[string]*schema.ParameterInfo{
+			"workflow_id":           {Type: schema.String, Desc: "待内容审核的任务 ID", Required: true},
+			"candidate_revision_id": {Type: schema.String, Desc: "作者确认的 candidate revision ID", Required: true},
+		}, run: c.confirmContent},
+		&authoringTool{name: "request_content_changes", desc: "作者要求修改当前内容审核中的 candidate，返回工作区继续修复。", params: map[string]*schema.ParameterInfo{
+			"workflow_id":           {Type: schema.String, Desc: "待内容审核的任务 ID", Required: true},
+			"candidate_revision_id": {Type: schema.String, Desc: "作者审阅的 candidate revision ID", Required: true},
+			"feedback":              {Type: schema.String, Desc: "作者的具体内容修改意见", Required: true},
+		}, run: c.requestContentChanges},
+		&authoringTool{name: "get_classification", desc: "读取 Server 内部 Classifier 为当前 candidate 提出的分类提案。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "生成任务 ID", Required: true},
+		}, run: c.getClassification},
+		&authoringTool{name: "request_classification_changes", desc: "作者要求 Server 内部 Classifier 根据反馈修订当前分类提案。", params: map[string]*schema.ParameterInfo{
+			"workflow_id":           {Type: schema.String, Desc: "待分类审核的任务 ID", Required: true},
+			"candidate_revision_id": {Type: schema.String, Desc: "作者审阅的 candidate revision ID", Required: true},
+			"proposal_revision":     {Type: schema.Integer, Desc: "作者审阅的分类 proposal revision", Required: true},
+			"feedback":              {Type: schema.String, Desc: "作者的具体分类修改意见", Required: true},
+		}, run: c.requestClassificationChanges},
+		&authoringTool{name: "confirm_classification_and_publish", desc: "作者已确认当前分类提案后，创建题目发布动作。", params: map[string]*schema.ParameterInfo{
+			"workflow_id":           {Type: schema.String, Desc: "待分类审核的任务 ID", Required: true},
+			"candidate_revision_id": {Type: schema.String, Desc: "作者确认的 candidate revision ID", Required: true},
+			"proposal_revision":     {Type: schema.Integer, Desc: "作者确认的分类 proposal revision", Required: true},
+		}, run: c.confirmClassificationAndPublish},
+		&authoringTool{name: "cancel_generation", desc: "在作者明确要求后取消一个尚未结束的生成任务；工作区由后台回收。", params: map[string]*schema.ParameterInfo{
+			"workflow_id": {Type: schema.String, Desc: "要取消的生成任务 ID", Required: true},
+		}, run: c.cancelGeneration},
 	}
 }
 

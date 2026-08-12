@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	authoringPromptVersion = "authoring-v1"
+	authoringPromptVersion = "authoring-v2"
 )
 
 // RuntimeRepository is the Server-owned Authoring boundary. The Server owns
@@ -24,6 +24,7 @@ type RuntimeRepository interface {
 	CreateAuthoringSession(context.Context, domain.Session, domain.Plan) (*domain.Session, error)
 	CreateChallengeRevisionSession(context.Context, string, string) (*domain.Session, error)
 	GetAuthoringSession(context.Context, string, string) (*domain.Session, error)
+	GetAuthoringSessionInternal(context.Context, string) (*domain.Session, error)
 	GetLatestOpenAuthoringSession(context.Context, string) (*domain.Session, error)
 	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
 	StartAuthoringRun(context.Context, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, error)
@@ -36,10 +37,22 @@ type RuntimeRepository interface {
 	RestartInterruptedAuthoringRun(context.Context, string, string, time.Time) (*agent.Run, error)
 }
 
+// Execution is the trusted Server-owned context for one Authoring AgentRun.
+// User and session identity are read from durable state rather than supplied by
+// a model tool call.
+type Execution struct {
+	RunID         string
+	UserID        string
+	SessionID     string
+	UserMessageID string
+	Stage         domain.Stage
+	History       []agent.Message
+}
+
 // Executor owns the model call for one interactive authoring run. The Eino
 // implementation lives in adapter/llm; this package owns only state changes.
 type Executor interface {
-	Run(context.Context, string, domain.Stage, []agent.Message, StageUpdater, func(StreamEvent)) (string, error)
+	Run(context.Context, Execution, StageUpdater, func(StreamEvent)) (string, error)
 }
 
 type StageUpdater interface {
@@ -195,8 +208,22 @@ func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(St
 		if stage.RunAttempt != run.Attempt {
 			return "", agent.ErrRunActive
 		}
+		if len(history) == 0 || history[len(history)-1].Role != "user" {
+			return "", errors.New("authoring execution has no latest user message")
+		}
+		session, err := s.repo.GetAuthoringSessionInternal(ctx, stage.SessionID)
+		if err != nil {
+			return "", err
+		}
+		if session.ID != run.OwnerRef || session.RuntimeSessionID != run.SessionID || strings.TrimSpace(session.UserID) == "" {
+			return "", agent.ErrRunActive
+		}
+		execution := Execution{
+			RunID: run.ID, UserID: session.UserID, SessionID: session.ID, UserMessageID: history[len(history)-1].ID,
+			Stage: *stage, History: history,
+		}
 		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
-		content, err := s.executor.Run(attemptCtx, run.ID, *stage, history, s.repo, emit)
+		content, err := s.executor.Run(attemptCtx, execution, s.repo, emit)
 		if err == nil {
 			_, err = s.repo.FinalizeAuthoringRun(attemptCtx, run.ID, run.Attempt, content, time.Now().UTC())
 		}

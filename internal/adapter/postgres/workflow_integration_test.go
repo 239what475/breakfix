@@ -533,7 +533,7 @@ func TestConfirmedPlanRevisionsOwnIndependentWorkflows(t *testing.T) {
 	}
 }
 
-func TestGenerationConfirmationWaitsForActiveAuthoringRun(t *testing.T) {
+func TestGenerationConfirmationCanRunInsideAuthoringTurn(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 5, 13, 0, 0, 0, time.UTC)
@@ -551,14 +551,18 @@ func TestGenerationConfirmationWaitsForActiveAuthoringRun(t *testing.T) {
 	}
 	if _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
-		Model: "test-model", PromptVersion: "authoring-v1",
+		Model: "test-model", PromptVersion: "authoring-v2",
 	}); err != nil {
 		t.Fatalf("start authoring run: %v", err)
 	}
-	if _, err := database.Generation.CreateGenerationWorkflow(ctx, session.ID, session.UserID, generation.StartConfirmation{
-		PlanRevision: 1, IdempotencyKey: "wait-for-authoring-run",
-	}, now); !errors.Is(err, authoring.ErrInvalidState) {
-		t.Fatalf("confirm generation during authoring run = %v, want invalid state", err)
+	workflow, err := database.Generation.CreateGenerationWorkflow(ctx, session.ID, session.UserID, generation.StartConfirmation{
+		PlanRevision: 1, IdempotencyKey: "confirm-inside-authoring-run",
+	}, now)
+	if err != nil {
+		t.Fatalf("confirm generation during authoring run: %v", err)
+	}
+	if workflow.State != generation.StateGenerating || workflow.Source.Ref != session.ID || workflow.SourceRevision != "1" {
+		t.Fatalf("generation workflow created inside authoring run = %#v", workflow)
 	}
 }
 
@@ -576,7 +580,7 @@ func TestAuthoringRunRecoveryReplacesPrivateStageAndFencesOldAttempt(t *testing.
 	}
 	stage, run, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
-		Model: "test-model", PromptVersion: "authoring-v1",
+		Model: "test-model", PromptVersion: "authoring-v2",
 	})
 	if err != nil {
 		t.Fatalf("start authoring run: %v", err)
