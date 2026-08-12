@@ -20,7 +20,6 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
-	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
@@ -29,8 +28,6 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
-	"github.com/breakfix/breakfix/internal/content/challenge"
-	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -134,18 +131,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("create generator workspace manager: %w", err)
 		}
-		workspaceRuntime, err := appgeneration.NewWorkspaceRuntime(database.Generation, generatorWorkspace, generatorSandbox)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create generator workspace runtime: %w", err)
-		}
-		generatorExecutor, err := llm.NewGeneratorExecutor(cfg.Agent, workspaceRuntime)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create generator agent executor: %w", err)
-		}
 		classificationRuntime, err := appgeneration.NewClassificationRuntime(database.Generation, database.Agent, database.Roadmap)
 		if err != nil {
 			incusClient.Close()
@@ -158,12 +143,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("create classification agent executor: %w", err)
 		}
-		snapshot := runtimesnapshot.From(cfg.Runtime, cfg.Incus)
-		generationAgents, err = appgeneration.NewAgentRunner(database.Generation, generatorExecutor, classifierExecutor, generatorWorkspace, appgeneration.AgentRunnerConfig{
-			ServerID: catalogInstallerID(), Model: cfg.Agent.Model, DataDir: cfg.DataDir,
-			FreezeExecution: func(entry challenge.Entry) (generationdomain.ExecutionSnapshot, error) {
-				return appexecution.Freeze(entry, snapshot)
-			},
+		generationAgents, err = appgeneration.NewAgentRunner(database.Generation, llm.NewJudge(cfg.Agent), classifierExecutor, appgeneration.AgentRunnerConfig{
+			ServerID: catalogInstallerID(), Model: cfg.Agent.Model,
 		})
 		if err != nil {
 			incusClient.Close()

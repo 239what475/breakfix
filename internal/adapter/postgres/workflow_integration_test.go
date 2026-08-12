@@ -464,9 +464,8 @@ func TestGenerationRuntimeLeaseTakeoverRetainsActionVersion(t *testing.T) {
 	now := time.Date(2026, time.August, 4, 10, 45, 0, 0, time.UTC)
 	publishWorkflowRoadmap(t, database, now)
 	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
-	claim := claimGenerationWorkflow(t, database, workflow.ID, "generator-takeover", now)
-	finalizeGeneratedCandidate(t, database, claim, 1, now)
-	claim = claimGenerationWorkflow(t, database, workflow.ID, "judge-takeover", now)
+	finalizeSubmittedCandidate(t, database, workflow.ID, 1, now)
+	claim := claimGenerationWorkflow(t, database, workflow.ID, "judge-takeover", now)
 	approveGenerationJudgement(t, database, claim, now)
 
 	first, err := database.Generation.ClaimGenerationWorkflow(ctx, "runtime-before-takeover", time.Second, now)
@@ -671,15 +670,12 @@ func TestGenerationAgentRunInterruptionCreatesReplacementWithNewBudget(t *testin
 	now := time.Date(2026, time.August, 5, 13, 15, 0, 0, time.UTC)
 	publishWorkflowRoadmap(t, database, now)
 	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+	finalizeSubmittedCandidate(t, database, workflow.ID, 1, now)
 	claim := claimGenerationWorkflow(t, database, workflow.ID, "server-before-restart", now)
-	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
+	run := startGenerationRun(t, database, claim, generationapp.JudgePurpose, now)
 
-	interrupted, err := database.Generation.InterruptActiveGenerationAgentRuns(ctx, "server restarted", now.Add(time.Minute))
-	if err != nil {
+	if err := database.Generation.InterruptActiveGenerationAgentRuns(ctx, "server restarted", now.Add(time.Minute)); err != nil {
 		t.Fatalf("interrupt active generation runs: %v", err)
-	}
-	if len(interrupted) != 1 || interrupted[0].WorkflowID != workflow.ID || interrupted[0].State != generation.StateGenerating {
-		t.Fatalf("interrupted runs = %#v", interrupted)
 	}
 	stored, err := database.Agent.GetRun(ctx, run.ID)
 	if err != nil {
@@ -689,7 +685,7 @@ func TestGenerationAgentRunInterruptionCreatesReplacementWithNewBudget(t *testin
 		t.Fatalf("interrupted run status = %s, want %s", stored.Status, agent.RunInterrupted)
 	}
 	replacementClaim := claimGenerationWorkflow(t, database, workflow.ID, "server-after-restart", now.Add(time.Minute))
-	replacement := startGenerationRun(t, database, replacementClaim, generationapp.GeneratorPurpose, now.Add(time.Minute))
+	replacement := startGenerationRun(t, database, replacementClaim, generationapp.JudgePurpose, now.Add(time.Minute))
 	if replacement.ID == run.ID || replacement.Attempt != 1 {
 		t.Fatalf("replacement run = %#v, interrupted = %#v", replacement, run)
 	}
@@ -701,8 +697,9 @@ func TestGenerationAgentRunUsesFiveTechnicalAttempts(t *testing.T) {
 	now := time.Date(2026, time.August, 5, 13, 30, 0, 0, time.UTC)
 	publishWorkflowRoadmap(t, database, now)
 	workflow, _, _ := createGenerationWorkflowFixture(t, database, now)
+	finalizeSubmittedCandidate(t, database, workflow.ID, 1, now)
 	claim := claimGenerationWorkflow(t, database, workflow.ID, "server-retry", now)
-	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
+	run := startGenerationRun(t, database, claim, generationapp.JudgePurpose, now)
 	for attempt := 1; attempt <= agent.MaxAttempts; attempt++ {
 		next, err := database.Generation.RetryGenerationAgentRun(ctx, claim, run.ID, "model transport unavailable", now.Add(time.Duration(attempt)*time.Second))
 		if err != nil {
@@ -848,9 +845,8 @@ func prepareGenerationPublication(t *testing.T, database *Store, now time.Time) 
 
 func advanceToVerifiedCandidate(t *testing.T, database *Store, workflowID string, now time.Time) generation.Revision {
 	t.Helper()
-	claim := claimGenerationWorkflow(t, database, workflowID, "generator-a", now)
-	candidate := finalizeGeneratedCandidate(t, database, claim, 1, now)
-	claim = claimGenerationWorkflow(t, database, workflowID, "judge-a", now)
+	candidate := finalizeSubmittedCandidate(t, database, workflowID, 1, now)
+	claim := claimGenerationWorkflow(t, database, workflowID, "judge-a", now)
 	approveGenerationJudgement(t, database, claim, now)
 	claim = claimGenerationWorkflow(t, database, workflowID, "builder-a", now)
 	advanceGenerationBuildAndArtifact(t, database, claim, now)
@@ -931,7 +927,7 @@ func claimGenerationWorkflow(t *testing.T, database *Store, workflowID, workerID
 		t.Fatalf("read generation workflow before claim: %v", err)
 	}
 	var claim *generation.Claim
-	if workflow.State == generation.StateGenerating || workflow.State == generation.StateJudging || workflow.State == generation.StateClassifying {
+	if workflow.State == generation.StateJudging || workflow.State == generation.StateClassifying {
 		claim, err = database.Generation.ClaimGenerationAgentWorkflow(context.Background(), workerID, time.Minute, now)
 	} else {
 		claim, err = database.Generation.ClaimGenerationWorkflow(context.Background(), workerID, time.Minute, now)
@@ -948,7 +944,6 @@ func claimGenerationWorkflow(t *testing.T, database *Store, workflowID, workerID
 func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, purpose string, now time.Time) *agent.Run {
 	t.Helper()
 	promptVersions := map[string]string{
-		generationapp.GeneratorPurpose:  generationapp.GeneratorPromptVersion,
 		generationapp.JudgePurpose:      generationapp.JudgePromptVersion,
 		generationapp.ClassifierPurpose: generationapp.ClassifierPromptVersion,
 	}
@@ -966,21 +961,44 @@ func startGenerationRun(t *testing.T, database *Store, claim generation.Claim, p
 	return run
 }
 
-func finalizeGeneratedCandidate(t *testing.T, database *Store, claim generation.Claim, sequence int, now time.Time) generation.Revision {
+func finalizeSubmittedCandidate(t *testing.T, database *Store, workflowID string, sequence int, now time.Time) generation.Revision {
 	t.Helper()
-	run := startGenerationRun(t, database, claim, generationapp.GeneratorPurpose, now)
+	workflow, err := database.Generation.GetGenerationWorkflow(context.Background(), workflowID)
+	if err != nil {
+		t.Fatalf("read workflow for candidate submission: %v", err)
+	}
+	session, err := database.Authoring.GetAuthoringSessionInternal(context.Background(), workflow.Source.Ref)
+	if err != nil {
+		t.Fatalf("read candidate submission session: %v", err)
+	}
+	workspaceID := generation.NewID("workspace")
+	record, err := database.Generation.CreateGeneratorWorkspace(context.Background(), generation.Workspace{
+		ID: workspaceID, WorkflowID: workflow.ID, Namespace: "generator-test", PVCName: generation.NewWorkspacePVCName(workspaceID),
+		State: generation.WorkspacePending, ProvisionDeadline: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("create candidate submission workspace: %v", err)
+	}
+	if err := database.Generation.ActivateGeneratorWorkspace(context.Background(), record.ID, "sandbox-"+record.ID, now); err != nil {
+		t.Fatalf("activate candidate submission workspace: %v", err)
+	}
+	turn := generation.WorkspaceTurn{WorkflowID: workflow.ID, ID: generation.NewID("generator-turn")}
+	if _, err := database.Generation.AcquireGeneratorWorkspaceTurn(context.Background(), turn, now); err != nil {
+		t.Fatalf("bind candidate submission workspace turn: %v", err)
+	}
 	revision := generation.Revision{
-		ID:             generation.NewID("candidate-revision"),
-		Source:         claim.Workflow.Source,
-		SourceRevision: claim.Workflow.SourceRevision,
-		ArchivePath:    "/tmp/generated-candidate-" + string(rune('0'+sequence)) + ".tar.gz",
-		ArchiveSHA256:  workflowTestDigest,
-		Snapshot:       generationTestSnapshot(),
+		ID:            generation.NewID("candidate-revision"),
+		ArchivePath:   "/tmp/generated-candidate-" + string(rune('0'+sequence)) + ".tar.gz",
+		ArchiveSHA256: workflowTestDigest,
+		Snapshot:      generationTestSnapshot(),
 	}
-	if err := database.Generation.FinalizeGeneratedCandidate(context.Background(), claim, run.ID, revision, now); err != nil {
-		t.Fatalf("finalize generated candidate %d: %v", sequence, err)
+	result, err := database.Generation.SubmitGenerationCandidate(context.Background(), session.ID, session.UserID, generation.CandidateSubmission{
+		WorkflowID: workflow.ID, TurnID: turn.ID, IdempotencyKey: "submit-candidate-" + string(rune('0'+sequence)),
+	}, revision, now)
+	if err != nil {
+		t.Fatalf("submit candidate %d: %v", sequence, err)
 	}
-	return revision
+	return *result
 }
 
 func approveGenerationJudgement(t *testing.T, database *Store, claim generation.Claim, now time.Time) {

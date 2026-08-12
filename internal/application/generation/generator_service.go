@@ -474,3 +474,35 @@ func removeCandidateArchive(dataDir, candidateID string) error {
 	}
 	return nil
 }
+
+func workspacePath(value string) (string, error) {
+	value = strings.TrimSpace(strings.TrimPrefix(value, "./"))
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return "", errors.New("workspace path must be a non-empty relative slash path")
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("invalid workspace path %q", value)
+		}
+	}
+	return "/workspace/" + value, nil
+}
+
+func selectWorkspaceLines(content string, offset, limit int) string {
+	if offset < 1 {
+		offset = 1
+	}
+	lines := strings.SplitAfter(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	start := offset - 1
+	if start >= len(lines) {
+		return ""
+	}
+	end := len(lines)
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+	return strings.Join(lines[start:end], "")
+}

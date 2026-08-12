@@ -169,7 +169,8 @@ func (d *GenerationRepository) ListGenerationWorkflowsForUser(ctx context.Contex
 
 // ClaimGenerationWorkflow is the Runtime Worker's only claim path. Server-side
 // Eino roles use ClaimGenerationAgentWorkflow and can never be obtained by a
-// worker identity. An expired Runtime lease consumes the current state's
+// worker identity. Generating is user-directed workspace activity, not an
+// agent claim. An expired Runtime lease consumes the current state's
 // infrastructure retry budget before a replacement claim is issued.
 func (d *GenerationRepository) ClaimGenerationWorkflow(ctx context.Context, workerID string, leaseTTL time.Duration, now time.Time) (*generation.Claim, error) {
 	if strings.TrimSpace(workerID) == "" || leaseTTL <= 0 || now.IsZero() {
@@ -250,11 +251,11 @@ func (d *GenerationRepository) ClaimGenerationAgentWorkflow(ctx context.Context,
 	now = now.UTC()
 	var id string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM generation_workflows
-		WHERE state IN (?, ?, ?)
+		WHERE state IN (?, ?)
 		AND next_run_at <= ?
 		AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
 		ORDER BY next_run_at, created_at, id
-		FOR UPDATE SKIP LOCKED LIMIT 1`, generation.StateGenerating, generation.StateJudging, generation.StateClassifying, now, now).Scan(&id)
+		FOR UPDATE SKIP LOCKED LIMIT 1`, generation.StateJudging, generation.StateClassifying, now, now).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit generation agent empty claim: %w", err)
@@ -448,7 +449,7 @@ func (d *GenerationRepository) StartGenerationAgentRun(ctx context.Context, clai
 	if !claim.Valid() || now.IsZero() || input.OwnerKind != "generation-workflow" || input.OwnerRef != claim.Workflow.ID {
 		return nil, errors.New("generation agent run ownership is invalid")
 	}
-	if input.Purpose != "generator" && input.Purpose != "judge" && input.Purpose != "classifier" {
+	if input.Purpose != "judge" && input.Purpose != "classifier" {
 		return nil, errors.New("generation agent run purpose is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -460,8 +461,7 @@ func (d *GenerationRepository) StartGenerationAgentRun(ctx context.Context, clai
 	if err != nil {
 		return nil, err
 	}
-	if (input.Purpose == "generator" && workflow.State != generation.StateGenerating) ||
-		(input.Purpose == "judge" && workflow.State != generation.StateJudging) ||
+	if (input.Purpose == "judge" && workflow.State != generation.StateJudging) ||
 		(input.Purpose == "classifier" && workflow.State != generation.StateClassifying) {
 		return nil, errors.New("generation agent run purpose does not match workflow state")
 	}
@@ -510,6 +510,9 @@ func (d *GenerationRepository) RetryGenerationAgentRun(ctx context.Context, clai
 	if err != nil {
 		return nil, err
 	}
+	if !workflow.State.AgentState() {
+		return nil, errors.New("generation agent retry requires a Judge or Classifier workflow")
+	}
 	if workflow.ActiveAgentRunID != runID {
 		return nil, generationLeaseLost()
 	}
@@ -557,106 +560,59 @@ func (d *GenerationRepository) RetryGenerationAgentRun(ctx context.Context, clai
 	return nil, nil
 }
 
-// InterruptActiveGenerationAgentRuns is startup recovery for Server-owned
-// model execution. Runtime actions are deliberately excluded: their workers
-// continue under their own lease and idempotent external identity.
-func (d *GenerationRepository) InterruptActiveGenerationAgentRuns(ctx context.Context, reason string, now time.Time) ([]generation.InterruptedAgentRun, error) {
+// InterruptActiveGenerationAgentRuns is startup recovery for the Server-owned
+// Judge and Classifier. Runtime actions continue under their own lease, while
+// user-directed Generator workspaces are retired by WorkspaceReaper.
+func (d *GenerationRepository) InterruptActiveGenerationAgentRuns(ctx context.Context, reason string, now time.Time) error {
 	if strings.TrimSpace(reason) == "" || now.IsZero() {
-		return nil, errors.New("generation agent interruption requires reason and current time")
+		return errors.New("generation agent interruption requires reason and current time")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin interrupt generation agent runs: %w", err)
+		return fmt.Errorf("begin interrupt generation agent runs: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `SELECT id, state, COALESCE(active_agent_run_id, '') FROM generation_workflows
-		WHERE state IN (?, ?, ?) FOR UPDATE`,
-		generation.StateGenerating, generation.StateJudging, generation.StateClassifying)
+	rows, err := tx.QueryContext(ctx, `SELECT id, COALESCE(active_agent_run_id, '') FROM generation_workflows
+		WHERE state IN (?, ?) FOR UPDATE`, generation.StateJudging, generation.StateClassifying)
 	if err != nil {
-		return nil, fmt.Errorf("list active generation agent runs: %w", err)
+		return fmt.Errorf("list active generation agent runs: %w", err)
 	}
 	type activeRun struct {
 		workflowID string
-		state      generation.WorkflowState
 		runID      string
 	}
 	active := make([]activeRun, 0)
 	for rows.Next() {
 		var value activeRun
-		if err := rows.Scan(&value.workflowID, &value.state, &value.runID); err != nil {
+		if err := rows.Scan(&value.workflowID, &value.runID); err != nil {
 			_ = rows.Close()
-			return nil, err
+			return err
 		}
 		active = append(active, value)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, err
+		return err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close active generation agent run list: %w", err)
+		return fmt.Errorf("close active generation agent run list: %w", err)
 	}
-	interrupted := make([]generation.InterruptedAgentRun, 0, len(active))
 	for _, value := range active {
 		if value.runID != "" {
 			if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
 				WHERE id = ? AND status = ?`, agent.RunInterrupted, strings.TrimSpace(reason), now.UTC(), now.UTC(), value.runID, agent.RunRunning); err != nil {
-				return nil, fmt.Errorf("interrupt generation agent run: %w", err)
+				return fmt.Errorf("interrupt generation agent run: %w", err)
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET active_agent_run_id = NULL, lease_owner = '', lease_expires_at = NULL,
 			next_run_at = ?, updated_at = ? WHERE id = ?`, now.UTC(), now.UTC(), value.workflowID); err != nil {
-			return nil, fmt.Errorf("release interrupted generation claim: %w", err)
+			return fmt.Errorf("release interrupted generation claim: %w", err)
 		}
-		interrupted = append(interrupted, generation.InterruptedAgentRun{WorkflowID: value.workflowID, State: value.state})
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return interrupted, nil
-}
-
-func (d *GenerationRepository) FinalizeGeneratedCandidate(ctx context.Context, claim generation.Claim, runID string, revision generation.Revision, now time.Time) error {
-	if !claim.Valid() || strings.TrimSpace(runID) == "" || now.IsZero() {
-		return errors.New("generated candidate finalization is invalid")
-	}
-	if revision.JudgeRunID != "" || revision.Source != claim.Workflow.Source || revision.SourceRevision != claim.Workflow.SourceRevision {
-		return errors.New("generated candidate lineage does not match workflow")
-	}
-	if err := revision.ValidateForCreate(); err != nil {
 		return err
 	}
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin generated candidate finalization: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	workflow, err := lockGenerationClaimTx(ctx, tx, claim, generation.StateGenerating, now.UTC())
-	if err != nil {
-		return err
-	}
-	if workflow.ActiveAgentRunID != runID {
-		return generationLeaseLost()
-	}
-	if workflow.CandidateRevisionID != "" {
-		revision.ParentCandidateID = workflow.CandidateRevisionID
-		revision.RepairReason = strings.TrimSpace(workflow.LastError)
-	}
-	if err := completeRunTx(ctx, tx, runID, now.UTC()); err != nil {
-		return err
-	}
-	revision.CreatedAt = now.UTC()
-	revision.UpdatedAt = now.UTC()
-	if err := insertCandidateRevisionTx(ctx, tx, revision); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, candidate_revision_id = ?, active_agent_run_id = NULL,
-		state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
-		last_error = '', next_run_at = ?, updated_at = ? WHERE id = ?`,
-		generation.StateJudging, revision.ID, now.UTC(), now.UTC(), workflow.ID); err != nil {
-		return fmt.Errorf("advance generated candidate workflow: %w", err)
-	}
-	return tx.Commit()
+	return nil
 }
 
 // FindSubmittedGenerationCandidate resolves a completed idempotent submission
@@ -2291,33 +2247,30 @@ func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Conte
 		return err
 	}
 	if workflow.CandidateRevisionID == "" {
-		if expected != generation.StateGenerating || report != nil {
-			return errors.New("generation artifact failure has no candidate revision")
+		return errors.New("generation artifact failure has no candidate revision")
+	}
+	candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	if err != nil {
+		return err
+	}
+	if report != nil {
+		if err := report.Validate(candidateRevision.Snapshot); err != nil {
+			return err
 		}
-	} else {
-		candidateRevision, err := scanCandidateRevision(tx.QueryRowContext(ctx, candidateRevisionSelect+` WHERE id = ? FOR UPDATE`, workflow.CandidateRevisionID))
+	}
+	encoded, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: failure.Code, Summary: failure.Summary})
+	if err != nil {
+		return err
+	}
+	var reportJSON any
+	if report != nil {
+		reportJSON, err = marshalJSON(*report)
 		if err != nil {
 			return err
 		}
-		if report != nil {
-			if err := report.Validate(candidateRevision.Snapshot); err != nil {
-				return err
-			}
-		}
-		encoded, err := marshalJSON(generation.Failure{Class: generation.FailureArtifact, Code: failure.Code, Summary: failure.Summary})
-		if err != nil {
-			return err
-		}
-		var reportJSON any
-		if report != nil {
-			reportJSON, err = marshalJSON(*report)
-			if err != nil {
-				return err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, verification_report = COALESCE(?::jsonb, verification_report), updated_at = ? WHERE id = ?`, encoded, reportJSON, now.UTC(), workflow.CandidateRevisionID); err != nil {
-			return fmt.Errorf("record candidate artifact failure: %w", err)
-		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, verification_report = COALESCE(?::jsonb, verification_report), updated_at = ? WHERE id = ?`, encoded, reportJSON, now.UTC(), workflow.CandidateRevisionID); err != nil {
+		return fmt.Errorf("record candidate artifact failure: %w", err)
 	}
 	if workflow.ActiveAgentRunID != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
@@ -2325,19 +2278,11 @@ func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Conte
 			return fmt.Errorf("fail generation agent run: %w", err)
 		}
 	}
-	if expected == generation.StateGenerating {
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET active_agent_run_id = NULL, runtime_attempt = 0,
-			lease_owner = '', lease_expires_at = NULL, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
-			failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("release rejected Generator AgentRun: %w", err)
-		}
-	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL,
-			state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
-			last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
-			generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
-			return fmt.Errorf("return artifact failure to generation: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, active_agent_run_id = NULL,
+		state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
+		last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
+		generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
+		return fmt.Errorf("return artifact failure to generation: %w", err)
 	}
 	return tx.Commit()
 }

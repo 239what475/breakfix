@@ -7,20 +7,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
 
-func TestAgentRunnerRetriesKnownTechnicalErrorWithinOneRun(t *testing.T) {
+func TestAgentRunnerRetriesJudgeTechnicalErrorWithinOneRun(t *testing.T) {
 	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
-	workflow := testAgentWorkflow("workflow-retry", domain.StateGenerating)
+	revision := testAgentCandidate(t)
+	workflow := testAgentWorkflow("workflow-retry", domain.StateJudging, revision.ID)
 	store := &agentRunnerStore{claim: domain.Claim{
 		Workflow:        workflow,
 		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
-	}}
-	runner := newTestAgentRunner(t, store, &failingGeneratorExecutor{calls: &store.generatorCalls})
+	}, candidate: revision}
+	runner := newTestAgentRunner(t, store, &failingJudgeExecutor{calls: &store.judgeCalls}, stubClassifierExecutor{})
 	runner.now = func() time.Time { return now }
 
 	processed, err := runner.ProcessOne(context.Background())
@@ -30,8 +31,8 @@ func TestAgentRunnerRetriesKnownTechnicalErrorWithinOneRun(t *testing.T) {
 	if !processed {
 		t.Fatal("generation agent did not claim work")
 	}
-	if store.generatorCalls != agent.MaxAttempts {
-		t.Fatalf("generator calls = %d, want %d", store.generatorCalls, agent.MaxAttempts)
+	if store.judgeCalls != agent.MaxAttempts {
+		t.Fatalf("judge calls = %d, want %d", store.judgeCalls, agent.MaxAttempts)
 	}
 	if store.retryCalls != agent.MaxAttempts {
 		t.Fatalf("technical retries = %d, want %d", store.retryCalls, agent.MaxAttempts)
@@ -41,37 +42,52 @@ func TestAgentRunnerRetriesKnownTechnicalErrorWithinOneRun(t *testing.T) {
 	}
 }
 
-func TestAgentRunnerDispatchesIndependentWorkflowsConcurrently(t *testing.T) {
+func TestAgentRunnerFinalizesJudgeResult(t *testing.T) {
+	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+	revision := testAgentCandidate(t)
+	workflow := testAgentWorkflow("workflow-judge", domain.StateJudging, revision.ID)
+	store := &agentRunnerStore{claim: domain.Claim{
+		Workflow:        workflow,
+		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
+	}, candidate: revision}
+	runner := newTestAgentRunner(t, store, approvingJudgeExecutor{}, stubClassifierExecutor{})
+	runner.now = func() time.Time { return now }
+
+	processed, err := runner.ProcessOne(context.Background())
+	if err != nil {
+		t.Fatalf("process judge: %v", err)
+	}
+	if !processed || !store.judgementFinalized {
+		t.Fatalf("judge processing = processed:%t finalized:%t", processed, store.judgementFinalized)
+	}
+}
+
+func TestAgentRunnerDispatchesIndependentJudgeWorkflowsConcurrently(t *testing.T) {
+	revision := testAgentCandidate(t)
 	claims := []domain.Claim{
-		{Workflow: testAgentWorkflow("workflow-a", domain.StateGenerating), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-a"}},
-		{Workflow: testAgentWorkflow("workflow-b", domain.StateGenerating), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-b"}},
+		{Workflow: testAgentWorkflow("workflow-a", domain.StateJudging, revision.ID), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-a"}},
+		{Workflow: testAgentWorkflow("workflow-b", domain.StateJudging, revision.ID), LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "lease-b"}},
 	}
 	store := &dispatchStore{
-		agentRunnerStore: &agentRunnerStore{},
+		agentRunnerStore: &agentRunnerStore{candidate: revision},
 		claims:           claims,
-		started:          make(chan string, len(claims)),
-		finished:         make(chan string, len(claims)),
+		started:          make(chan struct{}, len(claims)),
+		finished:         make(chan struct{}, len(claims)),
 	}
-	executor := &blockingGeneratorExecutor{started: store.started, finished: store.finished}
-	runner := newTestAgentRunner(t, store, executor)
+	judge := &blockingJudgeExecutor{started: store.started, finished: store.finished}
+	runner := newTestAgentRunner(t, store, judge, stubClassifierExecutor{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- runner.Run(ctx) }()
 
-	seen := make(map[string]bool, len(claims))
 	for range claims {
 		select {
-		case workflowID := <-store.started:
-			seen[workflowID] = true
+		case <-store.started:
 		case <-time.After(2 * time.Second):
 			cancel()
 			t.Fatalf("timed out waiting for independent workflows to start")
 		}
-	}
-	if len(seen) != len(claims) {
-		cancel()
-		t.Fatalf("started workflow IDs = %#v, want both workflows", seen)
 	}
 
 	cancel()
@@ -95,58 +111,45 @@ func TestAgentRunnerDispatchesIndependentWorkflowsConcurrently(t *testing.T) {
 	}
 }
 
-func TestAgentRunnerRecoveryReplacesInterruptedGeneratorWorkspace(t *testing.T) {
+func TestAgentRunnerFinalizesClassifierResult(t *testing.T) {
 	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
-	repo := &memoryWorkspaceRepository{}
-	pvcs := &memoryWorkspacePVCs{}
-	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-before-restart"}
-	manager := newWorkspaceManager(t, repo, pvcs, sandboxes, &now)
-	first, err := manager.Ensure(context.Background(), "workflow-recovery", []byte("candidate-before-restart"))
-	if err != nil {
-		t.Fatalf("create original workspace: %v", err)
-	}
-
-	store := &agentRunnerStore{interrupted: []domain.InterruptedAgentRun{{
-		WorkflowID: "workflow-recovery",
-		State:      domain.StateGenerating,
-	}}}
-	runner := newTestAgentRunnerWithWorkspace(t, store, &failingGeneratorExecutor{}, manager)
+	revision := testAgentCandidate(t)
+	workflow := testAgentWorkflow("workflow-classifier", domain.StateClassifying, revision.ID)
+	store := &agentRunnerStore{claim: domain.Claim{
+		Workflow:        workflow,
+		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
+	}, candidate: revision}
+	classifier := &recordingClassifierExecutor{}
+	runner := newTestAgentRunner(t, store, unexpectedJudgeExecutor{}, classifier)
 	runner.now = func() time.Time { return now }
+
+	processed, err := runner.ProcessOne(context.Background())
+	if err != nil {
+		t.Fatalf("process classifier: %v", err)
+	}
+	if !processed || classifier.calls != 1 {
+		t.Fatalf("classifier processing = processed:%t calls:%d", processed, classifier.calls)
+	}
+	if !store.classificationFinalized {
+		t.Fatal("classifier result was not finalized")
+	}
+}
+
+func TestAgentRunnerRecoveryInterruptsInternalAgentRuns(t *testing.T) {
+	runner := newTestAgentRunner(t, &agentRunnerStore{}, unexpectedJudgeExecutor{}, stubClassifierExecutor{})
 	if err := runner.Recover(context.Background()); err != nil {
 		t.Fatalf("recover generation agent runtime: %v", err)
 	}
-
-	retired, err := repo.GetGeneratorWorkspace(context.Background(), first.ID)
-	if err != nil {
-		t.Fatalf("read retired workspace: %v", err)
-	}
-	if retired.State != domain.WorkspaceDeleting {
-		t.Fatalf("interrupted workspace state = %s, want deleting", retired.State)
-	}
-	sandboxes.nextID = "sandbox-after-restart"
-	replacement, err := manager.Ensure(context.Background(), "workflow-recovery", []byte("candidate-from-durable-facts"))
-	if err != nil {
-		t.Fatalf("create replacement workspace: %v", err)
-	}
-	if replacement.ID == first.ID || replacement.PVCName == first.PVCName || replacement.SandboxID != "sandbox-after-restart" {
-		t.Fatalf("replacement workspace = %#v, original = %#v", replacement, first)
+	store := runner.store.(*agentRunnerStore)
+	if store.interruptCalls != 1 {
+		t.Fatalf("interrupt calls = %d, want 1", store.interruptCalls)
 	}
 }
 
-func newTestAgentRunner(t *testing.T, store GenerationAgentStore, executor GeneratorRoleExecutor) *AgentRunner {
+func newTestAgentRunner(t *testing.T, store GenerationAgentStore, judge JudgeRoleExecutor, classifier ClassifierRoleExecutor) *AgentRunner {
 	t.Helper()
-	return newTestAgentRunnerWithWorkspace(t, store, executor, newWorkspaceManager(t, &memoryWorkspaceRepository{}, &memoryWorkspacePVCs{}, &memoryWorkspaceSandboxes{}, new(time.Time)))
-}
-
-func newTestAgentRunnerWithWorkspace(t *testing.T, store GenerationAgentStore, executor GeneratorRoleExecutor, workspace *Manager) *AgentRunner {
-	t.Helper()
-	runner, err := NewAgentRunner(store, executor, stubClassifierExecutor{}, workspace, AgentRunnerConfig{
-		ServerID: "server-test",
-		Model:    "test-model",
-		DataDir:  t.TempDir(),
-		FreezeExecution: func(challenge.Entry) (domain.ExecutionSnapshot, error) {
-			return domain.ExecutionSnapshot{}, nil
-		},
+	runner, err := NewAgentRunner(store, judge, classifier, AgentRunnerConfig{
+		ServerID: "server-test", Model: "test-model",
 	})
 	if err != nil {
 		t.Fatalf("create generation agent runner: %v", err)
@@ -154,16 +157,24 @@ func newTestAgentRunnerWithWorkspace(t *testing.T, store GenerationAgentStore, e
 	return runner
 }
 
-type failingGeneratorExecutor struct{ calls *int }
+type failingJudgeExecutor struct{ calls *int }
 
-func (e *failingGeneratorExecutor) Generate(context.Context, domain.Execution) ([]byte, error) {
+func (e *failingJudgeExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
 	if e.calls != nil {
 		*e.calls = *e.calls + 1
 	}
-	return nil, errors.New("model transport unavailable")
+	return Judgement{}, errors.New("model transport unavailable")
 }
 
-func (*failingGeneratorExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
+type approvingJudgeExecutor struct{}
+
+func (approvingJudgeExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
+	return Judgement{Approved: true}, nil
+}
+
+type unexpectedJudgeExecutor struct{}
+
+func (unexpectedJudgeExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
 	return Judgement{}, errors.New("unexpected judge execution")
 }
 
@@ -173,21 +184,33 @@ func (stubClassifierExecutor) Classify(context.Context, domain.Execution, *Candi
 	return ClassificationCompletion{}, errors.New("unexpected classifier execution")
 }
 
+type recordingClassifierExecutor struct{ calls int }
+
+func (e *recordingClassifierExecutor) Classify(context.Context, domain.Execution, *Candidate) (ClassificationCompletion, error) {
+	e.calls++
+	return ClassificationCompletion{Initial: &domain.ClassificationOutput{
+		Result: domain.ClassificationUnclassifiable, UnclassifiableReason: "暂无合适分类", AdjustmentSuggestion: "补充分类信息",
+	}}, nil
+}
+
 type agentRunnerStore struct {
-	claim          domain.Claim
-	claimed        bool
-	run            agent.Run
-	generatorCalls int
-	retryCalls     int
-	interrupted    []domain.InterruptedAgentRun
+	claim                   domain.Claim
+	claimed                 bool
+	run                     agent.Run
+	candidate               domain.Revision
+	judgeCalls              int
+	retryCalls              int
+	interruptCalls          int
+	judgementFinalized      bool
+	classificationFinalized bool
 }
 
 type dispatchStore struct {
 	*agentRunnerStore
 	mu       sync.Mutex
 	claims   []domain.Claim
-	started  chan string
-	finished chan string
+	started  chan struct{}
+	finished chan struct{}
 }
 
 func (s *dispatchStore) ClaimGenerationAgentWorkflow(context.Context, string, time.Duration, time.Time) (*domain.Claim, error) {
@@ -219,20 +242,16 @@ func (s *dispatchStore) RetryGenerationAgentRun(context.Context, domain.Claim, s
 	return nil, nil
 }
 
-type blockingGeneratorExecutor struct {
-	started  chan string
-	finished chan string
+type blockingJudgeExecutor struct {
+	started  chan struct{}
+	finished chan struct{}
 }
 
-func (e *blockingGeneratorExecutor) Generate(ctx context.Context, execution domain.Execution) ([]byte, error) {
-	e.started <- execution.Claim.Workflow.ID
-	defer func() { e.finished <- execution.Claim.Workflow.ID }()
+func (e *blockingJudgeExecutor) Judge(ctx context.Context, _ authoring.Plan, _ *Candidate) (Judgement, error) {
+	e.started <- struct{}{}
+	defer func() { e.finished <- struct{}{} }()
 	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-func (*blockingGeneratorExecutor) Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error) {
-	return Judgement{}, errors.New("unexpected judge execution")
+	return Judgement{}, ctx.Err()
 }
 
 func (s *agentRunnerStore) ClaimGenerationAgentWorkflow(context.Context, string, time.Duration, time.Time) (*domain.Claim, error) {
@@ -240,11 +259,6 @@ func (s *agentRunnerStore) ClaimGenerationAgentWorkflow(context.Context, string,
 		return nil, nil
 	}
 	s.claimed = true
-	claim := s.claim
-	return &claim, nil
-}
-
-func (s *agentRunnerStore) GetGenerationClaim(context.Context, string, domain.LeaseCredential, time.Time) (*domain.Claim, error) {
 	claim := s.claim
 	return &claim, nil
 }
@@ -271,24 +285,27 @@ func (s *agentRunnerStore) RetryGenerationAgentRun(_ context.Context, _ domain.C
 	return &s.run, nil
 }
 
-func (s *agentRunnerStore) InterruptActiveGenerationAgentRuns(context.Context, string, time.Time) ([]domain.InterruptedAgentRun, error) {
-	return append([]domain.InterruptedAgentRun(nil), s.interrupted...), nil
+func (s *agentRunnerStore) InterruptActiveGenerationAgentRuns(context.Context, string, time.Time) error {
+	s.interruptCalls++
+	return nil
 }
 
-func (s *agentRunnerStore) GetCandidateRevision(context.Context, string) (*domain.Revision, error) {
-	return nil, errors.New("unexpected candidate read")
-}
-
-func (s *agentRunnerStore) FinalizeGeneratedCandidate(context.Context, domain.Claim, string, domain.Revision, time.Time) error {
-	return errors.New("unexpected generated candidate finalization")
+func (s *agentRunnerStore) GetCandidateRevision(_ context.Context, id string) (*domain.Revision, error) {
+	if id != s.candidate.ID {
+		return nil, errors.New("unexpected candidate read")
+	}
+	value := s.candidate
+	return &value, nil
 }
 
 func (s *agentRunnerStore) FinalizeGenerationJudgement(context.Context, domain.Claim, string, bool, string, time.Time) error {
-	return errors.New("unexpected judgement finalization")
+	s.judgementFinalized = true
+	return nil
 }
 
 func (s *agentRunnerStore) FinalizeGenerationClassification(context.Context, domain.Claim, string, domain.ClassificationOutput, time.Time) error {
-	return errors.New("unexpected classification finalization")
+	s.classificationFinalized = true
+	return nil
 }
 
 func (s *agentRunnerStore) FinalizeGenerationClassificationAdjustment(context.Context, domain.Claim, domain.ClassificationAdjustment, time.Time) error {
@@ -303,13 +320,20 @@ func (s *agentRunnerStore) RenewGenerationLease(context.Context, domain.Claim, t
 	return nil
 }
 
-func testAgentWorkflow(id string, state domain.WorkflowState) domain.Workflow {
+func testAgentWorkflow(id string, state domain.WorkflowState, candidateID string) domain.Workflow {
 	return domain.Workflow{
-		ID:             id,
-		Source:         domain.Source{Kind: domain.SourceAuthoring, Ref: "authoring-session"},
-		SourceRevision: "1",
-		State:          state,
-		StateVersion:   1,
-		NextRunAt:      time.Now().UTC(),
+		ID: id, Source: domain.Source{Kind: domain.SourceAuthoring, Ref: "authoring-session"}, SourceRevision: "1",
+		State: state, CandidateRevisionID: candidateID, StateVersion: 1, NextRunAt: time.Now().UTC(),
 	}
+}
+
+func testAgentCandidate(t *testing.T) domain.Revision {
+	t.Helper()
+	root := t.TempDir()
+	id := "candidate-0123456789abcdef"
+	path, digest, err := candidate.SaveArchiveAtomic(root, id, generatorServiceCandidateArchive(t))
+	if err != nil {
+		t.Fatalf("save candidate archive: %v", err)
+	}
+	return domain.Revision{ID: id, ArchivePath: path, ArchiveSHA256: digest}
 }

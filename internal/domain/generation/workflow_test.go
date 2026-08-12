@@ -3,8 +3,8 @@ package generation
 import "testing"
 
 func TestGenerationStateClassification(t *testing.T) {
-	if !StateGenerating.AgentState() || StateGenerating.RuntimeState() {
-		t.Fatal("Generating must belong only to the Server Agent Runtime")
+	if StateGenerating.AgentState() || StateGenerating.RuntimeState() {
+		t.Fatal("Generating must be user-directed workspace activity")
 	}
 	if !StateClassifying.AgentState() || StateClassifying.RuntimeState() {
 		t.Fatal("Classifying must belong only to the Server Agent Runtime")

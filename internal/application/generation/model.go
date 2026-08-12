@@ -4,23 +4,15 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
 const (
-	GeneratorPurpose        = "generator"
 	JudgePurpose            = "judge"
 	ClassifierPurpose       = "classifier"
-	GeneratorPromptVersion  = "generator-deep-v5"
 	JudgePromptVersion      = "generator-judge-v6"
 	ClassifierPromptVersion = "classification-v1"
 )
-
-type WorkspaceContext struct {
-	Plan     authoring.Plan      `json:"plan"`
-	Feedback generation.Feedback `json:"feedback"`
-}
 
 type FileReadResponse struct {
 	Content string `json:"content"`

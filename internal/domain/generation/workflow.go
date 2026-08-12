@@ -146,7 +146,7 @@ func (s WorkflowState) Terminal() bool {
 // Agent Runtime. Runtime Worker identities can never claim these states.
 func (s WorkflowState) AgentState() bool {
 	switch s {
-	case StateGenerating, StateJudging, StateClassifying:
+	case StateJudging, StateClassifying:
 		return true
 	default:
 		return false
@@ -261,14 +261,6 @@ func (c LeaseCredential) Valid() bool {
 type Claim struct {
 	Workflow Workflow `json:"workflow"`
 	LeaseCredential
-}
-
-// InterruptedAgentRun records the durable owner boundary recovered after a
-// Server interruption. The replacement AgentRun is created by the owning
-// Server runner from persisted workflow facts, never by replaying model state.
-type InterruptedAgentRun struct {
-	WorkflowID string
-	State      WorkflowState
 }
 
 func (c Claim) Valid() bool {
