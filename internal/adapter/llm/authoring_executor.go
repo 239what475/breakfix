@@ -174,8 +174,10 @@ func (c *runtimeConversation) prompt(userMessage string) (string, error) {
 
 %s
 
+当前已持久化 Plan revision 编号：%d。作者若确认当前题意，confirm_generation 的 plan_revision 必须传入这个编号。
+
 作者本次消息：
-%s`, string(plan), userMessage), nil
+%s`, string(plan), c.stage.BaseRevision, userMessage), nil
 }
 
 func (c *runtimeConversation) tools() []tool.InvokableTool {

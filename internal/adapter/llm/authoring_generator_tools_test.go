@@ -138,6 +138,20 @@ func newAuthoringGeneratorConversation(service *authoringGeneratorToolsService) 
 	}
 }
 
+func TestAuthoringConversationPromptIncludesCurrentPlanRevision(t *testing.T) {
+	conversation := newAuthoringGeneratorConversation(newAuthoringGeneratorToolsService())
+	prompt, err := conversation.prompt("作者确认当前题意")
+	if err != nil {
+		t.Fatalf("build authoring prompt: %v", err)
+	}
+	if !strings.Contains(prompt, "当前已持久化 Plan revision 编号：4") {
+		t.Fatalf("authoring prompt does not expose the current plan revision:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "作者本次消息：\n作者确认当前题意") {
+		t.Fatalf("authoring prompt does not keep the user message:\n%s", prompt)
+	}
+}
+
 type authoringGeneratorToolsService struct {
 	workflow  generation.Workflow
 	candidate *generation.Revision
