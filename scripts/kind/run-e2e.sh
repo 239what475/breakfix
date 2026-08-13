@@ -25,10 +25,10 @@ require_command() {
 }
 
 case "$suite" in
-	ui|node|recovery|acceptance-node|acceptance-k8s|agent-assistant|agent-soak)
+	ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|recovery|acceptance-node|acceptance-k8s|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
@@ -202,6 +202,11 @@ run_suite() {
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
 				fail 'acceptance-node requires RUN_AGENT_LIVE_E2E=1; this suite calls the real model and OpenSandbox'
 			npm run test:acceptance:node --prefix "$repo_root/test"
+			;;
+		acceptance-mcp)
+			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
+				fail 'acceptance-mcp requires RUN_AGENT_LIVE_E2E=1; this suite calls the real model and OpenSandbox'
+			npm run test:acceptance:mcp --prefix "$repo_root/test"
 			;;
 		acceptance-k8s)
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||

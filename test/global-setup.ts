@@ -6,7 +6,7 @@ function configuredBaseURL() {
 	const value = process.env.BREAKFIX_E2E_BASE_URL?.trim();
 	if (!value) {
 		throw new Error(
-			"BREAKFIX_E2E_BASE_URL is required; use make test-e2e, make test-e2e-node, make test-e2e-recovery, or make test-acceptance-node",
+			"BREAKFIX_E2E_BASE_URL is required; use make test-e2e, make test-e2e-node, make test-e2e-recovery, make test-acceptance-node, or make test-acceptance-mcp",
 		);
 	}
 	const url = new URL(value);

@@ -6,14 +6,18 @@ import {
 	registerAndLogin,
 	runTerminalCommand,
 	stopChallenge,
-	waitForVerifiedRevision,
 } from "../support/live-helpers";
 import {
 	attachNodeEnvironmentIdentity,
 	waitForNodeEnvironmentDeletion,
 } from "../support/e2e-platform";
 import {
+	CandidateRejectedError,
+	currentAuthoringSessionID,
+	expectNoLifecycleButtons,
+	sendAuthoringMessage,
 	waitForCatalogChallenge,
+	waitForActiveWorkflow,
 	waitForClassificationReview,
 	waitForPublishedChallenge,
 	waitForVerifiedCandidate,
@@ -21,7 +25,7 @@ import {
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
-agentLiveTest("generator verifies, publishes, and runs a node challenge", async ({ page }, testInfo) => {
+agentLiveTest("conversation confirms, verifies, publishes, and runs a node challenge", async ({ page }, testInfo) => {
 	test.setTimeout(50 * 60_000);
 	let challengeID = "";
 	let environmentName = "";
@@ -33,31 +37,37 @@ agentLiveTest("generator verifies, publishes, and runs a node challenge", async 
 
 		const composer = page.locator(".authoring-composer textarea");
 		await expect(composer).toBeEnabled({ timeout: 30_000 });
-		await composer.fill(
-			"创建一道 runtime: node 的单节点日志清理题，节点名为 host。/var/log/app 中有一个实际 mtime 超过 7 天的 app.log 和一个今天的 current.log。" +
-				"学习者需要创建可重复执行的 /usr/local/bin/archive-old-log.sh，将旧 app.log 压缩为 /var/log/app/app.log.gz，不得处理 current.log。" +
-				"题目有两个检查点：脚本存在且可执行；旧日志被压缩而新日志保留。",
+		await expectNoLifecycleButtons(page);
+		await sendAuthoringMessage(
+			page,
+			"创建一道 runtime: node 的单节点运行时初始化验收题，节点名为 host。" +
+				"平台预期 /var/lib/breakfix/web-e2e/ready 在初始化后存在且内容精确等于 ready，但当前初始化丢失了这个标记文件。" +
+				"学习者需要恢复该标记。题目有一个检查点：标记文件存在且内容精确为 ready。",
 		);
-		await page.getByRole("button", { name: "发送消息", exact: true }).click();
-		await expect(composer).toBeEnabled({ timeout: 8 * 60_000 });
-		await composer.fill(
-			"题意已经完整。初始脚本写入 app.log 后必须让它的实际 mtime 超过 7 天；标准答案必须执行归档脚本。不要增加节点、资源或检查点。",
+		await sendAuthoringMessage(
+			page,
+			"题意已经完整，我确认当前已持久化的 Plan revision。请创建生成任务并生成题目：" +
+				"初始脚本必须真的删除该标记文件；标准答案必须重新创建目录并写入精确内容 ready。" +
+				"不要增加节点、资源或检查点，生成完成后直接提交 candidate。",
 		);
-		await page.getByRole("button", { name: "发送消息", exact: true }).click();
-		await expect(page.getByRole("button", { name: "生成并验证题目", exact: true })).toBeEnabled({ timeout: 8 * 60_000 });
+		const sessionID = await currentAuthoringSessionID(page);
+		const workflowID = await waitForActiveWorkflow(page, sessionID);
+		try {
+			await waitForVerifiedCandidate(page, workflowID);
+		} catch (cause) {
+			if (!(cause instanceof CandidateRejectedError)) throw cause;
+			await sendAuthoringMessage(
+				page,
+				"请读取生成任务的反馈，修复 candidate 后重新提交；不要改动题意约定。",
+				sessionID,
+			);
+			await waitForVerifiedCandidate(page, workflowID);
+		}
+		await sendAuthoringMessage(page, "我确认题目内容，请进入分类。", sessionID);
+		await waitForClassificationReview(page, workflowID);
 
-		const generation = page.waitForResponse(
-			(response) => response.request().method() === "POST" && response.url().includes("/generate"),
-		);
-		await page.getByRole("button", { name: "生成并验证题目", exact: true }).click();
-		const session = (await (await generation).json()) as { id: string };
-		await waitForVerifiedCandidate(page, session.id);
-		await waitForVerifiedRevision(page);
-		await page.getByRole("button", { name: "确认题目内容", exact: true }).click();
-		await waitForClassificationReview(page, session.id);
-
-		await page.getByRole("button", { name: "确认分类并发布", exact: true }).click();
-		challengeID = await waitForPublishedChallenge(page, session.id);
+		await sendAuthoringMessage(page, "我确认当前分类提案，请发布题目。", sessionID);
+		challengeID = await waitForPublishedChallenge(page, sessionID);
 		await waitForCatalogChallenge(page, challengeID);
 
 		await page.getByRole("button", { name: "Catalog", exact: true }).click();

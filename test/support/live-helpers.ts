@@ -154,9 +154,3 @@ export async function stopChallenge(page: Page, challengeID: string) {
 		if (!response.ok) throw new Error(await response.text());
 	}, challengeID);
 }
-
-export async function waitForVerifiedRevision(page: Page) {
-	await expect(
-		page.getByRole("button", { name: "确认题目内容", exact: true }),
-	).toBeVisible({ timeout: 50 * 60_000 });
-}

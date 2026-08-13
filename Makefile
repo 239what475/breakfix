@@ -1,6 +1,6 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
-	test-e2e-recovery test-acceptance-node test-vk8s-network
+	test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -124,6 +124,11 @@ test-acceptance-node: test-deps
 	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live Node acceptance" >&2; exit 2; }
 	$(MAKE) --no-print-directory e2e-prepare
 	RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-node
+
+test-acceptance-mcp: test-deps
+	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live MCP acceptance" >&2; exit 2; }
+	$(MAKE) --no-print-directory e2e-prepare
+	RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-mcp
 
 test-vk8s-network:
 	./scripts/kind/verify-vk8s-network-isolation.sh
