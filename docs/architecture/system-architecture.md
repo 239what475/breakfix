@@ -3,25 +3,29 @@
 Breakfix 将用户交互、环境调和和后台内容执行分开。已发布题目是 Server data PVC 中的文件 artifact；学习和验证环境是 Kubernetes CRD；持久化状态在 PostgreSQL。
 
 ```text
-Browser
-  |
-  v
-Server <----------------------> PostgreSQL
-  |                                  |
-  |-- Agent Runtime                  |
-  |   Authoring / Assistant           |  GenerationWorkflow
-  |   Generator / Judge / Classifier  |  CatalogRelease
-  |   Roadmap Planner / Reviewers     |  RoadmapRevision
-  |
-  +--------------------------> Runtime Worker x N
-  v
-Controller
-  |
-  v
-NodeEnvironment / VK8sEnvironment
+Browser                                  本机 breakfix-mcp（stdio）
+  |                                      |
+  +----------> Server <------------------+----------> PostgreSQL
+                 |                                          |
+                 |-- Authoring / Assistant                  |  GenerationWorkflow
+                 |   Judge / Classifier                     |  CatalogRelease
+                 |   Roadmap Planner / Reviewers            |  RoadmapRevision
+                 |-- 共享 GeneratorService
+                 |
+                 +--------------------------> Runtime Worker x N
+                 |
+                 v
+               Controller
+                 |
+                 v
+               NodeEnvironment / VK8sEnvironment
 ```
 
 Catalog installer 是 Server 内的可恢复协调器，不是另一个 Deployment。Registry 保存 K8s OCI artifact，Incus 保存 Node system-container image；两者都是运行时依赖，不是浏览器 API 的一部分。
+
+网页 Authoring Agent 和本机 `breakfix-mcp` 是同一 `GeneratorService` 的两个客户端：网页 Agent 直接调用 Server 内的
+function tools，外部 Agent 通过 stdio MCP connector 再经 HTTPS 与用户 Token 调用同一 HTTP application API。两者产生完全
+相同的 candidate 和后续生命周期；远程 Server 永远不写调用机器的 `/tmp`。
 
 空平台的题库基线由 Server 启动配置中的 immutable Catalog Release 一次性安装。baseline 建立后不再导入后续 release；新增和修订内容走 Authoring、Generation、Classification 与 Roadmap。portable source、真实验证和原子公开语义见 [Catalog Release](catalog-release.md)。
 
@@ -39,7 +43,11 @@ Server 是业务状态的唯一写者。每个 Worker 请求都携带 lease owne
 
 ## 后台执行
 
-`GenerationWorkflow` 是一位作者确认生成后创建的唯一持久流程。Server 内的 role-specific Agent Runtime 执行 Generator、Judge 和 Classifier；Runtime Worker 只执行 Build、Artifact Publish、真实验证、正式发布和当前的资源回收。两者都不创建通用任务或按 `kind` 分发阶段。
+`GenerationWorkflow` 是作者在对应对话中明确确认一个 Plan revision 后，由 Generator client 调用共享的
+`confirm_generation` 创建的唯一持久流程。`Generating` 只表示该用户拥有的远程 workspace 可编辑并等待
+`submit_candidate`，没有后台 Generator Agent 领取该状态；网页 Authoring Agent 与 `breakfix-mcp` 复用同一
+`GeneratorService` 和 workspace 能力。Server 内的 role-specific Agent Runtime 只执行 Judge 和 Classifier；Runtime
+Worker 只执行 Build、Artifact Publish、真实验证、正式发布和当前的资源回收。两者都不创建通用任务或按 `kind` 分发阶段。
 
 `CatalogRelease` 是 Server-owned 的初始化流程。其 Entry 与 Commit 使用同一套 Runtime Worker 构建、发布、验证和 final promotion 能力，但不进入作者工作流；全部 entry 就绪后，Server 在同一 Roadmap 写锁下公开 release revision 并建立已处理基线。
 
@@ -47,9 +55,14 @@ Authoring 对话和学习 Assistant 不属于后台 Workflow。Server 直接运�
 
 ### Server 生命周期
 
-`internal/bootstrap/server` 是 Server 进程生命周期的唯一所有者。它先完成 materialization、Generator workspace、Generation/interactive AgentRun、Roadmap、学习投影、Assistant lease 和 publication finalizer 的恢复，再构造 HTTP Handler 和 Router。`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
+`internal/bootstrap/server` 是 Server 进程生命周期的唯一所有者。它先完成 materialization、未完成 Generator
+workspace 的退休、Judge/Classifier 与 interactive AgentRun、Roadmap、学习投影、Assistant lease 和 publication
+finalizer 的恢复，再构造 HTTP Handler 和 Router。`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
 
-bootstrap 显式启动 Catalog installer、materialization reconciler、Generation AgentRunner、Generator workspace reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、Roadmap maintenance 和已恢复的 interactive AgentRun。停止时先停止接收 HTTP 请求，再取消并等待这些服务，最后关闭 Incus 与 PostgreSQL；没有通用 executor、内存 worklist 或额外 Deployment。
+bootstrap 显式启动 Catalog installer、materialization reconciler、Judge/Classifier AgentRunner、Generator
+workspace reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、
+Roadmap maintenance 和已恢复的 interactive AgentRun。停止时先停止接收 HTTP 请求，再取消并等待这些服务，最后关闭
+Incus 与 PostgreSQL；没有通用 executor、内存 worklist 或额外 Deployment。
 
 ## 部署边界
 

@@ -9,7 +9,7 @@ Breakfix 将测试按依赖和失败边界分层。日常测试不启动模型�
 | 快速测试 | Go 领域逻辑、API、前端纯逻辑和 Controller 决策 | `make test-unit`、前端测试 |
 | 集成测试 | PostgreSQL、OCI/Catalog、Incus 和外部适配器契约 | 按依赖显式运行 |
 | 平台验收 | Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量真实主路径 | `make test-e2e`、`make test-e2e-node`、`make test-e2e-recovery` |
-| Live Agent 验收 | 真实模型、OpenSandbox 和 Authoring 全链路 | `make test-acceptance-node` 或手工 Live 入口 |
+| Live Agent 验收 | 真实模型、OpenSandbox、网页与 MCP 两条 Authoring 全链路 | `make test-acceptance-node`、`make test-acceptance-mcp` 或手工 Live 入口 |
 
 平台验收不替代快速测试；Controller 使用 `envtest` 的测试也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go 单元/集成测试覆盖，不塞进浏览器场景。
 
@@ -73,13 +73,26 @@ reset 只接受同一个已标记 Kind target，先停止会写入数据的 Serv
 
 ## Live Agent 验收
 
-真实 Node Authoring 是显式的人工验收，不属于日常门禁。它会先准备一个新的 E2E target，然后执行 Authoring -> 生成/真实验证 -> 作者确认题目 -> 分类确认 -> 发布 -> Node 学习环境的主路径：
+真实 Authoring 是显式的人工验收，不属于日常门禁。两条入口共用同一个 `GeneratorService` 和后续状态机：
+
+- **网页 Authoring Agent**：先与作者讨论并持久化 Plan，作者在对话中明确确认某个 revision 后，Agent 在同一个回合调用
+  `confirm_generation`、操作远程 workspace 并提交 candidate；后续内容审核、分类审核与发布也由作者在对话中确认后经版本绑定
+  工具推进。页面只有只读审核 Tab 与正常聊天输入，没有承担授权职责的 lifecycle 按钮。
+- **本机 `breakfix-mcp`**：外部 Agent 通过 stdio MCP connector 调用同一组工具。验收额外断言审核包被校验、摘要匹配后原子
+  投影到系统临时目录，重复同步幂等、删除投影后可重新同步，目录内没有用户 Token 或底层环境凭据，且其他用户 Token 不能读取
+  同一 workflow。
+
+两条验收都覆盖 candidate 提交、被打回后的修复与重新提交、真实 `Build -> ArtifactPublish -> Verify`、内容审核、分类审核和
+显式发布。执行入口：
 
 ```bash
 RUN_AGENT_LIVE_E2E=1 make test-acceptance-node
+RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp
 ```
 
-该入口只断言持久化状态、公开 challenge、Environment 和 checkpoint 的结果，不断言模型措辞、prompt、工具调用次数或 Markdown 渲染。失败时保留 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment 和 Worker 日志，之后用 `make e2e-reset` 丢弃目标。
+这些入口只断言持久化状态、公开 challenge、Environment、checkpoint 结果与 MCP 本地审核投影，不断言模型措辞、prompt、工具调用
+次数或 Markdown 渲染。失败时保留 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment、Worker
+日志和 Playwright 附件，之后用 `make e2e-reset` 丢弃目标。
 
 其他真实验收保持独立，必须先手工准备目标并显式启用对应开关：
 

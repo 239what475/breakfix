@@ -9,7 +9,7 @@
 api/        HTTP 与 CRD 契约及其受控生成物
 build/      镜像构建输入
 catalog/    可选：与真实基础题库一起提交的 portable Catalog Release source
-cmd/        可执行进程的 main
+cmd/        可执行进程的 main（server、controller、runtime-worker、breakfix-mcp、catalog-release）
 config/     非密钥配置与 Secret 示例
 deploy/     Kubernetes 清单和唯一的 Kind overlay
 docs/       长期架构、运维、产品和参考文档
@@ -25,8 +25,8 @@ web/        Vue 应用、Node 配置和 TypeScript 生成 client
 
 ```text
 internal/
-  adapter/       Kubernetes、Incus、OCI、OpenSandbox、LLM、PostgreSQL 和内部 HTTP 的具体实现
-  application/   作者、生成、catalog、publication、学习和执行快照用例
+  adapter/       Kubernetes、Incus、OCI、OpenSandbox、LLM、PostgreSQL、MCP connector 和内部 HTTP 的具体实现
+  application/   作者、共享 GeneratorService、catalog、publication、学习和执行快照用例
   bootstrap/     各进程的配置加载、依赖装配和生命周期
   buildinfo/     由 ldflags 写入的版本信息
   content/       portable challenge、发布 materialization 和 Roadmap source 文件契约
@@ -48,6 +48,8 @@ source，但不拥有数据库状态、Kubernetes SDK 或 Worker lease。`domain
 - `worker` 只通过 `adapter/internalapi` 与 Server 领取 Runtime Action lease、读取不可变上下文和报告结果；它不持有
   PostgreSQL DSN、模型凭据、OpenSandbox 凭据或 Server data PVC。
 - `controller` 只调和 Environment CRD 与 provider，不读取 Workflow、HTTP transport 或数据库 repository。
+- `adapter/mcpconnector` 是本机 stdio MCP Server 与远程 Generator application API 之间的薄认证适配器；它不持有业务状态，
+  只在本地物化可丢弃的只读审核投影。
 - `cmd/*/main.go` 只解析 flag、安装信号处理并调用相应 bootstrap；业务装配不回流到 `cmd`。
 
 跨进程和浏览器测试放在 `test/`；与 package 同生命周期的单元和集成测试留在被测 package 旁边。生成物只能由

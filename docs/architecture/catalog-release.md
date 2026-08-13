@@ -61,7 +61,7 @@ CatalogEntry:   Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | F
 Commit:         Prepared -> ArtifactPublished -> Materialized -> Committed
 ```
 
-Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Generator AgentRun、Authoring Session 或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
+Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并把展开后的 source 持久化到 Server data directory。Server 只负责 source staging、commit intent、source materialization 和最终原子公开；Runtime Worker 独立执行 Entry 的真实 Build、artifact publish、Verify 和 Commit 的最终 artifact promotion。它们不创建 `GenerationWorkflow`、Authoring Session、Generator 回合或 Roadmap task。已完成阶段和外部资源身份都被持久化，重启或 lease 接管只恢复尚未完成的阶段。
 
 启动边界只允许以下情况：空平台安装首次 digest；首次安装中断后以同一 digest 恢复；`Ready` baseline 以同一 digest 重启；以及没有配置 release 的空平台。已有 `Ready` baseline 时配置另一个 digest、已有 Authoring 发布内容但没有 baseline 时再配置 release，都会作为配置冲突拒绝启动。失败且没有公开任何 Challenge 的首次安装可以改用新 digest，但 Server 会先删除旧 staged source，并等待 Runtime Worker 完成旧 release 的 provider resource reap，之后才创建新 Release。
 

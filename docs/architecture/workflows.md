@@ -6,30 +6,46 @@
 
 ## Generation Workflow
 
-作者先在 `AuthoringSession` 中和 Agent 讨论题意、运行时、检查点与教学内容。作者确认 Plan revision
-后，每次 generate 请求创建一条独立的 `GenerationWorkflow`；它是这一项生成任务从 candidate 生成到正式发布的唯一持久身份。
-`generation_workflows` 同时是这些独立任务的数据库 worklist，不存在一个集中处理所有作者任务的统一 workflow 或额外 worklist 表。
+作者先在 `AuthoringSession` 中和 Agent 讨论题意、运行时、检查点与教学内容。每个持久化的 Plan revision 只有在作者于
+对应对话中明确确认后，才由网页 Authoring Agent 或本机 `breakfix-mcp` 调用共享的 `confirm_generation` 创建一条独立的
+`GenerationWorkflow`；它是这一项生成任务从 candidate 生成到正式发布的唯一持久身份。确认请求携带 Plan revision 与请求
+幂等键：Server 在创建过程中崩溃后，重试同一请求仍只得到一个 workflow。`generation_workflows` 同时是这些独立任务的数据库
+worklist，不存在一个集中处理所有作者任务的统一 workflow 或额外 worklist 表。
 
-Server 的 Agent Runtime 从数据库逐条领取当前可执行的 workflow。领取成功后立即异步推进该 workflow 的当前阶段，随后继续领取其他 workflow；因此不同作者的 workflow 可以同时运行。一个阶段完成并持久化状态转移后，当前执行结束，后续阶段由下一次领取自然推进。数据库 lease 和状态版本只负责防止重复领取和拒绝过期结果，不构成固定并发上限。
+`Generating` 只表示该用户拥有的远程 candidate workspace 可被当前 Generator client 修改并等待 `submit_candidate`，不是
+某个后台 Generator Agent 正在执行。网页 Authoring Agent 通过 Eino function tools、外部 Agent 通过经 HTTPS 与用户 Token
+调用的同一个 `GeneratorService` 操作 workspace；两个入口不引入第二套 worklist、Agent pool 或 Sandbox 类型。每个
+workspace 操作都归属一个明确的 Generator 回合，同一 workflow 同时只有一个回合写入。`submit_candidate` 是生成阶段唯一的
+持久化边界：Server 在提交时分配独立的 `CandidateRevision` ID，该 ID 不从 GeneratorRunID 或客户端会话 ID 派生；重复请求
+按提交幂等键返回同一 revision。提交后，Judge、Build、Artifact Publish 和 Verify 由异步状态机继续推进。
+
+Server 内部的 Judge/Classifier Agent Runtime 只从数据库逐条领取 `Judging` 与 `Classifying` 的 workflow。领取成功后
+立即异步推进该 workflow 的当前阶段，随后继续领取其他 workflow；因此不同作者的 workflow 可以同时运行。一个阶段完成并
+持久化状态转移后，当前执行结束，后续阶段由下一次领取自然推进。数据库 lease 和状态版本只负责防止重复领取和拒绝过期结果，
+不构成固定并发上限。
 
 ```text
-Server Agent Runtime                         Runtime Worker
---------------------                         --------------
-Generating -> Judging -> Building -> ArtifactPublishing -> Verifying
-                                                        |
-                                                        v
-NeedsAuthorReview <- verified candidate       candidate repair -> Generating
-  |
-  | author confirms content
-  v
-Classifying -> NeedsClassificationReview
-                    |
-                    | author confirms classification
-                    v
-             ChallengePublishing -> promotion result
-                                      |
-                                      v
-                         Server finalizer: materialize + RoadmapRevision -> Published
+Generator client                          Server internal                    Runtime Worker
+----------------                          --------------                     --------------
+网页 Authoring Agent / breakfix-mcp
+  -> confirm_generation -> Generating（用户 workspace，等待 submit_candidate）
+  -> workspace tools + submit_candidate -> Judging（Server Judge Agent）
+                                                                           Building -> ArtifactPublishing -> Verifying
+                                                                                                |
+                                                                                                v
+                                                           NeedsAuthorReview <- verified candidate
+                                                             |
+                                                             | 作者确认内容 -> Classifying（Server Classifier Agent）
+                                                             | -> NeedsClassificationReview
+                                                             |
+                                                             作者确认分类 -> ChallengePublishing（Runtime Worker）
+                                                                          |
+                                                                          v
+                                                         Server finalizer: materialize + RoadmapRevision -> Published
+
+Judging / Build / ArtifactPublishing / Verifying 的 candidate 问题
+  -> Generating（保留 candidate、反馈和 workspace，等待用户要求某个 Generator client 修复）
+NeedsAuthorReview -> request_content_changes -> Generating
 ```
 
 实际状态枚举以 `internal/domain/generation/` 为准；公开接口字段以
@@ -37,7 +53,7 @@ Classifying -> NeedsClassificationReview
 
 | State | 执行者 | 持久化结果 |
 | --- | --- | --- |
-| `Generating` | Server 的 Generator Agent | immutable candidate archive。 |
+| `Generating` | 用户拥有的 Generator client（网页 Authoring Agent 或 `breakfix-mcp`） | 可修改的远程 workspace；Server 在提交时分配 immutable CandidateRevision。 |
 | `Judging` | Server 的 Judge Agent | 审核结果或返回 Generator 的反馈。 |
 | `Building` | Runtime Worker | Node 的 Incus build image reference，或 K8s 的 build-scoped immutable OCI reference。 |
 | `ArtifactPublishing` | Runtime Worker | 真实验证可访问的 staging artifact。 |
@@ -78,8 +94,12 @@ PostgreSQL 权威状态重新派生后回收；Runtime Worker 的 provider reape
 该题 binding/关系边并将 Challenge 标为 `deprecated`；历史 revision、artifact、Environment 和学习记录不删除。正常
 Catalog 和新 Environment 只看 active Roadmap，因此 deprecated Challenge 不会重新进入学习入口。
 
-Generator、Judge 和 Classifier 的已知技术错误属于各自 `AgentRun`，一个逻辑 Run 最多五次；它们不会产生
-新的 CandidateRevision。Runtime state 的基础设施错误则由 Server 管理当前 state 的 `runtime_attempt`：进入
+Judge 和 Classifier 的已知技术错误属于各自 `AgentRun`，一个逻辑 Run 最多五次；它们不会产生新的
+CandidateRevision。Generator 的普通工具失败或回合中断只释放该 workspace 的回合 binding 并保留 workspace，
+不产生 CandidateRevision，也不恢复或重放半完成工具调用。Server 崩溃或重启会使所有未完成 Generator workspace
+失效：后台 reaper 异步删除旧 Sandbox/PVC，下一次 Generator client 操作创建新的 Sandbox 和 PVC，并从最近已提交
+CandidateRevision 或初始 Plan scaffold 重建。Runtime state 的基础设施错误则由 Server 管理当前 state 的
+`runtime_attempt`：进入
 state 时为一，最多五次。接管同一 state 时 external identity 保持
 `workflow_id + candidate_revision_id + state + state_version`，不包含 `runtime_attempt`。确定性 candidate
 错误从 Building、ArtifactPublishing 或 Verifying 返回 `Generating`；第五次 Runtime 基础设施失败进入
@@ -101,7 +121,7 @@ Worker promotion。
 
 ## Catalog Release
 
-Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Generator AgentRun、Authoring Session
+Catalog Release 不是 `GenerationWorkflow` 的 source variant，也不会创建 Authoring Session、Generator 回合
 或 Agent 调用。它只在空平台根据 `catalog.release_reference` 选择一个 immutable OCI digest，并使用独立的 durable
 Release/Entry/Commit 状态建立一次题库 baseline：
 

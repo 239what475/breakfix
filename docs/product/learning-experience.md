@@ -39,7 +39,10 @@ Catalog 公开展示当前 RoadmapRevision 中已绑定的题目摘要，并按�
 
 作者在同一页面完成自然语言讨论、题意约定和已验证 revision 审核。左侧内容面板只读，右侧是对话；修改题意或检查点只能通过 agent 的受控领域操作，不能直接编辑题目文件。
 
-作者明确确认后，系统生成题目，并通过 `Build -> ArtifactPublish -> Verify` 在真实环境中验证。候选 artifact 失败会由内部 generator/judge 循环修复，作者不会看到未经验证的代码产物。验证成功后，作者可以查看题目资产、检查点、diff 和验证摘要，再显式发布。
+作者在对话中明确确认某个 Plan revision 后，Authoring Agent 调用版本绑定的生成工具创建任务、操作远程 workspace 并提交
+candidate；Judge 与 `Build -> ArtifactPublish -> Verify` 都由异步状态机继续推进。打回或验证失败的反馈返回作者对话，作者要求
+Agent 修复后重新提交，不会在后台自动修复。验证成功后，作者可以查看题目资产、检查点、diff 和验证摘要，再在对话中确认内容、
+确认分类并显式发布。
 
 <img src="../assets/authoring-workspace-sketch.png" alt="作者工作台信息架构草图" width="100%">
 

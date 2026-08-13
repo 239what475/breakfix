@@ -1,13 +1,16 @@
 # Breakfix
 
 Breakfix 是一个提供真实、可回收运维实验环境的练习平台。学习者在隔离的
-`node` 或 `k8s` 环境中完成题目，检查点自动更新进度。作者先与 Agent 讨论题意，
-确认后由后台工作流生成、真实验证并发布题目。
+`node` 或 `k8s` 环境中完成题目，检查点自动更新进度。作者可以在网页中与 Authoring
+Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` 现场生成题目；两者
+使用同一套 Generator 工具面，确认后经过同一质量门禁、真实验证和显式发布。
 
 ## 架构
 
-- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、Authoring、Assistant、Generator、Judge、Classifier 与 Roadmap
-  Agent Runtime；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
+- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、Authoring、Assistant、共享 GeneratorService、Judge、Classifier
+  与 Roadmap Agent Runtime；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
+- **`breakfix-mcp`**：用户机器上的 stdio MCP Server；经 HTTPS 与用户 Token 调用远程 Server 的 Generator application API，
+  并把不可变审核包原子投影到本机可丢弃的只读目录。
 - **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
   回收真实环境。
 - **Runtime Worker**：独立运行 Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行构建、artifact

@@ -60,6 +60,22 @@ Controller 是唯一有权限调和 Environment CRD 的组件。Server 创建和
 
 Runtime Worker 的 `/healthz` 与 `/readyz` 只表示进程和 action loop 可用，不能因一个 provider 故障而让它停止领取其他 runtime 的 action。Registry、Kubernetes API 和 Incus 分别通过 `/capabilities/registry`、`/capabilities/kubernetes-api`、`/capabilities/node-provider` 暴露独立探针，并同时写入 capability metrics，供部署者告警和排障。
 
+## Agent-native authoring 客户端
+
+网页 Authoring Agent 不需要额外部署：它随 Server 运行，并直接调用共享的 `GeneratorService` function tools。外部 Agent 使用
+部署在用户机器上的 `breakfix-mcp`，它同时是标准 stdio MCP Server 和远程 Breakfix 的认证客户端：
+
+```yaml
+server_url: https://breakfix.example.com/api
+token_env: BREAKFIX_MCP_TOKEN
+```
+
+连接器从本地配置读取 Server URL 与用户 Token 环境变量，通过 HTTPS 调用与网页相同的 Generator application API；远程连接必须
+是 HTTPS，Server 在每次 workspace、workflow、审核和发布操作中校验用户所有权。Token 只存在于进程环境，不进入 Agent 对话、
+配置、日志、审核目录或 candidate。连接器把 Server 返回的不可变审核包投影到系统临时目录（默认
+`/tmp/breakfix/reviews/<workflow-id>/`），该目录是可丢弃的只读缓存：删除或重启后可从 Server 重新同步，用户在其中编辑文件
+不会改变 Server 状态。远程 Server 永远不写调用机器的临时目录；本地审核目录也不会上传回 Server。
+
 ## 远程调试
 
 根部署配置将 `debug.enabled` 固定为 `false`，因此没有远程调试路由。需要临时排查 Roadmap maintenance 或 portable
@@ -90,4 +106,4 @@ kubectl kustomize .
 kubectl kustomize deploy/overlays/kind
 ```
 
-Kind 平台验收必须先在专用 `kind-breakfix-e2e` 目标执行 `make e2e-prepare`，再分别执行 `make test-e2e`、`make test-e2e-node` 和 `make test-e2e-recovery`；完成后用 `make e2e-reset` 丢弃目标。它们使用动态 port-forward，不使用固定的 `localhost:9090`。真实模型验收只通过 `RUN_AGENT_LIVE_E2E=1 make test-acceptance-node` 或测试文档中的独立 Live 入口运行。完整边界见[测试与真实验收](testing.md)。
+Kind 平台验收必须先在专用 `kind-breakfix-e2e` 目标执行 `make e2e-prepare`，再分别执行 `make test-e2e`、`make test-e2e-node` 和 `make test-e2e-recovery`；完成后用 `make e2e-reset` 丢弃目标。它们使用动态 port-forward，不使用固定的 `localhost:9090`。真实模型验收通过 `RUN_AGENT_LIVE_E2E=1 make test-acceptance-node`、`RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp` 或测试文档中的其他独立 Live 入口运行。完整边界见[测试与真实验收](testing.md)。

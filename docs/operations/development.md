@@ -16,6 +16,24 @@ make build
 `make build` 在 `web/package-lock.json` 未变化时复用 `web/node_modules`，不会反复执行 `npm ci`；缺少依赖或锁文件更新时
 才重新安装。需要主动刷新前端依赖时运行 `make web-deps`。三个可执行文件都接受相同的 `-config` 参数。
 
+## 本机 breakfix-mcp 调试
+
+`make build` 同时生成 `bin/breakfix-mcp`。连接器通过 stdio MCP 协议运行，由 Codex 等 MCP Host 启动；手工调试时可以写一个
+最小配置并直接启动进程：
+
+```bash
+cat > /tmp/breakfix-mcp.yaml <<'EOF'
+server_url: https://breakfix.example.com/api
+token_env: BREAKFIX_MCP_TOKEN
+EOF
+BREAKFIX_MCP_TOKEN="$(...)" ./bin/breakfix-mcp -config /tmp/breakfix-mcp.yaml
+```
+
+stdout 只承载 newline-delimited JSON-RPC，诊断只写 stderr。`get_generation`、`wait_generation` 或显式 `sync_review` 在
+workflow 到达 `NeedsAuthorReview` / `NeedsClassificationReview` 时，会把绑定当前 revision 的不可变审核包原子投影到
+`/tmp/breakfix/reviews/<workflow-id>/`；排查投影问题时删除该目录后重新调用即可从 Server 权威重新同步，不必重启连接器。
+网页与 MCP 两个入口可用同一个 workflow ID 交替调试，因为它们共享同一个 `GeneratorService`。
+
 ## Kind
 
 Kind 仅用于开发。创建运行时 Secret、Registry 认证 Secret 和 Incus 身份 Secret 后运行：

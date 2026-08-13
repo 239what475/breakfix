@@ -12,12 +12,26 @@ make verify-generated
 
 - 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
 - Catalog 与题目：浏览当前 RoadmapRevision 中可见的 challenge、读取 problem/solution/hint、开始或停止学习环境。
-- Authoring：创建和读取会话、发送自然语言消息、确认生成、显式取消未完成 workflow、读取只读候选、确认发布。
+- Authoring：创建和读取会话、通过 SSE 发送自然语言消息并观察 Server-owned AgentRun。
+- Generator application API：保存或修订 Plan、确认生成、操作 workspace、提交 candidate、读取审核、作出版本绑定的内容/分类决定、显式取消与发布。
 - Assistant：在活动学习环境中发送消息并读取持久对话与工具证据。
 - 终端：先经 JWT 保护的 HTTP 接口签发一次性 ticket，再由 WebSocket 消费。
 
 浏览器不提交 challenge artifact，也没有做题 Submit。检查点由 Controller 自动评估；作者发布通过
-`GenerationWorkflow` 的作者审核状态触发，而不是上传任意文件。
+`GenerationWorkflow` 的作者审核决定触发，而不是上传任意文件。
+
+## Generator application API 与 breakfix-mcp
+
+Generator 工具面是同一份契约的两个入口：网页 Authoring Agent 直接作为 Server 内 Eino function tools 调用，本机
+`breakfix-mcp` 通过 HTTPS + `Authorization: Bearer <user token>` 调用同一组 OpenAPI 端点（`/generator/...`）。所有有副作用
+的请求都携带 `workflow_id`、candidate/proposal revision 与请求幂等键；Server 原子校验用户所有权、当前状态和版本，重复请求
+返回同一结果，版本已变化的请求被拒绝。`confirm_generation` 是创建 workflow 的唯一对外工具，不存在绕过对话确认的
+`create_generation`。
+
+`breakfix-mcp` 是一个标准 stdio MCP Server：它把共享 Generator 工具映射为同名 MCP tools，并把当前不可变审核包投影到本机
+可丢弃目录。Server 只返回 manifest 与 payload bytes；连接器校验摘要、写入同级临时目录、原子 rename，并只向 MCP Host 返回
+只读 `review_path`。本地目录不是编辑输入，删除后可由连接器从 Server 重新同步，绝不参与 workflow 恢复。Token、Sandbox ID、
+PVC、内部地址或凭据不进入 manifest、审核目录、工具结果或日志；远程连接必须使用 HTTPS。
 
 ## 调试 HTTP
 
