@@ -43,7 +43,7 @@ agent:
   base_url: https://api.deepseek.com
   api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
-  request_timeout: 2m
+  request_timeout: 5m
 
 opensandbox:
   base_url: ${BREAKFIX_OPENSANDBOX_BASE_URL}
