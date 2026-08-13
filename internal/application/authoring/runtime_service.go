@@ -16,6 +16,7 @@ import (
 
 const (
 	authoringPromptVersion = "authoring-v2"
+	authoringRunDeadline   = 30 * time.Minute
 )
 
 // RuntimeRepository is the Server-owned Authoring boundary. The Server owns
@@ -178,6 +179,7 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		Input:         input,
 		Model:         s.model,
 		PromptVersion: authoringPromptVersion,
+		DeadlineAt:    now.Add(authoringRunDeadline),
 	})
 	if err != nil {
 		return nil, nil, err
