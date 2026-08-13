@@ -98,13 +98,16 @@ func (m *Manager) EnsureFresh(ctx context.Context, workflowID string, seed []byt
 	if record.State == domain.WorkspaceDeleted || record.State == domain.WorkspaceDeleting {
 		return nil, false, fmt.Errorf("generator workspace is %s", record.State)
 	}
+	// An active workspace has already provisioned its PVC and Sandbox. Later
+	// Generator turns reuse it without being bounded by the historical
+	// provision deadline, which only fences the pending provisioning path.
+	if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
+		return record, created, nil
+	}
 	provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
 	defer cancel()
 	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.WorkflowID, m.storage); err != nil {
 		return nil, false, fmt.Errorf("ensure generator workspace pvc: %w", err)
-	}
-	if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
-		return record, created, nil
 	}
 	if strings.TrimSpace(record.SandboxID) == "" {
 		sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.ID)

@@ -33,6 +33,33 @@ func TestManagerReusesOneWorkflowWorkspace(t *testing.T) {
 	}
 }
 
+func TestManagerReusesActiveWorkspaceAfterProvisionDeadline(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repo := &memoryWorkspaceRepository{}
+	pvcs := &memoryWorkspacePVCs{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-one"}
+	manager := newWorkspaceManager(t, repo, pvcs, sandboxes, &now)
+
+	first, err := manager.Ensure(context.Background(), "workflow-one", []byte("seed"))
+	if err != nil {
+		t.Fatalf("ensure first workspace: %v", err)
+	}
+	// The provision deadline only fences pending provisioning. A later
+	// Generator turn must keep using the active workspace instead of being
+	// cancelled by the stale deadline.
+	now = now.Add(2 * time.Minute)
+	reused, err := manager.Ensure(context.Background(), "workflow-one", []byte("must-not-reset"))
+	if err != nil {
+		t.Fatalf("reuse active workspace after provision deadline: %v", err)
+	}
+	if reused.ID != first.ID || reused.State != domain.WorkspaceActive {
+		t.Fatalf("active workspace was not reused: first=%#v reused=%#v", first, reused)
+	}
+	if pvcs.created != 1 || sandboxes.created != 1 || sandboxes.resets != 1 {
+		t.Fatalf("active workspace was reprovisioned after its deadline: pvcs:%d creates:%d resets:%d", pvcs.created, sandboxes.created, sandboxes.resets)
+	}
+}
+
 func TestManagerRetiresWorkspaceBeforeReplacement(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	repo := &memoryWorkspaceRepository{}
@@ -369,7 +396,10 @@ type memoryWorkspacePVCs struct {
 	created, deleted int
 }
 
-func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(_ context.Context, namespace, name, _ string, _ string) error {
+func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(ctx context.Context, namespace, name, _ string, _ string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if p.claims == nil {
 		p.claims = make(map[string]struct{})
 	}
