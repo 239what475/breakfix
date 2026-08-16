@@ -386,7 +386,17 @@ export type AuthoringMessage = {
     role: 'user' | 'agent' | 'system' | 'event';
     content: string;
     changes?: Array<AuthoringChange>;
+    event?: AuthoringRunEvent;
     created_at: string;
+};
+
+export type AuthoringRunEvent = {
+    schema_version: 1;
+    kind: 'authoring_run_interrupted' | 'authoring_run_failed';
+    run_id: string;
+    reason: 'deadline_exceeded' | 'server_stopping' | 'server_restarted' | 'permanent_executor_error';
+    resumable: boolean;
+    recovery: 'workspace' | 'snapshot' | 'candidate' | 'empty';
 };
 
 export type AuthoringAsset = {
@@ -401,6 +411,12 @@ export type AuthoringFileDiff = {
 
 export type AuthoringMessageRequest = {
     content: string;
+    idempotency_key: string;
+};
+
+export type AuthoringRunReceipt = {
+    run_id: string;
+    status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 };
 
 export type GeneratorPlanRequest = {
@@ -1151,6 +1167,10 @@ export type SendAuthoringMessageResponses = {
      * Server-sent authoring ready, delta, complete, and error events
      */
     200: string;
+    /**
+     * The idempotency key already owns an existing authoring run; read the session to obtain its durable result
+     */
+    202: AuthoringRunReceipt;
 };
 
 export type SendAuthoringMessageResponse = SendAuthoringMessageResponses[keyof SendAuthoringMessageResponses];

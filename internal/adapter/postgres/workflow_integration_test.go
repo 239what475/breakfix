@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -316,6 +317,11 @@ func TestGenerationClassificationAdjustmentRetainsItsPinnedRoadmapRevision(t *te
 	if repeated.ID != resumed.ID || repeated.State != generation.StateClassifying || repeated.ClassificationFeedback != adjustment.Feedback {
 		t.Fatalf("idempotent classification adjustment = %#v", repeated)
 	}
+	conflicting := adjustment
+	conflicting.Feedback = "改为另一个分类方向。"
+	if _, err := database.Generation.ResumeGenerationClassification(ctx, sessionID, userID, conflicting, resumedAt.Add(2*time.Second)); !errors.Is(err, authoring.ErrVersionConflict) {
+		t.Fatalf("reuse classification action key with different feedback: %v", err)
+	}
 
 	claim = claimGenerationWorkflow(t, database, workflow.ID, "classifier-adjustment", resumedAt)
 	run = startGenerationRun(t, database, claim, generationapp.ClassifierPurpose, resumedAt)
@@ -559,7 +565,7 @@ func TestGenerationConfirmationCanRunInsideAuthoringTurn(t *testing.T) {
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, session.ID, session.UserID, 0, plan, authoring.StateIntentReview); err != nil {
 		t.Fatalf("confirm authoring plan: %v", err)
 	}
-	if _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+	if _, _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-confirmation-run", agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
 		Model: "test-model", PromptVersion: "authoring-v2",
 	}); err != nil {
@@ -576,6 +582,106 @@ func TestGenerationConfirmationCanRunInsideAuthoringTurn(t *testing.T) {
 	}
 }
 
+func TestAuthoringMessageReceiptReturnsTheOriginalRun(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	userID := authoring.NewID("authoring-message-user")
+	if _, err := database.Identity.CreateUserWithAuth(userID, userID, "", ""); err != nil {
+		t.Fatalf("create author: %v", err)
+	}
+	session, err := database.Authoring.CreateAuthoringSession(ctx, authoring.Session{ID: authoring.NewID("authoring-message"), UserID: userID}, generationTestPlan())
+	if err != nil {
+		t.Fatalf("create authoring session: %v", err)
+	}
+	createRun := func(id string) agent.CreateRun {
+		return agent.CreateRun{
+			ID: id, SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
+			Model: "test-model", PromptVersion: "authoring-v4",
+		}
+	}
+	stage, first, created, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "message-request-one", agent.Message{
+		Role: "user", Content: "继续完善题意。",
+	}, createRun(agent.NewID("authoring-run")))
+	if err != nil {
+		t.Fatalf("start authoring run: %v", err)
+	}
+	if !created || stage == nil {
+		t.Fatalf("first authoring receipt = created=%t stage=%#v", created, stage)
+	}
+	replayedStage, replayed, created, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "message-request-one", agent.Message{
+		Role: "user", Content: "继续完善题意。",
+	}, createRun(agent.NewID("authoring-run")))
+	if err != nil {
+		t.Fatalf("replay authoring run: %v", err)
+	}
+	if created || replayedStage != nil || replayed.ID != first.ID {
+		t.Fatalf("replayed authoring receipt = created=%t stage=%#v run=%#v", created, replayedStage, replayed)
+	}
+	messages, err := database.Authoring.ListMessages(ctx, session.RuntimeSessionID)
+	if err != nil {
+		t.Fatalf("list authoring messages: %v", err)
+	}
+	runs, err := database.Agent.ListRunsForOwner(ctx, "authoring-session", session.ID)
+	if err != nil {
+		t.Fatalf("list authoring runs: %v", err)
+	}
+	if len(messages) != 1 || len(runs) != 1 {
+		t.Fatalf("idempotent authoring records: messages=%#v runs=%#v", messages, runs)
+	}
+	if _, _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "message-request-one", agent.Message{
+		Role: "user", Content: "改成另一条消息。",
+	}, createRun(agent.NewID("authoring-run"))); !errors.Is(err, authoring.ErrVersionConflict) {
+		t.Fatalf("reuse message key with different content: %v", err)
+	}
+}
+
+func TestAuthoringFinalizationCanReplayAfterItsResultIsLost(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	userID := authoring.NewID("authoring-finalization-user")
+	if _, err := database.Identity.CreateUserWithAuth(userID, userID, "", ""); err != nil {
+		t.Fatalf("create author: %v", err)
+	}
+	session, err := database.Authoring.CreateAuthoringSession(ctx, authoring.Session{ID: authoring.NewID("authoring-finalization"), UserID: userID}, generationTestPlan())
+	if err != nil {
+		t.Fatalf("create authoring session: %v", err)
+	}
+	_, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "finalization-request", agent.Message{
+		Role: "user", Content: "继续完善题意。",
+	}, agent.CreateRun{
+		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
+		InputRevision: "0", Model: "test-model", PromptVersion: "authoring-v4",
+	})
+	if err != nil {
+		t.Fatalf("start authoring run: %v", err)
+	}
+	first, err := database.Authoring.FinalizeAuthoringRun(ctx, run.ID, run.Attempt, "本轮已经完成。", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("finalize authoring run: %v", err)
+	}
+	replayed, err := database.Authoring.FinalizeAuthoringRun(ctx, run.ID, run.Attempt, "本轮已经完成。", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("replay authoring finalization: %v", err)
+	}
+	if first.Number != replayed.Number || !reflect.DeepEqual(first.Plan, replayed.Plan) {
+		t.Fatalf("replayed authoring revision = %#v, want %#v", replayed, first)
+	}
+	messages, err := database.Authoring.ListMessages(ctx, session.RuntimeSessionID)
+	if err != nil {
+		t.Fatalf("list authoring messages: %v", err)
+	}
+	if len(messages) != 2 || messages[1].ID != authoring.RunCompletionMessageID(run.ID) || messages[1].Role != "assistant" {
+		t.Fatalf("idempotent finalization messages = %#v", messages)
+	}
+	persisted, err := database.Agent.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("read finalized authoring run: %v", err)
+	}
+	if persisted.Status != agent.RunSucceeded {
+		t.Fatalf("finalized authoring run = %#v", persisted)
+	}
+}
+
 func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
@@ -588,7 +694,7 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create authoring session: %v", err)
 	}
-	stage, run, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+	stage, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-recovery-message", agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
 		Model: "test-model", PromptVersion: "authoring-v2",
 	})
@@ -601,13 +707,15 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create stage operation: %v", err)
 	}
-	updated, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, stage.Plan, authoring.Change{
+	changedPlan := stage.Plan.Clone()
+	changedPlan.Overview = "尚未提交的私有概览"
+	updated, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, changedPlan, authoring.Change{
 		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
 	})
 	if err != nil {
 		t.Fatalf("apply stage operation: %v", err)
 	}
-	replayed, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, stage.Plan, authoring.Change{
+	replayed, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, changedPlan, authoring.Change{
 		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
 	})
 	if err != nil {
@@ -616,12 +724,11 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	if updated.StageRevision != replayed.StageRevision || updated.StageRevision != stage.StageRevision+1 || !reflect.DeepEqual(updated.Plan, replayed.Plan) || !reflect.DeepEqual(updated.Changes, replayed.Changes) {
 		t.Fatalf("replayed stage = %#v, original = %#v", replayed, updated)
 	}
-	replacement, err := database.Authoring.RestartInterruptedAuthoringRun(ctx, run.ID, "server restarted", time.Now().UTC())
-	if err != nil {
-		t.Fatalf("restart authoring run: %v", err)
+	if err := database.Authoring.TerminateAuthoringRun(ctx, run.ID, authoring.RunTerminationServerRestarted, "server restarted before agent completion", time.Now().UTC()); err != nil {
+		t.Fatalf("terminate authoring run: %v", err)
 	}
-	if replacement == nil || replacement.ID == run.ID || replacement.Attempt != 1 || replacement.DeadlineAt.IsZero() {
-		t.Fatalf("replacement authoring run = %#v", replacement)
+	if err := database.Authoring.TerminateAuthoringRun(ctx, run.ID, authoring.RunTerminationServerRestarted, "server restarted before agent completion", time.Now().UTC()); err != nil {
+		t.Fatalf("replay authoring run termination: %v", err)
 	}
 	interrupted, err := database.Agent.GetRun(ctx, run.ID)
 	if err != nil {
@@ -633,19 +740,33 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	if _, err := database.Authoring.GetAuthoringStage(ctx, run.ID); !errors.Is(err, authoring.ErrNotFound) {
 		t.Fatalf("old private stage still exists: %v", err)
 	}
-	replacementStage, err := database.Authoring.GetAuthoringStage(ctx, replacement.ID)
+	persistedPlan, err := database.Authoring.GetAuthoringRevision(ctx, session.ID, session.CurrentRevision)
 	if err != nil {
-		t.Fatalf("read replacement stage: %v", err)
+		t.Fatalf("read persisted authoring plan: %v", err)
 	}
-	if replacementStage.RunAttempt != 1 || replacementStage.BaseRevision != session.CurrentRevision || replacementStage.Plan.Metadata.Title != plan.Metadata.Title {
-		t.Fatalf("replacement stage = %#v", replacementStage)
+	if persistedPlan.Plan.Overview == changedPlan.Overview {
+		t.Fatalf("private Plan change escaped terminated stage: %#v", persistedPlan.Plan)
 	}
 	messages, err := database.Authoring.ListMessages(ctx, session.RuntimeSessionID)
 	if err != nil {
 		t.Fatalf("read authoring messages: %v", err)
 	}
-	if len(messages) != 1 || messages[0].Role != "user" {
-		t.Fatalf("restart rewrote authoring conversation: %#v", messages)
+	if len(messages) != 2 || messages[0].Role != "user" || messages[1].Role != "event" || messages[1].ID != authoring.RunEventMessageID(run.ID, authoring.RunTerminationServerRestarted) {
+		t.Fatalf("termination conversation = %#v", messages)
+	}
+	var event authoring.RunEvent
+	if err := json.Unmarshal([]byte(messages[1].Content), &event); err != nil {
+		t.Fatalf("decode termination event: %v", err)
+	}
+	if event.Kind != "authoring_run_interrupted" || event.Reason != authoring.RunTerminationServerRestarted || !event.Resumable || event.Recovery != "empty" {
+		t.Fatalf("termination event = %#v", event)
+	}
+	runs, err := database.Agent.ListRunsForOwner(ctx, "authoring-session", session.ID)
+	if err != nil {
+		t.Fatalf("list authoring runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("startup termination created replacement runs: %#v", runs)
 	}
 }
 

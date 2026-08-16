@@ -103,6 +103,7 @@ var schemaGenerationStatements = []string{
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
 		action TEXT NOT NULL CHECK (action IN ('confirm-generation', 'submit-candidate', 'confirm-content', 'request-classification-changes', 'confirm-classification-and-publish', 'request-content-changes', 'cancel-generation')),
 		idempotency_key TEXT NOT NULL,
+		request_digest TEXT NOT NULL,
 		workflow_id TEXT NOT NULL REFERENCES generation_workflows(id) ON DELETE RESTRICT,
 		plan_revision BIGINT,
 		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,

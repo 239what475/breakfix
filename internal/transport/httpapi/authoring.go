@@ -97,9 +97,13 @@ func (h *Handler) SendAuthoringMessage(c *gin.Context, sessionID string) {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	_, run, err := h.authoring.StartTurn(c.Request.Context(), user.ID, sessionID, request.Content)
+	_, run, created, err := h.authoring.StartTurn(c.Request.Context(), user.ID, sessionID, request.IdempotencyKey, request.Content)
 	if err != nil {
 		h.writeAuthoringError(c, err)
+		return
+	}
+	if !created {
+		c.JSON(http.StatusAccepted, api.AuthoringRunReceipt{RunId: run.ID, Status: api.AuthoringRunReceiptStatus(run.Status)})
 		return
 	}
 	h.streamAuthoringTurn(c, run.ID)
@@ -383,7 +387,18 @@ func toAPIAuthoringMessages(messages []authoringdomain.Message) []api.AuthoringM
 		for _, change := range message.Changes {
 			changes = append(changes, api.AuthoringChange{DifficultyImpact: change.DifficultyImpact, Kind: change.Kind, Revision: int(change.Revision), Summary: change.Summary})
 		}
-		result = append(result, api.AuthoringMessage{Changes: optionalSlice(changes), Content: message.Content, CreatedAt: message.CreatedAt.UTC(), Id: message.ID, Role: api.AuthoringMessageRole(message.Role)})
+		var event *api.AuthoringRunEvent
+		if message.Event != nil {
+			event = &api.AuthoringRunEvent{
+				SchemaVersion: api.AuthoringRunEventSchemaVersion(message.Event.SchemaVersion),
+				Kind:          api.AuthoringRunEventKind(message.Event.Kind),
+				RunId:         message.Event.RunID,
+				Reason:        api.AuthoringRunEventReason(message.Event.Reason),
+				Resumable:     message.Event.Resumable,
+				Recovery:      api.AuthoringRunEventRecovery(message.Event.Recovery),
+			}
+		}
+		result = append(result, api.AuthoringMessage{Changes: optionalSlice(changes), Content: message.Content, CreatedAt: message.CreatedAt.UTC(), Event: event, Id: message.ID, Role: api.AuthoringMessageRole(message.Role)})
 	}
 	return result
 }

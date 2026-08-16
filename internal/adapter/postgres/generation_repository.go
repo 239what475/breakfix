@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,10 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !confirmation.Valid() || now.IsZero() {
 		return nil, errors.New("generation workflow requires authoring session, user, idempotent plan confirmation, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionConfirmGeneration, confirmation)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin generation workflow: %w", err)
@@ -43,7 +49,7 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	if err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmGeneration, confirmation.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmGeneration, confirmation.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.PlanRevision == nil || *receipt.PlanRevision != confirmation.PlanRevision {
@@ -61,7 +67,7 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	if err == nil {
 		if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 			SessionID: sessionID, Action: generationActionConfirmGeneration, IdempotencyKey: confirmation.IdempotencyKey,
-			WorkflowID: existing.ID, PlanRevision: &confirmation.PlanRevision, CreatedAt: now.UTC(),
+			RequestDigest: requestDigest, WorkflowID: existing.ID, PlanRevision: &confirmation.PlanRevision, CreatedAt: now.UTC(),
 		}); err != nil {
 			return nil, err
 		}
@@ -105,7 +111,7 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionConfirmGeneration, IdempotencyKey: confirmation.IdempotencyKey,
-		WorkflowID: workflow.ID, PlanRevision: &confirmation.PlanRevision, CreatedAt: now.UTC(),
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, PlanRevision: &confirmation.PlanRevision, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
 	}
@@ -631,6 +637,10 @@ func (d *GenerationRepository) FindSubmittedGenerationCandidate(ctx context.Cont
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !submission.Valid() {
 		return nil, errors.New("candidate submission requires authoring ownership, workflow turn, and idempotency key")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionSubmitCandidate, submission)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin submitted candidate lookup: %w", err)
@@ -639,7 +649,7 @@ func (d *GenerationRepository) FindSubmittedGenerationCandidate(ctx context.Cont
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionSubmitCandidate, submission.IdempotencyKey)
+	receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionSubmitCandidate, submission.IdempotencyKey, requestDigest)
 	if err != nil {
 		return nil, err
 	}
@@ -675,6 +685,10 @@ func (d *GenerationRepository) SubmitGenerationCandidate(ctx context.Context, se
 	if strings.TrimSpace(revision.ArchivePath) == "" || !generation.ValidSHA256(revision.ArchiveSHA256) || revision.Snapshot.Validate() != nil {
 		return nil, errors.New("candidate submission requires a valid immutable archive and execution snapshot")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionSubmitCandidate, submission)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin candidate submission: %w", err)
@@ -683,7 +697,7 @@ func (d *GenerationRepository) SubmitGenerationCandidate(ctx context.Context, se
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionSubmitCandidate, submission.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionSubmitCandidate, submission.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != submission.WorkflowID || receipt.CandidateRevisionID == nil {
@@ -735,7 +749,7 @@ func (d *GenerationRepository) SubmitGenerationCandidate(ctx context.Context, se
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionSubmitCandidate, IdempotencyKey: submission.IdempotencyKey,
-		WorkflowID: workflow.ID, CandidateRevisionID: &revision.ID, CreatedAt: now.UTC(),
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &revision.ID, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
 	}
@@ -945,6 +959,10 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !confirmation.Valid() || now.IsZero() {
 		return nil, errors.New("content confirmation requires authoring session, user, idempotent candidate confirmation, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionConfirmContent, confirmation)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin content confirmation: %w", err)
@@ -957,7 +975,7 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	if err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmContent, confirmation.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmContent, confirmation.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != confirmation.WorkflowID || receipt.CandidateRevisionID == nil || *receipt.CandidateRevisionID != confirmation.CandidateRevisionID {
@@ -1015,7 +1033,7 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 		}
 		if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 			SessionID: sessionID, Action: generationActionConfirmContent, IdempotencyKey: confirmation.IdempotencyKey,
-			WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID, CreatedAt: now.UTC(),
+			RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID, CreatedAt: now.UTC(),
 		}); err != nil {
 			return nil, err
 		}
@@ -1033,7 +1051,7 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionConfirmContent, IdempotencyKey: confirmation.IdempotencyKey,
-		WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID, CreatedAt: now.UTC(),
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
 	}
@@ -1051,6 +1069,10 @@ func (d *GenerationRepository) RequestGenerationContentChanges(ctx context.Conte
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !request.Valid() || now.IsZero() {
 		return nil, errors.New("content change request requires an authoring session, reviewed candidate, feedback, idempotency key, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionRequestContentChanges, request)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin content change request: %w", err)
@@ -1059,7 +1081,7 @@ func (d *GenerationRepository) RequestGenerationContentChanges(ctx context.Conte
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionRequestContentChanges, request.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionRequestContentChanges, request.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != request.WorkflowID || receipt.CandidateRevisionID == nil || *receipt.CandidateRevisionID != request.CandidateRevisionID {
@@ -1095,7 +1117,7 @@ func (d *GenerationRepository) RequestGenerationContentChanges(ctx context.Conte
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionRequestContentChanges, IdempotencyKey: request.IdempotencyKey,
-		WorkflowID: workflow.ID, CandidateRevisionID: &request.CandidateRevisionID, CreatedAt: now.UTC(),
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &request.CandidateRevisionID, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
 	}
@@ -1249,6 +1271,10 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !confirmation.Valid() || now.IsZero() {
 		return nil, errors.New("classification adjustment requires an authoring session, reviewed proposal, idempotency key, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionRequestClassificationChanges, confirmation)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin classification resume: %w", err)
@@ -1261,7 +1287,7 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionRequestClassificationChanges, confirmation.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionRequestClassificationChanges, confirmation.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != confirmation.WorkflowID || receipt.CandidateRevisionID == nil || *receipt.CandidateRevisionID != confirmation.CandidateRevisionID ||
@@ -1304,7 +1330,7 @@ func (d *GenerationRepository) ResumeGenerationClassification(ctx context.Contex
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionRequestClassificationChanges, IdempotencyKey: confirmation.IdempotencyKey,
-		WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
 		ProposalRevision: &confirmation.ProposalRevision, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
@@ -1321,6 +1347,10 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(challengeTitle) == "" || !confirmation.Valid() || now.IsZero() {
 		return nil, errors.New("classification publication requires session, user, title, idempotent proposal confirmation, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionConfirmClassificationAndPublish, confirmation)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin classification publication: %w", err)
@@ -1333,7 +1363,7 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmClassificationAndPublish, confirmation.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionConfirmClassificationAndPublish, confirmation.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != confirmation.WorkflowID || receipt.CandidateRevisionID == nil || *receipt.CandidateRevisionID != confirmation.CandidateRevisionID ||
@@ -1378,7 +1408,7 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 		}
 		if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 			SessionID: sessionID, Action: generationActionConfirmClassificationAndPublish, IdempotencyKey: confirmation.IdempotencyKey,
-			WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
+			RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
 			ProposalRevision: &confirmation.ProposalRevision, CreatedAt: now.UTC(),
 		}); err != nil {
 			return nil, err
@@ -1445,7 +1475,7 @@ func (d *GenerationRepository) BeginClassificationPublication(ctx context.Contex
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionConfirmClassificationAndPublish, IdempotencyKey: confirmation.IdempotencyKey,
-		WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CandidateRevisionID: &confirmation.CandidateRevisionID,
 		ProposalRevision: &confirmation.ProposalRevision, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
@@ -2300,6 +2330,10 @@ func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, ses
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(userID) == "" || !cancellation.Valid() || now.IsZero() {
 		return nil, errors.New("authoring generation cancellation requires session, user, workflow, idempotency key, and current time")
 	}
+	requestDigest, err := generationActionRequestDigest(generationActionCancelGeneration, cancellation)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin authoring generation cancellation: %w", err)
@@ -2308,7 +2342,7 @@ func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, ses
 	if err := lockAuthoringSessionTx(ctx, tx, sessionID, userID); err != nil {
 		return nil, err
 	}
-	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionCancelGeneration, cancellation.IdempotencyKey); err != nil {
+	if receipt, err := generationActionReceiptTx(ctx, tx, sessionID, generationActionCancelGeneration, cancellation.IdempotencyKey, requestDigest); err != nil {
 		return nil, err
 	} else if receipt != nil {
 		if receipt.WorkflowID != cancellation.WorkflowID {
@@ -2327,7 +2361,7 @@ func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, ses
 	if workflow.State == generation.StateCancelled {
 		if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 			SessionID: sessionID, Action: generationActionCancelGeneration, IdempotencyKey: cancellation.IdempotencyKey,
-			WorkflowID: workflow.ID, CreatedAt: now.UTC(),
+			RequestDigest: requestDigest, WorkflowID: workflow.ID, CreatedAt: now.UTC(),
 		}); err != nil {
 			return nil, err
 		}
@@ -2354,7 +2388,7 @@ func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, ses
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionCancelGeneration, IdempotencyKey: cancellation.IdempotencyKey,
-		WorkflowID: workflow.ID, CreatedAt: now.UTC(),
+		RequestDigest: requestDigest, WorkflowID: workflow.ID, CreatedAt: now.UTC(),
 	}); err != nil {
 		return nil, err
 	}
@@ -2562,6 +2596,7 @@ type generationActionReceipt struct {
 	SessionID           string
 	Action              generationAction
 	IdempotencyKey      string
+	RequestDigest       string
 	WorkflowID          string
 	PlanRevision        *int64
 	CandidateRevisionID *string
@@ -2586,19 +2621,34 @@ func lockAuthoringSessionTx(ctx context.Context, tx *Tx, sessionID, userID strin
 	return nil
 }
 
-func generationActionReceiptTx(ctx context.Context, tx *Tx, sessionID string, action generationAction, idempotencyKey string) (*generationActionReceipt, error) {
+func generationActionRequestDigest(action generationAction, request any) (string, error) {
+	canonical, err := json.Marshal(struct {
+		Action  generationAction `json:"action"`
+		Request any              `json:"request"`
+	}{Action: action, Request: request})
+	if err != nil {
+		return "", fmt.Errorf("encode generation action receipt: %w", err)
+	}
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func generationActionReceiptTx(ctx context.Context, tx *Tx, sessionID string, action generationAction, idempotencyKey, requestDigest string) (*generationActionReceipt, error) {
 	value := &generationActionReceipt{SessionID: sessionID, Action: action, IdempotencyKey: idempotencyKey}
 	var planRevision sql.NullInt64
 	var candidateID sql.NullString
 	var proposalRevision sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT workflow_id, plan_revision, candidate_revision_id, proposal_revision, created_at
+	err := tx.QueryRowContext(ctx, `SELECT request_digest, workflow_id, plan_revision, candidate_revision_id, proposal_revision, created_at
 		FROM generation_action_receipts WHERE session_id = ? AND action = ? AND idempotency_key = ? FOR UPDATE`,
-		sessionID, action, idempotencyKey).Scan(&value.WorkflowID, &planRevision, &candidateID, &proposalRevision, &value.CreatedAt)
+		sessionID, action, idempotencyKey).Scan(&value.RequestDigest, &value.WorkflowID, &planRevision, &candidateID, &proposalRevision, &value.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read generation action receipt: %w", err)
+	}
+	if value.RequestDigest != requestDigest {
+		return nil, authoring.ErrVersionConflict
 	}
 	if planRevision.Valid {
 		item := planRevision.Int64
@@ -2618,7 +2668,7 @@ func generationActionReceiptTx(ctx context.Context, tx *Tx, sessionID string, ac
 
 func insertGenerationActionReceiptTx(ctx context.Context, tx *Tx, value generationActionReceipt) error {
 	if strings.TrimSpace(value.SessionID) == "" || strings.TrimSpace(string(value.Action)) == "" || strings.TrimSpace(value.IdempotencyKey) == "" ||
-		strings.TrimSpace(value.WorkflowID) == "" || value.CreatedAt.IsZero() {
+		strings.TrimSpace(value.RequestDigest) == "" || strings.TrimSpace(value.WorkflowID) == "" || value.CreatedAt.IsZero() {
 		return errors.New("generation action receipt is incomplete")
 	}
 	var planRevision, candidateRevisionID, proposalRevision any
@@ -2632,8 +2682,8 @@ func insertGenerationActionReceiptTx(ctx context.Context, tx *Tx, value generati
 		proposalRevision = *value.ProposalRevision
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_action_receipts
-		(session_id, action, idempotency_key, workflow_id, plan_revision, candidate_revision_id, proposal_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.SessionID, value.Action, value.IdempotencyKey, value.WorkflowID,
+		(session_id, action, idempotency_key, request_digest, workflow_id, plan_revision, candidate_revision_id, proposal_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.SessionID, value.Action, value.IdempotencyKey, value.RequestDigest, value.WorkflowID,
 		planRevision, candidateRevisionID, proposalRevision, value.CreatedAt.UTC()); err != nil {
 		return fmt.Errorf("record generation action receipt: %w", err)
 	}

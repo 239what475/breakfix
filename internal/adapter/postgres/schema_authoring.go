@@ -48,4 +48,13 @@ var schemaAuthoringRuntimeStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL,
 		PRIMARY KEY (run_id, operation_id)
 	)`,
+	`CREATE TABLE authoring_message_receipts (
+		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE CASCADE,
+		idempotency_key TEXT NOT NULL,
+		request_digest TEXT NOT NULL,
+		message_id TEXT NOT NULL REFERENCES agent_messages(id) ON DELETE RESTRICT,
+		run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE RESTRICT,
+		created_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (session_id, idempotency_key)
+	)`,
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"math"
 	"testing"
+
+	"github.com/breakfix/breakfix/internal/domain/agent"
+	"github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
 func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T) {
@@ -21,5 +24,21 @@ func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T
 	cancel()
 	if config.IsRetryAble(ctx, context.DeadlineExceeded) {
 		t.Fatal("cancelled context scheduled another model retry")
+	}
+}
+
+func TestAuthoringInputsExcludePlatformEvents(t *testing.T) {
+	conversation := &runtimeConversation{stage: authoring.Stage{BaseRevision: 2}}
+	inputs, err := authoringInputs(conversation, []agent.Message{
+		{Role: "user", Content: "先设计题意"},
+		{Role: "assistant", Content: "已经记录第一版题意"},
+		{Role: "event", Content: `{"kind":"authoring_run_interrupted"}`},
+		{Role: "user", Content: "继续完成生成"},
+	})
+	if err != nil {
+		t.Fatalf("build authoring inputs: %v", err)
+	}
+	if len(inputs) != 3 {
+		t.Fatalf("authoring input count = %d, want 3", len(inputs))
 	}
 }

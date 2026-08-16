@@ -311,9 +311,11 @@ async function send() {
   try {
     const controller = new AbortController();
     streamController = controller;
+    const idempotencyKey = crypto.randomUUID();
     await streamAuthoringMessage(
       sessionID,
       content,
+      idempotencyKey,
       {
         onEvent(event) {
           if (event.type === "delta" && event.content) {
@@ -349,6 +351,24 @@ function messageLabel(role: string) {
   if (role === "agent") return "Breakfix agent";
   if (role === "system") return "真实验证";
   return "流程事件";
+}
+
+function messageContent(message: AuthoringMessage) {
+  const event = message.event;
+  if (message.role !== "event" || !event) return message.content;
+  const reason = {
+    deadline_exceeded: "本轮已达到时间预算并结束。",
+    server_stopping: "Server 停止，本轮已安全结束。",
+    server_restarted: "Server 已重启，之前的回合已结束。",
+    permanent_executor_error: "本轮因执行器故障结束。",
+  }[event.reason];
+  const recovery = {
+    workspace: "工作区已保留，可以在下一条消息中继续。",
+    snapshot: "工作区快照已保留，可以在下一条消息中恢复。",
+    candidate: "可以从最近一次 candidate 继续。",
+    empty: "没有未提交的工作区内容，可以继续讨论。",
+  }[event.recovery];
+  return `${reason} ${recovery}`;
 }
 
 watch(
@@ -444,7 +464,7 @@ onScopeDispose(() => {
           </div>
           <article v-for="entry in displayMessages" :key="entry.id" class="authoring-message" :class="entry.role">
             <span class="authoring-message-label">{{ messageLabel(entry.role) }}</span>
-            <div class="authoring-bubble">{{ entry.content }}</div>
+            <div class="authoring-bubble">{{ messageContent(entry) }}</div>
             <div v-for="change in entry.changes" :key="`${entry.id}-${change.revision}-${change.kind}`" class="authoring-change-card">
               <span>revision {{ change.revision }} · {{ change.kind }}</span>
               <button type="button" @click="focusChange">{{ change.summary || "查看题意变更" }}</button>

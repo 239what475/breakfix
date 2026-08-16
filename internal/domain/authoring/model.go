@@ -139,7 +139,123 @@ type Message struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	Changes   []Change  `json:"changes,omitempty"`
+	Event     *RunEvent `json:"event,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// RunTerminationKind is the durable terminal classification of one direct
+// Authoring turn. It is intentionally smaller than the generic Agent Run
+// status because only the two outcomes below produce author-visible events.
+type RunTerminationKind string
+
+const (
+	RunTerminationInterrupted RunTerminationKind = "interrupted"
+	RunTerminationFailed      RunTerminationKind = "failed"
+)
+
+// RunTerminationReason is the closed public reason set for a Server-owned
+// authoring turn ending without an assistant reply. Provider diagnostics stay
+// in the internal AgentRun record and service logs.
+type RunTerminationReason string
+
+const (
+	RunTerminationDeadlineExceeded       RunTerminationReason = "deadline_exceeded"
+	RunTerminationServerStopping         RunTerminationReason = "server_stopping"
+	RunTerminationServerRestarted        RunTerminationReason = "server_restarted"
+	RunTerminationPermanentExecutorError RunTerminationReason = "permanent_executor_error"
+)
+
+const authoringEventSchemaVersion = 1
+
+// RunEvent is stored as the JSON content of an existing role=event message.
+// It is not model context; it only tells the author how the next turn resumes.
+type RunEvent struct {
+	SchemaVersion int                  `json:"schema_version"`
+	Kind          string               `json:"kind"`
+	RunID         string               `json:"run_id"`
+	Reason        RunTerminationReason `json:"reason"`
+	Resumable     bool                 `json:"resumable"`
+	Recovery      string               `json:"recovery"`
+}
+
+func (e RunEvent) Valid() bool {
+	if e.SchemaVersion != authoringEventSchemaVersion || strings.TrimSpace(e.RunID) == "" || !e.Reason.Valid() || e.Kind != e.Reason.EventKind() || !e.Resumable {
+		return false
+	}
+	switch e.Recovery {
+	case "workspace", "snapshot", "candidate", "empty":
+		return true
+	default:
+		return false
+	}
+}
+
+func (t RunTerminationKind) Valid() bool {
+	return t == RunTerminationInterrupted || t == RunTerminationFailed
+}
+
+func (r RunTerminationReason) Valid() bool {
+	switch r {
+	case RunTerminationDeadlineExceeded, RunTerminationServerStopping, RunTerminationServerRestarted, RunTerminationPermanentExecutorError:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r RunTerminationReason) Kind() RunTerminationKind {
+	if r == RunTerminationPermanentExecutorError {
+		return RunTerminationFailed
+	}
+	return RunTerminationInterrupted
+}
+
+func (r RunTerminationReason) EventKind() string {
+	if r.Kind() == RunTerminationFailed {
+		return "authoring_run_failed"
+	}
+	return "authoring_run_interrupted"
+}
+
+func (r RunTerminationReason) ValidFor(kind RunTerminationKind) bool {
+	return r.Valid() && r.Kind() == kind
+}
+
+// NewRunEvent creates the stable, author-visible event payload for one
+// terminated turn. Recovery is one of workspace, snapshot, candidate, empty.
+func NewRunEvent(runID string, reason RunTerminationReason, recovery string) (RunEvent, error) {
+	runID = strings.TrimSpace(runID)
+	recovery = strings.TrimSpace(recovery)
+	if runID == "" || !reason.Valid() {
+		return RunEvent{}, errors.New("authoring run event requires a run and valid reason")
+	}
+	switch recovery {
+	case "workspace", "snapshot", "candidate", "empty":
+	default:
+		return RunEvent{}, errors.New("authoring run event has an invalid recovery source")
+	}
+	return RunEvent{
+		SchemaVersion: authoringEventSchemaVersion,
+		Kind:          reason.EventKind(),
+		RunID:         runID,
+		Reason:        reason,
+		Resumable:     true,
+		Recovery:      recovery,
+	}, nil
+}
+
+// RunEventMessageID is deterministic so termination retry/recovery can append
+// the event at most once without inventing a separate event receipt table.
+func RunEventMessageID(runID string, reason RunTerminationReason) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(runID) + ":" + reason.EventKind()))
+	return "authoring-event-" + hex.EncodeToString(digest[:])
+}
+
+// RunCompletionMessageID gives a completed Authoring Run exactly one durable
+// assistant reply even when the transaction result is lost and retried.
+func RunCompletionMessageID(runID string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(runID) + ":assistant"))
+	return "authoring-message-" + hex.EncodeToString(digest[:])
 }
 
 type Session struct {

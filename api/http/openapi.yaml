@@ -480,6 +480,12 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        "202":
+          description: The idempotency key already owns an existing authoring run; read the session to obtain its durable result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthoringRunReceipt"
         "404":
           $ref: "#/components/responses/Error"
 
@@ -1758,9 +1764,32 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AuthoringChange"
+        event:
+          $ref: "#/components/schemas/AuthoringRunEvent"
         created_at:
           type: string
           format: date-time
+
+    AuthoringRunEvent:
+      type: object
+      required: [schema_version, kind, run_id, reason, resumable, recovery]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        kind:
+          type: string
+          enum: [authoring_run_interrupted, authoring_run_failed]
+        run_id:
+          type: string
+        reason:
+          type: string
+          enum: [deadline_exceeded, server_stopping, server_restarted, permanent_executor_error]
+        resumable:
+          type: boolean
+        recovery:
+          type: string
+          enum: [workspace, snapshot, candidate, empty]
 
     AuthoringAsset:
       type: object
@@ -1782,10 +1811,24 @@ components:
 
     AuthoringMessageRequest:
       type: object
-      required: [content]
+      required: [content, idempotency_key]
       properties:
         content:
           type: string
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    AuthoringRunReceipt:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          enum: [running, succeeded, failed, cancelled, interrupted]
 
     GeneratorPlanRequest:
       type: object

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
-	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 )
 
@@ -32,19 +31,30 @@ type AssistantRequestRestorer interface {
 	RestoreAssistantRequest(context.Context, agent.Session, agent.Run) (appassistant.Request, error)
 }
 
+type AuthoringRuntime interface {
+	InterruptTurn(context.Context, string) error
+}
+
+type AssistantRuntime interface {
+	RestartInterruptedTurn(context.Context, string, string) (*agent.Run, error)
+	RunTurn(context.Context, string, string, appassistant.Request, func(appassistant.StreamEvent)) (appassistant.Message, error)
+}
+
 type RecoveryConfig struct {
 	Repository       Repository
-	Authoring        *appauthoring.RuntimeService
-	Assistant        *appassistant.Service
+	Authoring        AuthoringRuntime
+	Assistant        AssistantRuntime
 	AssistantRequest AssistantRequestRestorer
 }
 
-// Recovery first creates durable replacement runs, then continues those known
-// replacements under its explicit blocking Run lifecycle.
+// Recovery only closes work that was owned by the previous Server process.
+// Authoring never gets an automatic replacement run; the next author message
+// starts it explicitly. Assistant recovery retains its existing continuation
+// behavior because its request is independently reconstructible.
 type Recovery struct {
 	repository Repository
-	authoring  *appauthoring.RuntimeService
-	assistant  *appassistant.Service
+	authoring  AuthoringRuntime
+	assistant  AssistantRuntime
 	restorer   AssistantRequestRestorer
 	now        func() time.Time
 	pending    []continuation
@@ -52,7 +62,6 @@ type Recovery struct {
 }
 
 type continuation struct {
-	kind    string
 	runID   string
 	session string
 	request appassistant.Request
@@ -100,15 +109,8 @@ func (r *Recovery) recoverAuthoring(ctx context.Context) error {
 			}
 			continue
 		}
-		replacement, err := r.authoring.RestartInterruptedTurn(ctx, run.ID, interruptionReason)
-		if errors.Is(err, agent.ErrRunActive) || errors.Is(err, agent.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("replace interrupted authoring run %s: %w", run.ID, err)
-		}
-		if replacement != nil {
-			r.pending = append(r.pending, continuation{kind: "authoring", runID: replacement.ID})
+		if err := r.authoring.InterruptTurn(ctx, run.ID); err != nil && !errors.Is(err, agent.ErrRunActive) && !errors.Is(err, agent.ErrNotFound) {
+			return fmt.Errorf("interrupt authoring run %s: %w", run.ID, err)
 		}
 	}
 	return nil
@@ -143,14 +145,14 @@ func (r *Recovery) recoverAssistant(ctx context.Context) error {
 			return fmt.Errorf("replace interrupted assistant run %s: %w", run.ID, err)
 		}
 		if replacement != nil {
-			r.pending = append(r.pending, continuation{kind: "assistant", runID: replacement.ID, session: replacement.SessionID, request: request})
+			r.pending = append(r.pending, continuation{runID: replacement.ID, session: replacement.SessionID, request: request})
 		}
 	}
 	return nil
 }
 
-// Run starts only the replacements fixed by Recover, blocks until shutdown,
-// and waits for every continuation before returning to bootstrap.
+// Run starts only Assistant replacements fixed by Recover, blocks until
+// shutdown, and waits for every continuation before returning to bootstrap.
 func (r *Recovery) Run(ctx context.Context) error {
 	if r == nil {
 		return errors.New("interactive recovery is not configured")
@@ -164,15 +166,8 @@ func (r *Recovery) Run(ctx context.Context) error {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			switch value.kind {
-			case "authoring":
-				if _, err := r.authoring.RunTurn(ctx, value.runID, nil); err != nil && ctx.Err() == nil {
-					slog.Error("complete recovered authoring run", "run_id", value.runID, "err", err)
-				}
-			case "assistant":
-				if _, err := r.assistant.RunTurn(ctx, value.session, value.runID, value.request, nil); err != nil && ctx.Err() == nil {
-					slog.Error("complete recovered assistant run", "run_id", value.runID, "err", err)
-				}
+			if _, err := r.assistant.RunTurn(ctx, value.session, value.runID, value.request, nil); err != nil && ctx.Err() == nil {
+				slog.Error("complete recovered assistant run", "run_id", value.runID, "err", err)
 			}
 		}()
 	}

@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type {
+	AuthoringRunEvent,
 	AuthoringSession,
 	GeneratorGeneration,
 	GeneratorWorkflow,
@@ -162,6 +163,41 @@ export async function sendAuthoringMessage(page: Page, content: string, sessionI
 			{ timeout: 30 * 60_000, intervals: [1_000, 2_000, 5_000] },
 		)
 		.toBe(true);
+}
+
+export async function waitForAuthoringInterruption(
+	page: Page,
+	sessionID: string,
+	timeoutMilliseconds = 5 * 60_000,
+): Promise<AuthoringRunEvent> {
+	let interrupted: AuthoringRunEvent | undefined;
+	await expect
+		.poll(async () => {
+			const session = await readAuthoringSession(page, sessionID);
+			interrupted = [...session.messages]
+				.reverse()
+				.find((message) => message.role === "event" && message.event?.resumable)
+				?.event;
+			return interrupted !== undefined && !session.authoring_turn_active;
+		}, { timeout: timeoutMilliseconds, intervals: [500, 1_000, 2_000] })
+		.toBe(true);
+	return interrupted as AuthoringRunEvent;
+}
+
+export async function continueGeneratingWorkflow(
+	page: Page,
+	sessionID: string,
+	workflowID: string,
+): Promise<void> {
+	const generation = await readGeneration(page, workflowID);
+	if (generation.workflow.state !== "Generating") {
+		throw new Error(`workflow ${workflowID} is ${generation.workflow.state}, not Generating`);
+	}
+	await sendAuthoringMessage(
+		page,
+		`继续生成任务 ${workflowID}。先读取任务和工作区当前状态，再完成剩余工作并提交 candidate。`,
+		sessionID,
+	);
 }
 
 export async function expectNoLifecycleButtons(page: Page): Promise<void> {

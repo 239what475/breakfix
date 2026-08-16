@@ -169,6 +169,7 @@ export async function streamAssistantMessage(
 export async function streamAuthoringMessage(
 	id: string,
 	content: string,
+	idempotencyKey: string,
 	handlers: AuthoringStreamHandlers,
 	signal?: AbortSignal,
 ): Promise<void> {
@@ -178,12 +179,18 @@ export async function streamAuthoringMessage(
 	const response = await fetch(`${base}/authoring/sessions/${id}/messages`, {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ content }),
+		body: JSON.stringify({ content, idempotency_key: idempotencyKey }),
 		signal,
 	});
 	if (!response.ok) {
 		const data = await response.json().catch(() => ({}));
 		throw new APIError(response.status, data.error || `Request failed (${response.status})`);
+	}
+	if (response.status === 202) {
+		// The durable receipt already owns this run. The caller refreshes the
+		// session instead of starting a second stream consumer.
+		await response.json().catch(() => undefined);
+		return;
 	}
 	await consumeEventStream(response, (name, data) => {
 		const parsed = JSON.parse(data) as AuthoringStreamEvent | AuthoringStreamComplete | { content?: string };

@@ -148,6 +148,10 @@ func authoringInputs(conversation *runtimeConversation, history []agent.Message)
 			inputs = append(inputs, schema.UserMessage(content))
 		case "assistant":
 			inputs = append(inputs, schema.AssistantMessage(message.Content, nil))
+		case "event":
+			// Durable platform events are author-visible recovery status, not model
+			// instructions or conversational context.
+			continue
 		default:
 			return nil, fmt.Errorf("unsupported authoring history role %q", message.Role)
 		}

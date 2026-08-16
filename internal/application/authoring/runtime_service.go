@@ -15,8 +15,11 @@ import (
 )
 
 const (
-	authoringPromptVersion = "authoring-v3"
-	defaultRunDeadline     = 30 * time.Minute
+	authoringPromptVersion       = "authoring-v4"
+	defaultRunDeadline           = 30 * time.Minute
+	persistenceTimeout           = 10 * time.Second
+	initialPersistenceRetryDelay = 50 * time.Millisecond
+	maxPersistenceRetryDelay     = time.Second
 )
 
 // RuntimeRepository is the Server-owned Authoring boundary. The Server owns
@@ -28,13 +31,13 @@ type RuntimeRepository interface {
 	GetAuthoringSessionInternal(context.Context, string) (*domain.Session, error)
 	GetLatestOpenAuthoringSession(context.Context, string) (*domain.Session, error)
 	GetAuthoringRevision(context.Context, string, int64) (*domain.Revision, error)
-	StartAuthoringRun(context.Context, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, error)
+	StartAuthoringRun(context.Context, string, string, string, agent.Message, agent.CreateRun) (*domain.Stage, *agent.Run, bool, error)
 	ListMessages(context.Context, string) ([]agent.Message, error)
 	GetRun(context.Context, string) (*agent.Run, error)
 	LoadAuthoringExecution(context.Context, string) (*domain.Stage, []agent.Message, error)
 	UpdateAuthoringStage(context.Context, string, int, int64, domain.StageOperation, domain.Plan, domain.Change) (*domain.Stage, error)
 	FinalizeAuthoringRun(context.Context, string, int, string, time.Time) (*domain.Revision, error)
-	RestartInterruptedAuthoringRun(context.Context, string, string, time.Time) (*agent.Run, error)
+	TerminateAuthoringRun(context.Context, string, domain.RunTerminationReason, string, time.Time) error
 }
 
 // Execution is the trusted Server-owned context for one Authoring AgentRun.
@@ -139,34 +142,36 @@ func (s *RuntimeService) GetCurrent(ctx context.Context, userID string) (*domain
 	return s.repo.GetLatestOpenAuthoringSession(ctx, userID)
 }
 
-// StartTurn atomically creates the user message, Agent Run, and private stage.
-// The Server then executes and streams this turn in the request that created it.
-func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, content string) (*domain.Session, *agent.Run, error) {
+// StartTurn atomically creates one user message, Agent Run, and private stage.
+// A stable client idempotency key returns the existing run without starting a
+// second Eino execution when the original HTTP response is lost.
+func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, idempotencyKey, content string) (*domain.Session, *agent.Run, bool, error) {
 	if s == nil || s.repo == nil {
-		return nil, nil, errors.New("authoring runtime repository is required")
+		return nil, nil, false, errors.New("authoring runtime repository is required")
 	}
 	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil, nil, errors.New("消息不能为空")
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if content == "" || idempotencyKey == "" || len(idempotencyKey) > 200 {
+		return nil, nil, false, errors.New("消息和幂等键不能为空")
 	}
 	if s.model == "" {
-		return nil, nil, errors.New("authoring agent model is required")
+		return nil, nil, false, errors.New("authoring agent model is required")
 	}
 	session, err := s.repo.GetAuthoringSession(ctx, sessionID, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	if !domain.AllowsAuthorMessage(session.State) || strings.TrimSpace(session.RuntimeSessionID) == "" {
-		return nil, nil, domain.ErrInvalidState
+	if strings.TrimSpace(session.RuntimeSessionID) == "" {
+		return nil, nil, false, domain.ErrInvalidState
 	}
 	input, err := json.Marshal(struct {
 		BaseRevision int64 `json:"base_revision"`
 	}{BaseRevision: session.CurrentRevision})
 	if err != nil {
-		return nil, nil, fmt.Errorf("encode authoring run input: %w", err)
+		return nil, nil, false, fmt.Errorf("encode authoring run input: %w", err)
 	}
 	now := time.Now().UTC()
-	_, run, err := s.repo.StartAuthoringRun(ctx, session.ID, userID, agent.Message{
+	_, run, created, err := s.repo.StartAuthoringRun(ctx, session.ID, userID, idempotencyKey, agent.Message{
 		ID:        agent.NewID("authoring-message"),
 		SessionID: session.RuntimeSessionID,
 		Role:      "user",
@@ -185,13 +190,13 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		DeadlineAt:    now.Add(s.deadline),
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	updated, err := s.repo.GetAuthoringSession(ctx, session.ID, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	return updated, run, nil
+	return updated, run, created, nil
 }
 
 func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(StreamEvent)) (string, error) {
@@ -230,22 +235,83 @@ func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(St
 	defer cancel()
 	content, err := s.executor.Run(runCtx, execution, s.repo, emit)
 	if err != nil {
+		if terminalErr := s.terminateRun(run.ID, authoringTerminationReason(ctx, runCtx), err); terminalErr != nil {
+			return "", fmt.Errorf("terminate failed authoring run: %w", terminalErr)
+		}
 		return "", err
 	}
-	if _, err := s.repo.FinalizeAuthoringRun(runCtx, run.ID, run.Attempt, content, time.Now().UTC()); err != nil {
+	if err := s.finalizeRun(run.ID, run.Attempt, content); err != nil {
 		return "", err
 	}
 	return content, nil
 }
 
-// RestartInterruptedTurn replaces a Server-interrupted interactive execution
-// with a fresh Run. Its private stage is reconstructed from the committed Plan
-// and durable user message rather than resumed from prior model memory.
-func (s *RuntimeService) RestartInterruptedTurn(ctx context.Context, runID, reason string) (*agent.Run, error) {
+// InterruptTurn records a Server restart without replaying the model call. The
+// next author message creates a fresh AgentRun from durable conversation and
+// workspace state.
+func (s *RuntimeService) InterruptTurn(ctx context.Context, runID string) error {
 	if s == nil || s.repo == nil {
-		return nil, errors.New("authoring runtime repository is required")
+		return errors.New("authoring runtime repository is required")
 	}
-	return s.repo.RestartInterruptedAuthoringRun(ctx, runID, reason, time.Now().UTC())
+	return s.repo.TerminateAuthoringRun(ctx, runID, domain.RunTerminationServerRestarted, "server restarted before agent completion", time.Now().UTC())
+}
+
+func (s *RuntimeService) finalizeRun(runID string, attempt int, content string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), persistenceTimeout)
+	defer cancel()
+	completedAt := time.Now().UTC()
+	return retryRunPersistence(ctx, func(ctx context.Context) error {
+		_, err := s.repo.FinalizeAuthoringRun(ctx, runID, attempt, content, completedAt)
+		return err
+	})
+}
+
+func (s *RuntimeService) terminateRun(runID string, reason domain.RunTerminationReason, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), persistenceTimeout)
+	defer cancel()
+	completedAt := time.Now().UTC()
+	return retryRunPersistence(ctx, func(ctx context.Context) error {
+		return s.repo.TerminateAuthoringRun(ctx, runID, reason, strings.TrimSpace(cause.Error()), completedAt)
+	})
+}
+
+func retryRunPersistence(ctx context.Context, operation func(context.Context) error) error {
+	delay := initialPersistenceRetryDelay
+	for {
+		err := operation(ctx)
+		if err == nil || !retryableRunPersistenceError(ctx, err) {
+			return err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(err, ctx.Err())
+		case <-timer.C:
+		}
+		delay = min(delay*2, maxPersistenceRetryDelay)
+	}
+}
+
+func retryableRunPersistenceError(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return !errors.Is(err, agent.ErrNotFound) &&
+		!errors.Is(err, agent.ErrRunActive) &&
+		!errors.Is(err, domain.ErrNotFound) &&
+		!errors.Is(err, domain.ErrInvalidState) &&
+		!errors.Is(err, domain.ErrVersionConflict)
+}
+
+func authoringTerminationReason(parent, run context.Context) domain.RunTerminationReason {
+	if errors.Is(run.Err(), context.DeadlineExceeded) {
+		return domain.RunTerminationDeadlineExceeded
+	}
+	if parent.Err() != nil {
+		return domain.RunTerminationServerStopping
+	}
+	return domain.RunTerminationPermanentExecutorError
 }
 
 func projectRuntimeMessages(values []agent.Message) ([]domain.Message, error) {
@@ -256,10 +322,18 @@ func projectRuntimeMessages(values []agent.Message) ([]domain.Message, error) {
 		case "user":
 		case "assistant":
 			role = "agent"
+		case "event":
 		default:
 			return nil, fmt.Errorf("unsupported authoring runtime message role %q", value.Role)
 		}
 		message := domain.Message{ID: value.ID, Role: role, Content: value.Content, CreatedAt: value.CreatedAt}
+		if value.Role == "event" {
+			var event domain.RunEvent
+			if err := json.Unmarshal([]byte(value.Content), &event); err != nil || !event.Valid() {
+				return nil, fmt.Errorf("decode authoring run event %q", value.ID)
+			}
+			message.Event = &event
+		}
 		if len(value.Metadata) > 0 && !bytes.Equal(value.Metadata, []byte("{}")) {
 			var metadata struct {
 				Changes []domain.Change `json:"changes"`
