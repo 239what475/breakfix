@@ -51,6 +51,28 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 		}
 		return generationWorkflowForReceiptTx(ctx, tx, receipt.WorkflowID)
 	}
+	// A Plan revision is the business identity of one generation workflow. A
+	// retried confirmation may carry a new transport idempotency key, so resolve
+	// the existing workflow before validating the session's current interactive
+	// state instead of letting the database unique index become the API result.
+	planRevision := strconv.FormatInt(confirmation.PlanRevision, 10)
+	existing, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE source_kind = ? AND source_ref = ? AND source_revision = ? FOR UPDATE`,
+		generation.SourceAuthoring, sessionID, planRevision))
+	if err == nil {
+		if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
+			SessionID: sessionID, Action: generationActionConfirmGeneration, IdempotencyKey: confirmation.IdempotencyKey,
+			WorkflowID: existing.ID, PlanRevision: &confirmation.PlanRevision, CreatedAt: now.UTC(),
+		}); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit repeated generation confirmation: %w", err)
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find existing generation workflow: %w", err)
+	}
 	if session.CurrentRevision != confirmation.PlanRevision || session.State != authoring.StateIntentReview {
 		return nil, authoring.ErrInvalidState
 	}
@@ -67,7 +89,7 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	workflow := generation.Workflow{
 		ID:             generation.NewID("generation-workflow"),
 		Source:         generation.Source{Kind: generation.SourceAuthoring, Ref: sessionID},
-		SourceRevision: strconv.FormatInt(confirmation.PlanRevision, 10),
+		SourceRevision: planRevision,
 		State:          generation.StateGenerating,
 		StateVersion:   1,
 		NextRunAt:      now.UTC(),

@@ -517,6 +517,15 @@ func TestConfirmedPlanRevisionsOwnIndependentWorkflows(t *testing.T) {
 	if repeated.ID != workflow.ID {
 		t.Fatalf("repeat confirmation created workflow %q, want %q", repeated.ID, workflow.ID)
 	}
+	repeatedWithNewKey, err := database.Generation.CreateGenerationWorkflow(ctx, sessionID, userID, generation.StartConfirmation{
+		PlanRevision: 1, IdempotencyKey: "start-workflow-retry",
+	}, now.Add(45*time.Second))
+	if err != nil {
+		t.Fatalf("repeat confirmed workflow with a new idempotency key: %v", err)
+	}
+	if repeatedWithNewKey.ID != workflow.ID || repeatedWithNewKey.SourceRevision != workflow.SourceRevision {
+		t.Fatalf("repeat confirmation with a new key created workflow %#v, want %#v", repeatedWithNewKey, workflow)
+	}
 	plan := generationTestPlan()
 	plan.Overview = "A replacement authoring plan creates a separate workflow."
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, sessionID, userID, 1, plan, authoring.StateIntentReview); err != nil {

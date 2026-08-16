@@ -30,13 +30,7 @@
 
 ## P1：幂等与验收
 
-### 5. 重复 `confirm_generation` 的设计与数据库唯一约束冲突
-
-`TODO.md` 当前描述重复确认可能为同一 Plan revision 创建第二个 workflow，但数据库对 `(source_kind, source_ref, source_revision)` 建有唯一索引（[`schema_generation.go`](internal/adapter/postgres/schema_generation.go:100)）。不同幂等键再次确认同一 Plan revision 时，实际结果会是唯一约束错误，而不是第二个 workflow。
-
-建议：明确业务语义并统一实现。推荐把同一 session、Plan revision 的重复确认解析为返回已有 workflow；只有新的 Plan revision 才能创建新的 workflow。相应更新 API 契约、错误码和测试，不要让数据库异常成为业务行为。
-
-### 6. MCP live 测试没有断言 rejection 来自 Judge
+### 5. MCP live 测试没有断言 rejection 来自 Judge
 
 `submissionSettled` 将“workflow 回到 `Generating` 且存在 `last_error`”直接视为通过（[`authoring.mcp.live.spec.ts`](test/agent/authoring.mcp.live.spec.ts:176)）。但这个状态既可能来自 Judge，也可能来自 Verify；测试注释却声称损坏 candidate 必须由 Judge 打回（[`authoring.mcp.live.spec.ts`](test/agent/authoring.mcp.live.spec.ts:309)）。因此即使 Judge 没有执行或错误通过，测试仍可能成功。
 
