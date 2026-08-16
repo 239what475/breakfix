@@ -75,77 +75,111 @@ func (m *Manager) EnsureFresh(ctx context.Context, workflowID string, seed []byt
 	if workflowID == "" {
 		return nil, false, errors.New("generation workflow id is required")
 	}
-	record, err := m.repo.GetCurrentGeneratorWorkspace(ctx, workflowID)
 	created := false
-	if errors.Is(err, domain.ErrWorkspaceNotFound) {
-		now := m.now()
-		workspaceID := domain.NewID("generator-workspace")
-		record, err = m.repo.CreateGeneratorWorkspace(ctx, domain.Workspace{
-			ID:                workspaceID,
-			WorkflowID:        workflowID,
-			Namespace:         m.namespace,
-			PVCName:           domain.NewWorkspacePVCName(workspaceID),
-			State:             domain.WorkspacePending,
-			ProvisionDeadline: now.Add(m.provisionTimeout),
-			CreatedAt:         now,
-			UpdatedAt:         now,
-		})
-		created = err == nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if record.State == domain.WorkspaceDeleted || record.State == domain.WorkspaceDeleting {
-		return nil, false, fmt.Errorf("generator workspace is %s", record.State)
-	}
-	// An active workspace has already provisioned its PVC and Sandbox. Later
-	// Generator turns reuse it without being bounded by the historical
-	// provision deadline, which only fences the pending provisioning path.
-	if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
-		return record, created, nil
-	}
-	provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
-	defer cancel()
-	if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.WorkflowID, m.storage); err != nil {
-		return nil, false, fmt.Errorf("ensure generator workspace pvc: %w", err)
-	}
-	if strings.TrimSpace(record.SandboxID) == "" {
-		sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.ID)
-		if err != nil {
-			return nil, false, fmt.Errorf("find generator sandbox: %w", err)
+	for {
+		record, err := m.repo.GetCurrentGeneratorWorkspace(ctx, workflowID)
+		if errors.Is(err, domain.ErrWorkspaceNotFound) {
+			now := m.now()
+			workspaceID := domain.NewID("generator-workspace")
+			record, err = m.repo.CreateGeneratorWorkspace(ctx, domain.Workspace{
+				ID:                workspaceID,
+				WorkflowID:        workflowID,
+				Namespace:         m.namespace,
+				PVCName:           domain.NewWorkspacePVCName(workspaceID),
+				State:             domain.WorkspacePending,
+				ProvisionDeadline: now.Add(m.provisionTimeout),
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			})
+			created = err == nil
 		}
-		if !found {
-			sandboxID, err = m.sandboxes.CreateWorkspace(provisionCtx, record.PVCName, record.ID)
-			if err != nil {
-				return nil, false, fmt.Errorf("create generator sandbox: %w", err)
-			}
-		}
-		if err := m.repo.RecordGeneratorWorkspaceSandbox(provisionCtx, record.ID, sandboxID, m.now()); err != nil {
-			_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
-			return nil, false, fmt.Errorf("record generator sandbox: %w", err)
-		}
-		record, err = m.repo.GetGeneratorWorkspace(provisionCtx, record.ID)
 		if err != nil {
 			return nil, false, err
 		}
-	}
-	if err := m.sandboxes.WaitWorkspace(provisionCtx, record.SandboxID); err != nil {
-		return nil, false, fmt.Errorf("wait for generator sandbox: %w", err)
-	}
-	// Pending means no model can yet observe the workspace. Seed it before the
-	// durable transition to active so a retried provision repeats this exact
-	// initialization instead of exposing a partially restored repair context.
-	if record.State == domain.WorkspacePending {
-		if err := m.sandboxes.ResetWorkspace(provisionCtx, record.SandboxID, seed); err != nil {
-			return nil, false, fmt.Errorf("seed generator workspace: %w", err)
+		if record.State == domain.WorkspaceDeleted || record.State == domain.WorkspaceDeleting {
+			return nil, false, fmt.Errorf("generator workspace is %s", record.State)
 		}
+		// An active workspace has already provisioned its PVC and Sandbox. Check
+		// the provider binding before reusing it: the provider may have deleted
+		// the Sandbox while the durable record remained active.
+		if record.State == domain.WorkspaceActive && strings.TrimSpace(record.SandboxID) != "" {
+			sandboxID, found, findErr := m.sandboxes.FindWorkspace(ctx, record.ID)
+			if findErr != nil {
+				return nil, false, fmt.Errorf("verify generator sandbox: %w", findErr)
+			}
+			if found && strings.TrimSpace(sandboxID) == strings.TrimSpace(record.SandboxID) {
+				return record, created, nil
+			}
+			// A different Sandbox with the same workspace metadata is an orphaned
+			// provider resource, not a valid replacement for the recorded binding.
+			// Remove it before retiring the record so cleanup cannot leave it
+			// behind.
+			if found {
+				if err := m.sandboxes.DeleteWorkspace(ctx, sandboxID); err != nil {
+					return nil, false, fmt.Errorf("delete stale generator sandbox: %w", err)
+				}
+			}
+			if _, retireErr := m.repo.RetireCurrentGeneratorWorkspace(ctx, workflowID, m.now()); retireErr != nil {
+				if errors.Is(retireErr, domain.ErrWorkspaceNotFound) {
+					continue
+				}
+				return nil, false, fmt.Errorf("retire unavailable generator workspace: %w", retireErr)
+			}
+			// The retired record remains eligible for asynchronous Sandbox/PVC
+			// cleanup. The next iteration allocates a fresh workspace identity.
+			continue
+		}
+		provisionCtx, cancel := m.provisionContext(ctx, record.ProvisionDeadline)
+		if err := m.pvcs.EnsureWorkspacePVC(provisionCtx, record.Namespace, record.PVCName, record.WorkflowID, m.storage); err != nil {
+			cancel()
+			return nil, false, fmt.Errorf("ensure generator workspace pvc: %w", err)
+		}
+		if strings.TrimSpace(record.SandboxID) == "" {
+			sandboxID, found, err := m.sandboxes.FindWorkspace(provisionCtx, record.ID)
+			if err != nil {
+				cancel()
+				return nil, false, fmt.Errorf("find generator sandbox: %w", err)
+			}
+			if !found {
+				sandboxID, err = m.sandboxes.CreateWorkspace(provisionCtx, record.PVCName, record.ID)
+				if err != nil {
+					cancel()
+					return nil, false, fmt.Errorf("create generator sandbox: %w", err)
+				}
+			}
+			if err := m.repo.RecordGeneratorWorkspaceSandbox(provisionCtx, record.ID, sandboxID, m.now()); err != nil {
+				_ = m.sandboxes.DeleteWorkspace(context.Background(), sandboxID)
+				cancel()
+				return nil, false, fmt.Errorf("record generator sandbox: %w", err)
+			}
+			record, err = m.repo.GetGeneratorWorkspace(provisionCtx, record.ID)
+			if err != nil {
+				cancel()
+				return nil, false, err
+			}
+		}
+		if err := m.sandboxes.WaitWorkspace(provisionCtx, record.SandboxID); err != nil {
+			cancel()
+			return nil, false, fmt.Errorf("wait for generator sandbox: %w", err)
+		}
+		// Pending means no model can yet observe the workspace. Seed it before the
+		// durable transition to active so a retried provision repeats this exact
+		// initialization instead of exposing a partially restored repair context.
+		if record.State == domain.WorkspacePending {
+			if err := m.sandboxes.ResetWorkspace(provisionCtx, record.SandboxID, seed); err != nil {
+				cancel()
+				return nil, false, fmt.Errorf("seed generator workspace: %w", err)
+			}
+		}
+		if err := m.repo.ActivateGeneratorWorkspace(provisionCtx, record.ID, record.SandboxID, m.now()); err != nil {
+			_ = m.sandboxes.DeleteWorkspace(context.Background(), record.SandboxID)
+			cancel()
+			return nil, false, fmt.Errorf("record generator sandbox: %w", err)
+		}
+		cancel()
+		record, err = m.repo.GetGeneratorWorkspace(ctx, record.ID)
+		return record, created, err
 	}
-	if err := m.repo.ActivateGeneratorWorkspace(provisionCtx, record.ID, record.SandboxID, m.now()); err != nil {
-		_ = m.sandboxes.DeleteWorkspace(context.Background(), record.SandboxID)
-		return nil, false, fmt.Errorf("record generator sandbox: %w", err)
-	}
-	record, err = m.repo.GetGeneratorWorkspace(ctx, record.ID)
-	return record, created, err
 }
 
 func (m *Manager) Retire(ctx context.Context, workflowID string) error {

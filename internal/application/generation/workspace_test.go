@@ -60,6 +60,36 @@ func TestManagerReusesActiveWorkspaceAfterProvisionDeadline(t *testing.T) {
 	}
 }
 
+func TestManagerRebuildsActiveWorkspaceWhenSandboxDisappears(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repo := &memoryWorkspaceRepository{}
+	pvcs := &memoryWorkspacePVCs{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-one"}
+	manager := newWorkspaceManager(t, repo, pvcs, sandboxes, &now)
+
+	first, err := manager.Ensure(context.Background(), "workflow-one", []byte("initial"))
+	if err != nil {
+		t.Fatalf("ensure initial workspace: %v", err)
+	}
+	delete(sandboxes.workspaces, first.ID)
+	sandboxes.nextID = "sandbox-two"
+
+	second, err := manager.Ensure(context.Background(), "workflow-one", []byte("restore-candidate"))
+	if err != nil {
+		t.Fatalf("rebuild workspace after sandbox deletion: %v", err)
+	}
+	if second.ID == first.ID || second.PVCName == first.PVCName || second.SandboxID != "sandbox-two" {
+		t.Fatalf("replacement workspace = %#v, previous = %#v", second, first)
+	}
+	retired, err := repo.GetGeneratorWorkspace(context.Background(), first.ID)
+	if err != nil || retired.State != domain.WorkspaceDeleting {
+		t.Fatalf("retired workspace = %#v, err=%v", retired, err)
+	}
+	if pvcs.created != 2 || sandboxes.created != 2 || sandboxes.resets != 2 {
+		t.Fatalf("replacement lifecycle = pvcs:%d creates:%d resets:%d", pvcs.created, sandboxes.created, sandboxes.resets)
+	}
+}
+
 func TestManagerRetiresWorkspaceBeforeReplacement(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	repo := &memoryWorkspaceRepository{}
@@ -425,13 +455,19 @@ type memoryWorkspaceSandboxes struct {
 	created, resets int
 	deleted         int
 	lastSeed        []byte
+	workspaces      map[string]string
 }
 
-func (s *memoryWorkspaceSandboxes) FindWorkspace(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (s *memoryWorkspaceSandboxes) FindWorkspace(_ context.Context, workspaceID string) (string, bool, error) {
+	sandboxID, found := s.workspaces[workspaceID]
+	return sandboxID, found, nil
 }
-func (s *memoryWorkspaceSandboxes) CreateWorkspace(context.Context, string, string) (string, error) {
+func (s *memoryWorkspaceSandboxes) CreateWorkspace(_ context.Context, _, workspaceID string) (string, error) {
 	s.created++
+	if s.workspaces == nil {
+		s.workspaces = make(map[string]string)
+	}
+	s.workspaces[workspaceID] = s.nextID
 	return s.nextID, nil
 }
 func (s *memoryWorkspaceSandboxes) WaitWorkspace(context.Context, string) error { return nil }
@@ -440,7 +476,12 @@ func (s *memoryWorkspaceSandboxes) ResetWorkspace(_ context.Context, _ string, s
 	s.lastSeed = append([]byte(nil), seed...)
 	return s.resetErr
 }
-func (s *memoryWorkspaceSandboxes) DeleteWorkspace(context.Context, string) error {
+func (s *memoryWorkspaceSandboxes) DeleteWorkspace(_ context.Context, sandboxID string) error {
 	s.deleted++
+	for workspaceID, currentID := range s.workspaces {
+		if currentID == sandboxID {
+			delete(s.workspaces, workspaceID)
+		}
+	}
 	return nil
 }
