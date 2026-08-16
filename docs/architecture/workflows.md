@@ -97,8 +97,8 @@ Catalog 和新 Environment 只看 active Roadmap，因此 deprecated Challenge �
 Judge 和 Classifier 的已知技术错误属于各自 `AgentRun`，一个逻辑 Run 最多五次；它们不会产生新的
 CandidateRevision。Generator 的普通工具失败或回合中断只释放该 workspace 的回合 binding 并保留 workspace，
 不产生 CandidateRevision，也不恢复或重放半完成工具调用。Server 崩溃或重启会使所有未完成 Generator workspace
-失效：后台 reaper 异步删除旧 Sandbox/PVC，下一次 Generator client 操作创建新的 Sandbox 和 PVC，并从最近已提交
-CandidateRevision 或初始 Plan scaffold 重建。Runtime state 的基础设施错误则由 Server 管理当前 state 的
+失效：后台 reaper 异步删除旧 Sandbox/PVC，下一次 Generator client 操作创建新的 Sandbox 和 PVC，并按“最新有效
+workspace snapshot、最近已提交 CandidateRevision、空 scaffold”的顺序重建。Runtime state 的基础设施错误则由 Server 管理当前 state 的
 `runtime_attempt`：进入
 state 时为一，最多五次。接管同一 state 时 external identity 保持
 `workflow_id + candidate_revision_id + state + state_version`，不包含 `runtime_attempt`。确定性 candidate

@@ -60,7 +60,7 @@ workspace 的退休、Judge/Classifier 与 interactive AgentRun、Roadmap、学�
 finalizer 的恢复，再构造 HTTP Handler 和 Router。`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
 
 bootstrap 显式启动 Catalog installer、materialization reconciler、Judge/Classifier AgentRunner、Generator
-workspace reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、
+workspace snapshotter/reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、
 Roadmap maintenance 和已恢复的 interactive AgentRun。停止时先停止接收 HTTP 请求，再取消并等待这些服务，最后关闭
 Incus 与 PostgreSQL；没有通用 executor、内存 worklist 或额外 Deployment。
 

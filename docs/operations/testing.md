@@ -9,7 +9,7 @@ Breakfix 将测试按依赖和失败边界分层。日常测试不启动模型�
 | 快速测试 | Go 领域逻辑、API、前端纯逻辑和 Controller 决策 | `make test-unit`、前端测试 |
 | 集成测试 | PostgreSQL、OCI/Catalog、Incus 和外部适配器契约 | 按依赖显式运行 |
 | 平台验收 | Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量真实主路径 | `make test-e2e`、`make test-e2e-node`、`make test-e2e-recovery` |
-| Live Agent 验收 | 真实模型、OpenSandbox、网页与 MCP 两条 Authoring 全链路 | `make test-acceptance-node`、`make test-acceptance-mcp` 或手工 Live 入口 |
+| Live Agent 验收 | 真实模型、OpenSandbox、网页 Node/K8s 与 MCP 三条 Authoring 全链路 | `make test-acceptance-node`、`make test-acceptance-mcp` 或手工 K8s Live 入口 |
 
 平台验收不替代快速测试；Controller 使用 `envtest` 的测试也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go 单元/集成测试覆盖，不塞进浏览器场景。
 
@@ -28,7 +28,9 @@ kubectl config use-context kind-breakfix-e2e
 make e2e-prepare
 ```
 
-`e2e-prepare` 的顺序是：只读 preflight、构建当前工作树的运行时镜像、标记目标、准备专用 Incus project、将 target 的 Catalog 配置显式置空后部署当前工作树、清理该目标、重新标记以创建本轮的恢复快照，再次部署干净目标，通过 Kind Registry 发布 `test/fixtures/catalog-release/` 的 immutable OCI digest，写入该 digest 并等待公开 Catalog projection。镜像构建发生在 target preflight 之后、任何 target 状态改变之前。prepare 不调用模型、不把文件复制到 PVC、不直接写数据库，也不自动运行 Playwright。准备阶段会检查 Catalog 中只有当前 fixture，并核对 runtime、Domain、Topic 和 Tag；所有检查成功后才写入 prepared marker。
+`e2e-prepare` 的顺序是：只读 preflight、构建当前工作树的运行时镜像、标记目标、准备专用 Incus project、将 target 的 Catalog 配置显式置空后部署当前工作树、清理该目标、重新标记以创建本轮的恢复快照，再次部署干净目标，通过 Kind Registry 发布 `test/fixtures/catalog-release/` 的 immutable OCI digest，写入该 digest 并等待公开 Catalog projection。镜像构建发生在 target preflight 之后、任何 target 状态改变之前。prepare 不调用模型、不把文件复制到 PVC、不直接写数据库，也不自动运行 Playwright。
+
+这份 Catalog fixture 是验收自己的分类靶场，而不是 `catalog/` 的替身。它只发布一个稳定的 Node runtime 基线题，用于普通平台和 MCP 场景；其 Roadmap 还提供两个没有绑定基线题目的分类目标：Linux 日志归档，以及 Kubernetes 工作负载与 Service。这样网页 Node 场景可以生成真实的日志归档题，网页 K8s 场景可以生成 Deployment/Service 题，而不必把测试题意扭成运行时标记题。prepare 同时检查公开基线题的 runtime、Domain、Topic 和 Tag，所有检查成功后才写入 prepared marker。
 
 准备完成后分别运行测试：
 
@@ -73,7 +75,7 @@ reset 只接受同一个已标记 Kind target，先停止会写入数据的 Serv
 
 ## Live Agent 验收
 
-真实 Authoring 是显式的人工验收，不属于日常门禁。两条入口共用同一个 `GeneratorService` 和后续状态机：
+真实 Authoring 是显式的人工验收，不属于日常门禁。三条入口共用同一个 `GeneratorService` 和后续状态机：
 
 - **网页 Authoring Agent**：先与作者讨论并持久化 Plan，作者在对话中明确确认某个 revision 后，Agent 在同一个回合调用
   `confirm_generation`、操作远程 workspace 并提交 candidate；后续内容审核、分类审核与发布也由作者在对话中确认后经版本绑定
@@ -81,13 +83,16 @@ reset 只接受同一个已标记 Kind target，先停止会写入数据的 Serv
 - **本机 `breakfix-mcp`**：外部 Agent 通过 stdio MCP connector 调用同一组工具。验收额外断言审核包被校验、摘要匹配后原子
   投影到系统临时目录，重复同步幂等、删除投影后可重新同步，目录内没有用户 Token 或底层环境凭据，且其他用户 Token 不能读取
   同一 workflow。
+- **网页 K8s Authoring**：网页 Agent 生成一个 Deployment 与 ClusterIP Service 题，经历相同的审核、分类、发布和 VK8s
+  验证路径。它通过 `scripts/kind/run-e2e.sh acceptance-k8s` 显式运行，保持与 Node/MCP 验收独立。
 
-两条验收都覆盖 candidate 提交、被打回后的修复与重新提交、真实 `Build -> ArtifactPublish -> Verify`、内容审核、分类审核和
-显式发布。执行入口：
+三条验收都覆盖 candidate 提交、被打回后的修复与重新提交、真实 `Build -> ArtifactPublish -> Verify`、内容审核、分类审核和
+显式发布。Node 和 MCP Make 入口会先重新 prepare；需要在同一 prepared target 上运行 K8s 场景时使用直接入口：
 
 ```bash
 RUN_AGENT_LIVE_E2E=1 make test-acceptance-node
 RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp
+RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
 ```
 
 这些入口只断言持久化状态、公开 challenge、Environment、checkpoint 结果与 MCP 本地审核投影，不断言模型措辞、prompt、工具调用
@@ -97,7 +102,6 @@ RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp
 其他真实验收保持独立，必须先手工准备目标并显式启用对应开关：
 
 ```bash
-RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
 RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh agent-assistant
 RUN_AGENT_SOAK_E2E=1 ./scripts/kind/run-e2e.sh agent-soak
 ```

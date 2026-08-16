@@ -144,7 +144,7 @@ Graceful deadline/永久性执行器故障的「结束 Run + 删除 private stag
 - [x] 5.3 网页 node 场景恢复为日志归档等真实 Linux 题
 - [x] 5.4 删除或标注无引用的 `test/fixtures/roadmap/`
 - [x] 5.5 空环境 prepare 后三条 live 验收全部通过
-- [ ] 6.1 文档同步：agent-runtime、testing、catalog-release
+- [x] 6.1 文档同步：agent-runtime、testing、catalog-release
 
 ### 提交计划
 

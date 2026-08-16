@@ -36,6 +36,18 @@ roadmap:
 
 `challenge.yaml` 仍是 portable candidate 语义，不能携带平台生成的 challenge ID、目录 slug、runtime artifact、发布时间或已发布 content revision。`source_ref` 与 title 位于 Roadmap source：Domain 全局唯一，Topic 使用 `domain/topic`，Tag 全局唯一，Challenge 使用 `domain/topic/challenge`。Release 作者显式维护 ASCII `source_ref`；Authoring 创建的实体从显示标题导出稳定 ASCII 引用，非 ASCII 标题使用确定性摘要段。运行时 opaque challenge ID 只在最终 commit 时分配。
 
+编辑 portable source 后，先重新计算声明的内容 revision，再打包：
+
+```bash
+go run ./cmd/catalog-release \
+  -source /path/to/foundation-catalog \
+  -print-content-revisions
+```
+
+该命令校验目录布局、challenge 与 Roadmap source，并输出每个 `entries[].contentRevision` 和
+`roadmap.contentRevision` 的 JSON。计算时不信任 `release.yaml` 中已有的 digest，因此可用于修复过期声明；将输出值写回
+manifest 后，普通打包路径仍会严格拒绝任何不匹配。它不写 source、不会安装 Catalog，也不会联系 Registry。
+
 ## Challenge 生命周期
 
 平台为每道题分配一个稳定的 `Challenge.id`，并为每次经过完整
@@ -151,5 +163,6 @@ make catalog-package \
 
 平台验收也使用这条启动路径。`make e2e-prepare` 在专用、可丢弃的 Kind target 上将
 `test/fixtures/catalog-release/` 打包、推送并作为 Server 的 `catalog_release_reference` 配置，然后有界地等待公开 Catalog
-出现 fixture。Playwright global setup 只检查准备好的 Server 连接；测试不会安装 release、复制文件或调用内部管理 API。完整的
-target 生命周期和运行入口见[测试与真实验收](../operations/testing.md)。
+出现唯一的基线题。fixture Roadmap 同时携带 Linux 日志归档和 Kubernetes 工作负载/Service 的分类目标，使 live Authoring
+验收可以在不修改 Roadmap 的前提下验证两种真实题意。Playwright global setup 只检查准备好的 Server 连接；测试不会安装
+release、复制文件或调用内部管理 API。完整的 target 生命周期和运行入口见[测试与真实验收](../operations/testing.md)。
