@@ -7,6 +7,9 @@ import (
 )
 
 func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T) {
+	if authoringMaxIterations != math.MaxInt {
+		t.Fatalf("authoring max iterations = %d, want %d", authoringMaxIterations, math.MaxInt)
+	}
 	config := authoringModelRetryConfig()
 	if config.MaxRetries != math.MaxInt {
 		t.Fatalf("authoring model max retries = %d, want %d", config.MaxRetries, math.MaxInt)

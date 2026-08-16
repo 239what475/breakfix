@@ -118,10 +118,10 @@ Graceful deadline/永久性执行器故障的「结束 Run + 删除 private stag
 - [x] 1.4 工具错误语义：命令/参数错误作为工具结果留在同一 AgentRun；副作用工具 HTTP 超时返回“执行状态未知”，不自动重放、不重建 Agent、不退休 workspace；Agent 可继续执行检查命令判断产出
 - [x] 1.5 网页 Eino 与 MCP 的工具结果统一为成功、已知失败、执行状态未知三种可读结构；MCP 不再把未知状态压缩为公共错误文本
 - [x] 1.6 私有 Plan 变更使用由 run、stage revision 和 canonical arguments 派生的 operation identity；未知结果可由模型显式重放同一 operation，自动生成的 checkpoint ID 仍确定
-- [ ] 2.1 authoring `MaxIterations` 改无上限大整数
-- [ ] 2.2 系统提示补充 `CANDIDATE_INVALID` 语义
-- [ ] 2.3 llm 行为测试：无上限迭代配置与模型重试行为；不对 prompt 文案作单元测试断言
-- [ ] 2.4 系统提示要求按需读取、避免重复读大文件；记录上下文窗口风险
+- [x] 2.1 authoring `MaxIterations` 改无上限大整数
+- [x] 2.2 系统提示补充 `CANDIDATE_INVALID` 语义
+- [x] 2.3 llm 行为测试：无上限迭代配置与模型重试行为；不对 prompt 文案作单元测试断言
+- [x] 2.4 系统提示要求按需读取、避免重复读大文件；记录上下文窗口风险
 - [ ] 3.1 提示允许「部分完成 + 交代剩余」的回合结尾
 - [ ] 3.2 终止事务：Run 状态、private stage、Event 在同一事务完成；使用独立持久化 context
 - [ ] 3.3 Event 确定性 ID、状态与闭合 reason 枚举映射、API/UI 投影与 Eino 输入过滤；终止不能向公开的 `authoring_sessions.last_error` 写原始执行错误；浏览器/MCP 断开不结束 Run

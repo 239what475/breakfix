@@ -28,6 +28,8 @@ type AuthoringExecutor struct {
 	generator appauthoring.GeneratorOperations
 }
 
+const authoringMaxIterations = math.MaxInt
+
 func NewAuthoringExecutor(cfg config.AgentConfig, generator appauthoring.GeneratorOperations) *AuthoringExecutor {
 	return &AuthoringExecutor{config: cfg, generator: generator}
 }
@@ -53,11 +55,13 @@ func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Exec
 		return "", err
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:          "authoring_agent",
-		Description:   "Breakfix challenge authoring agent",
-		Instruction:   authoringSystemPrompt(),
-		Model:         chat,
-		MaxIterations: 18,
+		Name:        "authoring_agent",
+		Description: "Breakfix challenge authoring agent",
+		Instruction: authoringSystemPrompt(),
+		Model:       chat,
+		// The run deadline and the model context window bound Authoring; a fixed
+		// tool/model turn count would terminate legitimate long-running work.
+		MaxIterations: authoringMaxIterations,
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
 			Tools:               toBaseAuthoringTools(conversation.tools()),
 			ExecuteSequentially: true,

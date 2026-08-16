@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	authoringPromptVersion = "authoring-v2"
+	authoringPromptVersion = "authoring-v3"
 	defaultRunDeadline     = 30 * time.Minute
 )
 
