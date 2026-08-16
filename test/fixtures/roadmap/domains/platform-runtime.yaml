@@ -1,6 +1,0 @@
-kind: Domain
-source_ref: platform-runtime
-title: 平台运行时
-definition: 面向学习环境运行时与节点行为的运维课程边界。
-scope: 节点环境、服务管理和验证脚本。
-non_goals: 不涵盖 Kubernetes 控制平面实现。

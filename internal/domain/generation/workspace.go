@@ -17,6 +17,8 @@ var (
 	ErrWorkspaceNotIdle         = errors.New("generator workspace is not eligible for idle retirement")
 )
 
+const workspaceSnapshotHolderPrefix = "workspace-snapshot-"
+
 type WorkspaceState string
 
 const (
@@ -65,6 +67,18 @@ type WorkspaceSnapshotReference struct {
 type WorkspaceTurn struct {
 	WorkflowID string `json:"workflow_id"`
 	ID         string `json:"id"`
+}
+
+// NewWorkspaceSnapshotHolderID identifies the Server-only turn that protects
+// a workspace while its current contents are archived. It is distinct from a
+// user turn so an interactive request can wait for this short-lived operation
+// without waiting behind another interactive writer.
+func NewWorkspaceSnapshotHolderID() string {
+	return NewID("workspace-snapshot")
+}
+
+func IsWorkspaceSnapshotHolder(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), workspaceSnapshotHolderPrefix)
 }
 
 func (t WorkspaceTurn) Valid() bool {

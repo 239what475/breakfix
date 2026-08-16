@@ -40,14 +40,15 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a node chall
 		await expectNoLifecycleButtons(page);
 		await sendAuthoringMessage(
 			page,
-			"创建一道 runtime: node 的单节点运行时初始化验收题，节点名为 host。" +
-				"平台预期 /var/lib/breakfix/web-e2e/ready 在初始化后存在且内容精确等于 ready，但当前初始化丢失了这个标记文件。" +
-				"学习者需要恢复该标记。题目有一个检查点：标记文件存在且内容精确为 ready。",
+			"创建一道 runtime: node 的单节点 Linux 日志归档题，节点名为 host。" +
+				"节点上的应用日志位于 /var/log/breakfix-web-e2e/app.log，当前日志需要归档到 /var/log/breakfix-web-e2e/archive/app.log，" +
+				"同时保留原日志文件。学习者需要完成归档。题目有一个检查点：归档副本存在，并且内容与原日志完全一致。",
 		);
 		await sendAuthoringMessage(
 			page,
 			"题意已经完整，我确认当前已持久化的 Plan revision。请创建生成任务并生成题目：" +
-				"初始脚本必须真的删除该标记文件；标准答案必须重新创建目录并写入精确内容 ready。" +
+				"初始脚本必须创建包含几行固定内容的应用日志，并确保 archive/app.log 不存在；标准答案必须创建归档目录，" +
+				"将原日志复制到 archive/app.log 并保留原文件。检查脚本只验证归档副本存在且与原日志内容一致。" +
 				"不要增加节点、资源或检查点，生成完成后直接提交 candidate。",
 		);
 		const sessionID = await currentAuthoringSessionID(page);

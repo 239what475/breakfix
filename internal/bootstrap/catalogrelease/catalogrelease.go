@@ -3,6 +3,7 @@ package catalogrelease
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,16 +15,28 @@ import (
 )
 
 type Options struct {
-	Source          string
-	Output          string
-	Reference       string
-	TrustBundleFile string
+	Source                string
+	Output                string
+	Reference             string
+	TrustBundleFile       string
+	PrintContentRevisions bool
 }
 
 // Run writes a portable Catalog Release OCI archive and optionally publishes
 // it to the explicitly configured Registry. It never contacts Server, Incus
 // or Kubernetes.
 func Run(ctx context.Context, options Options) (string, error) {
+	if options.PrintContentRevisions {
+		report, err := appcatalog.CalculateContentRevisions(strings.TrimSpace(options.Source))
+		if err != nil {
+			return "", fmt.Errorf("calculate catalog content revisions: %w", err)
+		}
+		encoded, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("encode catalog content revisions: %w", err)
+		}
+		return string(encoded), nil
+	}
 	if strings.TrimSpace(options.Output) == "" {
 		return "", errors.New("-output is required")
 	}

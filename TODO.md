@@ -139,11 +139,11 @@ Graceful deadline/永久性执行器故障的「结束 Run + 删除 private stag
 - [x] 4.5 单元/集成测试：周期触发、并发跳过、digest 校验、损坏回退、清理、seed 优先级、重启恢复
 - [x] 4.6 canonical archive 安全性：拒绝路径穿越、链接和特殊文件；恢复不再直接调用 shell `tar -xzf`
 - [x] 4.7 workspace 闲置回收：增加 `idle_since` 与 Server 固定 `24h` TTL；turn 获取清空计时、释放不直接开始计时，成功快照后才设置且已有有效快照时不重复刷新；turn 获取/释放、快照发布和闲置退休使用同一行锁；覆盖 TTL 到期、活跃 turn 抢占、快照缺失保留、异步删除及从快照重建
-- [ ] 5.1 扩展 fixture Roadmap：Linux/Node 与 k8s 两个方向的 domain/topic
-- [ ] 5.2 `cmd/catalog-release` 增加 `-print-content-revisions`，并用它重算写回 `release.yaml`
-- [ ] 5.3 网页 node 场景恢复为日志归档等真实 Linux 题
-- [ ] 5.4 删除或标注无引用的 `test/fixtures/roadmap/`
-- [ ] 5.5 空环境 prepare 后三条 live 验收全部通过
+- [x] 5.1 扩展 fixture Roadmap：Linux/Node 与 k8s 两个方向的 domain/topic
+- [x] 5.2 `cmd/catalog-release` 增加 `-print-content-revisions`，并用它重算写回 `release.yaml`
+- [x] 5.3 网页 node 场景恢复为日志归档等真实 Linux 题
+- [x] 5.4 删除或标注无引用的 `test/fixtures/roadmap/`
+- [x] 5.5 空环境 prepare 后三条 live 验收全部通过
 - [ ] 6.1 文档同步：agent-runtime、testing、catalog-release
 
 ### 提交计划

@@ -104,6 +104,51 @@ func TestGeneratorServiceRecreatesWorkspaceWhenIdleRetirementWinsTurnAcquire(t *
 	}
 }
 
+func TestGeneratorServiceWaitsForSnapshotHolderBeforeBindingUserTurn(t *testing.T) {
+	store := newGeneratorServiceStore("user-one")
+	workflow := store.addWorkflow("workflow-snapshot-holder")
+	service := newGeneratorServiceForTest(t, store, &generatorServicePlans{}, &generatorServiceTools{})
+	repository := &snapshotHolderWorkspaceRepository{
+		memoryWorkspaceRepository: service.workspace.repo.(*memoryWorkspaceRepository),
+		busy:                      make(chan struct{}, 1),
+	}
+	service.workspace.repo = repository
+	store.workspace = repository
+	if _, err := service.workspace.Ensure(context.Background(), workflow.ID, nil); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	holder := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: domain.NewWorkspaceSnapshotHolderID()}
+	if _, err := repository.AcquireGeneratorWorkspaceTurn(context.Background(), holder, service.now()); err != nil {
+		t.Fatalf("bind snapshot holder: %v", err)
+	}
+
+	userTurn := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "authoring-turn"}
+	completed := make(chan error, 1)
+	go func() {
+		completed <- service.StartWorkspaceTurn(context.Background(), "user-one", userTurn)
+	}()
+	select {
+	case <-repository.busy:
+	case <-time.After(time.Second):
+		t.Fatal("user turn did not wait for the snapshot holder")
+	}
+	if err := repository.ReleaseGeneratorWorkspaceTurn(context.Background(), holder, service.now()); err != nil {
+		t.Fatalf("release snapshot holder: %v", err)
+	}
+	select {
+	case err := <-completed:
+		if err != nil {
+			t.Fatalf("bind user turn after snapshot: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("user turn did not resume after snapshot holder release")
+	}
+	record, err := repository.GetGeneratorWorkspaceForTurn(context.Background(), userTurn)
+	if err != nil || record.ActiveTurnID != userTurn.ID {
+		t.Fatalf("workspace user turn = %#v, err=%v", record, err)
+	}
+}
+
 func TestGeneratorServiceSubmitsOneImmutableCandidatePerIdempotencyKey(t *testing.T) {
 	store := newGeneratorServiceStore("user-one")
 	workflow := store.addWorkflow("workflow-submit")
@@ -260,6 +305,22 @@ type generatorServiceStore struct {
 type retirementRaceWorkspaceRepository struct {
 	*memoryWorkspaceRepository
 	acquireCalls int
+}
+
+type snapshotHolderWorkspaceRepository struct {
+	*memoryWorkspaceRepository
+	busy chan struct{}
+}
+
+func (r *snapshotHolderWorkspaceRepository) AcquireGeneratorWorkspaceTurn(ctx context.Context, turn domain.WorkspaceTurn, now time.Time) (*domain.Workspace, error) {
+	workspace, err := r.memoryWorkspaceRepository.AcquireGeneratorWorkspaceTurn(ctx, turn, now)
+	if errors.Is(err, domain.ErrWorkspaceBusy) {
+		select {
+		case r.busy <- struct{}{}:
+		default:
+		}
+	}
+	return workspace, err
 }
 
 func (r *retirementRaceWorkspaceRepository) AcquireGeneratorWorkspaceTurn(ctx context.Context, turn domain.WorkspaceTurn, now time.Time) (*domain.Workspace, error) {

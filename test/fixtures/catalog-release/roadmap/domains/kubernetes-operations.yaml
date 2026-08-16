@@ -1,0 +1,6 @@
+kind: Domain
+source_ref: kubernetes-operations
+title: Kubernetes 平台运维
+definition: 面向 Kubernetes 集群中工作负载、服务和资源状态的运维实践。
+scope: Pod、Deployment、Service、标签选择器、端口、就绪状态和基础资源排查。
+non_goals: 不覆盖 Kubernetes 控制器源码开发、云厂商托管服务和复杂网络插件实现。

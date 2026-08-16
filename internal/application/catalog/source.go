@@ -39,62 +39,101 @@ type SourceChallenge struct {
 	ContentRevision catalogdomain.ContentRevision
 }
 
+// ContentRevisionReport contains the revisions that must be copied into a
+// Catalog Release manifest after editing its source tree. It intentionally
+// does not use the manifest's declared values, so it can repair stale ones.
+type ContentRevisionReport struct {
+	Entries []ContentRevisionEntry `json:"entries"`
+	Roadmap ContentRevisionValue   `json:"roadmap"`
+}
+
+type ContentRevisionEntry struct {
+	Path            string                        `json:"path"`
+	ContentRevision catalogdomain.ContentRevision `json:"contentRevision"`
+}
+
+type ContentRevisionValue struct {
+	ContentRevision catalogdomain.ContentRevision `json:"contentRevision"`
+}
+
 // LoadPortableSource validates the complete checked-in catalog source. It
 // does not install, build, or make any challenge visible.
 func LoadPortableSource(root string) (*PortableSource, error) {
-	root, err := validateSourceRoot(root)
+	result, revisions, err := loadPortableSource(root)
 	if err != nil {
 		return nil, err
+	}
+	for index, declared := range result.Manifest.Entries {
+		actual := revisions.Entries[index].ContentRevision
+		if actual != declared.ContentRevision {
+			return nil, fmt.Errorf("release challenge %q contentRevision is %q, want %q", declared.Path, actual, declared.ContentRevision)
+		}
+	}
+	if revisions.Roadmap.ContentRevision != result.Manifest.Roadmap.ContentRevision {
+		return nil, fmt.Errorf("release roadmap contentRevision is %q, want %q", revisions.Roadmap.ContentRevision, result.Manifest.Roadmap.ContentRevision)
+	}
+	return result, nil
+}
+
+// CalculateContentRevisions validates the source tree and computes its
+// current revisions without trusting the values declared in release.yaml.
+// This is the repair path used before packaging a changed release source.
+func CalculateContentRevisions(root string) (ContentRevisionReport, error) {
+	_, revisions, err := loadPortableSource(root)
+	return revisions, err
+}
+
+func loadPortableSource(root string) (*PortableSource, ContentRevisionReport, error) {
+	root, err := validateSourceRoot(root)
+	if err != nil {
+		return nil, ContentRevisionReport{}, err
 	}
 	manifest, err := readReleaseManifest(filepath.Join(root, releaseManifestFilename))
 	if err != nil {
-		return nil, err
+		return nil, ContentRevisionReport{}, err
 	}
 	if err := manifest.Validate(); err != nil {
-		return nil, fmt.Errorf("validate release manifest: %w", err)
+		return nil, ContentRevisionReport{}, fmt.Errorf("validate release manifest: %w", err)
 	}
 	if err := validateDistinctChallengeRoots(manifest.Entries); err != nil {
-		return nil, err
+		return nil, ContentRevisionReport{}, err
 	}
 	if err := validateChallengeSourceLayout(root, manifest.Entries); err != nil {
-		return nil, err
+		return nil, ContentRevisionReport{}, err
 	}
 
 	result := &PortableSource{Root: root, Manifest: manifest, Challenges: make([]SourceChallenge, 0, len(manifest.Entries))}
+	revisions := ContentRevisionReport{Entries: make([]ContentRevisionEntry, 0, len(manifest.Entries))}
 	for _, declared := range manifest.Entries {
 		dir, err := sourcePath(root, declared.Path)
 		if err != nil {
-			return nil, err
+			return nil, ContentRevisionReport{}, err
 		}
 		revision, err := ContentRevision(dir)
 		if err != nil {
-			return nil, fmt.Errorf("hash release challenge %q: %w", declared.Path, err)
-		}
-		if revision != declared.ContentRevision {
-			return nil, fmt.Errorf("release challenge %q contentRevision is %q, want %q", declared.Path, revision, declared.ContentRevision)
+			return nil, ContentRevisionReport{}, fmt.Errorf("hash release challenge %q: %w", declared.Path, err)
 		}
 		entry, err := challenge.ValidatePortableDir(dir)
 		if err != nil {
-			return nil, fmt.Errorf("validate release challenge %q: %w", declared.Path, err)
+			return nil, ContentRevisionReport{}, fmt.Errorf("validate release challenge %q: %w", declared.Path, err)
 		}
 		result.Challenges = append(result.Challenges, SourceChallenge{
 			Path: declared.Path, Entry: *entry, ContentRevision: revision,
 		})
+		revisions.Entries = append(revisions.Entries, ContentRevisionEntry{Path: declared.Path, ContentRevision: revision})
 	}
 
 	roadmapRoot := filepath.Join(root, roadmapSourcesDirname)
 	roadmapRevision, snapshot, err := loadPortableRoadmap(roadmapRoot)
 	if err != nil {
-		return nil, err
-	}
-	if roadmapRevision != manifest.Roadmap.ContentRevision {
-		return nil, fmt.Errorf("release roadmap contentRevision is %q, want %q", roadmapRevision, manifest.Roadmap.ContentRevision)
+		return nil, ContentRevisionReport{}, err
 	}
 	if err := validateRoadmapSources(snapshot, result.Challenges); err != nil {
-		return nil, err
+		return nil, ContentRevisionReport{}, err
 	}
 	result.Roadmap = snapshot
-	return result, nil
+	revisions.Roadmap = ContentRevisionValue{ContentRevision: roadmapRevision}
+	return result, revisions, nil
 }
 
 func readReleaseManifest(filename string) (catalogdomain.SourceManifest, error) {

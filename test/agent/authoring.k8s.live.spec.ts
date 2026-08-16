@@ -37,7 +37,7 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s challe
 		await expectNoLifecycleButtons(page);
 		await sendAuthoringMessage(
 			page,
-			"创建一道 runtime: k8s 的练习题。学习者在 default namespace 创建 Deployment web：replicas 为 2，标签 app=web，" +
+			"创建一道属于 Kubernetes 工作负载与服务运维方向的 runtime: k8s 练习题。学习者在 default namespace 创建 Deployment web：replicas 为 2，标签 app=web，" +
 				"容器 nginx 使用 nginx:1.27.5 并暴露 80。再创建 ClusterIP Service web，selector app=web，port 和 targetPort 都为 80。" +
 				"初始时资源不存在，只有两个检查点：Deployment 的期望与 Ready 副本数；Service 的类型、selector 和端口。",
 		);

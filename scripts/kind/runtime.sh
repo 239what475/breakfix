@@ -174,8 +174,19 @@ kubectl -n "$namespace" get networkpolicy breakfix-runtime-worker -o json |
         .metadata.managedFields,
         .metadata.resourceVersion,
         .metadata.uid
-      )
+    )
   ' | kubectl replace -f - >/dev/null
+
+kubectl -n "$namespace" get networkpolicy breakfix-runtime-worker -o json |
+  jq -e '
+    any(.spec.egress[]?;
+      any(.to[]?; .podSelector.matchLabels["app.kubernetes.io/name"] == "breakfix-registry") and
+      any(.ports[]?; .protocol == "TCP" and .port == 5000)
+    )
+  ' >/dev/null || {
+    printf 'Runtime Worker NetworkPolicy must allow Registry Pods on TCP 5000\n' >&2
+    exit 1
+  }
 
 kubectl -n "$namespace" scale deployment/breakfix-runtime-worker \
   --replicas="$runtime_worker_replicas" >/dev/null

@@ -59,6 +59,8 @@ type GeneratorService struct {
 	snapshotRequested func(string)
 }
 
+const workspaceSnapshotWaitInterval = 25 * time.Millisecond
+
 func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspace *Manager, sandboxes GeneratorWorkspaceTools, config GeneratorServiceConfig) (*GeneratorService, error) {
 	if store == nil || plans == nil || workspace == nil || sandboxes == nil {
 		return nil, errors.New("generator service requires stores, workspace manager, and sandbox tools")
@@ -185,11 +187,41 @@ func (s *GeneratorService) StartWorkspaceTurn(ctx context.Context, userID string
 		if _, _, err := s.workspace.EnsureFresh(ctx, workflow.ID, seed); err != nil {
 			return err
 		}
-		if _, err := s.workspace.repo.AcquireGeneratorWorkspaceTurn(ctx, turn, s.now()); !errors.Is(err, domain.ErrWorkspaceNotFound) || pass == 1 {
+		err = s.acquireWorkspaceTurn(ctx, turn)
+		if !errors.Is(err, domain.ErrWorkspaceNotFound) || pass == 1 {
 			return err
 		}
 	}
 	return domain.ErrWorkspaceNotFound
+}
+
+// acquireWorkspaceTurn gives an interactive writer priority over the
+// Server-owned snapshotter. A snapshot holder is short lived and does not
+// represent a competing user turn, so returning a conflict here would expose
+// a background implementation detail to Authoring and MCP clients.
+func (s *GeneratorService) acquireWorkspaceTurn(ctx context.Context, turn domain.WorkspaceTurn) error {
+	for {
+		if _, err := s.workspace.repo.AcquireGeneratorWorkspaceTurn(ctx, turn, s.now()); err == nil || !errors.Is(err, domain.ErrWorkspaceBusy) {
+			return err
+		}
+		current, err := s.workspace.repo.GetCurrentGeneratorWorkspace(ctx, turn.WorkflowID)
+		if err != nil {
+			return err
+		}
+		if current.ActiveTurnID == "" {
+			continue
+		}
+		if !domain.IsWorkspaceSnapshotHolder(current.ActiveTurnID) {
+			return domain.ErrWorkspaceBusy
+		}
+		timer := time.NewTimer(workspaceSnapshotWaitInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *GeneratorService) EndWorkspaceTurn(ctx context.Context, userID string, turn domain.WorkspaceTurn) error {

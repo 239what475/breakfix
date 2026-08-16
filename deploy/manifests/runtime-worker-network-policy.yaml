@@ -17,6 +17,13 @@ spec:
         - protocol: TCP
           port: 9090
     - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: breakfix-registry
+      ports:
+        - protocol: TCP
+          port: 5000
+    - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system

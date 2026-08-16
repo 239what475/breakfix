@@ -1,0 +1,10 @@
+kind: Topic
+source_ref: linux-operations/log-archiving
+title: Linux 日志与归档
+domain:
+  source_ref: linux-operations
+  title: Linux 系统与网络运维
+definition: 通过日志文件、目录结构和命令行工具完成日志保留、归档与结果核验。
+scope: 日志文件定位、归档目录、文件复制或压缩、权限和归档结果检查。
+non_goals: 不讨论集中式日志平台、复杂日志采集链路和应用代码实现。
+challenge_guidance: 当题目的主要目标是处理 Linux 主机上的日志文件、轮转产物或归档结果时使用该 Topic。

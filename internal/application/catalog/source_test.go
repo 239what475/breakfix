@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
@@ -64,6 +65,34 @@ func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
 	}
 	if got := string(files["challenges/linux/cleanup-logs/challenge.yaml"].Content); !bytes.Contains([]byte(got), []byte("description: |")) {
 		t.Fatalf("source layer changed challenge YAML:\n%s", got)
+	}
+}
+
+func TestCalculateContentRevisionsIgnoresStaleManifestValues(t *testing.T) {
+	root, challengeRevision, roadmapRevision := writePortableRelease(t)
+	manifestPath := filepath.Join(root, "release.yaml")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestText := strings.Replace(string(manifest), string(challengeRevision), "sha256:"+strings.Repeat("1", 64), 1)
+	manifestText = strings.Replace(manifestText, string(roadmapRevision), "sha256:"+strings.Repeat("2", 64), 1)
+	if err := os.WriteFile(manifestPath, []byte(manifestText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := CalculateContentRevisions(root)
+	if err != nil {
+		t.Fatalf("calculate content revisions: %v", err)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].ContentRevision != challengeRevision {
+		t.Fatalf("challenge revisions = %#v, want %q", report.Entries, challengeRevision)
+	}
+	if report.Roadmap.ContentRevision != roadmapRevision {
+		t.Fatalf("roadmap revision = %q, want %q", report.Roadmap.ContentRevision, roadmapRevision)
+	}
+	if _, err := LoadPortableSource(root); err == nil {
+		t.Fatal("stale manifest unexpectedly loaded as a valid source")
 	}
 }
 

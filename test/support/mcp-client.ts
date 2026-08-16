@@ -190,11 +190,11 @@ export class MCPConnectorClient {
 				.join("\n");
 			throw new Error(`MCP tool ${name} failed: ${detail ?? "unknown error"}`);
 		}
-		if (raw.structuredContent !== undefined) return raw.structuredContent;
+		if (raw.structuredContent !== undefined) return unwrapToolEnvelope(raw.structuredContent);
 		const text = raw.content?.find((entry) => entry.type === "text")?.text;
 		if (text === undefined) return undefined;
 		try {
-			return JSON.parse(text) as unknown;
+			return unwrapToolEnvelope(JSON.parse(text) as unknown);
 		} catch {
 			return text;
 		}
@@ -208,4 +208,17 @@ export class MCPConnectorClient {
 		this.process.kill();
 		await exited;
 	}
+}
+
+function unwrapToolEnvelope(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const envelope = value as { status?: unknown; data?: unknown; error?: unknown };
+	if (envelope.status === "succeeded") return envelope.data;
+	if (envelope.status === "failed" || envelope.status === "unknown") {
+		const message = typeof envelope.error === "string" && envelope.error !== ""
+			? envelope.error
+			: "unknown error";
+		throw new Error(`MCP tool returned ${envelope.status}: ${message}`);
+	}
+	return value;
 }

@@ -1,0 +1,10 @@
+kind: Topic
+source_ref: kubernetes-operations/workloads-and-services
+title: Kubernetes 工作负载与服务
+domain:
+  source_ref: kubernetes-operations
+  title: Kubernetes 平台运维
+definition: 使用 Kubernetes 资源描述、部署和排查工作负载及其服务发现入口。
+scope: Deployment 副本与就绪状态、Pod 标签、Service 类型、selector、port 和 targetPort。
+non_goals: 不讨论存储编排、网络策略、控制器开发和集群安装。
+challenge_guidance: 当题目的主要学习目标是创建或修复 Kubernetes Deployment、Pod 或 Service 及其关联关系时使用该 Topic。

@@ -1,8 +1,0 @@
-- source:
-    source_ref: platform-runtime/node-environment-validation/node-runtime-fixture
-    title: 节点运行时验证
-  target:
-    source_ref: platform-runtime/systemd-service-recovery/systemd-service-recovery
-    title: 修复 systemd 服务
-  relation: related
-  reason: 两题都使用同一运行时验证链路。

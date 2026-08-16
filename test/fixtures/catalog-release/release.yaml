@@ -7,4 +7,4 @@ entries:
   - path: challenges/node-runtime-fixture
     contentRevision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
 roadmap:
-  contentRevision: sha256:d199fcc788375c3928a09199aa91e83790c13e897619cec6e72745a6827cd204
+  contentRevision: sha256:b41429cde47025ce7517beca55d88a7988709419e674f2368b2f93b5fabf6620

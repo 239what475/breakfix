@@ -155,7 +155,7 @@ func (s *WorkspaceSnapshotter) reconcile(ctx context.Context, target domain.Work
 		}
 	}
 
-	holder := domain.NewID("workspace-snapshot")
+	holder := domain.NewWorkspaceSnapshotHolderID()
 	acquired, err := s.repo.AcquireGeneratorWorkspaceSnapshot(ctx, target.Workspace.WorkflowID, holder, now)
 	if err != nil {
 		return err
