@@ -1621,6 +1621,20 @@ components:
           type: string
         archive_sha256:
           type: string
+        failure:
+          $ref: "#/components/schemas/AuthoringCandidateFailure"
+
+    AuthoringCandidateFailure:
+      type: object
+      required: [class, code, summary]
+      properties:
+        class:
+          type: string
+          enum: [artifact, infrastructure, cancelled]
+        code:
+          type: string
+        summary:
+          type: string
 
     GeneratorWorkflow:
       type: object

@@ -28,14 +28,6 @@
 
 建议：使用不可变或版本化快照文件，先完整写入并校验 digest，再原子更新数据库指针；保留旧版本直到新指针提交成功，并由后台任务清理旧版本和无引用文件。明确重启时如何选择最后一个完整快照。
 
-## P1：幂等与验收
-
-### 5. MCP live 测试没有断言 rejection 来自 Judge
-
-`submissionSettled` 将“workflow 回到 `Generating` 且存在 `last_error`”直接视为通过（[`authoring.mcp.live.spec.ts`](test/agent/authoring.mcp.live.spec.ts:176)）。但这个状态既可能来自 Judge，也可能来自 Verify；测试注释却声称损坏 candidate 必须由 Judge 打回（[`authoring.mcp.live.spec.ts`](test/agent/authoring.mcp.live.spec.ts:309)）。因此即使 Judge 没有执行或错误通过，测试仍可能成功。
-
-建议：在验收断言中检查 Judge 的持久化结果、阶段/报告类型或其他明确的 Judge 证据；若测试只想验证“任一验证链路可回退”，则修改注释和测试名称，不要声称覆盖 Judge rejection。
-
 ## 已执行验证
 
 本轮已通过：

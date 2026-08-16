@@ -49,7 +49,7 @@ export async function waitForActiveWorkflow(page: Page, sessionID: string): Prom
 }
 
 // A rejected submission is a valid intermediate result, not an infrastructure
-// failure: the workflow returns to Generating with the Judge or Verify
+// failure: the workflow returns to Generating with durable Judge or Verify
 // feedback so a later user-requested turn can repair and resubmit.
 export class CandidateRejectedError extends Error {}
 

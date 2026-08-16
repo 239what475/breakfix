@@ -125,6 +125,7 @@ func TestGeneratorHTTPAPIProjectsSafeGenerationReview(t *testing.T) {
 		Candidate: &generation.Revision{
 			ID: "candidate-review", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
 			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
+			Failure: &generation.Failure{Class: generation.FailureArtifact, Code: "JUDGE_REJECT", Summary: "the candidate does not satisfy the authoring policy"},
 		},
 	}
 	router, cfg := newGeneratorHTTPRouter(t, service)
@@ -139,6 +140,8 @@ func TestGeneratorHTTPAPIProjectsSafeGenerationReview(t *testing.T) {
 	var review api.GeneratorGeneration
 	decodeGeneratorHTTPResponse(t, response, &review)
 	if review.Workflow.Id != "workflow-review" || review.Candidate == nil || review.Candidate.Id != "candidate-review" ||
+		review.Candidate.Failure == nil || review.Candidate.Failure.Class != api.AuthoringCandidateFailureClassArtifact ||
+		review.Candidate.Failure.Code != "JUDGE_REJECT" || review.Candidate.Failure.Summary == "" ||
 		review.Verified == nil || review.Verified.Metadata.Title != "HTTP review candidate" || len(review.Assets) == 0 {
 		t.Fatalf("review projection = %#v", review)
 	}

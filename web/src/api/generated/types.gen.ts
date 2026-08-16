@@ -326,6 +326,13 @@ export type VerifiedChallenge = {
 export type AuthoringCandidate = {
     id: string;
     archive_sha256: string;
+    failure?: AuthoringCandidateFailure;
+};
+
+export type AuthoringCandidateFailure = {
+    class: 'artifact' | 'infrastructure' | 'cancelled';
+    code: string;
+    summary: string;
 };
 
 export type GeneratorWorkflow = {

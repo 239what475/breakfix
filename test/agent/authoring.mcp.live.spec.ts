@@ -17,7 +17,11 @@ type Workflow = {
 type GenerationResult = {
 	generation: {
 		workflow: Workflow;
-		candidate?: { id: string; archive_sha256: string } | null;
+		candidate?: {
+			id: string;
+			archive_sha256: string;
+			failure?: { class: "artifact" | "infrastructure" | "cancelled"; code: string; summary: string };
+		} | null;
 		verification?: { passed: boolean } | null;
 		classification?: {
 			revision: number;
@@ -306,8 +310,8 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 			idempotency_key: "mcp-e2e-submit-broken",
 		});
 
-		// The deliberately broken answer must be sent back to the Generator by
-		// the Judge (and would also be rejected by Verify if the Judge passed).
+		// The deliberately broken answer must be sent back by the Judge. The
+		// durable candidate failure identifies the rejecting stage explicitly.
 		let settled = await submissionSettled(
 			client,
 			workflowID,
@@ -316,6 +320,10 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 		);
 		expect(settled.generation.workflow.state).toBe("Generating");
 		expect(settled.generation.workflow.last_error).toBeTruthy();
+		expect(settled.generation.candidate?.failure).toMatchObject({
+			class: "artifact",
+			code: "JUDGE_REJECT",
+		});
 
 		// Repair against the durable feedback and resubmit. One repair rewrites
 		// the complete candidate, and any residual Judge feedback is answered

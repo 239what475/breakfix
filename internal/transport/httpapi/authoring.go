@@ -179,7 +179,16 @@ func toAPIAuthoringCandidate(revision *generation.Revision) *api.AuthoringCandid
 	if revision == nil {
 		return nil
 	}
-	return &api.AuthoringCandidate{Id: revision.ID, ArchiveSha256: revision.ArchiveSHA256}
+	candidate := &api.AuthoringCandidate{Id: revision.ID, ArchiveSha256: revision.ArchiveSHA256}
+	if revision.Failure != nil {
+		failure := api.AuthoringCandidateFailure{
+			Class:   api.AuthoringCandidateFailureClass(revision.Failure.Class),
+			Code:    revision.Failure.Code,
+			Summary: revision.Failure.Summary,
+		}
+		candidate.Failure = &failure
+	}
+	return candidate
 }
 
 func toAPIGeneratorWorkflow(workflow generation.Workflow) api.GeneratorWorkflow {
