@@ -112,6 +112,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	var generatorService *appgeneration.GeneratorService
 	var generationAgents *appgeneration.AgentRunner
 	var workspaceReaper *appgeneration.WorkspaceReaper
+	var workspaceSnapshotter *appgeneration.WorkspaceSnapshotter
 	if cfg.OpenSandbox.APIKey != "" {
 		generatorSandbox, err = opensandbox.New(cfg.OpenSandbox)
 		if err != nil {
@@ -135,13 +136,29 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("create generator workspace manager: %w", err)
 		}
+		workspaceIdleTTL, err := cfg.WorkspaceIdleTTL()
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("parse generator workspace idle ttl: %w", err)
+		}
+		workspaceSnapshotter, err = appgeneration.NewWorkspaceSnapshotter(generatorWorkspace, generatorSandbox, appgeneration.WorkspaceSnapshotterConfig{
+			DataDir: cfg.DataDir,
+			IdleTTL: workspaceIdleTTL,
+		})
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create generator workspace snapshotter: %w", err)
+		}
 		generatorService, err = appgeneration.NewGeneratorService(
 			database.Generation,
 			database.Authoring,
 			generatorWorkspace,
 			generatorSandbox,
 			appgeneration.GeneratorServiceConfig{
-				DataDir: cfg.DataDir,
+				DataDir:           cfg.DataDir,
+				SnapshotRequested: workspaceSnapshotter.Request,
 				FreezeExecution: func(entry challenge.Entry) (generationdomain.ExecutionSnapshot, error) {
 					return appexecution.Freeze(entry, runtimesnapshot.From(cfg.Runtime, cfg.Incus))
 				},
@@ -370,6 +387,9 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	if workspaceReaper != nil {
 		services.start("generator workspace reaper", workspaceReaper.Run)
+	}
+	if workspaceSnapshotter != nil {
+		services.start("generator workspace snapshotter", workspaceSnapshotter.Run)
 	}
 	services.start("learning cleanup", cleanupService.Run)
 	services.start("learning environment projection", projectionService.Run)

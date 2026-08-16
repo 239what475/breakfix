@@ -770,6 +770,46 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	}
 }
 
+func TestAuthoringRestartEventReportsSnapshotRecovery(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow, sessionID, userID := createGenerationWorkflowFixture(t, database, now)
+	session, err := database.Authoring.GetAuthoringSession(ctx, sessionID, userID)
+	if err != nil {
+		t.Fatalf("read authoring session: %v", err)
+	}
+	_, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "snapshot-recovery-message", agent.Message{
+		Role: "user", Content: "继续生成任务。",
+	}, agent.CreateRun{
+		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
+		InputRevision: "1", Model: "test-model", PromptVersion: "authoring-v4",
+	})
+	if err != nil {
+		t.Fatalf("start authoring run: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET workspace_snapshot_digest = ? WHERE id = ?`, workflowTestDigest, workflow.ID); err != nil {
+		t.Fatalf("record workspace snapshot: %v", err)
+	}
+	if err := database.Authoring.TerminateAuthoringRun(ctx, run.ID, authoring.RunTerminationServerRestarted, "server restarted before agent completion", now.Add(time.Second)); err != nil {
+		t.Fatalf("terminate authoring run: %v", err)
+	}
+	messages, err := database.Authoring.ListMessages(ctx, session.RuntimeSessionID)
+	if err != nil {
+		t.Fatalf("list authoring messages: %v", err)
+	}
+	if len(messages) != 2 || messages[1].Role != "event" {
+		t.Fatalf("restart messages = %#v", messages)
+	}
+	var event authoring.RunEvent
+	if err := json.Unmarshal([]byte(messages[1].Content), &event); err != nil {
+		t.Fatalf("decode restart event: %v", err)
+	}
+	if event.Reason != authoring.RunTerminationServerRestarted || event.Recovery != "snapshot" {
+		t.Fatalf("restart event = %#v", event)
+	}
+}
+
 func TestInteractiveAssistantRunRecoveryCreatesFreshBudget(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()

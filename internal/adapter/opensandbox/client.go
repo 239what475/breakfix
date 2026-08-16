@@ -3,6 +3,7 @@
 package opensandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,13 +15,12 @@ import (
 
 	sdk "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 const workspaceMountPath = "/workspace"
-
-const workspaceArchivePath = "/tmp/breakfix-generator-candidate.tar.gz"
 
 const workspaceIDMetadataKey = "breakfix.generator_workspace_id"
 
@@ -219,7 +219,7 @@ func (c *Client) uploadFile(ctx context.Context, sandboxID, path string, content
 	if err != nil {
 		return err
 	}
-	err = sandbox.UploadFile(ctx, strings.NewReader(string(content)), sdk.UploadFileOptions{
+	err = sandbox.UploadFile(ctx, bytes.NewReader(content), sdk.UploadFileOptions{
 		FileName: "content",
 		Metadata: sdk.FileMetadata{Path: path, Mode: providerFileMode(mode)},
 	})
@@ -234,46 +234,208 @@ func providerFileMode(mode int) int {
 	return ((mode>>6)&0o7)*100 + ((mode>>3)&0o7)*10 + (mode & 0o7)
 }
 
-// ResetWorkspace atomically replaces the sandbox's visible workspace with the
-// supplied immutable artifact. The archive transfer and shell operations stay
-// Server-side, so the Runtime Worker never receives a Sandbox connection.
+// ResetWorkspace replaces the sandbox's visible workspace with a verified
+// canonical archive. It never delegates archive extraction to a shell.
 func (c *Client) ResetWorkspace(ctx context.Context, sandboxID string, archive []byte) error {
-	if _, err := c.Execute(ctx, sandboxID, "rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*; mkdir -p /workspace", "/workspace", nil); err != nil {
-		return fmt.Errorf("clear generator workspace: %w", err)
+	entries := make([]workspacearchive.Entry, 0)
+	if len(archive) != 0 {
+		var err error
+		entries, err = workspacearchive.Decode(archive)
+		if err != nil {
+			return fmt.Errorf("validate generator workspace seed: %w", err)
+		}
 	}
-	if len(archive) == 0 {
-		return nil
-	}
-	if err := c.uploadFile(ctx, sandboxID, workspaceArchivePath, archive, 0o600); err != nil {
-		return fmt.Errorf("upload generator seed artifact: %w", err)
-	}
-	result, err := c.Execute(ctx, sandboxID, "tar -xzf "+workspaceArchivePath+" -C /workspace && rm -f "+workspaceArchivePath, "/workspace", nil)
+	sandbox, err := c.connect(ctx, sandboxID)
 	if err != nil {
-		return fmt.Errorf("extract generator seed artifact: %w", err)
+		return err
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("extract generator seed artifact exited with code %d: %s", result.ExitCode, result.Output)
+	if err := restoreWorkspace(ctx, sandbox, entries); err != nil {
+		return fmt.Errorf("restore generator workspace: %w", classifyWorkspaceOperationError(err))
 	}
 	return nil
 }
 
-// ArchiveWorkspace serializes the current workspace through OpenSandbox. It
-// preserves executable modes for challenge scripts and never exposes provider
-// credentials or Sandbox IDs to the Worker.
+// ArchiveWorkspace serializes the current workspace through a canonical Go
+// encoder. It preserves executable modes without relying on provider shell
+// tools or a shared temporary archive path.
 func (c *Client) ArchiveWorkspace(ctx context.Context, sandboxID string) ([]byte, error) {
-	result, err := c.Execute(ctx, sandboxID, "tar -C /workspace -czf "+workspaceArchivePath+" .", "/workspace", nil)
+	sandbox, err := c.connect(ctx, sandboxID)
 	if err != nil {
-		return nil, fmt.Errorf("archive generator workspace: %w", err)
+		return nil, err
 	}
-	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("archive generator workspace exited with code %d: %s", result.ExitCode, result.Output)
-	}
-	archive, err := c.ReadFile(ctx, sandboxID, workspaceArchivePath)
+	archive, err := archiveWorkspace(ctx, sandbox)
 	if err != nil {
-		return nil, fmt.Errorf("download generator workspace archive: %w", err)
+		return nil, fmt.Errorf("archive generator workspace: %w", classifyWorkspaceOperationError(err))
 	}
-	_, _ = c.Execute(context.Background(), sandboxID, "rm -f "+workspaceArchivePath, "/workspace", nil)
 	return archive, nil
+}
+
+type workspaceFilesystem interface {
+	ListDirectory(context.Context, string) ([]sdk.FileInfo, error)
+	DownloadFile(context.Context, string, string, ...sdk.DownloadFileOptions) (io.ReadCloser, error)
+	UploadFile(context.Context, io.Reader, sdk.UploadFileOptions) error
+	CreateDirectory(context.Context, string, int) error
+	DeleteFiles(context.Context, []string) error
+	DeleteDirectory(context.Context, string) error
+}
+
+func archiveWorkspace(ctx context.Context, sandbox workspaceFilesystem) ([]byte, error) {
+	if sandbox == nil {
+		return nil, errors.New("workspace filesystem is required")
+	}
+	type directory struct {
+		remote   string
+		relative string
+	}
+	pending := []directory{{remote: workspaceMountPath}}
+	seen := make(map[string]struct{})
+	entries := make([]workspacearchive.Entry, 0)
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+		children, err := sandbox.ListDirectory(ctx, current.remote)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			relative, err := archiveRelativePath(child.Path)
+			if err != nil {
+				return nil, err
+			}
+			if pathDirectory(relative) != current.relative {
+				return nil, fmt.Errorf("workspace provider returned non-child path %q while listing %q", child.Path, current.remote)
+			}
+			if _, exists := seen[relative]; exists {
+				return nil, fmt.Errorf("workspace provider returned duplicate path %q", child.Path)
+			}
+			seen[relative] = struct{}{}
+			mode, err := workspaceMode(child.Mode)
+			if err != nil {
+				return nil, fmt.Errorf("workspace provider returned invalid mode for %q: %w", child.Path, err)
+			}
+			switch strings.ToLower(strings.TrimSpace(child.Type)) {
+			case "directory", "dir":
+				entries = append(entries, workspacearchive.Entry{Path: relative, Directory: true, Mode: mode})
+				pending = append(pending, directory{remote: strings.TrimRight(child.Path, "/"), relative: relative})
+			case "file", "regular":
+				content, err := downloadWorkspaceFile(ctx, sandbox, child.Path)
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, workspacearchive.Entry{Path: relative, Mode: mode, Content: content})
+			default:
+				return nil, fmt.Errorf("workspace provider returned unsupported entry type %q for %q", child.Type, child.Path)
+			}
+		}
+	}
+	return workspacearchive.Encode(entries)
+}
+
+func restoreWorkspace(ctx context.Context, sandbox workspaceFilesystem, entries []workspacearchive.Entry) error {
+	if sandbox == nil {
+		return errors.New("workspace filesystem is required")
+	}
+	if err := clearWorkspace(ctx, sandbox); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		remote := WorkspacePath(entry.Path)
+		if entry.Directory {
+			if err := sandbox.CreateDirectory(ctx, remote, providerFileMode(entry.Mode)); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := sandbox.UploadFile(ctx, bytes.NewReader(entry.Content), sdk.UploadFileOptions{
+			FileName: "workspace-content",
+			Metadata: sdk.FileMetadata{Path: remote, Mode: providerFileMode(entry.Mode)},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearWorkspace(ctx context.Context, sandbox workspaceFilesystem) error {
+	entries, err := sandbox.ListDirectory(ctx, workspaceMountPath)
+	if err != nil {
+		return err
+	}
+	files := make([]string, 0, len(entries))
+	directories := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		relative, err := archiveRelativePath(entry.Path)
+		if err != nil {
+			return err
+		}
+		if pathDirectory(relative) != "" {
+			return fmt.Errorf("workspace provider returned non-child path %q while clearing workspace", entry.Path)
+		}
+		switch strings.ToLower(strings.TrimSpace(entry.Type)) {
+		case "directory", "dir":
+			directories = append(directories, entry.Path)
+		default:
+			files = append(files, entry.Path)
+		}
+	}
+	if len(files) > 0 {
+		if err := sandbox.DeleteFiles(ctx, files); err != nil {
+			return err
+		}
+	}
+	for _, directory := range directories {
+		if err := sandbox.DeleteDirectory(ctx, directory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func downloadWorkspaceFile(ctx context.Context, sandbox workspaceFilesystem, remote string) ([]byte, error) {
+	reader, err := sandbox.DownloadFile(ctx, remote, "")
+	if err != nil {
+		return nil, err
+	}
+	content, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close workspace file reader: %w", closeErr)
+	}
+	return content, nil
+}
+
+func archiveRelativePath(remote string) (string, error) {
+	remote = strings.TrimSpace(remote)
+	prefix := workspaceMountPath + "/"
+	if !strings.HasPrefix(remote, prefix) {
+		return "", fmt.Errorf("workspace provider returned invalid path %q", remote)
+	}
+	relative := strings.TrimPrefix(remote, prefix)
+	if err := ValidateWorkspacePath(relative); err != nil {
+		return "", fmt.Errorf("workspace provider returned invalid path %q: %w", remote, err)
+	}
+	return relative, nil
+}
+
+func pathDirectory(value string) string {
+	if index := strings.LastIndex(value, "/"); index >= 0 {
+		return value[:index]
+	}
+	return ""
+}
+
+func workspaceMode(value int) (int, error) {
+	if value < 0 || value > 777 {
+		return 0, errors.New("mode is outside Unix permission bits")
+	}
+	owner, group, other := value/100, (value/10)%10, value%10
+	if owner > 7 || group > 7 || other > 7 {
+		return 0, errors.New("mode is not octal")
+	}
+	return owner<<6 | group<<3 | other, nil
 }
 
 type Execution struct {

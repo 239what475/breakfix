@@ -19,6 +19,39 @@ export async function restartDeployment(name: "breakfix-server" | "breakfix-cont
   await kubectl(["-n", namespace, "rollout", "status", `deployment/${name}`, "--timeout=3m"]);
 }
 
+// The interruption acceptance temporarily changes the Server ConfigMap. The
+// production deployment has no runtime configuration mutation API; this
+// helper is deliberately test infrastructure and always restarts the Server
+// because configuration is loaded only during bootstrap.
+export async function setServerAuthoringDeadline(deadline: string) {
+  const value = deadline.trim();
+  if (!value) throw new Error("authoring deadline must not be empty");
+  const { stdout: deployment } = await kubectl([
+    "-n", namespace, "get", "deployment", "breakfix-server", "-o", "json",
+  ]);
+  const configMap = (JSON.parse(deployment) as {
+    spec?: { template?: { spec?: { volumes?: Array<{ name?: string; configMap?: { name?: string } }> } } };
+  }).spec?.template?.spec?.volumes?.find((volume) => volume.name === "config")?.configMap?.name;
+  if (!configMap) throw new Error("breakfix-server config ConfigMap is missing");
+
+  const { stdout: configJSON } = await kubectl(["-n", namespace, "get", "configmap", configMap, "-o", "json"]);
+  const config = (JSON.parse(configJSON) as { data?: Record<string, string> }).data?.["config.yaml"];
+  if (!config) throw new Error("breakfix-server config ConfigMap has no config.yaml");
+  const lines = config.split("\n");
+  let replacements = 0;
+  const patched = lines.map((line) => {
+    if (!/^\s*authoring_run_deadline:\s*/.test(line)) return line;
+    replacements += 1;
+    return `  authoring_run_deadline: ${value}`;
+  }).join("\n");
+  if (replacements !== 1) throw new Error(`expected one authoring_run_deadline, found ${replacements}`);
+  await kubectl([
+    "-n", namespace, "patch", "configmap", configMap, "--type", "merge", "--patch",
+    JSON.stringify({ data: { "config.yaml": patched } }),
+  ]);
+  await restartDeployment("breakfix-server");
+}
+
 export async function nodeEnvironment(name: string): Promise<NodeEnvironment> {
   const { stdout } = await kubectl(["-n", namespace, "get", "nodeenvironment", name, "-o", "json"]);
   return JSON.parse(stdout) as NodeEnvironment;

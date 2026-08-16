@@ -46,6 +46,8 @@ agent:
   request_timeout: 5m
   authoring_run_deadline: 30m
 
+generator_workspace_idle_ttl: ${GENERATOR_WORKSPACE_IDLE_TTL}
+
 opensandbox:
   base_url: ${BREAKFIX_OPENSANDBOX_BASE_URL}
   api_key_env: OPEN_SANDBOX_API_KEY

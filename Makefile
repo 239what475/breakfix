@@ -130,5 +130,9 @@ test-acceptance-mcp: test-deps
 	$(MAKE) --no-print-directory e2e-prepare
 	RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-mcp
 
+test-acceptance-interruption: test-deps
+	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live interruption acceptance" >&2; exit 2; }
+	RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-authoring-interruption-e2e.sh
+
 test-vk8s-network:
 	./scripts/kind/verify-vk8s-network-isolation.sh

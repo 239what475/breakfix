@@ -63,6 +63,9 @@ agent:
   request_timeout: 5m
   authoring_run_deadline: 30m
 
+# Optional Server-wide retention policy. Empty means the built-in 24h default.
+generator_workspace_idle_ttl: ${GENERATOR_WORKSPACE_IDLE_TTL}
+
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
 # lifecycle API key is only present in the Server process, never a Runtime Worker.
 # Each GenerationWorkflow owns one current workspace and reuses it across

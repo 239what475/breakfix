@@ -207,8 +207,9 @@ func newWorkspaceManager(t *testing.T, repo *memoryWorkspaceRepository, pvcs *me
 }
 
 type memoryWorkspaceRepository struct {
-	mu      sync.Mutex
-	records map[string]domain.Workspace
+	mu        sync.Mutex
+	records   map[string]domain.Workspace
+	snapshots map[string]string
 }
 
 func (r *memoryWorkspaceRepository) CreateGeneratorWorkspace(_ context.Context, record domain.Workspace) (*domain.Workspace, error) {
@@ -289,6 +290,7 @@ func (r *memoryWorkspaceRepository) AcquireGeneratorWorkspaceTurn(_ context.Cont
 		return nil, domain.ErrWorkspaceBusy
 	}
 	record.ActiveTurnID = turn.ID
+	record.IdleSince = nil
 	record.UpdatedAt = now
 	r.records[record.ID] = *record
 	return record, nil
@@ -303,6 +305,7 @@ func (r *memoryWorkspaceRepository) ReleaseGeneratorWorkspaceTurn(_ context.Cont
 	for id, record := range r.records {
 		if record.WorkflowID == turn.WorkflowID && record.State == domain.WorkspaceActive && record.ActiveTurnID == turn.ID {
 			record.ActiveTurnID = ""
+			record.IdleSince = nil
 			record.UpdatedAt = now
 			r.records[id] = record
 			return nil
@@ -344,6 +347,7 @@ func (r *memoryWorkspaceRepository) BeginGeneratorWorkspaceCleanup(_ context.Con
 	}
 	if record.State != domain.WorkspaceDeleted {
 		record.State, record.ActiveTurnID, record.UpdatedAt = domain.WorkspaceDeleting, "", now
+		record.IdleSince = nil
 		r.records[id] = *record
 	}
 	return record, nil
@@ -357,6 +361,7 @@ func (r *memoryWorkspaceRepository) RetireCurrentGeneratorWorkspace(_ context.Co
 		return nil, err
 	}
 	record.State, record.ActiveTurnID, record.UpdatedAt = domain.WorkspaceDeleting, "", now
+	record.IdleSince = nil
 	r.records[record.ID] = *record
 	return record, nil
 }
@@ -371,6 +376,7 @@ func (r *memoryWorkspaceRepository) RetireIncompleteGeneratorWorkspaces(_ contex
 		}
 		record.State = domain.WorkspaceDeleting
 		record.ActiveTurnID = ""
+		record.IdleSince = nil
 		record.UpdatedAt = now
 		r.records[id] = record
 		retired = append(retired, record)
@@ -419,6 +425,104 @@ func (r *memoryWorkspaceRepository) ListTerminalGeneratorWorkspaces(context.Cont
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return nil, nil
+}
+
+func (r *memoryWorkspaceRepository) ListGeneratorWorkspaceSnapshotTargets(context.Context) ([]domain.WorkspaceSnapshotTarget, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]domain.WorkspaceSnapshotTarget, 0)
+	for _, record := range r.records {
+		if record.State != domain.WorkspaceActive {
+			continue
+		}
+		result = append(result, domain.WorkspaceSnapshotTarget{Workspace: record, SnapshotDigest: r.snapshotDigest(record.WorkflowID)})
+	}
+	return result, nil
+}
+
+func (r *memoryWorkspaceRepository) AcquireGeneratorWorkspaceSnapshot(_ context.Context, workflowID, holderID string, now time.Time) (*domain.WorkspaceSnapshotTarget, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, err := r.getCurrentGeneratorWorkspace(workflowID)
+	if err != nil || record.State != domain.WorkspaceActive {
+		return nil, domain.ErrWorkspaceNotFound
+	}
+	if record.ActiveTurnID != "" {
+		return nil, domain.ErrWorkspaceBusy
+	}
+	digest := r.snapshotDigest(workflowID)
+	if record.IdleSince != nil && digest != "" {
+		return nil, domain.ErrWorkspaceSnapshotCurrent
+	}
+	record.ActiveTurnID = holderID
+	record.IdleSince = nil
+	record.UpdatedAt = now
+	r.records[record.ID] = *record
+	return &domain.WorkspaceSnapshotTarget{Workspace: *record, SnapshotDigest: digest}, nil
+}
+
+func (r *memoryWorkspaceRepository) PublishGeneratorWorkspaceSnapshot(_ context.Context, workspaceID, holderID, digest string, now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, err := r.getGeneratorWorkspace(workspaceID)
+	if err != nil || record.State != domain.WorkspaceActive || record.ActiveTurnID != holderID {
+		return domain.ErrWorkspaceTurnLost
+	}
+	if r.snapshots == nil {
+		r.snapshots = make(map[string]string)
+	}
+	r.snapshots[record.WorkflowID] = digest
+	record.ActiveTurnID = ""
+	record.IdleSince = &now
+	record.UpdatedAt = now
+	r.records[record.ID] = *record
+	return nil
+}
+
+func (r *memoryWorkspaceRepository) ClearGeneratorWorkspaceSnapshot(_ context.Context, workflowID, expectedDigest string, now time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.snapshotDigest(workflowID) != expectedDigest {
+		return false, nil
+	}
+	delete(r.snapshots, workflowID)
+	if record, err := r.getCurrentGeneratorWorkspace(workflowID); err == nil {
+		record.IdleSince = nil
+		record.UpdatedAt = now
+		r.records[record.ID] = *record
+	}
+	return true, nil
+}
+
+func (r *memoryWorkspaceRepository) RetireIdleGeneratorWorkspace(_ context.Context, workspaceID, expectedDigest string, staleBefore, now time.Time) (*domain.Workspace, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, err := r.getGeneratorWorkspace(workspaceID)
+	if err != nil || record.State != domain.WorkspaceActive || record.ActiveTurnID != "" || record.IdleSince == nil || record.IdleSince.After(staleBefore) || r.snapshotDigest(record.WorkflowID) != expectedDigest {
+		return nil, domain.ErrWorkspaceNotIdle
+	}
+	record.State = domain.WorkspaceDeleting
+	record.IdleSince = nil
+	record.UpdatedAt = now
+	r.records[record.ID] = *record
+	return record, nil
+}
+
+func (r *memoryWorkspaceRepository) ListGeneratorWorkspaceSnapshotReferences(context.Context) ([]domain.WorkspaceSnapshotReference, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]domain.WorkspaceSnapshotReference, 0, len(r.snapshots))
+	for workflowID, digest := range r.snapshots {
+		result = append(result, domain.WorkspaceSnapshotReference{WorkflowID: workflowID, Digest: digest})
+	}
+	return result, nil
+}
+
+func (r *memoryWorkspaceRepository) snapshotDigest(workflowID string) string {
+	if r.snapshots == nil {
+		return ""
+	}
+	return r.snapshots[workflowID]
 }
 
 type memoryWorkspacePVCs struct {

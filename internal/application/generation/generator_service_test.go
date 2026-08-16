@@ -7,11 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 )
@@ -38,6 +41,8 @@ func TestGeneratorServiceKeepsWorkspaceTurnAfterToolFailure(t *testing.T) {
 	workflow := store.addWorkflow("workflow-one")
 	tools := &generatorServiceTools{readErr: errors.New("sandbox transport unavailable")}
 	service := newGeneratorServiceForTest(t, store, &generatorServicePlans{}, tools)
+	var snapshotRequests []string
+	service.snapshotRequested = func(workflowID string) { snapshotRequests = append(snapshotRequests, workflowID) }
 	first := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "turn-one"}
 	second := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "turn-two"}
 
@@ -64,6 +69,9 @@ func TestGeneratorServiceKeepsWorkspaceTurnAfterToolFailure(t *testing.T) {
 	if err := service.EndWorkspaceTurn(context.Background(), "user-one", first); err != nil {
 		t.Fatalf("end failed workspace turn: %v", err)
 	}
+	if len(snapshotRequests) != 1 || snapshotRequests[0] != workflow.ID {
+		t.Fatalf("workspace snapshot requests = %#v", snapshotRequests)
+	}
 	if err := service.StartWorkspaceTurn(context.Background(), "user-one", second); err != nil {
 		t.Fatalf("start workspace turn after explicit release: %v", err)
 	}
@@ -72,6 +80,27 @@ func TestGeneratorServiceKeepsWorkspaceTurnAfterToolFailure(t *testing.T) {
 	}
 	if err := service.StartWorkspaceTurn(context.Background(), "user-one", first); !errors.Is(err, domain.ErrWorkspaceBusy) {
 		t.Fatalf("start turn after command validation failure = %v, want busy", err)
+	}
+}
+
+func TestGeneratorServiceRecreatesWorkspaceWhenIdleRetirementWinsTurnAcquire(t *testing.T) {
+	store := newGeneratorServiceStore("user-one")
+	workflow := store.addWorkflow("workflow-retired-before-turn")
+	service := newGeneratorServiceForTest(t, store, &generatorServicePlans{}, &generatorServiceTools{})
+	repository := &retirementRaceWorkspaceRepository{memoryWorkspaceRepository: service.workspace.repo.(*memoryWorkspaceRepository)}
+	service.workspace.repo = repository
+	store.workspace = repository
+
+	turn := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "turn-after-retirement"}
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", turn); err != nil {
+		t.Fatalf("start turn after idle retirement race: %v", err)
+	}
+	if repository.acquireCalls != 2 {
+		t.Fatalf("workspace turn acquire calls = %d, want 2", repository.acquireCalls)
+	}
+	record, err := repository.GetGeneratorWorkspaceForTurn(context.Background(), turn)
+	if err != nil || record.ActiveTurnID != turn.ID {
+		t.Fatalf("replacement workspace turn = %#v, err=%v", record, err)
 	}
 }
 
@@ -115,6 +144,91 @@ func TestGeneratorServiceSubmitsOneImmutableCandidatePerIdempotencyKey(t *testin
 	}
 }
 
+func TestGeneratorServiceSeedsReplacementWorkspaceFromSnapshotBeforeCandidate(t *testing.T) {
+	store := newGeneratorServiceStore("user-one")
+	workflow := store.addWorkflow("workflow-seed")
+	tools := &generatorServiceTools{}
+	service := newGeneratorServiceForTest(t, store, &generatorServicePlans{}, tools)
+
+	candidateArchive := generatorServiceCandidateArchive(t)
+	candidateID := "candidate-revision-seed"
+	candidatePath, candidateDigest, err := candidate.SaveArchiveAtomic(service.dataDir, candidateID, candidateArchive)
+	if err != nil {
+		t.Fatalf("save fallback candidate: %v", err)
+	}
+	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveSHA256: candidateDigest}
+	snapshotArchive, err := workspacearchive.Encode([]workspacearchive.Entry{{Path: "unfinished.md", Content: []byte("continue here\n")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalSnapshot, snapshotDigest, err := service.snapshots.Save(workflow.ID, snapshotArchive)
+	if err != nil {
+		t.Fatalf("save workspace snapshot: %v", err)
+	}
+	workflow.CandidateRevisionID = candidateID
+	workflow.WorkspaceSnapshotDigest = snapshotDigest
+	store.workflows[workflow.ID] = workflow
+
+	turn := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "turn-seed"}
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", turn); err != nil {
+		t.Fatalf("start seeded workspace turn: %v", err)
+	}
+	if !bytes.Equal(service.workspace.sandboxes.(*memoryWorkspaceSandboxes).lastSeed, canonicalSnapshot) {
+		t.Fatalf("workspace seed did not prefer snapshot: %q", service.workspace.sandboxes.(*memoryWorkspaceSandboxes).lastSeed)
+	}
+}
+
+func TestGeneratorServiceFallsBackToCandidateWhenSnapshotIsDamaged(t *testing.T) {
+	store := newGeneratorServiceStore("user-one")
+	workflow := store.addWorkflow("workflow-damaged-snapshot")
+	tools := &generatorServiceTools{}
+	service := newGeneratorServiceForTest(t, store, &generatorServicePlans{}, tools)
+
+	candidateArchive := generatorServiceCandidateArchive(t)
+	candidateID := "candidate-revision-fallback"
+	candidatePath, candidateDigest, err := candidate.SaveArchiveAtomic(service.dataDir, candidateID, candidateArchive)
+	if err != nil {
+		t.Fatalf("save fallback candidate: %v", err)
+	}
+	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveSHA256: candidateDigest}
+	snapshotArchive := snapshotArchiveForService(t, "stale draft\n")
+	_, snapshotDigest, err := service.snapshots.Save(workflow.ID, snapshotArchive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath, err := service.snapshots.Path(workflow.ID, snapshotDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(snapshotPath, 0o640); err != nil {
+		t.Fatalf("unlock snapshot for damage test: %v", err)
+	}
+	if err := os.WriteFile(snapshotPath, []byte("corrupt"), 0o440); err != nil {
+		t.Fatalf("damage snapshot: %v", err)
+	}
+	workflow.CandidateRevisionID = candidateID
+	workflow.WorkspaceSnapshotDigest = snapshotDigest
+	store.workflows[workflow.ID] = workflow
+	service.workspace.repo.(*memoryWorkspaceRepository).snapshots = map[string]string{workflow.ID: snapshotDigest}
+
+	turn := domain.WorkspaceTurn{WorkflowID: workflow.ID, ID: "turn-fallback"}
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", turn); err != nil {
+		t.Fatalf("start fallback workspace turn: %v", err)
+	}
+	if !bytes.Equal(service.workspace.sandboxes.(*memoryWorkspaceSandboxes).lastSeed, candidateArchive) {
+		t.Fatalf("workspace seed did not fall back to candidate: %q", service.workspace.sandboxes.(*memoryWorkspaceSandboxes).lastSeed)
+	}
+}
+
+func snapshotArchiveForService(t *testing.T, content string) []byte {
+	t.Helper()
+	archive, err := workspacearchive.Encode([]workspacearchive.Entry{{Path: "unfinished.md", Content: []byte(content)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return archive
+}
+
 func newGeneratorServiceForTest(t *testing.T, store *generatorServiceStore, plans *generatorServicePlans, tools *generatorServiceTools) *GeneratorService {
 	t.Helper()
 	now := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
@@ -141,6 +255,22 @@ type generatorServiceStore struct {
 	receipts    map[string]domain.Revision
 	workspace   WorkspaceRepository
 	submitCalls int
+}
+
+type retirementRaceWorkspaceRepository struct {
+	*memoryWorkspaceRepository
+	acquireCalls int
+}
+
+func (r *retirementRaceWorkspaceRepository) AcquireGeneratorWorkspaceTurn(ctx context.Context, turn domain.WorkspaceTurn, now time.Time) (*domain.Workspace, error) {
+	r.acquireCalls++
+	if r.acquireCalls == 1 {
+		if _, err := r.RetireCurrentGeneratorWorkspace(ctx, turn.WorkflowID, now); err != nil {
+			return nil, err
+		}
+		return nil, domain.ErrWorkspaceNotFound
+	}
+	return r.memoryWorkspaceRepository.AcquireGeneratorWorkspaceTurn(ctx, turn, now)
 }
 
 func newGeneratorServiceStore(owner string) *generatorServiceStore {

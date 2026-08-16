@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/candidate"
+	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/toolresult"
@@ -30,8 +31,9 @@ type GeneratorWorkspaceTools interface {
 // archive into an immutable candidate. Generator clients never configure
 // archive storage or runtime snapshot behavior.
 type GeneratorServiceConfig struct {
-	DataDir         string
-	FreezeExecution ExecutionSnapshotter
+	DataDir           string
+	FreezeExecution   ExecutionSnapshotter
+	SnapshotRequested func(string)
 }
 
 // GenerationView is the ownership-fenced read model returned to either
@@ -45,14 +47,16 @@ type GenerationView struct {
 // challenge generation. It never claims a workflow or runs a background
 // Generator model; Generating only means this user's workspace can be edited.
 type GeneratorService struct {
-	store      GeneratorStore
-	plans      GeneratorPlanStore
-	workspace  *Manager
-	sandboxes  GeneratorWorkspaceTools
-	dataDir    string
-	freeze     ExecutionSnapshotter
-	now        func() time.Time
-	cleanupTTL time.Duration
+	store             GeneratorStore
+	plans             GeneratorPlanStore
+	workspace         *Manager
+	sandboxes         GeneratorWorkspaceTools
+	dataDir           string
+	snapshots         *workspacearchive.Store
+	freeze            ExecutionSnapshotter
+	now               func() time.Time
+	cleanupTTL        time.Duration
+	snapshotRequested func(string)
 }
 
 func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspace *Manager, sandboxes GeneratorWorkspaceTools, config GeneratorServiceConfig) (*GeneratorService, error) {
@@ -62,10 +66,17 @@ func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspa
 	if strings.TrimSpace(config.DataDir) == "" || config.FreezeExecution == nil {
 		return nil, errors.New("generator service requires candidate data directory and runtime snapshotter")
 	}
+	snapshots, err := workspacearchive.NewStore(config.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	if config.SnapshotRequested == nil {
+		config.SnapshotRequested = func(string) {}
+	}
 	return &GeneratorService{
 		store: store, plans: plans, workspace: workspace, sandboxes: sandboxes,
-		dataDir: strings.TrimSpace(config.DataDir), freeze: config.FreezeExecution,
-		now: func() time.Time { return time.Now().UTC() }, cleanupTTL: 10 * time.Second,
+		dataDir: strings.TrimSpace(config.DataDir), snapshots: snapshots, freeze: config.FreezeExecution,
+		now: func() time.Time { return time.Now().UTC() }, cleanupTTL: 10 * time.Second, snapshotRequested: config.SnapshotRequested,
 	}, nil
 }
 
@@ -152,31 +163,44 @@ func (s *GeneratorService) ListActiveGenerations(ctx context.Context, userID str
 
 // StartWorkspaceTurn creates the Server-owned workspace if needed and binds
 // exactly one explicit Generator turn as its writer. A replacement workspace
-// after Server recovery receives only the last submitted candidate archive.
+// after Server recovery restores its latest durable snapshot, then falls back
+// to the last submitted candidate archive when no snapshot remains.
 func (s *GeneratorService) StartWorkspaceTurn(ctx context.Context, userID string, turn domain.WorkspaceTurn) error {
-	workflow, err := s.generatingWorkflow(ctx, userID, turn.WorkflowID)
-	if err != nil {
-		return err
-	}
 	if !turn.Valid() {
 		return domain.ErrWorkspaceTurnLost
 	}
-	seed, err := s.workspaceSeed(ctx, *workflow)
-	if err != nil {
-		return err
+	// Idle retirement and turn acquisition share the workspace row lock, but
+	// provisioning necessarily happens before acquiring that lock. If
+	// retirement wins in that small window, repeat once to allocate the next
+	// workspace identity and seed it from the durable snapshot.
+	for pass := 0; pass < 2; pass++ {
+		workflow, err := s.generatingWorkflow(ctx, userID, turn.WorkflowID)
+		if err != nil {
+			return err
+		}
+		seed, err := s.workspaceSeed(ctx, userID, *workflow)
+		if err != nil {
+			return err
+		}
+		if _, _, err := s.workspace.EnsureFresh(ctx, workflow.ID, seed); err != nil {
+			return err
+		}
+		if _, err := s.workspace.repo.AcquireGeneratorWorkspaceTurn(ctx, turn, s.now()); !errors.Is(err, domain.ErrWorkspaceNotFound) || pass == 1 {
+			return err
+		}
 	}
-	if _, _, err := s.workspace.EnsureFresh(ctx, workflow.ID, seed); err != nil {
-		return err
-	}
-	_, err = s.workspace.repo.AcquireGeneratorWorkspaceTurn(ctx, turn, s.now())
-	return err
+	return domain.ErrWorkspaceNotFound
 }
 
 func (s *GeneratorService) EndWorkspaceTurn(ctx context.Context, userID string, turn domain.WorkspaceTurn) error {
 	if _, err := s.generatingWorkspace(ctx, userID, turn); err != nil {
 		return err
 	}
-	return s.workspace.repo.ReleaseGeneratorWorkspaceTurn(ctx, turn, s.now())
+	if err := s.workspace.repo.ReleaseGeneratorWorkspaceTurn(ctx, turn, s.now()); err != nil {
+		return err
+	}
+	s.snapshotRequested(turn.WorkflowID)
+	return nil
 }
 
 func (s *GeneratorService) ListWorkspaceFiles(ctx context.Context, userID string, turn domain.WorkspaceTurn) ([]domain.WorkspaceFile, error) {
@@ -308,6 +332,10 @@ func (s *GeneratorService) ArchiveWorkspace(ctx context.Context, userID string, 
 	archive, err := s.sandboxes.ArchiveWorkspace(ctx, record.SandboxID)
 	if err != nil {
 		return ArchiveResponse{}, err
+	}
+	archive, err = workspacearchive.Canonicalize(archive)
+	if err != nil {
+		return ArchiveResponse{}, fmt.Errorf("canonicalize workspace archive: %w", err)
 	}
 	return ArchiveResponse{Archive: archive}, nil
 }
@@ -464,7 +492,26 @@ func (s *GeneratorService) generatingWorkspace(ctx context.Context, userID strin
 	return record, nil
 }
 
-func (s *GeneratorService) workspaceSeed(ctx context.Context, workflow domain.Workflow) ([]byte, error) {
+func (s *GeneratorService) workspaceSeed(ctx context.Context, userID string, workflow domain.Workflow) ([]byte, error) {
+	if workflow.WorkspaceSnapshotDigest != "" {
+		archive, err := s.snapshots.Read(workflow.ID, workflow.WorkspaceSnapshotDigest)
+		if err == nil {
+			return archive, nil
+		}
+		cleared, clearErr := s.workspace.repo.ClearGeneratorWorkspaceSnapshot(ctx, workflow.ID, workflow.WorkspaceSnapshotDigest, s.now())
+		if clearErr != nil {
+			return nil, fmt.Errorf("clear invalid generator workspace snapshot: %w", clearErr)
+		}
+		if !cleared {
+			current, reloadErr := s.store.GetGenerationWorkflowForUser(ctx, workflow.ID, userID)
+			if reloadErr != nil {
+				return nil, reloadErr
+			}
+			if current.WorkspaceSnapshotDigest != workflow.WorkspaceSnapshotDigest {
+				return s.workspaceSeed(ctx, userID, *current)
+			}
+		}
+	}
 	if workflow.CandidateRevisionID == "" {
 		return nil, nil
 	}

@@ -11,6 +11,7 @@
     "test:e2e:recovery": "playwright test -c playwright.recovery.config.ts",
     "test:acceptance:node": "playwright test -c playwright.agent-live.config.ts authoring.node.live.spec.ts",
     "test:acceptance:mcp": "playwright test -c playwright.agent-live.config.ts authoring.mcp.live.spec.ts",
+    "test:acceptance:interruption": "playwright test -c playwright.agent-live.config.ts authoring.interruption.live.spec.ts",
     "test:agent-live:assistant": "playwright test -c playwright.agent-live.config.ts assistant.live.spec.ts",
     "test:agent-live:soak": "playwright test -c playwright.agent-live.config.ts assistant.soak.live.spec.ts",
     "test:agent-live:k8s": "playwright test -c playwright.agent-live.config.ts authoring.k8s.live.spec.ts"

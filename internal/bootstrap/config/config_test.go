@@ -104,6 +104,20 @@ func TestAgentAuthoringDeadlineDefaultsAndParses(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
+	defaultTTL, err := (Config{}).WorkspaceIdleTTL()
+	if err != nil || defaultTTL != 24*time.Hour {
+		t.Fatalf("default workspace idle ttl = %s, %v", defaultTTL, err)
+	}
+	configured, err := (Config{GeneratorWorkspaceIdleTTL: "90m"}).WorkspaceIdleTTL()
+	if err != nil || configured != 90*time.Minute {
+		t.Fatalf("configured workspace idle ttl = %s, %v", configured, err)
+	}
+	if _, err := (Config{GeneratorWorkspaceIdleTTL: "0s"}).WorkspaceIdleTTL(); err == nil {
+		t.Fatal("zero workspace idle ttl unexpectedly parsed")
+	}
+}
+
 //nolint:gosec // Test-only configuration verifies that real credentials cannot be reused.
 func TestServerRejectsDebugCredentialReuse(t *testing.T) {
 	base := validProcessConfig()

@@ -17,28 +17,29 @@ import (
 )
 
 type Config struct {
-	Port                 int                `yaml:"port"`
-	HealthPort           int                `yaml:"health_port"`
-	DataDir              string             `yaml:"data_dir"`
-	DatabaseURL          string             `yaml:"database_url"`
-	Kubeconfig           string             `yaml:"kubeconfig"`
-	Registry             RegistryConfig     `yaml:"registry"`
-	VClusterBinary       string             `yaml:"vcluster_binary"`
-	VClusterChartRepo    string             `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion string             `yaml:"vcluster_chart_version"`
-	UIOrigin             string             `yaml:"ui_origin"`
-	Namespace            string             `yaml:"namespace"`
-	CRDNamespace         string             `yaml:"crd_namespace"`
-	CooldownMinutes      int                `yaml:"cooldown_minutes"`
-	JWTSecret            string             `yaml:"jwt_secret"`
-	Debug                DebugConfig        `yaml:"debug"`
-	InternalWorkers      InternalWorkerKeys `yaml:"internal_workers"`
-	Worker               WorkerConfig       `yaml:"worker"`
-	Agent                AgentConfig        `yaml:"agent"`
-	OpenSandbox          OpenSandboxConfig  `yaml:"opensandbox"`
-	Incus                incus.Config       `yaml:"incus"`
-	Runtime              RuntimeConfig      `yaml:"runtime"`
-	Catalog              CatalogConfig      `yaml:"catalog"`
+	Port                      int                `yaml:"port"`
+	HealthPort                int                `yaml:"health_port"`
+	DataDir                   string             `yaml:"data_dir"`
+	DatabaseURL               string             `yaml:"database_url"`
+	Kubeconfig                string             `yaml:"kubeconfig"`
+	Registry                  RegistryConfig     `yaml:"registry"`
+	VClusterBinary            string             `yaml:"vcluster_binary"`
+	VClusterChartRepo         string             `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion      string             `yaml:"vcluster_chart_version"`
+	UIOrigin                  string             `yaml:"ui_origin"`
+	Namespace                 string             `yaml:"namespace"`
+	CRDNamespace              string             `yaml:"crd_namespace"`
+	CooldownMinutes           int                `yaml:"cooldown_minutes"`
+	JWTSecret                 string             `yaml:"jwt_secret"`
+	Debug                     DebugConfig        `yaml:"debug"`
+	InternalWorkers           InternalWorkerKeys `yaml:"internal_workers"`
+	Worker                    WorkerConfig       `yaml:"worker"`
+	Agent                     AgentConfig        `yaml:"agent"`
+	OpenSandbox               OpenSandboxConfig  `yaml:"opensandbox"`
+	Incus                     incus.Config       `yaml:"incus"`
+	Runtime                   RuntimeConfig      `yaml:"runtime"`
+	Catalog                   CatalogConfig      `yaml:"catalog"`
+	GeneratorWorkspaceIdleTTL string             `yaml:"generator_workspace_idle_ttl"`
 }
 
 // RegistryConfig identifies the only OCI repository root used by the platform.
@@ -86,6 +87,20 @@ func (c DebugConfig) Validate() error {
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
+
+// WorkspaceIdleTTL is a Server-wide resource policy. It is never controlled
+// by a user workflow and defaults to one day when omitted by deployment.
+func (c Config) WorkspaceIdleTTL() (time.Duration, error) {
+	value := strings.TrimSpace(c.GeneratorWorkspaceIdleTTL)
+	if value == "" {
+		return 24 * time.Hour, nil
+	}
+	ttl, err := time.ParseDuration(value)
+	if err != nil || ttl <= 0 {
+		return 0, fmt.Errorf("generator_workspace_idle_ttl must be a positive duration")
+	}
+	return ttl, nil
+}
 
 func (c CatalogConfig) Validate() error {
 	if !c.Enabled() {
@@ -359,6 +374,7 @@ func Load(path string) (Config, error) {
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
+	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	cfg.UIOrigin = os.ExpandEnv(cfg.UIOrigin)
@@ -448,6 +464,9 @@ func (c Config) ValidateServer() error {
 		return fmt.Errorf("server agent model is required")
 	}
 	if _, err := c.Agent.AuthoringDeadline(); err != nil {
+		return fmt.Errorf("server %w", err)
+	}
+	if _, err := c.WorkspaceIdleTTL(); err != nil {
 		return fmt.Errorf("server %w", err)
 	}
 	if err := c.OpenSandbox.Validate(); err != nil {

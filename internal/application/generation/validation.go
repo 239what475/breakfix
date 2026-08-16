@@ -1,13 +1,13 @@
 package generation
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 )
 
 // Candidate is the immutable archive inspected by the Generator and Judge
@@ -26,20 +26,23 @@ type CandidateFile struct {
 	Content string
 }
 
-// InspectCandidateArchive validates exactly the archive returned by the
-// workspace. It makes no metadata substitutions or normalizations: platform
-// fields are rejected so a model protocol mistake cannot silently change the
-// candidate that reaches the build stage.
+// InspectCandidateArchive validates the canonical archive returned by the
+// workspace. Platform fields are still rejected by challenge validation; the
+// archive format itself has no provider-owned metadata semantics.
 func InspectCandidateArchive(archive []byte) (*Candidate, error) {
 	if len(archive) == 0 {
 		return nil, errors.New("generator candidate archive is empty")
+	}
+	canonical, err := workspacearchive.Canonicalize(archive)
+	if err != nil {
+		return nil, fmt.Errorf("validate generator candidate archive: %w", err)
 	}
 	dir, err := os.MkdirTemp("", "breakfix-generator-candidate-")
 	if err != nil {
 		return nil, fmt.Errorf("create candidate staging: %w", err)
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck
-	if err := challenge.ExtractTarGz(dir, bytes.NewReader(archive)); err != nil {
+	if err := workspacearchive.Extract(dir, canonical); err != nil {
 		return nil, fmt.Errorf("extract generator candidate: %w", err)
 	}
 	entry, err := ValidateCandidateDir(dir)
@@ -50,7 +53,7 @@ func InspectCandidateArchive(archive []byte) (*Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Candidate{Archive: append([]byte(nil), archive...), Entry: *entry, Files: files}, nil
+	return &Candidate{Archive: canonical, Entry: *entry, Files: files}, nil
 }
 
 // ValidateCandidateDir validates a generator-owned challenge directory. In

@@ -25,10 +25,10 @@ require_command() {
 }
 
 case "$suite" in
-	ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|agent-assistant|agent-soak)
+	ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
@@ -212,6 +212,11 @@ run_suite() {
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
 				fail 'acceptance-k8s requires RUN_AGENT_LIVE_E2E=1; this suite calls the real model and OpenSandbox'
 			npm run test:agent-live:k8s --prefix "$repo_root/test"
+			;;
+		acceptance-interruption)
+			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
+				fail 'acceptance-interruption requires RUN_AGENT_LIVE_E2E=1; this suite calls the real model and OpenSandbox'
+			npm run test:acceptance:interruption --prefix "$repo_root/test"
 			;;
 		agent-assistant)
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||

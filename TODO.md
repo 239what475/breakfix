@@ -127,18 +127,18 @@ Graceful deadline/永久性执行器故障的「结束 Run + 删除 private stag
 - [x] 3.3 Event 确定性 ID、状态与闭合 reason 枚举映射、API/UI 投影与 Eino 输入过滤；终止不能向公开的 `authoring_sessions.last_error` 写原始执行错误；浏览器/MCP 断开不结束 Run
 - [x] 3.4 Server 启动将旧 Authoring AgentRun 标记为 `RunInterrupted`，不自动创建 replacement Run
 - [x] 3.5 验收 helper 支持跨回合继续
-- [ ] 3.6 短 deadline 的 live 验收：预算耗尽 → 下一轮继续 → 提交并发布
+- [x] 3.6 短 deadline 的 live 验收：预算耗尽 → 下一轮继续 → 提交并发布
 - [x] 3.7 删除 private stage 后确认未提交 Plan 修改不会伪装成已恢复
 - [x] 3.8 网页 Authoring message 的持久化幂等键：重复 POST 返回同一 Run，不重复写用户消息、stage 或执行模型
 - [x] 3.9 重复网页 POST 的 SSE 语义：已有运行 Run 只返回 run/status 并由前端轮询；只有新建 Run 的连接执行并接收实时流
 - [x] 3.10 generation action receipt 保存 canonical request digest；相同 idempotency key 的不同反馈或其他 payload 返回冲突
-- [ ] 4.1 新增 30 秒周期的 Generator workspace snapshotter，并在回合释放后补拍；turn 释放只清空 `idle_since`，成功快照才启动闲置计时
-- [ ] 4.2 快照单写者 holder 覆盖归档、校验和 rename；最终事务在 holder 仍占用 workspace 时发布 digest、设置 `idle_since` 并释放 holder；使用唯一临时路径、canonical archive 和 digest 去重
-- [ ] 4.3 快照落 PVC + `generation_workflows` 记录 digest；submit 事务清空 digest
-- [ ] 4.4 后台宽限期清理无引用快照/临时文件；覆盖 snapshot、submit、Run 终止和 reaper 的并发协调
-- [ ] 4.5 单元/集成测试：周期触发、并发跳过、digest 校验、损坏回退、清理、seed 优先级、重启恢复
-- [ ] 4.6 canonical archive 安全性：拒绝路径穿越、链接和特殊文件；恢复不再直接调用 shell `tar -xzf`
-- [ ] 4.7 workspace 闲置回收：增加 `idle_since` 与 Server 固定 `24h` TTL；turn 获取清空计时、释放不直接开始计时，成功快照后才设置且已有有效快照时不重复刷新；turn 获取/释放、快照发布和闲置退休使用同一行锁；覆盖 TTL 到期、活跃 turn 抢占、快照缺失保留、异步删除及从快照重建
+- [x] 4.1 新增 30 秒周期的 Generator workspace snapshotter，并在回合释放后补拍；turn 释放只清空 `idle_since`，成功快照才启动闲置计时
+- [x] 4.2 快照单写者 holder 覆盖归档、校验和 rename；最终事务在 holder 仍占用 workspace 时发布 digest、设置 `idle_since` 并释放 holder；使用唯一临时路径、canonical archive 和 digest 去重
+- [x] 4.3 快照落 PVC + `generation_workflows` 记录 digest；submit 事务清空 digest
+- [x] 4.4 后台宽限期清理无引用快照/临时文件；覆盖 snapshot、submit、Run 终止和 reaper 的并发协调
+- [x] 4.5 单元/集成测试：周期触发、并发跳过、digest 校验、损坏回退、清理、seed 优先级、重启恢复
+- [x] 4.6 canonical archive 安全性：拒绝路径穿越、链接和特殊文件；恢复不再直接调用 shell `tar -xzf`
+- [x] 4.7 workspace 闲置回收：增加 `idle_since` 与 Server 固定 `24h` TTL；turn 获取清空计时、释放不直接开始计时，成功快照后才设置且已有有效快照时不重复刷新；turn 获取/释放、快照发布和闲置退休使用同一行锁；覆盖 TTL 到期、活跃 turn 抢占、快照缺失保留、异步删除及从快照重建
 - [ ] 5.1 扩展 fixture Roadmap：Linux/Node 与 k8s 两个方向的 domain/topic
 - [ ] 5.2 `cmd/catalog-release` 增加 `-print-content-revisions`，并用它重算写回 `release.yaml`
 - [ ] 5.3 网页 node 场景恢复为日志归档等真实 Linux 题

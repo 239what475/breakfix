@@ -892,8 +892,19 @@ func authoringRunRecoveryTx(ctx context.Context, tx *Tx, sessionID string, reaso
 			return "workspace", nil
 		}
 	}
-	var hasCandidate bool
+	var hasSnapshot bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM generation_workflows
+		WHERE source_kind = ? AND source_ref = ? AND state = ? AND workspace_snapshot_digest <> ''
+	)`, generation.SourceAuthoring, sessionID, generation.StateGenerating).Scan(&hasSnapshot)
+	if err != nil {
+		return "", fmt.Errorf("read authoring snapshot recovery: %w", err)
+	}
+	if hasSnapshot {
+		return "snapshot", nil
+	}
+	var hasCandidate bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(
 		SELECT 1 FROM generation_workflows
 		WHERE source_kind = ? AND source_ref = ? AND candidate_revision_id IS NOT NULL
 	)`, generation.SourceAuthoring, sessionID).Scan(&hasCandidate)

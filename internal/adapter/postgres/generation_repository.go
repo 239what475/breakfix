@@ -25,7 +25,7 @@ import (
 var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
 
 const generationWorkflowColumns = `id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
-	COALESCE(candidate_revision_id, ''), COALESCE(active_agent_run_id, ''), state_version, runtime_attempt, lease_owner, lease_expires_at,
+	COALESCE(candidate_revision_id, ''), workspace_snapshot_digest, COALESCE(active_agent_run_id, ''), state_version, runtime_attempt, lease_owner, lease_expires_at,
 	next_run_at, last_error, finalizer_error_category, finalizer_last_error, finalizer_last_attempted_at, finalizer_next_retry_at, created_at, updated_at`
 const generationWorkflowSelect = `SELECT ` + generationWorkflowColumns + ` FROM generation_workflows`
 
@@ -104,8 +104,8 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_workflows
 		(id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
-		candidate_revision_id, active_agent_run_id, state_version, runtime_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, 1, 0, '', ?, '', ?, ?)`,
+		candidate_revision_id, workspace_snapshot_digest, active_agent_run_id, state_version, runtime_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', '', NULL, '', NULL, 1, 0, '', ?, '', ?, ?)`,
 		workflow.ID, workflow.Source.Kind, workflow.Source.Ref, workflow.SourceRevision, workflow.State, workflow.NextRunAt, workflow.CreatedAt, workflow.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("insert generation workflow: %w", err)
 	}
@@ -737,11 +737,11 @@ func (d *GenerationRepository) SubmitGenerationCandidate(ctx context.Context, se
 	if err := insertCandidateRevisionTx(ctx, tx, revision); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET active_turn_id = '', updated_at = ? WHERE workspace_id = ? AND active_turn_id = ?`,
+	if _, err := tx.ExecContext(ctx, `UPDATE generator_workspaces SET active_turn_id = '', idle_since = NULL, updated_at = ? WHERE workspace_id = ? AND active_turn_id = ?`,
 		now.UTC(), workspace.ID, submission.TurnID); err != nil {
 		return nil, fmt.Errorf("release submitted generator workspace turn: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, candidate_revision_id = ?, active_agent_run_id = NULL,
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, candidate_revision_id = ?, workspace_snapshot_digest = '', active_agent_run_id = NULL,
 		state_version = state_version + 1, runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL,
 		last_error = '', next_run_at = ?, updated_at = ? WHERE id = ?`,
 		generation.StateJudging, revision.ID, now.UTC(), now.UTC(), workflow.ID); err != nil {
@@ -2381,7 +2381,7 @@ func (d *GenerationRepository) CancelGenerationWorkflow(ctx context.Context, ses
 	}
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
 		runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL, active_agent_run_id = NULL,
-		last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
+		workspace_snapshot_digest = '', last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
 		generation.StateCancelled, reason, now.UTC(), now.UTC(), workflow.ID))
 	if err != nil {
 		return nil, fmt.Errorf("cancel authoring generation workflow: %w", err)
@@ -2545,7 +2545,7 @@ func scanGenerationWorkflow(row agentRow) (*generation.Workflow, error) {
 	var workflow generation.Workflow
 	var leaseExpiresAt, finalizerLastAttemptedAt, finalizerNextRetryAt sql.NullTime
 	err := row.Scan(&workflow.ID, &workflow.Source.Kind, &workflow.Source.Ref, &workflow.SourceRevision, &workflow.State, &workflow.ClassificationRoadmapRevision, &workflow.ClassificationFeedback,
-		&workflow.CandidateRevisionID, &workflow.ActiveAgentRunID, &workflow.StateVersion, &workflow.RuntimeAttempt, &workflow.LeaseOwner, &leaseExpiresAt,
+		&workflow.CandidateRevisionID, &workflow.WorkspaceSnapshotDigest, &workflow.ActiveAgentRunID, &workflow.StateVersion, &workflow.RuntimeAttempt, &workflow.LeaseOwner, &leaseExpiresAt,
 		&workflow.NextRunAt, &workflow.LastError, &workflow.FinalizerErrorCategory, &workflow.FinalizerLastError, &finalizerLastAttemptedAt, &finalizerNextRetryAt,
 		&workflow.CreatedAt, &workflow.UpdatedAt)
 	if err != nil {

@@ -26,6 +26,12 @@ type WorkspaceRepository interface {
 	ListExpiredPendingGeneratorWorkspaces(context.Context, time.Time) ([]generation.Workspace, error)
 	ListDeletingGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)
 	ListTerminalGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)
+	ListGeneratorWorkspaceSnapshotTargets(context.Context) ([]generation.WorkspaceSnapshotTarget, error)
+	AcquireGeneratorWorkspaceSnapshot(context.Context, string, string, time.Time) (*generation.WorkspaceSnapshotTarget, error)
+	PublishGeneratorWorkspaceSnapshot(context.Context, string, string, string, time.Time) error
+	ClearGeneratorWorkspaceSnapshot(context.Context, string, string, time.Time) (bool, error)
+	RetireIdleGeneratorWorkspace(context.Context, string, string, time.Time, time.Time) (*generation.Workspace, error)
+	ListGeneratorWorkspaceSnapshotReferences(context.Context) ([]generation.WorkspaceSnapshotReference, error)
 }
 
 // GeneratorStore owns the durable, user-facing generation lifecycle. It is

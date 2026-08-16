@@ -204,6 +204,7 @@ type Workflow struct {
 	// Classifying run. It is private workflow input, never Roadmap content.
 	ClassificationFeedback   string               `json:"classification_feedback,omitempty"`
 	CandidateRevisionID      string               `json:"candidate_revision_id,omitempty"`
+	WorkspaceSnapshotDigest  string               `json:"-"`
 	ActiveAgentRunID         string               `json:"active_agent_run_id,omitempty"`
 	StateVersion             int64                `json:"state_version"`
 	RuntimeAttempt           int                  `json:"runtime_attempt"`
@@ -222,6 +223,9 @@ type Workflow struct {
 func (w Workflow) Valid() bool {
 	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || strings.TrimSpace(w.SourceRevision) == "" || !w.State.Valid() ||
 		w.StateVersion < 1 || w.RuntimeAttempt < 0 || w.RuntimeAttempt > MaxRuntimeAttempts {
+		return false
+	}
+	if w.WorkspaceSnapshotDigest != "" && !ValidSHA256(w.WorkspaceSnapshotDigest) {
 		return false
 	}
 	if w.State.RuntimeState() {

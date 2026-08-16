@@ -26,11 +26,28 @@ export async function readAuthoringSession(page: Page, sessionID: string): Promi
 }
 
 export async function currentAuthoringSessionID(page: Page): Promise<string> {
-	const session = await authorizedJSON<{ id?: unknown }>(page, "/api/authoring/sessions/current");
-	if (typeof session.id !== "string" || session.id === "") {
-		throw new Error("current authoring session is missing its id");
-	}
-	return session.id;
+	let sessionID = "";
+	await expect
+		.poll(
+			async () => {
+				const result = await page.evaluate(async () => {
+					const response = await fetch("/api/authoring/sessions/current", {
+						headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+					});
+					return { status: response.status, body: await response.text() };
+				});
+				if (result.status === 404) return false;
+				if (result.status < 200 || result.status >= 300) {
+					throw new Error(result.body);
+				}
+				const session = JSON.parse(result.body) as { id?: unknown };
+				sessionID = typeof session.id === "string" ? session.id : "";
+				return sessionID !== "";
+			},
+			{ timeout: 30_000, intervals: [250, 500, 1_000, 2_000] },
+		)
+		.toBe(true);
+	return sessionID;
 }
 
 export async function readGeneration(page: Page, workflowID: string): Promise<GeneratorGeneration> {

@@ -10,9 +10,11 @@ import (
 )
 
 var (
-	ErrWorkspaceNotFound = errors.New("generator workspace not found")
-	ErrWorkspaceBusy     = errors.New("generator workspace is already bound to another turn")
-	ErrWorkspaceTurnLost = errors.New("generator workspace turn binding was lost")
+	ErrWorkspaceNotFound        = errors.New("generator workspace not found")
+	ErrWorkspaceBusy            = errors.New("generator workspace is already bound to another turn")
+	ErrWorkspaceTurnLost        = errors.New("generator workspace turn binding was lost")
+	ErrWorkspaceSnapshotCurrent = errors.New("generator workspace already has a current snapshot")
+	ErrWorkspaceNotIdle         = errors.New("generator workspace is not eligible for idle retirement")
 )
 
 type WorkspaceState string
@@ -36,9 +38,24 @@ type Workspace struct {
 	ActiveTurnID      string
 	State             WorkspaceState
 	ProvisionDeadline time.Time
+	IdleSince         *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+}
+
+// WorkspaceSnapshotTarget joins one active workspace with the latest durable
+// workflow snapshot pointer. The archive bytes remain Server-private.
+type WorkspaceSnapshotTarget struct {
+	Workspace      Workspace
+	SnapshotDigest string
+}
+
+// WorkspaceSnapshotReference protects one immutable archive from background
+// garbage collection.
+type WorkspaceSnapshotReference struct {
+	WorkflowID string
+	Digest     string
 }
 
 // WorkspaceTurn identifies one explicit Generator client turn. Web authoring
@@ -84,6 +101,9 @@ func ValidateWorkspace(record Workspace) error {
 	}
 	if record.ProvisionDeadline.IsZero() {
 		return errors.New("generator workspace provision deadline is required")
+	}
+	if record.IdleSince != nil && (record.State != WorkspaceActive || strings.TrimSpace(record.ActiveTurnID) != "") {
+		return errors.New("generator workspace idle timestamp requires an unbound active workspace")
 	}
 	return nil
 }
