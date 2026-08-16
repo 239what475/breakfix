@@ -498,8 +498,10 @@ export type GeneratorWorkspaceCommandRequest = {
 export type GeneratorWorkspaceCommandResult = {
     workflow_id: string;
     turn_id: string;
-    exit_code: number;
-    output: string;
+    status: 'succeeded' | 'failed' | 'unknown';
+    exit_code?: number;
+    output?: string;
+    error?: string;
 };
 
 export type GeneratorCandidateSubmissionRequest = {

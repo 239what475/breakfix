@@ -10,30 +10,25 @@ import (
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 )
 
-func TestRuntimeServiceRetriesOneRunFiveTimes(t *testing.T) {
+func TestRuntimeServiceDoesNotRebuildAuthoringRunAfterExecutorFailure(t *testing.T) {
 	repository := &runtimeServiceRepository{run: agent.Run{
 		ID: "authoring-run", Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: "authoring-session", Status: agent.RunRunning,
 		Attempt: 1, DeadlineAt: time.Now().UTC().Add(time.Minute),
 	}}
 	executor := &failingRuntimeExecutor{}
-	service := NewRuntimeService(repository, "test-model", executor)
+	service := NewRuntimeService(repository, "test-model", time.Minute, executor)
 
 	if _, err := service.RunTurn(context.Background(), repository.run.ID, nil); err == nil {
 		t.Fatal("RunTurn unexpectedly succeeded")
 	}
-	if executor.calls != agent.MaxAttempts {
-		t.Fatalf("executor calls = %d, want %d", executor.calls, agent.MaxAttempts)
+	if executor.calls != 1 {
+		t.Fatalf("executor calls = %d, want 1", executor.calls)
 	}
-	if len(repository.retryAttempts) != agent.MaxAttempts {
+	if len(repository.retryAttempts) != 0 {
 		t.Fatalf("retry calls = %v", repository.retryAttempts)
 	}
-	for index, attempt := range repository.retryAttempts {
-		if want := index + 1; attempt != want {
-			t.Fatalf("retry attempt %d = %d, want %d", index, attempt, want)
-		}
-	}
-	if repository.run.Status != agent.RunFailed || repository.run.Attempt != agent.MaxAttempts {
-		t.Fatalf("terminal authoring run = %#v", repository.run)
+	if repository.run.Status != agent.RunRunning || repository.run.Attempt != 1 {
+		t.Fatalf("authoring run changed after executor failure = %#v", repository.run)
 	}
 }
 
@@ -44,7 +39,7 @@ func TestRuntimeServiceLeavesRunForServerRecoveryOnLifecycleCancellation(t *test
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	service := NewRuntimeService(repository, "test-model", contextRuntimeExecutor{})
+	service := NewRuntimeService(repository, "test-model", time.Minute, contextRuntimeExecutor{})
 
 	if _, err := service.RunTurn(ctx, repository.run.ID, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunTurn error = %v, want context cancellation", err)
@@ -100,26 +95,12 @@ func (r *runtimeServiceRepository) LoadAuthoringExecution(context.Context, strin
 	return &authoringdomain.Stage{RunID: r.run.ID, SessionID: r.run.OwnerRef, RunAttempt: r.run.Attempt}, []agent.Message{{Role: "user", Content: "继续完善题意"}}, nil
 }
 
-func (r *runtimeServiceRepository) UpdateAuthoringStage(context.Context, string, int, int64, authoringdomain.Plan, authoringdomain.Change) (*authoringdomain.Stage, error) {
+func (r *runtimeServiceRepository) UpdateAuthoringStage(context.Context, string, int, int64, authoringdomain.StageOperation, authoringdomain.Plan, authoringdomain.Change) (*authoringdomain.Stage, error) {
 	return nil, errors.New("unexpected UpdateAuthoringStage")
 }
 
 func (r *runtimeServiceRepository) FinalizeAuthoringRun(context.Context, string, int, string, time.Time) (*authoringdomain.Revision, error) {
 	return nil, errors.New("unexpected FinalizeAuthoringRun")
-}
-
-func (r *runtimeServiceRepository) RetryAuthoringRun(_ context.Context, _ string, expectedAttempt int, _ string, _ time.Time) (*agent.Run, error) {
-	r.retryAttempts = append(r.retryAttempts, expectedAttempt)
-	if expectedAttempt != r.run.Attempt {
-		return nil, agent.ErrRunActive
-	}
-	if expectedAttempt == agent.MaxAttempts {
-		r.run.Status = agent.RunFailed
-		return nil, nil
-	}
-	r.run.Attempt++
-	copy := r.run
-	return &copy, nil
 }
 
 func (r *runtimeServiceRepository) RestartInterruptedAuthoringRun(context.Context, string, string, time.Time) (*agent.Run, error) {

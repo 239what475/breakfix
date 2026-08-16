@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
+	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -232,12 +235,35 @@ func (h *Handler) RunGeneratorWorkspaceCommand(c *gin.Context, workflowID string
 		h.writeGeneratorError(c, err)
 		return
 	}
-	exitCode, output, err := service.ExecuteWorkspaceCommand(c.Request.Context(), user.ID, generatorWorkspaceTurn(workflowID, request.TurnId), request.Command)
+	result, err := service.ExecuteWorkspaceCommand(c.Request.Context(), user.ID, generatorWorkspaceTurn(workflowID, request.TurnId), request.Command)
 	if err != nil {
 		h.writeGeneratorError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, api.GeneratorWorkspaceCommandResult{WorkflowId: workflowID, TurnId: request.TurnId, ExitCode: exitCode, Output: output})
+	var command appgeneration.WorkspaceCommand
+	if len(result.Data) > 0 {
+		if err := json.Unmarshal(result.Data, &command); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "invalid workspace command result"})
+			return
+		}
+	}
+	if command.WorkflowID == "" {
+		command.WorkflowID = workflowID
+	}
+	exitCode, output := command.ExitCode, command.Output
+	var commandError *string
+	if strings.TrimSpace(result.Error) != "" {
+		value := result.Error
+		commandError = &value
+	}
+	c.JSON(http.StatusOK, api.GeneratorWorkspaceCommandResult{
+		WorkflowId: command.WorkflowID,
+		TurnId:     request.TurnId,
+		Status:     api.GeneratorWorkspaceCommandResultStatus(result.Status),
+		ExitCode:   &exitCode,
+		Output:     &output,
+		Error:      commandError,
+	})
 }
 
 func (h *Handler) SubmitGeneratorCandidate(c *gin.Context, workflowID string) {

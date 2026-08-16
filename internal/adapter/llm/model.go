@@ -5,18 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	deepseek "github.com/cloudwego/eino-ext/components/model/deepseek"
 	"github.com/cloudwego/eino/components/model"
 	deepseekapi "github.com/cohesion-org/deepseek-go"
 )
-
-const maxTransportAttempts = 3
 
 func NewChatModel(ctx context.Context, cfg config.AgentConfig) (model.ToolCallingChatModel, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
@@ -41,36 +39,14 @@ func NewChatModel(ctx context.Context, cfg config.AgentConfig) (model.ToolCallin
 	return chat, nil
 }
 
-// RetryTransport retries only provider transport failures. It deliberately
-// excludes model protocol, tool, 4xx parameter, and context-cancellation
-// errors, which must become an attempt failure instead of a semantic result.
-func RetryTransport(ctx context.Context, call func(context.Context) error) error {
-	var last error
-	for attempt := 0; attempt < maxTransportAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		last = call(ctx)
-		if last == nil || !IsTransientTransportError(last) || attempt == maxTransportAttempts-1 {
-			return last
-		}
-		delay := time.Duration(attempt+1) * 200 * time.Millisecond
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return last
-}
-
 func IsTransientTransportError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	var apiError *deepseekapi.APIError

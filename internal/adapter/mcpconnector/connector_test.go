@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -172,8 +173,13 @@ func TestConnectorRedactsRemoteErrorDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("call get_generation: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("get_generation unexpectedly succeeded: %#v", result)
+	if result.IsError {
+		t.Fatalf("get_generation returned MCP protocol error: %#v", result)
+	}
+	var envelope toolresult.Envelope
+	decodeMCPEnvelope(t, result, &envelope)
+	if envelope.Status != toolresult.Unknown {
+		t.Fatalf("error envelope status = %q", envelope.Status)
 	}
 	assertNoSensitiveMCPResult(t, result, "sandbox-secret", "local-user-token", "10.0.0.1")
 	if !strings.Contains(mcpResultText(result), "Breakfix could not complete") {
@@ -199,6 +205,18 @@ func connectMCP(t *testing.T, server *mcp.Server) *mcp.ClientSession {
 }
 
 func decodeMCPResult(t *testing.T, result *mcp.CallToolResult, target any) {
+	t.Helper()
+	var envelope toolresult.Envelope
+	decodeMCPEnvelope(t, result, &envelope)
+	if envelope.Status != toolresult.Succeeded {
+		t.Fatalf("MCP result status = %q, error = %q", envelope.Status, envelope.Error)
+	}
+	if err := json.Unmarshal(envelope.Data, target); err != nil {
+		t.Fatalf("decode MCP result data: %q: %v", string(envelope.Data), err)
+	}
+}
+
+func decodeMCPEnvelope(t *testing.T, result *mcp.CallToolResult, target *toolresult.Envelope) {
 	t.Helper()
 	if result == nil || len(result.Content) != 1 {
 		t.Fatalf("unexpected MCP result %#v", result)

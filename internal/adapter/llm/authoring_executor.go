@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
@@ -61,12 +62,7 @@ func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Exec
 			Tools:               toBaseAuthoringTools(conversation.tools()),
 			ExecuteSequentially: true,
 		}},
-		ModelRetryConfig: &adk.ModelRetryConfig{
-			MaxRetries: 3,
-			IsRetryAble: func(_ context.Context, err error) bool {
-				return IsTransientTransportError(err)
-			},
-		},
+		ModelRetryConfig: authoringModelRetryConfig(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("create Eino authoring agent: %w", err)
@@ -121,6 +117,15 @@ func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Exec
 		return "", errors.New("authoring agent returned an empty response")
 	}
 	return content, nil
+}
+
+func authoringModelRetryConfig() *adk.ModelRetryConfig {
+	return &adk.ModelRetryConfig{
+		MaxRetries: math.MaxInt,
+		IsRetryAble: func(ctx context.Context, err error) bool {
+			return ctx.Err() == nil && IsTransientTransportError(err)
+		},
+	}
 }
 
 func authoringInputs(conversation *runtimeConversation, history []agent.Message) ([]adk.Message, error) {
@@ -262,15 +267,19 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 	}
 }
 
-func (c *runtimeConversation) apply(ctx context.Context, kind, summary, difficultyImpact string, mutate func(*domain.Plan) error) (string, error) {
+func (c *runtimeConversation) apply(ctx context.Context, kind string, arguments any, summary, difficultyImpact string, mutate func(*domain.Plan, domain.StageOperation) error) (string, error) {
 	if strings.TrimSpace(summary) == "" || strings.TrimSpace(difficultyImpact) == "" {
 		return "", invalidToolInput(errors.New("修改理由和难度影响不能为空"))
 	}
+	operation, err := domain.NewStageOperation(c.runID, c.stage.StageRevision, kind, arguments)
+	if err != nil {
+		return "", err
+	}
 	plan := c.stage.Plan.Clone()
-	if err := mutate(&plan); err != nil {
+	if err := mutate(&plan, operation); err != nil {
 		return "", invalidToolInput(err)
 	}
-	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.RunAttempt, c.stage.StageRevision, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
+	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.RunAttempt, c.stage.StageRevision, operation, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
 	if err != nil {
 		return "", err
 	}
@@ -290,7 +299,7 @@ func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (stri
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "metadata", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
+	return c.apply(ctx, "metadata", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Description) == "" {
 			return errors.New("标题和简介不能为空")
 		}
@@ -314,7 +323,7 @@ func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "overview", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
+	return c.apply(ctx, "overview", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.Markdown) == "" {
 			return errors.New("概览不能为空")
 		}
@@ -335,13 +344,13 @@ func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
+	return c.apply(ctx, "checkpoint", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, operation domain.StageOperation) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Markdown) == "" || args.Position < 1 {
 			return errors.New("检查点标题、说明不能为空，position 必须从 1 开始")
 		}
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
-			id = domain.NewID("checkpoint")
+			id = domain.CheckpointIDForOperation(operation)
 		}
 		for index := range plan.Checkpoints {
 			if plan.Checkpoints[index].ID == id {
@@ -363,7 +372,7 @@ func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) 
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
+	return c.apply(ctx, "checkpoint", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.ID) == "" {
 			return errors.New("检查点 id 不能为空")
 		}
@@ -386,7 +395,7 @@ func (c *runtimeConversation) reorderCheckpoints(ctx context.Context, raw string
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint-order", args.Reason, args.DifficultyImpact, func(plan *domain.Plan) error {
+	return c.apply(ctx, "checkpoint-order", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if len(args.IDs) != len(plan.Checkpoints) {
 			return errors.New("ids 必须恰好覆盖全部检查点")
 		}

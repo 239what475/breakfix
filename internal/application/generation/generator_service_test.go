@@ -33,7 +33,7 @@ func TestGeneratorServiceCreatesPlanRevisionForExternalClient(t *testing.T) {
 	}
 }
 
-func TestGeneratorServiceEnforcesSingleWorkspaceWriterAndReleasesFailedTurn(t *testing.T) {
+func TestGeneratorServiceKeepsWorkspaceTurnAfterToolFailure(t *testing.T) {
 	store := newGeneratorServiceStore("user-one")
 	workflow := store.addWorkflow("workflow-one")
 	tools := &generatorServiceTools{readErr: errors.New("sandbox transport unavailable")}
@@ -51,21 +51,27 @@ func TestGeneratorServiceEnforcesSingleWorkspaceWriterAndReleasesFailedTurn(t *t
 		t.Fatal("read workspace file unexpectedly succeeded")
 	}
 
-	if err := service.StartWorkspaceTurn(context.Background(), "user-one", second); err != nil {
-		t.Fatalf("start replacement workspace turn after normal tool failure: %v", err)
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", second); !errors.Is(err, domain.ErrWorkspaceBusy) {
+		t.Fatalf("start concurrent turn after tool failure = %v, want busy", err)
 	}
 	record, err := service.workspace.repo.GetCurrentGeneratorWorkspace(context.Background(), workflow.ID)
 	if err != nil {
 		t.Fatalf("read retained workspace: %v", err)
 	}
-	if record.State != domain.WorkspaceActive || record.ActiveTurnID != second.ID {
+	if record.State != domain.WorkspaceActive || record.ActiveTurnID != first.ID {
 		t.Fatalf("workspace after failed turn = %#v", record)
+	}
+	if err := service.EndWorkspaceTurn(context.Background(), "user-one", first); err != nil {
+		t.Fatalf("end failed workspace turn: %v", err)
+	}
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", second); err != nil {
+		t.Fatalf("start workspace turn after explicit release: %v", err)
 	}
 	if err := service.RunWorkspaceCommand(context.Background(), "user-one", second, "", nil); err == nil {
 		t.Fatal("empty command unexpectedly succeeded")
 	}
-	if err := service.StartWorkspaceTurn(context.Background(), "user-one", first); err != nil {
-		t.Fatalf("start turn after command validation failure: %v", err)
+	if err := service.StartWorkspaceTurn(context.Background(), "user-one", first); !errors.Is(err, domain.ErrWorkspaceBusy) {
+		t.Fatalf("start turn after command validation failure = %v, want busy", err)
 	}
 }
 

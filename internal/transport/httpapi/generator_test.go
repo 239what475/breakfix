@@ -23,6 +23,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/middleware"
@@ -469,9 +470,11 @@ func (*generatorHTTPService) WriteWorkspaceFile(context.Context, string, generat
 	return nil
 }
 
-func (s *generatorHTTPService) ExecuteWorkspaceCommand(_ context.Context, userID string, turn generation.WorkspaceTurn, command string) (int, string, error) {
+func (s *generatorHTTPService) ExecuteWorkspaceCommand(_ context.Context, userID string, turn generation.WorkspaceTurn, command string) (toolresult.Envelope, error) {
 	s.commandUserID, s.commandTurn, s.command = userID, turn, command
-	return 0, "ok\n", nil
+	return toolresult.WithData(toolresult.Succeeded, appgeneration.WorkspaceCommand{
+		WorkflowID: turn.WorkflowID, ExitCode: 0, Output: "ok\n",
+	}, "")
 }
 
 func (*generatorHTTPService) SubmitCandidate(context.Context, string, generation.CandidateSubmission) (*generation.Revision, error) {

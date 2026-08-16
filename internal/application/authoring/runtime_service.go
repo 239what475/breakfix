@@ -16,7 +16,7 @@ import (
 
 const (
 	authoringPromptVersion = "authoring-v2"
-	authoringRunDeadline   = 30 * time.Minute
+	defaultRunDeadline     = 30 * time.Minute
 )
 
 // RuntimeRepository is the Server-owned Authoring boundary. The Server owns
@@ -32,9 +32,8 @@ type RuntimeRepository interface {
 	ListMessages(context.Context, string) ([]agent.Message, error)
 	GetRun(context.Context, string) (*agent.Run, error)
 	LoadAuthoringExecution(context.Context, string) (*domain.Stage, []agent.Message, error)
-	UpdateAuthoringStage(context.Context, string, int, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+	UpdateAuthoringStage(context.Context, string, int, int64, domain.StageOperation, domain.Plan, domain.Change) (*domain.Stage, error)
 	FinalizeAuthoringRun(context.Context, string, int, string, time.Time) (*domain.Revision, error)
-	RetryAuthoringRun(context.Context, string, int, string, time.Time) (*agent.Run, error)
 	RestartInterruptedAuthoringRun(context.Context, string, string, time.Time) (*agent.Run, error)
 }
 
@@ -57,7 +56,7 @@ type Executor interface {
 }
 
 type StageUpdater interface {
-	UpdateAuthoringStage(context.Context, string, int, int64, domain.Plan, domain.Change) (*domain.Stage, error)
+	UpdateAuthoringStage(context.Context, string, int, int64, domain.StageOperation, domain.Plan, domain.Change) (*domain.Stage, error)
 }
 
 type StreamEvent struct {
@@ -69,11 +68,15 @@ type StreamEvent struct {
 type RuntimeService struct {
 	repo     RuntimeRepository
 	model    string
+	deadline time.Duration
 	executor Executor
 }
 
-func NewRuntimeService(repo RuntimeRepository, model string, executor Executor) *RuntimeService {
-	return &RuntimeService{repo: repo, model: strings.TrimSpace(model), executor: executor}
+func NewRuntimeService(repo RuntimeRepository, model string, deadline time.Duration, executor Executor) *RuntimeService {
+	if deadline <= 0 {
+		deadline = defaultRunDeadline
+	}
+	return &RuntimeService{repo: repo, model: strings.TrimSpace(model), deadline: deadline, executor: executor}
 }
 
 func (s *RuntimeService) Create(ctx context.Context, userID string) (*domain.Session, error) {
@@ -179,7 +182,7 @@ func (s *RuntimeService) StartTurn(ctx context.Context, userID, sessionID, conte
 		Input:         input,
 		Model:         s.model,
 		PromptVersion: authoringPromptVersion,
-		DeadlineAt:    now.Add(authoringRunDeadline),
+		DeadlineAt:    now.Add(s.deadline),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -202,49 +205,37 @@ func (s *RuntimeService) RunTurn(ctx context.Context, runID string, emit func(St
 	if run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.Status != agent.RunRunning {
 		return "", agent.ErrRunActive
 	}
-	for {
-		stage, history, err := s.repo.LoadAuthoringExecution(ctx, run.ID)
-		if err != nil {
-			return "", err
-		}
-		if stage.RunAttempt != run.Attempt {
-			return "", agent.ErrRunActive
-		}
-		if len(history) == 0 || history[len(history)-1].Role != "user" {
-			return "", errors.New("authoring execution has no latest user message")
-		}
-		session, err := s.repo.GetAuthoringSessionInternal(ctx, stage.SessionID)
-		if err != nil {
-			return "", err
-		}
-		if session.ID != run.OwnerRef || session.RuntimeSessionID != run.SessionID || strings.TrimSpace(session.UserID) == "" {
-			return "", agent.ErrRunActive
-		}
-		execution := Execution{
-			RunID: run.ID, UserID: session.UserID, SessionID: session.ID, UserMessageID: history[len(history)-1].ID,
-			Stage: *stage, History: history,
-		}
-		attemptCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
-		content, err := s.executor.Run(attemptCtx, execution, s.repo, emit)
-		if err == nil {
-			_, err = s.repo.FinalizeAuthoringRun(attemptCtx, run.ID, run.Attempt, content, time.Now().UTC())
-		}
-		cancel()
-		if err == nil {
-			return content, nil
-		}
-		if ctx.Err() != nil {
-			return "", err
-		}
-		next, retryErr := s.repo.RetryAuthoringRun(ctx, run.ID, run.Attempt, err.Error(), time.Now().UTC())
-		if retryErr != nil {
-			return "", retryErr
-		}
-		if next == nil {
-			return "", err
-		}
-		run = next
+	stage, history, err := s.repo.LoadAuthoringExecution(ctx, run.ID)
+	if err != nil {
+		return "", err
 	}
+	if stage.RunAttempt != run.Attempt {
+		return "", agent.ErrRunActive
+	}
+	if len(history) == 0 || history[len(history)-1].Role != "user" {
+		return "", errors.New("authoring execution has no latest user message")
+	}
+	session, err := s.repo.GetAuthoringSessionInternal(ctx, stage.SessionID)
+	if err != nil {
+		return "", err
+	}
+	if session.ID != run.OwnerRef || session.RuntimeSessionID != run.SessionID || strings.TrimSpace(session.UserID) == "" {
+		return "", agent.ErrRunActive
+	}
+	execution := Execution{
+		RunID: run.ID, UserID: session.UserID, SessionID: session.ID, UserMessageID: history[len(history)-1].ID,
+		Stage: *stage, History: history,
+	}
+	runCtx, cancel := context.WithDeadline(ctx, run.DeadlineAt)
+	defer cancel()
+	content, err := s.executor.Run(runCtx, execution, s.repo, emit)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.repo.FinalizeAuthoringRun(runCtx, run.ID, run.Attempt, content, time.Now().UTC()); err != nil {
+		return "", err
+	}
+	return content, nil
 }
 
 // RestartInterruptedTurn replaces a Server-interrupted interactive execution

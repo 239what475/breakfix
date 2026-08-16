@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -124,7 +125,21 @@ func (c *Connector) registerTools(server *mcp.Server) {
 			if err != nil {
 				return nil, err
 			}
-			return workspaceCommandResult{WorkflowID: input.WorkflowID, ExitCode: result.ExitCode, Output: result.Output}, nil
+			exitCode := 0
+			if result.ExitCode != nil {
+				exitCode = *result.ExitCode
+			}
+			output := ""
+			if result.Output != nil {
+				output = *result.Output
+			}
+			message := ""
+			if result.Error != nil {
+				message = *result.Error
+			}
+			return toolresult.WithData(toolresult.Status(result.Status), workspaceCommandResult{
+				WorkflowID: input.WorkflowID, ExitCode: exitCode, Output: output,
+			}, message)
 		})
 	})
 	registerTool(server, "submit_candidate", "归档并提交指定 Generating 任务当前远程工作区。仅在用户要求提交当前 candidate 后调用。", false, func(ctx context.Context, input submitCandidateInput) (any, error) {
@@ -171,10 +186,22 @@ func registerTool[Input any](server *mcp.Server, name, description string, readO
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input Input) (*mcp.CallToolResult, any, error) {
 		result, err := handler(ctx, input)
 		if err != nil {
-			return nil, nil, publicToolError(err)
+			return nil, toolResultFromError(err), nil
 		}
-		return nil, result, nil
+		if envelope, ok := result.(toolresult.Envelope); ok {
+			return nil, envelope, nil
+		}
+		envelope, err := toolresult.Success(result)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, envelope, nil
 	})
+}
+
+func toolResultFromError(err error) toolresult.Envelope {
+	status := toolresult.StatusForError(err)
+	return toolresult.WithRawData(status, nil, publicToolError(err).Error())
 }
 
 func (c *Connector) generationResult(ctx context.Context, workflowID string) (generationResult, error) {

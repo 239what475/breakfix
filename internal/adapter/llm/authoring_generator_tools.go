@@ -12,6 +12,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 const authoringWorkspaceReleaseTimeout = 10 * time.Second
@@ -92,7 +93,6 @@ func (c *runtimeConversation) listWorkspaceFiles(ctx context.Context, raw string
 	}
 	files, err := c.generator.ListWorkspaceFiles(ctx, c.userID, turn)
 	if err != nil {
-		c.releaseFailedWorkspaceTurn(turn)
 		return "", generatorToolError(err)
 	}
 	return marshalAuthoringToolResult(struct {
@@ -120,7 +120,6 @@ func (c *runtimeConversation) readWorkspaceFile(ctx context.Context, raw string)
 	}
 	content, err := c.generator.ReadWorkspaceContent(ctx, c.userID, turn, args.Path, args.Offset, args.Limit)
 	if err != nil {
-		c.releaseFailedWorkspaceTurn(turn)
 		return "", generatorToolError(err)
 	}
 	return marshalAuthoringToolResult(struct {
@@ -147,7 +146,6 @@ func (c *runtimeConversation) writeWorkspaceFile(ctx context.Context, raw string
 		return "", err
 	}
 	if err := c.generator.WriteWorkspaceFile(ctx, c.userID, turn, args.Path, args.Content); err != nil {
-		c.releaseFailedWorkspaceTurn(turn)
 		return "", generatorToolError(err)
 	}
 	return marshalAuthoringToolResult(struct {
@@ -171,16 +169,11 @@ func (c *runtimeConversation) runWorkspaceCommand(ctx context.Context, raw strin
 	if err != nil {
 		return "", err
 	}
-	exitCode, output, err := c.generator.ExecuteWorkspaceCommand(ctx, c.userID, turn, args.Command)
+	result, err := c.generator.ExecuteWorkspaceCommand(ctx, c.userID, turn, args.Command)
 	if err != nil {
-		c.releaseFailedWorkspaceTurn(turn)
 		return "", generatorToolError(err)
 	}
-	return marshalAuthoringToolResult(struct {
-		WorkflowID string `json:"workflow_id"`
-		ExitCode   int    `json:"exit_code"`
-		Output     string `json:"output"`
-	}{WorkflowID: turn.WorkflowID, ExitCode: exitCode, Output: output})
+	return toolresult.Marshal(result)
 }
 
 func (c *runtimeConversation) submitCandidate(ctx context.Context, raw string) (string, error) {
@@ -199,13 +192,13 @@ func (c *runtimeConversation) submitCandidate(ctx context.Context, raw string) (
 		TurnID:         turn.ID,
 		IdempotencyKey: c.idempotencyKey("submit-candidate", turn.WorkflowID),
 	})
-	// SubmitCandidate owns the durable turn release together with the state
-	// transition. A retried submission resolves the same receipt.
-	c.turn = nil
 	if err != nil {
-		c.releaseTurn(turn)
 		return "", generatorToolError(err)
 	}
+	// A successful submission ends its workspace turn atomically with the
+	// workflow transition. An unknown or rejected submission keeps this turn so
+	// the Agent can inspect and correct the workspace in the same run.
+	c.turn = nil
 	return marshalAuthoringToolResult(struct {
 		Candidate generation.Revision `json:"candidate"`
 	}{Candidate: *revision})
@@ -383,17 +376,6 @@ func (c *runtimeConversation) releaseWorkspaceTurn() {
 	}
 	turn := *c.turn
 	c.turn = nil
-	c.releaseTurn(turn)
-}
-
-func (c *runtimeConversation) clearWorkspaceTurn(turn generation.WorkspaceTurn) {
-	if c != nil && c.turn != nil && *c.turn == turn {
-		c.turn = nil
-	}
-}
-
-func (c *runtimeConversation) releaseFailedWorkspaceTurn(turn generation.WorkspaceTurn) {
-	c.clearWorkspaceTurn(turn)
 	c.releaseTurn(turn)
 }
 

@@ -112,12 +112,12 @@ Graceful deadline/永久性执行器故障的「结束 Run + 删除 private stag
 
 ### 任务清单
 
-- [ ] 1.1 删除 Authoring `RetryAuthoringRun` 重建路径；移除公共 AgentRun 和 authoring stage 的 `attempt <= 5` 约束，attempt 退化为审计
-- [ ] 1.2 authoring 最大时间可配置（默认 30m）
-- [ ] 1.3 单元测试：模型传输故障在 deadline 内持续退避重试、单次请求超时可重试、整体 run deadline 不再进入重试、配置生效
-- [ ] 1.4 工具错误语义：命令/参数错误作为工具结果留在同一 AgentRun；副作用工具 HTTP 超时返回“执行状态未知”，不自动重放、不重建 Agent、不退休 workspace；Agent 可继续执行检查命令判断产出
-- [ ] 1.5 网页 Eino 与 MCP 的工具结果统一为成功、已知失败、执行状态未知三种可读结构；MCP 不再把未知状态压缩为公共错误文本
-- [ ] 1.6 私有 Plan 变更使用由 run、stage revision 和 canonical arguments 派生的 operation identity；未知结果可由模型显式重放同一 operation，自动生成的 checkpoint ID 仍确定
+- [x] 1.1 删除 Authoring `RetryAuthoringRun` 重建路径；移除公共 AgentRun 和 authoring stage 的 `attempt <= 5` 约束，attempt 退化为审计
+- [x] 1.2 authoring 最大时间可配置（默认 30m）
+- [x] 1.3 单元测试：模型传输故障在 deadline 内持续退避重试、单次请求超时可重试、整体 run deadline 不再进入重试、配置生效
+- [x] 1.4 工具错误语义：命令/参数错误作为工具结果留在同一 AgentRun；副作用工具 HTTP 超时返回“执行状态未知”，不自动重放、不重建 Agent、不退休 workspace；Agent 可继续执行检查命令判断产出
+- [x] 1.5 网页 Eino 与 MCP 的工具结果统一为成功、已知失败、执行状态未知三种可读结构；MCP 不再把未知状态压缩为公共错误文本
+- [x] 1.6 私有 Plan 变更使用由 run、stage revision 和 canonical arguments 派生的 operation identity；未知结果可由模型显式重放同一 operation，自动生成的 checkpoint ID 仍确定
 - [ ] 2.1 authoring `MaxIterations` 改无上限大整数
 - [ ] 2.2 系统提示补充 `CANDIDATE_INVALID` 语义
 - [ ] 2.3 llm 行为测试：无上限迭代配置与模型重试行为；不对 prompt 文案作单元测试断言

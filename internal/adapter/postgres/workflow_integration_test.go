@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -575,7 +576,7 @@ func TestGenerationConfirmationCanRunInsideAuthoringTurn(t *testing.T) {
 	}
 }
 
-func TestAuthoringRunRecoveryReplacesPrivateStageAndFencesOldAttempt(t *testing.T) {
+func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	userID := authoring.NewID("authoring-recovery-user")
@@ -594,14 +595,26 @@ func TestAuthoringRunRecoveryReplacesPrivateStageAndFencesOldAttempt(t *testing.
 	if err != nil {
 		t.Fatalf("start authoring run: %v", err)
 	}
-	next, err := database.Authoring.RetryAuthoringRun(ctx, run.ID, run.Attempt, "model transport unavailable", time.Now().UTC())
-	if err != nil || next == nil || next.Attempt != 2 {
-		t.Fatalf("retry authoring run = %#v, err=%v", next, err)
+	operation, err := authoring.NewStageOperation(run.ID, stage.StageRevision, "overview", struct {
+		Markdown string `json:"markdown"`
+	}{Markdown: "新的概览"})
+	if err != nil {
+		t.Fatalf("create stage operation: %v", err)
 	}
-	if _, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, stage.Plan, authoring.Change{
+	updated, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, stage.Plan, authoring.Change{
 		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
-	}); !errors.Is(err, agent.ErrRunActive) {
-		t.Fatalf("old attempt stage write = %v, want active-run fence", err)
+	})
+	if err != nil {
+		t.Fatalf("apply stage operation: %v", err)
+	}
+	replayed, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, stage.Plan, authoring.Change{
+		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
+	})
+	if err != nil {
+		t.Fatalf("replay stage operation: %v", err)
+	}
+	if updated.StageRevision != replayed.StageRevision || updated.StageRevision != stage.StageRevision+1 || !reflect.DeepEqual(updated.Plan, replayed.Plan) || !reflect.DeepEqual(updated.Changes, replayed.Changes) {
+		t.Fatalf("replayed stage = %#v, original = %#v", replayed, updated)
 	}
 	replacement, err := database.Authoring.RestartInterruptedAuthoringRun(ctx, run.ID, "server restarted", time.Now().UTC())
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 )
@@ -83,6 +84,23 @@ func TestProcessConfigurationsValidate(t *testing.T) {
 	}
 	if err := cfg.ValidateRuntimeWorker(); err != nil {
 		t.Fatalf("validate runtime worker configuration: %v", err)
+	}
+}
+
+func TestAgentAuthoringDeadlineDefaultsAndParses(t *testing.T) {
+	defaultDeadline, err := (AgentConfig{}).AuthoringDeadline()
+	if err != nil {
+		t.Fatalf("default authoring deadline: %v", err)
+	}
+	if defaultDeadline != 30*time.Minute {
+		t.Fatalf("default authoring deadline = %s", defaultDeadline)
+	}
+	configured, err := (AgentConfig{AuthoringRunDeadline: "45s"}).AuthoringDeadline()
+	if err != nil {
+		t.Fatalf("configured authoring deadline: %v", err)
+	}
+	if configured != 45*time.Second {
+		t.Fatalf("configured authoring deadline = %s", configured)
 	}
 }
 

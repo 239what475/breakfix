@@ -1980,15 +1980,20 @@ components:
 
     GeneratorWorkspaceCommandResult:
       type: object
-      required: [workflow_id, turn_id, exit_code, output]
+      required: [workflow_id, turn_id, status]
       properties:
         workflow_id:
           type: string
         turn_id:
           type: string
+        status:
+          type: string
+          enum: [succeeded, failed, unknown]
         exit_code:
           type: integer
         output:
+          type: string
+        error:
           type: string
 
     GeneratorCandidateSubmissionRequest:

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 // GeneratorOperations is the user-owned generation capability available to an
@@ -21,7 +22,7 @@ type GeneratorOperations interface {
 	ListWorkspaceFiles(context.Context, string, generation.WorkspaceTurn) ([]generation.WorkspaceFile, error)
 	ReadWorkspaceContent(context.Context, string, generation.WorkspaceTurn, string, int, int) (string, error)
 	WriteWorkspaceFile(context.Context, string, generation.WorkspaceTurn, string, string) error
-	ExecuteWorkspaceCommand(context.Context, string, generation.WorkspaceTurn, string) (int, string, error)
+	ExecuteWorkspaceCommand(context.Context, string, generation.WorkspaceTurn, string) (toolresult.Envelope, error)
 	SubmitCandidate(context.Context, string, generation.CandidateSubmission) (*generation.Revision, error)
 
 	ConfirmContent(context.Context, string, generation.ContentConfirmation) (*generation.Workflow, error)

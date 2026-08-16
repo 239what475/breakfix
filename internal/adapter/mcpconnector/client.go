@@ -36,6 +36,13 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("generator API request failed (%d): %s", e.StatusCode, e.Message)
 }
 
+func (e *HTTPError) HTTPStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
 func NewClient(serverURL, token string, httpClient *http.Client) (*Client, error) {
 	serverURL = strings.TrimSpace(serverURL)
 	token = strings.TrimSpace(token)

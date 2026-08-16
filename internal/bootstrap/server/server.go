@@ -234,7 +234,13 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, errors.New("generator service is required for authoring")
 	}
-	authoringService := appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, llm.NewAuthoringExecutor(cfg.Agent, generatorService))
+	authoringDeadline, err := cfg.Agent.AuthoringDeadline()
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("parse authoring run deadline: %w", err)
+	}
+	authoringService := appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, authoringDeadline, llm.NewAuthoringExecutor(cfg.Agent, generatorService))
 	assistantService := appassistant.NewService(database.Agent, cfg.Agent.Model, llm.NewAssistantExecutor(cfg.Agent))
 	roadmapMaintenance, err := approadmap.NewMaintenanceService(approadmap.MaintenanceConfig{
 		Repository: database.Roadmap, Executor: llm.NewRoadmapExecutor(cfg.Agent),

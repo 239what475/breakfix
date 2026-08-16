@@ -3,7 +3,9 @@ package authoring
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -167,6 +169,54 @@ type Stage struct {
 	Changes       []Change  `json:"changes"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// StageOperation identifies one private Plan mutation. The identity includes
+// the stage revision so a replay can return the exact stage produced by the
+// original mutation without conflating it with a later change in the same run.
+type StageOperation struct {
+	ID            string
+	RequestDigest string
+}
+
+// NewStageOperation creates the deterministic receipt identity for one Plan
+// tool invocation. The tool arguments must be a typed value or another value
+// with stable JSON encoding; callers must use the same arguments to replay an
+// outcome whose database response was lost.
+func NewStageOperation(runID string, stageRevision int64, kind string, arguments any) (StageOperation, error) {
+	runID = strings.TrimSpace(runID)
+	kind = strings.TrimSpace(kind)
+	if runID == "" || kind == "" || stageRevision < 0 {
+		return StageOperation{}, errors.New("authoring stage operation identity is invalid")
+	}
+	argumentJSON, err := json.Marshal(arguments)
+	if err != nil {
+		return StageOperation{}, fmt.Errorf("encode authoring stage operation arguments: %w", err)
+	}
+	canonical, err := json.Marshal(struct {
+		RunID         string          `json:"run_id"`
+		StageRevision int64           `json:"stage_revision"`
+		Kind          string          `json:"kind"`
+		Arguments     json.RawMessage `json:"arguments"`
+	}{
+		RunID: runID, StageRevision: stageRevision, Kind: kind, Arguments: argumentJSON,
+	})
+	if err != nil {
+		return StageOperation{}, fmt.Errorf("encode authoring stage operation: %w", err)
+	}
+	digest := sha256.Sum256(canonical)
+	value := hex.EncodeToString(digest[:])
+	return StageOperation{ID: "authoring-stage-" + value, RequestDigest: value}, nil
+}
+
+// CheckpointIDForOperation derives an automatically assigned checkpoint ID
+// from the same receipt identity as its enclosing Plan mutation.
+func CheckpointIDForOperation(operation StageOperation) string {
+	digest := strings.TrimSpace(operation.RequestDigest)
+	if len(digest) > 24 {
+		digest = digest[:24]
+	}
+	return "checkpoint-" + digest
 }
 
 func NewID(prefix string) string {

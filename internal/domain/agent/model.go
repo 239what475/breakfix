@@ -35,9 +35,9 @@ const (
 	RunInterrupted RunStatus = "interrupted"
 )
 
-// MaxAttempts is the bounded retry budget for one logical AgentRun. A retry
-// reuses the same durable run identity while creating a fresh Eino instance.
-// An interrupted process creates a replacement AgentRun with a new budget.
+// MaxAttempts is the bounded retry budget used by short, typed agent tasks
+// such as Judge, Classifier, and Roadmap. Interactive Authoring instead uses
+// its own deadline as the only turn budget.
 const MaxAttempts = 5
 
 type Session struct {

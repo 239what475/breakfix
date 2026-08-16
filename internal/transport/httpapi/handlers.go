@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
@@ -64,7 +65,7 @@ type generatorApplication interface {
 	ListWorkspaceFiles(context.Context, string, generationdomain.WorkspaceTurn) ([]generationdomain.WorkspaceFile, error)
 	ReadWorkspaceFile(context.Context, string, generationdomain.WorkspaceTurn, string, int, int) (appgeneration.FileReadResponse, error)
 	WriteWorkspaceFile(context.Context, string, generationdomain.WorkspaceTurn, string, string) error
-	ExecuteWorkspaceCommand(context.Context, string, generationdomain.WorkspaceTurn, string) (int, string, error)
+	ExecuteWorkspaceCommand(context.Context, string, generationdomain.WorkspaceTurn, string) (toolresult.Envelope, error)
 	SubmitCandidate(context.Context, string, generationdomain.CandidateSubmission) (*generationdomain.Revision, error)
 	ConfirmContent(context.Context, string, generationdomain.ContentConfirmation) (*generationdomain.Workflow, error)
 	RequestContentChanges(context.Context, string, generationdomain.ContentChangeRequest) (*generationdomain.Workflow, error)
@@ -133,10 +134,14 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	handler.authoring = dependencies.Authoring
 	handler.assistant = dependencies.Assistant
 	if handler.authoring == nil {
+		deadline, err := cfg.Agent.AuthoringDeadline()
+		if err != nil {
+			return nil, fmt.Errorf("parse authoring run deadline: %w", err)
+		}
 		if database != nil {
-			handler.authoring = appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, nil)
+			handler.authoring = appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, deadline, nil)
 		} else {
-			handler.authoring = appauthoring.NewRuntimeService(nil, cfg.Agent.Model, nil)
+			handler.authoring = appauthoring.NewRuntimeService(nil, cfg.Agent.Model, deadline, nil)
 		}
 	}
 	if handler.assistant == nil {

@@ -2,9 +2,8 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
@@ -31,6 +30,13 @@ func (e *invalidToolInputError) Unwrap() error {
 	return e.err
 }
 
+func (e *invalidToolInputError) ToolMessage() string {
+	if e == nil || e.err == nil {
+		return "tool input is invalid"
+	}
+	return e.err.Error()
+}
+
 func invalidToolInput(err error) error {
 	if err == nil {
 		return nil
@@ -44,21 +50,13 @@ func (t *authoringTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 
 func (t *authoringTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (string, error) {
 	result, err := t.run(ctx, args)
-	if err == nil {
+	if err != nil {
+		return toolresult.Marshal(toolresult.FromError(err))
+	}
+	if toolresult.IsEnvelopeJSON([]byte(result)) {
 		return result, nil
 	}
-	var inputErr *invalidToolInputError
-	if !errors.As(err, &inputErr) {
-		return "", err
-	}
-	payload, marshalErr := json.Marshal(struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}{OK: false, Error: inputErr.Error()})
-	if marshalErr != nil {
-		return "", marshalErr
-	}
-	return string(payload), nil
+	return toolresult.SuccessJSON([]byte(result))
 }
 
 func authoringSystemPrompt() string {
@@ -90,5 +88,5 @@ Plan：使用 Plan 工具修改当前回合的私有 Plan。每次修改都填�
 
 审核：读取任务和 candidate 以了解当前状态与反馈。只有作者在当前对话中明确授权时，才调用内容确认、内容修改请求、分类修改请求、分类确认发布或取消工具；这些调用必须针对工具返回的当前版本。分类 proposal 只由 Server 内部 Classifier 生成。你只能读取 proposal、传递作者反馈或确认发布，不能自行写入 topic、tag 或路线图关系。
 
-工具返回 {"ok":false,"error":"..."} 表示本次调用未成功；根据错误修正后再继续。回复保持简洁，说明已确认的状态、下一步需要作者决定的事项或尚缺的信息。`
+	工具结果使用 status=succeeded、status=failed 或 status=unknown。failed 表示平台确认本次调用未生效；unknown 表示请求是否生效无法确定，先检查工作区或任务状态再决定是否以相同参数重试。回复保持简洁，说明已确认的状态、下一步需要作者决定的事项或尚缺的信息。`
 }

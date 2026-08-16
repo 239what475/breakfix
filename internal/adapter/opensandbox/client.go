@@ -15,6 +15,7 @@ import (
 	sdk "github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 const workspaceMountPath = "/workspace"
@@ -164,15 +165,15 @@ func (c *Client) ReadFile(ctx context.Context, sandboxID, path string) ([]byte, 
 	}
 	reader, err := sandbox.DownloadFile(ctx, path, "")
 	if err != nil {
-		return nil, err
+		return nil, classifyWorkspaceOperationError(err)
 	}
 	content, readErr := io.ReadAll(reader)
 	closeErr := reader.Close()
 	if readErr != nil {
-		return nil, readErr
+		return nil, classifyWorkspaceOperationError(readErr)
 	}
 	if closeErr != nil {
-		return nil, fmt.Errorf("close sandbox file reader: %w", closeErr)
+		return nil, classifyWorkspaceOperationError(fmt.Errorf("close sandbox file reader: %w", closeErr))
 	}
 	return content, nil
 }
@@ -187,7 +188,7 @@ func (c *Client) ListWorkspaceFiles(ctx context.Context, sandboxID string) ([]ge
 	}
 	entries, err := sandbox.ListDirectoryWithDepth(ctx, workspaceMountPath, 32)
 	if err != nil {
-		return nil, err
+		return nil, classifyWorkspaceOperationError(err)
 	}
 	files := make([]generation.WorkspaceFile, 0, len(entries))
 	for _, entry := range entries {
@@ -218,10 +219,11 @@ func (c *Client) uploadFile(ctx context.Context, sandboxID, path string, content
 	if err != nil {
 		return err
 	}
-	return sandbox.UploadFile(ctx, strings.NewReader(string(content)), sdk.UploadFileOptions{
+	err = sandbox.UploadFile(ctx, strings.NewReader(string(content)), sdk.UploadFileOptions{
 		FileName: "content",
 		Metadata: sdk.FileMetadata{Path: path, Mode: providerFileMode(mode)},
 	})
+	return classifyWorkspaceOperationError(err)
 }
 
 // providerFileMode converts Go's numeric permission bits to the OpenSandbox
@@ -293,10 +295,10 @@ func (c *Client) Execute(ctx context.Context, sandboxID, command, cwd string, on
 		},
 	})
 	if err != nil {
-		return Execution{}, err
+		return Execution{}, classifyWorkspaceOperationError(err)
 	}
 	if result.ExitCode == nil {
-		return Execution{}, errors.New("opensandbox command returned no exit code")
+		return Execution{}, toolresult.Mark(errors.New("opensandbox command returned no exit code"), toolresult.Failed)
 	}
 	return Execution{ExitCode: *result.ExitCode, Output: result.Text()}, nil
 }
@@ -316,7 +318,25 @@ func (c *Client) connect(ctx context.Context, sandboxID string) (*sdk.Sandbox, e
 	if c == nil || strings.TrimSpace(sandboxID) == "" {
 		return nil, errors.New("opensandbox sandbox id is required")
 	}
-	return sdk.ConnectSandbox(ctx, c.connection, sandboxID)
+	sandbox, err := sdk.ConnectSandbox(ctx, c.connection, sandboxID)
+	if err != nil {
+		return nil, classifyWorkspaceOperationError(err)
+	}
+	return sandbox, nil
+}
+
+func classifyWorkspaceOperationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *sdk.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == http.StatusRequestTimeout || apiErr.StatusCode == http.StatusTooManyRequests || apiErr.StatusCode >= http.StatusInternalServerError {
+			return toolresult.Mark(err, toolresult.Unknown)
+		}
+		return toolresult.Mark(err, toolresult.Failed)
+	}
+	return toolresult.Mark(err, toolresult.StatusForError(err))
 }
 
 func IsNotFound(err error) bool {

@@ -294,8 +294,8 @@ func (d *AuthoringRepository) LoadAuthoringExecution(ctx context.Context, runID 
 	return stage, messages, nil
 }
 
-func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID string, expectedAttempt int, expectedStageRevision int64, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
-	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || expectedStageRevision < 0 || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
+func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID string, expectedAttempt int, expectedStageRevision int64, operation authoring.StageOperation, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
+	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || expectedStageRevision < 0 || strings.TrimSpace(operation.ID) == "" || strings.TrimSpace(operation.RequestDigest) == "" || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
 		return nil, errors.New("authoring stage update is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
@@ -311,11 +311,19 @@ func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID st
 	if stage.RunAttempt != expectedAttempt {
 		return nil, agent.ErrRunActive
 	}
-	if stage.StageRevision != expectedStageRevision {
-		return nil, authoring.ErrVersionConflict
-	}
 	if err := requireRunningAuthoringRunTx(ctx, tx, stage.RunID, stage.SessionID, expectedAttempt); err != nil {
 		return nil, err
+	}
+	if replay, digest, err := readAuthoringStageOperationTx(ctx, tx, *stage, operation.ID); err != nil {
+		return nil, err
+	} else if replay != nil {
+		if digest != operation.RequestDigest {
+			return nil, authoring.ErrVersionConflict
+		}
+		return replay, nil
+	}
+	if stage.StageRevision != expectedStageRevision {
+		return nil, authoring.ErrVersionConflict
 	}
 	if _, err := lockAuthoringPlanSessionTx(ctx, tx, stage.SessionID, ""); err != nil {
 		return nil, err
@@ -337,6 +345,12 @@ func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID st
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_stages SET stage_revision = ?, plan_json = ?::jsonb, changes_json = ?::jsonb, updated_at = ? WHERE run_id = ?`,
 		stage.StageRevision, planJSON, changesJSON, now, stage.RunID); err != nil {
 		return nil, fmt.Errorf("update authoring stage: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO authoring_stage_operations
+		(run_id, operation_id, request_digest, stage_revision, plan_json, changes_json, updated_at)
+		VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)`,
+		stage.RunID, operation.ID, operation.RequestDigest, stage.StageRevision, planJSON, changesJSON, now); err != nil {
+		return nil, fmt.Errorf("record authoring stage operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET updated_at = ? WHERE id = ?`, nowText(now), stage.SessionID); err != nil {
 		return nil, err
@@ -417,69 +431,6 @@ func (d *AuthoringRepository) FinalizeAuthoringRun(ctx context.Context, runID st
 		return nil, err
 	}
 	return revision, nil
-}
-
-// RetryAuthoringRun advances a known technical attempt while carrying the
-// same Run identity and private Plan stage forward. The stage's RunAttempt is
-// updated in the same transaction so a late tool call from the old Eino
-// instance cannot change the newer attempt.
-func (d *AuthoringRepository) RetryAuthoringRun(ctx context.Context, runID string, expectedAttempt int, message string, now time.Time) (*agent.Run, error) {
-	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || strings.TrimSpace(message) == "" || now.IsZero() {
-		return nil, errors.New("authoring retry is incomplete")
-	}
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin authoring retry: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	stage, err := readAuthoringStage(tx.QueryRowContext(ctx, `SELECT run_id, session_id, base_revision, stage_revision, run_attempt, plan_json, changes_json, created_at, updated_at
-		FROM authoring_stages WHERE run_id = ? FOR UPDATE`, runID))
-	if err != nil {
-		return nil, err
-	}
-	run, err := scanAgentRun(tx.QueryRowContext(ctx, agentRunSelect+` WHERE id = ? FOR UPDATE`, runID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, agent.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if stage.RunAttempt != expectedAttempt || run.Attempt != expectedAttempt || run.Status != agent.RunRunning ||
-		run.Purpose != "authoring" || run.OwnerKind != "authoring-session" || run.OwnerRef != stage.SessionID {
-		return nil, agent.ErrRunActive
-	}
-	if run.Attempt < agent.MaxAttempts && run.DeadlineAt.After(now.UTC()) {
-		next, err := scanAgentRun(tx.QueryRowContext(ctx, `UPDATE agent_runs SET attempt = attempt + 1, last_error = ?, updated_at = ?
-			WHERE id = ? AND status = ? AND attempt = ? RETURNING `+agentRunColumns,
-			strings.TrimSpace(message), now.UTC(), runID, agent.RunRunning, expectedAttempt))
-		if err != nil {
-			return nil, fmt.Errorf("advance authoring attempt: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_stages SET run_attempt = ?, updated_at = ? WHERE run_id = ?`, next.Attempt, now.UTC(), runID); err != nil {
-			return nil, fmt.Errorf("fence authoring stage attempt: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET last_error = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(message), nowText(now), stage.SessionID); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return next, nil
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND attempt = ?`, agent.RunFailed, strings.TrimSpace(message), now.UTC(), now.UTC(), runID, agent.RunRunning, expectedAttempt); err != nil {
-		return nil, fmt.Errorf("fail exhausted authoring run: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM authoring_stages WHERE run_id = ?`, runID); err != nil {
-		return nil, fmt.Errorf("delete failed authoring stage: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET last_error = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(message), nowText(now), stage.SessionID); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return nil, nil
 }
 
 // RestartInterruptedAuthoringRun abandons an incomplete private stage and
@@ -778,6 +729,32 @@ func readAuthoringStage(row agentRow) (*authoring.Stage, error) {
 		return nil, fmt.Errorf("decode authoring stage changes: %w", err)
 	}
 	return &stage, nil
+}
+
+func readAuthoringStageOperationTx(ctx context.Context, tx *Tx, current authoring.Stage, operationID string) (*authoring.Stage, string, error) {
+	var stageRevision int64
+	var requestDigest string
+	var planJSON, changesJSON []byte
+	var updatedAt time.Time
+	err := tx.QueryRowContext(ctx, `SELECT request_digest, stage_revision, plan_json, changes_json, updated_at
+		FROM authoring_stage_operations WHERE run_id = ? AND operation_id = ?`, current.RunID, operationID).
+		Scan(&requestDigest, &stageRevision, &planJSON, &changesJSON, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read authoring stage operation: %w", err)
+	}
+	replay := current
+	replay.StageRevision = stageRevision
+	replay.UpdatedAt = updatedAt
+	if err := json.Unmarshal(planJSON, &replay.Plan); err != nil {
+		return nil, "", fmt.Errorf("decode authoring operation plan: %w", err)
+	}
+	if err := json.Unmarshal(changesJSON, &replay.Changes); err != nil {
+		return nil, "", fmt.Errorf("decode authoring operation changes: %w", err)
+	}
+	return &replay, requestDigest, nil
 }
 
 func requireRunningAuthoringRunTx(ctx context.Context, tx *Tx, runID, authoringSessionID string, attempt int) error {

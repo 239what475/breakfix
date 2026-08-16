@@ -3,13 +3,47 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
+
+func TestAuthoringToolReturnsKnownAndUnknownFailuresAsData(t *testing.T) {
+	known := &authoringTool{name: "known", run: func(context.Context, string) (string, error) {
+		return "", errors.New("command rejected")
+	}}
+	raw, err := known.InvokableRun(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("known tool failure escaped wrapper: %v", err)
+	}
+	var knownResult toolresult.Envelope
+	if err := json.Unmarshal([]byte(raw), &knownResult); err != nil {
+		t.Fatalf("decode known tool result: %v", err)
+	}
+	if knownResult.Status != toolresult.Failed || knownResult.Error != "command rejected" {
+		t.Fatalf("known tool result = %#v", knownResult)
+	}
+
+	unknown := &authoringTool{name: "unknown", run: func(context.Context, string) (string, error) {
+		return "", context.DeadlineExceeded
+	}}
+	raw, err = unknown.InvokableRun(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unknown tool failure escaped wrapper: %v", err)
+	}
+	var unknownResult toolresult.Envelope
+	if err := json.Unmarshal([]byte(raw), &unknownResult); err != nil {
+		t.Fatalf("decode unknown tool result: %v", err)
+	}
+	if unknownResult.Status != toolresult.Unknown || unknownResult.Error == "" {
+		t.Fatalf("unknown tool result = %#v", unknownResult)
+	}
+}
 
 func TestAuthoringGeneratorToolsConfirmPlanThenSubmitCandidate(t *testing.T) {
 	service := newAuthoringGeneratorToolsService()
@@ -41,11 +75,18 @@ func TestAuthoringGeneratorToolsConfirmPlanThenSubmitCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run workspace command: %v", err)
 	}
+	var envelope toolresult.Envelope
+	if err := json.Unmarshal([]byte(commandResult), &envelope); err != nil {
+		t.Fatalf("decode command envelope: %v", err)
+	}
+	if envelope.Status != toolresult.Succeeded {
+		t.Fatalf("command envelope = %#v", envelope)
+	}
 	var command struct {
 		ExitCode int    `json:"exit_code"`
 		Output   string `json:"output"`
 	}
-	if err := json.Unmarshal([]byte(commandResult), &command); err != nil {
+	if err := json.Unmarshal(envelope.Data, &command); err != nil {
 		t.Fatalf("decode command result: %v", err)
 	}
 	if command.ExitCode != 0 || command.Output != "candidate is valid\n" {
@@ -138,20 +179,6 @@ func newAuthoringGeneratorConversation(service *authoringGeneratorToolsService) 
 	}
 }
 
-func TestAuthoringConversationPromptIncludesCurrentPlanRevision(t *testing.T) {
-	conversation := newAuthoringGeneratorConversation(newAuthoringGeneratorToolsService())
-	prompt, err := conversation.prompt("作者确认当前题意")
-	if err != nil {
-		t.Fatalf("build authoring prompt: %v", err)
-	}
-	if !strings.Contains(prompt, "当前已持久化 Plan revision 编号：4") {
-		t.Fatalf("authoring prompt does not expose the current plan revision:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "作者本次消息：\n作者确认当前题意") {
-		t.Fatalf("authoring prompt does not keep the user message:\n%s", prompt)
-	}
-}
-
 type authoringGeneratorToolsService struct {
 	workflow  generation.Workflow
 	candidate *generation.Revision
@@ -233,8 +260,12 @@ func (s *authoringGeneratorToolsService) WriteWorkspaceFile(_ context.Context, _
 	return nil
 }
 
-func (*authoringGeneratorToolsService) ExecuteWorkspaceCommand(context.Context, string, generation.WorkspaceTurn, string) (int, string, error) {
-	return 0, "candidate is valid\n", nil
+func (*authoringGeneratorToolsService) ExecuteWorkspaceCommand(context.Context, string, generation.WorkspaceTurn, string) (toolresult.Envelope, error) {
+	return toolresult.WithData(toolresult.Succeeded, struct {
+		WorkflowID string `json:"workflow_id"`
+		ExitCode   int    `json:"exit_code"`
+		Output     string `json:"output"`
+	}{WorkflowID: "workflow-one", ExitCode: 0, Output: "candidate is valid\n"}, "")
 }
 
 func (s *authoringGeneratorToolsService) SubmitCandidate(_ context.Context, _ string, submission generation.CandidateSubmission) (*generation.Revision, error) {

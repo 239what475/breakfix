@@ -12,6 +12,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
 // GeneratorWorkspaceTools is the narrow Server-owned workspace capability
@@ -185,7 +186,6 @@ func (s *GeneratorService) ListWorkspaceFiles(ctx context.Context, userID string
 	}
 	files, err := s.sandboxes.ListWorkspaceFiles(ctx, record.SandboxID)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return nil, err
 	}
 	return files, nil
@@ -198,12 +198,10 @@ func (s *GeneratorService) ReadWorkspaceFile(ctx context.Context, userID string,
 	}
 	path, err = workspacePath(path)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return FileReadResponse{}, err
 	}
 	content, err := s.sandboxes.ReadFile(ctx, record.SandboxID, path)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return FileReadResponse{}, err
 	}
 	return FileReadResponse{Content: selectWorkspaceLines(string(content), offset, limit)}, nil
@@ -227,11 +225,9 @@ func (s *GeneratorService) WriteWorkspaceFile(ctx context.Context, userID string
 	}
 	path, err = workspacePath(path)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return err
 	}
 	if err := s.sandboxes.WriteFile(ctx, record.SandboxID, path, []byte(content), 0o644); err != nil {
-		s.releaseFailedTurn(turn)
 		return err
 	}
 	return nil
@@ -243,7 +239,6 @@ func (s *GeneratorService) RunWorkspaceCommand(ctx context.Context, userID strin
 		return err
 	}
 	if strings.TrimSpace(command) == "" {
-		s.releaseFailedTurn(turn)
 		return errors.New("generator command is required")
 	}
 	streamed := false
@@ -255,7 +250,6 @@ func (s *GeneratorService) RunWorkspaceCommand(ctx context.Context, userID strin
 		return consume(ExecuteEvent{Type: "stdout", Content: content})
 	})
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return err
 	}
 	if consume == nil {
@@ -265,7 +259,6 @@ func (s *GeneratorService) RunWorkspaceCommand(ctx context.Context, userID strin
 		output = ""
 	}
 	if err := consume(ExecuteEvent{Type: "result", Content: output, ExitCode: &exitCode}); err != nil {
-		s.releaseFailedTurn(turn)
 		return err
 	}
 	return nil
@@ -274,7 +267,7 @@ func (s *GeneratorService) RunWorkspaceCommand(ctx context.Context, userID strin
 // ExecuteWorkspaceCommand collects one command's streamed and final output
 // for a function tool response. The provider execution remains inside
 // GeneratorService and the caller never receives a sandbox identity.
-func (s *GeneratorService) ExecuteWorkspaceCommand(ctx context.Context, userID string, turn domain.WorkspaceTurn, command string) (int, string, error) {
+func (s *GeneratorService) ExecuteWorkspaceCommand(ctx context.Context, userID string, turn domain.WorkspaceTurn, command string) (toolresult.Envelope, error) {
 	var output strings.Builder
 	exitCode := 0
 	err := s.RunWorkspaceCommand(ctx, userID, turn, command, func(event ExecuteEvent) error {
@@ -285,9 +278,23 @@ func (s *GeneratorService) ExecuteWorkspaceCommand(ctx context.Context, userID s
 		return nil
 	})
 	if err != nil {
-		return 0, "", err
+		// A provider failure is a tool result, not an Eino execution failure.
+		// The workspace turn remains held so the web Agent can inspect it before
+		// choosing another command. MCP releases its short turn in its caller.
+		result, marshalErr := toolresult.WithData(toolresult.StatusForError(err), WorkspaceCommand{
+			WorkflowID: turn.WorkflowID,
+			ExitCode:   exitCode,
+			Output:     output.String(),
+		}, toolresult.Message(err))
+		return result, marshalErr
 	}
-	return exitCode, output.String(), nil
+	data := WorkspaceCommand{WorkflowID: turn.WorkflowID, ExitCode: exitCode, Output: output.String()}
+	if exitCode != 0 {
+		result, marshalErr := toolresult.WithData(toolresult.Failed, data, fmt.Sprintf("command exited with code %d", exitCode))
+		return result, marshalErr
+	}
+	result, marshalErr := toolresult.WithData(toolresult.Succeeded, data, "")
+	return result, marshalErr
 }
 
 // ArchiveWorkspace keeps archive bytes inside the Server application boundary.
@@ -300,7 +307,6 @@ func (s *GeneratorService) ArchiveWorkspace(ctx context.Context, userID string, 
 	}
 	archive, err := s.sandboxes.ArchiveWorkspace(ctx, record.SandboxID)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return ArchiveResponse{}, err
 	}
 	return ArchiveResponse{Archive: archive}, nil
@@ -319,13 +325,9 @@ func (s *GeneratorService) SubmitCandidate(ctx context.Context, userID string, s
 	}
 	turn := domain.WorkspaceTurn{WorkflowID: submission.WorkflowID, ID: submission.TurnID}
 	if workflow.Source.Kind != domain.SourceAuthoring || strings.TrimSpace(workflow.Source.Ref) == "" {
-		s.releaseFailedTurn(turn)
 		return nil, errors.New("generator workflow source is invalid")
 	}
 	if repeated, err := s.store.FindSubmittedGenerationCandidate(ctx, workflow.Source.Ref, userID, submission); err != nil || repeated != nil {
-		if err != nil {
-			s.releaseFailedTurn(turn)
-		}
 		return repeated, err
 	}
 	record, err := s.generatingWorkspace(ctx, userID, turn)
@@ -334,23 +336,19 @@ func (s *GeneratorService) SubmitCandidate(ctx context.Context, userID string, s
 	}
 	archive, err := s.sandboxes.ArchiveWorkspace(ctx, record.SandboxID)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return nil, err
 	}
 	inspected, err := InspectCandidateArchive(archive)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return nil, domain.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
 	snapshot, err := s.freeze(inspected.Entry)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return nil, domain.NewArtifactError("CANDIDATE_RUNTIME_INVALID", err.Error())
 	}
 	candidateID := domain.NewID("candidate-revision")
 	archivePath, digest, err := candidate.SaveArchiveAtomic(s.dataDir, candidateID, inspected.Archive)
 	if err != nil {
-		s.releaseFailedTurn(turn)
 		return nil, fmt.Errorf("persist candidate archive: %w", err)
 	}
 	revision, err := s.store.SubmitGenerationCandidate(ctx, workflow.Source.Ref, userID, submission, domain.Revision{
@@ -359,8 +357,8 @@ func (s *GeneratorService) SubmitCandidate(ctx context.Context, userID string, s
 	if err != nil {
 		// A commit may have succeeded even when its response was lost. Preserve
 		// this Server-owned archive rather than risking deletion of a committed
-		// candidate; a later retry resolves the durable receipt.
-		s.releaseFailedTurn(turn)
+		// candidate; the caller can inspect workflow state before deciding what
+		// to do next.
 		return nil, err
 	}
 	if revision.ID != candidateID {
@@ -482,15 +480,6 @@ func (s *GeneratorService) workspaceSeed(ctx context.Context, workflow domain.Wo
 		return nil, fmt.Errorf("read generator repair archive: %w", err)
 	}
 	return archive, nil
-}
-
-func (s *GeneratorService) releaseFailedTurn(turn domain.WorkspaceTurn) {
-	if s == nil || s.workspace == nil || !turn.Valid() {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.cleanupTTL)
-	defer cancel()
-	_ = s.workspace.repo.ReleaseGeneratorWorkspaceTurn(ctx, turn, s.now())
 }
 
 func (s *GeneratorService) retireWorkspace(workflowID string) {

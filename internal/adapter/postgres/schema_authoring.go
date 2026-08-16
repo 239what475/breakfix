@@ -31,11 +31,21 @@ var schemaAuthoringRuntimeStatements = []string{
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE CASCADE,
 		base_revision BIGINT NOT NULL,
 		stage_revision BIGINT NOT NULL,
-		run_attempt INTEGER NOT NULL CHECK (run_attempt >= 1 AND run_attempt <= 5),
+		run_attempt INTEGER NOT NULL CHECK (run_attempt >= 1),
 		plan_json JSONB NOT NULL,
 		changes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL
-	)`,
+		)`,
 	`CREATE INDEX authoring_stages_session ON authoring_stages(session_id)`,
+	`CREATE TABLE authoring_stage_operations (
+		run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+		operation_id TEXT NOT NULL,
+		request_digest TEXT NOT NULL,
+		stage_revision BIGINT NOT NULL,
+		plan_json JSONB NOT NULL,
+		changes_json JSONB NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (run_id, operation_id)
+	)`,
 }

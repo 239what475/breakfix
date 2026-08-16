@@ -167,11 +167,12 @@ type K8sResourceConfig struct {
 }
 
 type AgentConfig struct {
-	BaseURL        string `yaml:"base_url"`
-	APIKeyEnv      string `yaml:"api_key_env"`
-	Model          string `yaml:"model"`
-	RequestTimeout string `yaml:"request_timeout"`
-	APIKey         string `yaml:"-"`
+	BaseURL              string `yaml:"base_url"`
+	APIKeyEnv            string `yaml:"api_key_env"`
+	Model                string `yaml:"model"`
+	RequestTimeout       string `yaml:"request_timeout"`
+	AuthoringRunDeadline string `yaml:"authoring_run_deadline"`
+	APIKey               string `yaml:"-"`
 }
 
 type WorkerConfig struct {
@@ -245,6 +246,18 @@ func (c AgentConfig) Timeout() (time.Duration, error) {
 		return 0, fmt.Errorf("agent request_timeout must be a positive duration")
 	}
 	return value, nil
+}
+
+func (c AgentConfig) AuthoringDeadline() (time.Duration, error) {
+	value := strings.TrimSpace(c.AuthoringRunDeadline)
+	if value == "" {
+		return 30 * time.Minute, nil
+	}
+	deadline, err := time.ParseDuration(value)
+	if err != nil || deadline <= 0 {
+		return 0, fmt.Errorf("agent authoring_run_deadline must be a positive duration")
+	}
+	return deadline, nil
 }
 
 func (c OpenSandboxConfig) Validate() error {
@@ -433,6 +446,9 @@ func (c Config) ValidateServer() error {
 	}
 	if strings.TrimSpace(c.Agent.Model) == "" {
 		return fmt.Errorf("server agent model is required")
+	}
+	if _, err := c.Agent.AuthoringDeadline(); err != nil {
+		return fmt.Errorf("server %w", err)
 	}
 	if err := c.OpenSandbox.Validate(); err != nil {
 		return fmt.Errorf("server opensandbox: %w", err)

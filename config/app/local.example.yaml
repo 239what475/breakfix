@@ -61,6 +61,7 @@ agent:
   api_key_env: DEEPSEEK_API_KEY
   model: deepseek-v4-pro
   request_timeout: 5m
+  authoring_run_deadline: 30m
 
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
 # lifecycle API key is only present in the Server process, never a Runtime Worker.
