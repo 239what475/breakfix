@@ -14,7 +14,7 @@ Domain；Tag 用于跨 Topic 的场景筛选。作者确认题目后，Classific
 
 首个完整领域是 Linux 系统与网络运维，使用 `NodeEnvironment`。先将一个领域做深，再依次进入 Kubernetes
 工作负载与服务运维和 SRE 可靠性运维；不把容器、集群控制平面、CI/CD 或云厂商题目混入尚未完成的领域。具体
-Topic、场景卡、能力前置项和内容审查清单见 [TODO.md](TODO.md) 与 `catalog/curriculum/`。
+Topic、场景卡、能力前置项和内容审查清单见 `catalog/curriculum/`。
 
 每道公开 Challenge 必须满足：
 
