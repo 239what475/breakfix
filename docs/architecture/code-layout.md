@@ -8,7 +8,6 @@
 ```text
 api/        HTTP 与 CRD 契约及其受控生成物
 build/      镜像构建输入
-catalog/    可选：portable Catalog Release source
 cmd/        server、controller、runtime-worker、breakfix-mcp、catalog-release 的 main
 config/     非密钥配置与 Secret 示例
 deploy/     Kubernetes 清单和唯一的 Kind overlay
