@@ -21,14 +21,21 @@ func (h *Handler) entryForEnvironment(ctx context.Context, environment *activeEn
 	if environment == nil || environment.ScenarioRef == "" || environment.SourceRevision == "" {
 		return nil, errNoMatchingEnvironment
 	}
-	current, err := h.catalog.Entry(ctx, environment.ScenarioRef)
+	current, err := h.catalog.EntryOperations(ctx, environment.ScenarioRef)
 	if err == nil && current.RevisionID == environment.SourceRevision {
 		return current, nil
 	}
 	if err != nil && !errors.Is(err, scenario.ErrNotFound) {
 		return nil, err
 	}
-	return h.catalog.HistoricalEntry(ctx, environment.ScenarioRef, environment.SourceRevision)
+	entry, err := h.catalog.HistoricalEntry(ctx, environment.ScenarioRef, environment.SourceRevision)
+	if err != nil {
+		return nil, err
+	}
+	if err := scenario.RequireOperationsScenario(entry); err != nil {
+		return nil, scenario.ErrNotFound
+	}
+	return entry, nil
 }
 
 // entryForScenarioRevision keeps My Space projections on the same durable
@@ -48,7 +55,7 @@ func (h *Handler) entryForScenarioRevision(ctx context.Context, catalogEntries m
 // parameter, so silently selecting one of several historical revisions would
 // bind a terminal or assistant to the wrong task.
 func (h *Handler) resolveEnvironmentScenario(ctx context.Context, userID, scenarioID string, includeCompleted bool) (*scenario.Entry, *activeEnvironment, error) {
-	current, currentErr := h.catalog.Entry(ctx, scenarioID)
+	current, currentErr := h.catalog.EntryOperations(ctx, scenarioID)
 	if currentErr == nil {
 		var (
 			environment *activeEnvironment

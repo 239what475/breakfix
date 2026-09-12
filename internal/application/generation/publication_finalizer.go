@@ -183,7 +183,7 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*scenario
 	if err := scenario.ExtractTarGz(source, bytes.NewReader(archive)); err != nil {
 		return nil, publication.Deterministic(err)
 	}
-	candidateEntry, err := scenario.ValidateCandidateDir(source)
+	candidateEntry, err := ValidateCandidateDir(source)
 	if err != nil {
 		return nil, publication.Deterministic(err)
 	}

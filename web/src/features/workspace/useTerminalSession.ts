@@ -95,7 +95,7 @@ export function useTerminalSession(
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const query = new URLSearchParams({ window, ticket });
     if (node) query.set("node", node);
-    socket = new WebSocket(`${protocol}//${location.host}/api/scenarios/${scenario}/terminal?${query.toString()}`);
+    socket = new WebSocket(`${protocol}//${location.host}/api/operations/scenarios/${scenario}/terminal?${query.toString()}`);
     socket.onopen = () => {
       if (currentEpoch !== epoch) return;
       stateMessage.value = "";

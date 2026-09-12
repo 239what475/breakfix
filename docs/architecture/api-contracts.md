@@ -10,8 +10,9 @@ make verify-generated
 ## 公开 HTTP
 
 - 认证和用户资料：注册、登录、TOTP、`/api/me/space`。
-- Catalog 与场景：列出当前 active 场景 revision，按稳定 ID 读取内容，并开始、重置或停止学习环境。Catalog 摘要包含
-  `scenario_type`、`scenario_tags`、runtime、发布时间和可用状态；没有课程图、难度或关系边。
+- 运维场景：`/api/operations/scenarios` 列出当前 active 的运维场景 revision，按稳定 ID 读取内容，并开始、重置或停止环境。
+  Catalog 摘要包含 `scenario_tags`、runtime、发布时间和可用状态；没有课程图、难度或关系边。文档实践化将使用独立的
+  `/api/documentation` namespace。
 - Authoring：创建和读取会话，通过 SSE 发送自然语言消息并观察 Server-owned `AgentRun`。
 - Generator application API：保存或修订 Plan、确认生成、操作 workspace、提交 candidate、读取内容审核、确认内容发布、请求
   修改或取消。确认内容后直接进入发布，不存在分类审核步骤。

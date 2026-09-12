@@ -78,9 +78,10 @@ func (s *Service) Readiness(ctx context.Context) error {
 	return s.CheckIntegrity(ctx)
 }
 
-// List exposes only active immutable revisions that match their durable
-// identity and materialized source.
-func (s *Service) List(ctx context.Context) ([]PublishedScenario, error) {
+// ListOperations exposes only active immutable operations scenarios that
+// match their durable identity and materialized source. Documentation content
+// has a separate product API and must not be projected into this Catalog.
+func (s *Service) ListOperations(ctx context.Context) ([]PublishedScenario, error) {
 	if err := s.Ready(ctx); err != nil {
 		return nil, err
 	}
@@ -88,19 +89,26 @@ func (s *Service) List(ctx context.Context) ([]PublishedScenario, error) {
 	if err != nil {
 		return nil, err
 	}
-	return projectPublishedScenarios(revisions, entries), nil
+	published := projectPublishedScenarios(revisions, entries)
+	operations := make([]PublishedScenario, 0, len(published))
+	for _, item := range published {
+		if item.Entry.Type == scenario.ScenarioOperationsScenario {
+			operations = append(operations, item)
+		}
+	}
+	return operations, nil
 }
 
-func (s *Service) Entry(ctx context.Context, id string) (*scenario.Entry, error) {
-	published, err := s.Find(ctx, id)
+func (s *Service) EntryOperations(ctx context.Context, id string) (*scenario.Entry, error) {
+	published, err := s.FindOperations(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	return &published.Entry, nil
 }
 
-func (s *Service) Find(ctx context.Context, id string) (*PublishedScenario, error) {
-	entries, err := s.List(ctx)
+func (s *Service) FindOperations(ctx context.Context, id string) (*PublishedScenario, error) {
+	entries, err := s.ListOperations(ctx)
 	if err != nil {
 		return nil, err
 	}

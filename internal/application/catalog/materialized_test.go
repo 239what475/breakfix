@@ -58,7 +58,7 @@ func TestCatalogReadsOnlyActiveLifecycleRevisions(t *testing.T) {
 	}
 	writeCatalogFile(t, filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb", "scenario.yaml"), []byte("not a scenario"), 0o600)
 
-	visible, err := service.List(context.Background())
+	visible, err := service.ListOperations(context.Background())
 	if err != nil || len(visible) != 1 {
 		t.Fatalf("visible catalog = %#v, err=%v", visible, err)
 	}
@@ -69,6 +69,52 @@ func TestCatalogReadsOnlyActiveLifecycleRevisions(t *testing.T) {
 	}
 	if len(lifecycle.active) != 1 || lifecycle.active[0].Revision.ID != entry.RevisionID {
 		t.Fatalf("lifecycle active revisions = %#v", lifecycle.active)
+	}
+}
+
+func TestCatalogListOperationsExcludesLegacyDocumentationExamples(t *testing.T) {
+	service, entry, scenariosDir, lifecycle := newMaterializedCatalog(t)
+	candidate := filepath.Join(t.TempDir(), "documentation")
+	writeScenarioSource(t, candidate, false)
+	manifestPath := filepath.Join(candidate, "scenario.yaml")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append([]byte("type: documentation-example\n"), manifest...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contentRevision, err := ContentRevision(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := scenario.PromoteDirectoryAt(scenariosDir, candidate, "chal-documentation", "chrev-bbbbbbbbbbbbbbbb", "documentation", strings.Repeat("b", 64), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyScenario := lifecycle.active[0].Scenario
+	legacyScenario.ID = published.ID
+	legacyScenario.ActiveRevisionID = published.RevisionID
+	legacyScenario.SourceSlug = published.SourceSlug
+	legacyRevision := lifecycle.active[0].Revision
+	legacyRevision.ID = published.RevisionID
+	legacyRevision.ScenarioID = published.ID
+	legacyRevision.Type = published.Type
+	legacyRevision.SourceSlug = published.SourceSlug
+	legacyRevision.MaterializedPath = scenario.MaterializedPath(published.SourceSlug, published.RevisionID)
+	legacyRevision.ContentRevision = published.ContentRevision
+	legacyRevision.MaterializedRevision = published.Revision
+	legacyRevision.SourceRevisionID = "legacy-documentation"
+	legacyRevision.Artifact = execution.ArtifactReference{Runtime: published.Runtime, IncusAlias: "documentation", IncusFingerprint: published.Image}
+	legacyScenario.SourceRef = legacyRevision.SourceRef
+	lifecycle.active = append(lifecycle.active, scenariodomain.ActiveRevision{Scenario: legacyScenario, Revision: legacyRevision})
+
+	visible, err := service.ListOperations(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].Entry.ID != entry.ID {
+		t.Fatalf("operations catalog = %#v", visible)
 	}
 }
 
@@ -110,7 +156,7 @@ func TestCatalogReadinessAllowsEmptyBootstrapAndBypassesAvailability(t *testing.
 	if err := service.Readiness(context.Background()); err != nil {
 		t.Fatalf("empty bootstrap readiness = %v", err)
 	}
-	if _, err := service.List(context.Background()); !errors.Is(err, ErrReleaseNotReady) {
+	if _, err := service.ListOperations(context.Background()); !errors.Is(err, ErrReleaseNotReady) {
 		t.Fatalf("catalog list did not honor availability gate: %v", err)
 	}
 }

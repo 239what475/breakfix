@@ -51,6 +51,24 @@ description: ""
 	}
 }
 
+func TestValidateCandidateDirRejectsDocumentationExample(t *testing.T) {
+	dir := t.TempDir()
+	writeGeneratorTestFile(t, filepath.Join(dir, "scenario.yaml"), `type: documentation-example
+runtime: node
+title: Observe a process
+description: Observe one process state.
+nodes:
+  - name: host
+    title: Host
+`)
+	writeGeneratorTestFile(t, filepath.Join(dir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+
+	_, err := ValidateCandidateDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "operations module accepts only operations-scenario") {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
 func writeGeneratorTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

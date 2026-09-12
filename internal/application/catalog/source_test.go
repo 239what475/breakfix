@@ -99,6 +99,22 @@ func TestPortableSourceRejectsUnexpectedTopLevelDirectory(t *testing.T) {
 	}
 }
 
+func TestPortableSourceRejectsDocumentationExample(t *testing.T) {
+	root, _ := writePortableRelease(t)
+	path := filepath.Join(root, "scenarios", "linux", "cleanup-logs", "scenario.yaml")
+	manifest, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append([]byte("type: documentation-example\n"), manifest...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadPortableSource(root); err == nil || !strings.Contains(err.Error(), "operations module accepts only operations-scenario") {
+		t.Fatalf("LoadPortableSource error = %v", err)
+	}
+}
+
 func TestContentRevisionIncludesExecutableBit(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "script.sh")

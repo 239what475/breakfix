@@ -153,7 +153,7 @@ export async function streamAssistantMessage(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const currentToken = token();
   if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
-  const response = await fetch(`${base}/scenarios/${id}/assistant/messages`, {
+  const response = await fetch(`${base}/operations/scenarios/${id}/assistant/messages`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -219,8 +219,8 @@ export const api = {
       "/auth/login",
       { username, password, totp_code },
     ),
-  listScenarios: () =>
-		request<ScenarioList>("GET", "/scenarios"),
+	listScenarios: () =>
+		request<ScenarioList>("GET", "/operations/scenarios"),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });
@@ -230,29 +230,29 @@ export const api = {
 		return request<MySpaceLearningPage>("GET", `/me/space/learning?${query.toString()}`);
 	},
   getScenarioContent: (id: string) =>
-    request<ScenarioContent>("GET", `/scenarios/${id}/content`),
+    request<ScenarioContent>("GET", `/operations/scenarios/${id}/content`),
   getScenarioProgress: (id: string) =>
 		request<ScenarioProgress>(
       "GET",
-      `/scenarios/${id}/progress`,
+      `/operations/scenarios/${id}/progress`,
     ),
   getScenarioAssistant: (id: string) =>
-    request<AssistantConversation>("GET", `/scenarios/${id}/assistant`),
+    request<AssistantConversation>("GET", `/operations/scenarios/${id}/assistant`),
   startScenario: (id: string) =>
-		request<StartResponse>("POST", `/scenarios/${id}/start`),
+		request<StartResponse>("POST", `/operations/scenarios/${id}/start`),
   resetScenario: (id: string) =>
-		request<ResetResponse>("POST", `/scenarios/${id}/reset`),
+		request<ResetResponse>("POST", `/operations/scenarios/${id}/reset`),
   stopScenario: (id: string) =>
-		request<StopResponse>("POST", `/scenarios/${id}/stop`),
+		request<StopResponse>("POST", `/operations/scenarios/${id}/stop`),
 	createTerminalTicket: (id: string, window: string, node?: string) =>
-		request<TerminalTicketResponse>("POST", `/scenarios/${id}/terminal-ticket`, { window, node }),
+		request<TerminalTicketResponse>("POST", `/operations/scenarios/${id}/terminal-ticket`, { window, node }),
   closeTerminalWindow: (id: string, window: string, node?: string) => {
 		const query = new URLSearchParams();
 		if (node) query.set("node", node);
 		const suffix = query.size ? `?${query.toString()}` : "";
 		return request<CloseTerminalWindowResponse>(
 			"DELETE",
-			`/scenarios/${id}/terminals/${window}${suffix}`,
+			`/operations/scenarios/${id}/terminals/${window}${suffix}`,
 		);
 	},
   createAuthoringSession: () =>

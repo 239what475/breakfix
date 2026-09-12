@@ -1,7 +1,7 @@
 # 场景内容格式
 
-portable candidate 与已发布场景使用同一组教学和运行时文件，平台身份由后者在 materialize 时补充。Catalog 从状态为 active 的
-Scenario 及其 active revision 构造；目录、校验和发布行为以
+运维场景的 portable candidate 与已发布 revision 使用同一组教学和运行时文件，平台身份由后者在 materialize 时补充。运维场景
+Catalog 从状态为 active 的 Scenario 及其 active revision 构造；目录、校验和发布行为以
 [`internal/content/scenario/`](../../internal/content/scenario/) 为准。`Scenario` 是领域对象，产品层显示为“场景”。
 
 ## Portable Candidate
@@ -40,8 +40,8 @@ checkpoints:
 
 `versions` 的每项必须有唯一的 `component` 与非空 `version`。`topology` 说明环境中的参与者和关系，`initialization` 说明
 `generate.sh` 如何建立初始状态；`reproduction.objective` 是要复现的现象，`evidence` 给出可观察事实。Node evidence 必须声明
-执行节点，Kubernetes evidence 不得声明节点。`type` 必须是 `documentation-example` 或 `operations-scenario`。文档示例不能包含
-标签；运维场景最多八个标签。标签去除首尾空格、英文字母转为小写后，必须是 1 到 32 个字符的中文、英文字母、数字、`.`、`+` 或
+执行节点，Kubernetes evidence 不得声明节点。当前运维场景入口只接受 `type: operations-scenario`，最多八个标签。文档实践化
+使用独立内容模型，不通过本格式、运维标签或作者投稿流程发布。标签去除首尾空格、英文字母转为小写后，必须是 1 到 32 个字符的中文、英文字母、数字、`.`、`+` 或
 `-`，按规范化结果去重和确定性排序。没有 Tag 实体、同义词合并或发布后的标签维护流程。
 
 ## 已发布目录

@@ -147,7 +147,7 @@ export async function runNodeRuntimeFixtureAnswer(page: Page) {
 
 export async function stopScenario(page: Page, scenarioID: string) {
 	await page.evaluate(async (id) => {
-		const response = await fetch(`/api/scenarios/${id}/stop`, {
+		const response = await fetch(`/api/operations/scenarios/${id}/stop`, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
 		});

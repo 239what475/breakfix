@@ -127,7 +127,7 @@ export async function waitForCatalogScenario(page: Page, scenarioID: string): Pr
 	await expect
 		.poll(async () => {
 			return page.evaluate(async (id) => {
-				const response = await fetch("/api/scenarios");
+				const response = await fetch("/api/operations/scenarios");
 				if (!response.ok) throw new Error(await response.text());
 				const body = (await response.json()) as { scenarios: Array<{ id: string }> };
 				return body.scenarios.some((scenario) => scenario.id === id);

@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -35,11 +36,22 @@ func TestReadinessUsesMaterializedCatalogIntegrity(t *testing.T) {
 	}
 }
 
+func TestMySpaceScenarioContentSourceReflectsItsModule(t *testing.T) {
+	operations := mySpaceScenario(scenario.Entry{ID: "chal-operations", Title: "Operations", Runtime: scenario.RuntimeNode, Type: scenario.ScenarioOperationsScenario})
+	if operations.ContentSource != api.Operations {
+		t.Fatalf("operations source = %q", operations.ContentSource)
+	}
+	documentation := mySpaceScenario(scenario.Entry{ID: "chal-documentation", Title: "Documentation", Runtime: scenario.RuntimeK8s, Type: scenario.ScenarioDocumentationExample})
+	if documentation.ContentSource != api.Documentation {
+		t.Fatalf("documentation source = %q", documentation.ContentSource)
+	}
+}
+
 func TestGetScenarioProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
 	handler.GetScenarioProgress(ctx, "demo")
@@ -68,7 +80,7 @@ func TestGetScenarioProgressRejectsNonReadyEnvironment(t *testing.T) {
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
 	handler.GetScenarioProgress(ctx, "demo")
@@ -84,7 +96,7 @@ func TestGetScenarioProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
 	handler.GetScenarioProgress(ctx, "demo")
@@ -103,7 +115,7 @@ func TestGetScenarioProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
 	handler.GetScenarioProgress(ctx, "demo")
@@ -124,7 +136,7 @@ func TestGetScenarioProgressRequiresLogin(t *testing.T) {
 	handler := newHandlerForTest(t, nil, nil, config.Config{})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
 
 	handler.GetScenarioProgress(ctx, "demo")
 
@@ -155,7 +167,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	handler := newHandlerForTest(t, database, nil, config.Config{DataDir: root})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/content", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/content", nil)
 	ctx.Set("user_id", "u-demo")
 
 	handler.GetScenarioContent(ctx, "demo")
@@ -173,7 +185,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
-	if content.ScenarioType != api.ScenarioContentScenarioTypeOperationsScenario || len(content.ScenarioTags) != 0 {
+	if len(content.ScenarioTags) != 0 {
 		t.Fatalf("scenario content projection = %#v", content)
 	}
 }
@@ -202,7 +214,7 @@ func TestListScenariosIncludesRuntime(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios", nil)
 
 	handler.ListScenarios(c)
 
@@ -227,7 +239,7 @@ func TestListScenariosIncludesRuntime(t *testing.T) {
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
 	}
-	if got.ScenarioType != api.ScenarioSummaryScenarioTypeOperationsScenario || len(got.ScenarioTags) != 0 {
+	if len(got.ScenarioTags) != 0 {
 		t.Fatalf("scenario summary = %#v", got)
 	}
 }
@@ -244,7 +256,7 @@ func TestListScenariosMergesCurrentProgressWithDurableCompletion(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios", nil)
 	c.Set("user_id", "u-demo")
 	handler.ListScenarios(c)
 
@@ -276,7 +288,7 @@ func TestListScenariosShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios", nil)
 	ctx.Set("user_id", "u-demo")
 	handler.ListScenarios(ctx)
 
@@ -304,7 +316,7 @@ func TestListScenariosKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios", nil)
 	c.Set("user_id", "u-demo")
 	handler.ListScenarios(c)
 

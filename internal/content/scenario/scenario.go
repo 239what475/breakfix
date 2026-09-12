@@ -8,9 +8,9 @@ import (
 	"unicode/utf8"
 )
 
-// ScenarioType identifies how a runnable item is organized and presented.
-// Both types share the same runtime contract, but their source metadata has
-// different semantics.
+// ScenarioType retains the serialized type of historical Scenario revisions.
+// New operations Catalog and authoring entry points accept only
+// ScenarioOperationsScenario; documentation practice has its own model.
 type ScenarioType string
 
 const (
@@ -28,6 +28,19 @@ func NormalizeScenarioType(value string) ScenarioType {
 		return ScenarioOperationsScenario
 	}
 	return ScenarioType(value)
+}
+
+// RequireOperationsScenario keeps the operations product boundary explicit at
+// its ingress points. Documentation examples use their own source and
+// publication flow instead of entering the operations Catalog.
+func RequireOperationsScenario(entry *Entry) error {
+	if entry == nil {
+		return fmt.Errorf("operations scenario is required")
+	}
+	if entry.Type != ScenarioOperationsScenario {
+		return fmt.Errorf("operations module accepts only operations-scenario, got %q", entry.Type)
+	}
+	return nil
 }
 
 const (

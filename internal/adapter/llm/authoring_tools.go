@@ -64,7 +64,7 @@ func authoringSystemPrompt() string {
 
 	你只能依据工具成功返回的结果声称已修改、已提交或已推进任务。信息不足时先提出具体澄清问题。Plan 的概览与提供时的检查点使用中文 Markdown；检查点描述可观察的最终状态，不规定唯一命令或编辑路径。运行时只能是 node 或 k8s，底层平台实现不属于场景内容。
 
-Candidate 文件结构：workspace 中的运维场景以复现核心为必需内容，学习辅助按需提供。scenario.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title 与 description。operations-scenario 还必须包含 versions（每项有唯一 component 和非空 version）、topology、initialization，以及含 objective 和至少一项 evidence 的 reproduction。Node evidence 必须有 node，K8s evidence 不得有 node。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
+Candidate 文件结构：workspace 中的运维场景以复现核心为必需内容，学习辅助按需提供。scenario.yaml 必须包含 type: operations-scenario、runtime、title 与 description，以及 versions（每项有唯一 component 和非空 version）、topology、initialization 和含 objective 与至少一项 evidence 的 reproduction。Node evidence 必须有 node，K8s evidence 不得有 node。tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。文档实践化使用独立模块，不能在当前 authoring workspace 中生成。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
 
 type: operations-scenario
 runtime: node

@@ -12,7 +12,7 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-const page = ref<"catalog" | "my-space">("catalog");
+const page = ref<"operations" | "my-space">("operations");
 const mySpaceRefreshRequest = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
@@ -58,19 +58,19 @@ function closeAuthoring() {
   authoringSessionId.value = undefined;
 }
 
-function openCatalog(scenarioId?: string) {
+function openOperations(scenarioId?: string) {
 	catalogFocusId.value = scenarioId;
-	page.value = "catalog";
+	page.value = "operations";
 }
 
 function openMySpace() {
 	page.value = "my-space";
 }
 
-function navigateCatalog() {
+function navigateOperations() {
   closeAuthoring();
   closeWorkspace();
-  openCatalog();
+  openOperations();
 }
 
 function navigateMySpace() {
@@ -81,19 +81,13 @@ function navigateMySpace() {
   if (alreadyVisible) mySpaceRefreshRequest.value += 1;
 }
 
-function navigateStudio() {
-  if (authoringOpen.value) return;
-  closeWorkspace();
-  openAuthoring();
-}
-
 function signOut() {
-	page.value = "catalog";
+	page.value = "operations";
 	logout();
 }
 
-const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => {
-  if (authoringOpen.value) return "studio";
+const topbarActive = computed<"operations" | "my-space" | "none">(() => {
+  if (authoringOpen.value) return "none";
   if (workspace.value) return "none";
   return page.value;
 });
@@ -101,17 +95,17 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
 
 <template>
   <div class="app-root">
-    <AppTopbar :active="topbarActive" :show-navigation="loggedIn" :logged-in="loggedIn" :account-name="accountName" @catalog="navigateCatalog" @my-space="navigateMySpace" @studio="navigateStudio" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
+    <AppTopbar :active="topbarActive" :show-navigation="loggedIn" :logged-in="loggedIn" :account-name="accountName" @operations="navigateOperations" @my-space="navigateMySpace" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
     <div
       v-if="notice"
       class="toast"
-      :class="[notice.kind, { 'workspace-toast': workspace, 'my-space-toast': page === 'my-space', 'catalog-toast': !workspace && !authoringOpen && page === 'catalog' }]"
+      :class="[notice.kind, { 'workspace-toast': workspace, 'my-space-toast': page === 'my-space', 'catalog-toast': !workspace && !authoringOpen && page === 'operations' }]"
     >
       {{ notice.text }}
     </div>
 		<main class="app-main">
       <ScenarioCatalogPage
-		v-show="!workspace && !authoringOpen && page === 'catalog'"
+		v-show="!workspace && !authoringOpen && page === 'operations'"
       :scenarios="scenarios"
       :loading="loading"
       :logged-in="loggedIn"
@@ -126,7 +120,7 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
 		:active="!workspace && !authoringOpen && page === 'my-space'"
 		:logged-in="loggedIn"
 		:refresh-request="mySpaceRefreshRequest"
-			@catalog="openCatalog($event)"
+			@catalog="openOperations($event)"
 		@start="startWorkspace"
 		@studio="openAuthoring($event)"
 			/>

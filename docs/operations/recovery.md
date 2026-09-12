@@ -59,7 +59,7 @@ StorageClass、Registry 与 Incus project 以部署配置为准。
    ```
 
    `/readyz` 会核验 active revision 到 materialized source 的完整性，但不会探测 Registry 或 Incus。以只读方式检查
-   `/api/scenarios` 的 identity、revision 和数量符合恢复清单。
+   `/api/operations/scenarios` 的 identity、revision 和数量符合恢复清单。
 6. 只有 PostgreSQL、PVC、active revision、Registry digest 与 Incus fingerprint 一致时，启动 Runtime Worker 与 Controller，随后恢复
    入口流量。
 

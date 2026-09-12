@@ -89,52 +89,54 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		c.Data(http.StatusOK, "application/json", spec)
 	})
 
-	// The catalog is public read-only. Starting, viewing full content, and every
-	// environment operation below remain bound to an authenticated user.
-	catalogRoutes.GET("/api/scenarios", optionalJWTMW, h.ListScenarios)
-	catalogRoutes.POST("/api/scenarios/:id/start", func(c *gin.Context) {
+	// Operations scenarios are public read-only. Starting, viewing full content,
+	// and every environment operation below remain bound to an authenticated
+	// user. Documentation uses its own /api/documentation namespace once its
+	// source-sync and reading flow exists; it is intentionally not routed here.
+	catalogRoutes.GET("/api/operations/scenarios", optionalJWTMW, h.ListScenarios)
+	catalogRoutes.POST("/api/operations/scenarios/:id/start", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.StartScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/scenarios/:id/content", func(c *gin.Context) {
+	catalogRoutes.GET("/api/operations/scenarios/:id/content", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetScenarioContent(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/scenarios/:id/progress", func(c *gin.Context) {
+	catalogRoutes.GET("/api/operations/scenarios/:id/progress", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetScenarioProgress(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/scenarios/:id/assistant", func(c *gin.Context) {
+	catalogRoutes.GET("/api/operations/scenarios/:id/assistant", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.GetScenarioAssistant(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/scenarios/:id/assistant/messages", func(c *gin.Context) {
+	catalogRoutes.POST("/api/operations/scenarios/:id/assistant/messages", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.SendScenarioAssistantMessage(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/scenarios/:id/reset", func(c *gin.Context) {
+	catalogRoutes.POST("/api/operations/scenarios/:id/reset", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.ResetScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/scenarios/:id/stop", func(c *gin.Context) {
+	catalogRoutes.POST("/api/operations/scenarios/:id/stop", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.StopScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/scenarios/:id/terminal-ticket", func(c *gin.Context) {
+	catalogRoutes.POST("/api/operations/scenarios/:id/terminal-ticket", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CreateTerminalTicket(c, c.Param("id"))
@@ -231,8 +233,8 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportRuntimeArtifactFailure)
 
 	// Terminal WebSocket
-	catalogRoutes.GET("/api/scenarios/:id/terminal", h.HandleTerminalTicket)
-	catalogRoutes.DELETE("/api/scenarios/:id/terminals/:window", func(c *gin.Context) {
+	catalogRoutes.GET("/api/operations/scenarios/:id/terminal", h.HandleTerminalTicket)
+	catalogRoutes.DELETE("/api/operations/scenarios/:id/terminals/:window", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CloseTerminalWindow(c, c.Param("id"), c.Param("window"))

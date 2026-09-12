@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
-    active?: "catalog" | "my-space" | "studio" | "none";
+    active?: "operations" | "my-space" | "none";
     showNavigation?: boolean;
     loggedIn: boolean;
     accountName?: string;
@@ -15,14 +15,14 @@ const props = withDefaults(
   },
 );
 
-const emit = defineEmits<{ catalog: []; mySpace: []; studio: []; login: []; register: []; logout: [] }>();
+const emit = defineEmits<{ operations: []; mySpace: []; login: []; register: []; logout: [] }>();
 const initials = computed(() => props.accountName?.slice(0, 1).toUpperCase() || "?");
 const mobileNavigationOpen = ref(false);
 
-function navigateMobile(target: "catalog" | "mySpace") {
-  mobileNavigationOpen.value = false;
-  if (target === "catalog") {
-    emit("catalog");
+function navigateMobile(target: "operations" | "mySpace") {
+	mobileNavigationOpen.value = false;
+	if (target === "operations") {
+		emit("operations");
     return;
   }
   emit("mySpace");
@@ -31,14 +31,13 @@ function navigateMobile(target: "catalog" | "mySpace") {
 
 <template>
   <header class="app-topbar">
-    <div class="app-topbar-start"><button class="brand brand-button" type="button" aria-label="Open catalog" @click="navigateMobile('catalog')"><span class="brand-symbol">B</span><span>breakfix</span></button></div>
+    <div class="app-topbar-start"><button class="brand brand-button" type="button" aria-label="Open operations scenarios" @click="navigateMobile('operations')"><span class="brand-symbol">B</span><span>breakfix</span></button></div>
     <nav v-if="showNavigation" class="app-global-nav" aria-label="Primary">
-      <button :class="{ active: active === 'catalog' }" :aria-current="active === 'catalog' ? 'page' : undefined" type="button" @click="emit('catalog')">Catalog</button>
+      <button :class="{ active: active === 'operations' }" :aria-current="active === 'operations' ? 'page' : undefined" type="button" @click="emit('operations')">Operations</button>
       <button :class="{ active: active === 'my-space' }" :aria-current="active === 'my-space' ? 'page' : undefined" type="button" @click="emit('mySpace')">My space</button>
-      <button :class="{ active: active === 'studio' }" :aria-current="active === 'studio' ? 'page' : undefined" type="button" @click="emit('studio')">Scenario studio</button>
     </nav>
     <nav v-if="showNavigation && mobileNavigationOpen" class="app-mobile-nav" aria-label="Mobile primary">
-      <button :class="{ active: active === 'catalog' }" :aria-current="active === 'catalog' ? 'page' : undefined" type="button" @click="navigateMobile('catalog')">Catalog</button>
+      <button :class="{ active: active === 'operations' }" :aria-current="active === 'operations' ? 'page' : undefined" type="button" @click="navigateMobile('operations')">Operations</button>
       <button :class="{ active: active === 'my-space' }" :aria-current="active === 'my-space' ? 'page' : undefined" type="button" @click="navigateMobile('mySpace')">My space</button>
     </nav>
     <div class="app-topbar-end">

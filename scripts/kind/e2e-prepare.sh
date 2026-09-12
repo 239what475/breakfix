@@ -8,7 +8,6 @@ target_id=${BREAKFIX_E2E_TARGET:-e2e}
 fixture_source=${BREAKFIX_E2E_CATALOG_SOURCE:-$repo_root/test/fixtures/catalog-release}
 fixture_title='Node 运行时验收'
 fixture_runtime=node
-fixture_type=operations-scenario
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/$target_id}
 fixture_archive=$state_dir/catalog-release.oci.tar
 catalog_tag=${BREAKFIX_E2E_CATALOG_TAG:-e2e-$target_id}
@@ -183,17 +182,16 @@ base_url=http://127.0.0.1:$base_port
 deadline=$(( $(date +%s) + prepare_timeout_seconds ))
 catalog_json=$state_dir/catalog-projection.json
 while [ "$(date +%s)" -lt "$deadline" ]; do
-	if curl --fail --silent --show-error "$base_url/api/scenarios" >"$catalog_json" 2>/dev/null &&
+	if curl --fail --silent --show-error "$base_url/api/operations/scenarios" >"$catalog_json" 2>/dev/null &&
 		jq -e \
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
-			--arg type "$fixture_type" '
+			'
 				(.scenarios | length) == 1 and
 				.scenarios[0].title == $title and
 				.scenarios[0].runtime == $runtime and
-				.scenarios[0].scenario_type == $type and
 				(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
-		' "$catalog_json" >/dev/null; then
+			' "$catalog_json" >/dev/null; then
 		break
 	fi
 	sleep 2
@@ -201,11 +199,10 @@ done
 jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
-	--arg type "$fixture_type" '
+	'
 		(.scenarios | length) == 1 and
 		.scenarios[0].title == $title and
 		.scenarios[0].runtime == $runtime and
-		.scenarios[0].scenario_type == $type and
 		(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
 ' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 

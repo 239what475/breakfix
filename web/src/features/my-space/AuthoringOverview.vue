@@ -16,6 +16,9 @@ function date(value: string) {
 function rate(value?: number | null) {
 	return value == null ? "--" : `${Math.round(value * 100)}%`;
 }
+function sourceLabel(source: MySpaceAuthoring["published"][number]["scenario"]["content_source"]) {
+	return source === "documentation" ? "Documentation" : "Operations";
+}
 </script>
 
 <template>
@@ -28,7 +31,7 @@ function rate(value?: number | null) {
     <div class="published-heading"><h3>Published scenarios</h3><span>{{ authoring.published.length }}</span></div>
     <div v-if="authoring.published.length" class="published-grid">
       <article v-for="published in authoring.published" :key="published.scenario.id" class="published-card">
-        <div><p class="eyebrow">{{ published.scenario.runtime }} · {{ date(published.published_at) }}</p><h3>{{ published.scenario.title }}</h3><small>{{ published.state === "active" ? "Published" : "Deprecated" }}</small></div>
+        <div><p class="eyebrow">{{ sourceLabel(published.scenario.content_source) }} · {{ published.scenario.runtime }} · {{ date(published.published_at) }}</p><h3>{{ published.scenario.title }}</h3><small>{{ published.state === "active" ? "Published" : "Deprecated" }}</small></div>
         <dl><div><dt><UsersRound :size="13" aria-hidden="true" />Attempts</dt><dd>{{ published.attempted_users }}</dd></div><div><dt>Completed</dt><dd>{{ published.completed_users }}</dd></div><div><dt>Pass rate</dt><dd>{{ rate(published.pass_rate) }}</dd></div></dl>
         <div class="published-actions">
           <button v-if="published.state === 'active'" class="text-button" type="button" @click="emit('revision', published.scenario.id)">Revise</button>

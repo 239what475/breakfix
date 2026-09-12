@@ -65,6 +65,9 @@ func ValidateCandidateDir(chalDir string) (*scenario.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := scenario.RequireOperationsScenario(entry); err != nil {
+		return nil, err
+	}
 	return entry, nil
 }
 func candidateFiles(root string) ([]CandidateFile, error) {

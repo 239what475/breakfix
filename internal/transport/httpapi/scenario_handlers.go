@@ -26,7 +26,7 @@ func (h *Handler) StartScenario(c *gin.Context, id string) {
 		return
 	}
 
-	scenarioEntry, err := h.catalog.Entry(c.Request.Context(), id)
+	scenarioEntry, err := h.catalog.EntryOperations(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "scenario not found"})
 		return
@@ -61,7 +61,7 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 
-	scenarioEntry, err := h.catalog.Entry(c.Request.Context(), id)
+	scenarioEntry, err := h.catalog.EntryOperations(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "scenario not found"})
 		return

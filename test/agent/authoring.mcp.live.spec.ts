@@ -418,7 +418,7 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node sc
 	await expect
 		.poll(
 			async () => {
-				const response = await fetch(`${baseURL}/api/scenarios`);
+				const response = await fetch(`${baseURL}/api/operations/scenarios`);
 				if (!response.ok) throw new Error(await response.text());
 				const body = (await response.json()) as {
 					scenarios: Array<{ title: string }>;

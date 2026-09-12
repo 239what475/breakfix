@@ -105,6 +105,9 @@ func loadPortableSource(root string) (*PortableSource, ContentRevisionReport, er
 		if err != nil {
 			return nil, ContentRevisionReport{}, fmt.Errorf("validate release scenario %q: %w", declared.Path, err)
 		}
+		if err := scenario.RequireOperationsScenario(entry); err != nil {
+			return nil, ContentRevisionReport{}, fmt.Errorf("validate release operations scenario %q: %w", declared.Path, err)
+		}
 		result.Scenarios = append(result.Scenarios, SourceScenario{
 			Path: declared.Path, Entry: *entry, ContentRevision: revision,
 		})

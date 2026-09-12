@@ -16,7 +16,7 @@ import (
 func (h *Handler) ListScenarios(c *gin.Context) {
 	user := h.getUser(c)
 
-	scenarios, err := h.catalog.List(c.Request.Context())
+	scenarios, err := h.catalog.ListOperations(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -59,7 +59,6 @@ func (h *Handler) ListScenarios(c *gin.Context) {
 			Id:           ch.ID,
 			Title:        ch.Title,
 			Runtime:      scenarioSummaryRuntime(ch.Runtime),
-			ScenarioType: api.ScenarioSummaryScenarioType(published.Catalog.Type),
 			ScenarioTags: append([]string(nil), published.Catalog.Tags...),
 			Description:  ch.Description,
 		}
@@ -83,7 +82,7 @@ func (h *Handler) ListScenarios(c *gin.Context) {
 }
 
 func (h *Handler) catalogEntries(ctx context.Context) (map[string]scenario.Entry, error) {
-	published, err := h.catalog.List(ctx)
+	published, err := h.catalog.ListOperations(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +99,7 @@ func (h *Handler) GetScenarioContent(c *gin.Context, id string) {
 		return
 	}
 	var entry *scenario.Entry
-	published, err := h.catalog.Find(c.Request.Context(), id)
+	published, err := h.catalog.FindOperations(c.Request.Context(), id)
 	if err == nil {
 		entry = &published.Entry
 		// Prefer the revision pinned by an existing Environment. If there is
@@ -147,7 +146,6 @@ func (h *Handler) GetScenarioContent(c *gin.Context, id string) {
 		Id:                    entry.ID,
 		Title:                 entry.Title,
 		Runtime:               api.ScenarioContentRuntime(entry.Runtime),
-		ScenarioType:          api.ScenarioContentScenarioType(entry.Type),
 		ScenarioTags:          append([]string(nil), entry.Tags...),
 		Nodes:                 toAPIScenarioNodes(entry.Nodes),
 		Versions:              toAPIScenarioVersions(entry.Versions),

@@ -97,6 +97,7 @@ watch([() => props.focusScenarioId, () => props.scenarios], ([id]) => {
 				@toggle:status="statuses = toggleSelection(statuses, $event)"
 				@reset="resetFilters"
 				@close="filtersOpen = false"
+				@create="emit('studio')"
 			/>
 			<ScenarioList
 				:scenarios="filteredScenarios"

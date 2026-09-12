@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { X } from "lucide-vue-next";
+import { Plus, X } from "lucide-vue-next";
 const props = defineProps<{
 	query: string;
 	runtimes: string[];
@@ -18,6 +18,7 @@ const emit = defineEmits<{
 	"toggle:status": [value: string];
 	reset: [];
 	close: [];
+	create: [];
 }>();
 
 function updateQuery(event: Event) {
@@ -32,9 +33,12 @@ function updateQuery(event: Event) {
 				<p class="filters-kicker">Scenario catalog</p>
 				<h1>Find a scenario</h1>
 			</div>
-			<button class="filters-close icon-button" type="button" aria-label="Close filters" title="Close filters" @click="emit('close')">
-				<X :size="16" aria-hidden="true" />
-			</button>
+			<div class="filters-heading-actions">
+				<button v-if="loggedIn" class="compact-button" type="button" @click="emit('create')"><Plus :size="14" aria-hidden="true" />Create scenario</button>
+				<button class="filters-close icon-button" type="button" aria-label="Close filters" title="Close filters" @click="emit('close')">
+					<X :size="16" aria-hidden="true" />
+				</button>
+			</div>
 		</div>
 
 		<label class="catalog-search-field">

@@ -6,7 +6,12 @@ defineProps<{ environments: MySpaceActiveEnvironment[] }>();
 const emit = defineEmits<{ start: [id: string] }>();
 
 function checkpointLabel(environment: MySpaceActiveEnvironment) {
+  if (environment.checkpoint_progress.total === 0) return "No checkpoints";
   return `${environment.checkpoint_progress.passed}/${environment.checkpoint_progress.total} checkpoints`;
+}
+
+function sourceLabel(source: MySpaceActiveEnvironment["scenario"]["content_source"]) {
+  return source === "documentation" ? "Documentation" : "Operations";
 }
 
 function expiryLabel(expiresAt?: string | null) {
@@ -29,7 +34,7 @@ function expiryLabel(expiresAt?: string | null) {
     <div v-if="environments.length" class="space-row-list">
       <article v-for="environment in environments" :key="environment.environment_id" class="space-row active-environment-row">
         <div class="space-row-main">
-          <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ environment.runtime }}</span></div>
+          <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(environment.scenario.content_source) }}</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
           <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
         </div>
         <button class="compact-button space-start-button" type="button" @click="emit('start', environment.scenario.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start scenario</button>

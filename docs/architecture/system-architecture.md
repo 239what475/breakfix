@@ -1,8 +1,8 @@
 # 系统架构
 
-Breakfix 让用户在真实、隔离且可回收的 `node` 或 `k8s` 环境中学习可运行内容。平台同时支持两种内容方向：按上游文档组织的
-`documentation-example`，以及带简单标签的 `operations-scenario`。两者共享构建、验证、发布、环境与历史 revision 底座，
-不共享课程图或自动分类。
+Breakfix 让用户在真实、隔离且可回收的 `node` 或 `k8s` 环境中研究可运行内容。当前公开产品是带简单标签的
+`operations-scenario`。文档实践化将使用独立的文档来源、页面和锚点模型；它复用运行环境底座，但不进入当前 Scenario、Catalog
+或作者投稿链路。
 
 ```text
 Browser / breakfix-mcp
@@ -29,7 +29,7 @@ Browser / breakfix-mcp
 | 数据或行为 | 权威所有者 | 说明 |
 | --- | --- | --- |
 | 账户、会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、Scenario 与 revision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
-| 公开 Catalog | active Scenario revision 与对应 materialized source | 每次读取严格核验 revision 与目录。 |
+| 运维场景 Catalog | active `operations-scenario` revision 与对应 materialized source | 每次读取严格核验 revision 与目录。 |
 | 便携场景 source、candidate archive、已发布目录 | Server data PVC | 发布目录不可变，历史 revision 继续可读。 |
 | K8s artifact | 部署者提供的 OCI Registry | 按 immutable digest 读取。 |
 | Node artifact | Incus image project | 按完整 fingerprint 读取。 |
@@ -46,8 +46,9 @@ promotion 成功后，Server 在一个事务中写入 stable Scenario、active r
 基线建立后，新增与修订走 Authoring 的 `GenerationWorkflow`。详细的 portable source、bootstrap 和完整性契约见
 [Catalog Release](catalog-release.md)。
 
-Catalog 只读取 `active` Scenario 及其 active immutable revision。每个摘要返回 type、标签、runtime、标题、描述、发布时间和
-可用状态。`documentation-example` 不使用标签；`operations-scenario` 的标签是 revision 级、规范化的字符串集合。课程层级、
+运维场景 Catalog 只读取 `active operations-scenario` 及其 active immutable revision。每个摘要返回标签、runtime、标题、描述、
+发布时间和可用状态。标签是 revision 级、规范化的字符串集合。文档实践化预留 `/api/documentation` namespace，并在
+`internal/application/documentpractice` 中维护上游页面位置；在完成来源同步和阅读器前不开放空导航或复用此 Catalog。课程层级、
 关系边、推荐图和后台分类任务不属于系统。
 
 ## Server 生命周期

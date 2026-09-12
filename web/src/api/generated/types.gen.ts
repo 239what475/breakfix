@@ -37,6 +37,7 @@ export type MySpaceScenario = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
+    content_source: 'operations' | 'documentation';
 };
 
 export type MySpaceProfile = {
@@ -118,7 +119,6 @@ export type ScenarioSummary = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
-    scenario_type: 'documentation-example' | 'operations-scenario';
     scenario_tags: Array<string>;
     description: string;
     published_at: string;
@@ -178,7 +178,6 @@ export type ScenarioContent = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
-    scenario_type: 'documentation-example' | 'operations-scenario';
     scenario_tags: Array<string>;
     nodes: Array<ScenarioNode>;
     versions: Array<ScenarioVersion>;
@@ -651,7 +650,7 @@ export type ListScenariosData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/scenarios';
+    url: '/operations/scenarios';
 };
 
 export type ListScenariosResponses = {
@@ -669,7 +668,7 @@ export type StartScenarioData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/start';
+    url: '/operations/scenarios/{id}/start';
 };
 
 export type StartScenarioErrors = {
@@ -696,7 +695,7 @@ export type GetScenarioContentData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/content';
+    url: '/operations/scenarios/{id}/content';
 };
 
 export type GetScenarioContentErrors = {
@@ -723,7 +722,7 @@ export type GetScenarioProgressData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/progress';
+    url: '/operations/scenarios/{id}/progress';
 };
 
 export type GetScenarioProgressErrors = {
@@ -754,7 +753,7 @@ export type GetScenarioAssistantData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/assistant';
+    url: '/operations/scenarios/{id}/assistant';
 };
 
 export type GetScenarioAssistantErrors = {
@@ -785,7 +784,7 @@ export type SendScenarioAssistantMessageData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/assistant/messages';
+    url: '/operations/scenarios/{id}/assistant/messages';
 };
 
 export type SendScenarioAssistantMessageErrors = {
@@ -820,7 +819,7 @@ export type ResetScenarioData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/reset';
+    url: '/operations/scenarios/{id}/reset';
 };
 
 export type ResetScenarioErrors = {
@@ -847,7 +846,7 @@ export type StopScenarioData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/stop';
+    url: '/operations/scenarios/{id}/stop';
 };
 
 export type StopScenarioErrors = {
@@ -874,7 +873,7 @@ export type CreateTerminalTicketData = {
         id: string;
     };
     query?: never;
-    url: '/scenarios/{id}/terminal-ticket';
+    url: '/operations/scenarios/{id}/terminal-ticket';
 };
 
 export type CreateTerminalTicketErrors = {
@@ -904,7 +903,7 @@ export type CloseTerminalWindowData = {
     query?: {
         node?: string;
     };
-    url: '/scenarios/{id}/terminals/{window}';
+    url: '/operations/scenarios/{id}/terminals/{window}';
 };
 
 export type CloseTerminalWindowErrors = {

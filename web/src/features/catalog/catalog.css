@@ -29,6 +29,13 @@
   gap: 10px;
 }
 
+.filters-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .filters-kicker {
   margin: 0 0 5px;
   color: var(--muted);

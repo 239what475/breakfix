@@ -27,8 +27,8 @@ entries:
 ```
 
 `scenario.yaml` 是 portable candidate：不能携带平台生成的 scenario ID、目录 slug、runtime artifact、发布时间或已发布
-content revision。它必须声明 `type: documentation-example|operations-scenario` 和 runtime。运维场景携带规范化的简单 tags；
-文档示例不使用 tags。运行时 opaque scenario ID 只在最终 commit 时分配。
+content revision。它必须声明 `type: operations-scenario` 和 runtime，并携带规范化的简单 tags。文档实践化不使用 Catalog Release；
+它将在独立的文档来源同步和发布流程中维护。运行时 opaque scenario ID 只在最终 commit 时分配。
 
 编辑 portable source 后，先重新计算声明的内容 revision，再打包：
 

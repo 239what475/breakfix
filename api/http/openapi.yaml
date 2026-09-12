@@ -109,11 +109,11 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
-  /scenarios:
+  /operations/scenarios:
     get:
       operationId: listScenarios
-      summary: List all scenarios
-      tags: [scenarios]
+      summary: List operations scenarios
+      tags: [operations]
       responses:
         "200":
           description: Scenario list
@@ -122,11 +122,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScenarioList"
 
-  /scenarios/{id}/start:
+  /operations/scenarios/{id}/start:
     post:
       operationId: startScenario
       summary: Start or resume a scenario environment
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -145,11 +145,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/content:
+  /operations/scenarios/{id}/content:
     get:
       operationId: getScenarioContent
       summary: Get scenario details and any available learning aids
-      tags: [scenarios]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -168,11 +168,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/progress:
+  /operations/scenarios/{id}/progress:
     get:
       operationId: getScenarioProgress
       summary: Read the controller-owned current scenario checkpoint snapshot
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -193,7 +193,7 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/assistant:
+  /operations/scenarios/{id}/assistant:
     get:
       operationId: getScenarioAssistant
       summary: Read or create the assistant conversation for the active scenario environment
@@ -218,7 +218,7 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/assistant/messages:
+  /operations/scenarios/{id}/assistant/messages:
     post:
       operationId: sendScenarioAssistantMessage
       summary: Send a message to the active scenario assistant and receive SSE events
@@ -251,11 +251,11 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/reset:
+  /operations/scenarios/{id}/reset:
     post:
       operationId: resetScenario
       summary: Reset scenario to initial state
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -274,11 +274,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/stop:
+  /operations/scenarios/{id}/stop:
     post:
       operationId: stopScenario
       summary: Stop the current scenario environment
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -297,11 +297,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/terminal-ticket:
+  /operations/scenarios/{id}/terminal-ticket:
     post:
       operationId: createTerminalTicket
       summary: Create a one-time ticket for a terminal WebSocket
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -326,11 +326,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /scenarios/{id}/terminals/{window}:
+  /operations/scenarios/{id}/terminals/{window}:
     delete:
       operationId: closeTerminalWindow
       summary: Close one terminal tab in the current scenario environment
-      tags: [environments]
+      tags: [operations]
       security:
         - bearerAuth: []
       parameters:
@@ -926,7 +926,7 @@ components:
 
     MySpaceScenario:
       type: object
-      required: [id, title, runtime]
+      required: [id, title, runtime, content_source]
       properties:
         id:
           type: string
@@ -935,6 +935,9 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
+        content_source:
+          type: string
+          enum: [operations, documentation]
     MySpaceProfile:
       type: object
       required: [id, name, created_at]
@@ -1117,7 +1120,7 @@ components:
 
     ScenarioSummary:
       type: object
-      required: [id, title, runtime, scenario_type, scenario_tags, description, published_at]
+      required: [id, title, runtime, scenario_tags, description, published_at]
       properties:
         id:
           type: string
@@ -1126,9 +1129,6 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
-        scenario_type:
-          type: string
-          enum: [documentation-example, operations-scenario]
         scenario_tags:
           type: array
           items:
@@ -1240,7 +1240,7 @@ components:
 
     ScenarioContent:
       type: object
-      required: [id, title, runtime, scenario_type, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, hints, checkpoints]
+      required: [id, title, runtime, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, hints, checkpoints]
       properties:
         id:
           type: string
@@ -1249,9 +1249,6 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
-        scenario_type:
-          type: string
-          enum: [documentation-example, operations-scenario]
         scenario_tags:
           type: array
           items:
