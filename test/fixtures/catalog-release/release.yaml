@@ -5,6 +5,4 @@ metadata:
   version: 2026.08.01
 entries:
   - path: challenges/node-runtime-fixture
-    contentRevision: sha256:14f78cadbbfbbcc4767ee7e451131ccf364d28a39c1a3f2de07033fe0a281ce6
-roadmap:
-  contentRevision: sha256:b41429cde47025ce7517beca55d88a7988709419e674f2368b2f93b5fabf6620
+    contentRevision: sha256:b87b7c3946f44dc32174d270074c79d1252a55b108968d65d6565d0468f071d4

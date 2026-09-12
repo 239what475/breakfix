@@ -112,16 +112,13 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err := database.Catalog.CompleteCatalogChallengePublication(ctx, *commitAction, finalArtifact, now); err != nil {
 		t.Fatalf("publish final catalog artifact: %v", err)
 	}
-	materialized, err := database.Catalog.MarkCommitMaterialized(ctx, initializedRelease.ID, commits[0].ID, now)
+	materializedRevision := "sha256:" + strings.Repeat("f", 64)
+	materialized, err := database.Catalog.MarkCommitMaterialized(ctx, initializedRelease.ID, commits[0].ID, materializedRevision, now)
 	if err != nil || materialized.State != catalogdomain.CommitMaterialized {
 		t.Fatalf("mark catalog source materialized = %#v, err=%v", materialized, err)
 	}
-
-	revision, err := roadmap.CompilePortable(portable, map[string]roadmap.ChallengeRef{
-		binding.Challenge.Path: {ID: challengeID, RevisionID: intent.ChallengeRevisionID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: binding.Challenge.ContentRevision, SourceSlug: intent.SourceSlug, MaterializedRevision: "sha256:" + strings.Repeat("f", 64)},
-	})
-	if err != nil {
-		t.Fatalf("compile catalog roadmap revision: %v", err)
+	if materialized.MaterializedRevision != materializedRevision {
+		t.Fatalf("materialized catalog revision = %q, want %q", materialized.MaterializedRevision, materializedRevision)
 	}
 	diagnostic, err := publication.NewDiagnostic(publication.Transient(errors.New("temporary materialization filesystem failure")), now)
 	if err != nil {
@@ -142,7 +139,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 		t.Fatalf("reloaded catalog publication diagnostic = %#v", reloaded)
 	}
 	authoring := insertChallengeLifecycleFixture(t, database, "authoring", "catalog-race-author", false, now.Add(time.Second))
-	if _, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, revision, now); !errors.Is(err, catalogdomain.ErrBaselineEstablished) {
+	if _, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now); !errors.Is(err, catalogdomain.ErrBaselineEstablished) {
 		t.Fatalf("catalog commit over authoring content = %v, want baseline established", err)
 	}
 	tx, err := database.conn.BeginTx(ctx, nil)
@@ -160,16 +157,20 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit catalog race cleanup: %v", err)
 	}
-	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, revision, now)
+	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now)
 	if err != nil || ready.State != catalogdomain.ReleaseReady {
 		t.Fatalf("complete catalog release = %#v, err=%v", ready, err)
 	}
 	if ready.FinalizerErrorCategory != publication.CategoryUnknown || ready.FinalizerLastError != "" || ready.FinalizerLastAttemptedAt != nil || ready.FinalizerNextRetryAt != nil {
 		t.Fatalf("ready catalog release retained finalizer diagnostic = %#v", ready)
 	}
-	current, err := database.Roadmap.CurrentRoadmap(ctx)
-	if err != nil || len(current.ChallengeBindings) != 1 || current.ChallengeBindings[0].Challenge.ID != challengeID {
-		t.Fatalf("committed roadmap = %#v, err=%v", current, err)
+	stable, err := database.Challenge.GetChallenge(ctx, challengeID)
+	if err != nil || stable.ActiveRevisionID != intent.ChallengeRevisionID {
+		t.Fatalf("committed catalog challenge = %#v, err=%v", stable, err)
+	}
+	published, err := database.Challenge.GetChallengeRevision(ctx, challengeID, intent.ChallengeRevisionID)
+	if err != nil || published.MaterializedRevision != materializedRevision || published.Type != challenge.ScenarioOperationsScenario {
+		t.Fatalf("committed catalog revision = %#v, err=%v", published, err)
 	}
 	storedCommits, err := database.Catalog.Commits(ctx, initializedRelease.ID)
 	if err != nil || len(storedCommits) != 1 || storedCommits[0].State != catalogdomain.CommitCommitted {
@@ -374,7 +375,7 @@ func createCatalogRuntimeFixture(t *testing.T, database *Store, now time.Time) (
 func catalogRepositoryEntry(releaseID string, binding roadmap.PortableChallengeBinding, now time.Time) catalogdomain.Entry {
 	return catalogdomain.Entry{
 		ID: catalogdomain.EntryIDFor(releaseID, binding.Challenge.Path), ReleaseID: releaseID, SourcePath: binding.Challenge.Path,
-		SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, ContentRevision: catalogdomain.ContentRevision(binding.Challenge.ContentRevision),
+		SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, Type: challenge.ScenarioOperationsScenario, Tags: []string{"runtime-fixture"}, ContentRevision: catalogdomain.ContentRevision(binding.Challenge.ContentRevision),
 		ArchiveSHA256: "sha256:" + strings.Repeat("f", 64),
 		Snapshot: execution.Snapshot{Runtime: challenge.RuntimeNode, Checkpoints: []execution.CheckpointSnapshot{{ID: "ready", Node: "host"}},
 			Node: &execution.NodeRuntimeSnapshot{BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "catalog-node-profile", NetworkPolicyRevision: "catalog-node-network",

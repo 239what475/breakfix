@@ -27,9 +27,8 @@ const (
 	challengeEdgesFile   = "challenge-edges.yaml"
 )
 
-// LoadPortable reads a complete Roadmap source tree. The source layout is
-// intentionally part of the portable Catalog Release contract, so unknown
-// files, symlinks, and multiple YAML documents are rejected.
+// LoadPortable reads a complete Roadmap source tree. Its layout is strict so
+// unknown files, symlinks, and multiple YAML documents are rejected.
 func LoadPortable(root string) (domain.PortableRevision, error) {
 	root, err := validateRoot(root)
 	if err != nil {

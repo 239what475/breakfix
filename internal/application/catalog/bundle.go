@@ -41,9 +41,8 @@ func BuildPortableBundle(root string) (*PortableBundle, error) {
 		LayerMediaType: ReleaseSourceLayerType,
 		SourceLayer:    layer,
 		Annotations: map[string]string{
-			"org.opencontainers.image.title":                source.Manifest.Metadata.Name,
-			"org.opencontainers.image.version":              source.Manifest.Metadata.Version,
-			"breakfix.dev/catalog.roadmap-content-revision": string(source.Manifest.Roadmap.ContentRevision),
+			"org.opencontainers.image.title":   source.Manifest.Metadata.Name,
+			"org.opencontainers.image.version": source.Manifest.Metadata.Version,
 		},
 		Manifest: source.Manifest,
 	}, nil

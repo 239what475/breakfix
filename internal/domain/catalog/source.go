@@ -19,7 +19,6 @@ type SourceManifest struct {
 	Kind       string         `yaml:"kind" json:"kind"`
 	Metadata   SourceMetadata `yaml:"metadata" json:"metadata"`
 	Entries    []SourceEntry  `yaml:"entries" json:"entries"`
-	Roadmap    SourceRoadmap  `yaml:"roadmap" json:"roadmap"`
 }
 
 type SourceMetadata struct {
@@ -31,10 +30,6 @@ type SourceMetadata struct {
 // It has no challenge ID, slug, runtime artifact, or publication time.
 type SourceEntry struct {
 	Path            string          `yaml:"path" json:"path"`
-	ContentRevision ContentRevision `yaml:"contentRevision" json:"contentRevision"`
-}
-
-type SourceRoadmap struct {
 	ContentRevision ContentRevision `yaml:"contentRevision" json:"contentRevision"`
 }
 
@@ -50,9 +45,6 @@ func (m SourceManifest) Validate() error {
 	}
 	if len(m.Entries) == 0 {
 		return errors.New("release entries are required")
-	}
-	if err := m.Roadmap.ContentRevision.Validate(); err != nil {
-		return fmt.Errorf("release roadmap contentRevision: %w", err)
 	}
 	seen := make(map[string]struct{}, len(m.Entries))
 	for _, entry := range m.Entries {

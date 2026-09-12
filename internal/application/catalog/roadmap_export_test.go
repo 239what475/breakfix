@@ -89,25 +89,8 @@ func TestRoadmapRevisionExportIsPortableAndByteStable(t *testing.T) {
 	if source.Challenges[0].Entry.ID != "" || source.Challenges[0].Entry.Image != "" || !source.Challenges[0].Entry.PublishedAt.IsZero() {
 		t.Fatalf("export retained published challenge data: %#v", source.Challenges[0].Entry)
 	}
-	if got := source.Roadmap.ChallengeBindings[0].Challenge.ContentRevision; got != string(source.Challenges[0].ContentRevision) {
-		t.Fatalf("exported binding content revision = %q, want %q", got, source.Challenges[0].ContentRevision)
-	}
-	bindingDir := filepath.Join(extracted, "roadmap", "challenge-bindings")
-	bindingFiles, err := os.ReadDir(bindingDir)
-	if err != nil {
-		t.Fatalf("read exported challenge bindings: %v", err)
-	}
-	for _, bindingFile := range bindingFiles {
-		data, err := os.ReadFile(filepath.Join(bindingDir, bindingFile.Name()))
-		if err != nil {
-			t.Fatalf("read exported challenge binding: %v", err)
-		}
-		if bytes.Contains(data, []byte("materialized_revision")) || bytes.Contains(data, []byte("source_slug")) {
-			t.Fatalf("portable export retained runtime integrity fields: %s", data)
-		}
-	}
-	if len(source.Roadmap.TopicEdges) != 1 || len(source.Roadmap.ChallengeEdges) != 1 {
-		t.Fatalf("exported roadmap edges = %#v %#v", source.Roadmap.TopicEdges, source.Roadmap.ChallengeEdges)
+	if _, err := os.Stat(filepath.Join(extracted, "roadmap")); !os.IsNotExist(err) {
+		t.Fatalf("portable export retained roadmap sources: %v", err)
 	}
 	if info, err := os.Stat(filepath.Join(extracted, "challenges", "linux", "shell-files", "cleanup-logs", "nodes", "host", "generate.sh")); err != nil || info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("export did not retain executable source mode: %v, %#o", err, info.Mode().Perm())

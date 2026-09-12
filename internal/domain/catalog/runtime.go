@@ -225,24 +225,25 @@ func (e Entry) Valid() bool {
 // artifact publication and filesystem materialization. The identity is never
 // regenerated after a restart.
 type Commit struct {
-	ID                  string                       `json:"id"`
-	ReleaseID           string                       `json:"release_id"`
-	EntryID             string                       `json:"entry_id"`
-	ChallengeID         string                       `json:"challenge_id,omitempty"`
-	ChallengeRevisionID string                       `json:"challenge_revision_id,omitempty"`
-	SourceSlug          string                       `json:"source_slug,omitempty"`
-	State               CommitState                  `json:"state"`
-	StateVersion        int64                        `json:"state_version"`
-	RuntimeAttempt      int                          `json:"runtime_attempt"`
-	LeaseOwner          string                       `json:"-"`
-	LeaseExpires        *time.Time                   `json:"lease_expires_at,omitempty"`
-	NextRunAt           time.Time                    `json:"next_run_at"`
-	LastError           string                       `json:"last_error,omitempty"`
-	Artifact            *execution.ArtifactReference `json:"artifact,omitempty"`
-	MaterializedAt      *time.Time                   `json:"materialized_at,omitempty"`
-	CommittedAt         *time.Time                   `json:"committed_at,omitempty"`
-	CreatedAt           time.Time                    `json:"created_at"`
-	UpdatedAt           time.Time                    `json:"updated_at"`
+	ID                   string                       `json:"id"`
+	ReleaseID            string                       `json:"release_id"`
+	EntryID              string                       `json:"entry_id"`
+	ChallengeID          string                       `json:"challenge_id,omitempty"`
+	ChallengeRevisionID  string                       `json:"challenge_revision_id,omitempty"`
+	SourceSlug           string                       `json:"source_slug,omitempty"`
+	State                CommitState                  `json:"state"`
+	StateVersion         int64                        `json:"state_version"`
+	RuntimeAttempt       int                          `json:"runtime_attempt"`
+	LeaseOwner           string                       `json:"-"`
+	LeaseExpires         *time.Time                   `json:"lease_expires_at,omitempty"`
+	NextRunAt            time.Time                    `json:"next_run_at"`
+	LastError            string                       `json:"last_error,omitempty"`
+	Artifact             *execution.ArtifactReference `json:"artifact,omitempty"`
+	MaterializedRevision string                       `json:"materialized_revision,omitempty"`
+	MaterializedAt       *time.Time                   `json:"materialized_at,omitempty"`
+	CommittedAt          *time.Time                   `json:"committed_at,omitempty"`
+	CreatedAt            time.Time                    `json:"created_at"`
+	UpdatedAt            time.Time                    `json:"updated_at"`
 }
 
 func (c Commit) Valid() bool {
@@ -253,13 +254,13 @@ func (c Commit) Valid() bool {
 		return false
 	}
 	if c.State == CommitPending {
-		return c.ChallengeID == "" && c.ChallengeRevisionID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.ChallengeID == "" && c.ChallengeRevisionID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
 	if !challenge.ValidID(c.ChallengeID) || !challenge.ValidRevisionID(c.ChallengeRevisionID) || !challenge.ValidSourceSlug(c.SourceSlug) {
 		return false
 	}
 	if c.State == CommitPrepared {
-		return c.RuntimeAttempt >= 1 && c.RuntimeAttempt <= runtime.MaxAttempts && c.Artifact == nil && c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.RuntimeAttempt >= 1 && c.RuntimeAttempt <= runtime.MaxAttempts && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
 	if c.RuntimeAttempt != 0 {
 		return false
@@ -271,9 +272,9 @@ func (c Commit) Valid() bool {
 		return false
 	}
 	if c.State == CommitArtifactPublished {
-		return c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
-	if c.MaterializedAt == nil {
+	if !challenge.ValidRevision(c.MaterializedRevision) || c.MaterializedAt == nil {
 		return false
 	}
 	if c.State == CommitMaterialized {

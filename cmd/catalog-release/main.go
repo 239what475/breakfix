@@ -18,7 +18,7 @@ func main() {
 	output := flag.String("output", "", "destination OCI archive path")
 	reference := flag.String("reference", "", "optional mutable OCI reference to publish, for example registry.example/catalog/foundation:2026.08.01")
 	trustBundle := flag.String("trust-bundle-file", "", "optional PEM bundle trusted for the Registry")
-	printContentRevisions := flag.Bool("print-content-revisions", false, "print current challenge and roadmap content revisions as JSON")
+	printContentRevisions := flag.Bool("print-content-revisions", false, "print current entry content revisions as JSON")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

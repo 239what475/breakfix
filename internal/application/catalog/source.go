@@ -11,16 +11,13 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	roadmapsource "github.com/breakfix/breakfix/internal/content/roadmap"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
-	roadmapdomain "github.com/breakfix/breakfix/internal/domain/roadmap"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	releaseManifestFilename = "release.yaml"
 	challengeSourcesDirname = "challenges"
-	roadmapSourcesDirname   = "roadmap"
 )
 
 // PortableSource is a validated catalog source tree. It contains source
@@ -30,7 +27,6 @@ type PortableSource struct {
 	Root       string
 	Manifest   catalogdomain.SourceManifest
 	Challenges []SourceChallenge
-	Roadmap    roadmapdomain.PortableRevision
 }
 
 type SourceChallenge struct {
@@ -44,15 +40,10 @@ type SourceChallenge struct {
 // does not use the manifest's declared values, so it can repair stale ones.
 type ContentRevisionReport struct {
 	Entries []ContentRevisionEntry `json:"entries"`
-	Roadmap ContentRevisionValue   `json:"roadmap"`
 }
 
 type ContentRevisionEntry struct {
 	Path            string                        `json:"path"`
-	ContentRevision catalogdomain.ContentRevision `json:"contentRevision"`
-}
-
-type ContentRevisionValue struct {
 	ContentRevision catalogdomain.ContentRevision `json:"contentRevision"`
 }
 
@@ -68,9 +59,6 @@ func LoadPortableSource(root string) (*PortableSource, error) {
 		if actual != declared.ContentRevision {
 			return nil, fmt.Errorf("release challenge %q contentRevision is %q, want %q", declared.Path, actual, declared.ContentRevision)
 		}
-	}
-	if revisions.Roadmap.ContentRevision != result.Manifest.Roadmap.ContentRevision {
-		return nil, fmt.Errorf("release roadmap contentRevision is %q, want %q", revisions.Roadmap.ContentRevision, result.Manifest.Roadmap.ContentRevision)
 	}
 	return result, nil
 }
@@ -123,16 +111,6 @@ func loadPortableSource(root string) (*PortableSource, ContentRevisionReport, er
 		revisions.Entries = append(revisions.Entries, ContentRevisionEntry{Path: declared.Path, ContentRevision: revision})
 	}
 
-	roadmapRoot := filepath.Join(root, roadmapSourcesDirname)
-	roadmapRevision, snapshot, err := loadPortableRoadmap(roadmapRoot)
-	if err != nil {
-		return nil, ContentRevisionReport{}, err
-	}
-	if err := validateRoadmapSources(snapshot, result.Challenges); err != nil {
-		return nil, ContentRevisionReport{}, err
-	}
-	result.Roadmap = snapshot
-	revisions.Roadmap = ContentRevisionValue{ContentRevision: roadmapRevision}
 	return result, revisions, nil
 }
 
@@ -170,7 +148,7 @@ func validateSourceRoot(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read catalog source root: %w", err)
 	}
-	expected := map[string]bool{releaseManifestFilename: false, challengeSourcesDirname: false, roadmapSourcesDirname: false}
+	expected := map[string]bool{releaseManifestFilename: false, challengeSourcesDirname: false}
 	for _, entry := range entries {
 		_, exists := expected[entry.Name()]
 		if !exists {
@@ -198,41 +176,6 @@ func validateSourceRoot(root string) (string, error) {
 		}
 	}
 	return root, nil
-}
-
-func loadPortableRoadmap(root string) (catalogdomain.ContentRevision, roadmapdomain.PortableRevision, error) {
-	revision, err := ContentRevision(root)
-	if err != nil {
-		return "", roadmapdomain.PortableRevision{}, fmt.Errorf("hash portable roadmap: %w", err)
-	}
-	snapshot, err := roadmapsource.LoadPortable(root)
-	if err != nil {
-		return "", roadmapdomain.PortableRevision{}, err
-	}
-	return revision, snapshot, nil
-}
-
-func validateRoadmapSources(snapshot roadmapdomain.PortableRevision, challenges []SourceChallenge) error {
-	expected := make(map[string]SourceChallenge, len(challenges))
-	for _, source := range challenges {
-		expected[source.Path] = source
-	}
-	if len(snapshot.ChallengeBindings) != len(expected) {
-		return fmt.Errorf("portable roadmap has %d challenge bindings, want %d", len(snapshot.ChallengeBindings), len(expected))
-	}
-	for _, binding := range snapshot.ChallengeBindings {
-		source, exists := expected[binding.Challenge.Path]
-		if !exists {
-			return fmt.Errorf("portable roadmap binding references unknown challenge source %q", binding.Challenge.Path)
-		}
-		if binding.Challenge.Title != source.Entry.Title {
-			return fmt.Errorf("portable roadmap binding title for %q does not match source", binding.Challenge.Path)
-		}
-		if binding.Challenge.ContentRevision != string(source.ContentRevision) {
-			return fmt.Errorf("portable roadmap binding contentRevision for %q does not match source", binding.Challenge.Path)
-		}
-	}
-	return nil
 }
 
 func validateDistinctChallengeRoots(entries []catalogdomain.SourceEntry) error {

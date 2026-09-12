@@ -1,6 +1,0 @@
-kind: Domain
-source_ref: linux-operations
-title: Linux 系统与网络运维
-definition: 面向 Linux 主机的系统管理、故障排查和网络运维实践。
-scope: 文件系统、进程、服务、日志、权限、资源和主机网络的可观察状态。
-non_goals: 不覆盖 Kubernetes 控制平面实现、云厂商产品操作和内核开发。

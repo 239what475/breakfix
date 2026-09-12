@@ -1,6 +1,10 @@
 runtime: node
+type: operations-scenario
 title: "Node 运行时验收"
 difficulty: easy
+tags:
+  - Linux
+  - runtime-fixture
 description: |
   此环境仅用于验证 Breakfix 的 Node 运行时、终端和自动检查点链路。
 

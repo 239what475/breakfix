@@ -71,6 +71,7 @@ var schemaCatalogStatements = []string{
 		next_run_at TIMESTAMPTZ NOT NULL,
 		last_error TEXT NOT NULL DEFAULT '',
 		artifact_reference JSONB,
+		materialized_revision TEXT NOT NULL DEFAULT '',
 		materialized_at TIMESTAMPTZ,
 		committed_at TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL,

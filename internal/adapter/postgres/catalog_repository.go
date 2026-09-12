@@ -16,7 +16,6 @@ import (
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
@@ -37,9 +36,9 @@ const catalogEntryColumns = `id, release_id, source_path, source_ref, title, sce
 const catalogEntrySelect = `SELECT ` + catalogEntryColumns + ` FROM catalog_release_entries`
 
 const catalogCommitColumns = `id, release_id, entry_id, challenge_id, challenge_revision_id, source_slug, state, state_version, runtime_attempt,
-	lease_owner, lease_expires_at, next_run_at, last_error, artifact_reference, materialized_at, committed_at, created_at, updated_at`
+	lease_owner, lease_expires_at, next_run_at, last_error, artifact_reference, materialized_revision, materialized_at, committed_at, created_at, updated_at`
 const catalogCommitReturningColumns = `commit.id, commit.release_id, commit.entry_id, commit.challenge_id, commit.challenge_revision_id, commit.source_slug, commit.state, commit.state_version, commit.runtime_attempt,
-	commit.lease_owner, commit.lease_expires_at, commit.next_run_at, commit.last_error, commit.artifact_reference, commit.materialized_at, commit.committed_at, commit.created_at, commit.updated_at`
+	commit.lease_owner, commit.lease_expires_at, commit.next_run_at, commit.last_error, commit.artifact_reference, commit.materialized_revision, commit.materialized_at, commit.committed_at, commit.created_at, commit.updated_at`
 const catalogCommitSelect = `SELECT ` + catalogCommitColumns + ` FROM catalog_release_entry_commits`
 
 type scanner interface{ Scan(...any) error }
@@ -837,14 +836,14 @@ func (d *CatalogRepository) Commits(ctx context.Context, releaseID string) ([]ca
 // MarkCommitMaterialized is the Server-owned, idempotent finalizer boundary.
 // It is deliberately separate from final artifact promotion so a Server crash
 // can resume source materialization without invoking Runtime Worker again.
-func (d *CatalogRepository) MarkCommitMaterialized(ctx context.Context, releaseID, commitID string, now time.Time) (*catalogdomain.Commit, error) {
-	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(commitID) == "" || now.IsZero() {
+func (d *CatalogRepository) MarkCommitMaterialized(ctx context.Context, releaseID, commitID, materializedRevision string, now time.Time) (*catalogdomain.Commit, error) {
+	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(commitID) == "" || !contentchallenge.ValidRevision(materializedRevision) || now.IsZero() {
 		return nil, errors.New("catalog materialization completion is invalid")
 	}
 	updated, err := scanCatalogCommit(d.conn.QueryRowContext(ctx, `UPDATE catalog_release_entry_commits commit SET state = ?, state_version = state_version + 1,
-		runtime_attempt = 0, materialized_at = ?, updated_at = ? FROM catalog_releases release
+		runtime_attempt = 0, materialized_revision = ?, materialized_at = ?, updated_at = ? FROM catalog_releases release
 		WHERE commit.id = ? AND commit.release_id = ? AND commit.release_id = release.id AND release.state = ? AND commit.state = ?
-		RETURNING `+catalogCommitReturningColumns, catalogdomain.CommitMaterialized, now.UTC(), now.UTC(), strings.TrimSpace(commitID), strings.TrimSpace(releaseID),
+		RETURNING `+catalogCommitReturningColumns, catalogdomain.CommitMaterialized, strings.TrimSpace(materializedRevision), now.UTC(), now.UTC(), strings.TrimSpace(commitID), strings.TrimSpace(releaseID),
 		catalogdomain.ReleaseCommitting, catalogdomain.CommitArtifactPublished))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, runtime.ErrLeaseLost
@@ -856,14 +855,11 @@ func (d *CatalogRepository) MarkCommitMaterialized(ctx context.Context, releaseI
 }
 
 // CompleteReleaseCommit is the sole visibility transition. It atomically
-// publishes the Roadmap revision and commits every already-materialized entry.
-func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID string, value roadmap.Revision, now time.Time) (*catalogdomain.Release, error) {
+// creates active identities and immutable revisions for every materialized
+// entry, then makes the release Ready.
+func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID string, now time.Time) (*catalogdomain.Release, error) {
 	if strings.TrimSpace(releaseID) == "" || now.IsZero() {
 		return nil, errors.New("catalog release completion is invalid")
-	}
-	canonical, encoded, revisionID, err := canonicalRoadmap(value)
-	if err != nil {
-		return nil, err
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -879,12 +875,6 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	}
 	if release.State != catalogdomain.ReleaseCommitting {
 		return nil, runtime.ErrLeaseLost
-	}
-	if _, err := tx.ExecContext(ctx, `SELECT revision_id FROM roadmap_current WHERE singleton = TRUE FOR UPDATE`); err != nil {
-		return nil, fmt.Errorf("lock roadmap current revision: %w", err)
-	}
-	if err := ensureRoadmapPublicationAllowedTx(ctx, tx, now); err != nil {
-		return nil, err
 	}
 	var publishedChallenges int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM challenges`).Scan(&publishedChallenges); err != nil {
@@ -913,10 +903,10 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	for _, entry := range entries {
 		entriesByID[entry.ID] = entry
 	}
-	bindingsByChallengeID := make(map[string]roadmap.ChallengeBinding, len(canonical.ChallengeBindings))
-	for _, binding := range canonical.ChallengeBindings {
-		bindingsByChallengeID[binding.Challenge.ID] = binding
+	if len(commits) != len(entries) {
+		return nil, errors.New("catalog release commits do not cover every entry")
 	}
+	seenEntries := make(map[string]struct{}, len(commits))
 	for _, commit := range commits {
 		if commit.State != catalogdomain.CommitMaterialized {
 			return nil, errors.New("catalog release has incomplete materialization")
@@ -925,23 +915,20 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 		if !exists {
 			return nil, fmt.Errorf("catalog commit %q has no release entry", commit.EntryID)
 		}
-		binding, exists := bindingsByChallengeID[commit.ChallengeID]
-		if !exists || binding.Challenge.RevisionID != commit.ChallengeRevisionID || binding.Challenge.SourceRef != entry.SourceRef ||
-			binding.Challenge.Title != entry.Title || binding.Challenge.ContentRevision != string(entry.ContentRevision) ||
-			binding.Challenge.SourceSlug != commit.SourceSlug || binding.Challenge.MaterializedRevision == "" ||
+		if _, duplicate := seenEntries[entry.ID]; duplicate || !contentchallenge.ValidRevision(commit.MaterializedRevision) ||
 			commit.Artifact == nil || commit.Artifact.Validate(entry.Snapshot.Runtime) != nil {
-			return nil, fmt.Errorf("catalog commit %q does not match its roadmap binding", commit.EntryID)
+			return nil, fmt.Errorf("catalog commit %q does not match its durable entry", commit.EntryID)
 		}
+		seenEntries[entry.ID] = struct{}{}
 	}
 	for _, commit := range commits {
 		entry := entriesByID[commit.EntryID]
-		binding := bindingsByChallengeID[commit.ChallengeID]
 		stable := challengedomain.Challenge{
 			ID: commit.ChallengeID, SourceKind: challengedomain.SourceRelease, SourceRef: entry.SourceRef,
 			State: challengedomain.StateActive, ActiveRevisionID: commit.ChallengeRevisionID, SourceSlug: commit.SourceSlug,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 		}
-		published := challengeRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), binding.Challenge.MaterializedRevision,
+		published := challengeRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), commit.MaterializedRevision,
 			*commit.Artifact, commit.ChallengeRevisionID, commit.ChallengeID, entry.SourceRef, string(entry.ContentRevision), "",
 			commit.SourceSlug, contentchallenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID), challengedomain.SourceRelease, now.UTC())
 		if err := insertPersistedChallengeTx(ctx, tx, stable); err != nil {
@@ -949,20 +936,6 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 		}
 		if err := insertPersistedChallengeRevisionTx(ctx, tx, published); err != nil {
 			return nil, fmt.Errorf("create catalog challenge revision %q: %w", commit.ChallengeRevisionID, err)
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_revisions (id, content_json, created_at) VALUES (?, ?::jsonb, ?)
-		ON CONFLICT (id) DO NOTHING`, revisionID, encoded, now.UTC()); err != nil {
-		return nil, fmt.Errorf("store catalog roadmap revision: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_current SET revision_id = ?, updated_at = ? WHERE singleton = TRUE`, revisionID, now.UTC()); err != nil {
-		return nil, fmt.Errorf("publish catalog roadmap revision: %w", err)
-	}
-	for _, commit := range commits {
-		binding := bindingsByChallengeID[commit.ChallengeID]
-		if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_entries (challenge_id, topic_id, topic_processed, challenge_processed, created_at)
-			VALUES (?, ?, TRUE, TRUE, ?) ON CONFLICT (challenge_id) DO NOTHING`, binding.Challenge.ID, binding.Topic.ID, now.UTC()); err != nil {
-			return nil, fmt.Errorf("store catalog roadmap baseline: %w", err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entry_commits SET state = ?, committed_at = ?, updated_at = ?
@@ -978,7 +951,6 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	canonical.Revision = revisionID
 	return updated, nil
 }
 
@@ -1389,7 +1361,7 @@ func scanCatalogCommit(row scanner) (*catalogdomain.Commit, error) {
 	var artifact []byte
 	var expires, materialized, committed sql.NullTime
 	if err := row.Scan(&value.ID, &value.ReleaseID, &value.EntryID, &value.ChallengeID, &value.ChallengeRevisionID, &value.SourceSlug, &value.State, &value.StateVersion,
-		&value.RuntimeAttempt, &value.LeaseOwner, &expires, &value.NextRunAt, &value.LastError, &artifact, &materialized, &committed,
+		&value.RuntimeAttempt, &value.LeaseOwner, &expires, &value.NextRunAt, &value.LastError, &artifact, &value.MaterializedRevision, &materialized, &committed,
 		&value.CreatedAt, &value.UpdatedAt); err != nil {
 		return nil, err
 	}

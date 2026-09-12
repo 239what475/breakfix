@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,6 @@ import (
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
 // BundlePuller and SourceLayerReader deliberately model only the two OCI
@@ -47,8 +47,8 @@ type ReleaseStore interface {
 	Entries(context.Context, string) ([]catalogdomain.Entry, error)
 	PrepareReleaseCommit(context.Context, string, []catalogdomain.Commit, time.Time) (*catalogdomain.Release, []catalogdomain.Commit, error)
 	Commits(context.Context, string) ([]catalogdomain.Commit, error)
-	MarkCommitMaterialized(context.Context, string, string, time.Time) (*catalogdomain.Commit, error)
-	CompleteReleaseCommit(context.Context, string, roadmap.Revision, time.Time) (*catalogdomain.Release, error)
+	MarkCommitMaterialized(context.Context, string, string, string, time.Time) (*catalogdomain.Commit, error)
+	CompleteReleaseCommit(context.Context, string, time.Time) (*catalogdomain.Release, error)
 }
 
 type InstallerConfig struct {
@@ -228,7 +228,7 @@ func (i *Installer) RunOnce(ctx context.Context) error {
 		return nil
 	}
 	if release.State == catalogdomain.ReleaseInstalling {
-		return i.prepareCommit(ctx, release, source)
+		return i.prepareCommit(ctx, release)
 	}
 	if release.State == catalogdomain.ReleaseCommitting {
 		return i.finalizeCommit(ctx, source, *release)
@@ -328,13 +328,12 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 }
 
 func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]catalogdomain.Entry, error) {
-	bindings := portableBindingsByPath(source.Roadmap)
 	now := i.now().UTC()
 	entries := make([]catalogdomain.Entry, 0, len(source.Challenges))
 	for _, sourceChallenge := range source.Challenges {
-		binding, exists := bindings[sourceChallenge.Path]
-		if !exists {
-			return nil, fmt.Errorf("catalog source %q has no roadmap binding", sourceChallenge.Path)
+		sourceRef, err := sourceReference(sourceChallenge.Path)
+		if err != nil {
+			return nil, err
 		}
 		archive, err := archiveSourceCandidate(filepath.Join(source.Root, filepath.FromSlash(sourceChallenge.Path)))
 		if err != nil {
@@ -344,22 +343,9 @@ func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]cata
 		if err != nil {
 			return nil, fmt.Errorf("freeze catalog source %q: %w", sourceChallenge.Path, err)
 		}
-		tags := append([]string(nil), sourceChallenge.Entry.Tags...)
-		// Roadmap remains the compatibility source until the portable Catalog
-		// release is simplified in the next migration slice.
-		if len(tags) == 0 && sourceChallenge.Entry.Type == challenge.ScenarioOperationsScenario {
-			legacyTags := make([]string, 0, len(binding.Tags))
-			for _, tag := range binding.Tags {
-				legacyTags = append(legacyTags, tag.SourceRef)
-			}
-			tags, err = challenge.NormalizeTags(legacyTags)
-			if err != nil {
-				return nil, fmt.Errorf("normalize legacy roadmap tags for %q: %w", sourceChallenge.Path, err)
-			}
-		}
 		entries = append(entries, catalogdomain.Entry{
 			ID: catalogdomain.EntryIDFor(releaseID, sourceChallenge.Path), ReleaseID: releaseID, SourcePath: sourceChallenge.Path,
-			SourceRef: binding.Challenge.SourceRef, Title: sourceChallenge.Entry.Title, Type: sourceChallenge.Entry.Type, Tags: tags, ContentRevision: sourceChallenge.ContentRevision,
+			SourceRef: sourceRef, Title: sourceChallenge.Entry.Title, Type: sourceChallenge.Entry.Type, Tags: append([]string(nil), sourceChallenge.Entry.Tags...), ContentRevision: sourceChallenge.ContentRevision,
 			ArchiveSHA256: candidate.Digest(archive), Snapshot: snapshot, State: catalogdomain.EntryBuilding,
 			StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		})
@@ -367,7 +353,19 @@ func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]cata
 	return entries, nil
 }
 
-func (i *Installer) prepareCommit(ctx context.Context, release *catalogdomain.Release, source *PortableSource) error {
+func sourceReference(sourcePath string) (string, error) {
+	const challengePrefix = challengeSourcesDirname + "/"
+	if !strings.HasPrefix(sourcePath, challengePrefix) {
+		return "", fmt.Errorf("catalog source path %q is not a challenge source", sourcePath)
+	}
+	value := strings.TrimPrefix(sourcePath, challengePrefix)
+	if value == "" {
+		return "", fmt.Errorf("catalog source path %q has an empty source reference", sourcePath)
+	}
+	return value, nil
+}
+
+func (i *Installer) prepareCommit(ctx context.Context, release *catalogdomain.Release) error {
 	entries, err := i.store.Entries(ctx, release.ID)
 	if err != nil {
 		return err
@@ -416,15 +414,16 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 			allMaterialized = false
 			continue
 		case catalogdomain.CommitArtifactPublished:
-			if err := i.materializeCommit(source, entry, commit); err != nil {
+			materialized, err := i.materializeCommit(source, entry, commit)
+			if err != nil {
 				return i.handleFinalizerError(ctx, release, err)
 			}
-			if _, err := i.store.MarkCommitMaterialized(ctx, release.ID, commit.ID, i.now().UTC()); err != nil {
+			if _, err := i.store.MarkCommitMaterialized(ctx, release.ID, commit.ID, materialized.Revision, i.now().UTC()); err != nil {
 				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 			}
 			allMaterialized = false
 		case catalogdomain.CommitMaterialized:
-			if err := i.ensureMaterialized(entry, commit); err != nil {
+			if _, err := i.ensureMaterialized(entry, commit); err != nil {
 				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 			}
 		case catalogdomain.CommitCommitted:
@@ -441,11 +440,7 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 	if err != nil {
 		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
-	compiled, err := i.compileRevision(source, entries, commits)
-	if err != nil {
-		return i.handleFinalizerError(ctx, release, err)
-	}
-	_, err = i.store.CompleteReleaseCommit(ctx, release.ID, compiled, i.now().UTC())
+	_, err = i.store.CompleteReleaseCommit(ctx, release.ID, i.now().UTC())
 	if err != nil {
 		if errors.Is(err, catalogdomain.ErrBaselineEstablished) {
 			return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(err))
@@ -575,103 +570,66 @@ func (i *Installer) removeTerminalSource(releaseID string) error {
 	return nil
 }
 
-func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomain.Entry, commit catalogdomain.Commit) error {
-	if err := i.ensureMaterialized(entry, commit); err == nil {
-		return nil
+func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomain.Entry, commit catalogdomain.Commit) (*challenge.Entry, error) {
+	if published, err := i.ensureMaterialized(entry, commit); err == nil {
+		return published, nil
 	} else if !errors.Is(err, challenge.ErrNotFound) {
-		return catalogFinalizerFailure(err)
+		return nil, catalogFinalizerFailure(err)
 	}
 	if commit.Artifact == nil {
-		return deterministicCatalogFailure(errors.New("catalog materialization has no final artifact"))
+		return nil, deterministicCatalogFailure(errors.New("catalog materialization has no final artifact"))
 	}
 	image, err := artifactImage(*commit.Artifact)
 	if err != nil {
-		return deterministicCatalogFailure(err)
+		return nil, deterministicCatalogFailure(err)
 	}
 	sourceDir := filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath))
 	if _, err := challenge.ValidateCandidateDir(sourceDir); err != nil {
-		return catalogContentFailure(fmt.Errorf("validate catalog challenge %q: %w", entry.SourcePath, err))
+		return nil, catalogContentFailure(fmt.Errorf("validate catalog challenge %q: %w", entry.SourcePath, err))
 	}
 	published, err := challenge.PromoteDirectoryAt(i.challengesDir, sourceDir, commit.ChallengeID, commit.ChallengeRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
 	if err != nil {
-		return catalogFinalizerFailure(fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err))
+		return nil, catalogFinalizerFailure(fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err))
 	}
-	if published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image {
-		return deterministicCatalogFailure(errors.New("materialized catalog challenge does not match its commit intent"))
+	if err := validateMaterializedCommit(entry, commit, published, image); err != nil {
+		return nil, err
 	}
-	return nil
+	return published, nil
 }
 
-func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalogdomain.Commit) error {
+func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalogdomain.Commit) (*challenge.Entry, error) {
 	if commit.Artifact == nil {
-		return deterministicCatalogFailure(errors.New("catalog commit has no final artifact"))
+		return nil, deterministicCatalogFailure(errors.New("catalog commit has no final artifact"))
 	}
 	image, err := artifactImage(*commit.Artifact)
 	if err != nil {
-		return deterministicCatalogFailure(err)
+		return nil, deterministicCatalogFailure(err)
 	}
 	target := filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID))
 	if _, err := os.Lstat(target); err != nil {
 		if os.IsNotExist(err) {
-			return challenge.ErrNotFound
+			return nil, challenge.ErrNotFound
 		}
-		return catalogFinalizerFailure(err)
+		return nil, catalogFinalizerFailure(err)
 	}
 	published, err := challenge.ValidateDir(target)
 	if err != nil {
-		return catalogContentFailure(fmt.Errorf("validate materialized catalog challenge: %w", err))
+		return nil, catalogContentFailure(fmt.Errorf("validate materialized catalog challenge: %w", err))
 	}
-	if published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug || published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title {
+	if err := validateMaterializedCommit(entry, commit, published, image); err != nil {
+		return nil, err
+	}
+	return published, nil
+}
+
+func validateMaterializedCommit(entry catalogdomain.Entry, commit catalogdomain.Commit, published *challenge.Entry, image string) error {
+	if published == nil || published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug ||
+		published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title ||
+		published.Runtime != entry.Snapshot.Runtime || published.Type != entry.Type || !slices.Equal(published.Tags, entry.Tags) ||
+		(commit.MaterializedRevision != "" && published.Revision != commit.MaterializedRevision) {
 		return deterministicCatalogFailure(errors.New("materialized catalog challenge conflicts with its durable commit"))
 	}
 	return nil
-}
-
-func (i *Installer) compileRevision(source *PortableSource, entries []catalogdomain.Entry, commits []catalogdomain.Commit) (roadmap.Revision, error) {
-	entryByPath := make(map[string]catalogdomain.Entry, len(entries))
-	for _, entry := range entries {
-		entryByPath[entry.SourcePath] = entry
-	}
-	commitByEntry := make(map[string]catalogdomain.Commit, len(commits))
-	for _, commit := range commits {
-		commitByEntry[commit.EntryID] = commit
-	}
-	values := make(map[string]roadmap.ChallengeRef, len(source.Roadmap.ChallengeBindings))
-	for _, binding := range source.Roadmap.ChallengeBindings {
-		entry, found := entryByPath[binding.Challenge.Path]
-		if !found {
-			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("roadmap binding %q has no catalog entry", binding.Challenge.Path))
-		}
-		commit, found := commitByEntry[entry.ID]
-		if !found || commit.State != catalogdomain.CommitMaterialized {
-			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("roadmap binding %q has no materialized catalog commit", binding.Challenge.Path))
-		}
-		published, err := challenge.ValidateDir(filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID)))
-		if err != nil {
-			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("read materialized catalog challenge %q: %w", binding.Challenge.Path, err))
-		}
-		if published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug || published.Title != binding.Challenge.Title ||
-			published.ContentRevision != binding.Challenge.ContentRevision {
-			return roadmap.Revision{}, deterministicCatalogFailure(fmt.Errorf("materialized catalog challenge %q does not match its roadmap binding", binding.Challenge.Path))
-		}
-		values[binding.Challenge.Path] = roadmap.ChallengeRef{
-			ID: commit.ChallengeID, RevisionID: commit.ChallengeRevisionID, SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title,
-			ContentRevision: binding.Challenge.ContentRevision, SourceSlug: published.SourceSlug, MaterializedRevision: published.Revision,
-		}
-	}
-	compiled, err := roadmap.CompilePortable(source.Roadmap, values)
-	if err != nil {
-		return roadmap.Revision{}, deterministicCatalogFailure(err)
-	}
-	return compiled, nil
-}
-
-func portableBindingsByPath(value roadmap.PortableRevision) map[string]roadmap.PortableChallengeBinding {
-	result := make(map[string]roadmap.PortableChallengeBinding, len(value.ChallengeBindings))
-	for _, binding := range value.ChallengeBindings {
-		result[binding.Challenge.Path] = binding
-	}
-	return result
 }
 
 func sourceArchive(source *PortableSource, entry catalogdomain.Entry) ([]byte, error) {
