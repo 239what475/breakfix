@@ -16,7 +16,7 @@ Browser / breakfix-mcp
         +-- Authoring Agent
         |     通过 GeneratorService 操作生成 workspace
         |
-        +-- Classifier / Roadmap maintenance
+        +-- Judge / Catalog publication finalizer
         |
         +-- Workspace lifecycle
         |     OpenSandbox + PVC + Server data PVC archive

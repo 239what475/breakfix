@@ -90,6 +90,24 @@ type Revision struct {
 	CreatedAt            time.Time
 }
 
+// ActiveRevision pairs a stable Challenge identity with the immutable
+// revision currently exposed by the Catalog. Historical callers continue to
+// resolve a specific revision ID rather than following this active pointer.
+type ActiveRevision struct {
+	Challenge Challenge
+	Revision  Revision
+}
+
+func (r ActiveRevision) Valid() bool {
+	return r.Challenge.Valid() && r.Challenge.State == StateActive &&
+		r.Revision.Valid() && r.Revision.State == RevisionActive &&
+		r.Challenge.ID == r.Revision.ChallengeID &&
+		r.Challenge.ActiveRevisionID == r.Revision.ID &&
+		r.Challenge.SourceKind == r.Revision.SourceKind &&
+		r.Challenge.SourceRef == r.Revision.SourceRef &&
+		r.Challenge.SourceSlug == r.Revision.SourceSlug
+}
+
 func (r Revision) Valid() bool {
 	if !content.ValidRevisionID(r.ID) || !content.ValidID(r.ChallengeID) || !r.SourceKind.Valid() ||
 		strings.TrimSpace(r.SourceRef) == "" || strings.TrimSpace(r.SourceRevisionID) == "" ||

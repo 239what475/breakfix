@@ -84,11 +84,9 @@ type Dependencies struct {
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
 	catalogService := dependencies.Catalog
 	if catalogService == nil {
-		var roadmap appcatalog.RoadmapStore
 		var lifecycle appcatalog.ChallengeLifecycleStore
 		var availability *appcatalog.Availability
 		if database != nil {
-			roadmap = database.Roadmap
 			lifecycle = database.Challenge
 			if cfg.Catalog.Enabled() {
 				var err error
@@ -100,7 +98,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		} else if cfg.Catalog.Enabled() {
 			return nil, fmt.Errorf("configured catalog release requires a database")
 		}
-		catalogService = appcatalog.NewService(cfg.ChallengesDir(), roadmap, availability, lifecycle)
+		catalogService = appcatalog.NewService(cfg.ChallengesDir(), availability, lifecycle)
 	}
 	agentRuntimeContext := dependencies.AgentRuntimeContext
 	if agentRuntimeContext == nil {

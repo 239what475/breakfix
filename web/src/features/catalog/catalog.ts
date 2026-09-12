@@ -1,8 +1,7 @@
-import type { Challenge, RoadmapReference } from "../../api/types";
+import type { Challenge } from "../../api/types";
 
 export type ChallengeStatus = "todo" | "in-progress" | "completed";
 export type CatalogSort = "newest" | "oldest";
-export type CatalogTopicFilter = RoadmapReference & { domainTitle: string };
 
 export function challengeStatus(challenge: Challenge): ChallengeStatus {
 	if (challenge.active) return "in-progress";
@@ -12,10 +11,6 @@ export function challengeStatus(challenge: Challenge): ChallengeStatus {
 
 export function formatRuntime(runtime: Challenge["runtime"]) {
 	return runtime === "k8s" ? "Kubernetes" : "Linux nodes";
-}
-
-export function formatDifficulty(difficulty: Challenge["difficulty"]) {
-	return difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
 }
 
 export function formatPublishedAt(value: string) {

@@ -7,8 +7,8 @@ Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` �
 
 ## 架构
 
-- **Server**：HTTP/Web UI、认证、终端代理、题库、学习记录、Authoring、Assistant、共享 GeneratorService、Judge、Classifier
-  与 Roadmap Agent Runtime；也是 PostgreSQL 与 immutable RoadmapRevision 的唯一写者。
+- **Server**：HTTP/Web UI、认证、终端代理、Catalog、学习记录、Authoring、Assistant、共享 GeneratorService 与 Judge；也是
+  PostgreSQL 和 immutable Challenge revision 的唯一写者。
 - **`breakfix-mcp`**：用户机器上的 stdio MCP Server；经 HTTPS 与用户 Token 调用远程 Server 的 Generator application API，
   并把不可变审核包原子投影到本机可丢弃的只读目录。
 - **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
@@ -16,7 +16,7 @@ Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` �
 - **Runtime Worker**：独立运行 Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行构建、artifact
   promotion、验证 Environment 和正式发布，后者只执行 runtime resource reaping。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
-  GenerationWorkflow 和 RoadmapRevision 的权威存储。
+  GenerationWorkflow、CatalogRelease、Challenge 及其 revision 的权威存储。
 - **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是
   浏览器 API 的一部分。
 

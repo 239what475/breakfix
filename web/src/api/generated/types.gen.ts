@@ -37,7 +37,6 @@ export type MySpaceChallenge = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
-    difficulty: string;
 };
 
 export type MySpaceProfile = {
@@ -121,10 +120,6 @@ export type ChallengeSummary = {
     runtime: 'node' | 'k8s';
     scenario_type: 'documentation-example' | 'operations-scenario';
     scenario_tags: Array<string>;
-    difficulty: 'easy' | 'medium' | 'hard';
-    domain: RoadmapReference;
-    topic: RoadmapReference;
-    tags: Array<RoadmapReference>;
     description: string;
     published_at: string;
     solved?: boolean;
@@ -139,55 +134,6 @@ export type CheckpointProgressSummary = {
 
 export type ChallengeList = {
     challenges: Array<ChallengeSummary>;
-};
-
-export type RoadmapReference = {
-    id: string;
-    source_ref: string;
-    title: string;
-};
-
-export type RoadmapDomain = {
-    id: string;
-    source_ref: string;
-    title: string;
-    definition: string;
-    scope: string;
-    non_goals: string;
-};
-
-export type RoadmapTopic = {
-    id: string;
-    source_ref: string;
-    title: string;
-    domain: RoadmapReference;
-    definition: string;
-    scope: string;
-    non_goals: string;
-    challenge_guidance: string;
-};
-
-export type RoadmapTag = {
-    id: string;
-    source_ref: string;
-    title: string;
-    description: string;
-};
-
-export type RoadmapEdge = {
-    source: RoadmapReference;
-    target: RoadmapReference;
-    relation: 'precedes' | 'related';
-    reason: string;
-};
-
-export type ChallengeRoadmap = {
-    revision: string;
-    domain: RoadmapReference;
-    topic: RoadmapTopic;
-    tags: Array<RoadmapTag>;
-    topic_neighbors: Array<RoadmapEdge>;
-    challenge_neighbors: Array<RoadmapEdge>;
 };
 
 export type ChallengeCheckpoint = {
@@ -221,6 +167,8 @@ export type ChallengeContent = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
+    scenario_type: 'documentation-example' | 'operations-scenario';
+    scenario_tags: Array<string>;
     nodes: Array<ChallengeNode>;
     problem: string;
     solution: string;
@@ -228,7 +176,6 @@ export type ChallengeContent = {
         [key: string]: string;
     };
     checkpoints: Array<ChallengeCheckpoint>;
-    roadmap: ChallengeRoadmap;
 };
 
 export type ChallengeProgress = {
@@ -294,7 +241,6 @@ export type TerminalTicketResponse = {
 
 export type AuthoringMetadata = {
     title: string;
-    difficulty: 'easy' | 'medium' | 'hard';
     description: string;
     runtime: 'node' | 'k8s';
 };
@@ -378,7 +324,6 @@ export type AuthoringCheckpointResult = {
 export type AuthoringChange = {
     kind: string;
     summary: string;
-    difficulty_impact: string;
     revision: number;
 };
 

@@ -22,7 +22,6 @@ type Entry struct {
 	Type            ScenarioType
 	Title           string
 	Runtime         string
-	Difficulty      string
 	Description     string
 	Tags            []string
 	Image           string
@@ -41,7 +40,6 @@ type Spec struct {
 	Type            ScenarioType `yaml:"type,omitempty"`
 	Title           string       `yaml:"title"`
 	Runtime         string       `yaml:"runtime"`
-	Difficulty      string       `yaml:"difficulty"`
 	Description     string       `yaml:"description"`
 	Tags            []string     `yaml:"tags,omitempty"`
 	Image           string       `yaml:"image"`
@@ -180,7 +178,7 @@ func loadSpec(dir string) (*Spec, error) {
 }
 
 // artifactRevision covers every regular file in the published challenge
-// directory, including the executable bit. Roadmap bindings therefore become
+// directory, including the executable bit. A materialized source becomes
 // stale when the problem, solution, checkpoint implementation, runtime setup,
 // or executable mode changes even if manifest metadata stays identical.
 func artifactRevision(dir string) (string, error) {
@@ -208,7 +206,6 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 		Type:            spec.Type,
 		Title:           spec.Title,
 		Runtime:         spec.Runtime,
-		Difficulty:      spec.Difficulty,
 		Description:     spec.Description,
 		Tags:            tags,
 		Image:           spec.Image,

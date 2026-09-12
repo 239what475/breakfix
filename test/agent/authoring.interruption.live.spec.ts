@@ -7,7 +7,6 @@ import {
 	sendAuthoringMessage,
 	waitForAuthoringInterruption,
 	waitForCatalogChallenge,
-	waitForClassificationReview,
 	waitForPublishedChallenge,
 	waitForVerifiedCandidate,
 } from "./authoring-live-helpers";
@@ -20,7 +19,6 @@ const challengeTitle = `Restore the Node task marker ${Date.now().toString(36)}`
 type Plan = {
 	metadata: {
 		title: string;
-		difficulty: "easy" | "medium" | "hard";
 		description: string;
 		runtime: "node" | "k8s";
 	};
@@ -36,7 +34,6 @@ type Plan = {
 const plan: Plan = {
 	metadata: {
 		title: challengeTitle,
-		difficulty: "easy",
 		description: "Repair the missing Node task marker.",
 		runtime: "node",
 	},
@@ -53,10 +50,10 @@ const plan: Plan = {
 };
 
 const candidateFiles: Record<string, string> = {
-	"challenge.yaml":
-		"runtime: node\n" +
-		`title: ${challengeTitle}\n` +
-		"difficulty: easy\n" +
+		"challenge.yaml":
+			"runtime: node\n" +
+			"type: operations-scenario\n" +
+			`title: ${challengeTitle}\n` +
 		"description: Repair the missing Node task marker.\n" +
 		"nodes:\n" +
 		"  - name: host\n" +
@@ -219,15 +216,6 @@ agentLiveTest("authoring resumes after its deadline and publishes the same workf
 	await authorized(page, `/generator/workflows/${workflowID}/content/confirm`, "POST", {
 		candidate_revision_id: candidateID,
 		idempotency_key: `interruption-content-${Date.now()}`,
-	});
-	await waitForClassificationReview(page, workflowID);
-	const generation = await readGeneration(page, workflowID);
-	const proposalRevision = generation.classification?.revision ?? 0;
-	expect(proposalRevision).toBeGreaterThan(0);
-	await authorized(page, `/generator/workflows/${workflowID}/classification/publish`, "POST", {
-		candidate_revision_id: candidateID,
-		proposal_revision: proposalRevision,
-		idempotency_key: `interruption-publish-${Date.now()}`,
 	});
 	const challengeID = await waitForPublishedChallenge(page, sessionID);
 	await waitForCatalogChallenge(page, challengeID);

@@ -24,7 +24,6 @@ func TestExampleConfigLoads(t *testing.T) {
 
 func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_JWT", "jwt-from-environment")
-	t.Setenv("BREAKFIX_TEST_DEBUG_CREDENTIAL", "debug-from-environment")
 	t.Setenv("BREAKFIX_TEST_RUNTIME_WORKER", "runtime-from-environment")
 	t.Setenv("BREAKFIX_TEST_WORKER_KEY", "worker-from-environment")
 	t.Setenv("BREAKFIX_TEST_SANDBOX_URL", "http://opensandbox.test.svc.cluster.local")
@@ -40,7 +39,6 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	t.Setenv("BREAKFIX_TEST_REGISTRY_CA", "/run/config/registry-ca.crt")
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	content := "jwt_secret: ${BREAKFIX_TEST_JWT}\n" +
-		"debug:\n  enabled: true\n  credential_env: BREAKFIX_TEST_DEBUG_CREDENTIAL\n" +
 		"internal_workers:\n  runtime: ${BREAKFIX_TEST_RUNTIME_WORKER}\n" +
 		"worker:\n  api_key_env: BREAKFIX_TEST_WORKER_KEY\n" +
 		"registry:\n  repository: ${BREAKFIX_TEST_REGISTRY_REPOSITORY}\n  pull_secret: ${BREAKFIX_TEST_REGISTRY_PULL_SECRET}\n  trust_bundle_file: ${BREAKFIX_TEST_REGISTRY_CA}\n" +
@@ -55,8 +53,8 @@ func TestLoadExpandsRuntimeConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.JWTSecret != "jwt-from-environment" || cfg.Debug.Credential != "debug-from-environment" || cfg.InternalWorkers.Runtime != "runtime-from-environment" || cfg.Worker.APIKey != "worker-from-environment" {
-		t.Fatalf("runtime secret expansion = jwt %q, debug %q, workers %#v, worker key %q", cfg.JWTSecret, cfg.Debug.Credential, cfg.InternalWorkers, cfg.Worker.APIKey)
+	if cfg.JWTSecret != "jwt-from-environment" || cfg.InternalWorkers.Runtime != "runtime-from-environment" || cfg.Worker.APIKey != "worker-from-environment" {
+		t.Fatalf("runtime secret expansion = jwt %q, workers %#v, worker key %q", cfg.JWTSecret, cfg.InternalWorkers, cfg.Worker.APIKey)
 	}
 	if cfg.OpenSandbox.BaseURL != "http://opensandbox.test.svc.cluster.local" || cfg.OpenSandbox.Namespace != "opensandbox-test" {
 		t.Fatalf("opensandbox runtime expansion = url %q, namespace %q", cfg.OpenSandbox.BaseURL, cfg.OpenSandbox.Namespace)
@@ -115,46 +113,6 @@ func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
 	}
 	if _, err := (Config{GeneratorWorkspaceIdleTTL: "0s"}).WorkspaceIdleTTL(); err == nil {
 		t.Fatal("zero workspace idle ttl unexpectedly parsed")
-	}
-}
-
-//nolint:gosec // Test-only configuration verifies that real credentials cannot be reused.
-func TestServerRejectsDebugCredentialReuse(t *testing.T) {
-	base := validProcessConfig()
-	identities := []struct {
-		name  string
-		value string
-	}{
-		{name: "jwt", value: base.JWTSecret},
-		{name: "runtime worker", value: base.InternalWorkers.Runtime},
-		{name: "worker", value: base.Worker.APIKey},
-		{name: "agent", value: base.Agent.APIKey},
-		{name: "opensandbox", value: base.OpenSandbox.APIKey},
-		{name: "registry username", value: base.Registry.Username},
-		{name: "registry", value: base.Registry.Password},
-	}
-	for _, identity := range identities {
-		t.Run(identity.name, func(t *testing.T) {
-			cfg := base
-			cfg.Debug = DebugConfig{Enabled: true, CredentialEnv: "BREAKFIX_DEBUG_CREDENTIAL", Credential: identity.value}
-			if err := cfg.ValidateServer(); err == nil {
-				t.Fatalf("reused %s credential was accepted", identity.name)
-			}
-		})
-	}
-}
-
-//nolint:gosec // Test-only placeholder verifies the independent debug credential contract.
-func TestServerRequiresIndependentDebugCredentialWhenEnabled(t *testing.T) {
-	cfg := validProcessConfig()
-	cfg.Debug = DebugConfig{Enabled: true, CredentialEnv: "BREAKFIX_DEBUG_CREDENTIAL"}
-	if err := cfg.ValidateServer(); err == nil {
-		t.Fatal("enabled debug routes accepted without a credential")
-	}
-
-	cfg.Debug.Credential = "debug-only-credential"
-	if err := cfg.ValidateServer(); err != nil {
-		t.Fatalf("valid independent debug credential rejected: %v", err)
 	}
 }
 

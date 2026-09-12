@@ -1,6 +1,6 @@
 runtime: node
+type: operations-scenario
 title: Complete runtime initialization
-difficulty: easy
 description: Repair the missing runtime initialization marker.
 nodes:
   - name: host

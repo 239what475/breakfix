@@ -41,11 +41,6 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 	if manifestScalar(spec["title"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 title")
 	}
-	switch manifestScalar(spec["difficulty"]) {
-	case "easy", "medium", "hard":
-	default:
-		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", manifestScalar(spec["difficulty"])))
-	}
 	typeValue := NormalizeScenarioType(manifestScalar(spec["type"]))
 	if !typeValue.Valid() {
 		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 documentation-example 或 operations-scenario，当前为 %q", typeValue))

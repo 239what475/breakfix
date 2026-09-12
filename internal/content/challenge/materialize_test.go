@@ -69,7 +69,7 @@ func TestMaterializePromotesValidatedChallenge(t *testing.T) {
 func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 	root := t.TempDir()
 	_, err := MaterializeWithPath(root, "broken-task", testChallengeRevisionID, "broken-task-source/"+testChallengeRevisionID, func(dst string) error {
-		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: broken-task-source\ntitle: Broken\nruntime: node\ndifficulty: easy\nimage: broken-task:v1\ndescription: demo\n")
+		writeFile(t, filepath.Join(dst, "challenge.yaml"), "id: broken-task\nrevision_id: "+testChallengeRevisionID+"\nsource_slug: broken-task-source\ntitle: Broken\nruntime: node\nimage: broken-task:v1\ndescription: demo\n")
 		return nil
 	})
 	if err == nil {
@@ -83,7 +83,7 @@ func TestMaterializeRejectsMissingRequiredFiles(t *testing.T) {
 
 func TestValidateDirRejectsMissingMetadata(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\nsource_slug: invalid\ntitle: Invalid\nruntime: node\ndifficulty: \ndescription: \"\"\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\npublished_at: 2026-07-24T08:00:00Z\n")
+	writeFile(t, filepath.Join(root, "challenge.yaml"), "id: invalid\nsource_slug: invalid\ntitle: Invalid\nruntime: node\ndescription: \"\"\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\npublished_at: 2026-07-24T08:00:00Z\n")
 	writeChallengeAssets(t, root)
 
 	if _, err := ValidateDir(root); err == nil {
@@ -266,7 +266,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func validManifest(prefix string) string {
-	return prefix + "runtime: node\ndifficulty: easy\ndescription: demo\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return prefix + "runtime: node\ndescription: demo\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func validPublishedNodeManifest(prefix string) string {
@@ -274,7 +274,7 @@ func validPublishedNodeManifest(prefix string) string {
 }
 
 func validK8sManifest(prefix string) string {
-	return prefix + "runtime: k8s\ndifficulty: easy\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+	return prefix + "runtime: k8s\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
 }
 
 func validPublishedK8sManifest(prefix string) string {

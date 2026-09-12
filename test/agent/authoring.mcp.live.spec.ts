@@ -23,16 +23,11 @@ type GenerationResult = {
 			failure?: { class: "artifact" | "infrastructure" | "cancelled"; code: string; summary: string };
 		} | null;
 		verification?: { passed: boolean } | null;
-		classification?: {
-			revision: number;
-			result: "proposed" | "unclassifiable";
-		} | null;
 	};
 	review?: {
 		workflow_id: string;
 		candidate_revision_id: string;
-		kind: "content" | "classification";
-		proposal_revision: number;
+		kind: "content";
 		review_path: string;
 	} | null;
 };
@@ -40,7 +35,6 @@ type GenerationResult = {
 const plan = {
 	metadata: {
 		title: "Restore the Node runtime readiness marker",
-		difficulty: "easy",
 		description: "Repair the missing Node runtime readiness marker.",
 		runtime: "node",
 	},
@@ -62,8 +56,8 @@ function candidateFiles(answerScript: string): Record<string, string> {
 	return {
 		"challenge.yaml":
 			"runtime: node\n" +
+			"type: operations-scenario\n" +
 			"title: Restore the Node runtime readiness marker\n" +
-			"difficulty: easy\n" +
 			"description: Repair the missing Node runtime readiness marker.\n" +
 			"nodes:\n" +
 			"  - name: host\n" +
@@ -270,7 +264,6 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 			"get_generation",
 			"sync_review",
 			"confirm_content",
-			"confirm_classification_and_publish",
 		]) {
 			expect(toolNames, "connector should expose the shared generator tools").toContain(expected);
 		}
@@ -407,36 +400,6 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 			idempotency_key: "mcp-e2e-confirm-content",
 		});
 
-		// The candidate is a Node runtime validation scenario that belongs to
-		// the prepared Roadmap's existing topic, so the Server Classifier must
-		// return a reviewable proposal; clients never write topic/tag data.
-		const classificationReview = await waitForGeneration(
-			client,
-			workflowID,
-			(result) =>
-				result.generation.workflow.state === "NeedsClassificationReview" &&
-				result.generation.classification?.result === "proposed" &&
-				Boolean(result.review),
-			20 * 60_000,
-			"classification review",
-		);
-		const proposalRevision = classificationReview.generation.classification?.revision ?? 0;
-		expect(proposalRevision).toBeGreaterThan(0);
-		const classificationProjection = classificationReview.review;
-		if (!classificationProjection) throw new Error("classification review projection is missing");
-		expect(classificationProjection.kind).toBe("classification");
-		expect(classificationProjection.proposal_revision).toBe(proposalRevision);
-		await expectFile(classificationProjection.review_path, "manifest.json");
-		await expectFile(classificationProjection.review_path, "topic.md");
-		await expectFile(classificationProjection.review_path, "tags.md");
-		await expectNoSensitiveContent(path.join(reviewRoot, workflowID), token);
-
-		await client.callTool("confirm_classification_and_publish", {
-			workflow_id: workflowID,
-			candidate_revision_id: candidateRevisionID,
-			proposal_revision: proposalRevision,
-			idempotency_key: "mcp-e2e-publish",
-		});
 		await waitForGeneration(
 			client,
 			workflowID,

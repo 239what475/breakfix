@@ -199,28 +199,6 @@ select:focus-visible {
     monospace;
   text-transform: uppercase;
 }
-.difficulty {
-  display: inline-flex;
-  width: max-content;
-  padding: 2px 5px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  font:
-    10px "DM Mono",
-    monospace;
-}
-.difficulty.easy {
-  color: var(--green);
-  background: #e0f1e9;
-}
-.difficulty.medium {
-  color: var(--amber);
-  background: #f8eddb;
-}
-.difficulty.hard {
-  color: var(--red);
-  background: #f7e6e2;
-}
 .toast {
   position: fixed;
   z-index: 20;

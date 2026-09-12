@@ -13,7 +13,6 @@ func TestValidateChallengeManifestRejectsPlatformFields(t *testing.T) {
 image: should-disappear
 runtime: node
 title: Cleanup Logs
-difficulty: medium
 description: |
   修复日志清理流程并恢复磁盘空间。
 `)
@@ -39,7 +38,6 @@ func TestValidateChallengeManifestRejectsMissingMetadata(t *testing.T) {
 	dir := t.TempDir()
 	writeGeneratorTestFile(t, filepath.Join(dir, "challenge.yaml"), `runtime: node
 title: Cleanup Logs
-difficulty: medium
 description: ""
 `)
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Challenge } from "../../api/types";
-import { challengeStatus, formatDifficulty, formatPublishedAt, formatRuntime } from "./catalog";
+import { challengeStatus, formatPublishedAt, formatRuntime } from "./catalog";
 
 const props = defineProps<{
 	challenge: Challenge;
@@ -21,7 +21,6 @@ const emit = defineEmits<{ start: [id: string] }>();
 			<div class="challenge-card-topline">
 				<div class="challenge-pills">
 					<span class="runtime-pill">{{ formatRuntime(challenge.runtime) }}</span>
-					<span :class="['difficulty', challenge.difficulty]">{{ formatDifficulty(challenge.difficulty) }}</span>
 				</div>
 				<time :datetime="challenge.published_at">{{ formatPublishedAt(challenge.published_at) }}</time>
 			</div>
@@ -29,7 +28,7 @@ const emit = defineEmits<{ start: [id: string] }>();
 			<p class="challenge-card-description">{{ challenge.description }}</p>
 			<div class="challenge-card-bottom">
 				<div class="challenge-tags" aria-label="Challenge tags">
-					<span v-for="tag in challenge.tags" :key="tag.id">{{ tag.title }}</span>
+					<span v-for="tag in challenge.scenario_tags" :key="tag">{{ tag }}</span>
 				</div>
 				<div v-if="loggedIn" class="challenge-state" :class="challengeStatus(challenge)">
 					<span v-if="challengeStatus(challenge) === 'in-progress'">
@@ -40,7 +39,6 @@ const emit = defineEmits<{ start: [id: string] }>();
 					<span v-if="challenge.active && challenge.solved" class="completion-history">Completed before</span>
 				</div>
 			</div>
-			<p class="challenge-primary-topic">Topic: {{ challenge.topic.title }}</p>
 		</div>
 		<div class="challenge-card-action">
 			<button class="primary-button" type="button" :disabled="starting" @click="emit('start', challenge.id)">

@@ -291,7 +291,7 @@ func decodeGeneratorHTTPResponse(t *testing.T, recorder *httptest.ResponseRecord
 
 func generatorHTTPPlan() authoring.Plan {
 	return authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "HTTP Generator", Difficulty: "easy", Description: "Exercise the generator HTTP application contract.", Runtime: challenge.RuntimeNode},
+		Metadata:    authoring.Metadata{Title: "HTTP Generator", Description: "Exercise the generator HTTP application contract.", Runtime: challenge.RuntimeNode},
 		Overview:    "Build a small node workspace through the generator API.",
 		Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The node is ready.", Position: 1}},
 	}
@@ -315,7 +315,7 @@ func generatorHTTPReviewArchive(t *testing.T) []byte {
 		content string
 		mode    int64
 	}{
-		{"challenge.yaml", "runtime: node\ntitle: HTTP review candidate\ndifficulty: easy\ndescription: Review the public candidate projection.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
+		{"challenge.yaml", "runtime: node\ntype: operations-scenario\ntitle: HTTP review candidate\ndescription: Review the public candidate projection.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
 		{"problem.md", "# Problem\n\nInspect the candidate.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host.\n", 0o644},

@@ -13,7 +13,7 @@ var ErrReleaseNotReady = errors.New("configured catalog release is not ready")
 
 // ReleaseReadinessStore exposes only the configured immutable release state.
 // Catalog reads must not infer readiness from a partially materialized
-// filesystem or a previously published Roadmap revision.
+// filesystem or a previously published revision.
 type ReleaseReadinessStore interface {
 	ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error)
 }

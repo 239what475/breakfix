@@ -430,7 +430,7 @@ func fromAPIAuthoringPlan(value api.AuthoringPlan) authoringdomain.Plan {
 	}
 	return authoringdomain.Plan{
 		Metadata: authoringdomain.Metadata{
-			Title: value.Metadata.Title, Difficulty: string(value.Metadata.Difficulty), Description: value.Metadata.Description, Runtime: string(value.Metadata.Runtime),
+			Title: value.Metadata.Title, Description: value.Metadata.Description, Runtime: string(value.Metadata.Runtime),
 		},
 		Overview: value.Overview, Checkpoints: checkpoints,
 	}

@@ -28,14 +28,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-primary-topic {
-  overflow: hidden;
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .workspace-header-actions {
   display: flex;
   align-items: center;
@@ -229,75 +221,6 @@
   max-width: 780px;
   padding: 28px clamp(22px, 4vw, 58px) 80px;
   color: #24312d;
-}
-.roadmap-panel {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  max-width: 780px;
-  margin: 22px clamp(22px, 4vw, 58px) 0;
-  padding: 14px;
-  border: 1px solid #d9e2dc;
-  background: #f6f9f6;
-}
-.roadmap-group {
-  min-width: 0;
-}
-.roadmap-group .eyebrow {
-  margin: 0 0 4px;
-}
-.roadmap-group strong {
-  display: block;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.roadmap-tags {
-  display: grid;
-  gap: 5px;
-  margin: 7px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.roadmap-tags li,
-.roadmap-group small {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.roadmap-group small {
-	display: block;
-	margin-top: 2px;
-}
-.roadmap-neighbors {
-	grid-column: 1 / -1;
-	padding-top: 10px;
-	border-top: 1px solid #d9e2dc;
-}
-.roadmap-edge-list {
-	display: grid;
-	gap: 8px;
-	margin: 7px 0 0;
-	padding: 0;
-	list-style: none;
-}
-.roadmap-edge-list li {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 2px 8px;
-}
-.roadmap-edge-list strong {
-	min-width: 0;
-	font-size: 11px;
-	font-weight: 600;
-}
-.roadmap-edge-list span {
-	color: #4c7963;
-	font: 10px "DM Mono", monospace;
-}
-.roadmap-edge-list small {
-	grid-column: 1 / -1;
-	color: var(--muted);
-	font-size: 10px;
 }
 .markdown-document h1 {
   margin: 0 0 24px;

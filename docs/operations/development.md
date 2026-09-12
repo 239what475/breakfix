@@ -30,7 +30,7 @@ BREAKFIX_MCP_TOKEN="$(...)" ./bin/breakfix-mcp -config /tmp/breakfix-mcp.yaml
 ```
 
 stdout 只承载 newline-delimited JSON-RPC，诊断只写 stderr。`get_generation`、`wait_generation` 或显式 `sync_review` 在
-workflow 到达 `NeedsAuthorReview` / `NeedsClassificationReview` 时，会把绑定当前 revision 的不可变审核包原子投影到
+workflow 到达 `NeedsAuthorReview` 时，会把绑定当前 revision 的不可变审核包原子投影到
 `/tmp/breakfix/reviews/<workflow-id>/`；排查投影问题时删除该目录后重新调用即可从 Server 权威重新同步，不必重启连接器。
 网页与 MCP 两个入口可用同一个 workflow ID 交替调试，因为它们共享同一个 `GeneratorService`。
 

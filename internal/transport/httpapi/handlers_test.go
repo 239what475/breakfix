@@ -172,11 +172,8 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
-	if content.Roadmap.Domain.SourceRef != "test-catalog" || content.Roadmap.Topic.SourceRef != "test-catalog/repair" {
-		t.Fatalf("roadmap topic projection = %#v", content.Roadmap)
-	}
-	if len(content.Roadmap.Tags) != 1 || content.Roadmap.Tags[0].SourceRef != "test" || content.Roadmap.Tags[0].Description != "Test fixture tag." {
-		t.Fatalf("roadmap tag projection = %#v", content.Roadmap.Tags)
+	if content.ScenarioType != api.ChallengeContentScenarioTypeOperationsScenario || len(content.ScenarioTags) != 0 {
+		t.Fatalf("scenario content projection = %#v", content)
 	}
 }
 
@@ -190,7 +187,7 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nrevision_id: "+testPublishedChallengeRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndifficulty: easy\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nrevision_id: "+testPublishedChallengeRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
@@ -228,11 +225,8 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
 	}
-	if got.Domain.SourceRef != "test-catalog" || got.Topic.SourceRef != "test-catalog/repair" {
-		t.Fatalf("roadmap summary = %#v", got)
-	}
-	if len(got.Tags) != 1 || got.Tags[0].SourceRef != "test" || got.Tags[0].Title != "Test" {
-		t.Fatalf("structured tags = %#v", got.Tags)
+	if got.ScenarioType != api.ChallengeSummaryScenarioTypeOperationsScenario || len(got.ScenarioTags) != 0 {
+		t.Fatalf("scenario summary = %#v", got)
 	}
 }
 
@@ -397,7 +391,7 @@ func writeTestChallenge(t *testing.T, root string) {
 const testPublishedChallengeRevisionID = "chrev-aaaaaaaaaaaaaaaa"
 
 func nodeTestManifest(title string) string {
-	return "id: demo\nrevision_id: " + testPublishedChallengeRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndifficulty: easy\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return "id: demo\nrevision_id: " + testPublishedChallengeRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {

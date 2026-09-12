@@ -348,10 +348,9 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 
 func mySpaceChallenge(entry challenge.Entry) api.MySpaceChallenge {
 	return api.MySpaceChallenge{
-		Id:         entry.ID,
-		Title:      entry.Title,
-		Runtime:    api.MySpaceChallengeRuntime(entry.Runtime),
-		Difficulty: entry.Difficulty,
+		Id:      entry.ID,
+		Title:   entry.Title,
+		Runtime: api.MySpaceChallengeRuntime(entry.Runtime),
 	}
 }
 

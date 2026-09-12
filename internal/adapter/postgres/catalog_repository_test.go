@@ -11,9 +11,7 @@ import (
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
-	roadmaptest "github.com/breakfix/breakfix/internal/testkit/roadmap"
 )
 
 func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing.T) {
@@ -30,13 +28,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 		t.Fatalf("create catalog release = %#v, inserted=%v, err=%v", created, inserted, err)
 	}
 
-	portable := roadmaptest.PortableRevision()
-	portable.Topics = portable.Topics[:1]
-	portable.ChallengeBindings = portable.ChallengeBindings[:1]
-	portable.TopicEdges = nil
-	portable.ChallengeEdges = nil
-	binding := portable.ChallengeBindings[0]
-	entry := catalogRepositoryEntry(release.ID, binding, now)
+	entry := catalogRepositoryEntry(release.ID, now)
 	initialized := *created
 	initialized.Name = "catalog-integration"
 	initialized.Version = "2026.08.04"
@@ -45,7 +37,6 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err != nil || initializedRelease.State != catalogdomain.ReleaseInstalling {
 		t.Fatalf("initialize catalog release = %#v, err=%v", initializedRelease, err)
 	}
-	assertNoCurrentRoadmap(t, database)
 
 	action, err := database.Catalog.ClaimCatalogRuntimeAction(ctx, "catalog-worker", time.Second, now)
 	if err != nil || action == nil {
@@ -92,14 +83,13 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	challengeID := challenge.NewID()
 	intent := catalogdomain.Commit{
 		ID: catalogdomain.EntryCommitIDFor(initializedRelease.ID, entry.ID), ReleaseID: initializedRelease.ID, EntryID: entry.ID,
-		ChallengeID: challengeID, ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceSlug: challenge.SourceSlugFor(binding.Challenge.Title, challengeID),
+		ChallengeID: challengeID, ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceSlug: challenge.SourceSlugFor(entry.Title, challengeID),
 		State: catalogdomain.CommitPrepared, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	committing, commits, err := database.Catalog.PrepareReleaseCommit(ctx, initializedRelease.ID, []catalogdomain.Commit{intent}, now)
 	if err != nil || committing.State != catalogdomain.ReleaseCommitting || len(commits) != 1 {
 		t.Fatalf("prepare catalog commit = release:%#v commits:%#v err=%v", committing, commits, err)
 	}
-	assertNoCurrentRoadmap(t, database)
 
 	commitAction := claimCatalogRuntimeAction(t, database, now)
 	if commitAction.Identity.Scope != runtime.ScopeCatalogCommit || commitAction.Identity.State != runtime.StateChallengePublishing {
@@ -138,7 +128,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if reloaded.FinalizerLastError != "temporary materialization filesystem failure" || reloaded.FinalizerNextRetryAt == nil {
 		t.Fatalf("reloaded catalog publication diagnostic = %#v", reloaded)
 	}
-	authoring := insertChallengeLifecycleFixture(t, database, "authoring", "catalog-race-author", false, now.Add(time.Second))
+	authoring := insertChallengeLifecycleFixture(t, database, "authoring", "catalog-race-author", now.Add(time.Second))
 	if _, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now); !errors.Is(err, catalogdomain.ErrBaselineEstablished) {
 		t.Fatalf("catalog commit over authoring content = %v, want baseline established", err)
 	}
@@ -318,8 +308,7 @@ func TestCatalogDeterministicFinalizerFailureIsTerminal(t *testing.T) {
 	if err != nil || !inserted {
 		t.Fatalf("create catalog finalizer release = %#v, inserted=%v, err=%v", created, inserted, err)
 	}
-	portable := roadmaptest.PortableRevision()
-	entry := catalogRepositoryEntry(created.ID, portable.ChallengeBindings[0], now)
+	entry := catalogRepositoryEntry(created.ID, now)
 	initialized := *created
 	initialized.Name = "catalog-finalizer"
 	initialized.Version = "2026.08.04"
@@ -358,9 +347,7 @@ func createCatalogRuntimeFixture(t *testing.T, database *Store, now time.Time) (
 	if err != nil || !inserted {
 		t.Fatalf("create entry runtime release = %#v, inserted=%v, err=%v", created, inserted, err)
 	}
-	portable := roadmaptest.PortableRevision()
-	binding := portable.ChallengeBindings[0]
-	entry := catalogRepositoryEntry(created.ID, binding, now)
+	entry := catalogRepositoryEntry(created.ID, now)
 	initializedInput := *created
 	initializedInput.Name = "runtime-retry"
 	initializedInput.Version = "v1"
@@ -372,10 +359,10 @@ func createCatalogRuntimeFixture(t *testing.T, database *Store, now time.Time) (
 	return initialized, entry
 }
 
-func catalogRepositoryEntry(releaseID string, binding roadmap.PortableChallengeBinding, now time.Time) catalogdomain.Entry {
+func catalogRepositoryEntry(releaseID string, now time.Time) catalogdomain.Entry {
 	return catalogdomain.Entry{
-		ID: catalogdomain.EntryIDFor(releaseID, binding.Challenge.Path), ReleaseID: releaseID, SourcePath: binding.Challenge.Path,
-		SourceRef: binding.Challenge.SourceRef, Title: binding.Challenge.Title, Type: challenge.ScenarioOperationsScenario, Tags: []string{"runtime-fixture"}, ContentRevision: catalogdomain.ContentRevision(binding.Challenge.ContentRevision),
+		ID: catalogdomain.EntryIDFor(releaseID, "challenges/linux/runtime-fixture"), ReleaseID: releaseID, SourcePath: "challenges/linux/runtime-fixture",
+		SourceRef: "node-runtime-fixture", Title: "Runtime fixture", Type: challenge.ScenarioOperationsScenario, Tags: []string{"runtime-fixture"}, ContentRevision: catalogdomain.ContentRevision("sha256:" + strings.Repeat("e", 64)),
 		ArchiveSHA256: "sha256:" + strings.Repeat("f", 64),
 		Snapshot: execution.Snapshot{Runtime: challenge.RuntimeNode, Checkpoints: []execution.CheckpointSnapshot{{ID: "ready", Node: "host"}},
 			Node: &execution.NodeRuntimeSnapshot{BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "catalog-node-profile", NetworkPolicyRevision: "catalog-node-network",
@@ -391,12 +378,4 @@ func claimCatalogRuntimeAction(t *testing.T, database *Store, now time.Time) *ru
 		t.Fatalf("claim catalog runtime action = %#v, err=%v", action, err)
 	}
 	return action
-}
-
-func assertNoCurrentRoadmap(t *testing.T, database *Store) {
-	t.Helper()
-	_, err := database.Roadmap.CurrentRoadmap(context.Background())
-	if !errors.Is(err, roadmap.ErrNoCurrentRevision) {
-		t.Fatalf("current roadmap before final catalog commit = %v, want no current revision", err)
-	}
 }

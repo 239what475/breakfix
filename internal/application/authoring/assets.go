@@ -86,7 +86,7 @@ func ReadVerifiedChallenge(archive []byte) (*domain.VerifiedChallenge, error) {
 	err := withCandidateArchive(archive, func(_ string, entry *challenge.Entry) error {
 		result = &domain.VerifiedChallenge{
 			Metadata: domain.Metadata{
-				Title: entry.Title, Difficulty: entry.Difficulty, Description: entry.Description, Runtime: entry.Runtime,
+				Title: entry.Title, Description: entry.Description, Runtime: entry.Runtime,
 			},
 			Checkpoints: make([]domain.VerifiedCheckpoint, 0, len(entry.Checkpoints)),
 		}

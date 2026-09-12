@@ -445,13 +445,13 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	changedPlan := stage.Plan.Clone()
 	changedPlan.Overview = "尚未提交的私有概览"
 	updated, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, changedPlan, authoring.Change{
-		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
+		Kind: "overview", Summary: "stale attempt",
 	})
 	if err != nil {
 		t.Fatalf("apply stage operation: %v", err)
 	}
 	replayed, err := database.Authoring.UpdateAuthoringStage(ctx, run.ID, 1, stage.StageRevision, operation, changedPlan, authoring.Change{
-		Kind: "overview", Summary: "stale attempt", DifficultyImpact: "unchanged",
+		Kind: "overview", Summary: "stale attempt",
 	})
 	if err != nil {
 		t.Fatalf("replay stage operation: %v", err)
@@ -771,7 +771,7 @@ func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Tim
 
 func generationTestPlan() authoring.Plan {
 	return authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Workflow lifecycle", Difficulty: "medium", Description: "Exercise durable workflow recovery.", Runtime: "k8s"},
+		Metadata:    authoring.Metadata{Title: "Workflow lifecycle", Description: "Exercise durable workflow recovery.", Runtime: "k8s"},
 		Overview:    "Repair a workload and verify the observable outcome.",
 		Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The workload is healthy.", Position: 1}},
 	}

@@ -17,7 +17,7 @@ func TestPublicationRetentionIncludesHistoryAndOnlyNonTerminalIntents(t *testing
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 7, 9, 0, 0, 0, time.UTC)
-	historical := insertChallengeLifecycleFixture(t, database, "authoring", "retention-author", true, now)
+	historical := insertChallengeLifecycleFixture(t, database, "authoring", "retention-author", now)
 	if _, err := database.Challenge.DeprecateAuthoringChallenge(ctx, historical.challenge.OwnerUserID, historical.challenge.ID, now.Add(time.Second)); err != nil {
 		t.Fatalf("deprecate historical challenge: %v", err)
 	}

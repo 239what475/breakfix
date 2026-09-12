@@ -8,9 +8,7 @@ import (
 	"time"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
-	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/content/challenge"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -61,7 +59,6 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Id:           ch.ID,
 			Title:        ch.Title,
 			Runtime:      challengeSummaryRuntime(ch.Runtime),
-			Difficulty:   api.ChallengeSummaryDifficulty(ch.Difficulty),
 			ScenarioType: api.ChallengeSummaryScenarioType(published.Catalog.Type),
 			ScenarioTags: append([]string(nil), published.Catalog.Tags...),
 			Description:  ch.Description,
@@ -80,9 +77,6 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 				s.Progress = &progress
 			}
 		}
-		s.Domain = toAPIRoadmapReference(published.Roadmap.Domain)
-		s.Topic = toAPIRoadmapReference(roadmap.Ref{ID: published.Roadmap.Topic.ID, SourceRef: published.Roadmap.Topic.SourceRef, Title: published.Roadmap.Topic.Title})
-		s.Tags = toAPIRoadmapReferences(published.Roadmap.Tags)
 		summaries = append(summaries, s)
 	}
 	c.JSON(http.StatusOK, api.ChallengeList{Challenges: summaries})
@@ -105,14 +99,10 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	if user == nil {
 		return
 	}
-	var (
-		entry            *challenge.Entry
-		challengeRoadmap appcatalog.ChallengeRoadmap
-	)
+	var entry *challenge.Entry
 	published, err := h.catalog.Find(c.Request.Context(), id)
 	if err == nil {
 		entry = &published.Entry
-		challengeRoadmap = published.Roadmap
 		// Prefer the revision pinned by an existing Environment. If there is
 		// no Environment, the public current revision remains readable without
 		// requiring a user to start one first.
@@ -142,7 +132,6 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 		}
 		// A deprecated Challenge has no active Catalog projection. Its durable
 		// content remains readable for an existing Environment.
-		challengeRoadmap = appcatalog.ChallengeRoadmap{Tags: []roadmap.Tag{}, TopicNeighbors: []roadmap.Edge{}, ChallengeNeighbors: []roadmap.Edge{}}
 	} else {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -155,61 +144,17 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 	checkpoints := toAPICheckpoints(entry.Checkpoints)
 	hints := content.Hints
 	c.JSON(http.StatusOK, api.ChallengeContent{
-		Id:          entry.ID,
-		Title:       entry.Title,
-		Runtime:     api.ChallengeContentRuntime(entry.Runtime),
-		Nodes:       toAPIChallengeNodes(entry.Nodes),
-		Problem:     content.Problem,
-		Solution:    content.Solution,
-		Hints:       hints,
-		Checkpoints: checkpoints,
-		Roadmap:     toAPIChallengeRoadmap(challengeRoadmap),
+		Id:           entry.ID,
+		Title:        entry.Title,
+		Runtime:      api.ChallengeContentRuntime(entry.Runtime),
+		ScenarioType: api.ChallengeContentScenarioType(entry.Type),
+		ScenarioTags: append([]string(nil), entry.Tags...),
+		Nodes:        toAPIChallengeNodes(entry.Nodes),
+		Problem:      content.Problem,
+		Solution:     content.Solution,
+		Hints:        hints,
+		Checkpoints:  checkpoints,
 	})
-}
-
-func toAPIRoadmapReference(value roadmap.Ref) api.RoadmapReference {
-	return api.RoadmapReference{Id: value.ID, SourceRef: value.SourceRef, Title: value.Title}
-}
-
-func toAPIRoadmapReferences(values []roadmap.Tag) []api.RoadmapReference {
-	result := make([]api.RoadmapReference, 0, len(values))
-	for _, value := range values {
-		result = append(result, toAPIRoadmapReference(roadmap.Ref{ID: value.ID, SourceRef: value.SourceRef, Title: value.Title}))
-	}
-	return result
-}
-
-func toAPIRoadmapTag(value roadmap.Tag) api.RoadmapTag {
-	return api.RoadmapTag{Id: value.ID, SourceRef: value.SourceRef, Title: value.Title, Description: value.Description}
-}
-
-func toAPIRoadmapTopic(value roadmap.Topic) api.RoadmapTopic {
-	return api.RoadmapTopic{
-		Id: value.ID, SourceRef: value.SourceRef, Title: value.Title, Domain: toAPIRoadmapReference(value.Domain),
-		Definition: value.Definition, Scope: value.Scope, NonGoals: value.NonGoals, ChallengeGuidance: value.ChallengeGuidance,
-	}
-}
-
-func toAPIRoadmapEdges(values []roadmap.Edge) []api.RoadmapEdge {
-	result := make([]api.RoadmapEdge, 0, len(values))
-	for _, value := range values {
-		result = append(result, api.RoadmapEdge{
-			Source: toAPIRoadmapReference(value.Source), Target: toAPIRoadmapReference(value.Target),
-			Relation: api.RoadmapEdgeRelation(value.Relation), Reason: value.Reason,
-		})
-	}
-	return result
-}
-
-func toAPIChallengeRoadmap(value appcatalog.ChallengeRoadmap) api.ChallengeRoadmap {
-	tags := make([]api.RoadmapTag, 0, len(value.Tags))
-	for _, tag := range value.Tags {
-		tags = append(tags, toAPIRoadmapTag(tag))
-	}
-	return api.ChallengeRoadmap{
-		Revision: value.Revision, Domain: toAPIRoadmapReference(value.Domain), Topic: toAPIRoadmapTopic(value.Topic), Tags: tags,
-		TopicNeighbors: toAPIRoadmapEdges(value.TopicNeighbors), ChallengeNeighbors: toAPIRoadmapEdges(value.ChallengeNeighbors),
-	}
 }
 
 func (h *Handler) GetChallengeProgress(c *gin.Context, id string) {

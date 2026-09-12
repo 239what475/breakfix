@@ -1,6 +1,6 @@
 // Package catalog defines portable release identities. Runtime installation
 // state is added by the catalog application; this package never models a
-// GenerationWorkflow or a second Roadmap read model.
+// GenerationWorkflow or a second Catalog read model.
 package catalog
 
 import (

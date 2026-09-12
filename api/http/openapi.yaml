@@ -926,7 +926,7 @@ components:
 
     MySpaceChallenge:
       type: object
-      required: [id, title, runtime, difficulty]
+      required: [id, title, runtime]
       properties:
         id:
           type: string
@@ -935,9 +935,6 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
-        difficulty:
-          type: string
-
     MySpaceProfile:
       type: object
       required: [id, name, created_at]
@@ -1120,7 +1117,7 @@ components:
 
     ChallengeSummary:
       type: object
-      required: [id, title, runtime, difficulty, scenario_type, scenario_tags, domain, topic, tags, description, published_at]
+      required: [id, title, runtime, scenario_type, scenario_tags, description, published_at]
       properties:
         id:
           type: string
@@ -1136,17 +1133,6 @@ components:
           type: array
           items:
             type: string
-        difficulty:
-          type: string
-          enum: [easy, medium, hard]
-        domain:
-          $ref: "#/components/schemas/RoadmapReference"
-        topic:
-          $ref: "#/components/schemas/RoadmapReference"
-        tags:
-          type: array
-          items:
-            $ref: "#/components/schemas/RoadmapReference"
         description:
           type: string
         published_at:
@@ -1178,105 +1164,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChallengeSummary"
-
-    RoadmapReference:
-      type: object
-      required: [id, source_ref, title]
-      properties:
-        id:
-          type: string
-        source_ref:
-          type: string
-        title:
-          type: string
-
-    RoadmapDomain:
-      type: object
-      required: [id, source_ref, title, definition, scope, non_goals]
-      properties:
-        id:
-          type: string
-        source_ref:
-          type: string
-        title:
-          type: string
-        definition:
-          type: string
-        scope:
-          type: string
-        non_goals:
-          type: string
-
-    RoadmapTopic:
-      type: object
-      required: [id, source_ref, title, domain, definition, scope, non_goals, challenge_guidance]
-      properties:
-        id:
-          type: string
-        source_ref:
-          type: string
-        title:
-          type: string
-        domain:
-          $ref: "#/components/schemas/RoadmapReference"
-        definition:
-          type: string
-        scope:
-          type: string
-        non_goals:
-          type: string
-        challenge_guidance:
-          type: string
-
-    RoadmapTag:
-      type: object
-      required: [id, source_ref, title, description]
-      properties:
-        id:
-          type: string
-        source_ref:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
-
-    RoadmapEdge:
-      type: object
-      required: [source, target, relation, reason]
-      properties:
-        source:
-          $ref: "#/components/schemas/RoadmapReference"
-        target:
-          $ref: "#/components/schemas/RoadmapReference"
-        relation:
-          type: string
-          enum: [precedes, related]
-        reason:
-          type: string
-
-    ChallengeRoadmap:
-      type: object
-      required: [revision, domain, topic, tags, topic_neighbors, challenge_neighbors]
-      properties:
-        revision:
-          type: string
-        domain:
-          $ref: "#/components/schemas/RoadmapReference"
-        topic:
-          $ref: "#/components/schemas/RoadmapTopic"
-        tags:
-          type: array
-          items:
-            $ref: "#/components/schemas/RoadmapTag"
-        topic_neighbors:
-          type: array
-          items:
-            $ref: "#/components/schemas/RoadmapEdge"
-        challenge_neighbors:
-          type: array
-          items:
-            $ref: "#/components/schemas/RoadmapEdge"
 
     ChallengeCheckpoint:
       type: object
@@ -1333,7 +1220,7 @@ components:
 
     ChallengeContent:
       type: object
-      required: [id, title, runtime, nodes, problem, solution, hints, checkpoints, roadmap]
+      required: [id, title, runtime, scenario_type, scenario_tags, nodes, problem, solution, hints, checkpoints]
       properties:
         id:
           type: string
@@ -1342,6 +1229,13 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
+        scenario_type:
+          type: string
+          enum: [documentation-example, operations-scenario]
+        scenario_tags:
+          type: array
+          items:
+            type: string
         nodes:
           type: array
           items:
@@ -1358,9 +1252,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChallengeCheckpoint"
-        roadmap:
-          $ref: "#/components/schemas/ChallengeRoadmap"
-
     ChallengeProgress:
       type: object
       required: [checks]
@@ -1490,15 +1381,11 @@ components:
       type: object
       required:
         - title
-        - difficulty
         - description
         - runtime
       properties:
         title:
           type: string
-        difficulty:
-          type: string
-          enum: [easy, medium, hard]
         description:
           type: string
         runtime:
@@ -1674,13 +1561,11 @@ components:
 
     AuthoringChange:
       type: object
-      required: [kind, summary, difficulty_impact, revision]
+      required: [kind, summary, revision]
       properties:
         kind:
           type: string
         summary:
-          type: string
-        difficulty_impact:
           type: string
         revision:
           type: integer

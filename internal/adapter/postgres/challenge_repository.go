@@ -11,12 +11,16 @@ import (
 	content "github.com/breakfix/breakfix/internal/content/challenge"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
 const persistedChallengeColumns = `id, source_kind, source_ref, owner_user_id, state, active_revision_id, source_slug, created_at, updated_at`
 const persistedChallengeRevisionColumns = `id, challenge_id, source_kind, source_ref, source_revision_id, base_active_revision_id,
 	title, runtime, scenario_type, tags, content_revision, source_slug, materialized_path, materialized_revision, artifact_reference, state, published_at, created_at`
+const activeChallengeRevisionColumns = `
+	c.id, c.source_kind, c.source_ref, c.owner_user_id, c.state, c.active_revision_id, c.source_slug, c.created_at, c.updated_at,
+	r.id, r.challenge_id, r.source_kind, r.source_ref, r.source_revision_id, r.base_active_revision_id,
+	r.title, r.runtime, r.scenario_type, r.tags, r.content_revision, r.source_slug, r.materialized_path, r.materialized_revision,
+	r.artifact_reference, r.state, r.published_at, r.created_at`
 
 // GetChallenge returns the stable identity and its active pointer. Callers that
 // need content must resolve the returned revision explicitly; this method never
@@ -43,6 +47,32 @@ func (d *ChallengeRepository) GetChallengeRevision(ctx context.Context, challeng
 		return nil, fmt.Errorf("get challenge revision: %w", err)
 	}
 	return value, nil
+}
+
+// ListActiveChallengeRevisions reads the Catalog directly from stable
+// identities and their active immutable revision pointers.
+func (d *ChallengeRepository) ListActiveChallengeRevisions(ctx context.Context) ([]challengedomain.ActiveRevision, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT `+activeChallengeRevisionColumns+`
+		FROM challenges c
+		JOIN challenge_revisions r ON r.challenge_id = c.id AND r.id = c.active_revision_id
+		WHERE c.state = ? AND r.state = ?
+		ORDER BY r.published_at DESC, c.id`, challengedomain.StateActive, challengedomain.RevisionActive)
+	if err != nil {
+		return nil, fmt.Errorf("list active challenge revisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	result := make([]challengedomain.ActiveRevision, 0)
+	for rows.Next() {
+		value, scanErr := scanActiveChallengeRevision(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan active challenge revision: %w", scanErr)
+		}
+		result = append(result, *value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active challenge revisions: %w", err)
+	}
+	return result, nil
 }
 
 // ListAuthoringChallenges returns the stable identities visible in one
@@ -73,10 +103,9 @@ func (d *ChallengeRepository) ListAuthoringChallenges(ctx context.Context, userI
 	return result, nil
 }
 
-// DeprecateAuthoringChallenge removes one author-owned active Challenge from
-// the current public Roadmap while retaining its stable identity, immutable
-// revisions, and all Environment history. A later revision cannot race this
-// operation because both paths lock the Challenge and current Roadmap.
+// DeprecateAuthoringChallenge hides one author-owned active Challenge from
+// the public Catalog while retaining its stable identity, immutable revisions,
+// and all Environment history.
 func (d *ChallengeRepository) DeprecateAuthoringChallenge(ctx context.Context, userID, challengeID string, now time.Time) (*challengedomain.Challenge, error) {
 	if strings.TrimSpace(userID) == "" || strings.TrimSpace(challengeID) == "" || now.IsZero() {
 		return nil, errors.New("challenge deprecation requires user, challenge, and current time")
@@ -108,31 +137,6 @@ func (d *ChallengeRepository) DeprecateAuthoringChallenge(ctx context.Context, u
 		return nil, challengedomain.ErrRevisionConflict
 	}
 
-	current, err := currentRoadmapForUpdateTx(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := ensureRoadmapPublicationAllowedTx(ctx, tx, now.UTC()); err != nil {
-		return nil, err
-	}
-	next, err := removeActiveChallengeBinding(*current, *target)
-	if err != nil {
-		return nil, err
-	}
-	_, encodedRoadmap, revisionID, err := canonicalRoadmap(next)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO roadmap_revisions (id, content_json, created_at)
-		VALUES (?, ?::jsonb, ?) ON CONFLICT (id) DO NOTHING`, revisionID, encodedRoadmap, now.UTC()); err != nil {
-		return nil, fmt.Errorf("store deprecated challenge roadmap revision: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE roadmap_current SET revision_id = ?, updated_at = ? WHERE singleton = TRUE`, revisionID, now.UTC()); err != nil {
-		return nil, fmt.Errorf("publish deprecated challenge roadmap revision: %w", err)
-	}
-	if err := removeRoadmapEntryTx(ctx, tx, target.ID); err != nil {
-		return nil, err
-	}
 	updated, err := scanPersistedChallenge(tx.QueryRowContext(ctx, `UPDATE challenges SET state = ?, updated_at = ?
 		WHERE id = ? AND state = ? RETURNING `+persistedChallengeColumns,
 		challengedomain.StateDeprecated, now.UTC(), target.ID, challengedomain.StateActive))
@@ -149,66 +153,6 @@ func (d *ChallengeRepository) DeprecateAuthoringChallenge(ctx context.Context, u
 		return nil, fmt.Errorf("commit challenge deprecation: %w", err)
 	}
 	return updated, nil
-}
-
-func removeActiveChallengeBinding(current roadmap.Revision, target challengedomain.Challenge) (roadmap.Revision, error) {
-	next := current.Clone()
-	bindings := make([]roadmap.ChallengeBinding, 0, len(next.ChallengeBindings)-1)
-	found := false
-	for _, binding := range next.ChallengeBindings {
-		if binding.Challenge.ID != target.ID {
-			bindings = append(bindings, binding)
-			continue
-		}
-		if binding.Challenge.RevisionID != target.ActiveRevisionID || binding.Challenge.SourceSlug != target.SourceSlug {
-			return roadmap.Revision{}, challengedomain.ErrRevisionConflict
-		}
-		found = true
-	}
-	if !found {
-		return roadmap.Revision{}, challengedomain.ErrRevisionConflict
-	}
-	next.ChallengeBindings = bindings
-	edges := make([]roadmap.Edge, 0, len(next.ChallengeEdges))
-	for _, edge := range next.ChallengeEdges {
-		if edge.Source.ID != target.ID && edge.Target.ID != target.ID {
-			edges = append(edges, edge)
-		}
-	}
-	next.ChallengeEdges = edges
-	if err := next.Validate(); err != nil {
-		return roadmap.Revision{}, fmt.Errorf("validate deprecated challenge roadmap: %w", err)
-	}
-	return next, nil
-}
-
-func removeRoadmapEntryTx(ctx context.Context, tx *Tx, challengeID string) error {
-	var topicProcessed, challengeProcessed bool
-	err := tx.QueryRowContext(ctx, `SELECT topic_processed, challenge_processed FROM roadmap_entries
-		WHERE challenge_id = ? FOR UPDATE`, challengeID).Scan(&topicProcessed, &challengeProcessed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("lock deprecated roadmap entry: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM roadmap_entries WHERE challenge_id = ?`, challengeID); err != nil {
-		return fmt.Errorf("remove deprecated roadmap entry: %w", err)
-	}
-	if topicProcessed && challengeProcessed {
-		return nil
-	}
-	control, err := lockRoadmapMaintenanceControlTx(ctx, tx)
-	if err != nil {
-		return err
-	}
-	if !control.Requested && control.UnrequestedChallengeCount > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE roadmap_maintenance_control
-			SET unrequested_challenge_count = unrequested_challenge_count - 1 WHERE singleton = TRUE`); err != nil {
-			return fmt.Errorf("adjust deprecated roadmap request count: %w", err)
-		}
-	}
-	return nil
 }
 
 func lockPersistedChallengeTx(ctx context.Context, tx *Tx, id string) (*challengedomain.Challenge, error) {
@@ -265,6 +209,35 @@ func scanPersistedChallengeRevision(row scanner) (*challengedomain.Revision, err
 	value.CreatedAt = value.CreatedAt.UTC()
 	if !value.Valid() {
 		return nil, errors.New("stored challenge revision is invalid")
+	}
+	return &value, nil
+}
+
+func scanActiveChallengeRevision(row scanner) (*challengedomain.ActiveRevision, error) {
+	var value challengedomain.ActiveRevision
+	var tags, artifact []byte
+	if err := row.Scan(
+		&value.Challenge.ID, &value.Challenge.SourceKind, &value.Challenge.SourceRef, &value.Challenge.OwnerUserID,
+		&value.Challenge.State, &value.Challenge.ActiveRevisionID, &value.Challenge.SourceSlug, &value.Challenge.CreatedAt, &value.Challenge.UpdatedAt,
+		&value.Revision.ID, &value.Revision.ChallengeID, &value.Revision.SourceKind, &value.Revision.SourceRef,
+		&value.Revision.SourceRevisionID, &value.Revision.BaseActiveRevisionID, &value.Revision.Title, &value.Revision.Runtime,
+		&value.Revision.Type, &tags, &value.Revision.ContentRevision, &value.Revision.SourceSlug, &value.Revision.MaterializedPath,
+		&value.Revision.MaterializedRevision, &artifact, &value.Revision.State, &value.Revision.PublishedAt, &value.Revision.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if err := decodeOptionalJSON(tags, &value.Revision.Tags); err != nil {
+		return nil, fmt.Errorf("decode active challenge revision tags: %w", err)
+	}
+	if err := decodeOptionalJSON(artifact, &value.Revision.Artifact); err != nil {
+		return nil, fmt.Errorf("decode active challenge revision artifact: %w", err)
+	}
+	value.Challenge.CreatedAt = value.Challenge.CreatedAt.UTC()
+	value.Challenge.UpdatedAt = value.Challenge.UpdatedAt.UTC()
+	value.Revision.PublishedAt = value.Revision.PublishedAt.UTC()
+	value.Revision.CreatedAt = value.Revision.CreatedAt.UTC()
+	if !value.Valid() {
+		return nil, errors.New("stored active challenge revision is invalid")
 	}
 	return &value, nil
 }

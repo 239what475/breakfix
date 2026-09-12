@@ -99,7 +99,7 @@ const overview = computed(() => {
   const body = usingVerifiedRevision.value
     ? problem || "已验证题目未包含可展示的 problem.md。"
     : session.value?.intent.overview || "等待 agent 写入题意约定。";
-  return `# ${metadata.title || "未命名题目"}\n\n${metadata.description || "等待 agent 根据题意补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n- **难度**：${metadata.difficulty || "待定"}\n\n${body}`;
+  return `# ${metadata.title || "未命名题目"}\n\n${metadata.description || "等待 agent 根据题意补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n\n${body}`;
 });
 const activeCheckpoint = computed(() => {
   const id = activeTab.value.replace("checkpoint:", "");
@@ -357,7 +357,6 @@ onScopeDispose(() => {
             </label>
             <div v-if="session" class="authoring-meta">
               <span>{{ displayMetadata?.runtime || "runtime 待定" }}</span>
-              <span>{{ displayMetadata?.difficulty || "difficulty 待定" }}</span>
             </div>
           </div>
         </header>
@@ -409,7 +408,6 @@ onScopeDispose(() => {
             <div v-for="change in entry.changes" :key="`${entry.id}-${change.revision}-${change.kind}`" class="authoring-change-card">
               <span>revision {{ change.revision }} · {{ change.kind }}</span>
               <button type="button" @click="focusChange">{{ change.summary || "查看题意变更" }}</button>
-              <span class="authoring-change-impact">难度影响：{{ change.difficulty_impact }}</span>
             </div>
           </article>
         </div>

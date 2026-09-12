@@ -25,7 +25,6 @@ import (
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
 	apppublication "github.com/breakfix/breakfix/internal/application/publication"
-	approadmap "github.com/breakfix/breakfix/internal/application/roadmap"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
@@ -227,7 +226,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create catalog availability gate: %w", err)
 	}
-	catalogService := appcatalog.NewService(cfg.ChallengesDir(), database.Roadmap, availability, database.Challenge)
+	catalogService := appcatalog.NewService(cfg.ChallengesDir(), availability, database.Challenge)
 	if err := catalogService.CheckIntegrity(ctx); err != nil {
 		incusClient.Close()
 		cleanupDatabase()
@@ -247,16 +246,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	authoringService := appauthoring.NewRuntimeService(database.Authoring, cfg.Agent.Model, authoringDeadline, llm.NewAuthoringExecutor(cfg.Agent, generatorService))
 	assistantService := appassistant.NewService(database.Agent, cfg.Agent.Model, llm.NewAssistantExecutor(cfg.Agent))
-	roadmapMaintenance, err := approadmap.NewMaintenanceService(approadmap.MaintenanceConfig{
-		Repository: database.Roadmap, Executor: llm.NewRoadmapExecutor(cfg.Agent),
-		ChallengeReader: approadmap.FilesystemChallengeReader{Root: cfg.ChallengesDir()},
-		Model:           cfg.Agent.Model, ServerID: catalogInstallerID(),
-	})
-	if err != nil {
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("create roadmap maintenance service: %w", err)
-	}
 	cleanupService, err := applearning.NewCleanupService(learningStore{repository: database.Environment})
 	if err != nil {
 		incusClient.Close()
@@ -339,12 +328,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("recover generation publication finalizer: %w", err)
 	}
-	if err := roadmapMaintenance.Recover(ctx); err != nil {
-		services.stop()
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("recover roadmap maintenance: %w", err)
-	}
 	if err := interactiveRecovery.Recover(ctx); err != nil {
 		services.stop()
 		incusClient.Close()
@@ -383,7 +366,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	services.start("learning environment projection", projectionService.Run)
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
 	services.start("generation publication finalizer", publicationFinalizer.Run)
-	services.start("roadmap maintenance", roadmapMaintenance.Run)
 	services.start("interactive agent recovery", interactiveRecovery.Run)
 
 	slog.Info("Breakfix Server starting", "version", buildinfo.Version, "data_dir", cfg.DataDir)

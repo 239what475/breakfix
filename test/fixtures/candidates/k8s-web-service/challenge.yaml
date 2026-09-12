@@ -1,6 +1,6 @@
 runtime: k8s
+type: operations-scenario
 title: 在 Kubernetes 中部署 Web 服务
-difficulty: easy
 description: 在隔离的 Kubernetes 集群中创建指定的 Deployment 和 Service。
 checkpoints:
   - id: deployment-ready

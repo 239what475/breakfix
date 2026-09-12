@@ -249,7 +249,7 @@ func toAPIAuthoringPlan(plan authoringdomain.Plan) api.AuthoringPlan {
 }
 
 func toAPIAuthoringMetadata(metadata authoringdomain.Metadata) api.AuthoringMetadata {
-	return api.AuthoringMetadata{Description: metadata.Description, Difficulty: api.AuthoringMetadataDifficulty(metadata.Difficulty), Runtime: api.AuthoringMetadataRuntime(metadata.Runtime), Title: metadata.Title}
+	return api.AuthoringMetadata{Description: metadata.Description, Runtime: api.AuthoringMetadataRuntime(metadata.Runtime), Title: metadata.Title}
 }
 
 func toAPIVerifiedChallenge(value *authoringdomain.VerifiedChallenge) *api.VerifiedChallenge {
@@ -268,7 +268,7 @@ func toAPIAuthoringMessages(messages []authoringdomain.Message) []api.AuthoringM
 	for _, message := range messages {
 		changes := make([]api.AuthoringChange, 0, len(message.Changes))
 		for _, change := range message.Changes {
-			changes = append(changes, api.AuthoringChange{DifficultyImpact: change.DifficultyImpact, Kind: change.Kind, Revision: int(change.Revision), Summary: change.Summary})
+			changes = append(changes, api.AuthoringChange{Kind: change.Kind, Revision: int(change.Revision), Summary: change.Summary})
 		}
 		var event *api.AuthoringRunEvent
 		if message.Event != nil {

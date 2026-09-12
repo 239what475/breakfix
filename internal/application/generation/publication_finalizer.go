@@ -46,7 +46,7 @@ type PublicationFinalizerConfig struct {
 }
 
 // PublicationFinalizer owns the final filesystem materialization and durable
-// Challenge/Roadmap promotion. It never invokes a provider or HTTP handler.
+// Challenge publication. It never invokes a provider or HTTP handler.
 type PublicationFinalizer struct {
 	store         PublicationFinalizerStore
 	challengesDir string

@@ -56,7 +56,7 @@ func TestReadVerifiedChallengeUsesCandidateManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verified.Metadata.Title != "Actual verified title" || verified.Metadata.Difficulty != "medium" || verified.Metadata.Runtime != "node" {
+	if verified.Metadata.Title != "Actual verified title" || verified.Metadata.Runtime != "node" {
 		t.Fatalf("metadata was not loaded from candidate: %#v", verified.Metadata)
 	}
 	if len(verified.Checkpoints) != 1 || verified.Checkpoints[0].Description != "The service responds successfully." || verified.Checkpoints[0].Node != "host" {
@@ -88,7 +88,7 @@ func TestReadAssetsRejectsArchivePathTraversal(t *testing.T) {
 
 func writeCandidateAssets(t *testing.T, root, title, description, problem, checks, solution string) {
 	t.Helper()
-	writeCandidateAsset(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\nruntime: node\ndifficulty: medium\ndescription: "+description+"\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
+	writeCandidateAsset(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\nruntime: node\ndescription: "+description+"\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
 	writeCandidateAsset(t, filepath.Join(root, "problem.md"), problem)
 	writeCandidateAsset(t, filepath.Join(root, "solution.md"), solution)
 	writeCandidateAsset(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")

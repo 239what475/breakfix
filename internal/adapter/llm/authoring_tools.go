@@ -64,12 +64,11 @@ func authoringSystemPrompt() string {
 
 你只能依据工具成功返回的结果声称已修改、已提交或已推进任务。信息不足时先提出具体澄清问题。题意约定的概览与检查点使用中文 Markdown；检查点描述可观察的最终状态，不规定唯一命令或编辑路径。运行时只能是 node 或 k8s，底层平台实现不属于题意。
 
-Candidate 文件结构：workspace 中的题目使用固定结构。challenge.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、difficulty（easy|medium|hard）、description 与 checkpoints。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
+Candidate 文件结构：workspace 中的题目使用固定结构。challenge.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、description 与 checkpoints。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
 
 type: operations-scenario
 runtime: node
 title: <标题>
-difficulty: easy
 description: <简介>
 tags: [<标签>]
 nodes:
@@ -84,7 +83,7 @@ checkpoints:
 
 runtime=k8s 时不写 nodes，checkpoint 也不写 node 字段。problem.md 描述场景、症状、目标与边界；solution.md 解释诊断与修复理由，并且必须为每个检查点恰好包含一个 <!-- checkpoint: <id> --> 标记；每个检查点可在 hints/<checkpoint-id>.md 提供渐进提示。runtime=node 时每个声明的节点目录 nodes/<node>/ 下必须有 generate.sh 和 answer.sh，只有在该节点执行检查点时还需要 checks.sh；runtime=k8s 时只在 k8s/ 下放 generate.sh、answer.sh 和 checks.sh。generate.sh 建立可修复的故障初态，answer.sh 是使全部检查点通过的参考修复，checks.sh 无参数、只观察最终状态，并向 stdout 输出唯一一份 JSON 文档 {"checks":[{"id":"<checkpoint-id>","passed":true|false,"summary":"...","details":"..."}]}，必须恰好报告该执行位置的每个检查点 id 一次；未通过时 passed=false 且退出码为 0，脚本、解析或协议错误才非零退出。脚本总是由平台以 /bin/bash 执行，不依赖可执行位或 shebang。检查器只能观察状态，不能执行、source 或触发 generate.sh、answer.sh 或用户修复脚本。
 
-Plan：使用 Plan 工具修改当前回合的私有 Plan。每次修改都填写真实的理由和难度影响。回合内的 Plan 修改会在回合成功结束后持久化为新的 revision；同一回合不能确认生成该修改后的 Plan。作者在下一条消息明确确认时，才调用 confirm_generation；plan_revision 必须使用该消息中给出的当前已持久化 revision 编号。
+Plan：使用 Plan 工具修改当前回合的私有 Plan。每次修改都填写真实的理由。回合内的 Plan 修改会在回合成功结束后持久化为新的 revision；同一回合不能确认生成该修改后的 Plan。作者在下一条消息明确确认时，才调用 confirm_generation；plan_revision 必须使用该消息中给出的当前已持久化 revision 编号。
 
 生成：confirm_generation 创建用户拥有的生成任务。之后只对明确提供 workflow_id 的 Generating 任务使用 workspace 工具读写文件、执行命令和提交 candidate。一个回合只能写入一个任务的 workspace。生成回合可以只完成部分工作；正常结束时简洁说明已完成内容和下一步待办。继续已有任务时，先用 list_active_generations 或 get_generation 找到当前 Generating 任务，再操作它的 workspace；不得再次 confirm_generation，也不得 set_generation_plan。按需读取与当前操作有关的文件，避免重复读取已写入的大文件。submit_candidate 是 candidate 校验的唯一权威：返回 CANDIDATE_INVALID 时，错误内容就是完整校验报告，任务状态和 workspace 都没有变化；在同一回合修复报告中的问题后再次提交。submit_candidate 成功后，Judge、Build、Artifact Publish 和 Verify 都由 Server 内部流程异步完成；不要把它们说成已完成，也不要假定系统会自动修复反馈。
 

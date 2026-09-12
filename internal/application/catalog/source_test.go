@@ -89,13 +89,13 @@ func TestCalculateContentRevisionsIgnoresStaleManifestValues(t *testing.T) {
 	}
 }
 
-func TestPortableSourceRejectsRoadmapDirectory(t *testing.T) {
+func TestPortableSourceRejectsUnexpectedTopLevelDirectory(t *testing.T) {
 	root, _ := writePortableRelease(t)
-	if err := os.Mkdir(filepath.Join(root, "roadmap"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(root, "unexpected"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadPortableSource(root); err == nil {
-		t.Fatal("source with a roadmap directory unexpectedly loaded")
+		t.Fatal("source with an unexpected directory unexpectedly loaded")
 	}
 }
 
@@ -190,7 +190,6 @@ func TestExportPublishedCandidatePreservesRemainingManifestBytes(t *testing.T) {
 	}
 	want := `runtime: node
 title: Cleanup logs
-difficulty: easy
 description: |
   Keep this indentation.
 nodes:
@@ -269,7 +268,6 @@ func writeChallengeSource(t *testing.T, root string, published bool) {
 	t.Helper()
 	manifest := `runtime: node
 title: Cleanup logs
-difficulty: easy
 description: |
   Keep this indentation.
 nodes:
@@ -288,7 +286,6 @@ revision_id: chrev-aaaaaaaaaaaaaaaa
 source_slug: cleanup-logs
 runtime: node
 title: Cleanup logs
-difficulty: easy
 image: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 content_revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 published_at: 2026-08-01T00:00:00Z

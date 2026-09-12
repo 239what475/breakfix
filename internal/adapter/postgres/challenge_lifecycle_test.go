@@ -10,14 +10,13 @@ import (
 	"github.com/breakfix/breakfix/internal/content/challenge"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 )
 
 func TestDeprecateAuthoringChallengeRetainsImmutableHistory(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 6, 8, 0, 0, 0, time.UTC)
-	fixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceAuthoring, "author-one", true, now)
+	fixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceAuthoring, "author-one", now)
 
 	updated, err := database.Challenge.DeprecateAuthoringChallenge(ctx, "author-one", fixture.challenge.ID, now.Add(time.Minute))
 	if err != nil {
@@ -25,13 +24,6 @@ func TestDeprecateAuthoringChallengeRetainsImmutableHistory(t *testing.T) {
 	}
 	if updated.State != challengedomain.StateDeprecated || updated.ActiveRevisionID != fixture.revision.ID || updated.SourceSlug != fixture.challenge.SourceSlug {
 		t.Fatalf("deprecated challenge = %#v", updated)
-	}
-	current, err := database.Roadmap.CurrentRoadmap(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(current.ChallengeBindings) != 0 || len(current.ChallengeEdges) != 0 {
-		t.Fatalf("deprecated challenge remains in roadmap: %#v", current)
 	}
 	stable, err := database.Challenge.GetChallenge(ctx, fixture.challenge.ID)
 	if err != nil {
@@ -44,12 +36,14 @@ func TestDeprecateAuthoringChallengeRetainsImmutableHistory(t *testing.T) {
 	if stable.ActiveRevisionID != fixture.revision.ID || revision.State != challengedomain.RevisionActive || revision.Artifact != fixture.revision.Artifact {
 		t.Fatalf("deprecated lifecycle changed immutable history: challenge=%#v revision=%#v", stable, revision)
 	}
-	var roadmapEntryCount int
-	if err := database.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM roadmap_entries WHERE challenge_id = ?`, fixture.challenge.ID).Scan(&roadmapEntryCount); err != nil {
+	active, err := database.Challenge.ListActiveChallengeRevisions(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if roadmapEntryCount != 0 {
-		t.Fatalf("roadmap maintenance entry was not removed: %d", roadmapEntryCount)
+	for _, value := range active {
+		if value.Challenge.ID == fixture.challenge.ID {
+			t.Fatalf("deprecated challenge remains visible in the active catalog: %#v", value)
+		}
 	}
 
 	if _, err := database.Challenge.DeprecateAuthoringChallenge(ctx, "author-one", fixture.challenge.ID, now.Add(2*time.Minute)); !errors.Is(err, challengedomain.ErrNotMutable) {
@@ -60,11 +54,11 @@ func TestDeprecateAuthoringChallengeRetainsImmutableHistory(t *testing.T) {
 func TestDeprecateAuthoringChallengeRejectsWrongOwnerAndReleaseChallenge(t *testing.T) {
 	database := newTestDB(t)
 	now := time.Date(2026, time.August, 6, 9, 0, 0, 0, time.UTC)
-	authorFixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceAuthoring, "author-one", false, now)
+	authorFixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceAuthoring, "author-one", now)
 	if _, err := database.Challenge.DeprecateAuthoringChallenge(context.Background(), "author-two", authorFixture.challenge.ID, now.Add(time.Minute)); !errors.Is(err, challengedomain.ErrNotFound) {
 		t.Fatalf("wrong owner deprecation = %v, want not found", err)
 	}
-	releaseFixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceRelease, "", false, now.Add(2*time.Minute))
+	releaseFixture := insertChallengeLifecycleFixture(t, database, challengedomain.SourceRelease, "", now.Add(2*time.Minute))
 	if _, err := database.Challenge.DeprecateAuthoringChallenge(context.Background(), "author-one", releaseFixture.challenge.ID, now.Add(3*time.Minute)); !errors.Is(err, challengedomain.ErrNotMutable) {
 		t.Fatalf("release challenge deprecation = %v, want not mutable", err)
 	}
@@ -75,7 +69,7 @@ type challengeLifecycleFixture struct {
 	revision  challengedomain.Revision
 }
 
-func insertChallengeLifecycleFixture(t *testing.T, database *Store, sourceKind challengedomain.SourceKind, owner string, withRoadmap bool, now time.Time) challengeLifecycleFixture {
+func insertChallengeLifecycleFixture(t *testing.T, database *Store, sourceKind challengedomain.SourceKind, owner string, now time.Time) challengeLifecycleFixture {
 	t.Helper()
 	index := strings.TrimPrefix(challenge.NewID(), "chal-")[:8]
 	challengeID := "chal-" + index
@@ -91,7 +85,7 @@ func insertChallengeLifecycleFixture(t *testing.T, database *Store, sourceKind c
 		},
 		revision: challengedomain.Revision{
 			ID: revisionID, ChallengeID: challengeID, SourceKind: sourceKind, SourceRef: "lifecycle/topic/" + index, SourceRevisionID: "1",
-			Title: "Lifecycle challenge " + index, Runtime: challenge.RuntimeNode, ContentRevision: contentRevision, SourceSlug: sourceSlug,
+			Title: "Lifecycle challenge " + index, Runtime: challenge.RuntimeNode, Type: challenge.ScenarioOperationsScenario, ContentRevision: contentRevision, SourceSlug: sourceSlug,
 			MaterializedPath: challenge.MaterializedPath(sourceSlug, revisionID), MaterializedRevision: materializedRevision, Artifact: artifact,
 			State: challengedomain.RevisionActive, PublishedAt: now, CreatedAt: now,
 		},
@@ -109,22 +103,6 @@ func insertChallengeLifecycleFixture(t *testing.T, database *Store, sourceKind c
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if !withRoadmap {
-		return fixture
-	}
-	domain := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindDomain, "lifecycle"), SourceRef: "lifecycle", Title: "Lifecycle"}
-	topic := roadmap.Ref{ID: roadmap.RuntimeID(roadmap.KindTopic, "lifecycle/topic"), SourceRef: "lifecycle/topic", Title: "Lifecycle topic"}
-	value := roadmap.Revision{
-		Domains:           []roadmap.Domain{{ID: domain.ID, SourceRef: domain.SourceRef, Title: domain.Title, Definition: "Lifecycle domain.", Scope: "Lifecycle scope.", NonGoals: "None."}},
-		Topics:            []roadmap.Topic{{ID: topic.ID, SourceRef: topic.SourceRef, Title: topic.Title, Domain: domain, Definition: "Lifecycle topic.", Scope: "Lifecycle scope.", NonGoals: "None.", ChallengeGuidance: "Use for lifecycle tests."}},
-		ChallengeBindings: []roadmap.ChallengeBinding{{Challenge: roadmap.ChallengeRef{ID: challengeID, RevisionID: revisionID, SourceRef: fixture.revision.SourceRef, Title: fixture.revision.Title, ContentRevision: contentRevision, SourceSlug: sourceSlug, MaterializedRevision: materializedRevision}, Topic: topic}},
-	}
-	if _, err := database.Roadmap.PublishRoadmap(context.Background(), value, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.conn.ExecContext(context.Background(), `INSERT INTO roadmap_entries (challenge_id, topic_id, topic_processed, challenge_processed, created_at) VALUES (?, ?, TRUE, TRUE, ?)`, challengeID, topic.ID, now); err != nil {
 		t.Fatal(err)
 	}
 	return fixture

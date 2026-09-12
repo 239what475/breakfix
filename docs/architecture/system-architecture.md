@@ -1,71 +1,60 @@
 # 系统架构
 
-Breakfix 将用户交互、环境调和和后台内容执行分开。已发布题目是 Server data PVC 中的文件 artifact；学习和验证环境是 Kubernetes CRD；持久化状态在 PostgreSQL。
+Breakfix 让用户在真实、隔离且可回收的 `node` 或 `k8s` 环境中学习可运行内容。平台同时支持两种内容方向：按上游文档组织的
+`documentation-example`，以及带简单标签的 `operations-scenario`。两者共享构建、验证、发布、环境与历史 revision 底座，
+不共享课程图或自动分类。
 
 ```text
-Browser                                  本机 breakfix-mcp（stdio）
-  |                                      |
-  +----------> Server <------------------+----------> PostgreSQL
-                 |                                          |
-                 |-- Authoring / Assistant                  |  GenerationWorkflow
-                 |   Judge / Classifier                     |  CatalogRelease
-                 |   Roadmap Planner / Reviewers            |  RoadmapRevision
-                 |-- 共享 GeneratorService
-                 |
-                 +--------------------------> Runtime Worker x N
-                 |
-                 v
-               Controller
-                 |
-                 v
-               NodeEnvironment / VK8sEnvironment
+Browser / breakfix-mcp
+          |
+          v
+        Server ---------------- PostgreSQL
+          |                       |
+          |                       +-- Challenge + immutable revisions
+          |                       +-- GenerationWorkflow / CatalogRelease
+          |                       +-- users, sessions, learning facts, leases
+          |
+          +-- Authoring / Assistant / Judge / Catalog reads
+          +-- Server data PVC: materialized sources, candidate archives
+          |
+          v
+     Runtime Worker ----------- Registry / Incus / Kubernetes
+          |
+          v
+ Controller ------------------- NodeEnvironment / VK8sEnvironment CRDs
 ```
-
-Catalog installer 是 Server 内的可恢复协调器，不是另一个 Deployment。Registry 保存 K8s OCI artifact，Incus 保存 Node system-container image；两者都是运行时依赖，不是浏览器 API 的一部分。
-
-网页 Authoring Agent 和本机 `breakfix-mcp` 是同一 `GeneratorService` 的两个客户端：网页 Agent 直接调用 Server 内的
-function tools，外部 Agent 通过 stdio MCP connector 再经 HTTPS 与用户 Token 调用同一 HTTP application API。两者产生完全
-相同的 candidate 和后续生命周期；远程 Server 永远不写调用机器的 `/tmp`。
-
-空平台的题库基线由 Server 启动配置中的 immutable Catalog Release 一次性安装。baseline 建立后不再导入后续 release；新增和修订内容走 Authoring、Generation、Classification 与 Roadmap。portable source、真实验证和原子公开语义见 [Catalog Release](catalog-release.md)。
 
 ## 所有权
 
-| 数据或副作用 | 权威所有者 | 其他组件的边界 |
+| 数据或行为 | 权威所有者 | 说明 |
 | --- | --- | --- |
-| 用户、作者会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、RoadmapRevision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
-| challenge 目录和持久化 Catalog source | Server data PVC，经 Server 写入和回收 | Server 从 PostgreSQL 的 revision 与非终态 publication intent 派生保留集合；Worker 只提交 typed 结果，不访问该 PVC。 |
-| `NodeEnvironment`、`VK8sEnvironment` spec/status | Server 写 spec，Controller 写 status | Server 不直接写 status。 |
-| Node image | Incus image project | Runtime Worker 构建/发布；Controller 只消费正式 artifact。 |
-| K8s image | 运营方提供的 OCI Registry；Kind 开发环境使用 NodePort Registry | Runtime Worker 和节点都使用 `registry_repository` 的同一 authority。 |
+| 账户、会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、Challenge 与 revision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
+| 公开 Catalog | active Challenge revision 与对应 materialized source | 每次读取严格核验 revision 与目录。 |
+| 便携场景 source、candidate archive、已发布目录 | Server data PVC | 发布目录不可变，历史 revision 继续可读。 |
+| K8s artifact | 部署者提供的 OCI Registry | 按 immutable digest 读取。 |
+| Node artifact | Incus image project | 按完整 fingerprint 读取。 |
+| Environment CRD 和 provider 资源 | Controller | Controller 只调和 Environment，不写 Catalog 或 authoring 状态。 |
 
-Server 是业务状态的唯一写者。每个 Worker 请求都携带 lease owner 与 state attempt；Server 在同一事务中校验租约、保存阶段输出并推进状态。迟到或失去租约的结果被拒绝。
+Server 是唯一的 HTTP、认证、Catalog、Authoring、Assistant 和 durable workflow 协调者。Authoring Agent 和本机
+`breakfix-mcp` 调用同一 GeneratorService；Judge 是唯一后台模型角色。Runtime Worker 只运行 lease-fenced 构建、artifact
+publish、验证、正式场景 publish 与资源清理。
 
-## 后台执行
+## Catalog 与发布
 
-`GenerationWorkflow` 是作者在对应对话中明确确认一个 Plan revision 后，由 Generator client 调用共享的
-`confirm_generation` 创建的唯一持久流程。`Generating` 只表示该用户拥有的远程 workspace 可编辑并等待
-`submit_candidate`，没有后台 Generator Agent 领取该状态；网页 Authoring Agent 与 `breakfix-mcp` 复用同一
-`GeneratorService` 和 workspace 能力。Server 内的 role-specific Agent Runtime 只执行 Judge 和 Classifier；Runtime
-Worker 只执行 Build、Artifact Publish、真实验证、正式发布和当前的资源回收。两者都不创建通用任务或按 `kind` 分发阶段。
+空平台可在 Server 启动时按 immutable `catalog.release_reference` 安装一个 Catalog Release。所有 entry 的真实验证和 artifact
+promotion 成功后，Server 在一个事务中写入 stable Challenge、active revision，并将 release 置为 Ready；因此不会公开部分题库。
+基线建立后，新增与修订走 Authoring 的 `GenerationWorkflow`。详细的 portable source、bootstrap 和完整性契约见
+[Catalog Release](catalog-release.md)。
 
-`CatalogRelease` 是 Server-owned 的初始化流程。其 Entry 与 Commit 使用同一套 Runtime Worker 构建、发布、验证和 final promotion 能力，但不进入作者工作流；全部 entry 就绪后，Server 在同一 Roadmap 写锁下公开 release revision 并建立已处理基线。
+Catalog 只读取 `active` Challenge 及其 active immutable revision。每个摘要返回 type、标签、runtime、标题、描述、发布时间和
+可用状态。`documentation-example` 不使用标签；`operations-scenario` 的标签是 revision 级、规范化的字符串集合。课程层级、
+关系边、推荐图和后台分类任务不属于系统。
 
-Authoring 对话和学习 Assistant 不属于后台 Workflow。Server 直接运行模型调用、保存会话与 AgentRun，并向浏览器提供对话结果；同一会话同时只允许一轮运行，不同会话可并发。
+## Server 生命周期
 
-### Server 生命周期
+`internal/bootstrap/server` 是 Server 进程生命周期的唯一所有者。它先恢复 materialization、Catalog installer、未完成 Generator
+workspace、Judge 和 interactive AgentRun、学习投影、Assistant lease 与 publication finalizer，再构造 HTTP Handler 和 Router。
+`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
 
-`internal/bootstrap/server` 是 Server 进程生命周期的唯一所有者。它先完成 materialization、未完成 Generator
-workspace 的退休、Judge/Classifier 与 interactive AgentRun、Roadmap、学习投影、Assistant lease 和 publication
-finalizer 的恢复，再构造 HTTP Handler 和 Router。`SetupRouter` 只登记路由，不读取或修改持久状态，也不启动 goroutine。
-
-bootstrap 显式启动 Catalog installer、materialization reconciler、Judge/Classifier AgentRunner、Generator
-workspace snapshotter/reaper、learning cleanup/projection、Assistant lease maintainer、Generation publication finalizer、
-Roadmap maintenance 和已恢复的 interactive AgentRun。停止时先停止接收 HTTP 请求，再取消并等待这些服务，最后关闭
-Incus 与 PostgreSQL；没有通用 executor、内存 worklist 或额外 Deployment。
-
-## 部署边界
-
-固定 Deployment 为 Server、Controller、Runtime Worker 和 PostgreSQL。生产 Registry 由运营方独立提供；只有 Kind 开发 overlay 会额外部署 Registry。Environment 是按用户或验证需求创建的 CRD 与动态资源，不是常驻 Deployment。
-
-Server 当前使用 RWO data PVC，因此以单副本运行。PostgreSQL 支持 release/worker lease 的跨副本接管；将 Server 扩为多副本需要先单独解决流式连接和共享 artifact 存储，不能通过复制 Pod 伪装完成。
+固定 Deployment 为 Server、Controller、Runtime Worker 和 PostgreSQL。生产 Registry 由运营方独立提供；只有 Kind 开发 overlay
+额外部署 Registry。Server 当前使用 RWO data PVC，因此以单副本运行；扩展到多副本需要先单独解决流式连接和共享 artifact 存储。

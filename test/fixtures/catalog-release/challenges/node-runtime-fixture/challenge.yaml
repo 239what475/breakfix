@@ -1,7 +1,6 @@
 runtime: node
 type: operations-scenario
 title: "Node 运行时验收"
-difficulty: easy
 tags:
   - Linux
   - runtime-fixture

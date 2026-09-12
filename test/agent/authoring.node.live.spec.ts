@@ -18,7 +18,6 @@ import {
 	sendAuthoringMessage,
 	waitForCatalogChallenge,
 	waitForActiveWorkflow,
-	waitForClassificationReview,
 	waitForPublishedChallenge,
 	waitForVerifiedCandidate,
 } from "./authoring-live-helpers";
@@ -64,10 +63,7 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a node chall
 			);
 			await waitForVerifiedCandidate(page, workflowID);
 		}
-		await sendAuthoringMessage(page, "我确认题目内容，请进入分类。", sessionID);
-		await waitForClassificationReview(page, workflowID);
-
-		await sendAuthoringMessage(page, "我确认当前分类提案，请发布题目。", sessionID);
+			await sendAuthoringMessage(page, "我确认题目内容，请发布题目。", sessionID);
 		challengeID = await waitForPublishedChallenge(page, sessionID);
 		await waitForCatalogChallenge(page, challengeID);
 

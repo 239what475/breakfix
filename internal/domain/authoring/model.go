@@ -31,7 +31,6 @@ const (
 
 type Metadata struct {
 	Title       string `json:"title"`
-	Difficulty  string `json:"difficulty"`
 	Description string `json:"description"`
 	Runtime     string `json:"runtime"`
 }
@@ -82,11 +81,6 @@ func (p Plan) ValidateForGeneration() error {
 	if strings.TrimSpace(metadata.Description) == "" {
 		return errors.New("题目简介不能为空")
 	}
-	switch metadata.Difficulty {
-	case "easy", "medium", "hard":
-	default:
-		return errors.New("难度必须是 easy、medium 或 hard")
-	}
 	if runtime := challenge.NormalizeRuntime(metadata.Runtime); runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s {
 		return errors.New("运行时必须是 node 或 k8s")
 	}
@@ -128,10 +122,9 @@ type Revision struct {
 }
 
 type Change struct {
-	Kind             string `json:"kind"`
-	Summary          string `json:"summary"`
-	DifficultyImpact string `json:"difficulty_impact"`
-	Revision         int64  `json:"revision"`
+	Kind     string `json:"kind"`
+	Summary  string `json:"summary"`
+	Revision int64  `json:"revision"`
 }
 
 type Message struct {
@@ -143,7 +136,7 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// RunTerminationKind is the durable terminal classification of one direct
+// RunTerminationKind is the durable terminal reason of one direct
 // Authoring turn. It is intentionally smaller than the generic Agent Run
 // status because only the two outcomes below produce author-visible events.
 type RunTerminationKind string

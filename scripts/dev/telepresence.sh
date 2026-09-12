@@ -11,7 +11,6 @@ CONFIG_SOURCE="$ROOT_DIR/config/app/in-cluster.yaml"
 TP_NAMESPACE="${BREAKFIX_TELEPRESENCE_NAMESPACE:-breakfix-system}"
 TP_MANAGER_NAMESPACE="${BREAKFIX_TELEPRESENCE_MANAGER_NAMESPACE:-ambassador}"
 TP_RUNTIME_SECRET="${BREAKFIX_TELEPRESENCE_RUNTIME_SECRET:-breakfix-runtime}"
-TP_DEBUG_SECRET="${BREAKFIX_TELEPRESENCE_DEBUG_SECRET:-breakfix-debug}"
 TP_SERVER_PORT="${BREAKFIX_TELEPRESENCE_SERVER_PORT:-19091}"
 TP_CONTROLLER_HEALTH_PORT="${BREAKFIX_TELEPRESENCE_CONTROLLER_HEALTH_PORT:-18081}"
 TP_WORKSPACE_IMAGE="${BREAKFIX_TELEPRESENCE_WORKSPACE_IMAGE:-}"
@@ -319,7 +318,7 @@ registry_trust_bundle_for_mount() {
 }
 
 run_server() {
-  local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file catalog_release_reference debug_credential
+  local kubeconfig config mount_root base_url sandbox_namespace registry_trust_bundle_file catalog_release_reference
   ensure_server_fuse
   mount_root="$STATE_DIR/mount-server"
   kubeconfig="$(create_service_account_kubeconfig server)"
@@ -333,13 +332,11 @@ run_server() {
     sed -i "s|^  trust_bundle_file:.*|  trust_bundle_file: $registry_trust_bundle_file|" "$config"
   fi
   catalog_release_reference="$(secret_value catalog_release_reference)"
-  debug_credential="$(optional_secret_value "$TP_DEBUG_SECRET" credential)"
 
   printf 'Replacing Server locally at http://127.0.0.1:%s.\n' "$TP_SERVER_PORT"
   env \
     BREAKFIX_DATABASE_URL="$(secret_value database_url)" \
     BREAKFIX_JWT_SECRET="$(secret_value jwt_secret)" \
-    BREAKFIX_DEBUG_CREDENTIAL="$debug_credential" \
     BREAKFIX_RUNTIME_WORKER_API_KEY="$(worker_identity_key runtime-worker)" \
     BREAKFIX_REGISTRY_REPOSITORY="$(secret_value registry_repository)" \
     BREAKFIX_REGISTRY_USERNAME="$(secret_value registry_username)" \

@@ -43,13 +43,6 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		c.Status(http.StatusOK)
 	})
 	router.GET("/metrics", h.WorkflowMetrics)
-	if cfg.Debug.Enabled {
-		debugRoutes := router.Group("/internal/debug")
-		debugRoutes.Use(middleware.DebugCredentialMiddleware(cfg.Debug.Credential))
-		debugRoutes.POST("/roadmap-maintenance", h.RequestRoadmapMaintenance)
-		debugRoutes.GET("/roadmap-revisions/:revision_id/export", h.ExportRoadmapRevision)
-	}
-
 	// Public routes
 	router.POST("/api/auth/register", h.Register)
 	router.POST("/api/auth/login", h.Login)

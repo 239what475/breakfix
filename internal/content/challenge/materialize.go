@@ -140,11 +140,6 @@ func ValidateDir(dir string) (*Entry, error) {
 	if err := validatePublishedImage(challenge); err != nil {
 		return nil, err
 	}
-	switch strings.TrimSpace(challenge.Difficulty) {
-	case "easy", "medium", "hard":
-	default:
-		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
-	}
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")
 	}
@@ -196,11 +191,6 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	case RuntimeNode, RuntimeK8s:
 	default:
 		return nil, fmt.Errorf("unsupported challenge runtime %q", challenge.Runtime)
-	}
-	switch strings.TrimSpace(challenge.Difficulty) {
-	case "easy", "medium", "hard":
-	default:
-		return nil, fmt.Errorf("challenge difficulty must be easy, medium, or hard")
 	}
 	if strings.TrimSpace(challenge.Description) == "" {
 		return nil, fmt.Errorf("challenge description is required")

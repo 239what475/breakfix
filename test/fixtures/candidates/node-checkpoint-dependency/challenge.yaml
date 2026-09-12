@@ -1,6 +1,6 @@
 runtime: node
+type: operations-scenario
 title: Restore dependent configuration
-difficulty: easy
 description: Recreate a configuration file and the result derived from it.
 nodes:
   - name: host

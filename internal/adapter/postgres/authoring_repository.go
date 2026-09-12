@@ -324,7 +324,7 @@ func (d *AuthoringRepository) LoadAuthoringExecution(ctx context.Context, runID 
 }
 
 func (d *AuthoringRepository) UpdateAuthoringStage(ctx context.Context, runID string, expectedAttempt int, expectedStageRevision int64, operation authoring.StageOperation, plan authoring.Plan, change authoring.Change) (*authoring.Stage, error) {
-	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || expectedStageRevision < 0 || strings.TrimSpace(operation.ID) == "" || strings.TrimSpace(operation.RequestDigest) == "" || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" || strings.TrimSpace(change.DifficultyImpact) == "" {
+	if strings.TrimSpace(runID) == "" || expectedAttempt < 1 || expectedStageRevision < 0 || strings.TrimSpace(operation.ID) == "" || strings.TrimSpace(operation.RequestDigest) == "" || strings.TrimSpace(change.Kind) == "" || strings.TrimSpace(change.Summary) == "" {
 		return nil, errors.New("authoring stage update is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)

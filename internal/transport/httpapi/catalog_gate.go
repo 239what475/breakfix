@@ -8,7 +8,7 @@ import (
 )
 
 // requireCatalogReady is applied only to routes that consume the current
-// Catalog/Roadmap baseline. It intentionally excludes health, authentication,
+// Catalog baseline. It intentionally excludes health, authentication,
 // authoring discussion, and the Runtime Worker API so an in-progress release
 // can finish installing without creating a readiness deadlock.
 func (h *Handler) requireCatalogReady(c *gin.Context) {

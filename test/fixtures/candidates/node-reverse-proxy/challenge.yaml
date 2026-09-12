@@ -1,6 +1,6 @@
 runtime: node
+type: operations-scenario
 title: Repair a multi-node reverse proxy
-difficulty: medium
 description: Restore the systemd-managed proxy path from a client node to an application node.
 nodes:
   - name: client

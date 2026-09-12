@@ -124,7 +124,7 @@ func contentOverviewMarkdown(value api.GeneratorGeneration) string {
 	metadata := value.Verified.Metadata
 	var out strings.Builder
 	fmt.Fprintf(&out, "# %s\n\n", metadata.Title)
-	fmt.Fprintf(&out, "**运行时**：%s  \n**难度**：%s\n\n", metadata.Runtime, metadata.Difficulty)
+	fmt.Fprintf(&out, "**运行时**：%s\n\n", metadata.Runtime)
 	fmt.Fprintf(&out, "## 题目简介\n\n%s\n\n", metadata.Description)
 	out.WriteString("## 检查点\n\n")
 	for _, checkpoint := range value.Verified.Checkpoints {

@@ -1,19 +1,11 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
-import type { RoadmapReference } from "../../api/types";
-import type { CatalogTopicFilter } from "./catalog";
-
 const props = defineProps<{
 	query: string;
-	difficulties: string[];
 	runtimes: string[];
-	domains: string[];
-	topics: string[];
 	tags: string[];
 	statuses: string[];
-	availableDomains: RoadmapReference[];
-	availableTopics: CatalogTopicFilter[];
-	availableTags: RoadmapReference[];
+	availableTags: string[];
 	resultCount: number;
 	loggedIn: boolean;
 	open: boolean;
@@ -21,10 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	"update:query": [value: string];
-	"toggle:difficulty": [value: string];
 	"toggle:runtime": [value: string];
-	"toggle:domain": [value: string];
-	"toggle:topic": [value: string];
 	"toggle:tag": [value: string];
 	"toggle:status": [value: string];
 	reset: [];
@@ -58,38 +47,11 @@ function updateQuery(event: Event) {
 			<button class="text-button" type="button" @click="emit('reset')">Reset filters</button>
 		</div>
 
-		<section class="filter-group" aria-labelledby="difficulty-filter">
-			<h2 id="difficulty-filter">Difficulty</h2>
-			<label v-for="difficulty in ['easy', 'medium', 'hard']" :key="difficulty" class="filter-option">
-				<input type="checkbox" :checked="difficulties.includes(difficulty)" @change="emit('toggle:difficulty', difficulty)" />
-				<span>{{ difficulty.charAt(0).toUpperCase() + difficulty.slice(1) }}</span>
-			</label>
-		</section>
-
 		<section class="filter-group" aria-labelledby="runtime-filter">
 			<h2 id="runtime-filter">Runtime</h2>
 			<label v-for="runtime in ['node', 'k8s']" :key="runtime" class="filter-option">
 				<input type="checkbox" :checked="runtimes.includes(runtime)" @change="emit('toggle:runtime', runtime)" />
 				<span>{{ runtime === 'k8s' ? 'Kubernetes' : 'Linux nodes' }}</span>
-			</label>
-		</section>
-
-		<section v-if="availableDomains.length" class="filter-group" aria-labelledby="domain-filter">
-			<h2 id="domain-filter">Domain</h2>
-			<label v-for="domain in availableDomains" :key="domain.id" class="filter-option">
-				<input type="checkbox" :checked="domains.includes(domain.id)" @change="emit('toggle:domain', domain.id)" />
-				<span>{{ domain.title }}</span>
-			</label>
-		</section>
-
-		<section v-if="availableTopics.length" class="filter-group" aria-labelledby="topic-filter">
-			<h2 id="topic-filter">Topic</h2>
-			<label v-for="topic in availableTopics" :key="topic.id" class="filter-option filter-option-with-context">
-				<input type="checkbox" :checked="topics.includes(topic.id)" @change="emit('toggle:topic', topic.id)" />
-				<span>
-					<strong>{{ topic.title }}</strong>
-					<small>{{ topic.domainTitle }}</small>
-				</span>
 			</label>
 		</section>
 
@@ -103,9 +65,9 @@ function updateQuery(event: Event) {
 
 		<section class="filter-group tags-filter-group" aria-labelledby="tags-filter">
 			<h2 id="tags-filter">Tags</h2>
-			<label v-for="tag in availableTags" :key="tag.id" class="filter-option">
-				<input type="checkbox" :checked="tags.includes(tag.id)" @change="emit('toggle:tag', tag.id)" />
-				<span>{{ tag.title }}</span>
+			<label v-for="tag in availableTags" :key="tag" class="filter-option">
+				<input type="checkbox" :checked="tags.includes(tag)" @change="emit('toggle:tag', tag)" />
+				<span>{{ tag }}</span>
 			</label>
 		</section>
 	</aside>

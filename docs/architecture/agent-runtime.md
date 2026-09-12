@@ -1,130 +1,50 @@
 # Agent Runtime
 
-Breakfix uses Eino in Server, PostgreSQL `AgentRun` records, and Server-managed
-OpenSandbox workspaces for authoring. It has no Claude Code CLI,
-`eino-claude-code`, alternate Agent SDK compatibility path, or generic agent
-queue.
+Breakfix 在 Server 中使用 Eino、PostgreSQL `AgentRun` 记录和 Server-managed OpenSandbox workspace。没有独立 Agent
+Deployment、CLI 兼容层或通用 Agent 队列。
 
-## Execution Boundaries
+## 执行边界
 
-| Role | Executor | Durable boundary | Scheduling |
+| 角色 | 执行者 | 持久化边界 | 调度方式 |
 | --- | --- | --- | --- |
-| Authoring | Server | AuthoringSession, messages, AgentRun, private Plan stage | One active run per session; a browser message has a stable idempotency key. |
-| Learning Assistant | Server | Assistant session, messages, AgentRun, read-only evidence | One active run per session. |
-| Generator client (web) | Server Authoring Agent calling GeneratorService directly | GenerationWorkflow, PlanRevision, CandidateRevision, workflow workspace | A user-confirmed conversation turn. |
-| Generator client (external) | Local `breakfix-mcp` stdio connector calling the same GeneratorService over HTTPS | Same as web | One explicit MCP workspace turn per operation. |
-| Judge | Server | GenerationWorkflow, PlanRevision, CandidateRevision | Independently claims `Judging` workflows. |
-| Classifier | Server | GenerationWorkflow, verified CandidateRevision, immutable RoadmapRevision | Independently claims `Classifying` workflows. |
-| Roadmap planner and reviewers | Server | RoadmapTask, fixed RoadmapRevision, ChangeSet/Review, AgentRun | Server maintenance workflow. |
-| Build, artifact publish, verification, challenge publish, and provider cleanup | Runtime Worker | Lease-fenced runtime action | Runtime Worker only. |
+| Authoring | Server | AuthoringSession、消息、AgentRun、私有 Plan stage | 每个会话同时一轮；浏览器消息有稳定幂等键。 |
+| Learning Assistant | Server | Assistant 会话、消息、AgentRun、只读证据 | 每个会话同时一轮。 |
+| Generator client (web) | 调用 GeneratorService 的 Server Authoring Agent | GenerationWorkflow、PlanRevision、CandidateRevision、workspace | 作者确认后的对话回合。 |
+| Generator client (external) | 本机 `breakfix-mcp` | 同一 GeneratorService 契约 | 每次操作一个显式 MCP workspace turn。 |
+| Judge | Server | GenerationWorkflow、PlanRevision、CandidateRevision | 独立领取 `Judging` workflow。 |
+| Build、artifact publish、verify、场景 publish、provider cleanup | Runtime Worker | lease-fenced runtime action | 仅 Runtime Worker。 |
 
-`AgentRun` is one complete, auditable logical execution. It can make many model
-HTTP requests and tool calls; it is neither a resident process nor a generic
-queue item. The durable business aggregate remains authoritative for every
-typed result.
+`AgentRun` 是一次完整、可审计的逻辑执行，可以包含多个模型 HTTP 请求和工具调用；它不是常驻进程或通用队列。每个 typed result 的业务
+aggregate 才是权威状态。
 
-## Authoring Turns
+## Authoring 回合
 
-An Authoring run has one `DeadlineAt`, configured by
-`agent.authoring_run_deadline` and defaulting to 30 minutes. The deadline, a
-single model request timeout, and the model context window are separate limits.
-Authoring uses `math.MaxInt` for the Eino iteration and transient model
-transport retry ceilings, so a fixed tool/model iteration count or a fixed
-retry count cannot terminate legitimate work before the run deadline.
+一个 Authoring run 有由 `agent.authoring_run_deadline` 配置、默认 30 分钟的 `DeadlineAt`。该期限、单次模型请求超时和模型上下文
+窗口是不同限制。临时模型传输失败保留在同一 Eino run 内，并且不会重放已接受的工具结果；永久 executor 错误结束该 run。
 
-Temporary model transport failures such as stream receive failures, request
-timeouts, HTTP 5xx, and rate limits stay inside the same Eino run while its
-context remains valid. Accepted tool results are not replayed. Model
-configuration, protocol, or other permanent executor errors end the run. The
-public `attempt` field remains an audit value; it is not an Authoring budget.
-Judge, Classifier, and Roadmap roles retain their own short, finite retry
-policies because they are separate typed background operations.
+浏览器以同一幂等键重发消息时返回已有 run，而不是追加第二条消息或启动第二次模型执行。SSE 断开本身不结束 run。若 deadline 到达、Server
+重启或发生永久 executor 错误，一个事务结束 run、丢弃私有 Plan stage 并写入作者可见的确定性事件。下一条作者消息从持久化对话和
+workspace 状态继续，不恢复模型内存或半完成工具调用。
 
-Workspace tool outcomes are explicit:
+## Generator Workspace 恢复
 
-- Known command and validation failures are tool results for the model to
-  inspect and handle in the same run.
-- If a side-effecting call times out or loses its connection after dispatch,
-  the tool returns a structured `unknown` outcome. Breakfix does not replay the
-  call, retire the workspace, or assume that the command did not run. The
-  model can inspect files, processes, services, or other observable state and
-  decide what to do next.
-- A database persistence retry only retries persistence. It never reruns the
-  model or repeats a tool call.
+每个 `GenerationWorkflow` 在 workspace 活跃时拥有一个 Server 创建的 OpenSandbox Sandbox 和专用 PVC。Generator turn 必须先取得该
+workflow 的单写者 binding，才能读取、写入、执行、归档或提交；短暂的内部 snapshot holder 使用同一栅栏。
 
-The browser persists a user message, private stage, and AgentRun together. A
-repeat POST with the same idempotency key returns the existing run rather than
-adding another user message or starting another Eino execution. Only the
-request that created the run owns its SSE stream; a reconnect observes durable
-session state and does not create a second stream executor.
+snapshotter 每 30 秒并在 turn 释放后归档 `/workspace`，校验摘要并把不可变快照写入 Server data PVC，再原子更新 workflow。它不保存
+Sandbox 操作系统、命令进程或工具执行状态。`generator_workspace_idle_ttl` 默认 24 小时；过期 workspace 由异步 reaper 删除 Sandbox
+和 PVC。普通 Authoring deadline、未知工具结果和浏览器/MCP 断开保留 workspace；Server 重启则退休未完成 workspace，下一次操作按
+最新有效 snapshot、最近 CandidateRevision archive、空 scaffold 的顺序重建。
 
-When a run reaches its deadline, Server stops, Server restarts, or a permanent
-executor error occurs, one durable transaction ends the run, discards its
-private Plan stage, and appends one deterministic `role=event` message. The
-event has a closed reason set: `deadline_exceeded`, `server_stopping`,
-`server_restarted`, or `permanent_executor_error`. It is author-visible status,
-not model context, so the next Eino input contains only user and assistant
-messages. Breakfix never creates an automatic replacement Authoring run; the
-next author message starts a new run from durable conversation and workspace
-state. Losing an SSE connection alone does not end a run.
+`submit_candidate` 是 candidate 确定性校验的唯一入口。无效提交没有 CandidateRevision 或状态副作用，workspace 可继续修复；有效提交
+将不可变 CandidateRevision 作为下一次重建的后备。
 
-## Generator Workspace Recovery
+## 启动与权限
 
-A `GenerationWorkflow` owns a Server-created OpenSandbox Sandbox and dedicated
-PVC only while its workspace is active. A Generator turn obtains the workflow's
-single-writer binding before it can read, write, execute, archive, or submit.
-Another user turn is rejected; an internal snapshot holder is short-lived, and
-an interactive turn waits for it rather than exposing that implementation
-detail as a client conflict.
+HTTP readiness 前，Server 恢复 durable state：中断未完成 Authoring 和 Judge run、退休旧 Generator workspace，并恢复 Catalog
+installer、内容 materialization、workspace snapshotter/reaper、学习投影、Assistant lease 和 publication finalizer。模型不会获得
+Kubernetes、Incus、Registry、OpenSandbox、PostgreSQL 或 Server data PVC 凭据。网页 Authoring 与 MCP connector 只能操作调用者拥有的、
+当前绑定的 workspace；MCP 只转发用户 JWT 并在本机 materialize 内容审核包。
 
-The workspace snapshotter is a Server-owned background service. It tries every
-30 seconds and is also prompted after a turn releases its binding. While it
-holds the same writer fence, it archives only `/workspace` using the canonical,
-safe archive format, verifies the digest, writes an immutable file on the
-Server data PVC, and then atomically publishes that digest to the workflow.
-It does not snapshot the Sandbox operating system, command processes, or tool
-execution state. Unchanged snapshots do not create a new version or extend an
-existing idle deadline.
-
-`generator_workspace_idle_ttl` is a Server-wide policy and defaults to 24
-hours. Idle time begins only after a valid snapshot is published. When the TTL
-expires with no active turn, the workspace is marked for deletion; the existing
-WorkspaceReaper asynchronously deletes the Sandbox and PVC. The snapshotter
-never performs provider cleanup itself. A new turn that wins the row lock first
-clears idle status and reuses the current workspace.
-
-A normal Authoring deadline, a tool `unknown` outcome, or a browser/MCP
-disconnect preserves the workspace. A Server restart is different: Server
-retires every incomplete Generator workspace and the reaper deletes its old
-Sandbox and PVC asynchronously. The next Generator operation creates a new
-workspace and seeds it in this order: latest valid workspace snapshot, latest
-CandidateRevision archive, then an empty scaffold. A corrupt snapshot pointer
-is cleared before the fallback. No model context, half-finished command, or
-tool result is resumed or replayed.
-
-`submit_candidate` remains the only authoritative candidate validation point.
-An invalid submission has no CandidateRevision or workflow-state side effect
-and leaves the workspace available for repair. A successful submission makes
-the immutable CandidateRevision the next durable fallback; old snapshot files
-are reclaimed asynchronously after their grace period.
-
-## Startup And Privileges
-
-Before HTTP readiness, Server recovers durable state. It marks unfinished
-Authoring runs interrupted without replacement, interrupts and later reclaims
-unfinished Judge/Classifier phases through their workflow state, retires stale
-Generator workspaces, and starts the snapshotter and reaper. Learning
-Assistant recovery remains separate because its read-only request can be
-rebuilt from durable environment facts.
-
-Agent roles have separate prompts, typed outputs, and typed tools. Models do
-not receive Kubernetes, Incus, Registry, OpenSandbox, PostgreSQL, or Server
-data PVC credentials. Web Authoring tools and the MCP connector call the same
-GeneratorService and can operate only on the caller-owned, bound workspace.
-The MCP connector only forwards a user JWT and materializes the immutable
-review bundle on the client machine; it never uploads local files back to
-Server.
-
-Formal external effects become business state first and are then executed by
-the Runtime Worker. The Worker has no model API key, OpenSandbox credential,
-PostgreSQL DSN, or Server data PVC access.
+外部副作用先写入业务状态，再由 Runtime Worker 执行。Worker 没有模型 API key、OpenSandbox 凭据、PostgreSQL DSN 或 Server data PVC
+访问权限。

@@ -8,9 +8,7 @@ target_id=${BREAKFIX_E2E_TARGET:-e2e}
 fixture_source=${BREAKFIX_E2E_CATALOG_SOURCE:-$repo_root/test/fixtures/catalog-release}
 fixture_title='Node 运行时验收'
 fixture_runtime=node
-fixture_domain=platform-runtime
-fixture_topic=platform-runtime/node-environment-validation
-fixture_tag=runtime-fixture
+fixture_type=operations-scenario
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/$target_id}
 fixture_archive=$state_dir/catalog-release.oci.tar
 catalog_tag=${BREAKFIX_E2E_CATALOG_TAG:-e2e-$target_id}
@@ -189,16 +187,13 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 		jq -e \
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
-			--arg domain "$fixture_domain" \
-			--arg topic "$fixture_topic" \
-			--arg tag "$fixture_tag" '
+			--arg type "$fixture_type" '
 				(.challenges | length) == 1 and
 				.challenges[0].title == $title and
 				.challenges[0].runtime == $runtime and
-				.challenges[0].domain.source_ref == $domain and
-				.challenges[0].topic.source_ref == $topic and
-				([.challenges[0].tags[].source_ref] | sort) == [$tag]
-			' "$catalog_json" >/dev/null; then
+				.challenges[0].scenario_type == $type and
+				(.challenges[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
+		' "$catalog_json" >/dev/null; then
 		break
 	fi
 	sleep 2
@@ -206,16 +201,13 @@ done
 jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
-	--arg domain "$fixture_domain" \
-	--arg topic "$fixture_topic" \
-	--arg tag "$fixture_tag" '
+	--arg type "$fixture_type" '
 		(.challenges | length) == 1 and
 		.challenges[0].title == $title and
 		.challenges[0].runtime == $runtime and
-		.challenges[0].domain.source_ref == $domain and
-		.challenges[0].topic.source_ref == $topic and
-		([.challenges[0].tags[].source_ref] | sort) == [$tag]
-	' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
+		.challenges[0].scenario_type == $type and
+		(.challenges[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
+' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 
 "$target_script" mark-prepared "$catalog_reference" "$ui_origin"
 

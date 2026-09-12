@@ -555,7 +555,7 @@ func (*generatorServiceTools) ExecuteWorkspace(context.Context, string, string, 
 
 func generatorServicePlan() authoring.Plan {
 	return authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Generator Service", Difficulty: "easy", Description: "Validate shared generation lifecycle.", Runtime: challenge.RuntimeNode},
+		Metadata:    authoring.Metadata{Title: "Generator Service", Description: "Validate shared generation lifecycle.", Runtime: challenge.RuntimeNode},
 		Overview:    "Build a small node environment and validate a durable generation service.",
 		Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The service is ready.", Position: 1}},
 	}
@@ -583,7 +583,7 @@ func generatorServiceCandidateArchive(t *testing.T) []byte {
 		content string
 		mode    int64
 	}{
-		{"challenge.yaml", "runtime: node\ntitle: Generator service candidate\ndifficulty: easy\ndescription: Validate the shared generator service.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
+		{"challenge.yaml", "runtime: node\ntitle: Generator service candidate\ndescription: Validate the shared generator service.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
 		{"problem.md", "# Problem\n\nMake the workspace ready.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host state.\n", 0o644},

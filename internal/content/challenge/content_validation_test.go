@@ -165,7 +165,7 @@ func TestValidateCandidateDirRejectsInvalidTags(t *testing.T) {
 
 func writeTeachingChallenge(t *testing.T, root, hint, solution string) {
 	t.Helper()
-	manifest := "title: Teaching fixture\nruntime: node\ndifficulty: easy\ndescription: fixture\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"
+	manifest := "title: Teaching fixture\nruntime: node\ndescription: fixture\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"
 	if hint != "" {
 		manifest += "    hint: " + hint + "\n"
 	}

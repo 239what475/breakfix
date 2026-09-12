@@ -40,7 +40,6 @@ func reviewedPlanContext(plan authoring.Plan) string {
 	parts := []string{
 		fmt.Sprintf("标题：%s", metadata.Title),
 		fmt.Sprintf("简介：%s", metadata.Description),
-		fmt.Sprintf("难度：%s", metadata.Difficulty),
 		fmt.Sprintf("运行时：%s", challenge.NormalizeRuntime(metadata.Runtime)),
 		fmt.Sprintf("作者审核方案概览：\n%s", plan.Overview),
 	}

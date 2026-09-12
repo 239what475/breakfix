@@ -19,7 +19,6 @@ import (
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
@@ -82,9 +81,6 @@ func (d *GenerationRepository) CreateGenerationWorkflow(ctx context.Context, ses
 	}
 	if session.CurrentRevision != confirmation.PlanRevision || session.State != authoring.StateIntentReview {
 		return nil, authoring.ErrInvalidState
-	}
-	if err := ensureRoadmapExecutionAllowedTx(ctx, tx, now); err != nil {
-		return nil, err
 	}
 	plan, err := readAuthoringRevisionTx(ctx, tx, sessionID, confirmation.PlanRevision)
 	if err != nil {
@@ -1089,7 +1085,7 @@ func (d *GenerationRepository) RequestGenerationContentChanges(ctx context.Conte
 }
 
 // RecordGenerationChallengePublicationResult durably stores a successful
-// provider promotion before Server materializes source or updates Roadmap. The
+// provider promotion before Server materializes source or updates the active
 // Runtime Worker lease is released without changing state, so a later Server
 // finalizer can recover without repeating promotion.
 func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
@@ -1140,7 +1136,7 @@ func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx co
 
 // PendingGenerationPublicationFinalizations returns only promotion results
 // that still need Server-owned source materialization and transactional
-// Roadmap publication. No Runtime Worker action is returned for these rows.
+// Catalog publication. No Runtime Worker action is returned for these rows.
 func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx context.Context, now time.Time) ([]generation.PublicationFinalization, error) {
 	if now.IsZero() {
 		return nil, errors.New("generation publication finalizer listing requires current time")
@@ -1361,36 +1357,6 @@ func failStaleRevisionPublicationTx(ctx context.Context, tx *Tx, workflow *gener
 		return fmt.Errorf("fail stale revision workflow: %w", err)
 	}
 	return tx.Commit()
-}
-
-func currentRoadmapForUpdateTx(ctx context.Context, tx *Tx) (*roadmap.Revision, error) {
-	var revisionID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT revision_id FROM roadmap_current WHERE singleton = TRUE FOR UPDATE`).Scan(&revisionID); err != nil {
-		return nil, fmt.Errorf("lock current roadmap revision: %w", err)
-	}
-	if !revisionID.Valid || strings.TrimSpace(revisionID.String) == "" {
-		return nil, roadmap.ErrNoCurrentRevision
-	}
-	return roadmapRevisionTx(ctx, tx, revisionID.String)
-}
-
-func roadmapRevisionTx(ctx context.Context, tx *Tx, revisionID string) (*roadmap.Revision, error) {
-	if !roadmap.ValidRevision(revisionID) {
-		return nil, roadmap.ErrNoCurrentRevision
-	}
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, `SELECT content_json FROM roadmap_revisions WHERE id = ?`, revisionID).Scan(&encoded); err != nil {
-		return nil, fmt.Errorf("read current roadmap revision: %w", err)
-	}
-	var value roadmap.Revision
-	if err := json.Unmarshal(encoded, &value); err != nil {
-		return nil, fmt.Errorf("decode current roadmap revision: %w", err)
-	}
-	value.Revision = revisionID
-	if err := value.Validate(); err != nil {
-		return nil, fmt.Errorf("validate current roadmap revision: %w", err)
-	}
-	return &value, nil
 }
 
 func prepareGenerationPublicationTx(ctx context.Context, tx *Tx, session authoring.Session, candidate *generation.Revision, metadata generation.PublicationMetadata, now time.Time) (generation.Publication, error) {

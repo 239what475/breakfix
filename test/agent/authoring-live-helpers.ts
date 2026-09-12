@@ -136,25 +136,6 @@ export async function waitForCatalogChallenge(page: Page, challengeID: string): 
 		.toBe(true);
 }
 
-export async function waitForClassificationReview(page: Page, workflowID: string): Promise<void> {
-	const deadline = Date.now() + 10 * 60_000;
-	while (Date.now() < deadline) {
-		const generation = await readGeneration(page, workflowID);
-		const workflow = generation.workflow;
-		if (workflow.state === "Failed" || workflow.state === "Cancelled") {
-			throw workflowStoppedError(workflow.state, workflow);
-		}
-		if (
-			workflow.state === "NeedsClassificationReview" &&
-			generation.classification?.result === "proposed"
-		) {
-			return;
-		}
-		await sleep(2_000);
-	}
-	throw new Error("classification did not reach review in time");
-}
-
 export async function sendAuthoringMessage(page: Page, content: string, sessionID?: string): Promise<void> {
 	const composer = page.locator(".authoring-composer textarea");
 	await expect(composer).toBeEnabled({ timeout: 30 * 60_000 });

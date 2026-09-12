@@ -24,7 +24,6 @@ type Store struct {
 	Generation  *GenerationRepository
 	Identity    *IdentityRepository
 	Publication *PublicationRepository
-	Roadmap     *RoadmapRepository
 	Reporting   *ReportingRepository
 }
 
@@ -73,7 +72,6 @@ func newStore(conn *Conn) *Store {
 		Generation:  &GenerationRepository{conn: conn},
 		Identity:    &IdentityRepository{conn: conn},
 		Publication: &PublicationRepository{conn: conn},
-		Roadmap:     &RoadmapRepository{conn: conn},
 		Reporting:   &ReportingRepository{conn: conn},
 	}
 }

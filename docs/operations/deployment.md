@@ -76,21 +76,6 @@ token_env: BREAKFIX_MCP_TOKEN
 `/tmp/breakfix/reviews/<workflow-id>/`），该目录是可丢弃的只读缓存：删除或重启后可从 Server 重新同步，用户在其中编辑文件
 不会改变 Server 状态。远程 Server 永远不写调用机器的临时目录；本地审核目录也不会上传回 Server。
 
-## 远程调试
-
-根部署配置将 `debug.enabled` 固定为 `false`，因此没有远程调试路由。需要临时排查 Roadmap maintenance 或 portable
-release 导出时，先创建独立 Secret：
-
-```bash
-kubectl -n breakfix-system create secret generic breakfix-debug \
-  --from-literal=credential="$(openssl rand -base64 48)"
-```
-
-然后将部署配置中的 `debug.enabled` 改为 `true` 并应用 Kustomize 包。Server 只接受
-`X-Breakfix-Debug-Key`，且启动时会拒绝与 JWT、Runtime Worker、模型、OpenSandbox 或 Registry 凭据相同的值。
-不要将它写入 `breakfix-runtime`、Worker identity Secret 或浏览器配置；调试结束后先恢复 `false`，再删除
-`breakfix-debug` Secret 并 rollout Server。
-
 ## Incus
 
 Node runtime 的基础镜像和 role-specific mTLS 身份由 `scripts/incus/bootstrap.sh` 准备。脚本将证书写入被忽略的 `.local/incus/<role>/`，并输出 `base_image_fingerprint`；部署者再将 `server`、`controller` 和 `runtime` 三套证书创建为 `breakfix-incus-*` Secret，并把该 fingerprint 写入 `breakfix-runtime` 的 `incus_base_image_fingerprint`。

@@ -195,28 +195,27 @@ func (c *runtimeConversation) prompt(userMessage string) (string, error) {
 
 func (c *runtimeConversation) tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
-		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介、难度和运行时。", params: map[string]*schema.ParameterInfo{
+		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介和运行时。", params: map[string]*schema.ParameterInfo{
 			"title": {Type: schema.String, Desc: "题目标题", Required: true}, "description": {Type: schema.String, Desc: "题目简介", Required: true},
-			"difficulty": {Type: schema.String, Enum: []string{"easy", "medium", "hard"}, Required: true},
-			"runtime":    {Type: schema.String, Enum: []string{"node", "k8s"}, Required: true},
-			"reason":     {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"runtime": {Type: schema.String, Enum: []string{"node", "k8s"}, Required: true},
+			"reason":  {Type: schema.String, Desc: "修改理由", Required: true},
 		}, run: c.setMetadata},
 		&authoringTool{name: "replace_overview", desc: "替换题意约定概览。", params: map[string]*schema.ParameterInfo{
 			"markdown": {Type: schema.String, Desc: "完整概览 Markdown", Required: true},
-			"reason":   {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"reason":   {Type: schema.String, Desc: "修改理由", Required: true},
 		}, run: c.replaceOverview},
 		&authoringTool{name: "upsert_checkpoint", desc: "新增或修改一个公开检查点。", params: map[string]*schema.ParameterInfo{
 			"id":    {Type: schema.String, Desc: "已有检查点 id", Required: false},
 			"title": {Type: schema.String, Desc: "检查点标题", Required: true}, "markdown": {Type: schema.String, Desc: "检查点说明 Markdown", Required: true}, "position": {Type: schema.Integer, Desc: "从 1 开始的展示顺序", Required: true},
-			"reason": {Type: schema.String, Desc: "修改理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"reason": {Type: schema.String, Desc: "修改理由", Required: true},
 		}, run: c.upsertCheckpoint},
 		&authoringTool{name: "remove_checkpoint", desc: "移除不再需要的检查点。", params: map[string]*schema.ParameterInfo{
 			"id":     {Type: schema.String, Desc: "检查点 id", Required: true},
-			"reason": {Type: schema.String, Desc: "移除理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"reason": {Type: schema.String, Desc: "移除理由", Required: true},
 		}, run: c.removeCheckpoint},
 		&authoringTool{name: "reorder_checkpoints", desc: "重新排序全部检查点。", params: map[string]*schema.ParameterInfo{
 			"ids":    {Type: schema.Array, ElemInfo: &schema.ParameterInfo{Type: schema.String}, Required: true},
-			"reason": {Type: schema.String, Desc: "排序理由", Required: true}, "difficulty_impact": {Type: schema.String, Desc: "难度影响", Required: true},
+			"reason": {Type: schema.String, Desc: "排序理由", Required: true},
 		}, run: c.reorderCheckpoints},
 		&authoringTool{name: "confirm_generation", desc: "在作者已明确确认一个已持久化的 Plan revision 后创建生成任务。当前回合修改过 Plan 时不能调用，必须等该回合结束后由作者在新消息中确认。", params: map[string]*schema.ParameterInfo{
 			"plan_revision": {Type: schema.Integer, Desc: "作者明确确认的当前 Plan revision", Required: true},
@@ -261,9 +260,9 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 	}
 }
 
-func (c *runtimeConversation) apply(ctx context.Context, kind string, arguments any, summary, difficultyImpact string, mutate func(*domain.Plan, domain.StageOperation) error) (string, error) {
-	if strings.TrimSpace(summary) == "" || strings.TrimSpace(difficultyImpact) == "" {
-		return "", invalidToolInput(errors.New("修改理由和难度影响不能为空"))
+func (c *runtimeConversation) apply(ctx context.Context, kind string, arguments any, summary string, mutate func(*domain.Plan, domain.StageOperation) error) (string, error) {
+	if strings.TrimSpace(summary) == "" {
+		return "", invalidToolInput(errors.New("修改理由不能为空"))
 	}
 	operation, err := domain.NewStageOperation(c.runID, c.stage.StageRevision, kind, arguments)
 	if err != nil {
@@ -273,7 +272,7 @@ func (c *runtimeConversation) apply(ctx context.Context, kind string, arguments 
 	if err := mutate(&plan, operation); err != nil {
 		return "", invalidToolInput(err)
 	}
-	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.RunAttempt, c.stage.StageRevision, operation, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary), DifficultyImpact: strings.TrimSpace(difficultyImpact)})
+	stage, err := c.updater.UpdateAuthoringStage(ctx, c.runID, c.stage.RunAttempt, c.stage.StageRevision, operation, plan, domain.Change{Kind: kind, Summary: strings.TrimSpace(summary)})
 	if err != nil {
 		return "", err
 	}
@@ -283,41 +282,35 @@ func (c *runtimeConversation) apply(ctx context.Context, kind string, arguments 
 
 func (c *runtimeConversation) setMetadata(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Title            string `json:"title"`
-		Description      string `json:"description"`
-		Difficulty       string `json:"difficulty"`
-		Runtime          string `json:"runtime"`
-		Reason           string `json:"reason"`
-		DifficultyImpact string `json:"difficulty_impact"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Runtime     string `json:"runtime"`
+		Reason      string `json:"reason"`
 	}
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "metadata", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
+	return c.apply(ctx, "metadata", args, args.Reason, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Description) == "" {
 			return errors.New("标题和简介不能为空")
-		}
-		if args.Difficulty != "easy" && args.Difficulty != "medium" && args.Difficulty != "hard" {
-			return errors.New("difficulty 必须是 easy、medium 或 hard")
 		}
 		if args.Runtime != "node" && args.Runtime != "k8s" {
 			return errors.New("runtime 必须是 node 或 k8s")
 		}
-		plan.Metadata = domain.Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Difficulty: args.Difficulty, Runtime: args.Runtime}
+		plan.Metadata = domain.Metadata{Title: strings.TrimSpace(args.Title), Description: strings.TrimSpace(args.Description), Runtime: args.Runtime}
 		return nil
 	})
 }
 
 func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		Markdown         string `json:"markdown"`
-		Reason           string `json:"reason"`
-		DifficultyImpact string `json:"difficulty_impact"`
+		Markdown string `json:"markdown"`
+		Reason   string `json:"reason"`
 	}
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "overview", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
+	return c.apply(ctx, "overview", args, args.Reason, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.Markdown) == "" {
 			return errors.New("概览不能为空")
 		}
@@ -328,17 +321,16 @@ func (c *runtimeConversation) replaceOverview(ctx context.Context, raw string) (
 
 func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		ID               string `json:"id"`
-		Title            string `json:"title"`
-		Markdown         string `json:"markdown"`
-		Position         int    `json:"position"`
-		Reason           string `json:"reason"`
-		DifficultyImpact string `json:"difficulty_impact"`
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Markdown string `json:"markdown"`
+		Position int    `json:"position"`
+		Reason   string `json:"reason"`
 	}
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, operation domain.StageOperation) error {
+	return c.apply(ctx, "checkpoint", args, args.Reason, func(plan *domain.Plan, operation domain.StageOperation) error {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Markdown) == "" || args.Position < 1 {
 			return errors.New("检查点标题、说明不能为空，position 必须从 1 开始")
 		}
@@ -359,14 +351,13 @@ func (c *runtimeConversation) upsertCheckpoint(ctx context.Context, raw string) 
 
 func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		ID               string `json:"id"`
-		Reason           string `json:"reason"`
-		DifficultyImpact string `json:"difficulty_impact"`
+		ID     string `json:"id"`
+		Reason string `json:"reason"`
 	}
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
+	return c.apply(ctx, "checkpoint", args, args.Reason, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if strings.TrimSpace(args.ID) == "" {
 			return errors.New("检查点 id 不能为空")
 		}
@@ -382,14 +373,13 @@ func (c *runtimeConversation) removeCheckpoint(ctx context.Context, raw string) 
 
 func (c *runtimeConversation) reorderCheckpoints(ctx context.Context, raw string) (string, error) {
 	var args struct {
-		IDs              []string `json:"ids"`
-		Reason           string   `json:"reason"`
-		DifficultyImpact string   `json:"difficulty_impact"`
+		IDs    []string `json:"ids"`
+		Reason string   `json:"reason"`
 	}
 	if err := decodeAuthoringToolArguments(raw, &args); err != nil {
 		return "", err
 	}
-	return c.apply(ctx, "checkpoint-order", args, args.Reason, args.DifficultyImpact, func(plan *domain.Plan, _ domain.StageOperation) error {
+	return c.apply(ctx, "checkpoint-order", args, args.Reason, func(plan *domain.Plan, _ domain.StageOperation) error {
 		if len(args.IDs) != len(plan.Checkpoints) {
 			return errors.New("ids 必须恰好覆盖全部检查点")
 		}
