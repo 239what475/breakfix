@@ -77,10 +77,10 @@ func (c *Connector) NewMCPServer() (*mcp.Server, error) {
 }
 
 func (c *Connector) registerTools(server *mcp.Server) {
-	registerTool(server, "set_generation_plan", "保存或修订结构化题目 Plan。首次保存不提供 session_id，后续修订提供上次返回的 session_id 和当前 revision。", false, func(ctx context.Context, input setGenerationPlanInput) (any, error) {
+	registerTool(server, "set_generation_plan", "保存或修订结构化运维场景 Plan。首次保存不提供 session_id，后续修订提供上次返回的 session_id 和当前 revision。", false, func(ctx context.Context, input setGenerationPlanInput) (any, error) {
 		return c.api.SetGenerationPlan(ctx, api.GeneratorPlanRequest{SessionId: input.SessionID, ExpectedRevision: input.ExpectedRevision, IdempotencyKey: input.IdempotencyKey, Plan: input.Plan})
 	})
-	registerTool(server, "confirm_generation", "仅在用户明确确认当前 Plan revision 后创建题目生成任务。", false, func(ctx context.Context, input confirmGenerationInput) (any, error) {
+	registerTool(server, "confirm_generation", "仅在用户明确确认当前 Plan revision 后创建运维场景生成任务。", false, func(ctx context.Context, input confirmGenerationInput) (any, error) {
 		return c.api.ConfirmGeneration(ctx, api.GeneratorGenerationConfirmationRequest{SessionId: input.SessionID, PlanRevision: input.PlanRevision, IdempotencyKey: input.IdempotencyKey})
 	})
 	registerTool(server, "list_active_generations", "列出当前用户尚未结束的生成任务。", true, func(ctx context.Context, _ emptyInput) (any, error) {

@@ -9,7 +9,7 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
 	await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-	await expect(page.getByRole("button", { name: "Catalog", exact: true })).toHaveAttribute("aria-current", "page");
+	await expect(page.getByRole("button", { name: "Operations", exact: true })).toHaveAttribute("aria-current", "page");
 	await page.getByRole("button", { name: "My space", exact: true }).click();
 	await expect(page.getByRole("heading", { name: "Your learning space", exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "My space", exact: true })).toHaveAttribute("aria-current", "page");
@@ -25,7 +25,7 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await expect(page.getByRole("button", { name: "Overview", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Navigation", exact: true }).click();
 	await expect(page.getByRole("navigation", { name: "Mobile primary" })).toBeVisible();
-	await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Catalog", exact: true }).click();
+	await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Operations", exact: true }).click();
 	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
 	await expect(page.getByRole("button", { name: "Start scenario", exact: true })).toHaveCount(0);
 });

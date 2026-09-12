@@ -35,7 +35,7 @@ func TestSendAuthoringMessageReceiptDoesNotStartASecondStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register authoring API routes: %v", err)
 	}
-	request := api.AuthoringMessageRequest{Content: "继续完善题目。", IdempotencyKey: "authoring-message-one"}
+	request := api.AuthoringMessageRequest{Content: "继续完善场景。", IdempotencyKey: "authoring-message-one"}
 	first := generatorHTTPRequest(t, router, cfg, http.MethodPost, "/api/authoring/sessions/"+session.ID+"/messages", request)
 	if first.Code != http.StatusOK || executor.calls != 1 {
 		t.Fatalf("first authoring request: status=%d calls=%d body=%s", first.Code, executor.calls, first.Body.String())
@@ -75,7 +75,7 @@ func TestRunningAuthoringMessageReceiptDoesNotStartAStream(t *testing.T) {
 	}
 	executor := &authoringHTTPExecutor{}
 	runtime := appauthoring.NewRuntimeService(database.Authoring, "test-model", time.Minute, executor)
-	request := api.AuthoringMessageRequest{Content: "继续完善题目。", IdempotencyKey: "authoring-message-running"}
+	request := api.AuthoringMessageRequest{Content: "继续完善场景。", IdempotencyKey: "authoring-message-running"}
 	if _, _, created, err := runtime.StartTurn(context.Background(), "user-one", session.ID, request.IdempotencyKey, request.Content); err != nil || !created {
 		t.Fatalf("start pending authoring turn: created=%t err=%v", created, err)
 	}

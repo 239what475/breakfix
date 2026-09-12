@@ -8,8 +8,8 @@ Server 写 `spec`，Controller 调和实际资源并写 `status`。Controller �
 
 | CRD | runtime | 学习者入口 | 底层资源 |
 | --- | --- | --- | --- |
-| `NodeEnvironment` | `node` | 可以进入题目声明的所有节点 | Incus system containers 与每环境隔离网络。 |
-| `VK8sEnvironment` | `k8s` | 进入管理 terminal，通过 kubeconfig 操作 vcluster | vcluster、管理 terminal 和题目工作负载。 |
+| `NodeEnvironment` | `node` | 可以进入场景声明的所有节点 | Incus system containers 与每环境隔离网络。 |
+| `VK8sEnvironment` | `k8s` | 进入管理 terminal，通过 kubeconfig 操作 vcluster | vcluster、管理 terminal 和场景工作负载。 |
 
 环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自当前 active scenario revision；
 验证环境来自 immutable CandidateRevision artifact。两者都复制运行时 profile、scenario revision、
@@ -34,8 +34,8 @@ Controller 根据 CRD finalizer、用户停止、完成、空闲时间和 drain 
 
 ## 运行时初始化与检查点
 
-每道题携带 `generate.sh`，但它不是镜像构建步骤。基础镜像只包含平台运行时；Environment 启动后由
-runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 scenario bundle 可以
+每个运维场景携带 `generate.sh`，但它不是镜像构建步骤。基础镜像只包含平台运行时；Environment 启动后由
+runtime init 挂载场景 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 scenario bundle 可以
 在学习与验证环境使用一致的初始化语义。
 
 检查点没有人为 Submit。声明了 checkpoint 时，`internal/domain/checkpoint` 是 `checks.sh` JSON report 的唯一协议实现；Controller 与
@@ -51,7 +51,7 @@ Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment�
 
 ## 网络与镜像
 
-NodeEnvironment 使用题目私有 Incus project/network；Node 名称与静态地址由平台生成并写入对应节点的
+NodeEnvironment 使用场景私有 Incus project/network；Node 名称与静态地址由平台生成并写入对应节点的
 `/etc/hosts`，避免向学习者暴露 Incus DNS 细节。VK8s 的 OCI image 由 Kubernetes node 按
 `registry_repository` 拉取；私有 Registry 必须让 node 与平台 Pod 使用同一个可解析、可访问且受信任的
 HTTPS authority，不能用 `.svc` 作为镜像引用。

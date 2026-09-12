@@ -199,7 +199,7 @@ export async function continueGeneratingWorkflow(
 }
 
 export async function expectNoLifecycleButtons(page: Page): Promise<void> {
-	for (const name of ["生成并验证题目", "确认题目内容", "确认分类并发布"]) {
+	for (const name of ["生成并验证场景", "确认场景内容", "确认审核并发布"]) {
 		await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
 	}
 }

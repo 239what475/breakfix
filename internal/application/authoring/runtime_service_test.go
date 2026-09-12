@@ -141,7 +141,7 @@ func (r *runtimeServiceRepository) GetRun(context.Context, string) (*agent.Run, 
 }
 
 func (r *runtimeServiceRepository) LoadAuthoringExecution(context.Context, string) (*authoringdomain.Stage, []agent.Message, error) {
-	return &authoringdomain.Stage{RunID: r.run.ID, SessionID: r.run.OwnerRef, RunAttempt: r.run.Attempt}, []agent.Message{{Role: "user", Content: "继续完善题意"}}, nil
+	return &authoringdomain.Stage{RunID: r.run.ID, SessionID: r.run.OwnerRef, RunAttempt: r.run.Attempt}, []agent.Message{{Role: "user", Content: "继续完善现场说明"}}, nil
 }
 
 func (r *runtimeServiceRepository) UpdateAuthoringStage(context.Context, string, int, int64, authoringdomain.StageOperation, authoringdomain.Plan, authoringdomain.Change) (*authoringdomain.Stage, error) {

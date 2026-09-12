@@ -65,10 +65,10 @@
 
 ### 5. 清理旧产品语义
 
-- [ ] 将 README、OpenAPI 描述、Authoring Agent prompt、MCP 工具说明和前端中的“面试练习平台”“题目”“挑战”等旧定位改为
+- [x] 将 README、OpenAPI 描述、Authoring Agent prompt、MCP 工具说明和前端中的“面试练习平台”“题目”“挑战”等旧定位改为
       “运维场景”“现场说明”“参考修复”和“复现验证”。
-- [ ] 保留学习记录、提示、检查点和参考答案等真实功能，但不再让它们定义所有 Scenario 的产品形态。
-- [ ] 全仓搜索受版本控制文件中的 `challenge`、Roadmap、Classifier、classification、Domain/Topic、curriculum 和 difficulty，
+- [x] 保留学习记录、提示、检查点和参考答案等真实功能，但不再让它们定义所有 Scenario 的产品形态。
+- [x] 全仓搜索受版本控制文件中的 `challenge`、Roadmap、Classifier、classification、Domain/Topic、curriculum 和 difficulty，
       只保留确有其他技术含义的词以及兼容稳定 ID。
 
 ### 6. 验证

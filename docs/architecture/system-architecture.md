@@ -42,7 +42,7 @@ publish、验证、正式场景 publish 与资源清理。
 ## Catalog 与发布
 
 空平台可在 Server 启动时按 immutable `catalog.release_reference` 安装一个 Catalog Release。所有 entry 的真实验证和 artifact
-promotion 成功后，Server 在一个事务中写入 stable Scenario、active revision，并将 release 置为 Ready；因此不会公开部分题库。
+promotion 成功后，Server 在一个事务中写入 stable Scenario、active revision，并将 release 置为 Ready；因此不会公开部分 Catalog。
 基线建立后，新增与修订走 Authoring 的 `GenerationWorkflow`。详细的 portable source、bootstrap 和完整性契约见
 [Catalog Release](catalog-release.md)。
 

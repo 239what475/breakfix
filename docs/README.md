@@ -1,6 +1,6 @@
 # Breakfix 文档
 
-本文档目录保存当前系统的长期说明。完整 HTTP、CRD 和题目字段仍以代码与生成物为准；Markdown 解释边界、所有权和操作路径，
+本文档目录保存当前系统的长期说明。完整 HTTP、CRD 和运维场景字段仍以代码与生成物为准；Markdown 解释边界、所有权和操作路径，
 不复制第二份机器契约。
 
 ## 权威来源
@@ -26,7 +26,7 @@
 ## 产品与参考
 
 - [学习与创作体验](product/learning-experience.md)
-- [题目内容格式](reference/scenario-format.md)
+- [运维场景内容格式](reference/scenario-format.md)
 - [`assets/`](assets/)：产品设计草图与参考截图，仅用于设计沟通。
 
 ## 运维

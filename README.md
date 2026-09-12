@@ -1,8 +1,8 @@
 # Breakfix
 
-Breakfix 是一个提供真实、可回收运维实验环境的练习平台。学习者在隔离的
-`node` 或 `k8s` 环境中完成题目，检查点自动更新进度。作者可以在网页中与 Authoring
-Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` 现场生成题目；两者
+Breakfix 是一个提供真实、可回收运维实验环境的平台。用户在隔离的
+`node` 或 `k8s` 环境中复现和研究运维场景，检查点自动更新进度。作者可以在网页中与 Authoring
+Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` 现场生成运维场景；两者
 使用同一套 Generator 工具面，确认后经过同一质量门禁、真实验证和显式发布。
 
 ## 架构
@@ -28,7 +28,7 @@ Worker 不持有 PostgreSQL 凭据。所有 lease、状态转移和阶段结果�
 ## 本地开始
 
 前置条件和运行时配置以[`config/app/local.example.yaml`](config/app/local.example.yaml)为准。
-本地开发需要 PostgreSQL、Kubernetes 访问、模型凭据和 OpenSandbox；运行 Node 题还需要准备好的 Incus
+本地开发需要 PostgreSQL、Kubernetes 访问、模型凭据和 OpenSandbox；运行 Node 场景还需要准备好的 Incus
 provider。Kind 开发使用 `deploy/overlays/kind` 提供固定 `NodePort 30443` Registry；创建好运行时 Secret 后，
 `make deploy-kind` 会构建镜像、准备 Registry 并部署运行时。生产部署使用运营方提供的 Registry 配置。
 
@@ -63,5 +63,5 @@ kubectl kustomize .
 - [部署与运行](docs/operations/deployment.md)
 
 机器可验证的契约以代码为准：HTTP 接口见 `api/http/openapi.yaml`，CRD 见
-`api/v1/`，题目格式见 `internal/content/scenario/`，运行时配置见
+`api/v1/`，运维场景格式见 `internal/content/scenario/`，运行时配置见
 `config/app/local.example.yaml`，构建和运维命令见 `Makefile`。

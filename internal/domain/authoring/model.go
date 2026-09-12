@@ -76,10 +76,10 @@ func (p Plan) Clone() Plan {
 func (p Plan) ValidateForGeneration() error {
 	metadata := p.Metadata
 	if strings.TrimSpace(metadata.Title) == "" {
-		return errors.New("题目标题不能为空")
+		return errors.New("场景标题不能为空")
 	}
 	if strings.TrimSpace(metadata.Description) == "" {
-		return errors.New("题目简介不能为空")
+		return errors.New("场景简介不能为空")
 	}
 	if runtime := scenario.NormalizeRuntime(metadata.Runtime); runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s {
 		return errors.New("运行时必须是 node 或 k8s")

@@ -30,8 +30,8 @@ func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T
 func TestAuthoringInputsExcludePlatformEvents(t *testing.T) {
 	conversation := &runtimeConversation{stage: authoring.Stage{BaseRevision: 2}}
 	inputs, err := authoringInputs(conversation, []agent.Message{
-		{Role: "user", Content: "先设计题意"},
-		{Role: "assistant", Content: "已经记录第一版题意"},
+		{Role: "user", Content: "先设计现场说明"},
+		{Role: "assistant", Content: "已经记录第一版现场说明"},
 		{Role: "event", Content: `{"kind":"authoring_run_interrupted"}`},
 		{Role: "user", Content: "继续完成生成"},
 	})

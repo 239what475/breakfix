@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: Breakfix API
   version: "1.0.0"
-  description: SRE/DevOps interview practice platform
+  description: SRE/DevOps operations scenario practice platform
 servers:
   - url: http://localhost:9090/api
     description: Local dev

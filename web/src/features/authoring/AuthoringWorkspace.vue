@@ -29,8 +29,8 @@ let pollTimer: number | undefined;
 let streamController: AbortController | undefined;
 
 const sessionStateLabel: Record<string, string> = {
-  DraftConversation: "等待题意",
-  IntentReview: "题意约定",
+  DraftConversation: "等待现场说明",
+  IntentReview: "现场说明约定",
   Published: "已发布",
 };
 const workflowStateLabel: Record<string, string> = {
@@ -40,7 +40,7 @@ const workflowStateLabel: Record<string, string> = {
   ArtifactPublishing: "正在发布候选产物",
   Verifying: "正在真实验证",
   NeedsAuthorReview: "等待内容审核",
-  ScenarioPublishing: "正在发布挑战",
+  ScenarioPublishing: "正在发布场景",
   Published: "已发布",
   Failed: "基础设施失败",
   Cancelled: "已取消",
@@ -97,9 +97,9 @@ const overview = computed(() => {
   if (!metadata) return "";
   const problem = assets.value.find((asset) => asset.path === "problem.md")?.content;
   const body = usingVerifiedRevision.value
-    ? problem || "已验证题目未包含可展示的 problem.md。"
-    : session.value?.intent.overview || "等待 agent 写入题意约定。";
-  return `# ${metadata.title || "未命名题目"}\n\n${metadata.description || "等待 agent 根据题意补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n\n${body}`;
+    ? problem || "已验证场景未包含可展示的 problem.md。"
+    : session.value?.intent.overview || "等待 agent 写入现场说明约定。";
+  return `# ${metadata.title || "未命名场景"}\n\n${metadata.description || "等待 agent 根据现场说明补全简介。"}\n\n- **运行时**：${metadata.runtime || "待定"}\n\n${body}`;
 });
 const activeCheckpoint = computed(() => {
   const id = activeTab.value.replace("checkpoint:", "");
@@ -338,7 +338,7 @@ onScopeDispose(() => {
         <header class="authoring-plan-heading">
           <div>
             <p class="eyebrow">{{ candidate ? "Candidate review" : "Intent revision" }}</p>
-            <h1>{{ candidate ? "题目审核" : "题意约定" }}</h1>
+            <h1>{{ candidate ? "场景审核" : "现场说明约定" }}</h1>
           </div>
           <div class="authoring-plan-actions">
             <div v-if="session" class="authoring-status" :data-state="displayState">
@@ -397,7 +397,7 @@ onScopeDispose(() => {
       </section>
 
       <section class="authoring-chat-pane" :class="{ 'narrow-hidden': narrowPane !== 'chat' }">
-        <header class="authoring-chat-heading"><strong><MessageSquareText :size="15" /> 题目讨论</strong><span>{{ activeWorkflow ? workflowStateLabel[activeWorkflow.state] : "题意约定" }}</span></header>
+        <header class="authoring-chat-heading"><strong><MessageSquareText :size="15" /> 场景讨论</strong><span>{{ activeWorkflow ? workflowStateLabel[activeWorkflow.state] : "现场说明约定" }}</span></header>
         <p v-if="error" class="authoring-alert">{{ error }}</p>
         <div class="authoring-timeline">
           <div v-if="session && !displayMessages.length" class="authoring-empty">
@@ -408,14 +408,14 @@ onScopeDispose(() => {
             <div class="authoring-bubble">{{ messageContent(entry) }}</div>
             <div v-for="change in entry.changes" :key="`${entry.id}-${change.revision}-${change.kind}`" class="authoring-change-card">
               <span>revision {{ change.revision }} · {{ change.kind }}</span>
-              <button type="button" @click="focusChange">{{ change.summary || "查看题意变更" }}</button>
+              <button type="button" @click="focusChange">{{ change.summary || "查看现场说明变更" }}</button>
             </div>
           </article>
         </div>
         <form class="authoring-composer" @submit.prevent="send">
-          <textarea v-model="message" :disabled="!canCompose" rows="2" placeholder="继续讨论题意、生成、审核、调整或取消…"></textarea>
+          <textarea v-model="message" :disabled="!canCompose" rows="2" placeholder="继续讨论现场说明、生成、审核、调整或取消…"></textarea>
           <button type="submit" title="发送消息" aria-label="发送消息" :disabled="!canSend"><Send :size="16" /></button>
-          <p class="authoring-composer-note">{{ busy || session?.authoring_turn_active ? "agent 正在处理这条消息…" : session?.state === "Published" ? "该作者会话已经发布。" : "通过对话继续当前题目。" }}</p>
+          <p class="authoring-composer-note">{{ busy || session?.authoring_turn_active ? "agent 正在处理这条消息…" : session?.state === "Published" ? "该作者会话已经发布。" : "通过对话继续当前场景。" }}</p>
         </form>
       </section>
     </div>

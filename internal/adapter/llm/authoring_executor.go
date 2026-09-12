@@ -183,11 +183,11 @@ func (c *runtimeConversation) prompt(userMessage string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(`当前私有题意约定如下：
+	return fmt.Sprintf(`当前私有现场说明约定如下：
 
 %s
 
-当前已持久化 Plan revision 编号：%d。作者若确认当前题意，confirm_generation 的 plan_revision 必须传入这个编号。
+当前已持久化 Plan revision 编号：%d。作者若确认当前现场说明，confirm_generation 的 plan_revision 必须传入这个编号。
 
 作者本次消息：
 %s`, string(plan), c.stage.BaseRevision, userMessage), nil
@@ -195,12 +195,12 @@ func (c *runtimeConversation) prompt(userMessage string) (string, error) {
 
 func (c *runtimeConversation) tools() []tool.InvokableTool {
 	return []tool.InvokableTool{
-		&authoringTool{name: "set_metadata", desc: "更新题目标题、简介和运行时。", params: map[string]*schema.ParameterInfo{
-			"title": {Type: schema.String, Desc: "题目标题", Required: true}, "description": {Type: schema.String, Desc: "题目简介", Required: true},
+		&authoringTool{name: "set_metadata", desc: "更新场景标题、简介和运行时。", params: map[string]*schema.ParameterInfo{
+			"title": {Type: schema.String, Desc: "场景标题", Required: true}, "description": {Type: schema.String, Desc: "场景简介", Required: true},
 			"runtime": {Type: schema.String, Enum: []string{"node", "k8s"}, Required: true},
 			"reason":  {Type: schema.String, Desc: "修改理由", Required: true},
 		}, run: c.setMetadata},
-		&authoringTool{name: "replace_overview", desc: "替换题意约定概览。", params: map[string]*schema.ParameterInfo{
+		&authoringTool{name: "replace_overview", desc: "替换现场说明约定概览。", params: map[string]*schema.ParameterInfo{
 			"markdown": {Type: schema.String, Desc: "完整概览 Markdown", Required: true},
 			"reason":   {Type: schema.String, Desc: "修改理由", Required: true},
 		}, run: c.replaceOverview},

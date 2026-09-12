@@ -29,20 +29,20 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s scenar
 	try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await registerAndLogin(page);
-		await page.getByRole("button", { name: "Scenario studio", exact: true }).click();
+		await page.getByRole("button", { name: "Create scenario", exact: true }).click();
 
 		const composer = page.locator(".authoring-composer textarea");
 		await expect(composer).toBeEnabled({ timeout: 30_000 });
 		await expectNoLifecycleButtons(page);
 		await sendAuthoringMessage(
 			page,
-			"创建一道属于 Kubernetes 工作负载与服务运维方向的 runtime: k8s 练习题。学习者在 default namespace 创建 Deployment web：replicas 为 2，标签 app=web，" +
+				"创建一个属于 Kubernetes 工作负载与服务运维方向的 runtime: k8s 运维场景。用户在 default namespace 创建 Deployment web：replicas 为 2，标签 app=web，" +
 				"容器 nginx 使用 nginx:1.27.5 并暴露 80。再创建 ClusterIP Service web，selector app=web，port 和 targetPort 都为 80。" +
-				"初始时资源不存在，只有两个检查点：Deployment 的期望与 Ready 副本数；Service 的类型、selector 和端口。",
+				"初始时资源不存在，场景只有两个检查点：Deployment 的期望与 Ready 副本数；Service 的类型、selector 和端口。",
 		);
 		await sendAuthoringMessage(
 			page,
-			"题意已经完整，我确认当前已持久化的 Plan revision。请创建生成任务并生成题目，" +
+			"现场说明已经完整，我确认当前已持久化的 Plan revision。请创建生成任务并生成场景，" +
 				"不要添加额外资源或检查点，生成完成后直接提交 candidate。",
 		);
 		const sessionID = await currentAuthoringSessionID(page);
@@ -53,16 +53,16 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s scenar
 			if (!(cause instanceof CandidateRejectedError)) throw cause;
 			await sendAuthoringMessage(
 				page,
-				"请读取生成任务的反馈，修复 candidate 后重新提交；不要改动题意约定。",
+					"请读取生成任务的反馈，修复 candidate 后重新提交；不要改动现场说明约定。",
 				sessionID,
 			);
 			await waitForVerifiedCandidate(page, workflowID);
 		}
-			await sendAuthoringMessage(page, "我确认题目内容，请发布题目。", sessionID);
+			await sendAuthoringMessage(page, "我确认场景内容，请发布场景。", sessionID);
 		scenarioID = await waitForPublishedScenario(page, sessionID);
 		await waitForCatalogScenario(page, scenarioID);
 
-		await page.getByRole("button", { name: "Catalog", exact: true }).click();
+		await page.getByRole("button", { name: "Operations", exact: true }).click();
 		const card = scenarioCardByID(page, scenarioID);
 		await expect(card).toBeVisible({ timeout: 30_000 });
 		await card.getByRole("button", { name: "Start scenario", exact: true }).click();

@@ -19,7 +19,7 @@ make verify-generated
 - Assistant：在活动学习环境中发送消息并读取持久对话与工具证据。
 - 终端：先经 JWT 保护的 HTTP 接口签发一次性 ticket，再由 WebSocket 消费。
 
-浏览器不提交场景 artifact，也没有做题 Submit。检查点由 Controller 自动评估；作者发布通过 `GenerationWorkflow` 的内容审核决定触发，
+浏览器不提交场景 artifact，也没有手动完成提交。检查点由 Controller 自动评估；作者发布通过 `GenerationWorkflow` 的内容审核决定触发，
 而不是上传任意文件。
 
 ## Generator application API 与 breakfix-mcp
@@ -63,4 +63,4 @@ Origin 与配置的 `ui_origin` 完全一致。terminal connection 与 usage ses
 清理仍能按活动状态收敛。
 
 Authoring 与 Assistant 的 SSE 只订阅已持久化的 Server AgentRun。浏览器断开不会取消该 Run；完成结果原子写入会话后，浏览器可通过
-普通读取接口重新取得对话或题意更新，不回放未完成 token。
+普通读取接口重新取得对话或现场说明更新，不回放未完成 token。

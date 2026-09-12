@@ -49,7 +49,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 	if err != nil {
 		return app.Judgement{}, err
 	}
-	resultTool, err := NewResultTool[judgementResult]("submit_judgement", "提交题目审核结论。", validateJudgement)
+	resultTool, err := NewResultTool[judgementResult]("submit_judgement", "提交运维场景审核结论。", validateJudgement)
 	if err != nil {
 		return app.Judgement{}, err
 	}

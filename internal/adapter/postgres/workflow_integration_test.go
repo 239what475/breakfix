@@ -300,7 +300,7 @@ func TestGenerationConfirmationCanRunInsideAuthoringTurn(t *testing.T) {
 	if _, err := database.Authoring.ReplaceAuthoringPlan(ctx, session.ID, session.UserID, 0, plan, authoring.StateIntentReview); err != nil {
 		t.Fatalf("confirm authoring plan: %v", err)
 	}
-	if _, _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-confirmation-run", agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+	if _, _, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-confirmation-run", agent.Message{Role: "user", Content: "继续完善现场说明。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
 		Model: "test-model", PromptVersion: "authoring-v2",
 	}); err != nil {
@@ -335,7 +335,7 @@ func TestAuthoringMessageReceiptReturnsTheOriginalRun(t *testing.T) {
 		}
 	}
 	stage, first, created, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "message-request-one", agent.Message{
-		Role: "user", Content: "继续完善题意。",
+		Role: "user", Content: "继续完善现场说明。",
 	}, createRun(agent.NewID("authoring-run")))
 	if err != nil {
 		t.Fatalf("start authoring run: %v", err)
@@ -344,7 +344,7 @@ func TestAuthoringMessageReceiptReturnsTheOriginalRun(t *testing.T) {
 		t.Fatalf("first authoring receipt = created=%t stage=%#v", created, stage)
 	}
 	replayedStage, replayed, created, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "message-request-one", agent.Message{
-		Role: "user", Content: "继续完善题意。",
+		Role: "user", Content: "继续完善现场说明。",
 	}, createRun(agent.NewID("authoring-run")))
 	if err != nil {
 		t.Fatalf("replay authoring run: %v", err)
@@ -382,7 +382,7 @@ func TestAuthoringFinalizationCanReplayAfterItsResultIsLost(t *testing.T) {
 		t.Fatalf("create authoring session: %v", err)
 	}
 	_, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, userID, "finalization-request", agent.Message{
-		Role: "user", Content: "继续完善题意。",
+		Role: "user", Content: "继续完善现场说明。",
 	}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
 		InputRevision: "0", Model: "test-model", PromptVersion: "authoring-v4",
@@ -429,7 +429,7 @@ func TestAuthoringStageOperationReplayReturnsThePersistedStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create authoring session: %v", err)
 	}
-	stage, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-recovery-message", agent.Message{Role: "user", Content: "继续完善题意。"}, agent.CreateRun{
+	stage, run, _, err := database.Authoring.StartAuthoringRun(ctx, session.ID, session.UserID, "authoring-recovery-message", agent.Message{Role: "user", Content: "继续完善现场说明。"}, agent.CreateRun{
 		ID: agent.NewID("authoring-run"), SessionID: session.RuntimeSessionID, Purpose: "authoring", OwnerKind: "authoring-session", OwnerRef: session.ID,
 		Model: "test-model", PromptVersion: "authoring-v2",
 	})

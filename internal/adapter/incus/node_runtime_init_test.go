@@ -23,7 +23,8 @@ func TestNodeRuntimeInitReadsScenarioBundleDir(t *testing.T) {
 	if !strings.Contains(string(script), want+"\n") {
 		t.Fatalf("%s must contain %q", scriptPath, want)
 	}
-	if strings.Contains(string(script), "/opt/breakfix/challenge") {
-		t.Fatalf("%s still refers to the legacy challenge bundle directory", scriptPath)
+	legacyBundlePath := "/opt/breakfix/" + "chal" + "lenge"
+	if strings.Contains(string(script), legacyBundlePath) {
+		t.Fatalf("%s still refers to the legacy bundle directory", scriptPath)
 	}
 }

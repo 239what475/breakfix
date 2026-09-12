@@ -38,12 +38,12 @@ const plan: Plan = {
 		runtime: "node",
 	},
 	overview:
-		"# 场景\n\nNode 题目节点丢失了 `/var/lib/breakfix/mcp-e2e-task/ready` 任务标记。学习者需要恢复该标记，使文件内容精确等于 `ready`。\n\n# 节点\n\n- host",
+		"# 场景\n\nNode 场景节点丢失了 `/var/lib/breakfix/mcp-e2e-task/ready` 任务标记。用户需要恢复该标记，使文件内容精确等于 `ready`。\n\n# 节点\n\n- host",
 	checkpoints: [
 		{
 			id: "task-marker-ready",
 			title: "Task marker ready",
-			markdown: "Node 题目节点的任务标记存在且内容精确等于 `ready`。",
+			markdown: "Node 场景节点的任务标记存在且内容精确等于 `ready`。",
 			position: 1,
 		},
 	],
@@ -158,7 +158,7 @@ agentLiveTest("authoring resumes after its deadline and publishes the same workf
 	test.setTimeout(45 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	await page.getByRole("button", { name: "Scenario studio", exact: true }).click();
+	await page.getByRole("button", { name: "Create scenario", exact: true }).click();
 
 	const sessionID = await currentAuthoringSessionID(page);
 	const savedPlan = await authorized<{ session_id: string; plan_revision: number }>(page, "/generator/plans", "POST", {
@@ -177,7 +177,7 @@ agentLiveTest("authoring resumes after its deadline and publishes the same workf
 
 	await sendAuthoringMessage(
 		page,
-		`继续生成任务 ${workflowID}。这是跨回合恢复验收的第一轮：先读取当前工作区，然后必须调用 run_workspace_command 执行 sleep 120，保持本轮不要提交 candidate，等待时间预算结束。不要重新 confirm_generation，也不要修改题意。`,
+		`继续生成任务 ${workflowID}。这是跨回合恢复验收的第一轮：先读取当前工作区，然后必须调用 run_workspace_command 执行 sleep 120，保持本轮不要提交 candidate，等待时间预算结束。不要重新 confirm_generation，也不要修改现场说明。`,
 		sessionID,
 	);
 	const event = await waitForAuthoringInterruption(page, sessionID, 5 * 60_000);

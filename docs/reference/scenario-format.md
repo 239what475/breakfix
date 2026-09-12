@@ -73,7 +73,7 @@ k8s/answer.sh              # Optional reference repair
 k8s/checks.sh              # Required only when checkpoints are declared
 ```
 
-发布时平台写入 `id`、`revision_id`、`source_slug`、`image`、`content_revision` 和 `published_at`。`id` 是稳定、不含题意的
+发布时平台写入 `id`、`revision_id`、`source_slug`、`image`、`content_revision` 和 `published_at`。`id` 是稳定、不含场景内容的
 opaque Scenario identity；`revision_id` 是本次不可变发布结果。API、Environment 和学习记录使用 `id + revision_id`；`source_slug`
 必须与发布目录一致，但不是关系键。
 
