@@ -6,9 +6,9 @@ Scenario 及其 active revision 构造；目录、校验和发布行为以
 
 ## Portable Candidate
 
-作者生成的 CandidateRevision 和 Catalog Release source 都是 portable candidate。`scenario.yaml` 必须包含场景类型、标题、
-运行时、描述、节点和检查点，不能包含 `id`、`revision_id`、`source_slug`、`image`、`content_revision` 或 `published_at`。
-source 的确定性 `contentRevision` 由文件树计算，不写回 candidate manifest。
+作者生成的 CandidateRevision 和 Catalog Release source 都是 portable candidate。运维场景必须声明现场说明、运行时、依赖版本、
+环境拓扑、初始化说明、目标现象与至少一项关键证据；不能包含 `id`、`revision_id`、`source_slug`、`image`、`content_revision` 或
+`published_at`。source 的确定性 `contentRevision` 由文件树计算，不写回 candidate manifest。
 
 ```yaml
 runtime: node
@@ -16,6 +16,17 @@ type: operations-scenario
 title: 恢复反向代理
 description: 恢复客户端到应用服务的可用路径。
 tags: [linux, nginx, systemd]
+versions:
+  - component: nginx
+    version: 1.27.5
+topology: "客户端通过反向代理访问应用服务。"
+initialization: "generate.sh 配置错误的上游地址并启动服务。"
+reproduction:
+  objective: "反向代理指向错误上游，客户端无法获得应用响应。"
+  evidence:
+    - id: proxy-upstream-wrong
+      description: "代理配置仍使用错误的上游端口。"
+      node: proxy
 nodes:
   - name: proxy
     title: Proxy
@@ -27,9 +38,11 @@ checkpoints:
     node: proxy
 ```
 
-`type` 必须是 `documentation-example` 或 `operations-scenario`。文档示例不能包含标签；运维场景最多八个标签。标签去除首尾空格、
-英文字母转为小写后，必须是 1 到 32 个字符的中文、英文字母、数字、`.`、`+` 或 `-`，按规范化结果去重和确定性排序。没有 Tag 实体、
-同义词合并或发布后的标签维护流程。
+`versions` 的每项必须有唯一的 `component` 与非空 `version`。`topology` 说明环境中的参与者和关系，`initialization` 说明
+`generate.sh` 如何建立初始状态；`reproduction.objective` 是要复现的现象，`evidence` 给出可观察事实。Node evidence 必须声明
+执行节点，Kubernetes evidence 不得声明节点。`type` 必须是 `documentation-example` 或 `operations-scenario`。文档示例不能包含
+标签；运维场景最多八个标签。标签去除首尾空格、英文字母转为小写后，必须是 1 到 32 个字符的中文、英文字母、数字、`.`、`+` 或
+`-`，按规范化结果去重和确定性排序。没有 Tag 实体、同义词合并或发布后的标签维护流程。
 
 ## 已发布目录
 
@@ -47,11 +60,13 @@ hints/<checkpoint-id>.md
 ```text
 # runtime: node
 nodes/<node>/generate.sh
+nodes/<node>/reproduce.sh
 nodes/<node>/answer.sh
 nodes/<node>/checks.sh
 
 # runtime: k8s
 k8s/generate.sh
+k8s/reproduce.sh
 k8s/answer.sh
 k8s/checks.sh
 ```
@@ -75,8 +90,25 @@ stable Scenario 状态，不删除历史内容。
 - Node 基础镜像只含 Ubuntu、systemd、tmux、APT 和常用诊断工具。每个 Node instance 首次启动时运行自己的 `generate.sh`。
 - K8s 管理终端首次启动时运行 `k8s/generate.sh`。
 
-`generate.sh` 可以安装场景专属软件并建立错误初态；它不参与 Builder，也不能依赖构建期联网。`answer.sh` 是真实验证的参考解法：
-Node 全部节点答案并行执行，K8s 在管理终端执行唯一答案。学习环境永远不会自动执行答案。
+`generate.sh` 可以安装场景专属软件并建立错误初态；它不参与 Builder，也不能依赖构建期联网。Verifier 先运行
+`reproduce.sh` 证明 manifest 所述的初始现象存在，再运行 `answer.sh` 验证参考修复。Node 仅在拥有 evidence 的节点运行
+`reproduce.sh`，随后全部节点答案并行执行；K8s 都在管理终端运行。学习环境永远不会自动执行这两类脚本。
+
+## 复现证据协议
+
+每个执行位置的 `reproduce.sh` stdout 只输出 JSON：
+
+```json
+{
+  "evidence": [
+    {"id": "proxy-upstream-wrong", "observed": true, "summary": "short result", "details": "optional detail"}
+  ]
+}
+```
+
+脚本必须恰好报告该位置被分配的每个 evidence ID 一次。`observed: true` 表示目标现象的证据确实存在；`false` 是有效结果，表示
+该 candidate 未能复现现场，并且 Verifier 不会继续执行参考修复。脚本、解析或协议错误才非零退出。`reproduce.sh` 只能观察
+初始化后的环境，不能修改环境或执行、source `generate.sh`、`answer.sh` 或用户脚本。
 
 ## 检查点协议
 
@@ -91,11 +123,11 @@ Node 全部节点答案并行执行，K8s 在管理终端执行唯一答案。�
 ```
 
 脚本必须恰好报告该执行位置 manifest 声明的每个 checkpoint ID 一次。未通过是有效检查结果，输出 `passed: false` 且退出 0；脚本、
-解析或协议错误才非零退出。Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 在验证环境运行 answer 后单次
-执行它。检查器只能观察环境，不能修改环境或依赖唯一命令路径。
+解析或协议错误才非零退出。Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 仅在复现证据通过、
+参考修复完成后单次执行它。检查器只能观察环境，不能修改环境或依赖唯一命令路径。
 
 ## 教学资产
 
 `problem.md` 描述症状、目标和边界。每个 checkpoint 可通过 `hints/` 提供渐进提示；`solution.md` 说明诊断和修复理由，而不只粘贴命令。
-`answer.sh` 必须在 generate 初始化后的真实环境通过全部 checkpoint。学习者没有手动 Submit；作者在发布前看到经
-`Build -> ArtifactPublish -> Verify` 真实验证的资产，详见[工作流](../architecture/workflows.md)。
+`answer.sh` 必须在目标现象已复现的真实环境通过全部 checkpoint。学习者没有手动 Submit；作者在发布前分别看到复现证据和
+参考修复/检查点的验证结果，详见[工作流](../architecture/workflows.md)。

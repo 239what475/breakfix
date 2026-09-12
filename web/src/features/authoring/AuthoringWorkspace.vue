@@ -388,8 +388,9 @@ onScopeDispose(() => {
             <p>{{ verification?.summary || activeWorkflow?.last_error || "验证没有返回摘要" }}</p>
             <dl>
               <div><dt>生成工作流</dt><dd>{{ activeWorkflow?.state || "-" }}</dd></div>
-              <div><dt>标准解答</dt><dd>{{ verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ verification?.answers.length || 0 }}</dd></div>
-              <div><dt>检查点</dt><dd>{{ verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ verification?.checkpoints.length || 0 }}</dd></div>
+              <div><dt>目标现象</dt><dd>{{ verification?.reproduction.filter((entry) => entry.observed).length || 0 }} / {{ verification?.reproduction.length || 0 }}</dd></div>
+              <div><dt>参考修复</dt><dd>{{ verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ verification?.answers.length || 0 }}</dd></div>
+              <div><dt>修复后检查点</dt><dd>{{ verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ verification?.checkpoints.length || 0 }}</dd></div>
             </dl>
           </div>
         </div>

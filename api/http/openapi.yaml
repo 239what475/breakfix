@@ -1189,6 +1189,26 @@ components:
         title:
           type: string
 
+    ScenarioVersion:
+      type: object
+      required: [component, version]
+      properties:
+        component:
+          type: string
+        version:
+          type: string
+
+    ScenarioReproductionEvidence:
+      type: object
+      required: [id, description]
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        node:
+          type: string
+
     CheckpointResult:
       type: object
       required: [id, passed, summary]
@@ -1220,7 +1240,7 @@ components:
 
     ScenarioContent:
       type: object
-      required: [id, title, runtime, scenario_type, scenario_tags, nodes, problem, solution, hints, checkpoints]
+      required: [id, title, runtime, scenario_type, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, problem, solution, hints, checkpoints]
       properties:
         id:
           type: string
@@ -1240,6 +1260,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ScenarioNode"
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioVersion"
+        topology:
+          type: string
+        initialization:
+          type: string
+        reproduction_objective:
+          type: string
+        reproduction_evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioReproductionEvidence"
         problem:
           type: string
         solution:
@@ -1518,12 +1552,16 @@ components:
 
     AuthoringVerificationReport:
       type: object
-      required: [passed, answers, checkpoints, summary]
+      required: [passed, reproduction, answers, checkpoints, summary]
       properties:
         passed:
           type: boolean
         summary:
           type: string
+        reproduction:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthoringReproductionEvidenceResult"
         answers:
           type: array
           items:
@@ -1544,6 +1582,19 @@ components:
         stdout:
           type: string
         stderr:
+          type: string
+
+    AuthoringReproductionEvidenceResult:
+      type: object
+      required: [id, observed, summary]
+      properties:
+        id:
+          type: string
+        observed:
+          type: boolean
+        summary:
+          type: string
+        details:
           type: string
 
     AuthoringCheckpointResult:

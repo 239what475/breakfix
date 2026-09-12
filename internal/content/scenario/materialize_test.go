@@ -266,7 +266,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func validManifest(prefix string) string {
-	return prefix + "runtime: node\ndescription: demo\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return prefix + "runtime: node\ndescription: demo\nversions:\n  - component: fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh removes the completion marker.\nreproduction:\n  objective: The completion marker is absent.\n  evidence:\n    - id: completion-marker-absent\n      description: The completion marker does not exist.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func validPublishedNodeManifest(prefix string) string {
@@ -274,7 +274,7 @@ func validPublishedNodeManifest(prefix string) string {
 }
 
 func validK8sManifest(prefix string) string {
-	return prefix + "runtime: k8s\ndescription: demo\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
+	return prefix + "runtime: k8s\ndescription: demo\nversions:\n  - component: kubernetes\n    version: v1\ntopology: One isolated Kubernetes control plane.\ninitialization: generate.sh removes the completion marker.\nreproduction:\n  objective: The completion marker is absent.\n  evidence:\n    - id: completion-marker-absent\n      description: The completion marker does not exist.\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n"
 }
 
 func validPublishedK8sManifest(prefix string) string {
@@ -287,6 +287,7 @@ func writeScenarioAssets(t *testing.T, root string) {
 	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"completion-marker-absent\",\"observed\":true,\"summary\":\"absent\",\"details\":\"fixture\"}]}'\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "checks.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }
@@ -297,6 +298,7 @@ func writeK8sScenarioAssets(t *testing.T, root string) {
 	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeFile(t, filepath.Join(root, "hints", "complete.md"), "hint\n")
 	writeFile(t, filepath.Join(root, "k8s", "generate.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(root, "k8s", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"completion-marker-absent\",\"observed\":true,\"summary\":\"absent\",\"details\":\"fixture\"}]}'\n")
 	writeFile(t, filepath.Join(root, "k8s", "checks.sh"), "#!/bin/sh\nprintf '{\"checks\":[{\"id\":\"complete\",\"passed\":true,\"summary\":\"complete\",\"details\":\"done\"}]}'\n")
 	writeFile(t, filepath.Join(root, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }

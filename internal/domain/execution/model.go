@@ -27,6 +27,13 @@ type CheckpointSnapshot struct {
 	Node string `json:"node,omitempty"`
 }
 
+// ReproductionEvidenceSnapshot pins one observation that must be true in the
+// initialized environment before a reference repair is evaluated.
+type ReproductionEvidenceSnapshot struct {
+	ID   string `json:"id"`
+	Node string `json:"node,omitempty"`
+}
+
 type NodeSnapshot struct {
 	Name  string `json:"name"`
 	Title string `json:"title"`
@@ -71,10 +78,11 @@ type K8sResources struct {
 // Snapshot freezes the platform runtime profile used to build and verify one
 // portable scenario. It remains valid independent of its work owner.
 type Snapshot struct {
-	Runtime     string               `json:"runtime"`
-	Checkpoints []CheckpointSnapshot `json:"checkpoints"`
-	Node        *NodeRuntimeSnapshot `json:"node,omitempty"`
-	K8s         *K8sRuntimeSnapshot  `json:"k8s,omitempty"`
+	Runtime      string                         `json:"runtime"`
+	Reproduction []ReproductionEvidenceSnapshot `json:"reproduction,omitempty"`
+	Checkpoints  []CheckpointSnapshot           `json:"checkpoints"`
+	Node         *NodeRuntimeSnapshot           `json:"node,omitempty"`
+	K8s          *K8sRuntimeSnapshot            `json:"k8s,omitempty"`
 }
 
 type BuildOutput struct {
@@ -122,11 +130,22 @@ type CheckpointResult struct {
 	Details string `json:"details,omitempty"`
 }
 
+// ReproductionEvidenceResult records an initialized-state observation. It is
+// intentionally distinct from a checkpoint, which describes the repaired
+// state after a reference answer has run.
+type ReproductionEvidenceResult struct {
+	ID       string `json:"id"`
+	Observed bool   `json:"observed"`
+	Summary  string `json:"summary"`
+	Details  string `json:"details,omitempty"`
+}
+
 type VerificationReport struct {
-	Passed      bool               `json:"passed"`
-	Answers     []ExecutionResult  `json:"answers"`
-	Checkpoints []CheckpointResult `json:"checkpoints"`
-	Summary     string             `json:"summary,omitempty"`
+	Passed       bool                         `json:"passed"`
+	Reproduction []ReproductionEvidenceResult `json:"reproduction,omitempty"`
+	Answers      []ExecutionResult            `json:"answers"`
+	Checkpoints  []CheckpointResult           `json:"checkpoints"`
+	Summary      string                       `json:"summary,omitempty"`
 }
 
 // Work is the immutable execution view consumed by build, publication, and
@@ -209,6 +228,20 @@ func (r VerificationReport) Validate(snapshot Snapshot) error {
 	if strings.TrimSpace(r.Summary) == "" {
 		return errors.New("verification report summary is required")
 	}
+	reproduced, err := r.validateReproduction(snapshot)
+	if err != nil {
+		return err
+	}
+	if !reproduced {
+		if len(r.Answers) != 0 || len(r.Checkpoints) != 0 {
+			return errors.New("verification report with unreproduced evidence must not contain repair results")
+		}
+		if r.Passed {
+			return errors.New("verification report passed despite unreproduced evidence")
+		}
+		return nil
+	}
+
 	wantAnswers := make(map[string]struct{})
 	switch snapshot.Runtime {
 	case scenario.RuntimeNode:
@@ -264,6 +297,41 @@ func (r VerificationReport) Validate(snapshot Snapshot) error {
 		return errors.New("verification report passed flag does not match its results")
 	}
 	return nil
+}
+
+func (r VerificationReport) validateReproduction(snapshot Snapshot) (bool, error) {
+	if len(snapshot.Reproduction) == 0 {
+		if len(r.Reproduction) != 0 {
+			return false, errors.New("legacy verification report contains reproduction evidence")
+		}
+		return true, nil
+	}
+	if len(r.Reproduction) != len(snapshot.Reproduction) {
+		return false, errors.New("verification report does not cover every reproduction evidence item")
+	}
+	expected := make(map[string]struct{}, len(snapshot.Reproduction))
+	for _, evidence := range snapshot.Reproduction {
+		expected[evidence.ID] = struct{}{}
+	}
+	observed := true
+	seen := make(map[string]struct{}, len(r.Reproduction))
+	for _, evidence := range r.Reproduction {
+		if _, ok := expected[evidence.ID]; !ok {
+			return false, fmt.Errorf("verification report contains unknown reproduction evidence %q", evidence.ID)
+		}
+		if _, duplicate := seen[evidence.ID]; duplicate {
+			return false, fmt.Errorf("verification report contains duplicate reproduction evidence %q", evidence.ID)
+		}
+		if strings.TrimSpace(evidence.Summary) == "" {
+			return false, fmt.Errorf("verification report has empty reproduction evidence summary for %q", evidence.ID)
+		}
+		seen[evidence.ID] = struct{}{}
+		observed = observed && evidence.Observed
+	}
+	if len(seen) != len(expected) {
+		return false, errors.New("verification report does not cover every reproduction evidence item")
+	}
+	return observed, nil
 }
 
 func (e VerificationEnvironment) Validate(runtime string) error {
@@ -348,6 +416,16 @@ func (s Snapshot) Validate() error {
 		}
 		seen[checkpoint.ID] = struct{}{}
 	}
+	reproduction := make(map[string]struct{}, len(s.Reproduction))
+	for _, evidence := range s.Reproduction {
+		if strings.TrimSpace(evidence.ID) == "" {
+			return errors.New("candidate snapshot has an empty reproduction evidence id")
+		}
+		if _, duplicate := reproduction[evidence.ID]; duplicate {
+			return errors.New("candidate snapshot has duplicate reproduction evidence ids")
+		}
+		reproduction[evidence.ID] = struct{}{}
+	}
 	if s.Runtime == scenario.RuntimeNode {
 		if s.Node == nil || s.K8s != nil || len(s.Node.Nodes) == 0 || !validFingerprint(s.Node.BaseImageFingerprint) {
 			return errors.New("node candidate snapshot is incomplete")
@@ -368,6 +446,11 @@ func (s Snapshot) Validate() error {
 		for _, checkpoint := range s.Checkpoints {
 			if _, ok := nodes[checkpoint.Node]; !ok {
 				return errors.New("node candidate checkpoint references an unknown node")
+			}
+		}
+		for _, evidence := range s.Reproduction {
+			if _, ok := nodes[evidence.Node]; !ok {
+				return errors.New("node candidate reproduction evidence references an unknown node")
 			}
 		}
 	} else if s.K8s == nil || s.Node != nil || !strings.Contains(s.K8s.BaseImageDigest, "@sha256:") {
@@ -392,6 +475,11 @@ func (s Snapshot) Validate() error {
 		for _, checkpoint := range s.Checkpoints {
 			if strings.TrimSpace(checkpoint.Node) != "" {
 				return errors.New("k8s candidate checkpoint declares a node")
+			}
+		}
+		for _, evidence := range s.Reproduction {
+			if strings.TrimSpace(evidence.Node) != "" {
+				return errors.New("k8s candidate reproduction evidence declares a node")
 			}
 		}
 	}

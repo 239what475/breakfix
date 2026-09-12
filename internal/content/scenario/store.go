@@ -29,6 +29,10 @@ type Entry struct {
 	Revision        string
 	PublishedAt     time.Time
 	Nodes           []Node
+	Versions        []Version
+	Topology        string
+	Initialization  string
+	Reproduction    Reproduction
 	Checkpoints     []Checkpoint
 	Dir             string
 }
@@ -46,6 +50,10 @@ type Spec struct {
 	ContentRevision string       `yaml:"content_revision,omitempty"`
 	PublishedAt     time.Time    `yaml:"published_at,omitempty"`
 	Nodes           []Node       `yaml:"nodes,omitempty"`
+	Versions        []Version    `yaml:"versions,omitempty"`
+	Topology        string       `yaml:"topology,omitempty"`
+	Initialization  string       `yaml:"initialization,omitempty"`
+	Reproduction    Reproduction `yaml:"reproduction,omitempty"`
 	Checkpoints     []Checkpoint `yaml:"checkpoints"`
 }
 
@@ -57,6 +65,29 @@ func ValidRevision(value string) bool {
 type Node struct {
 	Name  string `yaml:"name" json:"name"`
 	Title string `yaml:"title" json:"title"`
+}
+
+// Version pins one software, image, or dataset dependency that participates
+// in reproducing an operations scenario.
+type Version struct {
+	Component string `yaml:"component" json:"component"`
+	Version   string `yaml:"version" json:"version"`
+}
+
+// Reproduction describes the broken initial state that publication must prove
+// before it evaluates an optional reference repair.
+type Reproduction struct {
+	Objective string                 `yaml:"objective" json:"objective"`
+	Evidence  []ReproductionEvidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// ReproductionEvidence is an observable fact proving the target phenomenon.
+// Node scenarios execute it on Node; Kubernetes evidence executes from the
+// management terminal and therefore leaves Node empty.
+type ReproductionEvidence struct {
+	ID          string `yaml:"id" json:"id"`
+	Description string `yaml:"description" json:"description"`
+	Node        string `yaml:"node,omitempty" json:"node,omitempty"`
 }
 
 // Checkpoint is a user-visible, independently verifiable scenario outcome.
@@ -212,7 +243,14 @@ func entryFromSpec(dir string, spec *Spec) *Entry {
 		ContentRevision: spec.ContentRevision,
 		PublishedAt:     spec.PublishedAt,
 		Nodes:           append([]Node{}, spec.Nodes...),
-		Checkpoints:     append([]Checkpoint{}, spec.Checkpoints...),
-		Dir:             dir,
+		Versions:        append([]Version{}, spec.Versions...),
+		Topology:        spec.Topology,
+		Initialization:  spec.Initialization,
+		Reproduction: Reproduction{
+			Objective: spec.Reproduction.Objective,
+			Evidence:  append([]ReproductionEvidence{}, spec.Reproduction.Evidence...),
+		},
+		Checkpoints: append([]Checkpoint{}, spec.Checkpoints...),
+		Dir:         dir,
 	}
 }

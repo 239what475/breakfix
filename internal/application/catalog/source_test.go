@@ -192,6 +192,17 @@ func TestExportPublishedCandidatePreservesRemainingManifestBytes(t *testing.T) {
 title: Cleanup logs
 description: |
   Keep this indentation.
+versions:
+  - component: cleanup-fixture
+    version: v1
+topology: One host node.
+initialization: generate.sh removes the cleanup script.
+reproduction:
+  objective: The cleanup script is absent.
+  evidence:
+    - id: cleanup-script-absent
+      description: The cleanup script is absent.
+      node: host
 nodes:
   - name: host
     title: Host
@@ -270,6 +281,17 @@ func writeScenarioSource(t *testing.T, root string, published bool) {
 title: Cleanup logs
 description: |
   Keep this indentation.
+versions:
+  - component: cleanup-fixture
+    version: v1
+topology: One host node.
+initialization: generate.sh removes the cleanup script.
+reproduction:
+  objective: The cleanup script is absent.
+  evidence:
+    - id: cleanup-script-absent
+      description: The cleanup script is absent.
+      node: host
 nodes:
   - name: host
     title: Host
@@ -291,6 +313,17 @@ content_revision: sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 published_at: 2026-08-01T00:00:00Z
 description: |
   Keep this indentation.
+versions:
+  - component: cleanup-fixture
+    version: v1
+topology: One host node.
+initialization: generate.sh removes the cleanup script.
+reproduction:
+  objective: The cleanup script is absent.
+  evidence:
+    - id: cleanup-script-absent
+      description: The cleanup script is absent.
+      node: host
 nodes:
   - name: host
     title: Host
@@ -306,7 +339,7 @@ checkpoints:
 	writeCatalogFile(t, filepath.Join(root, "problem.md"), []byte("# Cleanup logs\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "solution.md"), []byte("<!-- checkpoint: cleanup-script-ready -->\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "hints", "cleanup-script-ready.md"), []byte("Create the script.\n"), 0o644)
-	for _, name := range []string{"generate.sh", "answer.sh", "checks.sh"} {
+	for _, name := range []string{"generate.sh", "answer.sh", "checks.sh", "reproduce.sh"} {
 		writeCatalogFile(t, filepath.Join(root, "nodes", "host", name), []byte("#!/bin/sh\nexit 0\n"), 0o755)
 	}
 }

@@ -2,6 +2,20 @@ runtime: node
 type: operations-scenario
 title: Restore dependent configuration
 description: Recreate a configuration file and the result derived from it.
+versions:
+  - component: breakfix-dependency-fixture
+    version: v1
+topology: One Node container containing a source configuration and its derived state.
+initialization: generate.sh removes both the source configuration and derived state.
+reproduction:
+  objective: The service configuration and derived state are absent after initialization.
+  evidence:
+    - id: configuration-missing
+      description: The source configuration is missing or disabled.
+      node: host
+    - id: derived-state-missing
+      description: The derived state is missing or stale.
+      node: host
 nodes:
   - name: host
     title: Configuration host

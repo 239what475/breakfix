@@ -144,6 +144,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "Look at the service.\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"service-unavailable\",\"observed\":true,\"summary\":\"unavailable\"}]}'\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	database := testpostgres.New(t)
@@ -187,11 +188,12 @@ func TestListScenariosIncludesRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), "id: demo\nrevision_id: "+testPublishedScenarioRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), "id: demo\nrevision_id: "+testPublishedScenarioRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nversions:\n  - component: fixture\n    version: v1\ntopology: One Kubernetes cluster.\ninitialization: generate.sh removes the workload.\nreproduction:\n  objective: The workload is absent.\n  evidence:\n    - id: workload-absent\n      description: The workload is absent.\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workload-absent\",\"observed\":true,\"summary\":\"absent\"}]}'\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "checks.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	cfg := config.Config{DataDir: root}
@@ -384,6 +386,7 @@ func writeTestScenario(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"service-unavailable\",\"observed\":true,\"summary\":\"unavailable\"}]}'\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }
@@ -391,7 +394,7 @@ func writeTestScenario(t *testing.T, root string) {
 const testPublishedScenarioRevisionID = "chrev-aaaaaaaaaaaaaaaa"
 
 func nodeTestManifest(title string) string {
-	return "id: demo\nrevision_id: " + testPublishedScenarioRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return "id: demo\nrevision_id: " + testPublishedScenarioRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nversions:\n  - component: fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh creates the broken state.\nreproduction:\n  objective: The service is unavailable.\n  evidence:\n    - id: service-unavailable\n      description: The service is unavailable.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {

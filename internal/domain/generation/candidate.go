@@ -18,6 +18,7 @@ var (
 // aliases preserve Generation's persisted JSON contract while keeping Catalog
 // independent from GenerationWorkflow state.
 type CheckpointSnapshot = execution.CheckpointSnapshot
+type ReproductionEvidenceSnapshot = execution.ReproductionEvidenceSnapshot
 type NodeSnapshot = execution.NodeSnapshot
 type NodeRuntimeSnapshot = execution.NodeRuntimeSnapshot
 type NodeResources = execution.NodeResources
@@ -30,6 +31,7 @@ type ArtifactReference = execution.ArtifactReference
 type VerificationEnvironment = execution.VerificationEnvironment
 type ExecutionResult = execution.ExecutionResult
 type CheckpointResult = execution.CheckpointResult
+type ReproductionEvidenceResult = execution.ReproductionEvidenceResult
 type VerificationReport = execution.VerificationReport
 
 type Publication struct {

@@ -2,6 +2,20 @@ runtime: k8s
 type: operations-scenario
 title: 在 Kubernetes 中部署 Web 服务
 description: 在隔离的 Kubernetes 集群中创建指定的 Deployment 和 Service。
+versions:
+  - component: kubernetes
+    version: vcluster-compatible
+  - component: nginx
+    version: 1.27.5
+topology: 一个隔离的 Kubernetes 虚拟集群，使用管理终端创建 web 工作负载。
+initialization: generate.sh 删除 web Deployment 和 Service，留下空的目标命名空间。
+reproduction:
+  objective: web Deployment 和 Service 在初始化后的集群中均不存在。
+  evidence:
+    - id: deployment-absent
+      description: web Deployment 不存在，因而没有 Ready 副本。
+    - id: service-absent
+      description: web Service 不存在，无法选择工作负载。
 checkpoints:
   - id: deployment-ready
     title: Deployment 已就绪

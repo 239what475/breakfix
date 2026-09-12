@@ -143,6 +143,9 @@ func ValidateDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(scenario.Description) == "" {
 		return nil, fmt.Errorf("scenario description is required")
 	}
+	if err := validateOperationsCore(scenario); err != nil {
+		return nil, err
+	}
 	if err := validateCheckpoints(scenario, dir); err != nil {
 		return nil, err
 	}
@@ -195,6 +198,9 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(scenario.Description) == "" {
 		return nil, fmt.Errorf("scenario description is required")
 	}
+	if err := validateOperationsCore(scenario); err != nil {
+		return nil, err
+	}
 	if err := validateCheckpoints(scenario, dir); err != nil {
 		return nil, err
 	}
@@ -202,6 +208,68 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 		return nil, err
 	}
 	return scenario, nil
+}
+
+func validateOperationsCore(scenario *Entry) error {
+	if scenario.Type != ScenarioOperationsScenario {
+		return nil
+	}
+	if len(scenario.Versions) == 0 {
+		return fmt.Errorf("operations scenario versions are required")
+	}
+	components := make(map[string]struct{}, len(scenario.Versions))
+	for _, version := range scenario.Versions {
+		component := strings.TrimSpace(version.Component)
+		if component == "" || strings.TrimSpace(version.Version) == "" {
+			return fmt.Errorf("operations scenario version component and version are required")
+		}
+		key := strings.ToLower(component)
+		if _, duplicate := components[key]; duplicate {
+			return fmt.Errorf("duplicate operations scenario version component %q", component)
+		}
+		components[key] = struct{}{}
+	}
+	if strings.TrimSpace(scenario.Topology) == "" {
+		return fmt.Errorf("operations scenario topology is required")
+	}
+	if strings.TrimSpace(scenario.Initialization) == "" {
+		return fmt.Errorf("operations scenario initialization is required")
+	}
+	if strings.TrimSpace(scenario.Reproduction.Objective) == "" {
+		return fmt.Errorf("operations scenario reproduction objective is required")
+	}
+	if len(scenario.Reproduction.Evidence) == 0 {
+		return fmt.Errorf("operations scenario reproduction evidence is required")
+	}
+	nodes := make(map[string]struct{}, len(scenario.Nodes))
+	for _, node := range scenario.Nodes {
+		nodes[node.Name] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(scenario.Reproduction.Evidence))
+	for _, evidence := range scenario.Reproduction.Evidence {
+		id := strings.TrimSpace(evidence.ID)
+		if !ValidID(id) {
+			return fmt.Errorf("invalid reproduction evidence id %q", evidence.ID)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("duplicate reproduction evidence id %q", id)
+		}
+		if strings.TrimSpace(evidence.Description) == "" {
+			return fmt.Errorf("reproduction evidence %q description is required", id)
+		}
+		switch scenario.Runtime {
+		case RuntimeNode:
+			if _, known := nodes[evidence.Node]; !known {
+				return fmt.Errorf("reproduction evidence %q references unknown node %q", id, evidence.Node)
+			}
+		case RuntimeK8s:
+			if strings.TrimSpace(evidence.Node) != "" {
+				return fmt.Errorf("k8s reproduction evidence %q must not declare a node", id)
+			}
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
 }
 
 func validateCheckpoints(scenario *Entry, dir string) error {
@@ -268,6 +336,10 @@ func validateScenarioFiles(scenario *Entry, dir string) error {
 		for _, checkpoint := range scenario.Checkpoints {
 			checkpointNodes[checkpoint.Node] = struct{}{}
 		}
+		reproductionNodes := make(map[string]struct{})
+		for _, evidence := range scenario.Reproduction.Evidence {
+			reproductionNodes[evidence.Node] = struct{}{}
+		}
 		for _, node := range scenario.Nodes {
 			name := strings.TrimSpace(node.Name)
 			if !ValidID(name) {
@@ -290,6 +362,11 @@ func validateScenarioFiles(scenario *Entry, dir string) error {
 			}
 			if _, hasChecks := checkpointNodes[name]; hasChecks {
 				if err := requireRegularFile(dir, filepath.Join("nodes", name, "checks.sh")); err != nil {
+					return err
+				}
+			}
+			if _, hasReproduction := reproductionNodes[name]; hasReproduction {
+				if err := requireRegularFile(dir, filepath.Join("nodes", name, "reproduce.sh")); err != nil {
 					return err
 				}
 			}
@@ -317,6 +394,11 @@ func validateScenarioFiles(scenario *Entry, dir string) error {
 		}
 		for _, script := range []string{"generate.sh", "answer.sh", "checks.sh"} {
 			if err := requireRegularFile(dir, filepath.Join("k8s", script)); err != nil {
+				return err
+			}
+		}
+		if len(scenario.Reproduction.Evidence) > 0 {
+			if err := requireRegularFile(dir, filepath.Join("k8s", "reproduce.sh")); err != nil {
 				return err
 			}
 		}

@@ -64,13 +64,24 @@ func authoringSystemPrompt() string {
 
 你只能依据工具成功返回的结果声称已修改、已提交或已推进任务。信息不足时先提出具体澄清问题。题意约定的概览与检查点使用中文 Markdown；检查点描述可观察的最终状态，不规定唯一命令或编辑路径。运行时只能是 node 或 k8s，底层平台实现不属于题意。
 
-Candidate 文件结构：workspace 中的题目使用固定结构。scenario.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、description 与 checkpoints。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
+Candidate 文件结构：workspace 中的运维场景使用固定结构。scenario.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、description 与 checkpoints。operations-scenario 还必须包含 versions（每项有唯一 component 和非空 version）、topology、initialization，以及含 objective 和至少一项 evidence 的 reproduction。Node evidence 必须有 node，K8s evidence 不得有 node。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
 
 type: operations-scenario
 runtime: node
 title: <标题>
 description: <简介>
 tags: [<标签>]
+versions:
+  - component: <软件、镜像或数据组件>
+    version: <固定版本>
+topology: <节点和连接关系>
+initialization: <generate.sh 如何建立初始状态>
+reproduction:
+  objective: <要观察的故障或现象>
+  evidence:
+    - id: <证据 id>
+      description: <可观察的初始事实>
+      node: <执行节点名>
 nodes:
   - name: <节点名>
     title: <节点标题>
@@ -81,7 +92,7 @@ checkpoints:
     hint: hints/<检查点 id>.md
     node: <执行节点名>
 
-runtime=k8s 时不写 nodes，checkpoint 也不写 node 字段。problem.md 描述场景、症状、目标与边界；solution.md 解释诊断与修复理由，并且必须为每个检查点恰好包含一个 <!-- checkpoint: <id> --> 标记；每个检查点可在 hints/<checkpoint-id>.md 提供渐进提示。runtime=node 时每个声明的节点目录 nodes/<node>/ 下必须有 generate.sh 和 answer.sh，只有在该节点执行检查点时还需要 checks.sh；runtime=k8s 时只在 k8s/ 下放 generate.sh、answer.sh 和 checks.sh。generate.sh 建立可修复的故障初态，answer.sh 是使全部检查点通过的参考修复，checks.sh 无参数、只观察最终状态，并向 stdout 输出唯一一份 JSON 文档 {"checks":[{"id":"<checkpoint-id>","passed":true|false,"summary":"...","details":"..."}]}，必须恰好报告该执行位置的每个检查点 id 一次；未通过时 passed=false 且退出码为 0，脚本、解析或协议错误才非零退出。脚本总是由平台以 /bin/bash 执行，不依赖可执行位或 shebang。检查器只能观察状态，不能执行、source 或触发 generate.sh、answer.sh 或用户修复脚本。
+runtime=k8s 时不写 nodes，evidence 和 checkpoint 也不写 node 字段。problem.md 描述场景、症状、目标与边界；solution.md 解释诊断与修复理由，并且必须为每个检查点恰好包含一个 <!-- checkpoint: <id> --> 标记；每个检查点可在 hints/<checkpoint-id>.md 提供渐进提示。runtime=node 时每个声明的节点目录 nodes/<node>/ 下必须有 generate.sh 和 answer.sh，拥有 evidence 的节点还必须有 reproduce.sh，只有在该节点执行检查点时还需要 checks.sh；runtime=k8s 时在 k8s/ 下放 generate.sh、reproduce.sh、answer.sh 和 checks.sh。generate.sh 建立可修复的故障初态；reproduce.sh 无参数、只观察初始状态，并向 stdout 输出唯一 JSON 文档 {"evidence":[{"id":"<evidence-id>","observed":true|false,"summary":"...","details":"..."}]}，必须恰好报告该执行位置的 evidence id 一次。observed=true 表示目标现象确实存在，false 表示 candidate 未复现；脚本、解析或协议错误才非零退出。answer.sh 是使全部检查点通过的参考修复；checks.sh 无参数、只观察修复后状态，并向 stdout 输出唯一 JSON 文档 {"checks":[{"id":"<checkpoint-id>","passed":true|false,"summary":"...","details":"..."}]}，必须恰好报告该执行位置的每个 checkpoint id 一次；未通过时 passed=false 且退出码为 0。脚本总是由平台以 /bin/bash 执行，不依赖可执行位或 shebang。reproduce.sh 和检查器只能观察状态，不能执行、source 或触发 generate.sh、answer.sh 或用户修复脚本。
 
 Plan：使用 Plan 工具修改当前回合的私有 Plan。每次修改都填写真实的理由。回合内的 Plan 修改会在回合成功结束后持久化为新的 revision；同一回合不能确认生成该修改后的 Plan。作者在下一条消息明确确认时，才调用 confirm_generation；plan_revision 必须使用该消息中给出的当前已持久化 revision 编号。
 

@@ -144,17 +144,38 @@ func (h *Handler) GetScenarioContent(c *gin.Context, id string) {
 	checkpoints := toAPICheckpoints(entry.Checkpoints)
 	hints := content.Hints
 	c.JSON(http.StatusOK, api.ScenarioContent{
-		Id:           entry.ID,
-		Title:        entry.Title,
-		Runtime:      api.ScenarioContentRuntime(entry.Runtime),
-		ScenarioType: api.ScenarioContentScenarioType(entry.Type),
-		ScenarioTags: append([]string(nil), entry.Tags...),
-		Nodes:        toAPIScenarioNodes(entry.Nodes),
-		Problem:      content.Problem,
-		Solution:     content.Solution,
-		Hints:        hints,
-		Checkpoints:  checkpoints,
+		Id:                    entry.ID,
+		Title:                 entry.Title,
+		Runtime:               api.ScenarioContentRuntime(entry.Runtime),
+		ScenarioType:          api.ScenarioContentScenarioType(entry.Type),
+		ScenarioTags:          append([]string(nil), entry.Tags...),
+		Nodes:                 toAPIScenarioNodes(entry.Nodes),
+		Versions:              toAPIScenarioVersions(entry.Versions),
+		Topology:              entry.Topology,
+		Initialization:        entry.Initialization,
+		ReproductionObjective: entry.Reproduction.Objective,
+		ReproductionEvidence:  toAPIReproductionEvidence(entry.Reproduction.Evidence),
+		Problem:               content.Problem,
+		Solution:              content.Solution,
+		Hints:                 hints,
+		Checkpoints:           checkpoints,
 	})
+}
+
+func toAPIScenarioVersions(versions []scenario.Version) []api.ScenarioVersion {
+	result := make([]api.ScenarioVersion, 0, len(versions))
+	for _, version := range versions {
+		result = append(result, api.ScenarioVersion{Component: version.Component, Version: version.Version})
+	}
+	return result
+}
+
+func toAPIReproductionEvidence(evidence []scenario.ReproductionEvidence) []api.ScenarioReproductionEvidence {
+	result := make([]api.ScenarioReproductionEvidence, 0, len(evidence))
+	for _, item := range evidence {
+		result = append(result, api.ScenarioReproductionEvidence{Id: item.ID, Description: item.Description, Node: optionalString(item.Node)})
+	}
+	return result
 }
 
 func (h *Handler) GetScenarioProgress(c *gin.Context, id string) {

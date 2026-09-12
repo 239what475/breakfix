@@ -163,9 +163,71 @@ func TestValidateCandidateDirRejectsInvalidTags(t *testing.T) {
 	}
 }
 
+func TestValidateCandidateDirRequiresOperationsReproductionCore(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove string
+		want   string
+	}{
+		{name: "versions", remove: "versions:\n  - component: fixture\n    version: v1\n", want: "operations scenario versions are required"},
+		{name: "topology", remove: "topology: One teaching host.\n", want: "operations scenario topology is required"},
+		{name: "initialization", remove: "initialization: generate.sh prepares the missing marker.\n", want: "operations scenario initialization is required"},
+		{name: "objective", remove: "  objective: The fixture starts incomplete.\n", want: "operations scenario reproduction objective is required"},
+		{name: "evidence", remove: "  evidence:\n    - id: fixture-incomplete\n      description: The fixture is initially incomplete.\n      node: host\n", want: "operations scenario reproduction evidence is required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTeachingScenario(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+			path := filepath.Join(root, "scenario.yaml")
+			manifest, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated := strings.Replace(string(manifest), test.remove, "", 1)
+			if updated == string(manifest) {
+				t.Fatalf("fixture manifest did not contain %q", test.remove)
+			}
+			if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateCandidateDir error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateCandidateDirRequiresReproduceScriptForOperationsScenario(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingScenario(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+	if err := os.Remove(filepath.Join(root, "nodes", "host", "reproduce.sh")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), "missing nodes/host/reproduce.sh") {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
+func TestValidateCandidateDirRequiresK8sReproduceScriptForOperationsScenario(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "scenario.yaml"), "type: operations-scenario\ntitle: K8s fixture\nruntime: k8s\ndescription: fixture\nversions:\n  - component: kubernetes\n    version: v1.31.0\ntopology: One Kubernetes cluster.\ninitialization: generate.sh removes the workload.\nreproduction:\n  objective: The workload is absent.\n  evidence:\n    - id: workload-absent\n      description: The workload is absent.\ncheckpoints:\n  - id: workload-ready\n    title: Workload ready\n    description: The workload is ready.\n    hint: hints/workload-ready.md\n")
+	writeFile(t, filepath.Join(root, "problem.md"), "problem\n")
+	writeFile(t, filepath.Join(root, "solution.md"), "<!-- checkpoint: workload-ready -->\n")
+	writeFile(t, filepath.Join(root, "hints", "workload-ready.md"), "hint\n")
+	writeFile(t, filepath.Join(root, "k8s", "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "k8s", "answer.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "k8s", "checks.sh"), "#!/bin/sh\n")
+
+	if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), "missing k8s/reproduce.sh") {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
 func writeTeachingScenario(t *testing.T, root, hint, solution string) {
 	t.Helper()
-	manifest := "title: Teaching fixture\nruntime: node\ndescription: fixture\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"
+	manifest := "title: Teaching fixture\nruntime: node\ndescription: fixture\nversions:\n  - component: fixture\n    version: v1\ntopology: One teaching host.\ninitialization: generate.sh prepares the missing marker.\nreproduction:\n  objective: The fixture starts incomplete.\n  evidence:\n    - id: fixture-incomplete\n      description: The fixture is initially incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"
 	if hint != "" {
 		manifest += "    hint: " + hint + "\n"
 	}
@@ -176,6 +238,7 @@ func writeTeachingScenario(t *testing.T, root, hint, solution string) {
 		writeFile(t, filepath.Join(root, hint), "hint\n")
 	}
 	writeFile(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"fixture-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\n")
 }

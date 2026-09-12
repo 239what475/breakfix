@@ -8,6 +8,17 @@ description: |
   此环境仅用于验证 Breakfix 的 Node 运行时、终端和自动检查点链路。
 
   创建指定的可执行标记文件。
+versions:
+  - component: breakfix-node-runtime-fixture
+    version: v1
+topology: 一个运行 systemd 的 Node 容器，使用本地文件作为可观察状态。
+initialization: generate.sh 删除可执行标记文件，建立未完成的初始状态。
+reproduction:
+  objective: 运行时标记文件不存在，因此场景尚未完成。
+  evidence:
+    - id: runtime-marker-absent
+      description: /usr/local/bin/breakfix-runtime-fixture 不存在或不可执行。
+      node: host
 nodes:
   - name: host
     title: 验收节点

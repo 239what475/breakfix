@@ -233,11 +233,15 @@ func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *ap
 	for _, answer := range report.Answers {
 		answers = append(answers, api.AuthoringExecutionResult{Location: answer.Location, ExitCode: answer.ExitCode, Stdout: optionalString(answer.Stdout), Stderr: optionalString(answer.Stderr)})
 	}
+	reproduction := make([]api.AuthoringReproductionEvidenceResult, 0, len(report.Reproduction))
+	for _, evidence := range report.Reproduction {
+		reproduction = append(reproduction, api.AuthoringReproductionEvidenceResult{Id: evidence.ID, Observed: evidence.Observed, Summary: evidence.Summary, Details: optionalString(evidence.Details)})
+	}
 	checkpoints := make([]api.AuthoringCheckpointResult, 0, len(report.Checkpoints))
 	for _, checkpoint := range report.Checkpoints {
 		checkpoints = append(checkpoints, api.AuthoringCheckpointResult{Id: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: optionalString(checkpoint.Details)})
 	}
-	return &api.AuthoringVerificationReport{Passed: report.Passed, Summary: report.Summary, Answers: answers, Checkpoints: checkpoints}
+	return &api.AuthoringVerificationReport{Passed: report.Passed, Reproduction: reproduction, Summary: report.Summary, Answers: answers, Checkpoints: checkpoints}
 }
 
 func toAPIAuthoringPlan(plan authoringdomain.Plan) api.AuthoringPlan {

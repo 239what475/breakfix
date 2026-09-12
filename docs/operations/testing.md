@@ -52,6 +52,10 @@ make test-e2e-recovery  # Server 与 Controller restart
   历史看到完成记录。
 - 平台恢复：Server restart 后已有 NodeEnvironment 保持 identity 并可完成 checkpoint；Controller restart 后仍能继续调和并提供终端。
 
+发布验证与学习环境的运行顺序不同：发布 Verifier 在 runtime init 后先执行 `reproduce.sh`，确认每个目标现象证据都存在；只有这样才执行
+`answer.sh`，再执行 `checks.sh` 验证参考修复。复现证据缺失、脚本协议错误或执行失败时，发布失败且不会运行参考修复。学习环境仅执行
+初始化脚本，始终不自动运行这些验证或参考修复脚本。
+
 失败时 Playwright 保留 trace、截图和 video。`run-e2e.sh` 在 `.local/e2e/<target>/<suite>-failure-<timestamp>/` 保存
 Deployment/Pod/PVC/Environment、事件、组件日志、PostgreSQL 日志和 Incus 实例列表。确认现场后执行 `make e2e-reset`；它只接受
 同一个已标记 Kind target，先停止写入组件、回收 workspace 和专用 Incus project，再恢复 prepare 保存的 Secret 快照。

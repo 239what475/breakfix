@@ -39,11 +39,15 @@ type K8sRuntimeConfig struct {
 // Freeze creates the complete runtime contract before any external build
 // starts. Later configuration changes cannot alter this execution.
 func Freeze(entry scenario.Entry, config SnapshotConfig) (domain.Snapshot, error) {
+	reproduction := make([]domain.ReproductionEvidenceSnapshot, 0, len(entry.Reproduction.Evidence))
+	for _, evidence := range entry.Reproduction.Evidence {
+		reproduction = append(reproduction, domain.ReproductionEvidenceSnapshot{ID: evidence.ID, Node: evidence.Node})
+	}
 	checkpoints := make([]domain.CheckpointSnapshot, 0, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
 		checkpoints = append(checkpoints, domain.CheckpointSnapshot{ID: checkpoint.ID, Node: checkpoint.Node})
 	}
-	snapshot := domain.Snapshot{Runtime: entry.Runtime, Checkpoints: checkpoints}
+	snapshot := domain.Snapshot{Runtime: entry.Runtime, Reproduction: reproduction, Checkpoints: checkpoints}
 	switch entry.Runtime {
 	case scenario.RuntimeNode:
 		if config.MaxNodes <= 0 || len(entry.Nodes) > config.MaxNodes {

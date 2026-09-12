@@ -5,4 +5,4 @@ metadata:
   version: 2026.08.01
 entries:
   - path: scenarios/node-runtime-fixture
-    contentRevision: sha256:e4324bb41369018bcdaebfd4131ce0f6dcfd6fa887d621d9538afa5b24924c14
+    contentRevision: sha256:591e5ce79fc04aba5ea168dde40b8cb003c87840bbc7afd5b159ded38aae887a

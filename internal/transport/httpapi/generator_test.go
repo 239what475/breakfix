@@ -315,11 +315,12 @@ func generatorHTTPReviewArchive(t *testing.T) []byte {
 		content string
 		mode    int64
 	}{
-		{"scenario.yaml", "runtime: node\ntype: operations-scenario\ntitle: HTTP review candidate\ndescription: Review the public candidate projection.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
+		{"scenario.yaml", "runtime: node\ntype: operations-scenario\ntitle: HTTP review candidate\ndescription: Review the public candidate projection.\nversions:\n  - component: http-review-fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh prepares the incomplete workspace.\nreproduction:\n  objective: The workspace is initially incomplete.\n  evidence:\n    - id: workspace-incomplete\n      description: The workspace is initially incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
 		{"problem.md", "# Problem\n\nInspect the candidate.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host.\n", 0o644},
 		{"nodes/host/generate.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/reproduce.sh", "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workspace-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n", 0o755},
 		{"nodes/host/answer.sh", "#!/bin/sh\nexit 0\n", 0o755},
 		{"nodes/host/checks.sh", "#!/bin/sh\nexit 0\n", 0o755},
 	} {

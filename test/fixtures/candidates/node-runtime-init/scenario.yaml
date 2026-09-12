@@ -2,6 +2,17 @@ runtime: node
 type: operations-scenario
 title: Complete runtime initialization
 description: Repair the missing runtime initialization marker.
+versions:
+  - component: breakfix-runtime-init-fixture
+    version: v1
+topology: One systemd-enabled Node container with a runtime initialization state directory.
+initialization: generate.sh removes the runtime initialization marker before the environment becomes ready.
+reproduction:
+  objective: The runtime initialization marker is missing after initialization.
+  evidence:
+    - id: runtime-marker-missing
+      description: The runtime initialization marker does not exist with its expected content.
+      node: host
 nodes:
   - name: host
     title: Runtime host

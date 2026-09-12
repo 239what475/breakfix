@@ -19,6 +19,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/reproduction"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -324,6 +325,18 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 		return domainexecution.VerificationReport{}, err
 	}
 	nodes := work.Snapshot.Node.Nodes
+	reproduced, err := e.reproduceNode(ctx, work, ref, identity, nodes)
+	if err != nil {
+		var artifact *domainexecution.ArtifactError
+		if errors.As(err, &artifact) && artifact.Report != nil {
+			return *artifact.Report, err
+		}
+		return domainexecution.VerificationReport{}, err
+	}
+	if !allReproductionObserved(reproduced) {
+		report := failedReproductionReport(work.Snapshot, reproduced, "target phenomenon was not reproduced")
+		return report, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_FAILED", report.Summary, report)
+	}
 	answers, err := executeParallel(nodes, func(node domainexecution.NodeSnapshot) (domainexecution.ExecutionResult, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
@@ -335,7 +348,7 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute Node answers: %w", err)
 	}
 	if hasFailedAnswer(answers) {
-		report := failedReport(work.Snapshot, answers, "one or more answer scripts failed")
+		report := failedReport(work.Snapshot, reproduced, answers, "one or more answer scripts failed")
 		return report, domainexecution.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
 	}
 
@@ -370,7 +383,7 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 	if err != nil {
 		var protocol *checkpointProtocolError
 		if errors.As(err, &protocol) {
-			report := failedReport(work.Snapshot, answers, protocol.Error())
+			report := failedReport(work.Snapshot, reproduced, answers, protocol.Error())
 			return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 		}
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute Node checkpoints: %w", err)
@@ -382,7 +395,7 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 		}
 	}
 	checks := orderedCheckpointResults(work.Snapshot.Checkpoints, byID)
-	return finishReport(work.Snapshot, answers, checks)
+	return finishReport(work.Snapshot, reproduced, answers, checks)
 }
 
 func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref environmentRef) (domainexecution.VerificationReport, error) {
@@ -390,13 +403,25 @@ func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref
 		return domainexecution.VerificationReport{}, errors.New("ready K8s verification environment has no terminal identity")
 	}
 	runtime := ref.vk8s.Status.Runtime
+	reproduced, err := e.reproduceK8s(ctx, work, runtime.Namespace, runtime.TerminalPodName)
+	if err != nil {
+		var artifact *domainexecution.ArtifactError
+		if errors.As(err, &artifact) && artifact.Report != nil {
+			return *artifact.Report, err
+		}
+		return domainexecution.VerificationReport{}, err
+	}
+	if !allReproductionObserved(reproduced) {
+		report := failedReproductionReport(work.Snapshot, reproduced, "target phenomenon was not reproduced")
+		return report, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_FAILED", report.Summary, report)
+	}
 	answer, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "answer.sh"))
 	if err != nil {
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s answer: %w", err)
 	}
 	answers := []domainexecution.ExecutionResult{{Location: "management", ExitCode: answer.ExitCode, Stdout: answer.Stdout, Stderr: answer.Stderr}}
 	if answer.ExitCode != 0 {
-		report := failedReport(work.Snapshot, answers, "K8s answer script failed")
+		report := failedReport(work.Snapshot, reproduced, answers, "K8s answer script failed")
 		return report, domainexecution.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
 	}
 	check, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "checks.sh"))
@@ -404,27 +429,104 @@ func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s checkpoints: %w", err)
 	}
 	if check.ExitCode != 0 {
-		report := failedReport(work.Snapshot, answers, fmt.Sprintf("K8s checks.sh exited with %d: %s", check.ExitCode, strings.TrimSpace(check.Stderr)))
+		report := failedReport(work.Snapshot, reproduced, answers, fmt.Sprintf("K8s checks.sh exited with %d: %s", check.ExitCode, strings.TrimSpace(check.Stderr)))
 		return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 	}
 	checks, err := parseCheckpointResults(check.Stdout, work.Snapshot.Checkpoints)
 	if err != nil {
-		report := failedReport(work.Snapshot, answers, "K8s checks.sh: "+err.Error())
+		report := failedReport(work.Snapshot, reproduced, answers, "K8s checks.sh: "+err.Error())
 		return report, domainexecution.NewArtifactErrorWithReport("CHECKPOINT_PROTOCOL_FAILED", report.Summary, report)
 	}
-	return finishReport(work.Snapshot, answers, checks)
+	return finishReport(work.Snapshot, reproduced, answers, checks)
 }
 
-func finishReport(snapshot domainexecution.Snapshot, answers []domainexecution.ExecutionResult, checks []domainexecution.CheckpointResult) (domainexecution.VerificationReport, error) {
+func (e *Executor) reproduceNode(ctx context.Context, work domainexecution.Work, ref environmentRef, identity incus.NodeEnvironmentIdentity, nodes []domainexecution.NodeSnapshot) ([]domainexecution.ReproductionEvidenceResult, error) {
+	groups := nodeReproductionGroups(work.Snapshot.Reproduction)
+	if len(groups) == 0 {
+		return []domainexecution.ReproductionEvidenceResult{}, nil
+	}
+	type reproductionRun struct {
+		node     string
+		evidence []domainexecution.ReproductionEvidenceResult
+	}
+	runNodes := make([]domainexecution.NodeSnapshot, 0, len(groups))
+	for _, node := range nodes {
+		if len(groups[node.Name]) > 0 {
+			runNodes = append(runNodes, node)
+		}
+	}
+	runs, err := executeParallel(runNodes, func(node domainexecution.NodeSnapshot) (reproductionRun, error) {
+		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
+			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
+			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(scenarioRoot, "nodes", node.Name, "reproduce.sh")},
+		})
+		if execErr != nil {
+			return reproductionRun{}, execErr
+		}
+		if result.ExitCode != 0 {
+			return reproductionRun{}, &reproductionProtocolError{message: fmt.Sprintf("%s reproduce.sh exited with %d: %s", node.Name, result.ExitCode, strings.TrimSpace(result.Stderr))}
+		}
+		evidence, parseErr := parseReproductionResults(result.Stdout, groups[node.Name])
+		if parseErr != nil {
+			return reproductionRun{}, &reproductionProtocolError{message: fmt.Sprintf("%s reproduce.sh: %v", node.Name, parseErr)}
+		}
+		return reproductionRun{node: node.Name, evidence: evidence}, nil
+	})
+	if err != nil {
+		var protocol *reproductionProtocolError
+		if errors.As(err, &protocol) {
+			report := failedReproductionReport(work.Snapshot, unobservedReproduction(work.Snapshot, protocol.Error()), protocol.Error())
+			return nil, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_PROTOCOL_FAILED", report.Summary, report)
+		}
+		return nil, fmt.Errorf("execute Node reproduction checks: %w", err)
+	}
+	byID := make(map[string]domainexecution.ReproductionEvidenceResult)
+	for _, run := range runs {
+		for _, evidence := range run.evidence {
+			byID[evidence.ID] = evidence
+		}
+	}
+	return orderedReproductionResults(work.Snapshot.Reproduction, byID), nil
+}
+
+func (e *Executor) reproduceK8s(ctx context.Context, work domainexecution.Work, namespace, terminalPod string) ([]domainexecution.ReproductionEvidenceResult, error) {
+	if len(work.Snapshot.Reproduction) == 0 {
+		return []domainexecution.ReproductionEvidenceResult{}, nil
+	}
+	result, err := e.environments.ExecInPodStreamsContext(ctx, namespace, terminalPod, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "reproduce.sh"))
+	if err != nil {
+		return nil, fmt.Errorf("execute K8s reproduction checks: %w", err)
+	}
+	if result.ExitCode != 0 {
+		summary := fmt.Sprintf("K8s reproduce.sh exited with %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+		report := failedReproductionReport(work.Snapshot, unobservedReproduction(work.Snapshot, summary), summary)
+		return nil, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_PROTOCOL_FAILED", report.Summary, report)
+	}
+	evidence, err := parseReproductionResults(result.Stdout, work.Snapshot.Reproduction)
+	if err != nil {
+		summary := "K8s reproduce.sh: " + err.Error()
+		report := failedReproductionReport(work.Snapshot, unobservedReproduction(work.Snapshot, summary), summary)
+		return nil, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_PROTOCOL_FAILED", report.Summary, report)
+	}
+	return evidence, nil
+}
+
+func finishReport(snapshot domainexecution.Snapshot, reproduced []domainexecution.ReproductionEvidenceResult, answers []domainexecution.ExecutionResult, checks []domainexecution.CheckpointResult) (domainexecution.VerificationReport, error) {
 	passed := !hasFailedAnswer(answers)
+	for _, evidence := range reproduced {
+		passed = passed && evidence.Observed
+	}
 	for _, check := range checks {
 		passed = passed && check.Passed
 	}
-	summary := "all answers and checkpoints passed"
+	summary := "all reproduction evidence, answers, and checkpoints passed"
+	if len(snapshot.Reproduction) == 0 {
+		summary = "all answers and checkpoints passed"
+	}
 	if !passed {
 		summary = "one or more checkpoints did not pass"
 	}
-	report := domainexecution.VerificationReport{Passed: passed, Answers: answers, Checkpoints: checks, Summary: summary}
+	report := domainexecution.VerificationReport{Passed: passed, Reproduction: reproduced, Answers: answers, Checkpoints: checks, Summary: summary}
 	if err := report.Validate(snapshot); err != nil {
 		return domainexecution.VerificationReport{}, fmt.Errorf("construct verification report: %w", err)
 	}
@@ -437,6 +539,10 @@ func finishReport(snapshot domainexecution.Snapshot, answers []domainexecution.E
 type checkpointProtocolError struct{ message string }
 
 func (e *checkpointProtocolError) Error() string { return e.message }
+
+type reproductionProtocolError struct{ message string }
+
+func (e *reproductionProtocolError) Error() string { return e.message }
 
 func parseCheckpointResults(raw string, snapshots []domainexecution.CheckpointSnapshot) ([]domainexecution.CheckpointResult, error) {
 	expected := make([]string, len(snapshots))
@@ -454,12 +560,49 @@ func parseCheckpointResults(raw string, snapshots []domainexecution.CheckpointSn
 	return results, nil
 }
 
-func failedReport(snapshot domainexecution.Snapshot, answers []domainexecution.ExecutionResult, summary string) domainexecution.VerificationReport {
+func parseReproductionResults(raw string, snapshots []domainexecution.ReproductionEvidenceSnapshot) ([]domainexecution.ReproductionEvidenceResult, error) {
+	expected := make([]string, len(snapshots))
+	for index, value := range snapshots {
+		expected[index] = value.ID
+	}
+	report, err := reproduction.Parse(raw, expected)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domainexecution.ReproductionEvidenceResult, len(report.Evidence))
+	for index, evidence := range report.Evidence {
+		result[index] = domainexecution.ReproductionEvidenceResult{ID: evidence.ID, Observed: evidence.Observed, Summary: evidence.Summary, Details: evidence.Details}
+	}
+	return result, nil
+}
+
+func failedReproductionReport(snapshot domainexecution.Snapshot, reproduced []domainexecution.ReproductionEvidenceResult, summary string) domainexecution.VerificationReport {
+	return domainexecution.VerificationReport{Passed: false, Reproduction: reproduced, Summary: summary}
+}
+
+func unobservedReproduction(snapshot domainexecution.Snapshot, summary string) []domainexecution.ReproductionEvidenceResult {
+	result := make([]domainexecution.ReproductionEvidenceResult, len(snapshot.Reproduction))
+	for index, evidence := range snapshot.Reproduction {
+		result[index] = domainexecution.ReproductionEvidenceResult{ID: evidence.ID, Observed: false, Summary: "not observed during verification", Details: summary}
+	}
+	return result
+}
+
+func allReproductionObserved(evidence []domainexecution.ReproductionEvidenceResult) bool {
+	for _, item := range evidence {
+		if !item.Observed {
+			return false
+		}
+	}
+	return true
+}
+
+func failedReport(snapshot domainexecution.Snapshot, reproduced []domainexecution.ReproductionEvidenceResult, answers []domainexecution.ExecutionResult, summary string) domainexecution.VerificationReport {
 	checks := make([]domainexecution.CheckpointResult, len(snapshot.Checkpoints))
 	for index, checkpoint := range snapshot.Checkpoints {
 		checks[index] = domainexecution.CheckpointResult{ID: checkpoint.ID, Passed: false, Summary: "not passed during verification", Details: summary}
 	}
-	return domainexecution.VerificationReport{Passed: false, Answers: answers, Checkpoints: checks, Summary: summary}
+	return domainexecution.VerificationReport{Passed: false, Reproduction: reproduced, Answers: answers, Checkpoints: checks, Summary: summary}
 }
 
 func hasFailedAnswer(results []domainexecution.ExecutionResult) bool {
@@ -479,10 +622,28 @@ func nodeCheckpointGroups(checkpoints []domainexecution.CheckpointSnapshot) map[
 	return groups
 }
 
+func nodeReproductionGroups(evidence []domainexecution.ReproductionEvidenceSnapshot) map[string][]domainexecution.ReproductionEvidenceSnapshot {
+	groups := make(map[string][]domainexecution.ReproductionEvidenceSnapshot)
+	for _, item := range evidence {
+		groups[item.Node] = append(groups[item.Node], item)
+	}
+	return groups
+}
+
 func orderedCheckpointResults(snapshots []domainexecution.CheckpointSnapshot, values map[string]domainexecution.CheckpointResult) []domainexecution.CheckpointResult {
 	result := make([]domainexecution.CheckpointResult, 0, len(snapshots))
 	for _, checkpoint := range snapshots {
 		if value, ok := values[checkpoint.ID]; ok {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func orderedReproductionResults(snapshots []domainexecution.ReproductionEvidenceSnapshot, values map[string]domainexecution.ReproductionEvidenceResult) []domainexecution.ReproductionEvidenceResult {
+	result := make([]domainexecution.ReproductionEvidenceResult, 0, len(snapshots))
+	for _, evidence := range snapshots {
+		if value, ok := values[evidence.ID]; ok {
 			result = append(result, value)
 		}
 	}

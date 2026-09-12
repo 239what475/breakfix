@@ -149,6 +149,17 @@ export type ScenarioNode = {
     title: string;
 };
 
+export type ScenarioVersion = {
+    component: string;
+    version: string;
+};
+
+export type ScenarioReproductionEvidence = {
+    id: string;
+    description: string;
+    node?: string;
+};
+
 export type CheckpointResult = {
     id: string;
     passed: boolean;
@@ -170,6 +181,11 @@ export type ScenarioContent = {
     scenario_type: 'documentation-example' | 'operations-scenario';
     scenario_tags: Array<string>;
     nodes: Array<ScenarioNode>;
+    versions: Array<ScenarioVersion>;
+    topology: string;
+    initialization: string;
+    reproduction_objective: string;
+    reproduction_evidence: Array<ScenarioReproductionEvidence>;
     problem: string;
     solution: string;
     hints: {
@@ -303,6 +319,7 @@ export type GeneratorWorkflow = {
 export type AuthoringVerificationReport = {
     passed: boolean;
     summary: string;
+    reproduction: Array<AuthoringReproductionEvidenceResult>;
     answers: Array<AuthoringExecutionResult>;
     checkpoints: Array<AuthoringCheckpointResult>;
 };
@@ -312,6 +329,13 @@ export type AuthoringExecutionResult = {
     exit_code: number;
     stdout?: string;
     stderr?: string;
+};
+
+export type AuthoringReproductionEvidenceResult = {
+    id: string;
+    observed: boolean;
+    summary: string;
+    details?: string;
 };
 
 export type AuthoringCheckpointResult = {

@@ -42,8 +42,9 @@ runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状�
 Runtime Worker Verifier 都用它校验字段、expected ID 完整性和整体通过状态。Controller 只额外把共享 Result 转换为
 包含 `FirstPassedAt` 的 Environment status，并将首次通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
 
-Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init、运行
-`answer.sh` 并收集相同检查点的结构化结果。Environment identity 会先持久化到 CandidateRevision；验证报告
+Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init，先运行
+`reproduce.sh` 收集目标现象的结构化证据。任一证据未观察到时，验证以 artifact failure 结束且不会执行参考修复；只有全部证据
+成立后，才运行 `answer.sh` 并收集修复后相同检查点的结构化结果。Environment identity 会先持久化到 CandidateRevision；验证报告
 持久化后由 Runtime Worker 的异步 reaper 删除该 Environment。删除失败只重试清理，不会重新执行验证。
 
 ## 网络与镜像

@@ -2,6 +2,22 @@ runtime: node
 type: operations-scenario
 title: Repair a multi-node reverse proxy
 description: Restore the systemd-managed proxy path from a client node to an application node.
+versions:
+  - component: socat
+    version: system-package
+  - component: breakfix-demo-response
+    version: v1
+topology: "Three Node containers: a client reaches an application service through a systemd-managed proxy."
+initialization: "generate.sh starts the application on app:8080 and a proxy with an intentionally incorrect app:9090 upstream."
+reproduction:
+  objective: "The proxy points to the wrong upstream, so the client cannot reach the application through proxy:8080."
+  evidence:
+    - id: proxy-upstream-misconfigured
+      description: "The proxy systemd unit still targets app:9090 instead of the application port."
+      node: proxy
+    - id: application-unreachable
+      description: "The client cannot receive the expected response through proxy:8080."
+      node: client
 nodes:
   - name: client
     title: Client
