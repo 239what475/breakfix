@@ -10,7 +10,7 @@ import (
 	"unicode"
 )
 
-var commonRequiredFiles = []string{"scenario.yaml", "problem.md", "solution.md"}
+var commonRequiredFiles = []string{"scenario.yaml"}
 
 var (
 	nodeImageFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -118,7 +118,8 @@ func ValidateDir(dir string) (*Entry, error) {
 	if !contentRevisionPattern.MatchString(scenario.ContentRevision) {
 		return nil, fmt.Errorf("scenario content_revision must be a lowercase sha256 digest")
 	}
-	if err := validateScenarioFiles(scenario, dir); err != nil {
+	hasReferenceRepair, err := validateScenarioFiles(scenario, dir)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(scenario.Title) == "" {
@@ -149,6 +150,7 @@ func ValidateDir(dir string) (*Entry, error) {
 	if err := validateCheckpoints(scenario, dir); err != nil {
 		return nil, err
 	}
+	scenario.HasReferenceRepair = hasReferenceRepair
 	if err := validateTeachingAssets(scenario, dir); err != nil {
 		return nil, err
 	}
@@ -176,7 +178,8 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateScenarioFiles(scenario, dir); err != nil {
+	hasReferenceRepair, err := validateScenarioFiles(scenario, dir)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(scenario.Title) == "" {
@@ -204,6 +207,7 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	if err := validateCheckpoints(scenario, dir); err != nil {
 		return nil, err
 	}
+	scenario.HasReferenceRepair = hasReferenceRepair
 	if err := validateTeachingAssets(scenario, dir); err != nil {
 		return nil, err
 	}
@@ -273,9 +277,6 @@ func validateOperationsCore(scenario *Entry) error {
 }
 
 func validateCheckpoints(scenario *Entry, dir string) error {
-	if len(scenario.Checkpoints) == 0 {
-		return fmt.Errorf("scenario checkpoints are required")
-	}
 	known := make(map[string]struct{}, len(scenario.Checkpoints))
 	nodes := make(map[string]struct{}, len(scenario.Nodes))
 	for _, node := range scenario.Nodes {
@@ -295,15 +296,14 @@ func validateCheckpoints(scenario *Entry, dir string) error {
 		if strings.TrimSpace(checkpoint.Description) == "" {
 			return fmt.Errorf("checkpoint %q description is required", id)
 		}
-		if strings.TrimSpace(checkpoint.Hint) == "" {
-			return fmt.Errorf("checkpoint %q hint is required", id)
-		}
-		path, err := safeScenarioPath(dir, checkpoint.Hint)
-		if err != nil {
-			return fmt.Errorf("checkpoint %q hint: %w", id, err)
-		}
-		if info, err := os.Stat(path); err != nil || info.IsDir() {
-			return fmt.Errorf("checkpoint %q hint is not a file", id)
+		if strings.TrimSpace(checkpoint.Hint) != "" {
+			path, err := safeScenarioPath(dir, checkpoint.Hint)
+			if err != nil {
+				return fmt.Errorf("checkpoint %q hint: %w", id, err)
+			}
+			if info, err := os.Stat(path); err != nil || info.IsDir() {
+				return fmt.Errorf("checkpoint %q hint is not a file", id)
+			}
 		}
 		if scenario.Runtime == RuntimeNode {
 			if _, ok := nodes[checkpoint.Node]; !ok {
@@ -317,19 +317,19 @@ func validateCheckpoints(scenario *Entry, dir string) error {
 	return nil
 }
 
-func validateScenarioFiles(scenario *Entry, dir string) error {
+func validateScenarioFiles(scenario *Entry, dir string) (bool, error) {
 	for _, name := range commonRequiredFiles {
 		if err := requireRegularFile(dir, name); err != nil {
-			return err
+			return false, err
 		}
 	}
 	switch scenario.Runtime {
 	case RuntimeNode:
 		if len(scenario.Nodes) == 0 {
-			return fmt.Errorf("node scenario requires at least one node")
+			return false, fmt.Errorf("node scenario requires at least one node")
 		}
 		if len(scenario.Nodes) > MaxScenarioNodes {
-			return fmt.Errorf("node scenario exceeds the %d node limit", MaxScenarioNodes)
+			return false, fmt.Errorf("node scenario exceeds the %d node limit", MaxScenarioNodes)
 		}
 		declared := make(map[string]struct{}, len(scenario.Nodes))
 		checkpointNodes := make(map[string]struct{})
@@ -343,72 +343,134 @@ func validateScenarioFiles(scenario *Entry, dir string) error {
 		for _, node := range scenario.Nodes {
 			name := strings.TrimSpace(node.Name)
 			if !ValidID(name) {
-				return fmt.Errorf("invalid node name %q", node.Name)
+				return false, fmt.Errorf("invalid node name %q", node.Name)
 			}
 			if _, reserved := reservedNodeNames[name]; reserved {
-				return fmt.Errorf("node name %q is reserved", name)
+				return false, fmt.Errorf("node name %q is reserved", name)
 			}
 			if _, duplicate := declared[name]; duplicate {
-				return fmt.Errorf("duplicate node name %q", name)
+				return false, fmt.Errorf("duplicate node name %q", name)
 			}
 			if strings.TrimSpace(node.Title) == "" {
-				return fmt.Errorf("node %q title is required", name)
+				return false, fmt.Errorf("node %q title is required", name)
 			}
 			declared[name] = struct{}{}
-			for _, script := range []string{"generate.sh", "answer.sh"} {
-				if err := requireRegularFile(dir, filepath.Join("nodes", name, script)); err != nil {
-					return err
-				}
+			if err := requireRegularFile(dir, filepath.Join("nodes", name, "generate.sh")); err != nil {
+				return false, err
 			}
 			if _, hasChecks := checkpointNodes[name]; hasChecks {
 				if err := requireRegularFile(dir, filepath.Join("nodes", name, "checks.sh")); err != nil {
-					return err
+					return false, err
 				}
 			}
 			if _, hasReproduction := reproductionNodes[name]; hasReproduction {
 				if err := requireRegularFile(dir, filepath.Join("nodes", name, "reproduce.sh")); err != nil {
-					return err
+					return false, err
 				}
 			}
 		}
 		entries, err := os.ReadDir(filepath.Join(dir, "nodes"))
 		if err != nil {
-			return fmt.Errorf("read nodes directory: %w", err)
+			return false, fmt.Errorf("read nodes directory: %w", err)
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
-				return fmt.Errorf("nodes/%s must be a declared node directory", entry.Name())
+				return false, fmt.Errorf("nodes/%s must be a declared node directory", entry.Name())
 			}
 			if _, ok := declared[entry.Name()]; !ok {
-				return fmt.Errorf("nodes/%s is not declared in scenario.yaml", entry.Name())
+				return false, fmt.Errorf("nodes/%s is not declared in scenario.yaml", entry.Name())
 			}
 		}
 		if _, err := os.Lstat(filepath.Join(dir, "k8s")); err == nil {
-			return fmt.Errorf("node scenario must not contain k8s assets")
+			return false, fmt.Errorf("node scenario must not contain k8s assets")
 		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect k8s assets: %w", err)
+			return false, fmt.Errorf("inspect k8s assets: %w", err)
 		}
+		return validateNodeReferenceRepair(scenario, dir)
 	case RuntimeK8s:
 		if len(scenario.Nodes) != 0 {
-			return fmt.Errorf("k8s scenario must not declare nodes")
+			return false, fmt.Errorf("k8s scenario must not declare nodes")
 		}
-		for _, script := range []string{"generate.sh", "answer.sh", "checks.sh"} {
-			if err := requireRegularFile(dir, filepath.Join("k8s", script)); err != nil {
-				return err
+		if err := requireRegularFile(dir, filepath.Join("k8s", "generate.sh")); err != nil {
+			return false, err
+		}
+		if len(scenario.Checkpoints) > 0 {
+			if err := requireRegularFile(dir, filepath.Join("k8s", "checks.sh")); err != nil {
+				return false, err
 			}
 		}
 		if len(scenario.Reproduction.Evidence) > 0 {
 			if err := requireRegularFile(dir, filepath.Join("k8s", "reproduce.sh")); err != nil {
-				return err
+				return false, err
 			}
 		}
 		if _, err := os.Lstat(filepath.Join(dir, "nodes")); err == nil {
-			return fmt.Errorf("k8s scenario must not contain node assets")
+			return false, fmt.Errorf("k8s scenario must not contain node assets")
 		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect node assets: %w", err)
+			return false, fmt.Errorf("inspect node assets: %w", err)
+		}
+		return validateK8sReferenceRepair(scenario, dir)
+	}
+	return false, nil
+}
+
+func validateNodeReferenceRepair(scenario *Entry, dir string) (bool, error) {
+	solution, err := hasRegularFile(dir, "solution.md")
+	if err != nil {
+		return false, err
+	}
+	answers := 0
+	for _, node := range scenario.Nodes {
+		hasAnswer, err := hasRegularFile(dir, filepath.Join("nodes", node.Name, "answer.sh"))
+		if err != nil {
+			return false, err
+		}
+		if hasAnswer {
+			answers++
 		}
 	}
-	return nil
+	if solution != (answers > 0) {
+		return false, fmt.Errorf("solution.md and reference answer scripts must be provided together")
+	}
+	if answers > 0 && answers != len(scenario.Nodes) {
+		return false, fmt.Errorf("reference repair requires answer.sh for every declared node")
+	}
+	if solution && len(scenario.Checkpoints) == 0 {
+		return false, fmt.Errorf("reference repair requires at least one checkpoint")
+	}
+	return solution, nil
+}
+
+func validateK8sReferenceRepair(scenario *Entry, dir string) (bool, error) {
+	solution, err := hasRegularFile(dir, "solution.md")
+	if err != nil {
+		return false, err
+	}
+	answer, err := hasRegularFile(dir, filepath.Join("k8s", "answer.sh"))
+	if err != nil {
+		return false, err
+	}
+	if solution != answer {
+		return false, fmt.Errorf("solution.md and k8s/answer.sh must be provided together")
+	}
+	if solution && len(scenario.Checkpoints) == 0 {
+		return false, fmt.Errorf("reference repair requires at least one checkpoint")
+	}
+	return solution, nil
+}
+
+func hasRegularFile(root, relative string) (bool, error) {
+	info, err := os.Lstat(filepath.Join(root, relative))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect %s: %w", filepath.ToSlash(relative), err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("%s must be a regular file", filepath.ToSlash(relative))
+	}
+	return true, nil
 }
 
 var reservedNodeNames = map[string]struct{}{

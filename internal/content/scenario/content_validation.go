@@ -18,17 +18,29 @@ var checkpointMarkerPattern = regexp.MustCompile(`<!--\s*checkpoint:\s*([a-z0-9-
 // validateTeachingAssets keeps instructional material tied to the same
 // immutable artifact as the executable checks without prescribing a repair.
 func validateTeachingAssets(scenario *Entry, dir string) error {
-	solution, err := os.ReadFile(filepath.Join(dir, "solution.md"))
-	if err != nil {
-		return fmt.Errorf("read solution.md: %w", err)
+	markdown := make([]string, 0, len(scenario.Checkpoints)+2)
+	for _, relative := range []string{"problem.md", "solution.md"} {
+		exists, err := hasRegularFile(dir, relative)
+		if err != nil {
+			return err
+		}
+		if exists {
+			markdown = append(markdown, relative)
+		}
 	}
-	if err := validateSolutionMarkers(scenario, solution); err != nil {
-		return err
+	if scenario.HasReferenceRepair {
+		solution, err := os.ReadFile(filepath.Join(dir, "solution.md"))
+		if err != nil {
+			return fmt.Errorf("read solution.md: %w", err)
+		}
+		if err := validateSolutionMarkers(scenario, solution); err != nil {
+			return err
+		}
 	}
-
-	markdown := []string{"problem.md", "solution.md"}
 	for _, checkpoint := range scenario.Checkpoints {
-		markdown = append(markdown, checkpoint.Hint)
+		if strings.TrimSpace(checkpoint.Hint) != "" {
+			markdown = append(markdown, checkpoint.Hint)
+		}
 	}
 	for _, relative := range markdown {
 		if err := validateMarkdownLinks(dir, relative); err != nil {

@@ -122,7 +122,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 
 	markNodeReady(&environment, r.now())
-	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
+	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning && len(environment.Spec.Environment.Checkpoints) > 0 {
 		report, checkErr := r.runNodeCheckpoints(ctx, &environment, identity)
 		recordNodeCheckpointStatus(&environment.Status.Environment, report, checkErr, r.now())
 		if checkErr == nil && report.Passed() {
@@ -425,7 +425,7 @@ func drainGracePeriod(lifecycle breakfixv1.EnvironmentLifecycleSpec) time.Durati
 }
 
 func nodeEnvironmentRequeue(environment *breakfixv1.NodeEnvironment, now time.Time) ctrl.Result {
-	if environment.Status.Environment.Phase == breakfixv1.EnvironmentReady && environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
+	if environment.Status.Environment.Phase == breakfixv1.EnvironmentReady && environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning && len(environment.Spec.Environment.Checkpoints) > 0 {
 		return ctrl.Result{RequeueAfter: checkpointInterval}
 	}
 	next := time.Duration(0)

@@ -38,6 +38,19 @@ func TestNewEnvironmentSpecCreatesPublishedLearningSnapshot(t *testing.T) {
 	}
 }
 
+func TestNewEnvironmentSpecAllowsPublishedScenarioWithoutCheckpoints(t *testing.T) {
+	handler := &Handler{cooldownMin: 1}
+	spec, err := handler.newEnvironmentSpec("u-demo", &scenario.Entry{
+		ID: "chal-r7m4x2q9v6kp", RevisionID: "chrev-aaaaaaaaaaaaaaaa", Runtime: scenario.RuntimeK8s,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Checkpoints == nil || len(spec.Checkpoints) != 0 {
+		t.Fatalf("expected an empty checkpoint snapshot, got %#v", spec.Checkpoints)
+	}
+}
+
 func TestNewEnvironmentSpecRejectsIncompleteSnapshot(t *testing.T) {
 	handler := &Handler{cooldownMin: 1}
 	_, err := handler.newEnvironmentSpec("u-demo", &scenario.Entry{

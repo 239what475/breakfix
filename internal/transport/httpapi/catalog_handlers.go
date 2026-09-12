@@ -237,14 +237,22 @@ func scenarioSummaryRuntime(runtime string) api.ScenarioSummaryRuntime {
 func toAPICheckpoints(checkpoints []scenario.Checkpoint) []api.ScenarioCheckpoint {
 	result := make([]api.ScenarioCheckpoint, 0, len(checkpoints))
 	for _, checkpoint := range checkpoints {
-		hint := checkpoint.Hint
-		node := checkpoint.Node
+		var hint *string
+		if checkpoint.Hint != "" {
+			value := checkpoint.Hint
+			hint = &value
+		}
+		var node *string
+		if checkpoint.Node != "" {
+			value := checkpoint.Node
+			node = &value
+		}
 		result = append(result, api.ScenarioCheckpoint{
 			Id:          checkpoint.ID,
 			Title:       checkpoint.Title,
 			Description: checkpoint.Description,
-			Hint:        &hint,
-			Node:        &node,
+			Hint:        hint,
+			Node:        node,
 		})
 	}
 	return result

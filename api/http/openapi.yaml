@@ -148,7 +148,7 @@ paths:
   /scenarios/{id}/content:
     get:
       operationId: getScenarioContent
-      summary: Get scenario problem, solution, hints, and checkpoint metadata
+      summary: Get scenario details and any available learning aids
       tags: [scenarios]
       security:
         - bearerAuth: []
@@ -1240,7 +1240,7 @@ components:
 
     ScenarioContent:
       type: object
-      required: [id, title, runtime, scenario_type, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, problem, solution, hints, checkpoints]
+      required: [id, title, runtime, scenario_type, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, hints, checkpoints]
       properties:
         id:
           type: string
@@ -1276,8 +1276,10 @@ components:
             $ref: "#/components/schemas/ScenarioReproductionEvidence"
         problem:
           type: string
+          nullable: true
         solution:
           type: string
+          nullable: true
         hints:
           type: object
           additionalProperties:

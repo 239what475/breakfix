@@ -103,7 +103,7 @@ func (c *conversation) tools() []tool.InvokableTool {
 			"offset":    {Type: schema.Integer, Desc: "从文件开头跳过的字节数，从 0 开始", Required: false},
 			"max_bytes": {Type: schema.Integer, Desc: "读取的最大字节数", Required: false},
 		}, run: c.readEnvironmentFile},
-		&assistantTool{name: "get_solution", desc: "读取当前挑战的完整参考答案和讲解。仅在需要确认正确解法、解释用户偏差或用户明确要求完整答案时调用。", params: map[string]*schema.ParameterInfo{}, run: c.getSolution},
+		&assistantTool{name: "get_solution", desc: "读取当前场景的完整参考修复和讲解。仅在场景提供参考修复且需要确认正确解法、解释用户偏差或用户明确要求时调用。", params: map[string]*schema.ParameterInfo{}, run: c.getSolution},
 	}
 }
 

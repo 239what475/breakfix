@@ -2,6 +2,23 @@ package authoring
 
 import "testing"
 
+func TestPlanAllowsGenerationWithoutOverviewOrCheckpoints(t *testing.T) {
+	plan := Plan{Metadata: Metadata{Title: "复现 DNS 故障", Description: "仅验证故障现象。", Runtime: "node"}}
+	if err := plan.ValidateForGeneration(); err != nil {
+		t.Fatalf("ValidateForGeneration() error = %v", err)
+	}
+}
+
+func TestPlanStillValidatesProvidedCheckpoint(t *testing.T) {
+	plan := Plan{
+		Metadata:    Metadata{Title: "复现 DNS 故障", Description: "仅验证故障现象。", Runtime: "node"},
+		Checkpoints: []Checkpoint{{ID: "dns-ready", Title: "DNS ready"}},
+	}
+	if err := plan.ValidateForGeneration(); err == nil {
+		t.Fatal("expected incomplete optional checkpoint to be rejected")
+	}
+}
+
 func TestStageOperationAndGeneratedCheckpointIDAreDeterministic(t *testing.T) {
 	arguments := struct {
 		ID       string `json:"id"`

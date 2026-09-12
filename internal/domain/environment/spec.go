@@ -63,8 +63,5 @@ func (s Spec) Validate() error {
 		}
 		checkpointIDs[checkpoint.ID] = struct{}{}
 	}
-	if len(checkpointIDs) == 0 {
-		return fmt.Errorf("environment checkpoints are required")
-	}
 	return nil
 }

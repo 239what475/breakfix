@@ -19,7 +19,7 @@ const emit = defineEmits<{
 const content = ref<ScenarioContent>();
 const loadingContent = ref(false);
 const contentError = ref("");
-const view = ref<"problem" | "solution" | "assistant">("problem");
+const view = ref<"problem" | "solution" | "assistant">("assistant");
 const sidebarCollapsed = ref(false);
 const mobileView = ref<"document" | "terminal">("document");
 const isNarrow = ref(false);
@@ -69,6 +69,11 @@ async function loadContent() {
   contentError.value = "";
   try {
     content.value = await api.getScenarioContent(props.scenario.id);
+    view.value = content.value.problem
+      ? "problem"
+      : content.value.solution
+        ? "solution"
+        : "assistant";
   } catch (err) {
     contentError.value =
       err instanceof Error ? err.message : "Unable to load scenario content";
@@ -113,7 +118,7 @@ watch(
     currentTerminalNode.value = "";
     currentTerminalWindow.value = "shell-1";
     terminalContexts.value = [{ windows: ["shell-1"] }];
-    view.value = "problem";
+    view.value = "assistant";
     resetElapsed();
     void loadContent();
   },
@@ -145,6 +150,7 @@ onUnmounted(() => {
       :scenario="scenario"
       :complete="completed"
       :total="content?.checkpoints.length ?? 0"
+      :has-checkpoints="(content?.checkpoints.length ?? 0) > 0"
       :connected="terminalConnected"
       :elapsed="elapsed"
       :resetting="resetting"
@@ -155,6 +161,8 @@ onUnmounted(() => {
     <div class="workspace-body" :class="`mobile-${mobileView}`">
       <WorkspaceSidebar
         :view="view"
+        :has-problem="!!content?.problem"
+        :has-solution="!!content?.solution"
         :checkpoints="content?.checkpoints ?? []"
         :results="checks"
         :collapsed="sidebarCollapsed"

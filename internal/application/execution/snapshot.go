@@ -47,7 +47,8 @@ func Freeze(entry scenario.Entry, config SnapshotConfig) (domain.Snapshot, error
 	for _, checkpoint := range entry.Checkpoints {
 		checkpoints = append(checkpoints, domain.CheckpointSnapshot{ID: checkpoint.ID, Node: checkpoint.Node})
 	}
-	snapshot := domain.Snapshot{Runtime: entry.Runtime, Reproduction: reproduction, Checkpoints: checkpoints}
+	referenceRepair := entry.HasReferenceRepair
+	snapshot := domain.Snapshot{Runtime: entry.Runtime, Reproduction: reproduction, ReferenceRepair: &referenceRepair, Checkpoints: checkpoints}
 	switch entry.Runtime {
 	case scenario.RuntimeNode:
 		if config.MaxNodes <= 0 || len(entry.Nodes) > config.MaxNodes {

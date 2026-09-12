@@ -47,10 +47,6 @@ func (h *Handler) newEnvironmentSpec(userID string, entry *scenario.Entry) (brea
 		seen[id] = struct{}{}
 		checkpoints = append(checkpoints, breakfixv1.EnvironmentCheckpointSpec{ID: id, Node: strings.TrimSpace(checkpoint.Node)})
 	}
-	if len(checkpoints) == 0 {
-		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has no checkpoints", entry.ID)
-	}
-
 	activityAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	idleTTLSeconds := int64(h.cooldownMin * 60)
 	drainGraceSeconds := int64(environmentDrainGrace / time.Second)

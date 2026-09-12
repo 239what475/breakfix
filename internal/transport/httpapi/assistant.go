@@ -156,6 +156,10 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 	if err != nil {
 		return assistant.Request{}, err
 	}
+	problem := ""
+	if content.Problem != nil {
+		problem = *content.Problem
+	}
 	return assistant.Request{
 		UserID:           userID,
 		EnvironmentUID:   env.UID,
@@ -163,7 +167,7 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 		Runtime:          env.Runtime,
 		ScenarioID:       entry.ID,
 		ScenarioTitle:    entry.Title,
-		Problem:          content.Problem,
+		Problem:          problem,
 		Nodes:            nodes,
 		CurrentNode:      input.CurrentNode,
 		CurrentWindow:    input.CurrentWindow,

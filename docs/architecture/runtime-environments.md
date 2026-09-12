@@ -13,7 +13,7 @@ Server 写 `spec`，Controller 调和实际资源并写 `status`。Controller �
 
 环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自当前 active scenario revision；
 验证环境来自 immutable CandidateRevision artifact。两者都复制运行时 profile、scenario revision、
-checkpoint 定义和 artifact reference，因此后续配置或题目修改不会改变已运行环境。
+可选 checkpoint 定义和 artifact reference，因此后续配置或场景修改不会改变已运行环境。
 
 Environment 的 `spec.environment.source` 同时保存稳定 `scenario_id` 和不可变 `scenario_revision_id`。作者发布新
 revision 或弃用 Scenario 后，已有 Environment、Progress、Assistant 和 Terminal 仍按这个 revision 读取；只有新建
@@ -38,14 +38,16 @@ Controller 根据 CRD finalizer、用户停止、完成、空闲时间和 drain 
 runtime init 挂载题目 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 scenario bundle 可以
 在学习与验证环境使用一致的初始化语义。
 
-检查点没有人为 Submit。`internal/domain/checkpoint` 是 `checks.sh` JSON report 的唯一协议实现；Controller 与
+检查点没有人为 Submit。声明了 checkpoint 时，`internal/domain/checkpoint` 是 `checks.sh` JSON report 的唯一协议实现；Controller 与
 Runtime Worker Verifier 都用它校验字段、expected ID 完整性和整体通过状态。Controller 只额外把共享 Result 转换为
-包含 `FirstPassedAt` 的 Environment status，并将首次通过事件投影到学习记录。所有检查点通过后，学习挑战自动完成。
+包含 `FirstPassedAt` 的 Environment status，并将首次通过事件投影到学习记录。没有 checkpoint 的环境保持 Ready，不伪造完成记录；
+所有已声明检查点通过后，环境自动完成。
 
 Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init，先运行
 `reproduce.sh` 收集目标现象的结构化证据。任一证据未观察到时，验证以 artifact failure 结束且不会执行参考修复；只有全部证据
-成立后，才运行 `answer.sh` 并收集修复后相同检查点的结构化结果。Environment identity 会先持久化到 CandidateRevision；验证报告
-持久化后由 Runtime Worker 的异步 reaper 删除该 Environment。删除失败只重试清理，不会重新执行验证。
+成立后，若场景提供完整参考修复，才运行 `answer.sh` 并收集修复后相同检查点的结构化结果；没有参考修复时复现证据本身就是该次验证的
+终点。Environment identity 会先持久化到 CandidateRevision；验证报告持久化后由 Runtime Worker 的异步 reaper 删除该 Environment。
+删除失败只重试清理，不会重新执行验证。
 
 ## 网络与镜像
 

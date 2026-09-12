@@ -35,12 +35,23 @@ func TestTeachingAssetFixturesValidate(t *testing.T) {
 	}
 }
 
-func TestValidateCandidateDirRequiresCheckpointHints(t *testing.T) {
+func TestValidateCandidateDirAllowsCheckpointWithoutHint(t *testing.T) {
 	root := t.TempDir()
 	writeTeachingScenario(t, root, "", "<!-- checkpoint: complete -->\n")
 
-	_, err := ValidateCandidateDir(root)
-	if err == nil || !strings.Contains(err.Error(), `checkpoint "complete" hint is required`) {
+	if _, err := ValidateCandidateDir(root); err != nil {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
+func TestValidateCandidateDirRequiresReferencedCheckpointHint(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingScenario(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+	if err := os.Remove(filepath.Join(root, "hints", "complete.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), `checkpoint "complete" hint is not a file`) {
 		t.Fatalf("ValidateCandidateDir error = %v", err)
 	}
 }
@@ -225,6 +236,70 @@ func TestValidateCandidateDirRequiresK8sReproduceScriptForOperationsScenario(t *
 	}
 }
 
+func TestValidateCandidateDirAllowsOperationsScenarioWithoutLearningAids(t *testing.T) {
+	tests := []struct {
+		name  string
+		write func(*testing.T, string)
+	}{
+		{name: "node", write: writeNodeOperationsCore},
+		{name: "k8s", write: writeK8sOperationsCore},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			test.write(t, root)
+			entry, err := ValidateCandidateDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.HasReferenceRepair || len(entry.Checkpoints) != 0 {
+				t.Fatalf("learning aids were inferred for core-only scenario: %#v", entry)
+			}
+		})
+	}
+}
+
+func TestValidateCandidateDirRequiresCompleteReferenceRepairSet(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove string
+		want   string
+	}{
+		{name: "solution", remove: "solution.md", want: "solution.md and reference answer scripts must be provided together"},
+		{name: "answer", remove: "nodes/host/answer.sh", want: "solution.md and reference answer scripts must be provided together"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTeachingScenario(t, root, "", "<!-- checkpoint: complete -->\n")
+			if err := os.Remove(filepath.Join(root, filepath.FromSlash(test.remove))); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateCandidateDir error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateCandidateDirRequiresChecksForDeclaredCheckpointWithoutReferenceRepair(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingScenario(t, root, "", "<!-- checkpoint: complete -->\n")
+	if err := os.Remove(filepath.Join(root, "solution.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "nodes", "host", "answer.sh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "nodes", "host", "checks.sh")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), "missing nodes/host/checks.sh") {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
 func writeTeachingScenario(t *testing.T, root, hint, solution string) {
 	t.Helper()
 	manifest := "title: Teaching fixture\nruntime: node\ndescription: fixture\nversions:\n  - component: fixture\n    version: v1\ntopology: One teaching host.\ninitialization: generate.sh prepares the missing marker.\nreproduction:\n  objective: The fixture starts incomplete.\n  evidence:\n    - id: fixture-incomplete\n      description: The fixture is initially incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"
@@ -241,4 +316,18 @@ func writeTeachingScenario(t *testing.T, root, hint, solution string) {
 	writeFile(t, filepath.Join(root, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"fixture-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
 	writeFile(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\n")
+}
+
+func writeNodeOperationsCore(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "scenario.yaml"), "type: operations-scenario\ntitle: Core node fixture\nruntime: node\ndescription: fixture\nversions:\n  - component: fixture\n    version: v1\ntopology: One host.\ninitialization: generate.sh creates the target state.\nreproduction:\n  objective: The fixture starts incomplete.\n  evidence:\n    - id: fixture-incomplete\n      description: The fixture is incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"fixture-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n")
+}
+
+func writeK8sOperationsCore(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "scenario.yaml"), "type: operations-scenario\ntitle: Core Kubernetes fixture\nruntime: k8s\ndescription: fixture\nversions:\n  - component: kubernetes\n    version: v1.31.0\ntopology: One Kubernetes cluster.\ninitialization: generate.sh creates the target state.\nreproduction:\n  objective: The workload is absent.\n  evidence:\n    - id: workload-absent\n      description: The workload is absent.\ncheckpoints: []\n")
+	writeFile(t, filepath.Join(root, "k8s", "generate.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(root, "k8s", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workload-absent\",\"observed\":true,\"summary\":\"absent\"}]}'\n")
 }

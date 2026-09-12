@@ -8,8 +8,8 @@ import (
 )
 
 type Content struct {
-	Problem  string            `json:"problem"`
-	Solution string            `json:"solution"`
+	Problem  *string           `json:"problem,omitempty"`
+	Solution *string           `json:"solution,omitempty"`
 	Hints    map[string]string `json:"hints"`
 }
 
@@ -17,17 +17,17 @@ func ReadContent(entry *Entry) (*Content, error) {
 	if entry == nil {
 		return nil, fmt.Errorf("scenario is nil")
 	}
-	problem, err := os.ReadFile(filepath.Join(entry.Dir, "problem.md"))
+	problem, err := readOptionalMarkdown(entry.Dir, "problem.md")
 	if err != nil {
-		return nil, fmt.Errorf("read problem.md: %w", err)
+		return nil, err
 	}
-	solution, err := os.ReadFile(filepath.Join(entry.Dir, "solution.md"))
+	solution, err := readOptionalMarkdown(entry.Dir, "solution.md")
 	if err != nil {
-		return nil, fmt.Errorf("read solution.md: %w", err)
+		return nil, err
 	}
 	content := &Content{
-		Problem:  string(problem),
-		Solution: string(solution),
+		Problem:  problem,
+		Solution: solution,
 		Hints:    make(map[string]string),
 	}
 	for _, checkpoint := range entry.Checkpoints {
@@ -45,6 +45,18 @@ func ReadContent(entry *Entry) (*Content, error) {
 		content.Hints[checkpoint.ID] = string(hint)
 	}
 	return content, nil
+}
+
+func readOptionalMarkdown(root, relative string) (*string, error) {
+	value, err := os.ReadFile(filepath.Join(root, relative))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", relative, err)
+	}
+	result := string(value)
+	return &result, nil
 }
 
 func safeScenarioPath(root, name string) (string, error) {

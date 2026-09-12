@@ -11,6 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -53,6 +54,26 @@ func TestVerifyNodeDoesNotRunReferenceAnswerWhenPhenomenonIsAbsent(t *testing.T)
 	}
 }
 
+func TestVerifyNodeCompletesAfterReproductionWhenReferenceRepairIsAbsent(t *testing.T) {
+	node := &verificationNodeExecutor{outputs: map[string]incus.ExecNodeResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"service-unavailable","observed":true,"summary":"service is unavailable"}]}`},
+	}}
+	executor := &Executor{node: node}
+	snapshot := verificationNodeSnapshot()
+	referenceRepair := false
+	snapshot.ReferenceRepair = &referenceRepair
+	report, err := executor.verifyNode(context.Background(), domainexecution.Work{ArchiveSHA256: "sha256:" + strings.Repeat("a", 64), Snapshot: snapshot}, verificationNodeEnvironment())
+	if err != nil {
+		t.Fatalf("verify node: %v", err)
+	}
+	if !report.Passed || len(report.Answers) != 0 || len(report.Checkpoints) != 0 {
+		t.Fatalf("reproduction-only report = %#v", report)
+	}
+	if got, want := strings.Join(node.scripts, ","), "reproduce.sh"; got != want {
+		t.Fatalf("scripts = %q, want %q", got, want)
+	}
+}
+
 func TestVerifyNodeReturnsReproductionProtocolReport(t *testing.T) {
 	node := &verificationNodeExecutor{outputs: map[string]incus.ExecNodeResult{
 		"reproduce.sh": {ExitCode: 0, Stdout: "not JSON"},
@@ -92,6 +113,44 @@ func TestReproduceK8sParsesInitialEvidence(t *testing.T) {
 	}
 }
 
+func TestVerifyK8sCompletesAfterReproductionWhenReferenceRepairIsAbsent(t *testing.T) {
+	environments := &verificationEnvironmentClient{outputs: map[string]kubernetes.PodExecResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"deployment-absent","observed":true,"summary":"deployment absent"}]}`},
+	}}
+	executor := &Executor{environments: environments}
+	referenceRepair := false
+	work := domainexecution.Work{Snapshot: domainexecution.Snapshot{
+		Runtime:         scenario.RuntimeK8s,
+		ReferenceRepair: &referenceRepair,
+		Reproduction:    []domainexecution.ReproductionEvidenceSnapshot{{ID: "deployment-absent"}},
+		K8s: &domainexecution.K8sRuntimeSnapshot{
+			BaseImageDigest:         "registry.example.com/base@sha256:" + strings.Repeat("a", 64),
+			ProfileRevision:         "k8s-profile-v1",
+			Version:                 "v0.31.0",
+			ManagementTerminalImage: "registry.example.com/terminal@sha256:" + strings.Repeat("b", 64),
+			Resources: domainexecution.K8sResources{
+				ControlPlaneCPU: "1", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
+				WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",
+				QuotaCPU: "3", QuotaMemory: "3Gi", QuotaEphemeralStorage: "30Gi",
+			},
+			Network: environment.VK8sNetwork{
+				PublicEgressCIDR: "0.0.0.0/0",
+				ProtectedCIDRs:   []string{"10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"},
+			},
+		},
+	}}
+	report, err := executor.verifyK8s(context.Background(), work, verificationK8sEnvironment())
+	if err != nil {
+		t.Fatalf("verify K8s: %v", err)
+	}
+	if !report.Passed || len(report.Answers) != 0 || len(report.Checkpoints) != 0 {
+		t.Fatalf("reproduction-only report = %#v", report)
+	}
+	if got, want := strings.Join(environments.scripts, ","), "reproduce.sh"; got != want {
+		t.Fatalf("scripts = %q, want %q", got, want)
+	}
+}
+
 func verificationNodeSnapshot() domainexecution.Snapshot {
 	return domainexecution.Snapshot{
 		Runtime:      scenario.RuntimeNode,
@@ -112,6 +171,17 @@ func verificationNodeEnvironment() environmentRef {
 		node: &breakfixv1.NodeEnvironment{
 			ObjectMeta: metav1.ObjectMeta{UID: types.UID("verify-node")},
 			Status:     breakfixv1.NodeEnvironmentStatus{Runtime: breakfixv1.NodeRuntimeStatus{Project: "project", Network: "network", ACL: "acl", Profile: "profile"}},
+		},
+	}
+}
+
+func verificationK8sEnvironment() environmentRef {
+	return environmentRef{
+		runtime: scenario.RuntimeK8s,
+		vk8s: &breakfixv1.VK8sEnvironment{
+			Status: breakfixv1.VK8sEnvironmentStatus{Runtime: breakfixv1.VK8sRuntimeStatus{
+				Namespace: "verify", TerminalPodName: "terminal",
+			}},
 		},
 	}
 }

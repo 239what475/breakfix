@@ -34,7 +34,11 @@ type Entry struct {
 	Initialization  string
 	Reproduction    Reproduction
 	Checkpoints     []Checkpoint
-	Dir             string
+	// HasReferenceRepair is derived from the verified asset set. It is not
+	// source metadata: runtime verification needs it to decide whether to run
+	// answer.sh after the initial phenomenon has been reproduced.
+	HasReferenceRepair bool
+	Dir                string
 }
 
 type Spec struct {

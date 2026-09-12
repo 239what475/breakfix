@@ -337,6 +337,9 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 		report := failedReproductionReport(work.Snapshot, reproduced, "target phenomenon was not reproduced")
 		return report, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_FAILED", report.Summary, report)
 	}
+	if !work.Snapshot.RequiresReferenceRepair() {
+		return reproducedOnlyReport(work.Snapshot, reproduced)
+	}
 	answers, err := executeParallel(nodes, func(node domainexecution.NodeSnapshot) (domainexecution.ExecutionResult, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
@@ -414,6 +417,9 @@ func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref
 	if !allReproductionObserved(reproduced) {
 		report := failedReproductionReport(work.Snapshot, reproduced, "target phenomenon was not reproduced")
 		return report, domainexecution.NewArtifactErrorWithReport("REPRODUCTION_FAILED", report.Summary, report)
+	}
+	if !work.Snapshot.RequiresReferenceRepair() {
+		return reproducedOnlyReport(work.Snapshot, reproduced)
 	}
 	answer, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "answer.sh"))
 	if err != nil {
@@ -578,6 +584,17 @@ func parseReproductionResults(raw string, snapshots []domainexecution.Reproducti
 
 func failedReproductionReport(snapshot domainexecution.Snapshot, reproduced []domainexecution.ReproductionEvidenceResult, summary string) domainexecution.VerificationReport {
 	return domainexecution.VerificationReport{Passed: false, Reproduction: reproduced, Summary: summary}
+}
+
+func reproducedOnlyReport(snapshot domainexecution.Snapshot, reproduced []domainexecution.ReproductionEvidenceResult) (domainexecution.VerificationReport, error) {
+	report := domainexecution.VerificationReport{
+		Passed: true, Reproduction: reproduced,
+		Summary: "all reproduction evidence passed; no reference repair was provided",
+	}
+	if err := report.Validate(snapshot); err != nil {
+		return domainexecution.VerificationReport{}, fmt.Errorf("construct reproduction-only verification report: %w", err)
+	}
+	return report, nil
 }
 
 func unobservedReproduction(snapshot domainexecution.Snapshot, summary string) []domainexecution.ReproductionEvidenceResult {

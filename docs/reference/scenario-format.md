@@ -50,6 +50,8 @@ checkpoints:
 
 ```text
 scenario.yaml
+
+# Optional learning aids
 problem.md
 solution.md
 hints/<checkpoint-id>.md
@@ -61,21 +63,21 @@ hints/<checkpoint-id>.md
 # runtime: node
 nodes/<node>/generate.sh
 nodes/<node>/reproduce.sh
-nodes/<node>/answer.sh
-nodes/<node>/checks.sh
+nodes/<node>/answer.sh     # Optional reference repair; required on every node when present
+nodes/<node>/checks.sh     # Required only for nodes that own checkpoints
 
 # runtime: k8s
 k8s/generate.sh
 k8s/reproduce.sh
-k8s/answer.sh
-k8s/checks.sh
+k8s/answer.sh              # Optional reference repair
+k8s/checks.sh              # Required only when checkpoints are declared
 ```
 
 发布时平台写入 `id`、`revision_id`、`source_slug`、`image`、`content_revision` 和 `published_at`。`id` 是稳定、不含题意的
 opaque Scenario identity；`revision_id` 是本次不可变发布结果。API、Environment 和学习记录使用 `id + revision_id`；`source_slug`
 必须与发布目录一致，但不是关系键。
 
-发布目录必须有合法平台字段、非空标题/描述和至少一个 checkpoint。`runtime: node` 的 `image` 是完整 64 位小写 Incus fingerprint；
+发布目录必须有合法平台字段、非空标题/描述与完整复现核心，但不要求任何学习辅助。`runtime: node` 的 `image` 是完整 64 位小写 Incus fingerprint；
 `runtime: k8s` 的 `image` 是完整 `repository@sha256:<64 位小写摘要>` OCI 引用。Node checkpoint 必须声明执行节点，K8s checkpoint
 不能有节点字段；checkpoint 顺序只控制 UI 展示，不表达依赖或必须通过的先后关系。
 
@@ -91,8 +93,9 @@ stable Scenario 状态，不删除历史内容。
 - K8s 管理终端首次启动时运行 `k8s/generate.sh`。
 
 `generate.sh` 可以安装场景专属软件并建立错误初态；它不参与 Builder，也不能依赖构建期联网。Verifier 先运行
-`reproduce.sh` 证明 manifest 所述的初始现象存在，再运行 `answer.sh` 验证参考修复。Node 仅在拥有 evidence 的节点运行
-`reproduce.sh`，随后全部节点答案并行执行；K8s 都在管理终端运行。学习环境永远不会自动执行这两类脚本。
+`reproduce.sh` 证明 manifest 所述的初始现象存在。只有完整提供了参考修复时，才继续运行 `answer.sh` 和修复后检查点：Node
+仅在拥有 evidence 的节点运行 `reproduce.sh`，随后全部节点答案并行执行；K8s 都在管理终端运行。学习环境永远不会自动执行
+`reproduce.sh` 或 `answer.sh`。
 
 ## 复现证据协议
 
@@ -123,11 +126,15 @@ stable Scenario 状态，不删除历史内容。
 ```
 
 脚本必须恰好报告该执行位置 manifest 声明的每个 checkpoint ID 一次。未通过是有效检查结果，输出 `passed: false` 且退出 0；脚本、
-解析或协议错误才非零退出。Controller 在学习环境周期执行同一协议并写入 Environment status；Verifier 仅在复现证据通过、
-参考修复完成后单次执行它。检查器只能观察环境，不能修改环境或依赖唯一命令路径。
+解析或协议错误才非零退出。Controller 在声明 checkpoint 的学习环境周期执行同一协议并写入 Environment status；Verifier 仅在
+复现证据通过且提供完整参考修复后单次执行它。检查器只能观察环境，不能修改环境或依赖唯一命令路径。
 
 ## 教学资产
 
-`problem.md` 描述症状、目标和边界。每个 checkpoint 可通过 `hints/` 提供渐进提示；`solution.md` 说明诊断和修复理由，而不只粘贴命令。
-`answer.sh` 必须在目标现象已复现的真实环境通过全部 checkpoint。学习者没有手动 Submit；作者在发布前分别看到复现证据和
-参考修复/检查点的验证结果，详见[工作流](../architecture/workflows.md)。
+`problem.md` 可提供现场的诊断思路、症状和边界；每个 checkpoint 可选择引用一个 `hints/` 中的渐进提示。它们都不是发布前提，
+但存在时必须是 artifact 内可解析的 Markdown，并且 hint 必须由它所属 checkpoint 实际引用。
+
+`solution.md` 与参考修复必须成组提供：Node 场景要求每个声明节点都有 `answer.sh`，K8s 场景要求有 `k8s/answer.sh`，并且场景至少
+声明一个 checkpoint 与对应 `checks.sh`。`solution.md` 必须为每个 checkpoint 恰好包含一个 `<!-- checkpoint: <id> -->` 标记；
+参考修复必须在目标现象已复现的真实环境通过全部 checkpoint。没有参考修复的场景只验证复现证据，验证报告不会伪造空答案或完成状态。
+学习者没有手动 Submit；作者在发布前分别看到复现证据和（提供时的）参考修复/检查点验证结果，详见[工作流](../architecture/workflows.md)。

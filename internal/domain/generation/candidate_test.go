@@ -132,6 +132,25 @@ func TestVerificationReportSeparatesReproductionFromRepair(t *testing.T) {
 	}
 }
 
+func TestVerificationReportAllowsReproductionOnlyScenario(t *testing.T) {
+	snapshot := validNodeExecutionSnapshot()
+	referenceRepair := false
+	snapshot.ReferenceRepair = &referenceRepair
+	snapshot.Reproduction = []ReproductionEvidenceSnapshot{{ID: "service-unavailable", Node: "client"}}
+	report := VerificationReport{
+		Passed:       true,
+		Reproduction: []ReproductionEvidenceResult{{ID: "service-unavailable", Observed: true, Summary: "service is unavailable"}},
+		Summary:      "all reproduction evidence passed; no reference repair was provided",
+	}
+	if err := report.Validate(snapshot); err != nil {
+		t.Fatalf("reproduction-only report: %v", err)
+	}
+	report.Answers = []ExecutionResult{{Location: "client", ExitCode: 0}}
+	if err := report.Validate(snapshot); err == nil || !strings.Contains(err.Error(), "without a reference repair") {
+		t.Fatalf("reproduction-only report with answer error = %v", err)
+	}
+}
+
 func validNodeExecutionSnapshot() ExecutionSnapshot {
 	return ExecutionSnapshot{
 		Runtime:     scenario.RuntimeNode,

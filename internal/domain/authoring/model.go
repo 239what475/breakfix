@@ -84,12 +84,6 @@ func (p Plan) ValidateForGeneration() error {
 	if runtime := scenario.NormalizeRuntime(metadata.Runtime); runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s {
 		return errors.New("运行时必须是 node 或 k8s")
 	}
-	if strings.TrimSpace(p.Overview) == "" {
-		return errors.New("题目概览不能为空")
-	}
-	if len(p.Checkpoints) == 0 {
-		return errors.New("至少需要一个检查点")
-	}
 	seen := make(map[string]struct{}, len(p.Checkpoints))
 	for index, checkpoint := range p.SortedCheckpoints() {
 		if strings.TrimSpace(checkpoint.ID) == "" || strings.TrimSpace(checkpoint.Title) == "" || strings.TrimSpace(checkpoint.Markdown) == "" {

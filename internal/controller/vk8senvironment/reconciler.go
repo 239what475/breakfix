@@ -105,7 +105,7 @@ func (r *VK8sEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 
 	markVK8sReady(&environment, r.now())
-	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
+	if environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning && len(environment.Spec.Environment.Checkpoints) > 0 {
 		report, checkErr := r.runCheckpoints(ctx, &environment, providerRequest)
 		recordVK8sCheckpointStatus(&environment.Status.Environment, report, checkErr, r.now())
 		if checkErr == nil && report.Passed() {
@@ -380,7 +380,7 @@ func shouldDestroyVK8sEnvironment(environment *breakfixv1.VK8sEnvironment, now t
 }
 
 func vk8sEnvironmentRequeue(environment *breakfixv1.VK8sEnvironment, now time.Time) ctrl.Result {
-	if environment.Status.Environment.Phase == breakfixv1.EnvironmentReady && environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning {
+	if environment.Status.Environment.Phase == breakfixv1.EnvironmentReady && environment.Spec.Environment.Purpose == breakfixv1.EnvironmentPurposeLearning && len(environment.Spec.Environment.Checkpoints) > 0 {
 		return ctrl.Result{RequeueAfter: checkpointInterval}
 	}
 	next := time.Duration(0)

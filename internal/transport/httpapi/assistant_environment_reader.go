@@ -102,7 +102,10 @@ func (r *environmentAssistantReader) ReadEnvironmentFile(ctx context.Context, no
 }
 
 func (r *environmentAssistantReader) Solution(context.Context) (string, error) {
-	return r.content.Solution, nil
+	if r.content == nil || r.content.Solution == nil {
+		return "", errors.New("this scenario does not provide a reference repair")
+	}
+	return *r.content.Solution, nil
 }
 
 func (r *environmentAssistantReader) captureNodeTMUXPane(ctx context.Context, node, window string, offset, lines int) ([]string, int, error) {

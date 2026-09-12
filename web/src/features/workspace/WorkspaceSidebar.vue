@@ -6,7 +6,6 @@ import {
 	ChevronRight,
 	CircleDashed,
 	FileText,
-	ListChecks,
 	MessageCircle,
 	RefreshCw,
 } from "lucide-vue-next";
@@ -14,6 +13,8 @@ import type { Checkpoint, CheckpointResult } from "../../api/types";
 
 defineProps<{
   view: "problem" | "solution" | "assistant";
+  hasProblem: boolean;
+  hasSolution: boolean;
   checkpoints: Checkpoint[];
   results: CheckpointResult[];
   collapsed: boolean;
@@ -45,11 +46,14 @@ function firstPassedLabel(value?: string | null) {
     <template v-if="!collapsed">
       <div class="document-tabs">
         <button
+          v-if="hasProblem"
           :class="{ active: view === 'problem' }"
           @click="emit('updateView', 'problem')"
         >
-          Problem</button
-        ><button
+          Problem
+        </button>
+        <button
+          v-if="hasSolution"
           :class="{ active: view === 'solution' }"
           @click="emit('updateView', 'solution')"
         >
@@ -62,56 +66,59 @@ function firstPassedLabel(value?: string | null) {
           Assistant
         </button>
       </div>
-      <div class="checkpoint-heading">
-        <strong>Checkpoints</strong
-        ><button
-          class="icon-button"
-          title="Refresh checkpoints"
-          @click="emit('refresh')"
-        >
-          <RefreshCw :size="14" aria-hidden="true" />
-        </button>
-      </div>
-      <p v-if="error" class="checkpoint-error">{{ error }}</p>
-      <ol class="checkpoint-list">
-        <li
-          v-for="checkpoint in checkpoints"
-          :key="checkpoint.id"
-          :class="{
-            passed: results.find((result) => result.id === checkpoint.id)
-              ?.passed,
-          }"
-        >
+      <template v-if="checkpoints.length">
+        <div class="checkpoint-heading">
+          <strong>Checkpoints</strong>
           <button
-            class="checkpoint-button"
-            @click="checkpoint.hint && emit('hint', checkpoint.id)"
+            class="icon-button"
+            title="Refresh checkpoints"
+            @click="emit('refresh')"
           >
-            <span class="checkpoint-mark">
-              <Check
-                v-if="results.find((result) => result.id === checkpoint.id)?.passed"
-                :size="12"
-                aria-hidden="true"
-              />
-              <CircleDashed v-else :size="12" aria-hidden="true" />
-            </span>
-            <span
-              ><strong>{{ checkpoint.title }}</strong
-              ><small>{{
-                results.find((result) => result.id === checkpoint.id)
-                  ?.summary || checkpoint.description
-              }}</small
-              ><time
-                v-if="results.find((result) => result.id === checkpoint.id)?.first_passed_at"
-                class="checkpoint-first-passed"
-                :datetime="results.find((result) => result.id === checkpoint.id)?.first_passed_at ?? undefined"
-              >{{ firstPassedLabel(results.find((result) => result.id === checkpoint.id)?.first_passed_at) }}</time></span
-            >
+            <RefreshCw :size="14" aria-hidden="true" />
           </button>
-        </li>
-      </ol>
+        </div>
+        <p v-if="error" class="checkpoint-error">{{ error }}</p>
+        <ol class="checkpoint-list">
+          <li
+            v-for="checkpoint in checkpoints"
+            :key="checkpoint.id"
+            :class="{
+              passed: results.find((result) => result.id === checkpoint.id)
+                ?.passed,
+            }"
+          >
+            <button
+              class="checkpoint-button"
+              @click="checkpoint.hint && emit('hint', checkpoint.id)"
+            >
+              <span class="checkpoint-mark">
+                <Check
+                  v-if="results.find((result) => result.id === checkpoint.id)?.passed"
+                  :size="12"
+                  aria-hidden="true"
+                />
+                <CircleDashed v-else :size="12" aria-hidden="true" />
+              </span>
+              <span>
+                <strong>{{ checkpoint.title }}</strong>
+                <small>{{
+                  results.find((result) => result.id === checkpoint.id)
+                    ?.summary || checkpoint.description
+                }}</small>
+                <time
+                  v-if="results.find((result) => result.id === checkpoint.id)?.first_passed_at"
+                  class="checkpoint-first-passed"
+                  :datetime="results.find((result) => result.id === checkpoint.id)?.first_passed_at ?? undefined"
+                >{{ firstPassedLabel(results.find((result) => result.id === checkpoint.id)?.first_passed_at) }}</time>
+              </span>
+            </button>
+          </li>
+        </ol>
+      </template>
     </template>
     <nav v-else class="sidebar-rail" aria-label="Workspace navigation">
       <button
+        v-if="hasProblem"
         class="icon-button"
         :class="{ active: view === 'problem' }"
         aria-label="Show Problem"
@@ -121,6 +128,7 @@ function firstPassedLabel(value?: string | null) {
         <FileText :size="16" aria-hidden="true" />
       </button>
       <button
+        v-if="hasSolution"
         class="icon-button"
         :class="{ active: view === 'solution' }"
         aria-label="Show Solution"
@@ -137,14 +145,6 @@ function firstPassedLabel(value?: string | null) {
         @click="emit('updateView', 'assistant')"
       >
         <MessageCircle :size="16" aria-hidden="true" />
-      </button>
-      <button
-        class="icon-button"
-        aria-label="Expand checkpoints"
-        title="Expand checkpoints"
-        @click="emit('toggle')"
-      >
-        <ListChecks :size="16" aria-hidden="true" />
       </button>
     </nav>
   </aside>

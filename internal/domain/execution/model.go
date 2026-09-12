@@ -80,9 +80,12 @@ type K8sResources struct {
 type Snapshot struct {
 	Runtime      string                         `json:"runtime"`
 	Reproduction []ReproductionEvidenceSnapshot `json:"reproduction,omitempty"`
-	Checkpoints  []CheckpointSnapshot           `json:"checkpoints"`
-	Node         *NodeRuntimeSnapshot           `json:"node,omitempty"`
-	K8s          *K8sRuntimeSnapshot            `json:"k8s,omitempty"`
+	// ReferenceRepair is nil for snapshots written before learning aids became
+	// optional. Those revisions retain the original answer/checkpoint contract.
+	ReferenceRepair *bool                `json:"reference_repair,omitempty"`
+	Checkpoints     []CheckpointSnapshot `json:"checkpoints"`
+	Node            *NodeRuntimeSnapshot `json:"node,omitempty"`
+	K8s             *K8sRuntimeSnapshot  `json:"k8s,omitempty"`
 }
 
 type BuildOutput struct {
@@ -238,6 +241,16 @@ func (r VerificationReport) Validate(snapshot Snapshot) error {
 		}
 		if r.Passed {
 			return errors.New("verification report passed despite unreproduced evidence")
+		}
+		return nil
+	}
+
+	if !snapshot.RequiresReferenceRepair() {
+		if len(r.Answers) != 0 || len(r.Checkpoints) != 0 {
+			return errors.New("verification report without a reference repair must not contain repair results")
+		}
+		if !r.Passed {
+			return errors.New("verification report failed despite reproduced phenomenon and no reference repair")
 		}
 		return nil
 	}
@@ -403,7 +416,7 @@ func (s Snapshot) Validate() error {
 	if s.Runtime != scenario.RuntimeNode && s.Runtime != scenario.RuntimeK8s {
 		return errors.New("candidate snapshot has an invalid runtime")
 	}
-	if len(s.Checkpoints) == 0 {
+	if s.RequiresReferenceRepair() && len(s.Checkpoints) == 0 {
 		return errors.New("candidate snapshot requires checkpoints")
 	}
 	seen := make(map[string]struct{}, len(s.Checkpoints))
@@ -484,6 +497,11 @@ func (s Snapshot) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (s Snapshot) RequiresReferenceRepair() bool {
+	// Old persisted snapshots necessarily had answer and checkpoint assets.
+	return s.ReferenceRepair == nil || *s.ReferenceRepair
 }
 
 func validFingerprint(value string) bool {

@@ -167,7 +167,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	if err := json.Unmarshal(recorder.Body.Bytes(), &content); err != nil {
 		t.Fatal(err)
 	}
-	if content.Problem != "# Problem\nRepair it.\n" {
+	if content.Problem == nil || *content.Problem != "# Problem\nRepair it.\n" {
 		t.Fatalf("unexpected problem: %#v", content.Problem)
 	}
 	if content.Hints["complete"] != "Look at the service.\n" {

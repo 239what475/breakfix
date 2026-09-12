@@ -186,8 +186,8 @@ export type ScenarioContent = {
     initialization: string;
     reproduction_objective: string;
     reproduction_evidence: Array<ScenarioReproductionEvidence>;
-    problem: string;
-    solution: string;
+    problem?: string | null;
+    solution?: string | null;
     hints: {
         [key: string]: string;
     };

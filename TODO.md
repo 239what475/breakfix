@@ -40,10 +40,10 @@
 
 - [x] 为 `operations-scenario` 定义最小复现核心：现场说明、runtime、版本、环境拓扑、初始化步骤、目标现象、关键证据和复现验证。
 - [x] 将“目标现象复现验证”从现有参考答案验证中拆出；发布必须先确认初始化后的现场与描述一致。
-- [ ] 将 checkpoints、hints、参考诊断、`solution.md` 和 `answer.sh` 改为成组的可选学习辅助；存在时继续执行严格的结构和真实运行
+- [x] 将 checkpoints、hints、参考诊断、`solution.md` 和 `answer.sh` 改为成组的可选学习辅助；存在时继续执行严格的结构和真实运行
       校验，不存在时不得伪造完成度或空答案。
-- [ ] 明确条件约束，例如提供参考修复时必须同时提供修复后断言；提供 checkpoint 时只要求它实际引用的检查脚本和提示资产。
-- [ ] 更新 portable manifest、candidate archive、materialized revision、Judge prompt、验证报告和场景格式文档，并补充有/无学习
+- [x] 明确条件约束，例如提供参考修复时必须同时提供修复后断言；提供 checkpoint 时只要求它实际引用的检查脚本和提示资产。
+- [x] 更新 portable manifest、candidate archive、materialized revision、Judge prompt、验证报告和场景格式文档，并补充有/无学习
       辅助的 Node 与 K8s 单元测试。
 
 ### 3. 建立两个独立产品模块
