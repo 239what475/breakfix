@@ -1,5 +1,5 @@
 [Unit]
-Description=Initialize the Breakfix node challenge
+Description=Initialize the Breakfix node scenario
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=!/var/lib/breakfix/runtime-init/succeeded

@@ -3,7 +3,7 @@ set -eu
 
 state_dir=/var/lib/breakfix/runtime-init
 credentials_dir=${CREDENTIALS_DIRECTORY:-/dev/.incus-systemd-credentials}
-bundle=/opt/breakfix/challenge
+bundle=/opt/breakfix/scenario
 mkdir -p "$state_dir"
 
 fail() {

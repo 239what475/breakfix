@@ -30,11 +30,11 @@
 
 ### 1. 修复 Node 场景初始化路径
 
-- [ ] 将 Node 基础镜像 `runtime-init.sh` 的 bundle 路径从 `/opt/breakfix/challenge` 改为
+- [x] 将 Node 基础镜像 `runtime-init.sh` 的 bundle 路径从 `/opt/breakfix/challenge` 改为
       `/opt/breakfix/scenario`，与镜像构建、Controller 检查点和 Verifier 使用的路径保持一致。
-- [ ] 清理 systemd unit 和 `.golangci.yml` 中剩余的 `challenge` 描述，并全仓确认稳定 ID 前缀之外不再存在旧术语。
-- [ ] 增加能够阻止 Node bundle 写入路径与初始化读取路径再次漂移的自动化检查。
-- [ ] 通过单元测试和静态构建；真实 Node 验收继续使用专用环境，在得到明确执行指令前不运行。
+- [x] 清理 systemd unit 和 `.golangci.yml` 中剩余的 `challenge` 描述，并全仓确认稳定 ID 前缀之外不再存在旧术语。
+- [x] 增加能够阻止 Node bundle 写入路径与初始化读取路径再次漂移的自动化检查。
+- [x] 通过单元测试和静态构建；真实 Node 验收继续使用专用环境，在得到明确执行指令前不运行。
 
 ### 2. 拆分复现核心与学习辅助
 
