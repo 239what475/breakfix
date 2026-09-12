@@ -111,6 +111,58 @@ func TestValidateCandidateDirAcceptsRelativeAndHTTPSMarkdownResources(t *testing
 	}
 }
 
+func TestValidatePortableDirNormalizesOperationsScenarioTags(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingChallenge(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+	manifest := "type: operations-scenario\ntags: [K8S, linux, k8s]\n"
+	data, err := os.ReadFile(filepath.Join(root, "challenge.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "challenge.yaml"), append([]byte(manifest), data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := ValidatePortableDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(entry.Tags, ","); got != "k8s,linux" || entry.Type != ScenarioOperationsScenario {
+		t.Fatalf("scenario metadata = %#v", entry)
+	}
+}
+
+func TestValidatePortableDirRejectsTaggedDocumentationExample(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingChallenge(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+	data, err := os.ReadFile(filepath.Join(root, "challenge.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := append([]byte("type: documentation-example\ntags: [k8s]\n"), data...)
+	if err := os.WriteFile(filepath.Join(root, "challenge.yaml"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidatePortableDir(root); err == nil || !strings.Contains(err.Error(), "不得包含 tags") {
+		t.Fatalf("ValidatePortableDir error = %v", err)
+	}
+}
+
+func TestValidateCandidateDirRejectsInvalidTags(t *testing.T) {
+	root := t.TempDir()
+	writeTeachingChallenge(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
+	data, err := os.ReadFile(filepath.Join(root, "challenge.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := append([]byte("tags: [invalid_tag]\n"), data...)
+	if err := os.WriteFile(filepath.Join(root, "challenge.yaml"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateCandidateDir(root); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("ValidateCandidateDir error = %v", err)
+	}
+}
+
 func writeTeachingChallenge(t *testing.T, root, hint, solution string) {
 	t.Helper()
 	manifest := "title: Teaching fixture\nruntime: node\ndifficulty: easy\ndescription: fixture\nnodes:\n  - name: host\n    title: Teaching host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete it\n    node: host\n"

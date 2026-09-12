@@ -66,6 +66,11 @@ func writePublishedManifest(dir, challengeID, revisionID, sourceSlug, image, con
 	manifest.Image = image
 	manifest.ContentRevision = contentRevision
 	manifest.PublishedAt = publishedAt.UTC()
+	manifest.Type = NormalizeScenarioType(string(manifest.Type))
+	manifest.Tags, err = NormalizeTags(manifest.Tags)
+	if err != nil {
+		return fmt.Errorf("normalize challenge tags: %w", err)
+	}
 	normalized, err := yaml.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("marshal challenge manifest: %w", err)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1649,10 +1650,14 @@ func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx c
 // FinalizeGenerationChallengePublication makes one already-promoted artifact
 // visible after Server has idempotently materialized its source directory. It
 // never calls a provider and is safe to retry after a Server interruption.
-func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision, materializedRevision string, now time.Time) error {
+func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision, materializedRevision string, scenarioType challenge.ScenarioType, scenarioTags []string, now time.Time) error {
 	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" ||
-		!roadmap.ValidRevision(contentRevision) || !roadmap.ValidRevision(materializedRevision) || now.IsZero() {
+		!roadmap.ValidRevision(contentRevision) || !roadmap.ValidRevision(materializedRevision) || !scenarioType.Valid() || now.IsZero() {
 		return errors.New("generation challenge publication finalization is invalid")
+	}
+	canonicalTags, err := challenge.NormalizeTags(scenarioTags)
+	if err != nil || !slices.Equal(canonicalTags, scenarioTags) || (scenarioType == challenge.ScenarioDocumentationExample && len(scenarioTags) != 0) {
+		return errors.New("generation challenge publication tags are invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -1707,7 +1712,7 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 				OwnerUserID: session.UserID, State: challengedomain.StateActive, ActiveRevisionID: publication.ChallengeRevisionID,
 				SourceSlug: publication.SourceSlug, CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 			}
-			published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, publication.ContentRevision, materializedRevision,
+			published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
 				*publication.Artifact, publication.ChallengeRevisionID, publication.ChallengeID, workflow.Source.Ref, workflow.SourceRevision,
 				"", publication.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now.UTC())
 			if err = insertPersistedChallengeTx(ctx, tx, stable); err == nil {
@@ -1733,7 +1738,7 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 				} else {
 					nextRoadmap, err = applyRevisionClassificationPublication(*current, *candidateRevision.Classification, publication, materializedRevision)
 					if err == nil {
-						published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, publication.ContentRevision, materializedRevision,
+						published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
 							*publication.Artifact, publication.ChallengeRevisionID, target.ID, workflow.Source.Ref, workflow.SourceRevision,
 							target.ActiveRevisionID, target.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now.UTC())
 						if _, updateErr := tx.ExecContext(ctx, `UPDATE challenge_revisions SET state = ? WHERE id = ? AND state = ?`,

@@ -1189,7 +1189,7 @@ components:
 
     ChallengeSummary:
       type: object
-      required: [id, title, runtime, difficulty, domain, topic, tags, description, published_at]
+      required: [id, title, runtime, difficulty, scenario_type, scenario_tags, domain, topic, tags, description, published_at]
       properties:
         id:
           type: string
@@ -1198,6 +1198,13 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
+        scenario_type:
+          type: string
+          enum: [documentation-example, operations-scenario]
+        scenario_tags:
+          type: array
+          items:
+            type: string
         difficulty:
           type: string
           enum: [easy, medium, hard]

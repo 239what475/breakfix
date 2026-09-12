@@ -27,7 +27,7 @@ var errPublicationInvariant = errors.New("candidate publication invariant breach
 // tail after a Runtime Worker has recorded an immutable promoted artifact.
 type PublicationFinalizerStore interface {
 	PendingGenerationPublicationFinalizations(context.Context, time.Time) ([]domain.PublicationFinalization, error)
-	FinalizeGenerationChallengePublication(context.Context, string, string, string, string, time.Time) error
+	FinalizeGenerationChallengePublication(context.Context, string, string, string, string, challenge.ScenarioType, []string, time.Time) error
 	RecordGenerationPublicationFinalizerFailure(context.Context, string, string, publication.Diagnostic) (*domain.Workflow, error)
 }
 
@@ -106,7 +106,7 @@ func (f *PublicationFinalizer) RunOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := f.store.FinalizeGenerationChallengePublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, entry.Revision, f.now()); err != nil {
+		if err := f.store.FinalizeGenerationChallengePublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, entry.Revision, entry.Type, entry.Tags, f.now()); err != nil {
 			if recordErr := f.recordFailure(ctx, value, classifyPublicationFinalizerError(err)); recordErr != nil {
 				slog.Warn("record generation publication diagnostic", "workflow_id", value.Workflow.ID, "candidate_revision_id", value.Candidate.ID, "err", recordErr)
 			}

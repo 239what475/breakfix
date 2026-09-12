@@ -344,9 +344,22 @@ func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]cata
 		if err != nil {
 			return nil, fmt.Errorf("freeze catalog source %q: %w", sourceChallenge.Path, err)
 		}
+		tags := append([]string(nil), sourceChallenge.Entry.Tags...)
+		// Roadmap remains the compatibility source until the portable Catalog
+		// release is simplified in the next migration slice.
+		if len(tags) == 0 && sourceChallenge.Entry.Type == challenge.ScenarioOperationsScenario {
+			legacyTags := make([]string, 0, len(binding.Tags))
+			for _, tag := range binding.Tags {
+				legacyTags = append(legacyTags, tag.SourceRef)
+			}
+			tags, err = challenge.NormalizeTags(legacyTags)
+			if err != nil {
+				return nil, fmt.Errorf("normalize legacy roadmap tags for %q: %w", sourceChallenge.Path, err)
+			}
+		}
 		entries = append(entries, catalogdomain.Entry{
 			ID: catalogdomain.EntryIDFor(releaseID, sourceChallenge.Path), ReleaseID: releaseID, SourcePath: sourceChallenge.Path,
-			SourceRef: binding.Challenge.SourceRef, Title: sourceChallenge.Entry.Title, ContentRevision: sourceChallenge.ContentRevision,
+			SourceRef: binding.Challenge.SourceRef, Title: sourceChallenge.Entry.Title, Type: sourceChallenge.Entry.Type, Tags: tags, ContentRevision: sourceChallenge.ContentRevision,
 			ArchiveSHA256: candidate.Digest(archive), Snapshot: snapshot, State: catalogdomain.EntryBuilding,
 			StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		})

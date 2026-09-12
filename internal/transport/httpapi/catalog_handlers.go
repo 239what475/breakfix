@@ -62,6 +62,8 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 			Title:       ch.Title,
 			Runtime:     challengeSummaryRuntime(ch.Runtime),
 			Difficulty:  api.ChallengeSummaryDifficulty(ch.Difficulty),
+			ScenarioType: api.ChallengeSummaryScenarioType(published.Catalog.Type),
+			ScenarioTags: append([]string(nil), published.Catalog.Tags...),
 			Description: ch.Description,
 		}
 		publishedAt := ch.PublishedAt.UTC()

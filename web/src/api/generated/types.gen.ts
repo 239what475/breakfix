@@ -119,6 +119,8 @@ export type ChallengeSummary = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
+    scenario_type: 'documentation-example' | 'operations-scenario';
+    scenario_tags: Array<string>;
     difficulty: 'easy' | 'medium' | 'hard';
     domain: RoadmapReference;
     topic: RoadmapReference;

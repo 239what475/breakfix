@@ -124,6 +124,14 @@ func ValidateDir(dir string) (*Entry, error) {
 	if strings.TrimSpace(challenge.Title) == "" {
 		return nil, fmt.Errorf("challenge title is required")
 	}
+	if !NormalizeScenarioType(string(challenge.Type)).Valid() {
+		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
+	}
+	if tags, err := NormalizeTags(challenge.Tags); err != nil {
+		return nil, err
+	} else if challenge.Type == ScenarioDocumentationExample && len(tags) > 0 {
+		return nil, fmt.Errorf("documentation-example must not contain tags")
+	}
 	switch challenge.Runtime {
 	case RuntimeNode, RuntimeK8s:
 	default:
@@ -175,6 +183,14 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	}
 	if strings.TrimSpace(challenge.Title) == "" {
 		return nil, fmt.Errorf("challenge title is required")
+	}
+	if !NormalizeScenarioType(string(challenge.Type)).Valid() {
+		return nil, fmt.Errorf("unsupported challenge type %q", challenge.Type)
+	}
+	if tags, err := NormalizeTags(challenge.Tags); err != nil {
+		return nil, err
+	} else if challenge.Type == ScenarioDocumentationExample && len(tags) > 0 {
+		return nil, fmt.Errorf("documentation-example must not contain tags")
 	}
 	switch challenge.Runtime {
 	case RuntimeNode, RuntimeK8s:

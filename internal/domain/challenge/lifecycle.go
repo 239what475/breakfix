@@ -5,6 +5,7 @@ package challenge
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,6 +78,8 @@ type Revision struct {
 	BaseActiveRevisionID string
 	Title                string
 	Runtime              string
+	Type                 content.ScenarioType
+	Tags                 []string
 	ContentRevision      string
 	SourceSlug           string
 	MaterializedPath     string
@@ -90,13 +93,17 @@ type Revision struct {
 func (r Revision) Valid() bool {
 	if !content.ValidRevisionID(r.ID) || !content.ValidID(r.ChallengeID) || !r.SourceKind.Valid() ||
 		strings.TrimSpace(r.SourceRef) == "" || strings.TrimSpace(r.SourceRevisionID) == "" ||
-		strings.TrimSpace(r.Title) == "" || !content.ValidRevision(r.ContentRevision) ||
+		strings.TrimSpace(r.Title) == "" || !r.Type.Valid() || !content.ValidRevision(r.ContentRevision) ||
 		!content.ValidSourceSlug(r.SourceSlug) || strings.TrimSpace(r.MaterializedPath) == "" ||
 		!content.ValidRevision(r.MaterializedRevision) || !r.State.Valid() || r.PublishedAt.IsZero() || r.CreatedAt.IsZero() ||
 		r.Artifact.Validate(r.Runtime) != nil {
 		return false
 	}
 	if r.BaseActiveRevisionID != "" && !content.ValidRevisionID(r.BaseActiveRevisionID) {
+		return false
+	}
+	canonicalTags, err := content.NormalizeTags(r.Tags)
+	if err != nil || !slices.Equal(canonicalTags, r.Tags) || (r.Type == content.ScenarioDocumentationExample && len(r.Tags) != 0) {
 		return false
 	}
 	return true

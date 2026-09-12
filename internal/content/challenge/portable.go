@@ -46,8 +46,22 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 	default:
 		errs = append(errs, fmt.Sprintf("challenge.yaml difficulty 必须为 easy/medium/hard，当前为 %q", manifestScalar(spec["difficulty"])))
 	}
-	if _, exists := spec["tags"]; exists {
-		errs = append(errs, "challenge.yaml 不得包含 tags；分类由 Roadmap 维护")
+	typeValue := NormalizeScenarioType(manifestScalar(spec["type"]))
+	if !typeValue.Valid() {
+		errs = append(errs, fmt.Sprintf("challenge.yaml type 必须为 documentation-example 或 operations-scenario，当前为 %q", typeValue))
+	}
+	if tags, exists := spec["tags"]; exists {
+		var values []string
+		encoded, marshalErr := yaml.Marshal(tags)
+		if marshalErr != nil {
+			errs = append(errs, fmt.Sprintf("challenge.yaml tags 无效: %v", marshalErr))
+		} else if unmarshalErr := yaml.Unmarshal(encoded, &values); unmarshalErr != nil {
+			errs = append(errs, fmt.Sprintf("challenge.yaml tags 必须是字符串数组: %v", unmarshalErr))
+		} else if _, tagErr := NormalizeTags(values); tagErr != nil {
+			errs = append(errs, fmt.Sprintf("challenge.yaml tags 无效: %v", tagErr))
+		} else if typeValue == ScenarioDocumentationExample && len(values) > 0 {
+			errs = append(errs, "documentation-example 不得包含 tags")
+		}
 	}
 	if manifestScalar(spec["description"]) == "" {
 		errs = append(errs, "challenge.yaml 缺少 description")

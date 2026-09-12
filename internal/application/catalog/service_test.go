@@ -41,7 +41,7 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 		},
 	}
 	entries := map[string]challenge.Entry{
-		challengeOne.ID:   {ID: challengeOne.ID, RevisionID: challengeOne.RevisionID, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision, SourceSlug: challengeOne.SourceSlug, Revision: challengeOne.MaterializedRevision},
+		challengeOne.ID:   {ID: challengeOne.ID, RevisionID: challengeOne.RevisionID, Type: challenge.ScenarioOperationsScenario, Title: challengeOne.Title, ContentRevision: challengeOne.ContentRevision, SourceSlug: challengeOne.SourceSlug, Revision: challengeOne.MaterializedRevision, Tags: []string{"systemd"}},
 		challengeTwo.ID:   {ID: challengeTwo.ID, RevisionID: challengeTwo.RevisionID, Title: challengeTwo.Title, ContentRevision: challengeTwo.ContentRevision, SourceSlug: challengeTwo.SourceSlug, Revision: challengeTwo.MaterializedRevision},
 		challengeThree.ID: {ID: challengeThree.ID, RevisionID: challengeThree.RevisionID, Title: challengeThree.Title, ContentRevision: challengeThree.ContentRevision, SourceSlug: challengeThree.SourceSlug, Revision: challengeThree.MaterializedRevision},
 		"chal-stale":      {ID: "chal-stale", Title: "Stale challenge", ContentRevision: catalogTestRevision('e')},
@@ -52,6 +52,12 @@ func TestProjectPublishedChallengesUsesOneImmutableRevisionAndSeparateOneHopGrap
 		t.Fatalf("projected challenges = %#v", projected)
 	}
 	first := projected[0]
+	if first.Catalog.ID != challengeOne.ID || first.Catalog.ActiveRevisionID != challengeOne.RevisionID || first.Catalog.Type != challenge.ScenarioOperationsScenario || !first.Catalog.Available {
+		t.Fatalf("unexpected direct catalog model: %#v", first.Catalog)
+	}
+	if len(first.Catalog.Tags) != 1 || first.Catalog.Tags[0] != "systemd" {
+		t.Fatalf("direct catalog tags = %#v", first.Catalog.Tags)
+	}
 	if first.Entry.ID != challengeOne.ID || first.Roadmap.Revision != revision.Revision || first.Roadmap.Domain != domain || first.Roadmap.Topic.ID != topicOne.ID {
 		t.Fatalf("unexpected catalog projection: %#v", first)
 	}

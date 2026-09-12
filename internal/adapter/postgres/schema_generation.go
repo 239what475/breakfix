@@ -49,6 +49,8 @@ var schemaGenerationStatements = []string{
 		base_active_revision_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		runtime TEXT NOT NULL CHECK (runtime IN ('node', 'k8s')),
+		scenario_type TEXT NOT NULL CHECK (scenario_type IN ('documentation-example', 'operations-scenario')),
+		tags JSONB NOT NULL DEFAULT '[]'::jsonb,
 		content_revision TEXT NOT NULL,
 		source_slug TEXT NOT NULL,
 		materialized_path TEXT NOT NULL UNIQUE,

@@ -137,7 +137,7 @@ func TestGenerationWorkflowPersistsClassificationAndPublicationLifecycle(t *test
 	if len(pendingFinalizations) != 1 {
 		t.Fatalf("due publication retry count = %d", len(pendingFinalizations))
 	}
-	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", publishAt); err != nil {
+	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", challenge.ScenarioOperationsScenario, nil, publishAt); err != nil {
 		t.Fatalf("finalize classification publication: %v", err)
 	}
 	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt)

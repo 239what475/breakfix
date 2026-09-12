@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	content "github.com/breakfix/breakfix/internal/content/challenge"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/roadmap"
@@ -15,7 +16,7 @@ import (
 
 const persistedChallengeColumns = `id, source_kind, source_ref, owner_user_id, state, active_revision_id, source_slug, created_at, updated_at`
 const persistedChallengeRevisionColumns = `id, challenge_id, source_kind, source_ref, source_revision_id, base_active_revision_id,
-	title, runtime, content_revision, source_slug, materialized_path, materialized_revision, artifact_reference, state, published_at, created_at`
+	title, runtime, scenario_type, tags, content_revision, source_slug, materialized_path, materialized_revision, artifact_reference, state, published_at, created_at`
 
 // GetChallenge returns the stable identity and its active pointer. Callers that
 // need content must resolve the returned revision explicitly; this method never
@@ -248,11 +249,14 @@ func scanPersistedChallenge(row scanner) (*challengedomain.Challenge, error) {
 
 func scanPersistedChallengeRevision(row scanner) (*challengedomain.Revision, error) {
 	var value challengedomain.Revision
-	var artifact []byte
+	var tags, artifact []byte
 	if err := row.Scan(&value.ID, &value.ChallengeID, &value.SourceKind, &value.SourceRef, &value.SourceRevisionID, &value.BaseActiveRevisionID,
-		&value.Title, &value.Runtime, &value.ContentRevision, &value.SourceSlug, &value.MaterializedPath, &value.MaterializedRevision,
+		&value.Title, &value.Runtime, &value.Type, &tags, &value.ContentRevision, &value.SourceSlug, &value.MaterializedPath, &value.MaterializedRevision,
 		&artifact, &value.State, &value.PublishedAt, &value.CreatedAt); err != nil {
 		return nil, err
+	}
+	if err := decodeOptionalJSON(tags, &value.Tags); err != nil {
+		return nil, fmt.Errorf("decode challenge revision tags: %w", err)
 	}
 	if err := decodeOptionalJSON(artifact, &value.Artifact); err != nil {
 		return nil, fmt.Errorf("decode challenge revision artifact: %w", err)
@@ -286,22 +290,26 @@ func insertPersistedChallengeRevisionTx(ctx context.Context, tx *Tx, value chall
 	if err != nil {
 		return fmt.Errorf("encode challenge revision artifact: %w", err)
 	}
+	tags, err := marshalJSON(value.Tags)
+	if err != nil {
+		return fmt.Errorf("encode challenge revision tags: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO challenge_revisions
 		(id, challenge_id, source_kind, source_ref, source_revision_id, base_active_revision_id, title, runtime,
-		content_revision, source_slug, materialized_path, materialized_revision, artifact_reference, state, published_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`, value.ID, value.ChallengeID, value.SourceKind,
-		value.SourceRef, value.SourceRevisionID, value.BaseActiveRevisionID, value.Title, value.Runtime, value.ContentRevision,
+		scenario_type, tags, content_revision, source_slug, materialized_path, materialized_revision, artifact_reference, state, published_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)`, value.ID, value.ChallengeID, value.SourceKind,
+		value.SourceRef, value.SourceRevisionID, value.BaseActiveRevisionID, value.Title, value.Runtime, value.Type, tags, value.ContentRevision,
 		value.SourceSlug, value.MaterializedPath, value.MaterializedRevision, artifact, value.State, value.PublishedAt.UTC(), value.CreatedAt.UTC()); err != nil {
 		return fmt.Errorf("insert challenge revision: %w", err)
 	}
 	return nil
 }
 
-func challengeRevisionFromPublication(publicationTitle, runtime, contentRevision, materializedRevision string, publicationArtifact execution.ArtifactReference,
+func challengeRevisionFromPublication(publicationTitle, runtime string, scenarioType content.ScenarioType, tags []string, contentRevision, materializedRevision string, publicationArtifact execution.ArtifactReference,
 	id, challengeID, sourceRef, sourceRevisionID, baseActiveRevisionID, sourceSlug, materializedPath string, sourceKind challengedomain.SourceKind, publishedAt time.Time) challengedomain.Revision {
 	return challengedomain.Revision{
 		ID: id, ChallengeID: challengeID, SourceKind: sourceKind, SourceRef: sourceRef, SourceRevisionID: sourceRevisionID,
-		BaseActiveRevisionID: baseActiveRevisionID, Title: publicationTitle, Runtime: runtime, ContentRevision: contentRevision,
+		BaseActiveRevisionID: baseActiveRevisionID, Title: publicationTitle, Runtime: runtime, Type: scenarioType, Tags: append([]string(nil), tags...), ContentRevision: contentRevision,
 		SourceSlug: sourceSlug, MaterializedPath: materializedPath, MaterializedRevision: materializedRevision,
 		Artifact: publicationArtifact, State: challengedomain.RevisionActive, PublishedAt: publishedAt.UTC(), CreatedAt: publishedAt.UTC(),
 	}

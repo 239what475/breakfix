@@ -19,10 +19,12 @@ type Entry struct {
 	ID              string
 	RevisionID      string
 	SourceSlug      string
+	Type            ScenarioType
 	Title           string
 	Runtime         string
 	Difficulty      string
 	Description     string
+	Tags            []string
 	Image           string
 	ContentRevision string
 	Revision        string
@@ -36,10 +38,12 @@ type Spec struct {
 	ID              string       `yaml:"id"`
 	RevisionID      string       `yaml:"revision_id,omitempty"`
 	SourceSlug      string       `yaml:"source_slug,omitempty"`
+	Type            ScenarioType `yaml:"type,omitempty"`
 	Title           string       `yaml:"title"`
 	Runtime         string       `yaml:"runtime"`
 	Difficulty      string       `yaml:"difficulty"`
 	Description     string       `yaml:"description"`
+	Tags            []string     `yaml:"tags,omitempty"`
 	Image           string       `yaml:"image"`
 	ContentRevision string       `yaml:"content_revision,omitempty"`
 	PublishedAt     time.Time    `yaml:"published_at,omitempty"`
@@ -189,14 +193,24 @@ func artifactRevision(dir string) (string, error) {
 
 func entryFromSpec(dir string, spec *Spec) *Entry {
 	spec.Runtime = NormalizeRuntime(spec.Runtime)
+	spec.Type = NormalizeScenarioType(string(spec.Type))
+	tags, err := NormalizeTags(spec.Tags)
+	if err != nil {
+		// Keep the source values so ValidateCandidateDir and ValidateDir can
+		// reject them consistently instead of accidentally treating invalid
+		// metadata as an empty tag set.
+		tags = append([]string(nil), spec.Tags...)
+	}
 
 	return &Entry{
 		ID: spec.ID, RevisionID: spec.RevisionID,
 		SourceSlug:      spec.SourceSlug,
+		Type:            spec.Type,
 		Title:           spec.Title,
 		Runtime:         spec.Runtime,
 		Difficulty:      spec.Difficulty,
 		Description:     spec.Description,
+		Tags:            tags,
 		Image:           spec.Image,
 		ContentRevision: spec.ContentRevision,
 		PublishedAt:     spec.PublishedAt,

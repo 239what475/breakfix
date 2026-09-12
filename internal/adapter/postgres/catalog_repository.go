@@ -31,7 +31,7 @@ const catalogReleaseColumns = `id, name, version, bundle_digest, source_digest, 
 	last_error, finalizer_error_category, finalizer_last_error, finalizer_last_attempted_at, finalizer_next_retry_at, created_at, updated_at`
 const catalogReleaseSelect = `SELECT ` + catalogReleaseColumns + ` FROM catalog_releases`
 
-const catalogEntryColumns = `id, release_id, source_path, source_ref, title, content_revision, archive_sha256,
+const catalogEntryColumns = `id, release_id, source_path, source_ref, title, scenario_type, tags, content_revision, archive_sha256,
 	execution_snapshot, state, state_version, runtime_attempt, lease_owner, lease_expires_at, next_run_at, build_output,
 	artifact_reference, verify_environment, verification_report, last_error, created_at, updated_at`
 const catalogEntrySelect = `SELECT ` + catalogEntryColumns + ` FROM catalog_release_entries`
@@ -137,11 +137,15 @@ func (d *CatalogRepository) InitializeRelease(ctx context.Context, release catal
 		if err != nil {
 			return nil, fmt.Errorf("encode catalog entry %q snapshot: %w", entry.ID, err)
 		}
+		tags, err := marshalJSON(entry.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("encode catalog entry %q tags: %w", entry.ID, err)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_release_entries
-			(id, release_id, source_path, source_ref, title, content_revision, archive_sha256, execution_snapshot, state,
+			(id, release_id, source_path, source_ref, title, scenario_type, tags, content_revision, archive_sha256, execution_snapshot, state,
 			state_version, runtime_attempt, lease_owner, lease_expires_at, next_run_at, last_error, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, '', NULL, ?, '', ?, ?)`,
-			entry.ID, entry.ReleaseID, entry.SourcePath, entry.SourceRef, entry.Title, entry.ContentRevision, entry.ArchiveSHA256,
+			VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, '', NULL, ?, '', ?, ?)`,
+			entry.ID, entry.ReleaseID, entry.SourcePath, entry.SourceRef, entry.Title, entry.Type, tags, entry.ContentRevision, entry.ArchiveSHA256,
 			snapshot, entry.State, entry.StateVersion, entry.RuntimeAttempt, entry.NextRunAt.UTC(), entry.CreatedAt.UTC(), entry.UpdatedAt.UTC()); err != nil {
 			return nil, fmt.Errorf("insert catalog entry %q: %w", entry.ID, err)
 		}
@@ -937,7 +941,7 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 			State: challengedomain.StateActive, ActiveRevisionID: commit.ChallengeRevisionID, SourceSlug: commit.SourceSlug,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 		}
-		published := challengeRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, string(entry.ContentRevision), binding.Challenge.MaterializedRevision,
+		published := challengeRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), binding.Challenge.MaterializedRevision,
 			*commit.Artifact, commit.ChallengeRevisionID, commit.ChallengeID, entry.SourceRef, string(entry.ContentRevision), "",
 			commit.SourceSlug, contentchallenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID), challengedomain.SourceRelease, now.UTC())
 		if err := insertPersistedChallengeTx(ctx, tx, stable); err != nil {
@@ -1341,14 +1345,17 @@ func scanCatalogRelease(row scanner) (*catalogdomain.Release, error) {
 func scanCatalogEntry(row scanner) (*catalogdomain.Entry, error) {
 	var value catalogdomain.Entry
 	var revision string
-	var snapshot, build, artifact, environment, report []byte
+	var tags, snapshot, build, artifact, environment, report []byte
 	var expires sql.NullTime
-	if err := row.Scan(&value.ID, &value.ReleaseID, &value.SourcePath, &value.SourceRef, &value.Title, &revision, &value.ArchiveSHA256,
+	if err := row.Scan(&value.ID, &value.ReleaseID, &value.SourcePath, &value.SourceRef, &value.Title, &value.Type, &tags, &revision, &value.ArchiveSHA256,
 		&snapshot, &value.State, &value.StateVersion, &value.RuntimeAttempt, &value.LeaseOwner, &expires, &value.NextRunAt, &build, &artifact,
 		&environment, &report, &value.LastError, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return nil, err
 	}
 	value.ContentRevision = catalogdomain.ContentRevision(revision)
+	if err := json.Unmarshal(tags, &value.Tags); err != nil {
+		return nil, fmt.Errorf("decode catalog entry tags: %w", err)
+	}
 	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
 		return nil, fmt.Errorf("decode catalog entry snapshot: %w", err)
 	}

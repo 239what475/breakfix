@@ -6,8 +6,8 @@ Kubernetes CRD；Server 从已发布目录和当前 RoadmapRevision 构造 Catal
 
 ## Portable Candidate
 
-作者生成的 CandidateRevision 和 Catalog Release source 都是 portable candidate。它们的 `challenge.yaml` 只保存
-标题、运行时、难度、描述、节点和检查点，不能包含 `id`、`source_slug`、`image`、`content_revision` 或 `published_at`。
+作者生成的 CandidateRevision 和 Catalog Release source 都是 portable candidate。它们的 `challenge.yaml` 保存
+场景类型、标题、运行时、难度、描述、标签、节点和检查点，不能包含 `id`、`source_slug`、`image`、`content_revision` 或 `published_at`。
 source 的确定性 `contentRevision` 由文件树计算，不写回 candidate manifest。
 
 ## 已发布目录
@@ -35,7 +35,7 @@ k8s/answer.sh
 k8s/checks.sh
 ```
 
-`challenge.yaml` 记录用户可见元数据、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`revision_id`、`source_slug`、`image`、`content_revision`、`published_at`。`id` 是稳定且与题意无关的 opaque Challenge identity；`revision_id` 是本次不可变发布结果的 identity。API、Environment、学习记录和 Roadmap binding 同时引用 `id + revision_id`；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
+`challenge.yaml` 记录用户可见元数据、`type: documentation-example|operations-scenario`、`runtime: node|k8s`、节点和检查点，以及发布时由平台写入的 `id`、`revision_id`、`source_slug`、`image`、`content_revision`、`published_at`。文档示例不能包含标签；运维场景最多包含 8 个规范化标签。`id` 是稳定且与题意无关的 opaque Challenge identity；`revision_id` 是本次不可变发布结果的 identity。API、Environment、学习记录和 Roadmap binding 同时引用 `id + revision_id`；`source_slug` 是可读目录名，必须与发布目录同名，不能作为关系键。
 
 发布目录必须有合法的发布字段、非空标题/描述、`easy|medium|hard` 难度和至少一个 checkpoint。`runtime: node` 的 `image` 必须是完整的 64 位小写 Incus fingerprint；`runtime: k8s` 的 `image` 必须是完整的 `repository@sha256:<64 位小写摘要>` OCI 引用。Node manifest 还必须声明唯一逻辑节点；每个 checkpoint 必须声明执行节点，节点名称不能泄漏 Provider 实现。K8s checkpoint 没有节点字段。checkpoint 数组顺序只决定 UI 展示，不表达依赖或必须通过的先后顺序。
 
@@ -45,7 +45,7 @@ Server 只在验证成功后为已发布目录写入平台托管字段；作者�
 它不会改写已验证 candidate archive。作者修订会创建同一 `id` 下的新 `<challenge_revision_id>` 目录，旧目录和 artifact
 保留；弃用只移除当前 Roadmap binding，不删除历史内容。
 
-发布后的课程归属和横向筛选信息不属于 `challenge.yaml`。Catalog Release 在最终 commit 时将 Domain、Topic、Tag、Challenge binding 和关系图一并写入 immutable RoadmapRevision；只有与当前 revision 精确绑定的题目才进入公开 Catalog。
+发布后的课程归属和横向筛选信息不属于 `challenge.yaml`。运维场景标签属于不可变内容 revision，并随 revision 一起发布；旧 Roadmap 投影仅作为迁移期间的兼容读取来源。
 
 ## 运行时初始化
 

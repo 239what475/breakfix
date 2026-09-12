@@ -32,6 +32,8 @@ var schemaCatalogStatements = []string{
 		source_path TEXT NOT NULL,
 		source_ref TEXT NOT NULL,
 		title TEXT NOT NULL,
+		scenario_type TEXT NOT NULL CHECK (scenario_type IN ('documentation-example', 'operations-scenario')),
+		tags JSONB NOT NULL DEFAULT '[]'::jsonb,
 		content_revision TEXT NOT NULL,
 		archive_sha256 TEXT NOT NULL,
 		execution_snapshot JSONB NOT NULL,

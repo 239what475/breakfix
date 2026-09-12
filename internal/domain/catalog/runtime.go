@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -160,6 +161,8 @@ type Entry struct {
 	SourcePath        string                             `json:"source_path"`
 	SourceRef         string                             `json:"source_ref"`
 	Title             string                             `json:"title"`
+	Type              challenge.ScenarioType             `json:"type"`
+	Tags              []string                           `json:"tags"`
 	ContentRevision   ContentRevision                    `json:"content_revision"`
 	ArchiveSHA256     string                             `json:"archive_sha256"`
 	Snapshot          execution.Snapshot                 `json:"snapshot"`
@@ -179,7 +182,7 @@ type Entry struct {
 }
 
 func (e Entry) Valid() bool {
-	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ReleaseID) == "" || !validSourcePath(e.SourcePath) || strings.TrimSpace(e.SourceRef) == "" || strings.TrimSpace(e.Title) == "" ||
+	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ReleaseID) == "" || !validSourcePath(e.SourcePath) || strings.TrimSpace(e.SourceRef) == "" || strings.TrimSpace(e.Title) == "" || !e.Type.Valid() ||
 		!e.ContentRevision.Valid() || !execution.ValidSHA256(e.ArchiveSHA256) || !e.State.Valid() || e.StateVersion < 1 || e.RuntimeAttempt < 0 || e.NextRunAt.IsZero() || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
 		return false
 	}
@@ -187,6 +190,10 @@ func (e Entry) Valid() bool {
 		return false
 	}
 	if err := e.Snapshot.Validate(); err != nil {
+		return false
+	}
+	canonicalTags, err := challenge.NormalizeTags(e.Tags)
+	if err != nil || !slices.Equal(canonicalTags, e.Tags) || (e.Type == challenge.ScenarioDocumentationExample && len(e.Tags) != 0) {
 		return false
 	}
 	if e.Build != nil && !validBuild(*e.Build, e.Snapshot.Runtime) {

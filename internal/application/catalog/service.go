@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/challenge"
@@ -28,8 +29,26 @@ type ChallengeLifecycleStore interface {
 }
 
 type PublishedChallenge struct {
+	Catalog CatalogReadModel
 	Entry   challenge.Entry
 	Roadmap ChallengeRoadmap
+}
+
+// CatalogReadModel is the smallest stable projection consumed by Catalog
+// clients. It is revision-aware and does not require consumers to interpret
+// a Roadmap graph. The Roadmap field on PublishedChallenge remains only as a
+// temporary compatibility projection while its storage is removed.
+type CatalogReadModel struct {
+	ID               string
+	ActiveRevisionID string
+	Type             challenge.ScenarioType
+	Title            string
+	Description      string
+	Runtime          string
+	Tags             []string
+	PublishedAt      time.Time
+	State            challengedomain.State
+	Available        bool
 }
 
 type ChallengeRoadmap struct {
@@ -146,8 +165,17 @@ func (s *Service) HistoricalEntry(ctx context.Context, challengeID, revisionID s
 	if revision.Runtime == challenge.RuntimeK8s {
 		expectedImage = revision.Artifact.OCIReference
 	}
+	revisionType := challenge.NormalizeScenarioType(string(revision.Type))
+	revisionTags := revision.Tags
+	if revisionTags == nil {
+		revisionTags = []string{}
+	}
+	entryTags := entry.Tags
+	if entryTags == nil {
+		entryTags = []string{}
+	}
 	if entry.ID != revision.ChallengeID || entry.RevisionID != revision.ID || entry.SourceSlug != revision.SourceSlug ||
-		entry.Title != revision.Title || entry.Runtime != revision.Runtime || entry.ContentRevision != revision.ContentRevision ||
+		entry.Title != revision.Title || entry.Runtime != revision.Runtime || entry.Type != revisionType || !slices.Equal(entryTags, revisionTags) || entry.ContentRevision != revision.ContentRevision ||
 		entry.Revision != revision.MaterializedRevision || entry.Image != expectedImage {
 		return nil, materializedIntegrity(roadmapdomain.ChallengeRef{ID: stable.ID, RevisionID: revision.ID, SourceSlug: revision.SourceSlug}, "historical materialized source does not match its durable revision")
 	}
@@ -201,7 +229,24 @@ func projectPublishedChallenges(revision roadmapdomain.Revision, entries map[str
 				projection.Tags = append(projection.Tags, tag)
 			}
 		}
-		result = append(result, PublishedChallenge{Entry: entry, Roadmap: projection})
+		directTags := append([]string(nil), entry.Tags...)
+		if len(directTags) == 0 {
+			legacyTags := make([]string, 0, len(binding.Tags))
+			for _, reference := range binding.Tags {
+				if tag, exists := tags[reference.ID]; exists {
+					legacyTags = append(legacyTags, tag.SourceRef)
+				}
+			}
+			directTags, _ = challenge.NormalizeTags(legacyTags)
+		}
+		result = append(result, PublishedChallenge{
+			Catalog: CatalogReadModel{
+				ID: entry.ID, ActiveRevisionID: entry.RevisionID, Type: entry.Type, Title: entry.Title,
+				Description: entry.Description, Runtime: entry.Runtime, Tags: directTags, PublishedAt: entry.PublishedAt.UTC(),
+				State: challengedomain.StateActive, Available: true,
+			},
+			Entry: entry, Roadmap: projection,
+		})
 	}
 	return result
 }
