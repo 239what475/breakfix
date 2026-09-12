@@ -81,6 +81,11 @@ function navigateMySpace() {
   if (alreadyVisible) mySpaceRefreshRequest.value += 1;
 }
 
+function handleWorkspaceStopped() {
+  closeWorkspace();
+  notify("Environment stopped.", "info");
+}
+
 function signOut() {
 	page.value = "operations";
 	logout();
@@ -124,7 +129,7 @@ const topbarActive = computed<"operations" | "my-space" | "none">(() => {
 		@start="startWorkspace"
 		@studio="openAuthoring($event)"
 			/>
-      <ScenarioWorkspace v-if="workspace" :scenario="workspace" @changed="loadScenarios(true)" @notice="notify" />
+      <ScenarioWorkspace v-if="workspace" :scenario="workspace" @changed="loadScenarios(true)" @stopped="handleWorkspaceStopped" @notice="notify" />
       <AuthoringWorkspace
       v-else-if="authoringOpen"
       :initial-session-id="authoringSessionId"

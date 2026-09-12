@@ -16,6 +16,7 @@ const loggedIn = toRef(props, "loggedIn");
 const tab = ref<"overview" | "learning" | "authoring">("overview");
 const learningState = ref<LearningStateFilter>("all");
 const learningRuntime = ref<LearningRuntimeFilter>("all");
+const stoppingId = ref<string | null>(null);
 const { space, history, nextCursor, loading, loadingLearning, loadingMore, error, refresh, loadMore } = useMySpace(active, loggedIn, learningState, learningRuntime);
 const initials = computed(() => space.value?.profile.name.slice(0, 1).toUpperCase() || "?");
 const heading = computed(() => ({ overview: "Your learning space", learning: "Learning history", authoring: "Scenario authoring" })[tab.value]);
@@ -37,6 +38,20 @@ async function deprecateScenario(id: string) {
     await refresh();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Unable to deprecate the scenario";
+  }
+}
+
+async function stopEnvironment(id: string) {
+  if (stoppingId.value) return;
+  if (!window.confirm("Stop this environment? Any unsaved changes in it will be destroyed, while the history record will remain.")) return;
+  stoppingId.value = id;
+  try {
+    await api.stopScenario(id);
+    await refresh();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Unable to stop the environment";
+  } finally {
+    stoppingId.value = null;
   }
 }
 
@@ -73,7 +88,7 @@ watch(
         <div v-else-if="error && !space" class="space-error"><UserRound :size="19" aria-hidden="true" /><span>{{ error }}</span><button class="compact-button" type="button" @click="refresh">Retry</button></div>
         <template v-else-if="space">
           <p v-if="error" class="space-inline-error">{{ error }}</p>
-          <template v-if="tab === 'overview'"><ActiveEnvironmentList :environments="space.active_environments" @start="emit('start', $event)" /><LearningHistory :items="space.recent_learning.slice(0, 5)" :loading="false" :loading-more="false" :has-more="false" /></template>
+          <template v-if="tab === 'overview'"><ActiveEnvironmentList :environments="space.active_environments" :stopping-id="stoppingId" @start="emit('start', $event)" @stop="stopEnvironment" /><LearningHistory :items="space.recent_learning.slice(0, 5)" :loading="false" :loading-more="false" :has-more="false" /></template>
           <LearningHistory v-else-if="tab === 'learning'" :items="history" :loading="loadingLearning" :loading-more="loadingMore" :has-more="!!nextCursor" show-filters :state-filter="learningState" :runtime-filter="learningRuntime" @update:state-filter="learningState = $event" @update:runtime-filter="learningRuntime = $event" @more="loadMore" />
           <AuthoringOverview v-else :authoring="space.authoring" @authoring="emit('studio', $event)" @catalog="emit('catalog', $event)" @revision="reviseScenario" @deprecate="deprecateScenario" />
         </template>

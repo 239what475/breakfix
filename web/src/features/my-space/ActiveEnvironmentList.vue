@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Play, TimerReset } from "lucide-vue-next";
+import { Play, Square, TimerReset } from "lucide-vue-next";
 import type { MySpaceActiveEnvironment } from "../../api/types";
 
-defineProps<{ environments: MySpaceActiveEnvironment[] }>();
-const emit = defineEmits<{ start: [id: string] }>();
+const props = defineProps<{ environments: MySpaceActiveEnvironment[]; stoppingId?: string | null }>();
+const emit = defineEmits<{ start: [id: string]; stop: [id: string] }>();
 
 function checkpointLabel(environment: MySpaceActiveEnvironment) {
   if (environment.checkpoint_progress.total === 0) return "No checkpoints";
@@ -37,7 +37,10 @@ function expiryLabel(expiresAt?: string | null) {
           <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(environment.scenario.content_source) }}</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
           <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
         </div>
-        <button class="compact-button space-start-button" type="button" @click="emit('start', environment.scenario.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start scenario</button>
+        <div class="space-environment-actions">
+          <button class="compact-button space-start-button" type="button" @click="emit('start', environment.scenario.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start scenario</button>
+          <button class="compact-button danger-button space-stop-button" type="button" :disabled="props.stoppingId === environment.scenario.id" @click="emit('stop', environment.scenario.id)"><Square :size="13" fill="currentColor" aria-hidden="true" />{{ props.stoppingId === environment.scenario.id ? "Stopping..." : "Stop" }}</button>
+        </div>
       </article>
     </div>
     <p v-else class="space-empty">No active environment. Pick a scenario from the catalog when you are ready.</p>

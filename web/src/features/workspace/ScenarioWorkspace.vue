@@ -14,6 +14,7 @@ import "./assistant.css";
 const props = defineProps<{ scenario: Scenario }>();
 const emit = defineEmits<{
   changed: [];
+  stopped: [];
   notice: [message: string, kind?: "error" | "info"];
 }>();
 const content = ref<ScenarioContent>();
@@ -29,6 +30,7 @@ const currentTerminalNode = ref("");
 const currentTerminalWindow = ref("shell-1");
 const terminalContexts = ref<AssistantTerminalContext[]>([{ windows: ["shell-1"] }]);
 const resetting = ref(false);
+const stopping = ref(false);
 const sessionStartedAt = ref(Date.now());
 const elapsedSeconds = ref(0);
 let elapsedTimer: number | undefined;
@@ -109,6 +111,23 @@ async function reset() {
   }
 }
 
+async function stop() {
+  if (!window.confirm("Stop this environment? Any unsaved changes in it will be destroyed, while the history record will remain.")) return;
+  stopping.value = true;
+  try {
+    await api.stopScenario(props.scenario.id);
+    emit("stopped");
+  } catch (err) {
+    emit(
+      "notice",
+      err instanceof Error ? err.message : "Stop failed",
+      "error",
+    );
+  } finally {
+    stopping.value = false;
+  }
+}
+
 watch(
   () => props.scenario.id,
   () => {
@@ -154,8 +173,10 @@ onUnmounted(() => {
       :connected="terminalConnected"
       :elapsed="elapsed"
       :resetting="resetting"
+      :stopping="stopping"
       :mobile-view="mobileView"
       @reset="reset"
+      @stop="stop"
       @update-mobile-view="mobileView = $event"
     />
     <div class="workspace-body" :class="`mobile-${mobileView}`">

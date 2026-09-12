@@ -298,6 +298,16 @@
   white-space: nowrap;
 }
 
+.space-environment-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.space-stop-button {
+  white-space: nowrap;
+}
+
 .space-empty,
 .space-loading {
   margin: 14px 0 0;
@@ -577,6 +587,10 @@
 
   .space-start-button {
     display: none;
+  }
+
+  .space-environment-actions {
+    justify-content: flex-end;
   }
 
   .history-row {

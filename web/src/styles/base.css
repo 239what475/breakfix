@@ -175,6 +175,15 @@ select:focus-visible {
 .compact-button:hover {
   background: #f1f5f2;
 }
+.danger-button {
+  border-color: #e0b4ad;
+  color: #9d443d;
+  background: #fffaf8;
+}
+.danger-button:hover {
+  border-color: #d3948b;
+  background: #fff1ee;
+}
 .primary-button {
   border: 1px solid #19679d;
   color: #fff;
