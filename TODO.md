@@ -73,10 +73,10 @@
 
 ### 6. 验证
 
-- [ ] 运行 `make test-unit`、`make verify-generated`、`npm run build --prefix web`、`kubectl kustomize .` 和 `git diff --check`。
-- [ ] 单元和集成测试覆盖目标现象复现失败、可选学习辅助、参考修复失败、发布重试、revision 切换及历史 revision 读取。
-- [ ] Web 测试覆盖两个模块的导航边界、运维场景筛选、启动/恢复/重置/停止，以及没有 checkpoints 或参考答案的场景展示。
-- [ ] 在专用、可丢弃的真实环境中分别验收 Node 和 VK8s 运维场景；未经明确指令不运行真实 E2E 或 Kind 验收。
+- [x] 已运行 `make test-unit`、`make verify-generated`、`npm run build --prefix web`、`kubectl kustomize .` 和 `git diff --check`，结果均通过。
+- [x] 现有单元和集成测试覆盖目标现象复现失败、可选学习辅助、参考修复失败、发布重试、revision 切换及历史 revision 读取，并已随 `make test-unit` 通过。
+- [ ] Web 测试已有导航、运维场景筛选、启动/学习记录和停止相关用例；重置及无 checkpoints/参考答案展示仍需在专用环境执行 Playwright 验收。本轮按要求不运行真实 E2E。
+- [ ] 在专用、可丢弃的真实环境中分别验收 Node 和 VK8s 运维场景；本轮按要求暂缓，不运行真实 E2E 或 Kind 验收。
 
 ## 提交拆分
 
