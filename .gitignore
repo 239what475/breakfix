@@ -29,6 +29,7 @@ dist/
 
 # Local reference repositories
 projects/
+references/
 
 # Kind kubeconfig
 .kube/
