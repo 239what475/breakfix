@@ -18,11 +18,17 @@ revision 与学习/运行记录必须保留。
 5. 初始 Catalog Release 只列出内容 entry。所有 entry 验证和 artifact promotion 成功后，在一个数据库事务中创建内容身份、
    active revision 并将 release 标记为 Ready，避免暴露半次安装。
 6. 运维现场的标签直接属于其不可变内容 revision，采用经过规范化的简单字符串集合；不单独维护 Tag 实体、定义、关系或审核
-   workflow。标签修改视为内容修订，并重新走发布流程。
+   workflow。每个现场最多有 8 个标签；每个标签去除首尾空格后包含 1～32 个字符，只允许中文、英文字母、数字、`.`、`+`、
+   `-`，英文字母统一转为小写。标签按规范化结果去重和确定性排序，并直接使用该结果展示。平台暂不合并 `k8s` 与
+   `kubernetes` 等同义标签。标签修改视为内容修订，并重新走发布流程。
 7. 文档可执行示例不使用这些标签。其来源、上游 revision、页面路径和章节锚点将在后续文档实践化设计中定义。
-8. 当前代码中的 `Challenge` 命名先作为现有可运行内容的兼容术语保留。是否统一重命名为 `Scenario`/`Example` 不与 Roadmap
-   删除混在一起，避免一次机械改名掩盖数据与发布语义的变化。
-9. 当前数据库只支持开发期整库重建，因此本次通过提升 schema version 和重建 schema 完成，不编写旧 Roadmap 数据迁移。
+8. 删除 `difficulty`。它不属于文档示例，也不能客观描述真实运维现场；portable manifest、materialized content、数据库投影、
+   API 和界面均不再保留该字段或筛选条件。
+9. `Scenario` 是 Roadmap 清理后的通用可运行内容对象。现有代码中的 `Challenge` 命名在清理期间作为兼容术语保留，避免
+   机械改名掩盖数据与发布语义的变化；清理完成后统一改为 `Scenario`。内容类型至少区分
+   `documentation-example`（文档可执行示例）和 `operations-scenario`（可复现运维现场），用户界面分别显示为“可执行示例”和
+   “运维场景”。两者共享运行底座，但不合并内容来源、组织方式或发布标准。
+10. 当前数据库只支持开发期整库重建，因此本次通过提升 schema version 和重建 schema 完成，不编写旧 Roadmap 数据迁移。
 
 ## 不做的事项
 
@@ -36,17 +42,17 @@ revision 与学习/运行记录必须保留。
 
 ### 1. 固定替代契约
 
-- [ ] 为现有可运行内容定义最小 Catalog 读模型：稳定 ID、active revision、标题、描述、runtime、难度、简单标签、发布时间和
-      可用状态。
-- [ ] 将规范化标签加入 portable manifest、materialized content 与 immutable revision 元数据；校验空值、长度、数量、字符
-      规则、去重和确定性排序。
+- [ ] 为现有可运行内容定义最小 Catalog 读模型：稳定 ID、active revision、类型、标题、描述、runtime、简单标签、发布时间和
+      可用状态；从内容模型中删除 `difficulty`。
+- [ ] 将规范化标签加入 portable manifest、materialized content 与 immutable revision 元数据；按已确认的字符、大小写、长度、
+      数量、去重和排序规则实现同一套确定性校验。
 - [ ] 明确 list/get/start Environment 均解析同一个 active revision，历史 Environment 始终按创建时保存的 revision 读取。
 - [ ] 明确弃用只切换内容状态并阻止新 Environment，不删除旧 revision、artifact、运行记录或用户进度。
 
 ### 2. 简化数据库与 Catalog
 
 - [ ] 从 schema 中删除全部 `roadmap_*` 表和外键，提升开发数据库 schema version。
-- [ ] 让 Catalog 查询直接联结 active content identity 与 active revision，并在数据库层提供搜索、标签、runtime、难度和状态筛选。
+- [ ] 让 Catalog 查询直接联结 active content identity 与 active revision，并在数据库层提供搜索、标签、runtime 和状态筛选。
 - [ ] 删除 `RoadmapStore`、Roadmap repository、retrieval、content parser/compiler、testkit 与对应测试。
 - [ ] 保留并补测 materialized source 的 hash 校验、active revision 一致性以及缺失内容时 fail closed 的行为。
 - [ ] 更新弃用和内容修订事务，使其只维护 stable identity 与 active revision pointer。
@@ -68,7 +74,8 @@ revision 与学习/运行记录必须保留。
 - [ ] 删除 Roadmap maintenance domain/application/adapter/bootstrap 代码以及启动、接管、lease 和恢复逻辑。
 - [ ] 删除 Roadmap export、maintenance/debug HTTP API 及 OpenAPI schema，重新生成 Go 与 TypeScript client。
 - [ ] 从 Challenge/Catalog 响应移除 Domain、Topic、关系边和 Roadmap 对象，改为返回简单标签。
-- [ ] 删除工作台 `RoadmapPanel`、Catalog 的 Domain/Topic 筛选及关系图；Catalog 只保留搜索、标签和必要的运行属性筛选。
+- [ ] 从 portable manifest、materialized content、数据库投影、OpenAPI 和前端中删除 `difficulty`。
+- [ ] 删除工作台 `RoadmapPanel`、Catalog 的 Domain/Topic/难度筛选及关系图；Catalog 只保留搜索、标签和必要的运行属性筛选。
 - [ ] 更新 Authoring 状态文案与界面，移除分类 proposal、分类反馈和分类确认步骤。
 
 ### 5. 清理配置、部署和文档
@@ -79,7 +86,17 @@ revision 与学习/运行记录必须保留。
 - [ ] 删除正式 Catalog 和测试 fixture 中的 `roadmap/` 内容，给运维现场添加直接标签。
 - [ ] 全仓搜索 `roadmap`、`Roadmap`、`Domain`、`Topic`、`Classifier` 和 classification，只保留历史说明或确有其他含义的用法。
 
-### 6. 验证
+### 6. 统一 Scenario 术语
+
+- [ ] Roadmap 清理并验收通过后，将领域模型、内容模型、数据库、API、前端和运行记录中的 `Challenge` 统一改为 `Scenario`，
+      同步更新稳定 ID 之外的类型名称、路由、事件和错误信息。
+- [ ] 为 Scenario 增加明确的内容类型：`documentation-example` 与 `operations-scenario`；禁止用类型名称重新引入课程层级或
+      关系图。
+- [ ] 为两种类型分别定义最小元数据和发布校验：文档示例绑定上游文档位置，运维场景保存简单标签；两者继续共享环境构建、
+      验证、重置和回收能力。
+- [ ] 补充迁移后的 API、前端、运行记录和历史 revision 兼容性测试，确保已有 Scenario 的 stable ID、artifact 和学习记录不变。
+
+### 7. 验证
 
 - [ ] 单元测试覆盖 manifest 标签校验、Catalog 查询、发布、修订冲突、弃用与历史 revision 读取。
 - [ ] Catalog Release 集成测试证明失败不会暴露部分内容，重启可恢复，重复提交保持幂等。
@@ -89,17 +106,15 @@ revision 与学习/运行记录必须保留。
 
 ## 提交拆分
 
-按以下顺序提交，每一步都必须保持相应测试通过，不能先删除约束再等待后续提交恢复正确性：
+按以下顺序拆分提交。每完成一个独立步骤的内容并通过该步骤对应的验证，就立即创建一个单独提交；不要把多个步骤、多个
+模块或一次完整清理攒成一个大提交。每个提交都应能被独立审查、回滚，并保持仓库处于可构建状态。不能先删除约束再等待
+后续提交恢复正确性：
 
 1. **Catalog 简化契约与标签**：加入 revision 级简单标签和直接 Catalog 读模型，暂时从旧 Roadmap 投影做兼容读取。
 2. **发布链路去分类化**：缩短 GenerationWorkflow，删除 Classifier 和分类审核，发布时写入直接标签。
 3. **Catalog Release 去 Roadmap 化**：修改 portable bundle 与原子安装事务，迁移正式内容及 fixture。
 4. **删除 Roadmap 后端**：切换 Catalog 到直接读取后，删除 Roadmap schema、repository、maintenance、Agent 和 HTTP API。
 5. **删除 Roadmap 前端**：移除图和 Domain/Topic 交互，完成标签搜索与简化后的 Authoring 流程。
-6. **生成物、部署和文档收尾**：重新生成 API，清理配置和文档，执行全量单元、集成与真实环境验收。
-
-## 开始实施前需要确认
-
-- 简单标签允许的字符和长度上限，以及是否统一存储为小写 ASCII slug；显示时是否直接使用 slug。
-- Catalog 是否继续保留 `difficulty`。它对文档示例没有意义，但对用户分享的运维现场也可能只是主观信息。
-- Roadmap 删除完成后，是否紧接着把现有 `Challenge` 产品用语改为“运维现场”；本次默认只移除 Roadmap，不执行全仓重命名。
+6. **生成物、部署和文档收尾**：重新生成 API，清理配置和文档，执行本轮 Roadmap 清理的单元、集成与真实环境验收。
+7. **统一 Scenario 术语**：在前六步完成并验收后，单独提交 `Challenge` 到 `Scenario` 的类型和产品用语重命名，以及两种
+   Scenario 内容类型的契约和测试。
