@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
-	"github.com/breakfix/breakfix/internal/domain/roadmap"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
@@ -202,21 +200,20 @@ func toAPIGeneratorWorkflow(workflow generation.Workflow) api.GeneratorWorkflow 
 		finalizerCategory = &value
 	}
 	return api.GeneratorWorkflow{
-		Id:                            workflow.ID,
-		SessionId:                     workflow.Source.Ref,
-		PlanRevision:                  generatorPlanRevision(workflow.SourceRevision),
-		State:                         api.GeneratorWorkflowState(workflow.State),
-		StateVersion:                  workflow.StateVersion,
-		RuntimeAttempt:                workflow.RuntimeAttempt,
-		CandidateRevisionId:           optionalString(workflow.CandidateRevisionID),
-		ClassificationRoadmapRevision: optionalString(workflow.ClassificationRoadmapRevision),
-		LastError:                     optionalString(workflow.LastError),
-		FinalizerErrorCategory:        finalizerCategory,
-		FinalizerLastError:            optionalString(workflow.FinalizerLastError),
-		FinalizerLastAttemptedAt:      workflow.FinalizerLastAttemptedAt,
-		FinalizerNextRetryAt:          workflow.FinalizerNextRetryAt,
-		CreatedAt:                     workflow.CreatedAt.UTC(),
-		UpdatedAt:                     workflow.UpdatedAt.UTC(),
+		Id:                       workflow.ID,
+		SessionId:                workflow.Source.Ref,
+		PlanRevision:             generatorPlanRevision(workflow.SourceRevision),
+		State:                    api.GeneratorWorkflowState(workflow.State),
+		StateVersion:             workflow.StateVersion,
+		RuntimeAttempt:           workflow.RuntimeAttempt,
+		CandidateRevisionId:      optionalString(workflow.CandidateRevisionID),
+		LastError:                optionalString(workflow.LastError),
+		FinalizerErrorCategory:   finalizerCategory,
+		FinalizerLastError:       optionalString(workflow.FinalizerLastError),
+		FinalizerLastAttemptedAt: workflow.FinalizerLastAttemptedAt,
+		FinalizerNextRetryAt:     workflow.FinalizerNextRetryAt,
+		CreatedAt:                workflow.CreatedAt.UTC(),
+		UpdatedAt:                workflow.UpdatedAt.UTC(),
 	}
 }
 
@@ -226,120 +223,6 @@ func generatorPlanRevision(value string) int64 {
 		return 0
 	}
 	return revision
-}
-
-func (h *Handler) authoringClassificationProposal(ctx context.Context, value *generation.ClassificationProposal) (*api.AuthoringClassificationProposal, error) {
-	if value == nil {
-		return nil, nil
-	}
-	var source *roadmap.Revision
-	if value.Result == generation.ClassificationProposed {
-		if h == nil || h.db == nil {
-			return nil, errors.New("roadmap repository is unavailable for classification review")
-		}
-		var err error
-		source, err = h.db.Roadmap.RoadmapRevision(ctx, value.RoadmapRevision)
-		if err != nil {
-			return nil, fmt.Errorf("load classification roadmap revision: %w", err)
-		}
-	}
-	return toAPIAuthoringClassificationProposal(value, source)
-}
-
-func toAPIAuthoringClassificationProposal(value *generation.ClassificationProposal, source *roadmap.Revision) (*api.AuthoringClassificationProposal, error) {
-	if value == nil {
-		return nil, nil
-	}
-	result := &api.AuthoringClassificationProposal{
-		Revision:             value.Revision,
-		CandidateRevisionId:  value.CandidateRevisionID,
-		RoadmapRevision:      value.RoadmapRevision,
-		Result:               api.AuthoringClassificationProposalResult(value.Result),
-		Tags:                 make([]api.AuthoringClassificationTag, 0, len(value.Tags)),
-		UnclassifiableReason: optionalString(value.UnclassifiableReason),
-		AdjustmentSuggestion: optionalString(value.AdjustmentSuggestion),
-		UpdatedAt:            value.UpdatedAt.UTC(),
-	}
-	if value.Topic != nil {
-		topic, err := toAPIAuthoringClassificationTopic(*value.Topic, source)
-		if err != nil {
-			return nil, err
-		}
-		result.Topic = topic
-	}
-	for _, tag := range value.Tags {
-		converted, err := toAPIAuthoringClassificationTag(tag, source)
-		if err != nil {
-			return nil, err
-		}
-		result.Tags = append(result.Tags, converted)
-	}
-	return result, nil
-}
-
-func toAPIAuthoringClassificationTopic(value generation.TopicProposal, source *roadmap.Revision) (*api.AuthoringClassificationTopic, error) {
-	result := &api.AuthoringClassificationTopic{Reason: value.Reason}
-	if value.Existing != nil {
-		topic, err := classificationTopicDefinition(source, *value.Existing)
-		if err != nil {
-			return nil, err
-		}
-		converted := toAPIRoadmapTopic(*topic)
-		result.Existing = &converted
-	}
-	if value.New != nil {
-		result.New = &api.AuthoringClassificationNewTopic{
-			Domain:            toAPIRoadmapReference(value.New.Domain),
-			Title:             value.New.Title,
-			Definition:        value.New.Definition,
-			Scope:             value.New.Scope,
-			NonGoals:          value.New.NonGoals,
-			ChallengeGuidance: value.New.ChallengeGuidance,
-		}
-	}
-	return result, nil
-}
-
-func toAPIAuthoringClassificationTag(value generation.TagProposal, source *roadmap.Revision) (api.AuthoringClassificationTag, error) {
-	result := api.AuthoringClassificationTag{Reason: value.Reason}
-	if value.Existing != nil {
-		tag, err := classificationTagDefinition(source, *value.Existing)
-		if err != nil {
-			return api.AuthoringClassificationTag{}, err
-		}
-		converted := toAPIRoadmapTag(*tag)
-		result.Existing = &converted
-	}
-	if value.New != nil {
-		result.New = &api.AuthoringClassificationNewTag{Title: value.New.Title, Description: value.New.Description}
-	}
-	return result, nil
-}
-
-func classificationTopicDefinition(source *roadmap.Revision, reference roadmap.Ref) (*roadmap.Topic, error) {
-	if source == nil {
-		return nil, errors.New("classification proposal has no roadmap revision")
-	}
-	for _, topic := range source.Topics {
-		if topic.ID == reference.ID && topic.SourceRef == reference.SourceRef && topic.Title == reference.Title {
-			value := topic
-			return &value, nil
-		}
-	}
-	return nil, fmt.Errorf("classification Topic %q is absent from revision %s", reference.SourceRef, source.Revision)
-}
-
-func classificationTagDefinition(source *roadmap.Revision, reference roadmap.Ref) (*roadmap.Tag, error) {
-	if source == nil {
-		return nil, errors.New("classification proposal has no roadmap revision")
-	}
-	for _, tag := range source.Tags {
-		if tag.ID == reference.ID && tag.SourceRef == reference.SourceRef && tag.Title == reference.Title {
-			value := tag
-			return &value, nil
-		}
-	}
-	return nil, fmt.Errorf("classification Tag %q is absent from revision %s", reference.SourceRef, source.Revision)
 }
 
 func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *api.AuthoringVerificationReport {
@@ -422,7 +305,7 @@ func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, challengedomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
 	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState),
-		errors.Is(err, generation.ErrClassificationConflict), errors.Is(err, generation.ErrChallengeSourceRefConflict),
+		errors.Is(err, generation.ErrChallengeSourceRefConflict),
 		errors.Is(err, challengedomain.ErrRevisionConflict), errors.Is(err, challengedomain.ErrNotMutable):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:

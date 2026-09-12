@@ -42,8 +42,7 @@ func TestConnectorRegistersGeneratorToolsAndProjectsContentReview(t *testing.T) 
 	for _, required := range []string{
 		"set_generation_plan", "confirm_generation", "list_active_generations", "get_generation",
 		"list_workspace_files", "read_workspace_file", "write_workspace_file", "run_workspace_command",
-		"submit_candidate", "wait_generation", "sync_review", "confirm_content", "request_content_changes",
-		"get_classification", "confirm_classification_and_publish", "request_classification_changes", "cancel_generation",
+		"submit_candidate", "wait_generation", "sync_review", "confirm_content", "request_content_changes", "cancel_generation",
 	} {
 		if !slices.Contains(got, required) {
 			t.Fatalf("registered tools %#v do not contain %q", got, required)
@@ -100,53 +99,6 @@ func TestConnectorWaitGenerationReturnsCurrentReview(t *testing.T) {
 	decodeMCPResult(t, result, &response)
 	if response.Review == nil || response.TimedOut {
 		t.Fatalf("wait result = %#v", response)
-	}
-}
-
-func TestConnectorProjectsClassificationReview(t *testing.T) {
-	fake := newConnectorAPI(t)
-	fake.generation.Workflow.State = "NeedsClassificationReview"
-	fake.bundle = testReviewBundle(t, "classification", "NeedsClassificationReview", 2, map[string]string{
-		"topic.md": "# Topic\n", "tags.md": "# Tags\n", "classification.md": "# Classification\n",
-	})
-	fake.classification = api.GeneratorClassificationReview{
-		Workflow:  fake.generation.Workflow,
-		Candidate: *fake.generation.Candidate,
-		Classification: api.AuthoringClassificationProposal{
-			CandidateRevisionId: fake.generation.Candidate.Id, Revision: 2, RoadmapRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			Result: "proposed", Tags: []api.AuthoringClassificationTag{}, UpdatedAt: time.Now().UTC(),
-		},
-	}
-	projector, err := NewReviewProjector(filepath.Join(t.TempDir(), "reviews"))
-	if err != nil {
-		t.Fatalf("new review projector: %v", err)
-	}
-	connector, err := NewConnector(fake, projector, ConnectorConfig{})
-	if err != nil {
-		t.Fatalf("new connector: %v", err)
-	}
-	server, err := connector.NewMCPServer()
-	if err != nil {
-		t.Fatalf("new MCP server: %v", err)
-	}
-	session := connectMCP(t, server)
-
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "get_classification", Arguments: map[string]any{"workflow_id": fake.generation.Workflow.Id},
-	})
-	if err != nil {
-		t.Fatalf("call get_classification: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("get_classification returned tool error: %#v", result.Content)
-	}
-	var response classificationResult
-	decodeMCPResult(t, result, &response)
-	if response.Review == nil || response.Review.Kind != "classification" || response.Review.ProposalRevision != 2 {
-		t.Fatalf("classification review projection = %#v", response)
-	}
-	if fake.reviewKind != api.GetGeneratorReviewBundleParamsKindClassification {
-		t.Fatalf("review bundle kind = %q", fake.reviewKind)
 	}
 }
 
@@ -255,7 +207,6 @@ func mcpResultText(result *mcp.CallToolResult) string {
 
 type connectorAPI struct {
 	generation       api.GeneratorGeneration
-	classification   api.GeneratorClassificationReview
 	bundle           api.GeneratorReviewBundle
 	reviewKind       api.GetGeneratorReviewBundleParamsKind
 	getGenerationErr error
@@ -263,7 +214,7 @@ type connectorAPI struct {
 
 func newConnectorAPI(t *testing.T) *connectorAPI {
 	t.Helper()
-	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", 0, map[string]string{
+	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", map[string]string{
 		"overview.md": "# Candidate\n", "judge.md": "# Judge\n", "verification.md": "# Verification\n",
 		"checkpoints/ready.md": "# Ready\n", "candidate/problem.md": "# Problem\n",
 	})
@@ -325,21 +276,6 @@ func (*connectorAPI) ConfirmContent(context.Context, string, api.GeneratorConten
 
 func (*connectorAPI) RequestContentChanges(context.Context, string, api.GeneratorContentChangeRequest) (api.GeneratorWorkflow, error) {
 	return api.GeneratorWorkflow{}, errors.New("unexpected request content changes")
-}
-
-func (s *connectorAPI) GetClassification(context.Context, string) (api.GeneratorClassificationReview, error) {
-	if s.classification.Workflow.Id == "" {
-		return api.GeneratorClassificationReview{}, errors.New("unexpected get classification")
-	}
-	return s.classification, nil
-}
-
-func (*connectorAPI) RequestClassificationChanges(context.Context, string, api.GeneratorClassificationChangeRequest) (api.GeneratorWorkflow, error) {
-	return api.GeneratorWorkflow{}, errors.New("unexpected request classification changes")
-}
-
-func (*connectorAPI) ConfirmClassificationAndPublish(context.Context, string, api.GeneratorClassificationPublicationRequest) (api.GeneratorWorkflow, error) {
-	return api.GeneratorWorkflow{}, errors.New("unexpected confirm classification")
 }
 
 func (*connectorAPI) CancelGeneration(context.Context, string, api.GeneratorCancellationRequest) (api.GeneratorWorkflow, error) {

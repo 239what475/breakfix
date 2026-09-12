@@ -19,7 +19,6 @@ var schemaGenerationStatements = []string{
 		verification_report JSONB,
 		verify_environment JSONB,
 		failure JSONB,
-		classification_proposal JSONB,
 		publication JSONB,
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
@@ -71,9 +70,7 @@ var schemaGenerationStatements = []string{
 		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),
 		source_ref TEXT NOT NULL,
 		source_revision TEXT NOT NULL,
-		 state TEXT NOT NULL CHECK (state IN ('Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'Classifying', 'NeedsClassificationReview', 'ChallengePublishing', 'Published', 'Failed', 'Cancelled')),
-		classification_roadmap_revision TEXT NOT NULL DEFAULT '',
-		classification_feedback TEXT NOT NULL DEFAULT '',
+		 state TEXT NOT NULL CHECK (state IN ('Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'ChallengePublishing', 'Published', 'Failed', 'Cancelled')),
 		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		workspace_snapshot_digest TEXT NOT NULL DEFAULT '',
 		active_agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,
@@ -104,7 +101,7 @@ var schemaGenerationStatements = []string{
 	`CREATE INDEX generation_workflows_claim ON generation_workflows(state, next_run_at, lease_expires_at, created_at, id)`,
 	`CREATE TABLE generation_action_receipts (
 		session_id TEXT NOT NULL REFERENCES authoring_sessions(id) ON DELETE RESTRICT,
-		action TEXT NOT NULL CHECK (action IN ('confirm-generation', 'submit-candidate', 'confirm-content', 'request-classification-changes', 'confirm-classification-and-publish', 'request-content-changes', 'cancel-generation')),
+		action TEXT NOT NULL CHECK (action IN ('confirm-generation', 'submit-candidate', 'confirm-content', 'request-content-changes', 'cancel-generation')),
 		idempotency_key TEXT NOT NULL,
 		request_digest TEXT NOT NULL,
 		workflow_id TEXT NOT NULL REFERENCES generation_workflows(id) ON DELETE RESTRICT,
@@ -116,8 +113,7 @@ var schemaGenerationStatements = []string{
 		CHECK (
 			(action = 'confirm-generation' AND plan_revision IS NOT NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
 			(action IN ('submit-candidate', 'confirm-content', 'request-content-changes') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NULL) OR
-			(action = 'cancel-generation' AND plan_revision IS NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL) OR
-			(action IN ('request-classification-changes', 'confirm-classification-and-publish') AND plan_revision IS NULL AND candidate_revision_id IS NOT NULL AND proposal_revision IS NOT NULL)
+			(action = 'cancel-generation' AND plan_revision IS NULL AND candidate_revision_id IS NULL AND proposal_revision IS NULL)
 		)
 	)`,
 	`CREATE TABLE generation_plan_receipts (

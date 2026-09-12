@@ -36,9 +36,6 @@ type GeneratorAPI interface {
 	SubmitCandidate(context.Context, string, api.GeneratorCandidateSubmissionRequest) (api.GeneratorGeneration, error)
 	ConfirmContent(context.Context, string, api.GeneratorContentConfirmationRequest) (api.GeneratorWorkflow, error)
 	RequestContentChanges(context.Context, string, api.GeneratorContentChangeRequest) (api.GeneratorWorkflow, error)
-	GetClassification(context.Context, string) (api.GeneratorClassificationReview, error)
-	RequestClassificationChanges(context.Context, string, api.GeneratorClassificationChangeRequest) (api.GeneratorWorkflow, error)
-	ConfirmClassificationAndPublish(context.Context, string, api.GeneratorClassificationPublicationRequest) (api.GeneratorWorkflow, error)
 	CancelGeneration(context.Context, string, api.GeneratorCancellationRequest) (api.GeneratorWorkflow, error)
 	GetReviewBundle(context.Context, string, api.GetGeneratorReviewBundleParamsKind) (api.GeneratorReviewBundle, error)
 }
@@ -151,28 +148,11 @@ func (c *Connector) registerTools(server *mcp.Server) {
 	registerTool(server, "sync_review", "重新下载当前不可变审核快照到本机只读目录。", true, func(ctx context.Context, input workflowInput) (any, error) {
 		return c.syncReview(ctx, input.WorkflowID)
 	})
-	registerTool(server, "confirm_content", "仅在用户明确确认当前内容审核快照后进入分类。", false, func(ctx context.Context, input contentConfirmationInput) (any, error) {
+	registerTool(server, "confirm_content", "仅在用户明确确认当前内容审核快照后开始发布。", false, func(ctx context.Context, input contentConfirmationInput) (any, error) {
 		return c.api.ConfirmContent(ctx, input.WorkflowID, api.GeneratorContentConfirmationRequest{CandidateRevisionId: input.CandidateRevisionID, IdempotencyKey: input.IdempotencyKey})
 	})
 	registerTool(server, "request_content_changes", "仅在用户明确要求修改当前内容审核 candidate 后返回远程工作区继续修复。", false, func(ctx context.Context, input contentChangeInput) (any, error) {
 		return c.api.RequestContentChanges(ctx, input.WorkflowID, api.GeneratorContentChangeRequest{CandidateRevisionId: input.CandidateRevisionID, Feedback: input.Feedback, IdempotencyKey: input.IdempotencyKey})
-	})
-	registerTool(server, "get_classification", "读取 Server Classifier 提出的当前分类 proposal；到达分类审核状态时自动同步本地只读审核目录。", true, func(ctx context.Context, input workflowInput) (any, error) {
-		result, err := c.api.GetClassification(ctx, input.WorkflowID)
-		if err != nil {
-			return nil, err
-		}
-		projection, err := c.syncReviewForWorkflow(ctx, result.Workflow, &result.Candidate)
-		if err != nil {
-			return nil, err
-		}
-		return classificationResult{Classification: result, Review: projection}, nil
-	})
-	registerTool(server, "confirm_classification_and_publish", "仅在用户明确确认当前分类审核快照后开始发布题目。", false, func(ctx context.Context, input classificationPublicationInput) (any, error) {
-		return c.api.ConfirmClassificationAndPublish(ctx, input.WorkflowID, api.GeneratorClassificationPublicationRequest{CandidateRevisionId: input.CandidateRevisionID, ProposalRevision: input.ProposalRevision, IdempotencyKey: input.IdempotencyKey})
-	})
-	registerTool(server, "request_classification_changes", "仅在用户明确要求调整当前分类 proposal 后请求 Server Classifier 再次分类。", false, func(ctx context.Context, input classificationChangeInput) (any, error) {
-		return c.api.RequestClassificationChanges(ctx, input.WorkflowID, api.GeneratorClassificationChangeRequest{CandidateRevisionId: input.CandidateRevisionID, ProposalRevision: input.ProposalRevision, Feedback: input.Feedback, IdempotencyKey: input.IdempotencyKey})
 	})
 	registerTool(server, "cancel_generation", "仅在用户明确要求取消一个未结束的生成任务后调用。", false, func(ctx context.Context, input cancellationInput) (any, error) {
 		return c.api.CancelGeneration(ctx, input.WorkflowID, api.GeneratorCancellationRequest{IdempotencyKey: input.IdempotencyKey})
@@ -232,8 +212,6 @@ func (c *Connector) syncReviewForWorkflow(ctx context.Context, workflow api.Gene
 	switch string(workflow.State) {
 	case "NeedsAuthorReview":
 		kind = api.GetGeneratorReviewBundleParamsKindContent
-	case "NeedsClassificationReview":
-		kind = api.GetGeneratorReviewBundleParamsKindClassification
 	default:
 		return nil, nil
 	}
@@ -494,21 +472,6 @@ type contentChangeInput struct {
 	IdempotencyKey      string `json:"idempotency_key"`
 }
 
-type classificationPublicationInput struct {
-	WorkflowID          string `json:"workflow_id"`
-	CandidateRevisionID string `json:"candidate_revision_id"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	IdempotencyKey      string `json:"idempotency_key"`
-}
-
-type classificationChangeInput struct {
-	WorkflowID          string `json:"workflow_id"`
-	CandidateRevisionID string `json:"candidate_revision_id"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	Feedback            string `json:"feedback"`
-	IdempotencyKey      string `json:"idempotency_key"`
-}
-
 type cancellationInput struct {
 	WorkflowID     string `json:"workflow_id"`
 	IdempotencyKey string `json:"idempotency_key"`
@@ -522,11 +485,6 @@ type generationResult struct {
 type generationWaitResult struct {
 	generationResult
 	TimedOut bool `json:"timed_out,omitempty"`
-}
-
-type classificationResult struct {
-	Classification api.GeneratorClassificationReview `json:"classification"`
-	Review         *ReviewProjection                 `json:"review,omitempty"`
 }
 
 type workspaceFilesResult struct {

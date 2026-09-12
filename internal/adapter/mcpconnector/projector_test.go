@@ -21,7 +21,7 @@ func TestReviewProjectorAtomicallyProjectsAndResynchronizesContent(t *testing.T)
 	if err != nil {
 		t.Fatalf("new review projector: %v", err)
 	}
-	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", 0, map[string]string{
+	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", map[string]string{
 		"overview.md":                    "# Candidate\n",
 		"checkpoints/ready.md":           "# Ready\n",
 		"candidate/problem.md":           "# Problem\n",
@@ -35,7 +35,7 @@ func TestReviewProjectorAtomicallyProjectsAndResynchronizesContent(t *testing.T)
 		t.Fatalf("project content review: %v", err)
 	}
 	want := filepath.Join(root, "generation-workflow-one", "content", "candidate-revision-one")
-	if first.ReviewPath != want || first.Kind != "content" || first.ProposalRevision != 0 {
+	if first.ReviewPath != want || first.Kind != "content" {
 		t.Fatalf("projection = %#v, want path %q", first, want)
 	}
 	assertReviewProjection(t, first.ReviewPath, bundle.Manifest, "local-token", "sandbox_id", "pvc_name", "10.0.0.1")
@@ -65,8 +65,8 @@ func TestReviewProjectorRejectsIncorrectPayloadDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new review projector: %v", err)
 	}
-	bundle := testReviewBundle(t, "classification", "NeedsClassificationReview", 3, map[string]string{
-		"topic.md": "# Topic\n", "tags.md": "# Tags\n", "classification.md": "# Classification\n",
+	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", map[string]string{
+		"overview.md": "# Candidate\n", "judge.md": "# Judge\n", "verification.md": "# Verification\n",
 	})
 	bundle.Manifest.PayloadSha256 = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if _, err := projector.Project(bundle); err == nil || !strings.Contains(err.Error(), "digest") {
@@ -131,7 +131,7 @@ func assertReviewProjection(t *testing.T, root string, manifest api.GeneratorRev
 	}
 }
 
-func testReviewBundle(t *testing.T, kind, state string, proposalRevision int, entries map[string]string) api.GeneratorReviewBundle {
+func testReviewBundle(t *testing.T, kind, state string, entries map[string]string) api.GeneratorReviewBundle {
 	t.Helper()
 	payload := testReviewPayload(t, entries)
 	manifest := api.GeneratorReviewManifest{
@@ -141,7 +141,6 @@ func testReviewBundle(t *testing.T, kind, state string, proposalRevision int, en
 		WorkflowState:          state,
 		CandidateRevisionId:    "candidate-revision-one",
 		CandidateArchiveSha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		ProposalRevision:       proposalRevision,
 		PayloadSha256:          reviewPayloadDigest(payload),
 		ExportedAt:             time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC),
 	}

@@ -22,7 +22,7 @@ const (
 )
 
 // GenerationAgentStore is the workflow-owned persistence boundary for the
-// Server's Judge and Classifier roles. It deliberately contains no Generator
+// Server's Judge role. It deliberately contains no Generator
 // workspace, runtime build, registry, Incus, or Environment operation.
 type GenerationAgentStore interface {
 	ClaimGenerationAgentWorkflow(context.Context, string, time.Duration, time.Time) (*domain.Claim, error)
@@ -32,8 +32,6 @@ type GenerationAgentStore interface {
 	InterruptActiveGenerationAgentRuns(context.Context, string, time.Time) error
 	GetCandidateRevision(context.Context, string) (*domain.Revision, error)
 	FinalizeGenerationJudgement(context.Context, domain.Claim, string, bool, string, time.Time) error
-	FinalizeGenerationClassification(context.Context, domain.Claim, string, domain.ClassificationOutput, time.Time) error
-	FinalizeGenerationClassificationAdjustment(context.Context, domain.Claim, domain.ClassificationAdjustment, time.Time) error
 	ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, *domain.VerificationReport, time.Time) error
 	RenewGenerationLease(context.Context, domain.Claim, time.Duration, time.Time) error
 }
@@ -44,11 +42,6 @@ type JudgeRoleExecutor interface {
 	Judge(context.Context, authoring.Plan, *Candidate) (Judgement, error)
 }
 
-// ClassifierRoleExecutor owns only the independent classification role.
-type ClassifierRoleExecutor interface {
-	Classify(context.Context, domain.Execution, *Candidate) (ClassificationCompletion, error)
-}
-
 type AgentRunnerConfig struct {
 	ServerID  string
 	Model     string
@@ -57,21 +50,20 @@ type AgentRunnerConfig struct {
 }
 
 // AgentRunner is the Server's durable background Agent Runtime for exactly
-// Judging and Classifying. Generating is user-directed workspace activity and
+// Judging. Generating is user-directed workspace activity and
 // is never claimed by this runner. Each claimed phase is dispatched
 // independently; the database workflow remains the scheduling authority.
 type AgentRunner struct {
-	store      GenerationAgentStore
-	judge      JudgeRoleExecutor
-	classifier ClassifierRoleExecutor
-	config     AgentRunnerConfig
-	now        func() time.Time
-	sleep      func(context.Context, time.Duration) error
+	store  GenerationAgentStore
+	judge  JudgeRoleExecutor
+	config AgentRunnerConfig
+	now    func() time.Time
+	sleep  func(context.Context, time.Duration) error
 }
 
-func NewAgentRunner(store GenerationAgentStore, judge JudgeRoleExecutor, classifier ClassifierRoleExecutor, cfg AgentRunnerConfig) (*AgentRunner, error) {
-	if store == nil || judge == nil || classifier == nil || strings.TrimSpace(cfg.ServerID) == "" || strings.TrimSpace(cfg.Model) == "" {
-		return nil, errors.New("generation agent runner requires Server store, Judge and Classifier executors, identity, and model")
+func NewAgentRunner(store GenerationAgentStore, judge JudgeRoleExecutor, cfg AgentRunnerConfig) (*AgentRunner, error) {
+	if store == nil || judge == nil || strings.TrimSpace(cfg.ServerID) == "" || strings.TrimSpace(cfg.Model) == "" {
+		return nil, errors.New("generation agent runner requires Server store, Judge executor, identity, and model")
 	}
 	if cfg.LeaseTTL <= 0 {
 		cfg.LeaseTTL = defaultGenerationAgentLeaseTTL
@@ -80,7 +72,7 @@ func NewAgentRunner(store GenerationAgentStore, judge JudgeRoleExecutor, classif
 		cfg.PollEvery = defaultGenerationAgentPoll
 	}
 	return &AgentRunner{
-		store: store, judge: judge, classifier: classifier, config: cfg,
+		store: store, judge: judge, config: cfg,
 		now: func() time.Time { return time.Now().UTC() }, sleep: waitContext,
 	}, nil
 }
@@ -190,8 +182,7 @@ func (r *AgentRunner) executeClaim(ctx context.Context, lease *agentLease) error
 	if err != nil {
 		return err
 	}
-	execution := domain.Execution{Claim: claim, Context: *workflowContext}
-	if !execution.Valid() {
+	if !(domain.Execution{Claim: claim, Context: *workflowContext}).Valid() {
 		return errors.New("generation agent runner received inconsistent workflow context")
 	}
 	run, err := r.store.StartGenerationAgentRun(ctx, claim, agent.CreateRun{
@@ -235,8 +226,7 @@ func (r *AgentRunner) executeClaim(ctx context.Context, lease *agentLease) error
 func (r *AgentRunner) executeRun(ctx context.Context, claim domain.Claim, workflowContext domain.Context, run agent.Run) error {
 	claim.Workflow.ActiveAgentRunID = run.ID
 	workflowContext.Workflow.ActiveAgentRunID = run.ID
-	execution := domain.Execution{Claim: claim, Context: workflowContext}
-	if !execution.Valid() {
+	if !(domain.Execution{Claim: claim, Context: workflowContext}).Valid() {
 		return errors.New("generation agent run has inconsistent execution context")
 	}
 	switch claim.Workflow.State {
@@ -253,24 +243,6 @@ func (r *AgentRunner) executeRun(ctx context.Context, claim domain.Claim, workfl
 			return err
 		}
 		return r.store.FinalizeGenerationJudgement(ctx, claim, run.ID, judgement.Approved, judgement.Feedback, r.now())
-	case domain.StateClassifying:
-		candidateValue, err := r.readCandidate(ctx, claim.Workflow.CandidateRevisionID)
-		if err != nil {
-			return err
-		}
-		completion, err := r.classifier.Classify(ctx, execution, candidateValue)
-		if err != nil {
-			return err
-		}
-		if err := completion.Validate(); err != nil {
-			return err
-		}
-		if completion.Initial != nil {
-			return r.store.FinalizeGenerationClassification(ctx, claim, run.ID, *completion.Initial, r.now())
-		}
-		adjustment := *completion.Adjustment
-		adjustment.RunID = run.ID
-		return r.store.FinalizeGenerationClassificationAdjustment(ctx, claim, adjustment, r.now())
 	default:
 		return fmt.Errorf("generation agent runner cannot execute %s", claim.Workflow.State)
 	}
@@ -341,8 +313,6 @@ func generationPurpose(state domain.WorkflowState) string {
 	switch state {
 	case domain.StateJudging:
 		return JudgePurpose
-	case domain.StateClassifying:
-		return ClassifierPurpose
 	default:
 		return ""
 	}
@@ -352,15 +322,13 @@ func generationPromptVersion(state domain.WorkflowState) string {
 	switch state {
 	case domain.StateJudging:
 		return JudgePromptVersion
-	case domain.StateClassifying:
-		return ClassifierPromptVersion
 	default:
 		return ""
 	}
 }
 
 func generationInputRevision(workflow domain.Workflow) string {
-	parts := []string{workflow.SourceRevision, workflow.CandidateRevisionID, workflow.ClassificationRoadmapRevision}
+	parts := []string{workflow.SourceRevision, workflow.CandidateRevisionID}
 	return strings.Join(parts, ":")
 }
 

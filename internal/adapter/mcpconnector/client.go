@@ -149,24 +149,6 @@ func (c *Client) RequestContentChanges(ctx context.Context, workflowID string, r
 	return response, err
 }
 
-func (c *Client) GetClassification(ctx context.Context, workflowID string) (api.GeneratorClassificationReview, error) {
-	var response api.GeneratorClassificationReview
-	err := c.doJSON(ctx, http.MethodGet, "/generator/workflows/"+url.PathEscape(strings.TrimSpace(workflowID))+"/classification", nil, nil, &response)
-	return response, err
-}
-
-func (c *Client) RequestClassificationChanges(ctx context.Context, workflowID string, request api.GeneratorClassificationChangeRequest) (api.GeneratorWorkflow, error) {
-	var response api.GeneratorWorkflow
-	err := c.doJSON(ctx, http.MethodPost, "/generator/workflows/"+url.PathEscape(strings.TrimSpace(workflowID))+"/classification/changes", nil, request, &response)
-	return response, err
-}
-
-func (c *Client) ConfirmClassificationAndPublish(ctx context.Context, workflowID string, request api.GeneratorClassificationPublicationRequest) (api.GeneratorWorkflow, error) {
-	var response api.GeneratorWorkflow
-	err := c.doJSON(ctx, http.MethodPost, "/generator/workflows/"+url.PathEscape(strings.TrimSpace(workflowID))+"/classification/publish", nil, request, &response)
-	return response, err
-}
-
 func (c *Client) CancelGeneration(ctx context.Context, workflowID string, request api.GeneratorCancellationRequest) (api.GeneratorWorkflow, error) {
 	var response api.GeneratorWorkflow
 	err := c.doJSON(ctx, http.MethodPost, "/generator/workflows/"+url.PathEscape(strings.TrimSpace(workflowID))+"/cancel", nil, request, &response)

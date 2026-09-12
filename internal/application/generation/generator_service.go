@@ -434,30 +434,6 @@ func (s *GeneratorService) ConfirmContent(ctx context.Context, userID string, co
 	if err != nil {
 		return nil, err
 	}
-	return s.store.ConfirmGenerationContent(ctx, workflow.Source.Ref, userID, confirmation, s.now())
-}
-
-func (s *GeneratorService) RequestContentChanges(ctx context.Context, userID string, request domain.ContentChangeRequest) (*domain.Workflow, error) {
-	workflow, err := s.ownedWorkflow(ctx, userID, request.WorkflowID)
-	if err != nil {
-		return nil, err
-	}
-	return s.store.RequestGenerationContentChanges(ctx, workflow.Source.Ref, userID, request, s.now())
-}
-
-func (s *GeneratorService) RequestClassificationChanges(ctx context.Context, userID string, confirmation domain.ClassificationAdjustmentConfirmation) (*domain.Workflow, error) {
-	workflow, err := s.ownedWorkflow(ctx, userID, confirmation.WorkflowID)
-	if err != nil {
-		return nil, err
-	}
-	return s.store.ResumeGenerationClassification(ctx, workflow.Source.Ref, userID, confirmation, s.now())
-}
-
-func (s *GeneratorService) ConfirmClassificationAndPublish(ctx context.Context, userID string, confirmation domain.PublicationConfirmation) (*domain.Workflow, error) {
-	workflow, err := s.ownedWorkflow(ctx, userID, confirmation.WorkflowID)
-	if err != nil {
-		return nil, err
-	}
 	if workflow.CandidateRevisionID != confirmation.CandidateRevisionID {
 		return nil, authoring.ErrVersionConflict
 	}
@@ -473,7 +449,16 @@ func (s *GeneratorService) ConfirmClassificationAndPublish(ctx context.Context, 
 	if err != nil {
 		return nil, domain.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
-	return s.store.BeginClassificationPublication(ctx, workflow.Source.Ref, userID, inspected.Entry.Title, confirmation, s.now())
+	return s.store.ConfirmGenerationContent(ctx, workflow.Source.Ref, userID, confirmation,
+		domain.PublicationMetadata{Title: inspected.Entry.Title, Runtime: inspected.Entry.Runtime}, s.now())
+}
+
+func (s *GeneratorService) RequestContentChanges(ctx context.Context, userID string, request domain.ContentChangeRequest) (*domain.Workflow, error) {
+	workflow, err := s.ownedWorkflow(ctx, userID, request.WorkflowID)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.RequestGenerationContentChanges(ctx, workflow.Source.Ref, userID, request, s.now())
 }
 
 func (s *GeneratorService) CancelGeneration(ctx context.Context, userID string, cancellation domain.Cancellation) (*domain.Workflow, error) {

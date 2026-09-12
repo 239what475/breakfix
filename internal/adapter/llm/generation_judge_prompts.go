@@ -22,7 +22,7 @@ func generationJudgeSystemPrompt() string {
 4. 检查点协议：每个无参数 checks.sh 是否显然会以唯一 JSON 文档报告其执行位置的全部 checkpoint id，失败是否保留诊断，stdout 是否只会有这一份 JSON；检查器是否只观察状态，而非执行、source 或触发 generate.sh、answer.sh 或用户修复脚本。
 5. 运行时契约：Node 的每节点脚本是否只操作自身节点、是否误用 Kubernetes 或底层 Provider API、是否错误依赖并行脚本顺序；K8s 脚本是否只操作目标集群；是否把平台构建或入口职责写入题目资产。
 6. 运行时正确性：必须静态推演全部 generate.sh 完成后的状态、全部 answer.sh 的每个副作用和每个检查点的实际判断。初始化是否构造可修复的明确故障；标准答案是否针对同一事实修复并已经使所有检查点要求的最终状态存在。创建一个用户可执行脚本但不执行它，不是对该最终状态的修复；文件写入后的时间戳、权限等元数据也必须与检查器和题面一致。检查器必须确实证明自己的标题和描述声称的全部状态。K8s 检查器不得依赖 kubectl run、外部探测镜像或不稳定的 Pod 文本匹配。
-7. 字段归属：challenge.yaml 是否仅含题目实现字段，且没有 id、source_slug、image、published_at、tags 等平台或 Roadmap 托管字段。
+7. 字段归属：challenge.yaml 是否包含有效的 type；operations-scenario 的 tags 是否遵守简单标签规则，documentation-example 是否没有 tags；是否混入 id、source_slug、image、content_revision 或 published_at 等平台托管字段。
 
 你必须使用 submit_judgement 交付审核结论。发现任一实质问题时 decision 必须为 reject，feedback 必须用中文说明具体文件、问题和可操作修复方向；没有实质问题时 decision 必须为 pass，feedback 必须为空。不得用普通文本、Markdown、代码块或其他工具替代该调用。工具返回 {"ok":false,"error":"..."} 时，根据 error 在同一次对话中修正并重新调用；只有 {"ok":true} 才表示结果已被接受，此时结束回复。`
 }

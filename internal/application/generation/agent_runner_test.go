@@ -21,7 +21,7 @@ func TestAgentRunnerRetriesJudgeTechnicalErrorWithinOneRun(t *testing.T) {
 		Workflow:        workflow,
 		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
 	}, candidate: revision}
-	runner := newTestAgentRunner(t, store, &failingJudgeExecutor{calls: &store.judgeCalls}, stubClassifierExecutor{})
+	runner := newTestAgentRunner(t, store, &failingJudgeExecutor{calls: &store.judgeCalls})
 	runner.now = func() time.Time { return now }
 
 	processed, err := runner.ProcessOne(context.Background())
@@ -50,7 +50,7 @@ func TestAgentRunnerFinalizesJudgeResult(t *testing.T) {
 		Workflow:        workflow,
 		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
 	}, candidate: revision}
-	runner := newTestAgentRunner(t, store, approvingJudgeExecutor{}, stubClassifierExecutor{})
+	runner := newTestAgentRunner(t, store, approvingJudgeExecutor{})
 	runner.now = func() time.Time { return now }
 
 	processed, err := runner.ProcessOne(context.Background())
@@ -75,7 +75,7 @@ func TestAgentRunnerDispatchesIndependentJudgeWorkflowsConcurrently(t *testing.T
 		finished:         make(chan struct{}, len(claims)),
 	}
 	judge := &blockingJudgeExecutor{started: store.started, finished: store.finished}
-	runner := newTestAgentRunner(t, store, judge, stubClassifierExecutor{})
+	runner := newTestAgentRunner(t, store, judge)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
@@ -111,32 +111,8 @@ func TestAgentRunnerDispatchesIndependentJudgeWorkflowsConcurrently(t *testing.T
 	}
 }
 
-func TestAgentRunnerFinalizesClassifierResult(t *testing.T) {
-	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
-	revision := testAgentCandidate(t)
-	workflow := testAgentWorkflow("workflow-classifier", domain.StateClassifying, revision.ID)
-	store := &agentRunnerStore{claim: domain.Claim{
-		Workflow:        workflow,
-		LeaseCredential: domain.LeaseCredential{StateVersion: 1, LeaseOwner: "server-lease"},
-	}, candidate: revision}
-	classifier := &recordingClassifierExecutor{}
-	runner := newTestAgentRunner(t, store, unexpectedJudgeExecutor{}, classifier)
-	runner.now = func() time.Time { return now }
-
-	processed, err := runner.ProcessOne(context.Background())
-	if err != nil {
-		t.Fatalf("process classifier: %v", err)
-	}
-	if !processed || classifier.calls != 1 {
-		t.Fatalf("classifier processing = processed:%t calls:%d", processed, classifier.calls)
-	}
-	if !store.classificationFinalized {
-		t.Fatal("classifier result was not finalized")
-	}
-}
-
 func TestAgentRunnerRecoveryInterruptsInternalAgentRuns(t *testing.T) {
-	runner := newTestAgentRunner(t, &agentRunnerStore{}, unexpectedJudgeExecutor{}, stubClassifierExecutor{})
+	runner := newTestAgentRunner(t, &agentRunnerStore{}, unexpectedJudgeExecutor{})
 	if err := runner.Recover(context.Background()); err != nil {
 		t.Fatalf("recover generation agent runtime: %v", err)
 	}
@@ -146,9 +122,9 @@ func TestAgentRunnerRecoveryInterruptsInternalAgentRuns(t *testing.T) {
 	}
 }
 
-func newTestAgentRunner(t *testing.T, store GenerationAgentStore, judge JudgeRoleExecutor, classifier ClassifierRoleExecutor) *AgentRunner {
+func newTestAgentRunner(t *testing.T, store GenerationAgentStore, judge JudgeRoleExecutor) *AgentRunner {
 	t.Helper()
-	runner, err := NewAgentRunner(store, judge, classifier, AgentRunnerConfig{
+	runner, err := NewAgentRunner(store, judge, AgentRunnerConfig{
 		ServerID: "server-test", Model: "test-model",
 	})
 	if err != nil {
@@ -178,21 +154,6 @@ func (unexpectedJudgeExecutor) Judge(context.Context, authoring.Plan, *Candidate
 	return Judgement{}, errors.New("unexpected judge execution")
 }
 
-type stubClassifierExecutor struct{}
-
-func (stubClassifierExecutor) Classify(context.Context, domain.Execution, *Candidate) (ClassificationCompletion, error) {
-	return ClassificationCompletion{}, errors.New("unexpected classifier execution")
-}
-
-type recordingClassifierExecutor struct{ calls int }
-
-func (e *recordingClassifierExecutor) Classify(context.Context, domain.Execution, *Candidate) (ClassificationCompletion, error) {
-	e.calls++
-	return ClassificationCompletion{Initial: &domain.ClassificationOutput{
-		Result: domain.ClassificationUnclassifiable, UnclassifiableReason: "暂无合适分类", AdjustmentSuggestion: "补充分类信息",
-	}}, nil
-}
-
 type agentRunnerStore struct {
 	claim                   domain.Claim
 	claimed                 bool
@@ -202,7 +163,6 @@ type agentRunnerStore struct {
 	retryCalls              int
 	interruptCalls          int
 	judgementFinalized      bool
-	classificationFinalized bool
 }
 
 type dispatchStore struct {
@@ -301,15 +261,6 @@ func (s *agentRunnerStore) GetCandidateRevision(_ context.Context, id string) (*
 func (s *agentRunnerStore) FinalizeGenerationJudgement(context.Context, domain.Claim, string, bool, string, time.Time) error {
 	s.judgementFinalized = true
 	return nil
-}
-
-func (s *agentRunnerStore) FinalizeGenerationClassification(context.Context, domain.Claim, string, domain.ClassificationOutput, time.Time) error {
-	s.classificationFinalized = true
-	return nil
-}
-
-func (s *agentRunnerStore) FinalizeGenerationClassificationAdjustment(context.Context, domain.Claim, domain.ClassificationAdjustment, time.Time) error {
-	return errors.New("unexpected classification adjustment finalization")
 }
 
 func (s *agentRunnerStore) ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, *domain.VerificationReport, time.Time) error {

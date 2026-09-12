@@ -58,13 +58,13 @@ func (h *Handler) ListChallenges(c *gin.Context) {
 	for _, published := range challenges {
 		ch := published.Entry
 		s := api.ChallengeSummary{
-			Id:          ch.ID,
-			Title:       ch.Title,
-			Runtime:     challengeSummaryRuntime(ch.Runtime),
-			Difficulty:  api.ChallengeSummaryDifficulty(ch.Difficulty),
+			Id:           ch.ID,
+			Title:        ch.Title,
+			Runtime:      challengeSummaryRuntime(ch.Runtime),
+			Difficulty:   api.ChallengeSummaryDifficulty(ch.Difficulty),
 			ScenarioType: api.ChallengeSummaryScenarioType(published.Catalog.Type),
 			ScenarioTags: append([]string(nil), published.Catalog.Tags...),
-			Description: ch.Description,
+			Description:  ch.Description,
 		}
 		publishedAt := ch.PublishedAt.UTC()
 		s.PublishedAt = publishedAt
@@ -140,9 +140,8 @@ func (h *Handler) GetChallengeContent(c *gin.Context, id string) {
 			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "challenge not found"})
 			return
 		}
-		// A deprecated Challenge has no current Roadmap binding. Its durable
-		// content remains readable for an existing Environment, but there is
-		// no current classification to expose as if it were still published.
+		// A deprecated Challenge has no active Catalog projection. Its durable
+		// content remains readable for an existing Environment.
 		challengeRoadmap = appcatalog.ChallengeRoadmap{Tags: []roadmap.Tag{}, TopicNeighbors: []roadmap.Edge{}, ChallengeNeighbors: []roadmap.Edge{}}
 	} else {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})

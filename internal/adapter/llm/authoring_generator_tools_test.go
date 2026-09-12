@@ -114,12 +114,7 @@ func TestAuthoringGeneratorToolsConfirmPlanThenSubmitCandidate(t *testing.T) {
 
 func TestAuthoringGeneratorToolsAdvanceReviewAndReleaseUnsubmittedWorkspace(t *testing.T) {
 	service := newAuthoringGeneratorToolsService()
-	service.candidate = &generation.Revision{
-		ID: "candidate-one",
-		Classification: &generation.ClassificationProposal{
-			Revision: 3, CandidateRevisionID: "candidate-one", RoadmapRevision: "roadmap-one", Result: generation.ClassificationProposed,
-		},
-	}
+	service.candidate = &generation.Revision{ID: "candidate-one"}
 	conversation := newAuthoringGeneratorConversation(service)
 	ctx := context.Background()
 
@@ -139,36 +134,6 @@ func TestAuthoringGeneratorToolsAdvanceReviewAndReleaseUnsubmittedWorkspace(t *t
 		t.Fatalf("content confirmation = %#v", service.contentConfirmation)
 	}
 
-	classificationResult, err := conversation.getClassification(ctx, `{"workflow_id":"workflow-one"}`)
-	if err != nil {
-		t.Fatalf("get classification: %v", err)
-	}
-	var classification struct {
-		CandidateRevisionID string                             `json:"candidate_revision_id"`
-		Proposal            *generation.ClassificationProposal `json:"classification"`
-	}
-	if err := json.Unmarshal([]byte(classificationResult), &classification); err != nil {
-		t.Fatalf("decode classification result: %v", err)
-	}
-	if classification.CandidateRevisionID != "candidate-one" || classification.Proposal == nil || classification.Proposal.Revision != 3 {
-		t.Fatalf("classification result = %#v", classification)
-	}
-
-	if _, err := conversation.requestClassificationChanges(ctx, `{"workflow_id":"workflow-one","candidate_revision_id":"candidate-one","proposal_revision":3,"feedback":"请收窄标签"}`); err != nil {
-		t.Fatalf("request classification changes: %v", err)
-	}
-	if service.classificationAdjustment.WorkflowID != "workflow-one" || service.classificationAdjustment.CandidateRevisionID != "candidate-one" ||
-		service.classificationAdjustment.ProposalRevision != 3 || service.classificationAdjustment.Feedback != "请收窄标签" {
-		t.Fatalf("classification adjustment = %#v", service.classificationAdjustment)
-	}
-
-	if _, err := conversation.confirmClassificationAndPublish(ctx, `{"workflow_id":"workflow-one","candidate_revision_id":"candidate-one","proposal_revision":3}`); err != nil {
-		t.Fatalf("confirm classification and publish: %v", err)
-	}
-	if service.publication.WorkflowID != "workflow-one" || service.publication.CandidateRevisionID != "candidate-one" || service.publication.ProposalRevision != 3 ||
-		!strings.HasPrefix(service.publication.IdempotencyKey, "authoring-confirm-classification-and-publish-") {
-		t.Fatalf("publication confirmation = %#v", service.publication)
-	}
 }
 
 func newAuthoringGeneratorConversation(service *authoringGeneratorToolsService) *runtimeConversation {
@@ -189,8 +154,6 @@ type authoringGeneratorToolsService struct {
 	writes                   []authoringWorkspaceWrite
 	submissions              []generation.CandidateSubmission
 	contentConfirmation      generation.ContentConfirmation
-	classificationAdjustment generation.ClassificationAdjustmentConfirmation
-	publication              generation.PublicationConfirmation
 	cancellation             generation.Cancellation
 }
 
@@ -278,26 +241,12 @@ func (s *authoringGeneratorToolsService) SubmitCandidate(_ context.Context, _ st
 func (s *authoringGeneratorToolsService) ConfirmContent(_ context.Context, _ string, confirmation generation.ContentConfirmation) (*generation.Workflow, error) {
 	s.contentConfirmation = confirmation
 	workflow := s.workflow
-	workflow.State = generation.StateClassifying
+	workflow.State = generation.StateChallengePublishing
 	return &workflow, nil
 }
 
 func (*authoringGeneratorToolsService) RequestContentChanges(_ context.Context, _ string, _ generation.ContentChangeRequest) (*generation.Workflow, error) {
 	workflow := generation.Workflow{ID: "workflow-one", State: generation.StateGenerating, StateVersion: 2}
-	return &workflow, nil
-}
-
-func (s *authoringGeneratorToolsService) RequestClassificationChanges(_ context.Context, _ string, confirmation generation.ClassificationAdjustmentConfirmation) (*generation.Workflow, error) {
-	s.classificationAdjustment = confirmation
-	workflow := s.workflow
-	workflow.State = generation.StateClassifying
-	return &workflow, nil
-}
-
-func (s *authoringGeneratorToolsService) ConfirmClassificationAndPublish(_ context.Context, _ string, confirmation generation.PublicationConfirmation) (*generation.Workflow, error) {
-	s.publication = confirmation
-	workflow := s.workflow
-	workflow.State = generation.StateChallengePublishing
 	return &workflow, nil
 }
 

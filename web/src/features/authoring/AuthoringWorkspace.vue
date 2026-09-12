@@ -27,7 +27,6 @@ const narrowPane = ref<"plan" | "chat">("plan");
 const pendingMessages = ref<AuthoringMessage[]>([]);
 let pollTimer: number | undefined;
 let streamController: AbortController | undefined;
-let displayedClassificationReview = "";
 
 const sessionStateLabel: Record<string, string> = {
   DraftConversation: "等待题意",
@@ -41,8 +40,6 @@ const workflowStateLabel: Record<string, string> = {
   ArtifactPublishing: "正在发布候选产物",
   Verifying: "正在真实验证",
   NeedsAuthorReview: "等待内容审核",
-  Classifying: "正在分类",
-  NeedsClassificationReview: "等待分类审核",
   ChallengePublishing: "正在发布挑战",
   Published: "已发布",
   Failed: "基础设施失败",
@@ -61,7 +58,6 @@ const activeWorkflow = computed<GeneratorWorkflow | undefined>(() => {
 const candidate = computed(() => generation.value?.candidate);
 const verified = computed(() => generation.value?.verified);
 const verification = computed(() => generation.value?.verification);
-const classification = computed(() => generation.value?.classification);
 const assets = computed(() => generation.value?.assets ?? []);
 const diff = computed(() => generation.value?.diff ?? []);
 const usingVerifiedRevision = computed(() => !!verified.value);
@@ -94,10 +90,6 @@ const tabs = computed(() => {
     entries.push({ id: "diff", label: "Diff" });
   }
   if (verification.value) entries.push({ id: "verification", label: "验证" });
-  if (classification.value) {
-    entries.push({ id: "topic", label: "Topic" });
-    entries.push({ id: "tags", label: "Tags" });
-  }
   return entries;
 });
 const overview = computed(() => {
@@ -131,44 +123,6 @@ const canCompose = computed(() => {
   return !!current && !busy.value && !current.authoring_turn_active && current.state !== "Published";
 });
 const canSend = computed(() => canCompose.value && message.value.trim().length > 0);
-const topicMarkdown = computed(() => {
-  const proposal = classification.value;
-  if (!proposal) return "";
-  if (proposal.result === "unclassifiable") {
-    return `# Topic\n\n当前题目无法可靠归入现有课程 Topic。\n\n## 原因\n\n${proposal.unclassifiable_reason || "分类 Agent 没有返回原因。"}\n\n## 建议\n\n${proposal.adjustment_suggestion || "请调整题目内容后重新生成。"}`;
-  }
-  const topic = proposal.topic;
-  if (!topic) return "# Topic\n\n分类提案尚未提供 Topic。";
-  if (topic.existing) {
-    const value = topic.existing;
-    return `# 已有 Topic\n\n## ${value.title}\n\n${value.definition}\n\n- **领域**：${value.domain.title}\n- **范围**：${value.scope}\n- **非范围**：${value.non_goals}\n\n## 题目归属指引\n\n${value.challenge_guidance}\n\n## 本题归属理由\n\n${topic.reason}`;
-  }
-  if (topic.new) {
-    const value = topic.new;
-    return `# 新建 Topic\n\n## ${value.title}\n\n${value.definition}\n\n- **领域**：${value.domain.title}\n- **范围**：${value.scope}\n- **非范围**：${value.non_goals}\n\n## 题目归属指引\n\n${value.challenge_guidance}\n\n## 本题归属理由\n\n${topic.reason}`;
-  }
-  return "# Topic\n\n分类提案不完整。";
-});
-const tagsMarkdown = computed(() => {
-  const proposal = classification.value;
-  if (!proposal) return "";
-  if (proposal.result === "unclassifiable") {
-    return "# Tags\n\n当前题目尚不能建立可靠分类，因此没有 Tag 提案。";
-  }
-  if (!proposal.tags.length) {
-    return "# Tags\n\n当前题目不需要跨 Topic 的横向筛选 Tag。";
-  }
-  const sections = proposal.tags.map((tag, index) => {
-    if (tag.existing) {
-      return `## ${index + 1}. 已有 Tag：${tag.existing.title}\n\n${tag.existing.description}\n\n**本题使用理由**：${tag.reason}`;
-    }
-    if (tag.new) {
-      return `## ${index + 1}. 新建 Tag：${tag.new.title}\n\n${tag.new.description}\n\n**本题使用理由**：${tag.reason}`;
-    }
-    return `## ${index + 1}. 不完整 Tag 提案`;
-  });
-  return `# Tags\n\n${sections.join("\n\n")}`;
-});
 const displayMessages = computed(() => [
   ...(session.value?.messages ?? []),
   ...pendingMessages.value,
@@ -186,7 +140,6 @@ function shouldPoll() {
     "Building",
     "ArtifactPublishing",
     "Verifying",
-    "Classifying",
     "ChallengePublishing",
   ].includes(workflow.state));
 }
@@ -238,16 +191,6 @@ async function refresh(force = false) {
 }
 
 function syncSelections() {
-  const currentWorkflow = activeWorkflow.value;
-  const currentClassification = classification.value;
-  const classificationReview =
-    currentWorkflow?.state === "NeedsClassificationReview" && currentClassification
-      ? `${currentWorkflow.id}:${currentClassification.revision}`
-      : "";
-  if (classificationReview && classificationReview !== displayedClassificationReview) {
-    activeTab.value = "topic";
-  }
-  displayedClassificationReview = classificationReview;
   const currentTabs = new Set(tabs.value.map((entry) => entry.id));
   if (!currentTabs.has(activeTab.value)) activeTab.value = "overview";
   if (!activeAsset.value && assets.value[0]) activeAsset.value = assets.value[0].path;
@@ -394,8 +337,8 @@ onScopeDispose(() => {
       <section class="authoring-plan-pane" :class="{ 'narrow-hidden': narrowPane !== 'plan' }">
         <header class="authoring-plan-heading">
           <div>
-            <p class="eyebrow">{{ classification ? "Classification proposal" : candidate ? "Candidate review" : "Intent revision" }}</p>
-            <h1>{{ classification ? "分类审核" : candidate ? "题目审核" : "题意约定" }}</h1>
+            <p class="eyebrow">{{ candidate ? "Candidate review" : "Intent revision" }}</p>
+            <h1>{{ candidate ? "题目审核" : "题意约定" }}</h1>
           </div>
           <div class="authoring-plan-actions">
             <div v-if="session" class="authoring-status" :data-state="displayState">
@@ -427,8 +370,6 @@ onScopeDispose(() => {
           <div v-if="!session" class="authoring-empty"><strong>正在创建作者会话</strong></div>
           <MarkdownDocument v-else-if="activeTab === 'overview'" :source="overview" />
           <MarkdownDocument v-else-if="activeCheckpoint" :source="`# ${activeCheckpoint.title}\n\n${activeCheckpoint.markdown}`" />
-          <MarkdownDocument v-else-if="activeTab === 'topic'" :source="topicMarkdown" />
-          <MarkdownDocument v-else-if="activeTab === 'tags'" :source="tagsMarkdown" />
           <div v-else-if="activeTab === 'assets'" class="authoring-code-view">
             <select v-if="assets.length" v-model="activeAsset" aria-label="候选文件">
               <option v-for="asset in assets" :key="asset.path" :value="asset.path">{{ asset.path }}</option>

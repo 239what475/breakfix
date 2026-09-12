@@ -36,7 +36,7 @@ const (
 )
 
 // MaxAttempts is the bounded retry budget used by short, typed agent tasks
-// such as Judge, Classifier, and Roadmap. Interactive Authoring instead uses
+// such as Judge and Roadmap maintenance. Interactive Authoring instead uses
 // its own deadline as the only turn budget.
 const MaxAttempts = 5
 

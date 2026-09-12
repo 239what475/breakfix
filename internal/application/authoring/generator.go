@@ -27,7 +27,5 @@ type GeneratorOperations interface {
 
 	ConfirmContent(context.Context, string, generation.ContentConfirmation) (*generation.Workflow, error)
 	RequestContentChanges(context.Context, string, generation.ContentChangeRequest) (*generation.Workflow, error)
-	RequestClassificationChanges(context.Context, string, generation.ClassificationAdjustmentConfirmation) (*generation.Workflow, error)
-	ConfirmClassificationAndPublish(context.Context, string, generation.PublicationConfirmation) (*generation.Workflow, error)
 	CancelGeneration(context.Context, string, generation.Cancellation) (*generation.Workflow, error)
 }

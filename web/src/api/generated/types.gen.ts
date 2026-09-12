@@ -341,11 +341,10 @@ export type GeneratorWorkflow = {
     id: string;
     session_id: string;
     plan_revision: number;
-    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'Classifying' | 'NeedsClassificationReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
+    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
     state_version: number;
     runtime_attempt: number;
     candidate_revision_id?: string;
-    classification_roadmap_revision?: string;
     last_error?: string | null;
     finalizer_error_category?: 'deterministic' | 'transient';
     finalizer_last_error?: string | null;
@@ -449,7 +448,6 @@ export type GeneratorGeneration = {
     candidate?: AuthoringCandidate;
     verified?: VerifiedChallenge;
     verification?: AuthoringVerificationReport;
-    classification?: AuthoringClassificationProposal;
     assets: Array<AuthoringAsset>;
     diff: Array<AuthoringFileDiff>;
 };
@@ -464,12 +462,11 @@ export type GeneratorReviewBundle = {
 
 export type GeneratorReviewManifest = {
     schema_version: number;
-    kind: 'content' | 'classification';
+    kind: 'content';
     workflow_id: string;
     workflow_state: string;
     candidate_revision_id: string;
     candidate_archive_sha256: string;
-    proposal_revision: number;
     payload_sha256: string;
     exported_at: string;
 };
@@ -538,65 +535,8 @@ export type GeneratorContentChangeRequest = {
     idempotency_key: string;
 };
 
-export type GeneratorClassificationReview = {
-    workflow: GeneratorWorkflow;
-    candidate: AuthoringCandidate;
-    classification: AuthoringClassificationProposal;
-};
-
-export type GeneratorClassificationChangeRequest = {
-    candidate_revision_id: string;
-    proposal_revision: number;
-    feedback: string;
-    idempotency_key: string;
-};
-
-export type GeneratorClassificationPublicationRequest = {
-    candidate_revision_id: string;
-    proposal_revision: number;
-    idempotency_key: string;
-};
-
 export type GeneratorCancellationRequest = {
     idempotency_key: string;
-};
-
-export type AuthoringClassificationNewTopic = {
-    domain: RoadmapReference;
-    title: string;
-    definition: string;
-    scope: string;
-    non_goals: string;
-    challenge_guidance: string;
-};
-
-export type AuthoringClassificationTopic = {
-    existing?: RoadmapTopic;
-    new?: AuthoringClassificationNewTopic;
-    reason: string;
-};
-
-export type AuthoringClassificationNewTag = {
-    title: string;
-    description: string;
-};
-
-export type AuthoringClassificationTag = {
-    existing?: RoadmapTag;
-    new?: AuthoringClassificationNewTag;
-    reason: string;
-};
-
-export type AuthoringClassificationProposal = {
-    revision: number;
-    candidate_revision_id: string;
-    roadmap_revision: string;
-    result: 'proposed' | 'unclassifiable';
-    topic?: AuthoringClassificationTopic;
-    tags: Array<AuthoringClassificationTag>;
-    unclassifiable_reason?: string;
-    adjustment_suggestion?: string;
-    updated_at: string;
 };
 
 export type AuthoringSession = {
@@ -1276,7 +1216,7 @@ export type GetGeneratorReviewBundleData = {
         workflow_id: string;
     };
     query: {
-        kind: 'content' | 'classification';
+        kind: 'content';
     };
     url: '/generator/workflows/{workflow_id}/review-bundle';
 };
@@ -1519,7 +1459,7 @@ export type ConfirmGeneratorContentError = ConfirmGeneratorContentErrors[keyof C
 
 export type ConfirmGeneratorContentResponses = {
     /**
-     * Workflow advanced to classification
+     * Workflow advanced to challenge publication
      */
     200: GeneratorWorkflow;
 };
@@ -1552,87 +1492,6 @@ export type RequestGeneratorContentChangesResponses = {
 };
 
 export type RequestGeneratorContentChangesResponse = RequestGeneratorContentChangesResponses[keyof RequestGeneratorContentChangesResponses];
-
-export type GetGeneratorClassificationData = {
-    body?: never;
-    path: {
-        workflow_id: string;
-    };
-    query?: never;
-    url: '/generator/workflows/{workflow_id}/classification';
-};
-
-export type GetGeneratorClassificationErrors = {
-    /**
-     * Error
-     */
-    404: ErrorResponse;
-};
-
-export type GetGeneratorClassificationError = GetGeneratorClassificationErrors[keyof GetGeneratorClassificationErrors];
-
-export type GetGeneratorClassificationResponses = {
-    /**
-     * Candidate-bound classification proposal
-     */
-    200: GeneratorClassificationReview;
-};
-
-export type GetGeneratorClassificationResponse = GetGeneratorClassificationResponses[keyof GetGeneratorClassificationResponses];
-
-export type RequestGeneratorClassificationChangesData = {
-    body: GeneratorClassificationChangeRequest;
-    path: {
-        workflow_id: string;
-    };
-    query?: never;
-    url: '/generator/workflows/{workflow_id}/classification/changes';
-};
-
-export type RequestGeneratorClassificationChangesErrors = {
-    /**
-     * Error
-     */
-    409: ErrorResponse;
-};
-
-export type RequestGeneratorClassificationChangesError = RequestGeneratorClassificationChangesErrors[keyof RequestGeneratorClassificationChangesErrors];
-
-export type RequestGeneratorClassificationChangesResponses = {
-    /**
-     * Workflow advanced to classification
-     */
-    200: GeneratorWorkflow;
-};
-
-export type RequestGeneratorClassificationChangesResponse = RequestGeneratorClassificationChangesResponses[keyof RequestGeneratorClassificationChangesResponses];
-
-export type ConfirmGeneratorClassificationAndPublishData = {
-    body: GeneratorClassificationPublicationRequest;
-    path: {
-        workflow_id: string;
-    };
-    query?: never;
-    url: '/generator/workflows/{workflow_id}/classification/publish';
-};
-
-export type ConfirmGeneratorClassificationAndPublishErrors = {
-    /**
-     * Error
-     */
-    409: ErrorResponse;
-};
-
-export type ConfirmGeneratorClassificationAndPublishError = ConfirmGeneratorClassificationAndPublishErrors[keyof ConfirmGeneratorClassificationAndPublishErrors];
-
-export type ConfirmGeneratorClassificationAndPublishResponses = {
-    /**
-     * Workflow advanced to challenge publication
-     */
-    200: GeneratorWorkflow;
-};
-
-export type ConfirmGeneratorClassificationAndPublishResponse = ConfirmGeneratorClassificationAndPublishResponses[keyof ConfirmGeneratorClassificationAndPublishResponses];
 
 export type CancelGenerationData = {
     body: GeneratorCancellationRequest;

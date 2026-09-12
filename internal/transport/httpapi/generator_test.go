@@ -183,7 +183,7 @@ func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
 	decodeGeneratorHTTPResponse(t, response, &bundle)
 	if bundle.Manifest.SchemaVersion != reviewBundleSchemaVersion || bundle.Manifest.Kind != api.GeneratorReviewManifestKindContent ||
 		bundle.Manifest.WorkflowId != workflow.ID || bundle.Manifest.CandidateRevisionId != service.generation.Candidate.ID ||
-		bundle.Manifest.WorkflowState != string(generation.StateNeedsAuthorReview) || bundle.Manifest.ProposalRevision != 0 ||
+		bundle.Manifest.WorkflowState != string(generation.StateNeedsAuthorReview) ||
 		bundle.Manifest.CandidateArchiveSha256 != service.generation.Candidate.ArchiveSHA256 || bundle.Manifest.PayloadSha256 == "" {
 		t.Fatalf("review bundle manifest = %#v", bundle.Manifest)
 	}
@@ -210,57 +210,6 @@ func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
 		if strings.Contains(joined, sensitive) {
 			t.Fatalf("review bundle leaked %q", sensitive)
 		}
-	}
-}
-
-func TestGeneratorHTTPAPIExportsImmutableClassificationReviewBundle(t *testing.T) {
-	service := newGeneratorHTTPService()
-	archive := generatorHTTPReviewArchive(t)
-	archivePath := filepath.Join(t.TempDir(), "private", "candidate.tar.gz")
-	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(archivePath, archive, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	workflow := generatorHTTPWorkflow("workflow-classification-bundle", "session-one", 2)
-	workflow.State = generation.StateNeedsClassificationReview
-	workflow.ClassificationRoadmapRevision = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	service.generation = &appgeneration.GenerationView{
-		Workflow: workflow,
-		Candidate: &generation.Revision{
-			ID: "candidate-classification-bundle", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
-			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
-			Classification: &generation.ClassificationProposal{
-				Revision: 2, CandidateRevisionID: "candidate-classification-bundle", RoadmapRevision: workflow.ClassificationRoadmapRevision,
-				Result: generation.ClassificationUnclassifiable, UnclassifiableReason: "当前 Roadmap 没有匹配 Topic。", AdjustmentSuggestion: "请补充 Topic。", UpdatedAt: time.Now().UTC(),
-			},
-		},
-	}
-	router, cfg := newGeneratorHTTPRouter(t, service)
-
-	response := generatorHTTPRequest(t, router, cfg, http.MethodGet, "/api/generator/workflows/workflow-classification-bundle/review-bundle?kind=classification", nil)
-	if response.Code != http.StatusOK {
-		t.Fatalf("get classification review bundle status = %d: %s", response.Code, response.Body.String())
-	}
-	var bundle api.GeneratorReviewBundle
-	decodeGeneratorHTTPResponse(t, response, &bundle)
-	if bundle.Manifest.Kind != api.GeneratorReviewManifestKindClassification || bundle.Manifest.WorkflowState != string(generation.StateNeedsClassificationReview) ||
-		bundle.Manifest.ProposalRevision != 2 || bundle.Manifest.CandidateRevisionId != service.generation.Candidate.ID {
-		t.Fatalf("classification review manifest = %#v", bundle.Manifest)
-	}
-	payload, err := base64.StdEncoding.DecodeString(bundle.Payload)
-	if err != nil {
-		t.Fatalf("decode classification review payload: %v", err)
-	}
-	entries := generatorHTTPReviewBundleEntries(t, payload)
-	for _, required := range []string{"topic.md", "tags.md", "classification.md"} {
-		if _, found := entries[required]; !found {
-			t.Fatalf("classification review bundle is missing %q: %#v", required, entries)
-		}
-	}
-	if strings.Contains(response.Body.String()+"\n"+string(payload), archivePath) {
-		t.Fatalf("classification review bundle leaked archive path %q", archivePath)
 	}
 }
 
@@ -487,16 +436,6 @@ func (*generatorHTTPService) ConfirmContent(context.Context, string, generation.
 }
 
 func (*generatorHTTPService) RequestContentChanges(context.Context, string, generation.ContentChangeRequest) (*generation.Workflow, error) {
-	workflow := generatorHTTPWorkflow("workflow-one", "session-one", 1)
-	return &workflow, nil
-}
-
-func (*generatorHTTPService) RequestClassificationChanges(context.Context, string, generation.ClassificationAdjustmentConfirmation) (*generation.Workflow, error) {
-	workflow := generatorHTTPWorkflow("workflow-one", "session-one", 1)
-	return &workflow, nil
-}
-
-func (*generatorHTTPService) ConfirmClassificationAndPublish(context.Context, string, generation.PublicationConfirmation) (*generation.Workflow, error) {
 	workflow := generatorHTTPWorkflow("workflow-one", "session-one", 1)
 	return &workflow, nil
 }

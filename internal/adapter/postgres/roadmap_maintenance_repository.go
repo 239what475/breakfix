@@ -224,12 +224,12 @@ func requeueRoadmapChallengeTx(ctx context.Context, tx *Tx, challengeID, topicID
 	var pending bool
 	if err := tx.QueryRowContext(ctx, `SELECT topic_id, NOT challenge_processed FROM roadmap_entries WHERE challenge_id = ? FOR UPDATE`, challengeID).Scan(&storedTopicID, &pending); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return generation.ErrClassificationConflict
+			return roadmap.ErrNoCurrentRevision
 		}
 		return fmt.Errorf("lock roadmap challenge entry: %w", err)
 	}
 	if storedTopicID != topicID {
-		return generation.ErrClassificationConflict
+		return roadmap.ErrNoCurrentRevision
 	}
 	if pending {
 		return nil
@@ -294,9 +294,9 @@ func hasActiveRoadmapWorkflowTx(ctx context.Context, tx *Tx) (bool, error) {
 
 func hasGenerationExecutionTx(ctx context.Context, tx *Tx) (bool, error) {
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM generation_workflows WHERE state IN (?, ?, ?, ?, ?, ?, ?))`,
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM generation_workflows WHERE state IN (?, ?, ?, ?, ?, ?))`,
 		generation.StateGenerating, generation.StateJudging, generation.StateBuilding, generation.StateArtifactPublishing,
-		generation.StateVerifying, generation.StateClassifying, generation.StateChallengePublishing).Scan(&exists); err != nil {
+		generation.StateVerifying, generation.StateChallengePublishing).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check active generation execution: %w", err)
 	}
 	return exists, nil

@@ -35,7 +35,7 @@ type WorkspaceRepository interface {
 }
 
 // GeneratorStore owns the durable, user-facing generation lifecycle. It is
-// intentionally narrower than the Server's internal Judge/Classifier runner:
+// intentionally narrower than the Server's internal Judge runner:
 // generator clients cannot claim workflows or create AgentRuns.
 type GeneratorStore interface {
 	CreateGenerationWorkflow(context.Context, string, string, generation.StartConfirmation, time.Time) (*generation.Workflow, error)
@@ -44,10 +44,8 @@ type GeneratorStore interface {
 	GetCandidateRevision(context.Context, string) (*generation.Revision, error)
 	FindSubmittedGenerationCandidate(context.Context, string, string, generation.CandidateSubmission) (*generation.Revision, error)
 	SubmitGenerationCandidate(context.Context, string, string, generation.CandidateSubmission, generation.Revision, time.Time) (*generation.Revision, error)
-	ConfirmGenerationContent(context.Context, string, string, generation.ContentConfirmation, time.Time) (*generation.Workflow, error)
+	ConfirmGenerationContent(context.Context, string, string, generation.ContentConfirmation, generation.PublicationMetadata, time.Time) (*generation.Workflow, error)
 	RequestGenerationContentChanges(context.Context, string, string, generation.ContentChangeRequest, time.Time) (*generation.Workflow, error)
-	ResumeGenerationClassification(context.Context, string, string, generation.ClassificationAdjustmentConfirmation, time.Time) (*generation.Workflow, error)
-	BeginClassificationPublication(context.Context, string, string, string, generation.PublicationConfirmation, time.Time) (*generation.Workflow, error)
 	CancelGenerationWorkflow(context.Context, string, string, generation.Cancellation, time.Time) (*generation.Workflow, error)
 }
 

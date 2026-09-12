@@ -28,7 +28,6 @@ type ReviewProjection struct {
 	WorkflowID          string `json:"workflow_id"`
 	CandidateRevisionID string `json:"candidate_revision_id"`
 	Kind                string `json:"kind"`
-	ProposalRevision    int    `json:"proposal_revision"`
 	ReviewPath          string `json:"review_path"`
 }
 
@@ -88,7 +87,6 @@ func (p *ReviewProjector) Project(bundle api.GeneratorReviewBundle) (ReviewProje
 		WorkflowID:          manifest.WorkflowId,
 		CandidateRevisionID: manifest.CandidateRevisionId,
 		Kind:                kind,
-		ProposalRevision:    manifest.ProposalRevision,
 		ReviewPath:          target,
 	}
 
@@ -143,17 +141,12 @@ func validateReviewManifest(manifest api.GeneratorReviewManifest) (kind, version
 	}
 	switch string(manifest.Kind) {
 	case "content":
-		if manifest.WorkflowState != "NeedsAuthorReview" || manifest.ProposalRevision != 0 {
+		if manifest.WorkflowState != "NeedsAuthorReview" {
 			return "", "", errors.New("content review manifest is not bound to content review state")
 		}
 		return "content", manifest.CandidateRevisionId, nil
-	case "classification":
-		if manifest.WorkflowState != "NeedsClassificationReview" || manifest.ProposalRevision < 1 {
-			return "", "", errors.New("classification review manifest is not bound to classification review state")
-		}
-		return "classification", fmt.Sprintf("%s-%d", manifest.CandidateRevisionId, manifest.ProposalRevision), nil
 	default:
-		return "", "", errors.New("review manifest kind must be content or classification")
+		return "", "", errors.New("review manifest kind must be content")
 	}
 }
 
@@ -219,7 +212,6 @@ func sameReviewManifest(left, right api.GeneratorReviewManifest) bool {
 		left.WorkflowState == right.WorkflowState &&
 		left.CandidateRevisionId == right.CandidateRevisionId &&
 		left.CandidateArchiveSha256 == right.CandidateArchiveSha256 &&
-		left.ProposalRevision == right.ProposalRevision &&
 		left.PayloadSha256 == right.PayloadSha256
 }
 
@@ -277,10 +269,7 @@ func safeReviewPayloadPath(kind, value string) (string, error) {
 		}
 		return "", fmt.Errorf("content review payload path is not allowed: %q", value)
 	}
-	if value == "topic.md" || value == "tags.md" || value == "classification.md" {
-		return value, nil
-	}
-	return "", fmt.Errorf("classification review payload path is not allowed: %q", value)
+	return "", fmt.Errorf("review payload path is not allowed: %q", value)
 }
 
 func writeReviewTarFile(root, name string, reader io.Reader) error {

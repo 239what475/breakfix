@@ -22,25 +22,22 @@ const (
 var (
 	ErrWorkflowNotFound           = errors.New("generation workflow not found")
 	ErrLeaseLost                  = runtime.ErrLeaseLost
-	ErrClassificationConflict     = errors.New("classification proposal conflicts with the current roadmap")
-	ErrChallengeSourceRefConflict = errors.New("challenge source reference conflicts with the current roadmap")
+	ErrChallengeSourceRefConflict = errors.New("challenge source reference conflicts with an existing challenge")
 )
 
 type WorkflowState string
 
 const (
-	StateGenerating                WorkflowState = "Generating"
-	StateJudging                   WorkflowState = "Judging"
-	StateBuilding                  WorkflowState = "Building"
-	StateArtifactPublishing        WorkflowState = "ArtifactPublishing"
-	StateVerifying                 WorkflowState = "Verifying"
-	StateNeedsAuthorReview         WorkflowState = "NeedsAuthorReview"
-	StateClassifying               WorkflowState = "Classifying"
-	StateNeedsClassificationReview WorkflowState = "NeedsClassificationReview"
-	StateChallengePublishing       WorkflowState = "ChallengePublishing"
-	StatePublished                 WorkflowState = "Published"
-	StateFailed                    WorkflowState = "Failed"
-	StateCancelled                 WorkflowState = "Cancelled"
+	StateGenerating          WorkflowState = "Generating"
+	StateJudging             WorkflowState = "Judging"
+	StateBuilding            WorkflowState = "Building"
+	StateArtifactPublishing  WorkflowState = "ArtifactPublishing"
+	StateVerifying           WorkflowState = "Verifying"
+	StateNeedsAuthorReview   WorkflowState = "NeedsAuthorReview"
+	StateChallengePublishing WorkflowState = "ChallengePublishing"
+	StatePublished           WorkflowState = "Published"
+	StateFailed              WorkflowState = "Failed"
+	StateCancelled           WorkflowState = "Cancelled"
 )
 
 // StartConfirmation is the explicit, idempotent confirmation of one author
@@ -54,8 +51,8 @@ func (c StartConfirmation) Valid() bool {
 	return c.PlanRevision >= 0 && validIdempotencyKey(c.IdempotencyKey)
 }
 
-// ContentConfirmation freezes one verified CandidateRevision and starts the
-// independent classification lifecycle.
+// ContentConfirmation freezes one verified CandidateRevision and starts its
+// explicit publication lifecycle.
 type ContentConfirmation struct {
 	WorkflowID          string `json:"workflow_id"`
 	CandidateRevisionID string `json:"candidate_revision_id"`
@@ -93,35 +90,6 @@ func (c Cancellation) Valid() bool {
 	return strings.TrimSpace(c.WorkflowID) != "" && validIdempotencyKey(c.IdempotencyKey)
 }
 
-// ClassificationAdjustmentConfirmation requests one new private Classifying
-// run for the reviewed proposal. The proposal revision is the optimistic
-// concurrency fence; the author message itself is classified by the Agent.
-type ClassificationAdjustmentConfirmation struct {
-	WorkflowID          string `json:"workflow_id"`
-	CandidateRevisionID string `json:"candidate_revision_id"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	Feedback            string `json:"feedback"`
-	IdempotencyKey      string `json:"idempotency_key"`
-}
-
-func (c ClassificationAdjustmentConfirmation) Valid() bool {
-	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" &&
-		c.ProposalRevision > 0 && strings.TrimSpace(c.Feedback) != "" && validIdempotencyKey(c.IdempotencyKey)
-}
-
-// PublicationConfirmation makes a reviewed private classification proposal
-// public. The proposal revision is the optimistic-concurrency fence.
-type PublicationConfirmation struct {
-	WorkflowID          string `json:"workflow_id"`
-	CandidateRevisionID string `json:"candidate_revision_id"`
-	ProposalRevision    int    `json:"proposal_revision"`
-	IdempotencyKey      string `json:"idempotency_key"`
-}
-
-func (c PublicationConfirmation) Valid() bool {
-	return strings.TrimSpace(c.WorkflowID) != "" && strings.TrimSpace(c.CandidateRevisionID) != "" && c.ProposalRevision > 0 && validIdempotencyKey(c.IdempotencyKey)
-}
-
 func validIdempotencyKey(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && len(value) <= 200
@@ -130,7 +98,7 @@ func validIdempotencyKey(value string) bool {
 func (s WorkflowState) Valid() bool {
 	switch s {
 	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
-		StateVerifying, StateNeedsAuthorReview, StateClassifying, StateNeedsClassificationReview,
+		StateVerifying, StateNeedsAuthorReview,
 		StateChallengePublishing, StatePublished, StateFailed, StateCancelled:
 		return true
 	default:
@@ -146,7 +114,7 @@ func (s WorkflowState) Terminal() bool {
 // Agent Runtime. Runtime Worker identities can never claim these states.
 func (s WorkflowState) AgentState() bool {
 	switch s {
-	case StateJudging, StateClassifying:
+	case StateJudging:
 		return true
 	default:
 		return false
@@ -165,7 +133,7 @@ func (s WorkflowState) RuntimeState() bool {
 }
 
 func (s WorkflowState) Review() bool {
-	return s == StateNeedsAuthorReview || s == StateNeedsClassificationReview
+	return s == StateNeedsAuthorReview
 }
 
 type FailureClass string
@@ -195,14 +163,10 @@ func (f Failure) Validate() error {
 // Server after an infrastructure failure or expired Runtime Worker lease.
 // LeaseOwner is randomized for every claim and fences late reports.
 type Workflow struct {
-	ID                            string        `json:"id"`
-	Source                        Source        `json:"source"`
-	SourceRevision                string        `json:"source_revision"`
-	State                         WorkflowState `json:"state"`
-	ClassificationRoadmapRevision string        `json:"classification_roadmap_revision,omitempty"`
-	// ClassificationFeedback is the one pending author message for a resumed
-	// Classifying run. It is private workflow input, never Roadmap content.
-	ClassificationFeedback   string               `json:"classification_feedback,omitempty"`
+	ID                       string               `json:"id"`
+	Source                   Source               `json:"source"`
+	SourceRevision           string               `json:"source_revision"`
+	State                    WorkflowState        `json:"state"`
 	CandidateRevisionID      string               `json:"candidate_revision_id,omitempty"`
 	WorkspaceSnapshotDigest  string               `json:"-"`
 	ActiveAgentRunID         string               `json:"active_agent_run_id,omitempty"`

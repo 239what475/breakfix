@@ -56,8 +56,8 @@ func (q TagSearch) Validate() error {
 	return nil
 }
 
-// TopicMatch is intentionally compact. A Classifying Agent must call
-// ReadTopic when it needs the complete definition before selecting a topic.
+// TopicMatch is intentionally compact. A caller must call ReadTopic when it
+// needs the complete definition.
 type TopicMatch struct {
 	ID          string     `json:"id"`
 	SourceRef   string     `json:"source_ref"`
@@ -67,8 +67,8 @@ type TopicMatch struct {
 	MatchReason string     `json:"match_reason"`
 }
 
-// TagMatch is intentionally compact. A Classifying Agent must call ReadTag
-// when it needs the complete definition before selecting a tag.
+// TagMatch is intentionally compact. A caller must call ReadTag when it needs
+// the complete definition.
 type TagMatch struct {
 	ID          string `json:"id"`
 	SourceRef   string `json:"source_ref"`

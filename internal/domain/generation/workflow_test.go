@@ -2,18 +2,14 @@ package generation
 
 import "testing"
 
-func TestGenerationStateClassification(t *testing.T) {
+func TestGenerationStatesHaveOneExecutor(t *testing.T) {
 	if StateGenerating.AgentState() || StateGenerating.RuntimeState() {
 		t.Fatal("Generating must be user-directed workspace activity")
-	}
-	if !StateClassifying.AgentState() || StateClassifying.RuntimeState() {
-		t.Fatal("Classifying must belong only to the Server Agent Runtime")
 	}
 	if !StateBuilding.RuntimeState() || StateBuilding.AgentState() || !StateChallengePublishing.RuntimeState() {
 		t.Fatal("external runtime states must belong only to Runtime Worker")
 	}
-	if StateNeedsAuthorReview.AgentState() || StateNeedsAuthorReview.RuntimeState() ||
-		StateNeedsClassificationReview.AgentState() || StateNeedsClassificationReview.RuntimeState() {
+	if StateNeedsAuthorReview.AgentState() || StateNeedsAuthorReview.RuntimeState() {
 		t.Fatal("author review states must have no active executor")
 	}
 	if !StatePublished.Terminal() || !StateCancelled.Terminal() {

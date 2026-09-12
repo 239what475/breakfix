@@ -68,9 +68,9 @@ func TestRoadmapMaintenanceWaitsForGenerationIdleWindowAndLeasesTasks(t *testing
 		t.Fatalf("request maintenance = %v, %v", requested, err)
 	}
 	if _, err := database.conn.ExecContext(ctx, `INSERT INTO generation_workflows
-		(id, source_kind, source_ref, source_revision, state, classification_roadmap_revision, classification_feedback,
+		(id, source_kind, source_ref, source_revision, state,
 		candidate_revision_id, active_agent_run_id, state_version, runtime_attempt, lease_owner, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, 1, 0, '', ?, '', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, 0, '', ?, '', ?, ?)`,
 		"roadmap-blocking-generation", generation.SourceAuthoring, "roadmap-blocking-session", "1", generation.StateGenerating,
 		now, now, now); err != nil {
 		t.Fatalf("insert active generation workflow: %v", err)

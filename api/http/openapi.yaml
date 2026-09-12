@@ -581,7 +581,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [content, classification]
+            enum: [content]
       responses:
         "200":
           description: Version-bound review manifest and deterministic tar.gz payload
@@ -767,7 +767,7 @@ paths:
   /generator/workflows/{workflow_id}/content/confirm:
     post:
       operationId: confirmGeneratorContent
-      summary: Confirm a verified candidate and begin classification
+      summary: Confirm a verified candidate and begin publication
       tags: [generator]
       security:
         - bearerAuth: []
@@ -781,7 +781,7 @@ paths:
               $ref: "#/components/schemas/GeneratorContentConfirmationRequest"
       responses:
         "200":
-          description: Workflow advanced to classification
+          description: Workflow advanced to challenge publication
           content:
             application/json:
               schema:
@@ -807,75 +807,6 @@ paths:
       responses:
         "200":
           description: Workflow returned to generating
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GeneratorWorkflow"
-        "409":
-          $ref: "#/components/responses/Error"
-
-  /generator/workflows/{workflow_id}/classification:
-    get:
-      operationId: getGeneratorClassification
-      summary: Read the current private classification proposal for one workflow
-      tags: [generator]
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/GeneratorWorkflowID"
-      responses:
-        "200":
-          description: Candidate-bound classification proposal
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GeneratorClassificationReview"
-        "404":
-          $ref: "#/components/responses/Error"
-
-  /generator/workflows/{workflow_id}/classification/changes:
-    post:
-      operationId: requestGeneratorClassificationChanges
-      summary: Ask the Server classifier to revise one private proposal
-      tags: [generator]
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/GeneratorWorkflowID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GeneratorClassificationChangeRequest"
-      responses:
-        "200":
-          description: Workflow advanced to classification
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GeneratorWorkflow"
-        "409":
-          $ref: "#/components/responses/Error"
-
-  /generator/workflows/{workflow_id}/classification/publish:
-    post:
-      operationId: confirmGeneratorClassificationAndPublish
-      summary: Confirm one private classification proposal and begin challenge publication
-      tags: [generator]
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/GeneratorWorkflowID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GeneratorClassificationPublicationRequest"
-      responses:
-        "200":
-          description: Workflow advanced to challenge publication
           content:
             application/json:
               schema:
@@ -1663,7 +1594,7 @@ components:
           minimum: 0
         state:
           type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, Classifying, NeedsClassificationReview, ChallengePublishing, Published, Failed, Cancelled]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, Published, Failed, Cancelled]
         state_version:
           type: integer
           format: int64
@@ -1672,8 +1603,6 @@ components:
           type: integer
           minimum: 0
         candidate_revision_id:
-          type: string
-        classification_roadmap_revision:
           type: string
         last_error:
           type: string
@@ -1903,8 +1832,6 @@ components:
           $ref: "#/components/schemas/VerifiedChallenge"
         verification:
           $ref: "#/components/schemas/AuthoringVerificationReport"
-        classification:
-          $ref: "#/components/schemas/AuthoringClassificationProposal"
         assets:
           type: array
           items:
@@ -1926,14 +1853,14 @@ components:
 
     GeneratorReviewManifest:
       type: object
-      required: [schema_version, kind, workflow_id, workflow_state, candidate_revision_id, candidate_archive_sha256, proposal_revision, payload_sha256, exported_at]
+      required: [schema_version, kind, workflow_id, workflow_state, candidate_revision_id, candidate_archive_sha256, payload_sha256, exported_at]
       properties:
         schema_version:
           type: integer
           minimum: 1
         kind:
           type: string
-          enum: [content, classification]
+          enum: [content]
         workflow_id:
           type: string
         workflow_state:
@@ -1943,9 +1870,6 @@ components:
         candidate_archive_sha256:
           type: string
           pattern: '^sha256:[0-9a-f]{64}$'
-        proposal_revision:
-          type: integer
-          minimum: 0
         payload_sha256:
           type: string
           pattern: '^sha256:[0-9a-f]{64}$'
@@ -2082,48 +2006,6 @@ components:
           minLength: 1
           maxLength: 200
 
-    GeneratorClassificationReview:
-      type: object
-      required: [workflow, candidate, classification]
-      properties:
-        workflow:
-          $ref: "#/components/schemas/GeneratorWorkflow"
-        candidate:
-          $ref: "#/components/schemas/AuthoringCandidate"
-        classification:
-          $ref: "#/components/schemas/AuthoringClassificationProposal"
-
-    GeneratorClassificationChangeRequest:
-      type: object
-      required: [candidate_revision_id, proposal_revision, feedback, idempotency_key]
-      properties:
-        candidate_revision_id:
-          type: string
-        proposal_revision:
-          type: integer
-          minimum: 1
-        feedback:
-          type: string
-          minLength: 1
-        idempotency_key:
-          type: string
-          minLength: 1
-          maxLength: 200
-
-    GeneratorClassificationPublicationRequest:
-      type: object
-      required: [candidate_revision_id, proposal_revision, idempotency_key]
-      properties:
-        candidate_revision_id:
-          type: string
-        proposal_revision:
-          type: integer
-          minimum: 1
-        idempotency_key:
-          type: string
-          minLength: 1
-          maxLength: 200
-
     GeneratorCancellationRequest:
       type: object
       required: [idempotency_key]
@@ -2132,82 +2014,6 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-
-    AuthoringClassificationNewTopic:
-      type: object
-      required: [domain, title, definition, scope, non_goals, challenge_guidance]
-      properties:
-        domain:
-          $ref: "#/components/schemas/RoadmapReference"
-        title:
-          type: string
-        definition:
-          type: string
-        scope:
-          type: string
-        non_goals:
-          type: string
-        challenge_guidance:
-          type: string
-
-    AuthoringClassificationTopic:
-      type: object
-      required: [reason]
-      properties:
-        existing:
-          $ref: "#/components/schemas/RoadmapTopic"
-        new:
-          $ref: "#/components/schemas/AuthoringClassificationNewTopic"
-        reason:
-          type: string
-
-    AuthoringClassificationNewTag:
-      type: object
-      required: [title, description]
-      properties:
-        title:
-          type: string
-        description:
-          type: string
-
-    AuthoringClassificationTag:
-      type: object
-      required: [reason]
-      properties:
-        existing:
-          $ref: "#/components/schemas/RoadmapTag"
-        new:
-          $ref: "#/components/schemas/AuthoringClassificationNewTag"
-        reason:
-          type: string
-
-    AuthoringClassificationProposal:
-      type: object
-      required: [revision, candidate_revision_id, roadmap_revision, result, tags, updated_at]
-      properties:
-        revision:
-          type: integer
-          minimum: 1
-        candidate_revision_id:
-          type: string
-        roadmap_revision:
-          type: string
-        result:
-          type: string
-          enum: [proposed, unclassifiable]
-        topic:
-          $ref: "#/components/schemas/AuthoringClassificationTopic"
-        tags:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringClassificationTag"
-        unclassifiable_reason:
-          type: string
-        adjustment_suggestion:
-          type: string
-        updated_at:
-          type: string
-          format: date-time
 
     AuthoringSession:
       type: object

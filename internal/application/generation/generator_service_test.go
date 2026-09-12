@@ -449,20 +449,12 @@ func (s *generatorServiceStore) SubmitGenerationCandidate(ctx context.Context, s
 	return &revision, nil
 }
 
-func (*generatorServiceStore) ConfirmGenerationContent(context.Context, string, string, domain.ContentConfirmation, time.Time) (*domain.Workflow, error) {
+func (*generatorServiceStore) ConfirmGenerationContent(context.Context, string, string, domain.ContentConfirmation, domain.PublicationMetadata, time.Time) (*domain.Workflow, error) {
 	return nil, errors.New("unexpected content confirmation")
 }
 
 func (*generatorServiceStore) RequestGenerationContentChanges(context.Context, string, string, domain.ContentChangeRequest, time.Time) (*domain.Workflow, error) {
 	return nil, errors.New("unexpected content change request")
-}
-
-func (*generatorServiceStore) ResumeGenerationClassification(context.Context, string, string, domain.ClassificationAdjustmentConfirmation, time.Time) (*domain.Workflow, error) {
-	return nil, errors.New("unexpected classification change request")
-}
-
-func (*generatorServiceStore) BeginClassificationPublication(context.Context, string, string, string, domain.PublicationConfirmation, time.Time) (*domain.Workflow, error) {
-	return nil, errors.New("unexpected publication confirmation")
 }
 
 func (s *generatorServiceStore) CancelGenerationWorkflow(_ context.Context, sessionID, userID string, cancellation domain.Cancellation, now time.Time) (*domain.Workflow, error) {

@@ -169,19 +169,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("create generator service: %w", err)
 		}
-		classificationRuntime, err := appgeneration.NewClassificationRuntime(database.Generation, database.Agent, database.Roadmap)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create classification runtime: %w", err)
-		}
-		classifierExecutor, err := llm.NewClassifier(cfg.Agent, classificationRuntime)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create classification agent executor: %w", err)
-		}
-		generationAgents, err = appgeneration.NewAgentRunner(database.Generation, llm.NewJudge(cfg.Agent), classifierExecutor, appgeneration.AgentRunnerConfig{
+		generationAgents, err = appgeneration.NewAgentRunner(database.Generation, llm.NewJudge(cfg.Agent), appgeneration.AgentRunnerConfig{
 			ServerID: catalogInstallerID(), Model: cfg.Agent.Model,
 		})
 		if err != nil {

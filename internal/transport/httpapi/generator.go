@@ -348,84 +348,6 @@ func (h *Handler) RequestGeneratorContentChanges(c *gin.Context, workflowID stri
 	c.JSON(http.StatusOK, toAPIGeneratorWorkflow(*workflow))
 }
 
-func (h *Handler) GetGeneratorClassification(c *gin.Context, workflowID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	service, ok := h.requireGenerator(c)
-	if !ok {
-		return
-	}
-	view, err := service.GetGeneration(c.Request.Context(), user.ID, workflowID)
-	if err != nil {
-		h.writeGeneratorError(c, err)
-		return
-	}
-	if view.Candidate == nil || view.Candidate.Classification == nil {
-		h.writeGeneratorError(c, authoringdomain.ErrInvalidState)
-		return
-	}
-	classification, err := h.authoringClassificationProposal(c.Request.Context(), view.Candidate.Classification)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read classification review: %v", err)})
-		return
-	}
-	c.JSON(http.StatusOK, api.GeneratorClassificationReview{
-		Workflow: toAPIGeneratorWorkflow(view.Workflow), Candidate: *toAPIAuthoringCandidate(view.Candidate), Classification: *classification,
-	})
-}
-
-func (h *Handler) RequestGeneratorClassificationChanges(c *gin.Context, workflowID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	service, ok := h.requireGenerator(c)
-	if !ok {
-		return
-	}
-	var request api.GeneratorClassificationChangeRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		h.writeGeneratorError(c, err)
-		return
-	}
-	workflow, err := service.RequestClassificationChanges(c.Request.Context(), user.ID, generation.ClassificationAdjustmentConfirmation{
-		WorkflowID: workflowID, CandidateRevisionID: request.CandidateRevisionId, ProposalRevision: request.ProposalRevision,
-		Feedback: request.Feedback, IdempotencyKey: request.IdempotencyKey,
-	})
-	if err != nil {
-		h.writeGeneratorError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toAPIGeneratorWorkflow(*workflow))
-}
-
-func (h *Handler) ConfirmGeneratorClassificationAndPublish(c *gin.Context, workflowID string) {
-	user := h.requireUser(c)
-	if user == nil {
-		return
-	}
-	service, ok := h.requireGenerator(c)
-	if !ok {
-		return
-	}
-	var request api.GeneratorClassificationPublicationRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		h.writeGeneratorError(c, err)
-		return
-	}
-	workflow, err := service.ConfirmClassificationAndPublish(c.Request.Context(), user.ID, generation.PublicationConfirmation{
-		WorkflowID: workflowID, CandidateRevisionID: request.CandidateRevisionId, ProposalRevision: request.ProposalRevision,
-		IdempotencyKey: request.IdempotencyKey,
-	})
-	if err != nil {
-		h.writeGeneratorError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toAPIGeneratorWorkflow(*workflow))
-}
-
 func (h *Handler) CancelGeneration(c *gin.Context, workflowID string) {
 	user := h.requireUser(c)
 	if user == nil {
@@ -492,11 +414,6 @@ func (h *Handler) toAPIGeneratorGeneration(ctx context.Context, workflow generat
 	}
 	response.Verified = toAPIVerifiedChallenge(verified)
 	response.Verification = toAPIAuthoringVerificationReport(revision.Verification)
-	classification, err := h.authoringClassificationProposal(ctx, revision.Classification)
-	if err != nil {
-		return api.GeneratorGeneration{}, err
-	}
-	response.Classification = classification
 	return response, nil
 }
 
@@ -531,7 +448,7 @@ func (h *Handler) writeGeneratorError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, generation.ErrWorkspaceBusy), errors.Is(err, generation.ErrWorkspaceTurnLost),
 		errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState),
-		errors.Is(err, generation.ErrCandidateInvalidState), errors.Is(err, generation.ErrClassificationConflict),
+		errors.Is(err, generation.ErrCandidateInvalidState),
 		errors.Is(err, generation.ErrChallengeSourceRefConflict):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:

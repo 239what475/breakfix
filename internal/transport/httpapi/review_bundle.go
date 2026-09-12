@@ -47,7 +47,6 @@ func (h *Handler) GetGeneratorReviewBundle(c *gin.Context, workflowID string, pa
 
 	kind := reviewBundleKind(params.Kind)
 	var payload []byte
-	var proposalRevision int
 	switch kind {
 	case reviewBundleContent:
 		if view.Workflow.State != generation.StateNeedsAuthorReview {
@@ -55,15 +54,8 @@ func (h *Handler) GetGeneratorReviewBundle(c *gin.Context, workflowID string, pa
 			return
 		}
 		payload, err = h.buildContentReviewPayload(c.Request.Context(), view.Workflow, view.Candidate)
-	case reviewBundleClassification:
-		if view.Workflow.State != generation.StateNeedsClassificationReview || view.Candidate.Classification == nil {
-			h.writeGeneratorError(c, generation.ErrCandidateInvalidState)
-			return
-		}
-		proposalRevision = view.Candidate.Classification.Revision
-		payload, err = h.buildClassificationReviewPayload(c.Request.Context(), view.Workflow, view.Candidate)
 	default:
-		h.writeGeneratorError(c, errors.New("review bundle kind must be content or classification"))
+		h.writeGeneratorError(c, errors.New("review bundle kind must be content"))
 		return
 	}
 	if err != nil {
@@ -77,7 +69,6 @@ func (h *Handler) GetGeneratorReviewBundle(c *gin.Context, workflowID string, pa
 		WorkflowState:          string(view.Workflow.State),
 		CandidateRevisionId:    view.Candidate.ID,
 		CandidateArchiveSha256: view.Candidate.ArchiveSHA256,
-		ProposalRevision:       proposalRevision,
 		PayloadSha256:          candidate.Digest(payload),
 		ExportedAt:             time.Now().UTC(),
 	}
@@ -90,12 +81,11 @@ func (h *Handler) GetGeneratorReviewBundle(c *gin.Context, workflowID string, pa
 type reviewBundleKind string
 
 const (
-	reviewBundleContent        reviewBundleKind = "content"
-	reviewBundleClassification reviewBundleKind = "classification"
+	reviewBundleContent reviewBundleKind = "content"
 )
 
 func (k reviewBundleKind) valid() bool {
-	return k == reviewBundleContent || k == reviewBundleClassification
+	return k == reviewBundleContent
 }
 
 func (h *Handler) buildContentReviewPayload(ctx context.Context, workflow generation.Workflow, revision *generation.Revision) ([]byte, error) {
@@ -123,22 +113,6 @@ func (h *Handler) buildContentReviewPayload(ctx context.Context, workflow genera
 			return nil, err
 		}
 		entries[name] = []byte(diff.Diff)
-	}
-	return writeDeterministicReviewArchive(entries)
-}
-
-func (h *Handler) buildClassificationReviewPayload(ctx context.Context, workflow generation.Workflow, revision *generation.Revision) ([]byte, error) {
-	proposal, err := h.authoringClassificationProposal(ctx, revision.Classification)
-	if err != nil {
-		return nil, err
-	}
-	if proposal == nil {
-		return nil, errors.New("classification review proposal is missing")
-	}
-	entries := map[string][]byte{
-		"topic.md":          []byte(classificationTopicMarkdown(proposal)),
-		"tags.md":           []byte(classificationTagsMarkdown(proposal)),
-		"classification.md": []byte(classificationSummaryMarkdown(workflow, proposal)),
 	}
 	return writeDeterministicReviewArchive(entries)
 }
@@ -208,65 +182,6 @@ func verificationReviewMarkdown(value *api.AuthoringVerificationReport) string {
 		return "# 验证\n\n验证报告无法序列化。\n"
 	}
 	return "# 验证\n\n```json\n" + string(data) + "\n```\n"
-}
-
-func classificationSummaryMarkdown(workflow generation.Workflow, proposal *api.AuthoringClassificationProposal) string {
-	data, err := json.MarshalIndent(proposal, "", "  ")
-	if err != nil {
-		return "# 分类\n"
-	}
-	return fmt.Sprintf("# 分类\n\n**工作流状态**：`%s`\n\n```json\n%s\n```\n", workflow.State, data)
-}
-
-func classificationTopicMarkdown(proposal *api.AuthoringClassificationProposal) string {
-	var out strings.Builder
-	out.WriteString("# Topic\n\n")
-	if proposal.Topic == nil {
-		out.WriteString("当前提案没有 Topic。\n")
-		return out.String()
-	}
-	fmt.Fprintf(&out, "## 判定理由\n\n%s\n\n", proposal.Topic.Reason)
-	if proposal.Topic.Existing != nil {
-		topic := proposal.Topic.Existing
-		fmt.Fprintf(&out, "## 已有 Topic\n\n### %s\n\n**source_ref**：`%s`\n\n%s\n\n", topic.Title, topic.SourceRef, topic.Definition)
-		fmt.Fprintf(&out, "### 范围\n\n%s\n\n### 非目标\n\n%s\n\n### 题目指导\n\n%s\n", topic.Scope, topic.NonGoals, topic.ChallengeGuidance)
-		return out.String()
-	}
-	if proposal.Topic.New != nil {
-		topic := proposal.Topic.New
-		fmt.Fprintf(&out, "## 候选新增 Topic\n\n### %s\n\n%s\n\n", topic.Title, topic.Definition)
-		fmt.Fprintf(&out, "**Domain**：%s\n\n### 范围\n\n%s\n\n### 非目标\n\n%s\n\n### 题目指导\n\n%s\n", topic.Domain.Title, topic.Scope, topic.NonGoals, topic.ChallengeGuidance)
-	}
-	return out.String()
-}
-
-func classificationTagsMarkdown(proposal *api.AuthoringClassificationProposal) string {
-	var out strings.Builder
-	out.WriteString("# Tags\n\n")
-	if len(proposal.Tags) == 0 {
-		out.WriteString("当前提案没有 Tag。\n")
-		return out.String()
-	}
-	for _, tag := range proposal.Tags {
-		fmt.Fprintf(&out, "## %s\n\n%s\n\n", classificationTagTitle(tag), tag.Reason)
-		if tag.Existing != nil {
-			fmt.Fprintf(&out, "**类型**：已有 Tag  \n**source_ref**：`%s`  \n**描述**：%s\n\n", tag.Existing.SourceRef, tag.Existing.Description)
-		}
-		if tag.New != nil {
-			fmt.Fprintf(&out, "**类型**：候选新增 Tag  \n**描述**：%s\n\n", tag.New.Description)
-		}
-	}
-	return out.String()
-}
-
-func classificationTagTitle(tag api.AuthoringClassificationTag) string {
-	if tag.Existing != nil {
-		return tag.Existing.Title
-	}
-	if tag.New != nil {
-		return tag.New.Title
-	}
-	return "未命名 Tag"
 }
 
 func reviewPath(prefix, value string) (string, error) {

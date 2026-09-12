@@ -69,8 +69,6 @@ type generatorApplication interface {
 	SubmitCandidate(context.Context, string, generationdomain.CandidateSubmission) (*generationdomain.Revision, error)
 	ConfirmContent(context.Context, string, generationdomain.ContentConfirmation) (*generationdomain.Workflow, error)
 	RequestContentChanges(context.Context, string, generationdomain.ContentChangeRequest) (*generationdomain.Workflow, error)
-	RequestClassificationChanges(context.Context, string, generationdomain.ClassificationAdjustmentConfirmation) (*generationdomain.Workflow, error)
-	ConfirmClassificationAndPublish(context.Context, string, generationdomain.PublicationConfirmation) (*generationdomain.Workflow, error)
 	CancelGeneration(context.Context, string, generationdomain.Cancellation) (*generationdomain.Workflow, error)
 }
 

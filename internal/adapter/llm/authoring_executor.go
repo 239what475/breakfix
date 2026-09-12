@@ -246,7 +246,7 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 		&authoringTool{name: "submit_candidate", desc: "归档并提交当前 Generating 任务的工作区，进入 Server 内部审核。", params: map[string]*schema.ParameterInfo{
 			"workflow_id": {Type: schema.String, Desc: "Generating 任务 ID", Required: true},
 		}, run: c.submitCandidate},
-		&authoringTool{name: "confirm_content", desc: "作者已审阅当前已验证 candidate 后，确认内容并启动 Server 内部分类。", params: map[string]*schema.ParameterInfo{
+		&authoringTool{name: "confirm_content", desc: "作者已审阅当前已验证 candidate 后，确认内容并开始发布。", params: map[string]*schema.ParameterInfo{
 			"workflow_id":           {Type: schema.String, Desc: "待内容审核的任务 ID", Required: true},
 			"candidate_revision_id": {Type: schema.String, Desc: "作者确认的 candidate revision ID", Required: true},
 		}, run: c.confirmContent},
@@ -255,20 +255,6 @@ func (c *runtimeConversation) tools() []tool.InvokableTool {
 			"candidate_revision_id": {Type: schema.String, Desc: "作者审阅的 candidate revision ID", Required: true},
 			"feedback":              {Type: schema.String, Desc: "作者的具体内容修改意见", Required: true},
 		}, run: c.requestContentChanges},
-		&authoringTool{name: "get_classification", desc: "读取 Server 内部 Classifier 为当前 candidate 提出的分类提案。", params: map[string]*schema.ParameterInfo{
-			"workflow_id": {Type: schema.String, Desc: "生成任务 ID", Required: true},
-		}, run: c.getClassification},
-		&authoringTool{name: "request_classification_changes", desc: "作者要求 Server 内部 Classifier 根据反馈修订当前分类提案。", params: map[string]*schema.ParameterInfo{
-			"workflow_id":           {Type: schema.String, Desc: "待分类审核的任务 ID", Required: true},
-			"candidate_revision_id": {Type: schema.String, Desc: "作者审阅的 candidate revision ID", Required: true},
-			"proposal_revision":     {Type: schema.Integer, Desc: "作者审阅的分类 proposal revision", Required: true},
-			"feedback":              {Type: schema.String, Desc: "作者的具体分类修改意见", Required: true},
-		}, run: c.requestClassificationChanges},
-		&authoringTool{name: "confirm_classification_and_publish", desc: "作者已确认当前分类提案后，创建题目发布动作。", params: map[string]*schema.ParameterInfo{
-			"workflow_id":           {Type: schema.String, Desc: "待分类审核的任务 ID", Required: true},
-			"candidate_revision_id": {Type: schema.String, Desc: "作者确认的 candidate revision ID", Required: true},
-			"proposal_revision":     {Type: schema.Integer, Desc: "作者确认的分类 proposal revision", Required: true},
-		}, run: c.confirmClassificationAndPublish},
 		&authoringTool{name: "cancel_generation", desc: "在作者明确要求后取消一个尚未结束的生成任务；工作区由后台回收。", params: map[string]*schema.ParameterInfo{
 			"workflow_id": {Type: schema.String, Desc: "要取消的生成任务 ID", Required: true},
 		}, run: c.cancelGeneration},

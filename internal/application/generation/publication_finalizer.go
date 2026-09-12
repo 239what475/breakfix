@@ -128,7 +128,7 @@ func classifyPublicationFinalizerError(err error) error {
 	if err == nil || publication.CategoryOf(err).Valid() {
 		return err
 	}
-	if errors.Is(err, domain.ErrCandidateInvalidState) || errors.Is(err, domain.ErrClassificationConflict) || errors.Is(err, domain.ErrChallengeSourceRefConflict) {
+	if errors.Is(err, domain.ErrCandidateInvalidState) || errors.Is(err, domain.ErrChallengeSourceRefConflict) {
 		return publication.Deterministic(err)
 	}
 	return publication.Transient(err)
