@@ -11,20 +11,20 @@ import (
 // state continues to live in the Environment CRD; this table only records the
 // first successful observation for one environment/checkpoint pair.
 type CheckpointFirstPassEvent struct {
-	EnvironmentUID    string
-	UserID            string
-	ChallengeID       string
-	ChallengeRevision string
-	CheckpointID      string
-	FirstPassedAt     time.Time
-	Summary           string
+	EnvironmentUID   string
+	UserID           string
+	ScenarioID       string
+	ScenarioRevision string
+	CheckpointID     string
+	FirstPassedAt    time.Time
+	Summary          string
 }
 
 func (d *EnvironmentRepository) RecordCheckpointFirstPass(ctx context.Context, event CheckpointFirstPassEvent) error {
 	for name, value := range map[string]string{
 		"environment uid": event.EnvironmentUID,
 		"user id":         event.UserID,
-		"challenge id":    event.ChallengeID,
+		"scenario id":     event.ScenarioID,
 		"checkpoint id":   event.CheckpointID,
 		"summary":         event.Summary,
 	} {
@@ -37,10 +37,10 @@ func (d *EnvironmentRepository) RecordCheckpointFirstPass(ctx context.Context, e
 	}
 	_, err := d.conn.ExecContext(ctx, `
 		INSERT INTO checkpoint_pass_events
-			(environment_uid, checkpoint_id, user_id, challenge_id, challenge_revision, first_passed_at, summary)
+			(environment_uid, checkpoint_id, user_id, scenario_id, scenario_revision, first_passed_at, summary)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(environment_uid, checkpoint_id) DO NOTHING
-	`, event.EnvironmentUID, event.CheckpointID, event.UserID, event.ChallengeID, strings.TrimSpace(event.ChallengeRevision), event.FirstPassedAt.UTC(), event.Summary)
+	`, event.EnvironmentUID, event.CheckpointID, event.UserID, event.ScenarioID, strings.TrimSpace(event.ScenarioRevision), event.FirstPassedAt.UTC(), event.Summary)
 	if err != nil {
 		return fmt.Errorf("record checkpoint first pass: %w", err)
 	}
@@ -64,7 +64,7 @@ func (d *EnvironmentRepository) ListCheckpointFirstPasses(ctx context.Context, e
 		args = append(args, environmentUID)
 	}
 	rows, err := d.conn.QueryContext(ctx, `
-		SELECT environment_uid, user_id, challenge_id, challenge_revision, checkpoint_id, first_passed_at, summary
+		SELECT environment_uid, user_id, scenario_id, scenario_revision, checkpoint_id, first_passed_at, summary
 		FROM checkpoint_pass_events
 		WHERE environment_uid IN (`+strings.Join(placeholders, ",")+`)
 		ORDER BY environment_uid, first_passed_at, checkpoint_id
@@ -75,7 +75,7 @@ func (d *EnvironmentRepository) ListCheckpointFirstPasses(ctx context.Context, e
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var event CheckpointFirstPassEvent
-		if err := rows.Scan(&event.EnvironmentUID, &event.UserID, &event.ChallengeID, &event.ChallengeRevision, &event.CheckpointID, &event.FirstPassedAt, &event.Summary); err != nil {
+		if err := rows.Scan(&event.EnvironmentUID, &event.UserID, &event.ScenarioID, &event.ScenarioRevision, &event.CheckpointID, &event.FirstPassedAt, &event.Summary); err != nil {
 			return nil, fmt.Errorf("scan checkpoint first pass: %w", err)
 		}
 		event.FirstPassedAt = event.FirstPassedAt.UTC()

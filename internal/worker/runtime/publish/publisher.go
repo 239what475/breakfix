@@ -11,7 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
@@ -25,10 +25,10 @@ type Registry interface {
 
 type NodeImagePublisher interface {
 	PublishNodeImage(context.Context, incus.PublishNodeImageRequest) (incus.PublishNodeImageResult, error)
-	PublishChallengeNodeImage(context.Context, incus.PublishChallengeNodeImageRequest) (incus.PublishNodeImageResult, error)
+	PublishScenarioNodeImage(context.Context, incus.PublishScenarioNodeImageRequest) (incus.PublishNodeImageResult, error)
 	DeleteCandidateNodeImage(context.Context, string, string) error
 	DeleteBuildNodeImage(context.Context, incus.BuildNodeImageResult) error
-	DeleteChallengeNodeImage(context.Context, string, string, string) error
+	DeleteScenarioNodeImage(context.Context, string, string, string) error
 }
 
 type Executor struct {
@@ -54,7 +54,7 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 		return domainexecution.ArtifactReference{}, errors.New("candidate has no build output")
 	}
 	switch work.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		target, err := e.candidateImage(work.CandidateID)
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
@@ -63,9 +63,9 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
 		}
-		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return domainexecution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: immutable}, nil
 
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if e.node == nil {
 			return domainexecution.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
@@ -81,24 +81,24 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 		if err != nil {
 			return domainexecution.ArtifactReference{}, fmt.Errorf("publish candidate Node image: %w", err)
 		}
-		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return domainexecution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
 		return domainexecution.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
 }
 
-// PublishChallengeWork promotes a verified staging artifact to a final,
-// challenge-scoped artifact. The caller owns materialization and visibility.
-func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecution.Work, challengeID, challengeRevisionID string) (domainexecution.ArtifactReference, error) {
+// PublishScenarioWork promotes a verified staging artifact to a final,
+// scenario-scoped artifact. The caller owns materialization and visibility.
+func (e *Executor) PublishScenarioWork(ctx context.Context, work domainexecution.Work, scenarioID, scenarioRevisionID string) (domainexecution.ArtifactReference, error) {
 	if err := work.Validate(); err != nil {
-		return domainexecution.ArtifactReference{}, fmt.Errorf("challenge publication execution work: %w", err)
+		return domainexecution.ArtifactReference{}, fmt.Errorf("scenario publication execution work: %w", err)
 	}
-	if work.Artifact == nil || !challenge.ValidID(challengeID) || !challenge.ValidRevisionID(challengeRevisionID) {
-		return domainexecution.ArtifactReference{}, errors.New("challenge publication requires a verified artifact and immutable challenge identity")
+	if work.Artifact == nil || !scenario.ValidID(scenarioID) || !scenario.ValidRevisionID(scenarioRevisionID) {
+		return domainexecution.ArtifactReference{}, errors.New("scenario publication requires a verified artifact and immutable scenario identity")
 	}
 	switch work.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
-		target, err := e.challengeImage(challengeID, challengeRevisionID)
+	case scenario.RuntimeK8s:
+		target, err := e.scenarioImage(scenarioID, scenarioRevisionID)
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
 		}
@@ -106,24 +106,24 @@ func (e *Executor) PublishChallengeWork(ctx context.Context, work domainexecutio
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
 		}
-		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+		return domainexecution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: immutable}, nil
 
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if e.node == nil {
 			return domainexecution.ArtifactReference{}, errors.New("node image publisher is unavailable")
 		}
-		published, err := e.node.PublishChallengeNodeImage(ctx, incus.PublishChallengeNodeImageRequest{
+		published, err := e.node.PublishScenarioNodeImage(ctx, incus.PublishScenarioNodeImageRequest{
 			CandidateRevisionID: work.CandidateID,
-			ChallengeID:         challengeID,
-			ChallengeRevisionID: challengeRevisionID,
+			ScenarioID:          scenarioID,
+			ScenarioRevisionID:  scenarioRevisionID,
 			Staging: incus.PublishNodeImageResult{
 				Alias: work.Artifact.IncusAlias, Fingerprint: work.Artifact.IncusFingerprint,
 			},
 		})
 		if err != nil {
-			return domainexecution.ArtifactReference{}, fmt.Errorf("publish final challenge Node image: %w", err)
+			return domainexecution.ArtifactReference{}, fmt.Errorf("publish final scenario Node image: %w", err)
 		}
-		return domainexecution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
+		return domainexecution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: published.Alias, IncusFingerprint: published.Fingerprint}, nil
 	default:
 		return domainexecution.ArtifactReference{}, errors.New("candidate runtime is unsupported")
 	}
@@ -179,7 +179,7 @@ func (e *Executor) ReapResource(ctx context.Context, reap runtime.Reap) error {
 
 func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap) error {
 	switch reap.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		if reap.Build != nil && reap.Build.OCIReference != "" {
 			if err := e.registry.DeleteImage(ctx, reap.Build.OCIReference); err != nil {
 				return fmt.Errorf("delete K8s build artifact: %w", err)
@@ -187,7 +187,7 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap)
 		}
 		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil {
 			if err := e.registry.DeleteImage(ctx, reap.FinalArtifact.OCIReference); err != nil {
-				return fmt.Errorf("delete uncommitted challenge OCI image: %w", err)
+				return fmt.Errorf("delete uncommitted scenario OCI image: %w", err)
 			}
 		}
 		if reap.Artifact != nil && reap.Artifact.OCIReference != "" {
@@ -197,13 +197,13 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap)
 		}
 		return nil
 
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if e.node == nil {
 			return errors.New("node image publisher is unavailable")
 		}
 		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil && reap.FinalArtifact.IncusFingerprint != "" {
-			if err := e.node.DeleteChallengeNodeImage(ctx, reap.ChallengeID, reap.ChallengeRevisionID, reap.FinalArtifact.IncusFingerprint); err != nil {
-				return fmt.Errorf("delete uncommitted challenge Node image: %w", err)
+			if err := e.node.DeleteScenarioNodeImage(ctx, reap.ScenarioID, reap.ScenarioRevisionID, reap.FinalArtifact.IncusFingerprint); err != nil {
+				return fmt.Errorf("delete uncommitted scenario Node image: %w", err)
 			}
 		}
 		fingerprint := ""
@@ -222,7 +222,7 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap)
 }
 
 func (e *Executor) reapNodeBuildImage(ctx context.Context, reap runtime.Reap) error {
-	if reap.Snapshot.Runtime != challenge.RuntimeNode || reap.Build == nil || reap.Build.Incus == nil {
+	if reap.Snapshot.Runtime != scenario.RuntimeNode || reap.Build == nil || reap.Build.Incus == nil {
 		return nil
 	}
 	if e.node == nil {
@@ -246,7 +246,7 @@ func (e *Executor) resolveImmutable(ctx context.Context, tagged string) (string,
 	if err != nil {
 		return "", fmt.Errorf("resolve published OCI image: %w", err)
 	}
-	if err := (domainexecution.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: immutable}).Validate(challenge.RuntimeK8s); err != nil {
+	if err := (domainexecution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: immutable}).Validate(scenario.RuntimeK8s); err != nil {
 		return "", fmt.Errorf("Registry returned an invalid immutable OCI reference: %w", err)
 	}
 	return immutable, nil
@@ -256,8 +256,8 @@ func (e *Executor) candidateImage(candidateID string) (string, error) {
 	return candidate.CandidateOCIImageReference(e.registryRepository, candidateID)
 }
 
-func (e *Executor) challengeImage(challengeID, challengeRevisionID string) (string, error) {
-	return candidate.ChallengeOCIImageReference(e.registryRepository, challengeID, challengeRevisionID)
+func (e *Executor) scenarioImage(scenarioID, scenarioRevisionID string) (string, error) {
+	return candidate.ScenarioOCIImageReference(e.registryRepository, scenarioID, scenarioRevisionID)
 }
 
 func nodeBuildResult(build *domainexecution.BuildOutput) (incus.BuildNodeImageResult, error) {

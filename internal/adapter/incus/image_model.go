@@ -34,9 +34,9 @@ type PublishNodeImageResult struct {
 	Fingerprint string
 }
 
-type PublishChallengeNodeImageRequest struct {
+type PublishScenarioNodeImageRequest struct {
 	CandidateRevisionID string
-	ChallengeID         string
-	ChallengeRevisionID string
+	ScenarioID          string
+	ScenarioRevisionID  string
 	Staging             PublishNodeImageResult
 }

@@ -64,7 +64,7 @@ func authoringSystemPrompt() string {
 
 你只能依据工具成功返回的结果声称已修改、已提交或已推进任务。信息不足时先提出具体澄清问题。题意约定的概览与检查点使用中文 Markdown；检查点描述可观察的最终状态，不规定唯一命令或编辑路径。运行时只能是 node 或 k8s，底层平台实现不属于题意。
 
-Candidate 文件结构：workspace 中的题目使用固定结构。challenge.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、description 与 checkpoints。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
+Candidate 文件结构：workspace 中的题目使用固定结构。scenario.yaml 必须包含 type（documentation-example 或 operations-scenario）、runtime、title、description 与 checkpoints。operations-scenario 的 tags 是可选的简单字符串列表，最多 8 个；每个标签去除空格后为 1-32 个中文、英文字母、数字、.、+ 或 -，英文字母小写，不能重复。documentation-example 不得包含 tags。不能包含 id、source_slug、image、content_revision 或 published_at。runtime=node 的 operations-scenario 结构为：
 
 type: operations-scenario
 runtime: node

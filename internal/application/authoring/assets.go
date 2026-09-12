@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	domain "github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/pmezard/go-difflib/difflib"
 )
@@ -32,7 +32,7 @@ func ReadAssets(archive []byte) ([]Asset, error) {
 		return []Asset{}, nil
 	}
 	var assets []Asset
-	err := withCandidateArchive(archive, func(root string, _ *challenge.Entry) error {
+	err := withCandidateArchive(archive, func(root string, _ *scenario.Entry) error {
 		rootFS, err := os.OpenRoot(root)
 		if err != nil {
 			return err
@@ -78,13 +78,13 @@ func ReadAssets(archive []byte) ([]Asset, error) {
 	return assets, nil
 }
 
-func ReadVerifiedChallenge(archive []byte) (*domain.VerifiedChallenge, error) {
+func ReadVerifiedScenario(archive []byte) (*domain.VerifiedScenario, error) {
 	if len(archive) == 0 {
 		return nil, nil
 	}
-	var result *domain.VerifiedChallenge
-	err := withCandidateArchive(archive, func(_ string, entry *challenge.Entry) error {
-		result = &domain.VerifiedChallenge{
+	var result *domain.VerifiedScenario
+	err := withCandidateArchive(archive, func(_ string, entry *scenario.Entry) error {
+		result = &domain.VerifiedScenario{
 			Metadata: domain.Metadata{
 				Title: entry.Title, Description: entry.Description, Runtime: entry.Runtime,
 			},
@@ -99,7 +99,7 @@ func ReadVerifiedChallenge(archive []byte) (*domain.VerifiedChallenge, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read verified challenge manifest: %w", err)
+		return nil, fmt.Errorf("read verified scenario manifest: %w", err)
 	}
 	return result, nil
 }
@@ -150,16 +150,16 @@ func DiffAssets(currentArchive, previousArchive []byte) ([]FileDiff, error) {
 	return diffs, nil
 }
 
-func withCandidateArchive(archive []byte, consume func(string, *challenge.Entry) error) error {
+func withCandidateArchive(archive []byte, consume func(string, *scenario.Entry) error) error {
 	root, err := os.MkdirTemp("", "breakfix-author-review-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(root) //nolint:errcheck
-	if err := challenge.ExtractTarGz(root, bytes.NewReader(archive)); err != nil {
+	if err := scenario.ExtractTarGz(root, bytes.NewReader(archive)); err != nil {
 		return err
 	}
-	entry, err := challenge.ValidateCandidateDir(root)
+	entry, err := scenario.ValidateCandidateDir(root)
 	if err != nil {
 		return err
 	}

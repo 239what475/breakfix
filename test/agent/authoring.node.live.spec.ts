@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
 	activeEnvironmentName,
-	challengeCardByID,
+	scenarioCardByID,
 	expectTerminalConnected,
 	registerAndLogin,
 	runTerminalCommand,
-	stopChallenge,
+	stopScenario,
 } from "../support/live-helpers";
 import {
 	attachNodeEnvironmentIdentity,
@@ -16,23 +16,23 @@ import {
 	currentAuthoringSessionID,
 	expectNoLifecycleButtons,
 	sendAuthoringMessage,
-	waitForCatalogChallenge,
+	waitForCatalogScenario,
 	waitForActiveWorkflow,
-	waitForPublishedChallenge,
+	waitForPublishedScenario,
 	waitForVerifiedCandidate,
 } from "./authoring-live-helpers";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
-agentLiveTest("conversation confirms, verifies, publishes, and runs a node challenge", async ({ page }, testInfo) => {
+agentLiveTest("conversation confirms, verifies, publishes, and runs a node scenario", async ({ page }, testInfo) => {
 	test.setTimeout(50 * 60_000);
-	let challengeID = "";
+	let scenarioID = "";
 	let environmentName = "";
 	let completed = false;
 	try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await registerAndLogin(page);
-		await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
+		await page.getByRole("button", { name: "Scenario studio", exact: true }).click();
 
 		const composer = page.locator(".authoring-composer textarea");
 		await expect(composer).toBeEnabled({ timeout: 30_000 });
@@ -64,22 +64,22 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a node chall
 			await waitForVerifiedCandidate(page, workflowID);
 		}
 			await sendAuthoringMessage(page, "我确认题目内容，请发布题目。", sessionID);
-		challengeID = await waitForPublishedChallenge(page, sessionID);
-		await waitForCatalogChallenge(page, challengeID);
+		scenarioID = await waitForPublishedScenario(page, sessionID);
+		await waitForCatalogScenario(page, scenarioID);
 
 		await page.getByRole("button", { name: "Catalog", exact: true }).click();
-		const card = challengeCardByID(page, challengeID);
+		const card = scenarioCardByID(page, scenarioID);
 		await expect(card).toBeVisible({ timeout: 30_000 });
-		await card.getByRole("button", { name: "Start challenge", exact: true }).click();
+		await card.getByRole("button", { name: "Start scenario", exact: true }).click();
 		await expectTerminalConnected(page);
-		environmentName = await activeEnvironmentName(page, challengeID);
-		await runTerminalCommand(page, "/bin/bash /opt/breakfix/challenge/nodes/host/answer.sh");
+		environmentName = await activeEnvironmentName(page, scenarioID);
+		await runTerminalCommand(page, "/bin/bash /opt/breakfix/scenario/nodes/host/answer.sh");
 		await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
 		completed = true;
 	} finally {
 		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
-		if (completed && environmentName && challengeID) {
-			await stopChallenge(page, challengeID);
+		if (completed && environmentName && scenarioID) {
+			await stopScenario(page, scenarioID);
 			await waitForNodeEnvironmentDeletion(environmentName);
 		}
 	}

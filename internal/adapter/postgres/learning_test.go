@@ -6,22 +6,22 @@ import (
 	"time"
 )
 
-func TestChallengeAttemptCompletionNeverOverwritesTerminalOutcome(t *testing.T) {
+func TestScenarioAttemptCompletionNeverOverwritesTerminalOutcome(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	readyAt := time.Date(2026, time.July, 24, 1, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
+	if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.FinishChallengeAttempt(ctx, "environment-one", AttemptStopped, readyAt.Add(time.Minute)); err != nil {
+	if err := database.Environment.FinishScenarioAttempt(ctx, "environment-one", AttemptStopped, readyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", readyAt.Add(2*time.Minute)); err != nil {
+	if err := database.Environment.RecordScenarioCompletion(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", readyAt.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
 	var outcome string
-	if err := database.conn.QueryRow(`SELECT outcome FROM user_challenge_attempts WHERE environment_uid = ?`, "environment-one").Scan(&outcome); err != nil {
+	if err := database.conn.QueryRow(`SELECT outcome FROM user_scenario_attempts WHERE environment_uid = ?`, "environment-one").Scan(&outcome); err != nil {
 		t.Fatal(err)
 	}
 	if outcome != AttemptStopped {
@@ -33,8 +33,8 @@ func TestTerminalUsageSessionDeduplicatesConnections(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 2, 0, 0, 0, time.UTC)
-	first := TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}
-	second := TerminalConnection{ID: "connection-two", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-b", ConnectedAt: started.Add(5 * time.Second)}
+	first := TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ScenarioID: "scenario-one", ServerInstanceID: "server-a", ConnectedAt: started}
+	second := TerminalConnection{ID: "connection-two", EnvironmentUID: "environment-one", UserID: "u-one", ScenarioID: "scenario-one", ServerInstanceID: "server-b", ConnectedAt: started.Add(5 * time.Second)}
 	if err := database.Environment.OpenTerminalConnection(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestCleanupTerminalActivityClosesStaleConnectionAndSession(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 3, 0, 0, 0, time.UTC)
-	if err := database.Environment.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
+	if err := database.Environment.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ScenarioID: "scenario-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Environment.CleanupTerminalActivity(ctx, started.Add(time.Minute), started.Add(4*time.Minute)); err != nil {
@@ -129,10 +129,10 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	started := time.Date(2026, time.July, 24, 4, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", started); err != nil {
+	if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", started); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ChallengeID: "challenge-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
+	if err := database.Environment.OpenTerminalConnection(ctx, TerminalConnection{ID: "connection-one", EnvironmentUID: "environment-one", UserID: "u-one", ScenarioID: "scenario-one", ServerInstanceID: "server-a", ConnectedAt: started}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Environment.CloseTerminalConnection(ctx, "connection-one", started.Add(90*time.Second)); err != nil {
@@ -141,7 +141,7 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	if _, err := database.Environment.FinishTerminalUsageSession(ctx, "environment-one", started.Add(90*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", started.Add(2*time.Minute)); err != nil {
+	if err := database.Environment.RecordScenarioCompletion(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", started.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,7 +152,7 @@ func TestLearningSummaryAndHistoryUseUsageSessions(t *testing.T) {
 	if summary.CompletedCount != 1 || summary.AttemptedCount != 1 || summary.TerminalLearningSecond != 90 {
 		t.Fatalf("summary = %#v", summary)
 	}
-	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: []string{"challenge-one"}}, 10, nil, started.Add(3*time.Minute))
+	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ScenarioIDs: []string{"scenario-one"}}, 10, nil, started.Add(3*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,10 +165,10 @@ func TestLearningHistoryIncludesUncompletedAttempt(t *testing.T) {
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	readyAt := time.Date(2026, time.July, 24, 5, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
+	if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-one", "node", readyAt); err != nil {
 		t.Fatal(err)
 	}
-	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: []string{"challenge-one"}}, 10, nil, readyAt.Add(time.Minute))
+	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ScenarioIDs: []string{"scenario-one"}}, 10, nil, readyAt.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,26 +181,26 @@ func TestLearningHistoryPreservesAttemptOutcomeAfterEarlierCompletion(t *testing
 	database := newLearningTestDB(t)
 	ctx := context.Background()
 	firstReadyAt := time.Date(2026, time.July, 24, 5, 0, 0, 0, time.UTC)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", "node", firstReadyAt); err != nil {
+	if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", "node", firstReadyAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.RecordChallengeCompletion(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", firstReadyAt.Add(time.Minute)); err != nil {
+	if err := database.Environment.RecordScenarioCompletion(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-first", firstReadyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	secondReadyAt := firstReadyAt.Add(2 * time.Hour)
-	if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", "challenge-one", "chrev-aaaaaaaaaaaaaaaa", "environment-second", "node", secondReadyAt); err != nil {
+	if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", "scenario-one", "chrev-aaaaaaaaaaaaaaaa", "environment-second", "node", secondReadyAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Environment.FinishChallengeAttempt(ctx, "environment-second", AttemptStopped, secondReadyAt.Add(time.Minute)); err != nil {
+	if err := database.Environment.FinishScenarioAttempt(ctx, "environment-second", AttemptStopped, secondReadyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
-	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: []string{"challenge-one"}}, 10, nil, secondReadyAt.Add(2*time.Minute))
+	history, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ScenarioIDs: []string{"scenario-one"}}, 10, nil, secondReadyAt.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(history) != 2 || history[0].EnvironmentUID != "environment-second" || history[0].Outcome != AttemptStopped || history[0].CompletedAt != nil {
-		t.Fatalf("repeated challenge history = %#v", history)
+		t.Fatalf("repeated scenario history = %#v", history)
 	}
 	if history[1].EnvironmentUID != "environment-first" || history[1].Outcome != AttemptCompleted || history[1].CompletedAt == nil {
 		t.Fatalf("completed attempt history = %#v", history)
@@ -216,22 +216,22 @@ func TestLearningHistoryFiltersAndPaginatesSameTimestampAttempts(t *testing.T) {
 	readyAt := time.Date(2026, time.July, 24, 6, 0, 0, 0, time.UTC)
 	for _, attempt := range []struct {
 		environmentUID string
-		challengeID    string
+		scenarioID     string
 		runtime        string
 	}{
-		{"environment-c", "challenge-node", "node"},
-		{"environment-b", "challenge-k8s", "k8s"},
-		{"environment-a", "challenge-ended", "node"},
+		{"environment-c", "scenario-node", "node"},
+		{"environment-b", "scenario-k8s", "k8s"},
+		{"environment-a", "scenario-ended", "node"},
 	} {
-		if err := database.Environment.RecordChallengeAttempt(ctx, "u-one", attempt.challengeID, "chrev-aaaaaaaaaaaaaaaa", attempt.environmentUID, attempt.runtime, readyAt); err != nil {
+		if err := database.Environment.RecordScenarioAttempt(ctx, "u-one", attempt.scenarioID, "chrev-aaaaaaaaaaaaaaaa", attempt.environmentUID, attempt.runtime, readyAt); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := database.Environment.FinishChallengeAttempt(ctx, "environment-a", AttemptStopped, readyAt.Add(time.Minute)); err != nil {
+	if err := database.Environment.FinishScenarioAttempt(ctx, "environment-a", AttemptStopped, readyAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
-	filter := LearningHistoryFilter{ChallengeIDs: []string{"challenge-node", "challenge-k8s", "challenge-ended"}}
+	filter := LearningHistoryFilter{ScenarioIDs: []string{"scenario-node", "scenario-k8s", "scenario-ended"}}
 	first, err := database.Environment.ListLearningHistory(ctx, "u-one", filter, 2, nil, readyAt.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -247,14 +247,14 @@ func TestLearningHistoryFiltersAndPaginatesSameTimestampAttempts(t *testing.T) {
 		t.Fatalf("second page = %#v", second)
 	}
 
-	ended, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: filter.ChallengeIDs, State: "ended"}, 10, nil, readyAt.Add(2*time.Minute))
+	ended, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ScenarioIDs: filter.ScenarioIDs, State: "ended"}, 10, nil, readyAt.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ended) != 1 || ended[0].EnvironmentUID != "environment-a" {
 		t.Fatalf("ended attempts = %#v", ended)
 	}
-	k8s, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ChallengeIDs: filter.ChallengeIDs, Runtime: "k8s"}, 10, nil, readyAt.Add(2*time.Minute))
+	k8s, err := database.Environment.ListLearningHistory(ctx, "u-one", LearningHistoryFilter{ScenarioIDs: filter.ScenarioIDs, Runtime: "k8s"}, 10, nil, readyAt.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

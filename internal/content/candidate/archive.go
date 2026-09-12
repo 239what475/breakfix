@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
 
@@ -23,7 +23,7 @@ func ArchivePath(root, id string) string {
 // SaveArchiveAtomic stores exactly one immutable archive for a revision. A
 // retry is accepted only when the existing bytes have the same digest.
 func SaveArchiveAtomic(root, id string, data []byte) (string, string, error) {
-	if !challenge.ValidID(id) {
+	if !scenario.ValidID(id) {
 		return "", "", fmt.Errorf("invalid candidate revision id %q", id)
 	}
 	if len(data) == 0 {

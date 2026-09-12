@@ -10,7 +10,7 @@ import (
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
@@ -344,20 +344,20 @@ func (h *Handler) InternalCompleteRuntimeVerification(c *gin.Context) {
 	})
 }
 
-func (h *Handler) InternalRecordRuntimeChallengePublication(c *gin.Context) {
+func (h *Handler) InternalRecordRuntimeScenarioPublication(c *gin.Context) {
 	var request runtimeArtifactCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.Credential, runtime.StateChallengePublishing, func(action *claimedRuntimeAction) error {
-		if err := h.validateRuntimeChallengeArtifact(action.Context, request.Artifact); err != nil {
-			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "CHALLENGE_ARTIFACT_INVALID", Summary: err.Error()}, nil)
+	h.completeRuntimeAction(c, request.Credential, runtime.StateScenarioPublishing, func(action *claimedRuntimeAction) error {
+		if err := h.validateRuntimeScenarioArtifact(action.Context, request.Artifact); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "SCENARIO_ARTIFACT_INVALID", Summary: err.Error()}, nil)
 		}
 		switch action.Context.Identity.Scope {
 		case runtime.ScopeGenerationWorkflow:
-			return h.db.Generation.RecordGenerationChallengePublicationResult(c.Request.Context(), *action.generationClaim, request.Artifact, time.Now().UTC())
+			return h.db.Generation.RecordGenerationScenarioPublicationResult(c.Request.Context(), *action.generationClaim, request.Artifact, time.Now().UTC())
 		case runtime.ScopeCatalogCommit:
-			return h.db.Catalog.CompleteCatalogChallengePublication(c.Request.Context(), action.Context, request.Artifact, time.Now().UTC())
+			return h.db.Catalog.CompleteCatalogScenarioPublication(c.Request.Context(), action.Context, request.Artifact, time.Now().UTC())
 		default:
 			return runtime.ErrActionNotFound
 		}
@@ -469,7 +469,7 @@ func (h *Handler) validateRuntimeBuildOutput(action runtime.Context, output exec
 		return err
 	}
 	switch action.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		expected, err := candidate.BuildOCIRepository(h.registryRepository, action.Identity.OwnerID, action.Identity.CandidateID, action.Identity.StateVersion)
 		if err != nil {
 			return err
@@ -482,7 +482,7 @@ func (h *Handler) validateRuntimeBuildOutput(action runtime.Context, output exec
 			return errors.New("K8s build artifact OCI repository does not belong to this runtime action")
 		}
 		return nil
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if output.Incus == nil || output.Incus.Project != h.incusConfig.BuildProject || output.Incus.WorkflowID != action.Identity.OwnerID ||
 			output.Incus.CandidateRevisionID != action.Identity.CandidateID || output.Incus.Attempt != action.Identity.StateVersion {
 			return errors.New("node build output does not match its fenced runtime action")

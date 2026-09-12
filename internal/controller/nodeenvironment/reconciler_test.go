@@ -98,7 +98,7 @@ func TestNodeLearningEnvironmentCompletesFromNodeCheckpoint(t *testing.T) {
 	if provider.execCalls != 1 || provider.lastExecRequest.LogicalName != "proxy" {
 		t.Fatalf("checkpoint exec = %d on %q", provider.execCalls, provider.lastExecRequest.LogicalName)
 	}
-	wantCommand := []string{"/bin/bash", "/opt/breakfix/challenge/nodes/proxy/checks.sh"}
+	wantCommand := []string{"/bin/bash", "/opt/breakfix/scenario/nodes/proxy/checks.sh"}
 	if len(provider.lastExecRequest.Command) != len(wantCommand) || provider.lastExecRequest.Command[0] != wantCommand[0] || provider.lastExecRequest.Command[1] != wantCommand[1] {
 		t.Fatalf("checkpoint command = %v", provider.lastExecRequest.Command)
 	}

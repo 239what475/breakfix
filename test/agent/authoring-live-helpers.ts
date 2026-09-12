@@ -107,8 +107,8 @@ export async function waitForVerifiedCandidate(
 	throw new Error("candidate did not reach content review in time");
 }
 
-export async function waitForPublishedChallenge(page: Page, sessionID: string): Promise<string> {
-	let challengeID = "";
+export async function waitForPublishedScenario(page: Page, sessionID: string): Promise<string> {
+	let scenarioID = "";
 	await expect
 		.poll(async () => {
 			const snapshot = await readAuthoringSession(page, sessionID);
@@ -116,22 +116,22 @@ export async function waitForPublishedChallenge(page: Page, sessionID: string): 
 				const stopped = snapshot.workflows.find((workflow) => workflow.state === "Failed" || workflow.state === "Cancelled");
 				throw workflowStoppedError(stopped?.state ?? "Failed", stopped ?? snapshot.workflows[0]);
 			}
-			challengeID = snapshot.publish_challenge_id ?? "";
-			return snapshot.state === "Published" && challengeID !== "";
+			scenarioID = snapshot.publish_scenario_id ?? "";
+			return snapshot.state === "Published" && scenarioID !== "";
 		}, { timeout: 10 * 60_000, intervals: [1_000, 2_000, 5_000] })
 		.toBe(true);
-	return challengeID;
+	return scenarioID;
 }
 
-export async function waitForCatalogChallenge(page: Page, challengeID: string): Promise<void> {
+export async function waitForCatalogScenario(page: Page, scenarioID: string): Promise<void> {
 	await expect
 		.poll(async () => {
 			return page.evaluate(async (id) => {
-				const response = await fetch("/api/challenges");
+				const response = await fetch("/api/scenarios");
 				if (!response.ok) throw new Error(await response.text());
-				const body = (await response.json()) as { challenges: Array<{ id: string }> };
-				return body.challenges.some((challenge) => challenge.id === id);
-			}, challengeID);
+				const body = (await response.json()) as { scenarios: Array<{ id: string }> };
+				return body.scenarios.some((scenario) => scenario.id === id);
+			}, scenarioID);
 		}, { timeout: 15 * 60_000, intervals: [1_000, 2_000, 5_000] })
 		.toBe(true);
 }

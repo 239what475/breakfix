@@ -56,7 +56,7 @@ func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Exec
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "authoring_agent",
-		Description: "Breakfix challenge authoring agent",
+		Description: "Breakfix scenario authoring agent",
 		Instruction: authoringSystemPrompt(),
 		Model:       chat,
 		// The run deadline and the model context window bound Authoring; a fixed

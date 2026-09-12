@@ -21,7 +21,7 @@ func (h *Handler) validateReadiness(ctx context.Context) error {
 		return fmt.Errorf("catalog service is not configured")
 	}
 	if err := h.catalog.Readiness(ctx); err != nil {
-		return fmt.Errorf("validate challenge catalog readiness: %w", err)
+		return fmt.Errorf("validate scenario catalog readiness: %w", err)
 	}
 	return nil
 }

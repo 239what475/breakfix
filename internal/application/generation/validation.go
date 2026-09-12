@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 )
 
@@ -15,7 +15,7 @@ import (
 // in memory; Server is the authority that persists a passed candidate.
 type Candidate struct {
 	Archive []byte
-	Entry   challenge.Entry
+	Entry   scenario.Entry
 	Files   []CandidateFile
 }
 
@@ -27,7 +27,7 @@ type CandidateFile struct {
 }
 
 // InspectCandidateArchive validates the canonical archive returned by the
-// workspace. Platform fields are still rejected by challenge validation; the
+// workspace. Platform fields are still rejected by scenario validation; the
 // archive format itself has no provider-owned metadata semantics.
 func InspectCandidateArchive(archive []byte) (*Candidate, error) {
 	if len(archive) == 0 {
@@ -56,12 +56,12 @@ func InspectCandidateArchive(archive []byte) (*Candidate, error) {
 	return &Candidate{Archive: canonical, Entry: *entry, Files: files}, nil
 }
 
-// ValidateCandidateDir validates a generator-owned challenge directory. In
+// ValidateCandidateDir validates a generator-owned scenario directory. In
 // contrast with a published catalog entry, it must not contain platform-owned
 // id, source slug, image, or publication metadata. They are added only by
 // publication.
-func ValidateCandidateDir(chalDir string) (*challenge.Entry, error) {
-	entry, err := challenge.ValidatePortableDir(chalDir)
+func ValidateCandidateDir(chalDir string) (*scenario.Entry, error) {
+	entry, err := scenario.ValidatePortableDir(chalDir)
 	if err != nil {
 		return nil, err
 	}

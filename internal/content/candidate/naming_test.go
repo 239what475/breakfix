@@ -2,27 +2,27 @@ package candidate
 
 import "testing"
 
-func TestCandidateAndChallengeOCIReferencesUseDistinctOpaqueScopes(t *testing.T) {
+func TestCandidateAndScenarioOCIReferencesUseDistinctOpaqueScopes(t *testing.T) {
 	candidateID := "candidate-3efac8f8"
-	challengeID := "challenge-b8caf76c"
-	challengeRevisionID := "chrev-0123456789abcdef"
+	scenarioID := "scenario-b8caf76c"
+	scenarioRevisionID := "chrev-0123456789abcdef"
 
 	candidateRef, err := CandidateOCIImageReference("registry.example.com/breakfix", candidateID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	challengeRef, err := ChallengeOCIImageReference("registry.example.com/breakfix", challengeID, challengeRevisionID)
+	scenarioRef, err := ScenarioOCIImageReference("registry.example.com/breakfix", scenarioID, scenarioRevisionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if candidateRef != "registry.example.com/breakfix/candidates/"+OpaqueName(candidateID)+":artifact" {
 		t.Fatalf("candidate image reference = %q", candidateRef)
 	}
-	if challengeRef != "registry.example.com/breakfix/challenges/"+OpaqueName(challengeID+"\x00"+challengeRevisionID)+":published" {
-		t.Fatalf("challenge image reference = %q", challengeRef)
+	if scenarioRef != "registry.example.com/breakfix/scenarios/"+OpaqueName(scenarioID+"\x00"+scenarioRevisionID)+":published" {
+		t.Fatalf("scenario image reference = %q", scenarioRef)
 	}
-	if candidateRef == challengeRef {
-		t.Fatalf("candidate and challenge references collide: %q", candidateRef)
+	if candidateRef == scenarioRef {
+		t.Fatalf("candidate and scenario references collide: %q", candidateRef)
 	}
 }
 

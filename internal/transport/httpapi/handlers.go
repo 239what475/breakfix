@@ -32,7 +32,7 @@ type Handler struct {
 	registryRepository string
 	namespace          string
 	crdNamespace       string
-	challengesDir      string
+	scenariosDir       string
 	dataDir            string
 	cooldownMin        int
 	llm                config.AgentConfig
@@ -84,10 +84,10 @@ type Dependencies struct {
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
 	catalogService := dependencies.Catalog
 	if catalogService == nil {
-		var lifecycle appcatalog.ChallengeLifecycleStore
+		var lifecycle appcatalog.ScenarioLifecycleStore
 		var availability *appcatalog.Availability
 		if database != nil {
-			lifecycle = database.Challenge
+			lifecycle = database.Scenario
 			if cfg.Catalog.Enabled() {
 				var err error
 				availability, err = appcatalog.NewAvailability(cfg.Catalog.ReleaseReference, database.Catalog)
@@ -98,7 +98,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		} else if cfg.Catalog.Enabled() {
 			return nil, fmt.Errorf("configured catalog release requires a database")
 		}
-		catalogService = appcatalog.NewService(cfg.ChallengesDir(), availability, lifecycle)
+		catalogService = appcatalog.NewService(cfg.ScenariosDir(), availability, lifecycle)
 	}
 	agentRuntimeContext := dependencies.AgentRuntimeContext
 	if agentRuntimeContext == nil {
@@ -112,7 +112,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		registryRepository: cfg.Registry.Repository,
 		namespace:          cfg.Namespace,
 		crdNamespace:       cfg.CRDNamespace,
-		challengesDir:      cfg.ChallengesDir(),
+		scenariosDir:       cfg.ScenariosDir(),
 		dataDir:            cfg.DataDir,
 		cooldownMin:        cfg.CooldownMinutes,
 		llm:                cfg.Agent,

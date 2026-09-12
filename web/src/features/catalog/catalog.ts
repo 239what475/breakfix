@@ -1,15 +1,15 @@
-import type { Challenge } from "../../api/types";
+import type { Scenario } from "../../api/types";
 
-export type ChallengeStatus = "todo" | "in-progress" | "completed";
+export type ScenarioStatus = "todo" | "in-progress" | "completed";
 export type CatalogSort = "newest" | "oldest";
 
-export function challengeStatus(challenge: Challenge): ChallengeStatus {
-	if (challenge.active) return "in-progress";
-	if (challenge.solved) return "completed";
+export function scenarioStatus(scenario: Scenario): ScenarioStatus {
+	if (scenario.active) return "in-progress";
+	if (scenario.solved) return "completed";
 	return "todo";
 }
 
-export function formatRuntime(runtime: Challenge["runtime"]) {
+export function formatRuntime(runtime: Scenario["runtime"]) {
 	return runtime === "k8s" ? "Kubernetes" : "Linux nodes";
 }
 

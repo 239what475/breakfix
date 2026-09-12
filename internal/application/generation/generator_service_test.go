@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
@@ -52,7 +52,7 @@ func TestGeneratorServiceKeepsWorkspaceTurnAfterToolFailure(t *testing.T) {
 	if err := service.StartWorkspaceTurn(context.Background(), "user-one", second); !errors.Is(err, domain.ErrWorkspaceBusy) {
 		t.Fatalf("start concurrent workspace turn = %v, want busy", err)
 	}
-	if _, err := service.ReadWorkspaceFile(context.Background(), "user-one", first, "challenge.yaml", 1, 0); err == nil {
+	if _, err := service.ReadWorkspaceFile(context.Background(), "user-one", first, "scenario.yaml", 1, 0); err == nil {
 		t.Fatal("read workspace file unexpectedly succeeded")
 	}
 
@@ -282,7 +282,7 @@ func newGeneratorServiceForTest(t *testing.T, store *generatorServiceStore, plan
 	manager := newWorkspaceManager(t, workspaceRepo, &memoryWorkspacePVCs{}, &memoryWorkspaceSandboxes{nextID: "sandbox-test"}, &now)
 	service, err := NewGeneratorService(store, plans, manager, tools, GeneratorServiceConfig{
 		DataDir: t.TempDir(),
-		FreezeExecution: func(challenge.Entry) (domain.ExecutionSnapshot, error) {
+		FreezeExecution: func(scenario.Entry) (domain.ExecutionSnapshot, error) {
 			return generatorServiceSnapshot(), nil
 		},
 	})
@@ -530,7 +530,7 @@ type generatorServiceTools struct {
 }
 
 func (*generatorServiceTools) ListWorkspaceFiles(context.Context, string) ([]domain.WorkspaceFile, error) {
-	return []domain.WorkspaceFile{{Path: "challenge.yaml", Size: 1}}, nil
+	return []domain.WorkspaceFile{{Path: "scenario.yaml", Size: 1}}, nil
 }
 
 func (s *generatorServiceTools) ReadFile(context.Context, string, string) ([]byte, error) {
@@ -555,7 +555,7 @@ func (*generatorServiceTools) ExecuteWorkspace(context.Context, string, string, 
 
 func generatorServicePlan() authoring.Plan {
 	return authoring.Plan{
-		Metadata:    authoring.Metadata{Title: "Generator Service", Description: "Validate shared generation lifecycle.", Runtime: challenge.RuntimeNode},
+		Metadata:    authoring.Metadata{Title: "Generator Service", Description: "Validate shared generation lifecycle.", Runtime: scenario.RuntimeNode},
 		Overview:    "Build a small node environment and validate a durable generation service.",
 		Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The service is ready.", Position: 1}},
 	}
@@ -563,7 +563,7 @@ func generatorServicePlan() authoring.Plan {
 
 func generatorServiceSnapshot() domain.ExecutionSnapshot {
 	return domain.ExecutionSnapshot{
-		Runtime:     challenge.RuntimeNode,
+		Runtime:     scenario.RuntimeNode,
 		Checkpoints: []domain.CheckpointSnapshot{{ID: "ready", Node: "host"}},
 		Node: &domain.NodeRuntimeSnapshot{
 			BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "node-profile", NetworkPolicyRevision: "network-profile",
@@ -583,7 +583,7 @@ func generatorServiceCandidateArchive(t *testing.T) []byte {
 		content string
 		mode    int64
 	}{
-		{"challenge.yaml", "runtime: node\ntitle: Generator service candidate\ndescription: Validate the shared generator service.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
+		{"scenario.yaml", "runtime: node\ntitle: Generator service candidate\ndescription: Validate the shared generator service.\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
 		{"problem.md", "# Problem\n\nMake the workspace ready.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host state.\n", 0o644},

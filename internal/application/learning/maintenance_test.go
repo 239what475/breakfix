@@ -13,24 +13,24 @@ type projectionTestStore struct {
 	repository *postgres.EnvironmentRepository
 }
 
-func (s projectionTestStore) RecordChallengeAttempt(ctx context.Context, userID, challengeID, revisionID, environmentUID, runtimeName string, startedAt time.Time) error {
-	return s.repository.RecordChallengeAttempt(ctx, userID, challengeID, revisionID, environmentUID, runtimeName, startedAt)
+func (s projectionTestStore) RecordScenarioAttempt(ctx context.Context, userID, scenarioID, revisionID, environmentUID, runtimeName string, startedAt time.Time) error {
+	return s.repository.RecordScenarioAttempt(ctx, userID, scenarioID, revisionID, environmentUID, runtimeName, startedAt)
 }
 
 func (s projectionTestStore) RecordCheckpointFirstPass(ctx context.Context, event CheckpointFirstPass) error {
 	return s.repository.RecordCheckpointFirstPass(ctx, postgres.CheckpointFirstPassEvent{
-		EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ChallengeID: event.ChallengeID,
-		ChallengeRevision: event.ChallengeRevisionID, CheckpointID: event.CheckpointID,
+		EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ScenarioID: event.ScenarioID,
+		ScenarioRevision: event.ScenarioRevisionID, CheckpointID: event.CheckpointID,
 		FirstPassedAt: event.FirstPassedAt, Summary: event.Summary,
 	})
 }
 
-func (s projectionTestStore) RecordChallengeCompletion(ctx context.Context, userID, challengeID, revisionID, environmentUID string, completedAt time.Time) error {
-	return s.repository.RecordChallengeCompletion(ctx, userID, challengeID, revisionID, environmentUID, completedAt)
+func (s projectionTestStore) RecordScenarioCompletion(ctx context.Context, userID, scenarioID, revisionID, environmentUID string, completedAt time.Time) error {
+	return s.repository.RecordScenarioCompletion(ctx, userID, scenarioID, revisionID, environmentUID, completedAt)
 }
 
-func (s projectionTestStore) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome string, finishedAt time.Time) error {
-	return s.repository.FinishChallengeAttempt(ctx, environmentUID, outcome, finishedAt)
+func (s projectionTestStore) FinishScenarioAttempt(ctx context.Context, environmentUID, outcome string, finishedAt time.Time) error {
+	return s.repository.FinishScenarioAttempt(ctx, environmentUID, outcome, finishedAt)
 }
 
 func newProjectionTestService(t *testing.T) (*ProjectionService, *postgres.Store) {
@@ -55,7 +55,7 @@ func (projectionTestSource) DeleteEnvironmentProjection(context.Context, string,
 func learningProjection(uid, runtimeName string, readyAt time.Time) EnvironmentProjection {
 	return EnvironmentProjection{
 		UID: uid, Name: uid, Runtime: runtimeName, Purpose: purposeLearning,
-		UserID: "u-demo", ChallengeID: "chal-r7m4x2q9v6kp", ChallengeRevision: "chrev-aaaaaaaaaaaaaaaa",
+		UserID: "u-demo", ScenarioID: "chal-r7m4x2q9v6kp", ScenarioRevision: "chrev-aaaaaaaaaaaaaaaa",
 		Phase: "Ready", ReadyAt: &readyAt,
 	}
 }
@@ -102,7 +102,7 @@ func TestProjectionFinishesDestroyedAttempt(t *testing.T) {
 	if err != nil || !deleteAfter {
 		t.Fatalf("destroyed projection = delete:%v err:%v", deleteAfter, err)
 	}
-	history, err := database.Environment.ListLearningHistory(ctx, "u-demo", postgres.LearningHistoryFilter{ChallengeIDs: []string{"chal-r7m4x2q9v6kp"}}, 10, nil, destroyed.Add(time.Minute))
+	history, err := database.Environment.ListLearningHistory(ctx, "u-demo", postgres.LearningHistoryFilter{ScenarioIDs: []string{"chal-r7m4x2q9v6kp"}}, 10, nil, destroyed.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestProjectionRecordsCheckpointFirstPassOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := events[projection.UID]; len(got) != 1 || got[0].ChallengeRevision != "chrev-aaaaaaaaaaaaaaaa" || got[0].CheckpointID != "proxy-ready" {
+	if got := events[projection.UID]; len(got) != 1 || got[0].ScenarioRevision != "chrev-aaaaaaaaaaaaaaaa" || got[0].CheckpointID != "proxy-ready" {
 		t.Fatalf("checkpoint events = %#v", got)
 	}
 }

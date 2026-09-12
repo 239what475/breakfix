@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
@@ -109,9 +109,9 @@ type Release struct {
 // Failed releases remain as diagnostics; they do not become additional
 // baselines.
 type BootstrapState struct {
-	Releases                []Release
-	PublishedChallengeCount int
-	FailedCleanupPending    bool
+	Releases               []Release
+	PublishedScenarioCount int
+	FailedCleanupPending   bool
 }
 
 func (r Release) Valid() bool {
@@ -161,7 +161,7 @@ type Entry struct {
 	SourcePath        string                             `json:"source_path"`
 	SourceRef         string                             `json:"source_ref"`
 	Title             string                             `json:"title"`
-	Type              challenge.ScenarioType             `json:"type"`
+	Type              scenario.ScenarioType              `json:"type"`
 	Tags              []string                           `json:"tags"`
 	ContentRevision   ContentRevision                    `json:"content_revision"`
 	ArchiveSHA256     string                             `json:"archive_sha256"`
@@ -192,8 +192,8 @@ func (e Entry) Valid() bool {
 	if err := e.Snapshot.Validate(); err != nil {
 		return false
 	}
-	canonicalTags, err := challenge.NormalizeTags(e.Tags)
-	if err != nil || !slices.Equal(canonicalTags, e.Tags) || (e.Type == challenge.ScenarioDocumentationExample && len(e.Tags) != 0) {
+	canonicalTags, err := scenario.NormalizeTags(e.Tags)
+	if err != nil || !slices.Equal(canonicalTags, e.Tags) || (e.Type == scenario.ScenarioDocumentationExample && len(e.Tags) != 0) {
 		return false
 	}
 	if e.Build != nil && !validBuild(*e.Build, e.Snapshot.Runtime) {
@@ -221,15 +221,15 @@ func (e Entry) Valid() bool {
 	return true
 }
 
-// Commit reserves the final opaque Challenge identity before external final
+// Commit reserves the final opaque Scenario identity before external final
 // artifact publication and filesystem materialization. The identity is never
 // regenerated after a restart.
 type Commit struct {
 	ID                   string                       `json:"id"`
 	ReleaseID            string                       `json:"release_id"`
 	EntryID              string                       `json:"entry_id"`
-	ChallengeID          string                       `json:"challenge_id,omitempty"`
-	ChallengeRevisionID  string                       `json:"challenge_revision_id,omitempty"`
+	ScenarioID           string                       `json:"scenario_id,omitempty"`
+	ScenarioRevisionID   string                       `json:"scenario_revision_id,omitempty"`
 	SourceSlug           string                       `json:"source_slug,omitempty"`
 	State                CommitState                  `json:"state"`
 	StateVersion         int64                        `json:"state_version"`
@@ -254,9 +254,9 @@ func (c Commit) Valid() bool {
 		return false
 	}
 	if c.State == CommitPending {
-		return c.ChallengeID == "" && c.ChallengeRevisionID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
+		return c.ScenarioID == "" && c.ScenarioRevisionID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
-	if !challenge.ValidID(c.ChallengeID) || !challenge.ValidRevisionID(c.ChallengeRevisionID) || !challenge.ValidSourceSlug(c.SourceSlug) {
+	if !scenario.ValidID(c.ScenarioID) || !scenario.ValidRevisionID(c.ScenarioRevisionID) || !scenario.ValidSourceSlug(c.SourceSlug) {
 		return false
 	}
 	if c.State == CommitPrepared {
@@ -274,7 +274,7 @@ func (c Commit) Valid() bool {
 	if c.State == CommitArtifactPublished {
 		return c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
 	}
-	if !challenge.ValidRevision(c.MaterializedRevision) || c.MaterializedAt == nil {
+	if !scenario.ValidRevision(c.MaterializedRevision) || c.MaterializedAt == nil {
 		return false
 	}
 	if c.State == CommitMaterialized {

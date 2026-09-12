@@ -44,7 +44,7 @@ type GenerationView struct {
 }
 
 // GeneratorService is the single application boundary for user-directed
-// challenge generation. It never claims a workflow or runs a background
+// scenario generation. It never claims a workflow or runs a background
 // Generator model; Generating only means this user's workspace can be edited.
 type GeneratorService struct {
 	store             GeneratorStore

@@ -6,7 +6,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
@@ -20,7 +20,7 @@ func (h *Handler) validateRuntimeStagingArtifact(action runtime.Context, artifac
 		return err
 	}
 	switch action.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		expected, err := candidate.CandidateOCIRepository(h.registryRepository, action.Identity.CandidateID)
 		if err != nil {
 			return fmt.Errorf("derive candidate OCI repository: %w", err)
@@ -34,7 +34,7 @@ func (h *Handler) validateRuntimeStagingArtifact(action runtime.Context, artifac
 		}
 		return nil
 
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if action.Build == nil || action.Build.Incus == nil {
 			return errors.New("node candidate has no build image identity")
 		}
@@ -51,28 +51,28 @@ func (h *Handler) validateRuntimeStagingArtifact(action runtime.Context, artifac
 	}
 }
 
-// validateCandidateChallengeArtifact enforces both final-artifact ownership and
+// validateCandidateScenarioArtifact enforces both final-artifact ownership and
 // content identity. Publishing must not turn a candidate artifact into a
 // different image merely because both values are valid immutable references.
-func (h *Handler) validateRuntimeChallengeArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.ChallengeID == "" || action.ChallengeRevisionID == "" {
-		return errors.New("runtime action has no challenge publication input")
+func (h *Handler) validateRuntimeScenarioArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
+	if action.Artifact == nil || action.ScenarioID == "" || action.ScenarioRevisionID == "" {
+		return errors.New("runtime action has no scenario publication input")
 	}
 	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
 		return err
 	}
 	switch action.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
-		expected, err := candidate.ChallengeOCIRepository(h.registryRepository, action.ChallengeID, action.ChallengeRevisionID)
+	case scenario.RuntimeK8s:
+		expected, err := candidate.ScenarioOCIRepository(h.registryRepository, action.ScenarioID, action.ScenarioRevisionID)
 		if err != nil {
-			return fmt.Errorf("derive challenge OCI repository: %w", err)
+			return fmt.Errorf("derive scenario OCI repository: %w", err)
 		}
 		actual, err := candidate.OCIRepository(artifact.OCIReference)
 		if err != nil {
 			return err
 		}
 		if actual != expected {
-			return errors.New("challenge artifact OCI repository does not belong to publication")
+			return errors.New("scenario artifact OCI repository does not belong to publication")
 		}
 		stagingDigest, err := candidate.OCIDigest(action.Artifact.OCIReference)
 		if err != nil {
@@ -83,20 +83,20 @@ func (h *Handler) validateRuntimeChallengeArtifact(action runtime.Context, artif
 			return err
 		}
 		if finalDigest != stagingDigest {
-			return errors.New("challenge artifact digest differs from verified candidate artifact")
+			return errors.New("scenario artifact digest differs from verified candidate artifact")
 		}
 		return nil
 
-	case challenge.RuntimeNode:
-		expected, err := incus.AliasForChallenge(h.incusConfig.NamePrefix, action.ChallengeID, action.ChallengeRevisionID)
+	case scenario.RuntimeNode:
+		expected, err := incus.AliasForScenario(h.incusConfig.NamePrefix, action.ScenarioID, action.ScenarioRevisionID)
 		if err != nil {
-			return fmt.Errorf("derive challenge Incus alias: %w", err)
+			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}
 		if artifact.IncusAlias != expected || artifact.IncusFingerprint != action.Artifact.IncusFingerprint {
-			return errors.New("challenge artifact does not match the verified Node artifact")
+			return errors.New("scenario artifact does not match the verified Node artifact")
 		}
 		return nil
 	default:
-		return errors.New("runtime action has an unsupported challenge runtime")
+		return errors.New("runtime action has an unsupported scenario runtime")
 	}
 }

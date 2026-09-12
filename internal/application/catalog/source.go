@@ -10,28 +10,28 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	releaseManifestFilename = "release.yaml"
-	challengeSourcesDirname = "challenges"
+	scenarioSourcesDirname  = "scenarios"
 )
 
 // PortableSource is a validated catalog source tree. It contains source
-// identity only; platform challenge IDs and runtime artifacts are created by
+// identity only; platform scenario IDs and runtime artifacts are created by
 // the installer after real verification succeeds.
 type PortableSource struct {
-	Root       string
-	Manifest   catalogdomain.SourceManifest
-	Challenges []SourceChallenge
+	Root      string
+	Manifest  catalogdomain.SourceManifest
+	Scenarios []SourceScenario
 }
 
-type SourceChallenge struct {
+type SourceScenario struct {
 	Path            string
-	Entry           challenge.Entry
+	Entry           scenario.Entry
 	ContentRevision catalogdomain.ContentRevision
 }
 
@@ -48,7 +48,7 @@ type ContentRevisionEntry struct {
 }
 
 // LoadPortableSource validates the complete checked-in catalog source. It
-// does not install, build, or make any challenge visible.
+// does not install, build, or make any scenario visible.
 func LoadPortableSource(root string) (*PortableSource, error) {
 	result, revisions, err := loadPortableSource(root)
 	if err != nil {
@@ -57,7 +57,7 @@ func LoadPortableSource(root string) (*PortableSource, error) {
 	for index, declared := range result.Manifest.Entries {
 		actual := revisions.Entries[index].ContentRevision
 		if actual != declared.ContentRevision {
-			return nil, fmt.Errorf("release challenge %q contentRevision is %q, want %q", declared.Path, actual, declared.ContentRevision)
+			return nil, fmt.Errorf("release scenario %q contentRevision is %q, want %q", declared.Path, actual, declared.ContentRevision)
 		}
 	}
 	return result, nil
@@ -83,14 +83,14 @@ func loadPortableSource(root string) (*PortableSource, ContentRevisionReport, er
 	if err := manifest.Validate(); err != nil {
 		return nil, ContentRevisionReport{}, fmt.Errorf("validate release manifest: %w", err)
 	}
-	if err := validateDistinctChallengeRoots(manifest.Entries); err != nil {
+	if err := validateDistinctScenarioRoots(manifest.Entries); err != nil {
 		return nil, ContentRevisionReport{}, err
 	}
-	if err := validateChallengeSourceLayout(root, manifest.Entries); err != nil {
+	if err := validateScenarioSourceLayout(root, manifest.Entries); err != nil {
 		return nil, ContentRevisionReport{}, err
 	}
 
-	result := &PortableSource{Root: root, Manifest: manifest, Challenges: make([]SourceChallenge, 0, len(manifest.Entries))}
+	result := &PortableSource{Root: root, Manifest: manifest, Scenarios: make([]SourceScenario, 0, len(manifest.Entries))}
 	revisions := ContentRevisionReport{Entries: make([]ContentRevisionEntry, 0, len(manifest.Entries))}
 	for _, declared := range manifest.Entries {
 		dir, err := sourcePath(root, declared.Path)
@@ -99,13 +99,13 @@ func loadPortableSource(root string) (*PortableSource, ContentRevisionReport, er
 		}
 		revision, err := ContentRevision(dir)
 		if err != nil {
-			return nil, ContentRevisionReport{}, fmt.Errorf("hash release challenge %q: %w", declared.Path, err)
+			return nil, ContentRevisionReport{}, fmt.Errorf("hash release scenario %q: %w", declared.Path, err)
 		}
-		entry, err := challenge.ValidatePortableDir(dir)
+		entry, err := scenario.ValidatePortableDir(dir)
 		if err != nil {
-			return nil, ContentRevisionReport{}, fmt.Errorf("validate release challenge %q: %w", declared.Path, err)
+			return nil, ContentRevisionReport{}, fmt.Errorf("validate release scenario %q: %w", declared.Path, err)
 		}
-		result.Challenges = append(result.Challenges, SourceChallenge{
+		result.Scenarios = append(result.Scenarios, SourceScenario{
 			Path: declared.Path, Entry: *entry, ContentRevision: revision,
 		})
 		revisions.Entries = append(revisions.Entries, ContentRevisionEntry{Path: declared.Path, ContentRevision: revision})
@@ -148,7 +148,7 @@ func validateSourceRoot(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read catalog source root: %w", err)
 	}
-	expected := map[string]bool{releaseManifestFilename: false, challengeSourcesDirname: false}
+	expected := map[string]bool{releaseManifestFilename: false, scenarioSourcesDirname: false}
 	for _, entry := range entries {
 		_, exists := expected[entry.Name()]
 		if !exists {
@@ -178,7 +178,7 @@ func validateSourceRoot(root string) (string, error) {
 	return root, nil
 }
 
-func validateDistinctChallengeRoots(entries []catalogdomain.SourceEntry) error {
+func validateDistinctScenarioRoots(entries []catalogdomain.SourceEntry) error {
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		paths = append(paths, entry.Path)
@@ -186,23 +186,23 @@ func validateDistinctChallengeRoots(entries []catalogdomain.SourceEntry) error {
 	slices.Sort(paths)
 	for index := 1; index < len(paths); index++ {
 		if strings.HasPrefix(paths[index], paths[index-1]+"/") {
-			return fmt.Errorf("release challenge paths %q and %q overlap", paths[index-1], paths[index])
+			return fmt.Errorf("release scenario paths %q and %q overlap", paths[index-1], paths[index])
 		}
 	}
 	return nil
 }
 
-func validateChallengeSourceLayout(root string, entries []catalogdomain.SourceEntry) error {
+func validateScenarioSourceLayout(root string, entries []catalogdomain.SourceEntry) error {
 	entryPaths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		entryPaths = append(entryPaths, entry.Path)
 	}
-	challengesRoot := filepath.Join(root, challengeSourcesDirname)
-	return filepath.WalkDir(challengesRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	scenariosRoot := filepath.Join(root, scenarioSourcesDirname)
+	return filepath.WalkDir(scenariosRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if path == challengesRoot {
+		if path == scenariosRoot {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -211,14 +211,14 @@ func validateChallengeSourceLayout(root string, entries []catalogdomain.SourceEn
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("catalog challenge source does not allow symlink %s", rel)
+			return fmt.Errorf("catalog scenario source does not allow symlink %s", rel)
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() && !info.Mode().IsRegular() {
-			return fmt.Errorf("catalog challenge source does not allow non-regular file %s", rel)
+			return fmt.Errorf("catalog scenario source does not allow non-regular file %s", rel)
 		}
 		if info.IsDir() {
 			for _, expected := range entryPaths {
@@ -226,14 +226,14 @@ func validateChallengeSourceLayout(root string, entries []catalogdomain.SourceEn
 					return nil
 				}
 			}
-			return fmt.Errorf("catalog challenge source has unreferenced directory %s", rel)
+			return fmt.Errorf("catalog scenario source has unreferenced directory %s", rel)
 		}
 		for _, expected := range entryPaths {
 			if strings.HasPrefix(rel, expected+"/") {
 				return nil
 			}
 		}
-		return fmt.Errorf("catalog challenge source has unreferenced file %s", rel)
+		return fmt.Errorf("catalog scenario source has unreferenced file %s", rel)
 	})
 }
 

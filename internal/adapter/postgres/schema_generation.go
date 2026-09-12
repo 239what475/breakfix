@@ -26,7 +26,7 @@ var schemaGenerationStatements = []string{
 		published_at TIMESTAMPTZ
 	)`,
 	`CREATE INDEX candidate_revisions_source ON candidate_revisions(source_kind, source_ref, source_revision, created_at)`,
-	`CREATE TABLE challenges (
+	`CREATE TABLE scenarios (
 		id TEXT PRIMARY KEY,
 		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
 		source_ref TEXT NOT NULL,
@@ -39,9 +39,9 @@ var schemaGenerationStatements = []string{
 		UNIQUE(source_kind, source_ref),
 		CHECK ((source_kind = 'authoring' AND owner_user_id <> '') OR (source_kind = 'release' AND owner_user_id = ''))
 	)`,
-	`CREATE TABLE challenge_revisions (
+	`CREATE TABLE scenario_revisions (
 		id TEXT PRIMARY KEY,
-		challenge_id TEXT NOT NULL REFERENCES challenges(id) ON DELETE RESTRICT,
+		scenario_id TEXT NOT NULL REFERENCES scenarios(id) ON DELETE RESTRICT,
 		source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring', 'release')),
 		source_ref TEXT NOT NULL,
 		source_revision_id TEXT NOT NULL,
@@ -58,19 +58,19 @@ var schemaGenerationStatements = []string{
 		state TEXT NOT NULL CHECK (state IN ('active', 'superseded')),
 		published_at TIMESTAMPTZ NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(challenge_id, content_revision, materialized_revision)
+		UNIQUE(scenario_id, content_revision, materialized_revision)
 	)`,
-	`CREATE INDEX challenge_revisions_challenge ON challenge_revisions(challenge_id, published_at DESC)`,
-	`CREATE UNIQUE INDEX challenge_revisions_one_active ON challenge_revisions(challenge_id) WHERE state = 'active'`,
-	`ALTER TABLE challenge_revisions ADD CONSTRAINT challenge_revisions_id_challenge_key UNIQUE (id, challenge_id)`,
-	`ALTER TABLE challenges ADD CONSTRAINT challenges_active_revision_fk FOREIGN KEY (active_revision_id, id)
-		REFERENCES challenge_revisions (id, challenge_id) DEFERRABLE INITIALLY DEFERRED`,
+	`CREATE INDEX scenario_revisions_scenario ON scenario_revisions(scenario_id, published_at DESC)`,
+	`CREATE UNIQUE INDEX scenario_revisions_one_active ON scenario_revisions(scenario_id) WHERE state = 'active'`,
+	`ALTER TABLE scenario_revisions ADD CONSTRAINT scenario_revisions_id_scenario_key UNIQUE (id, scenario_id)`,
+	`ALTER TABLE scenarios ADD CONSTRAINT scenarios_active_revision_fk FOREIGN KEY (active_revision_id, id)
+		REFERENCES scenario_revisions (id, scenario_id) DEFERRABLE INITIALLY DEFERRED`,
 	`CREATE TABLE generation_workflows (
 		id TEXT PRIMARY KEY,
 		 source_kind TEXT NOT NULL CHECK (source_kind IN ('authoring')),
 		source_ref TEXT NOT NULL,
 		source_revision TEXT NOT NULL,
-		 state TEXT NOT NULL CHECK (state IN ('Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'ChallengePublishing', 'Published', 'Failed', 'Cancelled')),
+		 state TEXT NOT NULL CHECK (state IN ('Generating', 'Judging', 'Building', 'ArtifactPublishing', 'Verifying', 'NeedsAuthorReview', 'ScenarioPublishing', 'Published', 'Failed', 'Cancelled')),
 		candidate_revision_id TEXT REFERENCES candidate_revisions(id) ON DELETE RESTRICT,
 		workspace_snapshot_digest TEXT NOT NULL DEFAULT '',
 		active_agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE RESTRICT,
@@ -87,8 +87,8 @@ var schemaGenerationStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL,
 		CHECK (
-			(state IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt BETWEEN 1 AND 5) OR
-			(state NOT IN ('Building', 'ArtifactPublishing', 'Verifying', 'ChallengePublishing') AND runtime_attempt = 0)
+			(state IN ('Building', 'ArtifactPublishing', 'Verifying', 'ScenarioPublishing') AND runtime_attempt BETWEEN 1 AND 5) OR
+			(state NOT IN ('Building', 'ArtifactPublishing', 'Verifying', 'ScenarioPublishing') AND runtime_attempt = 0)
 		),
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL)),
 		CHECK (

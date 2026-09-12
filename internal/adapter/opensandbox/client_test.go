@@ -48,7 +48,7 @@ func TestWorkspaceModeParsesOpenSandboxOctalNotation(t *testing.T) {
 
 func TestArchiveAndRestoreWorkspaceUseFileAPI(t *testing.T) {
 	filesystem := &testWorkspaceFilesystem{files: map[string]testWorkspaceFile{
-		"/workspace/challenge.yaml":        {content: []byte("title: test\n"), mode: 644},
+		"/workspace/scenario.yaml":         {content: []byte("title: test\n"), mode: 644},
 		"/workspace/checks/checkpoints.sh": {content: []byte("#!/bin/sh\n"), mode: 755},
 	}, directories: map[string]int{"/workspace/checks": 755}}
 	archive, err := archiveWorkspace(context.Background(), filesystem)
@@ -147,18 +147,18 @@ func (f *testWorkspaceFilesystem) DeleteDirectory(_ context.Context, path string
 }
 
 func TestWorkspacePathAcceptsEinoRelativePrefix(t *testing.T) {
-	for _, value := range []string{"challenge.yaml", "./challenge.yaml", "nodes/host/checks.sh", "./nodes/host/checks.sh"} {
+	for _, value := range []string{"scenario.yaml", "./scenario.yaml", "nodes/host/checks.sh", "./nodes/host/checks.sh"} {
 		if err := ValidateWorkspacePath(value); err != nil {
 			t.Fatalf("ValidateWorkspacePath(%q): %v", value, err)
 		}
 	}
-	if got, want := WorkspacePath("./challenge.yaml"), "/workspace/challenge.yaml"; got != want {
-		t.Fatalf("WorkspacePath(./challenge.yaml) = %q, want %q", got, want)
+	if got, want := WorkspacePath("./scenario.yaml"), "/workspace/scenario.yaml"; got != want {
+		t.Fatalf("WorkspacePath(./scenario.yaml) = %q, want %q", got, want)
 	}
 }
 
 func TestWorkspacePathRejectsEscapesAndAmbiguousRelativePaths(t *testing.T) {
-	for _, value := range []string{"", ".", "./", "././challenge.yaml", "../challenge.yaml", "checks/../challenge.yaml", "/etc/passwd", `checks\\bad`} {
+	for _, value := range []string{"", ".", "./", "././scenario.yaml", "../scenario.yaml", "checks/../scenario.yaml", "/etc/passwd", `checks\\bad`} {
 		if err := ValidateWorkspacePath(value); err == nil {
 			t.Fatalf("ValidateWorkspacePath(%q) unexpectedly succeeded", value)
 		}

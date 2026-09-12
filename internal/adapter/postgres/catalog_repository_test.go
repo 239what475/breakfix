@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
@@ -45,7 +45,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if action.Identity.Scope != runtime.ScopeCatalogEntry || action.Identity.State != runtime.StateBuilding {
 		t.Fatalf("build action = %#v", action)
 	}
-	build := execution.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &execution.IncusBuildReference{
+	build := execution.BuildOutput{Runtime: scenario.RuntimeNode, Incus: &execution.IncusBuildReference{
 		Project: "catalog-build", WorkflowID: entry.ID, CandidateRevisionID: entry.ID, Attempt: action.Identity.StateVersion,
 		InstanceName: "catalog-build-node", Alias: "catalog-build-node", Fingerprint: strings.Repeat("c", 64),
 	}}
@@ -57,7 +57,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if action.Identity.State != runtime.StateArtifactPublishing {
 		t.Fatalf("artifact action = %#v", action)
 	}
-	artifact := execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "catalog-candidate-node", IncusFingerprint: strings.Repeat("d", 64)}
+	artifact := execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "catalog-candidate-node", IncusFingerprint: strings.Repeat("d", 64)}
 	if err := database.Catalog.CompleteCatalogArtifactPublish(ctx, *action, artifact, now); err != nil {
 		t.Fatalf("complete catalog artifact publication: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 		t.Fatalf("verification action = %#v", action)
 	}
 	environment := execution.VerificationEnvironment{
-		Runtime: challenge.RuntimeNode, Name: "catalog-verify-node", UID: "catalog-verify-uid", WorkflowID: entry.ID, Attempt: action.Identity.StateVersion,
+		Runtime: scenario.RuntimeNode, Name: "catalog-verify-node", UID: "catalog-verify-uid", WorkflowID: entry.ID, Attempt: action.Identity.StateVersion,
 	}
 	if err := database.Catalog.RecordCatalogVerificationEnvironment(ctx, *action, environment, now); err != nil {
 		t.Fatalf("record catalog verification environment: %v", err)
@@ -80,10 +80,10 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 		t.Fatalf("complete catalog verification: %v", err)
 	}
 
-	challengeID := challenge.NewID()
+	scenarioID := scenario.NewID()
 	intent := catalogdomain.Commit{
 		ID: catalogdomain.EntryCommitIDFor(initializedRelease.ID, entry.ID), ReleaseID: initializedRelease.ID, EntryID: entry.ID,
-		ChallengeID: challengeID, ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceSlug: challenge.SourceSlugFor(entry.Title, challengeID),
+		ScenarioID: scenarioID, ScenarioRevisionID: "chrev-aaaaaaaaaaaaaaaa", SourceSlug: scenario.SourceSlugFor(entry.Title, scenarioID),
 		State: catalogdomain.CommitPrepared, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 	committing, commits, err := database.Catalog.PrepareReleaseCommit(ctx, initializedRelease.ID, []catalogdomain.Commit{intent}, now)
@@ -92,14 +92,14 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	}
 
 	commitAction := claimCatalogRuntimeAction(t, database, now)
-	if commitAction.Identity.Scope != runtime.ScopeCatalogCommit || commitAction.Identity.State != runtime.StateChallengePublishing {
+	if commitAction.Identity.Scope != runtime.ScopeCatalogCommit || commitAction.Identity.State != runtime.StateScenarioPublishing {
 		t.Fatalf("commit action = %#v", commitAction)
 	}
 	if err := database.Catalog.RenewCatalogRuntimeLease(ctx, commitAction.Credential(), time.Minute, now.Add(time.Second)); err != nil {
 		t.Fatalf("renew catalog commit runtime lease: %v", err)
 	}
-	finalArtifact := execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "catalog-challenge-node", IncusFingerprint: strings.Repeat("e", 64)}
-	if err := database.Catalog.CompleteCatalogChallengePublication(ctx, *commitAction, finalArtifact, now); err != nil {
+	finalArtifact := execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "catalog-scenario-node", IncusFingerprint: strings.Repeat("e", 64)}
+	if err := database.Catalog.CompleteCatalogScenarioPublication(ctx, *commitAction, finalArtifact, now); err != nil {
 		t.Fatalf("publish final catalog artifact: %v", err)
 	}
 	materializedRevision := "sha256:" + strings.Repeat("f", 64)
@@ -128,7 +128,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if reloaded.FinalizerLastError != "temporary materialization filesystem failure" || reloaded.FinalizerNextRetryAt == nil {
 		t.Fatalf("reloaded catalog publication diagnostic = %#v", reloaded)
 	}
-	authoring := insertChallengeLifecycleFixture(t, database, "authoring", "catalog-race-author", now.Add(time.Second))
+	authoring := insertScenarioLifecycleFixture(t, database, "authoring", "catalog-race-author", now.Add(time.Second))
 	if _, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now); !errors.Is(err, catalogdomain.ErrBaselineEstablished) {
 		t.Fatalf("catalog commit over authoring content = %v, want baseline established", err)
 	}
@@ -136,13 +136,13 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM challenge_revisions WHERE challenge_id = ?`, authoring.challenge.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scenario_revisions WHERE scenario_id = ?`, authoring.scenario.ID); err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("remove catalog race challenge revision: %v", err)
+		t.Fatalf("remove catalog race scenario revision: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM challenges WHERE id = ?`, authoring.challenge.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scenarios WHERE id = ?`, authoring.scenario.ID); err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("remove catalog race challenge: %v", err)
+		t.Fatalf("remove catalog race scenario: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit catalog race cleanup: %v", err)
@@ -154,12 +154,12 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if ready.FinalizerErrorCategory != publication.CategoryUnknown || ready.FinalizerLastError != "" || ready.FinalizerLastAttemptedAt != nil || ready.FinalizerNextRetryAt != nil {
 		t.Fatalf("ready catalog release retained finalizer diagnostic = %#v", ready)
 	}
-	stable, err := database.Challenge.GetChallenge(ctx, challengeID)
-	if err != nil || stable.ActiveRevisionID != intent.ChallengeRevisionID {
-		t.Fatalf("committed catalog challenge = %#v, err=%v", stable, err)
+	stable, err := database.Scenario.GetScenario(ctx, scenarioID)
+	if err != nil || stable.ActiveRevisionID != intent.ScenarioRevisionID {
+		t.Fatalf("committed catalog scenario = %#v, err=%v", stable, err)
 	}
-	published, err := database.Challenge.GetChallengeRevision(ctx, challengeID, intent.ChallengeRevisionID)
-	if err != nil || published.MaterializedRevision != materializedRevision || published.Type != challenge.ScenarioOperationsScenario {
+	published, err := database.Scenario.GetScenarioRevision(ctx, scenarioID, intent.ScenarioRevisionID)
+	if err != nil || published.MaterializedRevision != materializedRevision || published.Type != scenario.ScenarioOperationsScenario {
 		t.Fatalf("committed catalog revision = %#v, err=%v", published, err)
 	}
 	storedCommits, err := database.Catalog.Commits(ctx, initializedRelease.ID)
@@ -167,7 +167,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 		t.Fatalf("stored catalog commits = %#v, err=%v", storedCommits, err)
 	}
 	bootstrap, err := database.Catalog.CatalogBootstrapState(ctx)
-	if err != nil || len(bootstrap.Releases) != 1 || bootstrap.Releases[0].State != catalogdomain.ReleaseReady || bootstrap.PublishedChallengeCount != 1 {
+	if err != nil || len(bootstrap.Releases) != 1 || bootstrap.Releases[0].State != catalogdomain.ReleaseReady || bootstrap.PublishedScenarioCount != 1 {
 		t.Fatalf("ready catalog bootstrap state = %#v, err=%v", bootstrap, err)
 	}
 }
@@ -181,7 +181,7 @@ func TestCatalogBootstrapWaitsForFailedReleaseResourceCleanup(t *testing.T) {
 	if err != nil || action == nil {
 		t.Fatalf("claim failed bootstrap build = %#v, err=%v", action, err)
 	}
-	build := execution.BuildOutput{Runtime: challenge.RuntimeNode, Incus: &execution.IncusBuildReference{
+	build := execution.BuildOutput{Runtime: scenario.RuntimeNode, Incus: &execution.IncusBuildReference{
 		Project: "catalog-failed-build", WorkflowID: entry.ID, CandidateRevisionID: entry.ID, Attempt: action.Identity.StateVersion,
 		InstanceName: "catalog-failed-node", Alias: "catalog-failed-node", Fingerprint: strings.Repeat("d", 64),
 	}}
@@ -198,7 +198,7 @@ func TestCatalogBootstrapWaitsForFailedReleaseResourceCleanup(t *testing.T) {
 		t.Fatalf("discover failed bootstrap cleanup: %v", err)
 	}
 	state, err := database.Catalog.CatalogBootstrapState(ctx)
-	if err != nil || !state.FailedCleanupPending || state.PublishedChallengeCount != 0 {
+	if err != nil || !state.FailedCleanupPending || state.PublishedScenarioCount != 0 {
 		t.Fatalf("failed bootstrap state before cleanup = %#v, err=%v", state, err)
 	}
 	for {
@@ -361,10 +361,10 @@ func createCatalogRuntimeFixture(t *testing.T, database *Store, now time.Time) (
 
 func catalogRepositoryEntry(releaseID string, now time.Time) catalogdomain.Entry {
 	return catalogdomain.Entry{
-		ID: catalogdomain.EntryIDFor(releaseID, "challenges/linux/runtime-fixture"), ReleaseID: releaseID, SourcePath: "challenges/linux/runtime-fixture",
-		SourceRef: "node-runtime-fixture", Title: "Runtime fixture", Type: challenge.ScenarioOperationsScenario, Tags: []string{"runtime-fixture"}, ContentRevision: catalogdomain.ContentRevision("sha256:" + strings.Repeat("e", 64)),
+		ID: catalogdomain.EntryIDFor(releaseID, "scenarios/linux/runtime-fixture"), ReleaseID: releaseID, SourcePath: "scenarios/linux/runtime-fixture",
+		SourceRef: "node-runtime-fixture", Title: "Runtime fixture", Type: scenario.ScenarioOperationsScenario, Tags: []string{"runtime-fixture"}, ContentRevision: catalogdomain.ContentRevision("sha256:" + strings.Repeat("e", 64)),
 		ArchiveSHA256: "sha256:" + strings.Repeat("f", 64),
-		Snapshot: execution.Snapshot{Runtime: challenge.RuntimeNode, Checkpoints: []execution.CheckpointSnapshot{{ID: "ready", Node: "host"}},
+		Snapshot: execution.Snapshot{Runtime: scenario.RuntimeNode, Checkpoints: []execution.CheckpointSnapshot{{ID: "ready", Node: "host"}},
 			Node: &execution.NodeRuntimeSnapshot{BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "catalog-node-profile", NetworkPolicyRevision: "catalog-node-network",
 				Nodes: []execution.NodeSnapshot{{Name: "host", Title: "Host"}}, Resources: execution.NodeResources{CPU: "1", Memory: "512MiB", Processes: 128, RootDisk: "5GiB"}}},
 		State: catalogdomain.EntryBuilding, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,

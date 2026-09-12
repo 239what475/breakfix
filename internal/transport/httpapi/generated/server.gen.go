@@ -233,78 +233,6 @@ func (e AuthoringSessionState) Valid() bool {
 	}
 }
 
-// Defines values for ChallengeContentRuntime.
-const (
-	ChallengeContentRuntimeK8s  ChallengeContentRuntime = "k8s"
-	ChallengeContentRuntimeNode ChallengeContentRuntime = "node"
-)
-
-// Valid indicates whether the value is a known member of the ChallengeContentRuntime enum.
-func (e ChallengeContentRuntime) Valid() bool {
-	switch e {
-	case ChallengeContentRuntimeK8s:
-		return true
-	case ChallengeContentRuntimeNode:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ChallengeContentScenarioType.
-const (
-	ChallengeContentScenarioTypeDocumentationExample ChallengeContentScenarioType = "documentation-example"
-	ChallengeContentScenarioTypeOperationsScenario   ChallengeContentScenarioType = "operations-scenario"
-)
-
-// Valid indicates whether the value is a known member of the ChallengeContentScenarioType enum.
-func (e ChallengeContentScenarioType) Valid() bool {
-	switch e {
-	case ChallengeContentScenarioTypeDocumentationExample:
-		return true
-	case ChallengeContentScenarioTypeOperationsScenario:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ChallengeSummaryRuntime.
-const (
-	ChallengeSummaryRuntimeK8s  ChallengeSummaryRuntime = "k8s"
-	ChallengeSummaryRuntimeNode ChallengeSummaryRuntime = "node"
-)
-
-// Valid indicates whether the value is a known member of the ChallengeSummaryRuntime enum.
-func (e ChallengeSummaryRuntime) Valid() bool {
-	switch e {
-	case ChallengeSummaryRuntimeK8s:
-		return true
-	case ChallengeSummaryRuntimeNode:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ChallengeSummaryScenarioType.
-const (
-	ChallengeSummaryScenarioTypeDocumentationExample ChallengeSummaryScenarioType = "documentation-example"
-	ChallengeSummaryScenarioTypeOperationsScenario   ChallengeSummaryScenarioType = "operations-scenario"
-)
-
-// Valid indicates whether the value is a known member of the ChallengeSummaryScenarioType enum.
-func (e ChallengeSummaryScenarioType) Valid() bool {
-	switch e {
-	case ChallengeSummaryScenarioTypeDocumentationExample:
-		return true
-	case ChallengeSummaryScenarioTypeOperationsScenario:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for GeneratorReviewManifestKind.
 const (
 	GeneratorReviewManifestKindContent GeneratorReviewManifestKind = "content"
@@ -340,16 +268,16 @@ func (e GeneratorWorkflowFinalizerErrorCategory) Valid() bool {
 
 // Defines values for GeneratorWorkflowState.
 const (
-	GeneratorWorkflowStateArtifactPublishing  GeneratorWorkflowState = "ArtifactPublishing"
-	GeneratorWorkflowStateBuilding            GeneratorWorkflowState = "Building"
-	GeneratorWorkflowStateCancelled           GeneratorWorkflowState = "Cancelled"
-	GeneratorWorkflowStateChallengePublishing GeneratorWorkflowState = "ChallengePublishing"
-	GeneratorWorkflowStateFailed              GeneratorWorkflowState = "Failed"
-	GeneratorWorkflowStateGenerating          GeneratorWorkflowState = "Generating"
-	GeneratorWorkflowStateJudging             GeneratorWorkflowState = "Judging"
-	GeneratorWorkflowStateNeedsAuthorReview   GeneratorWorkflowState = "NeedsAuthorReview"
-	GeneratorWorkflowStatePublished           GeneratorWorkflowState = "Published"
-	GeneratorWorkflowStateVerifying           GeneratorWorkflowState = "Verifying"
+	GeneratorWorkflowStateArtifactPublishing GeneratorWorkflowState = "ArtifactPublishing"
+	GeneratorWorkflowStateBuilding           GeneratorWorkflowState = "Building"
+	GeneratorWorkflowStateCancelled          GeneratorWorkflowState = "Cancelled"
+	GeneratorWorkflowStateFailed             GeneratorWorkflowState = "Failed"
+	GeneratorWorkflowStateGenerating         GeneratorWorkflowState = "Generating"
+	GeneratorWorkflowStateJudging            GeneratorWorkflowState = "Judging"
+	GeneratorWorkflowStateNeedsAuthorReview  GeneratorWorkflowState = "NeedsAuthorReview"
+	GeneratorWorkflowStatePublished          GeneratorWorkflowState = "Published"
+	GeneratorWorkflowStateScenarioPublishing GeneratorWorkflowState = "ScenarioPublishing"
+	GeneratorWorkflowStateVerifying          GeneratorWorkflowState = "Verifying"
 )
 
 // Valid indicates whether the value is a known member of the GeneratorWorkflowState enum.
@@ -361,8 +289,6 @@ func (e GeneratorWorkflowState) Valid() bool {
 		return true
 	case GeneratorWorkflowStateCancelled:
 		return true
-	case GeneratorWorkflowStateChallengePublishing:
-		return true
 	case GeneratorWorkflowStateFailed:
 		return true
 	case GeneratorWorkflowStateGenerating:
@@ -372,6 +298,8 @@ func (e GeneratorWorkflowState) Valid() bool {
 	case GeneratorWorkflowStateNeedsAuthorReview:
 		return true
 	case GeneratorWorkflowStatePublished:
+		return true
+	case GeneratorWorkflowStateScenarioPublishing:
 		return true
 	case GeneratorWorkflowStateVerifying:
 		return true
@@ -437,24 +365,6 @@ func (e MySpaceAuthoringDraftState) Valid() bool {
 	}
 }
 
-// Defines values for MySpaceChallengeRuntime.
-const (
-	MySpaceChallengeRuntimeK8s  MySpaceChallengeRuntime = "k8s"
-	MySpaceChallengeRuntimeNode MySpaceChallengeRuntime = "node"
-)
-
-// Valid indicates whether the value is a known member of the MySpaceChallengeRuntime enum.
-func (e MySpaceChallengeRuntime) Valid() bool {
-	switch e {
-	case MySpaceChallengeRuntimeK8s:
-		return true
-	case MySpaceChallengeRuntimeNode:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for MySpaceLearningHistoryState.
 const (
 	MySpaceLearningHistoryStateActive    MySpaceLearningHistoryState = "active"
@@ -482,18 +392,108 @@ func (e MySpaceLearningHistoryState) Valid() bool {
 	}
 }
 
-// Defines values for MySpacePublishedChallengeState.
+// Defines values for MySpacePublishedScenarioState.
 const (
-	MySpacePublishedChallengeStateActive     MySpacePublishedChallengeState = "active"
-	MySpacePublishedChallengeStateDeprecated MySpacePublishedChallengeState = "deprecated"
+	MySpacePublishedScenarioStateActive     MySpacePublishedScenarioState = "active"
+	MySpacePublishedScenarioStateDeprecated MySpacePublishedScenarioState = "deprecated"
 )
 
-// Valid indicates whether the value is a known member of the MySpacePublishedChallengeState enum.
-func (e MySpacePublishedChallengeState) Valid() bool {
+// Valid indicates whether the value is a known member of the MySpacePublishedScenarioState enum.
+func (e MySpacePublishedScenarioState) Valid() bool {
 	switch e {
-	case MySpacePublishedChallengeStateActive:
+	case MySpacePublishedScenarioStateActive:
 		return true
-	case MySpacePublishedChallengeStateDeprecated:
+	case MySpacePublishedScenarioStateDeprecated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MySpaceScenarioRuntime.
+const (
+	MySpaceScenarioRuntimeK8s  MySpaceScenarioRuntime = "k8s"
+	MySpaceScenarioRuntimeNode MySpaceScenarioRuntime = "node"
+)
+
+// Valid indicates whether the value is a known member of the MySpaceScenarioRuntime enum.
+func (e MySpaceScenarioRuntime) Valid() bool {
+	switch e {
+	case MySpaceScenarioRuntimeK8s:
+		return true
+	case MySpaceScenarioRuntimeNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScenarioContentRuntime.
+const (
+	ScenarioContentRuntimeK8s  ScenarioContentRuntime = "k8s"
+	ScenarioContentRuntimeNode ScenarioContentRuntime = "node"
+)
+
+// Valid indicates whether the value is a known member of the ScenarioContentRuntime enum.
+func (e ScenarioContentRuntime) Valid() bool {
+	switch e {
+	case ScenarioContentRuntimeK8s:
+		return true
+	case ScenarioContentRuntimeNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScenarioContentScenarioType.
+const (
+	ScenarioContentScenarioTypeDocumentationExample ScenarioContentScenarioType = "documentation-example"
+	ScenarioContentScenarioTypeOperationsScenario   ScenarioContentScenarioType = "operations-scenario"
+)
+
+// Valid indicates whether the value is a known member of the ScenarioContentScenarioType enum.
+func (e ScenarioContentScenarioType) Valid() bool {
+	switch e {
+	case ScenarioContentScenarioTypeDocumentationExample:
+		return true
+	case ScenarioContentScenarioTypeOperationsScenario:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScenarioSummaryRuntime.
+const (
+	ScenarioSummaryRuntimeK8s  ScenarioSummaryRuntime = "k8s"
+	ScenarioSummaryRuntimeNode ScenarioSummaryRuntime = "node"
+)
+
+// Valid indicates whether the value is a known member of the ScenarioSummaryRuntime enum.
+func (e ScenarioSummaryRuntime) Valid() bool {
+	switch e {
+	case ScenarioSummaryRuntimeK8s:
+		return true
+	case ScenarioSummaryRuntimeNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScenarioSummaryScenarioType.
+const (
+	ScenarioSummaryScenarioTypeDocumentationExample ScenarioSummaryScenarioType = "documentation-example"
+	ScenarioSummaryScenarioTypeOperationsScenario   ScenarioSummaryScenarioType = "operations-scenario"
+)
+
+// Valid indicates whether the value is a known member of the ScenarioSummaryScenarioType enum.
+func (e ScenarioSummaryScenarioType) Valid() bool {
+	switch e {
+	case ScenarioSummaryScenarioTypeDocumentationExample:
+		return true
+	case ScenarioSummaryScenarioTypeOperationsScenario:
 		return true
 	default:
 		return false
@@ -556,9 +556,9 @@ func (e GetMySpaceLearningParamsRuntime) Valid() bool {
 
 // AssistantConversation defines model for AssistantConversation.
 type AssistantConversation struct {
-	ChallengeId string             `json:"challenge_id"`
-	Id          string             `json:"id"`
-	Messages    []AssistantMessage `json:"messages"`
+	Id         string             `json:"id"`
+	Messages   []AssistantMessage `json:"messages"`
+	ScenarioId string             `json:"scenario_id"`
 }
 
 // AssistantEvidence defines model for AssistantEvidence.
@@ -729,9 +729,9 @@ type AuthoringSession struct {
 	IntentRevision               int                   `json:"intent_revision"`
 	LastError                    *string               `json:"last_error,omitempty"`
 	Messages                     []AuthoringMessage    `json:"messages"`
-	PublishChallengeId           *string               `json:"publish_challenge_id,omitempty"`
+	PublishScenarioId            *string               `json:"publish_scenario_id,omitempty"`
 	RevisionBaseActiveRevisionId *string               `json:"revision_base_active_revision_id,omitempty"`
-	RevisionChallengeId          *string               `json:"revision_challenge_id,omitempty"`
+	RevisionScenarioId           *string               `json:"revision_scenario_id,omitempty"`
 	State                        AuthoringSessionState `json:"state"`
 	UpdatedAt                    time.Time             `json:"updated_at"`
 	VisibleRevision              int                   `json:"visible_revision"`
@@ -748,71 +748,6 @@ type AuthoringVerificationReport struct {
 	Passed      bool                        `json:"passed"`
 	Summary     string                      `json:"summary"`
 }
-
-// ChallengeCheckpoint defines model for ChallengeCheckpoint.
-type ChallengeCheckpoint struct {
-	Description string  `json:"description"`
-	Hint        *string `json:"hint,omitempty"`
-	Id          string  `json:"id"`
-	Node        *string `json:"node,omitempty"`
-	Title       string  `json:"title"`
-}
-
-// ChallengeContent defines model for ChallengeContent.
-type ChallengeContent struct {
-	Checkpoints  []ChallengeCheckpoint        `json:"checkpoints"`
-	Hints        map[string]string            `json:"hints"`
-	Id           string                       `json:"id"`
-	Nodes        []ChallengeNode              `json:"nodes"`
-	Problem      string                       `json:"problem"`
-	Runtime      ChallengeContentRuntime      `json:"runtime"`
-	ScenarioTags []string                     `json:"scenario_tags"`
-	ScenarioType ChallengeContentScenarioType `json:"scenario_type"`
-	Solution     string                       `json:"solution"`
-	Title        string                       `json:"title"`
-}
-
-// ChallengeContentRuntime defines model for ChallengeContent.Runtime.
-type ChallengeContentRuntime string
-
-// ChallengeContentScenarioType defines model for ChallengeContent.ScenarioType.
-type ChallengeContentScenarioType string
-
-// ChallengeList defines model for ChallengeList.
-type ChallengeList struct {
-	Challenges []ChallengeSummary `json:"challenges"`
-}
-
-// ChallengeNode defines model for ChallengeNode.
-type ChallengeNode struct {
-	Name  string `json:"name"`
-	Title string `json:"title"`
-}
-
-// ChallengeProgress defines model for ChallengeProgress.
-type ChallengeProgress struct {
-	Checks []CheckpointResult `json:"checks"`
-}
-
-// ChallengeSummary defines model for ChallengeSummary.
-type ChallengeSummary struct {
-	Active       *bool                        `json:"active,omitempty"`
-	Description  string                       `json:"description"`
-	Id           string                       `json:"id"`
-	Progress     *CheckpointProgressSummary   `json:"progress,omitempty"`
-	PublishedAt  time.Time                    `json:"published_at"`
-	Runtime      ChallengeSummaryRuntime      `json:"runtime"`
-	ScenarioTags []string                     `json:"scenario_tags"`
-	ScenarioType ChallengeSummaryScenarioType `json:"scenario_type"`
-	Solved       *bool                        `json:"solved,omitempty"`
-	Title        string                       `json:"title"`
-}
-
-// ChallengeSummaryRuntime defines model for ChallengeSummary.Runtime.
-type ChallengeSummaryRuntime string
-
-// ChallengeSummaryScenarioType defines model for ChallengeSummary.ScenarioType.
-type ChallengeSummaryScenarioType string
 
 // CheckpointFirstPass defines model for CheckpointFirstPass.
 type CheckpointFirstPass struct {
@@ -871,7 +806,7 @@ type GeneratorGeneration struct {
 	Candidate    *AuthoringCandidate          `json:"candidate,omitempty"`
 	Diff         []AuthoringFileDiff          `json:"diff"`
 	Verification *AuthoringVerificationReport `json:"verification,omitempty"`
-	Verified     *VerifiedChallenge           `json:"verified,omitempty"`
+	Verified     *VerifiedScenario            `json:"verified,omitempty"`
 	Workflow     GeneratorWorkflow            `json:"workflow"`
 }
 
@@ -1036,12 +971,12 @@ type MySpace struct {
 
 // MySpaceActiveEnvironment defines model for MySpaceActiveEnvironment.
 type MySpaceActiveEnvironment struct {
-	Challenge          MySpaceChallenge                `json:"challenge"`
 	CheckpointProgress CheckpointProgressSummary       `json:"checkpoint_progress"`
 	EnvironmentId      string                          `json:"environment_id"`
 	ExpiresAt          *time.Time                      `json:"expires_at,omitempty"`
 	Phase              string                          `json:"phase"`
 	Runtime            MySpaceActiveEnvironmentRuntime `json:"runtime"`
+	Scenario           MySpaceScenario                 `json:"scenario"`
 }
 
 // MySpaceActiveEnvironmentRuntime defines model for MySpaceActiveEnvironment.Runtime.
@@ -1049,8 +984,8 @@ type MySpaceActiveEnvironmentRuntime string
 
 // MySpaceAuthoring defines model for MySpaceAuthoring.
 type MySpaceAuthoring struct {
-	Drafts    []MySpaceAuthoringDraft     `json:"drafts"`
-	Published []MySpacePublishedChallenge `json:"published"`
+	Drafts    []MySpaceAuthoringDraft    `json:"drafts"`
+	Published []MySpacePublishedScenario `json:"published"`
 }
 
 // MySpaceAuthoringDraft defines model for MySpaceAuthoringDraft.
@@ -1064,16 +999,6 @@ type MySpaceAuthoringDraft struct {
 // MySpaceAuthoringDraftState defines model for MySpaceAuthoringDraft.State.
 type MySpaceAuthoringDraftState string
 
-// MySpaceChallenge defines model for MySpaceChallenge.
-type MySpaceChallenge struct {
-	Id      string                  `json:"id"`
-	Runtime MySpaceChallengeRuntime `json:"runtime"`
-	Title   string                  `json:"title"`
-}
-
-// MySpaceChallengeRuntime defines model for MySpaceChallenge.Runtime.
-type MySpaceChallengeRuntime string
-
 // MySpaceEnvironmentQuota defines model for MySpaceEnvironmentQuota.
 type MySpaceEnvironmentQuota struct {
 	Maximum  *int `json:"maximum"`
@@ -1082,11 +1007,11 @@ type MySpaceEnvironmentQuota struct {
 
 // MySpaceLearningHistory defines model for MySpaceLearningHistory.
 type MySpaceLearningHistory struct {
-	Challenge             MySpaceChallenge            `json:"challenge"`
 	CheckpointFirstPasses []CheckpointFirstPass       `json:"checkpoint_first_passes"`
 	CompletedAt           *time.Time                  `json:"completed_at,omitempty"`
 	LearningSeconds       int                         `json:"learning_seconds"`
 	ReadyAt               time.Time                   `json:"ready_at"`
+	Scenario              MySpaceScenario             `json:"scenario"`
 	State                 MySpaceLearningHistoryState `json:"state"`
 }
 
@@ -1106,19 +1031,29 @@ type MySpaceProfile struct {
 	Name      string    `json:"name"`
 }
 
-// MySpacePublishedChallenge defines model for MySpacePublishedChallenge.
-type MySpacePublishedChallenge struct {
-	AttemptedUsers int                            `json:"attempted_users"`
-	Challenge      MySpaceChallenge               `json:"challenge"`
-	CompletedUsers int                            `json:"completed_users"`
-	PassRate       *float32                       `json:"pass_rate,omitempty"`
-	PublishedAt    time.Time                      `json:"published_at"`
-	RevisionId     string                         `json:"revision_id"`
-	State          MySpacePublishedChallengeState `json:"state"`
+// MySpacePublishedScenario defines model for MySpacePublishedScenario.
+type MySpacePublishedScenario struct {
+	AttemptedUsers int                           `json:"attempted_users"`
+	CompletedUsers int                           `json:"completed_users"`
+	PassRate       *float32                      `json:"pass_rate,omitempty"`
+	PublishedAt    time.Time                     `json:"published_at"`
+	RevisionId     string                        `json:"revision_id"`
+	Scenario       MySpaceScenario               `json:"scenario"`
+	State          MySpacePublishedScenarioState `json:"state"`
 }
 
-// MySpacePublishedChallengeState defines model for MySpacePublishedChallenge.State.
-type MySpacePublishedChallengeState string
+// MySpacePublishedScenarioState defines model for MySpacePublishedScenario.State.
+type MySpacePublishedScenarioState string
+
+// MySpaceScenario defines model for MySpaceScenario.
+type MySpaceScenario struct {
+	Id      string                 `json:"id"`
+	Runtime MySpaceScenarioRuntime `json:"runtime"`
+	Title   string                 `json:"title"`
+}
+
+// MySpaceScenarioRuntime defines model for MySpaceScenario.Runtime.
+type MySpaceScenarioRuntime string
 
 // MySpaceSummary defines model for MySpaceSummary.
 type MySpaceSummary struct {
@@ -1145,18 +1080,83 @@ type RegisterResponse struct {
 
 // ResetResponse defines model for ResetResponse.
 type ResetResponse struct {
-	ChallengeTitle string `json:"challenge_title"`
+	ScenarioTitle string `json:"scenario_title"`
 }
+
+// ScenarioCheckpoint defines model for ScenarioCheckpoint.
+type ScenarioCheckpoint struct {
+	Description string  `json:"description"`
+	Hint        *string `json:"hint,omitempty"`
+	Id          string  `json:"id"`
+	Node        *string `json:"node,omitempty"`
+	Title       string  `json:"title"`
+}
+
+// ScenarioContent defines model for ScenarioContent.
+type ScenarioContent struct {
+	Checkpoints  []ScenarioCheckpoint        `json:"checkpoints"`
+	Hints        map[string]string           `json:"hints"`
+	Id           string                      `json:"id"`
+	Nodes        []ScenarioNode              `json:"nodes"`
+	Problem      string                      `json:"problem"`
+	Runtime      ScenarioContentRuntime      `json:"runtime"`
+	ScenarioTags []string                    `json:"scenario_tags"`
+	ScenarioType ScenarioContentScenarioType `json:"scenario_type"`
+	Solution     string                      `json:"solution"`
+	Title        string                      `json:"title"`
+}
+
+// ScenarioContentRuntime defines model for ScenarioContent.Runtime.
+type ScenarioContentRuntime string
+
+// ScenarioContentScenarioType defines model for ScenarioContent.ScenarioType.
+type ScenarioContentScenarioType string
+
+// ScenarioList defines model for ScenarioList.
+type ScenarioList struct {
+	Scenarios []ScenarioSummary `json:"scenarios"`
+}
+
+// ScenarioNode defines model for ScenarioNode.
+type ScenarioNode struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
+}
+
+// ScenarioProgress defines model for ScenarioProgress.
+type ScenarioProgress struct {
+	Checks []CheckpointResult `json:"checks"`
+}
+
+// ScenarioSummary defines model for ScenarioSummary.
+type ScenarioSummary struct {
+	Active       *bool                       `json:"active,omitempty"`
+	Description  string                      `json:"description"`
+	Id           string                      `json:"id"`
+	Progress     *CheckpointProgressSummary  `json:"progress,omitempty"`
+	PublishedAt  time.Time                   `json:"published_at"`
+	Runtime      ScenarioSummaryRuntime      `json:"runtime"`
+	ScenarioTags []string                    `json:"scenario_tags"`
+	ScenarioType ScenarioSummaryScenarioType `json:"scenario_type"`
+	Solved       *bool                       `json:"solved,omitempty"`
+	Title        string                      `json:"title"`
+}
+
+// ScenarioSummaryRuntime defines model for ScenarioSummary.Runtime.
+type ScenarioSummaryRuntime string
+
+// ScenarioSummaryScenarioType defines model for ScenarioSummary.ScenarioType.
+type ScenarioSummaryScenarioType string
 
 // StartResponse defines model for StartResponse.
 type StartResponse struct {
-	ChallengeTitle string `json:"challenge_title"`
+	ScenarioTitle string `json:"scenario_title"`
 }
 
 // StopResponse defines model for StopResponse.
 type StopResponse struct {
-	ChallengeTitle string `json:"challenge_title"`
-	Stopped        bool   `json:"stopped"`
+	ScenarioTitle string `json:"scenario_title"`
+	Stopped       bool   `json:"stopped"`
 }
 
 // TerminalTicketRequest defines model for TerminalTicketRequest.
@@ -1175,12 +1175,6 @@ type TerminalWindowCloseResponse struct {
 	Closed bool `json:"closed"`
 }
 
-// VerifiedChallenge defines model for VerifiedChallenge.
-type VerifiedChallenge struct {
-	Checkpoints []VerifiedCheckpoint `json:"checkpoints"`
-	Metadata    AuthoringMetadata    `json:"metadata"`
-}
-
 // VerifiedCheckpoint defines model for VerifiedCheckpoint.
 type VerifiedCheckpoint struct {
 	Description string  `json:"description"`
@@ -1188,6 +1182,12 @@ type VerifiedCheckpoint struct {
 	Id          string  `json:"id"`
 	Node        *string `json:"node,omitempty"`
 	Title       string  `json:"title"`
+}
+
+// VerifiedScenario defines model for VerifiedScenario.
+type VerifiedScenario struct {
+	Checkpoints []VerifiedCheckpoint `json:"checkpoints"`
+	Metadata    AuthoringMetadata    `json:"metadata"`
 }
 
 // AuthoringSessionID defines model for AuthoringSessionID.
@@ -1204,11 +1204,6 @@ type Error = ErrorResponse
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
-
-// CloseTerminalWindowParams defines parameters for CloseTerminalWindow.
-type CloseTerminalWindowParams struct {
-	Node *string `form:"node,omitempty" json:"node,omitempty"`
-}
 
 // GetGeneratorReviewBundleParams defines parameters for GetGeneratorReviewBundle.
 type GetGeneratorReviewBundleParams struct {
@@ -1250,6 +1245,11 @@ type GetMySpaceLearningParamsState string
 // GetMySpaceLearningParamsRuntime defines parameters for GetMySpaceLearning.
 type GetMySpaceLearningParamsRuntime string
 
+// CloseTerminalWindowParams defines parameters for CloseTerminalWindow.
+type CloseTerminalWindowParams struct {
+	Node *string `form:"node,omitempty" json:"node,omitempty"`
+}
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -1258,12 +1258,6 @@ type RegisterJSONRequestBody = RegisterRequest
 
 // SendAuthoringMessageJSONRequestBody defines body for SendAuthoringMessage for application/json ContentType.
 type SendAuthoringMessageJSONRequestBody = AuthoringMessageRequest
-
-// SendChallengeAssistantMessageJSONRequestBody defines body for SendChallengeAssistantMessage for application/json ContentType.
-type SendChallengeAssistantMessageJSONRequestBody = AssistantMessageRequest
-
-// CreateTerminalTicketJSONRequestBody defines body for CreateTerminalTicket for application/json ContentType.
-type CreateTerminalTicketJSONRequestBody = TerminalTicketRequest
 
 // SetGenerationPlanJSONRequestBody defines body for SetGenerationPlan for application/json ContentType.
 type SetGenerationPlanJSONRequestBody = GeneratorPlanRequest
@@ -1295,6 +1289,12 @@ type StartGeneratorWorkspaceTurnJSONRequestBody = GeneratorWorkspaceTurnRequest
 // EndGeneratorWorkspaceTurnJSONRequestBody defines body for EndGeneratorWorkspaceTurn for application/json ContentType.
 type EndGeneratorWorkspaceTurnJSONRequestBody = GeneratorWorkspaceTurnRequest
 
+// SendScenarioAssistantMessageJSONRequestBody defines body for SendScenarioAssistantMessage for application/json ContentType.
+type SendScenarioAssistantMessageJSONRequestBody = AssistantMessageRequest
+
+// CreateTerminalTicketJSONRequestBody defines body for CreateTerminalTicket for application/json ContentType.
+type CreateTerminalTicketJSONRequestBody = TerminalTicketRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Login with password + TOTP
@@ -1303,13 +1303,13 @@ type ServerInterface interface {
 	// Register a new user
 	// (POST /auth/register)
 	Register(c *gin.Context)
-	// Remove an author-owned Challenge from the active Catalog
-	// (POST /authoring/challenges/{id}/deprecate)
-	DeprecateAuthoringChallenge(c *gin.Context, id string)
-	// Start a new authoring session for an author-owned Challenge revision
-	// (POST /authoring/challenges/{id}/revisions)
-	CreateAuthoringChallengeRevision(c *gin.Context, id string)
-	// Create a human-reviewed challenge authoring session
+	// Remove an author-owned Scenario from the active Catalog
+	// (POST /authoring/scenarios/{id}/deprecate)
+	DeprecateAuthoringScenario(c *gin.Context, id string)
+	// Start a new authoring session for an author-owned Scenario revision
+	// (POST /authoring/scenarios/{id}/revisions)
+	CreateAuthoringScenarioRevision(c *gin.Context, id string)
+	// Create a human-reviewed scenario authoring session
 	// (POST /authoring/sessions)
 	CreateAuthoringSession(c *gin.Context)
 	// Resume the latest unfinished authoring session for the current user
@@ -1321,36 +1321,6 @@ type ServerInterface interface {
 	// Send one natural-language instruction to the authoring agent
 	// (POST /authoring/sessions/{id}/messages)
 	SendAuthoringMessage(c *gin.Context, id AuthoringSessionID)
-	// List all challenges
-	// (GET /challenges)
-	ListChallenges(c *gin.Context)
-	// Read or create the assistant conversation for the active challenge environment
-	// (GET /challenges/{id}/assistant)
-	GetChallengeAssistant(c *gin.Context, id string)
-	// Send a message to the active challenge assistant and receive SSE events
-	// (POST /challenges/{id}/assistant/messages)
-	SendChallengeAssistantMessage(c *gin.Context, id string)
-	// Get challenge problem, solution, hints, and checkpoint metadata
-	// (GET /challenges/{id}/content)
-	GetChallengeContent(c *gin.Context, id string)
-	// Read the controller-owned current challenge checkpoint snapshot
-	// (GET /challenges/{id}/progress)
-	GetChallengeProgress(c *gin.Context, id string)
-	// Reset challenge to initial state
-	// (POST /challenges/{id}/reset)
-	ResetChallenge(c *gin.Context, id string)
-	// Start or resume a challenge environment
-	// (POST /challenges/{id}/start)
-	StartChallenge(c *gin.Context, id string)
-	// Stop the current challenge environment
-	// (POST /challenges/{id}/stop)
-	StopChallenge(c *gin.Context, id string)
-	// Create a one-time ticket for a terminal WebSocket
-	// (POST /challenges/{id}/terminal-ticket)
-	CreateTerminalTicket(c *gin.Context, id string)
-	// Close one terminal tab in the current challenge environment
-	// (DELETE /challenges/{id}/terminals/{window})
-	CloseTerminalWindow(c *gin.Context, id string, window string, params CloseTerminalWindowParams)
 	// Create or revise one user-owned generation plan
 	// (POST /generator/plans)
 	SetGenerationPlan(c *gin.Context)
@@ -1402,6 +1372,36 @@ type ServerInterface interface {
 	// Page durable learning history for the authenticated user
 	// (GET /me/space/learning)
 	GetMySpaceLearning(c *gin.Context, params GetMySpaceLearningParams)
+	// List all scenarios
+	// (GET /scenarios)
+	ListScenarios(c *gin.Context)
+	// Read or create the assistant conversation for the active scenario environment
+	// (GET /scenarios/{id}/assistant)
+	GetScenarioAssistant(c *gin.Context, id string)
+	// Send a message to the active scenario assistant and receive SSE events
+	// (POST /scenarios/{id}/assistant/messages)
+	SendScenarioAssistantMessage(c *gin.Context, id string)
+	// Get scenario problem, solution, hints, and checkpoint metadata
+	// (GET /scenarios/{id}/content)
+	GetScenarioContent(c *gin.Context, id string)
+	// Read the controller-owned current scenario checkpoint snapshot
+	// (GET /scenarios/{id}/progress)
+	GetScenarioProgress(c *gin.Context, id string)
+	// Reset scenario to initial state
+	// (POST /scenarios/{id}/reset)
+	ResetScenario(c *gin.Context, id string)
+	// Start or resume a scenario environment
+	// (POST /scenarios/{id}/start)
+	StartScenario(c *gin.Context, id string)
+	// Stop the current scenario environment
+	// (POST /scenarios/{id}/stop)
+	StopScenario(c *gin.Context, id string)
+	// Create a one-time ticket for a terminal WebSocket
+	// (POST /scenarios/{id}/terminal-ticket)
+	CreateTerminalTicket(c *gin.Context, id string)
+	// Close one terminal tab in the current scenario environment
+	// (DELETE /scenarios/{id}/terminals/{window})
+	CloseTerminalWindow(c *gin.Context, id string, window string, params CloseTerminalWindowParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1439,8 +1439,8 @@ func (siw *ServerInterfaceWrapper) Register(c *gin.Context) {
 	siw.Handler.Register(c)
 }
 
-// DeprecateAuthoringChallenge operation middleware
-func (siw *ServerInterfaceWrapper) DeprecateAuthoringChallenge(c *gin.Context) {
+// DeprecateAuthoringScenario operation middleware
+func (siw *ServerInterfaceWrapper) DeprecateAuthoringScenario(c *gin.Context) {
 
 	var err error
 	_ = err
@@ -1463,11 +1463,11 @@ func (siw *ServerInterfaceWrapper) DeprecateAuthoringChallenge(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.DeprecateAuthoringChallenge(c, id)
+	siw.Handler.DeprecateAuthoringScenario(c, id)
 }
 
-// CreateAuthoringChallengeRevision operation middleware
-func (siw *ServerInterfaceWrapper) CreateAuthoringChallengeRevision(c *gin.Context) {
+// CreateAuthoringScenarioRevision operation middleware
+func (siw *ServerInterfaceWrapper) CreateAuthoringScenarioRevision(c *gin.Context) {
 
 	var err error
 	_ = err
@@ -1490,7 +1490,7 @@ func (siw *ServerInterfaceWrapper) CreateAuthoringChallengeRevision(c *gin.Conte
 		}
 	}
 
-	siw.Handler.CreateAuthoringChallengeRevision(c, id)
+	siw.Handler.CreateAuthoringScenarioRevision(c, id)
 }
 
 // CreateAuthoringSession operation middleware
@@ -1575,282 +1575,6 @@ func (siw *ServerInterfaceWrapper) SendAuthoringMessage(c *gin.Context) {
 	}
 
 	siw.Handler.SendAuthoringMessage(c, id)
-}
-
-// ListChallenges operation middleware
-func (siw *ServerInterfaceWrapper) ListChallenges(c *gin.Context) {
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListChallenges(c)
-}
-
-// GetChallengeAssistant operation middleware
-func (siw *ServerInterfaceWrapper) GetChallengeAssistant(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetChallengeAssistant(c, id)
-}
-
-// SendChallengeAssistantMessage operation middleware
-func (siw *ServerInterfaceWrapper) SendChallengeAssistantMessage(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.SendChallengeAssistantMessage(c, id)
-}
-
-// GetChallengeContent operation middleware
-func (siw *ServerInterfaceWrapper) GetChallengeContent(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetChallengeContent(c, id)
-}
-
-// GetChallengeProgress operation middleware
-func (siw *ServerInterfaceWrapper) GetChallengeProgress(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetChallengeProgress(c, id)
-}
-
-// ResetChallenge operation middleware
-func (siw *ServerInterfaceWrapper) ResetChallenge(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ResetChallenge(c, id)
-}
-
-// StartChallenge operation middleware
-func (siw *ServerInterfaceWrapper) StartChallenge(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StartChallenge(c, id)
-}
-
-// StopChallenge operation middleware
-func (siw *ServerInterfaceWrapper) StopChallenge(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StopChallenge(c, id)
-}
-
-// CreateTerminalTicket operation middleware
-func (siw *ServerInterfaceWrapper) CreateTerminalTicket(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CreateTerminalTicket(c, id)
-}
-
-// CloseTerminalWindow operation middleware
-func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Path parameter "window" -------------
-	var window string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "window", c.Param("window"), &window, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter window: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params CloseTerminalWindowParams
-
-	// ------------- Optional query parameter "node" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "node", c.Request.URL.Query(), &params.Node, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter node: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CloseTerminalWindow(c, id, window, params)
 }
 
 // SetGenerationPlan operation middleware
@@ -2347,6 +2071,282 @@ func (siw *ServerInterfaceWrapper) GetMySpaceLearning(c *gin.Context) {
 	siw.Handler.GetMySpaceLearning(c, params)
 }
 
+// ListScenarios operation middleware
+func (siw *ServerInterfaceWrapper) ListScenarios(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListScenarios(c)
+}
+
+// GetScenarioAssistant operation middleware
+func (siw *ServerInterfaceWrapper) GetScenarioAssistant(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetScenarioAssistant(c, id)
+}
+
+// SendScenarioAssistantMessage operation middleware
+func (siw *ServerInterfaceWrapper) SendScenarioAssistantMessage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SendScenarioAssistantMessage(c, id)
+}
+
+// GetScenarioContent operation middleware
+func (siw *ServerInterfaceWrapper) GetScenarioContent(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetScenarioContent(c, id)
+}
+
+// GetScenarioProgress operation middleware
+func (siw *ServerInterfaceWrapper) GetScenarioProgress(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetScenarioProgress(c, id)
+}
+
+// ResetScenario operation middleware
+func (siw *ServerInterfaceWrapper) ResetScenario(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ResetScenario(c, id)
+}
+
+// StartScenario operation middleware
+func (siw *ServerInterfaceWrapper) StartScenario(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StartScenario(c, id)
+}
+
+// StopScenario operation middleware
+func (siw *ServerInterfaceWrapper) StopScenario(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StopScenario(c, id)
+}
+
+// CreateTerminalTicket operation middleware
+func (siw *ServerInterfaceWrapper) CreateTerminalTicket(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateTerminalTicket(c, id)
+}
+
+// CloseTerminalWindow operation middleware
+func (siw *ServerInterfaceWrapper) CloseTerminalWindow(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "window" -------------
+	var window string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "window", c.Param("window"), &window, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter window: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CloseTerminalWindowParams
+
+	// ------------- Optional query parameter "node" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node", c.Request.URL.Query(), &params.Node, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter node: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CloseTerminalWindow(c, id, window, params)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -2376,22 +2376,12 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.POST(options.BaseURL+"/auth/login", wrapper.Login)
 	router.POST(options.BaseURL+"/auth/register", wrapper.Register)
-	router.POST(options.BaseURL+"/authoring/challenges/:id/deprecate", wrapper.DeprecateAuthoringChallenge)
-	router.POST(options.BaseURL+"/authoring/challenges/:id/revisions", wrapper.CreateAuthoringChallengeRevision)
+	router.POST(options.BaseURL+"/authoring/scenarios/:id/deprecate", wrapper.DeprecateAuthoringScenario)
+	router.POST(options.BaseURL+"/authoring/scenarios/:id/revisions", wrapper.CreateAuthoringScenarioRevision)
 	router.POST(options.BaseURL+"/authoring/sessions", wrapper.CreateAuthoringSession)
 	router.GET(options.BaseURL+"/authoring/sessions/current", wrapper.GetCurrentAuthoringSession)
 	router.GET(options.BaseURL+"/authoring/sessions/:id", wrapper.GetAuthoringSession)
 	router.POST(options.BaseURL+"/authoring/sessions/:id/messages", wrapper.SendAuthoringMessage)
-	router.GET(options.BaseURL+"/challenges", wrapper.ListChallenges)
-	router.GET(options.BaseURL+"/challenges/:id/assistant", wrapper.GetChallengeAssistant)
-	router.POST(options.BaseURL+"/challenges/:id/assistant/messages", wrapper.SendChallengeAssistantMessage)
-	router.GET(options.BaseURL+"/challenges/:id/content", wrapper.GetChallengeContent)
-	router.GET(options.BaseURL+"/challenges/:id/progress", wrapper.GetChallengeProgress)
-	router.POST(options.BaseURL+"/challenges/:id/reset", wrapper.ResetChallenge)
-	router.POST(options.BaseURL+"/challenges/:id/start", wrapper.StartChallenge)
-	router.POST(options.BaseURL+"/challenges/:id/stop", wrapper.StopChallenge)
-	router.POST(options.BaseURL+"/challenges/:id/terminal-ticket", wrapper.CreateTerminalTicket)
-	router.DELETE(options.BaseURL+"/challenges/:id/terminals/:window", wrapper.CloseTerminalWindow)
 	router.POST(options.BaseURL+"/generator/plans", wrapper.SetGenerationPlan)
 	router.GET(options.BaseURL+"/generator/workflows", wrapper.ListActiveGenerations)
 	router.POST(options.BaseURL+"/generator/workflows", wrapper.ConfirmGeneration)
@@ -2409,6 +2399,16 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/generator/workflows/:workflow_id/workspace/turn/end", wrapper.EndGeneratorWorkspaceTurn)
 	router.GET(options.BaseURL+"/me/space", wrapper.GetMySpace)
 	router.GET(options.BaseURL+"/me/space/learning", wrapper.GetMySpaceLearning)
+	router.GET(options.BaseURL+"/scenarios", wrapper.ListScenarios)
+	router.GET(options.BaseURL+"/scenarios/:id/assistant", wrapper.GetScenarioAssistant)
+	router.POST(options.BaseURL+"/scenarios/:id/assistant/messages", wrapper.SendScenarioAssistantMessage)
+	router.GET(options.BaseURL+"/scenarios/:id/content", wrapper.GetScenarioContent)
+	router.GET(options.BaseURL+"/scenarios/:id/progress", wrapper.GetScenarioProgress)
+	router.POST(options.BaseURL+"/scenarios/:id/reset", wrapper.ResetScenario)
+	router.POST(options.BaseURL+"/scenarios/:id/start", wrapper.StartScenario)
+	router.POST(options.BaseURL+"/scenarios/:id/stop", wrapper.StopScenario)
+	router.POST(options.BaseURL+"/scenarios/:id/terminal-ticket", wrapper.CreateTerminalTicket)
+	router.DELETE(options.BaseURL+"/scenarios/:id/terminals/:window", wrapper.CloseTerminalWindow)
 }
 
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
@@ -2416,102 +2416,102 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

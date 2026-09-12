@@ -9,7 +9,7 @@
 | --- | --- |
 | HTTP JSON 契约 | [`api/http/openapi.yaml`](../api/http/openapi.yaml) |
 | Kubernetes CRD | [`api/v1/`](../api/v1/) |
-| Challenge 文件契约 | [`internal/content/challenge/`](../internal/content/challenge/) |
+| Scenario 文件契约 | [`internal/content/scenario/`](../internal/content/scenario/) |
 | 运行时配置 | [`config/app/local.example.yaml`](../config/app/local.example.yaml) |
 | 构建、生成与测试命令 | [`Makefile`](../Makefile) |
 
@@ -26,7 +26,7 @@
 ## 产品与参考
 
 - [学习与创作体验](product/learning-experience.md)
-- [题目内容格式](reference/challenge-format.md)
+- [题目内容格式](reference/scenario-format.md)
 - [`assets/`](assets/)：产品设计草图与参考截图，仅用于设计沟通。
 
 ## 运维

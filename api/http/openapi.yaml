@@ -109,23 +109,23 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
-  /challenges:
+  /scenarios:
     get:
-      operationId: listChallenges
-      summary: List all challenges
-      tags: [challenges]
+      operationId: listScenarios
+      summary: List all scenarios
+      tags: [scenarios]
       responses:
         "200":
-          description: Challenge list
+          description: Scenario list
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChallengeList"
+                $ref: "#/components/schemas/ScenarioList"
 
-  /challenges/{id}/start:
+  /scenarios/{id}/start:
     post:
-      operationId: startChallenge
-      summary: Start or resume a challenge environment
+      operationId: startScenario
+      summary: Start or resume a scenario environment
       tags: [environments]
       security:
         - bearerAuth: []
@@ -145,11 +145,11 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/content:
+  /scenarios/{id}/content:
     get:
-      operationId: getChallengeContent
-      summary: Get challenge problem, solution, hints, and checkpoint metadata
-      tags: [challenges]
+      operationId: getScenarioContent
+      summary: Get scenario problem, solution, hints, and checkpoint metadata
+      tags: [scenarios]
       security:
         - bearerAuth: []
       parameters:
@@ -160,18 +160,18 @@ paths:
             type: string
       responses:
         "200":
-          description: Challenge content
+          description: Scenario content
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChallengeContent"
+                $ref: "#/components/schemas/ScenarioContent"
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/progress:
+  /scenarios/{id}/progress:
     get:
-      operationId: getChallengeProgress
-      summary: Read the controller-owned current challenge checkpoint snapshot
+      operationId: getScenarioProgress
+      summary: Read the controller-owned current scenario checkpoint snapshot
       tags: [environments]
       security:
         - bearerAuth: []
@@ -187,16 +187,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChallengeProgress"
+                $ref: "#/components/schemas/ScenarioProgress"
         "404":
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/assistant:
+  /scenarios/{id}/assistant:
     get:
-      operationId: getChallengeAssistant
-      summary: Read or create the assistant conversation for the active challenge environment
+      operationId: getScenarioAssistant
+      summary: Read or create the assistant conversation for the active scenario environment
       tags: [assistant]
       security:
         - bearerAuth: []
@@ -218,10 +218,10 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/assistant/messages:
+  /scenarios/{id}/assistant/messages:
     post:
-      operationId: sendChallengeAssistantMessage
-      summary: Send a message to the active challenge assistant and receive SSE events
+      operationId: sendScenarioAssistantMessage
+      summary: Send a message to the active scenario assistant and receive SSE events
       tags: [assistant]
       security:
         - bearerAuth: []
@@ -251,10 +251,10 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/reset:
+  /scenarios/{id}/reset:
     post:
-      operationId: resetChallenge
-      summary: Reset challenge to initial state
+      operationId: resetScenario
+      summary: Reset scenario to initial state
       tags: [environments]
       security:
         - bearerAuth: []
@@ -266,7 +266,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Challenge reset
+          description: Scenario reset
           content:
             application/json:
               schema:
@@ -274,10 +274,10 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/stop:
+  /scenarios/{id}/stop:
     post:
-      operationId: stopChallenge
-      summary: Stop the current challenge environment
+      operationId: stopScenario
+      summary: Stop the current scenario environment
       tags: [environments]
       security:
         - bearerAuth: []
@@ -289,7 +289,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Challenge stopped
+          description: Scenario stopped
           content:
             application/json:
               schema:
@@ -297,7 +297,7 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/terminal-ticket:
+  /scenarios/{id}/terminal-ticket:
     post:
       operationId: createTerminalTicket
       summary: Create a one-time ticket for a terminal WebSocket
@@ -326,10 +326,10 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /challenges/{id}/terminals/{window}:
+  /scenarios/{id}/terminals/{window}:
     delete:
       operationId: closeTerminalWindow
-      summary: Close one terminal tab in the current challenge environment
+      summary: Close one terminal tab in the current scenario environment
       tags: [environments]
       security:
         - bearerAuth: []
@@ -364,7 +364,7 @@ paths:
   /authoring/sessions:
     post:
       operationId: createAuthoringSession
-      summary: Create a human-reviewed challenge authoring session
+      summary: Create a human-reviewed scenario authoring session
       tags: [authoring]
       security:
         - bearerAuth: []
@@ -376,10 +376,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthoringSession"
 
-  /authoring/challenges/{id}/revisions:
+  /authoring/scenarios/{id}/revisions:
     post:
-      operationId: createAuthoringChallengeRevision
-      summary: Start a new authoring session for an author-owned Challenge revision
+      operationId: createAuthoringScenarioRevision
+      summary: Start a new authoring session for an author-owned Scenario revision
       tags: [authoring]
       security:
         - bearerAuth: []
@@ -391,7 +391,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Challenge revision authoring session created
+          description: Scenario revision authoring session created
           content:
             application/json:
               schema:
@@ -401,10 +401,10 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /authoring/challenges/{id}/deprecate:
+  /authoring/scenarios/{id}/deprecate:
     post:
-      operationId: deprecateAuthoringChallenge
-      summary: Remove an author-owned Challenge from the active Catalog
+      operationId: deprecateAuthoringScenario
+      summary: Remove an author-owned Scenario from the active Catalog
       tags: [authoring]
       security:
         - bearerAuth: []
@@ -416,7 +416,7 @@ paths:
             type: string
       responses:
         "204":
-          description: Challenge deprecated
+          description: Scenario deprecated
         "404":
           $ref: "#/components/responses/Error"
         "409":
@@ -781,7 +781,7 @@ paths:
               $ref: "#/components/schemas/GeneratorContentConfirmationRequest"
       responses:
         "200":
-          description: Workflow advanced to challenge publication
+          description: Workflow advanced to scenario publication
           content:
             application/json:
               schema:
@@ -924,7 +924,7 @@ components:
         name:
           type: string
 
-    MySpaceChallenge:
+    MySpaceScenario:
       type: object
       required: [id, title, runtime]
       properties:
@@ -986,12 +986,12 @@ components:
 
     MySpaceActiveEnvironment:
       type: object
-      required: [environment_id, challenge, runtime, phase, checkpoint_progress]
+      required: [environment_id, scenario, runtime, phase, checkpoint_progress]
       properties:
         environment_id:
           type: string
-        challenge:
-          $ref: "#/components/schemas/MySpaceChallenge"
+        scenario:
+          $ref: "#/components/schemas/MySpaceScenario"
         runtime:
           type: string
           enum: [node, k8s]
@@ -1006,10 +1006,10 @@ components:
 
     MySpaceLearningHistory:
       type: object
-      required: [challenge, ready_at, learning_seconds, state, checkpoint_first_passes]
+      required: [scenario, ready_at, learning_seconds, state, checkpoint_first_passes]
       properties:
-        challenge:
-          $ref: "#/components/schemas/MySpaceChallenge"
+        scenario:
+          $ref: "#/components/schemas/MySpaceScenario"
         ready_at:
           type: string
           format: date-time
@@ -1055,12 +1055,12 @@ components:
           type: string
           format: date-time
 
-    MySpacePublishedChallenge:
+    MySpacePublishedScenario:
       type: object
-      required: [challenge, revision_id, state, published_at, attempted_users, completed_users]
+      required: [scenario, revision_id, state, published_at, attempted_users, completed_users]
       properties:
-        challenge:
-          $ref: "#/components/schemas/MySpaceChallenge"
+        scenario:
+          $ref: "#/components/schemas/MySpaceScenario"
         revision_id:
           type: string
         state:
@@ -1091,7 +1091,7 @@ components:
         published:
           type: array
           items:
-            $ref: "#/components/schemas/MySpacePublishedChallenge"
+            $ref: "#/components/schemas/MySpacePublishedScenario"
 
     MySpace:
       type: object
@@ -1115,7 +1115,7 @@ components:
         authoring:
           $ref: "#/components/schemas/MySpaceAuthoring"
 
-    ChallengeSummary:
+    ScenarioSummary:
       type: object
       required: [id, title, runtime, scenario_type, scenario_tags, description, published_at]
       properties:
@@ -1156,16 +1156,16 @@ components:
           type: integer
           minimum: 0
 
-    ChallengeList:
+    ScenarioList:
       type: object
-      required: [challenges]
+      required: [scenarios]
       properties:
-        challenges:
+        scenarios:
           type: array
           items:
-            $ref: "#/components/schemas/ChallengeSummary"
+            $ref: "#/components/schemas/ScenarioSummary"
 
-    ChallengeCheckpoint:
+    ScenarioCheckpoint:
       type: object
       required: [id, title, description]
       properties:
@@ -1180,7 +1180,7 @@ components:
         node:
           type: string
 
-    ChallengeNode:
+    ScenarioNode:
       type: object
       required: [name, title]
       properties:
@@ -1218,7 +1218,7 @@ components:
         summary:
           type: string
 
-    ChallengeContent:
+    ScenarioContent:
       type: object
       required: [id, title, runtime, scenario_type, scenario_tags, nodes, problem, solution, hints, checkpoints]
       properties:
@@ -1239,7 +1239,7 @@ components:
         nodes:
           type: array
           items:
-            $ref: "#/components/schemas/ChallengeNode"
+            $ref: "#/components/schemas/ScenarioNode"
         problem:
           type: string
         solution:
@@ -1251,8 +1251,8 @@ components:
         checkpoints:
           type: array
           items:
-            $ref: "#/components/schemas/ChallengeCheckpoint"
-    ChallengeProgress:
+            $ref: "#/components/schemas/ScenarioCheckpoint"
+    ScenarioProgress:
       type: object
       required: [checks]
       properties:
@@ -1290,11 +1290,11 @@ components:
 
     AssistantConversation:
       type: object
-      required: [id, challenge_id, messages]
+      required: [id, scenario_id, messages]
       properties:
         id:
           type: string
-        challenge_id:
+        scenario_id:
           type: string
         messages:
           type: array
@@ -1332,24 +1332,24 @@ components:
 
     StartResponse:
       type: object
-      required: [challenge_title]
+      required: [scenario_title]
       properties:
-        challenge_title:
+        scenario_title:
           type: string
 
     ResetResponse:
       type: object
-      required: [challenge_title]
+      required: [scenario_title]
       properties:
-        challenge_title:
+        scenario_title:
           type: string
     StopResponse:
       type: object
-      required: [stopped, challenge_title]
+      required: [stopped, scenario_title]
       properties:
         stopped:
           type: boolean
-        challenge_title:
+        scenario_title:
           type: string
 
     TerminalWindowCloseResponse:
@@ -1433,7 +1433,7 @@ components:
         node:
           type: string
 
-    VerifiedChallenge:
+    VerifiedScenario:
       type: object
       required: [metadata, checkpoints]
       properties:
@@ -1481,7 +1481,7 @@ components:
           minimum: 0
         state:
           type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ChallengePublishing, Published, Failed, Cancelled]
+          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ScenarioPublishing, Published, Failed, Cancelled]
         state_version:
           type: integer
           format: int64
@@ -1714,7 +1714,7 @@ components:
         candidate:
           $ref: "#/components/schemas/AuthoringCandidate"
         verified:
-          $ref: "#/components/schemas/VerifiedChallenge"
+          $ref: "#/components/schemas/VerifiedScenario"
         verification:
           $ref: "#/components/schemas/AuthoringVerificationReport"
         assets:
@@ -1916,9 +1916,9 @@ components:
           type: integer
         visible_revision:
           type: integer
-        publish_challenge_id:
+        publish_scenario_id:
           type: string
-        revision_challenge_id:
+        revision_scenario_id:
           type: string
         revision_base_active_revision_id:
           type: string

@@ -4,8 +4,8 @@ import {
 	expectTerminalConnected,
 	registerAndLogin,
 	runTerminalCommand,
-	startChallengeFromCatalog,
-	stopChallenge,
+	startScenarioFromCatalog,
+	stopScenario,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
 import { attachNodeEnvironmentIdentity, waitForNodeEnvironmentDeletion } from "../support/e2e-platform";
@@ -18,9 +18,9 @@ agentLiveTest("assistant uses real terminal context", async ({ page }, testInfo)
 	let completed = false;
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
+	const scenario = await startScenarioFromCatalog(page, nodeRuntimeFixture.title);
 	await expectTerminalConnected(page);
-	environmentName = await activeEnvironmentName(page, challenge.id);
+	environmentName = await activeEnvironmentName(page, scenario.id);
 
 	try {
 		const marker = `BREAKFIX_ASSISTANT_SCROLLBACK_${Date.now()}`;
@@ -46,7 +46,7 @@ agentLiveTest("assistant uses real terminal context", async ({ page }, testInfo)
 	} finally {
 		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
 		if (completed) {
-			await stopChallenge(page, challenge.id);
+			await stopScenario(page, scenario.id);
 			await waitForNodeEnvironmentDeletion(environmentName);
 		}
 	}

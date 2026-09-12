@@ -11,7 +11,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
 )
@@ -24,9 +24,9 @@ type assistantMessageRequest struct {
 }
 
 type assistantConversationResponse struct {
-	ID          string              `json:"id"`
-	ChallengeID string              `json:"challenge_id"`
-	Messages    []assistant.Message `json:"messages"`
+	ID         string              `json:"id"`
+	ScenarioID string              `json:"scenario_id"`
+	Messages   []assistant.Message `json:"messages"`
 }
 
 type assistantStreamEvent struct {
@@ -40,12 +40,12 @@ type assistantStreamComplete struct {
 	Message assistant.Message `json:"message"`
 }
 
-func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
+func (h *Handler) GetScenarioAssistant(c *gin.Context, scenarioID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
 	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{CurrentWindow: "shell-1"})
+	request, err := h.assistantRequest(c.Request.Context(), user, scenarioID, assistant.RunInput{CurrentWindow: "shell-1"})
 	if err != nil {
 		h.writeAssistantError(c, err)
 		return
@@ -56,13 +56,13 @@ func (h *Handler) GetChallengeAssistant(c *gin.Context, challengeID string) {
 		return
 	}
 	c.JSON(http.StatusOK, assistantConversationResponse{
-		ID:          session.ID,
-		ChallengeID: challengeID,
-		Messages:    messages,
+		ID:         session.ID,
+		ScenarioID: scenarioID,
+		Messages:   messages,
 	})
 }
 
-func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID string) {
+func (h *Handler) SendScenarioAssistantMessage(c *gin.Context, scenarioID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
@@ -72,7 +72,7 @@ func (h *Handler) SendChallengeAssistantMessage(c *gin.Context, challengeID stri
 		c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	request, err := h.assistantRequest(c.Request.Context(), user, challengeID, assistant.RunInput{
+	request, err := h.assistantRequest(c.Request.Context(), user, scenarioID, assistant.RunInput{
 		CurrentNode: body.CurrentNode, CurrentWindow: body.CurrentWindow, Terminals: body.Terminals,
 	})
 	if err != nil {
@@ -113,13 +113,13 @@ func (h *Handler) streamAssistantTurn(c *gin.Context, sessionID, runID string, r
 	}
 }
 
-func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, challengeID string, input assistant.RunInput) (assistant.Request, error) {
-	entry, env, err := h.resolveEnvironmentChallenge(ctx, user.ID, challengeID, false)
+func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, scenarioID string, input assistant.RunInput) (assistant.Request, error) {
+	entry, env, err := h.resolveEnvironmentScenario(ctx, user.ID, scenarioID, false)
 	if err != nil {
 		if errors.Is(err, errAmbiguousEnvironment) {
-			return assistant.Request{}, challengeEnvironmentError(err)
+			return assistant.Request{}, scenarioEnvironmentError(err)
 		}
-		return assistant.Request{}, fmt.Errorf("no active environment for this challenge")
+		return assistant.Request{}, fmt.Errorf("no active environment for this scenario")
 	}
 	return h.assistantRequestForEnvironment(ctx, user.ID, entry, env, input)
 }
@@ -127,13 +127,13 @@ func (h *Handler) assistantRequest(ctx context.Context, user *postgres.User, cha
 // assistantRequestForEnvironment turns a previously resolved learning
 // Environment into the assistant's fixed read-only tool boundary. Startup
 // recovery uses the same path after resolving the Environment by its durable
-// UID instead of by the browser route's challenge id.
-func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID string, entry *challenge.Entry, env *activeEnvironment, input assistant.RunInput) (assistant.Request, error) {
+// UID instead of by the browser route's scenario id.
+func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID string, entry *scenario.Entry, env *activeEnvironment, input assistant.RunInput) (assistant.Request, error) {
 	if entry == nil || env == nil || strings.TrimSpace(userID) == "" {
 		return assistant.Request{}, fmt.Errorf("assistant environment context is incomplete")
 	}
-	if env.ChallengeRef != entry.ID {
-		return assistant.Request{}, fmt.Errorf("assistant environment challenge does not match the requested challenge")
+	if env.ScenarioRef != entry.ID {
+		return assistant.Request{}, fmt.Errorf("assistant environment scenario does not match the requested scenario")
 	}
 	if env.Phase == breakfixv1.EnvironmentDraining {
 		if err := h.resumeEnvironment(ctx, env); err != nil {
@@ -152,7 +152,7 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 	if err != nil {
 		return assistant.Request{}, err
 	}
-	content, err := challenge.ReadContent(entry)
+	content, err := scenario.ReadContent(entry)
 	if err != nil {
 		return assistant.Request{}, err
 	}
@@ -161,8 +161,8 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 		EnvironmentUID:   env.UID,
 		EnvironmentName:  env.Name,
 		Runtime:          env.Runtime,
-		ChallengeID:      entry.ID,
-		ChallengeTitle:   entry.Title,
+		ScenarioID:       entry.ID,
+		ScenarioTitle:    entry.Title,
 		Problem:          content.Problem,
 		Nodes:            nodes,
 		CurrentNode:      input.CurrentNode,
@@ -191,7 +191,7 @@ func normalizeAssistantWorkspace(env *activeEnvironment, input assistant.RunInpu
 		nodes[index] = node.Name
 	}
 	currentNode := strings.TrimSpace(input.CurrentNode)
-	if env.Runtime == challenge.RuntimeNode {
+	if env.Runtime == scenario.RuntimeNode {
 		if currentNode == "" && len(nodes) > 0 {
 			currentNode = nodes[0]
 		}
@@ -290,7 +290,7 @@ func assistantWindowOpen(windows []string, wanted string) bool {
 	return false
 }
 
-func assistantCheckpointSnapshot(entry *challenge.Entry, env *activeEnvironment) assistant.CheckpointSnapshot {
+func assistantCheckpointSnapshot(entry *scenario.Entry, env *activeEnvironment) assistant.CheckpointSnapshot {
 	titles := make(map[string]string, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
 		titles[checkpoint.ID] = checkpoint.Title

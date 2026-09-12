@@ -6,7 +6,7 @@
 
 PostgreSQL 与 Server data PVC 是同一个权威恢复单元，必须在同一维护窗口、没有写者时一起备份和恢复：
 
-- PostgreSQL 保存用户、会话、`GenerationWorkflow`、`CatalogRelease`、Challenge/revision identity、发布 intent 与清理 intent。
+- PostgreSQL 保存用户、会话、`GenerationWorkflow`、`CatalogRelease`、Scenario/revision identity、发布 intent 与清理 intent。
 - `breakfix-server-data` PVC 保存 materialized 场景目录、持久化 Catalog source 和 candidate archive。
 
 Registry 与 Incus 是数据库引用的外部 immutable artifact provider，不属于此恢复单元：K8s artifact 必须仍可按 OCI digest 读取，
@@ -20,7 +20,7 @@ StorageClass、Registry 与 Incus project 以部署配置为准。
 ## 维护窗口与备份
 
 1. 在 Ingress 或负载均衡器停止向 Server 发送新请求。平台没有维护模式 API。
-2. 记录维护开始时间、当前 `catalog.release_reference`、已发布 Challenge/revision 清单、PostgreSQL 备份标识和两个 PVC 快照标识。
+2. 记录维护开始时间、当前 `catalog.release_reference`、已发布 Scenario/revision 清单、PostgreSQL 备份标识和两个 PVC 快照标识。
 3. 观察正在执行的 Generation、Catalog 与 Environment 工作，等待可安全完成的工作结束。必须中断的工作保留未完成 intent；
    不要手工伪造完成状态。
 4. 停止所有应用写者，并确认 Server data PVC 没有挂载者：
@@ -44,7 +44,7 @@ StorageClass、Registry 与 Incus project 以部署配置为准。
 1. 从同一维护窗口恢复 PostgreSQL。先启动 PostgreSQL，确认数据库、凭据和 `breakfix_schema` 与部署的 Server 二进制一致。
 2. 恢复 `breakfix-server-data` PVC。不要通过重新安装 Catalog、复制 Git 工作区或手工重建目录替代该 PVC；这会破坏已发布 revision
    与 materialized revision 的对应关系。
-3. 通过 PostgreSQL 的只读查询列出当前 active Challenge/revision/materialized revision，并在恢复后的 Server PVC 核对相同目录和
+3. 通过 PostgreSQL 的只读查询列出当前 active Scenario/revision/materialized revision，并在恢复后的 Server PVC 核对相同目录和
    revision。不要修改 active pointer 或启动任何写入组件。
 4. 使用部署者已有的 Registry API/client 核验每个当前或未完成发布 intent 的 `OCIReference` manifest digest；使用 Incus API 核验每个
    Node artifact 的完整 fingerprint、image project 和镜像类型。`/capabilities/node-provider` 可辅助检查当前连通性，但不能替代历史
@@ -59,7 +59,7 @@ StorageClass、Registry 与 Incus project 以部署配置为准。
    ```
 
    `/readyz` 会核验 active revision 到 materialized source 的完整性，但不会探测 Registry 或 Incus。以只读方式检查
-   `/api/challenges` 的 identity、revision 和数量符合恢复清单。
+   `/api/scenarios` 的 identity、revision 和数量符合恢复清单。
 6. 只有 PostgreSQL、PVC、active revision、Registry digest 与 Incus fingerprint 一致时，启动 Runtime Worker 与 Controller，随后恢复
    入口流量。
 
@@ -75,7 +75,7 @@ Server 启动后恢复已有 finalizer、lease、Catalog installer、Judge 和 i
 | Registry 缺少数据库引用的 OCI digest，或 digest 指向不同 manifest | 保持相关 workflow/release 不可服务，恢复 Registry artifact 或通过正常 Build/Verify/Publish 创建新 revision；不得改写旧 revision 的 artifact reference。 |
 | Incus 缺少或不匹配数据库引用的 fingerprint | 恢复匹配 image project/镜像，或通过正常生命周期生成新 revision；不得用 alias 或当前 base image 冒充历史 fingerprint。 |
 
-任一不一致都不是“忽略后继续”的场景。记录受影响 workflow、release、Challenge revision 和 artifact identity，保持写入组件停止直到
+任一不一致都不是“忽略后继续”的场景。记录受影响 workflow、release、Scenario revision 和 artifact identity，保持写入组件停止直到
 恢复证据完整。现有 finalizer/reaper 只处理已经持久化的幂等 intent，不会从不一致备份组合猜测或重写权威数据。
 
 ## 演练验收

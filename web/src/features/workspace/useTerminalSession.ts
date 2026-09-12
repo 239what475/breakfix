@@ -8,7 +8,7 @@ type TerminalState = "idle" | "connecting" | "connected" | "disconnected";
 
 export function useTerminalSession(
   host: Readonly<Ref<HTMLDivElement | undefined>>,
-  challengeId: Readonly<Ref<string | null>>,
+  scenarioId: Readonly<Ref<string | null>>,
   nodeName: Readonly<Ref<string | null>>,
   windowName: Readonly<Ref<string | null>>,
 ) {
@@ -47,10 +47,10 @@ export function useTerminalSession(
 
   async function connect() {
     disconnect();
-    const challenge = challengeId.value;
+    const scenario = scenarioId.value;
     const node = nodeName.value;
     const window = windowName.value;
-    if (!host.value || !challenge || !window) {
+    if (!host.value || !scenario || !window) {
       state.value = "idle";
       return;
     }
@@ -84,7 +84,7 @@ export function useTerminalSession(
     fit.fit();
     let ticket: string;
     try {
-      ticket = (await api.createTerminalTicket(challenge, window, node || undefined)).ticket;
+      ticket = (await api.createTerminalTicket(scenario, window, node || undefined)).ticket;
     } catch (error) {
       if (currentEpoch !== epoch) return;
       state.value = "disconnected";
@@ -95,7 +95,7 @@ export function useTerminalSession(
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const query = new URLSearchParams({ window, ticket });
     if (node) query.set("node", node);
-    socket = new WebSocket(`${protocol}//${location.host}/api/challenges/${challenge}/terminal?${query.toString()}`);
+    socket = new WebSocket(`${protocol}//${location.host}/api/scenarios/${scenario}/terminal?${query.toString()}`);
     socket.onopen = () => {
       if (currentEpoch !== epoch) return;
       stateMessage.value = "";
@@ -137,7 +137,7 @@ export function useTerminalSession(
     observer.observe(host.value);
   }
 
-  watch([host, challengeId, nodeName, windowName], () => void connect(), { flush: "post" });
+  watch([host, scenarioId, nodeName, windowName], () => void connect(), { flush: "post" });
   onScopeDispose(disconnect);
   function refreshLayout() {
     requestAnimationFrame(() => {

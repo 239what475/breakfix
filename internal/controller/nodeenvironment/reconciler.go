@@ -98,7 +98,7 @@ func (r *NodeEnvironmentReconciler) Reconcile(ctx context.Context, request ctrl.
 	if err != nil {
 		// A transient provider outage must not invalidate an already usable
 		// environment. Its next observation can reconnect without making the
-		// user restart the challenge.
+		// user restart the scenario.
 		if stable && errors.Is(err, environmentdomain.ErrProviderUnavailable) {
 			return ctrl.Result{RequeueAfter: nodeProviderRetryInterval}, nil
 		}
@@ -396,7 +396,7 @@ func markRuntimeEnvironmentCompleted(status *breakfixv1.EnvironmentStatus, gener
 		status.CompletedAt = &completed
 	}
 	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionTrue, "CheckpointsCompleted", "all checkpoints passed", generation)
-	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "challenge completed", generation)
+	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "scenario completed", generation)
 }
 
 func shouldDestroyNodeEnvironment(environment *breakfixv1.NodeEnvironment, now time.Time) bool {
@@ -461,7 +461,7 @@ func (r *NodeEnvironmentReconciler) runNodeCheckpoints(ctx context.Context, envi
 		result, err := r.nodeProvider().Execute(checkCtx, environmentdomain.NodeExecutionRequest{
 			EnvironmentUID: string(environment.UID), Revision: environment.Spec.Environment.Source.Revision,
 			Identity: identity, LogicalName: node.Name,
-			Command: []string{"/bin/bash", "/opt/breakfix/challenge/nodes/" + node.Name + "/checks.sh"},
+			Command: []string{"/bin/bash", "/opt/breakfix/scenario/nodes/" + node.Name + "/checks.sh"},
 		})
 		cancel()
 		if err != nil {

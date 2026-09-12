@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/publication"
 )
@@ -17,9 +17,9 @@ func TestPublicationRetentionIncludesHistoryAndOnlyNonTerminalIntents(t *testing
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 7, 9, 0, 0, 0, time.UTC)
-	historical := insertChallengeLifecycleFixture(t, database, "authoring", "retention-author", now)
-	if _, err := database.Challenge.DeprecateAuthoringChallenge(ctx, historical.challenge.OwnerUserID, historical.challenge.ID, now.Add(time.Second)); err != nil {
-		t.Fatalf("deprecate historical challenge: %v", err)
+	historical := insertScenarioLifecycleFixture(t, database, "authoring", "retention-author", now)
+	if _, err := database.Scenario.DeprecateAuthoringScenario(ctx, historical.scenario.OwnerUserID, historical.scenario.ID, now.Add(time.Second)); err != nil {
+		t.Fatalf("deprecate historical scenario: %v", err)
 	}
 
 	workflow, candidate, publishAt := prepareGenerationPublication(t, database, now.Add(time.Minute))
@@ -37,9 +37,9 @@ func TestPublicationRetentionIncludesHistoryAndOnlyNonTerminalIntents(t *testing
 		t.Fatalf("prepare retention catalog release: %v", err)
 	}
 	if _, err := database.conn.ExecContext(ctx, `INSERT INTO catalog_release_entry_commits
-		(id, release_id, entry_id, challenge_id, challenge_revision_id, source_slug, state, state_version, runtime_attempt,
+		(id, release_id, entry_id, scenario_id, scenario_revision_id, source_slug, state, state_version, runtime_attempt,
 		next_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)`,
-		commitID, release.ID, entry.ID, challenge.NewID(), catalogRevisionID, catalogSlug, catalogdomain.CommitPrepared, now.UTC(), now.UTC(), now.UTC()); err != nil {
+		commitID, release.ID, entry.ID, scenario.NewID(), catalogRevisionID, catalogSlug, catalogdomain.CommitPrepared, now.UTC(), now.UTC(), now.UTC()); err != nil {
 		t.Fatalf("insert retention catalog commit: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestPublicationRetentionIncludesHistoryAndOnlyNonTerminalIntents(t *testing
 	for _, expected := range []string{
 		historical.revision.MaterializedPath,
 		candidateWithIntent.Publication.TargetPath,
-		challenge.MaterializedPath(catalogSlug, catalogRevisionID),
+		scenario.MaterializedPath(catalogSlug, catalogRevisionID),
 	} {
 		if !slices.Contains(paths, expected) {
 			t.Fatalf("retained paths %v omit %q", paths, expected)
@@ -74,7 +74,7 @@ func TestPublicationRetentionIncludesHistoryAndOnlyNonTerminalIntents(t *testing
 	if !slices.Contains(paths, historical.revision.MaterializedPath) {
 		t.Fatalf("deprecated history was dropped from retention: %v", paths)
 	}
-	if slices.Contains(paths, candidateWithIntent.Publication.TargetPath) || slices.Contains(paths, challenge.MaterializedPath(catalogSlug, catalogRevisionID)) {
+	if slices.Contains(paths, candidateWithIntent.Publication.TargetPath) || slices.Contains(paths, scenario.MaterializedPath(catalogSlug, catalogRevisionID)) {
 		t.Fatalf("terminal publication intents remain retained: %v", paths)
 	}
 	if !slices.IsSorted(paths) || len(paths) != len(uniqueStrings(paths)) {

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	contentchallenge "github.com/breakfix/breakfix/internal/content/challenge"
+	contentscenario "github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
 var (
@@ -35,9 +35,9 @@ const catalogEntryColumns = `id, release_id, source_path, source_ref, title, sce
 	artifact_reference, verify_environment, verification_report, last_error, created_at, updated_at`
 const catalogEntrySelect = `SELECT ` + catalogEntryColumns + ` FROM catalog_release_entries`
 
-const catalogCommitColumns = `id, release_id, entry_id, challenge_id, challenge_revision_id, source_slug, state, state_version, runtime_attempt,
+const catalogCommitColumns = `id, release_id, entry_id, scenario_id, scenario_revision_id, source_slug, state, state_version, runtime_attempt,
 	lease_owner, lease_expires_at, next_run_at, last_error, artifact_reference, materialized_revision, materialized_at, committed_at, created_at, updated_at`
-const catalogCommitReturningColumns = `commit.id, commit.release_id, commit.entry_id, commit.challenge_id, commit.challenge_revision_id, commit.source_slug, commit.state, commit.state_version, commit.runtime_attempt,
+const catalogCommitReturningColumns = `commit.id, commit.release_id, commit.entry_id, commit.scenario_id, commit.scenario_revision_id, commit.source_slug, commit.state, commit.state_version, commit.runtime_attempt,
 	commit.lease_owner, commit.lease_expires_at, commit.next_run_at, commit.last_error, commit.artifact_reference, commit.materialized_revision, commit.materialized_at, commit.committed_at, commit.created_at, commit.updated_at`
 const catalogCommitSelect = `SELECT ` + catalogCommitColumns + ` FROM catalog_release_entry_commits`
 
@@ -323,8 +323,8 @@ func (d *CatalogRepository) CatalogBootstrapState(ctx context.Context) (catalogd
 		return catalogdomain.BootstrapState{}, fmt.Errorf("iterate catalog bootstrap releases: %w", err)
 	}
 	state := catalogdomain.BootstrapState{Releases: releases}
-	if err := d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM challenges`).Scan(&state.PublishedChallengeCount); err != nil {
-		return catalogdomain.BootstrapState{}, fmt.Errorf("count published challenges for catalog bootstrap: %w", err)
+	if err := d.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM scenarios`).Scan(&state.PublishedScenarioCount); err != nil {
+		return catalogdomain.BootstrapState{}, fmt.Errorf("count published scenarios for catalog bootstrap: %w", err)
 	}
 	if err := d.conn.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM catalog_runtime_resource_reaps reap
@@ -611,9 +611,9 @@ func (d *CatalogRepository) CompleteCatalogVerification(ctx context.Context, act
 		`verification_report = ?::jsonb`, encoded)
 }
 
-func (d *CatalogRepository) CompleteCatalogChallengePublication(ctx context.Context, action runtime.Context, artifact execution.ArtifactReference, now time.Time) error {
-	if action.Identity.Scope != runtime.ScopeCatalogCommit || action.Identity.State != runtime.StateChallengePublishing || artifact.Validate(action.Snapshot.Runtime) != nil || now.IsZero() {
-		return errors.New("catalog challenge publication is invalid")
+func (d *CatalogRepository) CompleteCatalogScenarioPublication(ctx context.Context, action runtime.Context, artifact execution.ArtifactReference, now time.Time) error {
+	if action.Identity.Scope != runtime.ScopeCatalogCommit || action.Identity.State != runtime.StateScenarioPublishing || artifact.Validate(action.Snapshot.Runtime) != nil || now.IsZero() {
+		return errors.New("catalog scenario publication is invalid")
 	}
 	encoded, err := marshalJSON(artifact)
 	if err != nil {
@@ -626,7 +626,7 @@ func (d *CatalogRepository) CompleteCatalogChallengePublication(ctx context.Cont
 		catalogdomain.CommitArtifactPublished, encoded, now.UTC(), action.Identity.OwnerID, catalogdomain.ReleaseCommitting,
 		catalogdomain.CommitPrepared, action.Identity.StateVersion, action.LeaseOwner, now.UTC())
 	if err != nil {
-		return fmt.Errorf("complete catalog challenge publication: %w", err)
+		return fmt.Errorf("complete catalog scenario publication: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return runtime.ErrLeaseLost
@@ -735,9 +735,9 @@ func (d *CatalogRepository) reportCatalogRuntimeFailure(ctx context.Context, act
 	return tx.Commit()
 }
 
-// PrepareReleaseCommit reserves stable challenge identities only after all
+// PrepareReleaseCommit reserves stable scenario identities only after all
 // Entry runtime actions have verified. Each commit then becomes a separately
-// claimable ChallengePublishing action for Runtime Worker.
+// claimable ScenarioPublishing action for Runtime Worker.
 func (d *CatalogRepository) PrepareReleaseCommit(ctx context.Context, releaseID string, intents []catalogdomain.Commit, now time.Time) (*catalogdomain.Release, []catalogdomain.Commit, error) {
 	if strings.TrimSpace(releaseID) == "" || now.IsZero() {
 		return nil, nil, errors.New("catalog release commit preparation is invalid")
@@ -791,9 +791,9 @@ func (d *CatalogRepository) PrepareReleaseCommit(ctx context.Context, releaseID 
 			return nil, nil, fmt.Errorf("catalog commit entry %q does not belong to release", commit.EntryID)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_release_entry_commits
-			(id, release_id, entry_id, challenge_id, challenge_revision_id, source_slug, state, state_version, runtime_attempt, lease_owner, lease_expires_at, next_run_at, last_error, created_at, updated_at)
+			(id, release_id, entry_id, scenario_id, scenario_revision_id, source_slug, state, state_version, runtime_attempt, lease_owner, lease_expires_at, next_run_at, last_error, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, '', ?, ?)`,
-			commit.ID, commit.ReleaseID, commit.EntryID, commit.ChallengeID, commit.ChallengeRevisionID, commit.SourceSlug, commit.State, commit.StateVersion,
+			commit.ID, commit.ReleaseID, commit.EntryID, commit.ScenarioID, commit.ScenarioRevisionID, commit.SourceSlug, commit.State, commit.StateVersion,
 			commit.RuntimeAttempt, commit.NextRunAt.UTC(), commit.CreatedAt.UTC(), commit.UpdatedAt.UTC()); err != nil {
 			return nil, nil, fmt.Errorf("insert catalog entry commit %q: %w", commit.EntryID, err)
 		}
@@ -837,7 +837,7 @@ func (d *CatalogRepository) Commits(ctx context.Context, releaseID string) ([]ca
 // It is deliberately separate from final artifact promotion so a Server crash
 // can resume source materialization without invoking Runtime Worker again.
 func (d *CatalogRepository) MarkCommitMaterialized(ctx context.Context, releaseID, commitID, materializedRevision string, now time.Time) (*catalogdomain.Commit, error) {
-	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(commitID) == "" || !contentchallenge.ValidRevision(materializedRevision) || now.IsZero() {
+	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(commitID) == "" || !contentscenario.ValidRevision(materializedRevision) || now.IsZero() {
 		return nil, errors.New("catalog materialization completion is invalid")
 	}
 	updated, err := scanCatalogCommit(d.conn.QueryRowContext(ctx, `UPDATE catalog_release_entry_commits commit SET state = ?, state_version = state_version + 1,
@@ -876,11 +876,11 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	if release.State != catalogdomain.ReleaseCommitting {
 		return nil, runtime.ErrLeaseLost
 	}
-	var publishedChallenges int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM challenges`).Scan(&publishedChallenges); err != nil {
-		return nil, fmt.Errorf("count challenges before catalog baseline commit: %w", err)
+	var publishedScenarios int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM scenarios`).Scan(&publishedScenarios); err != nil {
+		return nil, fmt.Errorf("count scenarios before catalog baseline commit: %w", err)
 	}
-	if publishedChallenges != 0 {
+	if publishedScenarios != 0 {
 		return nil, catalogdomain.ErrBaselineEstablished
 	}
 	var otherReadyReleases int
@@ -915,7 +915,7 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 		if !exists {
 			return nil, fmt.Errorf("catalog commit %q has no release entry", commit.EntryID)
 		}
-		if _, duplicate := seenEntries[entry.ID]; duplicate || !contentchallenge.ValidRevision(commit.MaterializedRevision) ||
+		if _, duplicate := seenEntries[entry.ID]; duplicate || !contentscenario.ValidRevision(commit.MaterializedRevision) ||
 			commit.Artifact == nil || commit.Artifact.Validate(entry.Snapshot.Runtime) != nil {
 			return nil, fmt.Errorf("catalog commit %q does not match its durable entry", commit.EntryID)
 		}
@@ -923,19 +923,19 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	}
 	for _, commit := range commits {
 		entry := entriesByID[commit.EntryID]
-		stable := challengedomain.Challenge{
-			ID: commit.ChallengeID, SourceKind: challengedomain.SourceRelease, SourceRef: entry.SourceRef,
-			State: challengedomain.StateActive, ActiveRevisionID: commit.ChallengeRevisionID, SourceSlug: commit.SourceSlug,
+		stable := scenariodomain.Scenario{
+			ID: commit.ScenarioID, SourceKind: scenariodomain.SourceRelease, SourceRef: entry.SourceRef,
+			State: scenariodomain.StateActive, ActiveRevisionID: commit.ScenarioRevisionID, SourceSlug: commit.SourceSlug,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 		}
-		published := challengeRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), commit.MaterializedRevision,
-			*commit.Artifact, commit.ChallengeRevisionID, commit.ChallengeID, entry.SourceRef, string(entry.ContentRevision), "",
-			commit.SourceSlug, contentchallenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID), challengedomain.SourceRelease, now.UTC())
-		if err := insertPersistedChallengeTx(ctx, tx, stable); err != nil {
-			return nil, fmt.Errorf("create catalog challenge %q: %w", commit.ChallengeID, err)
+		published := scenarioRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), commit.MaterializedRevision,
+			*commit.Artifact, commit.ScenarioRevisionID, commit.ScenarioID, entry.SourceRef, string(entry.ContentRevision), "",
+			commit.SourceSlug, contentscenario.MaterializedPath(commit.SourceSlug, commit.ScenarioRevisionID), scenariodomain.SourceRelease, now.UTC())
+		if err := insertPersistedScenarioTx(ctx, tx, stable); err != nil {
+			return nil, fmt.Errorf("create catalog scenario %q: %w", commit.ScenarioID, err)
 		}
-		if err := insertPersistedChallengeRevisionTx(ctx, tx, published); err != nil {
-			return nil, fmt.Errorf("create catalog challenge revision %q: %w", commit.ChallengeRevisionID, err)
+		if err := insertPersistedScenarioRevisionTx(ctx, tx, published); err != nil {
+			return nil, fmt.Errorf("create catalog scenario revision %q: %w", commit.ScenarioRevisionID, err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE catalog_release_entry_commits SET state = ?, committed_at = ?, updated_at = ?
@@ -1022,7 +1022,7 @@ func recoverExpiredCatalogEntryRuntimeLeaseTx(ctx context.Context, tx *Tx, relea
 
 // recoverExpiredCatalogCommitRuntimeLeaseTx applies the same bounded retry
 // rule to the final artifact promotion action. The commit's persisted state is
-// Prepared while the shared Runtime Action state is ChallengePublishing.
+// Prepared while the shared Runtime Action state is ScenarioPublishing.
 func recoverExpiredCatalogCommitRuntimeLeaseTx(ctx context.Context, tx *Tx, release catalogdomain.Release, commit catalogdomain.Commit, now time.Time) error {
 	if release.State != catalogdomain.ReleaseCommitting || commit.State != catalogdomain.CommitPrepared || commit.LeaseExpires == nil || commit.LeaseExpires.After(now) {
 		return runtime.ErrLeaseLost
@@ -1069,7 +1069,7 @@ func entryActionMatches(entry catalogdomain.Entry, action runtime.Context, now t
 }
 
 func commitActionMatches(commit catalogdomain.Commit, action runtime.Context, now time.Time) bool {
-	return commit.LeaseExpires != nil && commit.LeaseExpires.After(now.UTC()) && commit.LeaseOwner == action.LeaseOwner && commit.StateVersion == action.Identity.StateVersion && commit.State == catalogdomain.CommitPrepared && action.Identity.State == runtime.StateChallengePublishing
+	return commit.LeaseExpires != nil && commit.LeaseExpires.After(now.UTC()) && commit.LeaseOwner == action.LeaseOwner && commit.StateVersion == action.Identity.StateVersion && commit.State == catalogdomain.CommitPrepared && action.Identity.State == runtime.StateScenarioPublishing
 }
 
 func catalogEntryAction(release catalogdomain.Release, entry catalogdomain.Entry) (*runtime.Context, error) {
@@ -1092,9 +1092,9 @@ func catalogCommitAction(release catalogdomain.Release, entry catalogdomain.Entr
 		return nil, runtime.ErrLeaseLost
 	}
 	action := runtime.Context{
-		Identity:   runtime.Identity{Scope: runtime.ScopeCatalogCommit, OwnerID: commit.ID, ParentID: release.ID, CandidateID: entry.ID, State: runtime.StateChallengePublishing, StateVersion: commit.StateVersion},
+		Identity:   runtime.Identity{Scope: runtime.ScopeCatalogCommit, OwnerID: commit.ID, ParentID: release.ID, CandidateID: entry.ID, State: runtime.StateScenarioPublishing, StateVersion: commit.StateVersion},
 		LeaseOwner: commit.LeaseOwner, ArchiveSHA256: entry.ArchiveSHA256, Snapshot: entry.Snapshot, Build: entry.Build,
-		Artifact: entry.Artifact, ChallengeID: commit.ChallengeID, ChallengeRevisionID: commit.ChallengeRevisionID,
+		Artifact: entry.Artifact, ScenarioID: commit.ScenarioID, ScenarioRevisionID: commit.ScenarioRevisionID,
 	}
 	if err := action.Valid(); err != nil {
 		return nil, fmt.Errorf("catalog commit runtime action is invalid: %w", err)
@@ -1144,12 +1144,12 @@ func (d *CatalogRepository) ClaimCatalogResourceReap(ctx context.Context, owner 
 		return nil, err
 	}
 	var final *execution.ArtifactReference
-	var challengeID, challengeRevisionID string
+	var scenarioID, scenarioRevisionID string
 	commit, commitErr := scanCatalogCommit(tx.QueryRowContext(ctx, catalogCommitSelect+` WHERE entry_id = ?`, entryID))
 	if commitErr == nil {
 		final = commit.Artifact
-		challengeID = commit.ChallengeID
-		challengeRevisionID = commit.ChallengeRevisionID
+		scenarioID = commit.ScenarioID
+		scenarioRevisionID = commit.ScenarioRevisionID
 	} else if !errors.Is(commitErr, sql.ErrNoRows) {
 		return nil, commitErr
 	}
@@ -1158,7 +1158,7 @@ func (d *CatalogRepository) ClaimCatalogResourceReap(ctx context.Context, owner 
 	}
 	reap := runtime.Reap{Scope: runtime.ScopeCatalogEntry, ResourceID: entry.ID, Kind: kind, DeleteFinalArtifact: deleteFinal,
 		Snapshot: entry.Snapshot, Build: entry.Build, Artifact: entry.Artifact, FinalArtifact: final,
-		VerificationEnvironment: entry.VerifyEnvironment, ChallengeID: challengeID, ChallengeRevisionID: challengeRevisionID}
+		VerificationEnvironment: entry.VerifyEnvironment, ScenarioID: scenarioID, ScenarioRevisionID: scenarioRevisionID}
 	if err := reap.Valid(); err != nil {
 		return nil, fmt.Errorf("load catalog resource reap: %w", err)
 	}
@@ -1360,7 +1360,7 @@ func scanCatalogCommit(row scanner) (*catalogdomain.Commit, error) {
 	var value catalogdomain.Commit
 	var artifact []byte
 	var expires, materialized, committed sql.NullTime
-	if err := row.Scan(&value.ID, &value.ReleaseID, &value.EntryID, &value.ChallengeID, &value.ChallengeRevisionID, &value.SourceSlug, &value.State, &value.StateVersion,
+	if err := row.Scan(&value.ID, &value.ReleaseID, &value.EntryID, &value.ScenarioID, &value.ScenarioRevisionID, &value.SourceSlug, &value.State, &value.StateVersion,
 		&value.RuntimeAttempt, &value.LeaseOwner, &expires, &value.NextRunAt, &value.LastError, &artifact, &value.MaterializedRevision, &materialized, &committed,
 		&value.CreatedAt, &value.UpdatedAt); err != nil {
 		return nil, err

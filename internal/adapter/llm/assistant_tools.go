@@ -55,7 +55,7 @@ func (c *conversation) prompt(userMessage string) (string, error) {
 %s
 
 用户本次问题：
-%s`, c.request.ChallengeTitle, c.request.ChallengeID, c.request.Runtime, c.request.EnvironmentPhase,
+%s`, c.request.ScenarioTitle, c.request.ScenarioID, c.request.Runtime, c.request.EnvironmentPhase,
 		strings.Join(c.request.Nodes, ", "), c.request.CurrentNode, c.request.CurrentWindow, string(terminals), c.request.Problem, string(checkpoints), userMessage), nil
 }
 

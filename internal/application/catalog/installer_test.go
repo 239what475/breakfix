@@ -10,7 +10,7 @@ import (
 	"time"
 
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
@@ -22,18 +22,18 @@ func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) 
 	if err != nil {
 		t.Fatalf("load fixture source: %v", err)
 	}
-	if len(source.Challenges) == 0 {
-		t.Fatal("fixture has no challenges")
+	if len(source.Scenarios) == 0 {
+		t.Fatal("fixture has no scenarios")
 	}
 	now := time.Date(2026, time.August, 4, 12, 0, 0, 0, time.UTC)
 	releaseID := "catalog-release-test"
 	entry := catalogdomain.Entry{
-		ID: "catalog-entry-test", ReleaseID: releaseID, SourcePath: source.Challenges[0].Path, SourceRef: "node-runtime-fixture", Title: source.Challenges[0].Entry.Title,
-		Type: source.Challenges[0].Entry.Type, Tags: source.Challenges[0].Entry.Tags,
-		ContentRevision: source.Challenges[0].ContentRevision, ArchiveSHA256: "sha256:" + strings.Repeat("a", 64),
-		Snapshot: execution.Snapshot{Runtime: source.Challenges[0].Entry.Runtime},
-		State:    catalogdomain.EntryReadyToCommit, StateVersion: 4, RuntimeAttempt: 0, NextRunAt: now, Build: &execution.BuildOutput{Runtime: source.Challenges[0].Entry.Runtime},
-		Artifact:     &execution.ArtifactReference{Runtime: source.Challenges[0].Entry.Runtime},
+		ID: "catalog-entry-test", ReleaseID: releaseID, SourcePath: source.Scenarios[0].Path, SourceRef: "node-runtime-fixture", Title: source.Scenarios[0].Entry.Title,
+		Type: source.Scenarios[0].Entry.Type, Tags: source.Scenarios[0].Entry.Tags,
+		ContentRevision: source.Scenarios[0].ContentRevision, ArchiveSHA256: "sha256:" + strings.Repeat("a", 64),
+		Snapshot: execution.Snapshot{Runtime: source.Scenarios[0].Entry.Runtime},
+		State:    catalogdomain.EntryReadyToCommit, StateVersion: 4, RuntimeAttempt: 0, NextRunAt: now, Build: &execution.BuildOutput{Runtime: source.Scenarios[0].Entry.Runtime},
+		Artifact:     &execution.ArtifactReference{Runtime: source.Scenarios[0].Entry.Runtime},
 		Verification: &execution.VerificationReport{Passed: true}, CreatedAt: now, UpdatedAt: now,
 	}
 	// The fixture can use either runtime, so use a minimal valid runtime view
@@ -45,7 +45,7 @@ func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) 
 		SourceAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 	}, entries: []catalogdomain.Entry{entry}}
 	installer, err := NewInstaller(InstallerConfig{
-		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
+		DataDir: t.TempDir(), ScenariosDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
 		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: store,
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) 
 		t.Fatalf("prepared catalog state = release:%#v commits:%#v", store.release, store.commits)
 	}
 	commit := store.commits[0]
-	if commit.State != catalogdomain.CommitPrepared || commit.StateVersion != 1 || commit.RuntimeAttempt != 1 || commit.EntryID != entry.ID || commit.ChallengeID == "" {
+	if commit.State != catalogdomain.CommitPrepared || commit.StateVersion != 1 || commit.RuntimeAttempt != 1 || commit.EntryID != entry.ID || commit.ScenarioID == "" {
 		t.Fatalf("commit intent = %#v", commit)
 	}
 }
@@ -70,7 +70,7 @@ func TestInstallerNewEntriesUseDirectScenarioMetadata(t *testing.T) {
 		t.Fatalf("load fixture source: %v", err)
 	}
 	installer, err := NewInstaller(InstallerConfig{
-		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
+		DataDir: t.TempDir(), ScenariosDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
 		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: &installerStore{},
 		Snapshot: appexecution.SnapshotConfig{MaxNodes: 1, Node: appexecution.NodeRuntimeConfig{
 			BaseImageFingerprint: strings.Repeat("c", 64), ProfileRevision: "profile", NetworkPolicyRevision: "network",
@@ -88,7 +88,7 @@ func TestInstallerNewEntriesUseDirectScenarioMetadata(t *testing.T) {
 		t.Fatalf("catalog entries = %#v", entries)
 	}
 	entry := entries[0]
-	if entry.SourceRef != "node-runtime-fixture" || entry.Type != challenge.ScenarioOperationsScenario || !slices.Equal(entry.Tags, []string{"linux", "runtime-fixture"}) {
+	if entry.SourceRef != "node-runtime-fixture" || entry.Type != scenario.ScenarioOperationsScenario || !slices.Equal(entry.Tags, []string{"linux", "runtime-fixture"}) {
 		t.Fatalf("direct catalog metadata = %#v", entry)
 	}
 }
@@ -100,17 +100,17 @@ func TestInstallerMaterializedCommitCapturesRevision(t *testing.T) {
 		t.Fatalf("load fixture source: %v", err)
 	}
 	entry := catalogdomain.Entry{
-		ID: "catalog-entry-materialized", ReleaseID: "catalog-release-materialized", SourcePath: source.Challenges[0].Path,
-		SourceRef: "node-runtime-fixture", Title: source.Challenges[0].Entry.Title, Type: source.Challenges[0].Entry.Type, Tags: source.Challenges[0].Entry.Tags,
-		ContentRevision: source.Challenges[0].ContentRevision, Snapshot: execution.Snapshot{Runtime: source.Challenges[0].Entry.Runtime},
+		ID: "catalog-entry-materialized", ReleaseID: "catalog-release-materialized", SourcePath: source.Scenarios[0].Path,
+		SourceRef: "node-runtime-fixture", Title: source.Scenarios[0].Entry.Title, Type: source.Scenarios[0].Entry.Type, Tags: source.Scenarios[0].Entry.Tags,
+		ContentRevision: source.Scenarios[0].ContentRevision, Snapshot: execution.Snapshot{Runtime: source.Scenarios[0].Entry.Runtime},
 	}
 	commit := catalogdomain.Commit{
-		ID: "catalog-commit-materialized", ReleaseID: entry.ReleaseID, EntryID: entry.ID, ChallengeID: "chal-materialized", ChallengeRevisionID: "chrev-aaaaaaaaaaaaaaaa",
-		SourceSlug: challenge.SourceSlugFor(entry.Title, "chal-materialized"), State: catalogdomain.CommitArtifactPublished,
-		Artifact: &execution.ArtifactReference{Runtime: challenge.RuntimeNode, IncusAlias: "catalog-materialized", IncusFingerprint: strings.Repeat("a", 64)},
+		ID: "catalog-commit-materialized", ReleaseID: entry.ReleaseID, EntryID: entry.ID, ScenarioID: "chal-materialized", ScenarioRevisionID: "chrev-aaaaaaaaaaaaaaaa",
+		SourceSlug: scenario.SourceSlugFor(entry.Title, "chal-materialized"), State: catalogdomain.CommitArtifactPublished,
+		Artifact: &execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "catalog-materialized", IncusFingerprint: strings.Repeat("a", 64)},
 	}
 	installer, err := NewInstaller(InstallerConfig{
-		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
+		DataDir: t.TempDir(), ScenariosDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("b", 64),
 		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: &installerStore{},
 	})
 	if err != nil {
@@ -125,9 +125,9 @@ func TestInstallerMaterializedCommitCapturesRevision(t *testing.T) {
 	if _, err := installer.ensureMaterialized(entry, commit); err != nil {
 		t.Fatalf("verify materialized catalog commit: %v", err)
 	}
-	stored, err := challenge.ValidateDir(filepath.Join(installer.challengesDir, commit.SourceSlug, commit.ChallengeRevisionID))
+	stored, err := scenario.ValidateDir(filepath.Join(installer.scenariosDir, commit.SourceSlug, commit.ScenarioRevisionID))
 	if err != nil {
-		t.Fatalf("read materialized challenge: %v", err)
+		t.Fatalf("read materialized scenario: %v", err)
 	}
 	if commit.MaterializedRevision != stored.Revision {
 		t.Fatalf("durable materialized revision = %q, want %q", commit.MaterializedRevision, stored.Revision)
@@ -151,9 +151,9 @@ func TestCatalogBootstrapSelectsOnlyTheInitialBaseline(t *testing.T) {
 		{name: "empty platform", digest: digestA},
 		{name: "resume active digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseInstalling)}}, digest: digestA, wantState: catalogdomain.ReleaseInstalling},
 		{name: "reject changed active digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseInstalling)}}, digest: digestB, wantErr: true},
-		{name: "restart ready baseline", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedChallengeCount: 4}, digest: digestA, wantState: catalogdomain.ReleaseReady},
-		{name: "reject changed ready digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedChallengeCount: 4}, digest: digestB, wantErr: true},
-		{name: "reject authoring content", state: catalogdomain.BootstrapState{PublishedChallengeCount: 1}, digest: digestA, wantErr: true},
+		{name: "restart ready baseline", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedScenarioCount: 4}, digest: digestA, wantState: catalogdomain.ReleaseReady},
+		{name: "reject changed ready digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseReady)}, PublishedScenarioCount: 4}, digest: digestB, wantErr: true},
+		{name: "reject authoring content", state: catalogdomain.BootstrapState{PublishedScenarioCount: 1}, digest: digestA, wantErr: true},
 		{name: "wait for failed release cleanup", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}, FailedCleanupPending: true}, digest: digestB, wantWait: true},
 		{name: "replace cleaned failed release", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}}, digest: digestB},
 		{name: "retain failed configured digest", state: catalogdomain.BootstrapState{Releases: []catalogdomain.Release{release(digestA, catalogdomain.ReleaseFailed)}, FailedCleanupPending: true}, digest: digestA, wantState: catalogdomain.ReleaseFailed},
@@ -188,9 +188,9 @@ func TestCatalogBootstrapSelectsOnlyTheInitialBaseline(t *testing.T) {
 }
 
 func TestInstallerValidateBootstrapRejectsPublishedAuthoringPlatform(t *testing.T) {
-	store := &installerStore{publishedChallenges: 1}
+	store := &installerStore{publishedScenarios: 1}
 	installer, err := NewInstaller(InstallerConfig{
-		DataDir: t.TempDir(), ChallengesDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
+		DataDir: t.TempDir(), ScenariosDir: t.TempDir(), ReleaseReference: "registry.example.com/breakfix/catalog@sha256:" + strings.Repeat("d", 64),
 		PollInterval: time.Second, Puller: installerPuller{}, LayerReader: installerLayerReader{}, Store: store,
 	})
 	if err != nil {
@@ -222,7 +222,7 @@ type installerStore struct {
 	otherReleases        []catalogdomain.Release
 	entries              []catalogdomain.Entry
 	commits              []catalogdomain.Commit
-	publishedChallenges  int
+	publishedScenarios   int
 	failedCleanupPending bool
 }
 
@@ -266,7 +266,7 @@ func (s *installerStore) CatalogBootstrapState(context.Context) (catalogdomain.B
 		releases = append(releases, s.release)
 	}
 	return catalogdomain.BootstrapState{
-		Releases: releases, PublishedChallengeCount: s.publishedChallenges, FailedCleanupPending: s.failedCleanupPending,
+		Releases: releases, PublishedScenarioCount: s.publishedScenarios, FailedCleanupPending: s.failedCleanupPending,
 	}, nil
 }
 func (*installerStore) EnsureCatalogResourceReaps(context.Context, time.Time) error { return nil }

@@ -22,28 +22,28 @@ export type {
 	AuthoringVerificationReport,
 	GeneratorGeneration,
 	GeneratorWorkflow,
-	ChallengeContent,
-	ChallengeNode,
+	ScenarioContent,
+	ScenarioNode,
 	CheckpointProgressSummary,
 	CheckpointResult,
 	MySpace,
 	MySpaceActiveEnvironment,
 	MySpaceAuthoring,
 	MySpaceAuthoringDraft,
-	MySpaceChallenge,
+	MySpaceScenario,
 	MySpaceEnvironmentQuota,
 	MySpaceLearningHistory,
 	MySpaceLearningPage,
 	MySpaceProfile,
-	MySpacePublishedChallenge,
+	MySpacePublishedScenario,
 	MySpaceSummary,
-	VerifiedChallenge,
+	VerifiedScenario,
 	VerifiedCheckpoint,
 } from "./generated";
 
 export type {
-	ChallengeCheckpoint as Checkpoint,
-	ChallengeSummary as Challenge,
+	ScenarioCheckpoint as Checkpoint,
+	ScenarioSummary as Scenario,
 } from "./generated";
 
 export type AuthoringState = GeneratedAuthoringSession["state"];

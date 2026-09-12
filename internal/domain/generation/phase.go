@@ -30,7 +30,7 @@ type VerificationResult struct {
 	Report VerificationReport `json:"report"`
 }
 
-type ChallengePublishResult struct {
+type ScenarioPublishResult struct {
 	Artifact ArtifactReference `json:"artifact"`
 }
 

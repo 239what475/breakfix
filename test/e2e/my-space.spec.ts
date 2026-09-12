@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
-	challengeCard,
+	scenarioCard,
 	registerAndLogin,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
@@ -26,6 +26,6 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await page.getByRole("button", { name: "Navigation", exact: true }).click();
 	await expect(page.getByRole("navigation", { name: "Mobile primary" })).toBeVisible();
 	await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Catalog", exact: true }).click();
-	await expect(challengeCard(page, nodeRuntimeFixture.title)).toBeVisible();
-	await expect(page.getByRole("button", { name: "Start challenge", exact: true })).toHaveCount(0);
+	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
+	await expect(page.getByRole("button", { name: "Start scenario", exact: true })).toHaveCount(0);
 });

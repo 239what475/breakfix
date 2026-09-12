@@ -19,7 +19,7 @@ const (
 	workflowIDKey      = "user.breakfix.workflow_id"
 	workflowAttemptKey = "user.breakfix.workflow_attempt"
 	candidateIDKey     = "user.breakfix.candidate_revision_id"
-	challengeBundleDir = "/opt/breakfix/challenge"
+	scenarioBundleDir  = "/opt/breakfix/scenario"
 )
 
 func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageRequest) (BuildNodeImageResult, error) {
@@ -73,14 +73,14 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 		return BuildNodeImageResult{}, err
 	}
 	for _, directory := range imageDirectories(files) {
-		if err := server.CreateInstanceFile(names.Instance, path.Join(challengeBundleDir, directory), incus.InstanceFileArgs{
+		if err := server.CreateInstanceFile(names.Instance, path.Join(scenarioBundleDir, directory), incus.InstanceFileArgs{
 			UID: 0, GID: 0, Mode: 0o755, Type: "directory", WriteMode: "overwrite",
 		}); err != nil {
 			return BuildNodeImageResult{}, classify("create node image bundle directory", directory, err)
 		}
 	}
 	for _, file := range files {
-		if err := server.CreateInstanceFile(names.Instance, path.Join(challengeBundleDir, file.Path), incus.InstanceFileArgs{
+		if err := server.CreateInstanceFile(names.Instance, path.Join(scenarioBundleDir, file.Path), incus.InstanceFileArgs{
 			Content: bytes.NewReader(file.Content), UID: 0, GID: 0, Mode: file.Mode, Type: "file", WriteMode: "overwrite",
 		}); err != nil {
 			return BuildNodeImageResult{}, classify("write node image bundle file", file.Path, err)
@@ -257,12 +257,12 @@ func (c *Client) deleteBuildNodeImageAttempt(ctx context.Context, server incus.I
 	})
 }
 
-func (c *Client) PublishChallengeNodeImage(ctx context.Context, request PublishChallengeNodeImageRequest) (PublishNodeImageResult, error) {
+func (c *Client) PublishScenarioNodeImage(ctx context.Context, request PublishScenarioNodeImageRequest) (PublishNodeImageResult, error) {
 	candidateAlias, err := AliasForCandidate(c.config.NamePrefix, request.CandidateRevisionID)
 	if err != nil {
 		return PublishNodeImageResult{}, err
 	}
-	challengeAlias, err := AliasForChallenge(c.config.NamePrefix, request.ChallengeID, request.ChallengeRevisionID)
+	scenarioAlias, err := AliasForScenario(c.config.NamePrefix, request.ScenarioID, request.ScenarioRevisionID)
 	if err != nil {
 		return PublishNodeImageResult{}, err
 	}
@@ -287,26 +287,26 @@ func (c *Client) PublishChallengeNodeImage(ctx context.Context, request PublishC
 	if err := validateEnvironmentImage(image, request.Staging.Fingerprint); err != nil {
 		return PublishNodeImageResult{}, err
 	}
-	formal, _, err := server.GetImageAlias(challengeAlias)
+	formal, _, err := server.GetImageAlias(scenarioAlias)
 	if err == nil {
 		if formal.Target != request.Staging.Fingerprint {
-			return PublishNodeImageResult{}, fmt.Errorf("%w: challenge image alias %q points to another immutable revision", ErrInvariant, challengeAlias)
+			return PublishNodeImageResult{}, fmt.Errorf("%w: scenario image alias %q points to another immutable revision", ErrInvariant, scenarioAlias)
 		}
-		return PublishNodeImageResult{Alias: challengeAlias, Fingerprint: request.Staging.Fingerprint}, nil
+		return PublishNodeImageResult{Alias: scenarioAlias, Fingerprint: request.Staging.Fingerprint}, nil
 	}
-	classified := classify("get challenge image alias", challengeAlias, err)
+	classified := classify("get scenario image alias", scenarioAlias, err)
 	if !errors.Is(classified, ErrNotFound) {
 		return PublishNodeImageResult{}, classified
 	}
 	if err := server.CreateImageAlias(api.ImageAliasesPost{ImageAliasesEntry: api.ImageAliasesEntry{
-		Name: challengeAlias,
+		Name: scenarioAlias,
 		ImageAliasesEntryPut: api.ImageAliasesEntryPut{
-			Target: request.Staging.Fingerprint, Description: "Breakfix published challenge image",
+			Target: request.Staging.Fingerprint, Description: "Breakfix published scenario image",
 		},
 	}}); err != nil {
-		return PublishNodeImageResult{}, classify("create challenge image alias", challengeAlias, err)
+		return PublishNodeImageResult{}, classify("create scenario image alias", scenarioAlias, err)
 	}
-	return PublishNodeImageResult{Alias: challengeAlias, Fingerprint: request.Staging.Fingerprint}, nil
+	return PublishNodeImageResult{Alias: scenarioAlias, Fingerprint: request.Staging.Fingerprint}, nil
 }
 
 func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevisionID, fingerprint string) error {
@@ -326,13 +326,13 @@ func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevision
 	})
 }
 
-func (c *Client) DeleteChallengeNodeImage(ctx context.Context, challengeID, challengeRevisionID, fingerprint string) error {
-	expectedAlias, err := AliasForChallenge(c.config.NamePrefix, challengeID, challengeRevisionID)
+func (c *Client) DeleteScenarioNodeImage(ctx context.Context, scenarioID, scenarioRevisionID, fingerprint string) error {
+	expectedAlias, err := AliasForScenario(c.config.NamePrefix, scenarioID, scenarioRevisionID)
 	if err != nil {
 		return err
 	}
 	if !fullFingerprintPattern.MatchString(fingerprint) {
-		return fmt.Errorf("%w: published challenge image identity is invalid", ErrInvalid)
+		return fmt.Errorf("%w: published scenario image identity is invalid", ErrInvalid)
 	}
 	server, err := c.scoped(ctx, c.config.ImageProject)
 	if err != nil {

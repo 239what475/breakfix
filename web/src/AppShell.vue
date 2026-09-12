@@ -3,10 +3,10 @@ import { computed, ref } from "vue";
 import AppTopbar from "./AppTopbar.vue";
 import AuthDialog from "./features/auth/AuthDialog.vue";
 import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
-import ChallengeCatalogPage from "./features/catalog/ChallengeCatalogPage.vue";
+import ScenarioCatalogPage from "./features/catalog/ScenarioCatalogPage.vue";
 import MySpacePage from "./features/my-space/MySpacePage.vue";
-import ChallengeWorkspace from "./features/workspace/ChallengeWorkspace.vue";
-import { useChallengeSession } from "./features/workspace/useChallengeSession";
+import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
+import { useScenarioSession } from "./features/workspace/useScenarioSession";
 
 const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
@@ -30,22 +30,22 @@ const {
 	loggedIn,
 	accountName,
 	loading,
-	challenges,
+	scenarios,
 	workspace,
 	startingId,
-	loadChallenges,
+	loadScenarios,
 	authenticated,
 	logout,
-	startChallenge,
+	startScenario,
 	closeWorkspace,
-} = useChallengeSession(notify);
+} = useScenarioSession(notify);
 
 function openAuth(mode: "login" | "register") {
   authMode.value = mode;
   authOpen.value = true;
 }
 async function startWorkspace(id: string) {
-	if (await startChallenge(id, () => openAuth("login"))) notice.value = null;
+	if (await startScenario(id, () => openAuth("login"))) notice.value = null;
 }
 function openAuthoring(sessionId?: string) {
   notice.value = null;
@@ -58,8 +58,8 @@ function closeAuthoring() {
   authoringSessionId.value = undefined;
 }
 
-function openCatalog(challengeId?: string) {
-	catalogFocusId.value = challengeId;
+function openCatalog(scenarioId?: string) {
+	catalogFocusId.value = scenarioId;
 	page.value = "catalog";
 }
 
@@ -110,13 +110,13 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
       {{ notice.text }}
     </div>
 		<main class="app-main">
-      <ChallengeCatalogPage
+      <ScenarioCatalogPage
 		v-show="!workspace && !authoringOpen && page === 'catalog'"
-      :challenges="challenges"
+      :scenarios="scenarios"
       :loading="loading"
       :logged-in="loggedIn"
       :starting-id="startingId"
-			:focus-challenge-id="catalogFocusId"
+			:focus-scenario-id="catalogFocusId"
       @start="startWorkspace"
 		@studio="openAuthoring"
       @focused="catalogFocusId = undefined"
@@ -130,7 +130,7 @@ const topbarActive = computed<"catalog" | "my-space" | "studio" | "none">(() => 
 		@start="startWorkspace"
 		@studio="openAuthoring($event)"
 			/>
-      <ChallengeWorkspace v-if="workspace" :challenge="workspace" @changed="loadChallenges(true)" @notice="notify" />
+      <ScenarioWorkspace v-if="workspace" :scenario="workspace" @changed="loadScenarios(true)" @notice="notify" />
       <AuthoringWorkspace
       v-else-if="authoringOpen"
       :initial-session-id="authoringSessionId"

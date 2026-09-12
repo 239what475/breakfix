@@ -44,7 +44,7 @@ POST /api/internal/runtime-actions/:id/build/complete
 POST /api/internal/runtime-actions/:id/artifact-publish/complete
 POST /api/internal/runtime-actions/:id/verification/environment
 POST /api/internal/runtime-actions/:id/verification/complete
-POST /api/internal/runtime-actions/:id/challenge-publish/complete
+POST /api/internal/runtime-actions/:id/scenario-publish/complete
 POST /api/internal/runtime-actions/:id/failure/infrastructure
 POST /api/internal/runtime-actions/:id/failure/artifact
 POST /api/internal/runtime-resource-reaps/claim

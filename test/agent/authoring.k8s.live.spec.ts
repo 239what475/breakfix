@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
 	activeEnvironmentName,
-	challengeCardByID,
+	scenarioCardByID,
 	expectTerminalConnected,
 	registerAndLogin,
 	runTerminalCommand,
-	stopChallenge,
+	stopScenario,
 } from "../support/live-helpers";
 import { attachEnvironmentIdentity, waitForEnvironmentDeletion } from "../support/e2e-platform";
 import {
@@ -14,22 +14,22 @@ import {
 	expectNoLifecycleButtons,
 	sendAuthoringMessage,
 	waitForActiveWorkflow,
-	waitForCatalogChallenge,
-	waitForPublishedChallenge,
+	waitForCatalogScenario,
+	waitForPublishedScenario,
 	waitForVerifiedCandidate,
 } from "./authoring-live-helpers";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
 
-agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s challenge", async ({ page }, testInfo) => {
+agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s scenario", async ({ page }, testInfo) => {
 	test.setTimeout(50 * 60_000);
-	let challengeID = "";
+	let scenarioID = "";
 	let environmentName = "";
 	let completed = false;
 	try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await registerAndLogin(page);
-		await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
+		await page.getByRole("button", { name: "Scenario studio", exact: true }).click();
 
 		const composer = page.locator(".authoring-composer textarea");
 		await expect(composer).toBeEnabled({ timeout: 30_000 });
@@ -59,22 +59,22 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s challe
 			await waitForVerifiedCandidate(page, workflowID);
 		}
 			await sendAuthoringMessage(page, "我确认题目内容，请发布题目。", sessionID);
-		challengeID = await waitForPublishedChallenge(page, sessionID);
-		await waitForCatalogChallenge(page, challengeID);
+		scenarioID = await waitForPublishedScenario(page, sessionID);
+		await waitForCatalogScenario(page, scenarioID);
 
 		await page.getByRole("button", { name: "Catalog", exact: true }).click();
-		const card = challengeCardByID(page, challengeID);
+		const card = scenarioCardByID(page, scenarioID);
 		await expect(card).toBeVisible({ timeout: 30_000 });
-		await card.getByRole("button", { name: "Start challenge", exact: true }).click();
+		await card.getByRole("button", { name: "Start scenario", exact: true }).click();
 		await expectTerminalConnected(page);
-		environmentName = await activeEnvironmentName(page, challengeID);
-		await runTerminalCommand(page, "/bin/bash /opt/breakfix/challenge/k8s/answer.sh");
+		environmentName = await activeEnvironmentName(page, scenarioID);
+		await runTerminalCommand(page, "/bin/bash /opt/breakfix/scenario/k8s/answer.sh");
 		await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 2 * 60_000 });
 		completed = true;
 	} finally {
 		if (environmentName) await attachEnvironmentIdentity(testInfo, "vk8senvironment", environmentName);
-		if (completed && environmentName && challengeID) {
-			await stopChallenge(page, challengeID);
+		if (completed && environmentName && scenarioID) {
+			await stopScenario(page, scenarioID);
 			await waitForEnvironmentDeletion("vk8senvironment", environmentName);
 		}
 	}

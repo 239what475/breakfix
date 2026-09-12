@@ -5,7 +5,7 @@ import "testing"
 const testRevision = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestContentRevisionRejectsRuntimeAndMalformedReferences(t *testing.T) {
-	for _, value := range []ContentRevision{"", "sha256:ABC", "registry.example/challenge@" + testRevision, ContentRevision(testRevision)} {
+	for _, value := range []ContentRevision{"", "sha256:ABC", "registry.example/scenario@" + testRevision, ContentRevision(testRevision)} {
 		want := value == ContentRevision(testRevision)
 		if value.Valid() != want {
 			t.Fatalf("ContentRevision(%q).Valid() = %v, want %v", value, value.Valid(), want)

@@ -2,13 +2,13 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { Monitor, Plus, X } from "lucide-vue-next";
 import { api } from "../../api/client";
-import type { AssistantTerminalContext, ChallengeNode } from "../../api/types";
+import type { AssistantTerminalContext, ScenarioNode } from "../../api/types";
 import { useTerminalSession } from "./useTerminalSession";
 
 const props = defineProps<{
-  challengeId: string;
+  scenarioId: string;
   runtime: "node" | "k8s";
-  nodes: ChallengeNode[];
+  nodes: ScenarioNode[];
   visible: boolean;
 }>();
 const emit = defineEmits<{
@@ -19,7 +19,7 @@ const host = ref<HTMLDivElement>();
 const selectedNode = ref("");
 const tabsByNode = reactive<Record<string, string[]>>({});
 const activeByNode = reactive<Record<string, string | null>>({});
-const challenge = computed(() => props.challengeId);
+const scenario = computed(() => props.scenarioId);
 const node = computed(() => props.runtime === "node" ? selectedNode.value || null : null);
 const terminalKey = computed(() => node.value || "management");
 const tabs = computed(() => tabsByNode[terminalKey.value] ?? []);
@@ -28,7 +28,7 @@ const active = computed<string | null>({
   set: (value) => { activeByNode[terminalKey.value] = value; },
 });
 const { state, stateMessage, connect, focus, refreshLayout } =
-  useTerminalSession(host, challenge, node, active);
+  useTerminalSession(host, scenario, node, active);
 const connected = computed(() => state.value === "connected");
 watch(connected, (value) => emit("connected", value), { immediate: true });
 
@@ -67,7 +67,7 @@ function resetTerminals() {
 }
 
 watch(
-  [() => props.challengeId, () => props.runtime, () => props.nodes.map((item) => item.name).join("\0")],
+  [() => props.scenarioId, () => props.runtime, () => props.nodes.map((item) => item.name).join("\0")],
   resetTerminals,
   { immediate: true },
 );
@@ -101,7 +101,7 @@ async function closeTab(name: string) {
   if (name === active.value) active.value = null;
   tabsByNode[key] = tabs.value.filter((tab) => tab !== name);
   try {
-    await api.closeTerminalWindow(props.challengeId, name, targetNode || undefined);
+    await api.closeTerminalWindow(props.scenarioId, name, targetNode || undefined);
   } catch {
     /* the local tab is already gone */
   }

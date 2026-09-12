@@ -1,6 +1,6 @@
 package postgres
 
-const currentSchemaVersion = 32
+const currentSchemaVersion = 33
 
 // currentSchemaStatements is the only database schema accepted by this
 // development-only, intentionally destructive runtime migration. Do not add

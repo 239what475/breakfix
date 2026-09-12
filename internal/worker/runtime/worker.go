@@ -24,7 +24,7 @@ type Store interface {
 	CompleteArtifactPublish(context.Context, runtime.Credential, domainexecution.ArtifactReference) error
 	RecordVerificationEnvironment(context.Context, runtime.Credential, domainexecution.VerificationEnvironment) error
 	CompleteVerification(context.Context, runtime.Credential, domainexecution.VerificationReport) error
-	RecordChallengePublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error
+	RecordScenarioPublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error
 	ReportInfrastructureFailure(context.Context, runtime.Credential, runtime.Failure) error
 	ReportArtifactFailure(context.Context, runtime.Credential, runtime.Failure, *domainexecution.VerificationReport) error
 }
@@ -35,7 +35,7 @@ type BuilderExecutor interface {
 
 type PublisherExecutor interface {
 	PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error)
-	PublishChallengeWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error)
+	PublishScenarioWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error)
 	ReapResource(context.Context, runtime.Reap) error
 }
 
@@ -264,15 +264,15 @@ func (w *Worker) executeAction(ctx context.Context, action runtime.Context, work
 		}
 		return w.store.CompleteVerification(ctx, credential, report)
 
-	case runtime.StateChallengePublishing:
-		artifact, err := w.publisher.PublishChallengeWork(ctx, work, action.ChallengeID, action.ChallengeRevisionID)
+	case runtime.StateScenarioPublishing:
+		artifact, err := w.publisher.PublishScenarioWork(ctx, work, action.ScenarioID, action.ScenarioRevisionID)
 		if err != nil {
 			return err
 		}
 		if lease.lost.Load() {
 			return runtime.ErrLeaseLost
 		}
-		return w.store.RecordChallengePublication(ctx, credential, artifact)
+		return w.store.RecordScenarioPublication(ctx, credential, artifact)
 
 	default:
 		return fmt.Errorf("runtime worker cannot execute workflow state %s", action.Identity.State)

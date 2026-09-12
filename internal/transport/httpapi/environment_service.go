@@ -10,7 +10,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -20,7 +20,7 @@ type activeEnvironment struct {
 	UID            string
 	Runtime        string
 	Name           string
-	ChallengeRef   string
+	ScenarioRef    string
 	SourceRevision string
 	Purpose        breakfixv1.EnvironmentPurpose
 	Namespace      string
@@ -47,8 +47,8 @@ func environmentFromNode(environment *breakfixv1.NodeEnvironment) *activeEnviron
 		identity.Nodes[index] = incus.NodeIdentity{LogicalName: node.Name, InstanceName: node.InstanceName, Address: node.Address}
 	}
 	return &activeEnvironment{
-		UID: string(environment.UID), Runtime: challenge.RuntimeNode, Name: environment.Name,
-		ChallengeRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
+		UID: string(environment.UID), Runtime: scenario.RuntimeNode, Name: environment.Name,
+		ScenarioRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
 		Purpose: environment.Spec.Environment.Purpose, NodeIdentity: identity,
 		Nodes: append([]breakfixv1.NodeRuntimeNodeSpec(nil), environment.Spec.Runtime.Nodes...),
 		Phase: environment.Status.Environment.Phase, ExpiresAt: environment.Status.Environment.ExpiresAt,
@@ -62,8 +62,8 @@ func environmentFromVK8s(environment *breakfixv1.VK8sEnvironment) *activeEnviron
 		return nil
 	}
 	return &activeEnvironment{
-		UID: string(environment.UID), Runtime: challenge.RuntimeK8s, Name: environment.Name,
-		ChallengeRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
+		UID: string(environment.UID), Runtime: scenario.RuntimeK8s, Name: environment.Name,
+		ScenarioRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
 		Purpose:   environment.Spec.Environment.Purpose,
 		Namespace: environment.Status.Runtime.Namespace, WorkspacePod: environment.Status.Runtime.TerminalPodName,
 		Phase: environment.Status.Environment.Phase, ExpiresAt: environment.Status.Environment.ExpiresAt,
@@ -75,7 +75,7 @@ func environmentFromVK8s(environment *breakfixv1.VK8sEnvironment) *activeEnviron
 func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]activeEnvironment, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s", userID)
 	result := make([]activeEnvironment, 0, 4)
-	for _, runtime := range []string{challenge.RuntimeNode, challenge.RuntimeK8s} {
+	for _, runtime := range []string{scenario.RuntimeNode, scenario.RuntimeK8s} {
 		adapter, err := h.environmentRuntimeAdapter(runtime)
 		if err != nil {
 			return nil, err
@@ -89,11 +89,11 @@ func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]
 	return result, nil
 }
 
-func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *scenario.Entry) (*activeEnvironment, error) {
 	if entry == nil {
 		return nil, errNoMatchingEnvironment
 	}
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/scenario=%s", userID, entry.ID)
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err
@@ -123,11 +123,11 @@ func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, enviro
 	return nil, errNoActiveAssistantEnvironment
 }
 
-func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *challenge.Entry) (*activeEnvironment, error) {
+func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *scenario.Entry) (*activeEnvironment, error) {
 	if entry == nil {
 		return nil, errNoMatchingEnvironment
 	}
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/challenge=%s", userID, entry.ID)
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/scenario=%s", userID, entry.ID)
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, en
 	return nil, errNoMatchingEnvironment
 }
 
-func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, entry *challenge.Entry) (*activeEnvironment, error) {
+func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, entry *scenario.Entry) (*activeEnvironment, error) {
 	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
 	if err != nil {
 		return nil, err

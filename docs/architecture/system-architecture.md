@@ -10,7 +10,7 @@ Browser / breakfix-mcp
           v
         Server ---------------- PostgreSQL
           |                       |
-          |                       +-- Challenge + immutable revisions
+          |                       +-- Scenario + immutable revisions
           |                       +-- GenerationWorkflow / CatalogRelease
           |                       +-- users, sessions, learning facts, leases
           |
@@ -28,8 +28,8 @@ Browser / breakfix-mcp
 
 | 数据或行为 | 权威所有者 | 说明 |
 | --- | --- | --- |
-| 账户、会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、Challenge 与 revision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
-| 公开 Catalog | active Challenge revision 与对应 materialized source | 每次读取严格核验 revision 与目录。 |
+| 账户、会话、学习事实、AgentRun、CandidateRevision、GenerationWorkflow、CatalogRelease、Scenario 与 revision | PostgreSQL，经 Server 写入 | Runtime Worker 不持有数据库凭据。 |
+| 公开 Catalog | active Scenario revision 与对应 materialized source | 每次读取严格核验 revision 与目录。 |
 | 便携场景 source、candidate archive、已发布目录 | Server data PVC | 发布目录不可变，历史 revision 继续可读。 |
 | K8s artifact | 部署者提供的 OCI Registry | 按 immutable digest 读取。 |
 | Node artifact | Incus image project | 按完整 fingerprint 读取。 |
@@ -42,11 +42,11 @@ publish、验证、正式场景 publish 与资源清理。
 ## Catalog 与发布
 
 空平台可在 Server 启动时按 immutable `catalog.release_reference` 安装一个 Catalog Release。所有 entry 的真实验证和 artifact
-promotion 成功后，Server 在一个事务中写入 stable Challenge、active revision，并将 release 置为 Ready；因此不会公开部分题库。
+promotion 成功后，Server 在一个事务中写入 stable Scenario、active revision，并将 release 置为 Ready；因此不会公开部分题库。
 基线建立后，新增与修订走 Authoring 的 `GenerationWorkflow`。详细的 portable source、bootstrap 和完整性契约见
 [Catalog Release](catalog-release.md)。
 
-Catalog 只读取 `active` Challenge 及其 active immutable revision。每个摘要返回 type、标签、runtime、标题、描述、发布时间和
+Catalog 只读取 `active` Scenario 及其 active immutable revision。每个摘要返回 type、标签、runtime、标题、描述、发布时间和
 可用状态。`documentation-example` 不使用标签；`operations-scenario` 的标签是 revision 级、规范化的字符串集合。课程层级、
 关系边、推荐图和后台分类任务不属于系统。
 

@@ -28,7 +28,7 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
@@ -57,8 +57,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	if err := os.MkdirAll(cfg.ChallengesDir(), 0o755); err != nil {
-		return nil, fmt.Errorf("create challenges directory: %w", err)
+	if err := os.MkdirAll(cfg.ScenariosDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("create scenarios directory: %w", err)
 	}
 
 	database, err := postgres.New(cfg.DatabaseURL)
@@ -94,17 +94,17 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("create OCI registry client: %w", err)
 	}
 	materializations, err := apppublication.NewMaterializationReconciler(database.Publication, apppublication.MaterializationReconcilerConfig{
-		ChallengesDir: cfg.ChallengesDir(),
+		ScenariosDir: cfg.ScenariosDir(),
 	})
 	if err != nil {
 		incusClient.Close()
 		cleanupDatabase()
-		return nil, fmt.Errorf("create challenge materialization reconciler: %w", err)
+		return nil, fmt.Errorf("create scenario materialization reconciler: %w", err)
 	}
 	if err := materializations.Recover(ctx); err != nil {
 		incusClient.Close()
 		cleanupDatabase()
-		return nil, fmt.Errorf("recover challenge materializations: %w", err)
+		return nil, fmt.Errorf("recover scenario materializations: %w", err)
 	}
 	var generatorSandbox *opensandbox.Client
 	var generatorWorkspace *appgeneration.Manager
@@ -158,7 +158,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			appgeneration.GeneratorServiceConfig{
 				DataDir:           cfg.DataDir,
 				SnapshotRequested: workspaceSnapshotter.Request,
-				FreezeExecution: func(entry challenge.Entry) (generationdomain.ExecutionSnapshot, error) {
+				FreezeExecution: func(entry scenario.Entry) (generationdomain.ExecutionSnapshot, error) {
 					return appexecution.Freeze(entry, runtimesnapshot.From(cfg.Runtime, cfg.Incus))
 				},
 			},
@@ -200,7 +200,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if cfg.Catalog.Enabled() {
 		catalogInstaller, err = appcatalog.NewInstaller(appcatalog.InstallerConfig{
 			DataDir:          cfg.DataDir,
-			ChallengesDir:    cfg.ChallengesDir(),
+			ScenariosDir:     cfg.ScenariosDir(),
 			ReleaseReference: cfg.Catalog.ReleaseReference,
 			PollInterval:     2 * time.Second,
 			Snapshot:         runtimesnapshot.From(cfg.Runtime, cfg.Incus),
@@ -226,11 +226,11 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create catalog availability gate: %w", err)
 	}
-	catalogService := appcatalog.NewService(cfg.ChallengesDir(), availability, database.Challenge)
+	catalogService := appcatalog.NewService(cfg.ScenariosDir(), availability, database.Scenario)
 	if err := catalogService.CheckIntegrity(ctx); err != nil {
 		incusClient.Close()
 		cleanupDatabase()
-		return nil, fmt.Errorf("validate challenge catalog: %w", err)
+		return nil, fmt.Errorf("validate scenario catalog: %w", err)
 	}
 
 	if generatorService == nil {
@@ -262,8 +262,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("create learning projection service: %w", err)
 	}
 	publicationFinalizer, err := appgeneration.NewPublicationFinalizer(appgeneration.PublicationFinalizerConfig{
-		Store: database.Generation, ChallengesDir: cfg.ChallengesDir(),
-		Validator: challengeArtifactValidator{registryRepository: cfg.Registry.Repository, incusNamePrefix: cfg.Incus.NamePrefix},
+		Store: database.Generation, ScenariosDir: cfg.ScenariosDir(),
+		Validator: scenarioArtifactValidator{registryRepository: cfg.Registry.Repository, incusNamePrefix: cfg.Incus.NamePrefix},
 	})
 	if err != nil {
 		incusClient.Close()
@@ -352,7 +352,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if catalogInstaller != nil {
 		services.start("catalog installer", catalogInstaller.Run)
 	}
-	services.start("challenge materialization reconciler", materializations.Run)
+	services.start("scenario materialization reconciler", materializations.Run)
 	if generationAgents != nil {
 		services.start("generation agent runtime", generationAgents.Run)
 	}

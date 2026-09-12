@@ -13,7 +13,7 @@ const (
 )
 
 // SourceManifest is the portable release.yaml contract. It deliberately
-// identifies candidate source trees rather than target-platform challenges.
+// identifies candidate source trees rather than target-platform scenarios.
 type SourceManifest struct {
 	APIVersion string         `yaml:"apiVersion" json:"apiVersion"`
 	Kind       string         `yaml:"kind" json:"kind"`
@@ -27,7 +27,7 @@ type SourceMetadata struct {
 }
 
 // SourceEntry points at one candidate directory inside the release source.
-// It has no challenge ID, slug, runtime artifact, or publication time.
+// It has no scenario ID, slug, runtime artifact, or publication time.
 type SourceEntry struct {
 	Path            string          `yaml:"path" json:"path"`
 	ContentRevision ContentRevision `yaml:"contentRevision" json:"contentRevision"`
@@ -48,27 +48,27 @@ func (m SourceManifest) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(m.Entries))
 	for _, entry := range m.Entries {
-		if !validChallengeSourcePath(entry.Path) {
-			return fmt.Errorf("invalid release challenge path %q", entry.Path)
+		if !validScenarioSourcePath(entry.Path) {
+			return fmt.Errorf("invalid release scenario path %q", entry.Path)
 		}
 		if err := entry.ContentRevision.Validate(); err != nil {
 			return fmt.Errorf("release entry %q contentRevision: %w", entry.Path, err)
 		}
 		if _, exists := seen[entry.Path]; exists {
-			return fmt.Errorf("duplicate release challenge path %q", entry.Path)
+			return fmt.Errorf("duplicate release scenario path %q", entry.Path)
 		}
 		seen[entry.Path] = struct{}{}
 	}
 	return nil
 }
 
-func validChallengeSourcePath(value string) bool {
+func validScenarioSourcePath(value string) bool {
 	if value == "" || strings.TrimSpace(value) != value || strings.Contains(value, "\\") || path.IsAbs(value) {
 		return false
 	}
 	clean := path.Clean(value)
-	if clean != value || !strings.HasPrefix(clean, "challenges/") {
+	if clean != value || !strings.HasPrefix(clean, "scenarios/") {
 		return false
 	}
-	return strings.TrimPrefix(clean, "challenges/") != ""
+	return strings.TrimPrefix(clean, "scenarios/") != ""
 }

@@ -40,7 +40,7 @@ const workflowStateLabel: Record<string, string> = {
   ArtifactPublishing: "正在发布候选产物",
   Verifying: "正在真实验证",
   NeedsAuthorReview: "等待内容审核",
-  ChallengePublishing: "正在发布挑战",
+  ScenarioPublishing: "正在发布挑战",
   Published: "已发布",
   Failed: "基础设施失败",
   Cancelled: "已取消",
@@ -140,7 +140,7 @@ function shouldPoll() {
     "Building",
     "ArtifactPublishing",
     "Verifying",
-    "ChallengePublishing",
+    "ScenarioPublishing",
   ].includes(workflow.state));
 }
 
@@ -327,7 +327,7 @@ onScopeDispose(() => {
 </script>
 
 <template>
-  <section class="authoring-workspace" aria-label="Challenge authoring workspace">
+  <section class="authoring-workspace" aria-label="Scenario authoring workspace">
     <nav class="authoring-narrow-tabs" aria-label="作者工作区视图">
       <button :class="{ active: narrowPane === 'plan' }" @click="narrowPane = 'plan'">内容</button>
       <button :class="{ active: narrowPane === 'chat' }" @click="narrowPane = 'chat'">对话</button>

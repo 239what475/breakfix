@@ -55,12 +55,12 @@ function updateRuntime(event: Event) {
     </div>
     <p v-if="loading" class="space-empty">Loading learning history...</p>
     <div v-else-if="items.length" class="space-row-list history-list">
-      <article v-for="item in items" :key="`${item.challenge.id}-${item.ready_at}`" class="space-row history-row">
+      <article v-for="item in items" :key="`${item.scenario.id}-${item.ready_at}`" class="space-row history-row">
         <div class="history-state" :class="{ complete: !!item.completed_at }">
           <CheckCircle2 v-if="item.completed_at" :size="18" aria-hidden="true" />
           <CircleDashed v-else :size="18" aria-hidden="true" />
         </div>
-        <div class="space-row-main"><div class="space-row-title"><h3>{{ item.challenge.title }}</h3></div><p>{{ stateLabel(item) }} · {{ date(item.state === "completed" ? item.completed_at ?? item.ready_at : item.ready_at) }}<span v-if="checkpointFirstPassLabel(item)"> · {{ checkpointFirstPassLabel(item) }}</span></p></div>
+        <div class="space-row-main"><div class="space-row-title"><h3>{{ item.scenario.title }}</h3></div><p>{{ stateLabel(item) }} · {{ date(item.state === "completed" ? item.completed_at ?? item.ready_at : item.ready_at) }}<span v-if="checkpointFirstPassLabel(item)"> · {{ checkpointFirstPassLabel(item) }}</span></p></div>
         <span class="history-duration"><Clock3 :size="13" aria-hidden="true" />{{ duration(item.learning_seconds) }}</span>
       </article>
     </div>

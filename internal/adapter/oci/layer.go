@@ -19,10 +19,10 @@ import (
 
 const gzipLayerMediaType = "application/vnd.oci.image.layer.v1.tar+gzip"
 
-// AppendChallengeLayer creates a new OCI archive without running candidate
+// AppendScenarioLayer creates a new OCI archive without running candidate
 // code. The trusted base config and entrypoint remain intact; the only new
-// filesystem content is the deterministic challenge bundle.
-func AppendChallengeLayer(baseArchive, bundleRoot, destination string) (string, error) {
+// filesystem content is the deterministic scenario bundle.
+func AppendScenarioLayer(baseArchive, bundleRoot, destination string) (string, error) {
 	if strings.TrimSpace(baseArchive) == "" || strings.TrimSpace(bundleRoot) == "" || strings.TrimSpace(destination) == "" {
 		return "", errors.New("base archive, bundle root, and destination are required")
 	}
@@ -62,7 +62,7 @@ func AppendChallengeLayer(baseArchive, bundleRoot, destination string) (string, 
 		return "", fmt.Errorf("read base OCI config: %w", err)
 	}
 
-	layer, diffID, err := deterministicChallengeLayer(bundleRoot)
+	layer, diffID, err := deterministicScenarioLayer(bundleRoot)
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +109,7 @@ func AppendChallengeLayer(baseArchive, bundleRoot, destination string) (string, 
 	return manifestDigest, nil
 }
 
-func deterministicChallengeLayer(bundleRoot string) ([]byte, string, error) {
+func deterministicScenarioLayer(bundleRoot string) ([]byte, string, error) {
 	paths := make([]string, 0)
 	err := filepath.WalkDir(bundleRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -119,7 +119,7 @@ func deterministicChallengeLayer(bundleRoot string) ([]byte, string, error) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
-			return fmt.Errorf("challenge layer contains unsupported entry %s", path)
+			return fmt.Errorf("scenario layer contains unsupported entry %s", path)
 		}
 		relative, err := filepath.Rel(bundleRoot, path)
 		if err != nil {
@@ -132,7 +132,7 @@ func deterministicChallengeLayer(bundleRoot string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	if len(paths) == 0 {
-		return nil, "", errors.New("challenge bundle is empty")
+		return nil, "", errors.New("scenario bundle is empty")
 	}
 	sort.Strings(paths)
 	var uncompressed bytes.Buffer
@@ -144,7 +144,7 @@ func deterministicChallengeLayer(bundleRoot string) ([]byte, string, error) {
 			return nil, "", err
 		}
 		header := &tar.Header{
-			Name: "opt/breakfix/challenge/" + relative, Mode: int64(info.Mode().Perm()), Size: info.Size(),
+			Name: "opt/breakfix/scenario/" + relative, Mode: int64(info.Mode().Perm()), Size: info.Size(),
 			Uid: 0, Gid: 0, ModTime: time.Unix(0, 0).UTC(), AccessTime: time.Time{}, ChangeTime: time.Time{},
 			Format: tar.FormatUSTAR,
 		}
@@ -204,7 +204,7 @@ func appendConfigDiffID(data []byte, diffID string) ([]byte, error) {
 	}
 	historyEntry, _ := json.Marshal(map[string]any{
 		"created":    time.Unix(0, 0).UTC().Format(time.RFC3339),
-		"created_by": "breakfix deterministic challenge layer",
+		"created_by": "breakfix deterministic scenario layer",
 	})
 	history = append(history, historyEntry)
 	config["history"], _ = json.Marshal(history)

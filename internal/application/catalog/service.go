@@ -6,22 +6,22 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
-// ChallengeLifecycleStore resolves both current and historical content through
-// the durable Challenge lifecycle. Current Catalog reads never depend on a
+// ScenarioLifecycleStore resolves both current and historical content through
+// the durable Scenario lifecycle. Current Catalog reads never depend on a
 // filesystem scan or a separate relation projection.
-type ChallengeLifecycleStore interface {
-	ListActiveChallengeRevisions(context.Context) ([]challengedomain.ActiveRevision, error)
-	GetChallenge(context.Context, string) (*challengedomain.Challenge, error)
-	GetChallengeRevision(context.Context, string, string) (*challengedomain.Revision, error)
+type ScenarioLifecycleStore interface {
+	ListActiveScenarioRevisions(context.Context) ([]scenariodomain.ActiveRevision, error)
+	GetScenario(context.Context, string) (*scenariodomain.Scenario, error)
+	GetScenarioRevision(context.Context, string, string) (*scenariodomain.Revision, error)
 }
 
-type PublishedChallenge struct {
+type PublishedScenario struct {
 	Catalog CatalogReadModel
-	Entry   challenge.Entry
+	Entry   scenario.Entry
 }
 
 // CatalogReadModel is the smallest stable projection consumed by Catalog
@@ -29,26 +29,26 @@ type PublishedChallenge struct {
 type CatalogReadModel struct {
 	ID               string
 	ActiveRevisionID string
-	Type             challenge.ScenarioType
+	Type             scenario.ScenarioType
 	Title            string
 	Description      string
 	Runtime          string
 	Tags             []string
 	PublishedAt      time.Time
-	State            challengedomain.State
+	State            scenariodomain.State
 	Available        bool
 }
 
 type Service struct {
-	challengesDir string
-	availability  *Availability
-	lifecycle     ChallengeLifecycleStore
+	scenariosDir string
+	availability *Availability
+	lifecycle    ScenarioLifecycleStore
 }
 
 const readinessCheckTimeout = 2 * time.Second
 
-func NewService(challengesDir string, availability *Availability, lifecycle ChallengeLifecycleStore) *Service {
-	return &Service{challengesDir: challengesDir, availability: availability, lifecycle: lifecycle}
+func NewService(scenariosDir string, availability *Availability, lifecycle ScenarioLifecycleStore) *Service {
+	return &Service{scenariosDir: scenariosDir, availability: availability, lifecycle: lifecycle}
 }
 
 // Ready verifies the configured immutable release, when one exists. It is
@@ -80,7 +80,7 @@ func (s *Service) Readiness(ctx context.Context) error {
 
 // List exposes only active immutable revisions that match their durable
 // identity and materialized source.
-func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
+func (s *Service) List(ctx context.Context) ([]PublishedScenario, error) {
 	if err := s.Ready(ctx); err != nil {
 		return nil, err
 	}
@@ -88,10 +88,10 @@ func (s *Service) List(ctx context.Context) ([]PublishedChallenge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return projectPublishedChallenges(revisions, entries), nil
+	return projectPublishedScenarios(revisions, entries), nil
 }
 
-func (s *Service) Entry(ctx context.Context, id string) (*challenge.Entry, error) {
+func (s *Service) Entry(ctx context.Context, id string) (*scenario.Entry, error) {
 	published, err := s.Find(ctx, id)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (s *Service) Entry(ctx context.Context, id string) (*challenge.Entry, error
 	return &published.Entry, nil
 }
 
-func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, error) {
+func (s *Service) Find(ctx context.Context, id string) (*PublishedScenario, error) {
 	entries, err := s.List(ctx)
 	if err != nil {
 		return nil, err
@@ -109,52 +109,52 @@ func (s *Service) Find(ctx context.Context, id string) (*PublishedChallenge, err
 			return &item, nil
 		}
 	}
-	return nil, challenge.ErrNotFound
+	return nil, scenario.ErrNotFound
 }
 
 // HistoricalEntry resolves the exact revision fixed in an existing
-// Environment or learning record. It never follows Challenge.ActiveRevisionID
+// Environment or learning record. It never follows Scenario.ActiveRevisionID
 // and accepts superseded or deprecated revisions while verifying that the
 // immutable materialized directory still matches the durable publication.
-func (s *Service) HistoricalEntry(ctx context.Context, challengeID, revisionID string) (*challenge.Entry, error) {
+func (s *Service) HistoricalEntry(ctx context.Context, scenarioID, revisionID string) (*scenario.Entry, error) {
 	if s == nil || s.lifecycle == nil {
-		return nil, challenge.ErrNotFound
+		return nil, scenario.ErrNotFound
 	}
-	stable, err := s.lifecycle.GetChallenge(ctx, challengeID)
+	stable, err := s.lifecycle.GetScenario(ctx, scenarioID)
 	if err != nil {
 		return nil, err
 	}
-	revision, err := s.lifecycle.GetChallengeRevision(ctx, stable.ID, revisionID)
+	revision, err := s.lifecycle.GetScenarioRevision(ctx, stable.ID, revisionID)
 	if err != nil {
 		return nil, err
 	}
-	return validateMaterializedRevision(s.challengesDir, *stable, *revision)
+	return validateMaterializedRevision(s.scenariosDir, *stable, *revision)
 }
 
-func (s *Service) currentMaterialized(ctx context.Context) ([]challengedomain.ActiveRevision, map[string]challenge.Entry, error) {
+func (s *Service) currentMaterialized(ctx context.Context) ([]scenariodomain.ActiveRevision, map[string]scenario.Entry, error) {
 	if s == nil || s.lifecycle == nil {
 		return nil, nil, errors.New("catalog service lifecycle is not configured")
 	}
-	revisions, err := s.lifecycle.ListActiveChallengeRevisions(ctx)
+	revisions, err := s.lifecycle.ListActiveScenarioRevisions(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list active challenge revisions: %w", err)
+		return nil, nil, fmt.Errorf("list active scenario revisions: %w", err)
 	}
-	entries, err := materializedChallengeIndex(revisions, s.challengesDir)
+	entries, err := materializedScenarioIndex(revisions, s.scenariosDir)
 	if err != nil {
 		return nil, nil, err
 	}
 	return revisions, entries, nil
 }
 
-func projectPublishedChallenges(revisions []challengedomain.ActiveRevision, entries map[string]challenge.Entry) []PublishedChallenge {
-	result := make([]PublishedChallenge, 0, len(revisions))
+func projectPublishedScenarios(revisions []scenariodomain.ActiveRevision, entries map[string]scenario.Entry) []PublishedScenario {
+	result := make([]PublishedScenario, 0, len(revisions))
 	for _, active := range revisions {
-		entry := entries[active.Challenge.ID]
-		result = append(result, PublishedChallenge{
+		entry := entries[active.Scenario.ID]
+		result = append(result, PublishedScenario{
 			Catalog: CatalogReadModel{
 				ID: entry.ID, ActiveRevisionID: entry.RevisionID, Type: entry.Type, Title: entry.Title,
 				Description: entry.Description, Runtime: entry.Runtime, Tags: append([]string(nil), entry.Tags...), PublishedAt: entry.PublishedAt.UTC(),
-				State: challengedomain.StateActive, Available: true,
+				State: scenariodomain.StateActive, Available: true,
 			},
 			Entry: entry,
 		})

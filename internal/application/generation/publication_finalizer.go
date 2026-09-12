@@ -12,7 +12,7 @@ import (
 
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	domain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/publication"
@@ -27,43 +27,43 @@ var errPublicationInvariant = errors.New("candidate publication invariant breach
 // tail after a Runtime Worker has recorded an immutable promoted artifact.
 type PublicationFinalizerStore interface {
 	PendingGenerationPublicationFinalizations(context.Context, time.Time) ([]domain.PublicationFinalization, error)
-	FinalizeGenerationChallengePublication(context.Context, string, string, string, string, challenge.ScenarioType, []string, time.Time) error
+	FinalizeGenerationScenarioPublication(context.Context, string, string, string, string, scenario.ScenarioType, []string, time.Time) error
 	RecordGenerationPublicationFinalizerFailure(context.Context, string, string, publication.Diagnostic) (*domain.Workflow, error)
 }
 
-// ChallengeArtifactValidator verifies that a Worker-promoted artifact belongs
+// ScenarioArtifactValidator verifies that a Worker-promoted artifact belongs
 // to the exact final publication intent. Bootstrap supplies provider-specific
 // naming rules without giving this application service provider credentials.
-type ChallengeArtifactValidator interface {
-	ValidateChallengeArtifact(runtime.Context, execution.ArtifactReference) error
+type ScenarioArtifactValidator interface {
+	ValidateScenarioArtifact(runtime.Context, execution.ArtifactReference) error
 }
 
 type PublicationFinalizerConfig struct {
-	Store         PublicationFinalizerStore
-	ChallengesDir string
-	Validator     ChallengeArtifactValidator
-	Interval      time.Duration
+	Store        PublicationFinalizerStore
+	ScenariosDir string
+	Validator    ScenarioArtifactValidator
+	Interval     time.Duration
 }
 
 // PublicationFinalizer owns the final filesystem materialization and durable
-// Challenge publication. It never invokes a provider or HTTP handler.
+// Scenario publication. It never invokes a provider or HTTP handler.
 type PublicationFinalizer struct {
-	store         PublicationFinalizerStore
-	challengesDir string
-	validator     ChallengeArtifactValidator
-	interval      time.Duration
-	now           func() time.Time
+	store        PublicationFinalizerStore
+	scenariosDir string
+	validator    ScenarioArtifactValidator
+	interval     time.Duration
+	now          func() time.Time
 }
 
 func NewPublicationFinalizer(config PublicationFinalizerConfig) (*PublicationFinalizer, error) {
-	if config.Store == nil || config.Validator == nil || config.ChallengesDir == "" {
-		return nil, errors.New("generation publication finalizer requires store, challenge directory, and artifact validator")
+	if config.Store == nil || config.Validator == nil || config.ScenariosDir == "" {
+		return nil, errors.New("generation publication finalizer requires store, scenario directory, and artifact validator")
 	}
 	if config.Interval <= 0 {
 		config.Interval = defaultPublicationFinalizerInterval
 	}
 	return &PublicationFinalizer{
-		store: config.Store, challengesDir: filepath.Clean(config.ChallengesDir), validator: config.Validator,
+		store: config.Store, scenariosDir: filepath.Clean(config.ScenariosDir), validator: config.Validator,
 		interval: config.Interval, now: func() time.Time { return time.Now().UTC() },
 	}, nil
 }
@@ -106,7 +106,7 @@ func (f *PublicationFinalizer) RunOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := f.store.FinalizeGenerationChallengePublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, entry.Revision, entry.Type, entry.Tags, f.now()); err != nil {
+		if err := f.store.FinalizeGenerationScenarioPublication(ctx, value.Workflow.ID, value.Candidate.ID, entry.ContentRevision, entry.Revision, entry.Type, entry.Tags, f.now()); err != nil {
 			if recordErr := f.recordFailure(ctx, value, classifyPublicationFinalizerError(err)); recordErr != nil {
 				slog.Warn("record generation publication diagnostic", "workflow_id", value.Workflow.ID, "candidate_revision_id", value.Candidate.ID, "err", recordErr)
 			}
@@ -128,7 +128,7 @@ func classifyPublicationFinalizerError(err error) error {
 	if err == nil || publication.CategoryOf(err).Valid() {
 		return err
 	}
-	if errors.Is(err, domain.ErrCandidateInvalidState) || errors.Is(err, domain.ErrChallengeSourceRefConflict) {
+	if errors.Is(err, domain.ErrCandidateInvalidState) || errors.Is(err, domain.ErrScenarioSourceRefConflict) {
 		return publication.Deterministic(err)
 	}
 	return publication.Transient(err)
@@ -148,7 +148,7 @@ func publicationFailure(err error) error {
 	return publication.Deterministic(err)
 }
 
-func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*challenge.Entry, error) {
+func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*scenario.Entry, error) {
 	if revision == nil || revision.Publication == nil || revision.Publication.Artifact == nil {
 		return nil, publication.Deterministic(domain.ErrCandidateInvalidState)
 	}
@@ -162,8 +162,8 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*challeng
 	if err := artifact.Validate(revision.Snapshot.Runtime); err != nil {
 		return nil, publicationFailure(fmt.Errorf("%w: invalid final artifact: %v", errPublicationInvariant, err))
 	}
-	if err := f.validator.ValidateChallengeArtifact(runtime.Context{
-		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ChallengeID: publicationIntent.ChallengeID, ChallengeRevisionID: publicationIntent.ChallengeRevisionID,
+	if err := f.validator.ValidateScenarioArtifact(runtime.Context{
+		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ScenarioID: publicationIntent.ScenarioID, ScenarioRevisionID: publicationIntent.ScenarioRevisionID,
 	}, artifact); err != nil {
 		return nil, publicationFailure(fmt.Errorf("%w: final artifact ownership: %v", errPublicationInvariant, err))
 	}
@@ -180,10 +180,10 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*challeng
 	if err := os.MkdirAll(source, 0o750); err != nil {
 		return nil, publication.Transient(err)
 	}
-	if err := challenge.ExtractTarGz(source, bytes.NewReader(archive)); err != nil {
+	if err := scenario.ExtractTarGz(source, bytes.NewReader(archive)); err != nil {
 		return nil, publication.Deterministic(err)
 	}
-	candidateEntry, err := challenge.ValidateCandidateDir(source)
+	candidateEntry, err := scenario.ValidateCandidateDir(source)
 	if err != nil {
 		return nil, publication.Deterministic(err)
 	}
@@ -191,26 +191,26 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*challeng
 	if err != nil {
 		return nil, publicationFailure(fmt.Errorf("hash verified candidate source: %w", err))
 	}
-	if (publicationIntent.BaseActiveRevisionID == "" && challenge.SourceSlugFor(candidateEntry.Title, publicationIntent.ChallengeID) != publicationIntent.SourceSlug) ||
-		challenge.MaterializedPath(publicationIntent.SourceSlug, publicationIntent.ChallengeRevisionID) != publicationIntent.TargetPath {
+	if (publicationIntent.BaseActiveRevisionID == "" && scenario.SourceSlugFor(candidateEntry.Title, publicationIntent.ScenarioID) != publicationIntent.SourceSlug) ||
+		scenario.MaterializedPath(publicationIntent.SourceSlug, publicationIntent.ScenarioRevisionID) != publicationIntent.TargetPath {
 		return nil, publicationFailure(fmt.Errorf("%w: intent does not match immutable archive", errPublicationInvariant))
 	}
 	image := artifact.IncusFingerprint
-	if artifact.Runtime == challenge.RuntimeK8s {
+	if artifact.Runtime == scenario.RuntimeK8s {
 		image = artifact.OCIReference
 	}
 	expectedRoot := filepath.Join(root, "expected")
-	expected, err := challenge.PromoteDirectoryAt(expectedRoot, source, publicationIntent.ChallengeID, publicationIntent.ChallengeRevisionID, publicationIntent.SourceSlug, image, string(contentRevision), publicationIntent.RequestedAt)
+	expected, err := scenario.PromoteDirectoryAt(expectedRoot, source, publicationIntent.ScenarioID, publicationIntent.ScenarioRevisionID, publicationIntent.SourceSlug, image, string(contentRevision), publicationIntent.RequestedAt)
 	if err != nil {
 		return nil, publicationFailure(err)
 	}
-	target := filepath.Join(f.challengesDir, publicationIntent.TargetPath)
+	target := filepath.Join(f.scenariosDir, publicationIntent.TargetPath)
 	if existing, found, err := validateExistingPublication(target, expected); err != nil || found {
 		return existing, publicationFailure(err)
 	}
 
-	materialized, err := challenge.MaterializeWithPath(f.challengesDir, expected.ID, expected.RevisionID, publicationIntent.TargetPath, func(destination string) error {
-		return challenge.CopyRegularFiles(expected.Dir, destination)
+	materialized, err := scenario.MaterializeWithPath(f.scenariosDir, expected.ID, expected.RevisionID, publicationIntent.TargetPath, func(destination string) error {
+		return scenario.CopyRegularFiles(expected.Dir, destination)
 	})
 	if err == nil {
 		return materialized, nil
@@ -221,7 +221,7 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*challeng
 	return nil, publicationFailure(err)
 }
 
-func validateExistingPublication(target string, expected *challenge.Entry) (*challenge.Entry, bool, error) {
+func validateExistingPublication(target string, expected *scenario.Entry) (*scenario.Entry, bool, error) {
 	info, err := os.Lstat(target)
 	if os.IsNotExist(err) {
 		return nil, false, nil
@@ -232,7 +232,7 @@ func validateExistingPublication(target string, expected *challenge.Entry) (*cha
 	if !info.IsDir() {
 		return nil, true, fmt.Errorf("%w: target is not a directory", errPublicationInvariant)
 	}
-	existing, err := challenge.ValidateDir(target)
+	existing, err := scenario.ValidateDir(target)
 	if err != nil {
 		return nil, true, fmt.Errorf("%w: invalid target: %v", errPublicationInvariant, err)
 	}

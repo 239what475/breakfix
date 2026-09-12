@@ -408,11 +408,11 @@ func (h *Handler) toAPIGeneratorGeneration(ctx context.Context, workflow generat
 			response.Diff = append(response.Diff, api.AuthoringFileDiff{Path: entry.Path, Diff: entry.Diff})
 		}
 	}
-	verified, err := appauthoring.ReadVerifiedChallenge(archive)
+	verified, err := appauthoring.ReadVerifiedScenario(archive)
 	if err != nil {
 		return api.GeneratorGeneration{}, err
 	}
-	response.Verified = toAPIVerifiedChallenge(verified)
+	response.Verified = toAPIVerifiedScenario(verified)
 	response.Verification = toAPIAuthoringVerificationReport(revision.Verification)
 	return response, nil
 }
@@ -449,7 +449,7 @@ func (h *Handler) writeGeneratorError(c *gin.Context, err error) {
 	case errors.Is(err, generation.ErrWorkspaceBusy), errors.Is(err, generation.ErrWorkspaceTurnLost),
 		errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState),
 		errors.Is(err, generation.ErrCandidateInvalidState),
-		errors.Is(err, generation.ErrChallengeSourceRefConflict):
+		errors.Is(err, generation.ErrScenarioSourceRefConflict):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:
 		h.writeAuthoringError(c, err)

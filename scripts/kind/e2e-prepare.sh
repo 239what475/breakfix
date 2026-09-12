@@ -183,16 +183,16 @@ base_url=http://127.0.0.1:$base_port
 deadline=$(( $(date +%s) + prepare_timeout_seconds ))
 catalog_json=$state_dir/catalog-projection.json
 while [ "$(date +%s)" -lt "$deadline" ]; do
-	if curl --fail --silent --show-error "$base_url/api/challenges" >"$catalog_json" 2>/dev/null &&
+	if curl --fail --silent --show-error "$base_url/api/scenarios" >"$catalog_json" 2>/dev/null &&
 		jq -e \
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
 			--arg type "$fixture_type" '
-				(.challenges | length) == 1 and
-				.challenges[0].title == $title and
-				.challenges[0].runtime == $runtime and
-				.challenges[0].scenario_type == $type and
-				(.challenges[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
+				(.scenarios | length) == 1 and
+				.scenarios[0].title == $title and
+				.scenarios[0].runtime == $runtime and
+				.scenarios[0].scenario_type == $type and
+				(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
 		' "$catalog_json" >/dev/null; then
 		break
 	fi
@@ -202,11 +202,11 @@ jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
 	--arg type "$fixture_type" '
-		(.challenges | length) == 1 and
-		.challenges[0].title == $title and
-		.challenges[0].runtime == $runtime and
-		.challenges[0].scenario_type == $type and
-		(.challenges[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
+		(.scenarios | length) == 1 and
+		.scenarios[0].title == $title and
+		.scenarios[0].runtime == $runtime and
+		.scenarios[0].scenario_type == $type and
+		(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
 ' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 
 "$target_script" mark-prepared "$catalog_reference" "$ui_origin"

@@ -91,50 +91,50 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 
 	// The catalog is public read-only. Starting, viewing full content, and every
 	// environment operation below remain bound to an authenticated user.
-	catalogRoutes.GET("/api/challenges", optionalJWTMW, h.ListChallenges)
-	catalogRoutes.POST("/api/challenges/:id/start", func(c *gin.Context) {
+	catalogRoutes.GET("/api/scenarios", optionalJWTMW, h.ListScenarios)
+	catalogRoutes.POST("/api/scenarios/:id/start", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.StartChallenge(c, c.Param("id"))
+			h.StartScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/challenges/:id/content", func(c *gin.Context) {
+	catalogRoutes.GET("/api/scenarios/:id/content", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.GetChallengeContent(c, c.Param("id"))
+			h.GetScenarioContent(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/challenges/:id/progress", func(c *gin.Context) {
+	catalogRoutes.GET("/api/scenarios/:id/progress", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.GetChallengeProgress(c, c.Param("id"))
+			h.GetScenarioProgress(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.GET("/api/challenges/:id/assistant", func(c *gin.Context) {
+	catalogRoutes.GET("/api/scenarios/:id/assistant", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.GetChallengeAssistant(c, c.Param("id"))
+			h.GetScenarioAssistant(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/challenges/:id/assistant/messages", func(c *gin.Context) {
+	catalogRoutes.POST("/api/scenarios/:id/assistant/messages", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.SendChallengeAssistantMessage(c, c.Param("id"))
+			h.SendScenarioAssistantMessage(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/challenges/:id/reset", func(c *gin.Context) {
+	catalogRoutes.POST("/api/scenarios/:id/reset", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.ResetChallenge(c, c.Param("id"))
+			h.ResetScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/challenges/:id/stop", func(c *gin.Context) {
+	catalogRoutes.POST("/api/scenarios/:id/stop", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.StopChallenge(c, c.Param("id"))
+			h.StopScenario(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/challenges/:id/terminal-ticket", func(c *gin.Context) {
+	catalogRoutes.POST("/api/scenarios/:id/terminal-ticket", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CreateTerminalTicket(c, c.Param("id"))
@@ -146,16 +146,16 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 			h.CreateAuthoringSession(c)
 		}
 	})
-	catalogRoutes.POST("/api/authoring/challenges/:id/revisions", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/scenarios/:id/revisions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.CreateAuthoringChallengeRevision(c, c.Param("id"))
+			h.CreateAuthoringScenarioRevision(c, c.Param("id"))
 		}
 	})
-	catalogRoutes.POST("/api/authoring/challenges/:id/deprecate", func(c *gin.Context) {
+	catalogRoutes.POST("/api/authoring/scenarios/:id/deprecate", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
-			h.DeprecateAuthoringChallenge(c, c.Param("id"))
+			h.DeprecateAuthoringScenario(c, c.Param("id"))
 		}
 	})
 	router.GET("/api/authoring/sessions/current", func(c *gin.Context) {
@@ -226,13 +226,13 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.POST("/api/internal/runtime-actions/:id/artifact-publish/complete", h.InternalCompleteRuntimeArtifactPublish)
 	router.POST("/api/internal/runtime-actions/:id/verification/environment", h.InternalRecordRuntimeVerificationEnvironment)
 	router.POST("/api/internal/runtime-actions/:id/verification/complete", h.InternalCompleteRuntimeVerification)
-	router.POST("/api/internal/runtime-actions/:id/challenge-publish/complete", h.InternalRecordRuntimeChallengePublication)
+	router.POST("/api/internal/runtime-actions/:id/scenario-publish/complete", h.InternalRecordRuntimeScenarioPublication)
 	router.POST("/api/internal/runtime-actions/:id/failure/infrastructure", h.InternalReportRuntimeInfrastructureFailure)
 	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportRuntimeArtifactFailure)
 
 	// Terminal WebSocket
-	catalogRoutes.GET("/api/challenges/:id/terminal", h.HandleTerminalTicket)
-	catalogRoutes.DELETE("/api/challenges/:id/terminals/:window", func(c *gin.Context) {
+	catalogRoutes.GET("/api/scenarios/:id/terminal", h.HandleTerminalTicket)
+	catalogRoutes.DELETE("/api/scenarios/:id/terminals/:window", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {
 			h.CloseTerminalWindow(c, c.Param("id"), c.Param("window"))

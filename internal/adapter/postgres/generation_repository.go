@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/publication"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
 var ErrGenerationWorkflowNotFound = errors.New("generation workflow not found")
@@ -205,7 +205,7 @@ func (d *GenerationRepository) ClaimGenerationWorkflow(ctx context.Context, work
 		))
 		ORDER BY next_run_at, created_at, id
 		FOR UPDATE SKIP LOCKED LIMIT 1`, generation.StateBuilding, generation.StateArtifactPublishing,
-		generation.StateVerifying, generation.StateChallengePublishing, now, now, generation.StateChallengePublishing).Scan(&id)
+		generation.StateVerifying, generation.StateScenarioPublishing, now, now, generation.StateScenarioPublishing).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit generation recovery: %w", err)
@@ -404,8 +404,8 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 		VerificationEnvironment: revision.VerifyEnvironment,
 	}
 	if revision.Publication != nil {
-		context.ChallengeID = revision.Publication.ChallengeID
-		context.ChallengeRevisionID = revision.Publication.ChallengeRevisionID
+		context.ScenarioID = revision.Publication.ScenarioID
+		context.ScenarioRevisionID = revision.Publication.ScenarioRevisionID
 	}
 	if err := context.Valid(); err != nil {
 		return nil, err
@@ -999,12 +999,12 @@ func (d *GenerationRepository) ConfirmGenerationContent(ctx context.Context, ses
 	updated, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, `UPDATE generation_workflows SET state = ?,
 		state_version = state_version + 1, runtime_attempt = 1, lease_owner = '', lease_expires_at = NULL,
 		next_run_at = ?, last_error = '', updated_at = ? WHERE id = ? RETURNING `+generationWorkflowColumns,
-		generation.StateChallengePublishing, now.UTC(), now.UTC(), workflow.ID))
+		generation.StateScenarioPublishing, now.UTC(), now.UTC(), workflow.ID))
 	if err != nil {
-		return nil, fmt.Errorf("start challenge publication: %w", err)
+		return nil, fmt.Errorf("start scenario publication: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), candidateRevision.ID); err != nil {
-		return nil, fmt.Errorf("record challenge publication intent: %w", err)
+		return nil, fmt.Errorf("record scenario publication intent: %w", err)
 	}
 	if err := insertGenerationActionReceiptTx(ctx, tx, generationActionReceipt{
 		SessionID: sessionID, Action: generationActionConfirmContent, IdempotencyKey: confirmation.IdempotencyKey,
@@ -1084,20 +1084,20 @@ func (d *GenerationRepository) RequestGenerationContentChanges(ctx context.Conte
 	return updated, nil
 }
 
-// RecordGenerationChallengePublicationResult durably stores a successful
+// RecordGenerationScenarioPublicationResult durably stores a successful
 // provider promotion before Server materializes source or updates the active
 // Runtime Worker lease is released without changing state, so a later Server
 // finalizer can recover without repeating promotion.
-func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
+func (d *GenerationRepository) RecordGenerationScenarioPublicationResult(ctx context.Context, claim generation.Claim, artifact generation.ArtifactReference, now time.Time) error {
 	if !claim.Valid() || now.IsZero() {
-		return errors.New("generation challenge promotion result is invalid")
+		return errors.New("generation scenario promotion result is invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin generation challenge promotion result: %w", err)
+		return fmt.Errorf("begin generation scenario promotion result: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, err := lockGenerationClaimTx(ctx, tx, claim, generation.StateChallengePublishing, now.UTC())
+	workflow, err := lockGenerationClaimTx(ctx, tx, claim, generation.StateScenarioPublishing, now.UTC())
 	if err != nil {
 		return err
 	}
@@ -1124,12 +1124,12 @@ func (d *GenerationRepository) RecordGenerationChallengePublicationResult(ctx co
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), candidateRevision.ID); err != nil {
-		return fmt.Errorf("record generation challenge promotion result: %w", err)
+		return fmt.Errorf("record generation scenario promotion result: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET lease_owner = '', lease_expires_at = NULL, last_error = '',
 		finalizer_error_category = '', finalizer_last_error = '', finalizer_last_attempted_at = NULL, finalizer_next_retry_at = NULL, updated_at = ?
-		WHERE id = ? AND state = ? AND state_version = ?`, now.UTC(), workflow.ID, generation.StateChallengePublishing, workflow.StateVersion); err != nil {
-		return fmt.Errorf("release generation challenge promotion lease: %w", err)
+		WHERE id = ? AND state = ? AND state_version = ?`, now.UTC(), workflow.ID, generation.StateScenarioPublishing, workflow.StateVersion); err != nil {
+		return fmt.Errorf("release generation scenario promotion lease: %w", err)
 	}
 	return tx.Commit()
 }
@@ -1148,7 +1148,7 @@ func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx con
 			WHERE candidate.id = generation_workflows.candidate_revision_id
 			AND candidate.publication -> 'artifact' IS NOT NULL
 			AND candidate.published_at IS NULL
-		) ORDER BY updated_at, id`, generation.StateChallengePublishing, now.UTC())
+		) ORDER BY updated_at, id`, generation.StateScenarioPublishing, now.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("list pending generation publication finalizers: %w", err)
 	}
@@ -1173,7 +1173,7 @@ func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx con
 
 // RecordGenerationPublicationFinalizerFailure persists the Server-owned
 // materialization outcome after Runtime Worker promotion has already been
-// recorded. Transient failures keep ChallengePublishing and its retry time;
+// recorded. Transient failures keep ScenarioPublishing and its retry time;
 // deterministic failures close the workflow without touching the published
 // artifact intent.
 func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx context.Context, workflowID, candidateRevisionID string, diagnostic publication.Diagnostic) (*generation.Workflow, error) {
@@ -1186,7 +1186,7 @@ func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx c
 	}
 	defer func() { _ = tx.Rollback() }()
 	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND state = ? FOR UPDATE`,
-		strings.TrimSpace(workflowID), generation.StateChallengePublishing))
+		strings.TrimSpace(workflowID), generation.StateScenarioPublishing))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, generation.ErrCandidateInvalidState
 	}
@@ -1216,7 +1216,7 @@ func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx c
 	if diagnostic.NextRetryAt != nil {
 		nextRunAt = diagnostic.NextRetryAt.UTC()
 	}
-	state := generation.StateChallengePublishing
+	state := generation.StateScenarioPublishing
 	stateVersion := workflow.StateVersion
 	runtimeAttempt := workflow.RuntimeAttempt
 	if diagnostic.Category == publication.CategoryDeterministic {
@@ -1234,7 +1234,7 @@ func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx c
 				return nil
 			}
 			return diagnostic.NextRetryAt.UTC()
-		}(), diagnostic.LastAttemptedAt.UTC(), workflow.ID, generation.StateChallengePublishing))
+		}(), diagnostic.LastAttemptedAt.UTC(), workflow.ID, generation.StateScenarioPublishing))
 	if err != nil {
 		return nil, fmt.Errorf("persist generation publication finalizer failure: %w", err)
 	}
@@ -1244,24 +1244,24 @@ func (d *GenerationRepository) RecordGenerationPublicationFinalizerFailure(ctx c
 	return updated, nil
 }
 
-// FinalizeGenerationChallengePublication makes one already-promoted artifact
+// FinalizeGenerationScenarioPublication makes one already-promoted artifact
 // visible after Server has idempotently materialized its source directory. It
 // never calls a provider and is safe to retry after a Server interruption.
-func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision, materializedRevision string, scenarioType challenge.ScenarioType, scenarioTags []string, now time.Time) error {
+func (d *GenerationRepository) FinalizeGenerationScenarioPublication(ctx context.Context, workflowID, candidateRevisionID, contentRevision, materializedRevision string, scenarioType scenario.ScenarioType, scenarioTags []string, now time.Time) error {
 	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(candidateRevisionID) == "" ||
-		!challenge.ValidRevision(contentRevision) || !challenge.ValidRevision(materializedRevision) || !scenarioType.Valid() || now.IsZero() {
-		return errors.New("generation challenge publication finalization is invalid")
+		!scenario.ValidRevision(contentRevision) || !scenario.ValidRevision(materializedRevision) || !scenarioType.Valid() || now.IsZero() {
+		return errors.New("generation scenario publication finalization is invalid")
 	}
-	canonicalTags, err := challenge.NormalizeTags(scenarioTags)
-	if err != nil || !slices.Equal(canonicalTags, scenarioTags) || (scenarioType == challenge.ScenarioDocumentationExample && len(scenarioTags) != 0) {
-		return errors.New("generation challenge publication tags are invalid")
+	canonicalTags, err := scenario.NormalizeTags(scenarioTags)
+	if err != nil || !slices.Equal(canonicalTags, scenarioTags) || (scenarioType == scenario.ScenarioDocumentationExample && len(scenarioTags) != 0) {
+		return errors.New("generation scenario publication tags are invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin challenge publication finalization: %w", err)
+		return fmt.Errorf("begin scenario publication finalization: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND state = ? FOR UPDATE`, workflowID, generation.StateChallengePublishing))
+	workflow, err := scanGenerationWorkflow(tx.QueryRowContext(ctx, generationWorkflowSelect+` WHERE id = ? AND state = ? FOR UPDATE`, workflowID, generation.StateScenarioPublishing))
 	if errors.Is(err, sql.ErrNoRows) {
 		return generation.ErrCandidateInvalidState
 	}
@@ -1293,20 +1293,20 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 	if err != nil {
 		return err
 	}
-	if session.RevisionChallengeID == "" {
-		stable := challengedomain.Challenge{ID: publication.ChallengeID, SourceKind: challengedomain.SourceAuthoring, SourceRef: workflow.Source.Ref,
-			OwnerUserID: session.UserID, State: challengedomain.StateActive, ActiveRevisionID: publication.ChallengeRevisionID,
+	if session.RevisionScenarioID == "" {
+		stable := scenariodomain.Scenario{ID: publication.ScenarioID, SourceKind: scenariodomain.SourceAuthoring, SourceRef: workflow.Source.Ref,
+			OwnerUserID: session.UserID, State: scenariodomain.StateActive, ActiveRevisionID: publication.ScenarioRevisionID,
 			SourceSlug: publication.SourceSlug, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
-		published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
-			*publication.Artifact, publication.ChallengeRevisionID, publication.ChallengeID, workflow.Source.Ref, workflow.SourceRevision,
-			"", publication.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now.UTC())
-		if err = insertPersistedChallengeTx(ctx, tx, stable); err == nil {
-			err = insertPersistedChallengeRevisionTx(ctx, tx, published)
+		published := scenarioRevisionFromPublication(publication.ScenarioTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
+			*publication.Artifact, publication.ScenarioRevisionID, publication.ScenarioID, workflow.Source.Ref, workflow.SourceRevision,
+			"", publication.SourceSlug, publication.TargetPath, scenariodomain.SourceAuthoring, now.UTC())
+		if err = insertPersistedScenarioTx(ctx, tx, stable); err == nil {
+			err = insertPersistedScenarioRevisionTx(ctx, tx, published)
 		}
 	} else {
 		err = finalizeAuthoringRevisionTx(ctx, tx, *session, workflow, publication, scenarioType, scenarioTags, materializedRevision, now.UTC())
 	}
-	if errors.Is(err, challengedomain.ErrRevisionConflict) {
+	if errors.Is(err, scenariodomain.ErrRevisionConflict) {
 		return failStaleRevisionPublicationTx(ctx, tx, workflow, candidateRevision, session, err, now.UTC())
 	}
 	if err != nil {
@@ -1317,9 +1317,9 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET publication = ?::jsonb, published_at = ?, updated_at = ? WHERE id = ?`, encodedPublication, now.UTC(), now.UTC(), candidateRevision.ID); err != nil {
-		return fmt.Errorf("record challenge publication: %w", err)
+		return fmt.Errorf("record scenario publication: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, publish_challenge_id = ?, updated_at = ? WHERE id = ?`, authoring.StatePublished, publication.ChallengeID, nowText(now), workflow.Source.Ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE authoring_sessions SET state = ?, publish_scenario_id = ?, updated_at = ? WHERE id = ?`, authoring.StatePublished, publication.ScenarioID, nowText(now), workflow.Source.Ref); err != nil {
 		return fmt.Errorf("mark authoring session published: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1,
@@ -1332,9 +1332,9 @@ func (d *GenerationRepository) FinalizeGenerationChallengePublication(ctx contex
 }
 
 // failStaleRevisionPublicationTx ends only a stale revision workflow. Its
-// stable Challenge and active revision remain untouched, while the author can
+// stable Scenario and active revision remain untouched, while the author can
 // see the conflict and begin a new revision session from the current active
-// state. Leaving this workflow in ChallengePublishing would make a known
+// state. Leaving this workflow in ScenarioPublishing would make a known
 // optimistic-concurrency conflict retry forever.
 func failStaleRevisionPublicationTx(ctx context.Context, tx *Tx, workflow *generation.Workflow, candidate *generation.Revision, session *authoring.Session, cause error, now time.Time) error {
 	if workflow == nil || candidate == nil || session == nil {
@@ -1364,73 +1364,73 @@ func prepareGenerationPublicationTx(ctx context.Context, tx *Tx, session authori
 		return generation.Publication{}, generation.ErrCandidateInvalidState
 	}
 	staging := *candidate.Artifact
-	publication := generation.Publication{CandidateRevisionID: candidate.ID, IntentRevision: 1, ChallengeTitle: metadata.Title,
+	publication := generation.Publication{CandidateRevisionID: candidate.ID, IntentRevision: 1, ScenarioTitle: metadata.Title,
 		Runtime: metadata.Runtime, RequestedAt: now.UTC(), StagingArtifact: &staging}
-	if session.RevisionChallengeID == "" {
-		publication.ChallengeID = challenge.NewID()
-		publication.ChallengeRevisionID = challenge.NewRevisionID()
-		publication.SourceSlug = challenge.SourceSlugFor(metadata.Title, publication.ChallengeID)
+	if session.RevisionScenarioID == "" {
+		publication.ScenarioID = scenario.NewID()
+		publication.ScenarioRevisionID = scenario.NewRevisionID()
+		publication.SourceSlug = scenario.SourceSlugFor(metadata.Title, publication.ScenarioID)
 	} else {
-		target, err := lockPersistedChallengeTx(ctx, tx, session.RevisionChallengeID)
+		target, err := lockPersistedScenarioTx(ctx, tx, session.RevisionScenarioID)
 		if err != nil {
 			return generation.Publication{}, err
 		}
-		if target.SourceKind != challengedomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != challengedomain.StateActive || target.ActiveRevisionID != session.RevisionBaseActiveRevisionID {
-			return generation.Publication{}, challengedomain.ErrRevisionConflict
+		if target.SourceKind != scenariodomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != scenariodomain.StateActive || target.ActiveRevisionID != session.RevisionBaseActiveRevisionID {
+			return generation.Publication{}, scenariodomain.ErrRevisionConflict
 		}
-		active, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+		active, err := lockPersistedScenarioRevisionTx(ctx, tx, target.ActiveRevisionID)
 		if err != nil {
 			return generation.Publication{}, err
 		}
-		if active.ChallengeID != target.ID || active.State != challengedomain.RevisionActive || active.Runtime != metadata.Runtime {
+		if active.ScenarioID != target.ID || active.State != scenariodomain.RevisionActive || active.Runtime != metadata.Runtime {
 			return generation.Publication{}, generation.ErrCandidateInvalidState
 		}
-		publication.ChallengeID = target.ID
-		publication.ChallengeRevisionID = challenge.NewRevisionID()
+		publication.ScenarioID = target.ID
+		publication.ScenarioRevisionID = scenario.NewRevisionID()
 		publication.BaseActiveRevisionID = target.ActiveRevisionID
 		publication.SourceSlug = target.SourceSlug
 	}
-	publication.TargetPath = challenge.MaterializedPath(publication.SourceSlug, publication.ChallengeRevisionID)
+	publication.TargetPath = scenario.MaterializedPath(publication.SourceSlug, publication.ScenarioRevisionID)
 	if err := publication.ValidateIntent(); err != nil {
 		return generation.Publication{}, err
 	}
 	return publication, nil
 }
 
-func finalizeAuthoringRevisionTx(ctx context.Context, tx *Tx, session authoring.Session, workflow *generation.Workflow, publication generation.Publication, scenarioType challenge.ScenarioType, scenarioTags []string, materializedRevision string, now time.Time) error {
-	if workflow == nil || publication.ChallengeID != session.RevisionChallengeID || publication.BaseActiveRevisionID != session.RevisionBaseActiveRevisionID {
-		return challengedomain.ErrRevisionConflict
+func finalizeAuthoringRevisionTx(ctx context.Context, tx *Tx, session authoring.Session, workflow *generation.Workflow, publication generation.Publication, scenarioType scenario.ScenarioType, scenarioTags []string, materializedRevision string, now time.Time) error {
+	if workflow == nil || publication.ScenarioID != session.RevisionScenarioID || publication.BaseActiveRevisionID != session.RevisionBaseActiveRevisionID {
+		return scenariodomain.ErrRevisionConflict
 	}
-	target, err := lockPersistedChallengeTx(ctx, tx, session.RevisionChallengeID)
+	target, err := lockPersistedScenarioTx(ctx, tx, session.RevisionScenarioID)
 	if err != nil {
 		return err
 	}
-	if target.SourceKind != challengedomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != challengedomain.StateActive || target.ActiveRevisionID != publication.BaseActiveRevisionID || target.SourceSlug != publication.SourceSlug {
-		return challengedomain.ErrRevisionConflict
+	if target.SourceKind != scenariodomain.SourceAuthoring || target.OwnerUserID != session.UserID || target.State != scenariodomain.StateActive || target.ActiveRevisionID != publication.BaseActiveRevisionID || target.SourceSlug != publication.SourceSlug {
+		return scenariodomain.ErrRevisionConflict
 	}
-	previous, err := lockPersistedChallengeRevisionTx(ctx, tx, target.ActiveRevisionID)
+	previous, err := lockPersistedScenarioRevisionTx(ctx, tx, target.ActiveRevisionID)
 	if err != nil {
 		return err
 	}
-	if previous.ChallengeID != target.ID || previous.State != challengedomain.RevisionActive || previous.Runtime != publication.Runtime {
+	if previous.ScenarioID != target.ID || previous.State != scenariodomain.RevisionActive || previous.Runtime != publication.Runtime {
 		return generation.ErrCandidateInvalidState
 	}
-	published := challengeRevisionFromPublication(publication.ChallengeTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
-		*publication.Artifact, publication.ChallengeRevisionID, target.ID, workflow.Source.Ref, workflow.SourceRevision,
-		target.ActiveRevisionID, target.SourceSlug, publication.TargetPath, challengedomain.SourceAuthoring, now)
-	if _, err := tx.ExecContext(ctx, `UPDATE challenge_revisions SET state = ? WHERE id = ? AND state = ?`, challengedomain.RevisionSuperseded, previous.ID, challengedomain.RevisionActive); err != nil {
-		return fmt.Errorf("supersede challenge revision: %w", err)
+	published := scenarioRevisionFromPublication(publication.ScenarioTitle, publication.Runtime, scenarioType, scenarioTags, publication.ContentRevision, materializedRevision,
+		*publication.Artifact, publication.ScenarioRevisionID, target.ID, workflow.Source.Ref, workflow.SourceRevision,
+		target.ActiveRevisionID, target.SourceSlug, publication.TargetPath, scenariodomain.SourceAuthoring, now)
+	if _, err := tx.ExecContext(ctx, `UPDATE scenario_revisions SET state = ? WHERE id = ? AND state = ?`, scenariodomain.RevisionSuperseded, previous.ID, scenariodomain.RevisionActive); err != nil {
+		return fmt.Errorf("supersede scenario revision: %w", err)
 	}
-	if err := insertPersistedChallengeRevisionTx(ctx, tx, published); err != nil {
+	if err := insertPersistedScenarioRevisionTx(ctx, tx, published); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE challenges SET active_revision_id = ?, updated_at = ? WHERE id = ? AND active_revision_id = ? AND state = ?`,
-		publication.ChallengeRevisionID, now, target.ID, target.ActiveRevisionID, challengedomain.StateActive)
+	result, err := tx.ExecContext(ctx, `UPDATE scenarios SET active_revision_id = ?, updated_at = ? WHERE id = ? AND active_revision_id = ? AND state = ?`,
+		publication.ScenarioRevisionID, now, target.ID, target.ActiveRevisionID, scenariodomain.StateActive)
 	if err != nil {
-		return fmt.Errorf("switch active challenge revision: %w", err)
+		return fmt.Errorf("switch active scenario revision: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return challengedomain.ErrRevisionConflict
+		return scenariodomain.ErrRevisionConflict
 	}
 	return nil
 }
@@ -1471,7 +1471,7 @@ func (d *GenerationRepository) ReportGenerationInfrastructureFailure(ctx context
 // ReportGenerationArtifactFailure records a deterministic candidate defect and
 // returns the authoring workflow to the same generator session for repair.
 func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Context, claim generation.Claim, expected generation.WorkflowState, failure generation.Failure, report *generation.VerificationReport, now time.Time) error {
-	if !claim.Valid() || (!expected.AgentState() && !expected.RuntimeState()) || expected == generation.StateChallengePublishing ||
+	if !claim.Valid() || (!expected.AgentState() && !expected.RuntimeState()) || expected == generation.StateScenarioPublishing ||
 		failure.Class != generation.FailureArtifact || failure.Validate() != nil || now.IsZero() {
 		return errors.New("generation artifact failure is invalid")
 	}

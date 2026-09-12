@@ -68,8 +68,8 @@ func runAssistantAttempt(ctx context.Context, cfg config.AgentConfig, request as
 		return assistant.EngineResult{}, err
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:          "challenge_assistant",
-		Description:   "Breakfix challenge learning assistant",
+		Name:          "scenario_assistant",
+		Description:   "Breakfix scenario learning assistant",
 		Instruction:   assistantSystemPrompt(),
 		Model:         chat,
 		MaxIterations: maxAssistantTurns,

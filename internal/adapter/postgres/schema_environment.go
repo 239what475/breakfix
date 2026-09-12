@@ -1,31 +1,31 @@
 package postgres
 
 var schemaEnvironmentLearningStatements = []string{
-	`CREATE TABLE user_challenge_progress (
+	`CREATE TABLE user_scenario_progress (
 		user_id TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
+		scenario_id TEXT NOT NULL,
 		completed_at TEXT NOT NULL,
 		environment_uid TEXT NOT NULL,
-		PRIMARY KEY (user_id, challenge_id)
+		PRIMARY KEY (user_id, scenario_id)
 	)`,
-	`CREATE INDEX user_challenge_progress_user ON user_challenge_progress(user_id)`,
-	`CREATE TABLE user_challenge_attempts (
+	`CREATE INDEX user_scenario_progress_user ON user_scenario_progress(user_id)`,
+	`CREATE TABLE user_scenario_attempts (
 		environment_uid TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
-		challenge_revision TEXT NOT NULL,
+		scenario_id TEXT NOT NULL,
+		scenario_revision TEXT NOT NULL,
 		runtime TEXT NOT NULL DEFAULT '',
 		ready_at TEXT NOT NULL,
 		ended_at TEXT NOT NULL DEFAULT '',
 		outcome TEXT NOT NULL DEFAULT 'active'
 	)`,
-	`CREATE INDEX user_challenge_attempts_user_recent ON user_challenge_attempts(user_id, ready_at DESC, environment_uid DESC)`,
-	`CREATE INDEX user_challenge_attempts_challenge_user ON user_challenge_attempts(challenge_id, user_id)`,
+	`CREATE INDEX user_scenario_attempts_user_recent ON user_scenario_attempts(user_id, ready_at DESC, environment_uid DESC)`,
+	`CREATE INDEX user_scenario_attempts_scenario_user ON user_scenario_attempts(scenario_id, user_id)`,
 	`CREATE TABLE terminal_connections (
 		id TEXT PRIMARY KEY,
 		environment_uid TEXT NOT NULL,
 		user_id TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
+		scenario_id TEXT NOT NULL,
 		server_instance_id TEXT NOT NULL,
 		connected_at TEXT NOT NULL,
 		heartbeat_at TEXT NOT NULL,
@@ -36,7 +36,7 @@ var schemaEnvironmentLearningStatements = []string{
 		id TEXT PRIMARY KEY,
 		environment_uid TEXT NOT NULL,
 		user_id TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
+		scenario_id TEXT NOT NULL,
 		started_at TEXT NOT NULL,
 		heartbeat_at TEXT NOT NULL,
 		ended_at TEXT NOT NULL DEFAULT ''
@@ -50,7 +50,7 @@ var schemaEnvironmentTerminalStatements = []string{
 		token_hash TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
 		environment_uid TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
+		scenario_id TEXT NOT NULL,
 		node_name TEXT NOT NULL DEFAULT '',
 		window_name TEXT NOT NULL,
 		expires_at TIMESTAMPTZ NOT NULL,
@@ -61,11 +61,11 @@ var schemaEnvironmentTerminalStatements = []string{
 		environment_uid TEXT NOT NULL,
 		checkpoint_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
-		challenge_id TEXT NOT NULL,
-		challenge_revision TEXT NOT NULL DEFAULT '',
+		scenario_id TEXT NOT NULL,
+		scenario_revision TEXT NOT NULL DEFAULT '',
 		first_passed_at TIMESTAMPTZ NOT NULL,
 		summary TEXT NOT NULL,
 		PRIMARY KEY (environment_uid, checkpoint_id)
 	)`,
-	`CREATE INDEX checkpoint_pass_events_user_challenge ON checkpoint_pass_events(user_id, challenge_id, first_passed_at)`,
+	`CREATE INDEX checkpoint_pass_events_user_scenario ON checkpoint_pass_events(user_id, scenario_id, first_passed_at)`,
 }

@@ -186,7 +186,7 @@ func sessionProjection(value *agent.Session, request Request) *Session {
 		EnvironmentUID:  request.EnvironmentUID,
 		EnvironmentName: request.EnvironmentName,
 		Runtime:         request.Runtime,
-		ChallengeID:     request.ChallengeID,
+		ScenarioID:      request.ScenarioID,
 		CreatedAt:       value.CreatedAt,
 		UpdatedAt:       value.UpdatedAt,
 	}

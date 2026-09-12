@@ -55,7 +55,7 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "generation_judge",
-		Description:   "Breakfix challenge judge",
+		Description:   "Breakfix scenario judge",
 		Instruction:   generationJudgeSystemPrompt(),
 		Model:         chat,
 		MaxIterations: 8,

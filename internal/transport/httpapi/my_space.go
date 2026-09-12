@@ -9,7 +9,7 @@ import (
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -72,7 +72,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 	}
 	catalog, err := h.catalogEntries(ctx)
 	if err != nil {
-		return api.MySpace{}, fmt.Errorf("list challenge catalog: %w", err)
+		return api.MySpace{}, fmt.Errorf("list scenario catalog: %w", err)
 	}
 
 	learning, err := h.db.Environment.LearningSummary(ctx, user.ID, now)
@@ -92,7 +92,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 		if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
 			continue
 		}
-		entry, err := h.entryForChallengeRevision(ctx, catalog, env.ChallengeRef, env.SourceRevision)
+		entry, err := h.entryForScenarioRevision(ctx, catalog, env.ScenarioRef, env.SourceRevision)
 		if err != nil {
 			continue
 		}
@@ -103,7 +103,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 		}
 		active = append(active, api.MySpaceActiveEnvironment{
 			EnvironmentId:      env.Name,
-			Challenge:          mySpaceChallenge(*entry),
+			Scenario:           mySpaceScenario(*entry),
 			Runtime:            api.MySpaceActiveEnvironmentRuntime(env.Runtime),
 			Phase:              string(env.Phase),
 			CheckpointProgress: checkpointProgressSummary(env.Checkpoints, len(entry.Checkpoints)),
@@ -174,15 +174,15 @@ func (h *Handler) occupiedEnvironmentCount(ctx context.Context, userID string) (
 func (h *Handler) mySpaceLearning(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int) (api.MySpaceLearningPage, error) {
 	catalog, err := h.catalogEntries(ctx)
 	if err != nil {
-		return api.MySpaceLearningPage{}, fmt.Errorf("list challenge catalog: %w", err)
+		return api.MySpaceLearningPage{}, fmt.Errorf("list scenario catalog: %w", err)
 	}
 	return h.mySpaceLearningFromCatalog(ctx, userID, cursor, filter, limit, time.Now().UTC(), catalog)
 }
 
-func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int, now time.Time, catalog map[string]challenge.Entry) (api.MySpaceLearningPage, error) {
-	// Do not filter by the current Catalog. Deprecated Challenges and older
+func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string, cursor *postgres.LearningHistoryCursor, filter postgres.LearningHistoryFilter, limit int, now time.Time, catalog map[string]scenario.Entry) (api.MySpaceLearningPage, error) {
+	// Do not filter by the current Catalog. Deprecated Scenarios and older
 	// revisions remain valid learning history and are resolved below through
-	// their durable challenge revision.
+	// their durable scenario revision.
 	items, err := h.db.Environment.ListLearningHistory(ctx, userID, filter, limit+1, cursor, now)
 	if err != nil {
 		return api.MySpaceLearningPage{}, err
@@ -202,9 +202,9 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 		return api.MySpaceLearningPage{}, err
 	}
 	for _, item := range items {
-		entry, err := h.entryForChallengeRevision(ctx, catalog, item.ChallengeID, item.ChallengeRevision)
+		entry, err := h.entryForScenarioRevision(ctx, catalog, item.ScenarioID, item.ScenarioRevision)
 		if err != nil {
-			return api.MySpaceLearningPage{}, fmt.Errorf("resolve learning challenge %q revision %q: %w", item.ChallengeID, item.ChallengeRevision, err)
+			return api.MySpaceLearningPage{}, fmt.Errorf("resolve learning scenario %q revision %q: %w", item.ScenarioID, item.ScenarioRevision, err)
 		}
 		events := firstPasses[item.EnvironmentUID]
 		checkpointFirstPasses := make([]api.CheckpointFirstPass, 0, len(events))
@@ -216,7 +216,7 @@ func (h *Handler) mySpaceLearningFromCatalog(ctx context.Context, userID string,
 			})
 		}
 		page.Items = append(page.Items, api.MySpaceLearningHistory{
-			Challenge:             mySpaceChallenge(*entry),
+			Scenario:              mySpaceScenario(*entry),
 			CheckpointFirstPasses: checkpointFirstPasses,
 			ReadyAt:               item.ReadyAt,
 			CompletedAt:           item.CompletedAt,
@@ -282,12 +282,12 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
-	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedChallenge, 0)}
+	view := api.MySpaceAuthoring{Drafts: make([]api.MySpaceAuthoringDraft, 0), Published: make([]api.MySpacePublishedScenario, 0)}
 	type authoredPublished struct {
-		challengeID string
+		scenarioID  string
 		revisionID  string
 		state       string
-		entry       challenge.Entry
+		entry       scenario.Entry
 		publishedAt time.Time
 	}
 	published := make([]authoredPublished, 0)
@@ -302,37 +302,37 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 			continue
 		}
 	}
-	challenges, err := h.db.Challenge.ListAuthoringChallenges(ctx, userID)
+	scenarios, err := h.db.Scenario.ListAuthoringScenarios(ctx, userID)
 	if err != nil {
-		return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("list authored challenges: %w", err)
+		return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("list authored scenarios: %w", err)
 	}
-	for _, authored := range challenges {
-		revision, err := h.db.Challenge.GetChallengeRevision(ctx, authored.ID, authored.ActiveRevisionID)
+	for _, authored := range scenarios {
+		revision, err := h.db.Scenario.GetScenarioRevision(ctx, authored.ID, authored.ActiveRevisionID)
 		if err != nil {
-			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored challenge %q revision: %w", authored.ID, err)
+			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored scenario %q revision: %w", authored.ID, err)
 		}
 		entry, err := h.catalog.HistoricalEntry(ctx, authored.ID, authored.ActiveRevisionID)
 		if err != nil {
-			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored challenge %q content: %w", authored.ID, err)
+			return api.MySpaceAuthoring{}, 0, 0, fmt.Errorf("read authored scenario %q content: %w", authored.ID, err)
 		}
 		published = append(published, authoredPublished{
-			challengeID: authored.ID, revisionID: revision.ID, state: string(authored.State), entry: *entry, publishedAt: revision.PublishedAt,
+			scenarioID: authored.ID, revisionID: revision.ID, state: string(authored.State), entry: *entry, publishedAt: revision.PublishedAt,
 		})
 	}
-	challengeIDs := make([]string, 0, len(published))
+	scenarioIDs := make([]string, 0, len(published))
 	for _, item := range published {
-		challengeIDs = append(challengeIDs, item.challengeID)
+		scenarioIDs = append(scenarioIDs, item.scenarioID)
 	}
-	counts, err := h.db.Reporting.ChallengeAudienceCounts(ctx, challengeIDs)
+	counts, err := h.db.Reporting.ScenarioAudienceCounts(ctx, scenarioIDs)
 	if err != nil {
 		return api.MySpaceAuthoring{}, 0, 0, err
 	}
 	for _, item := range published {
-		count := counts[item.challengeID]
-		card := api.MySpacePublishedChallenge{
-			Challenge:      mySpaceChallenge(item.entry),
+		count := counts[item.scenarioID]
+		card := api.MySpacePublishedScenario{
+			Scenario:       mySpaceScenario(item.entry),
 			RevisionId:     item.revisionID,
-			State:          api.MySpacePublishedChallengeState(item.state),
+			State:          api.MySpacePublishedScenarioState(item.state),
 			PublishedAt:    item.publishedAt,
 			AttemptedUsers: count.AttemptedUsers,
 			CompletedUsers: count.CompletedUsers,
@@ -346,17 +346,17 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 	return view, len(view.Drafts), len(view.Published), nil
 }
 
-func mySpaceChallenge(entry challenge.Entry) api.MySpaceChallenge {
-	return api.MySpaceChallenge{
+func mySpaceScenario(entry scenario.Entry) api.MySpaceScenario {
+	return api.MySpaceScenario{
 		Id:      entry.ID,
 		Title:   entry.Title,
-		Runtime: api.MySpaceChallengeRuntime(entry.Runtime),
+		Runtime: api.MySpaceScenarioRuntime(entry.Runtime),
 	}
 }
 
 func authoringSessionTitle(title string) string {
 	if title == "" {
-		return "Untitled challenge"
+		return "Untitled scenario"
 	}
 	return title
 }

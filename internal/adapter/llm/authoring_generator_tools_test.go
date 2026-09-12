@@ -61,13 +61,13 @@ func TestAuthoringGeneratorToolsConfirmPlanThenSubmitCandidate(t *testing.T) {
 		t.Fatalf("generation confirmation = %#v", confirmation)
 	}
 
-	if _, err := conversation.writeWorkspaceFile(ctx, `{"workflow_id":"workflow-one","path":"challenge.yaml","content":"title: test\n"}`); err != nil {
+	if _, err := conversation.writeWorkspaceFile(ctx, `{"workflow_id":"workflow-one","path":"scenario.yaml","content":"title: test\n"}`); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
 	if len(service.started) != 1 || service.started[0] != (generation.WorkspaceTurn{WorkflowID: "workflow-one", ID: "authoring-run"}) {
 		t.Fatalf("workspace turns = %#v", service.started)
 	}
-	if len(service.writes) != 1 || service.writes[0].path != "challenge.yaml" || service.writes[0].content != "title: test\n" {
+	if len(service.writes) != 1 || service.writes[0].path != "scenario.yaml" || service.writes[0].content != "title: test\n" {
 		t.Fatalf("workspace writes = %#v", service.writes)
 	}
 
@@ -148,13 +148,13 @@ type authoringGeneratorToolsService struct {
 	workflow  generation.Workflow
 	candidate *generation.Revision
 
-	confirmations            []authoringGenerationConfirmation
-	started                  []generation.WorkspaceTurn
-	ended                    []generation.WorkspaceTurn
-	writes                   []authoringWorkspaceWrite
-	submissions              []generation.CandidateSubmission
-	contentConfirmation      generation.ContentConfirmation
-	cancellation             generation.Cancellation
+	confirmations       []authoringGenerationConfirmation
+	started             []generation.WorkspaceTurn
+	ended               []generation.WorkspaceTurn
+	writes              []authoringWorkspaceWrite
+	submissions         []generation.CandidateSubmission
+	contentConfirmation generation.ContentConfirmation
+	cancellation        generation.Cancellation
 }
 
 type authoringGenerationConfirmation struct {
@@ -211,7 +211,7 @@ func (s *authoringGeneratorToolsService) EndWorkspaceTurn(_ context.Context, _ s
 }
 
 func (*authoringGeneratorToolsService) ListWorkspaceFiles(context.Context, string, generation.WorkspaceTurn) ([]generation.WorkspaceFile, error) {
-	return []generation.WorkspaceFile{{Path: "challenge.yaml", Size: 12}}, nil
+	return []generation.WorkspaceFile{{Path: "scenario.yaml", Size: 12}}, nil
 }
 
 func (*authoringGeneratorToolsService) ReadWorkspaceContent(context.Context, string, generation.WorkspaceTurn, string, int, int) (string, error) {
@@ -241,7 +241,7 @@ func (s *authoringGeneratorToolsService) SubmitCandidate(_ context.Context, _ st
 func (s *authoringGeneratorToolsService) ConfirmContent(_ context.Context, _ string, confirmation generation.ContentConfirmation) (*generation.Workflow, error) {
 	s.contentConfirmation = confirmation
 	workflow := s.workflow
-	workflow.State = generation.StateChallengePublishing
+	workflow.State = generation.StateScenarioPublishing
 	return &workflow, nil
 }
 

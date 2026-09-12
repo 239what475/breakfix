@@ -1,6 +1,6 @@
 # Breakfix Frontend
 
-Breakfix 前端是一个 Vue 单页应用，构建产物由 Server 内嵌并提供给浏览器。它包含 Catalog、Challenge Workspace、Assistant、Authoring 与 My space；路由状态由应用外壳管理，不依赖 vue-router。
+Breakfix 前端是一个 Vue 单页应用，构建产物由 Server 内嵌并提供给浏览器。它包含 Catalog、Scenario Workspace、Assistant、Authoring 与 My space；路由状态由应用外壳管理，不依赖 vue-router。
 
 ```bash
 npm ci

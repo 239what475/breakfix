@@ -115,7 +115,7 @@ func (c RegistryConfig) Validate() error {
 
 // RuntimeConfig contains the immutable platform profile used when Server
 // creates learning environments and CandidateRevision execution snapshots.
-// Artifact references come from the published challenge or candidate; these
+// Artifact references come from the published scenario or candidate; these
 // values describe only the platform-owned runtime around that artifact.
 type RuntimeConfig struct {
 	Node NodeRuntimeConfig `yaml:"node"`
@@ -527,4 +527,4 @@ func (c Config) ParsedUIOrigin() (*url.URL, error) {
 	return parsed, nil
 }
 
-func (c Config) ChallengesDir() string { return filepath.Join(c.DataDir, "challenges") }
+func (c Config) ScenariosDir() string { return filepath.Join(c.DataDir, "scenarios") }

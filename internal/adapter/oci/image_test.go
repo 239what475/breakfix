@@ -54,13 +54,13 @@ func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 		requests = append(requests, request.Method+" "+request.URL.Path)
 		switch request.Method {
 		case http.MethodHead:
-			if request.URL.Path != "/v2/team/challenge/manifests/latest" {
+			if request.URL.Path != "/v2/team/scenario/manifests/latest" {
 				t.Fatalf("unexpected manifest lookup path %q", request.URL.Path)
 			}
 			writer.Header().Set("Docker-Content-Digest", "sha256:verified")
 			writer.WriteHeader(http.StatusOK)
 		case http.MethodDelete:
-			if request.URL.Path != "/v2/team/challenge/manifests/sha256:verified" {
+			if request.URL.Path != "/v2/team/scenario/manifests/sha256:verified" {
 				t.Fatalf("unexpected manifest delete path %q", request.URL.Path)
 			}
 			writer.WriteHeader(http.StatusAccepted)
@@ -71,10 +71,10 @@ func TestDeleteImageDeletesResolvedManifestDigest(t *testing.T) {
 	defer server.Close()
 
 	registry := testTLSRegistryAddress(t, server)
-	if err := testTLSRegistryClient(t, server, Credentials{}).DeleteImage(context.Background(), registry+"/team/challenge:latest"); err != nil {
+	if err := testTLSRegistryClient(t, server, Credentials{}).DeleteImage(context.Background(), registry+"/team/scenario:latest"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Join(requests, ", "), "HEAD /v2/team/challenge/manifests/latest, DELETE /v2/team/challenge/manifests/sha256:verified"; got != want {
+	if got, want := strings.Join(requests, ", "), "HEAD /v2/team/scenario/manifests/latest, DELETE /v2/team/scenario/manifests/sha256:verified"; got != want {
 		t.Fatalf("registry requests = %q, want %q", got, want)
 	}
 }
@@ -97,7 +97,7 @@ func TestDeleteImageUsesRegistryCredentials(t *testing.T) {
 
 	address := testTLSRegistryAddress(t, server)
 	client := testTLSRegistryClient(t, server, Credentials{Username: "controller", Password: "secret"})
-	if err := client.DeleteImage(context.Background(), address+"/team/challenge:latest"); err != nil {
+	if err := client.DeleteImage(context.Background(), address+"/team/scenario:latest"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -124,9 +124,9 @@ func TestImageReference(t *testing.T) {
 		image                     string
 		registry, repository, ref string
 	}{
-		{image: "registry.example/team/challenge:latest", registry: "registry.example", repository: "team/challenge", ref: "latest"},
-		{image: "registry.example:5000/team/challenge", registry: "registry.example:5000", repository: "team/challenge", ref: "latest"},
-		{image: "registry.example/team/challenge@sha256:abc", registry: "registry.example", repository: "team/challenge", ref: "sha256:abc"},
+		{image: "registry.example/team/scenario:latest", registry: "registry.example", repository: "team/scenario", ref: "latest"},
+		{image: "registry.example:5000/team/scenario", registry: "registry.example:5000", repository: "team/scenario", ref: "latest"},
+		{image: "registry.example/team/scenario@sha256:abc", registry: "registry.example", repository: "team/scenario", ref: "sha256:abc"},
 	}
 	for _, test := range tests {
 		registry, repository, reference, err := imageReference(test.image)

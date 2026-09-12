@@ -17,7 +17,7 @@ type TerminalTicket struct {
 	TokenHash      string
 	UserID         string
 	EnvironmentUID string
-	ChallengeID    string
+	ScenarioID     string
 	NodeName       string
 	WindowName     string
 	ExpiresAt      time.Time
@@ -26,7 +26,7 @@ type TerminalTicket struct {
 func (d *EnvironmentRepository) CreateTerminalTicket(ctx context.Context, ticket TerminalTicket, now time.Time) error {
 	for name, value := range map[string]string{
 		"token hash": ticket.TokenHash, "user id": ticket.UserID, "environment uid": ticket.EnvironmentUID,
-		"challenge id": ticket.ChallengeID, "window name": ticket.WindowName,
+		"scenario id": ticket.ScenarioID, "window name": ticket.WindowName,
 	} {
 		if err := requiredLearningValue(name, value); err != nil {
 			return err
@@ -40,9 +40,9 @@ func (d *EnvironmentRepository) CreateTerminalTicket(ctx context.Context, ticket
 	}
 	if _, err := d.conn.ExecContext(ctx, `
 		INSERT INTO terminal_tickets
-			(token_hash, user_id, environment_uid, challenge_id, node_name, window_name, expires_at)
+			(token_hash, user_id, environment_uid, scenario_id, node_name, window_name, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, ticket.TokenHash, ticket.UserID, ticket.EnvironmentUID, ticket.ChallengeID, ticket.NodeName, ticket.WindowName, ticket.ExpiresAt.UTC()); err != nil {
+	`, ticket.TokenHash, ticket.UserID, ticket.EnvironmentUID, ticket.ScenarioID, ticket.NodeName, ticket.WindowName, ticket.ExpiresAt.UTC()); err != nil {
 		return fmt.Errorf("create terminal ticket: %w", err)
 	}
 	return nil
@@ -50,9 +50,9 @@ func (d *EnvironmentRepository) CreateTerminalTicket(ctx context.Context, ticket
 
 // ClaimTerminalTicket atomically consumes one ticket. Caller-supplied route
 // values are part of the predicate, so a ticket cannot be replayed for a
-// different challenge or tmux window.
-func (d *EnvironmentRepository) ClaimTerminalTicket(ctx context.Context, tokenHash, challengeID, windowName string, now time.Time) (TerminalTicket, error) {
-	if strings.TrimSpace(tokenHash) == "" || strings.TrimSpace(challengeID) == "" || strings.TrimSpace(windowName) == "" || now.IsZero() {
+// different scenario or tmux window.
+func (d *EnvironmentRepository) ClaimTerminalTicket(ctx context.Context, tokenHash, scenarioID, windowName string, now time.Time) (TerminalTicket, error) {
+	if strings.TrimSpace(tokenHash) == "" || strings.TrimSpace(scenarioID) == "" || strings.TrimSpace(windowName) == "" || now.IsZero() {
 		return TerminalTicket{}, ErrTerminalTicketInvalid
 	}
 	var ticket TerminalTicket
@@ -60,13 +60,13 @@ func (d *EnvironmentRepository) ClaimTerminalTicket(ctx context.Context, tokenHa
 		UPDATE terminal_tickets
 		SET used_at = ?
 		WHERE token_hash = ?
-		  AND challenge_id = ?
+		  AND scenario_id = ?
 		  AND window_name = ?
 		  AND used_at IS NULL
 		  AND expires_at > ?
-		RETURNING token_hash, user_id, environment_uid, challenge_id, node_name, window_name, expires_at
-	`, now.UTC(), tokenHash, challengeID, windowName, now.UTC()).Scan(
-		&ticket.TokenHash, &ticket.UserID, &ticket.EnvironmentUID, &ticket.ChallengeID, &ticket.NodeName, &ticket.WindowName, &ticket.ExpiresAt,
+		RETURNING token_hash, user_id, environment_uid, scenario_id, node_name, window_name, expires_at
+	`, now.UTC(), tokenHash, scenarioID, windowName, now.UTC()).Scan(
+		&ticket.TokenHash, &ticket.UserID, &ticket.EnvironmentUID, &ticket.ScenarioID, &ticket.NodeName, &ticket.WindowName, &ticket.ExpiresAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TerminalTicket{}, ErrTerminalTicketInvalid

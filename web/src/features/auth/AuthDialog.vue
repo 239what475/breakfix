@@ -86,7 +86,7 @@ async function login() {
         <p class="eyebrow">Account</p>
         <h2>Sign in</h2>
         <p class="dialog-copy">
-          Connect to your existing challenge environments.
+          Connect to your existing scenario environments.
         </p>
         <label
           >Username<input v-model="username" autocomplete="username"

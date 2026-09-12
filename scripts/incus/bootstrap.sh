@@ -286,7 +286,7 @@ if [ -z "$base_fingerprint" ]; then
   apt-get install -y --no-install-recommends $BREAKFIX_BASE_PACKAGES
   apt-get clean
   rm -rf /var/lib/apt/lists/*
-  install -d -m 0755 /usr/local/libexec /opt/breakfix/challenge /var/lib/breakfix/runtime-init
+  install -d -m 0755 /usr/local/libexec /opt/breakfix/scenario /var/lib/breakfix/runtime-init
 '
   incus file push "$runtime_init" "$remote:$instance/usr/local/libexec/breakfix-runtime-init" \
     --project "$build_project" --uid 0 --gid 0 --mode 0755

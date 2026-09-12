@@ -1,12 +1,12 @@
 // Package execution freezes platform-owned runtime profiles for portable
-// challenge content. It does not know whether the caller is authoring or a
+// scenario content. It does not know whether the caller is authoring or a
 // Catalog Release installer.
 package execution
 
 import (
 	"fmt"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	domain "github.com/breakfix/breakfix/internal/domain/execution"
 )
@@ -38,14 +38,14 @@ type K8sRuntimeConfig struct {
 
 // Freeze creates the complete runtime contract before any external build
 // starts. Later configuration changes cannot alter this execution.
-func Freeze(entry challenge.Entry, config SnapshotConfig) (domain.Snapshot, error) {
+func Freeze(entry scenario.Entry, config SnapshotConfig) (domain.Snapshot, error) {
 	checkpoints := make([]domain.CheckpointSnapshot, 0, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
 		checkpoints = append(checkpoints, domain.CheckpointSnapshot{ID: checkpoint.ID, Node: checkpoint.Node})
 	}
 	snapshot := domain.Snapshot{Runtime: entry.Runtime, Checkpoints: checkpoints}
 	switch entry.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		if config.MaxNodes <= 0 || len(entry.Nodes) > config.MaxNodes {
 			return domain.Snapshot{}, fmt.Errorf("node candidate declares %d nodes; platform limit is %d", len(entry.Nodes), config.MaxNodes)
 		}
@@ -62,7 +62,7 @@ func Freeze(entry challenge.Entry, config SnapshotConfig) (domain.Snapshot, erro
 				CPU: config.Node.CPU, Memory: config.Node.Memory, Processes: config.Node.Processes, RootDisk: config.Node.RootDisk,
 			},
 		}
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		snapshot.K8s = &domain.K8sRuntimeSnapshot{
 			BaseImageDigest:         config.K8s.BaseImageDigest,
 			ProfileRevision:         config.K8s.ProfileRevision,

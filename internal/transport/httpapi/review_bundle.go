@@ -139,7 +139,7 @@ func contentOverviewMarkdown(value api.GeneratorGeneration) string {
 	return out.String()
 }
 
-func verifiedCheckpoints(value *api.VerifiedChallenge) []api.VerifiedCheckpoint {
+func verifiedCheckpoints(value *api.VerifiedScenario) []api.VerifiedCheckpoint {
 	if value == nil {
 		return nil
 	}

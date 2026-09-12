@@ -9,7 +9,7 @@ import (
 	"time"
 
 	generationapp "github.com/breakfix/breakfix/internal/application/generation"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
 	"github.com/breakfix/breakfix/internal/domain/environment"
@@ -30,26 +30,26 @@ func TestGenerationWorkflowPublishesVerifiedContentAfterSingleConfirmation(t *te
 	publishAt := now.Add(10 * time.Minute)
 	publishing, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
 		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-1",
-	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: challenge.RuntimeK8s}, publishAt)
+	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: scenario.RuntimeK8s}, publishAt)
 	if err != nil {
 		t.Fatalf("confirm verified content: %v", err)
 	}
-	if publishing.State != generation.StateChallengePublishing || publishing.CandidateRevisionID != candidate.ID || publishing.RuntimeAttempt != 1 {
+	if publishing.State != generation.StateScenarioPublishing || publishing.CandidateRevisionID != candidate.ID || publishing.RuntimeAttempt != 1 {
 		t.Fatalf("publication start = %#v", publishing)
 	}
 	repeatedContent, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
 		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-1",
-	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: challenge.RuntimeK8s}, publishAt.Add(time.Second))
+	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: scenario.RuntimeK8s}, publishAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("repeat content confirmation: %v", err)
 	}
-	if repeatedContent.ID != publishing.ID || repeatedContent.State != generation.StateChallengePublishing {
+	if repeatedContent.ID != publishing.ID || repeatedContent.State != generation.StateScenarioPublishing {
 		t.Fatalf("idempotent content confirmation = %#v", repeatedContent)
 	}
 
 	claim := claimGenerationWorkflow(t, database, workflow.ID, "publisher-a", publishAt)
-	finalArtifact := generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/challenge@" + workflowTestDigest}
-	if err := database.Generation.RecordGenerationChallengePublicationResult(ctx, claim, finalArtifact, publishAt); err != nil {
+	finalArtifact := generation.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: "registry.example/scenario@" + workflowTestDigest}
+	if err := database.Generation.RecordGenerationScenarioPublicationResult(ctx, claim, finalArtifact, publishAt); err != nil {
 		t.Fatalf("record publication promotion: %v", err)
 	}
 	pendingFinalizations, err := database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt)
@@ -67,7 +67,7 @@ func TestGenerationWorkflowPublishesVerifiedContentAfterSingleConfirmation(t *te
 	if err != nil {
 		t.Fatalf("record transient publication diagnostic: %v", err)
 	}
-	if transient.State != generation.StateChallengePublishing || transient.FinalizerErrorCategory != publication.CategoryTransient || transient.FinalizerNextRetryAt == nil {
+	if transient.State != generation.StateScenarioPublishing || transient.FinalizerErrorCategory != publication.CategoryTransient || transient.FinalizerNextRetryAt == nil {
 		t.Fatalf("transient publication workflow = %#v", transient)
 	}
 	restarted, err := database.Generation.GetGenerationWorkflow(ctx, workflow.ID)
@@ -95,7 +95,7 @@ func TestGenerationWorkflowPublishesVerifiedContentAfterSingleConfirmation(t *te
 	if err != nil || persisted.Publication == nil {
 		t.Fatalf("load publication intent: %#v, %v", persisted, err)
 	}
-	if err := database.Generation.FinalizeGenerationChallengePublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", challenge.ScenarioOperationsScenario, nil, publishAt); err != nil {
+	if err := database.Generation.FinalizeGenerationScenarioPublication(ctx, workflow.ID, candidate.ID, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", scenario.ScenarioOperationsScenario, nil, publishAt); err != nil {
 		t.Fatalf("finalize publication: %v", err)
 	}
 	pendingFinalizations, err = database.Generation.PendingGenerationPublicationFinalizations(ctx, publishAt)
@@ -115,12 +115,12 @@ func TestGenerationWorkflowPublishesVerifiedContentAfterSingleConfirmation(t *te
 	if published.FinalizerErrorCategory != publication.CategoryUnknown || published.FinalizerLastError != "" || published.FinalizerLastAttemptedAt != nil || published.FinalizerNextRetryAt != nil {
 		t.Fatalf("published workflow retained finalizer diagnostic = %#v", published)
 	}
-	stable, err := database.Challenge.GetChallenge(ctx, persisted.Publication.ChallengeID)
+	stable, err := database.Scenario.GetScenario(ctx, persisted.Publication.ScenarioID)
 	if err != nil {
-		t.Fatalf("load published challenge: %v", err)
+		t.Fatalf("load published scenario: %v", err)
 	}
 	if stable == nil || stable.ID == "" || stable.ActiveRevisionID == "" {
-		t.Fatalf("published challenge = %#v", stable)
+		t.Fatalf("published scenario = %#v", stable)
 	}
 }
 
@@ -166,21 +166,21 @@ func TestGenerationPublicationFailsAfterFiveRuntimeAttempts(t *testing.T) {
 	publishingAt := now.Add(time.Minute)
 	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
 		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-publication-retry",
-	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: challenge.RuntimeK8s}, publishingAt); err != nil {
+	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: scenario.RuntimeK8s}, publishingAt); err != nil {
 		t.Fatalf("start publication: %v", err)
 	}
 
 	attemptAt := publishingAt
 	for attempt := 1; attempt <= generation.MaxRuntimeAttempts; attempt++ {
 		claim := claimGenerationWorkflow(t, database, workflow.ID, "publisher-retry", attemptAt)
-		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateChallengePublishing, generation.Failure{
+		updated, err := database.Generation.ReportGenerationInfrastructureFailure(ctx, claim, generation.StateScenarioPublishing, generation.Failure{
 			Class: generation.FailureInfrastructure, Code: "REGISTRY_UNAVAILABLE", Summary: "registry is unavailable",
 		}, attemptAt)
 		if err != nil {
 			t.Fatalf("record publication retry %d: %v", attempt, err)
 		}
 		if attempt < generation.MaxRuntimeAttempts {
-			if updated.State != generation.StateChallengePublishing || updated.RuntimeAttempt != attempt+1 {
+			if updated.State != generation.StateScenarioPublishing || updated.RuntimeAttempt != attempt+1 {
 				t.Fatalf("publication retry %d = %#v", attempt, updated)
 			}
 			attemptAt = updated.NextRunAt
@@ -197,7 +197,7 @@ func TestGenerationPublicationFailsAfterFiveRuntimeAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load candidate after publication retry: %v", err)
 	}
-	if persisted.Publication == nil || persisted.Publication.ChallengeID == "" || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
+	if persisted.Publication == nil || persisted.Publication.ScenarioID == "" || persisted.Artifact == nil || persisted.Verification == nil || !persisted.Verification.Passed {
 		t.Fatalf("publication retry changed candidate = %#v", persisted)
 	}
 }
@@ -672,7 +672,7 @@ func TestGenerationResourceReaperKeepsActiveCandidateAndReapsTerminalResources(t
 	publishAt := now.Add(30 * time.Second)
 	if _, err := database.Generation.ConfirmGenerationContent(ctx, sessionID, userID, generation.ContentConfirmation{
 		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "confirm-content-reaper",
-	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: challenge.RuntimeK8s}, publishAt); err != nil {
+	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: scenario.RuntimeK8s}, publishAt); err != nil {
 		t.Fatalf("start publication: %v", err)
 	}
 	reapClaim, err = database.Generation.ClaimGenerationResourceReap(ctx, "reaper", time.Minute, publishAt.Add(time.Second))
@@ -716,12 +716,12 @@ func prepareGenerationPublication(t *testing.T, database *Store, now time.Time) 
 	publishAt := now.Add(10 * time.Minute)
 	if _, err := database.Generation.ConfirmGenerationContent(context.Background(), sessionID, userID, generation.ContentConfirmation{
 		WorkflowID: workflow.ID, CandidateRevisionID: candidate.ID, IdempotencyKey: "prepare-content",
-	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: challenge.RuntimeK8s}, publishAt); err != nil {
+	}, generation.PublicationMetadata{Title: generationTestPlan().Metadata.Title, Runtime: scenario.RuntimeK8s}, publishAt); err != nil {
 		t.Fatalf("start publication: %v", err)
 	}
 	claim := claimGenerationWorkflow(t, database, workflow.ID, "publisher-prepare", publishAt)
-	if err := database.Generation.RecordGenerationChallengePublicationResult(context.Background(), claim, generation.ArtifactReference{
-		Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/challenge@" + workflowTestDigest,
+	if err := database.Generation.RecordGenerationScenarioPublicationResult(context.Background(), claim, generation.ArtifactReference{
+		Runtime: scenario.RuntimeK8s, OCIReference: "registry.example/scenario@" + workflowTestDigest,
 	}, publishAt); err != nil {
 		t.Fatalf("record promotion: %v", err)
 	}
@@ -868,7 +868,7 @@ func approveGenerationJudgement(t *testing.T, database *Store, claim generation.
 func advanceGenerationBuildAndArtifact(t *testing.T, database *Store, claim generation.Claim, now time.Time) {
 	t.Helper()
 	if err := database.Generation.CompleteGenerationBuild(context.Background(), claim, generation.BuildOutput{
-		Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/build@" + workflowTestDigest,
+		Runtime: scenario.RuntimeK8s, OCIReference: "registry.example/build@" + workflowTestDigest,
 	}, now); err != nil {
 		t.Fatalf("complete generation build: %v", err)
 	}
@@ -880,7 +880,7 @@ func advanceGenerationBuildAndArtifact(t *testing.T, database *Store, claim gene
 
 func generationTestSnapshot() generation.ExecutionSnapshot {
 	return generation.ExecutionSnapshot{
-		Runtime:     challenge.RuntimeK8s,
+		Runtime:     scenario.RuntimeK8s,
 		Checkpoints: []generation.CheckpointSnapshot{{ID: "ready"}},
 		K8s: &generation.K8sRuntimeSnapshot{
 			BaseImageDigest:         "registry.example/base@" + workflowTestDigest,
@@ -901,12 +901,12 @@ func generationTestSnapshot() generation.ExecutionSnapshot {
 }
 
 func artifactReference() generation.ArtifactReference {
-	return generation.ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/candidate@" + workflowTestDigest}
+	return generation.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: "registry.example/candidate@" + workflowTestDigest}
 }
 
 func verificationEnvironment(claim generation.Claim) generation.VerificationEnvironment {
 	return generation.VerificationEnvironment{
-		Runtime: challenge.RuntimeK8s, Name: "verify-environment", UID: "verify-uid", WorkflowID: claim.Workflow.ID,
+		Runtime: scenario.RuntimeK8s, Name: "verify-environment", UID: "verify-uid", WorkflowID: claim.Workflow.ID,
 		Attempt: claim.StateVersion,
 	}
 }

@@ -8,15 +8,15 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNewEnvironmentSpecCreatesPublishedLearningSnapshot(t *testing.T) {
 	handler := &Handler{cooldownMin: 1}
-	spec, err := handler.newEnvironmentSpec("u-demo", &challenge.Entry{
-		ID: "chal-r7m4x2q9v6kp", RevisionID: "chrev-aaaaaaaaaaaaaaaa", Revision: "sha256:abc", Runtime: challenge.RuntimeNode,
-		Checkpoints: []challenge.Checkpoint{
+	spec, err := handler.newEnvironmentSpec("u-demo", &scenario.Entry{
+		ID: "chal-r7m4x2q9v6kp", RevisionID: "chrev-aaaaaaaaaaaaaaaa", Revision: "sha256:abc", Runtime: scenario.RuntimeNode,
+		Checkpoints: []scenario.Checkpoint{
 			{ID: "proxy-listens", Node: "proxy"},
 			{ID: "client-reaches-app", Node: "client"},
 		},
@@ -40,11 +40,11 @@ func TestNewEnvironmentSpecCreatesPublishedLearningSnapshot(t *testing.T) {
 
 func TestNewEnvironmentSpecRejectsIncompleteSnapshot(t *testing.T) {
 	handler := &Handler{cooldownMin: 1}
-	_, err := handler.newEnvironmentSpec("u-demo", &challenge.Entry{
-		ID: "chal-r7m4x2q9v6kp", Runtime: challenge.RuntimeNode,
+	_, err := handler.newEnvironmentSpec("u-demo", &scenario.Entry{
+		ID: "chal-r7m4x2q9v6kp", Runtime: scenario.RuntimeNode,
 	})
 	if err == nil {
-		t.Fatal("expected incomplete challenge snapshot to fail")
+		t.Fatal("expected incomplete scenario snapshot to fail")
 	}
 }
 
@@ -52,7 +52,7 @@ func TestRenewActivityOnlyUpdatesEnvironmentSpec(t *testing.T) {
 	before := metav1.NewTime(time.Now().Add(-time.Minute))
 	spec := breakfixv1.EnvironmentSpec{Lifecycle: breakfixv1.EnvironmentLifecycleSpec{ActivityAt: &before}}
 	adapter := &environmentRuntimeAdapter{
-		runtime: challenge.RuntimeNode,
+		runtime: scenario.RuntimeNode,
 		updateSpec: func(_ context.Context, _ string, mutate func(*breakfixv1.EnvironmentSpec)) error {
 			mutate(&spec)
 			return nil

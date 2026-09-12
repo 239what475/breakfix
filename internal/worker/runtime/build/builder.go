@@ -15,7 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/oci"
 	app "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -64,19 +64,19 @@ func (e *Executor) ExecuteWork(ctx context.Context, work domainexecution.Work, a
 		return domainexecution.BuildOutput{}, err
 	}
 	defer func() { _ = os.RemoveAll(root) }()
-	bundle := filepath.Join(root, "challenge")
+	bundle := filepath.Join(root, "scenario")
 	if err := os.MkdirAll(bundle, 0o750); err != nil {
 		return domainexecution.BuildOutput{}, err
 	}
-	if err := challenge.ExtractTarGz(bundle, bytes.NewReader(archive)); err != nil {
+	if err := scenario.ExtractTarGz(bundle, bytes.NewReader(archive)); err != nil {
 		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_ARCHIVE_INVALID", err.Error())
 	}
 
 	switch work.Snapshot.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		output, err := e.buildNode(ctx, work, bundle)
 		return output, err
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		return e.buildK8s(ctx, work, bundle, root)
 	default:
 		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("CANDIDATE_RUNTIME_INVALID", "candidate runtime is unsupported")
@@ -99,7 +99,7 @@ func (e *Executor) buildNode(ctx context.Context, work domainexecution.Work, bun
 		return domainexecution.BuildOutput{}, fmt.Errorf("build stopped Node image: %w", err)
 	}
 	output := domainexecution.BuildOutput{
-		Runtime: challenge.RuntimeNode,
+		Runtime: scenario.RuntimeNode,
 		Incus: &domainexecution.IncusBuildReference{
 			Project: e.config.BuildProject, WorkflowID: result.WorkflowID, CandidateRevisionID: result.CandidateRevisionID,
 			Attempt: result.Attempt, InstanceName: result.InstanceName, Alias: result.Alias, Fingerprint: result.Fingerprint,
@@ -117,9 +117,9 @@ func (e *Executor) buildK8s(ctx context.Context, work domainexecution.Work, bund
 	if err := e.registry.PullOCIArchive(ctx, work.Snapshot.K8s.BaseImageDigest, basePath); err != nil {
 		return domainexecution.BuildOutput{}, fmt.Errorf("pull trusted K8s base image: %w", err)
 	}
-	manifestDigest, err := oci.AppendChallengeLayer(basePath, bundle, outputPath)
+	manifestDigest, err := oci.AppendScenarioLayer(basePath, bundle, outputPath)
 	if err != nil {
-		return domainexecution.BuildOutput{}, fmt.Errorf("append deterministic K8s challenge layer: %w", err)
+		return domainexecution.BuildOutput{}, fmt.Errorf("append deterministic K8s scenario layer: %w", err)
 	}
 	if err := oci.ValidateOCIArchive(outputPath); err != nil {
 		return domainexecution.BuildOutput{}, fmt.Errorf("validate K8s build OCI archive: %w", err)
@@ -132,7 +132,7 @@ func (e *Executor) buildK8s(ctx context.Context, work domainexecution.Work, bund
 		if digest, digestErr := candidate.OCIDigest(existing); digestErr != nil || digest != manifestDigest {
 			return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("BUILD_ARTIFACT_CONFLICT", "existing K8s build artifact does not match this immutable action")
 		}
-		return domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: existing}, nil
+		return domainexecution.BuildOutput{Runtime: scenario.RuntimeK8s, OCIReference: existing}, nil
 	} else if !errors.Is(resolveErr, oci.ErrReferenceNotFound) {
 		return domainexecution.BuildOutput{}, fmt.Errorf("resolve existing K8s build artifact: %w", resolveErr)
 	}
@@ -146,5 +146,5 @@ func (e *Executor) buildK8s(ctx context.Context, work domainexecution.Work, bund
 	if digest, digestErr := candidate.OCIDigest(immutable); digestErr != nil || digest != manifestDigest {
 		return domainexecution.BuildOutput{}, domainexecution.NewArtifactError("BUILD_ARTIFACT_CONFLICT", "published K8s build artifact digest does not match this immutable action")
 	}
-	return domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: immutable}, nil
+	return domainexecution.BuildOutput{Runtime: scenario.RuntimeK8s, OCIReference: immutable}, nil
 }

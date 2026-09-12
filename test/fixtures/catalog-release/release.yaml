@@ -4,5 +4,5 @@ metadata:
   name: catalog-fixture
   version: 2026.08.01
 entries:
-  - path: challenges/node-runtime-fixture
-    contentRevision: sha256:b87b7c3946f44dc32174d270074c79d1252a55b108968d65d6565d0468f071d4
+  - path: scenarios/node-runtime-fixture
+    contentRevision: sha256:e4324bb41369018bcdaebfd4131ce0f6dcfd6fa887d621d9538afa5b24924c14

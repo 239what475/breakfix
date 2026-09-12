@@ -70,7 +70,7 @@ func (c *Connector) NewMCPServer() (*mcp.Server, error) {
 		return nil, errors.New("MCP connector is not configured")
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "breakfix-mcp", Version: "0.1.0"}, &mcp.ServerOptions{
-		Instructions: "Use these tools to create and review Breakfix challenges. Before tools that create, modify, submit, confirm, request changes, publish, or cancel, obtain the user's explicit current instruction in this conversation.",
+		Instructions: "Use these tools to create and review Breakfix scenarios. Before tools that create, modify, submit, confirm, request changes, publish, or cancel, obtain the user's explicit current instruction in this conversation.",
 	})
 	c.registerTools(server)
 	return server, nil

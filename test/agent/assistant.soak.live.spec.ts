@@ -4,8 +4,8 @@ import {
 	expectTerminalConnected,
 	registerAndLogin,
 	runTerminalCommand,
-	startChallengeFromCatalog,
-	stopChallenge,
+	startScenarioFromCatalog,
+	stopScenario,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
 import { attachNodeEnvironmentIdentity, waitForNodeEnvironmentDeletion } from "../support/e2e-platform";
@@ -18,9 +18,9 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 	let completed = false;
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
+	const scenario = await startScenarioFromCatalog(page, nodeRuntimeFixture.title);
 	await expectTerminalConnected(page);
-	environmentName = await activeEnvironmentName(page, challenge.id);
+	environmentName = await activeEnvironmentName(page, scenario.id);
 
 	const marker = `BREAKFIX_ASSISTANT_SOAK_${Date.now()}`;
 	await runTerminalCommand(page, `printf '%s\\n' '${marker}'`);
@@ -54,7 +54,7 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 	} finally {
 		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
 		if (completed) {
-			await stopChallenge(page, challenge.id);
+			await stopScenario(page, scenario.id);
 			await waitForNodeEnvironmentDeletion(environmentName);
 		}
 	}

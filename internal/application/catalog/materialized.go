@@ -8,26 +8,26 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
 // ErrMaterializedIntegrity identifies a mismatch between a durable active
-// revision and its published challenge directory on the Server data volume.
+// revision and its published scenario directory on the Server data volume.
 var ErrMaterializedIntegrity = errors.New("catalog materialized integrity error")
 
 // MaterializedIntegrityError names the content that cannot be safely exposed.
 type MaterializedIntegrityError struct {
-	ChallengeID string
-	SourceSlug  string
-	Detail      string
+	ScenarioID string
+	SourceSlug string
+	Detail     string
 }
 
 func (e *MaterializedIntegrityError) Error() string {
 	if e == nil {
 		return ErrMaterializedIntegrity.Error()
 	}
-	identity := strings.TrimSpace(e.ChallengeID)
+	identity := strings.TrimSpace(e.ScenarioID)
 	if strings.TrimSpace(e.SourceSlug) != "" {
 		if identity != "" {
 			identity += " at "
@@ -42,56 +42,56 @@ func (e *MaterializedIntegrityError) Error() string {
 
 func (e *MaterializedIntegrityError) Unwrap() error { return ErrMaterializedIntegrity }
 
-func materializedIntegrity(challengeID, sourceSlug, format string, args ...any) error {
+func materializedIntegrity(scenarioID, sourceSlug, format string, args ...any) error {
 	return &MaterializedIntegrityError{
-		ChallengeID: challengeID,
-		SourceSlug:  sourceSlug,
-		Detail:      fmt.Sprintf(format, args...),
+		ScenarioID: scenarioID,
+		SourceSlug: sourceSlug,
+		Detail:     fmt.Sprintf(format, args...),
 	}
 }
 
-// materializedChallengeIndex creates an ID index for the exact immutable
+// materializedScenarioIndex creates an ID index for the exact immutable
 // active revisions selected by the durable lifecycle. Directories not selected
 // by that query are historical or not-yet-published content and cannot alter
 // current Catalog reads.
-func materializedChallengeIndex(revisions []challengedomain.ActiveRevision, challengesDir string) (map[string]challenge.Entry, error) {
-	rootInfo, err := os.Lstat(challengesDir)
+func materializedScenarioIndex(revisions []scenariodomain.ActiveRevision, scenariosDir string) (map[string]scenario.Entry, error) {
+	rootInfo, err := os.Lstat(scenariosDir)
 	if err != nil {
 		if os.IsNotExist(err) && len(revisions) == 0 {
-			return map[string]challenge.Entry{}, nil
+			return map[string]scenario.Entry{}, nil
 		}
 		if os.IsNotExist(err) && len(revisions) > 0 {
-			return nil, materializedIntegrity(revisions[0].Challenge.ID, revisions[0].Challenge.SourceSlug, "materialized challenges root is missing")
+			return nil, materializedIntegrity(revisions[0].Scenario.ID, revisions[0].Scenario.SourceSlug, "materialized scenarios root is missing")
 		}
-		return nil, materializedIntegrity("", "", "stat materialized challenges root: %v", err)
+		return nil, materializedIntegrity("", "", "stat materialized scenarios root: %v", err)
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-		return nil, materializedIntegrity("", "", "materialized challenges root must be a directory, not a symlink")
+		return nil, materializedIntegrity("", "", "materialized scenarios root must be a directory, not a symlink")
 	}
-	result := make(map[string]challenge.Entry, len(revisions))
+	result := make(map[string]scenario.Entry, len(revisions))
 	for _, active := range revisions {
 		if !active.Valid() {
-			return nil, materializedIntegrity(active.Challenge.ID, active.Challenge.SourceSlug, "active lifecycle record is invalid")
+			return nil, materializedIntegrity(active.Scenario.ID, active.Scenario.SourceSlug, "active lifecycle record is invalid")
 		}
-		if _, exists := result[active.Challenge.ID]; exists {
-			return nil, materializedIntegrity(active.Challenge.ID, active.Challenge.SourceSlug, "active lifecycle returned the challenge more than once")
+		if _, exists := result[active.Scenario.ID]; exists {
+			return nil, materializedIntegrity(active.Scenario.ID, active.Scenario.SourceSlug, "active lifecycle returned the scenario more than once")
 		}
-		entry, err := validateMaterializedRevision(challengesDir, active.Challenge, active.Revision)
+		entry, err := validateMaterializedRevision(scenariosDir, active.Scenario, active.Revision)
 		if err != nil {
 			return nil, err
 		}
-		result[active.Challenge.ID] = *entry
+		result[active.Scenario.ID] = *entry
 	}
 	return result, nil
 }
 
-func validateMaterializedRevision(challengesDir string, stable challengedomain.Challenge, revision challengedomain.Revision) (*challenge.Entry, error) {
-	if !stable.Valid() || !revision.Valid() || stable.ID != revision.ChallengeID || stable.SourceKind != revision.SourceKind ||
+func validateMaterializedRevision(scenariosDir string, stable scenariodomain.Scenario, revision scenariodomain.Revision) (*scenario.Entry, error) {
+	if !stable.Valid() || !revision.Valid() || stable.ID != revision.ScenarioID || stable.SourceKind != revision.SourceKind ||
 		stable.SourceRef != revision.SourceRef || stable.SourceSlug != revision.SourceSlug ||
-		challenge.ValidateMaterializedPath(revision.MaterializedPath, revision.SourceSlug, revision.ID) != nil {
+		scenario.ValidateMaterializedPath(revision.MaterializedPath, revision.SourceSlug, revision.ID) != nil {
 		return nil, materializedIntegrity(stable.ID, stable.SourceSlug, "durable revision identity conflicts with its lifecycle")
 	}
-	entry, err := challenge.ValidateDir(filepath.Join(challengesDir, filepath.FromSlash(revision.MaterializedPath)))
+	entry, err := scenario.ValidateDir(filepath.Join(scenariosDir, filepath.FromSlash(revision.MaterializedPath)))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, materializedIntegrity(stable.ID, revision.SourceSlug, "referenced materialized source is missing")
@@ -99,7 +99,7 @@ func validateMaterializedRevision(challengesDir string, stable challengedomain.C
 		return nil, materializedIntegrity(stable.ID, revision.SourceSlug, "invalid materialized source: %v", err)
 	}
 	expectedImage := revision.Artifact.IncusFingerprint
-	if revision.Runtime == challenge.RuntimeK8s {
+	if revision.Runtime == scenario.RuntimeK8s {
 		expectedImage = revision.Artifact.OCIReference
 	}
 	revisionTags := revision.Tags
@@ -110,7 +110,7 @@ func validateMaterializedRevision(challengesDir string, stable challengedomain.C
 	if entryTags == nil {
 		entryTags = []string{}
 	}
-	if entry.ID != revision.ChallengeID || entry.RevisionID != revision.ID || entry.SourceSlug != revision.SourceSlug ||
+	if entry.ID != revision.ScenarioID || entry.RevisionID != revision.ID || entry.SourceSlug != revision.SourceSlug ||
 		entry.Title != revision.Title || entry.Runtime != revision.Runtime || entry.Type != revision.Type || !slices.Equal(entryTags, revisionTags) ||
 		entry.ContentRevision != revision.ContentRevision || entry.Revision != revision.MaterializedRevision || entry.Image != expectedImage ||
 		!entry.PublishedAt.UTC().Equal(revision.PublishedAt.UTC()) {

@@ -92,13 +92,13 @@ func (s *CleanupService) Run(ctx context.Context) error {
 // CheckpointFirstPass is an immutable learning fact derived from an
 // Environment status projection.
 type CheckpointFirstPass struct {
-	EnvironmentUID      string
-	UserID              string
-	ChallengeID         string
-	ChallengeRevisionID string
-	CheckpointID        string
-	FirstPassedAt       time.Time
-	Summary             string
+	EnvironmentUID     string
+	UserID             string
+	ScenarioID         string
+	ScenarioRevisionID string
+	CheckpointID       string
+	FirstPassedAt      time.Time
+	Summary            string
 }
 
 // Checkpoint is the status subset required to project first-pass facts.
@@ -111,18 +111,18 @@ type Checkpoint struct {
 // EnvironmentProjection is the stable application representation of one CRD
 // status. Kubernetes conversion belongs to the adapter wired by bootstrap.
 type EnvironmentProjection struct {
-	UID               string
-	Name              string
-	Runtime           string
-	Purpose           string
-	UserID            string
-	ChallengeID       string
-	ChallengeRevision string
-	Phase             string
-	ReadyAt           *time.Time
-	CompletedAt       *time.Time
-	DestroyedAt       *time.Time
-	Checkpoints       []Checkpoint
+	UID              string
+	Name             string
+	Runtime          string
+	Purpose          string
+	UserID           string
+	ScenarioID       string
+	ScenarioRevision string
+	Phase            string
+	ReadyAt          *time.Time
+	CompletedAt      *time.Time
+	DestroyedAt      *time.Time
+	Checkpoints      []Checkpoint
 }
 
 // ProjectionSource reads runtime Environment status and requests deletion
@@ -135,10 +135,10 @@ type ProjectionSource interface {
 // ProjectionRepository is the durable learning history boundary. String
 // outcomes keep this application package independent of PostgreSQL types.
 type ProjectionRepository interface {
-	RecordChallengeAttempt(context.Context, string, string, string, string, string, time.Time) error
+	RecordScenarioAttempt(context.Context, string, string, string, string, string, time.Time) error
 	RecordCheckpointFirstPass(context.Context, CheckpointFirstPass) error
-	RecordChallengeCompletion(context.Context, string, string, string, string, time.Time) error
-	FinishChallengeAttempt(context.Context, string, string, time.Time) error
+	RecordScenarioCompletion(context.Context, string, string, string, string, time.Time) error
+	FinishScenarioAttempt(context.Context, string, string, time.Time) error
 }
 
 // ProjectionService is the sole Server-side writer of learning history from
@@ -218,7 +218,7 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 		return false, fmt.Errorf("environment %q has no uid", projection.Name)
 	}
 	if projection.ReadyAt != nil && !projection.ReadyAt.IsZero() {
-		if err := s.repository.RecordChallengeAttempt(ctx, projection.UserID, projection.ChallengeID, projection.ChallengeRevision, projection.UID, projection.Runtime, projection.ReadyAt.UTC()); err != nil {
+		if err := s.repository.RecordScenarioAttempt(ctx, projection.UserID, projection.ScenarioID, projection.ScenarioRevision, projection.UID, projection.Runtime, projection.ReadyAt.UTC()); err != nil {
 			return false, fmt.Errorf("record environment attempt: %w", err)
 		}
 	}
@@ -227,8 +227,8 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 			continue
 		}
 		if err := s.repository.RecordCheckpointFirstPass(ctx, CheckpointFirstPass{
-			EnvironmentUID: projection.UID, UserID: projection.UserID, ChallengeID: projection.ChallengeID,
-			ChallengeRevisionID: projection.ChallengeRevision, CheckpointID: checkpoint.ID,
+			EnvironmentUID: projection.UID, UserID: projection.UserID, ScenarioID: projection.ScenarioID,
+			ScenarioRevisionID: projection.ScenarioRevision, CheckpointID: checkpoint.ID,
 			FirstPassedAt: checkpoint.FirstPassedAt.UTC(), Summary: checkpoint.Summary,
 		}); err != nil {
 			return false, fmt.Errorf("record checkpoint first pass %q: %w", checkpoint.ID, err)
@@ -236,12 +236,12 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 	}
 	switch projection.Phase {
 	case phaseCompleted:
-		if err := s.repository.RecordChallengeCompletion(ctx, projection.UserID, projection.ChallengeID, projection.ChallengeRevision, projection.UID, s.lifecycleTime(projection.CompletedAt)); err != nil {
+		if err := s.repository.RecordScenarioCompletion(ctx, projection.UserID, projection.ScenarioID, projection.ScenarioRevision, projection.UID, s.lifecycleTime(projection.CompletedAt)); err != nil {
 			return false, fmt.Errorf("record environment completion: %w", err)
 		}
 	case phaseDestroyed, phaseFailed:
 		if projection.ReadyAt != nil && !projection.ReadyAt.IsZero() {
-			if err := s.repository.FinishChallengeAttempt(ctx, projection.UID, attemptOutcomeExpired, s.lifecycleTime(projection.DestroyedAt)); err != nil {
+			if err := s.repository.FinishScenarioAttempt(ctx, projection.UID, attemptOutcomeExpired, s.lifecycleTime(projection.DestroyedAt)); err != nil {
 				return false, fmt.Errorf("finish environment attempt: %w", err)
 			}
 		}

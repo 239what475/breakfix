@@ -6,15 +6,15 @@ import {
 	readGeneration,
 	sendAuthoringMessage,
 	waitForAuthoringInterruption,
-	waitForCatalogChallenge,
-	waitForPublishedChallenge,
+	waitForCatalogScenario,
+	waitForPublishedScenario,
 	waitForVerifiedCandidate,
 } from "./authoring-live-helpers";
 import { registerAndLogin } from "../support/live-helpers";
 import { setServerAuthoringDeadline } from "../support/e2e-platform";
 
 const agentLiveTest = process.env.RUN_AGENT_LIVE_E2E === "1" ? test : test.skip;
-const challengeTitle = `Restore the Node task marker ${Date.now().toString(36)}`;
+const scenarioTitle = `Restore the Node task marker ${Date.now().toString(36)}`;
 
 type Plan = {
 	metadata: {
@@ -33,7 +33,7 @@ type Plan = {
 
 const plan: Plan = {
 	metadata: {
-		title: challengeTitle,
+		title: scenarioTitle,
 		description: "Repair the missing Node task marker.",
 		runtime: "node",
 	},
@@ -50,10 +50,10 @@ const plan: Plan = {
 };
 
 const candidateFiles: Record<string, string> = {
-		"challenge.yaml":
+		"scenario.yaml":
 			"runtime: node\n" +
 			"type: operations-scenario\n" +
-			`title: ${challengeTitle}\n` +
+			`title: ${scenarioTitle}\n` +
 		"description: Repair the missing Node task marker.\n" +
 		"nodes:\n" +
 		"  - name: host\n" +
@@ -65,7 +65,7 @@ const candidateFiles: Record<string, string> = {
 		"    hint: hints/task-marker-ready.md\n" +
 		"    node: host\n",
 	"problem.md":
-		`# ${challengeTitle}\n\n` +
+		`# ${scenarioTitle}\n\n` +
 		"The Node task host has lost its task marker at `/var/lib/breakfix/mcp-e2e-task/ready`. Restore the marker so its content is exactly `ready`.\n",
 	"hints/task-marker-ready.md": "Check the expected marker path and its exact content.\n",
 	"solution.md":
@@ -145,10 +145,10 @@ async function assertSnapshotRestoredWorkspace(page: Page, workflowID: string): 
 	try {
 		const restored = await authorized<{ content?: unknown }>(
 			page,
-			`/generator/workflows/${workflowID}/workspace/file?turn_id=${encodeURIComponent(turnID)}&path=challenge.yaml`,
+			`/generator/workflows/${workflowID}/workspace/file?turn_id=${encodeURIComponent(turnID)}&path=scenario.yaml`,
 			"GET",
 		);
-		expect(restored.content).toContain(challengeTitle);
+		expect(restored.content).toContain(scenarioTitle);
 	} finally {
 		await authorized(page, `/generator/workflows/${workflowID}/workspace/turn/end`, "POST", { turn_id: turnID });
 	}
@@ -158,7 +158,7 @@ agentLiveTest("authoring resumes after its deadline and publishes the same workf
 	test.setTimeout(45 * 60_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await registerAndLogin(page);
-	await page.getByRole("button", { name: "Challenge studio", exact: true }).click();
+	await page.getByRole("button", { name: "Scenario studio", exact: true }).click();
 
 	const sessionID = await currentAuthoringSessionID(page);
 	const savedPlan = await authorized<{ session_id: string; plan_revision: number }>(page, "/generator/plans", "POST", {
@@ -217,6 +217,6 @@ agentLiveTest("authoring resumes after its deadline and publishes the same workf
 		candidate_revision_id: candidateID,
 		idempotency_key: `interruption-content-${Date.now()}`,
 	});
-	const challengeID = await waitForPublishedChallenge(page, sessionID);
-	await waitForCatalogChallenge(page, challengeID);
+	const scenarioID = await waitForPublishedScenario(page, sessionID);
+	await waitForCatalogScenario(page, scenarioID);
 });

@@ -11,13 +11,13 @@ func TestCheckpointFirstPassEventsAreImmutablePerEnvironment(t *testing.T) {
 	ctx := context.Background()
 	first := time.Date(2026, time.July, 28, 3, 4, 5, 0, time.UTC)
 	event := CheckpointFirstPassEvent{
-		EnvironmentUID:    "environment-one",
-		UserID:            "user-one",
-		ChallengeID:       "challenge-one",
-		ChallengeRevision: "revision-one",
-		CheckpointID:      "repair",
-		FirstPassedAt:     first,
-		Summary:           "repair is ready",
+		EnvironmentUID:   "environment-one",
+		UserID:           "user-one",
+		ScenarioID:       "scenario-one",
+		ScenarioRevision: "revision-one",
+		CheckpointID:     "repair",
+		FirstPassedAt:    first,
+		Summary:          "repair is ready",
 	}
 	if err := database.Environment.RecordCheckpointFirstPass(ctx, event); err != nil {
 		t.Fatal(err)

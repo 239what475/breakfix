@@ -5,14 +5,14 @@
 port: 9090
 health_port: 8081
 
-# Persistent server state: artifacts and the filesystem challenge catalog.
+# Persistent server state: artifacts and the filesystem scenario catalog.
 data_dir: ./data
 # PostgreSQL is the only relational database. The Server data directory is not
 # a database volume and must not be shared with the Controller or Runtime Worker.
 database_url: ${BREAKFIX_DATABASE_URL}
 kubeconfig: ~/.kube/config
 
-# Registry repository includes the namespace used for challenge images. Its
+# Registry repository includes the namespace used for scenario images. Its
 # authority is used unchanged by Kubernetes nodes, Server, and Runtime Worker.
 # Production always uses an operator-provided OCI Registry such as Harbor or a
 # cloud Registry; every consumer must independently trust and reach it.
@@ -75,7 +75,7 @@ opensandbox:
   workspace_memory: 512Mi
   workspace_provision_timeout: 5m
 
-# Immutable platform runtime profiles. Published challenge images replace the
+# Immutable platform runtime profiles. Published scenario images replace the
 # base artifact reference, while all other values are copied into each
 # Environment and CandidateRevision so later configuration changes cannot
 # alter an in-flight execution.

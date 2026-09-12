@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { Clock3, RotateCcw } from "lucide-vue-next";
-import type { Challenge } from "../../api/types";
+import type { Scenario } from "../../api/types";
 
 defineProps<{
-  challenge: Challenge;
+  scenario: Scenario;
   complete: number;
   total: number;
   connected: boolean;
@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <header class="workspace-header">
-    <div class="workspace-title"><div><p class="eyebrow">{{ challenge.runtime }} lab</p><h1>{{ challenge.title }}</h1><div v-if="challenge.scenario_tags.length" class="workspace-tags"><span v-for="tag in challenge.scenario_tags" :key="tag">{{ tag }}</span></div></div></div>
+    <div class="workspace-title"><div><p class="eyebrow">{{ scenario.runtime }} lab</p><h1>{{ scenario.title }}</h1><div v-if="scenario.scenario_tags.length" class="workspace-tags"><span v-for="tag in scenario.scenario_tags" :key="tag">{{ tag }}</span></div></div></div>
     <div class="workspace-header-actions">
       <div class="mobile-view-toggle"><button :class="{ active: mobileView === 'document' }" @click="emit('updateMobileView', 'document')">Docs</button><button :class="{ active: mobileView === 'terminal' }" @click="emit('updateMobileView', 'terminal')">Terminal</button></div>
       <span class="progress-count">{{ complete }} / {{ total }} complete</span>

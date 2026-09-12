@@ -26,11 +26,11 @@ function updateQuery(event: Event) {
 </script>
 
 <template>
-	<aside class="catalog-filters" :class="{ open }" aria-label="Challenge filters">
+	<aside class="catalog-filters" :class="{ open }" aria-label="Scenario filters">
 		<div class="filters-heading">
 			<div>
-				<p class="filters-kicker">Challenge catalog</p>
-				<h1>Find a challenge</h1>
+				<p class="filters-kicker">Scenario catalog</p>
+				<h1>Find a scenario</h1>
 			</div>
 			<button class="filters-close icon-button" type="button" aria-label="Close filters" title="Close filters" @click="emit('close')">
 				<X :size="16" aria-hidden="true" />
@@ -38,8 +38,8 @@ function updateQuery(event: Event) {
 		</div>
 
 		<label class="catalog-search-field">
-			<span class="sr-only">Search challenges</span>
-			<input :value="query" placeholder="Search challenges" aria-label="Search challenges" @input="updateQuery" />
+			<span class="sr-only">Search scenarios</span>
+			<input :value="query" placeholder="Search scenarios" aria-label="Search scenarios" @input="updateQuery" />
 		</label>
 
 		<div class="filters-result-row">

@@ -27,8 +27,8 @@ internal/
   adapter/       Kubernetes、Incus、OCI、OpenSandbox、LLM、PostgreSQL、MCP connector 和内部 HTTP 的具体实现
   application/   Authoring、GeneratorService、Catalog、发布、Environment、学习和 Assistant 用例
   bootstrap/     进程装配、配置、运行时 snapshot 与 Catalog Release 打包入口
-  content/       portable challenge、candidate archive、发布 materialization 文件契约
-  domain/        Challenge、workflow、Environment、Catalog、Authoring 和 checkpoint 协议的不变量
+  content/       portable scenario、candidate archive、发布 materialization 文件契约
+  domain/        Scenario、workflow、Environment、Catalog、Authoring 和 checkpoint 协议的不变量
   transport/     公开 HTTP、SSE、WebSocket 和内部 Worker HTTP 映射
   testkit/       测试共享 fixture 与 provider fake
 ```
@@ -45,5 +45,4 @@ internal/
 - `adapter` 实现具体 I/O；SDK 类型不得泄漏到 `domain` 的公开模型。
 - `bootstrap` 负责具体实现的选择和后台服务启动；业务规则不写在 `main` 或启动代码中。
 
-当前 Go 领域和目录仍使用 `Challenge` 作为兼容术语。产品层将其显示为可运行场景；统一重命名为 `Scenario` 是后续单独步骤，
-不能以机械重命名掩盖发布与历史 revision 的语义。
+Go 领域和目录统一使用 `Scenario`。产品层将其显示为可运行场景；稳定 ID 前缀和历史 revision 语义保持不变。

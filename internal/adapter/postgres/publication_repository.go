@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/generation"
 )
@@ -19,20 +19,20 @@ type PublicationRepository struct {
 
 func (d *PublicationRepository) RetainedMaterializationPaths(ctx context.Context) ([]string, error) {
 	rows, err := d.conn.QueryContext(ctx, `
-		SELECT materialized_path, source_slug, id, 'challenge-revision'
-		FROM challenge_revisions
+		SELECT materialized_path, source_slug, id, 'scenario-revision'
+		FROM scenario_revisions
 		UNION ALL
 		SELECT candidate.publication ->> 'target_path', candidate.publication ->> 'source_slug',
-			candidate.publication ->> 'challenge_revision_id', 'generation-publication'
+			candidate.publication ->> 'scenario_revision_id', 'generation-publication'
 		FROM generation_workflows workflow
 		JOIN candidate_revisions candidate ON candidate.id = workflow.candidate_revision_id
 		WHERE workflow.state = ? AND candidate.published_at IS NULL AND candidate.publication IS NOT NULL
 		UNION ALL
-		SELECT CONCAT(commit.source_slug, '/', commit.challenge_revision_id), commit.source_slug, commit.challenge_revision_id, 'catalog-commit'
+		SELECT CONCAT(commit.source_slug, '/', commit.scenario_revision_id), commit.source_slug, commit.scenario_revision_id, 'catalog-commit'
 		FROM catalog_release_entry_commits commit
 		JOIN catalog_releases release ON release.id = commit.release_id
 		WHERE release.state = ? AND commit.state IN (?, ?, ?)`,
-		generation.StateChallengePublishing, catalogdomain.ReleaseCommitting,
+		generation.StateScenarioPublishing, catalogdomain.ReleaseCommitting,
 		catalogdomain.CommitPrepared, catalogdomain.CommitArtifactPublished, catalogdomain.CommitMaterialized)
 	if err != nil {
 		return nil, fmt.Errorf("query retained materializations: %w", err)
@@ -48,7 +48,7 @@ func (d *PublicationRepository) RetainedMaterializationPaths(ctx context.Context
 		path = strings.TrimSpace(path)
 		sourceSlug = strings.TrimSpace(sourceSlug)
 		revisionID = strings.TrimSpace(revisionID)
-		if err := challenge.ValidateMaterializedPath(path, sourceSlug, revisionID); err != nil {
+		if err := scenario.ValidateMaterializedPath(path, sourceSlug, revisionID); err != nil {
 			return nil, fmt.Errorf("%s has invalid materialized path: %w", source, err)
 		}
 		retained[path] = struct{}{}

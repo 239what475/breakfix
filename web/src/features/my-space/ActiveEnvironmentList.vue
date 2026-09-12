@@ -29,12 +29,12 @@ function expiryLabel(expiresAt?: string | null) {
     <div v-if="environments.length" class="space-row-list">
       <article v-for="environment in environments" :key="environment.environment_id" class="space-row active-environment-row">
         <div class="space-row-main">
-          <div class="space-row-title"><h3>{{ environment.challenge.title }}</h3><span class="runtime-pill">{{ environment.runtime }}</span></div>
+          <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ environment.runtime }}</span></div>
           <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
         </div>
-        <button class="compact-button space-start-button" type="button" @click="emit('start', environment.challenge.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start challenge</button>
+        <button class="compact-button space-start-button" type="button" @click="emit('start', environment.scenario.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start scenario</button>
       </article>
     </div>
-    <p v-else class="space-empty">No active environment. Pick a challenge from the catalog when you are ready.</p>
+    <p v-else class="space-empty">No active environment. Pick a scenario from the catalog when you are ready.</p>
   </section>
 </template>

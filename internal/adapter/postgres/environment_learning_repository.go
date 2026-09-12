@@ -16,23 +16,23 @@ const (
 	AttemptExpired   = "expired"
 )
 
-type ChallengeAttempt struct {
-	EnvironmentUID    string
-	UserID            string
-	ChallengeID       string
-	ChallengeRevision string
-	Runtime           string
-	ReadyAt           time.Time
-	EndedAt           *time.Time
-	Outcome           string
-	LearningSeconds   int64
+type ScenarioAttempt struct {
+	EnvironmentUID   string
+	UserID           string
+	ScenarioID       string
+	ScenarioRevision string
+	Runtime          string
+	ReadyAt          time.Time
+	EndedAt          *time.Time
+	Outcome          string
+	LearningSeconds  int64
 }
 
 type TerminalConnection struct {
 	ID               string
 	EnvironmentUID   string
 	UserID           string
-	ChallengeID      string
+	ScenarioID       string
 	ServerInstanceID string
 	ConnectedAt      time.Time
 }
@@ -41,7 +41,7 @@ type EnvironmentUsageSession struct {
 	ID             string
 	EnvironmentUID string
 	UserID         string
-	ChallengeID    string
+	ScenarioID     string
 	StartedAt      time.Time
 	HeartbeatAt    time.Time
 	EndedAt        *time.Time
@@ -50,16 +50,16 @@ type EnvironmentUsageSession struct {
 // LearningHistoryItem is a durable user-facing attempt. Learning time is
 // derived from environment usage sessions rather than duplicated on attempts.
 type LearningHistoryItem struct {
-	EnvironmentUID    string
-	ChallengeID       string
-	ChallengeRevision string
-	Runtime           string
-	ReadyAt           time.Time
-	CompletedAt       *time.Time
-	EndedAt           *time.Time
-	Outcome           string
-	LearningSeconds   int64
-	LastActivityAt    time.Time
+	EnvironmentUID   string
+	ScenarioID       string
+	ScenarioRevision string
+	Runtime          string
+	ReadyAt          time.Time
+	CompletedAt      *time.Time
+	EndedAt          *time.Time
+	Outcome          string
+	LearningSeconds  int64
+	LastActivityAt   time.Time
 }
 
 // LearningHistoryCursor identifies an attempt in the same order used by the
@@ -70,14 +70,14 @@ type LearningHistoryCursor struct {
 	EnvironmentUID string
 }
 
-// LearningHistoryFilter optionally limits history to stable Challenge IDs and
-// to a user-facing state/runtime. An empty ChallengeIDs slice deliberately
-// means every durable attempt: published Challenges may later be deprecated
+// LearningHistoryFilter optionally limits history to stable Scenario IDs and
+// to a user-facing state/runtime. An empty ScenarioIDs slice deliberately
+// means every durable attempt: published Scenarios may later be deprecated
 // while their learning history remains visible.
 type LearningHistoryFilter struct {
-	ChallengeIDs []string
-	State        string
-	Runtime      string
+	ScenarioIDs []string
+	State       string
+	Runtime     string
 }
 
 type LearningSummary struct {
@@ -102,11 +102,11 @@ func requiredLearningValue(name, value string) error {
 	return nil
 }
 
-// RecordChallengeAttempt persists the point at which a user received a Ready
+// RecordScenarioAttempt persists the point at which a user received a Ready
 // environment. Reconciliation retries must not produce a second attempt.
-func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, userID, challengeID, challengeRevision, environmentUID, runtime string, readyAt time.Time) error {
+func (d *EnvironmentRepository) RecordScenarioAttempt(ctx context.Context, userID, scenarioID, scenarioRevision, environmentUID, runtime string, readyAt time.Time) error {
 	for name, value := range map[string]string{
-		"user id": userID, "challenge id": challengeID, "challenge revision": challengeRevision, "environment uid": environmentUID,
+		"user id": userID, "scenario id": scenarioID, "scenario revision": scenarioRevision, "environment uid": environmentUID,
 	} {
 		if err := requiredLearningValue(name, value); err != nil {
 			return err
@@ -116,20 +116,20 @@ func (d *EnvironmentRepository) RecordChallengeAttempt(ctx context.Context, user
 		return fmt.Errorf("learning ready time is required")
 	}
 	_, err := d.conn.ExecContext(ctx, `
-		INSERT INTO user_challenge_attempts
-			(environment_uid, user_id, challenge_id, challenge_revision, runtime, ready_at, outcome)
+		INSERT INTO user_scenario_attempts
+			(environment_uid, user_id, scenario_id, scenario_revision, runtime, ready_at, outcome)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(environment_uid) DO NOTHING
-	`, environmentUID, userID, challengeID, challengeRevision, runtime, nowText(readyAt.UTC()), AttemptActive)
+	`, environmentUID, userID, scenarioID, scenarioRevision, runtime, nowText(readyAt.UTC()), AttemptActive)
 	if err != nil {
-		return fmt.Errorf("record challenge attempt: %w", err)
+		return fmt.Errorf("record scenario attempt: %w", err)
 	}
 	return nil
 }
 
-// FinishChallengeAttempt records the final state of a Ready environment. A
+// FinishScenarioAttempt records the final state of a Ready environment. A
 // terminal lifecycle event must never overwrite a previously completed result.
-func (d *EnvironmentRepository) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome string, endedAt time.Time) error {
+func (d *EnvironmentRepository) FinishScenarioAttempt(ctx context.Context, environmentUID, outcome string, endedAt time.Time) error {
 	if err := requiredLearningValue("environment uid", environmentUID); err != nil {
 		return err
 	}
@@ -140,12 +140,12 @@ func (d *EnvironmentRepository) FinishChallengeAttempt(ctx context.Context, envi
 		return fmt.Errorf("learning end time is required")
 	}
 	_, err := d.conn.ExecContext(ctx, `
-		UPDATE user_challenge_attempts
+		UPDATE user_scenario_attempts
 		SET outcome = ?, ended_at = ?
 		WHERE environment_uid = ? AND outcome = ?
 	`, outcome, nowText(endedAt.UTC()), environmentUID, AttemptActive)
 	if err != nil {
-		return fmt.Errorf("finish challenge attempt: %w", err)
+		return fmt.Errorf("finish scenario attempt: %w", err)
 	}
 	return nil
 }
@@ -157,7 +157,7 @@ func (d *EnvironmentRepository) OpenTerminalConnection(ctx context.Context, conn
 		"connection id":      connection.ID,
 		"environment uid":    connection.EnvironmentUID,
 		"user id":            connection.UserID,
-		"challenge id":       connection.ChallengeID,
+		"scenario id":        connection.ScenarioID,
 		"server instance id": connection.ServerInstanceID,
 	} {
 		if err := requiredLearningValue(name, value); err != nil {
@@ -176,9 +176,9 @@ func (d *EnvironmentRepository) OpenTerminalConnection(ctx context.Context, conn
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO terminal_connections
-			(id, environment_uid, user_id, challenge_id, server_instance_id, connected_at, heartbeat_at)
+			(id, environment_uid, user_id, scenario_id, server_instance_id, connected_at, heartbeat_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, connection.ID, connection.EnvironmentUID, connection.UserID, connection.ChallengeID, connection.ServerInstanceID, nowText(now), nowText(now)); err != nil {
+	`, connection.ID, connection.EnvironmentUID, connection.UserID, connection.ScenarioID, connection.ServerInstanceID, nowText(now), nowText(now)); err != nil {
 		return fmt.Errorf("insert terminal connection: %w", err)
 	}
 
@@ -187,10 +187,10 @@ func (d *EnvironmentRepository) OpenTerminalConnection(ctx context.Context, conn
 	usageID := fmt.Sprintf("usage-%s-%d", connection.EnvironmentUID, now.UnixNano())
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO environment_usage_sessions
-			(id, environment_uid, user_id, challenge_id, started_at, heartbeat_at)
+			(id, environment_uid, user_id, scenario_id, started_at, heartbeat_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
-	`, usageID, connection.EnvironmentUID, connection.UserID, connection.ChallengeID, nowText(now), nowText(now)); err != nil {
+	`, usageID, connection.EnvironmentUID, connection.UserID, connection.ScenarioID, nowText(now), nowText(now)); err != nil {
 		return fmt.Errorf("open environment usage session: %w", err)
 	}
 	return tx.Commit()
@@ -365,14 +365,14 @@ func (d *EnvironmentRepository) LearningSummary(ctx context.Context, userID stri
 
 	var summary LearningSummary
 	if err := d.conn.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM user_challenge_progress WHERE user_id = ?
+		SELECT COUNT(*) FROM user_scenario_progress WHERE user_id = ?
 	`, userID).Scan(&summary.CompletedCount); err != nil {
-		return LearningSummary{}, fmt.Errorf("count completed challenges: %w", err)
+		return LearningSummary{}, fmt.Errorf("count completed scenarios: %w", err)
 	}
 	if err := d.conn.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT challenge_id) FROM user_challenge_attempts WHERE user_id = ?
+		SELECT COUNT(DISTINCT scenario_id) FROM user_scenario_attempts WHERE user_id = ?
 	`, userID).Scan(&summary.AttemptedCount); err != nil {
-		return LearningSummary{}, fmt.Errorf("count attempted challenges: %w", err)
+		return LearningSummary{}, fmt.Errorf("count attempted scenarios: %w", err)
 	}
 	if err := d.conn.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(
@@ -401,13 +401,13 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 	}
 	args := []any{nowText(now.UTC()), nowText(now.UTC()), userID}
 	whereParts := []string{"a.user_id = ?"}
-	if len(filter.ChallengeIDs) > 0 {
-		challengePlaceholders := make([]string, 0, len(filter.ChallengeIDs))
-		for _, challengeID := range filter.ChallengeIDs {
-			challengePlaceholders = append(challengePlaceholders, "?")
-			args = append(args, challengeID)
+	if len(filter.ScenarioIDs) > 0 {
+		scenarioPlaceholders := make([]string, 0, len(filter.ScenarioIDs))
+		for _, scenarioID := range filter.ScenarioIDs {
+			scenarioPlaceholders = append(scenarioPlaceholders, "?")
+			args = append(args, scenarioID)
 		}
-		whereParts = append(whereParts, "a.challenge_id IN ("+strings.Join(challengePlaceholders, ",")+")")
+		whereParts = append(whereParts, "a.scenario_id IN ("+strings.Join(scenarioPlaceholders, ",")+")")
 	}
 	switch filter.State {
 	case "active", "completed":
@@ -430,12 +430,12 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 	}
 	args = append(args, limit)
 	rows, err := d.conn.QueryContext(ctx, `
-		SELECT a.environment_uid, a.challenge_id, a.challenge_revision, a.runtime, a.ready_at, a.ended_at, a.outcome,
+		SELECT a.environment_uid, a.scenario_id, a.scenario_revision, a.runtime, a.ready_at, a.ended_at, a.outcome,
 			CASE WHEN a.outcome = 'completed' AND a.ended_at != '' THEN a.ended_at END AS completed_at,
 			COALESCE(SUM(CASE WHEN s.ended_at = '' THEN GREATEST(0, EXTRACT(EPOCH FROM (?::timestamptz - s.started_at::timestamptz))::BIGINT)
 				ELSE GREATEST(0, EXTRACT(EPOCH FROM (s.ended_at::timestamptz - s.started_at::timestamptz))::BIGINT) END), 0)::BIGINT AS learning_seconds,
 			COALESCE(MAX(CASE WHEN s.ended_at = '' THEN ? ELSE s.ended_at END), a.ended_at, a.ready_at) AS last_activity_at
-		FROM user_challenge_attempts a
+		FROM user_scenario_attempts a
 		LEFT JOIN environment_usage_sessions s ON s.environment_uid = a.environment_uid
 		WHERE `+strings.Join(whereParts, " AND ")+`
 		GROUP BY a.environment_uid
@@ -452,7 +452,7 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 		var item LearningHistoryItem
 		var readyAt, endedAt, lastActivityAt string
 		var completedAt sql.NullString
-		if err := rows.Scan(&item.EnvironmentUID, &item.ChallengeID, &item.ChallengeRevision, &item.Runtime, &readyAt, &endedAt, &item.Outcome, &completedAt, &item.LearningSeconds, &lastActivityAt); err != nil {
+		if err := rows.Scan(&item.EnvironmentUID, &item.ScenarioID, &item.ScenarioRevision, &item.Runtime, &readyAt, &endedAt, &item.Outcome, &completedAt, &item.LearningSeconds, &lastActivityAt); err != nil {
 			return nil, fmt.Errorf("scan learning history: %w", err)
 		}
 		item.ReadyAt = parseLearningTime(readyAt)
@@ -470,9 +470,9 @@ func (d *EnvironmentRepository) ListLearningHistory(ctx context.Context, userID 
 }
 
 func validateLearningHistoryFilter(filter LearningHistoryFilter) error {
-	for _, challengeID := range filter.ChallengeIDs {
-		if strings.TrimSpace(challengeID) == "" {
-			return fmt.Errorf("learning history challenge id is required")
+	for _, scenarioID := range filter.ScenarioIDs {
+		if strings.TrimSpace(scenarioID) == "" {
+			return fmt.Errorf("learning history scenario id is required")
 		}
 	}
 	switch filter.State {

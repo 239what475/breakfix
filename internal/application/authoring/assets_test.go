@@ -27,7 +27,7 @@ func TestCandidateArchiveAssetsAndDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasAsset(assets, "nodes/host/checks.sh") || !hasAsset(assets, "solution.md") || !hasAsset(assets, "challenge.yaml") {
+	if !hasAsset(assets, "nodes/host/checks.sh") || !hasAsset(assets, "solution.md") || !hasAsset(assets, "scenario.yaml") {
 		t.Fatalf("candidate assets are incomplete: %#v", assets)
 	}
 	diffs, err := DiffAssets(second, first)
@@ -48,11 +48,11 @@ func TestCandidateArchiveAssetsAndDiff(t *testing.T) {
 	}
 }
 
-func TestReadVerifiedChallengeUsesCandidateManifest(t *testing.T) {
+func TestReadVerifiedScenarioUsesCandidateManifest(t *testing.T) {
 	dir := t.TempDir()
 	writeCandidateAssets(t, dir, "Actual verified title", "Actual verified description", "# Actual problem\n", "#!/bin/sh\nexit 0\n", "# Actual solution\n<!-- checkpoint: service-ready -->\n")
 
-	verified, err := ReadVerifiedChallenge(archiveCandidateDir(t, dir))
+	verified, err := ReadVerifiedScenario(archiveCandidateDir(t, dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestReadAssetsRejectsArchivePathTraversal(t *testing.T) {
 
 func writeCandidateAssets(t *testing.T, root, title, description, problem, checks, solution string) {
 	t.Helper()
-	writeCandidateAsset(t, filepath.Join(root, "challenge.yaml"), "title: "+title+"\nruntime: node\ndescription: "+description+"\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
+	writeCandidateAsset(t, filepath.Join(root, "scenario.yaml"), "title: "+title+"\nruntime: node\ndescription: "+description+"\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
 	writeCandidateAsset(t, filepath.Join(root, "problem.md"), problem)
 	writeCandidateAsset(t, filepath.Join(root, "solution.md"), solution)
 	writeCandidateAsset(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")

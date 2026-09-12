@@ -33,7 +33,7 @@ export type LoginResponse = {
     name: string;
 };
 
-export type MySpaceChallenge = {
+export type MySpaceScenario = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
@@ -62,7 +62,7 @@ export type MySpaceSummary = {
 
 export type MySpaceActiveEnvironment = {
     environment_id: string;
-    challenge: MySpaceChallenge;
+    scenario: MySpaceScenario;
     runtime: 'node' | 'k8s';
     phase: string;
     checkpoint_progress: CheckpointProgressSummary;
@@ -70,7 +70,7 @@ export type MySpaceActiveEnvironment = {
 };
 
 export type MySpaceLearningHistory = {
-    challenge: MySpaceChallenge;
+    scenario: MySpaceScenario;
     ready_at: string;
     completed_at?: string | null;
     learning_seconds: number;
@@ -90,8 +90,8 @@ export type MySpaceAuthoringDraft = {
     updated_at: string;
 };
 
-export type MySpacePublishedChallenge = {
-    challenge: MySpaceChallenge;
+export type MySpacePublishedScenario = {
+    scenario: MySpaceScenario;
     revision_id: string;
     state: 'active' | 'deprecated';
     published_at: string;
@@ -102,7 +102,7 @@ export type MySpacePublishedChallenge = {
 
 export type MySpaceAuthoring = {
     drafts: Array<MySpaceAuthoringDraft>;
-    published: Array<MySpacePublishedChallenge>;
+    published: Array<MySpacePublishedScenario>;
 };
 
 export type MySpace = {
@@ -114,7 +114,7 @@ export type MySpace = {
     authoring: MySpaceAuthoring;
 };
 
-export type ChallengeSummary = {
+export type ScenarioSummary = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
@@ -132,11 +132,11 @@ export type CheckpointProgressSummary = {
     total: number;
 };
 
-export type ChallengeList = {
-    challenges: Array<ChallengeSummary>;
+export type ScenarioList = {
+    scenarios: Array<ScenarioSummary>;
 };
 
-export type ChallengeCheckpoint = {
+export type ScenarioCheckpoint = {
     id: string;
     title: string;
     description: string;
@@ -144,7 +144,7 @@ export type ChallengeCheckpoint = {
     node?: string;
 };
 
-export type ChallengeNode = {
+export type ScenarioNode = {
     name: string;
     title: string;
 };
@@ -163,22 +163,22 @@ export type CheckpointFirstPass = {
     summary: string;
 };
 
-export type ChallengeContent = {
+export type ScenarioContent = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
     scenario_type: 'documentation-example' | 'operations-scenario';
     scenario_tags: Array<string>;
-    nodes: Array<ChallengeNode>;
+    nodes: Array<ScenarioNode>;
     problem: string;
     solution: string;
     hints: {
         [key: string]: string;
     };
-    checkpoints: Array<ChallengeCheckpoint>;
+    checkpoints: Array<ScenarioCheckpoint>;
 };
 
-export type ChallengeProgress = {
+export type ScenarioProgress = {
     checks: Array<CheckpointResult>;
 };
 
@@ -197,7 +197,7 @@ export type AssistantMessage = {
 
 export type AssistantConversation = {
     id: string;
-    challenge_id: string;
+    scenario_id: string;
     messages: Array<AssistantMessage>;
 };
 
@@ -214,16 +214,16 @@ export type AssistantMessageRequest = {
 };
 
 export type StartResponse = {
-    challenge_title: string;
+    scenario_title: string;
 };
 
 export type ResetResponse = {
-    challenge_title: string;
+    scenario_title: string;
 };
 
 export type StopResponse = {
     stopped: boolean;
-    challenge_title: string;
+    scenario_title: string;
 };
 
 export type TerminalWindowCloseResponse = {
@@ -266,7 +266,7 @@ export type VerifiedCheckpoint = {
     node?: string;
 };
 
-export type VerifiedChallenge = {
+export type VerifiedScenario = {
     metadata: AuthoringMetadata;
     checkpoints: Array<VerifiedCheckpoint>;
 };
@@ -287,7 +287,7 @@ export type GeneratorWorkflow = {
     id: string;
     session_id: string;
     plan_revision: number;
-    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ChallengePublishing' | 'Published' | 'Failed' | 'Cancelled';
+    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ScenarioPublishing' | 'Published' | 'Failed' | 'Cancelled';
     state_version: number;
     runtime_attempt: number;
     candidate_revision_id?: string;
@@ -391,7 +391,7 @@ export type GeneratorWorkflowList = {
 export type GeneratorGeneration = {
     workflow: GeneratorWorkflow;
     candidate?: AuthoringCandidate;
-    verified?: VerifiedChallenge;
+    verified?: VerifiedScenario;
     verification?: AuthoringVerificationReport;
     assets: Array<AuthoringAsset>;
     diff: Array<AuthoringFileDiff>;
@@ -493,8 +493,8 @@ export type AuthoringSession = {
     authoring_turn_active: boolean;
     intent_revision: number;
     visible_revision: number;
-    publish_challenge_id?: string;
-    revision_challenge_id?: string;
+    publish_scenario_id?: string;
+    revision_scenario_id?: string;
     revision_base_active_revision_id?: string;
     workflows: Array<GeneratorWorkflow>;
     last_error?: string;
@@ -623,86 +623,86 @@ export type GetMySpaceLearningResponses = {
 
 export type GetMySpaceLearningResponse = GetMySpaceLearningResponses[keyof GetMySpaceLearningResponses];
 
-export type ListChallengesData = {
+export type ListScenariosData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/challenges';
+    url: '/scenarios';
 };
 
-export type ListChallengesResponses = {
+export type ListScenariosResponses = {
     /**
-     * Challenge list
+     * Scenario list
      */
-    200: ChallengeList;
+    200: ScenarioList;
 };
 
-export type ListChallengesResponse = ListChallengesResponses[keyof ListChallengesResponses];
+export type ListScenariosResponse = ListScenariosResponses[keyof ListScenariosResponses];
 
-export type StartChallengeData = {
+export type StartScenarioData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/start';
+    url: '/scenarios/{id}/start';
 };
 
-export type StartChallengeErrors = {
+export type StartScenarioErrors = {
     /**
      * Error
      */
     404: ErrorResponse;
 };
 
-export type StartChallengeError = StartChallengeErrors[keyof StartChallengeErrors];
+export type StartScenarioError = StartScenarioErrors[keyof StartScenarioErrors];
 
-export type StartChallengeResponses = {
+export type StartScenarioResponses = {
     /**
      * Environment ready
      */
     200: StartResponse;
 };
 
-export type StartChallengeResponse = StartChallengeResponses[keyof StartChallengeResponses];
+export type StartScenarioResponse = StartScenarioResponses[keyof StartScenarioResponses];
 
-export type GetChallengeContentData = {
+export type GetScenarioContentData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/content';
+    url: '/scenarios/{id}/content';
 };
 
-export type GetChallengeContentErrors = {
+export type GetScenarioContentErrors = {
     /**
      * Error
      */
     404: ErrorResponse;
 };
 
-export type GetChallengeContentError = GetChallengeContentErrors[keyof GetChallengeContentErrors];
+export type GetScenarioContentError = GetScenarioContentErrors[keyof GetScenarioContentErrors];
 
-export type GetChallengeContentResponses = {
+export type GetScenarioContentResponses = {
     /**
-     * Challenge content
+     * Scenario content
      */
-    200: ChallengeContent;
+    200: ScenarioContent;
 };
 
-export type GetChallengeContentResponse = GetChallengeContentResponses[keyof GetChallengeContentResponses];
+export type GetScenarioContentResponse = GetScenarioContentResponses[keyof GetScenarioContentResponses];
 
-export type GetChallengeProgressData = {
+export type GetScenarioProgressData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/progress';
+    url: '/scenarios/{id}/progress';
 };
 
-export type GetChallengeProgressErrors = {
+export type GetScenarioProgressErrors = {
     /**
      * Error
      */
@@ -713,27 +713,27 @@ export type GetChallengeProgressErrors = {
     409: ErrorResponse;
 };
 
-export type GetChallengeProgressError = GetChallengeProgressErrors[keyof GetChallengeProgressErrors];
+export type GetScenarioProgressError = GetScenarioProgressErrors[keyof GetScenarioProgressErrors];
 
-export type GetChallengeProgressResponses = {
+export type GetScenarioProgressResponses = {
     /**
      * Current checkpoint results
      */
-    200: ChallengeProgress;
+    200: ScenarioProgress;
 };
 
-export type GetChallengeProgressResponse = GetChallengeProgressResponses[keyof GetChallengeProgressResponses];
+export type GetScenarioProgressResponse = GetScenarioProgressResponses[keyof GetScenarioProgressResponses];
 
-export type GetChallengeAssistantData = {
+export type GetScenarioAssistantData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/assistant';
+    url: '/scenarios/{id}/assistant';
 };
 
-export type GetChallengeAssistantErrors = {
+export type GetScenarioAssistantErrors = {
     /**
      * Error
      */
@@ -744,27 +744,27 @@ export type GetChallengeAssistantErrors = {
     409: ErrorResponse;
 };
 
-export type GetChallengeAssistantError = GetChallengeAssistantErrors[keyof GetChallengeAssistantErrors];
+export type GetScenarioAssistantError = GetScenarioAssistantErrors[keyof GetScenarioAssistantErrors];
 
-export type GetChallengeAssistantResponses = {
+export type GetScenarioAssistantResponses = {
     /**
      * Environment-scoped assistant conversation
      */
     200: AssistantConversation;
 };
 
-export type GetChallengeAssistantResponse = GetChallengeAssistantResponses[keyof GetChallengeAssistantResponses];
+export type GetScenarioAssistantResponse = GetScenarioAssistantResponses[keyof GetScenarioAssistantResponses];
 
-export type SendChallengeAssistantMessageData = {
+export type SendScenarioAssistantMessageData = {
     body: AssistantMessageRequest;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/assistant/messages';
+    url: '/scenarios/{id}/assistant/messages';
 };
 
-export type SendChallengeAssistantMessageErrors = {
+export type SendScenarioAssistantMessageErrors = {
     /**
      * Error
      */
@@ -779,70 +779,70 @@ export type SendChallengeAssistantMessageErrors = {
     409: ErrorResponse;
 };
 
-export type SendChallengeAssistantMessageError = SendChallengeAssistantMessageErrors[keyof SendChallengeAssistantMessageErrors];
+export type SendScenarioAssistantMessageError = SendScenarioAssistantMessageErrors[keyof SendScenarioAssistantMessageErrors];
 
-export type SendChallengeAssistantMessageResponses = {
+export type SendScenarioAssistantMessageResponses = {
     /**
      * Server-sent assistant status, tool, delta, complete, and error events
      */
     200: string;
 };
 
-export type SendChallengeAssistantMessageResponse = SendChallengeAssistantMessageResponses[keyof SendChallengeAssistantMessageResponses];
+export type SendScenarioAssistantMessageResponse = SendScenarioAssistantMessageResponses[keyof SendScenarioAssistantMessageResponses];
 
-export type ResetChallengeData = {
+export type ResetScenarioData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/reset';
+    url: '/scenarios/{id}/reset';
 };
 
-export type ResetChallengeErrors = {
+export type ResetScenarioErrors = {
     /**
      * Error
      */
     404: ErrorResponse;
 };
 
-export type ResetChallengeError = ResetChallengeErrors[keyof ResetChallengeErrors];
+export type ResetScenarioError = ResetScenarioErrors[keyof ResetScenarioErrors];
 
-export type ResetChallengeResponses = {
+export type ResetScenarioResponses = {
     /**
-     * Challenge reset
+     * Scenario reset
      */
     200: ResetResponse;
 };
 
-export type ResetChallengeResponse = ResetChallengeResponses[keyof ResetChallengeResponses];
+export type ResetScenarioResponse = ResetScenarioResponses[keyof ResetScenarioResponses];
 
-export type StopChallengeData = {
+export type StopScenarioData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/stop';
+    url: '/scenarios/{id}/stop';
 };
 
-export type StopChallengeErrors = {
+export type StopScenarioErrors = {
     /**
      * Error
      */
     404: ErrorResponse;
 };
 
-export type StopChallengeError = StopChallengeErrors[keyof StopChallengeErrors];
+export type StopScenarioError = StopScenarioErrors[keyof StopScenarioErrors];
 
-export type StopChallengeResponses = {
+export type StopScenarioResponses = {
     /**
-     * Challenge stopped
+     * Scenario stopped
      */
     200: StopResponse;
 };
 
-export type StopChallengeResponse = StopChallengeResponses[keyof StopChallengeResponses];
+export type StopScenarioResponse = StopScenarioResponses[keyof StopScenarioResponses];
 
 export type CreateTerminalTicketData = {
     body: TerminalTicketRequest;
@@ -850,7 +850,7 @@ export type CreateTerminalTicketData = {
         id: string;
     };
     query?: never;
-    url: '/challenges/{id}/terminal-ticket';
+    url: '/scenarios/{id}/terminal-ticket';
 };
 
 export type CreateTerminalTicketErrors = {
@@ -880,7 +880,7 @@ export type CloseTerminalWindowData = {
     query?: {
         node?: string;
     };
-    url: '/challenges/{id}/terminals/{window}';
+    url: '/scenarios/{id}/terminals/{window}';
 };
 
 export type CloseTerminalWindowErrors = {
@@ -917,16 +917,16 @@ export type CreateAuthoringSessionResponses = {
 
 export type CreateAuthoringSessionResponse = CreateAuthoringSessionResponses[keyof CreateAuthoringSessionResponses];
 
-export type CreateAuthoringChallengeRevisionData = {
+export type CreateAuthoringScenarioRevisionData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/authoring/challenges/{id}/revisions';
+    url: '/authoring/scenarios/{id}/revisions';
 };
 
-export type CreateAuthoringChallengeRevisionErrors = {
+export type CreateAuthoringScenarioRevisionErrors = {
     /**
      * Error
      */
@@ -937,27 +937,27 @@ export type CreateAuthoringChallengeRevisionErrors = {
     409: ErrorResponse;
 };
 
-export type CreateAuthoringChallengeRevisionError = CreateAuthoringChallengeRevisionErrors[keyof CreateAuthoringChallengeRevisionErrors];
+export type CreateAuthoringScenarioRevisionError = CreateAuthoringScenarioRevisionErrors[keyof CreateAuthoringScenarioRevisionErrors];
 
-export type CreateAuthoringChallengeRevisionResponses = {
+export type CreateAuthoringScenarioRevisionResponses = {
     /**
-     * Challenge revision authoring session created
+     * Scenario revision authoring session created
      */
     200: AuthoringSession;
 };
 
-export type CreateAuthoringChallengeRevisionResponse = CreateAuthoringChallengeRevisionResponses[keyof CreateAuthoringChallengeRevisionResponses];
+export type CreateAuthoringScenarioRevisionResponse = CreateAuthoringScenarioRevisionResponses[keyof CreateAuthoringScenarioRevisionResponses];
 
-export type DeprecateAuthoringChallengeData = {
+export type DeprecateAuthoringScenarioData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/authoring/challenges/{id}/deprecate';
+    url: '/authoring/scenarios/{id}/deprecate';
 };
 
-export type DeprecateAuthoringChallengeErrors = {
+export type DeprecateAuthoringScenarioErrors = {
     /**
      * Error
      */
@@ -968,16 +968,16 @@ export type DeprecateAuthoringChallengeErrors = {
     409: ErrorResponse;
 };
 
-export type DeprecateAuthoringChallengeError = DeprecateAuthoringChallengeErrors[keyof DeprecateAuthoringChallengeErrors];
+export type DeprecateAuthoringScenarioError = DeprecateAuthoringScenarioErrors[keyof DeprecateAuthoringScenarioErrors];
 
-export type DeprecateAuthoringChallengeResponses = {
+export type DeprecateAuthoringScenarioResponses = {
     /**
-     * Challenge deprecated
+     * Scenario deprecated
      */
     204: void;
 };
 
-export type DeprecateAuthoringChallengeResponse = DeprecateAuthoringChallengeResponses[keyof DeprecateAuthoringChallengeResponses];
+export type DeprecateAuthoringScenarioResponse = DeprecateAuthoringScenarioResponses[keyof DeprecateAuthoringScenarioResponses];
 
 export type GetCurrentAuthoringSessionData = {
     body?: never;
@@ -1404,7 +1404,7 @@ export type ConfirmGeneratorContentError = ConfirmGeneratorContentErrors[keyof C
 
 export type ConfirmGeneratorContentResponses = {
     /**
-     * Workflow advanced to challenge publication
+     * Workflow advanced to scenario publication
      */
     200: GeneratorWorkflow;
 };

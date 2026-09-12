@@ -4,8 +4,8 @@ import {
   expectTerminalConnected,
   registerAndLogin,
   runNodeRuntimeFixtureAnswer,
-  startChallengeFromCatalog,
-  stopChallenge,
+  startScenarioFromCatalog,
+  stopScenario,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
 import {
@@ -14,20 +14,20 @@ import {
   waitForNodeEnvironmentDeletion,
 } from "../support/e2e-platform";
 
-test("learner completes the prepared Node challenge and sees the learning record", async ({ page }, testInfo) => {
+test("learner completes the prepared Node scenario and sees the learning record", async ({ page }, testInfo) => {
   test.setTimeout(6 * 60_000);
-  let challengeID = "";
+  let scenarioID = "";
   let environmentName = "";
   let completed = false;
 
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await registerAndLogin(page);
-    const challenge = await startChallengeFromCatalog(page, nodeRuntimeFixture.title);
-    challengeID = challenge.id;
+    const scenario = await startScenarioFromCatalog(page, nodeRuntimeFixture.title);
+    scenarioID = scenario.id;
 
     await expectTerminalConnected(page);
-    environmentName = await activeEnvironmentName(page, challengeID);
+    environmentName = await activeEnvironmentName(page, scenarioID);
     await expectNodeEnvironmentPhase(environmentName, "Ready");
 
     await runNodeRuntimeFixtureAnswer(page);
@@ -36,13 +36,13 @@ test("learner completes the prepared Node challenge and sees the learning record
 
     await page.getByRole("button", { name: "My space", exact: true }).click();
     await page.getByRole("button", { name: "Learning", exact: true }).first().click();
-    await expect(page.getByRole("heading", { name: challenge.title, exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByRole("heading", { name: scenario.title, exact: true })).toBeVisible({ timeout: 90_000 });
     await expect(page.getByLabel("Learning summary").getByText("Completed", { exact: true })).toBeVisible({ timeout: 90_000 });
     completed = true;
   } finally {
     if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
-    if (completed && challengeID) {
-      await stopChallenge(page, challengeID);
+    if (completed && scenarioID) {
+      await stopScenario(page, scenarioID);
       if (environmentName) await waitForNodeEnvironmentDeletion(environmentName);
     }
   }

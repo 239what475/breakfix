@@ -10,7 +10,7 @@ import {
 import type { AssistantMessage, AssistantTerminalContext } from "../../api/types";
 
 const props = defineProps<{
-  challengeId: string;
+  scenarioId: string;
   currentNode: string;
   currentWindow: string;
   terminals: AssistantTerminalContext[];
@@ -171,7 +171,7 @@ async function loadConversation() {
   loading.value = true;
   error.value = "";
   try {
-		const conversation = await api.getChallengeAssistant(props.challengeId);
+		const conversation = await api.getScenarioAssistant(props.scenarioId);
 		messages.value = conversation.messages;
 		await scrollToLatest();
   } catch (err) {
@@ -200,7 +200,7 @@ async function send() {
     const controller = new AbortController();
     streamController = controller;
 		await streamAssistantMessage(
-      props.challengeId,
+      props.scenarioId,
       {
         content,
         current_node: props.currentNode || undefined,
@@ -229,7 +229,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 watch(
-  () => props.challengeId,
+  () => props.scenarioId,
   async () => {
     stopSubscription();
     loading.value = false;
@@ -248,7 +248,7 @@ onUnmounted(stopSubscription);
 </script>
 
 <template>
-  <section class="assistant-chat" aria-label="Challenge assistant">
+  <section class="assistant-chat" aria-label="Scenario assistant">
     <div class="assistant-notice">
       <p v-if="error" class="assistant-error">{{ error }}</p>
     </div>

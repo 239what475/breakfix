@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
@@ -106,7 +106,7 @@ func newRuntimeStore() *runtimeStore {
 	archiveDigest := sha256.Sum256(archive)
 	digest := "sha256:" + fmt.Sprintf("%x", archiveDigest[:])
 	snapshot := domainexecution.Snapshot{
-		Runtime:     challenge.RuntimeNode,
+		Runtime:     scenario.RuntimeNode,
 		Checkpoints: []domainexecution.CheckpointSnapshot{{ID: "ready", Node: "host"}},
 		Node: &domainexecution.NodeRuntimeSnapshot{
 			BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "profile-v1", NetworkPolicyRevision: "network-v1",
@@ -147,7 +147,7 @@ func (s *runtimeStore) Archive(context.Context, runtime.Credential) ([]byte, str
 }
 
 func (s *runtimeStore) CompleteBuild(_ context.Context, _ runtime.Credential, output domainexecution.BuildOutput) error {
-	if err := output.Validate(challenge.RuntimeNode); err != nil {
+	if err := output.Validate(scenario.RuntimeNode); err != nil {
 		return err
 	}
 	s.completeBuildCalls.Add(1)
@@ -175,9 +175,9 @@ func (s *runtimeStore) CompleteVerification(context.Context, runtime.Credential,
 	return nil
 }
 
-func (s *runtimeStore) RecordChallengePublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error {
+func (s *runtimeStore) RecordScenarioPublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error {
 	s.mu.Lock()
-	s.completedStates = append(s.completedStates, runtime.StateChallengePublishing)
+	s.completedStates = append(s.completedStates, runtime.StateScenarioPublishing)
 	s.mu.Unlock()
 	return nil
 }
@@ -236,7 +236,7 @@ func (p *runtimePublisher) PublishArtifactWork(context.Context, domainexecution.
 	return domainexecution.ArtifactReference{}, nil
 }
 
-func (*runtimePublisher) PublishChallengeWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error) {
+func (*runtimePublisher) PublishScenarioWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error) {
 	return domainexecution.ArtifactReference{}, nil
 }
 

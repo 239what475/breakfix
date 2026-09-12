@@ -37,7 +37,7 @@ func TestEnvironmentNamespaceUsesCleanupPrefixAndStableBoundedName(t *testing.T)
 }
 
 func TestDNSLabelNameBoundsResourceNames(t *testing.T) {
-	name := DNSLabelName("challenge", strings.Repeat("verify-env-", 12))
+	name := DNSLabelName("scenario", strings.Repeat("verify-env-", 12))
 	if len(name) > 63 {
 		t.Fatalf("DNSLabelName() length = %d, want <= 63: %q", len(name), name)
 	}

@@ -35,7 +35,7 @@ function navigateMobile(target: "catalog" | "mySpace") {
     <nav v-if="showNavigation" class="app-global-nav" aria-label="Primary">
       <button :class="{ active: active === 'catalog' }" :aria-current="active === 'catalog' ? 'page' : undefined" type="button" @click="emit('catalog')">Catalog</button>
       <button :class="{ active: active === 'my-space' }" :aria-current="active === 'my-space' ? 'page' : undefined" type="button" @click="emit('mySpace')">My space</button>
-      <button :class="{ active: active === 'studio' }" :aria-current="active === 'studio' ? 'page' : undefined" type="button" @click="emit('studio')">Challenge studio</button>
+      <button :class="{ active: active === 'studio' }" :aria-current="active === 'studio' ? 'page' : undefined" type="button" @click="emit('studio')">Scenario studio</button>
     </nav>
     <nav v-if="showNavigation && mobileNavigationOpen" class="app-mobile-nav" aria-label="Mobile primary">
       <button :class="{ active: active === 'catalog' }" :aria-current="active === 'catalog' ? 'page' : undefined" type="button" @click="navigateMobile('catalog')">Catalog</button>

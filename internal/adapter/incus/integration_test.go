@@ -77,7 +77,7 @@ func TestNodeImageAndEnvironmentAgainstIncus(t *testing.T) {
 		WorkflowID: runID, CandidateRevisionID: runID,
 		Attempt: 1, Revision: revision,
 		Files: []incus.ImageFile{
-			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
+			{Path: "scenario.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/bash\nset -euo pipefail\nprintf ready >/var/lib/breakfix-node-ready\n"), Mode: 0o644},
 			{Path: "nodes/node/answer.sh", Content: []byte("#!/bin/sh\nset -eu\n"), Mode: 0o755},
 			{Path: "nodes/node/checks.sh", Content: []byte("#!/bin/sh\nprintf '{\"results\":[]}\\n'\n"), Mode: 0o755},
@@ -176,7 +176,7 @@ func TestNodeBuildSlotsAreCandidateScopedAgainstIncus(t *testing.T) {
 		WorkflowID: workflowID, CandidateRevisionID: workflowID + "-first",
 		Attempt: 1, Revision: "sha256:first-" + workflowID,
 		Files: []incus.ImageFile{
-			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
+			{Path: "scenario.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf first >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
 		},
 	})
@@ -189,7 +189,7 @@ func TestNodeBuildSlotsAreCandidateScopedAgainstIncus(t *testing.T) {
 		WorkflowID: workflowID, CandidateRevisionID: workflowID + "-second",
 		Attempt: 1, Revision: "sha256:second-" + workflowID,
 		Files: []incus.ImageFile{
-			{Path: "challenge.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
+			{Path: "scenario.yaml", Content: []byte("runtime: node\n"), Mode: 0o644},
 			{Path: "nodes/node/generate.sh", Content: []byte("#!/bin/sh\nprintf second >/var/lib/breakfix-build-slot\n"), Mode: 0o755},
 		},
 	})
@@ -310,7 +310,7 @@ func expectNodeCheck(t *testing.T, ctx context.Context, client *incus.Client, re
 	t.Helper()
 	result, err := client.ExecNode(ctx, incus.ExecNodeRequest{
 		EnvironmentUID: request.EnvironmentUID, Revision: request.Revision, Identity: request.Identity, LogicalName: node,
-		Command: []string{"/bin/bash", filepath.ToSlash(filepath.Join("/opt/breakfix/challenge", "nodes", node, "checks.sh"))},
+		Command: []string{"/bin/bash", filepath.ToSlash(filepath.Join("/opt/breakfix/scenario", "nodes", node, "checks.sh"))},
 	})
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("execute %s checkpoint on %s: result=%+v err=%v", checkID, node, result, err)
@@ -351,7 +351,7 @@ func executeNodeAnswers(t *testing.T, ctx context.Context, client *incus.Client,
 			defer group.Done()
 			result, err := client.ExecNode(ctx, incus.ExecNodeRequest{
 				EnvironmentUID: request.EnvironmentUID, Revision: request.Revision, Identity: request.Identity, LogicalName: node,
-				Command: []string{"/bin/bash", filepath.ToSlash(filepath.Join("/opt/breakfix/challenge", "nodes", node, "answer.sh"))},
+				Command: []string{"/bin/bash", filepath.ToSlash(filepath.Join("/opt/breakfix/scenario", "nodes", node, "answer.sh"))},
 			})
 			results <- struct {
 				node   string

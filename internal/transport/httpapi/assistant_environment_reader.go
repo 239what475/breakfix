@@ -10,7 +10,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 )
 
 type environmentAssistantReader struct {
@@ -22,8 +22,8 @@ type environmentAssistantReader struct {
 	node           NodeTerminalProvider
 	getEnvironment func(context.Context, string, string) (*activeEnvironment, error)
 	env            *activeEnvironment
-	entry          *challenge.Entry
-	content        *challenge.Content
+	entry          *scenario.Entry
+	content        *scenario.Content
 }
 
 func (r *environmentAssistantReader) TerminalScrollback(ctx context.Context, node, window string, offset, lines int) (assistant.Scrollback, error) {
@@ -31,9 +31,9 @@ func (r *environmentAssistantReader) TerminalScrollback(ctx context.Context, nod
 	var total int
 	var err error
 	switch r.env.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		values, total, err = r.captureNodeTMUXPane(ctx, node, window, offset, lines)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		if node != "" {
 			return assistant.Scrollback{}, errors.New("k8s environment has no logical node selector")
 		}
@@ -63,9 +63,9 @@ func (r *environmentAssistantReader) ListEnvironmentFiles(ctx context.Context, n
 	var total int
 	var err error
 	switch r.env.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		entries, total, err = r.listNodeFiles(ctx, node, path, offset, limit)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		if node != "" {
 			return assistant.EnvironmentFiles{}, errors.New("k8s environment has no logical node selector")
 		}
@@ -84,9 +84,9 @@ func (r *environmentAssistantReader) ReadEnvironmentFile(ctx context.Context, no
 	var size int64
 	var err error
 	switch r.env.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		content, size, err = r.readNodeFile(ctx, node, path, offset, maxBytes)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		if node != "" {
 			return assistant.EnvironmentFile{}, errors.New("k8s environment has no logical node selector")
 		}

@@ -1,4 +1,4 @@
-// Package authoring owns the human-reviewable lifecycle of generated challenges.
+// Package authoring owns the human-reviewable lifecycle of generated scenarios.
 package authoring
 
 import (
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 )
 
 var (
@@ -43,7 +43,7 @@ type Checkpoint struct {
 }
 
 // Plan is the author-visible, source-of-truth proposal. It intentionally keeps
-// checkpoint details as Markdown rather than forcing every challenge into one
+// checkpoint details as Markdown rather than forcing every scenario into one
 // fixed technical template.
 type Plan struct {
 	Metadata    Metadata     `json:"metadata"`
@@ -51,11 +51,11 @@ type Plan struct {
 	Checkpoints []Checkpoint `json:"checkpoints"`
 }
 
-// VerifiedChallenge is a read-only projection of the actual, verified
-// challenge.yaml. It is intentionally distinct from Plan: the latter is the
+// VerifiedScenario is a read-only projection of the actual, verified
+// scenario.yaml. It is intentionally distinct from Plan: the latter is the
 // author's natural-language intent, while this value is what the generator
 // really produced and the candidate pipeline verified.
-type VerifiedChallenge struct {
+type VerifiedScenario struct {
 	Metadata    Metadata             `json:"metadata"`
 	Checkpoints []VerifiedCheckpoint `json:"checkpoints"`
 }
@@ -81,7 +81,7 @@ func (p Plan) ValidateForGeneration() error {
 	if strings.TrimSpace(metadata.Description) == "" {
 		return errors.New("题目简介不能为空")
 	}
-	if runtime := challenge.NormalizeRuntime(metadata.Runtime); runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s {
+	if runtime := scenario.NormalizeRuntime(metadata.Runtime); runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s {
 		return errors.New("运行时必须是 node 或 k8s")
 	}
 	if strings.TrimSpace(p.Overview) == "" {
@@ -258,8 +258,8 @@ type Session struct {
 	State                        SessionState `json:"state"`
 	CurrentRevision              int64        `json:"current_revision"`
 	VisibleRevision              int64        `json:"visible_revision"`
-	PublishChallengeID           string       `json:"publish_challenge_id,omitempty"`
-	RevisionChallengeID          string       `json:"revision_challenge_id,omitempty"`
+	PublishScenarioID            string       `json:"publish_scenario_id,omitempty"`
+	RevisionScenarioID           string       `json:"revision_scenario_id,omitempty"`
 	RevisionBaseActiveRevisionID string       `json:"revision_base_active_revision_id,omitempty"`
 	LastError                    string       `json:"last_error,omitempty"`
 	CreatedAt                    time.Time    `json:"created_at"`

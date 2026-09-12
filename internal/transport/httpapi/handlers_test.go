@@ -24,25 +24,25 @@ import (
 
 func TestReadinessUsesMaterializedCatalogIntegrity(t *testing.T) {
 	root := t.TempDir()
-	writeTestChallenge(t, root)
+	writeTestScenario(t, root)
 	handler := newHandlerForTest(t, testpostgres.New(t), nil, config.Config{DataDir: root})
 	if err := handler.validateReadiness(context.Background()); err != nil {
 		t.Fatalf("valid catalog readiness = %v", err)
 	}
-	writeTestFile(t, filepath.Join(root, "challenges", "demo", testPublishedChallengeRevisionID, "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
+	writeTestFile(t, filepath.Join(root, "scenarios", "demo", testPublishedScenarioRevisionID, "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
 	if err := handler.validateReadiness(context.Background()); err == nil || !errors.Is(err, appcatalog.ErrMaterializedIntegrity) {
 		t.Fatalf("changed catalog readiness error = %v", err)
 	}
 }
 
-func TestGetChallengeProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
+func TestGetScenarioProgressRejectsRequestsWithoutAnEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
-	handler.GetChallengeProgress(ctx, "demo")
+	handler.GetScenarioProgress(ctx, "demo")
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 without environment, got %d: %s", recorder.Code, recorder.Body.String())
@@ -62,39 +62,39 @@ func TestAssistantWindowsIncludeOnlyValidatedWorkspaceTabs(t *testing.T) {
 	}
 }
 
-func TestGetChallengeProgressRejectsNonReadyEnvironment(t *testing.T) {
+func TestGetScenarioProgressRejectsNonReadyEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
 		testNodeEnvironment("environment-provisioning", breakfixv1.EnvironmentProvisioning, nil),
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
-	handler.GetChallengeProgress(ctx, "demo")
+	handler.GetScenarioProgress(ctx, "demo")
 
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for non-ready environment, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestGetChallengeProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
+func TestGetScenarioProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
 	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
 		testNodeEnvironment("environment-check-failed", breakfixv1.EnvironmentReady, &breakfixv1.CheckpointStatus{Error: "checkpoint runner exited with 1"}),
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
-	handler.GetChallengeProgress(ctx, "demo")
+	handler.GetScenarioProgress(ctx, "demo")
 
 	if recorder.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 for failed checkpoint runner, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
+func TestGetScenarioProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	firstPassedAt := metav1.NewTime(time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC))
 	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
 		testNodeEnvironment("environment-completed", breakfixv1.EnvironmentCompleted, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
@@ -103,15 +103,15 @@ func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
 	ctx.Set("user_id", "u-demo")
 
-	handler.GetChallengeProgress(ctx, "demo")
+	handler.GetScenarioProgress(ctx, "demo")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var progress api.ChallengeProgress
+	var progress api.ScenarioProgress
 	if err := json.Unmarshal(recorder.Body.Bytes(), &progress); err != nil {
 		t.Fatal(err)
 	}
@@ -120,32 +120,32 @@ func TestGetChallengeProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
 	}
 }
 
-func TestGetChallengeProgressRequiresLogin(t *testing.T) {
+func TestGetScenarioProgressRequiresLogin(t *testing.T) {
 	handler := newHandlerForTest(t, nil, nil, config.Config{})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/progress", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/progress", nil)
 
-	handler.GetChallengeProgress(ctx, "demo")
+	handler.GetScenarioProgress(ctx, "demo")
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without login, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testing.T) {
+func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	root := t.TempDir()
-	challengesDir := filepath.Join(root, "challenges")
-	challengeDir := filepath.Join(challengesDir, "demo", testPublishedChallengeRevisionID)
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
-	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "# Problem\nRepair it.\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
-	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "Look at the service.\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	scenariosDir := filepath.Join(root, "scenarios")
+	scenarioDir := filepath.Join(scenariosDir, "demo", testPublishedScenarioRevisionID)
+	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), nodeTestManifest("Demo"))
+	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "# Problem\nRepair it.\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "Look at the service.\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -154,15 +154,15 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	handler := newHandlerForTest(t, database, nil, config.Config{DataDir: root})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges/demo/content", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios/demo/content", nil)
 	ctx.Set("user_id", "u-demo")
 
-	handler.GetChallengeContent(ctx, "demo")
+	handler.GetScenarioContent(ctx, "demo")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var content api.ChallengeContent
+	var content api.ScenarioContent
 	if err := json.Unmarshal(recorder.Body.Bytes(), &content); err != nil {
 		t.Fatal(err)
 	}
@@ -172,51 +172,51 @@ func TestGetChallengeContentReturnsPublishedAssetsForAuthenticatedUser(t *testin
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
-	if content.ScenarioType != api.ChallengeContentScenarioTypeOperationsScenario || len(content.ScenarioTags) != 0 {
+	if content.ScenarioType != api.ScenarioContentScenarioTypeOperationsScenario || len(content.ScenarioTags) != 0 {
 		t.Fatalf("scenario content projection = %#v", content)
 	}
 }
 
-func TestListChallengesIncludesRuntime(t *testing.T) {
+func TestListScenariosIncludesRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	root := t.TempDir()
-	challengesDir := filepath.Join(root, "challenges")
-	challengeDir := filepath.Join(challengesDir, "demo", testPublishedChallengeRevisionID)
-	if err := os.MkdirAll(challengeDir, 0755); err != nil {
+	scenariosDir := filepath.Join(root, "scenarios")
+	scenarioDir := filepath.Join(scenariosDir, "demo", testPublishedScenarioRevisionID)
+	if err := os.MkdirAll(scenarioDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), "id: demo\nrevision_id: "+testPublishedChallengeRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
-	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
-	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(challengeDir, "k8s", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "k8s", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), "id: demo\nrevision_id: "+testPublishedScenarioRevisionID+"\nsource_slug: demo\ntitle: Demo\nruntime: k8s\ndescription: demo\nimage: registry.example/demo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "problem\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
 	cfg := config.Config{DataDir: root}
 	database := testpostgres.New(t)
 	handler := newHandlerForTest(t, database, nil, cfg)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
 
-	handler.ListChallenges(c)
+	handler.ListScenarios(c)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp api.ChallengeList
+	var resp api.ScenarioList
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Challenges) != 1 {
-		t.Fatalf("expected 1 challenge, got %#v", resp.Challenges)
+	if len(resp.Scenarios) != 1 {
+		t.Fatalf("expected 1 scenario, got %#v", resp.Scenarios)
 	}
-	got := resp.Challenges[0]
-	if got.Runtime != api.ChallengeSummaryRuntimeK8s {
+	got := resp.Scenarios[0]
+	if got.Runtime != api.ScenarioSummaryRuntimeK8s {
 		t.Fatalf("expected runtime k8s, got %#v", got.Runtime)
 	}
 	if !got.PublishedAt.Equal(time.Date(2026, time.July, 24, 9, 0, 0, 0, time.UTC)) {
@@ -225,38 +225,38 @@ func TestListChallengesIncludesRuntime(t *testing.T) {
 	if got.Active != nil || got.Solved != nil || got.Progress != nil {
 		t.Fatalf("guest catalog exposed personal state: %#v", got)
 	}
-	if got.ScenarioType != api.ChallengeSummaryScenarioTypeOperationsScenario || len(got.ScenarioTags) != 0 {
+	if got.ScenarioType != api.ScenarioSummaryScenarioTypeOperationsScenario || len(got.ScenarioTags) != 0 {
 		t.Fatalf("scenario summary = %#v", got)
 	}
 }
 
-func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) {
+func TestListScenariosMergesCurrentProgressWithDurableCompletion(t *testing.T) {
 	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
 		testNodeEnvironment("environment-active", breakfixv1.EnvironmentReady, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
 			ID: "complete", Passed: true, Summary: "done",
 		}}}),
 	})
-	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", testPublishedChallengeRevisionID, "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordScenarioCompletion(context.Background(), "u-demo", "demo", testPublishedScenarioRevisionID, "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
 	c.Set("user_id", "u-demo")
-	handler.ListChallenges(c)
+	handler.ListScenarios(c)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var response api.ChallengeList
+	var response api.ScenarioList
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Challenges) != 1 {
-		t.Fatalf("unexpected challenges: %#v", response.Challenges)
+	if len(response.Scenarios) != 1 {
+		t.Fatalf("unexpected scenarios: %#v", response.Scenarios)
 	}
-	got := response.Challenges[0]
+	got := response.Scenarios[0]
 	if got.Active == nil || !*got.Active || got.Solved == nil || !*got.Solved {
 		t.Fatalf("unexpected user state: %#v", got)
 	}
@@ -265,7 +265,7 @@ func TestListChallengesMergesCurrentProgressWithDurableCompletion(t *testing.T) 
 	}
 }
 
-func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T) {
+func TestListScenariosShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T) {
 	handler := newProgressTestHandler(t, []breakfixv1.NodeEnvironment{
 		testNodeEnvironment("environment-completed", breakfixv1.EnvironmentCompleted, &breakfixv1.CheckpointStatus{Results: []breakfixv1.CheckpointResultStatus{{
 			ID: "complete", Passed: true, Summary: "done",
@@ -274,46 +274,46 @@ func TestListChallengesShowsCompletedEnvironmentBeforeSQLProjection(t *testing.T
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
 	ctx.Set("user_id", "u-demo")
-	handler.ListChallenges(ctx)
+	handler.ListScenarios(ctx)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	var response api.ChallengeList
+	var response api.ScenarioList
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Challenges) != 1 {
-		t.Fatalf("unexpected challenges: %#v", response.Challenges)
+	if len(response.Scenarios) != 1 {
+		t.Fatalf("unexpected scenarios: %#v", response.Scenarios)
 	}
-	got := response.Challenges[0]
+	got := response.Scenarios[0]
 	if got.Solved == nil || !*got.Solved || got.Active == nil || *got.Active || got.Progress != nil {
 		t.Fatalf("completed environment was not reflected immediately: %#v", got)
 	}
 }
 
-func TestListChallengesKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
+func TestListScenariosKeepsCompletionAfterEnvironmentIsGone(t *testing.T) {
 	handler := newProgressTestHandler(t, nil)
-	if err := handler.db.Environment.RecordChallengeCompletion(context.Background(), "u-demo", "demo", testPublishedChallengeRevisionID, "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
+	if err := handler.db.Environment.RecordScenarioCompletion(context.Background(), "u-demo", "demo", testPublishedScenarioRevisionID, "completed-environment", time.Date(2026, time.July, 24, 10, 45, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/challenges", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
 	c.Set("user_id", "u-demo")
-	handler.ListChallenges(c)
+	handler.ListScenarios(c)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var response api.ChallengeList
+	var response api.ScenarioList
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	got := response.Challenges[0]
+	got := response.Scenarios[0]
 	if got.Solved == nil || !*got.Solved || got.Active == nil || *got.Active || got.Progress != nil {
 		t.Fatalf("unexpected durable completion state: %#v", got)
 	}
@@ -332,7 +332,7 @@ func writeTestFile(t *testing.T, path, content string) {
 func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironment) *Handler {
 	t.Helper()
 	root := t.TempDir()
-	writeTestChallenge(t, root)
+	writeTestScenario(t, root)
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -376,30 +376,30 @@ func newProgressTestHandler(t *testing.T, environments []breakfixv1.NodeEnvironm
 	return newHandlerForTest(t, database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
 }
 
-func writeTestChallenge(t *testing.T, root string) {
+func writeTestScenario(t *testing.T, root string) {
 	t.Helper()
-	challengeDir := filepath.Join(root, "challenges", "demo", testPublishedChallengeRevisionID)
-	writeTestFile(t, filepath.Join(challengeDir, "challenge.yaml"), nodeTestManifest("Demo"))
-	writeTestFile(t, filepath.Join(challengeDir, "problem.md"), "problem\n")
-	writeTestFile(t, filepath.Join(challengeDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
-	writeTestFile(t, filepath.Join(challengeDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(challengeDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	scenarioDir := filepath.Join(root, "scenarios", "demo", testPublishedScenarioRevisionID)
+	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), nodeTestManifest("Demo"))
+	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "problem\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
 }
 
-const testPublishedChallengeRevisionID = "chrev-aaaaaaaaaaaaaaaa"
+const testPublishedScenarioRevisionID = "chrev-aaaaaaaaaaaaaaaa"
 
 func nodeTestManifest(title string) string {
-	return "id: demo\nrevision_id: " + testPublishedChallengeRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
+	return "id: demo\nrevision_id: " + testPublishedScenarioRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
 func testNodeEnvironment(name string, phase breakfixv1.EnvironmentPhase, checkpoints *breakfixv1.CheckpointStatus) breakfixv1.NodeEnvironment {
 	return breakfixv1.NodeEnvironment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{"breakfix.dev/user": "u-demo", "breakfix.dev/challenge": "demo"}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{"breakfix.dev/user": "u-demo", "breakfix.dev/scenario": "demo"}},
 		Spec: breakfixv1.NodeEnvironmentSpec{Environment: breakfixv1.EnvironmentSpec{
 			Purpose: breakfixv1.EnvironmentPurposeLearning,
-			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "demo", Revision: testPublishedChallengeRevisionID},
+			Source:  breakfixv1.EnvironmentSourceSpec{Kind: breakfixv1.EnvironmentSourcePublished, Ref: "demo", Revision: testPublishedScenarioRevisionID},
 			UserRef: "u-demo",
 		}},
 		Status: breakfixv1.NodeEnvironmentStatus{Environment: breakfixv1.EnvironmentStatus{Phase: phase, Checkpoints: checkpoints}},

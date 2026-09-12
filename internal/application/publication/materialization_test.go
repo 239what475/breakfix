@@ -41,7 +41,7 @@ func TestMaterializationRecoveryRetainsHistoryAndPendingPublications(t *testing.
 		t.Fatal(err)
 	}
 
-	reconciler, err := NewMaterializationReconciler(materializationStoreStub{paths: retained}, MaterializationReconcilerConfig{ChallengesDir: root})
+	reconciler, err := NewMaterializationReconciler(materializationStoreStub{paths: retained}, MaterializationReconcilerConfig{ScenariosDir: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMaterializationRecoveryFailsClosedWhenRetentionCannotBeDerived(t *testi
 	orphan := "must-remain/chrev-aaaaaaaa"
 	writeMaterialization(t, root, orphan)
 
-	reconciler, err := NewMaterializationReconciler(materializationStoreStub{err: errors.New("database unavailable")}, MaterializationReconcilerConfig{ChallengesDir: root})
+	reconciler, err := NewMaterializationReconciler(materializationStoreStub{err: errors.New("database unavailable")}, MaterializationReconcilerConfig{ScenariosDir: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestMaterializationPeriodicPassDoesNotRemoveFreshStaging(t *testing.T) {
 	}
 
 	reconciler, err := NewMaterializationReconciler(materializationStoreStub{}, MaterializationReconcilerConfig{
-		ChallengesDir: root, StagingMaxAge: 10 * time.Minute,
+		ScenariosDir: root, StagingMaxAge: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestMaterializationRecoveryRejectsInvalidDatabasePathBeforeDeletion(t *test
 	orphan := "must-remain/chrev-bbbbbbbb"
 	writeMaterialization(t, root, orphan)
 
-	reconciler, err := NewMaterializationReconciler(materializationStoreStub{paths: []string{"../outside"}}, MaterializationReconcilerConfig{ChallengesDir: root})
+	reconciler, err := NewMaterializationReconciler(materializationStoreStub{paths: []string{"../outside"}}, MaterializationReconcilerConfig{ScenariosDir: root})
 	if err != nil {
 		t.Fatal(err)
 	}

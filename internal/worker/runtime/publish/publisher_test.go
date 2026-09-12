@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 )
@@ -77,7 +77,7 @@ func publishTestWork() domainexecution.Work {
 	return domainexecution.Work{
 		OwnerID: "workflow-publish-test", CandidateID: "candidate-publish-test", ArchiveSHA256: publishTestDigest,
 		Snapshot: domainexecution.Snapshot{
-			Runtime: challenge.RuntimeK8s, Checkpoints: []domainexecution.CheckpointSnapshot{{ID: "ready"}},
+			Runtime: scenario.RuntimeK8s, Checkpoints: []domainexecution.CheckpointSnapshot{{ID: "ready"}},
 			K8s: &domainexecution.K8sRuntimeSnapshot{
 				BaseImageDigest: "registry.example/base@" + publishTestDigest, ProfileRevision: "profile-v1", Version: "v1", ManagementTerminalImage: "registry.example/terminal@" + publishTestDigest,
 				Resources: domainexecution.K8sResources{
@@ -92,7 +92,7 @@ func publishTestWork() domainexecution.Work {
 			},
 		},
 		Attempt: 1, DeadlineAt: time.Now().Add(time.Hour),
-		Build: &domainexecution.BuildOutput{Runtime: challenge.RuntimeK8s, OCIReference: "registry.example/build@" + publishTestDigest},
+		Build: &domainexecution.BuildOutput{Runtime: scenario.RuntimeK8s, OCIReference: "registry.example/build@" + publishTestDigest},
 	}
 }
 

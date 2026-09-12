@@ -16,7 +16,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/checkpoint"
 	domainexecution "github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	challengeRoot            = "/opt/breakfix/challenge"
+	scenarioRoot             = "/opt/breakfix/scenario"
 	verificationOutputLimit  = 256 * 1024
 	verificationPollInterval = time.Second
 	cleanupTimeout           = 10 * time.Minute
@@ -170,7 +170,7 @@ func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.W
 		},
 	}
 	switch work.Snapshot.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		snapshot := work.Snapshot.Node
 		if snapshot == nil {
 			return nil, errors.New("node candidate has no runtime snapshot")
@@ -200,9 +200,9 @@ func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.W
 		if created.UID == "" {
 			return nil, errors.New("created Node verification environment has no UID")
 		}
-		return &environmentRef{runtime: challenge.RuntimeNode, name: name, uid: created.UID, node: created}, nil
+		return &environmentRef{runtime: scenario.RuntimeNode, name: name, uid: created.UID, node: created}, nil
 
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		snapshot := work.Snapshot.K8s
 		if snapshot == nil {
 			return nil, errors.New("K8s candidate has no runtime snapshot")
@@ -236,7 +236,7 @@ func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.W
 		if created.UID == "" {
 			return nil, errors.New("created K8s verification environment has no UID")
 		}
-		return &environmentRef{runtime: challenge.RuntimeK8s, name: name, uid: created.UID, vk8s: created}, nil
+		return &environmentRef{runtime: scenario.RuntimeK8s, name: name, uid: created.UID, vk8s: created}, nil
 	default:
 		return nil, errors.New("candidate runtime is unsupported")
 	}
@@ -245,7 +245,7 @@ func (e *Executor) createEnvironment(ctx context.Context, work domainexecution.W
 func (e *Executor) waitReady(ctx context.Context, ref environmentRef) (environmentRef, error) {
 	for {
 		switch ref.runtime {
-		case challenge.RuntimeNode:
+		case scenario.RuntimeNode:
 			environment, err := e.environments.GetNodeEnvironment(ctx, e.namespace, ref.name)
 			if err != nil {
 				return ref, err
@@ -260,7 +260,7 @@ func (e *Executor) waitReady(ctx context.Context, ref environmentRef) (environme
 			if environment.Status.Environment.Phase == breakfixv1.EnvironmentFailed {
 				return ref, environmentFailure(environment.Status.Environment.Failure)
 			}
-		case challenge.RuntimeK8s:
+		case scenario.RuntimeK8s:
 			environment, err := e.environments.GetVK8sEnvironment(ctx, e.namespace, ref.name)
 			if err != nil {
 				return ref, err
@@ -303,9 +303,9 @@ func environmentFailure(failure *breakfixv1.EnvironmentFailureStatus) error {
 
 func (e *Executor) runVerification(ctx context.Context, work domainexecution.Work, ref environmentRef) (domainexecution.VerificationReport, error) {
 	switch ref.runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		return e.verifyNode(ctx, work, ref)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		return e.verifyK8s(ctx, work, ref)
 	default:
 		return domainexecution.VerificationReport{}, errors.New("candidate runtime is unsupported")
@@ -327,7 +327,7 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 	answers, err := executeParallel(nodes, func(node domainexecution.NodeSnapshot) (domainexecution.ExecutionResult, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
-			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "answer.sh")},
+			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(scenarioRoot, "nodes", node.Name, "answer.sh")},
 		})
 		return domainexecution.ExecutionResult{Location: node.Name, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, execErr
 	})
@@ -353,7 +353,7 @@ func (e *Executor) verifyNode(ctx context.Context, work domainexecution.Work, re
 	runs, err := executeParallel(checkNodes, func(node domainexecution.NodeSnapshot) (checkRun, error) {
 		result, execErr := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(ref.uid), Revision: work.ArchiveSHA256, Identity: identity,
-			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(challengeRoot, "nodes", node.Name, "checks.sh")},
+			LogicalName: node.Name, Command: []string{"/bin/bash", path.Join(scenarioRoot, "nodes", node.Name, "checks.sh")},
 		})
 		if execErr != nil {
 			return checkRun{}, execErr
@@ -390,7 +390,7 @@ func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref
 		return domainexecution.VerificationReport{}, errors.New("ready K8s verification environment has no terminal identity")
 	}
 	runtime := ref.vk8s.Status.Runtime
-	answer, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(challengeRoot, "k8s", "answer.sh"))
+	answer, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "answer.sh"))
 	if err != nil {
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s answer: %w", err)
 	}
@@ -399,7 +399,7 @@ func (e *Executor) verifyK8s(ctx context.Context, work domainexecution.Work, ref
 		report := failedReport(work.Snapshot, answers, "K8s answer script failed")
 		return report, domainexecution.NewArtifactErrorWithReport("ANSWER_FAILED", report.Summary, report)
 	}
-	check, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(challengeRoot, "k8s", "checks.sh"))
+	check, err := e.environments.ExecInPodStreamsContext(ctx, runtime.Namespace, runtime.TerminalPodName, verificationOutputLimit, "/bin/bash", path.Join(scenarioRoot, "k8s", "checks.sh"))
 	if err != nil {
 		return domainexecution.VerificationReport{}, fmt.Errorf("execute K8s checkpoints: %w", err)
 	}
@@ -559,7 +559,7 @@ func (e *Executor) removePreviousEnvironment(ctx context.Context, work domainexe
 
 func (e *Executor) findEnvironment(ctx context.Context, runtime, name string) (*environmentRef, error) {
 	switch runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		environment, err := e.environments.GetNodeEnvironment(ctx, e.namespace, name)
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -568,7 +568,7 @@ func (e *Executor) findEnvironment(ctx context.Context, runtime, name string) (*
 			return nil, err
 		}
 		return &environmentRef{runtime: runtime, name: name, uid: environment.UID, node: environment}, nil
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		environment, err := e.environments.GetVK8sEnvironment(ctx, e.namespace, name)
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -588,9 +588,9 @@ func (e *Executor) deleteAndWait(ctx context.Context, ref environmentRef) error 
 	}
 	var err error
 	switch ref.runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		err = e.environments.DeleteNodeEnvironmentWithUID(ctx, e.namespace, ref.name, ref.uid)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		err = e.environments.DeleteVK8sEnvironmentWithUID(ctx, e.namespace, ref.name, ref.uid)
 	default:
 		return errors.New("verification environment has unsupported runtime")

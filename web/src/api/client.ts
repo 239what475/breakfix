@@ -6,14 +6,14 @@ import type {
 	AssistantMessageRequest,
 	AssistantStreamComplete,
 	AssistantStreamEvent,
-	ChallengeContent,
+	ScenarioContent,
 	GeneratorGeneration,
 	MySpace,
 	MySpaceLearningPage,
 } from "./types";
 import type {
-	ChallengeList,
-	ChallengeProgress,
+	ScenarioList,
+	ScenarioProgress,
 	CloseTerminalWindowResponse,
 	GetMySpaceLearningData,
 	LoginResponse,
@@ -153,7 +153,7 @@ export async function streamAssistantMessage(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const currentToken = token();
   if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
-  const response = await fetch(`${base}/challenges/${id}/assistant/messages`, {
+  const response = await fetch(`${base}/scenarios/${id}/assistant/messages`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -219,8 +219,8 @@ export const api = {
       "/auth/login",
       { username, password, totp_code },
     ),
-  listChallenges: () =>
-		request<ChallengeList>("GET", "/challenges"),
+  listScenarios: () =>
+		request<ScenarioList>("GET", "/scenarios"),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });
@@ -229,38 +229,38 @@ export const api = {
 		if (runtime) query.set("runtime", runtime);
 		return request<MySpaceLearningPage>("GET", `/me/space/learning?${query.toString()}`);
 	},
-  getChallengeContent: (id: string) =>
-    request<ChallengeContent>("GET", `/challenges/${id}/content`),
-  getChallengeProgress: (id: string) =>
-		request<ChallengeProgress>(
+  getScenarioContent: (id: string) =>
+    request<ScenarioContent>("GET", `/scenarios/${id}/content`),
+  getScenarioProgress: (id: string) =>
+		request<ScenarioProgress>(
       "GET",
-      `/challenges/${id}/progress`,
+      `/scenarios/${id}/progress`,
     ),
-  getChallengeAssistant: (id: string) =>
-    request<AssistantConversation>("GET", `/challenges/${id}/assistant`),
-  startChallenge: (id: string) =>
-		request<StartResponse>("POST", `/challenges/${id}/start`),
-  resetChallenge: (id: string) =>
-		request<ResetResponse>("POST", `/challenges/${id}/reset`),
-  stopChallenge: (id: string) =>
-		request<StopResponse>("POST", `/challenges/${id}/stop`),
+  getScenarioAssistant: (id: string) =>
+    request<AssistantConversation>("GET", `/scenarios/${id}/assistant`),
+  startScenario: (id: string) =>
+		request<StartResponse>("POST", `/scenarios/${id}/start`),
+  resetScenario: (id: string) =>
+		request<ResetResponse>("POST", `/scenarios/${id}/reset`),
+  stopScenario: (id: string) =>
+		request<StopResponse>("POST", `/scenarios/${id}/stop`),
 	createTerminalTicket: (id: string, window: string, node?: string) =>
-		request<TerminalTicketResponse>("POST", `/challenges/${id}/terminal-ticket`, { window, node }),
+		request<TerminalTicketResponse>("POST", `/scenarios/${id}/terminal-ticket`, { window, node }),
   closeTerminalWindow: (id: string, window: string, node?: string) => {
 		const query = new URLSearchParams();
 		if (node) query.set("node", node);
 		const suffix = query.size ? `?${query.toString()}` : "";
 		return request<CloseTerminalWindowResponse>(
 			"DELETE",
-			`/challenges/${id}/terminals/${window}${suffix}`,
+			`/scenarios/${id}/terminals/${window}${suffix}`,
 		);
 	},
   createAuthoringSession: () =>
     request<AuthoringSession>("POST", "/authoring/sessions"),
-	createAuthoringChallengeRevision: (id: string) =>
-		request<AuthoringSession>("POST", `/authoring/challenges/${id}/revisions`),
-	deprecateAuthoringChallenge: async (id: string) => {
-		await request<unknown>("POST", `/authoring/challenges/${id}/deprecate`);
+	createAuthoringScenarioRevision: (id: string) =>
+		request<AuthoringSession>("POST", `/authoring/scenarios/${id}/revisions`),
+	deprecateAuthoringScenario: async (id: string) => {
+		await request<unknown>("POST", `/authoring/scenarios/${id}/deprecate`);
 	},
   getCurrentAuthoringSession: () =>
     request<AuthoringSession>("GET", "/authoring/sessions/current"),

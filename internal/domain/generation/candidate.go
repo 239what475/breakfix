@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	execution "github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -35,12 +35,12 @@ type VerificationReport = execution.VerificationReport
 type Publication struct {
 	CandidateRevisionID  string             `json:"candidate_revision_id"`
 	IntentRevision       int                `json:"intent_revision"`
-	ChallengeID          string             `json:"challenge_id,omitempty"`
-	ChallengeRevisionID  string             `json:"challenge_revision_id,omitempty"`
+	ScenarioID           string             `json:"scenario_id,omitempty"`
+	ScenarioRevisionID   string             `json:"scenario_revision_id,omitempty"`
 	BaseActiveRevisionID string             `json:"base_active_revision_id,omitempty"`
 	SourceSlug           string             `json:"source_slug,omitempty"`
 	TargetPath           string             `json:"target_path,omitempty"`
-	ChallengeTitle       string             `json:"challenge_title"`
+	ScenarioTitle        string             `json:"scenario_title"`
 	Runtime              string             `json:"runtime"`
 	ContentRevision      string             `json:"content_revision,omitempty"`
 	RequestedAt          time.Time          `json:"requested_at"`
@@ -57,7 +57,7 @@ type PublicationMetadata struct {
 }
 
 func (m PublicationMetadata) Validate() error {
-	if strings.TrimSpace(m.Title) == "" || (m.Runtime != challenge.RuntimeNode && m.Runtime != challenge.RuntimeK8s) {
+	if strings.TrimSpace(m.Title) == "" || (m.Runtime != scenario.RuntimeNode && m.Runtime != scenario.RuntimeK8s) {
 		return errors.New("publication metadata is invalid")
 	}
 	return nil
@@ -68,7 +68,7 @@ func (p Publication) ValidateIntent() error {
 		return err
 	}
 	if p.Artifact != nil || p.ContentRevision != "" {
-		return errors.New("challenge publication intent contains final publication data")
+		return errors.New("scenario publication intent contains final publication data")
 	}
 	return nil
 }
@@ -77,8 +77,8 @@ func (p Publication) ValidateFinal() error {
 	if err := p.validateCommon(); err != nil {
 		return err
 	}
-	if p.Artifact == nil || p.Artifact.Validate(p.Runtime) != nil || !challenge.ValidRevision(p.ContentRevision) {
-		return errors.New("final challenge publication is incomplete")
+	if p.Artifact == nil || p.Artifact.Validate(p.Runtime) != nil || !scenario.ValidRevision(p.ContentRevision) {
+		return errors.New("final scenario publication is incomplete")
 	}
 	return nil
 }
@@ -91,23 +91,23 @@ func (p Publication) ValidatePromotionResult() error {
 		return err
 	}
 	if p.Artifact == nil || p.Artifact.Validate(p.Runtime) != nil || p.ContentRevision != "" {
-		return errors.New("challenge publication promotion result is incomplete")
+		return errors.New("scenario publication promotion result is incomplete")
 	}
 	return nil
 }
 
 func (p Publication) validateCommon() error {
-	if strings.TrimSpace(p.CandidateRevisionID) == "" || strings.TrimSpace(p.ChallengeTitle) == "" ||
-		(p.Runtime != challenge.RuntimeNode && p.Runtime != challenge.RuntimeK8s) || p.IntentRevision < 1 ||
+	if strings.TrimSpace(p.CandidateRevisionID) == "" || strings.TrimSpace(p.ScenarioTitle) == "" ||
+		(p.Runtime != scenario.RuntimeNode && p.Runtime != scenario.RuntimeK8s) || p.IntentRevision < 1 ||
 		p.RequestedAt.IsZero() || p.StagingArtifact == nil || p.StagingArtifact.Validate(p.Runtime) != nil {
-		return errors.New("challenge publication intent is incomplete")
+		return errors.New("scenario publication intent is incomplete")
 	}
-	if !challenge.ValidID(p.ChallengeID) || !challenge.ValidRevisionID(p.ChallengeRevisionID) || !challenge.ValidSourceSlug(p.SourceSlug) ||
-		challenge.ValidateMaterializedPath(p.TargetPath, p.SourceSlug, p.ChallengeRevisionID) != nil {
-		return errors.New("allocated challenge publication intent is incomplete")
+	if !scenario.ValidID(p.ScenarioID) || !scenario.ValidRevisionID(p.ScenarioRevisionID) || !scenario.ValidSourceSlug(p.SourceSlug) ||
+		scenario.ValidateMaterializedPath(p.TargetPath, p.SourceSlug, p.ScenarioRevisionID) != nil {
+		return errors.New("allocated scenario publication intent is incomplete")
 	}
-	if p.BaseActiveRevisionID != "" && !challenge.ValidRevisionID(p.BaseActiveRevisionID) {
-		return errors.New("challenge publication base active revision is invalid")
+	if p.BaseActiveRevisionID != "" && !scenario.ValidRevisionID(p.BaseActiveRevisionID) {
+		return errors.New("scenario publication base active revision is invalid")
 	}
 	return nil
 }

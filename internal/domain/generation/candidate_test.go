@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 )
 
@@ -64,7 +64,7 @@ func TestVerificationReportRequiresExactAnswerCoverage(t *testing.T) {
 
 func TestVerificationReportRequiresManagementAnswerForK8s(t *testing.T) {
 	snapshot := ExecutionSnapshot{
-		Runtime:     challenge.RuntimeK8s,
+		Runtime:     scenario.RuntimeK8s,
 		Checkpoints: []CheckpointSnapshot{{ID: "deployment-ready"}},
 		K8s: &K8sRuntimeSnapshot{
 			BaseImageDigest:         "registry.example.com/base@sha256:" + strings.Repeat("a", 64),
@@ -99,7 +99,7 @@ func TestVerificationReportRequiresManagementAnswerForK8s(t *testing.T) {
 
 func validNodeExecutionSnapshot() ExecutionSnapshot {
 	return ExecutionSnapshot{
-		Runtime:     challenge.RuntimeNode,
+		Runtime:     scenario.RuntimeNode,
 		Checkpoints: []CheckpointSnapshot{{ID: "service-ready", Node: "client"}},
 		Node: &NodeRuntimeSnapshot{
 			BaseImageFingerprint:  strings.Repeat("a", 64),

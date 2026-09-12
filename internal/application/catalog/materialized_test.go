@@ -9,21 +9,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
 func TestCatalogIntegrityFailsClosedForMissingOrChangedActiveSource(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(t *testing.T, root string, entry challenge.Entry)
+		mutate func(t *testing.T, root string, entry scenario.Entry)
 		want   string
 	}{
 		{
 			name: "missing active source", want: "referenced materialized source is missing",
-			mutate: func(t *testing.T, root string, entry challenge.Entry) {
+			mutate: func(t *testing.T, root string, entry scenario.Entry) {
 				t.Helper()
 				if err := os.RemoveAll(filepath.Join(root, entry.SourceSlug)); err != nil {
 					t.Fatal(err)
@@ -32,7 +32,7 @@ func TestCatalogIntegrityFailsClosedForMissingOrChangedActiveSource(t *testing.T
 		},
 		{
 			name: "changed active source", want: "materialized source does not match",
-			mutate: func(t *testing.T, root string, entry challenge.Entry) {
+			mutate: func(t *testing.T, root string, entry scenario.Entry) {
 				t.Helper()
 				writeCatalogFile(t, filepath.Join(root, entry.SourceSlug, entry.RevisionID, "solution.md"), []byte("<!-- checkpoint: cleanup-script-ready -->\nchanged\n"), 0o644)
 			},
@@ -56,7 +56,7 @@ func TestCatalogReadsOnlyActiveLifecycleRevisions(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeCatalogFile(t, filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb", "challenge.yaml"), []byte("not a challenge"), 0o600)
+	writeCatalogFile(t, filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb", "scenario.yaml"), []byte("not a scenario"), 0o600)
 
 	visible, err := service.List(context.Background())
 	if err != nil || len(visible) != 1 {
@@ -72,21 +72,21 @@ func TestCatalogReadsOnlyActiveLifecycleRevisions(t *testing.T) {
 	}
 }
 
-func TestHistoricalEntryDoesNotFollowActiveChallengePointer(t *testing.T) {
+func TestHistoricalEntryDoesNotFollowActiveScenarioPointer(t *testing.T) {
 	_, entry, root, _ := newMaterializedCatalog(t)
 	now := time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC)
 	lifecycle := &staticLifecycleStore{
-		stable: challengedomain.Challenge{
-			ID: entry.ID, SourceKind: challengedomain.SourceAuthoring, SourceRef: "author-session", OwnerUserID: "author",
-			State: challengedomain.StateDeprecated, ActiveRevisionID: "chrev-bbbbbbbbbbbbbbbb", SourceSlug: entry.SourceSlug,
+		stable: scenariodomain.Scenario{
+			ID: entry.ID, SourceKind: scenariodomain.SourceAuthoring, SourceRef: "author-session", OwnerUserID: "author",
+			State: scenariodomain.StateDeprecated, ActiveRevisionID: "chrev-bbbbbbbbbbbbbbbb", SourceSlug: entry.SourceSlug,
 			CreatedAt: now, UpdatedAt: now,
 		},
-		revision: challengedomain.Revision{
-			ID: entry.RevisionID, ChallengeID: entry.ID, SourceKind: challengedomain.SourceAuthoring, SourceRef: "author-session", SourceRevisionID: "1",
+		revision: scenariodomain.Revision{
+			ID: entry.RevisionID, ScenarioID: entry.ID, SourceKind: scenariodomain.SourceAuthoring, SourceRef: "author-session", SourceRevisionID: "1",
 			Title: entry.Title, Runtime: entry.Runtime, Type: entry.Type, Tags: entry.Tags, ContentRevision: entry.ContentRevision, SourceSlug: entry.SourceSlug,
-			MaterializedPath: challenge.MaterializedPath(entry.SourceSlug, entry.RevisionID), MaterializedRevision: entry.Revision,
+			MaterializedPath: scenario.MaterializedPath(entry.SourceSlug, entry.RevisionID), MaterializedRevision: entry.Revision,
 			Artifact: execution.ArtifactReference{Runtime: entry.Runtime, IncusAlias: "historical-alias", IncusFingerprint: entry.Image},
-			State:    challengedomain.RevisionSuperseded, PublishedAt: entry.PublishedAt, CreatedAt: entry.PublishedAt,
+			State:    scenariodomain.RevisionSuperseded, PublishedAt: entry.PublishedAt, CreatedAt: entry.PublishedAt,
 		},
 	}
 	service := NewService(root, nil, lifecycle)
@@ -100,7 +100,7 @@ func TestHistoricalEntryDoesNotFollowActiveChallengePointer(t *testing.T) {
 }
 
 func TestCatalogReadinessAllowsEmptyBootstrapAndBypassesAvailability(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "missing-challenges")
+	root := filepath.Join(t.TempDir(), "missing-scenarios")
 	releaseStore := &catalogReadinessStore{release: &catalogdomain.Release{State: catalogdomain.ReleaseInstalling}}
 	availability, err := NewAvailability("registry.example/catalog@sha256:"+strings.Repeat("b", 64), releaseStore)
 	if err != nil {
@@ -116,21 +116,21 @@ func TestCatalogReadinessAllowsEmptyBootstrapAndBypassesAvailability(t *testing.
 }
 
 type staticLifecycleStore struct {
-	active   []challengedomain.ActiveRevision
-	stable   challengedomain.Challenge
-	revision challengedomain.Revision
+	active   []scenariodomain.ActiveRevision
+	stable   scenariodomain.Scenario
+	revision scenariodomain.Revision
 }
 
-func (s *staticLifecycleStore) ListActiveChallengeRevisions(context.Context) ([]challengedomain.ActiveRevision, error) {
-	return append([]challengedomain.ActiveRevision(nil), s.active...), nil
+func (s *staticLifecycleStore) ListActiveScenarioRevisions(context.Context) ([]scenariodomain.ActiveRevision, error) {
+	return append([]scenariodomain.ActiveRevision(nil), s.active...), nil
 }
 
-func (s *staticLifecycleStore) GetChallenge(context.Context, string) (*challengedomain.Challenge, error) {
+func (s *staticLifecycleStore) GetScenario(context.Context, string) (*scenariodomain.Scenario, error) {
 	value := s.stable
 	return &value, nil
 }
 
-func (s *staticLifecycleStore) GetChallengeRevision(context.Context, string, string) (*challengedomain.Revision, error) {
+func (s *staticLifecycleStore) GetScenarioRevision(context.Context, string, string) (*scenariodomain.Revision, error) {
 	value := s.revision
 	return &value, nil
 }
@@ -141,31 +141,31 @@ func (s *catalogReadinessStore) ReleaseByDigest(context.Context, catalogdomain.B
 	return s.release, nil
 }
 
-func newMaterializedCatalog(t *testing.T) (*Service, challenge.Entry, string, *staticLifecycleStore) {
+func newMaterializedCatalog(t *testing.T) (*Service, scenario.Entry, string, *staticLifecycleStore) {
 	t.Helper()
 	root := t.TempDir()
 	candidate := filepath.Join(root, "candidate")
-	writeChallengeSource(t, candidate, false)
+	writeScenarioSource(t, candidate, false)
 	contentRevision, err := ContentRevision(candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	challengesDir := filepath.Join(root, "challenges")
-	published, err := challenge.PromoteDirectoryAt(challengesDir, candidate, "chal-integrity", "chrev-aaaaaaaaaaaaaaaa", "cleanup-logs", strings.Repeat("a", 64), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
+	scenariosDir := filepath.Join(root, "scenarios")
+	published, err := scenario.PromoteDirectoryAt(scenariosDir, candidate, "chal-integrity", "chrev-aaaaaaaaaaaaaaaa", "cleanup-logs", strings.Repeat("a", 64), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stable := challengedomain.Challenge{
-		ID: published.ID, SourceKind: challengedomain.SourceRelease, SourceRef: "catalog/cleanup-logs", State: challengedomain.StateActive,
+	stable := scenariodomain.Scenario{
+		ID: published.ID, SourceKind: scenariodomain.SourceRelease, SourceRef: "catalog/cleanup-logs", State: scenariodomain.StateActive,
 		ActiveRevisionID: published.RevisionID, SourceSlug: published.SourceSlug, CreatedAt: published.PublishedAt, UpdatedAt: published.PublishedAt,
 	}
-	revision := challengedomain.Revision{
-		ID: published.RevisionID, ChallengeID: published.ID, SourceKind: challengedomain.SourceRelease, SourceRef: stable.SourceRef, SourceRevisionID: "catalog-entry",
+	revision := scenariodomain.Revision{
+		ID: published.RevisionID, ScenarioID: published.ID, SourceKind: scenariodomain.SourceRelease, SourceRef: stable.SourceRef, SourceRevisionID: "catalog-entry",
 		Title: published.Title, Runtime: published.Runtime, Type: published.Type, Tags: published.Tags, ContentRevision: published.ContentRevision,
-		SourceSlug: published.SourceSlug, MaterializedPath: challenge.MaterializedPath(published.SourceSlug, published.RevisionID), MaterializedRevision: published.Revision,
+		SourceSlug: published.SourceSlug, MaterializedPath: scenario.MaterializedPath(published.SourceSlug, published.RevisionID), MaterializedRevision: published.Revision,
 		Artifact: execution.ArtifactReference{Runtime: published.Runtime, IncusAlias: "catalog-alias", IncusFingerprint: published.Image},
-		State:    challengedomain.RevisionActive, PublishedAt: published.PublishedAt, CreatedAt: published.PublishedAt,
+		State:    scenariodomain.RevisionActive, PublishedAt: published.PublishedAt, CreatedAt: published.PublishedAt,
 	}
-	lifecycle := &staticLifecycleStore{active: []challengedomain.ActiveRevision{{Challenge: stable, Revision: revision}}, stable: stable, revision: revision}
-	return NewService(challengesDir, nil, lifecycle), *published, challengesDir, lifecycle
+	lifecycle := &staticLifecycleStore{active: []scenariodomain.ActiveRevision{{Scenario: stable, Revision: revision}}, stable: stable, revision: revision}
+	return NewService(scenariosDir, nil, lifecycle), *published, scenariosDir, lifecycle
 }

@@ -1,14 +1,14 @@
 import { expect, type Page } from "@playwright/test";
 import { nodeRuntimeFixture } from "./catalog-fixture";
 
-export type StartedChallenge = {
+export type StartedScenario = {
 	id: string;
 	title: string;
 };
 
 type ActiveEnvironment = {
 	environment_id: string;
-	challenge: { id: string };
+	scenario: { id: string };
 };
 
 async function totpCode(page: Page, secret: string): Promise<string> {
@@ -77,23 +77,23 @@ export async function registerAndLogin(page: Page, openRegistration = true) {
     .click();
 }
 
-export function challengeCard(page: Page, title: string) {
-	return page.getByRole("article", { name: `Challenge: ${title}`, exact: true });
+export function scenarioCard(page: Page, title: string) {
+	return page.getByRole("article", { name: `Scenario: ${title}`, exact: true });
 }
 
-export function challengeCardByID(page: Page, challengeID: string) {
-	return page.getByTestId(`catalog-challenge-${challengeID}`);
+export function scenarioCardByID(page: Page, scenarioID: string) {
+	return page.getByTestId(`catalog-scenario-${scenarioID}`);
 }
 
-export async function startChallengeFromCatalog(page: Page, title: string): Promise<StartedChallenge> {
-	const card = challengeCard(page, title);
-	const id = await card.getAttribute("data-challenge-id");
-	if (!id) throw new Error(`catalog challenge ${title} is missing its published ID`);
-	await card.getByRole("button", { name: "Start challenge", exact: true }).click();
+export async function startScenarioFromCatalog(page: Page, title: string): Promise<StartedScenario> {
+	const card = scenarioCard(page, title);
+	const id = await card.getAttribute("data-scenario-id");
+	if (!id) throw new Error(`catalog scenario ${title} is missing its published ID`);
+	await card.getByRole("button", { name: "Start scenario", exact: true }).click();
 	return { id, title };
 }
 
-export async function activeEnvironmentName(page: Page, challengeID: string): Promise<string> {
+export async function activeEnvironmentName(page: Page, scenarioID: string): Promise<string> {
 	const read = () =>
 		page.evaluate(async (id) => {
 			const response = await fetch("/api/me/space", {
@@ -101,8 +101,8 @@ export async function activeEnvironmentName(page: Page, challengeID: string): Pr
 			});
 			if (!response.ok) throw new Error(await response.text());
 			const body = (await response.json()) as { active_environments: ActiveEnvironment[] };
-			return body.active_environments.find((environment) => environment.challenge.id === id)?.environment_id ?? "";
-		}, challengeID);
+			return body.active_environments.find((environment) => environment.scenario.id === id)?.environment_id ?? "";
+		}, scenarioID);
 	await expect.poll(read, { timeout: 90_000, intervals: [500, 1_000, 2_000, 5_000] }).not.toBe("");
 	return read();
 }
@@ -145,12 +145,12 @@ export async function runNodeRuntimeFixtureAnswer(page: Page) {
 	await runTerminalCommand(page, nodeRuntimeFixture.answerCommand);
 }
 
-export async function stopChallenge(page: Page, challengeID: string) {
+export async function stopScenario(page: Page, scenarioID: string) {
 	await page.evaluate(async (id) => {
-		const response = await fetch(`/api/challenges/${id}/stop`, {
+		const response = await fetch(`/api/scenarios/${id}/stop`, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
 		});
 		if (!response.ok) throw new Error(await response.text());
-	}, challengeID);
+	}, scenarioID);
 }

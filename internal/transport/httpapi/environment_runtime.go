@@ -9,7 +9,7 @@ import (
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -23,15 +23,15 @@ type serverEnvironment interface {
 	CommonEnvironmentSpec() *breakfixv1.EnvironmentSpec
 }
 
-func (h *Handler) newEnvironmentSpec(userID string, entry *challenge.Entry) (breakfixv1.EnvironmentSpec, error) {
+func (h *Handler) newEnvironmentSpec(userID string, entry *scenario.Entry) (breakfixv1.EnvironmentSpec, error) {
 	if entry == nil {
-		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge is required")
+		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario is required")
 	}
-	if entry.Runtime != challenge.RuntimeNode && entry.Runtime != challenge.RuntimeK8s {
-		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has unsupported runtime %q", entry.ID, entry.Runtime)
+	if entry.Runtime != scenario.RuntimeNode && entry.Runtime != scenario.RuntimeK8s {
+		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has unsupported runtime %q", entry.ID, entry.Runtime)
 	}
-	if strings.TrimSpace(userID) == "" || strings.TrimSpace(entry.ID) == "" || !challenge.ValidRevisionID(entry.RevisionID) {
-		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has an incomplete published identity", entry.ID)
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(entry.ID) == "" || !scenario.ValidRevisionID(entry.RevisionID) {
+		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has an incomplete published identity", entry.ID)
 	}
 
 	checkpoints := make([]breakfixv1.EnvironmentCheckpointSpec, 0, len(entry.Checkpoints))
@@ -39,16 +39,16 @@ func (h *Handler) newEnvironmentSpec(userID string, entry *challenge.Entry) (bre
 	for _, checkpoint := range entry.Checkpoints {
 		id := strings.TrimSpace(checkpoint.ID)
 		if id == "" {
-			return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has an empty checkpoint id", entry.ID)
+			return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has an empty checkpoint id", entry.ID)
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has duplicate checkpoint id %q", entry.ID, id)
+			return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has duplicate checkpoint id %q", entry.ID, id)
 		}
 		seen[id] = struct{}{}
 		checkpoints = append(checkpoints, breakfixv1.EnvironmentCheckpointSpec{ID: id, Node: strings.TrimSpace(checkpoint.Node)})
 	}
 	if len(checkpoints) == 0 {
-		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("challenge %q has no checkpoints", entry.ID)
+		return breakfixv1.EnvironmentSpec{}, fmt.Errorf("scenario %q has no checkpoints", entry.ID)
 	}
 
 	activityAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
@@ -72,7 +72,7 @@ type environmentRuntimeAdapter struct {
 	readyTimeout    time.Duration
 	list            func(context.Context, string) ([]activeEnvironment, error)
 	get             func(context.Context, string) (*activeEnvironment, error)
-	create          func(context.Context, *postgres.User, *challenge.Entry) (string, error)
+	create          func(context.Context, *postgres.User, *scenario.Entry) (string, error)
 	updateSpec      func(context.Context, string, func(*breakfixv1.EnvironmentSpec)) error
 	requestDeletion func(context.Context, string) error
 }
@@ -110,13 +110,13 @@ func mutateEnvironmentSpec[T serverEnvironment](ctx context.Context, name string
 }
 
 func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntimeAdapter, error) {
-	switch challenge.NormalizeRuntime(runtime) {
-	case challenge.RuntimeNode:
+	switch scenario.NormalizeRuntime(runtime) {
+	case scenario.RuntimeNode:
 		getNode := func(ctx context.Context, name string) (*breakfixv1.NodeEnvironment, error) {
 			return h.k8s.GetNodeEnvironment(ctx, h.crdNamespace, name)
 		}
 		return &environmentRuntimeAdapter{
-			runtime: challenge.RuntimeNode, readyTimeout: nodeEnvironmentReadyTimeout,
+			runtime: scenario.RuntimeNode, readyTimeout: nodeEnvironmentReadyTimeout,
 			list: func(ctx context.Context, selector string) ([]activeEnvironment, error) {
 				environments, err := h.k8s.ListNodeEnvironments(ctx, h.crdNamespace, selector)
 				if err != nil {
@@ -137,7 +137,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				}
 				return environmentFromNode(environment), nil
 			},
-			create: func(ctx context.Context, user *postgres.User, entry *challenge.Entry) (string, error) {
+			create: func(ctx context.Context, user *postgres.User, entry *scenario.Entry) (string, error) {
 				spec, err := h.newEnvironmentSpec(user.ID, entry)
 				if err != nil {
 					return "", err
@@ -177,12 +177,12 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			},
 		}, nil
 
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		getVK8s := func(ctx context.Context, name string) (*breakfixv1.VK8sEnvironment, error) {
 			return h.k8s.GetVK8sEnvironment(ctx, h.crdNamespace, name)
 		}
 		return &environmentRuntimeAdapter{
-			runtime: challenge.RuntimeK8s, readyTimeout: vk8sEnvironmentReadyTimeout,
+			runtime: scenario.RuntimeK8s, readyTimeout: vk8sEnvironmentReadyTimeout,
 			list: func(ctx context.Context, selector string) ([]activeEnvironment, error) {
 				environments, err := h.k8s.ListVK8sEnvironments(ctx, h.crdNamespace, selector)
 				if err != nil {
@@ -203,7 +203,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				}
 				return environmentFromVK8s(environment), nil
 			},
-			create: func(ctx context.Context, user *postgres.User, entry *challenge.Entry) (string, error) {
+			create: func(ctx context.Context, user *postgres.User, entry *scenario.Entry) (string, error) {
 				spec, err := h.newEnvironmentSpec(user.ID, entry)
 				if err != nil {
 					return "", err
@@ -252,11 +252,11 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 	}
 }
 
-func environmentObjectMeta(name, namespace, userID, challengeID string, purpose breakfixv1.EnvironmentPurpose) metav1.ObjectMeta {
+func environmentObjectMeta(name, namespace, userID, scenarioID string, purpose breakfixv1.EnvironmentPurpose) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
 		Name: name, Namespace: namespace,
 		Labels: map[string]string{
-			"breakfix.dev/user": userID, "breakfix.dev/challenge": challengeID, "breakfix.dev/purpose": string(purpose),
+			"breakfix.dev/user": userID, "breakfix.dev/scenario": scenarioID, "breakfix.dev/purpose": string(purpose),
 		},
 	}
 }

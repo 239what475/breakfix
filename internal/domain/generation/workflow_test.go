@@ -6,7 +6,7 @@ func TestGenerationStatesHaveOneExecutor(t *testing.T) {
 	if StateGenerating.AgentState() || StateGenerating.RuntimeState() {
 		t.Fatal("Generating must be user-directed workspace activity")
 	}
-	if !StateBuilding.RuntimeState() || StateBuilding.AgentState() || !StateChallengePublishing.RuntimeState() {
+	if !StateBuilding.RuntimeState() || StateBuilding.AgentState() || !StateScenarioPublishing.RuntimeState() {
 		t.Fatal("external runtime states must belong only to Runtime Worker")
 	}
 	if StateNeedsAuthorReview.AgentState() || StateNeedsAuthorReview.RuntimeState() {

@@ -26,7 +26,7 @@ const (
 	vk8sProvisioningInterval               = 2 * time.Second
 	vk8sProviderRetryInterval              = 5 * time.Second
 	checkpointInterval                     = 4 * time.Second
-	vk8sCheckpointRoot                     = "/opt/breakfix/challenge/k8s"
+	vk8sCheckpointRoot                     = "/opt/breakfix/scenario/k8s"
 )
 
 var immutableImagePattern = regexp.MustCompile(`^[^[:space:]]+@sha256:[0-9a-f]{64}$`)
@@ -351,7 +351,7 @@ func markRuntimeEnvironmentCompleted(status *breakfixv1.EnvironmentStatus, gener
 		status.CompletedAt = &completed
 	}
 	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionCompleted, metav1.ConditionTrue, "CheckpointsCompleted", "all checkpoints passed", generation)
-	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "challenge completed", generation)
+	setRuntimeEnvironmentCondition(status, breakfixv1.ConditionReady, metav1.ConditionFalse, "CheckpointsCompleted", "scenario completed", generation)
 }
 
 func drainGracePeriod(lifecycle breakfixv1.EnvironmentLifecycleSpec) time.Duration {

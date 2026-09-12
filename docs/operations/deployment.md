@@ -11,7 +11,7 @@ Breakfix 的固定控制面是 Server、Controller、Runtime Worker 和 PostgreS
 - 一个 HTTPS OCI Registry；使用私有 Registry 时，每个会拉取镜像的 node 都必须信任其 CA、解析并访问配置的稳定域名。
 - Node runtime 还需要私网可访问的 Incus cluster 与 role-specific mTLS 证书。
 
-配置字段以 [`config/app/local.example.yaml`](../../config/app/local.example.yaml) 和 [`config/app/in-cluster.yaml`](../../config/app/in-cluster.yaml) 为准。PostgreSQL 是唯一关系数据库；Server data PVC 保存持久化 Catalog source、已 materialize challenge 与可恢复的 artifact 文件，不是队列。
+配置字段以 [`config/app/local.example.yaml`](../../config/app/local.example.yaml) 和 [`config/app/in-cluster.yaml`](../../config/app/in-cluster.yaml) 为准。PostgreSQL 是唯一关系数据库；Server data PVC 保存持久化 Catalog source、已 materialize scenario 与可恢复的 artifact 文件，不是队列。
 
 ## Registry
 

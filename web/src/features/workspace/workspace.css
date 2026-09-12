@@ -1,4 +1,4 @@
-.challenge-workspace {
+.scenario-workspace {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: 100%;

@@ -15,7 +15,7 @@ import (
 
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
@@ -53,7 +53,7 @@ type ReleaseStore interface {
 
 type InstallerConfig struct {
 	DataDir          string
-	ChallengesDir    string
+	ScenariosDir     string
 	ReleaseReference string
 	PollInterval     time.Duration
 	Snapshot         appexecution.SnapshotConfig
@@ -66,18 +66,18 @@ type InstallerConfig struct {
 // It runs no admin API and no GenerationWorkflow; its durable state is wholly
 // represented by Catalog Release, Entry, and Commit records.
 type Installer struct {
-	dataDir       string
-	challengesDir string
-	reference     string
-	digest        catalogdomain.BundleDigest
-	pollInterval  time.Duration
-	snapshot      appexecution.SnapshotConfig
-	puller        BundlePuller
-	layerReader   SourceLayerReader
-	store         ReleaseStore
-	now           func() time.Time
-	sleep         func(context.Context, time.Duration) error
-	mu            sync.Mutex
+	dataDir      string
+	scenariosDir string
+	reference    string
+	digest       catalogdomain.BundleDigest
+	pollInterval time.Duration
+	snapshot     appexecution.SnapshotConfig
+	puller       BundlePuller
+	layerReader  SourceLayerReader
+	store        ReleaseStore
+	now          func() time.Time
+	sleep        func(context.Context, time.Duration) error
+	mu           sync.Mutex
 }
 
 func deterministicCatalogFailure(err error) error {
@@ -110,7 +110,7 @@ func catalogContentFailure(err error) error {
 }
 
 func NewInstaller(config InstallerConfig) (*Installer, error) {
-	if strings.TrimSpace(config.DataDir) == "" || strings.TrimSpace(config.ChallengesDir) == "" ||
+	if strings.TrimSpace(config.DataDir) == "" || strings.TrimSpace(config.ScenariosDir) == "" ||
 		config.PollInterval <= 0 || config.Puller == nil || config.LayerReader == nil || config.Store == nil {
 		return nil, errors.New("catalog installer requires data paths, source adapters, and a durable store")
 	}
@@ -119,7 +119,7 @@ func NewInstaller(config InstallerConfig) (*Installer, error) {
 		return nil, err
 	}
 	return &Installer{
-		dataDir: filepath.Clean(config.DataDir), challengesDir: filepath.Clean(config.ChallengesDir), reference: strings.TrimSpace(config.ReleaseReference),
+		dataDir: filepath.Clean(config.DataDir), scenariosDir: filepath.Clean(config.ScenariosDir), reference: strings.TrimSpace(config.ReleaseReference),
 		digest: digest, pollInterval: config.PollInterval,
 		snapshot: config.Snapshot, puller: config.Puller, layerReader: config.LayerReader, store: config.Store,
 		now: func() time.Time { return time.Now().UTC() }, sleep: sleepContext,
@@ -169,8 +169,8 @@ func selectBootstrapRelease(state catalogdomain.BootstrapState, digest catalogdo
 		}
 		return ready[0], false, nil
 	}
-	if state.PublishedChallengeCount != 0 {
-		return nil, false, fmt.Errorf("%w: %d challenges were published without a Ready Catalog baseline", ErrBootstrapConflict, state.PublishedChallengeCount)
+	if state.PublishedScenarioCount != 0 {
+		return nil, false, fmt.Errorf("%w: %d scenarios were published without a Ready Catalog baseline", ErrBootstrapConflict, state.PublishedScenarioCount)
 	}
 	if len(active) > 1 {
 		return nil, false, fmt.Errorf("%w: multiple Catalog bootstrap attempts are active", ErrBootstrapConflict)
@@ -329,23 +329,23 @@ func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, 
 
 func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]catalogdomain.Entry, error) {
 	now := i.now().UTC()
-	entries := make([]catalogdomain.Entry, 0, len(source.Challenges))
-	for _, sourceChallenge := range source.Challenges {
-		sourceRef, err := sourceReference(sourceChallenge.Path)
+	entries := make([]catalogdomain.Entry, 0, len(source.Scenarios))
+	for _, sourceScenario := range source.Scenarios {
+		sourceRef, err := sourceReference(sourceScenario.Path)
 		if err != nil {
 			return nil, err
 		}
-		archive, err := archiveSourceCandidate(filepath.Join(source.Root, filepath.FromSlash(sourceChallenge.Path)))
+		archive, err := archiveSourceCandidate(filepath.Join(source.Root, filepath.FromSlash(sourceScenario.Path)))
 		if err != nil {
-			return nil, fmt.Errorf("archive catalog source %q: %w", sourceChallenge.Path, err)
+			return nil, fmt.Errorf("archive catalog source %q: %w", sourceScenario.Path, err)
 		}
-		snapshot, err := appexecution.Freeze(sourceChallenge.Entry, i.snapshot)
+		snapshot, err := appexecution.Freeze(sourceScenario.Entry, i.snapshot)
 		if err != nil {
-			return nil, fmt.Errorf("freeze catalog source %q: %w", sourceChallenge.Path, err)
+			return nil, fmt.Errorf("freeze catalog source %q: %w", sourceScenario.Path, err)
 		}
 		entries = append(entries, catalogdomain.Entry{
-			ID: catalogdomain.EntryIDFor(releaseID, sourceChallenge.Path), ReleaseID: releaseID, SourcePath: sourceChallenge.Path,
-			SourceRef: sourceRef, Title: sourceChallenge.Entry.Title, Type: sourceChallenge.Entry.Type, Tags: append([]string(nil), sourceChallenge.Entry.Tags...), ContentRevision: sourceChallenge.ContentRevision,
+			ID: catalogdomain.EntryIDFor(releaseID, sourceScenario.Path), ReleaseID: releaseID, SourcePath: sourceScenario.Path,
+			SourceRef: sourceRef, Title: sourceScenario.Entry.Title, Type: sourceScenario.Entry.Type, Tags: append([]string(nil), sourceScenario.Entry.Tags...), ContentRevision: sourceScenario.ContentRevision,
 			ArchiveSHA256: candidate.Digest(archive), Snapshot: snapshot, State: catalogdomain.EntryBuilding,
 			StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		})
@@ -354,11 +354,11 @@ func (i *Installer) newEntries(releaseID string, source *PortableSource) ([]cata
 }
 
 func sourceReference(sourcePath string) (string, error) {
-	const challengePrefix = challengeSourcesDirname + "/"
-	if !strings.HasPrefix(sourcePath, challengePrefix) {
-		return "", fmt.Errorf("catalog source path %q is not a challenge source", sourcePath)
+	const scenarioPrefix = scenarioSourcesDirname + "/"
+	if !strings.HasPrefix(sourcePath, scenarioPrefix) {
+		return "", fmt.Errorf("catalog source path %q is not a scenario source", sourcePath)
 	}
-	value := strings.TrimPrefix(sourcePath, challengePrefix)
+	value := strings.TrimPrefix(sourcePath, scenarioPrefix)
 	if value == "" {
 		return "", fmt.Errorf("catalog source path %q has an empty source reference", sourcePath)
 	}
@@ -378,11 +378,11 @@ func (i *Installer) prepareCommit(ctx context.Context, release *catalogdomain.Re
 	now := i.now().UTC()
 	intents := make([]catalogdomain.Commit, 0, len(entries))
 	for _, entry := range entries {
-		challengeID := challenge.NewID()
-		challengeRevisionID := challenge.NewRevisionID()
+		scenarioID := scenario.NewID()
+		scenarioRevisionID := scenario.NewRevisionID()
 		intents = append(intents, catalogdomain.Commit{
 			ID: catalogdomain.EntryCommitIDFor(release.ID, entry.ID), ReleaseID: release.ID, EntryID: entry.ID,
-			ChallengeID: challengeID, ChallengeRevisionID: challengeRevisionID, SourceSlug: challenge.SourceSlugFor(entry.Title, challengeID),
+			ScenarioID: scenarioID, ScenarioRevisionID: scenarioRevisionID, SourceSlug: scenario.SourceSlugFor(entry.Title, scenarioID),
 			State: catalogdomain.CommitPrepared, StateVersion: 1, RuntimeAttempt: 1, NextRunAt: now, CreatedAt: now, UpdatedAt: now,
 		})
 	}
@@ -499,7 +499,7 @@ func (i *Installer) stageSource(ctx context.Context, releaseID string) (*Portabl
 	if err := os.Mkdir(sourceRoot, 0o750); err != nil {
 		return nil, "", err
 	}
-	if err := challenge.ExtractTarGz(sourceRoot, bytes.NewReader(layer)); err != nil {
+	if err := scenario.ExtractTarGz(sourceRoot, bytes.NewReader(layer)); err != nil {
 		return nil, "", deterministicCatalogFailure(fmt.Errorf("extract catalog release source: %w", err))
 	}
 	_, digest, err := loadSourceAt(sourceRoot)
@@ -570,10 +570,10 @@ func (i *Installer) removeTerminalSource(releaseID string) error {
 	return nil
 }
 
-func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomain.Entry, commit catalogdomain.Commit) (*challenge.Entry, error) {
+func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomain.Entry, commit catalogdomain.Commit) (*scenario.Entry, error) {
 	if published, err := i.ensureMaterialized(entry, commit); err == nil {
 		return published, nil
-	} else if !errors.Is(err, challenge.ErrNotFound) {
+	} else if !errors.Is(err, scenario.ErrNotFound) {
 		return nil, catalogFinalizerFailure(err)
 	}
 	if commit.Artifact == nil {
@@ -584,12 +584,12 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 		return nil, deterministicCatalogFailure(err)
 	}
 	sourceDir := filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath))
-	if _, err := challenge.ValidateCandidateDir(sourceDir); err != nil {
-		return nil, catalogContentFailure(fmt.Errorf("validate catalog challenge %q: %w", entry.SourcePath, err))
+	if _, err := scenario.ValidateCandidateDir(sourceDir); err != nil {
+		return nil, catalogContentFailure(fmt.Errorf("validate catalog scenario %q: %w", entry.SourcePath, err))
 	}
-	published, err := challenge.PromoteDirectoryAt(i.challengesDir, sourceDir, commit.ChallengeID, commit.ChallengeRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
+	published, err := scenario.PromoteDirectoryAt(i.scenariosDir, sourceDir, commit.ScenarioID, commit.ScenarioRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
 	if err != nil {
-		return nil, catalogFinalizerFailure(fmt.Errorf("materialize catalog challenge %q: %w", entry.SourcePath, err))
+		return nil, catalogFinalizerFailure(fmt.Errorf("materialize catalog scenario %q: %w", entry.SourcePath, err))
 	}
 	if err := validateMaterializedCommit(entry, commit, published, image); err != nil {
 		return nil, err
@@ -597,7 +597,7 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 	return published, nil
 }
 
-func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalogdomain.Commit) (*challenge.Entry, error) {
+func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalogdomain.Commit) (*scenario.Entry, error) {
 	if commit.Artifact == nil {
 		return nil, deterministicCatalogFailure(errors.New("catalog commit has no final artifact"))
 	}
@@ -605,16 +605,16 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	if err != nil {
 		return nil, deterministicCatalogFailure(err)
 	}
-	target := filepath.Join(i.challengesDir, challenge.MaterializedPath(commit.SourceSlug, commit.ChallengeRevisionID))
+	target := filepath.Join(i.scenariosDir, scenario.MaterializedPath(commit.SourceSlug, commit.ScenarioRevisionID))
 	if _, err := os.Lstat(target); err != nil {
 		if os.IsNotExist(err) {
-			return nil, challenge.ErrNotFound
+			return nil, scenario.ErrNotFound
 		}
 		return nil, catalogFinalizerFailure(err)
 	}
-	published, err := challenge.ValidateDir(target)
+	published, err := scenario.ValidateDir(target)
 	if err != nil {
-		return nil, catalogContentFailure(fmt.Errorf("validate materialized catalog challenge: %w", err))
+		return nil, catalogContentFailure(fmt.Errorf("validate materialized catalog scenario: %w", err))
 	}
 	if err := validateMaterializedCommit(entry, commit, published, image); err != nil {
 		return nil, err
@@ -622,12 +622,12 @@ func (i *Installer) ensureMaterialized(entry catalogdomain.Entry, commit catalog
 	return published, nil
 }
 
-func validateMaterializedCommit(entry catalogdomain.Entry, commit catalogdomain.Commit, published *challenge.Entry, image string) error {
-	if published == nil || published.ID != commit.ChallengeID || published.RevisionID != commit.ChallengeRevisionID || published.SourceSlug != commit.SourceSlug ||
+func validateMaterializedCommit(entry catalogdomain.Entry, commit catalogdomain.Commit, published *scenario.Entry, image string) error {
+	if published == nil || published.ID != commit.ScenarioID || published.RevisionID != commit.ScenarioRevisionID || published.SourceSlug != commit.SourceSlug ||
 		published.ContentRevision != string(entry.ContentRevision) || published.Image != image || published.Title != entry.Title ||
 		published.Runtime != entry.Snapshot.Runtime || published.Type != entry.Type || !slices.Equal(published.Tags, entry.Tags) ||
 		(commit.MaterializedRevision != "" && published.Revision != commit.MaterializedRevision) {
-		return deterministicCatalogFailure(errors.New("materialized catalog challenge conflicts with its durable commit"))
+		return deterministicCatalogFailure(errors.New("materialized catalog scenario conflicts with its durable commit"))
 	}
 	return nil
 }
@@ -668,9 +668,9 @@ func artifactImage(value execution.ArtifactReference) (string, error) {
 		return "", err
 	}
 	switch value.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		return value.IncusFingerprint, nil
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		return value.OCIReference, nil
 	default:
 		return "", errors.New("catalog artifact has unsupported runtime")

@@ -15,7 +15,7 @@ import (
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
 	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,24 +73,24 @@ func (s learningStore) DeleteClosedTerminalConnections(ctx context.Context, befo
 	return s.repository.DeleteClosedTerminalConnections(ctx, before)
 }
 
-func (s learningStore) RecordChallengeAttempt(ctx context.Context, userID, challengeID, revisionID, environmentUID, runtimeName string, startedAt time.Time) error {
-	return s.repository.RecordChallengeAttempt(ctx, userID, challengeID, revisionID, environmentUID, runtimeName, startedAt)
+func (s learningStore) RecordScenarioAttempt(ctx context.Context, userID, scenarioID, revisionID, environmentUID, runtimeName string, startedAt time.Time) error {
+	return s.repository.RecordScenarioAttempt(ctx, userID, scenarioID, revisionID, environmentUID, runtimeName, startedAt)
 }
 
 func (s learningStore) RecordCheckpointFirstPass(ctx context.Context, event applearning.CheckpointFirstPass) error {
 	return s.repository.RecordCheckpointFirstPass(ctx, postgres.CheckpointFirstPassEvent{
-		EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ChallengeID: event.ChallengeID,
-		ChallengeRevision: event.ChallengeRevisionID, CheckpointID: event.CheckpointID,
+		EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ScenarioID: event.ScenarioID,
+		ScenarioRevision: event.ScenarioRevisionID, CheckpointID: event.CheckpointID,
 		FirstPassedAt: event.FirstPassedAt, Summary: event.Summary,
 	})
 }
 
-func (s learningStore) RecordChallengeCompletion(ctx context.Context, userID, challengeID, revisionID, environmentUID string, completedAt time.Time) error {
-	return s.repository.RecordChallengeCompletion(ctx, userID, challengeID, revisionID, environmentUID, completedAt)
+func (s learningStore) RecordScenarioCompletion(ctx context.Context, userID, scenarioID, revisionID, environmentUID string, completedAt time.Time) error {
+	return s.repository.RecordScenarioCompletion(ctx, userID, scenarioID, revisionID, environmentUID, completedAt)
 }
 
-func (s learningStore) FinishChallengeAttempt(ctx context.Context, environmentUID, outcome string, finishedAt time.Time) error {
-	return s.repository.FinishChallengeAttempt(ctx, environmentUID, outcome, finishedAt)
+func (s learningStore) FinishScenarioAttempt(ctx context.Context, environmentUID, outcome string, finishedAt time.Time) error {
+	return s.repository.FinishScenarioAttempt(ctx, environmentUID, outcome, finishedAt)
 }
 
 type environmentProjectionSource struct {
@@ -124,10 +124,10 @@ func (s environmentProjectionSource) DeleteEnvironmentProjection(ctx context.Con
 	if s.client == nil {
 		return errors.New("kubernetes client is required")
 	}
-	switch challenge.NormalizeRuntime(runtimeName) {
-	case challenge.RuntimeNode:
+	switch scenario.NormalizeRuntime(runtimeName) {
+	case scenario.RuntimeNode:
 		return s.client.DeleteNodeEnvironment(ctx, s.namespace, name)
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		return s.client.DeleteVK8sEnvironment(ctx, s.namespace, name)
 	default:
 		return fmt.Errorf("unsupported projected environment runtime %q", runtimeName)
@@ -135,11 +135,11 @@ func (s environmentProjectionSource) DeleteEnvironmentProjection(ctx context.Con
 }
 
 func nodeProjection(environment breakfixv1.NodeEnvironment) applearning.EnvironmentProjection {
-	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, challenge.RuntimeNode, environment.Spec.Environment, environment.Status.Environment)
+	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, scenario.RuntimeNode, environment.Spec.Environment, environment.Status.Environment)
 }
 
 func vk8sProjection(environment breakfixv1.VK8sEnvironment) applearning.EnvironmentProjection {
-	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, challenge.RuntimeK8s, environment.Spec.Environment, environment.Status.Environment)
+	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, scenario.RuntimeK8s, environment.Spec.Environment, environment.Status.Environment)
 }
 
 func environmentProjectionFromSpecStatus(uid, name, runtimeName string, spec breakfixv1.EnvironmentSpec, status breakfixv1.EnvironmentStatus) applearning.EnvironmentProjection {
@@ -157,7 +157,7 @@ func environmentProjectionFromSpecStatus(uid, name, runtimeName string, spec bre
 	}
 	return applearning.EnvironmentProjection{
 		UID: uid, Name: name, Runtime: runtimeName, Purpose: string(spec.Purpose), UserID: spec.UserRef,
-		ChallengeID: spec.Source.Ref, ChallengeRevision: spec.Source.Revision, Phase: string(status.Phase),
+		ScenarioID: spec.Source.Ref, ScenarioRevision: spec.Source.Revision, Phase: string(status.Phase),
 		ReadyAt: timeValue(status.ReadyAt), CompletedAt: timeValue(status.CompletedAt), DestroyedAt: timeValue(status.DestroyedAt),
 		Checkpoints: checkpoints,
 	}
@@ -171,30 +171,30 @@ func timeValue(value *metav1.Time) *time.Time {
 	return &result
 }
 
-type challengeArtifactValidator struct {
+type scenarioArtifactValidator struct {
 	registryRepository string
 	incusNamePrefix    string
 }
 
-func (v challengeArtifactValidator) ValidateChallengeArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.ChallengeID == "" || action.ChallengeRevisionID == "" {
-		return errors.New("runtime action has no challenge publication input")
+func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
+	if action.Artifact == nil || action.ScenarioID == "" || action.ScenarioRevisionID == "" {
+		return errors.New("runtime action has no scenario publication input")
 	}
 	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
 		return err
 	}
 	switch action.Snapshot.Runtime {
-	case challenge.RuntimeK8s:
-		expected, err := candidate.ChallengeOCIRepository(v.registryRepository, action.ChallengeID, action.ChallengeRevisionID)
+	case scenario.RuntimeK8s:
+		expected, err := candidate.ScenarioOCIRepository(v.registryRepository, action.ScenarioID, action.ScenarioRevisionID)
 		if err != nil {
-			return fmt.Errorf("derive challenge OCI repository: %w", err)
+			return fmt.Errorf("derive scenario OCI repository: %w", err)
 		}
 		actual, err := candidate.OCIRepository(artifact.OCIReference)
 		if err != nil {
 			return err
 		}
 		if actual != expected {
-			return errors.New("challenge artifact OCI repository does not belong to publication")
+			return errors.New("scenario artifact OCI repository does not belong to publication")
 		}
 		stagingDigest, err := candidate.OCIDigest(action.Artifact.OCIReference)
 		if err != nil {
@@ -205,24 +205,24 @@ func (v challengeArtifactValidator) ValidateChallengeArtifact(action runtime.Con
 			return err
 		}
 		if finalDigest != stagingDigest {
-			return errors.New("challenge artifact digest differs from verified candidate artifact")
+			return errors.New("scenario artifact digest differs from verified candidate artifact")
 		}
 		return nil
-	case challenge.RuntimeNode:
-		expected, err := incus.AliasForChallenge(v.incusNamePrefix, action.ChallengeID, action.ChallengeRevisionID)
+	case scenario.RuntimeNode:
+		expected, err := incus.AliasForScenario(v.incusNamePrefix, action.ScenarioID, action.ScenarioRevisionID)
 		if err != nil {
-			return fmt.Errorf("derive challenge Incus alias: %w", err)
+			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}
 		if artifact.IncusAlias != expected || artifact.IncusFingerprint != action.Artifact.IncusFingerprint {
-			return errors.New("challenge artifact does not match the verified Node artifact")
+			return errors.New("scenario artifact does not match the verified Node artifact")
 		}
 		return nil
 	default:
-		return errors.New("runtime action has an unsupported challenge runtime")
+		return errors.New("runtime action has an unsupported scenario runtime")
 	}
 }
 
 var _ applearning.CleanupRepository = learningStore{}
 var _ applearning.ProjectionRepository = learningStore{}
 var _ applearning.ProjectionSource = environmentProjectionSource{}
-var _ appgeneration.ChallengeArtifactValidator = challengeArtifactValidator{}
+var _ appgeneration.ScenarioArtifactValidator = scenarioArtifactValidator{}

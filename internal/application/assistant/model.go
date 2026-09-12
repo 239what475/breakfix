@@ -24,7 +24,7 @@ type Session struct {
 	EnvironmentUID  string    `json:"-"`
 	EnvironmentName string    `json:"-"`
 	Runtime         string    `json:"-"`
-	ChallengeID     string    `json:"challenge_id"`
+	ScenarioID      string    `json:"scenario_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -104,8 +104,8 @@ type Request struct {
 	EnvironmentUID   string
 	EnvironmentName  string
 	Runtime          string
-	ChallengeID      string
-	ChallengeTitle   string
+	ScenarioID       string
+	ScenarioTitle    string
 	Problem          string
 	Nodes            []string
 	CurrentNode      string
@@ -129,8 +129,8 @@ type Executor interface {
 }
 
 func ValidateRequest(request Request) error {
-	if strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.EnvironmentUID) == "" || strings.TrimSpace(request.ChallengeID) == "" {
-		return errors.New("assistant session requires user, environment, and challenge")
+	if strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.EnvironmentUID) == "" || strings.TrimSpace(request.ScenarioID) == "" {
+		return errors.New("assistant session requires user, environment, and scenario")
 	}
 	if request.Reader == nil {
 		return errors.New("assistant reader is required")

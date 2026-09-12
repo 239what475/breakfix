@@ -21,7 +21,7 @@
 .authoring-status[data-state="Building"] i,
 .authoring-status[data-state="ArtifactPublishing"] i,
 .authoring-status[data-state="Verifying"] i,
-.authoring-status[data-state="ChallengePublishing"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
+.authoring-status[data-state="ScenarioPublishing"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
 .authoring-status[data-state="Published"] i { background: var(--green); }
 .authoring-status[data-state="Failed"] i { background: #b8504c; }
 .authoring-plan-actions { justify-content: flex-end; flex-wrap: wrap; gap: 7px; }

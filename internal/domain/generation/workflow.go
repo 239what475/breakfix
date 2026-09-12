@@ -1,4 +1,4 @@
-// Package generation owns the durable lifecycle of one authored challenge.
+// Package generation owns the durable lifecycle of one authored scenario.
 // A workflow is the scheduling authority; candidate revisions only retain
 // immutable content and the outputs produced for that content.
 package generation
@@ -20,24 +20,24 @@ const (
 )
 
 var (
-	ErrWorkflowNotFound           = errors.New("generation workflow not found")
-	ErrLeaseLost                  = runtime.ErrLeaseLost
-	ErrChallengeSourceRefConflict = errors.New("challenge source reference conflicts with an existing challenge")
+	ErrWorkflowNotFound          = errors.New("generation workflow not found")
+	ErrLeaseLost                 = runtime.ErrLeaseLost
+	ErrScenarioSourceRefConflict = errors.New("scenario source reference conflicts with an existing scenario")
 )
 
 type WorkflowState string
 
 const (
-	StateGenerating          WorkflowState = "Generating"
-	StateJudging             WorkflowState = "Judging"
-	StateBuilding            WorkflowState = "Building"
-	StateArtifactPublishing  WorkflowState = "ArtifactPublishing"
-	StateVerifying           WorkflowState = "Verifying"
-	StateNeedsAuthorReview   WorkflowState = "NeedsAuthorReview"
-	StateChallengePublishing WorkflowState = "ChallengePublishing"
-	StatePublished           WorkflowState = "Published"
-	StateFailed              WorkflowState = "Failed"
-	StateCancelled           WorkflowState = "Cancelled"
+	StateGenerating         WorkflowState = "Generating"
+	StateJudging            WorkflowState = "Judging"
+	StateBuilding           WorkflowState = "Building"
+	StateArtifactPublishing WorkflowState = "ArtifactPublishing"
+	StateVerifying          WorkflowState = "Verifying"
+	StateNeedsAuthorReview  WorkflowState = "NeedsAuthorReview"
+	StateScenarioPublishing WorkflowState = "ScenarioPublishing"
+	StatePublished          WorkflowState = "Published"
+	StateFailed             WorkflowState = "Failed"
+	StateCancelled          WorkflowState = "Cancelled"
 )
 
 // StartConfirmation is the explicit, idempotent confirmation of one author
@@ -99,7 +99,7 @@ func (s WorkflowState) Valid() bool {
 	switch s {
 	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
 		StateVerifying, StateNeedsAuthorReview,
-		StateChallengePublishing, StatePublished, StateFailed, StateCancelled:
+		StateScenarioPublishing, StatePublished, StateFailed, StateCancelled:
 		return true
 	default:
 		return false
@@ -125,7 +125,7 @@ func (s WorkflowState) AgentState() bool {
 // Runtime Worker. A Runtime state always has one Server-managed attempt.
 func (s WorkflowState) RuntimeState() bool {
 	switch s {
-	case StateBuilding, StateArtifactPublishing, StateVerifying, StateChallengePublishing:
+	case StateBuilding, StateArtifactPublishing, StateVerifying, StateScenarioPublishing:
 		return true
 	default:
 		return false

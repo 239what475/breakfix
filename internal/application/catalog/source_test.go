@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/oci"
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 )
 
@@ -29,17 +29,17 @@ func TestCheckedInCatalogFixtureSourceIsPortable(t *testing.T) {
 }
 
 func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
-	root, challengeRevision := writePortableRelease(t)
+	root, scenarioRevision := writePortableRelease(t)
 
 	source, err := LoadPortableSource(root)
 	if err != nil {
 		t.Fatalf("load portable source: %v", err)
 	}
-	if got := source.Manifest.Entries[0].ContentRevision; got != challengeRevision {
-		t.Fatalf("challenge contentRevision = %q, want %q", got, challengeRevision)
+	if got := source.Manifest.Entries[0].ContentRevision; got != scenarioRevision {
+		t.Fatalf("scenario contentRevision = %q, want %q", got, scenarioRevision)
 	}
-	if len(source.Challenges) != 1 || source.Challenges[0].Entry.Title != "Cleanup logs" {
-		t.Fatalf("loaded challenges = %#v", source.Challenges)
+	if len(source.Scenarios) != 1 || source.Scenarios[0].Entry.Title != "Cleanup logs" {
+		t.Fatalf("loaded scenarios = %#v", source.Scenarios)
 	}
 
 	first, err := BuildPortableBundle(root)
@@ -57,22 +57,22 @@ func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
 		t.Fatalf("bundle media types = (%q, %q)", first.ArtifactType, first.LayerMediaType)
 	}
 	files := sourceLayerFiles(t, first.SourceLayer)
-	if mode := files["challenges/linux/cleanup-logs/nodes/host/generate.sh"].Mode; mode != 0o755 {
+	if mode := files["scenarios/linux/cleanup-logs/nodes/host/generate.sh"].Mode; mode != 0o755 {
 		t.Fatalf("generate.sh mode = %04o, want 0755", mode)
 	}
-	if got := string(files["challenges/linux/cleanup-logs/challenge.yaml"].Content); !bytes.Contains([]byte(got), []byte("description: |")) {
-		t.Fatalf("source layer changed challenge YAML:\n%s", got)
+	if got := string(files["scenarios/linux/cleanup-logs/scenario.yaml"].Content); !bytes.Contains([]byte(got), []byte("description: |")) {
+		t.Fatalf("source layer changed scenario YAML:\n%s", got)
 	}
 }
 
 func TestCalculateContentRevisionsIgnoresStaleManifestValues(t *testing.T) {
-	root, challengeRevision := writePortableRelease(t)
+	root, scenarioRevision := writePortableRelease(t)
 	manifestPath := filepath.Join(root, "release.yaml")
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestText := strings.Replace(string(manifest), string(challengeRevision), "sha256:"+strings.Repeat("1", 64), 1)
+	manifestText := strings.Replace(string(manifest), string(scenarioRevision), "sha256:"+strings.Repeat("1", 64), 1)
 	if err := os.WriteFile(manifestPath, []byte(manifestText), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +81,8 @@ func TestCalculateContentRevisionsIgnoresStaleManifestValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("calculate content revisions: %v", err)
 	}
-	if len(report.Entries) != 1 || report.Entries[0].ContentRevision != challengeRevision {
-		t.Fatalf("challenge revisions = %#v, want %q", report.Entries, challengeRevision)
+	if len(report.Entries) != 1 || report.Entries[0].ContentRevision != scenarioRevision {
+		t.Fatalf("scenario revisions = %#v, want %q", report.Entries, scenarioRevision)
 	}
 	if _, err := LoadPortableSource(root); err == nil {
 		t.Fatal("stale manifest unexpectedly loaded as a valid source")
@@ -168,9 +168,9 @@ func TestPortableBundleWritesOCIReleaseArtifact(t *testing.T) {
 
 func TestExportPublishedCandidatePreservesRemainingManifestBytes(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "published")
-	writeChallengeSource(t, source, true)
-	if _, err := challenge.ValidateDir(source); err != nil {
-		t.Fatalf("validate published challenge fixture: %v", err)
+	writeScenarioSource(t, source, true)
+	if _, err := scenario.ValidateDir(source); err != nil {
+		t.Fatalf("validate published scenario fixture: %v", err)
 	}
 
 	destination := filepath.Join(t.TempDir(), "portable")
@@ -181,10 +181,10 @@ func TestExportPublishedCandidatePreservesRemainingManifestBytes(t *testing.T) {
 	if !revision.Valid() {
 		t.Fatalf("export revision is invalid: %q", revision)
 	}
-	if _, err := challenge.ValidatePortableDir(destination); err != nil {
+	if _, err := scenario.ValidatePortableDir(destination); err != nil {
 		t.Fatalf("validate exported candidate: %v", err)
 	}
-	manifest, err := os.ReadFile(filepath.Join(destination, "challenge.yaml"))
+	manifest, err := os.ReadFile(filepath.Join(destination, "scenario.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ checkpoints:
     node: host
 `
 	if string(manifest) != want {
-		t.Fatalf("exported challenge manifest = %q, want %q", manifest, want)
+		t.Fatalf("exported scenario manifest = %q, want %q", manifest, want)
 	}
 }
 
@@ -245,9 +245,9 @@ func sourceLayerFiles(t *testing.T, layer []byte) map[string]sourceLayerFile {
 func writePortableRelease(t *testing.T) (string, catalogdomain.ContentRevision) {
 	t.Helper()
 	root := t.TempDir()
-	challengePath := filepath.Join(root, "challenges", "linux", "cleanup-logs")
-	writeChallengeSource(t, challengePath, false)
-	challengeRevision, err := ContentRevision(challengePath)
+	scenarioPath := filepath.Join(root, "scenarios", "linux", "cleanup-logs")
+	writeScenarioSource(t, scenarioPath, false)
+	scenarioRevision, err := ContentRevision(scenarioPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,13 +258,13 @@ metadata:
   name: foundation
   version: 2026.08.01
 entries:
-  - path: challenges/linux/cleanup-logs
-    contentRevision: `+string(challengeRevision)+`
+  - path: scenarios/linux/cleanup-logs
+    contentRevision: `+string(scenarioRevision)+`
 `), 0o644)
-	return root, challengeRevision
+	return root, scenarioRevision
 }
 
-func writeChallengeSource(t *testing.T, root string, published bool) {
+func writeScenarioSource(t *testing.T, root string, published bool) {
 	t.Helper()
 	manifest := `runtime: node
 title: Cleanup logs
@@ -302,7 +302,7 @@ checkpoints:
     node: host
 `
 	}
-	writeCatalogFile(t, filepath.Join(root, "challenge.yaml"), []byte(manifest), 0o644)
+	writeCatalogFile(t, filepath.Join(root, "scenario.yaml"), []byte(manifest), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "problem.md"), []byte("# Cleanup logs\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "solution.md"), []byte("<!-- checkpoint: cleanup-script-ready -->\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "hints", "cleanup-script-ready.md"), []byte("Create the script.\n"), 0o644)

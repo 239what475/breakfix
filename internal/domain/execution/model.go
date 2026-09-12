@@ -1,4 +1,4 @@
-// Package execution owns immutable runtime data shared by every challenge
+// Package execution owns immutable runtime data shared by every scenario
 // build and verification path. It deliberately has no workflow state, agent
 // lineage, or publication intent.
 package execution
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 )
 
@@ -69,7 +69,7 @@ type K8sResources struct {
 }
 
 // Snapshot freezes the platform runtime profile used to build and verify one
-// portable challenge. It remains valid independent of its work owner.
+// portable scenario. It remains valid independent of its work owner.
 type Snapshot struct {
 	Runtime     string               `json:"runtime"`
 	Checkpoints []CheckpointSnapshot `json:"checkpoints"`
@@ -160,9 +160,9 @@ func (w Work) Validate() error {
 		if w.Build.Runtime != w.Snapshot.Runtime {
 			return errors.New("execution work build output runtime is invalid")
 		}
-		if w.Snapshot.Runtime == challenge.RuntimeK8s {
+		if w.Snapshot.Runtime == scenario.RuntimeK8s {
 			if w.Build.OCIReference == "" || w.Build.Incus != nil ||
-				(ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: w.Build.OCIReference}).Validate(challenge.RuntimeK8s) != nil {
+				(ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: w.Build.OCIReference}).Validate(scenario.RuntimeK8s) != nil {
 				return errors.New("execution work k8s build output is invalid")
 			}
 		} else if w.Build.Validate(w.Snapshot.Runtime) != nil {
@@ -211,11 +211,11 @@ func (r VerificationReport) Validate(snapshot Snapshot) error {
 	}
 	wantAnswers := make(map[string]struct{})
 	switch snapshot.Runtime {
-	case challenge.RuntimeNode:
+	case scenario.RuntimeNode:
 		for _, node := range snapshot.Node.Nodes {
 			wantAnswers[node.Name] = struct{}{}
 		}
-	case challenge.RuntimeK8s:
+	case scenario.RuntimeK8s:
 		wantAnswers["management"] = struct{}{}
 	default:
 		return errors.New("verification report has an unsupported runtime")
@@ -267,7 +267,7 @@ func (r VerificationReport) Validate(snapshot Snapshot) error {
 }
 
 func (e VerificationEnvironment) Validate(runtime string) error {
-	if e.Runtime != runtime || (runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s) ||
+	if e.Runtime != runtime || (runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s) ||
 		strings.TrimSpace(e.Name) == "" || strings.TrimSpace(e.UID) == "" || strings.TrimSpace(e.WorkflowID) == "" || e.Attempt <= 0 {
 		return errors.New("verification environment identity is incomplete")
 	}
@@ -275,11 +275,11 @@ func (e VerificationEnvironment) Validate(runtime string) error {
 }
 
 func (o BuildOutput) Validate(runtime string) error {
-	if o.Runtime != runtime || (runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s) {
+	if o.Runtime != runtime || (runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s) {
 		return errors.New("build output runtime does not match candidate")
 	}
-	if runtime == challenge.RuntimeK8s {
-		if o.Incus != nil || (ArtifactReference{Runtime: challenge.RuntimeK8s, OCIReference: o.OCIReference}).Validate(challenge.RuntimeK8s) != nil {
+	if runtime == scenario.RuntimeK8s {
+		if o.Incus != nil || (ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: o.OCIReference}).Validate(scenario.RuntimeK8s) != nil {
 			return errors.New("k8s build output is incomplete")
 		}
 		return nil
@@ -299,10 +299,10 @@ func (r IncusBuildReference) Validate() error {
 }
 
 func (r ArtifactReference) Validate(runtime string) error {
-	if r.Runtime != runtime || (runtime != challenge.RuntimeNode && runtime != challenge.RuntimeK8s) {
+	if r.Runtime != runtime || (runtime != scenario.RuntimeNode && runtime != scenario.RuntimeK8s) {
 		return errors.New("artifact runtime does not match candidate")
 	}
-	if runtime == challenge.RuntimeK8s {
+	if runtime == scenario.RuntimeK8s {
 		if !strings.Contains(r.OCIReference, "@sha256:") || r.IncusAlias != "" || r.IncusFingerprint != "" {
 			return errors.New("k8s artifact requires an immutable OCI reference")
 		}
@@ -332,7 +332,7 @@ func ValidSHA256(value string) bool {
 }
 
 func (s Snapshot) Validate() error {
-	if s.Runtime != challenge.RuntimeNode && s.Runtime != challenge.RuntimeK8s {
+	if s.Runtime != scenario.RuntimeNode && s.Runtime != scenario.RuntimeK8s {
 		return errors.New("candidate snapshot has an invalid runtime")
 	}
 	if len(s.Checkpoints) == 0 {
@@ -348,7 +348,7 @@ func (s Snapshot) Validate() error {
 		}
 		seen[checkpoint.ID] = struct{}{}
 	}
-	if s.Runtime == challenge.RuntimeNode {
+	if s.Runtime == scenario.RuntimeNode {
 		if s.Node == nil || s.K8s != nil || len(s.Node.Nodes) == 0 || !validFingerprint(s.Node.BaseImageFingerprint) {
 			return errors.New("node candidate snapshot is incomplete")
 		}

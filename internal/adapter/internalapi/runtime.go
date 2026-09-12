@@ -98,8 +98,8 @@ func (c *RuntimeActionClient) CompleteVerification(ctx context.Context, credenti
 	}{Credential: credential, Report: report})
 }
 
-func (c *RuntimeActionClient) RecordChallengePublication(ctx context.Context, credential runtime.Credential, artifact execution.ArtifactReference) error {
-	return c.complete(ctx, credential, "challenge-publish/complete", struct {
+func (c *RuntimeActionClient) RecordScenarioPublication(ctx context.Context, credential runtime.Credential, artifact execution.ArtifactReference) error {
+	return c.complete(ctx, credential, "scenario-publish/complete", struct {
 		runtime.Credential
 		Artifact execution.ArtifactReference `json:"artifact"`
 	}{Credential: credential, Artifact: artifact})

@@ -31,7 +31,7 @@ const (
 	vk8sTerminalNetworkPolicyName     = "breakfix-vk8s-terminal"
 	vk8sRuntimeServiceAccount         = "breakfix-runtime"
 	vk8sInitSentinel                  = "/var/lib/breakfix/.initialized"
-	vk8sChallengeRoot                 = "/opt/breakfix/challenge/k8s"
+	vk8sScenarioRoot                  = "/opt/breakfix/scenario/k8s"
 )
 
 type vclusterCommand interface {
@@ -554,11 +554,11 @@ func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources core
 			RestartPolicy:                corev1.RestartPolicyNever,
 			ServiceAccountName:           vk8sRuntimeServiceAccount,
 			Containers: []corev1.Container{{
-				Name: "challenge", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
+				Name: "scenario", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources: resources,
 				Env: []corev1.EnvVar{
 					{Name: "KUBECONFIG", Value: "/root/.kube/config"},
-					{Name: "BREAKFIX_GENERATE_SCRIPT", Value: vk8sChallengeRoot + "/generate.sh"},
+					{Name: "BREAKFIX_GENERATE_SCRIPT", Value: vk8sScenarioRoot + "/generate.sh"},
 				},
 				VolumeMounts: []corev1.VolumeMount{{Name: "kubeconfig", MountPath: "/root/.kube", ReadOnly: true}},
 			}},
@@ -579,7 +579,7 @@ func (p *vk8sEnvironmentProvider) observeTerminal(ctx context.Context, request e
 		return environment.InitializationObservation{}, fmt.Errorf("get VK8s terminal pod: %w", err)
 	}
 	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name != "challenge" {
+		if status.Name != "scenario" {
 			continue
 		}
 		if status.State.Waiting != nil && terminalPodWaitingReason(status.State.Waiting.Reason) {
@@ -617,7 +617,7 @@ func terminalPodWaitingReason(reason string) bool {
 
 func terminalTerminationMessage(state *corev1.ContainerStateTerminated) string {
 	if state == nil {
-		return "challenge terminal terminated"
+		return "scenario terminal terminated"
 	}
 	parts := []string{fmt.Sprintf("runtime initialization exited with %d", state.ExitCode)}
 	if value := strings.TrimSpace(state.Reason); value != "" {

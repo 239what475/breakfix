@@ -13,14 +13,14 @@ import (
 func TestEncodeIsCanonicalAndRoundTripsWorkspaceTree(t *testing.T) {
 	first, err := Encode([]Entry{
 		{Path: "checks/checkpoints.sh", Mode: 0o700, Content: []byte("#!/bin/sh\n")},
-		{Path: "challenge.yaml", Mode: 0o600, Content: []byte("title: test\n")},
+		{Path: "scenario.yaml", Mode: 0o600, Content: []byte("title: test\n")},
 		{Path: "empty", Directory: true, Mode: 0o700},
 	})
 	if err != nil {
 		t.Fatalf("encode first archive: %v", err)
 	}
 	second, err := Encode([]Entry{
-		{Path: "challenge.yaml", Mode: 0o644, Content: []byte("title: test\n")},
+		{Path: "scenario.yaml", Mode: 0o644, Content: []byte("title: test\n")},
 		{Path: "empty", Directory: true, Mode: 0o755},
 		{Path: "checks/checkpoints.sh", Mode: 0o755, Content: []byte("#!/bin/sh\n")},
 	})
@@ -34,10 +34,10 @@ func TestEncodeIsCanonicalAndRoundTripsWorkspaceTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode archive: %v", err)
 	}
-	if len(entries) != 4 || entries[0].Path != "challenge.yaml" || entries[1].Path != "checks" || entries[2].Path != "checks/checkpoints.sh" || entries[3].Path != "empty" {
+	if len(entries) != 4 || entries[0].Path != "checks" || entries[1].Path != "checks/checkpoints.sh" || entries[2].Path != "empty" || entries[3].Path != "scenario.yaml" {
 		t.Fatalf("decoded entries = %#v", entries)
 	}
-	if entries[2].Mode != 0o755 || entries[0].Mode != 0o644 {
+	if entries[1].Mode != 0o755 || entries[3].Mode != 0o644 {
 		t.Fatalf("decoded modes = %#v", entries)
 	}
 
@@ -91,7 +91,7 @@ func TestStoreProtectsReferencedSnapshotsAndRemovesStaleOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive, err := Encode([]Entry{{Path: "challenge.yaml", Content: []byte("title: one\n")}})
+	archive, err := Encode([]Entry{{Path: "scenario.yaml", Content: []byte("title: one\n")}})
 	if err != nil {
 		t.Fatal(err)
 	}

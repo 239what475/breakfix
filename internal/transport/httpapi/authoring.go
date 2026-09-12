@@ -12,8 +12,8 @@ import (
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
-	challengedomain "github.com/breakfix/breakfix/internal/domain/challenge"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/stream"
 	"github.com/gin-gonic/gin"
@@ -32,15 +32,15 @@ func (h *Handler) CreateAuthoringSession(c *gin.Context) {
 	h.writeAuthoringSession(c, user, session.ID)
 }
 
-// CreateAuthoringChallengeRevision opens a fresh authoring conversation for
-// an already published Challenge. The new session is only a proposal; it must
+// CreateAuthoringScenarioRevision opens a fresh authoring conversation for
+// an already published Scenario. The new session is only a proposal; it must
 // complete the same generation and verification lifecycle before activation.
-func (h *Handler) CreateAuthoringChallengeRevision(c *gin.Context, challengeID string) {
+func (h *Handler) CreateAuthoringScenarioRevision(c *gin.Context, scenarioID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
 	}
-	session, err := h.authoring.CreateRevision(c.Request.Context(), user.ID, challengeID)
+	session, err := h.authoring.CreateRevision(c.Request.Context(), user.ID, scenarioID)
 	if err != nil {
 		h.writeAuthoringError(c, err)
 		return
@@ -48,18 +48,18 @@ func (h *Handler) CreateAuthoringChallengeRevision(c *gin.Context, challengeID s
 	h.writeAuthoringSession(c, user, session.ID)
 }
 
-// DeprecateAuthoringChallenge hides an author-owned Challenge from the active
+// DeprecateAuthoringScenario hides an author-owned Scenario from the active
 // Catalog and rejects new Environments without deleting its immutable history.
-func (h *Handler) DeprecateAuthoringChallenge(c *gin.Context, challengeID string) {
+func (h *Handler) DeprecateAuthoringScenario(c *gin.Context, scenarioID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
 	}
 	if h.db == nil {
-		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "challenge lifecycle is unavailable"})
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "scenario lifecycle is unavailable"})
 		return
 	}
-	if _, err := h.db.Challenge.DeprecateAuthoringChallenge(c.Request.Context(), user.ID, challengeID, time.Now().UTC()); err != nil {
+	if _, err := h.db.Scenario.DeprecateAuthoringScenario(c.Request.Context(), user.ID, scenarioID, time.Now().UTC()); err != nil {
 		h.writeAuthoringError(c, err)
 		return
 	}
@@ -171,8 +171,8 @@ func toAPIAuthoringSession(session *authoringdomain.Session, revision *authoring
 	return api.AuthoringSession{
 		AuthoringTurnActive: turnActive, Id: session.ID, Intent: toAPIAuthoringPlan(revision.Plan),
 		IntentRevision: int(session.CurrentRevision), LastError: optionalString(session.LastError), Messages: toAPIAuthoringMessages(messages),
-		PublishChallengeId: optionalString(session.PublishChallengeID), State: api.AuthoringSessionState(session.State),
-		RevisionChallengeId: optionalString(session.RevisionChallengeID), RevisionBaseActiveRevisionId: optionalString(session.RevisionBaseActiveRevisionID),
+		PublishScenarioId: optionalString(session.PublishScenarioID), State: api.AuthoringSessionState(session.State),
+		RevisionScenarioId: optionalString(session.RevisionScenarioID), RevisionBaseActiveRevisionId: optionalString(session.RevisionBaseActiveRevisionID),
 		UpdatedAt: session.UpdatedAt.UTC(), VisibleRevision: int(revision.Number), Workflows: workflows,
 	}
 }
@@ -252,7 +252,7 @@ func toAPIAuthoringMetadata(metadata authoringdomain.Metadata) api.AuthoringMeta
 	return api.AuthoringMetadata{Description: metadata.Description, Runtime: api.AuthoringMetadataRuntime(metadata.Runtime), Title: metadata.Title}
 }
 
-func toAPIVerifiedChallenge(value *authoringdomain.VerifiedChallenge) *api.VerifiedChallenge {
+func toAPIVerifiedScenario(value *authoringdomain.VerifiedScenario) *api.VerifiedScenario {
 	if value == nil {
 		return nil
 	}
@@ -260,7 +260,7 @@ func toAPIVerifiedChallenge(value *authoringdomain.VerifiedChallenge) *api.Verif
 	for _, checkpoint := range value.Checkpoints {
 		checkpoints = append(checkpoints, api.VerifiedCheckpoint{Description: checkpoint.Description, Hint: optionalString(checkpoint.Hint), Id: checkpoint.ID, Node: optionalString(checkpoint.Node), Title: checkpoint.Title})
 	}
-	return &api.VerifiedChallenge{Checkpoints: checkpoints, Metadata: toAPIAuthoringMetadata(value.Metadata)}
+	return &api.VerifiedScenario{Checkpoints: checkpoints, Metadata: toAPIAuthoringMetadata(value.Metadata)}
 }
 
 func toAPIAuthoringMessages(messages []authoringdomain.Message) []api.AuthoringMessage {
@@ -302,11 +302,11 @@ func optionalSlice[T any](values []T) *[]T {
 
 func (h *Handler) writeAuthoringError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, challengedomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
+	case errors.Is(err, authoringdomain.ErrNotFound), errors.Is(err, scenariodomain.ErrNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, postgres.ErrGenerationWorkflowNotFound):
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "authoring session, generation workflow, or candidate not found"})
 	case errors.Is(err, authoringdomain.ErrVersionConflict), errors.Is(err, authoringdomain.ErrInvalidState), errors.Is(err, generation.ErrCandidateInvalidState),
-		errors.Is(err, generation.ErrChallengeSourceRefConflict),
-		errors.Is(err, challengedomain.ErrRevisionConflict), errors.Is(err, challengedomain.ErrNotMutable):
+		errors.Is(err, generation.ErrScenarioSourceRefConflict),
+		errors.Is(err, scenariodomain.ErrRevisionConflict), errors.Is(err, scenariodomain.ErrNotMutable):
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})

@@ -54,7 +54,7 @@ const plan = {
 
 function candidateFiles(answerScript: string): Record<string, string> {
 	return {
-		"challenge.yaml":
+		"scenario.yaml":
 			"runtime: node\n" +
 			"type: operations-scenario\n" +
 			"title: Restore the Node runtime readiness marker\n" +
@@ -231,7 +231,7 @@ async function expectNoSensitiveContent(root: string, token: string): Promise<vo
 	}
 }
 
-agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node challenge", async () => {
+agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node scenario", async () => {
 	test.setTimeout(70 * 60_000);
 	const baseURL = process.env.BREAKFIX_E2E_BASE_URL?.trim();
 	if (!baseURL) throw new Error("BREAKFIX_E2E_BASE_URL is required");
@@ -295,7 +295,7 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 			command: "find . -type f | sort",
 		})) as { exit_code: number; output: string };
 		expect(command.exit_code).toBe(0);
-		expect(command.output).toContain("challenge.yaml");
+		expect(command.output).toContain("scenario.yaml");
 		expect(command.output).toContain("nodes/host/answer.sh");
 
 		await client.callTool("submit_candidate", {
@@ -364,7 +364,7 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 		await expectFile(contentReview.review_path, "judge.md");
 		await expectFile(contentReview.review_path, "verification.md");
 		await expectFile(contentReview.review_path, "checkpoints/runtime-marker-ready.md");
-		await expectFile(contentReview.review_path, "candidate/challenge.yaml");
+		await expectFile(contentReview.review_path, "candidate/scenario.yaml");
 		await expectFile(contentReview.review_path, "candidate/problem.md");
 		const manifest = JSON.parse(
 			await readFile(path.join(contentReview.review_path, "manifest.json"), "utf8"),
@@ -405,7 +405,7 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 			workflowID,
 			(result) => result.generation.workflow.state === "Published",
 			20 * 60_000,
-			"challenge publication",
+			"scenario publication",
 		);
 		publishedTitle = plan.metadata.title;
 	} finally {
@@ -413,17 +413,17 @@ agentLiveTest("MCP connector repairs, reviews, projects, and publishes a node ch
 		await rm(directory, { recursive: true, force: true });
 	}
 
-	// The published challenge enters the same public Catalog as a web-authored
-	// challenge.
+	// The published scenario enters the same public Catalog as a web-authored
+	// scenario.
 	await expect
 		.poll(
 			async () => {
-				const response = await fetch(`${baseURL}/api/challenges`);
+				const response = await fetch(`${baseURL}/api/scenarios`);
 				if (!response.ok) throw new Error(await response.text());
 				const body = (await response.json()) as {
-					challenges: Array<{ title: string }>;
+					scenarios: Array<{ title: string }>;
 				};
-				return body.challenges.some((challenge) => challenge.title === publishedTitle);
+				return body.scenarios.some((scenario) => scenario.title === publishedTitle);
 			},
 			{ timeout: 15 * 60_000, intervals: [1_000, 2_000, 5_000] },
 		)

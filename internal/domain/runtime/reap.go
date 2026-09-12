@@ -39,8 +39,8 @@ type Reap struct {
 	Artifact                *execution.ArtifactReference       `json:"artifact,omitempty"`
 	FinalArtifact           *execution.ArtifactReference       `json:"final_artifact,omitempty"`
 	VerificationEnvironment *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
-	ChallengeID             string                             `json:"challenge_id,omitempty"`
-	ChallengeRevisionID     string                             `json:"challenge_revision_id,omitempty"`
+	ScenarioID              string                             `json:"scenario_id,omitempty"`
+	ScenarioRevisionID      string                             `json:"scenario_revision_id,omitempty"`
 }
 
 func (r Reap) Valid() error {
@@ -59,7 +59,7 @@ func (r Reap) Valid() error {
 	if r.VerificationEnvironment != nil && r.VerificationEnvironment.Validate(r.Snapshot.Runtime) != nil {
 		return errors.New("runtime resource reap verification environment is invalid")
 	}
-	if r.DeleteFinalArtifact && (r.FinalArtifact == nil || strings.TrimSpace(r.ChallengeID) == "" || strings.TrimSpace(r.ChallengeRevisionID) == "") {
+	if r.DeleteFinalArtifact && (r.FinalArtifact == nil || strings.TrimSpace(r.ScenarioID) == "" || strings.TrimSpace(r.ScenarioRevisionID) == "") {
 		return errors.New("runtime resource reap final artifact is incomplete")
 	}
 	return nil

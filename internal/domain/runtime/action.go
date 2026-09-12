@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/challenge"
+	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -43,20 +43,20 @@ func (s Scope) Valid() bool {
 }
 
 // State is the external runtime state represented by an action. Catalog
-// commit preparation maps to ChallengePublishing; the other values map
+// commit preparation maps to ScenarioPublishing; the other values map
 // directly to the corresponding persisted aggregate state.
 type State string
 
 const (
-	StateBuilding            State = "Building"
-	StateArtifactPublishing  State = "ArtifactPublishing"
-	StateVerifying           State = "Verifying"
-	StateChallengePublishing State = "ChallengePublishing"
+	StateBuilding           State = "Building"
+	StateArtifactPublishing State = "ArtifactPublishing"
+	StateVerifying          State = "Verifying"
+	StateScenarioPublishing State = "ScenarioPublishing"
 )
 
 func (s State) Valid() bool {
 	switch s {
-	case StateBuilding, StateArtifactPublishing, StateVerifying, StateChallengePublishing:
+	case StateBuilding, StateArtifactPublishing, StateVerifying, StateScenarioPublishing:
 		return true
 	default:
 		return false
@@ -115,8 +115,8 @@ type Context struct {
 	Build                   *execution.BuildOutput             `json:"build,omitempty"`
 	Artifact                *execution.ArtifactReference       `json:"artifact,omitempty"`
 	VerificationEnvironment *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
-	ChallengeID             string                             `json:"challenge_id,omitempty"`
-	ChallengeRevisionID     string                             `json:"challenge_revision_id,omitempty"`
+	ScenarioID              string                             `json:"scenario_id,omitempty"`
+	ScenarioRevisionID      string                             `json:"scenario_revision_id,omitempty"`
 }
 
 func (c Context) Credential() Credential {
@@ -138,20 +138,20 @@ func (c Context) Valid() error {
 	}
 	switch c.Identity.State {
 	case StateBuilding:
-		if c.Build != nil || c.Artifact != nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
+		if c.Build != nil || c.Artifact != nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
 			return errors.New("build action has unexpected runtime output")
 		}
 	case StateArtifactPublishing:
-		if c.Build == nil || c.Artifact != nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
+		if c.Build == nil || c.Artifact != nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
 			return errors.New("artifact publication action has invalid build input")
 		}
 	case StateVerifying:
-		if c.Artifact == nil || c.ChallengeID != "" || c.ChallengeRevisionID != "" {
+		if c.Artifact == nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
 			return errors.New("verification action has invalid staging input")
 		}
-	case StateChallengePublishing:
-		if c.Artifact == nil || !challenge.ValidID(c.ChallengeID) || !challenge.ValidRevisionID(c.ChallengeRevisionID) {
-			return errors.New("challenge publication action has invalid input")
+	case StateScenarioPublishing:
+		if c.Artifact == nil || !scenario.ValidID(c.ScenarioID) || !scenario.ValidRevisionID(c.ScenarioRevisionID) {
+			return errors.New("scenario publication action has invalid input")
 		}
 	default:
 		return errors.New("runtime action state is unsupported")

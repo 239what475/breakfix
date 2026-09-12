@@ -12,7 +12,7 @@ import (
 
 // OpaqueName derives the resource component used for candidate-scoped OCI
 // repositories. It intentionally depends only on the opaque domain ID, never
-// on author-visible challenge metadata.
+// on author-visible scenario metadata.
 func OpaqueName(value string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(value)))
 	return hex.EncodeToString(digest[:12])
@@ -22,13 +22,13 @@ func CandidateOCIRepository(registryRoot, candidateRevisionID string) (string, e
 	return ociRepository(registryRoot, "candidates", candidateRevisionID)
 }
 
-// ChallengeOCIRepository is scoped to one immutable published Challenge
+// ScenarioOCIRepository is scoped to one immutable published Scenario
 // revision. A later revision must never overwrite a prior runtime artifact.
-func ChallengeOCIRepository(registryRoot, challengeID, challengeRevisionID string) (string, error) {
-	if strings.TrimSpace(challengeID) == "" || strings.TrimSpace(challengeRevisionID) == "" {
-		return "", errors.New("challenge OCI repository requires a challenge and revision")
+func ScenarioOCIRepository(registryRoot, scenarioID, scenarioRevisionID string) (string, error) {
+	if strings.TrimSpace(scenarioID) == "" || strings.TrimSpace(scenarioRevisionID) == "" {
+		return "", errors.New("scenario OCI repository requires a scenario and revision")
 	}
-	return ociRepository(registryRoot, "challenges", challengeID+"\x00"+challengeRevisionID)
+	return ociRepository(registryRoot, "scenarios", scenarioID+"\x00"+scenarioRevisionID)
 }
 
 func CandidateOCIImageReference(registryRoot, candidateRevisionID string) (string, error) {
@@ -39,8 +39,8 @@ func CandidateOCIImageReference(registryRoot, candidateRevisionID string) (strin
 	return repository + ":artifact", nil
 }
 
-func ChallengeOCIImageReference(registryRoot, challengeID, challengeRevisionID string) (string, error) {
-	repository, err := ChallengeOCIRepository(registryRoot, challengeID, challengeRevisionID)
+func ScenarioOCIImageReference(registryRoot, scenarioID, scenarioRevisionID string) (string, error) {
+	repository, err := ScenarioOCIRepository(registryRoot, scenarioID, scenarioRevisionID)
 	if err != nil {
 		return "", err
 	}

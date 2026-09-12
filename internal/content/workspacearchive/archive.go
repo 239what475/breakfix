@@ -35,7 +35,7 @@ type Entry struct {
 }
 
 // Encode returns a deterministic tar.gz archive. It normalizes permissions to
-// the only semantic distinction the challenge format preserves: executable or
+// the only semantic distinction the scenario format preserves: executable or
 // non-executable regular files. Parent directories are materialized so a
 // decoded archive can be restored without relying on tar extraction behavior.
 func Encode(entries []Entry) ([]byte, error) {
