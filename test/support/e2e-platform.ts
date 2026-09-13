@@ -67,6 +67,26 @@ export async function nodeEnvironmentUID(name: string): Promise<string> {
 	return (await nodeEnvironment(name)).metadata?.uid ?? "";
 }
 
+// The Server owns normal activity renewal. This helper deliberately bypasses
+// that API so the E2E suite can exercise controller-owned idle reclamation.
+export async function expireNodeEnvironmentForIdleReclamation(name: string) {
+	const activityAt = new Date(Date.now() - 60_000).toISOString();
+	await kubectl([
+		"-n", namespace, "patch", "nodeenvironment", name, "--type", "merge", "--patch",
+		JSON.stringify({
+			spec: {
+				environment: {
+					lifecycle: {
+						activityAt,
+						idleTtlSeconds: 1,
+						drainGracePeriodSeconds: 1,
+					},
+				},
+			},
+		}),
+	]);
+}
+
 export async function expectNodeEnvironmentPhase(name: string, expected: "Ready" | "Completed") {
   await expect.poll(() => nodeEnvironmentPhase(name), {
     timeout: 90_000,
@@ -101,7 +121,22 @@ export async function waitForEnvironmentDeletion(kind: "nodeenvironment" | "vk8s
   }, {
     timeout: 5 * 60_000,
     intervals: [1_000, 2_000, 5_000],
-  }).toBe(true);
+	}).toBe(true);
+}
+
+export async function expectNoRuntimeEnvironments() {
+	await expect.poll(async () => {
+		const names = await Promise.all(
+			(["nodeenvironment", "vk8senvironment"] as const).map(async (kind) => {
+				const { stdout } = await kubectl(["-n", namespace, "get", kind, "-o", "name"]);
+				return stdout.trim();
+			}),
+		);
+		return names.filter(Boolean);
+	}, {
+		timeout: 5 * 60_000,
+		intervals: [1_000, 2_000, 5_000],
+	}).toEqual([]);
 }
 
 export async function attachEnvironmentIdentity(
