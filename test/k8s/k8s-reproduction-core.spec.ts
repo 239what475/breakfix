@@ -47,7 +47,7 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
     await page.getByRole("button", { name: "Learning", exact: true }).first().click();
     await expect.poll(async () => {
       const items = await learningHistory(page);
-      return items.some((item) => item.scenario.id === scenarioID && item.runtime === "k8s" && item.state === "stopped");
+      return items.some((item) => item.scenario.id === scenarioID && item.scenario.runtime === "k8s" && item.state === "stopped");
     }, { timeout: 30_000, intervals: [500, 1_000, 2_000] }).toBe(true);
     await expect(page.getByText("Attempt ended", { exact: true })).toBeVisible();
   } finally {

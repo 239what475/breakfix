@@ -13,9 +13,8 @@ type ActiveEnvironment = {
 };
 
 type LearningHistory = {
-	runtime: "node" | "k8s";
 	state: "active" | "completed" | "stopped" | "reset" | "expired";
-	scenario: { id: string };
+	scenario: { id: string; runtime: "node" | "k8s" };
 };
 
 async function totpCode(page: Page, secret: string): Promise<string> {

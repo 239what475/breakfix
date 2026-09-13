@@ -53,10 +53,10 @@ test("learner can reset and stop a Node workspace while retaining attempt histor
     await expect(page.getByRole("heading", { name: scenario.title, exact: true })).toHaveCount(2);
     await expect.poll(async () => {
       const items = await learningHistory(page);
-      const attempts = items.filter((item) => item.scenario.id === scenarioID && item.runtime === "node");
+      const attempts = items.filter((item) => item.scenario.id === scenarioID && item.scenario.runtime === "node");
       return attempts.map((item) => item.state).sort().join(",");
     }, { timeout: 30_000, intervals: [500, 1_000, 2_000] }).toBe("reset,stopped");
-    await expect(page.getByText("Attempt ended", { exact: true })).toHaveCount(2);
+    await expect(page.getByText(/^Attempt ended/)).toHaveCount(2);
   } finally {
     if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
     if (scenarioID && !stopped) {
