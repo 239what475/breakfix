@@ -1,6 +1,7 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
-	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network
+	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
+	docs-sync docs-build docs-check docs-serve
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -33,6 +34,7 @@ TARGETOS ?= linux
 TARGETARCH ?= amd64
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
+DOCS_SITE_SCRIPT := $(CURDIR)/docs-site/scripts/docs-site.sh
 
 CATALOG_SOURCE ?=
 CATALOG_ARCHIVE ?= dist/catalog.oci.tar
@@ -51,6 +53,18 @@ $(TEST_DEPS_STAMP): $(TEST_DIR)/package.json $(TEST_DIR)/package-lock.json
 	@touch $@
 
 test-deps: $(TEST_DEPS_STAMP)
+
+docs-sync:
+	$(DOCS_SITE_SCRIPT) sync
+
+docs-build:
+	$(DOCS_SITE_SCRIPT) build
+
+docs-check:
+	$(DOCS_SITE_SCRIPT) check
+
+docs-serve:
+	$(DOCS_SITE_SCRIPT) serve
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)

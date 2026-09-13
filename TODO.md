@@ -23,17 +23,18 @@ Breakfix Vue 文档阅读器
 
 ### 1. 固定版本的 Hugo 文档镜像
 
-- [ ] 新增 `docs-site/manifest.yaml`，固定上游仓库、revision、对外版本、语言、文档前缀、Hugo 版本和 Node 版本。
-- [ ] 首个快照先使用当前已验证的 Kubernetes website commit `ce98a43f24257385a9766003a6dadc95e962dc63`，对外版本标记为
+- [x] 新增 `docs-site/manifest.yaml`，固定上游仓库、revision、对外版本、语言、文档前缀、Hugo 版本和 Node 版本。
+- [x] 首个快照先使用当前已验证的 Kubernetes website commit `ce98a43f24257385a9766003a6dadc95e962dc63`，对外版本标记为
       `snapshot-ce98a43`；确认对应 Kubernetes 发布版本后再改用正式版本号，不凭日期猜测 `v1.37` 等版本。
-- [ ] 按上游当前构建要求固定 Hugo `0.144.2` 和 Node `20.17.0`，构建时拉取固定 revision，不把完整上游仓库复制进 Breakfix。
-- [ ] 使用完整 upstream Hugo 构建，保留其 shortcode、layout、data、i18n 和资源依赖；不把 `content/en/docs` 单独作为新的 `contentDir`。
-- [ ] 构建后只发布 `/docs/**` 页面和页面依赖的静态资源，删除或拒绝 `/blog`、`/case-studies` 等非文档页面，并用路径检查脚本阻止遗漏。
-- [ ] 保留 CC BY 4.0 署名、来源链接、修改说明；未单独确认许可的第三方图片、嵌入和资源暂不同步。
-- [ ] 生成公开的 `build-info.json`，至少包含 source、revision、version、locale 和构建时间。
+- [x] 按上游当前构建要求固定 Hugo `0.144.2` 和 Node `20.17.0`，构建时拉取固定 revision，不把完整上游仓库复制进 Breakfix；本地允许直接使用对应的 Hugo Extended 二进制。
+- [x] 调用 upstream 已定义的生产构建入口（`make production-build`），保留其 shortcode、layout、data、i18n、资源依赖和构建配置；不把 `content/en/docs` 单独作为新的 `contentDir`，不重新实现 Hugo 的构建流程。
+- [x] 原样保留 upstream 的完整 `public/` 目录结构并部署到独立 docs origin；不删除 `/blog`、`/case-studies` 等页面，不对生成后的 HTML、CSS、JS 或链接做 URL 重写。
+- [ ] Breakfix 的产品入口只指向 docs origin 的 `/docs/`，文档站的其他 upstream 页面不在 Breakfix 导航中暴露；是否限制直接访问由 docs origin/CDN 路由策略决定，不通过篡改 Hugo 产物实现。
+- [x] 保留 CC BY 4.0 署名、来源链接、修改说明；未单独确认许可的第三方图片、嵌入和资源暂不同步。
+- [x] 生成公开的 `build-info.json`，至少包含 source、revision、version、locale 和构建时间。
 
-首个闭环只验证一个固定版本的英文 Kubernetes 文档页面，不追求覆盖全站。构建产物使用稳定版本前缀，例如
-`/kubernetes/snapshot-ce98a43/en/docs/...`；Hugo `baseURL`、内部链接和静态资源路径必须在 smoke test 中验证。
+首个闭环使用一个固定版本的 Kubernetes website 快照，先验证英文 `/docs/` 入口即可，不要求 Breakfix 暴露全站导航。该快照以独立 docs origin 的根路径部署，例如
+`https://docs.breakfix.example/`，由构建配置记录当前 `source`、`version` 和 `revision`；Hugo `baseURL` 必须与该 origin 一致，内部链接和静态资源路径必须在 smoke test 中验证。后续多版本优先使用独立的 docs 部署或 origin；若未来采用路径前缀，必须先验证 upstream 官方配置和部署层支持，不能依赖产物后处理。
 
 ### 2. Breakfix 文档阅读器
 
@@ -79,11 +80,11 @@ docs.breakfix.example
 
 ### 4. 本地开发和生产发布
 
-- [ ] 增加 `make docs-sync`、`make docs-build` 和 `make docs-serve`，使文档镜像可以独立构建和预览。
-- [ ] 本地使用不同端口模拟跨 origin：Breakfix `http://localhost:5173`，Hugo `http://localhost:1313`，并为本地构建注入对应 parent origin。
-- [ ] 生产将 Hugo 静态产物部署到独立域名或 CDN，不与 Breakfix Go 服务共享 origin。
-- [ ] 使用稳定的版本路径 `/kubernetes/<version>/en/docs/...`，配置 `baseURL`、缓存、失败页、`frame-ancestors` 和 Breakfix 的 `frame-src` 响应头。
-- [ ] 同一镜像内的文档链接留在 docs origin；指向其他站点的链接打开新标签页；版本不存在或跳出允许 origin 的链接在构建检查中报告。
+- [x] 增加 `make docs-sync`、`make docs-build` 和 `make docs-serve`，使文档镜像可以独立构建和预览。
+- [ ] 本地使用不同端口模拟跨 origin：Breakfix `http://localhost:5173`，docs origin `http://localhost:1313`；本地构建使用 upstream 的 `hugo.server.toml`/生产配置，并注入对应 parent origin。
+- [ ] 生产将 upstream 完整 Hugo `public/` 静态产物部署到独立域名或 CDN 根路径，不与 Breakfix Go 服务共享 origin。
+- [ ] 配置 upstream 支持的 `baseURL`、缓存、失败页、`frame-ancestors` 和 Breakfix 的 `frame-src` 响应头；不通过改写产物制造版本路径。
+- [ ] 同一镜像内的文档链接和资源路径保持 upstream 规则并留在 docs origin；指向其他站点的链接打开新标签页；版本不存在或跳出允许 origin 的链接在部署配置检查中报告。
 - [ ] 记录本地、预发布和生产的 parent origin、docs origin 以及文档版本配置，避免构建产物与环境不匹配。
 
 ### 5. 验收测试
@@ -93,17 +94,17 @@ docs.breakfix.example
 - [ ] 测试验证非法 origin、非法 `event.source`、未知消息类型和无效字段都会被拒绝。
 - [ ] 测试验证文档加载失败、重试以及文档站非文档路径拒绝。
 - [ ] 新增固定的 `test/fixtures/documentation/` 静态文档 fixture，由独立端口提供，不依赖 `/tmp` checkout 或外网。
-- [ ] 使用真实固定 upstream 执行一次 Hugo smoke test，验证页面模板、脚本注入、baseURL、资源路径和 `build-info.json`。
+- [ ] 使用真实固定 upstream 执行一次官方生产构建 smoke test，验证完整 `public/` 结构、`/docs/` 页面模板、脚本注入、baseURL、资源路径和 `build-info.json`。
 - [ ] 在本地双端口和生产独立域名配置下分别完成一次构建验证。
 
 ## 提交拆分
 
 每完成一个独立步骤及其对应验证就立即提交，不把多项工作积累成一次大提交：
 
-1. **Hugo 文档镜像基础**：固定 Kubernetes website revision，新增 `docs-site/` 构建骨架、文档路径限制、许可证署名和镜像元数据；完成固定版本文档构建验证。
+1. **Hugo 文档镜像基础**：固定 Kubernetes website revision，新增 `docs-site/` 官方构建调用、独立 origin 部署说明、许可证署名和镜像元数据；完成固定版本完整 `public/` 和 `/docs/` 入口构建验证。
 2. **文档阅读器入口**：增加 Documentation 顶层入口、来源配置和 iframe 阅读器；完成 Vue 构建以及加载、失败和重试状态验证。
 3. **文档上下文桥接**：在 Hugo 公共模板注入位置上报脚本，在 Vue 中实现 `postMessage` 契约、来源校验和页面状态展示；完成页面导航与锚点传递验证。
-4. **本地与生产部署**：补充双端口本地命令、独立 origin 部署配置、版本路径、CSP/iframe 响应头和运行说明；完成本地构建与独立域名配置检查。
+4. **本地与生产部署**：补充双端口本地命令、独立 docs origin 部署配置、版本部署说明、CSP/iframe 响应头和运行说明；完成本地构建与独立域名配置检查。
 5. **嵌入验收收尾**：补齐浏览器测试，覆盖文档入口、iframe 导航、非法消息拒绝、加载失败和非文档路径拒绝；执行本阶段约定的静态、构建和浏览器验收。
 
 本阶段明确不做：Agent 阅读和场景生成、正文提取、标题滚动识别、实践环境启动、文档更新后的场景增量复验。这些任务属于 `NEXT.md`。
