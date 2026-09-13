@@ -923,6 +923,9 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 	}
 	for _, commit := range commits {
 		entry := entriesByID[commit.EntryID]
+		if commit.MaterializedAt == nil {
+			return nil, fmt.Errorf("catalog commit %q has no materialized timestamp", commit.ID)
+		}
 		stable := scenariodomain.Scenario{
 			ID: commit.ScenarioID, SourceKind: scenariodomain.SourceRelease, SourceRef: entry.SourceRef,
 			State: scenariodomain.StateActive, ActiveRevisionID: commit.ScenarioRevisionID, SourceSlug: commit.SourceSlug,
@@ -930,7 +933,7 @@ func (d *CatalogRepository) CompleteReleaseCommit(ctx context.Context, releaseID
 		}
 		published := scenarioRevisionFromPublication(entry.Title, entry.Snapshot.Runtime, entry.Type, entry.Tags, string(entry.ContentRevision), commit.MaterializedRevision,
 			*commit.Artifact, commit.ScenarioRevisionID, commit.ScenarioID, entry.SourceRef, string(entry.ContentRevision), "",
-			commit.SourceSlug, contentscenario.MaterializedPath(commit.SourceSlug, commit.ScenarioRevisionID), scenariodomain.SourceRelease, now.UTC())
+			commit.SourceSlug, contentscenario.MaterializedPath(commit.SourceSlug, commit.ScenarioRevisionID), scenariodomain.SourceRelease, commit.MaterializedAt.UTC())
 		if err := insertPersistedScenarioTx(ctx, tx, stable); err != nil {
 			return nil, fmt.Errorf("create catalog scenario %q: %w", commit.ScenarioID, err)
 		}

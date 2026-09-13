@@ -418,7 +418,10 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 			if err != nil {
 				return i.handleFinalizerError(ctx, release, err)
 			}
-			if _, err := i.store.MarkCommitMaterialized(ctx, release.ID, commit.ID, materialized.Revision, i.now().UTC()); err != nil {
+			// The materialized manifest is the immutable source that the active
+			// revision will later validate. Persist its exact publication time,
+			// rather than taking a second clock reading for the commit transition.
+			if _, err := i.store.MarkCommitMaterialized(ctx, release.ID, commit.ID, materialized.Revision, materialized.PublishedAt.UTC()); err != nil {
 				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 			}
 			allMaterialized = false
@@ -587,7 +590,11 @@ func (i *Installer) materializeCommit(source *PortableSource, entry catalogdomai
 	if _, err := scenario.ValidateCandidateDir(sourceDir); err != nil {
 		return nil, catalogContentFailure(fmt.Errorf("validate catalog scenario %q: %w", entry.SourcePath, err))
 	}
-	published, err := scenario.PromoteDirectoryAt(i.scenariosDir, sourceDir, commit.ScenarioID, commit.ScenarioRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), i.now().UTC())
+	// PostgreSQL timestamps preserve microseconds. Using that precision in the
+	// immutable manifest keeps its published_at identical to the durable commit
+	// timestamp after a restart and catalog integrity check.
+	publishedAt := i.now().UTC().Truncate(time.Microsecond)
+	published, err := scenario.PromoteDirectoryAt(i.scenariosDir, sourceDir, commit.ScenarioID, commit.ScenarioRevisionID, commit.SourceSlug, image, string(entry.ContentRevision), publishedAt)
 	if err != nil {
 		return nil, catalogFinalizerFailure(fmt.Errorf("materialize catalog scenario %q: %w", entry.SourcePath, err))
 	}

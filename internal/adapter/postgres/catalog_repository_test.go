@@ -17,7 +17,7 @@ import (
 func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	now := time.Date(2026, time.August, 4, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, time.August, 4, 12, 0, 0, 123456789, time.UTC)
 	digest := catalogdomain.BundleDigest("sha256:" + strings.Repeat("a", 64))
 	release := catalogdomain.Release{
 		ID: catalogdomain.ReleaseIDForBundle(digest), BundleDigest: digest, State: catalogdomain.ReleasePending,
@@ -147,7 +147,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit catalog race cleanup: %v", err)
 	}
-	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now)
+	ready, err := database.Catalog.CompleteReleaseCommit(ctx, initializedRelease.ID, now.Add(time.Minute))
 	if err != nil || ready.State != catalogdomain.ReleaseReady {
 		t.Fatalf("complete catalog release = %#v, err=%v", ready, err)
 	}
@@ -161,6 +161,9 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	published, err := database.Scenario.GetScenarioRevision(ctx, scenarioID, intent.ScenarioRevisionID)
 	if err != nil || published.MaterializedRevision != materializedRevision || published.Type != scenario.ScenarioOperationsScenario {
 		t.Fatalf("committed catalog revision = %#v, err=%v", published, err)
+	}
+	if materialized.MaterializedAt == nil || !published.PublishedAt.Equal(materialized.MaterializedAt.UTC()) {
+		t.Fatalf("committed catalog published_at = %s, materialized_at = %#v", published.PublishedAt, materialized.MaterializedAt)
 	}
 	storedCommits, err := database.Catalog.Commits(ctx, initializedRelease.ID)
 	if err != nil || len(storedCommits) != 1 || storedCommits[0].State != catalogdomain.CommitCommitted {

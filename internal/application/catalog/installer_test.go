@@ -116,10 +116,14 @@ func TestInstallerMaterializedCommitCapturesRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create installer: %v", err)
 	}
-	installer.now = func() time.Time { return time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC) }
+	publishedAt := time.Date(2026, time.August, 6, 0, 0, 0, 123456789, time.UTC)
+	installer.now = func() time.Time { return publishedAt }
 	published, err := installer.materializeCommit(source, entry, commit)
 	if err != nil {
 		t.Fatalf("materialize catalog commit: %v", err)
+	}
+	if !published.PublishedAt.Equal(publishedAt.Truncate(time.Microsecond)) {
+		t.Fatalf("materialized published_at = %s, want PostgreSQL-compatible %s", published.PublishedAt, publishedAt.Truncate(time.Microsecond))
 	}
 	commit.MaterializedRevision = published.Revision
 	if _, err := installer.ensureMaterialized(entry, commit); err != nil {
