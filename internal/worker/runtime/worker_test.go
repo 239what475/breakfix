@@ -97,6 +97,8 @@ type runtimeStore struct {
 	action             runtime.Context
 	claimed            bool
 	completedStates    []runtime.State
+	artifactFailures   []runtime.Failure
+	artifactReports    []*domainexecution.VerificationReport
 	renewCalls         atomic.Int32
 	completeBuildCalls atomic.Int32
 }
@@ -186,8 +188,36 @@ func (s *runtimeStore) ReportInfrastructureFailure(context.Context, runtime.Cred
 	return nil
 }
 
-func (s *runtimeStore) ReportArtifactFailure(context.Context, runtime.Credential, runtime.Failure, *domainexecution.VerificationReport) error {
+func (s *runtimeStore) ReportArtifactFailure(_ context.Context, _ runtime.Credential, failure runtime.Failure, report *domainexecution.VerificationReport) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.artifactFailures = append(s.artifactFailures, failure)
+	s.artifactReports = append(s.artifactReports, report)
 	return nil
+}
+
+func TestWorkerReportsVerificationArtifactFailures(t *testing.T) {
+	store := newRuntimeStore()
+	worker, err := New(store, &runtimeBuilder{}, &runtimePublisher{}, &runtimeVerifier{}, Config{WorkerID: "runtime-test", LeaseTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"ANSWER_FAILED", "CHECKPOINT_PROTOCOL_FAILED"} {
+		report := domainexecution.VerificationReport{Passed: false, Summary: "verification failed"}
+		if err := worker.reportError(context.Background(), runtime.Credential{}, domainexecution.NewArtifactErrorWithReport(code, report.Summary, report)); err != nil {
+			t.Fatalf("report %s = %v", code, err)
+		}
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.artifactFailures) != 2 || len(store.artifactReports) != 2 {
+		t.Fatalf("artifact failure reports = %#v %#v", store.artifactFailures, store.artifactReports)
+	}
+	for index, code := range []string{"ANSWER_FAILED", "CHECKPOINT_PROTOCOL_FAILED"} {
+		if store.artifactFailures[index].Class != runtime.FailureArtifact || store.artifactFailures[index].Code != code || store.artifactReports[index] == nil || store.artifactReports[index].Summary != "verification failed" {
+			t.Fatalf("artifact failure %d = %#v %#v", index, store.artifactFailures[index], store.artifactReports[index])
+		}
+	}
 }
 
 type runtimeBuilder struct {

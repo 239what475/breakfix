@@ -213,7 +213,7 @@ onUnmounted(() => {
             :current-window="currentTerminalWindow"
             :terminals="terminalContexts"
           />
-          <template v-else>
+          <template v-else-if="view !== 'overview'">
             <MarkdownDocument :source="documentSource" />
             <aside
               v-if="activeHint && content?.hints[activeHint]"

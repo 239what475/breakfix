@@ -74,6 +74,51 @@ func TestVerifyNodeCompletesAfterReproductionWhenReferenceRepairIsAbsent(t *test
 	}
 }
 
+func TestVerifyNodeReportsReferenceAnswerFailure(t *testing.T) {
+	node := &verificationNodeExecutor{outputs: map[string]incus.ExecNodeResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"service-unavailable","observed":true,"summary":"service is unavailable"}]}`},
+		"answer.sh":    {ExitCode: 23, Stderr: "repair command failed"},
+	}}
+	executor := &Executor{node: node}
+	report, err := executor.verifyNode(context.Background(), domainexecution.Work{ArchiveSHA256: "sha256:" + strings.Repeat("a", 64), Snapshot: verificationNodeSnapshot()}, verificationNodeEnvironment())
+	var artifact *domainexecution.ArtifactError
+	if !errors.As(err, &artifact) || artifact.Code != "ANSWER_FAILED" {
+		t.Fatalf("verification error = %v, want answer artifact failure", err)
+	}
+	if report.Passed || len(report.Reproduction) != 1 || !report.Reproduction[0].Observed || len(report.Answers) != 1 || report.Answers[0].ExitCode != 23 || len(report.Checkpoints) != 1 || report.Checkpoints[0].Passed {
+		t.Fatalf("answer failure report = %#v", report)
+	}
+	if artifact.Report == nil || artifact.Report.Summary != report.Summary {
+		t.Fatalf("artifact report = %#v, want returned report", artifact.Report)
+	}
+	if got, want := strings.Join(node.scripts, ","), "reproduce.sh,answer.sh"; got != want {
+		t.Fatalf("scripts after answer failure = %q, want %q", got, want)
+	}
+}
+
+func TestVerifyNodeReportsCheckpointProtocolFailureAfterReferenceRepair(t *testing.T) {
+	node := &verificationNodeExecutor{outputs: map[string]incus.ExecNodeResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"service-unavailable","observed":true,"summary":"service is unavailable"}]}`},
+		"answer.sh":    {ExitCode: 0},
+		"checks.sh":    {ExitCode: 0, Stdout: "not checkpoint JSON"},
+	}}
+	executor := &Executor{node: node}
+	report, err := executor.verifyNode(context.Background(), domainexecution.Work{ArchiveSHA256: "sha256:" + strings.Repeat("a", 64), Snapshot: verificationNodeSnapshot()}, verificationNodeEnvironment())
+	var artifact *domainexecution.ArtifactError
+	if !errors.As(err, &artifact) || artifact.Code != "CHECKPOINT_PROTOCOL_FAILED" {
+		t.Fatalf("verification error = %v, want checkpoint protocol artifact failure", err)
+	}
+	if report.Passed || len(report.Reproduction) != 1 || !report.Reproduction[0].Observed || len(report.Answers) != 1 || report.Answers[0].ExitCode != 0 || len(report.Checkpoints) != 1 || report.Checkpoints[0].Passed {
+		t.Fatalf("checkpoint protocol report = %#v", report)
+	}
+	if artifact.Report == nil || artifact.Report.Summary != report.Summary {
+		t.Fatalf("artifact report = %#v, want returned report", artifact.Report)
+	}
+	if got, want := strings.Join(node.scripts, ","), "reproduce.sh,answer.sh,checks.sh"; got != want {
+		t.Fatalf("scripts after checkpoint protocol failure = %q, want %q", got, want)
+	}
+}
+
 func TestVerifyNodeReturnsReproductionProtocolReport(t *testing.T) {
 	node := &verificationNodeExecutor{outputs: map[string]incus.ExecNodeResult{
 		"reproduce.sh": {ExitCode: 0, Stdout: "not JSON"},
@@ -149,6 +194,75 @@ func TestVerifyK8sCompletesAfterReproductionWhenReferenceRepairIsAbsent(t *testi
 	if got, want := strings.Join(environments.scripts, ","), "reproduce.sh"; got != want {
 		t.Fatalf("scripts = %q, want %q", got, want)
 	}
+}
+
+func TestVerifyK8sReportsReferenceAnswerFailure(t *testing.T) {
+	environments := &verificationEnvironmentClient{outputs: map[string]kubernetes.PodExecResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"deployment-absent","observed":true,"summary":"deployment absent"}]}`},
+		"answer.sh":    {ExitCode: 23, Stderr: "repair command failed"},
+	}}
+	executor := &Executor{environments: environments}
+	report, err := executor.verifyK8s(context.Background(), verificationK8sWork(true), verificationK8sEnvironment())
+	var artifact *domainexecution.ArtifactError
+	if !errors.As(err, &artifact) || artifact.Code != "ANSWER_FAILED" {
+		t.Fatalf("verification error = %v, want answer artifact failure", err)
+	}
+	if report.Passed || len(report.Reproduction) != 1 || !report.Reproduction[0].Observed || len(report.Answers) != 1 || report.Answers[0].ExitCode != 23 || len(report.Checkpoints) != 1 || report.Checkpoints[0].Passed {
+		t.Fatalf("answer failure report = %#v", report)
+	}
+	if artifact.Report == nil || artifact.Report.Summary != report.Summary {
+		t.Fatalf("artifact report = %#v, want returned report", artifact.Report)
+	}
+	if got, want := strings.Join(environments.scripts, ","), "reproduce.sh,answer.sh"; got != want {
+		t.Fatalf("scripts after answer failure = %q, want %q", got, want)
+	}
+}
+
+func TestVerifyK8sReportsCheckpointProtocolFailureAfterReferenceRepair(t *testing.T) {
+	environments := &verificationEnvironmentClient{outputs: map[string]kubernetes.PodExecResult{
+		"reproduce.sh": {ExitCode: 0, Stdout: `{"evidence":[{"id":"deployment-absent","observed":true,"summary":"deployment absent"}]}`},
+		"answer.sh":    {ExitCode: 0},
+		"checks.sh":    {ExitCode: 0, Stdout: "not checkpoint JSON"},
+	}}
+	executor := &Executor{environments: environments}
+	report, err := executor.verifyK8s(context.Background(), verificationK8sWork(true), verificationK8sEnvironment())
+	var artifact *domainexecution.ArtifactError
+	if !errors.As(err, &artifact) || artifact.Code != "CHECKPOINT_PROTOCOL_FAILED" {
+		t.Fatalf("verification error = %v, want checkpoint protocol artifact failure", err)
+	}
+	if report.Passed || len(report.Reproduction) != 1 || !report.Reproduction[0].Observed || len(report.Answers) != 1 || report.Answers[0].ExitCode != 0 || len(report.Checkpoints) != 1 || report.Checkpoints[0].Passed {
+		t.Fatalf("checkpoint protocol report = %#v", report)
+	}
+	if artifact.Report == nil || artifact.Report.Summary != report.Summary {
+		t.Fatalf("artifact report = %#v, want returned report", artifact.Report)
+	}
+	if got, want := strings.Join(environments.scripts, ","), "reproduce.sh,answer.sh,checks.sh"; got != want {
+		t.Fatalf("scripts after checkpoint protocol failure = %q, want %q", got, want)
+	}
+}
+
+func verificationK8sWork(referenceRepair bool) domainexecution.Work {
+	return domainexecution.Work{Snapshot: domainexecution.Snapshot{
+		Runtime:         scenario.RuntimeK8s,
+		ReferenceRepair: &referenceRepair,
+		Reproduction:    []domainexecution.ReproductionEvidenceSnapshot{{ID: "deployment-absent"}},
+		Checkpoints:     []domainexecution.CheckpointSnapshot{{ID: "deployment-ready"}},
+		K8s: &domainexecution.K8sRuntimeSnapshot{
+			BaseImageDigest:         "registry.example.com/base@sha256:" + strings.Repeat("a", 64),
+			ProfileRevision:         "k8s-profile-v1",
+			Version:                 "v0.31.0",
+			ManagementTerminalImage: "registry.example.com/terminal@sha256:" + strings.Repeat("b", 64),
+			Resources: domainexecution.K8sResources{
+				ControlPlaneCPU: "1", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
+				WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",
+				QuotaCPU: "3", QuotaMemory: "3Gi", QuotaEphemeralStorage: "30Gi",
+			},
+			Network: environment.VK8sNetwork{
+				PublicEgressCIDR: "0.0.0.0/0",
+				ProtectedCIDRs:   []string{"10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"},
+			},
+		},
+	}}
 }
 
 func verificationNodeSnapshot() domainexecution.Snapshot {
