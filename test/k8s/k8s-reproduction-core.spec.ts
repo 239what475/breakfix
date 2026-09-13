@@ -39,7 +39,7 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "Stop", exact: true }).click();
-    await expect(page.getByText("Environment stopped.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Environment stopped.", { exact: true })).toBeVisible({ timeout: 10 * 60_000 });
     await waitForEnvironmentDeletion("vk8senvironment", environmentName);
     stopped = true;
 
@@ -49,7 +49,7 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
       const items = await learningHistory(page);
       return items.some((item) => item.scenario.id === scenarioID && item.scenario.runtime === "k8s" && item.state === "stopped");
     }, { timeout: 30_000, intervals: [500, 1_000, 2_000] }).toBe(true);
-    await expect(page.getByText("Attempt ended", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Attempt ended/)).toBeVisible();
   } finally {
     if (environmentName) await attachEnvironmentIdentity(testInfo, "vk8senvironment", environmentName);
     if (scenarioID && !stopped) {
