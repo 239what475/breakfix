@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RefreshCw } from "lucide-vue-next";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { documentationSource } from "./documentation";
 import "./documentation.css";
 
@@ -62,8 +62,6 @@ function replaceReaderUrl() {
 function iframeUrl() {
   return `${normalizedOrigin}${current.value.path}${current.value.hash}`;
 }
-
-const sourceLabel = computed(() => `${documentationSource.source} · ${documentationSource.version} · ${documentationSource.locale}`);
 
 function isDocumentLocation(value: unknown): value is DocumentLocation {
   if (!value || typeof value !== "object") return false;
@@ -130,18 +128,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="documentation-page" aria-labelledby="documentation-title">
-    <header class="documentation-header">
-      <div>
-        <p class="eyebrow">Documentation</p>
-        <h1 id="documentation-title">Kubernetes</h1>
-        <p class="documentation-source">{{ sourceLabel }}</p>
-      </div>
-      <div class="documentation-location" aria-live="polite">
-        <span>{{ current.path }}{{ current.hash }}</span>
-        <button v-if="failed" class="icon-button" type="button" title="Retry loading documentation" aria-label="Retry loading documentation" @click="retry"><RefreshCw :size="16" aria-hidden="true" /></button>
-      </div>
-    </header>
+  <section class="documentation-page" aria-label="Kubernetes documentation">
     <div class="documentation-frame-wrap">
       <div v-if="loading" class="documentation-state">Loading documentation...</div>
       <div v-if="failed" class="documentation-state documentation-state-error">
