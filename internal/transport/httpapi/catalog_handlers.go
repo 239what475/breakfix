@@ -145,6 +145,7 @@ func (h *Handler) GetScenarioContent(c *gin.Context, id string) {
 	c.JSON(http.StatusOK, api.ScenarioContent{
 		Id:                    entry.ID,
 		Title:                 entry.Title,
+		Description:           entry.Description,
 		Runtime:               api.ScenarioContentRuntime(entry.Runtime),
 		ScenarioTags:          append([]string(nil), entry.Tags...),
 		Nodes:                 toAPIScenarioNodes(entry.Nodes),

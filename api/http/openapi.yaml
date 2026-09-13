@@ -1240,11 +1240,13 @@ components:
 
     ScenarioContent:
       type: object
-      required: [id, title, runtime, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, hints, checkpoints]
+      required: [id, title, description, runtime, scenario_tags, nodes, versions, topology, initialization, reproduction_objective, reproduction_evidence, hints, checkpoints]
       properties:
         id:
           type: string
         title:
+          type: string
+        description:
           type: string
         runtime:
           type: string

@@ -6,13 +6,14 @@ import {
 	ChevronRight,
 	CircleDashed,
 	FileText,
+	Info,
 	MessageCircle,
 	RefreshCw,
 } from "lucide-vue-next";
 import type { Checkpoint, CheckpointResult } from "../../api/types";
 
 defineProps<{
-  view: "problem" | "solution" | "assistant";
+  view: "overview" | "problem" | "solution" | "assistant";
   hasProblem: boolean;
   hasSolution: boolean;
   checkpoints: Checkpoint[];
@@ -21,7 +22,7 @@ defineProps<{
   error: string;
 }>();
 const emit = defineEmits<{
-  updateView: [view: "problem" | "solution" | "assistant"];
+  updateView: [view: "overview" | "problem" | "solution" | "assistant"];
   toggle: [];
   refresh: [];
   hint: [id: string];
@@ -45,6 +46,12 @@ function firstPassedLabel(value?: string | null) {
     </button>
     <template v-if="!collapsed">
       <div class="document-tabs">
+        <button
+          :class="{ active: view === 'overview' }"
+          @click="emit('updateView', 'overview')"
+        >
+          Overview
+        </button>
         <button
           v-if="hasProblem"
           :class="{ active: view === 'problem' }"
@@ -117,6 +124,15 @@ function firstPassedLabel(value?: string | null) {
       </template>
     </template>
     <nav v-else class="sidebar-rail" aria-label="Workspace navigation">
+      <button
+        class="icon-button"
+        :class="{ active: view === 'overview' }"
+        aria-label="Show overview"
+        title="Show overview"
+        @click="emit('updateView', 'overview')"
+      >
+        <Info :size="16" aria-hidden="true" />
+      </button>
       <button
         v-if="hasProblem"
         class="icon-button"

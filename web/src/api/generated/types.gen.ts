@@ -177,6 +177,7 @@ export type CheckpointFirstPass = {
 export type ScenarioContent = {
     id: string;
     title: string;
+    description: string;
     runtime: 'node' | 'k8s';
     scenario_tags: Array<string>;
     nodes: Array<ScenarioNode>;

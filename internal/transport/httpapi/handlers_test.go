@@ -182,11 +182,53 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	if content.Problem == nil || *content.Problem != "# Problem\nRepair it.\n" {
 		t.Fatalf("unexpected problem: %#v", content.Problem)
 	}
+	if content.Description != "demo" || content.Topology != "One host node." || content.Initialization != "generate.sh creates the broken state." || content.ReproductionObjective != "The service is unavailable." {
+		t.Fatalf("scenario reproduction core = %#v", content)
+	}
+	if len(content.Versions) != 1 || content.Versions[0].Component != "fixture" || len(content.ReproductionEvidence) != 1 || content.ReproductionEvidence[0].Id != "service-unavailable" {
+		t.Fatalf("scenario versions/evidence = %#v", content)
+	}
 	if content.Hints["complete"] != "Look at the service.\n" {
 		t.Fatalf("unexpected hints: %#v", content.Hints)
 	}
 	if len(content.ScenarioTags) != 0 {
 		t.Fatalf("scenario content projection = %#v", content)
+	}
+}
+
+func TestGetScenarioContentReturnsReproductionCoreWithoutLearningAids(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	root := t.TempDir()
+	scenarioDir := filepath.Join(root, "scenarios", "minimal", testPublishedScenarioRevisionID)
+	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), "id: minimal\nrevision_id: "+testPublishedScenarioRevisionID+"\nsource_slug: minimal\ntitle: Observe a failed service\nruntime: node\ndescription: A service was deployed but is not accepting requests.\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nversions:\n  - component: nginx\n    version: 1.27.0\ntopology: One host runs the service and its local client.\ninitialization: generate.sh installs the failed configuration.\nreproduction:\n  objective: A local request returns connection refused.\n  evidence:\n    - id: connection-refused\n      description: curl fails with connection refused.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"connection-refused\",\"observed\":true,\"summary\":\"connection refused\"}]}'\n")
+	database := testpostgres.New(t)
+	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := newHandlerForTest(t, database, nil, config.Config{DataDir: root})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/minimal/content", nil)
+	ctx.Set("user_id", "u-demo")
+
+	handler.GetScenarioContent(ctx, "minimal")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var content api.ScenarioContent
+	if err := json.Unmarshal(recorder.Body.Bytes(), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Description != "A service was deployed but is not accepting requests." || content.Topology == "" || content.Initialization == "" || content.ReproductionObjective == "" || len(content.Versions) != 1 || len(content.ReproductionEvidence) != 1 {
+		t.Fatalf("missing reproduction core: %#v", content)
+	}
+	if content.Problem != nil || content.Solution != nil || len(content.Hints) != 0 || len(content.Checkpoints) != 0 {
+		t.Fatalf("optional learning aids unexpectedly present: %#v", content)
 	}
 }
 

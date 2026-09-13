@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import type { AssistantTerminalContext, Scenario, ScenarioContent } from "../../api/types";
 import MarkdownDocument from "./MarkdownDocument.vue";
 import AssistantChat from "./AssistantChat.vue";
+import ScenarioOverview from "./ScenarioOverview.vue";
 import TerminalPane from "./TerminalPane.vue";
 import WorkspaceHeader from "./WorkspaceHeader.vue";
 import WorkspaceSidebar from "./WorkspaceSidebar.vue";
@@ -20,7 +21,7 @@ const emit = defineEmits<{
 const content = ref<ScenarioContent>();
 const loadingContent = ref(false);
 const contentError = ref("");
-const view = ref<"problem" | "solution" | "assistant">("assistant");
+const view = ref<"overview" | "problem" | "solution" | "assistant">("overview");
 const sidebarCollapsed = ref(false);
 const mobileView = ref<"document" | "terminal">("document");
 const isNarrow = ref(false);
@@ -71,11 +72,7 @@ async function loadContent() {
   contentError.value = "";
   try {
     content.value = await api.getScenarioContent(props.scenario.id);
-    view.value = content.value.problem
-      ? "problem"
-      : content.value.solution
-        ? "solution"
-        : "assistant";
+    view.value = "overview";
   } catch (err) {
     contentError.value =
       err instanceof Error ? err.message : "Unable to load scenario content";
@@ -88,7 +85,7 @@ function showHint(id: string) {
   activeHint.value = activeHint.value === id ? null : id;
 }
 
-function changeView(next: "problem" | "solution" | "assistant") {
+function changeView(next: "overview" | "problem" | "solution" | "assistant") {
   view.value = next;
   if (next === "assistant") activeHint.value = null;
 }
@@ -137,7 +134,7 @@ watch(
     currentTerminalNode.value = "";
     currentTerminalWindow.value = "shell-1";
     terminalContexts.value = [{ windows: ["shell-1"] }];
-    view.value = "assistant";
+    view.value = "overview";
     resetElapsed();
     void loadContent();
   },
@@ -203,11 +200,12 @@ onUnmounted(() => {
         </div>
         <template v-else>
           <div class="document-toolbar">
-            <span>{{ view === "problem" ? "Problem" : view === "solution" ? "Solution" : "Assistant" }}</span
+            <span>{{ view === "overview" ? "Overview" : view === "problem" ? "Problem" : view === "solution" ? "Solution" : "Assistant" }}</span
             ><span v-if="progressLoading" class="muted-copy"
               >Checking environment...</span
             >
           </div>
+          <ScenarioOverview v-if="view === 'overview' && content" :content="content" />
           <AssistantChat
             v-if="view === 'assistant'"
             :scenario-id="scenario.id"
