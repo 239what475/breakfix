@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import AppTopbar from "./AppTopbar.vue";
 import AuthDialog from "./features/auth/AuthDialog.vue";
 import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
 import ScenarioCatalogPage from "./features/catalog/ScenarioCatalogPage.vue";
 import MySpacePage from "./features/my-space/MySpacePage.vue";
+import DocumentationPage from "./features/documentation/DocumentationPage.vue";
+import { documentationSource } from "./features/documentation/documentation";
 import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
 import { useScenarioSession } from "./features/workspace/useScenarioSession";
 
@@ -12,7 +14,7 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-const page = ref<"operations" | "my-space">("operations");
+const page = ref<"operations" | "my-space" | "documentation">(window.location.pathname === "/documentation" ? "documentation" : "operations");
 const mySpaceRefreshRequest = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
@@ -59,12 +61,24 @@ function closeAuthoring() {
 }
 
 function openOperations(scenarioId?: string) {
+	if (page.value === "documentation") window.history.pushState({}, "", "/");
 	catalogFocusId.value = scenarioId;
 	page.value = "operations";
 }
 
 function openMySpace() {
+	if (page.value === "documentation") window.history.pushState({}, "", "/?page=my-space");
 	page.value = "my-space";
+}
+
+function openDocumentation() {
+	closeAuthoring();
+	closeWorkspace();
+	if (page.value !== "documentation") {
+		const params = new URLSearchParams({ source: documentationSource.source, version: documentationSource.version, path: documentationSource.entryPath });
+		window.history.pushState({}, "", `/documentation?${params.toString()}`);
+	}
+	page.value = "documentation";
 }
 
 function navigateOperations() {
@@ -91,16 +105,27 @@ function signOut() {
 	logout();
 }
 
-const topbarActive = computed<"operations" | "my-space" | "none">(() => {
+const topbarActive = computed<"operations" | "my-space" | "documentation" | "none">(() => {
   if (authoringOpen.value) return "none";
   if (workspace.value) return "none";
-  return page.value;
+	return page.value;
 });
+
+function handlePopState() {
+  if (window.location.pathname === "/documentation") {
+    page.value = "documentation";
+    return;
+  }
+  page.value = new URLSearchParams(window.location.search).get("page") === "my-space" ? "my-space" : "operations";
+}
+
+onMounted(() => window.addEventListener("popstate", handlePopState));
+onUnmounted(() => window.removeEventListener("popstate", handlePopState));
 </script>
 
 <template>
   <div class="app-root">
-    <AppTopbar :active="topbarActive" :show-navigation="loggedIn" :logged-in="loggedIn" :account-name="accountName" @operations="navigateOperations" @my-space="navigateMySpace" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
+    <AppTopbar :active="topbarActive" :show-navigation="true" :logged-in="loggedIn" :account-name="accountName" @operations="navigateOperations" @my-space="navigateMySpace" @documentation="openDocumentation" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
     <div
       v-if="notice"
       class="toast"
@@ -109,6 +134,7 @@ const topbarActive = computed<"operations" | "my-space" | "none">(() => {
       {{ notice.text }}
     </div>
 		<main class="app-main">
+      <DocumentationPage v-if="!workspace && !authoringOpen && page === 'documentation'" />
       <ScenarioCatalogPage
 		v-show="!workspace && !authoringOpen && page === 'operations'"
       :scenarios="scenarios"
