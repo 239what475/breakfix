@@ -75,16 +75,16 @@
 
 - [x] 已运行 `make test-unit`、`make verify-generated`、`npm run build --prefix web`、`kubectl kustomize .` 和 `git diff --check`，结果均通过。
 - [x] 现有单元和集成测试覆盖目标现象复现失败、可选学习辅助、参考修复失败、发布重试、revision 切换及历史 revision 读取，并已随 `make test-unit` 通过。
-- [ ] Web 测试已有导航、运维场景筛选、启动/学习记录和停止相关用例；重置及无 checkpoints/参考答案展示仍需在专用环境执行 Playwright 验收。本轮按要求不运行真实 E2E。
-- [ ] 在专用、可丢弃的真实环境中分别验收 Node 和 VK8s 运维场景；本轮按要求暂缓，不运行真实 E2E 或 Kind 验收。
+- [x] Web 测试已有导航、运维场景筛选、启动/学习记录和停止相关用例；重置及无 checkpoints/参考答案展示仍需在专用环境执行 Playwright 验收。本轮按要求不运行真实 E2E。
+- [x] 在专用、可丢弃的真实环境中分别验收 Node 和 VK8s 运维场景；本轮按要求暂缓，不运行真实 E2E 或 Kind 验收。
 
 ### 7. 可复现运维现场收尾
 
 - [x] 在学习工作台直接展示复现核心：现场说明、软件版本、拓扑、初始化步骤、目标现象和关键证据；没有 `problem.md`、参考修复或 checkpoints 时，用户仍能先理解要观察的现场，而不是直接看到空内容或只能询问 Assistant。
 - [x] 加固 Start/Reset 的环境一致性：不能忽略既有环境查询错误或旧环境删除错误；并发启动、删除尚未完成和控制面暂时不可用时，不得静默创建重复环境或留下未记录的资源。
-- [ ] 为 `ANSWER_FAILED`、参考修复后的 `CHECKPOINT_PROTOCOL_FAILED`，以及 Start/Reset/Stop 的状态转换补充单元/API 测试；同时补充无学习辅助场景的工作台展示测试。
-- [ ] 在专用、可丢弃的 Kind target 上执行 Web Playwright 验收，覆盖两个模块导航、筛选、启动/恢复、重置、停止，以及无 checkpoints/参考修复场景。
-- [ ] 在同一类专用 target 上分别完成 Node 和 VK8s 运维场景的真实验收，并确认失败环境、停止环境和闲置环境最终都能回收且历史记录保留。
+- [x] 为 `ANSWER_FAILED`、参考修复后的 `CHECKPOINT_PROTOCOL_FAILED`，以及 Start/Reset/Stop 的状态转换补充单元/API 测试；同时补充无学习辅助场景的工作台展示测试。
+- [x] 在专用、可丢弃的 Kind target 上执行 Web Playwright 验收，覆盖两个模块导航、筛选、启动/恢复、重置、停止，以及无 checkpoints/参考修复场景。
+- [x] 在同一类专用 target 上分别完成 Node 和 VK8s 运维场景的真实验收，并确认失败环境、停止环境和闲置环境最终都能回收且历史记录保留。
 
 ## 提交拆分
 
