@@ -11,12 +11,14 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
 	nodeEnvironmentReadyTimeout = 5 * time.Minute
 	vk8sEnvironmentReadyTimeout = 10 * time.Minute
 	environmentDrainGrace       = 30 * time.Second
+	environmentCreateAttempts   = 3
 )
 
 type serverEnvironment interface {
@@ -70,7 +72,7 @@ type environmentRuntimeAdapter struct {
 	get             func(context.Context, string) (*activeEnvironment, error)
 	create          func(context.Context, *postgres.User, *scenario.Entry) (string, error)
 	updateSpec      func(context.Context, string, func(*breakfixv1.EnvironmentSpec)) error
-	requestDeletion func(context.Context, string) error
+	requestDeletion func(context.Context, string, types.UID) error
 }
 
 func (a *environmentRuntimeAdapter) renewActivity(ctx context.Context, name string, activityAt metav1.Time) error {
@@ -142,7 +144,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				for index, node := range entry.Nodes {
 					nodes[index] = breakfixv1.NodeRuntimeNodeSpec{Name: node.Name, Title: node.Title}
 				}
-				name := kubernetes.RandomID()
+				name := learningEnvironmentName(user.ID, entry)
 				environment := &breakfixv1.NodeEnvironment{
 					ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, entry.ID, breakfixv1.EnvironmentPurposeLearning),
 					Spec: breakfixv1.NodeEnvironmentSpec{
@@ -168,7 +170,10 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 					return err
 				}, mutate)
 			},
-			requestDeletion: func(ctx context.Context, name string) error {
+			requestDeletion: func(ctx context.Context, name string, uid types.UID) error {
+				if uid != "" {
+					return h.k8s.DeleteNodeEnvironmentWithUID(ctx, h.crdNamespace, name, uid)
+				}
 				return h.k8s.DeleteNodeEnvironment(ctx, h.crdNamespace, name)
 			},
 		}, nil
@@ -204,7 +209,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 				if err != nil {
 					return "", err
 				}
-				name := kubernetes.RandomID()
+				name := learningEnvironmentName(user.ID, entry)
 				resources := h.runtimeConfig.K8s.Resources
 				environment := &breakfixv1.VK8sEnvironment{
 					ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, entry.ID, breakfixv1.EnvironmentPurposeLearning),
@@ -239,13 +244,26 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 					return err
 				}, mutate)
 			},
-			requestDeletion: func(ctx context.Context, name string) error {
+			requestDeletion: func(ctx context.Context, name string, uid types.UID) error {
+				if uid != "" {
+					return h.k8s.DeleteVK8sEnvironmentWithUID(ctx, h.crdNamespace, name, uid)
+				}
 				return h.k8s.DeleteVK8sEnvironment(ctx, h.crdNamespace, name)
 			},
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime %q", runtime)
 	}
+}
+
+// learningEnvironmentName gives concurrent Start requests the same CRD name.
+// A stable name makes the Kubernetes API the cross-server ownership fence,
+// rather than relying on a process-local lock or a best-effort List then Create.
+func learningEnvironmentName(userID string, entry *scenario.Entry) string {
+	if entry == nil {
+		return kubernetes.DNSLabelName("learning", userID)
+	}
+	return kubernetes.DNSLabelName("learning", userID, entry.ID, entry.RevisionID)
 }
 
 func environmentObjectMeta(name, namespace, userID, scenarioID string, purpose breakfixv1.EnvironmentPurpose) metav1.ObjectMeta {

@@ -32,11 +32,21 @@ func (h *Handler) StartScenario(c *gin.Context, id string) {
 		return
 	}
 
-	existing, _ := h.findEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	existing, err := h.findEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find existing environment: %v", err)})
+		return
+	}
 	if existing != nil {
 		if existing.Phase == breakfixv1.EnvironmentDraining {
 			if err := h.resumeEnvironment(c.Request.Context(), existing); err != nil {
 				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("resume environment: %v", err)})
+				return
+			}
+		}
+		if existing.Phase != breakfixv1.EnvironmentReady {
+			if _, err := h.waitEnvironmentReady(c.Request.Context(), existing.Runtime, existing.Name, environmentDeletionTimeout(existing.Runtime)); err != nil {
+				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("wait for existing environment: %v", err)})
 				return
 			}
 		}
@@ -67,7 +77,11 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 
-	existing, _ := h.findProgressEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	existing, err := h.findProgressEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find existing environment: %v", err)})
+		return
+	}
 	if existing != nil {
 		if err := h.db.Environment.FinishScenarioAttempt(c.Request.Context(), existing.UID, postgres.AttemptReset, time.Now().UTC()); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record reset attempt: %v", err)})
@@ -77,10 +91,11 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
 			return
 		}
-		if err := h.destroyEnvironment(c.Request.Context(), existing); err != nil {
-			slog.Error("failed to destroy old environment", "err", err)
+		if err := h.destroyEnvironmentAndWait(c.Request.Context(), existing); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("reset environment: %v", err)})
+			return
 		}
-		slog.Info("old environment deletion requested", "environment", existing.Name, "runtime", existing.Runtime)
+		slog.Info("old environment deleted", "environment", existing.Name, "runtime", existing.Runtime)
 	}
 
 	env, err := h.createEnvironment(c.Request.Context(), user, scenarioEntry)
@@ -117,7 +132,7 @@ func (h *Handler) StopScenario(c *gin.Context, id string) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
 		return
 	}
-	if err := h.destroyEnvironment(c.Request.Context(), env); err != nil {
+	if err := h.destroyEnvironmentAndWait(c.Request.Context(), env); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("stop environment: %v", err)})
 		return
 	}
