@@ -251,9 +251,6 @@ func TestResetAndStopRecordTerminalStateAfterDeletion(t *testing.T) {
 		state := newEnvironmentAPITestState()
 		state.nodes["old-environment"] = testReadyEnvironment("old-environment")
 		handler := newEnvironmentLifecycleHandler(t, state)
-		if err := handler.db.Environment.RecordScenarioAttempt(context.Background(), "u-demo", "demo", testPublishedScenarioRevisionID, "old-environment-uid", "node", time.Now().UTC()); err != nil {
-			t.Fatal(err)
-		}
 
 		recorder := scenarioRequest(t, handler, http.MethodPost, "reset")
 		if recorder.Code != http.StatusOK {
@@ -271,9 +268,6 @@ func TestResetAndStopRecordTerminalStateAfterDeletion(t *testing.T) {
 		state := newEnvironmentAPITestState()
 		state.nodes["active-environment"] = testReadyEnvironment("active-environment")
 		handler := newEnvironmentLifecycleHandler(t, state)
-		if err := handler.db.Environment.RecordScenarioAttempt(context.Background(), "u-demo", "demo", testPublishedScenarioRevisionID, "active-environment-uid", "node", time.Now().UTC()); err != nil {
-			t.Fatal(err)
-		}
 
 		recorder := scenarioRequest(t, handler, http.MethodPost, "stop")
 		if recorder.Code != http.StatusOK {

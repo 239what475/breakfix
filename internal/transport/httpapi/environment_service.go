@@ -32,6 +32,7 @@ type activeEnvironment struct {
 	Nodes          []breakfixv1.NodeRuntimeNodeSpec
 	Phase          breakfixv1.EnvironmentPhase
 	Deleting       bool
+	ReadyAt        *metav1.Time
 	ExpiresAt      *metav1.Time
 	Checkpoints    *breakfixv1.CheckpointStatus
 	Failure        *breakfixv1.EnvironmentFailureStatus
@@ -56,7 +57,7 @@ func environmentFromNode(environment *breakfixv1.NodeEnvironment) *activeEnviron
 		ScenarioRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
 		Purpose: environment.Spec.Environment.Purpose, NodeIdentity: identity,
 		Nodes: append([]breakfixv1.NodeRuntimeNodeSpec(nil), environment.Spec.Runtime.Nodes...),
-		Phase: environment.Status.Environment.Phase, Deleting: environment.DeletionTimestamp != nil, ExpiresAt: environment.Status.Environment.ExpiresAt,
+		Phase: environment.Status.Environment.Phase, Deleting: environment.DeletionTimestamp != nil, ReadyAt: environment.Status.Environment.ReadyAt, ExpiresAt: environment.Status.Environment.ExpiresAt,
 		Checkpoints: environment.Status.Environment.Checkpoints, Failure: environment.Status.Environment.Failure,
 		Lifecycle: environment.Spec.Environment.Lifecycle,
 	}
@@ -71,7 +72,7 @@ func environmentFromVK8s(environment *breakfixv1.VK8sEnvironment) *activeEnviron
 		ScenarioRef: environment.Spec.Environment.Source.Ref, SourceRevision: environment.Spec.Environment.Source.Revision,
 		Purpose:   environment.Spec.Environment.Purpose,
 		Namespace: environment.Status.Runtime.Namespace, WorkspacePod: environment.Status.Runtime.TerminalPodName,
-		Phase: environment.Status.Environment.Phase, Deleting: environment.DeletionTimestamp != nil, ExpiresAt: environment.Status.Environment.ExpiresAt,
+		Phase: environment.Status.Environment.Phase, Deleting: environment.DeletionTimestamp != nil, ReadyAt: environment.Status.Environment.ReadyAt, ExpiresAt: environment.Status.Environment.ExpiresAt,
 		Checkpoints: environment.Status.Environment.Checkpoints, Failure: environment.Status.Environment.Failure,
 		Lifecycle: environment.Spec.Environment.Lifecycle,
 	}

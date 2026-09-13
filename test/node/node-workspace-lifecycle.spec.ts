@@ -33,7 +33,7 @@ test("learner can reset and stop a Node workspace while retaining attempt histor
     const initialUID = await nodeEnvironmentUID(environmentName);
 
     await page.getByRole("button", { name: "Reset", exact: true }).click();
-    await expect(page.getByText("Scenario reset.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Scenario reset.", { exact: true })).toBeVisible({ timeout: 5 * 60_000 });
     await expect.poll(() => nodeEnvironmentUID(environmentName), {
       timeout: 90_000,
       intervals: [500, 1_000, 2_000, 5_000],

@@ -83,7 +83,7 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 	if existing != nil {
-		if err := h.db.Environment.FinishScenarioAttempt(c.Request.Context(), existing.UID, postgres.AttemptReset, time.Now().UTC()); err != nil {
+		if err := h.finishEnvironmentAttempt(c.Request.Context(), existing, postgres.AttemptReset, time.Now().UTC()); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record reset attempt: %v", err)})
 			return
 		}
@@ -124,7 +124,7 @@ func (h *Handler) StopScenario(c *gin.Context, id string) {
 		return
 	}
 
-	if err := h.db.Environment.FinishScenarioAttempt(c.Request.Context(), env.UID, postgres.AttemptStopped, time.Now().UTC()); err != nil {
+	if err := h.finishEnvironmentAttempt(c.Request.Context(), env, postgres.AttemptStopped, time.Now().UTC()); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record stopped attempt: %v", err)})
 		return
 	}
@@ -141,6 +141,22 @@ func (h *Handler) StopScenario(c *gin.Context, id string) {
 		Stopped:       true,
 		ScenarioTitle: scenarioEntry.Title,
 	})
+}
+
+// finishEnvironmentAttempt closes an attempt even when the periodic learning
+// projection has not yet observed a newly Ready environment.
+func (h *Handler) finishEnvironmentAttempt(ctx context.Context, environment *activeEnvironment, outcome string, finishedAt time.Time) error {
+	if environment == nil {
+		return errNoMatchingEnvironment
+	}
+	readyAt := finishedAt.UTC()
+	if environment.ReadyAt != nil && !environment.ReadyAt.IsZero() {
+		readyAt = environment.ReadyAt.Time.UTC()
+	}
+	if err := h.db.Environment.RecordScenarioAttempt(ctx, environment.UserID, environment.ScenarioRef, environment.SourceRevision, environment.UID, environment.Runtime, readyAt); err != nil {
+		return err
+	}
+	return h.db.Environment.FinishScenarioAttempt(ctx, environment.UID, outcome, finishedAt.UTC())
 }
 
 func (h *Handler) CreateTerminalTicket(c *gin.Context, scenarioID string) {
