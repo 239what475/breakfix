@@ -6,4 +6,3 @@ locale: en
 docs_prefix: /docs/
 default_base_url: http://localhost:1313/
 hugo_version: 0.144.2
-node_version: 20.17.0

@@ -1,7 +1,7 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	docs-sync docs-build docs-check docs-serve
+	docs-sync docs-build docs-package docs-check
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -60,11 +60,11 @@ docs-sync:
 docs-build:
 	$(DOCS_SITE_SCRIPT) build
 
+docs-package:
+	$(DOCS_SITE_SCRIPT) package
+
 docs-check:
 	$(DOCS_SITE_SCRIPT) check
-
-docs-serve:
-	$(DOCS_SITE_SCRIPT) serve
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)

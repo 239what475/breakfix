@@ -8,6 +8,7 @@ manifest="$repo_root/docs-site/manifest.yaml"
 cache_root=${DOCS_CACHE_DIR:-"$repo_root/.local/docs"}
 upstream_dir="$cache_root/upstream"
 public_dir="$cache_root/public"
+package_dir="$cache_root/packages"
 
 manifest_value() {
 	local key=$1
@@ -30,9 +31,10 @@ locale=$(manifest_value locale)
 docs_prefix=$(manifest_value docs_prefix)
 default_base_url=$(manifest_value default_base_url)
 hugo_version=$(manifest_value hugo_version)
-node_version=$(manifest_value node_version)
+container_engine=${DOCS_CONTAINER_ENGINE:-docker}
+container_image=${DOCS_CONTAINER_IMAGE:-breakfix/k8s-website-hugo:hugo-${hugo_version}}
 
-for value_name in source_name repository revision version locale docs_prefix default_base_url hugo_version node_version; do
+for value_name in source_name repository revision version locale docs_prefix default_base_url hugo_version; do
 	if [[ -z ${!value_name} ]]; then
 		echo "manifest value is empty: $value_name" >&2
 		exit 2
@@ -64,32 +66,20 @@ require_command() {
 	}
 }
 
-resolve_hugo() {
-	require_command hugo
-	local version_output
-	version_output=$(hugo version)
-	if [[ "$version_output" != *"hugo v${hugo_version}"* || "$version_output" != *"+extended"* ]]; then
-		echo "Hugo $hugo_version extended is required; found: $version_output" >&2
-		exit 2
-	fi
-	command -v hugo
-}
-
-resolve_node() {
-	require_command node
-	local version_output
-	version_output=$(node --version)
-	if [[ "$version_output" != "v${node_version}" ]]; then
-		echo "Node.js ${node_version} is required; found: $version_output" >&2
-		exit 2
-	fi
-	command -v node
-}
-
 clean_directory() {
 	local directory=$1
 	mkdir -p "$directory"
 	find "$directory" -mindepth 1 -delete
+}
+
+build_container_image() {
+	require_command "$container_engine"
+	echo "building documentation builder image: $container_image"
+	"$container_engine" build \
+		--network=host \
+		--tag "$container_image" \
+		--build-arg "HUGO_VERSION=$hugo_version" \
+		"$upstream_dir"
 }
 
 sync_upstream() {
@@ -166,18 +156,7 @@ check_public() {
 
 build_site() {
 	sync_upstream
-	local hugo_bin
-	hugo_bin=$(resolve_hugo)
-	require_command make
-	local node_bin
-	node_bin=$(resolve_node)
-	require_command npm
-	if [[ ! -d "$upstream_dir/node_modules/docsy" ]]; then
-		(
-			cd "$upstream_dir"
-			npm ci --ignore-scripts
-		)
-	fi
+	build_container_image
 	local base_url=${DOCS_BASE_URL:-$default_base_url}
 	case "$base_url" in
 	*/)
@@ -187,23 +166,33 @@ build_site() {
 		exit 2
 		;;
 	esac
-	clean_directory "$upstream_dir/public"
-	(
-		cd "$upstream_dir"
-		HUGO_BASEURL="$base_url" PATH="$(dirname "$hugo_bin"):$(dirname "$node_bin"):$PATH" make production-build
-	)
 	clean_directory "$public_dir"
-	cp -a "$upstream_dir/public/." "$public_dir/"
+	"$container_engine" run --rm --init \
+		--user "$(id -u):$(id -g)" \
+		--mount "type=bind,source=$upstream_dir,target=/src" \
+		--mount "type=volume,target=/src/node_modules" \
+		--mount "type=tmpfs,destination=/tmp,tmpfs-mode=01777" \
+		--mount "type=bind,source=$public_dir,target=/tmp/public" \
+		--env "HUGO_BASEURL=$base_url" \
+		--env HUGO_ENV=production \
+		"$container_image" \
+		hugo --destination /tmp/public --cleanDestinationDir --minify --environment production --noBuildLock
+	if [[ -f "$public_dir/_headers" ]] && rg -F -q "noindex" "$public_dir/_headers"; then
+		echo "production output contains noindex headers" >&2
+		exit 1
+	fi
 	write_build_info "$base_url"
 	check_public
 	echo "documentation mirror built at $public_dir"
 }
 
-serve_site() {
-	require_command python3
+package_site() {
 	check_public
-	local port=${DOCS_PORT:-1313}
-	python3 -m http.server "$port" --bind 127.0.0.1 --directory "$public_dir"
+	mkdir -p "$package_dir"
+	local package_path="$package_dir/${source_name}-${version}-${revision:0:12}.tar"
+	tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+		-cf "$package_path" -C "$public_dir" .
+	echo "documentation package created at $package_path"
 }
 
 case "${1:-}" in
@@ -216,11 +205,11 @@ case "${1:-}" in
 	check)
 		check_public
 	;;
-	serve)
-		serve_site
+	package)
+		package_site
 	;;
 	*)
-		echo "usage: $0 {sync|build|check|serve}" >&2
+		echo "usage: $0 {sync|build|check|package}" >&2
 		exit 2
 		;;
 esac
