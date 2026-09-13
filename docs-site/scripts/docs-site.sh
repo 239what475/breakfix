@@ -8,7 +8,6 @@ manifest="$repo_root/docs-site/manifest.yaml"
 cache_root=${DOCS_CACHE_DIR:-"$repo_root/.local/docs"}
 upstream_dir="$cache_root/upstream"
 public_dir="$cache_root/public"
-package_dir="$cache_root/packages"
 
 manifest_value() {
 	local key=$1
@@ -186,15 +185,6 @@ build_site() {
 	echo "documentation mirror built at $public_dir"
 }
 
-package_site() {
-	check_public
-	mkdir -p "$package_dir"
-	local package_path="$package_dir/${source_name}-${version}-${revision:0:12}.tar"
-	tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-		-cf "$package_path" -C "$public_dir" .
-	echo "documentation package created at $package_path"
-}
-
 case "${1:-}" in
 	sync)
 		sync_upstream
@@ -205,11 +195,8 @@ case "${1:-}" in
 	check)
 		check_public
 	;;
-	package)
-		package_site
-	;;
 	*)
-		echo "usage: $0 {sync|build|check|package}" >&2
+		echo "usage: $0 {sync|build|check}" >&2
 		exit 2
 		;;
 esac

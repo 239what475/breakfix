@@ -78,11 +78,11 @@ docs.breakfix.example
 
 文档页面不得接触 Breakfix JWT、`localStorage` 或 API。生产文档站响应头只允许明确的 Breakfix origin 作为 `frame-ancestors`，Breakfix 响应头的 `frame-src` 也只允许配置的 docs origin，不能开放任意站点嵌入。
 
-### 4. 构建、打包和生产发布
+### 4. 构建、运行时镜像和生产发布
 
-- [x] 增加 `make docs-sync`、`make docs-build`、`make docs-package` 和 `make docs-check`；源码缓存、静态产物和发布包均放在被忽略的 `.local/docs/` 下，不提供本地预览服务器。
+- [x] 增加 `make docs-sync`、`make docs-build` 和 `make docs-check`；源码缓存和静态产物均放在被忽略的 `.local/docs/` 下，不提供本地预览服务器。
 - [x] `docs-build` 默认使用 Docker/Podman 构建上游工具镜像，将固定 commit 渲染为完整生产 `public/`；固定快照阶段不做自动更新或增量更新。
-- [x] `docs-package` 将已校验的完整 `public/` 打包为可部署归档，归档内容不改写 upstream HTML、CSS、JavaScript 或链接。
+- [ ] 将已校验的完整 `public/` 构建为只包含静态文件和 HTTP 服务器的运行时 Docker 镜像，供本地和 Kind 部署；镜像内容不改写 upstream HTML、CSS、JavaScript 或链接。
 - [ ] 生产将 upstream 完整 Hugo `public/` 静态产物部署到独立域名或 CDN 根路径，不与 Breakfix Go 服务共享 origin。
 - [ ] 配置 upstream 支持的 `baseURL`、缓存、失败页、`frame-ancestors` 和 Breakfix 的 `frame-src` 响应头；不通过改写产物制造版本路径。
 - [ ] 同一镜像内的文档链接和资源路径保持 upstream 规则并留在 docs origin；指向其他站点的链接打开新标签页；版本不存在或跳出允许 origin 的链接在部署配置检查中报告。
@@ -105,7 +105,7 @@ docs.breakfix.example
 1. **Hugo 文档镜像基础**：固定 Kubernetes website revision，新增 `docs-site/` 官方构建调用、独立 origin 部署说明、许可证署名和镜像元数据；完成固定版本完整 `public/` 和 `/docs/` 入口构建验证。
 2. **文档阅读器入口**：增加 Documentation 顶层入口、来源配置和 iframe 阅读器；完成 Vue 构建以及加载、失败和重试状态验证。
 3. **文档上下文桥接**：在 Hugo 公共模板注入位置上报脚本，在 Vue 中实现 `postMessage` 契约、来源校验和页面状态展示；完成页面导航与锚点传递验证。
-4. **打包与生产部署**：补充静态发布包、独立 docs origin 部署配置、版本部署说明、CSP/iframe 响应头和运行说明；完成容器构建、打包与独立域名配置检查。
+4. **运行时镜像与生产部署**：补充静态站点运行时镜像、独立 docs origin 部署配置、版本部署说明、CSP/iframe 响应头和运行说明；完成容器构建、镜像运行与独立域名配置检查。
 5. **嵌入验收收尾**：补齐浏览器测试，覆盖文档入口、iframe 导航、非法消息拒绝、加载失败和非文档路径拒绝；执行本阶段约定的静态、构建和浏览器验收。
 
 本阶段明确不做：Agent 阅读和场景生成、正文提取、标题滚动识别、实践环境启动、文档更新后的场景增量复验。这些任务属于 `NEXT.md`。

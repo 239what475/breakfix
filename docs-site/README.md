@@ -16,7 +16,6 @@ dependency):
 ```bash
 make docs-sync
 DOCS_BASE_URL=http://localhost:1313/ make docs-build
-make docs-package
 make docs-check
 ```
 
@@ -32,8 +31,8 @@ installed or checked on the host.
 deployment. The documentation entry point is `<docs-origin>/docs/`; generated
 build metadata is available at `<docs-origin>/build-info.json`.
 
-`docs-package` creates a reproducible tar archive in `.local/docs/packages/`.
-Deploy that archive's contents to the independent documentation origin.
+After `docs-build`, build the small runtime image that serves
+`.local/docs/public` and deploy that image to the local machine or Kind.
 
 Kubernetes documentation is redistributed under its applicable CC BY 4.0
 terms. The mirror must retain upstream attribution and must not copy
