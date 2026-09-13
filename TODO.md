@@ -3,13 +3,107 @@
 “可复现运维现场”第一阶段已经完成。具体实施细节、长期契约和真实验收记录分别保留在
 `NEXT.md`、`docs/architecture/`、`docs/operations/` 以及 Git 提交历史中。
 
-下一阶段是 `NEXT.md` 定义的“文档实践化”首个 Kubernetes 文档最小闭环。在开始实现前，先确认：
+下一阶段是 `NEXT.md` 定义的“文档实践化”首个 Kubernetes 文档最小闭环。本文件只规划文档展示和阅读集成；Agent 场景生成、场景增量维护和实践环境生成继续保留在 `NEXT.md`。
 
-1. 首个上游文档来源、许可证和固定版本。
-2. 来源同步、页面版本、路径和章节锚点模型。
-3. 可执行示例的内容与运行定义，以及它和共享 Environment 底座的边界。
-4. 阅读器中的示例入口、启动/恢复/停止/回收体验。
-5. 文档更新后的影响识别、维护者审核和发布流程。
-6. 能够独立验收的最小页面、示例和版本升级范围。
+总体架构是“独立 Hugo 文档镜像 + Breakfix Vue 外层阅读器”：Hugo 负责 Markdown、shortcode、目录、链接、版本和多语言渲染；Breakfix 负责文档入口、阅读上下文以及后续实践入口。Breakfix 不自行解析 Kubernetes Markdown，不把 Hugo 迁移进 Vue，也不把文档反向代理到 Breakfix 的同源路径。
 
-正式工程任务在设计确认后再写入本文件，并按独立实现与验收步骤拆分提交。
+```text
+kubernetes/website 固定 commit
+        ↓
+独立 Hugo 构建和发布
+        ↓
+docs.breakfix.example
+        ↓ iframe
+Breakfix Vue 文档阅读器
+        ↑ postMessage
+页面路径、版本、语言、URL 锚点
+```
+
+## 实施计划
+
+### 1. 固定版本的 Hugo 文档镜像
+
+- [ ] 新增 `docs-site/manifest.yaml`，固定上游仓库、revision、对外版本、语言、文档前缀、Hugo 版本和 Node 版本。
+- [ ] 首个快照先使用当前已验证的 Kubernetes website commit `ce98a43f24257385a9766003a6dadc95e962dc63`，对外版本标记为
+      `snapshot-ce98a43`；确认对应 Kubernetes 发布版本后再改用正式版本号，不凭日期猜测 `v1.37` 等版本。
+- [ ] 按上游当前构建要求固定 Hugo `0.144.2` 和 Node `20.17.0`，构建时拉取固定 revision，不把完整上游仓库复制进 Breakfix。
+- [ ] 使用完整 upstream Hugo 构建，保留其 shortcode、layout、data、i18n 和资源依赖；不把 `content/en/docs` 单独作为新的 `contentDir`。
+- [ ] 构建后只发布 `/docs/**` 页面和页面依赖的静态资源，删除或拒绝 `/blog`、`/case-studies` 等非文档页面，并用路径检查脚本阻止遗漏。
+- [ ] 保留 CC BY 4.0 署名、来源链接、修改说明；未单独确认许可的第三方图片、嵌入和资源暂不同步。
+- [ ] 生成公开的 `build-info.json`，至少包含 source、revision、version、locale 和构建时间。
+
+首个闭环只验证一个固定版本的英文 Kubernetes 文档页面，不追求覆盖全站。构建产物使用稳定版本前缀，例如
+`/kubernetes/snapshot-ce98a43/en/docs/...`；Hugo `baseURL`、内部链接和静态资源路径必须在 smoke test 中验证。
+
+### 2. Breakfix 文档阅读器
+
+- [ ] 在现有 `AppTopbar`/`AppShell` 中增加公开可见的 `Documentation` 一级入口；未登录用户可以阅读文档，Operations 和 My space 继续按现有登录规则显示。
+- [ ] 新增 `DocumentationPage.vue` 及对应样式，使用 `iframe` 加载固定文档入口。
+- [ ] 将文档来源抽象成配置对象，即使首版只有 Kubernetes 一个来源，也包含 `source`、`version`、`locale`、`origin` 和 `entryPath`。
+- [ ] 支持 iframe 加载中、加载失败、重试和空状态；iframe 内部链接保持在文档 origin 内正常导航。
+- [ ] 使用 `/documentation?source=...&version=...&path=...&hash=...` 保存阅读位置；进入文档时使用一次 `pushState`，页面变化使用 `replaceState`，刷新后恢复并校验当前页面。
+- [ ] 在阅读器中展示当前来源、版本和页面路径；文档内部前进/后退由 iframe 处理，Breakfix 外层历史负责离开 Documentation。
+- [ ] 不读取 iframe 内部 DOM，不把文档正文复制成 Vue 组件。
+
+生产环境使用独立 origin，例如：
+
+```text
+app.breakfix.example
+docs.breakfix.example
+```
+
+### 3. Hugo 上下文脚本与消息契约
+
+- [ ] 在 Hugo 公共模板或 partial 中注入统一脚本，不修改每个 Markdown 文件。
+- [ ] 脚本在首次加载、页面导航、`hashchange` 和前进/后退时发送文档位置消息。
+- [ ] 第一版消息格式固定为：
+
+```json
+{
+  "type": "breakfix:document-location",
+  "source": "kubernetes",
+  "version": "snapshot-ce98a43",
+  "locale": "en",
+  "path": "/kubernetes/snapshot-ce98a43/en/docs/concepts/services-networking/service/",
+  "hash": "#publishing-services"
+}
+```
+
+- [ ] 通过 `BREAKFIX_PARENT_ORIGIN` 在构建时注入允许的 parent origin；本地使用 `http://localhost:5173`，生产使用明确的 Breakfix 域名，不从 iframe URL 接收任意 origin。
+- [ ] 消息只包含公开的文档位置元数据，脚本使用配置的 `targetOrigin` 发送，不携带 JWT、localStorage 内容或 API 数据。
+- [ ] Vue 端同时校验 `event.origin`、`event.source`、消息类型、字段格式和允许的文档路径前缀。
+- [ ] 非配置 origin、其他窗口或伪造消息必须被忽略并可在调试日志中区分。
+- [ ] 第一版只识别 URL 路径和锚点；使用 `IntersectionObserver` 识别当前 `h2/h3`，以及在标题旁显示实践按钮，列为后续增强。
+
+文档页面不得接触 Breakfix JWT、`localStorage` 或 API。生产文档站响应头只允许明确的 Breakfix origin 作为 `frame-ancestors`，Breakfix 响应头的 `frame-src` 也只允许配置的 docs origin，不能开放任意站点嵌入。
+
+### 4. 本地开发和生产发布
+
+- [ ] 增加 `make docs-sync`、`make docs-build` 和 `make docs-serve`，使文档镜像可以独立构建和预览。
+- [ ] 本地使用不同端口模拟跨 origin：Breakfix `http://localhost:5173`，Hugo `http://localhost:1313`，并为本地构建注入对应 parent origin。
+- [ ] 生产将 Hugo 静态产物部署到独立域名或 CDN，不与 Breakfix Go 服务共享 origin。
+- [ ] 使用稳定的版本路径 `/kubernetes/<version>/en/docs/...`，配置 `baseURL`、缓存、失败页、`frame-ancestors` 和 Breakfix 的 `frame-src` 响应头。
+- [ ] 同一镜像内的文档链接留在 docs origin；指向其他站点的链接打开新标签页；版本不存在或跳出允许 origin 的链接在构建检查中报告。
+- [ ] 记录本地、预发布和生产的 parent origin、docs origin 以及文档版本配置，避免构建产物与环境不匹配。
+
+### 5. 验收测试
+
+- [ ] 浏览器测试验证 Documentation 入口和固定版本首页可以打开。
+- [ ] 浏览器测试验证 iframe 内部导航、锚点变化和当前路径展示。
+- [ ] 测试验证非法 origin、非法 `event.source`、未知消息类型和无效字段都会被拒绝。
+- [ ] 测试验证文档加载失败、重试以及文档站非文档路径拒绝。
+- [ ] 新增固定的 `test/fixtures/documentation/` 静态文档 fixture，由独立端口提供，不依赖 `/tmp` checkout 或外网。
+- [ ] 使用真实固定 upstream 执行一次 Hugo smoke test，验证页面模板、脚本注入、baseURL、资源路径和 `build-info.json`。
+- [ ] 在本地双端口和生产独立域名配置下分别完成一次构建验证。
+
+## 提交拆分
+
+每完成一个独立步骤及其对应验证就立即提交，不把多项工作积累成一次大提交：
+
+1. **Hugo 文档镜像基础**：固定 Kubernetes website revision，新增 `docs-site/` 构建骨架、文档路径限制、许可证署名和镜像元数据；完成固定版本文档构建验证。
+2. **文档阅读器入口**：增加 Documentation 顶层入口、来源配置和 iframe 阅读器；完成 Vue 构建以及加载、失败和重试状态验证。
+3. **文档上下文桥接**：在 Hugo 公共模板注入位置上报脚本，在 Vue 中实现 `postMessage` 契约、来源校验和页面状态展示；完成页面导航与锚点传递验证。
+4. **本地与生产部署**：补充双端口本地命令、独立 origin 部署配置、版本路径、CSP/iframe 响应头和运行说明；完成本地构建与独立域名配置检查。
+5. **嵌入验收收尾**：补齐浏览器测试，覆盖文档入口、iframe 导航、非法消息拒绝、加载失败和非文档路径拒绝；执行本阶段约定的静态、构建和浏览器验收。
+
+本阶段明确不做：Agent 阅读和场景生成、正文提取、标题滚动识别、实践环境启动、文档更新后的场景增量复验。这些任务属于 `NEXT.md`。
