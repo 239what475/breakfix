@@ -6,9 +6,11 @@ const execFile = promisify(execFileCallback);
 const namespace = process.env.BREAKFIX_NAMESPACE ?? process.env.BREAKFIX_E2E_NAMESPACE ?? "breakfix-system";
 
 type NodeEnvironment = {
-  metadata?: { name?: string; uid?: string };
-  status?: { environment?: { phase?: string } };
+	metadata?: { name?: string; uid?: string };
+	status?: { environment?: { phase?: string } };
 };
+
+type VK8sEnvironment = NodeEnvironment;
 
 async function kubectl(args: string[]) {
   return execFile("kubectl", args, { encoding: "utf8" });
@@ -58,7 +60,11 @@ export async function nodeEnvironment(name: string): Promise<NodeEnvironment> {
 }
 
 export async function nodeEnvironmentPhase(name: string): Promise<string> {
-  return (await nodeEnvironment(name)).status?.environment?.phase ?? "";
+	return (await nodeEnvironment(name)).status?.environment?.phase ?? "";
+}
+
+export async function nodeEnvironmentUID(name: string): Promise<string> {
+	return (await nodeEnvironment(name)).metadata?.uid ?? "";
 }
 
 export async function expectNodeEnvironmentPhase(name: string, expected: "Ready" | "Completed") {
@@ -66,6 +72,22 @@ export async function expectNodeEnvironmentPhase(name: string, expected: "Ready"
     timeout: 90_000,
     intervals: [500, 1_000, 2_000, 5_000],
   }).toBe(expected);
+}
+
+export async function vk8sEnvironment(name: string): Promise<VK8sEnvironment> {
+	const { stdout } = await kubectl(["-n", namespace, "get", "vk8senvironment", name, "-o", "json"]);
+	return JSON.parse(stdout) as VK8sEnvironment;
+}
+
+export async function vk8sEnvironmentPhase(name: string): Promise<string> {
+	return (await vk8sEnvironment(name)).status?.environment?.phase ?? "";
+}
+
+export async function expectVK8sEnvironmentPhase(name: string, expected: "Ready" | "Completed") {
+	await expect.poll(() => vk8sEnvironmentPhase(name), {
+		timeout: 10 * 60_000,
+		intervals: [1_000, 2_000, 5_000],
+	}).toBe(expected);
 }
 
 export async function waitForNodeEnvironmentDeletion(name: string) {

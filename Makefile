@@ -1,6 +1,6 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
-	test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network
+	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -116,6 +116,9 @@ e2e-reset:
 
 test-e2e-node: test-deps
 	./scripts/kind/run-e2e.sh node
+
+test-e2e-k8s: test-deps
+	./scripts/kind/run-e2e.sh k8s
 
 test-e2e-recovery: test-deps
 	./scripts/kind/run-e2e.sh recovery

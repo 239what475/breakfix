@@ -6,3 +6,5 @@ metadata:
 entries:
   - path: scenarios/node-runtime-fixture
     contentRevision: sha256:591e5ce79fc04aba5ea168dde40b8cb003c87840bbc7afd5b159ded38aae887a
+  - path: scenarios/k8s-reproduction-core
+    contentRevision: sha256:b0676a7d302a95395fd722eab53bc0648701583dd86293e3bb16456ae8eca9f5

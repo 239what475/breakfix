@@ -1,0 +1,21 @@
+runtime: k8s
+type: operations-scenario
+title: "Kubernetes 复现核心验收"
+tags:
+  - kubernetes
+  - runtime-fixture
+description: |
+  此环境仅用于验证 Breakfix 的 Kubernetes 运行时和最小复现核心。
+
+  验证管理终端可观察到预期的缺失配置。
+versions:
+  - component: kubernetes
+    version: v1.36
+topology: 一个隔离的虚拟 Kubernetes 集群和管理终端。
+initialization: generate.sh 删除验收配置，建立未完成的初始状态。
+reproduction:
+  objective: breakfix-runtime-fixture ConfigMap 不存在，因此目标现象已复现。
+  evidence:
+    - id: runtime-config-absent
+      description: default namespace 中不存在 breakfix-runtime-fixture ConfigMap。
+checkpoints: []

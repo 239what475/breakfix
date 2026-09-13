@@ -12,6 +12,7 @@ import (
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
+	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
 )
@@ -75,6 +76,15 @@ func TestInstallerNewEntriesUseDirectScenarioMetadata(t *testing.T) {
 		Snapshot: appexecution.SnapshotConfig{MaxNodes: 1, Node: appexecution.NodeRuntimeConfig{
 			BaseImageFingerprint: strings.Repeat("c", 64), ProfileRevision: "profile", NetworkPolicyRevision: "network",
 			CPU: "1", Memory: "512MiB", Processes: 64, RootDisk: "5GiB",
+		}, K8s: appexecution.K8sRuntimeConfig{
+			BaseImageDigest: "registry.example/k8s-base@sha256:" + strings.Repeat("d", 64), ProfileRevision: "vk8s-profile", Version: "v1.36.2",
+			ManagementTerminalImage: "registry.example/k8s-base@sha256:" + strings.Repeat("d", 64),
+			Resources: execution.K8sResources{
+				ControlPlaneCPU: "500m", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
+				WorkloadCPU: "250m", WorkloadMemory: "256Mi", WorkloadEphemeralStorage: "1Gi",
+				QuotaCPU: "1", QuotaMemory: "2Gi", QuotaEphemeralStorage: "4Gi",
+			},
+			Network: environment.VK8sNetwork{PublicEgressCIDR: "0.0.0.0/0", ProtectedCIDRs: []string{"10.0.0.0/8"}},
 		}},
 	})
 	if err != nil {
@@ -84,12 +94,18 @@ func TestInstallerNewEntriesUseDirectScenarioMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build direct catalog entries: %v", err)
 	}
-	if len(entries) != 1 {
+	if len(entries) != 2 {
 		t.Fatalf("catalog entries = %#v", entries)
 	}
-	entry := entries[0]
-	if entry.SourceRef != "node-runtime-fixture" || entry.Type != scenario.ScenarioOperationsScenario || !slices.Equal(entry.Tags, []string{"linux", "runtime-fixture"}) {
-		t.Fatalf("direct catalog metadata = %#v", entry)
+	byRef := make(map[string]catalogdomain.Entry, len(entries))
+	for _, entry := range entries {
+		byRef[entry.SourceRef] = entry
+	}
+	if entry := byRef["node-runtime-fixture"]; entry.Type != scenario.ScenarioOperationsScenario || !slices.Equal(entry.Tags, []string{"linux", "runtime-fixture"}) {
+		t.Fatalf("Node direct catalog metadata = %#v", entry)
+	}
+	if entry := byRef["k8s-reproduction-core"]; entry.Type != scenario.ScenarioOperationsScenario || entry.Snapshot.Runtime != scenario.RuntimeK8s || !slices.Equal(entry.Tags, []string{"kubernetes", "runtime-fixture"}) {
+		t.Fatalf("K8s direct catalog metadata = %#v", entry)
 	}
 }
 

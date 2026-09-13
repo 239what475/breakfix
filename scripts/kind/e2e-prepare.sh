@@ -8,6 +8,7 @@ target_id=${BREAKFIX_E2E_TARGET:-e2e}
 fixture_source=${BREAKFIX_E2E_CATALOG_SOURCE:-$repo_root/test/fixtures/catalog-release}
 fixture_title='Node 运行时验收'
 fixture_runtime=node
+fixture_count=2
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/$target_id}
 fixture_archive=$state_dir/catalog-release.oci.tar
 catalog_tag=${BREAKFIX_E2E_CATALOG_TAG:-e2e-$target_id}
@@ -186,11 +187,11 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 		jq -e \
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
+			--argjson count "$fixture_count" \
 			'
-				(.scenarios | length) == 1 and
-				.scenarios[0].title == $title and
-				.scenarios[0].runtime == $runtime and
-				(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
+				(.scenarios | length) == $count and
+				any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+				any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
 			' "$catalog_json" >/dev/null; then
 		break
 	fi
@@ -199,12 +200,12 @@ done
 jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
+	--argjson count "$fixture_count" \
 	'
-		(.scenarios | length) == 1 and
-		.scenarios[0].title == $title and
-		.scenarios[0].runtime == $runtime and
-		(.scenarios[0].scenario_tags | sort) == ["linux", "runtime-fixture"]
-' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
+		(.scenarios | length) == $count and
+		any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+		any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
+	' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 
 "$target_script" mark-prepared "$catalog_reference" "$ui_origin"
 

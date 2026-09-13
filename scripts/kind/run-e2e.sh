@@ -25,10 +25,10 @@ require_command() {
 }
 
 case "$suite" in
-	ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
+	ui|node|k8s|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|k8s|recovery|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
@@ -194,6 +194,9 @@ run_suite() {
 			;;
 		node)
 			npm run test:e2e:node --prefix "$repo_root/test"
+			;;
+		k8s)
+			npm run test:e2e:k8s --prefix "$repo_root/test"
 			;;
 		recovery)
 			npm run test:e2e:recovery --prefix "$repo_root/test"

@@ -8,6 +8,13 @@ export type StartedScenario = {
 
 type ActiveEnvironment = {
 	environment_id: string;
+	runtime: "node" | "k8s";
+	scenario: { id: string };
+};
+
+type LearningHistory = {
+	runtime: "node" | "k8s";
+	state: "active" | "completed" | "stopped" | "reset" | "expired";
 	scenario: { id: string };
 };
 
@@ -105,6 +112,16 @@ export async function activeEnvironmentName(page: Page, scenarioID: string): Pro
 		}, scenarioID);
 	await expect.poll(read, { timeout: 90_000, intervals: [500, 1_000, 2_000, 5_000] }).not.toBe("");
 	return read();
+}
+
+export async function learningHistory(page: Page): Promise<LearningHistory[]> {
+	return page.evaluate(async () => {
+		const response = await fetch("/api/me/space/learning?limit=100", {
+			headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+		});
+		if (!response.ok) throw new Error(await response.text());
+		return (await response.json() as { items: LearningHistory[] }).items;
+	});
 }
 
 export async function expectTerminalConnected(page: Page) {
