@@ -27,7 +27,7 @@ Breakfix Vue 文档阅读器
 - [x] 首个快照先使用当前已验证的 Kubernetes website commit `ce98a43f24257385a9766003a6dadc95e962dc63`，对外版本标记为
       `snapshot-ce98a43`；确认对应 Kubernetes 发布版本后再改用正式版本号，不凭日期猜测 `v1.37` 等版本。
 - [x] 固定 Hugo `0.144.2`，构建时拉取固定 revision，不把完整上游仓库复制进 Breakfix；使用上游 Dockerfile 在容器内完成构建，宿主机不依赖 Hugo、Node.js 或 npm。Node.js 及 npm 仅作为上游镜像内部依赖，版本遵循上游 Dockerfile。
-- [x] 使用 upstream Dockerfile 构建文档镜像，在容器内执行生产 Hugo 构建，并将容器 `/tmp/public` 直接绑定到被忽略的 `.local/docs/public/`；宿主机不安装 Hugo、Node.js 或 npm，不把 `content/en/docs` 单独作为新的 `contentDir`，也不重新实现 Hugo 的资源处理流程。
+- [x] 使用 upstream Dockerfile 构建文档镜像，在容器内执行生产 Hugo 构建，并将容器 `/tmp/public` 直接绑定到被忽略的 `docs-site/public/`；宿主机不安装 Hugo、Node.js 或 npm，不把 `content/en/docs` 单独作为新的 `contentDir`，也不重新实现 Hugo 的资源处理流程。
 - [x] 原样保留 upstream 的完整 `public/` 目录结构并部署到独立 docs origin；不删除 `/blog`、`/case-studies` 等页面，不对生成后的 HTML、CSS、JS 或链接做 URL 重写。
 - [ ] Breakfix 的产品入口只指向 docs origin 的 `/docs/`，文档站的其他 upstream 页面不在 Breakfix 导航中暴露；是否限制直接访问由 docs origin/CDN 路由策略决定，不通过篡改 Hugo 产物实现。
 - [x] 保留 CC BY 4.0 署名、来源链接、修改说明；未单独确认许可的第三方图片、嵌入和资源暂不同步。
@@ -55,8 +55,8 @@ docs.breakfix.example
 
 ### 3. Hugo 上下文脚本与消息契约
 
-- [ ] 在 Hugo 公共模板或 partial 中注入统一脚本，不修改每个 Markdown 文件。
-- [ ] 脚本在首次加载、页面导航、`hashchange` 和前进/后退时发送文档位置消息。
+- [x] 在 Hugo 公共模板或 partial 中注入统一脚本，不修改每个 Markdown 文件。
+- [x] 脚本在首次加载、页面导航、`hashchange` 和前进/后退时发送文档位置消息。
 - [ ] 第一版消息格式固定为：
 
 ```json
@@ -70,8 +70,8 @@ docs.breakfix.example
 }
 ```
 
-- [ ] 通过 `BREAKFIX_PARENT_ORIGIN` 在构建时注入允许的 parent origin；本地使用 `http://localhost:5173`，生产使用明确的 Breakfix 域名，不从 iframe URL 接收任意 origin。
-- [ ] 消息只包含公开的文档位置元数据，脚本使用配置的 `targetOrigin` 发送，不携带 JWT、localStorage 内容或 API 数据。
+- [x] 通过 `BREAKFIX_PARENT_ORIGIN` 在构建时注入允许的 parent origin；本地使用 `http://localhost:5173`，生产使用明确的 Breakfix 域名，不从 iframe URL 接收任意 origin。
+- [x] 消息只包含公开的文档位置元数据，脚本使用配置的 `targetOrigin` 发送，不携带 JWT、localStorage 内容或 API 数据。
 - [ ] Vue 端同时校验 `event.origin`、`event.source`、消息类型、字段格式和允许的文档路径前缀。
 - [ ] 非配置 origin、其他窗口或伪造消息必须被忽略并可在调试日志中区分。
 - [ ] 第一版只识别 URL 路径和锚点；使用 `IntersectionObserver` 识别当前 `h2/h3`，以及在标题旁显示实践按钮，列为后续增强。
@@ -82,7 +82,7 @@ docs.breakfix.example
 
 - [x] 增加 `make docs-sync`、`make docs-build` 和 `make docs-check`；源码缓存和静态产物均放在被忽略的 `.local/docs/` 下，不提供本地预览服务器。
 - [x] `docs-build` 默认使用 Docker/Podman 构建上游工具镜像，将固定 commit 渲染为完整生产 `public/`；固定快照阶段不做自动更新或增量更新。
-- [ ] 将已校验的完整 `public/` 构建为只包含静态文件和 HTTP 服务器的运行时 Docker 镜像，供本地和 Kind 部署；镜像内容不改写 upstream HTML、CSS、JavaScript 或链接。
+- [x] 将已校验的完整 `public/` 构建为只包含静态文件和 HTTP 服务器的运行时 Docker 镜像，供本地和 Kind 部署；镜像内容不改写 upstream HTML、CSS、JavaScript 或链接。
 - [ ] 生产将 upstream 完整 Hugo `public/` 静态产物部署到独立域名或 CDN 根路径，不与 Breakfix Go 服务共享 origin。
 - [ ] 配置 upstream 支持的 `baseURL`、缓存、失败页、`frame-ancestors` 和 Breakfix 的 `frame-src` 响应头；不通过改写产物制造版本路径。
 - [ ] 同一镜像内的文档链接和资源路径保持 upstream 规则并留在 docs origin；指向其他站点的链接打开新标签页；版本不存在或跳出允许 origin 的链接在部署配置检查中报告。
@@ -95,7 +95,7 @@ docs.breakfix.example
 - [ ] 测试验证非法 origin、非法 `event.source`、未知消息类型和无效字段都会被拒绝。
 - [ ] 测试验证文档加载失败、重试以及文档站非文档路径拒绝。
 - [ ] 新增固定的 `test/fixtures/documentation/` 静态文档 fixture，由独立端口提供，不依赖 `/tmp` checkout 或外网。
-- [ ] 使用真实固定 upstream 执行一次官方生产构建 smoke test，验证完整 `public/` 结构、`/docs/` 页面模板、脚本注入、baseURL、资源路径和 `build-info.json`。
+- [x] 使用真实固定 upstream 执行一次官方生产构建 smoke test，验证完整 `public/` 结构、`/docs/` 页面模板、脚本注入、baseURL、资源路径和 `build-info.json`。
 - [ ] 在本地双端口和生产独立域名配置下分别完成一次构建验证。
 
 ## 提交拆分

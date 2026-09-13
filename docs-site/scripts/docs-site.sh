@@ -7,7 +7,12 @@ repo_root=$(cd "$script_dir/../.." && pwd)
 manifest="$repo_root/docs-site/manifest.yaml"
 cache_root=${DOCS_CACHE_DIR:-"$repo_root/.local/docs"}
 upstream_dir="$cache_root/upstream"
-public_dir="$cache_root/public"
+public_dir=${DOCS_PUBLIC_DIR:-"$repo_root/docs-site/public"}
+overlay_backup="$cache_root/.breakfix-body-end.html.orig"
+overlay_script="$upstream_dir/static/js/breakfix-document-context.js"
+overlay_script_backup="$cache_root/.breakfix-document-context.js.orig"
+overlay_script_missing="$cache_root/.breakfix-document-context.js.missing"
+overlay_body_end="$upstream_dir/layouts/partials/hooks/body-end.html"
 
 manifest_value() {
 	local key=$1
@@ -29,11 +34,13 @@ version=$(manifest_value version)
 locale=$(manifest_value locale)
 docs_prefix=$(manifest_value docs_prefix)
 default_base_url=$(manifest_value default_base_url)
+default_parent_origin=$(manifest_value default_parent_origin)
 hugo_version=$(manifest_value hugo_version)
 container_engine=${DOCS_CONTAINER_ENGINE:-docker}
 container_image=${DOCS_CONTAINER_IMAGE:-breakfix/k8s-website-hugo:hugo-${hugo_version}}
+runtime_image=${DOCS_RUNTIME_IMAGE:-breakfix/kubernetes-docs:${version}}
 
-for value_name in source_name repository revision version locale docs_prefix default_base_url hugo_version; do
+for value_name in source_name repository revision version locale docs_prefix default_base_url default_parent_origin hugo_version; do
 	if [[ -z ${!value_name} ]]; then
 		echo "manifest value is empty: $value_name" >&2
 		exit 2
@@ -79,6 +86,41 @@ build_container_image() {
 		--tag "$container_image" \
 		--build-arg "HUGO_VERSION=$hugo_version" \
 		"$upstream_dir"
+}
+
+cleanup_overlay() {
+	if [[ -f "$overlay_backup" && -f "$overlay_body_end" ]]; then
+		cp "$overlay_backup" "$overlay_body_end"
+	fi
+	if [[ -f "$overlay_script_backup" ]]; then
+		cp "$overlay_script_backup" "$overlay_script"
+	elif [[ -f "$overlay_script_missing" ]]; then
+		rm -f "$overlay_script"
+	fi
+	rm -f "$overlay_backup" "$overlay_script_backup" "$overlay_script_missing"
+}
+
+prepare_overlay() {
+	local parent_origin=${BREAKFIX_PARENT_ORIGIN:-$default_parent_origin}
+	if [[ ! "$parent_origin" =~ ^https?://[A-Za-z0-9._:-]+$ ]]; then
+		echo "BREAKFIX_PARENT_ORIGIN must be an HTTP(S) origin without a path: $parent_origin" >&2
+		exit 2
+	fi
+	cleanup_overlay
+	cp "$overlay_body_end" "$overlay_backup"
+	if [[ -e "$overlay_script" ]]; then
+		cp "$overlay_script" "$overlay_script_backup"
+	else
+		touch "$overlay_script_missing"
+	fi
+	sed \
+		-e "s|__BREAKFIX_PARENT_ORIGIN__|$parent_origin|g" \
+		-e "s|__BREAKFIX_SOURCE__|$source_name|g" \
+		-e "s|__BREAKFIX_VERSION__|$version|g" \
+		-e "s|__BREAKFIX_LOCALE__|$locale|g" \
+		-e "s|__BREAKFIX_DOCS_PREFIX__|$docs_prefix|g" \
+		"$repo_root/docs-site/breakfix-document-context.js" >"$overlay_script"
+	printf '\n<script defer src="{{ "js/breakfix-document-context.js" | relURL }}"></script>\n' >>"$overlay_body_end"
 }
 
 sync_upstream() {
@@ -166,6 +208,8 @@ build_site() {
 		;;
 	esac
 	clean_directory "$public_dir"
+	prepare_overlay
+	trap cleanup_overlay EXIT INT TERM
 	"$container_engine" run --rm --init \
 		--user "$(id -u):$(id -g)" \
 		--mount "type=bind,source=$upstream_dir,target=/src" \
@@ -176,6 +220,8 @@ build_site() {
 		--env HUGO_ENV=production \
 		"$container_image" \
 		hugo --destination /tmp/public --cleanDestinationDir --minify --environment production --noBuildLock
+	trap - EXIT INT TERM
+	cleanup_overlay
 	if [[ -f "$public_dir/_headers" ]] && rg -F -q "noindex" "$public_dir/_headers"; then
 		echo "production output contains noindex headers" >&2
 		exit 1
@@ -183,6 +229,23 @@ build_site() {
 	write_build_info "$base_url"
 	check_public
 	echo "documentation mirror built at $public_dir"
+}
+
+build_image() {
+	require_command "$container_engine"
+	if [[ ! -f "$public_dir/build-info.json" ]]; then
+		echo "missing built documentation output; run make docs-build first" >&2
+		exit 1
+	fi
+	check_public
+	echo "building documentation runtime image: $runtime_image"
+	"$container_engine" build \
+		--tag "$runtime_image" \
+		--build-arg "SOURCE=$source_name" \
+		--build-arg "VERSION=$version" \
+		--build-arg "REVISION=$revision" \
+		--file "$repo_root/docs-site/Dockerfile" \
+		"$repo_root/docs-site"
 }
 
 case "${1:-}" in
@@ -195,8 +258,11 @@ case "${1:-}" in
 	check)
 		check_public
 	;;
+	image)
+		build_image
+	;;
 	*)
-		echo "usage: $0 {sync|build|check}" >&2
+		echo "usage: $0 {sync|build|check|image}" >&2
 		exit 2
 		;;
 esac

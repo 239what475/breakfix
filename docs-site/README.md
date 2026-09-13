@@ -16,12 +16,13 @@ dependency):
 ```bash
 make docs-sync
 DOCS_BASE_URL=http://localhost:1313/ make docs-build
+make docs-image
 make docs-check
 ```
 
 `docs-build` builds the upstream Dockerfile with Hugo `0.144.2` and runs the
 production Hugo command inside that image. The container's `/tmp/public` is
-bound directly to `.local/docs/public`, so no generated site is copied through
+bound directly to `docs-site/public`, so no generated site is copied through
 the host and the host does not need Hugo, Node.js, npm, or upstream
 `node_modules`. Set `DOCS_CONTAINER_ENGINE=podman` to use Podman, or
 `DOCS_CONTAINER_IMAGE` to use an already-built compatible image.
@@ -32,7 +33,9 @@ deployment. The documentation entry point is `<docs-origin>/docs/`; generated
 build metadata is available at `<docs-origin>/build-info.json`.
 
 After `docs-build`, build the small runtime image that serves
-`.local/docs/public` and deploy that image to the local machine or Kind.
+`docs-site/public` and deploy that image to the local machine or Kind.
+The default image tag is `breakfix/kubernetes-docs:snapshot-ce98a43`; run it
+with `docker run --rm -p 1313:8080 breakfix/kubernetes-docs:snapshot-ce98a43`.
 
 Kubernetes documentation is redistributed under its applicable CC BY 4.0
 terms. The mirror must retain upstream attribution and must not copy
