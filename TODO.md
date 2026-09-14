@@ -425,7 +425,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [ ] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。
 - [x] 验证任何 `VerificationReport` 都能由 `RunnableRevision` digest、artifact digest 和 environment profile revision 重现。
 - [x] 验证 `RuntimeEnvironment v2` 的 strict schema、不可变字段、phase/operation 转换、稳定资源引用和 lease 回收语义；CRD 不包含内容专属字段或完整验证结果。
-- [ ] 新增一个仅依赖公共适配器接口的最小 fake content kind，证明无需修改 Runtime Worker 核心即可执行。
+- [x] 新增一个仅依赖公共适配器接口的最小 fake content kind，证明无需修改 Runtime Worker 核心即可执行。
 - [ ] 完成公共底座切换后，再开始以下文档实践 Agent 任务；不在同一阶段并行引入文档领域字段。
 
 ### 7. 固定文档来源与只读 Agent 工具
