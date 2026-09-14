@@ -24,6 +24,7 @@ import (
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
+	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	apppublication "github.com/breakfix/breakfix/internal/application/publication"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
@@ -232,6 +233,24 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("validate scenario catalog: %w", err)
 	}
+	operationsConfig, err := operationsRuntimeConfig(cfg)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("configure Operations runnable publisher: %w", err)
+	}
+	operationsPublisher, err := appoperations.NewRevisionPublisher(database.Runnable, database.Scenario, cfg.ScenariosDir(), operationsConfig)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("create Operations runnable publisher: %w", err)
+	}
+	operationsReconciler, err := appoperations.NewBindingReconciler(database.Scenario, database.Runnable, operationsPublisher, 5*time.Second)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("create Operations runnable reconciler: %w", err)
+	}
 
 	if generatorService == nil {
 		incusClient.Close()
@@ -328,6 +347,11 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("recover generation publication finalizer: %w", err)
 	}
+	if err := operationsReconciler.Recover(ctx); err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("recover Operations runnable revisions: %w", err)
+	}
 	if err := interactiveRecovery.Recover(ctx); err != nil {
 		services.stop()
 		incusClient.Close()
@@ -366,6 +390,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	services.start("learning environment projection", projectionService.Run)
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
 	services.start("generation publication finalizer", publicationFinalizer.Run)
+	services.start("Operations runnable revision reconciler", operationsReconciler.Run)
 	services.start("interactive agent recovery", interactiveRecovery.Run)
 
 	slog.Info("Breakfix Server starting", "version", buildinfo.Version, "data_dir", cfg.DataDir)
