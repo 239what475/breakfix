@@ -40,3 +40,26 @@ func TestPostLongUsesRequestContextInsteadOfOrdinaryClientTimeout(t *testing.T) 
 		t.Fatalf("PostLong() = %v", err)
 	}
 }
+
+func TestRunnableActionClientClaimsFromPublicEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/internal/runnable-actions/claim" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		if request.Header.Get("X-Breakfix-Internal-Key") != "internal-key" {
+			t.Fatal("internal key was not supplied")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client, err := NewRunnableActionClient(server.URL, "internal-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := client.Claim(context.Background(), "worker-01", 5*time.Second)
+	if err != nil || action != nil {
+		t.Fatalf("claim = %#v, %v", action, err)
+	}
+}

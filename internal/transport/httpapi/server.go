@@ -231,6 +231,11 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.POST("/api/internal/runtime-actions/:id/scenario-publish/complete", h.InternalRecordRuntimeScenarioPublication)
 	router.POST("/api/internal/runtime-actions/:id/failure/infrastructure", h.InternalReportRuntimeInfrastructureFailure)
 	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportRuntimeArtifactFailure)
+	router.POST("/api/internal/runnable-actions/claim", h.InternalClaimRunnableAction)
+	router.POST("/api/internal/runnable-actions/renew", h.InternalRenewRunnableAction)
+	router.POST("/api/internal/runnable-actions/materialization/complete", h.InternalCompleteRunnableMaterialization)
+	router.POST("/api/internal/runnable-actions/verification/complete", h.InternalCompleteRunnableVerification)
+	router.POST("/api/internal/runnable-actions/failure", h.InternalReportRunnableActionFailure)
 
 	// Terminal WebSocket
 	catalogRoutes.GET("/api/operations/scenarios/:id/terminal", h.HandleTerminalTicket)
