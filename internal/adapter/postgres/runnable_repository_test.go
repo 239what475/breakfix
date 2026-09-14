@@ -1,0 +1,135 @@
+package postgres
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/breakfix/breakfix/internal/domain/runnable"
+)
+
+func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedRevision := runnable.StoredRevision{
+		Reference: runnable.RevisionReference{ID: "revision-01", Digest: revisionDigest}, Revision: revision, CreatedAt: now,
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, storedRevision); err != nil {
+		t.Fatalf("store runnable revision: %v", err)
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, storedRevision); err != nil {
+		t.Fatalf("repeat runnable revision: %v", err)
+	}
+	resolved, err := database.Runnable.ResolveRunnableRevision(ctx, storedRevision.Reference.ID, revisionDigest)
+	if err != nil {
+		t.Fatalf("resolve runnable revision: %v", err)
+	}
+	if !reflect.DeepEqual(resolved, revision) {
+		t.Fatalf("resolved revision = %#v, want %#v", resolved, revision)
+	}
+
+	report := testVerificationReport(t, revision)
+	reportDigest, err := report.Digest(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedReport := runnable.StoredVerificationReport{
+		Reference: runnable.VerificationReportReference{ID: "report-01", Digest: reportDigest}, Report: report, RunnableRevision: revision, CreatedAt: now,
+	}
+	if err := database.Runnable.StoreVerificationReport(ctx, storedReport); err != nil {
+		t.Fatalf("store verification report: %v", err)
+	}
+	loadedReport, err := database.Runnable.ResolveVerificationReport(ctx, storedReport.Reference.ID, reportDigest, revision)
+	if err != nil {
+		t.Fatalf("resolve verification report: %v", err)
+	}
+	if !reflect.DeepEqual(loadedReport, report) {
+		t.Fatalf("resolved report = %#v, want %#v", loadedReport, report)
+	}
+
+	request := runnable.ReapRequest{
+		Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Revision: revisionDigest,
+		Binding: runnable.EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", RunnableRevision: revision},
+	}
+	if err := database.Runnable.Enqueue(ctx, request); err != nil {
+		t.Fatalf("enqueue reap: %v", err)
+	}
+	claim, err := database.Runnable.Claim(ctx, "reaper-a", time.Minute, now.Add(time.Second))
+	if err != nil || claim == nil {
+		t.Fatalf("claim reap = %#v, %v", claim, err)
+	}
+	if claim.Record.Attempt != 1 || claim.Record.LeaseOwner != "reaper-a" {
+		t.Fatalf("reap claim = %#v", claim)
+	}
+	if err := database.Runnable.Complete(ctx, *claim, true, "", now.Add(2*time.Second), now.Add(3*time.Second)); err != nil {
+		t.Fatalf("complete reap: %v", err)
+	}
+	reap, err := database.Runnable.Get(ctx, request.Key())
+	if err != nil || reap.State != runnable.ReapSucceeded || reap.CompletedAt == nil {
+		t.Fatalf("completed reap = %#v, %v", reap, err)
+	}
+	if err := database.Runnable.Complete(ctx, *claim, true, "", now.Add(2*time.Second), now.Add(3*time.Second)); err != runnable.ErrReapLeaseLost {
+		t.Fatalf("duplicate reap completion error = %v", err)
+	}
+}
+
+func testRunnableRevision(t *testing.T) runnable.RunnableRevision {
+	t.Helper()
+	spec := runnable.RunnableSpec{
+		FormatVersion: runnable.FormatVersion,
+		Identity:      runnable.ContentIdentity{Kind: "operations", ID: "service-startup", Revision: "rev-01"},
+		RuntimeProfile: runnable.RuntimeProfile{
+			Runtime: runnable.RuntimeNode, ProfileRevision: "profile-01", BaseImage: "registry.example/base@sha256:" + strings.Repeat("a", 64),
+			SoftwareVersions: map[string]string{"runtime": "v1"},
+			Resources:        runnable.ResourceLimits{CPU: "2", MemoryBytes: 1 << 30, EphemeralBytes: 1 << 30, MaxProcesses: 64, MaxConcurrentTasks: 1},
+			Network:          runnable.NetworkPrivate, Topology: "single-host",
+			ExecutionBoundaries: []runnable.ExecutionBoundary{
+				{ID: "host-write", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, Permission: runnable.PermissionReadWrite, Network: runnable.NetworkPrivate, MaxTimeout: 60},
+				{ID: "host-read", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, Permission: runnable.PermissionReadOnly, Network: runnable.NetworkPrivate, MaxTimeout: 60},
+			},
+		},
+		Source:          runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "archives/source.tar.gz", Digest: testRunnableDigest("b")},
+		Initialization:  []runnable.ActionSpec{{ID: "initialize", Entrypoint: "scripts/init.sh", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, BoundaryID: "host-write", TimeoutSeconds: 60, ExpectedExitCodes: []int{0}}},
+		ValidationPlan:  runnable.ValidationPlan{FormatVersion: runnable.FormatVersion, Phases: []runnable.ValidationPhase{{ID: "observe", TimeoutSeconds: 60, Execution: runnable.PhaseSequential, Assertions: []runnable.AssertionSpec{{ID: "ready", Entrypoint: "scripts/assert.sh", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, BoundaryID: "host-read", TimeoutSeconds: 60}}}}},
+		LifecyclePolicy: runnable.LifecyclePolicy{CreateTimeoutSeconds: 60, ResetTimeoutSeconds: 60, StopTimeoutSeconds: 60, ReapTimeoutSeconds: 60, IdleTTLSeconds: 600, MaxLifetimeSeconds: 1800},
+	}
+	specDigest, err := spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactDigest := testRunnableDigest("c")
+	return runnable.RunnableRevision{FormatVersion: runnable.FormatVersion, Spec: spec, Artifact: runnable.ArtifactReference{FormatVersion: runnable.FormatVersion, Runtime: runnable.RuntimeNode, ProviderReference: "incus://breakfix/image@" + artifactDigest, ArtifactDigest: artifactDigest, BuiltFromSpecDigest: specDigest, BuilderVersion: "builder-01"}}
+}
+
+func testVerificationReport(t *testing.T, revision runnable.RunnableRevision) runnable.VerificationReport {
+	t.Helper()
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runnable.VerificationReport{
+		FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: revisionDigest,
+		Environment: runnable.EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: profileDigest}, Attempt: 1, Passed: true,
+		CreatedAt: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+		Phases: []runnable.PhaseResult{
+			{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialized", Outputs: []runnable.ImmutableReference{{Reference: "logs/initialize", Digest: testRunnableDigest("d"), SizeBytes: 1}}}}},
+			{ID: "observe", Assertions: []runnable.AssertionResult{{ID: "ready", Satisfied: true, Summary: "ready", Outputs: []runnable.ImmutableReference{{Reference: "logs/ready", Digest: testRunnableDigest("e"), SizeBytes: 1}}}}},
+		},
+	}
+}
+
+func testRunnableDigest(character string) string {
+	return "sha256:" + strings.Repeat(character, 64)
+}

@@ -25,6 +25,7 @@ type Store struct {
 	Identity    *IdentityRepository
 	Publication *PublicationRepository
 	Reporting   *ReportingRepository
+	Runnable    *RunnableRepository
 }
 
 // New opens a PostgreSQL DSN and applies the current schema. Existing SQLite
@@ -73,6 +74,7 @@ func newStore(conn *Conn) *Store {
 		Identity:    &IdentityRepository{conn: conn},
 		Publication: &PublicationRepository{conn: conn},
 		Reporting:   &ReportingRepository{conn: conn},
+		Runnable:    &RunnableRepository{conn: conn},
 	}
 }
 

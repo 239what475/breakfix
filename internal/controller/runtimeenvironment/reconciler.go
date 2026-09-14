@@ -40,12 +40,7 @@ type Provider interface {
 	Reset(context.Context, Binding) (Observation, error)
 }
 
-type Binding struct {
-	Namespace        string
-	Name             string
-	UID              string
-	RunnableRevision runnable.RunnableRevision
-}
+type Binding = runnable.EnvironmentBinding
 
 type Observation struct {
 	Ready        bool
@@ -57,7 +52,7 @@ type Reconciler struct {
 	client.Client
 	Resolver RevisionResolver
 	Provider Provider
-	Reaps    ReapQueue
+	Reaps    runnable.ReapQueue
 	Now      func() time.Time
 }
 
@@ -224,7 +219,7 @@ func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.R
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	request := ReapRequest{Namespace: binding.Namespace, Name: binding.Name, UID: binding.UID, Revision: revisionDigest, Binding: binding}
+	request := runnable.ReapRequest{Namespace: binding.Namespace, Name: binding.Name, UID: binding.UID, Revision: revisionDigest, Binding: binding}
 	if err := r.Reaps.Enqueue(ctx, request); err != nil {
 		// Cleanup diagnostics remain internal to Reaper. Keeping Draining and
 		// retrying the handoff cannot invalidate completed verification work.
@@ -234,7 +229,7 @@ func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.R
 	if err != nil {
 		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil
 	}
-	if record.State != ReapSucceeded {
+	if record.State != runnable.ReapSucceeded {
 		return ctrl.Result{RequeueAfter: reapStatusRequeue}, nil
 	}
 	if environment.DeletionTimestamp.IsZero() {

@@ -18,3 +18,5 @@ type GenerationRepository struct{ conn *Conn }
 type IdentityRepository struct{ conn *Conn }
 
 type ReportingRepository struct{ conn *Conn }
+
+type RunnableRepository struct{ conn *Conn }
