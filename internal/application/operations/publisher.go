@@ -20,7 +20,11 @@ type MaterializationStore interface {
 	StoreRunnableSource(context.Context, runnable.SourceArchive, []byte, time.Time) error
 	ScheduleMaterialization(context.Context, runnable.RunnableSpec, int64, time.Time) (runnable.ActionIdentity, error)
 	ResolveMaterializedRunnableRevision(context.Context, runnable.ActionIdentity) (runnable.RevisionReference, error)
-	BindOperationsRevision(context.Context, string, string, runnable.RevisionReference, time.Time) error
+	// PublishOperationsRevision is the one-way, idempotent transaction that
+	// makes a completed public RunnableRevision visible to Operations. The
+	// application service owns when publication is attempted; persistence owns
+	// the revision/binding transaction and conflict fence.
+	PublishOperationsRevision(context.Context, string, string, runnable.RevisionReference, time.Time) error
 }
 
 type RevisionSource interface {
@@ -155,8 +159,8 @@ func (p *Publisher) Finalize(ctx context.Context, prepared PreparedPublication, 
 	if err != nil {
 		return runnable.RevisionReference{}, err
 	}
-	if err := p.store.BindOperationsRevision(ctx, prepared.Revision.ScenarioID, prepared.Revision.ScenarioRevisionID, reference, now.UTC()); err != nil {
-		return runnable.RevisionReference{}, fmt.Errorf("bind Operations runnable revision: %w", err)
+	if err := p.store.PublishOperationsRevision(ctx, prepared.Revision.ScenarioID, prepared.Revision.ScenarioRevisionID, reference, now.UTC()); err != nil {
+		return runnable.RevisionReference{}, fmt.Errorf("publish Operations runnable revision: %w", err)
 	}
 	return reference, nil
 }

@@ -76,7 +76,7 @@ func (s *publisherStore) ResolveMaterializedRunnableRevision(_ context.Context, 
 	return s.reference, nil
 }
 
-func (s *publisherStore) BindOperationsRevision(_ context.Context, scenarioID, revisionID string, reference runnable.RevisionReference, _ time.Time) error {
+func (s *publisherStore) PublishOperationsRevision(_ context.Context, scenarioID, revisionID string, reference runnable.RevisionReference, _ time.Time) error {
 	if reference != s.reference {
 		return errors.New("unexpected reference")
 	}

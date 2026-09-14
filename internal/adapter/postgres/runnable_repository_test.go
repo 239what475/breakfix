@@ -168,7 +168,7 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 }
 
-func TestRunnableRepositoryBindsOperationsRevisionAfterMaterialization(t *testing.T) {
+func TestRunnableRepositoryPublishesOperationsRevisionAfterMaterialization(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
@@ -188,20 +188,20 @@ func TestRunnableRepositoryBindsOperationsRevisionAfterMaterialization(t *testin
 	if err := database.Runnable.StoreRunnableRevision(ctx, stored); err != nil {
 		t.Fatalf("store runnable revision: %v", err)
 	}
-	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(time.Second)); err != nil {
-		t.Fatalf("bind Operations revision: %v", err)
+	if err := database.Runnable.PublishOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(time.Second)); err != nil {
+		t.Fatalf("publish Operations revision: %v", err)
 	}
 	resolved, err := database.Runnable.ResolveOperationsRevisionBinding(ctx, fixture.revision.ID)
 	if err != nil || resolved != stored.Reference {
-		t.Fatalf("resolved Operations binding = %#v, %v", resolved, err)
+		t.Fatalf("resolved Operations publication = %#v, %v", resolved, err)
 	}
-	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(2*time.Second)); err != nil {
-		t.Fatalf("repeat Operations binding: %v", err)
+	if err := database.Runnable.PublishOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("repeat Operations publication: %v", err)
 	}
 	other := stored
 	other.Reference.ID = "rr-other"
-	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, other.Reference, now.Add(3*time.Second)); err == nil || !strings.Contains(err.Error(), "already bound") {
-		t.Fatalf("conflicting Operations binding = %v", err)
+	if err := database.Runnable.PublishOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, other.Reference, now.Add(3*time.Second)); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("conflicting Operations publication = %v", err)
 	}
 }
 

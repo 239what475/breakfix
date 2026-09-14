@@ -561,11 +561,13 @@ func (d *RunnableRepository) ResolveRunnableRevision(ctx context.Context, id, di
 	return revision, nil
 }
 
-// BindOperationsRevision records the one-way link from a published
-// Operations revision to the complete public RunnableRevision produced by
-// materialization. The binding is separate from both immutable aggregates so
-// old Catalog projections cannot accidentally rewrite the public contract.
-func (d *RunnableRepository) BindOperationsRevision(ctx context.Context, scenarioID, scenarioRevisionID string, reference runnable.RevisionReference, now time.Time) error {
+// PublishOperationsRevision atomically records the one-way publication from
+// an Operations revision to the complete public RunnableRevision produced by
+// materialization. The transaction locks both immutable identities before
+// inserting the pointer, making retries idempotent and conflicting digests
+// deterministic. The binding is separate from both immutable aggregates so
+// old Catalog projections cannot rewrite the public contract.
+func (d *RunnableRepository) PublishOperationsRevision(ctx context.Context, scenarioID, scenarioRevisionID string, reference runnable.RevisionReference, now time.Time) error {
 	if strings.TrimSpace(scenarioID) == "" || strings.TrimSpace(scenarioRevisionID) == "" || reference.Validate() != nil || now.IsZero() {
 		return errors.New("operations runnable revision binding is invalid")
 	}

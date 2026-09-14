@@ -391,7 +391,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 将 Node、K8s、Registry、Incus 和环境 provider 的调用参数改为公共 target、执行边界和 lifecycle 数据；SDK 类型不得泄漏到 domain。
 - [x] 将断言执行身份限制为只读权限，将动作执行身份限制为已批准的执行边界；增加执行前后的资源和权限边界检查。
 - [x] 保留 lease fencing、动作 deadline、幂等创建/获取、attempt 上限和 artifact failure 分类；语义失败不得自动当作基础设施重试。
-- [ ] 将 Operations 的内容发布移回 Operations application service；Runtime Worker 只负责构建、artifact、环境、验证和资源生命周期。
+- [x] 将 Operations 的内容发布移回 Operations application service；Runtime Worker 只负责构建、artifact、环境、验证和资源生命周期。
 - [x] 为 Worker 增加观察型、修复型、多阶段、断言失败、协议失败、lease 丢失、重启接管和重复结果测试。
 
 ### 4. 迁移 Controller、Environment 与异步回收
