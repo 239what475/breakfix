@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 )
 
@@ -42,21 +41,21 @@ func (s Scope) Valid() bool {
 	}
 }
 
-// State is the external runtime state represented by an action. Catalog
-// commit preparation maps to ScenarioPublishing; the other values map
-// directly to the corresponding persisted aggregate state.
+// State is the external runtime state represented by an action. Artifact
+// finalization is a generic provider handoff; content modules retain their
+// own publication terminology outside this package.
 type State string
 
 const (
 	StateBuilding           State = "Building"
 	StateArtifactPublishing State = "ArtifactPublishing"
 	StateVerifying          State = "Verifying"
-	StateScenarioPublishing State = "ScenarioPublishing"
+	StateArtifactFinalizing State = "ArtifactFinalizing"
 )
 
 func (s State) Valid() bool {
 	switch s {
-	case StateBuilding, StateArtifactPublishing, StateVerifying, StateScenarioPublishing:
+	case StateBuilding, StateArtifactPublishing, StateVerifying, StateArtifactFinalizing:
 		return true
 	default:
 		return false
@@ -108,15 +107,15 @@ func (c Credential) Valid() bool {
 // action. It intentionally has no authoring plan, agent state, workspace
 // binding, database credential, or Server filesystem path.
 type Context struct {
-	Identity                Identity                           `json:"identity"`
-	LeaseOwner              string                             `json:"lease_owner"`
-	ArchiveSHA256           string                             `json:"archive_sha256"`
-	Snapshot                execution.Snapshot                 `json:"snapshot"`
-	Build                   *execution.BuildOutput             `json:"build,omitempty"`
-	Artifact                *execution.ArtifactReference       `json:"artifact,omitempty"`
-	VerificationEnvironment *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
-	ScenarioID              string                             `json:"scenario_id,omitempty"`
-	ScenarioRevisionID      string                             `json:"scenario_revision_id,omitempty"`
+	Identity                    Identity                           `json:"identity"`
+	LeaseOwner                  string                             `json:"lease_owner"`
+	ArchiveSHA256               string                             `json:"archive_sha256"`
+	Snapshot                    execution.Snapshot                 `json:"snapshot"`
+	Build                       *execution.BuildOutput             `json:"build,omitempty"`
+	Artifact                    *execution.ArtifactReference       `json:"artifact,omitempty"`
+	VerificationEnvironment     *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
+	FinalArtifactTargetID       string                             `json:"final_artifact_target_id,omitempty"`
+	FinalArtifactTargetRevision string                             `json:"final_artifact_target_revision,omitempty"`
 }
 
 func (c Context) Credential() Credential {
@@ -138,20 +137,20 @@ func (c Context) Valid() error {
 	}
 	switch c.Identity.State {
 	case StateBuilding:
-		if c.Build != nil || c.Artifact != nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
+		if c.Build != nil || c.Artifact != nil || c.FinalArtifactTargetID != "" || c.FinalArtifactTargetRevision != "" {
 			return errors.New("build action has unexpected runtime output")
 		}
 	case StateArtifactPublishing:
-		if c.Build == nil || c.Artifact != nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
+		if c.Build == nil || c.Artifact != nil || c.FinalArtifactTargetID != "" || c.FinalArtifactTargetRevision != "" {
 			return errors.New("artifact publication action has invalid build input")
 		}
 	case StateVerifying:
-		if c.Artifact == nil || c.ScenarioID != "" || c.ScenarioRevisionID != "" {
+		if c.Artifact == nil || c.FinalArtifactTargetID != "" || c.FinalArtifactTargetRevision != "" {
 			return errors.New("verification action has invalid staging input")
 		}
-	case StateScenarioPublishing:
-		if c.Artifact == nil || !scenario.ValidID(c.ScenarioID) || !scenario.ValidRevisionID(c.ScenarioRevisionID) {
-			return errors.New("scenario publication action has invalid input")
+	case StateArtifactFinalizing:
+		if c.Artifact == nil || strings.TrimSpace(c.FinalArtifactTargetID) == "" || strings.TrimSpace(c.FinalArtifactTargetRevision) == "" {
+			return errors.New("artifact finalization action has invalid input")
 		}
 	default:
 		return errors.New("runtime action state is unsupported")

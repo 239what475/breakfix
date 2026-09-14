@@ -92,7 +92,7 @@ func TestCatalogRepositoryPublishesRuntimeActionsAndCommitsAtomically(t *testing
 	}
 
 	commitAction := claimCatalogRuntimeAction(t, database, now)
-	if commitAction.Identity.Scope != runtime.ScopeCatalogCommit || commitAction.Identity.State != runtime.StateScenarioPublishing {
+	if commitAction.Identity.Scope != runtime.ScopeCatalogCommit || commitAction.Identity.State != runtime.StateArtifactFinalizing {
 		t.Fatalf("commit action = %#v", commitAction)
 	}
 	if err := database.Catalog.RenewCatalogRuntimeLease(ctx, commitAction.Credential(), time.Minute, now.Add(time.Second)); err != nil {

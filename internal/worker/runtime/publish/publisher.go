@@ -87,18 +87,18 @@ func (e *Executor) PublishArtifactWork(ctx context.Context, work domainexecution
 	}
 }
 
-// PublishScenarioWork promotes a verified staging artifact to a final,
-// scenario-scoped artifact. The caller owns materialization and visibility.
-func (e *Executor) PublishScenarioWork(ctx context.Context, work domainexecution.Work, scenarioID, scenarioRevisionID string) (domainexecution.ArtifactReference, error) {
+// PublishFinalArtifactWork promotes a verified staging artifact to a final
+// immutable provider reference. The caller owns materialization and visibility.
+func (e *Executor) PublishFinalArtifactWork(ctx context.Context, work domainexecution.Work, targetID, targetRevision string) (domainexecution.ArtifactReference, error) {
 	if err := work.Validate(); err != nil {
-		return domainexecution.ArtifactReference{}, fmt.Errorf("scenario publication execution work: %w", err)
+		return domainexecution.ArtifactReference{}, fmt.Errorf("artifact finalization execution work: %w", err)
 	}
-	if work.Artifact == nil || !scenario.ValidID(scenarioID) || !scenario.ValidRevisionID(scenarioRevisionID) {
-		return domainexecution.ArtifactReference{}, errors.New("scenario publication requires a verified artifact and immutable scenario identity")
+	if work.Artifact == nil || strings.TrimSpace(targetID) == "" || strings.TrimSpace(targetRevision) == "" {
+		return domainexecution.ArtifactReference{}, errors.New("artifact finalization requires a verified artifact and immutable target identity")
 	}
 	switch work.Snapshot.Runtime {
 	case scenario.RuntimeK8s:
-		target, err := e.scenarioImage(scenarioID, scenarioRevisionID)
+		target, err := e.scenarioImage(targetID, targetRevision)
 		if err != nil {
 			return domainexecution.ArtifactReference{}, err
 		}
@@ -114,8 +114,8 @@ func (e *Executor) PublishScenarioWork(ctx context.Context, work domainexecution
 		}
 		published, err := e.node.PublishScenarioNodeImage(ctx, incus.PublishScenarioNodeImageRequest{
 			CandidateRevisionID: work.CandidateID,
-			ScenarioID:          scenarioID,
-			ScenarioRevisionID:  scenarioRevisionID,
+			ScenarioID:          targetID,
+			ScenarioRevisionID:  targetRevision,
 			Staging: incus.PublishNodeImageResult{
 				Alias: work.Artifact.IncusAlias, Fingerprint: work.Artifact.IncusFingerprint,
 			},
@@ -202,7 +202,7 @@ func (e *Executor) reapCandidateArtifact(ctx context.Context, reap runtime.Reap)
 			return errors.New("node image publisher is unavailable")
 		}
 		if reap.DeleteFinalArtifact && reap.FinalArtifact != nil && reap.FinalArtifact.IncusFingerprint != "" {
-			if err := e.node.DeleteScenarioNodeImage(ctx, reap.ScenarioID, reap.ScenarioRevisionID, reap.FinalArtifact.IncusFingerprint); err != nil {
+			if err := e.node.DeleteScenarioNodeImage(ctx, reap.FinalArtifactTargetID, reap.FinalArtifactTargetRevision, reap.FinalArtifact.IncusFingerprint); err != nil {
 				return fmt.Errorf("delete uncommitted scenario Node image: %w", err)
 			}
 		}

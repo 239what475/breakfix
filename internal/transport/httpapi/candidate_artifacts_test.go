@@ -32,9 +32,9 @@ func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	k8sAction.Artifact = &staging
-	k8sAction.ScenarioID = "scenario-k8s"
-	k8sAction.ScenarioRevisionID = "chrev-aaaaaaaaaaaaaaaa"
-	if err := handler.validateRuntimeScenarioArtifact(k8sAction, execution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + fingerprint}); err != nil {
+	k8sAction.FinalArtifactTargetID = "scenario-k8s"
+	k8sAction.FinalArtifactTargetRevision = "chrev-aaaaaaaaaaaaaaaa"
+	if err := handler.validateRuntimeFinalArtifact(k8sAction, execution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: finalRepository + "@sha256:" + fingerprint}); err != nil {
 		t.Fatalf("validate K8s final artifact: %v", err)
 	}
 
@@ -53,9 +53,9 @@ func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodeAction.Artifact = &nodeStaging
-	nodeAction.ScenarioID = "scenario-node"
-	nodeAction.ScenarioRevisionID = "chrev-bbbbbbbbbbbbbbbb"
-	if err := handler.validateRuntimeScenarioArtifact(nodeAction, execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: scenarioAlias, IncusFingerprint: fingerprint}); err != nil {
+	nodeAction.FinalArtifactTargetID = "scenario-node"
+	nodeAction.FinalArtifactTargetRevision = "chrev-bbbbbbbbbbbbbbbb"
+	if err := handler.validateRuntimeFinalArtifact(nodeAction, execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: scenarioAlias, IncusFingerprint: fingerprint}); err != nil {
 		t.Fatalf("validate Node final artifact: %v", err)
 	}
 }

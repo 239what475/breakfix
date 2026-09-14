@@ -30,17 +30,17 @@ func (k ReapKind) Valid() bool {
 // CandidateRevision or Catalog Entry that owns the staging resources; final
 // artifacts are supplied separately because they can be scoped by a commit.
 type Reap struct {
-	Scope                   Scope                              `json:"scope"`
-	ResourceID              string                             `json:"resource_id"`
-	Kind                    ReapKind                           `json:"kind"`
-	DeleteFinalArtifact     bool                               `json:"delete_final_artifact,omitempty"`
-	Snapshot                execution.Snapshot                 `json:"snapshot"`
-	Build                   *execution.BuildOutput             `json:"build,omitempty"`
-	Artifact                *execution.ArtifactReference       `json:"artifact,omitempty"`
-	FinalArtifact           *execution.ArtifactReference       `json:"final_artifact,omitempty"`
-	VerificationEnvironment *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
-	ScenarioID              string                             `json:"scenario_id,omitempty"`
-	ScenarioRevisionID      string                             `json:"scenario_revision_id,omitempty"`
+	Scope                       Scope                              `json:"scope"`
+	ResourceID                  string                             `json:"resource_id"`
+	Kind                        ReapKind                           `json:"kind"`
+	DeleteFinalArtifact         bool                               `json:"delete_final_artifact,omitempty"`
+	Snapshot                    execution.Snapshot                 `json:"snapshot"`
+	Build                       *execution.BuildOutput             `json:"build,omitempty"`
+	Artifact                    *execution.ArtifactReference       `json:"artifact,omitempty"`
+	FinalArtifact               *execution.ArtifactReference       `json:"final_artifact,omitempty"`
+	VerificationEnvironment     *execution.VerificationEnvironment `json:"verification_environment,omitempty"`
+	FinalArtifactTargetID       string                             `json:"final_artifact_target_id,omitempty"`
+	FinalArtifactTargetRevision string                             `json:"final_artifact_target_revision,omitempty"`
 }
 
 func (r Reap) Valid() error {
@@ -59,7 +59,7 @@ func (r Reap) Valid() error {
 	if r.VerificationEnvironment != nil && r.VerificationEnvironment.Validate(r.Snapshot.Runtime) != nil {
 		return errors.New("runtime resource reap verification environment is invalid")
 	}
-	if r.DeleteFinalArtifact && (r.FinalArtifact == nil || strings.TrimSpace(r.ScenarioID) == "" || strings.TrimSpace(r.ScenarioRevisionID) == "") {
+	if r.DeleteFinalArtifact && (r.FinalArtifact == nil || strings.TrimSpace(r.FinalArtifactTargetID) == "" || strings.TrimSpace(r.FinalArtifactTargetRevision) == "") {
 		return errors.New("runtime resource reap final artifact is incomplete")
 	}
 	return nil

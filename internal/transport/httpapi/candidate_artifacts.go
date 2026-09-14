@@ -54,16 +54,16 @@ func (h *Handler) validateRuntimeStagingArtifact(action runtime.Context, artifac
 // validateCandidateScenarioArtifact enforces both final-artifact ownership and
 // content identity. Publishing must not turn a candidate artifact into a
 // different image merely because both values are valid immutable references.
-func (h *Handler) validateRuntimeScenarioArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.ScenarioID == "" || action.ScenarioRevisionID == "" {
-		return errors.New("runtime action has no scenario publication input")
+func (h *Handler) validateRuntimeFinalArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
+	if action.Artifact == nil || action.FinalArtifactTargetID == "" || action.FinalArtifactTargetRevision == "" {
+		return errors.New("runtime action has no final artifact target")
 	}
 	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
 		return err
 	}
 	switch action.Snapshot.Runtime {
 	case scenario.RuntimeK8s:
-		expected, err := candidate.ScenarioOCIRepository(h.registryRepository, action.ScenarioID, action.ScenarioRevisionID)
+		expected, err := candidate.ScenarioOCIRepository(h.registryRepository, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario OCI repository: %w", err)
 		}
@@ -88,7 +88,7 @@ func (h *Handler) validateRuntimeScenarioArtifact(action runtime.Context, artifa
 		return nil
 
 	case scenario.RuntimeNode:
-		expected, err := incus.AliasForScenario(h.incusConfig.NamePrefix, action.ScenarioID, action.ScenarioRevisionID)
+		expected, err := incus.AliasForScenario(h.incusConfig.NamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}

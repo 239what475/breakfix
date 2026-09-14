@@ -228,7 +228,7 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.POST("/api/internal/runtime-actions/:id/artifact-publish/complete", h.InternalCompleteRuntimeArtifactPublish)
 	router.POST("/api/internal/runtime-actions/:id/verification/environment", h.InternalRecordRuntimeVerificationEnvironment)
 	router.POST("/api/internal/runtime-actions/:id/verification/complete", h.InternalCompleteRuntimeVerification)
-	router.POST("/api/internal/runtime-actions/:id/scenario-publish/complete", h.InternalRecordRuntimeScenarioPublication)
+	router.POST("/api/internal/runtime-actions/:id/artifact-finalize/complete", h.InternalRecordRuntimeFinalArtifact)
 	router.POST("/api/internal/runtime-actions/:id/failure/infrastructure", h.InternalReportRuntimeInfrastructureFailure)
 	router.POST("/api/internal/runtime-actions/:id/failure/artifact", h.InternalReportRuntimeArtifactFailure)
 	router.POST("/api/internal/runnable-actions/claim", h.InternalClaimRunnableAction)

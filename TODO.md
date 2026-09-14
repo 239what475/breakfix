@@ -383,7 +383,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 3. 迁移 Runtime Worker 与 Provider 执行器
 
-- [ ] 将 Runtime Action 的输入改为 `RunnableSpec`、阶段结果和通用 artifact 引用；公共层以 `MaterializeArtifact` 表示构建与 artifact 发布，移除 `ScenarioID`、`ScenarioRevisionID`、`ScenarioPublishing` 及其专属状态分支。
+- [x] 将 Runtime Action 的输入改为 `RunnableSpec`、阶段结果和通用 artifact 引用；公共层以 `MaterializeArtifact` 表示构建与 artifact 发布，移除 `ScenarioID`、`ScenarioRevisionID`、`ScenarioPublishing` 及其专属状态分支。
 - [x] 将 action identity 改为公共的 content kind/id/revision、spec digest、阶段和 state version；基础设施 retry 不改变外部资源 identity。
 - [x] 让公共 `MaterializeArtifact` executor 消费 `RunnableSpec` 和 source archive，内部可以拆分 build/publish，但对上层只输出绑定 spec digest 的 `ArtifactReference`。
 - [x] 只有 artifact 构建和发布完成后，编排器才写入不可变 `RunnableRevision`；Worker 不在 revision 中逐阶段回填字段。

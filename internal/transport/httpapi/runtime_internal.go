@@ -345,14 +345,14 @@ func (h *Handler) InternalCompleteRuntimeVerification(c *gin.Context) {
 	})
 }
 
-func (h *Handler) InternalRecordRuntimeScenarioPublication(c *gin.Context) {
+func (h *Handler) InternalRecordRuntimeFinalArtifact(c *gin.Context) {
 	var request runtimeArtifactCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
 		return
 	}
-	h.completeRuntimeAction(c, request.Credential, runtime.StateScenarioPublishing, func(action *claimedRuntimeAction) error {
-		if err := h.validateRuntimeScenarioArtifact(action.Context, request.Artifact); err != nil {
-			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "SCENARIO_ARTIFACT_INVALID", Summary: err.Error()}, nil)
+	h.completeRuntimeAction(c, request.Credential, runtime.StateArtifactFinalizing, func(action *claimedRuntimeAction) error {
+		if err := h.validateRuntimeFinalArtifact(action.Context, request.Artifact); err != nil {
+			return h.reportRuntimeArtifactFailure(c.Request.Context(), action, runtime.Failure{Class: runtime.FailureArtifact, Code: "FINAL_ARTIFACT_INVALID", Summary: err.Error()}, nil)
 		}
 		switch action.Context.Identity.Scope {
 		case runtime.ScopeGenerationWorkflow:
@@ -441,7 +441,7 @@ func (h *Handler) runtimeAction(c *gin.Context, credential runtime.Credential) (
 func (h *Handler) reportRuntimeInfrastructureFailure(ctx context.Context, action *claimedRuntimeAction, failure runtime.Failure) error {
 	switch action.Context.Identity.Scope {
 	case runtime.ScopeGenerationWorkflow:
-		_, err := h.db.Generation.ReportGenerationInfrastructureFailure(ctx, *action.generationClaim, generation.WorkflowState(action.Context.Identity.State), generation.Failure{
+		_, err := h.db.Generation.ReportGenerationInfrastructureFailure(ctx, *action.generationClaim, generationStateForRuntime(action.Context.Identity.State), generation.Failure{
 			Class: generation.FailureInfrastructure, Code: failure.Code, Summary: failure.Summary,
 		}, time.Now().UTC())
 		return err
@@ -455,7 +455,7 @@ func (h *Handler) reportRuntimeInfrastructureFailure(ctx context.Context, action
 func (h *Handler) reportRuntimeArtifactFailure(ctx context.Context, action *claimedRuntimeAction, failure runtime.Failure, report *execution.VerificationReport) error {
 	switch action.Context.Identity.Scope {
 	case runtime.ScopeGenerationWorkflow:
-		return h.db.Generation.ReportGenerationArtifactFailure(ctx, *action.generationClaim, generation.WorkflowState(action.Context.Identity.State), generation.Failure{
+		return h.db.Generation.ReportGenerationArtifactFailure(ctx, *action.generationClaim, generationStateForRuntime(action.Context.Identity.State), generation.Failure{
 			Class: generation.FailureArtifact, Code: failure.Code, Summary: failure.Summary,
 		}, report, time.Now().UTC())
 	case runtime.ScopeCatalogEntry, runtime.ScopeCatalogCommit:
@@ -463,6 +463,13 @@ func (h *Handler) reportRuntimeArtifactFailure(ctx context.Context, action *clai
 	default:
 		return runtime.ErrActionNotFound
 	}
+}
+
+func generationStateForRuntime(state runtime.State) generation.WorkflowState {
+	if state == runtime.StateArtifactFinalizing {
+		return generation.StateScenarioPublishing
+	}
+	return generation.WorkflowState(state)
 }
 
 func (h *Handler) validateRuntimeBuildOutput(action runtime.Context, output execution.BuildOutput) error {

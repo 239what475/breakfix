@@ -163,7 +163,7 @@ func (f *PublicationFinalizer) materialize(revision *domain.Revision) (*scenario
 		return nil, publicationFailure(fmt.Errorf("%w: invalid final artifact: %v", errPublicationInvariant, err))
 	}
 	if err := f.validator.ValidateScenarioArtifact(runtime.Context{
-		Snapshot: revision.Snapshot, Artifact: revision.Artifact, ScenarioID: publicationIntent.ScenarioID, ScenarioRevisionID: publicationIntent.ScenarioRevisionID,
+		Snapshot: revision.Snapshot, Artifact: revision.Artifact, FinalArtifactTargetID: publicationIntent.ScenarioID, FinalArtifactTargetRevision: publicationIntent.ScenarioRevisionID,
 	}, artifact); err != nil {
 		return nil, publicationFailure(fmt.Errorf("%w: final artifact ownership: %v", errPublicationInvariant, err))
 	}

@@ -396,7 +396,7 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 	}
 	identity := runtime.Identity{
 		Scope: runtime.ScopeGenerationWorkflow, OwnerID: workflow.ID, CandidateID: revision.ID,
-		State: runtime.State(workflow.State), StateVersion: workflow.StateVersion,
+		State: runtimeStateForGeneration(workflow.State), StateVersion: workflow.StateVersion,
 	}
 	context := runtime.Context{
 		Identity: identity, LeaseOwner: claim.LeaseOwner, ArchiveSHA256: revision.ArchiveSHA256,
@@ -404,8 +404,8 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 		VerificationEnvironment: revision.VerifyEnvironment,
 	}
 	if revision.Publication != nil {
-		context.ScenarioID = revision.Publication.ScenarioID
-		context.ScenarioRevisionID = revision.Publication.ScenarioRevisionID
+		context.FinalArtifactTargetID = revision.Publication.ScenarioID
+		context.FinalArtifactTargetRevision = revision.Publication.ScenarioRevisionID
 	}
 	if err := context.Valid(); err != nil {
 		return nil, err
@@ -414,6 +414,13 @@ func (d *GenerationRepository) LoadGenerationRuntimeAction(ctx context.Context, 
 		return nil, fmt.Errorf("commit generation runtime action: %w", err)
 	}
 	return &context, nil
+}
+
+func runtimeStateForGeneration(state generation.WorkflowState) runtime.State {
+	if state == generation.StateScenarioPublishing {
+		return runtime.StateArtifactFinalizing
+	}
+	return runtime.State(state)
 }
 
 func (d *GenerationRepository) RenewGenerationLease(ctx context.Context, claim generation.Claim, leaseTTL time.Duration, now time.Time) error {

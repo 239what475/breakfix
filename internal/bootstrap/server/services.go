@@ -177,7 +177,7 @@ type scenarioArtifactValidator struct {
 }
 
 func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.ScenarioID == "" || action.ScenarioRevisionID == "" {
+	if action.Artifact == nil || action.FinalArtifactTargetID == "" || action.FinalArtifactTargetRevision == "" {
 		return errors.New("runtime action has no scenario publication input")
 	}
 	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
@@ -185,7 +185,7 @@ func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Conte
 	}
 	switch action.Snapshot.Runtime {
 	case scenario.RuntimeK8s:
-		expected, err := candidate.ScenarioOCIRepository(v.registryRepository, action.ScenarioID, action.ScenarioRevisionID)
+		expected, err := candidate.ScenarioOCIRepository(v.registryRepository, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario OCI repository: %w", err)
 		}
@@ -209,7 +209,7 @@ func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Conte
 		}
 		return nil
 	case scenario.RuntimeNode:
-		expected, err := incus.AliasForScenario(v.incusNamePrefix, action.ScenarioID, action.ScenarioRevisionID)
+		expected, err := incus.AliasForScenario(v.incusNamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}

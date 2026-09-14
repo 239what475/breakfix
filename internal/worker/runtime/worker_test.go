@@ -38,6 +38,30 @@ func TestWorkerProcessesOneClaimedRuntimeState(t *testing.T) {
 	}
 }
 
+func TestWorkerProcessesGenericFinalArtifactAction(t *testing.T) {
+	store := newRuntimeStore()
+	store.action.Identity.State = runtime.StateArtifactFinalizing
+	store.action.Artifact = &domainexecution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "candidate", IncusFingerprint: strings.Repeat("c", 64)}
+	store.action.FinalArtifactTargetID = "target"
+	store.action.FinalArtifactTargetRevision = "revision"
+	publisher := &runtimePublisher{}
+	worker, err := New(store, &runtimeBuilder{}, publisher, &runtimeVerifier{}, Config{WorkerID: "runtime-test", LeaseTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := worker.ProcessOne(context.Background()); err != nil || !processed {
+		t.Fatalf("process final artifact action = %v, %v", processed, err)
+	}
+	if publisher.finalArtifactCalls.Load() != 1 {
+		t.Fatalf("final artifact calls = %d, want 1", publisher.finalArtifactCalls.Load())
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.completedStates) != 1 || store.completedStates[0] != runtime.StateArtifactFinalizing {
+		t.Fatalf("completed runtime states = %#v", store.completedStates)
+	}
+}
+
 func TestWorkerRenewsActionLeaseBeforeCompletingLongBuild(t *testing.T) {
 	store := newRuntimeStore()
 	builder := &runtimeBuilder{delay: 1250 * time.Millisecond}
@@ -177,9 +201,9 @@ func (s *runtimeStore) CompleteVerification(context.Context, runtime.Credential,
 	return nil
 }
 
-func (s *runtimeStore) RecordScenarioPublication(context.Context, runtime.Credential, domainexecution.ArtifactReference) error {
+func (s *runtimeStore) RecordFinalArtifact(context.Context, runtime.Credential, domainexecution.ArtifactReference) error {
 	s.mu.Lock()
-	s.completedStates = append(s.completedStates, runtime.StateScenarioPublishing)
+	s.completedStates = append(s.completedStates, runtime.StateArtifactFinalizing)
 	s.mu.Unlock()
 	return nil
 }
@@ -258,7 +282,8 @@ func (b *runtimeBuilder) ExecuteWork(ctx context.Context, work domainexecution.W
 }
 
 type runtimePublisher struct {
-	artifactCalls atomic.Int32
+	artifactCalls      atomic.Int32
+	finalArtifactCalls atomic.Int32
 }
 
 func (p *runtimePublisher) PublishArtifactWork(context.Context, domainexecution.Work) (domainexecution.ArtifactReference, error) {
@@ -266,8 +291,9 @@ func (p *runtimePublisher) PublishArtifactWork(context.Context, domainexecution.
 	return domainexecution.ArtifactReference{}, nil
 }
 
-func (*runtimePublisher) PublishScenarioWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error) {
-	return domainexecution.ArtifactReference{}, nil
+func (p *runtimePublisher) PublishFinalArtifactWork(context.Context, domainexecution.Work, string, string) (domainexecution.ArtifactReference, error) {
+	p.finalArtifactCalls.Add(1)
+	return domainexecution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "target", IncusFingerprint: strings.Repeat("d", 64)}, nil
 }
 
 func (*runtimePublisher) ReapResource(context.Context, runtime.Reap) error { return nil }

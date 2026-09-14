@@ -70,8 +70,8 @@ func (d *GenerationRepository) ClaimGenerationResourceReap(ctx context.Context, 
 		VerificationEnvironment: candidate.VerifyEnvironment,
 	}
 	if candidate.Publication != nil {
-		reap.ScenarioID = candidate.Publication.ScenarioID
-		reap.ScenarioRevisionID = candidate.Publication.ScenarioRevisionID
+		reap.FinalArtifactTargetID = candidate.Publication.ScenarioID
+		reap.FinalArtifactTargetRevision = candidate.Publication.ScenarioRevisionID
 		reap.FinalArtifact = candidate.Publication.Artifact
 	}
 	if err := reap.Valid(); err != nil {

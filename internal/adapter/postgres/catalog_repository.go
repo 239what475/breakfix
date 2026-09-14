@@ -612,7 +612,7 @@ func (d *CatalogRepository) CompleteCatalogVerification(ctx context.Context, act
 }
 
 func (d *CatalogRepository) CompleteCatalogScenarioPublication(ctx context.Context, action runtime.Context, artifact execution.ArtifactReference, now time.Time) error {
-	if action.Identity.Scope != runtime.ScopeCatalogCommit || action.Identity.State != runtime.StateScenarioPublishing || artifact.Validate(action.Snapshot.Runtime) != nil || now.IsZero() {
+	if action.Identity.Scope != runtime.ScopeCatalogCommit || action.Identity.State != runtime.StateArtifactFinalizing || artifact.Validate(action.Snapshot.Runtime) != nil || now.IsZero() {
 		return errors.New("catalog scenario publication is invalid")
 	}
 	encoded, err := marshalJSON(artifact)
@@ -1072,7 +1072,7 @@ func entryActionMatches(entry catalogdomain.Entry, action runtime.Context, now t
 }
 
 func commitActionMatches(commit catalogdomain.Commit, action runtime.Context, now time.Time) bool {
-	return commit.LeaseExpires != nil && commit.LeaseExpires.After(now.UTC()) && commit.LeaseOwner == action.LeaseOwner && commit.StateVersion == action.Identity.StateVersion && commit.State == catalogdomain.CommitPrepared && action.Identity.State == runtime.StateScenarioPublishing
+	return commit.LeaseExpires != nil && commit.LeaseExpires.After(now.UTC()) && commit.LeaseOwner == action.LeaseOwner && commit.StateVersion == action.Identity.StateVersion && commit.State == catalogdomain.CommitPrepared && action.Identity.State == runtime.StateArtifactFinalizing
 }
 
 func catalogEntryAction(release catalogdomain.Release, entry catalogdomain.Entry) (*runtime.Context, error) {
@@ -1095,9 +1095,9 @@ func catalogCommitAction(release catalogdomain.Release, entry catalogdomain.Entr
 		return nil, runtime.ErrLeaseLost
 	}
 	action := runtime.Context{
-		Identity:   runtime.Identity{Scope: runtime.ScopeCatalogCommit, OwnerID: commit.ID, ParentID: release.ID, CandidateID: entry.ID, State: runtime.StateScenarioPublishing, StateVersion: commit.StateVersion},
+		Identity:   runtime.Identity{Scope: runtime.ScopeCatalogCommit, OwnerID: commit.ID, ParentID: release.ID, CandidateID: entry.ID, State: runtime.StateArtifactFinalizing, StateVersion: commit.StateVersion},
 		LeaseOwner: commit.LeaseOwner, ArchiveSHA256: entry.ArchiveSHA256, Snapshot: entry.Snapshot, Build: entry.Build,
-		Artifact: entry.Artifact, ScenarioID: commit.ScenarioID, ScenarioRevisionID: commit.ScenarioRevisionID,
+		Artifact: entry.Artifact, FinalArtifactTargetID: commit.ScenarioID, FinalArtifactTargetRevision: commit.ScenarioRevisionID,
 	}
 	if err := action.Valid(); err != nil {
 		return nil, fmt.Errorf("catalog commit runtime action is invalid: %w", err)
@@ -1147,12 +1147,12 @@ func (d *CatalogRepository) ClaimCatalogResourceReap(ctx context.Context, owner 
 		return nil, err
 	}
 	var final *execution.ArtifactReference
-	var scenarioID, scenarioRevisionID string
+	var targetID, targetRevision string
 	commit, commitErr := scanCatalogCommit(tx.QueryRowContext(ctx, catalogCommitSelect+` WHERE entry_id = ?`, entryID))
 	if commitErr == nil {
 		final = commit.Artifact
-		scenarioID = commit.ScenarioID
-		scenarioRevisionID = commit.ScenarioRevisionID
+		targetID = commit.ScenarioID
+		targetRevision = commit.ScenarioRevisionID
 	} else if !errors.Is(commitErr, sql.ErrNoRows) {
 		return nil, commitErr
 	}
@@ -1161,7 +1161,7 @@ func (d *CatalogRepository) ClaimCatalogResourceReap(ctx context.Context, owner 
 	}
 	reap := runtime.Reap{Scope: runtime.ScopeCatalogEntry, ResourceID: entry.ID, Kind: kind, DeleteFinalArtifact: deleteFinal,
 		Snapshot: entry.Snapshot, Build: entry.Build, Artifact: entry.Artifact, FinalArtifact: final,
-		VerificationEnvironment: entry.VerifyEnvironment, ScenarioID: scenarioID, ScenarioRevisionID: scenarioRevisionID}
+		VerificationEnvironment: entry.VerifyEnvironment, FinalArtifactTargetID: targetID, FinalArtifactTargetRevision: targetRevision}
 	if err := reap.Valid(); err != nil {
 		return nil, fmt.Errorf("load catalog resource reap: %w", err)
 	}
