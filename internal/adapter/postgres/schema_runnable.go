@@ -24,6 +24,14 @@ var schemaRunnableStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX runnable_revisions_spec ON runnable_revisions (spec_digest, created_at DESC)`,
+	`CREATE TABLE scenario_runnable_revision_bindings (
+		scenario_revision_id TEXT PRIMARY KEY REFERENCES scenario_revisions(id) ON DELETE RESTRICT,
+		runnable_revision_id TEXT NOT NULL REFERENCES runnable_revisions(id) ON DELETE RESTRICT,
+		runnable_revision_digest TEXT NOT NULL REFERENCES runnable_revisions(runnable_revision_digest) ON DELETE RESTRICT,
+		created_at TIMESTAMPTZ NOT NULL,
+		UNIQUE(runnable_revision_id),
+		UNIQUE(runnable_revision_digest)
+	)`,
 	`CREATE TABLE runnable_verification_reports (
 		id TEXT PRIMARY KEY,
 		verification_report_digest TEXT NOT NULL UNIQUE,
@@ -58,7 +66,13 @@ var schemaRunnableStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL,
 		completed_at TIMESTAMPTZ,
 		UNIQUE(content_kind, content_id, content_revision, spec_digest, phase, state_version),
-		CHECK ((phase = 'materialize-artifact' AND runnable_revision_digest IS NULL) OR (phase = 'verify' AND runnable_revision_digest IS NOT NULL)),
+		CHECK (
+			(phase = 'materialize-artifact' AND (
+				(state IN ('queued', 'running', 'failed') AND runnable_revision_digest IS NULL) OR
+				(state = 'completed' AND runnable_revision_digest IS NOT NULL)
+			)) OR
+			(phase = 'verify' AND runnable_revision_digest IS NOT NULL)
+		),
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
 	`CREATE INDEX runnable_actions_claim ON runnable_actions (state, next_run_at, lease_expires_at, created_at, action_key)`,

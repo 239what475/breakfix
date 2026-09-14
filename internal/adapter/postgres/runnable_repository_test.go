@@ -43,6 +43,9 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schedule materialization: %v", err)
 	}
+	if _, err := database.Runnable.ResolveMaterializedRunnableRevision(ctx, materializeIdentity); !errors.Is(err, runnable.ErrMaterializationNotReady) {
+		t.Fatalf("resolve pending materialization = %v, want not ready", err)
+	}
 	materializeAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now.Add(time.Second))
 	if err != nil || materializeAction == nil || materializeAction.Credential.Identity != materializeIdentity || materializeAction.Attempt != 1 || materializeAction.Spec == nil {
 		t.Fatalf("claim materialization = %#v, %v", materializeAction, err)
@@ -53,6 +56,10 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 	if err := database.Runnable.CompleteRunnableMaterialization(ctx, materializeAction.Credential, storedRevision, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("complete materialization: %v", err)
+	}
+	materializedReference, err := database.Runnable.ResolveMaterializedRunnableRevision(ctx, materializeIdentity)
+	if err != nil || materializedReference != storedRevision.Reference {
+		t.Fatalf("resolve materialized revision = %#v, %v", materializedReference, err)
 	}
 	if _, err := database.Runnable.ReadRunnableActionSource(ctx, materializeAction.Credential, now.Add(3*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
 		t.Fatalf("read completed action source = %v, want lease loss", err)
@@ -158,6 +165,43 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 	if err := database.Runnable.Complete(ctx, *claim, true, "", now.Add(2*time.Second), now.Add(3*time.Second)); err != runnable.ErrReapLeaseLost {
 		t.Fatalf("duplicate reap completion error = %v", err)
+	}
+}
+
+func TestRunnableRepositoryBindsOperationsRevisionAfterMaterialization(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	fixture := insertScenarioLifecycleFixture(t, database, "authoring", "operations-owner", now)
+	revision := testRunnableRevision(t)
+	revision.Spec.Identity = runnable.ContentIdentity{Kind: "operations", ID: fixture.scenario.ID, Revision: fixture.revision.ContentRevision}
+	specDigest, err := revision.Spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision.Artifact.BuiltFromSpecDigest = specDigest
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := runnable.StoredRevision{Reference: runnable.RevisionReference{ID: "rr-operations", Digest: revisionDigest}, Revision: revision, CreatedAt: now}
+	if err := database.Runnable.StoreRunnableRevision(ctx, stored); err != nil {
+		t.Fatalf("store runnable revision: %v", err)
+	}
+	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(time.Second)); err != nil {
+		t.Fatalf("bind Operations revision: %v", err)
+	}
+	resolved, err := database.Runnable.ResolveOperationsRevisionBinding(ctx, fixture.revision.ID)
+	if err != nil || resolved != stored.Reference {
+		t.Fatalf("resolved Operations binding = %#v, %v", resolved, err)
+	}
+	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, stored.Reference, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("repeat Operations binding: %v", err)
+	}
+	other := stored
+	other.Reference.ID = "rr-other"
+	if err := database.Runnable.BindOperationsRevision(ctx, fixture.scenario.ID, fixture.revision.ID, other.Reference, now.Add(3*time.Second)); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("conflicting Operations binding = %v", err)
 	}
 }
 

@@ -11,9 +11,10 @@ import (
 type ActionPhase string
 
 var (
-	ErrActionLeaseLost = errors.New("runnable action lease lost")
-	ErrSourceNotFound  = errors.New("runnable source archive not found")
-	ErrOutputNotFound  = errors.New("runnable execution output not found")
+	ErrActionLeaseLost         = errors.New("runnable action lease lost")
+	ErrSourceNotFound          = errors.New("runnable source archive not found")
+	ErrOutputNotFound          = errors.New("runnable execution output not found")
+	ErrMaterializationNotReady = errors.New("runnable materialization is not complete")
 )
 
 const (

@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	content "github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
+	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
 var (
@@ -319,8 +321,8 @@ func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context
 			return errors.New("runnable revision id is already bound to another digest")
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = 'completed', lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
-		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, now.UTC(), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
+	result, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = 'completed', runnable_revision_digest = ?, lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
+		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, value.Reference.Digest, now.UTC(), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
 	if err != nil {
 		return fmt.Errorf("complete runnable materialization: %w", err)
 	}
@@ -331,6 +333,33 @@ func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context
 		return fmt.Errorf("commit runnable materialization: %w", err)
 	}
 	return nil
+}
+
+// ResolveMaterializedRunnableRevision returns the immutable revision produced
+// by one exact materialization action. Content services use the action they
+// scheduled instead of reconstructing the Worker's private record ID.
+func (d *RunnableRepository) ResolveMaterializedRunnableRevision(ctx context.Context, identity runnable.ActionIdentity) (runnable.RevisionReference, error) {
+	if err := identity.Validate(); err != nil || identity.Phase != runnable.ActionMaterializeArtifact {
+		return runnable.RevisionReference{}, errors.New("runnable materialization identity is invalid")
+	}
+	var reference runnable.RevisionReference
+	err := d.conn.QueryRowContext(ctx, `SELECT revisions.id, actions.runnable_revision_digest
+		FROM runnable_actions actions
+		JOIN runnable_revisions revisions ON revisions.runnable_revision_digest = actions.runnable_revision_digest
+		WHERE actions.action_key = ? AND actions.content_kind = ? AND actions.content_id = ? AND actions.content_revision = ?
+			AND actions.spec_digest = ? AND actions.phase = ? AND actions.state_version = ? AND actions.state = 'completed'`,
+		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision,
+		identity.SpecDigest, identity.Phase, identity.StateVersion).Scan(&reference.ID, &reference.Digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runnable.RevisionReference{}, runnable.ErrMaterializationNotReady
+	}
+	if err != nil {
+		return runnable.RevisionReference{}, fmt.Errorf("resolve materialized runnable revision: %w", err)
+	}
+	if err := reference.Validate(); err != nil {
+		return runnable.RevisionReference{}, errors.New("stored materialized runnable revision reference is invalid")
+	}
+	return reference, nil
 }
 
 func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, credential runnable.LeaseCredential, value runnable.StoredVerificationReport, now time.Time) error {
@@ -530,6 +559,73 @@ func (d *RunnableRepository) ResolveRunnableRevision(ctx context.Context, id, di
 		return runnable.RunnableRevision{}, errors.New("stored runnable revision digest does not match its value")
 	}
 	return revision, nil
+}
+
+// BindOperationsRevision records the one-way link from a published
+// Operations revision to the complete public RunnableRevision produced by
+// materialization. The binding is separate from both immutable aggregates so
+// old Catalog projections cannot accidentally rewrite the public contract.
+func (d *RunnableRepository) BindOperationsRevision(ctx context.Context, scenarioID, scenarioRevisionID string, reference runnable.RevisionReference, now time.Time) error {
+	if strings.TrimSpace(scenarioID) == "" || strings.TrimSpace(scenarioRevisionID) == "" || reference.Validate() != nil || now.IsZero() {
+		return errors.New("operations runnable revision binding is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin operations runnable revision binding: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var contentRevision string
+	var scenarioType string
+	if err := tx.QueryRowContext(ctx, `SELECT content_revision, scenario_type FROM scenario_revisions WHERE id = ? AND scenario_id = ? FOR UPDATE`, scenarioRevisionID, scenarioID).Scan(&contentRevision, &scenarioType); errors.Is(err, sql.ErrNoRows) {
+		return scenariodomain.ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock operations scenario revision: %w", err)
+	}
+	if scenarioType != string(content.ScenarioOperationsScenario) {
+		return errors.New("only Operations scenario revisions can bind runnable revisions")
+	}
+	var boundID, boundDigest, kind, contentID, revision string
+	if err := tx.QueryRowContext(ctx, `SELECT revisions.id, revisions.runnable_revision_digest, specs.content_kind, specs.content_id, specs.content_revision
+		FROM runnable_revisions revisions JOIN runnable_specs specs ON specs.spec_digest = revisions.spec_digest
+		WHERE revisions.id = ? AND revisions.runnable_revision_digest = ? FOR UPDATE`, reference.ID, reference.Digest).Scan(&boundID, &boundDigest, &kind, &contentID, &revision); errors.Is(err, sql.ErrNoRows) {
+		return ErrRunnableRevisionNotFound
+	} else if err != nil {
+		return fmt.Errorf("load operations runnable revision: %w", err)
+	}
+	if kind != "operations" || contentID != scenarioID || revision != contentRevision {
+		return errors.New("runnable revision identity does not match the Operations revision")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scenario_runnable_revision_bindings (scenario_revision_id, runnable_revision_id, runnable_revision_digest, created_at)
+		VALUES (?, ?, ?, ?) ON CONFLICT (scenario_revision_id) DO NOTHING`, scenarioRevisionID, boundID, boundDigest, now.UTC()); err != nil {
+		return fmt.Errorf("store operations runnable revision binding: %w", err)
+	}
+	var existingID, existingDigest string
+	if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_id, runnable_revision_digest FROM scenario_runnable_revision_bindings WHERE scenario_revision_id = ? FOR UPDATE`, scenarioRevisionID).Scan(&existingID, &existingDigest); err != nil {
+		return fmt.Errorf("read operations runnable revision binding: %w", err)
+	}
+	if existingID != reference.ID || existingDigest != reference.Digest {
+		return errors.New("Operations revision is already bound to another runnable revision")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit operations runnable revision binding: %w", err)
+	}
+	return nil
+}
+
+func (d *RunnableRepository) ResolveOperationsRevisionBinding(ctx context.Context, scenarioRevisionID string) (runnable.RevisionReference, error) {
+	if strings.TrimSpace(scenarioRevisionID) == "" {
+		return runnable.RevisionReference{}, errors.New("scenario revision ID is required")
+	}
+	var reference runnable.RevisionReference
+	if err := d.conn.QueryRowContext(ctx, `SELECT runnable_revision_id, runnable_revision_digest FROM scenario_runnable_revision_bindings WHERE scenario_revision_id = ?`, scenarioRevisionID).Scan(&reference.ID, &reference.Digest); errors.Is(err, sql.ErrNoRows) {
+		return runnable.RevisionReference{}, runnable.ErrMaterializationNotReady
+	} else if err != nil {
+		return runnable.RevisionReference{}, fmt.Errorf("resolve operations runnable revision binding: %w", err)
+	}
+	if err := reference.Validate(); err != nil {
+		return runnable.RevisionReference{}, errors.New("stored Operations runnable revision binding is invalid")
+	}
+	return reference, nil
 }
 
 func (d *RunnableRepository) StoreVerificationReport(ctx context.Context, value runnable.StoredVerificationReport) error {
