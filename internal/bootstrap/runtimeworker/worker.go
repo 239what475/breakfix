@@ -12,12 +12,10 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/internalapi"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/oci"
+	"github.com/breakfix/breakfix/internal/adapter/runnableprovider"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/transport/health"
-	runtimeexecutor "github.com/breakfix/breakfix/internal/worker/runtime"
-	"github.com/breakfix/breakfix/internal/worker/runtime/build"
-	"github.com/breakfix/breakfix/internal/worker/runtime/publish"
-	"github.com/breakfix/breakfix/internal/worker/runtime/verify"
+	runnableworker "github.com/breakfix/breakfix/internal/worker/runnable"
 )
 
 // DefaultWorkerID derives a stable local identity when Kubernetes has not
@@ -44,7 +42,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err := cfg.ValidateRuntimeWorker(); err != nil {
 		return fmt.Errorf("validate Runtime Worker configuration: %w", err)
 	}
-	workflowClient, err := internalapi.NewRuntimeActionClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
+	actionClient, err := internalapi.NewRunnableActionClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
 		return fmt.Errorf("create runtime action client: %w", err)
 	}
@@ -69,27 +67,29 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	publisherExecutor, err := publish.NewExecutor(registryClient, incusClient, cfg.Registry.Repository)
+	builder, err := runnableprovider.NewArtifactBuilder(incusClient, registryClient, cfg.Incus, cfg.Registry.Repository)
 	if err != nil {
-		return fmt.Errorf("create publisher executor: %w", err)
+		return fmt.Errorf("create runnable artifact builder: %w", err)
 	}
-	verifierExecutor, err := verify.NewExecutor(k8sClient, incusClient, cfg.CRDNamespace)
+	materializer, err := runnableworker.NewArchiveMaterializer(actionClient, builder)
 	if err != nil {
-		return fmt.Errorf("create verifier executor: %w", err)
+		return fmt.Errorf("create runnable materializer: %w", err)
 	}
-	builderExecutor, err := build.NewExecutor(incusClient, registryClient, cfg.Incus, cfg.Registry.Repository)
+	verificationProvider, err := runnableprovider.NewVerificationProvider(k8sClient, incusClient, cfg.CRDNamespace)
 	if err != nil {
-		return fmt.Errorf("create runtime builder: %w", err)
+		return fmt.Errorf("create runnable verification provider: %w", err)
 	}
-	runner, err := runtimeexecutor.New(
-		workflowClient,
-		builderExecutor,
-		publisherExecutor,
-		verifierExecutor,
-		runtimeexecutor.Config{WorkerID: workerID},
-	)
+	verifier, err := runnableworker.NewExecutor(verificationProvider)
 	if err != nil {
-		return fmt.Errorf("create Runtime Worker: %w", err)
+		return fmt.Errorf("create runnable verifier: %w", err)
+	}
+	executor, err := runnableworker.New(materializer, verifier)
+	if err != nil {
+		return fmt.Errorf("create runnable executor: %w", err)
+	}
+	runner, err := runnableworker.NewRunner(actionClient, executor, runnableworker.RunnerConfig{WorkerID: workerID})
+	if err != nil {
+		return fmt.Errorf("create runnable Runtime Worker: %w", err)
 	}
 
 	return health.Run(ctx, health.Config{
@@ -97,10 +97,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 		Capabilities: []health.Capability{
 			{Name: "registry", Ready: func(probeCtx context.Context) error { return registryClient.Ping(probeCtx) }},
 			{Name: "kubernetes-api", Ready: func(probeCtx context.Context) error {
-				if _, err := k8sClient.ListNodeEnvironments(probeCtx, cfg.CRDNamespace, ""); err != nil {
-					return err
-				}
-				_, err := k8sClient.ListVK8sEnvironments(probeCtx, cfg.CRDNamespace, "")
+				_, err := k8sClient.ListRuntimeEnvironments(probeCtx, cfg.CRDNamespace, "")
 				return err
 			}},
 			{Name: "node-provider", Ready: func(probeCtx context.Context) error {

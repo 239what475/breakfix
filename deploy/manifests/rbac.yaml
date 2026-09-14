@@ -121,7 +121,7 @@ metadata:
   name: breakfix-runtime-worker
 rules:
   - apiGroups: ["breakfix.dev"]
-    resources: ["nodeenvironments", "vk8senvironments"]
+    resources: ["runtimeenvironments"]
     verbs: ["create", "get", "list", "delete"]
   - apiGroups: [""]
     resources: ["pods"]

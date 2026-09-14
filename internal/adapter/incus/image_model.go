@@ -12,6 +12,9 @@ type BuildNodeImageRequest struct {
 	Attempt             int64
 	Revision            string
 	Files               []ImageFile
+	// BundlePath is the absolute runtime path where files are installed. An
+	// empty value preserves the legacy scenario path for older callers.
+	BundlePath string
 }
 
 type BuildNodeImageResult struct {

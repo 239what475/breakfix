@@ -72,15 +72,19 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 	if err := waitOperation(ctx, "create node image build instance", names.Instance, op); err != nil {
 		return BuildNodeImageResult{}, err
 	}
+	bundlePath := scenarioBundleDir
+	if strings.TrimSpace(request.BundlePath) != "" {
+		bundlePath = request.BundlePath
+	}
 	for _, directory := range imageDirectories(files) {
-		if err := server.CreateInstanceFile(names.Instance, path.Join(scenarioBundleDir, directory), incus.InstanceFileArgs{
+		if err := server.CreateInstanceFile(names.Instance, path.Join(bundlePath, directory), incus.InstanceFileArgs{
 			UID: 0, GID: 0, Mode: 0o755, Type: "directory", WriteMode: "overwrite",
 		}); err != nil {
 			return BuildNodeImageResult{}, classify("create node image bundle directory", directory, err)
 		}
 	}
 	for _, file := range files {
-		if err := server.CreateInstanceFile(names.Instance, path.Join(scenarioBundleDir, file.Path), incus.InstanceFileArgs{
+		if err := server.CreateInstanceFile(names.Instance, path.Join(bundlePath, file.Path), incus.InstanceFileArgs{
 			Content: bytes.NewReader(file.Content), UID: 0, GID: 0, Mode: file.Mode, Type: "file", WriteMode: "overwrite",
 		}); err != nil {
 			return BuildNodeImageResult{}, classify("write node image bundle file", file.Path, err)
@@ -350,6 +354,9 @@ func (c *Client) validateBuildNodeImageRequest(request BuildNodeImageRequest) (B
 	}
 	if strings.TrimSpace(request.Revision) == "" || len(request.Files) == 0 {
 		return BuildNames{}, nil, fmt.Errorf("%w: revision and image files are required", ErrInvalid)
+	}
+	if bundlePath := strings.TrimSpace(request.BundlePath); bundlePath != "" && (!path.IsAbs(bundlePath) || path.Clean(bundlePath) != bundlePath || strings.Contains(bundlePath, "..")) {
+		return BuildNames{}, nil, fmt.Errorf("%w: invalid image bundle path", ErrInvalid)
 	}
 	files := append([]ImageFile(nil), request.Files...)
 	seen := make(map[string]struct{}, len(files))

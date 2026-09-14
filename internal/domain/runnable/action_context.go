@@ -34,7 +34,7 @@ func (c ActionContext) Validate() error {
 		if c.Spec != nil || c.RunnableRevision == nil || c.RunnableRevisionRef.Validate() != nil || !ValidDigest(c.RunnableRevisionDigest) || c.RunnableRevisionRef.Digest != c.RunnableRevisionDigest {
 			return errors.New("runnable verification action has an invalid input")
 		}
-		return VerifyRequest{Credential: c.Credential, RunnableRevision: *c.RunnableRevision, RunnableRevisionDigest: c.RunnableRevisionDigest, Attempt: c.Attempt}.Validate()
+		return VerifyRequest{Credential: c.Credential, RunnableRevision: *c.RunnableRevision, RunnableRevisionRef: c.RunnableRevisionRef, RunnableRevisionDigest: c.RunnableRevisionDigest, Attempt: c.Attempt}.Validate()
 	default:
 		return fmt.Errorf("runnable action has unsupported phase %q", c.Credential.Identity.Phase)
 	}

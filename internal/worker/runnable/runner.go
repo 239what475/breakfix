@@ -147,7 +147,7 @@ func (r *Runner) execute(ctx context.Context, action runnable.ActionContext) err
 	case runnable.ActionVerify:
 		revision := *action.RunnableRevision
 		report, err := r.executor.Verify(ctx, runnable.VerifyRequest{
-			Credential: action.Credential, RunnableRevision: revision, RunnableRevisionDigest: action.RunnableRevisionDigest, Attempt: action.Attempt,
+			Credential: action.Credential, RunnableRevision: revision, RunnableRevisionRef: action.RunnableRevisionRef, RunnableRevisionDigest: action.RunnableRevisionDigest, Attempt: action.Attempt,
 		})
 		if err != nil {
 			return err

@@ -82,7 +82,7 @@ func (b *ArtifactBuilder) BuildArtifact(ctx context.Context, spec runnable.Runna
 		return runnable.ArtifactReference{}, err
 	}
 	defer func() { _ = os.RemoveAll(root) }()
-	bundle := filepath.Join(root, "scenario")
+	bundle := filepath.Join(root, "bundle")
 	if err := os.MkdirAll(bundle, 0o750); err != nil {
 		return runnable.ArtifactReference{}, err
 	}
@@ -116,7 +116,7 @@ func (b *ArtifactBuilder) buildNode(ctx context.Context, spec runnable.RunnableS
 		CandidateRevisionID: spec.Identity.ID,
 		Attempt:             1,
 		Revision:            specDigest,
-		Files:               files,
+		Files:               files, BundlePath: "/opt/breakfix/runnable",
 	})
 	if err != nil {
 		return runnable.ArtifactReference{}, fmt.Errorf("build Node runnable artifact: %w", err)
@@ -145,7 +145,7 @@ func (b *ArtifactBuilder) buildK8s(ctx context.Context, spec runnable.RunnableSp
 	if err := b.registry.PullOCIArchive(ctx, base, basePath); err != nil {
 		return runnable.ArtifactReference{}, fmt.Errorf("pull K8s runnable base image: %w", err)
 	}
-	manifestDigest, err := oci.AppendBundleLayer(basePath, bundle, outputPath)
+	manifestDigest, err := oci.AppendBundleLayerAt(basePath, bundle, outputPath, "opt/breakfix/runnable")
 	if err != nil {
 		return runnable.ArtifactReference{}, runnable.NewArtifactFailure("oci-materialization", err.Error())
 	}

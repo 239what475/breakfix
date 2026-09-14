@@ -19,7 +19,7 @@ const maxAssertionOutputBytes = 256 * 1024
 // implementations create a fresh environment for the complete revision and
 // must enforce the supplied target, permission, network, and timeout limits.
 type EnvironmentProvider interface {
-	CreateVerificationEnvironment(context.Context, runnable.RunnableRevision, int64) (runnable.EnvironmentIdentity, error)
+	CreateVerificationEnvironment(context.Context, runnable.VerifyRequest) (runnable.EnvironmentIdentity, error)
 	Execute(context.Context, runnable.EnvironmentIdentity, ExecutionRequest) (ExecutionOutput, error)
 }
 
@@ -57,18 +57,13 @@ func NewExecutor(provider EnvironmentProvider) (*Executor, error) {
 // interprets the purpose of an action or assertion; false assertions are valid
 // machine results, while contract and output protocol defects are artifact
 // failures.
-func (e *Executor) Verify(ctx context.Context, revision runnable.RunnableRevision, attempt int64) (runnable.VerificationReport, error) {
-	if err := revision.Validate(); err != nil {
+func (e *Executor) Verify(ctx context.Context, request runnable.VerifyRequest) (runnable.VerificationReport, error) {
+	if err := request.Validate(); err != nil {
 		return runnable.VerificationReport{}, err
 	}
-	if attempt <= 0 {
-		return runnable.VerificationReport{}, errors.New("runnable verification attempt must be positive")
-	}
-	revisionDigest, err := revision.Digest()
-	if err != nil {
-		return runnable.VerificationReport{}, err
-	}
-	environment, err := e.provider.CreateVerificationEnvironment(ctx, revision, attempt)
+	revision := request.RunnableRevision
+	revisionDigest := request.RunnableRevisionDigest
+	environment, err := e.provider.CreateVerificationEnvironment(ctx, request)
 	if err != nil {
 		return runnable.VerificationReport{}, fmt.Errorf("create verification environment: %w", err)
 	}
@@ -84,7 +79,7 @@ func (e *Executor) Verify(ctx context.Context, revision runnable.RunnableRevisio
 	}
 	report := runnable.VerificationReport{
 		FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: revisionDigest,
-		Environment: environment, Attempt: attempt, CreatedAt: e.now().UTC(),
+		Environment: environment, Attempt: request.Attempt, CreatedAt: e.now().UTC(),
 	}
 
 	initialization := runnable.ValidationPhase{ID: "initialization", Actions: revision.Spec.Initialization}

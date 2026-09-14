@@ -170,7 +170,7 @@ func (p *EnvironmentProvider) provisionNode(ctx context.Context, binding runtime
 	}
 	endpoints := make([]runtimev2.EndpointReference, 0, len(observation.Identity.Nodes))
 	for _, node := range observation.Identity.Nodes {
-		refs = append(refs, runtimev2.ResourceReference{Provider: "incus", Kind: "instance", ID: node.InstanceName})
+		refs = append(refs, runtimev2.ResourceReference{Provider: "incus", Kind: "instance:" + node.LogicalName, ID: node.InstanceName})
 		if strings.TrimSpace(node.Address) != "" {
 			endpoints = append(endpoints, runtimev2.EndpointReference{Name: node.LogicalName, Ref: node.Address})
 		}

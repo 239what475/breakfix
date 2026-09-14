@@ -50,7 +50,7 @@ func TestVerifyRequestRequiresCompleteRevision(t *testing.T) {
 	}
 	request := VerifyRequest{
 		Credential:       LeaseCredential{Identity: ActionIdentity{Content: revision.Spec.Identity, SpecDigest: specDigest, Phase: ActionVerify, StateVersion: 4}, LeaseOwner: "worker-01"},
-		RunnableRevision: revision, RunnableRevisionDigest: revisionDigest, Attempt: 1,
+		RunnableRevision: revision, RunnableRevisionRef: RevisionReference{ID: "revision-01", Digest: revisionDigest}, RunnableRevisionDigest: revisionDigest, Attempt: 1,
 	}
 	if err := request.Validate(); err != nil {
 		t.Fatalf("validate complete revision: %v", err)

@@ -22,12 +22,15 @@ func TestExecutorRunsInitializationActionsAndReadOnlyAssertions(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor.now = func() time.Time { return time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC) }
-	report, err := executor.Verify(context.Background(), revision, 2)
+	report, err := executor.Verify(context.Background(), verifyRequest(t, revision, 2))
 	if err != nil {
 		t.Fatalf("execute verification: %v", err)
 	}
 	if !report.Passed || len(report.Phases) != 2 || len(provider.requests) != 3 || provider.requests[0].ReadOnly || provider.requests[1].ReadOnly || !provider.requests[2].ReadOnly {
 		t.Fatalf("unexpected report or execution requests: report=%#v requests=%#v", report, provider.requests)
+	}
+	if provider.createRequest.RunnableRevisionRef.ID != "revision-01" || provider.createRequest.Attempt != 2 {
+		t.Fatalf("provider did not receive complete verify request: %#v", provider.createRequest)
 	}
 	if err := report.Validate(revision); err != nil {
 		t.Fatalf("validate complete report: %v", err)
@@ -45,7 +48,7 @@ func TestExecutorKeepsUnsatisfiedAssertionAsBusinessResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := executor.Verify(context.Background(), revision, 1)
+	report, err := executor.Verify(context.Background(), verifyRequest(t, revision, 1))
 	if err != nil {
 		t.Fatalf("execute verification: %v", err)
 	}
@@ -68,7 +71,7 @@ func TestExecutorClassifiesInvalidAssertionProtocolAsArtifactFailure(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := executor.Verify(context.Background(), revision, 1)
+	report, err := executor.Verify(context.Background(), verifyRequest(t, revision, 1))
 	if err != nil {
 		t.Fatalf("execute verification: %v", err)
 	}
@@ -88,7 +91,7 @@ func TestExecutorClassifiesProviderExecutionErrorAsInfrastructureFailure(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := executor.Verify(context.Background(), revision, 1)
+	report, err := executor.Verify(context.Background(), verifyRequest(t, revision, 1))
 	if err != nil {
 		t.Fatalf("execute verification: %v", err)
 	}
@@ -104,10 +107,28 @@ type fakeEnvironmentProvider struct {
 	results          map[string]ExecutionOutput
 	errForEntrypoint map[string]error
 	requests         []ExecutionRequest
+	createRequest    runnable.VerifyRequest
 }
 
-func (p *fakeEnvironmentProvider) CreateVerificationEnvironment(_ context.Context, revision runnable.RunnableRevision, _ int64) (runnable.EnvironmentIdentity, error) {
-	digest, err := revision.Spec.RuntimeProfile.Digest()
+func verifyRequest(t *testing.T, revision runnable.RunnableRevision, attempt int64) runnable.VerifyRequest {
+	t.Helper()
+	specDigest, err := revision.Spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runnable.VerifyRequest{
+		Credential:       runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: revision.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 1}, LeaseOwner: "worker-01"},
+		RunnableRevision: revision, RunnableRevisionRef: runnable.RevisionReference{ID: "revision-01", Digest: revisionDigest}, RunnableRevisionDigest: revisionDigest, Attempt: attempt,
+	}
+}
+
+func (p *fakeEnvironmentProvider) CreateVerificationEnvironment(_ context.Context, request runnable.VerifyRequest) (runnable.EnvironmentIdentity, error) {
+	p.createRequest = request
+	digest, err := request.RunnableRevision.Spec.RuntimeProfile.Digest()
 	if err != nil {
 		return runnable.EnvironmentIdentity{}, err
 	}

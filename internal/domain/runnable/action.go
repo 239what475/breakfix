@@ -93,10 +93,11 @@ func (r MaterializeRequest) Validate() error {
 }
 
 type VerifyRequest struct {
-	Credential             LeaseCredential  `json:"credential"`
-	RunnableRevision       RunnableRevision `json:"runnable_revision"`
-	RunnableRevisionDigest string           `json:"runnable_revision_digest"`
-	Attempt                int64            `json:"attempt"`
+	Credential             LeaseCredential   `json:"credential"`
+	RunnableRevision       RunnableRevision  `json:"runnable_revision"`
+	RunnableRevisionRef    RevisionReference `json:"runnable_revision_ref"`
+	RunnableRevisionDigest string            `json:"runnable_revision_digest"`
+	Attempt                int64             `json:"attempt"`
 }
 
 func (r VerifyRequest) Validate() error {
@@ -117,7 +118,7 @@ func (r VerifyRequest) Validate() error {
 	if err != nil {
 		return err
 	}
-	if r.Credential.Identity.SpecDigest != specDigest || r.Credential.Identity.Content != r.RunnableRevision.Spec.Identity || r.RunnableRevisionDigest != revisionDigest || r.Attempt < 1 {
+	if err := r.RunnableRevisionRef.Validate(); err != nil || r.Credential.Identity.SpecDigest != specDigest || r.Credential.Identity.Content != r.RunnableRevision.Spec.Identity || r.RunnableRevisionDigest != revisionDigest || r.RunnableRevisionRef.Digest != revisionDigest || r.Attempt < 1 {
 		return errors.New("runnable verify request identity does not match revision")
 	}
 	return nil

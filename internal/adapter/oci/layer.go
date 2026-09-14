@@ -21,10 +21,20 @@ const gzipLayerMediaType = "application/vnd.oci.image.layer.v1.tar+gzip"
 
 // AppendBundleLayer creates a new OCI archive without running bundle code.
 // The trusted base config and entrypoint remain intact; the only new
-// filesystem content is the deterministic runnable bundle.
+// filesystem content is the deterministic bundle.
 func AppendBundleLayer(baseArchive, bundleRoot, destination string) (string, error) {
+	return AppendBundleLayerAt(baseArchive, bundleRoot, destination, "opt/breakfix/scenario")
+}
+
+// AppendBundleLayerAt appends a deterministic bundle under targetRoot in the
+// image. The target is provider infrastructure, not a content-owned path.
+func AppendBundleLayerAt(baseArchive, bundleRoot, destination, targetRoot string) (string, error) {
 	if strings.TrimSpace(baseArchive) == "" || strings.TrimSpace(bundleRoot) == "" || strings.TrimSpace(destination) == "" {
 		return "", errors.New("base archive, bundle root, and destination are required")
+	}
+	targetRoot = strings.Trim(targetRoot, "/")
+	if targetRoot == "" || strings.Contains(targetRoot, "..") {
+		return "", errors.New("bundle target root is invalid")
 	}
 	root, err := os.MkdirTemp("", "breakfix-oci-layer-")
 	if err != nil {
@@ -62,7 +72,7 @@ func AppendBundleLayer(baseArchive, bundleRoot, destination string) (string, err
 		return "", fmt.Errorf("read base OCI config: %w", err)
 	}
 
-	layer, diffID, err := deterministicBundleLayer(bundleRoot)
+	layer, diffID, err := deterministicBundleLayer(bundleRoot, targetRoot)
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +119,7 @@ func AppendBundleLayer(baseArchive, bundleRoot, destination string) (string, err
 	return manifestDigest, nil
 }
 
-func deterministicBundleLayer(bundleRoot string) ([]byte, string, error) {
+func deterministicBundleLayer(bundleRoot, targetRoot string) ([]byte, string, error) {
 	paths := make([]string, 0)
 	err := filepath.WalkDir(bundleRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -119,7 +129,7 @@ func deterministicBundleLayer(bundleRoot string) ([]byte, string, error) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
-			return fmt.Errorf("scenario layer contains unsupported entry %s", path)
+			return fmt.Errorf("bundle layer contains unsupported entry %s", path)
 		}
 		relative, err := filepath.Rel(bundleRoot, path)
 		if err != nil {
@@ -144,7 +154,7 @@ func deterministicBundleLayer(bundleRoot string) ([]byte, string, error) {
 			return nil, "", err
 		}
 		header := &tar.Header{
-			Name: "opt/breakfix/scenario/" + relative, Mode: int64(info.Mode().Perm()), Size: info.Size(),
+			Name: targetRoot + "/" + relative, Mode: int64(info.Mode().Perm()), Size: info.Size(),
 			Uid: 0, Gid: 0, ModTime: time.Unix(0, 0).UTC(), AccessTime: time.Time{}, ChangeTime: time.Time{},
 			Format: tar.FormatUSTAR,
 		}
