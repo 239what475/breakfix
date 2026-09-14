@@ -461,8 +461,8 @@ func (c Config) ValidateServer() error {
 }
 
 func (c Config) ValidateController() error {
-	if c.HealthPort <= 0 {
-		return fmt.Errorf("controller health_port is required")
+	if c.HealthPort <= 0 || strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("controller health_port and database_url are required")
 	}
 	if strings.TrimSpace(c.Namespace) == "" || strings.TrimSpace(c.CRDNamespace) == "" || c.CooldownMinutes <= 0 {
 		return fmt.Errorf("controller namespace, crd_namespace, and positive cooldown_minutes are required")

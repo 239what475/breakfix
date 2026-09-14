@@ -55,6 +55,12 @@ metadata:
   name: breakfix-controller
 rules:
   - apiGroups: ["breakfix.dev"]
+    resources: ["runtimeenvironments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["breakfix.dev"]
+    resources: ["runtimeenvironments/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["breakfix.dev"]
     resources: ["nodeenvironments", "vk8senvironments"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["breakfix.dev"]
