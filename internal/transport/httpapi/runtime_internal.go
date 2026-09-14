@@ -14,6 +14,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -498,7 +499,7 @@ func (h *Handler) writeInternalRuntimeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, runtime.ErrActionNotFound), errors.Is(err, generation.ErrWorkflowNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, generation.ErrWorkspaceNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, runtime.ErrLeaseLost), errors.Is(err, generation.ErrLeaseLost):
+	case errors.Is(err, runtime.ErrLeaseLost), errors.Is(err, generation.ErrLeaseLost), errors.Is(err, runnable.ErrActionLeaseLost):
 		status = http.StatusConflict
 	case strings.Contains(err.Error(), "unavailable"):
 		status = http.StatusServiceUnavailable

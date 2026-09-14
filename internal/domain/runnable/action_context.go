@@ -10,6 +10,7 @@ import (
 // aggregate, publication, or provider SDK state.
 type ActionContext struct {
 	Credential             LeaseCredential   `json:"credential"`
+	Attempt                int64             `json:"attempt"`
 	Spec                   *RunnableSpec     `json:"spec,omitempty"`
 	RunnableRevision       *RunnableRevision `json:"runnable_revision,omitempty"`
 	RunnableRevisionDigest string            `json:"runnable_revision_digest,omitempty"`
@@ -18,6 +19,9 @@ type ActionContext struct {
 func (c ActionContext) Validate() error {
 	if err := c.Credential.Validate(); err != nil {
 		return err
+	}
+	if c.Attempt < 1 {
+		return errors.New("runnable action has an invalid attempt")
 	}
 	switch c.Credential.Identity.Phase {
 	case ActionMaterializeArtifact:
@@ -29,7 +33,7 @@ func (c ActionContext) Validate() error {
 		if c.Spec != nil || c.RunnableRevision == nil || !ValidDigest(c.RunnableRevisionDigest) {
 			return errors.New("runnable verification action has an invalid input")
 		}
-		return VerifyRequest{Credential: c.Credential, RunnableRevision: *c.RunnableRevision, RunnableRevisionDigest: c.RunnableRevisionDigest}.Validate()
+		return VerifyRequest{Credential: c.Credential, RunnableRevision: *c.RunnableRevision, RunnableRevisionDigest: c.RunnableRevisionDigest, Attempt: c.Attempt}.Validate()
 	default:
 		return fmt.Errorf("runnable action has unsupported phase %q", c.Credential.Identity.Phase)
 	}

@@ -40,7 +40,7 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 		t.Fatalf("schedule materialization: %v", err)
 	}
 	materializeAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now.Add(time.Second))
-	if err != nil || materializeAction == nil || materializeAction.Credential.Identity != materializeIdentity || materializeAction.Spec == nil {
+	if err != nil || materializeAction == nil || materializeAction.Credential.Identity != materializeIdentity || materializeAction.Attempt != 1 || materializeAction.Spec == nil {
 		t.Fatalf("claim materialization = %#v, %v", materializeAction, err)
 	}
 	if err := database.Runnable.CompleteRunnableMaterialization(ctx, materializeAction.Credential, storedRevision, now.Add(2*time.Second)); err != nil {
@@ -70,8 +70,17 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 		t.Fatalf("schedule verification: %v", err)
 	}
 	verifyAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-b", time.Minute, now.Add(4*time.Second))
-	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verifyIdentity || verifyAction.RunnableRevision == nil {
+	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verifyIdentity || verifyAction.Attempt != 1 || verifyAction.RunnableRevision == nil {
 		t.Fatalf("claim verification = %#v, %v", verifyAction, err)
+	}
+	wrongAttempt := storedReport
+	wrongAttempt.Report.Attempt++
+	wrongAttempt.Reference.Digest, err = wrongAttempt.Report.Digest(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, wrongAttempt, now.Add(5*time.Second)); err == nil || !strings.Contains(err.Error(), "attempt") {
+		t.Fatalf("complete verification with wrong attempt = %v", err)
 	}
 	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, storedReport, now.Add(5*time.Second)); err != nil {
 		t.Fatalf("complete verification: %v", err)

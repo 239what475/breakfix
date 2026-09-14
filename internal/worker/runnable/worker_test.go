@@ -72,7 +72,7 @@ func TestVerifyRejectsReportWithCallerControlledPassedFlag(t *testing.T) {
 	}
 	_, err = worker.Verify(context.Background(), runnable.VerifyRequest{
 		Credential:       runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
-		RunnableRevision: revision, RunnableRevisionDigest: revisionDigest,
+		RunnableRevision: revision, RunnableRevisionDigest: revisionDigest, Attempt: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid report") {
 		t.Fatalf("expected machine result validation, got %v", err)

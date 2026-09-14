@@ -55,7 +55,7 @@ func (w *Worker) Verify(ctx context.Context, request runnable.VerifyRequest) (ru
 	if err := request.Validate(); err != nil {
 		return runnable.VerificationReport{}, err
 	}
-	report, err := w.verifier.Verify(ctx, request.RunnableRevision, request.Credential.Identity.StateVersion)
+	report, err := w.verifier.Verify(ctx, request.RunnableRevision, request.Attempt)
 	if err != nil {
 		return runnable.VerificationReport{}, err
 	}

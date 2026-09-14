@@ -3,10 +3,13 @@ package internalapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 func TestNilClientMethodsReturnConfigurationError(t *testing.T) {
@@ -19,6 +22,22 @@ func TestNilClientMethodsReturnConfigurationError(t *testing.T) {
 	}
 	if err := client.PostStream(context.Background(), "/internal", nil, func(json.RawMessage) error { return nil }); err == nil {
 		t.Fatal("PostStream on nil client unexpectedly succeeded")
+	}
+}
+
+func TestRunnableActionClientMapsConflictToLeaseLoss(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"runnable action lease lost"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewRunnableActionClient(server.URL, "internal-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Claim(context.Background(), "worker-01", 5*time.Second); !errors.Is(err, runnable.ErrActionLeaseLost) {
+		t.Fatalf("claim conflict = %v, want runnable action lease loss", err)
 	}
 }
 

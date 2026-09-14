@@ -10,6 +10,8 @@ import (
 // runnable contract. Product publication is intentionally absent.
 type ActionPhase string
 
+var ErrActionLeaseLost = errors.New("runnable action lease lost")
+
 const (
 	ActionMaterializeArtifact ActionPhase = "materialize-artifact"
 	ActionVerify              ActionPhase = "verify"
@@ -91,6 +93,7 @@ type VerifyRequest struct {
 	Credential             LeaseCredential  `json:"credential"`
 	RunnableRevision       RunnableRevision `json:"runnable_revision"`
 	RunnableRevisionDigest string           `json:"runnable_revision_digest"`
+	Attempt                int64            `json:"attempt"`
 }
 
 func (r VerifyRequest) Validate() error {
@@ -111,7 +114,7 @@ func (r VerifyRequest) Validate() error {
 	if err != nil {
 		return err
 	}
-	if r.Credential.Identity.SpecDigest != specDigest || r.Credential.Identity.Content != r.RunnableRevision.Spec.Identity || r.RunnableRevisionDigest != revisionDigest {
+	if r.Credential.Identity.SpecDigest != specDigest || r.Credential.Identity.Content != r.RunnableRevision.Spec.Identity || r.RunnableRevisionDigest != revisionDigest || r.Attempt < 1 {
 		return errors.New("runnable verify request identity does not match revision")
 	}
 	return nil

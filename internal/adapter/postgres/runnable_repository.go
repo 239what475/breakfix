@@ -103,14 +103,14 @@ func (d *RunnableRepository) ClaimRunnableAction(ctx context.Context, owner stri
 
 func (d *RunnableRepository) RenewRunnableAction(ctx context.Context, credential runnable.LeaseCredential, ttl time.Duration, now time.Time) error {
 	if err := credential.Validate(); err != nil || ttl <= 0 || now.IsZero() {
-		return runnable.ErrReapLeaseLost
+		return runnable.ErrActionLeaseLost
 	}
 	result, err := d.conn.ExecContext(ctx, `UPDATE runnable_actions SET lease_expires_at = ?, updated_at = ? WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, now.UTC().Add(ttl), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
 	if err != nil {
 		return fmt.Errorf("renew runnable action: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return runnable.ErrReapLeaseLost
+		return runnable.ErrActionLeaseLost
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func (d *RunnableRepository) ReportRunnableActionFailure(ctx context.Context, cr
 		return fmt.Errorf("report runnable action failure: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return runnable.ErrReapLeaseLost
+		return runnable.ErrActionLeaseLost
 	}
 	return nil
 }
@@ -151,7 +151,7 @@ func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context
 	defer func() { _ = tx.Rollback() }()
 	var actionSpec string
 	if err := tx.QueryRowContext(ctx, `SELECT spec_digest FROM runnable_actions WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionSpec); errors.Is(err, sql.ErrNoRows) {
-		return runnable.ErrReapLeaseLost
+		return runnable.ErrActionLeaseLost
 	} else if err != nil {
 		return fmt.Errorf("lock runnable materialization action: %w", err)
 	}
@@ -182,7 +182,7 @@ func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context
 		return fmt.Errorf("complete runnable materialization: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return runnable.ErrReapLeaseLost
+		return runnable.ErrActionLeaseLost
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit runnable materialization: %w", err)
@@ -207,13 +207,14 @@ func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, c
 	}
 	defer func() { _ = tx.Rollback() }()
 	var actionRevision string
-	if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_actions WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionRevision); errors.Is(err, sql.ErrNoRows) {
-		return runnable.ErrReapLeaseLost
+	var actionAttempt int64
+	if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest, attempt FROM runnable_actions WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionRevision, &actionAttempt); errors.Is(err, sql.ErrNoRows) {
+		return runnable.ErrActionLeaseLost
 	} else if err != nil {
 		return fmt.Errorf("lock runnable verification action: %w", err)
 	}
-	if actionRevision != revisionDigest {
-		return errors.New("verification report revision does not match its action")
+	if actionRevision != revisionDigest || value.Report.Attempt != actionAttempt {
+		return errors.New("verification report revision or attempt does not match its action")
 	}
 	encoded, err := marshalJSON(value.Report)
 	if err != nil {
@@ -250,7 +251,7 @@ func runnableActionContextTx(ctx context.Context, tx *Tx, row runnableActionRow,
 		if err := json.Unmarshal(encoded, &spec); err != nil {
 			return runnable.ActionContext{}, fmt.Errorf("decode runnable action spec: %w", err)
 		}
-		value := runnable.ActionContext{Credential: credential, Spec: &spec}
+		value := runnable.ActionContext{Credential: credential, Attempt: int64(row.attempt), Spec: &spec}
 		return value, value.Validate()
 	}
 	if row.identity.Phase == runnable.ActionVerify {
@@ -262,7 +263,7 @@ func runnableActionContextTx(ctx context.Context, tx *Tx, row runnableActionRow,
 		if err := json.Unmarshal(encoded, &revision); err != nil {
 			return runnable.ActionContext{}, fmt.Errorf("decode runnable action revision: %w", err)
 		}
-		value := runnable.ActionContext{Credential: credential, RunnableRevision: &revision, RunnableRevisionDigest: row.revisionDigest}
+		value := runnable.ActionContext{Credential: credential, Attempt: int64(row.attempt), RunnableRevision: &revision, RunnableRevisionDigest: row.revisionDigest}
 		return value, value.Validate()
 	}
 	return runnable.ActionContext{}, errors.New("stored runnable action has an unsupported phase")
