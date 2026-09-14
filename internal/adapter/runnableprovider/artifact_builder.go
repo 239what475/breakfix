@@ -38,6 +38,8 @@ type Registry interface {
 
 const builderVersion = "runnable-provider-v1"
 
+const deferInitializationMarker = ".breakfix-defer-initialization"
+
 type ArtifactBuilder struct {
 	node               NodeImageBuilder
 	registry           Registry
@@ -86,6 +88,9 @@ func (b *ArtifactBuilder) BuildArtifact(ctx context.Context, spec runnable.Runna
 	}
 	if err := extractSourceArchive(bundle, bytes.NewReader(archive)); err != nil {
 		return runnable.ArtifactReference{}, runnable.NewArtifactFailure("source-archive-invalid", err.Error())
+	}
+	if err := os.WriteFile(filepath.Join(bundle, deferInitializationMarker), []byte("public runnable initialization is worker-owned\n"), 0o600); err != nil {
+		return runnable.ArtifactReference{}, fmt.Errorf("defer provider initialization: %w", err)
 	}
 
 	switch spec.RuntimeProfile.Runtime {
@@ -140,7 +145,7 @@ func (b *ArtifactBuilder) buildK8s(ctx context.Context, spec runnable.RunnableSp
 	if err := b.registry.PullOCIArchive(ctx, base, basePath); err != nil {
 		return runnable.ArtifactReference{}, fmt.Errorf("pull K8s runnable base image: %w", err)
 	}
-	manifestDigest, err := oci.AppendScenarioLayer(basePath, bundle, outputPath)
+	manifestDigest, err := oci.AppendBundleLayer(basePath, bundle, outputPath)
 	if err != nil {
 		return runnable.ArtifactReference{}, runnable.NewArtifactFailure("oci-materialization", err.Error())
 	}

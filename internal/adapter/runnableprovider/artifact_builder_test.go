@@ -31,9 +31,18 @@ func TestArtifactBuilderBuildsNodeReferenceBoundToSpec(t *testing.T) {
 	if err := artifact.Validate(); err != nil {
 		t.Fatalf("artifact validation: %v", err)
 	}
-	if node.request.Files[0].Path != "scripts/init.sh" {
+	if !hasFile(node.request.Files, "scripts/init.sh") || !hasFile(node.request.Files, deferInitializationMarker) {
 		t.Fatalf("provider received files = %#v", node.request.Files)
 	}
+}
+
+func hasFile(files []incus.ImageFile, path string) bool {
+	for _, file := range files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func TestArtifactBuilderRejectsMalformedSourceArchive(t *testing.T) {

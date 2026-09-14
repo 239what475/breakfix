@@ -4,6 +4,11 @@ set -euo pipefail
 sentinel="${BREAKFIX_INIT_SENTINEL:-/var/lib/breakfix/.initialized}"
 generate_script="${BREAKFIX_GENERATE_SCRIPT:-/breakfix/generate.sh}"
 
+if [ -f /opt/breakfix/scenario/.breakfix-defer-initialization ]; then
+  touch "$sentinel"
+  exec sleep infinity
+fi
+
 mkdir -p /var/lib/breakfix /breakfix
 
 if [ -n "${KUBECONFIG:-}" ]; then

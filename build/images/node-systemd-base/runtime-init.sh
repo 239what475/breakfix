@@ -52,6 +52,13 @@ awk '
 } >/etc/hosts
 rm -f "$hosts_tmp"
 
+[ -f "$bundle/.breakfix-defer-initialization" ] && {
+  printf 'state=success\nexit_code=0\n' >"$state_dir/result"
+  touch "$state_dir/succeeded"
+  trap - EXIT HUP INT TERM
+  exit 0
+}
+
 /bin/bash "$generate"
 printf 'state=success\nexit_code=0\n' >"$state_dir/result"
 touch "$state_dir/succeeded"

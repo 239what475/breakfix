@@ -19,10 +19,10 @@ import (
 
 const gzipLayerMediaType = "application/vnd.oci.image.layer.v1.tar+gzip"
 
-// AppendScenarioLayer creates a new OCI archive without running candidate
-// code. The trusted base config and entrypoint remain intact; the only new
-// filesystem content is the deterministic scenario bundle.
-func AppendScenarioLayer(baseArchive, bundleRoot, destination string) (string, error) {
+// AppendBundleLayer creates a new OCI archive without running bundle code.
+// The trusted base config and entrypoint remain intact; the only new
+// filesystem content is the deterministic runnable bundle.
+func AppendBundleLayer(baseArchive, bundleRoot, destination string) (string, error) {
 	if strings.TrimSpace(baseArchive) == "" || strings.TrimSpace(bundleRoot) == "" || strings.TrimSpace(destination) == "" {
 		return "", errors.New("base archive, bundle root, and destination are required")
 	}
@@ -62,7 +62,7 @@ func AppendScenarioLayer(baseArchive, bundleRoot, destination string) (string, e
 		return "", fmt.Errorf("read base OCI config: %w", err)
 	}
 
-	layer, diffID, err := deterministicScenarioLayer(bundleRoot)
+	layer, diffID, err := deterministicBundleLayer(bundleRoot)
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +109,7 @@ func AppendScenarioLayer(baseArchive, bundleRoot, destination string) (string, e
 	return manifestDigest, nil
 }
 
-func deterministicScenarioLayer(bundleRoot string) ([]byte, string, error) {
+func deterministicBundleLayer(bundleRoot string) ([]byte, string, error) {
 	paths := make([]string, 0)
 	err := filepath.WalkDir(bundleRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -204,7 +204,7 @@ func appendConfigDiffID(data []byte, diffID string) ([]byte, error) {
 	}
 	historyEntry, _ := json.Marshal(map[string]any{
 		"created":    time.Unix(0, 0).UTC().Format(time.RFC3339),
-		"created_by": "breakfix deterministic scenario layer",
+		"created_by": "breakfix deterministic runnable bundle layer",
 	})
 	history = append(history, historyEntry)
 	config["history"], _ = json.Marshal(history)

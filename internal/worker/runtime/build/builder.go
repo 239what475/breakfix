@@ -117,7 +117,7 @@ func (e *Executor) buildK8s(ctx context.Context, work domainexecution.Work, bund
 	if err := e.registry.PullOCIArchive(ctx, work.Snapshot.K8s.BaseImageDigest, basePath); err != nil {
 		return domainexecution.BuildOutput{}, fmt.Errorf("pull trusted K8s base image: %w", err)
 	}
-	manifestDigest, err := oci.AppendScenarioLayer(basePath, bundle, outputPath)
+	manifestDigest, err := oci.AppendBundleLayer(basePath, bundle, outputPath)
 	if err != nil {
 		return domainexecution.BuildOutput{}, fmt.Errorf("append deterministic K8s scenario layer: %w", err)
 	}
