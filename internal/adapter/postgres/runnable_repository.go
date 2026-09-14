@@ -21,8 +21,7 @@ var (
 )
 
 const (
-	runnableMaxAttempts    = 5
-	runnableMaxSourceBytes = 64 * 1024 * 1024
+	runnableMaxAttempts = 5
 )
 
 // StoreRunnableExecutionOutput persists one canonical provider capture under
@@ -123,7 +122,7 @@ func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec r
 // RunnableSpec. The digest is the object identity; the SourceArchive remains
 // embedded in the spec for provenance rather than becoming another aggregate.
 func (d *RunnableRepository) StoreRunnableSource(ctx context.Context, source runnable.SourceArchive, archive []byte, now time.Time) error {
-	if err := source.Validate(); err != nil || now.IsZero() || len(archive) == 0 || len(archive) > runnableMaxSourceBytes {
+	if err := source.Validate(); err != nil || now.IsZero() || len(archive) == 0 || len(archive) > runnable.MaxSourceArchiveBytes {
 		return errors.New("store runnable source is invalid")
 	}
 	if runnableArchiveDigest(archive) != source.Digest {

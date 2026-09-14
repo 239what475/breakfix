@@ -21,6 +21,7 @@ const (
 	MaxEntrypointLength           = 512
 	MaxSummaryLength              = 1024
 	MaxDetailsLength              = 16 * 1024
+	MaxSourceArchiveBytes         = 64 * 1024 * 1024
 	MaxOutputReferenceCount       = 32
 	MaxValidationPhases           = 32
 	MaxActionsPerPhase            = 64
