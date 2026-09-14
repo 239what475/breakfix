@@ -47,9 +47,9 @@ func TestRunnerUsesClaimAttemptForVerificationReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	action := runnable.ActionContext{
-		Credential:             runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
-		Attempt:                4,
-		RunnableRevision:       &revision,
+		Credential:       runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
+		Attempt:          4,
+		RunnableRevision: &revision, RunnableRevisionRef: runnable.RevisionReference{ID: "revision-01", Digest: revisionDigest},
 		RunnableRevisionDigest: revisionDigest,
 	}
 	store := &runnerStore{action: &action}
@@ -106,9 +106,9 @@ func TestRunnerRequeuesInfrastructureVerificationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	action := runnable.ActionContext{
-		Credential:             runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
-		Attempt:                1,
-		RunnableRevision:       &revision,
+		Credential:       runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
+		Attempt:          1,
+		RunnableRevision: &revision, RunnableRevisionRef: runnable.RevisionReference{ID: "revision-01", Digest: revisionDigest},
 		RunnableRevisionDigest: revisionDigest,
 	}
 	store := &runnerStore{action: &action}

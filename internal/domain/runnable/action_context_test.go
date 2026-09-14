@@ -22,4 +22,19 @@ func TestActionContextOnlyExposesPhaseSpecificInput(t *testing.T) {
 	if err := context.Validate(); err == nil {
 		t.Fatal("materialization context accepted a runnable revision")
 	}
+	context.RunnableRevision = nil
+	context.Spec = nil
+	context.Credential.Identity.Phase = ActionVerify
+	context.RunnableRevision = &revision
+	context.RunnableRevisionDigest, err = revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := context.Validate(); err == nil {
+		t.Fatal("verification context accepted a missing revision reference")
+	}
+	context.RunnableRevisionRef = RevisionReference{ID: "revision-01", Digest: context.RunnableRevisionDigest}
+	if err := context.Validate(); err != nil {
+		t.Fatalf("verification context with revision reference: %v", err)
+	}
 }

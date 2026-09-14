@@ -337,7 +337,11 @@ func runnableActionContextTx(ctx context.Context, tx *Tx, row runnableActionRow,
 		if err := json.Unmarshal(encoded, &revision); err != nil {
 			return runnable.ActionContext{}, fmt.Errorf("decode runnable action revision: %w", err)
 		}
-		value := runnable.ActionContext{Credential: credential, Attempt: int64(row.attempt), RunnableRevision: &revision, RunnableRevisionDigest: row.revisionDigest}
+		var revisionID string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM runnable_revisions WHERE runnable_revision_digest = ?`, row.revisionDigest).Scan(&revisionID); err != nil {
+			return runnable.ActionContext{}, fmt.Errorf("load runnable action revision reference: %w", err)
+		}
+		value := runnable.ActionContext{Credential: credential, Attempt: int64(row.attempt), RunnableRevision: &revision, RunnableRevisionRef: runnable.RevisionReference{ID: revisionID, Digest: row.revisionDigest}, RunnableRevisionDigest: row.revisionDigest}
 		return value, value.Validate()
 	}
 	return runnable.ActionContext{}, errors.New("stored runnable action has an unsupported phase")

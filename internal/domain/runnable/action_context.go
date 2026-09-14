@@ -13,6 +13,7 @@ type ActionContext struct {
 	Attempt                int64             `json:"attempt"`
 	Spec                   *RunnableSpec     `json:"spec,omitempty"`
 	RunnableRevision       *RunnableRevision `json:"runnable_revision,omitempty"`
+	RunnableRevisionRef    RevisionReference `json:"runnable_revision_ref,omitempty"`
 	RunnableRevisionDigest string            `json:"runnable_revision_digest,omitempty"`
 }
 
@@ -25,12 +26,12 @@ func (c ActionContext) Validate() error {
 	}
 	switch c.Credential.Identity.Phase {
 	case ActionMaterializeArtifact:
-		if c.Spec == nil || c.RunnableRevision != nil || c.RunnableRevisionDigest != "" {
+		if c.Spec == nil || c.RunnableRevision != nil || c.RunnableRevisionDigest != "" || c.RunnableRevisionRef != (RevisionReference{}) {
 			return errors.New("runnable materialization action has an invalid input")
 		}
 		return MaterializeRequest{Credential: c.Credential, Spec: *c.Spec}.Validate()
 	case ActionVerify:
-		if c.Spec != nil || c.RunnableRevision == nil || !ValidDigest(c.RunnableRevisionDigest) {
+		if c.Spec != nil || c.RunnableRevision == nil || c.RunnableRevisionRef.Validate() != nil || !ValidDigest(c.RunnableRevisionDigest) || c.RunnableRevisionRef.Digest != c.RunnableRevisionDigest {
 			return errors.New("runnable verification action has an invalid input")
 		}
 		return VerifyRequest{Credential: c.Credential, RunnableRevision: *c.RunnableRevision, RunnableRevisionDigest: c.RunnableRevisionDigest, Attempt: c.Attempt}.Validate()
