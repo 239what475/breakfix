@@ -265,7 +265,7 @@ func testReapRequest(t *testing.T, revision runnable.RunnableRevision) ReapReque
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := Binding{Namespace: "breakfix-system", Name: "runtime-environment", UID: "runtime-environment-uid", RunnableRevision: revision}
+	binding := Binding{Namespace: "breakfix-system", Name: "runtime-environment", UID: "runtime-environment-uid", Purpose: runnable.PurposeVerification, RunnableRevision: revision}
 	return ReapRequest{Namespace: binding.Namespace, Name: binding.Name, UID: binding.UID, Revision: digest, Binding: binding}
 }
 

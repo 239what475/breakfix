@@ -99,7 +99,7 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 
 	request := runnable.ReapRequest{
 		Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Revision: revisionDigest,
-		Binding: runnable.EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", RunnableRevision: revision},
+		Binding: runnable.EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Purpose: runnable.PurposeVerification, RunnableRevision: revision},
 	}
 	if err := database.Runnable.Enqueue(ctx, request); err != nil {
 		t.Fatalf("enqueue reap: %v", err)

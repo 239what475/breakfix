@@ -23,14 +23,28 @@ const (
 	ReapSucceeded ReapState = "succeeded"
 )
 
+// EnvironmentPurpose controls the public lifecycle use of an environment.
+// It is intentionally a runtime concern: it carries no content semantics.
+type EnvironmentPurpose string
+
+const (
+	PurposeLearning     EnvironmentPurpose = "learning"
+	PurposeVerification EnvironmentPurpose = "verification"
+)
+
+func (p EnvironmentPurpose) Valid() bool {
+	return p == PurposeLearning || p == PurposeVerification
+}
+
 // EnvironmentBinding names one concrete provider resource set. It contains a
 // complete immutable runnable revision so lifecycle consumers never receive a
 // mutable artifact reference from an Environment object.
 type EnvironmentBinding struct {
-	Namespace        string           `json:"namespace"`
-	Name             string           `json:"name"`
-	UID              string           `json:"uid"`
-	RunnableRevision RunnableRevision `json:"runnable_revision"`
+	Namespace        string             `json:"namespace"`
+	Name             string             `json:"name"`
+	UID              string             `json:"uid"`
+	Purpose          EnvironmentPurpose `json:"purpose"`
+	RunnableRevision RunnableRevision   `json:"runnable_revision"`
 }
 
 // ReapRequest is immutable once enqueued. UID and revision digest fence the
@@ -51,7 +65,7 @@ func (r ReapRequest) Valid() error {
 	if strings.TrimSpace(r.Namespace) == "" || strings.TrimSpace(r.Name) == "" || strings.TrimSpace(r.UID) == "" || !ValidDigest(r.Revision) {
 		return errors.New("runnable reap request identity is incomplete")
 	}
-	if r.Namespace != r.Binding.Namespace || r.Name != r.Binding.Name || r.UID != r.Binding.UID {
+	if r.Namespace != r.Binding.Namespace || r.Name != r.Binding.Name || r.UID != r.Binding.UID || !r.Binding.Purpose.Valid() {
 		return errors.New("runnable reap request binding does not match identity")
 	}
 	digest, err := r.Binding.RunnableRevision.Digest()

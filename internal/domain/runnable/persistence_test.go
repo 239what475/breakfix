@@ -47,7 +47,7 @@ func TestReapRequestFencesEnvironmentAndRevision(t *testing.T) {
 	}
 	request := ReapRequest{
 		Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Revision: digest,
-		Binding: EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", RunnableRevision: revision},
+		Binding: EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Purpose: PurposeVerification, RunnableRevision: revision},
 	}
 	if err := request.Valid(); err != nil {
 		t.Fatalf("validate reap request: %v", err)

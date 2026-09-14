@@ -114,7 +114,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
-	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), RunnableRevision: revision}
+	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: revision}
 	switch decision {
 	case DecisionProvision:
 		if environment.Status.Phase == "" || environment.Status.Phase == runtimev2.PhasePending {
@@ -211,7 +211,7 @@ func (r *Reconciler) reconcileDeletion(ctx context.Context, environment *runtime
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.reconcileReap(ctx, environment, Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), RunnableRevision: revision})
+	return r.reconcileReap(ctx, environment, Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: revision})
 }
 
 func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.RuntimeEnvironment, binding Binding) (ctrl.Result, error) {
