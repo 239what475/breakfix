@@ -10,7 +10,10 @@ import (
 // runnable contract. Product publication is intentionally absent.
 type ActionPhase string
 
-var ErrActionLeaseLost = errors.New("runnable action lease lost")
+var (
+	ErrActionLeaseLost = errors.New("runnable action lease lost")
+	ErrSourceNotFound  = errors.New("runnable source archive not found")
+)
 
 const (
 	ActionMaterializeArtifact ActionPhase = "materialize-artifact"

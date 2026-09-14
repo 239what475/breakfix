@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -35,6 +36,9 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if !reflect.DeepEqual(resolved, revision) {
 		t.Fatalf("resolved revision = %#v, want %#v", resolved, revision)
 	}
+	if err := database.Runnable.StoreRunnableSource(ctx, revision.Spec.Source, []byte("source archive"), now); err != nil {
+		t.Fatalf("store runnable source: %v", err)
+	}
 	materializeIdentity, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 1, now)
 	if err != nil {
 		t.Fatalf("schedule materialization: %v", err)
@@ -43,8 +47,15 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if err != nil || materializeAction == nil || materializeAction.Credential.Identity != materializeIdentity || materializeAction.Attempt != 1 || materializeAction.Spec == nil {
 		t.Fatalf("claim materialization = %#v, %v", materializeAction, err)
 	}
+	source, err := database.Runnable.ReadRunnableActionSource(ctx, materializeAction.Credential, now.Add(time.Second))
+	if err != nil || string(source) != "source archive" {
+		t.Fatalf("read runnable action source = %q, %v", source, err)
+	}
 	if err := database.Runnable.CompleteRunnableMaterialization(ctx, materializeAction.Credential, storedRevision, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("complete materialization: %v", err)
+	}
+	if _, err := database.Runnable.ReadRunnableActionSource(ctx, materializeAction.Credential, now.Add(3*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
+		t.Fatalf("read completed action source = %v, want lease loss", err)
 	}
 
 	report := testVerificationReport(t, revision)
@@ -127,7 +138,7 @@ func testRunnableRevision(t *testing.T) runnable.RunnableRevision {
 				{ID: "host-read", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, Permission: runnable.PermissionReadOnly, Network: runnable.NetworkPrivate, MaxTimeout: 60},
 			},
 		},
-		Source:          runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "archives/source.tar.gz", Digest: testRunnableDigest("b")},
+		Source:          runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "archives/source.tar.gz", Digest: runnableArchiveDigest([]byte("source archive"))},
 		Initialization:  []runnable.ActionSpec{{ID: "initialize", Entrypoint: "scripts/init.sh", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, BoundaryID: "host-write", TimeoutSeconds: 60, ExpectedExitCodes: []int{0}}},
 		ValidationPlan:  runnable.ValidationPlan{FormatVersion: runnable.FormatVersion, Phases: []runnable.ValidationPhase{{ID: "observe", TimeoutSeconds: 60, Execution: runnable.PhaseSequential, Assertions: []runnable.AssertionSpec{{ID: "ready", Entrypoint: "scripts/assert.sh", Target: runnable.TargetLocation{Kind: "node", ID: "host"}, BoundaryID: "host-read", TimeoutSeconds: 60}}}}},
 		LifecyclePolicy: runnable.LifecyclePolicy{CreateTimeoutSeconds: 60, ResetTimeoutSeconds: 60, StopTimeoutSeconds: 60, ReapTimeoutSeconds: 60, IdleTTLSeconds: 600, MaxLifetimeSeconds: 1800},

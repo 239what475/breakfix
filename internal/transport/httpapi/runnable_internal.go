@@ -20,6 +20,10 @@ type runnableActionRenewRequest struct {
 	LeaseTTLMillis int64                    `json:"lease_ttl_millis"`
 }
 
+type runnableSourceRequest struct {
+	Credential runnable.LeaseCredential `json:"credential"`
+}
+
 type runnableMaterializationCompleteRequest struct {
 	Credential runnable.LeaseCredential `json:"credential"`
 	Revision   runnable.StoredRevision  `json:"revision"`
@@ -80,6 +84,29 @@ func (h *Handler) InternalRenewRunnableAction(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) InternalDownloadRunnableSource(c *gin.Context) {
+	var request runnableSourceRequest
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+		return
+	}
+	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionMaterializeArtifact {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "runnable source request is invalid"})
+		return
+	}
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runnable source store is unavailable"})
+		return
+	}
+	archive, err := h.db.Runnable.ReadRunnableActionSource(c.Request.Context(), request.Credential, time.Now().UTC())
+	if err != nil {
+		h.writeInternalRuntimeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		Archive []byte `json:"archive"`
+	}{Archive: archive})
 }
 
 func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {

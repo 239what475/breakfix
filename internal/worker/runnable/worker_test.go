@@ -83,7 +83,7 @@ type materializer struct {
 	artifact runnable.ArtifactReference
 }
 
-func (m materializer) Materialize(context.Context, runnable.RunnableSpec) (runnable.ArtifactReference, error) {
+func (m materializer) Materialize(context.Context, runnable.MaterializeRequest) (runnable.ArtifactReference, error) {
 	return m.artifact, nil
 }
 

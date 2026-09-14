@@ -2,6 +2,8 @@ package internalapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -52,6 +54,28 @@ func (c *RunnableActionClient) Renew(ctx context.Context, credential runnable.Le
 		Credential     runnable.LeaseCredential `json:"credential"`
 		LeaseTTLMillis int64                    `json:"lease_ttl_millis"`
 	}{credential, leaseTTL.Milliseconds()}, nil)
+}
+
+// ReadSource returns only the immutable archive bound to this materialization
+// lease. The Worker verifies the returned bytes before handing them to a
+// provider, and this client repeats the check before returning them.
+func (c *RunnableActionClient) ReadSource(ctx context.Context, credential runnable.LeaseCredential, source runnable.SourceArchive) ([]byte, error) {
+	if c == nil || c.server == nil || credential.Validate() != nil || credential.Identity.Phase != runnable.ActionMaterializeArtifact || source.Validate() != nil {
+		return nil, errors.New("runnable source request is invalid")
+	}
+	var response struct {
+		Archive []byte `json:"archive"`
+	}
+	if err := c.postLong(ctx, "/api/internal/runnable-actions/source", struct {
+		Credential runnable.LeaseCredential `json:"credential"`
+	}{credential}, &response); err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(response.Archive)
+	if actual := "sha256:" + hex.EncodeToString(sum[:]); actual != source.Digest {
+		return nil, runnable.NewArtifactFailure("source-archive-digest", "Server returned source bytes for another runnable spec")
+	}
+	return response.Archive, nil
 }
 
 func (c *RunnableActionClient) CompleteMaterialization(ctx context.Context, credential runnable.LeaseCredential, revision runnable.StoredRevision) error {
@@ -106,6 +130,9 @@ func mapRunnableActionError(err error) error {
 	}
 	if IsStatus(err, http.StatusConflict) {
 		return runnable.ErrActionLeaseLost
+	}
+	if IsStatus(err, http.StatusNotFound) {
+		return runnable.ErrSourceNotFound
 	}
 	return fmt.Errorf("runnable worker server request: %w", err)
 }

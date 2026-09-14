@@ -12,7 +12,7 @@ import (
 )
 
 type Materializer interface {
-	Materialize(context.Context, runnable.RunnableSpec) (runnable.ArtifactReference, error)
+	Materialize(context.Context, runnable.MaterializeRequest) (runnable.ArtifactReference, error)
 }
 
 type Verifier interface {
@@ -37,7 +37,7 @@ func (w *Worker) Materialize(ctx context.Context, request runnable.MaterializeRe
 	if err := request.Validate(); err != nil {
 		return runnable.RunnableRevision{}, err
 	}
-	artifact, err := w.materializer.Materialize(ctx, request.Spec)
+	artifact, err := w.materializer.Materialize(ctx, request)
 	if err != nil {
 		return runnable.RunnableRevision{}, err
 	}

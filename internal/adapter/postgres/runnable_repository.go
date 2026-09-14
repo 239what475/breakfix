@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +19,10 @@ var (
 	ErrVerificationReportNotFound = errors.New("runnable verification report not found")
 )
 
-const runnableMaxAttempts = 5
+const (
+	runnableMaxAttempts    = 5
+	runnableMaxSourceBytes = 64 * 1024 * 1024
+)
 
 func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec runnable.RunnableSpec, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
 	if stateVersion < 1 || now.IsZero() {
@@ -25,6 +30,9 @@ func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec r
 	}
 	specDigest, err := d.StoreRunnableSpec(ctx, spec, now)
 	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	if err := d.requireRunnableSource(ctx, spec.Source.Digest); err != nil {
 		return runnable.ActionIdentity{}, err
 	}
 	identity := runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionMaterializeArtifact, StateVersion: stateVersion}
@@ -39,6 +47,72 @@ func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec r
 		return runnable.ActionIdentity{}, fmt.Errorf("schedule runnable materialization: %w", err)
 	}
 	return identity, nil
+}
+
+// StoreRunnableSource persists the exact bytes referenced by a frozen
+// RunnableSpec. The digest is the object identity; the SourceArchive remains
+// embedded in the spec for provenance rather than becoming another aggregate.
+func (d *RunnableRepository) StoreRunnableSource(ctx context.Context, source runnable.SourceArchive, archive []byte, now time.Time) error {
+	if err := source.Validate(); err != nil || now.IsZero() || len(archive) == 0 || len(archive) > runnableMaxSourceBytes {
+		return errors.New("store runnable source is invalid")
+	}
+	if runnableArchiveDigest(archive) != source.Digest {
+		return runnable.NewArtifactFailure("source-archive-digest", "source archive does not match its declared digest")
+	}
+	result, err := d.conn.ExecContext(ctx, `INSERT INTO runnable_sources (source_digest, archive, created_at)
+		VALUES (?, ?, ?) ON CONFLICT (source_digest) DO NOTHING`, source.Digest, archive, now.UTC())
+	if err != nil {
+		return fmt.Errorf("store runnable source: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed > 0 {
+		return nil
+	}
+	var stored []byte
+	if err := d.conn.QueryRowContext(ctx, `SELECT archive FROM runnable_sources WHERE source_digest = ?`, source.Digest).Scan(&stored); err != nil {
+		return fmt.Errorf("read stored runnable source: %w", err)
+	}
+	if runnableArchiveDigest(stored) != source.Digest {
+		return errors.New("stored runnable source digest does not match its value")
+	}
+	return nil
+}
+
+// ReadRunnableActionSource is the only source archive egress for a public
+// Worker. The archive must belong to the claimed materialization action and a
+// currently live lease, so workers cannot read arbitrary Server storage.
+func (d *RunnableRepository) ReadRunnableActionSource(ctx context.Context, credential runnable.LeaseCredential, now time.Time) ([]byte, error) {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionMaterializeArtifact || now.IsZero() {
+		return nil, runnable.ErrActionLeaseLost
+	}
+	var digest string
+	if err := d.conn.QueryRowContext(ctx, `SELECT specs.source_digest FROM runnable_actions actions
+		JOIN runnable_specs specs ON specs.spec_digest = actions.spec_digest
+		WHERE actions.action_key = ? AND actions.state = 'running' AND actions.lease_owner = ? AND actions.lease_expires_at > ?`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&digest); errors.Is(err, sql.ErrNoRows) {
+		return nil, runnable.ErrActionLeaseLost
+	} else if err != nil {
+		return nil, fmt.Errorf("load runnable action source identity: %w", err)
+	}
+	var archive []byte
+	if err := d.conn.QueryRowContext(ctx, `SELECT archive FROM runnable_sources WHERE source_digest = ?`, digest).Scan(&archive); errors.Is(err, sql.ErrNoRows) {
+		return nil, runnable.ErrSourceNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("load runnable action source: %w", err)
+	}
+	if runnableArchiveDigest(archive) != digest {
+		return nil, errors.New("stored runnable source digest does not match its value")
+	}
+	return archive, nil
+}
+
+func (d *RunnableRepository) requireRunnableSource(ctx context.Context, digest string) error {
+	var exists bool
+	if err := d.conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runnable_sources WHERE source_digest = ?)`, digest).Scan(&exists); err != nil {
+		return fmt.Errorf("check runnable source: %w", err)
+	}
+	if !exists {
+		return runnable.ErrSourceNotFound
+	}
+	return nil
 }
 
 func (d *RunnableRepository) ScheduleVerification(ctx context.Context, reference runnable.RevisionReference, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
@@ -614,4 +688,9 @@ func truncateRunnableDiagnostic(value string) string {
 		return value[:runnable.MaxSummaryLength]
 	}
 	return value
+}
+
+func runnableArchiveDigest(archive []byte) string {
+	sum := sha256.Sum256(archive)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

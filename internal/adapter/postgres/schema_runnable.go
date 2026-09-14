@@ -1,6 +1,11 @@
 package postgres
 
 var schemaRunnableStatements = []string{
+	`CREATE TABLE runnable_sources (
+		source_digest TEXT PRIMARY KEY,
+		archive BYTEA NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL
+	)`,
 	`CREATE TABLE runnable_specs (
 		spec_digest TEXT PRIMARY KEY,
 		content_kind TEXT NOT NULL,

@@ -15,7 +15,7 @@ import (
 // is not trusted for identity: ArchiveMaterializer verifies the supplied
 // digest before passing bytes to a provider.
 type SourceReader interface {
-	ReadSource(context.Context, runnable.SourceArchive) ([]byte, error)
+	ReadSource(context.Context, runnable.LeaseCredential, runnable.SourceArchive) ([]byte, error)
 }
 
 // ArtifactBuilder materializes provider-specific bytes from a frozen spec and
@@ -37,29 +37,29 @@ func NewArchiveMaterializer(source SourceReader, builder ArtifactBuilder) (*Arch
 	return &ArchiveMaterializer{source: source, builder: builder}, nil
 }
 
-func (m *ArchiveMaterializer) Materialize(ctx context.Context, spec runnable.RunnableSpec) (runnable.ArtifactReference, error) {
-	if err := spec.Validate(); err != nil {
+func (m *ArchiveMaterializer) Materialize(ctx context.Context, request runnable.MaterializeRequest) (runnable.ArtifactReference, error) {
+	if err := request.Validate(); err != nil {
 		return runnable.ArtifactReference{}, err
 	}
-	archive, err := m.source.ReadSource(ctx, spec.Source)
+	archive, err := m.source.ReadSource(ctx, request.Credential, request.Spec.Source)
 	if err != nil {
 		return runnable.ArtifactReference{}, fmt.Errorf("read runnable source archive: %w", err)
 	}
-	if archiveDigest(archive) != spec.Source.Digest {
+	if archiveDigest(archive) != request.Spec.Source.Digest {
 		return runnable.ArtifactReference{}, runnable.NewArtifactFailure("source-archive-digest", "source archive does not match the frozen runnable spec")
 	}
-	artifact, err := m.builder.BuildArtifact(ctx, spec, archive)
+	artifact, err := m.builder.BuildArtifact(ctx, request.Spec, archive)
 	if err != nil {
 		return runnable.ArtifactReference{}, err
 	}
 	if err := artifact.Validate(); err != nil {
 		return runnable.ArtifactReference{}, fmt.Errorf("artifact builder returned an invalid reference: %w", err)
 	}
-	specDigest, err := spec.Digest()
+	specDigest, err := request.Spec.Digest()
 	if err != nil {
 		return runnable.ArtifactReference{}, err
 	}
-	if artifact.Runtime != spec.RuntimeProfile.Runtime || artifact.BuiltFromSpecDigest != specDigest {
+	if artifact.Runtime != request.Spec.RuntimeProfile.Runtime || artifact.BuiltFromSpecDigest != specDigest {
 		return runnable.ArtifactReference{}, runnable.NewArtifactFailure("artifact-spec-binding", "artifact builder returned a reference for another runnable spec")
 	}
 	return artifact, nil

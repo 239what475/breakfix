@@ -18,7 +18,7 @@ func TestArchiveMaterializerVerifiesSourceAndSpecBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := materializer.Materialize(context.Background(), spec)
+	artifact, err := materializer.Materialize(context.Background(), materializeRequest(t, spec))
 	if err != nil {
 		t.Fatalf("materialize archive: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestArchiveMaterializerRejectsChangedSourceBeforeBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = materializer.Materialize(context.Background(), spec)
+	_, err = materializer.Materialize(context.Background(), materializeRequest(t, spec))
 	var artifactFailure *runnable.ArtifactFailure
 	if !errors.As(err, &artifactFailure) || artifactFailure.Code != "source-archive-digest" || builder.called {
 		t.Fatalf("expected source digest artifact failure before build, got %#v", err)
@@ -51,7 +51,7 @@ func TestArchiveMaterializerRejectsArtifactForAnotherSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = materializer.Materialize(context.Background(), spec)
+	_, err = materializer.Materialize(context.Background(), materializeRequest(t, spec))
 	var artifactFailure *runnable.ArtifactFailure
 	if !errors.As(err, &artifactFailure) || artifactFailure.Code != "artifact-spec-binding" {
 		t.Fatalf("expected artifact binding failure, got %#v", err)
@@ -60,8 +60,17 @@ func TestArchiveMaterializerRejectsArtifactForAnotherSpec(t *testing.T) {
 
 type fakeSourceReader struct{ archive []byte }
 
-func (r fakeSourceReader) ReadSource(context.Context, runnable.SourceArchive) ([]byte, error) {
+func (r fakeSourceReader) ReadSource(context.Context, runnable.LeaseCredential, runnable.SourceArchive) ([]byte, error) {
 	return append([]byte(nil), r.archive...), nil
+}
+
+func materializeRequest(t *testing.T, spec runnable.RunnableSpec) runnable.MaterializeRequest {
+	t.Helper()
+	digest, err := spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runnable.MaterializeRequest{Credential: runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: digest, Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}, LeaseOwner: "worker-01"}, Spec: spec}
 }
 
 type fakeArtifactBuilder struct {

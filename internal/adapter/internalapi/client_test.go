@@ -2,10 +2,13 @@ package internalapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +41,32 @@ func TestRunnableActionClientMapsConflictToLeaseLoss(t *testing.T) {
 	}
 	if _, err := client.Claim(context.Background(), "worker-01", 5*time.Second); !errors.Is(err, runnable.ErrActionLeaseLost) {
 		t.Fatalf("claim conflict = %v, want runnable action lease loss", err)
+	}
+}
+
+func TestRunnableActionClientReadsOnlyDigestMatchedSource(t *testing.T) {
+	archive := []byte("immutable source archive")
+	sum := sha256.Sum256(archive)
+	source := runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "archives/source.tar.gz", Digest: "sha256:" + hex.EncodeToString(sum[:])}
+	credential := runnable.LeaseCredential{Identity: runnable.ActionIdentity{
+		Content:    runnable.ContentIdentity{Kind: "operations", ID: "runtime-test", Revision: "revision-01"},
+		SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionMaterializeArtifact, StateVersion: 1,
+	}, LeaseOwner: "worker-01"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/internal/runnable-actions/source" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"archive":"aW1tdXRhYmxlIHNvdXJjZSBhcmNoaXZl"}`))
+	}))
+	defer server.Close()
+	client, err := NewRunnableActionClient(server.URL, "internal-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := client.ReadSource(context.Background(), credential, source)
+	if err != nil || string(actual) != string(archive) {
+		t.Fatalf("read source = %q, %v", actual, err)
 	}
 }
 
