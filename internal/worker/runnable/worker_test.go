@@ -64,7 +64,7 @@ func TestVerifyRejectsReportWithCallerControlledPassedFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := reportFor(t, revision)
-	report.Phases[0].Assertions[0].Satisfied = false
+	report.Phases[1].Assertions[0].Satisfied = false
 	report.Passed = true
 	worker, err := New(materializer{}, verifier{report: report})
 	if err != nil {
@@ -91,7 +91,7 @@ type verifier struct {
 	report runnable.VerificationReport
 }
 
-func (v verifier) Verify(context.Context, runnable.RunnableRevision) (runnable.VerificationReport, error) {
+func (v verifier) Verify(context.Context, runnable.RunnableRevision, int64) (runnable.VerificationReport, error) {
 	return v.report, nil
 }
 
@@ -135,10 +135,17 @@ func reportFor(t *testing.T, revision runnable.RunnableRevision) runnable.Verifi
 	if err != nil {
 		t.Fatal(err)
 	}
+	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runnable.VerificationReport{
-		FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: digest, Environment: runnable.EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: testDigest("d")}, Attempt: 1, Passed: true,
+		FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: digest, Environment: runnable.EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: profileDigest}, Attempt: 1, Passed: true,
 		CreatedAt: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
-		Phases:    []runnable.PhaseResult{{ID: "observe", Actions: []runnable.ActionResult{{ID: "exercise", ExitCode: 0, Summary: "exercise complete"}}, Assertions: []runnable.AssertionResult{{ID: "ready", Satisfied: true, Summary: "ready"}}}},
+		Phases: []runnable.PhaseResult{
+			{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialization complete"}}},
+			{ID: "observe", Actions: []runnable.ActionResult{{ID: "exercise", ExitCode: 0, Summary: "exercise complete"}}, Assertions: []runnable.AssertionResult{{ID: "ready", Satisfied: true, Summary: "ready"}}},
+		},
 	}
 }
 

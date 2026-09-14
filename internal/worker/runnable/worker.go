@@ -16,7 +16,7 @@ type Materializer interface {
 }
 
 type Verifier interface {
-	Verify(context.Context, runnable.RunnableRevision) (runnable.VerificationReport, error)
+	Verify(context.Context, runnable.RunnableRevision, int64) (runnable.VerificationReport, error)
 }
 
 type Worker struct {
@@ -55,7 +55,7 @@ func (w *Worker) Verify(ctx context.Context, request runnable.VerifyRequest) (ru
 	if err := request.Validate(); err != nil {
 		return runnable.VerificationReport{}, err
 	}
-	report, err := w.verifier.Verify(ctx, request.RunnableRevision)
+	report, err := w.verifier.Verify(ctx, request.RunnableRevision, request.Credential.Identity.StateVersion)
 	if err != nil {
 		return runnable.VerificationReport{}, err
 	}

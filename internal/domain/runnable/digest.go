@@ -41,6 +41,13 @@ func (s RunnableSpec) Digest() (string, error) {
 	return digest(s)
 }
 
+func (p RuntimeProfile) Digest() (string, error) {
+	if err := p.Validate(); err != nil {
+		return "", err
+	}
+	return digest(p)
+}
+
 func (r RunnableRevision) CanonicalJSON() ([]byte, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err

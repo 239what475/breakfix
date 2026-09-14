@@ -67,7 +67,7 @@ func TestVerificationReportComputesAssertionFailure(t *testing.T) {
 		t.Fatalf("digest revision: %v", err)
 	}
 	report := validReport(revisionDigest)
-	report.Phases[0].Assertions[0].Satisfied = false
+	report.Phases[1].Assertions[0].Satisfied = false
 	report.Passed = false
 	if err := report.Validate(revision); err != nil {
 		t.Fatalf("validate business assertion failure: %v", err)
@@ -158,11 +158,18 @@ func validRevision(t *testing.T, spec RunnableSpec) RunnableRevision {
 }
 
 func validReport(revisionDigest string) VerificationReport {
+	profileDigest, err := validSpec().RuntimeProfile.Digest()
+	if err != nil {
+		panic(err)
+	}
 	return VerificationReport{
 		FormatVersion: FormatVersion, RunnableRevisionDigest: revisionDigest,
-		Environment: EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: testDigest("d")},
+		Environment: EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: profileDigest},
 		Attempt:     1, Passed: true, CreatedAt: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
 		Phases: []PhaseResult{{
+			ID:      "initialization",
+			Actions: []ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialization completed", Outputs: []ImmutableReference{{Reference: "logs/initialize", Digest: testDigest("a"), SizeBytes: 17}}}},
+		}, {
 			ID:         "observe",
 			Actions:    []ActionResult{{ID: "exercise", ExitCode: 0, Summary: "exercise completed", Outputs: []ImmutableReference{{Reference: "logs/exercise", Digest: testDigest("e"), SizeBytes: 23}}}},
 			Assertions: []AssertionResult{{ID: "service-ready", Satisfied: true, Summary: "service reached ready state", Outputs: []ImmutableReference{{Reference: "logs/assertion", Digest: testDigest("f"), SizeBytes: 42}}}},

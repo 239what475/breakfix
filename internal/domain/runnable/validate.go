@@ -156,8 +156,8 @@ func (a ActionSpec) Validate(profile RuntimeProfile, field string) error {
 		return err
 	}
 	boundary, ok := profile.boundary(a.BoundaryID)
-	if !ok || boundary.Target != a.Target {
-		return invalid(field+".boundary_id", "does not select its declared target")
+	if !ok || boundary.Target != a.Target || boundary.Permission != PermissionReadWrite {
+		return invalid(field+".boundary_id", "must select a read-write declared target")
 	}
 	if a.TimeoutSeconds <= 0 || a.TimeoutSeconds > boundary.MaxTimeout || a.TimeoutSeconds > MaxActionTimeoutSeconds {
 		return invalid(field+".timeout_seconds", "is outside its execution boundary")
@@ -298,6 +298,16 @@ func (s RunnableSpec) Validate() error {
 	if err := s.ValidationPlan.Validate(s.RuntimeProfile); err != nil {
 		return err
 	}
+	for _, phase := range s.ValidationPlan.Phases {
+		if phase.ID == "initialization" {
+			return invalid("validation_plan.phases", "must not use the reserved initialization phase id")
+		}
+		for _, action := range phase.Actions {
+			if _, exists := initializationIDs[action.ID]; exists {
+				return invalid("validation_plan", "reuses an initialization action id")
+			}
+		}
+	}
 	if err := s.LifecyclePolicy.Validate(); err != nil {
 		return err
 	}
@@ -386,11 +396,25 @@ func (f VerificationFailure) Validate() error {
 // phases. Assertion false is a business result; malformed or incomplete phase
 // data is a protocol error and therefore an ArtifactFailure.
 func ComputePassed(plan ValidationPlan, phases []PhaseResult) (bool, error) {
-	if len(phases) != len(plan.Phases) {
+	return computePassed(plan.Phases, phases)
+}
+
+// ComputeSpecPassed includes the reserved initialization phase. It is the
+// machine result used by VerificationReport, ensuring that every mutating
+// action has exactly one result in the immutable phase tree.
+func ComputeSpecPassed(spec RunnableSpec, phases []PhaseResult) (bool, error) {
+	expected := make([]ValidationPhase, 0, len(spec.ValidationPlan.Phases)+1)
+	expected = append(expected, ValidationPhase{ID: "initialization", Actions: spec.Initialization})
+	expected = append(expected, spec.ValidationPlan.Phases...)
+	return computePassed(expected, phases)
+}
+
+func computePassed(expectedPhases []ValidationPhase, phases []PhaseResult) (bool, error) {
+	if len(phases) != len(expectedPhases) {
 		return false, NewArtifactFailure("phase-coverage", "verification report does not cover every validation phase")
 	}
 	passed := true
-	for phaseIndex, specPhase := range plan.Phases {
+	for phaseIndex, specPhase := range expectedPhases {
 		result := phases[phaseIndex]
 		if result.ID != specPhase.ID {
 			return false, NewArtifactFailure("phase-order", "verification report phase order does not match validation plan")
@@ -477,10 +501,17 @@ func (r VerificationReport) Validate(revision RunnableRevision) error {
 	if err := r.Environment.Validate(); err != nil {
 		return err
 	}
+	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+	if err != nil {
+		return fmt.Errorf("verification report profile digest: %w", err)
+	}
+	if r.Environment.ProfileDigest != profileDigest {
+		return errors.New("verification report environment is bound to another runtime profile")
+	}
 	if r.Attempt <= 0 || r.CreatedAt.IsZero() {
 		return invalid("verification", "requires a positive attempt and creation time")
 	}
-	computed, computeErr := ComputePassed(revision.Spec.ValidationPlan, r.Phases)
+	computed, computeErr := ComputeSpecPassed(revision.Spec, r.Phases)
 	if r.Failure == nil {
 		if computeErr != nil {
 			return computeErr
@@ -499,7 +530,7 @@ func (r VerificationReport) Validate(revision RunnableRevision) error {
 	if r.Failure.Class == FailureArtifact && computeErr == nil && computed {
 		return errors.New("artifact failure conflicts with successful phase results")
 	}
-	if r.Failure.Class == FailureInfrastructure && len(r.Phases) > len(revision.Spec.ValidationPlan.Phases) {
+	if r.Failure.Class == FailureInfrastructure && len(r.Phases) > len(revision.Spec.ValidationPlan.Phases)+1 {
 		return errors.New("infrastructure failure reports too many phases")
 	}
 	return nil
