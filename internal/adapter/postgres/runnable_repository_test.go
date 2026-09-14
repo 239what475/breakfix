@@ -35,6 +35,17 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if !reflect.DeepEqual(resolved, revision) {
 		t.Fatalf("resolved revision = %#v, want %#v", resolved, revision)
 	}
+	materializeIdentity, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 1, now)
+	if err != nil {
+		t.Fatalf("schedule materialization: %v", err)
+	}
+	materializeAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now.Add(time.Second))
+	if err != nil || materializeAction == nil || materializeAction.Credential.Identity != materializeIdentity || materializeAction.Spec == nil {
+		t.Fatalf("claim materialization = %#v, %v", materializeAction, err)
+	}
+	if err := database.Runnable.CompleteRunnableMaterialization(ctx, materializeAction.Credential, storedRevision, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("complete materialization: %v", err)
+	}
 
 	report := testVerificationReport(t, revision)
 	reportDigest, err := report.Digest(revision)
@@ -53,6 +64,17 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loadedReport, report) {
 		t.Fatalf("resolved report = %#v, want %#v", loadedReport, report)
+	}
+	verifyIdentity, err := database.Runnable.ScheduleVerification(ctx, storedRevision.Reference, 2, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("schedule verification: %v", err)
+	}
+	verifyAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-b", time.Minute, now.Add(4*time.Second))
+	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verifyIdentity || verifyAction.RunnableRevision == nil {
+		t.Fatalf("claim verification = %#v, %v", verifyAction, err)
+	}
+	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, storedReport, now.Add(5*time.Second)); err != nil {
+		t.Fatalf("complete verification: %v", err)
 	}
 
 	request := runnable.ReapRequest{

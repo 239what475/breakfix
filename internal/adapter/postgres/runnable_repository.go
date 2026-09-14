@@ -17,6 +17,257 @@ var (
 	ErrVerificationReportNotFound = errors.New("runnable verification report not found")
 )
 
+const runnableMaxAttempts = 5
+
+func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec runnable.RunnableSpec, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
+	if stateVersion < 1 || now.IsZero() {
+		return runnable.ActionIdentity{}, errors.New("schedule runnable materialization is invalid")
+	}
+	specDigest, err := d.StoreRunnableSpec(ctx, spec, now)
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	identity := runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionMaterializeArtifact, StateVersion: stateVersion}
+	if err := identity.Validate(); err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	_, err = d.conn.ExecContext(ctx, `INSERT INTO runnable_actions
+		(action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, state, attempt, lease_owner, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, '', ?, ?, ?)
+		ON CONFLICT (action_key) DO NOTHING`, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, now.UTC(), now.UTC(), now.UTC())
+	if err != nil {
+		return runnable.ActionIdentity{}, fmt.Errorf("schedule runnable materialization: %w", err)
+	}
+	return identity, nil
+}
+
+func (d *RunnableRepository) ScheduleVerification(ctx context.Context, reference runnable.RevisionReference, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
+	if err := reference.Validate(); err != nil || stateVersion < 1 || now.IsZero() {
+		return runnable.ActionIdentity{}, errors.New("schedule runnable verification is invalid")
+	}
+	revision, err := d.ResolveRunnableRevision(ctx, reference.ID, reference.Digest)
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	specDigest, err := revision.Spec.Digest()
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	identity := runnable.ActionIdentity{Content: revision.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: stateVersion}
+	_, err = d.conn.ExecContext(ctx, `INSERT INTO runnable_actions
+		(action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, runnable_revision_digest, state, attempt, lease_owner, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, '', ?, ?, ?)
+		ON CONFLICT (action_key) DO NOTHING`, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, reference.Digest, now.UTC(), now.UTC(), now.UTC())
+	if err != nil {
+		return runnable.ActionIdentity{}, fmt.Errorf("schedule runnable verification: %w", err)
+	}
+	return identity, nil
+}
+
+func (d *RunnableRepository) ClaimRunnableAction(ctx context.Context, owner string, ttl time.Duration, now time.Time) (*runnable.ActionContext, error) {
+	if strings.TrimSpace(owner) == "" || ttl <= 0 || now.IsZero() {
+		return nil, errors.New("runnable action claim is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin runnable action claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var row runnableActionRow
+	err = tx.QueryRowContext(ctx, `SELECT action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, COALESCE(runnable_revision_digest, ''), attempt
+		FROM runnable_actions WHERE ((state = 'queued' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?)) AND attempt < ?
+		ORDER BY next_run_at, created_at, action_key FOR UPDATE SKIP LOCKED LIMIT 1`, now.UTC(), now.UTC(), runnableMaxAttempts).
+		Scan(&row.key, &row.identity.Content.Kind, &row.identity.Content.ID, &row.identity.Content.Revision, &row.identity.SpecDigest, &row.identity.Phase, &row.identity.StateVersion, &row.revisionDigest, &row.attempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("select runnable action: %w", err)
+	}
+	row.attempt++
+	if _, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = 'running', attempt = ?, lease_owner = ?, lease_expires_at = ?, updated_at = ? WHERE action_key = ?`, row.attempt, owner, now.UTC().Add(ttl), now.UTC(), row.key); err != nil {
+		return nil, fmt.Errorf("claim runnable action: %w", err)
+	}
+	value, err := runnableActionContextTx(ctx, tx, row, owner)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit runnable action claim: %w", err)
+	}
+	return &value, nil
+}
+
+func (d *RunnableRepository) RenewRunnableAction(ctx context.Context, credential runnable.LeaseCredential, ttl time.Duration, now time.Time) error {
+	if err := credential.Validate(); err != nil || ttl <= 0 || now.IsZero() {
+		return runnable.ErrReapLeaseLost
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE runnable_actions SET lease_expires_at = ?, updated_at = ? WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, now.UTC().Add(ttl), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
+	if err != nil {
+		return fmt.Errorf("renew runnable action: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return runnable.ErrReapLeaseLost
+	}
+	return nil
+}
+
+func (d *RunnableRepository) ReportRunnableActionFailure(ctx context.Context, credential runnable.LeaseCredential, class runnable.FailureClass, code, summary string, now time.Time) error {
+	if err := credential.Validate(); err != nil || !class.Valid() || strings.TrimSpace(code) == "" || strings.TrimSpace(summary) == "" || now.IsZero() {
+		return errors.New("runnable action failure is invalid")
+	}
+	state, retryAt := "failed", now.UTC()
+	if class == runnable.FailureInfrastructure {
+		state, retryAt = "queued", now.UTC().Add(time.Second)
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = ?, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, failure_class = ?, failure_code = ?, failure_summary = ?, updated_at = ? WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, state, retryAt, class, strings.TrimSpace(code), truncateRunnableDiagnostic(summary), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
+	if err != nil {
+		return fmt.Errorf("report runnable action failure: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return runnable.ErrReapLeaseLost
+	}
+	return nil
+}
+
+func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context, credential runnable.LeaseCredential, value runnable.StoredRevision, now time.Time) error {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionMaterializeArtifact || now.IsZero() {
+		return errors.New("complete runnable materialization is invalid")
+	}
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	specDigest, err := value.Revision.Spec.Digest()
+	if err != nil || credential.Identity.SpecDigest != specDigest || credential.Identity.Content != value.Revision.Spec.Identity {
+		return errors.New("materialized runnable revision does not match its action")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin complete runnable materialization: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var actionSpec string
+	if err := tx.QueryRowContext(ctx, `SELECT spec_digest FROM runnable_actions WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionSpec); errors.Is(err, sql.ErrNoRows) {
+		return runnable.ErrReapLeaseLost
+	} else if err != nil {
+		return fmt.Errorf("lock runnable materialization action: %w", err)
+	}
+	if actionSpec != specDigest {
+		return errors.New("materialized runnable revision spec does not match its action")
+	}
+	encoded, err := marshalJSON(value.Revision)
+	if err != nil {
+		return err
+	}
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO runnable_revisions (id, runnable_revision_digest, spec_digest, revision, created_at)
+		VALUES (?, ?, ?, ?::jsonb, ?) ON CONFLICT (id) DO NOTHING`, value.Reference.ID, value.Reference.Digest, specDigest, encoded, value.CreatedAt.UTC())
+	if err != nil {
+		return fmt.Errorf("store materialized runnable revision: %w", err)
+	}
+	if changed, _ := inserted.RowsAffected(); changed == 0 {
+		var existing string
+		if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_revisions WHERE id = ? FOR UPDATE`, value.Reference.ID).Scan(&existing); err != nil {
+			return fmt.Errorf("read stored materialized runnable revision: %w", err)
+		}
+		if existing != value.Reference.Digest {
+			return errors.New("runnable revision id is already bound to another digest")
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = 'completed', lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ?
+		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, now.UTC(), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
+	if err != nil {
+		return fmt.Errorf("complete runnable materialization: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return runnable.ErrReapLeaseLost
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit runnable materialization: %w", err)
+	}
+	return nil
+}
+
+func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, credential runnable.LeaseCredential, value runnable.StoredVerificationReport, now time.Time) error {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionVerify || now.IsZero() {
+		return errors.New("complete runnable verification is invalid")
+	}
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	revisionDigest, err := value.RunnableRevision.Digest()
+	if err != nil || credential.Identity.SpecDigest != value.RunnableRevision.Artifact.BuiltFromSpecDigest || credential.Identity.Content != value.RunnableRevision.Spec.Identity {
+		return errors.New("verification report does not match its action")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin complete runnable verification: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var actionRevision string
+	if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_actions WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionRevision); errors.Is(err, sql.ErrNoRows) {
+		return runnable.ErrReapLeaseLost
+	} else if err != nil {
+		return fmt.Errorf("lock runnable verification action: %w", err)
+	}
+	if actionRevision != revisionDigest {
+		return errors.New("verification report revision does not match its action")
+	}
+	encoded, err := marshalJSON(value.Report)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runnable_verification_reports (id, verification_report_digest, runnable_revision_digest, report, created_at)
+		VALUES (?, ?, ?, ?::jsonb, ?) ON CONFLICT (id) DO NOTHING`, value.Reference.ID, value.Reference.Digest, revisionDigest, encoded, value.CreatedAt.UTC()); err != nil {
+		return fmt.Errorf("store runnable verification report: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = 'completed', lease_owner = '', lease_expires_at = NULL, completed_at = ?, updated_at = ? WHERE action_key = ?`, now.UTC(), now.UTC(), credential.Identity.Key()); err != nil {
+		return fmt.Errorf("complete runnable verification: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit runnable verification: %w", err)
+	}
+	return nil
+}
+
+type runnableActionRow struct {
+	key            string
+	identity       runnable.ActionIdentity
+	revisionDigest string
+	attempt        int
+}
+
+func runnableActionContextTx(ctx context.Context, tx *Tx, row runnableActionRow, owner string) (runnable.ActionContext, error) {
+	credential := runnable.LeaseCredential{Identity: row.identity, LeaseOwner: owner}
+	if row.identity.Phase == runnable.ActionMaterializeArtifact {
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT spec FROM runnable_specs WHERE spec_digest = ?`, row.identity.SpecDigest).Scan(&encoded); err != nil {
+			return runnable.ActionContext{}, fmt.Errorf("load runnable action spec: %w", err)
+		}
+		var spec runnable.RunnableSpec
+		if err := json.Unmarshal(encoded, &spec); err != nil {
+			return runnable.ActionContext{}, fmt.Errorf("decode runnable action spec: %w", err)
+		}
+		value := runnable.ActionContext{Credential: credential, Spec: &spec}
+		return value, value.Validate()
+	}
+	if row.identity.Phase == runnable.ActionVerify {
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT revision FROM runnable_revisions WHERE runnable_revision_digest = ?`, row.revisionDigest).Scan(&encoded); err != nil {
+			return runnable.ActionContext{}, fmt.Errorf("load runnable action revision: %w", err)
+		}
+		var revision runnable.RunnableRevision
+		if err := json.Unmarshal(encoded, &revision); err != nil {
+			return runnable.ActionContext{}, fmt.Errorf("decode runnable action revision: %w", err)
+		}
+		value := runnable.ActionContext{Credential: credential, RunnableRevision: &revision, RunnableRevisionDigest: row.revisionDigest}
+		return value, value.Validate()
+	}
+	return runnable.ActionContext{}, errors.New("stored runnable action has an unsupported phase")
+}
+
 // StoreRunnableSpec records a canonical immutable pre-build contract. The
 // digest is the primary key, so equal specs are naturally idempotent.
 func (d *RunnableRepository) StoreRunnableSpec(ctx context.Context, spec runnable.RunnableSpec, now time.Time) (string, error) {
