@@ -497,7 +497,7 @@ func (h *Handler) validateRuntimeBuildOutput(action runtime.Context, output exec
 func (h *Handler) writeInternalRuntimeError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, runtime.ErrActionNotFound), errors.Is(err, generation.ErrWorkflowNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, generation.ErrWorkspaceNotFound), errors.Is(err, runnable.ErrSourceNotFound):
+	case errors.Is(err, runtime.ErrActionNotFound), errors.Is(err, generation.ErrWorkflowNotFound), errors.Is(err, generation.ErrCandidateNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, generation.ErrWorkspaceNotFound), errors.Is(err, runnable.ErrSourceNotFound), errors.Is(err, runnable.ErrOutputNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, runtime.ErrLeaseLost), errors.Is(err, generation.ErrLeaseLost), errors.Is(err, runnable.ErrActionLeaseLost):
 		status = http.StatusConflict

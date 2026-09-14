@@ -79,7 +79,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create runnable verification provider: %w", err)
 	}
-	verifier, err := runnableworker.NewExecutor(verificationProvider)
+	verifier, err := runnableworker.NewExecutor(verificationProvider, actionClient)
 	if err != nil {
 		return fmt.Errorf("create runnable verifier: %w", err)
 	}

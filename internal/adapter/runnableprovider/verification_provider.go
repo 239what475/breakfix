@@ -149,7 +149,7 @@ func (p *VerificationProvider) Execute(ctx context.Context, identity runnable.En
 		if err != nil {
 			return runnableworker.ExecutionOutput{}, err
 		}
-		return runnableworker.ExecutionOutput{ExitCode: result.ExitCode, Summary: strings.TrimSpace(result.Stderr), Raw: []byte(result.Stdout), Outputs: outputRefs(identity.ID, result.Stdout, result.Stderr)}, nil
+		return runnableworker.ExecutionOutput{ExitCode: result.ExitCode, Summary: strings.TrimSpace(result.Stderr), Raw: []byte(result.Stdout), Stderr: []byte(result.Stderr)}, nil
 	}
 	if identity.Provider != string(runnable.RuntimeNode) || p.node == nil || request.Target.Kind != "node" {
 		return runnableworker.ExecutionOutput{}, errors.New("verification target is not available in this environment")
@@ -167,7 +167,7 @@ func (p *VerificationProvider) Execute(ctx context.Context, identity runnable.En
 	if err != nil {
 		return runnableworker.ExecutionOutput{}, err
 	}
-	return runnableworker.ExecutionOutput{ExitCode: result.ExitCode, Summary: strings.TrimSpace(result.Stderr), Raw: []byte(result.Stdout), Outputs: outputRefs(identity.ID, result.Stdout, result.Stderr)}, nil
+	return runnableworker.ExecutionOutput{ExitCode: result.ExitCode, Summary: strings.TrimSpace(result.Stderr), Raw: []byte(result.Stdout), Stderr: []byte(result.Stderr)}, nil
 }
 
 func runtimeEntrypoint(value string) (string, error) {
@@ -200,15 +200,13 @@ func resourceRef(refs []runtimev2.ResourceReference, kind string) string {
 	return ""
 }
 
-func outputRefs(environmentID, stdout, stderr string) []runnable.ImmutableReference {
-	value := stdout + stderr
-	sum := sha256.Sum256([]byte(value))
-	return []runnable.ImmutableReference{{Reference: "runtime://" + environmentID + "/verification-output/" + hex.EncodeToString(sum[:]), Digest: "sha256:" + hex.EncodeToString(sum[:]), SizeBytes: int64(len(value))}}
+func verificationEnvironmentName(id string, attempt int64) string {
+	return verificationID("run", id, attempt)
 }
 
-func verificationEnvironmentName(id string, attempt int64) string {
+func verificationID(prefix, id string, attempt int64) string {
 	sum := sha256.Sum256([]byte(id + fmt.Sprintf("\x00%d", attempt)))
-	return "run-" + hex.EncodeToString(sum[:])[:24]
+	return prefix + "-" + hex.EncodeToString(sum[:])[:24]
 }
 
 var _ runnableworker.EnvironmentProvider = (*VerificationProvider)(nil)

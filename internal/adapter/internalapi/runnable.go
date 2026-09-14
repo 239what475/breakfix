@@ -78,6 +78,32 @@ func (c *RunnableActionClient) ReadSource(ctx context.Context, credential runnab
 	return response.Archive, nil
 }
 
+// StoreExecutionOutput writes provider stdout and stderr under the current
+// verification lease. The Server owns the immutable object namespace; the
+// client verifies that its returned reference is exactly the capture supplied.
+func (c *RunnableActionClient) StoreExecutionOutput(ctx context.Context, credential runnable.LeaseCredential, capture runnable.OutputCapture) (runnable.ImmutableReference, error) {
+	if c == nil || c.server == nil || credential.Validate() != nil || credential.Identity.Phase != runnable.ActionVerify || capture.Validate() != nil {
+		return runnable.ImmutableReference{}, errors.New("runnable execution output request is invalid")
+	}
+	expected, _, err := capture.Reference()
+	if err != nil {
+		return runnable.ImmutableReference{}, err
+	}
+	var response struct {
+		Reference runnable.ImmutableReference `json:"reference"`
+	}
+	if err := c.post(ctx, "/api/internal/runnable-actions/output", struct {
+		Credential runnable.LeaseCredential `json:"credential"`
+		Capture    runnable.OutputCapture   `json:"capture"`
+	}{credential, capture}, &response); err != nil {
+		return runnable.ImmutableReference{}, err
+	}
+	if response.Reference != expected {
+		return runnable.ImmutableReference{}, errors.New("server returned an execution output reference for another capture")
+	}
+	return response.Reference, nil
+}
+
 func (c *RunnableActionClient) CompleteMaterialization(ctx context.Context, credential runnable.LeaseCredential, revision runnable.StoredRevision) error {
 	if c == nil || c.server == nil || credential.Identity.Phase != runnable.ActionMaterializeArtifact || credential.Validate() != nil || revision.Validate() != nil {
 		return errors.New("runnable materialization completion is invalid")

@@ -23,6 +23,13 @@ type EnvironmentProvider interface {
 	Execute(context.Context, runnable.EnvironmentIdentity, ExecutionRequest) (ExecutionOutput, error)
 }
 
+// ExecutionOutputStore persists raw streams under the currently fenced verify
+// action. Provider adapters return bytes only; they cannot manufacture report
+// references or choose an output namespace.
+type ExecutionOutputStore interface {
+	StoreExecutionOutput(context.Context, runnable.LeaseCredential, runnable.OutputCapture) (runnable.ImmutableReference, error)
+}
+
 type ExecutionRequest struct {
 	Entrypoint string
 	Target     runnable.TargetLocation
@@ -31,26 +38,38 @@ type ExecutionRequest struct {
 	ReadOnly   bool
 }
 
-// ExecutionOutput contains bounded raw assertion output and references to the
-// immutable provider logs/raw streams. The provider must not turn output into
-// mutable in-memory state after returning it.
+// ExecutionOutput carries provider stdout and stderr. The verifier persists
+// both streams through its fenced output store before placing any reference in
+// an immutable report.
 type ExecutionOutput struct {
 	ExitCode int
 	Summary  string
 	Raw      []byte
+	Stderr   []byte
 	Outputs  []runnable.ImmutableReference
 }
 
 type Executor struct {
-	provider EnvironmentProvider
-	now      func() time.Time
+	provider    EnvironmentProvider
+	outputStore ExecutionOutputStore
+	now         func() time.Time
 }
 
-func NewExecutor(provider EnvironmentProvider) (*Executor, error) {
+func NewExecutor(provider EnvironmentProvider, outputStores ...ExecutionOutputStore) (*Executor, error) {
 	if provider == nil {
 		return nil, errors.New("runnable verifier requires an environment provider")
 	}
-	return &Executor{provider: provider, now: time.Now}, nil
+	if len(outputStores) > 1 {
+		return nil, errors.New("runnable verifier accepts at most one execution output store")
+	}
+	executor := &Executor{provider: provider, now: time.Now}
+	if len(outputStores) == 1 {
+		if outputStores[0] == nil {
+			return nil, errors.New("runnable verifier execution output store is nil")
+		}
+		executor.outputStore = outputStores[0]
+	}
+	return executor, nil
 }
 
 // Verify executes initialization then each declared phase in order. It never
@@ -83,13 +102,13 @@ func (e *Executor) Verify(ctx context.Context, request runnable.VerifyRequest) (
 	}
 
 	initialization := runnable.ValidationPhase{ID: "initialization", Actions: revision.Spec.Initialization}
-	result, failure := e.executePhase(ctx, environment, revision.Spec.RuntimeProfile, initialization)
+	result, failure := e.executePhase(ctx, request.Credential, environment, revision.Spec.RuntimeProfile, initialization)
 	report.Phases = append(report.Phases, result)
 	if failure != nil {
 		return finalizeFailure(revision, report, failure), nil
 	}
 	for _, phase := range revision.Spec.ValidationPlan.Phases {
-		result, failure = e.executePhase(ctx, environment, revision.Spec.RuntimeProfile, phase)
+		result, failure = e.executePhase(ctx, request.Credential, environment, revision.Spec.RuntimeProfile, phase)
 		report.Phases = append(report.Phases, result)
 		if failure != nil {
 			return finalizeFailure(revision, report, failure), nil
@@ -103,10 +122,10 @@ func (e *Executor) Verify(ctx context.Context, request runnable.VerifyRequest) (
 	return report, nil
 }
 
-func (e *Executor) executePhase(ctx context.Context, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, phase runnable.ValidationPhase) (runnable.PhaseResult, *runnable.VerificationFailure) {
+func (e *Executor) executePhase(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, phase runnable.ValidationPhase) (runnable.PhaseResult, *runnable.VerificationFailure) {
 	result := runnable.PhaseResult{ID: phase.ID, Actions: make([]runnable.ActionResult, 0, len(phase.Actions)), Assertions: make([]runnable.AssertionResult, 0, len(phase.Assertions))}
 	for _, action := range phase.Actions {
-		output, failure := e.executeAction(ctx, environment, profile, action)
+		output, failure := e.executeAction(ctx, credential, environment, profile, action)
 		if failure != nil {
 			return result, failure
 		}
@@ -116,7 +135,7 @@ func (e *Executor) executePhase(ctx context.Context, environment runnable.Enviro
 		}
 	}
 	for _, assertion := range phase.Assertions {
-		output, failure := e.executeAssertion(ctx, environment, profile, assertion)
+		output, failure := e.executeAssertion(ctx, credential, environment, profile, assertion)
 		if failure != nil {
 			return result, failure
 		}
@@ -125,14 +144,14 @@ func (e *Executor) executePhase(ctx context.Context, environment runnable.Enviro
 	return result, nil
 }
 
-func (e *Executor) executeAction(ctx context.Context, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, action runnable.ActionSpec) (runnable.ActionResult, *runnable.VerificationFailure) {
+func (e *Executor) executeAction(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, action runnable.ActionSpec) (runnable.ActionResult, *runnable.VerificationFailure) {
 	boundary, ok := lookupBoundary(profile, action.BoundaryID)
 	if !ok || boundary.Target != action.Target || boundary.Permission != runnable.PermissionReadWrite {
 		return runnable.ActionResult{}, artifactFailure("action-boundary", "action does not have an approved write boundary")
 	}
-	output, err := e.execute(ctx, environment, ExecutionRequest{Entrypoint: action.Entrypoint, Target: action.Target, Boundary: boundary, Timeout: time.Duration(action.TimeoutSeconds) * time.Second})
+	output, err := e.execute(ctx, credential, environment, ExecutionRequest{Entrypoint: action.Entrypoint, Target: action.Target, Boundary: boundary, Timeout: time.Duration(action.TimeoutSeconds) * time.Second})
 	if err != nil {
-		return runnable.ActionResult{}, infrastructureFailure("action-execution", err)
+		return runnable.ActionResult{}, executionFailure("action-execution", err)
 	}
 	if err := validateOutputReferences(output.Outputs); err != nil {
 		return runnable.ActionResult{}, artifactFailure("action-output", err.Error())
@@ -140,14 +159,14 @@ func (e *Executor) executeAction(ctx context.Context, environment runnable.Envir
 	return runnable.ActionResult{ID: action.ID, ExitCode: output.ExitCode, Summary: summary(output.Summary, "action completed"), Outputs: output.Outputs}, nil
 }
 
-func (e *Executor) executeAssertion(ctx context.Context, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, assertion runnable.AssertionSpec) (runnable.AssertionResult, *runnable.VerificationFailure) {
+func (e *Executor) executeAssertion(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity, profile runnable.RuntimeProfile, assertion runnable.AssertionSpec) (runnable.AssertionResult, *runnable.VerificationFailure) {
 	boundary, ok := lookupBoundary(profile, assertion.BoundaryID)
 	if !ok || boundary.Target != assertion.Target || boundary.Permission != runnable.PermissionReadOnly {
 		return runnable.AssertionResult{}, artifactFailure("assertion-boundary", "assertion does not have an approved read-only boundary")
 	}
-	output, err := e.execute(ctx, environment, ExecutionRequest{Entrypoint: assertion.Entrypoint, Target: assertion.Target, Boundary: boundary, Timeout: time.Duration(assertion.TimeoutSeconds) * time.Second, ReadOnly: true})
+	output, err := e.execute(ctx, credential, environment, ExecutionRequest{Entrypoint: assertion.Entrypoint, Target: assertion.Target, Boundary: boundary, Timeout: time.Duration(assertion.TimeoutSeconds) * time.Second, ReadOnly: true})
 	if err != nil {
-		return runnable.AssertionResult{}, infrastructureFailure("assertion-execution", err)
+		return runnable.AssertionResult{}, executionFailure("assertion-execution", err)
 	}
 	if output.ExitCode != 0 {
 		return runnable.AssertionResult{}, artifactFailure("assertion-exit", "assertion command exited unsuccessfully")
@@ -162,13 +181,26 @@ func (e *Executor) executeAssertion(ctx context.Context, environment runnable.En
 	return result, nil
 }
 
-func (e *Executor) execute(ctx context.Context, environment runnable.EnvironmentIdentity, request ExecutionRequest) (ExecutionOutput, error) {
+func (e *Executor) execute(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity, request ExecutionRequest) (ExecutionOutput, error) {
 	if request.Timeout <= 0 || request.Timeout > time.Duration(request.Boundary.MaxTimeout)*time.Second || request.ReadOnly != (request.Boundary.Permission == runnable.PermissionReadOnly) {
 		return ExecutionOutput{}, errors.New("execution request exceeds its approved boundary")
 	}
 	deadline, cancel := context.WithTimeout(ctx, request.Timeout)
 	defer cancel()
-	return e.provider.Execute(deadline, environment, request)
+	output, err := e.provider.Execute(deadline, environment, request)
+	if err != nil || e.outputStore == nil {
+		return output, err
+	}
+	capture := runnable.OutputCapture{Stdout: output.Raw, Stderr: output.Stderr}
+	if err := capture.Validate(); err != nil {
+		return ExecutionOutput{}, runnable.NewArtifactFailure("execution-output-size", err.Error())
+	}
+	ref, err := e.outputStore.StoreExecutionOutput(deadline, credential, capture)
+	if err != nil {
+		return ExecutionOutput{}, fmt.Errorf("persist execution output: %w", err)
+	}
+	output.Outputs = []runnable.ImmutableReference{ref}
+	return output, nil
 }
 
 func lookupBoundary(profile runnable.RuntimeProfile, id string) (runnable.ExecutionBoundary, bool) {
@@ -201,6 +233,14 @@ func artifactFailure(reason, message string) *runnable.VerificationFailure {
 
 func infrastructureFailure(reason string, err error) *runnable.VerificationFailure {
 	return &runnable.VerificationFailure{Class: runnable.FailureInfrastructure, Component: "provider", Reason: reason, Message: summary(err.Error(), "provider execution failed")}
+}
+
+func executionFailure(reason string, err error) *runnable.VerificationFailure {
+	var artifact *runnable.ArtifactFailure
+	if errors.As(err, &artifact) {
+		return artifactFailure(artifact.Code, summary(artifact.Error(), "execution output violates its contract"))
+	}
+	return infrastructureFailure(reason, err)
 }
 
 func summary(value, fallback string) string {

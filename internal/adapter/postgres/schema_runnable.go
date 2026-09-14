@@ -32,6 +32,11 @@ var schemaRunnableStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX runnable_verification_reports_revision ON runnable_verification_reports (runnable_revision_digest, created_at DESC)`,
+	`CREATE TABLE runnable_execution_outputs (
+		output_digest TEXT PRIMARY KEY,
+		capture BYTEA NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL
+	)`,
 	`CREATE TABLE runnable_actions (
 		action_key TEXT PRIMARY KEY,
 		content_kind TEXT NOT NULL,

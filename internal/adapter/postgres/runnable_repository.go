@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -23,6 +24,75 @@ const (
 	runnableMaxAttempts    = 5
 	runnableMaxSourceBytes = 64 * 1024 * 1024
 )
+
+// StoreRunnableExecutionOutput persists one canonical provider capture under
+// a live verification lease. The digest is both the immutable object key and
+// the reference reported by the public verifier.
+func (d *RunnableRepository) StoreRunnableExecutionOutput(ctx context.Context, credential runnable.LeaseCredential, capture runnable.OutputCapture, now time.Time) (runnable.ImmutableReference, error) {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionVerify || now.IsZero() {
+		return runnable.ImmutableReference{}, runnable.ErrActionLeaseLost
+	}
+	reference, encoded, err := capture.Reference()
+	if err != nil {
+		return runnable.ImmutableReference{}, err
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return runnable.ImmutableReference{}, fmt.Errorf("begin store runnable execution output: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var actionRevision string
+	if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_actions
+		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`, credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&actionRevision); errors.Is(err, sql.ErrNoRows) {
+		return runnable.ImmutableReference{}, runnable.ErrActionLeaseLost
+	} else if err != nil {
+		return runnable.ImmutableReference{}, fmt.Errorf("lock runnable execution output action: %w", err)
+	}
+	if actionRevision == "" {
+		return runnable.ImmutableReference{}, errors.New("runnable execution output action has no revision")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runnable_execution_outputs (output_digest, capture, created_at)
+		VALUES (?, ?, ?) ON CONFLICT (output_digest) DO NOTHING`, reference.Digest, encoded, now.UTC()); err != nil {
+		return runnable.ImmutableReference{}, fmt.Errorf("store runnable execution output: %w", err)
+	}
+	var stored []byte
+	if err := tx.QueryRowContext(ctx, `SELECT capture FROM runnable_execution_outputs WHERE output_digest = ? FOR UPDATE`, reference.Digest).Scan(&stored); err != nil {
+		return runnable.ImmutableReference{}, fmt.Errorf("read stored runnable execution output: %w", err)
+	}
+	if !bytes.Equal(stored, encoded) {
+		return runnable.ImmutableReference{}, errors.New("stored runnable execution output digest does not match its value")
+	}
+	if err := tx.Commit(); err != nil {
+		return runnable.ImmutableReference{}, fmt.Errorf("commit runnable execution output: %w", err)
+	}
+	return reference, nil
+}
+
+// ResolveRunnableExecutionOutput is intentionally narrow: consumers must
+// already have the immutable report reference and cannot enumerate captures.
+func (d *RunnableRepository) ResolveRunnableExecutionOutput(ctx context.Context, reference runnable.ImmutableReference) (runnable.OutputCapture, error) {
+	if err := reference.Validate("execution_output"); err != nil {
+		return runnable.OutputCapture{}, err
+	}
+	var encoded []byte
+	if err := d.conn.QueryRowContext(ctx, `SELECT capture FROM runnable_execution_outputs WHERE output_digest = ?`, reference.Digest).Scan(&encoded); errors.Is(err, sql.ErrNoRows) {
+		return runnable.OutputCapture{}, runnable.ErrOutputNotFound
+	} else if err != nil {
+		return runnable.OutputCapture{}, fmt.Errorf("resolve runnable execution output: %w", err)
+	}
+	var capture runnable.OutputCapture
+	if err := json.Unmarshal(encoded, &capture); err != nil {
+		return runnable.OutputCapture{}, fmt.Errorf("decode runnable execution output: %w", err)
+	}
+	actual, canonical, err := capture.Reference()
+	if err != nil {
+		return runnable.OutputCapture{}, fmt.Errorf("validate stored runnable execution output: %w", err)
+	}
+	if actual != reference || !bytes.Equal(encoded, canonical) {
+		return runnable.OutputCapture{}, errors.New("stored runnable execution output reference does not match its value")
+	}
+	return capture, nil
+}
 
 func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec runnable.RunnableSpec, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
 	if stateVersion < 1 || now.IsZero() {
@@ -290,6 +360,9 @@ func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, c
 	if actionRevision != revisionDigest || value.Report.Attempt != actionAttempt {
 		return errors.New("verification report revision or attempt does not match its action")
 	}
+	if err := validateRunnableVerificationOutputsTx(ctx, tx, value.Report); err != nil {
+		return err
+	}
 	encoded, err := marshalJSON(value.Report)
 	if err != nil {
 		return err
@@ -484,6 +557,9 @@ func (d *RunnableRepository) StoreVerificationReport(ctx context.Context, value 
 	if !exists {
 		return ErrRunnableRevisionNotFound
 	}
+	if err := validateRunnableVerificationOutputsTx(ctx, tx, value.Report); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO runnable_verification_reports
 		(id, verification_report_digest, runnable_revision_digest, report, created_at)
 		VALUES (?, ?, ?, ?::jsonb, ?)
@@ -502,6 +578,48 @@ func (d *RunnableRepository) StoreVerificationReport(ctx context.Context, value 
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit verification report: %w", err)
+	}
+	return nil
+}
+
+// validateRunnableVerificationOutputsTx prevents a report from pointing at a
+// provider-created or nonexistent object. Public verification currently emits
+// only Server-stored captures, and each reference must reproduce its capture.
+func validateRunnableVerificationOutputsTx(ctx context.Context, tx *Tx, report runnable.VerificationReport) error {
+	for _, phase := range report.Phases {
+		for _, action := range phase.Actions {
+			if err := validateRunnableExecutionOutputReferencesTx(ctx, tx, action.Outputs); err != nil {
+				return err
+			}
+		}
+		for _, assertion := range phase.Assertions {
+			if err := validateRunnableExecutionOutputReferencesTx(ctx, tx, assertion.Outputs); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateRunnableExecutionOutputReferencesTx(ctx context.Context, tx *Tx, references []runnable.ImmutableReference) error {
+	for _, reference := range references {
+		if err := reference.Validate("verification.output"); err != nil {
+			return err
+		}
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT capture FROM runnable_execution_outputs WHERE output_digest = ?`, reference.Digest).Scan(&encoded); errors.Is(err, sql.ErrNoRows) {
+			return errors.New("verification report refers to an execution output that was not persisted")
+		} else if err != nil {
+			return fmt.Errorf("load verification execution output: %w", err)
+		}
+		capture, err := runnable.ParseOutputCapture(encoded)
+		if err != nil {
+			return fmt.Errorf("decode verification execution output: %w", err)
+		}
+		actual, canonical, err := capture.Reference()
+		if err != nil || actual != reference || !bytes.Equal(encoded, canonical) {
+			return errors.New("verification report execution output reference does not match its stored capture")
+		}
 	}
 	return nil
 }

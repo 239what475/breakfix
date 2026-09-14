@@ -70,6 +70,68 @@ func TestRunnableActionClientReadsOnlyDigestMatchedSource(t *testing.T) {
 	}
 }
 
+func TestRunnableActionClientStoresOnlyMatchingExecutionOutputReference(t *testing.T) {
+	capture := runnable.OutputCapture{Stdout: []byte("standard output"), Stderr: []byte("standard error")}
+	expected, _, err := capture.Reference()
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := runnable.LeaseCredential{Identity: runnable.ActionIdentity{
+		Content:    runnable.ContentIdentity{Kind: "operations", ID: "runtime-test", Revision: "revision-01"},
+		SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionVerify, StateVersion: 1,
+	}, LeaseOwner: "worker-01"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/internal/runnable-actions/output" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		var body struct {
+			Credential runnable.LeaseCredential `json:"credential"`
+			Capture    runnable.OutputCapture   `json:"capture"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Credential != credential || string(body.Capture.Stdout) != string(capture.Stdout) || string(body.Capture.Stderr) != string(capture.Stderr) {
+			t.Fatalf("request = %#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(struct {
+			Reference runnable.ImmutableReference `json:"reference"`
+		}{Reference: expected}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer server.Close()
+	client, err := NewRunnableActionClient(server.URL, "internal-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := client.StoreExecutionOutput(context.Background(), credential, capture)
+	if err != nil || actual != expected {
+		t.Fatalf("store execution output = %#v, %v", actual, err)
+	}
+}
+
+func TestRunnableActionClientRejectsMismatchedExecutionOutputReference(t *testing.T) {
+	capture := runnable.OutputCapture{Stdout: []byte("standard output")}
+	credential := runnable.LeaseCredential{Identity: runnable.ActionIdentity{
+		Content:    runnable.ContentIdentity{Kind: "operations", ID: "runtime-test", Revision: "revision-01"},
+		SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionVerify, StateVersion: 1,
+	}, LeaseOwner: "worker-01"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"reference":{"reference":"runnable-output://sha256/` + strings.Repeat("b", 64) + `","digest":"sha256:` + strings.Repeat("b", 64) + `","size_bytes":1}}`))
+	}))
+	defer server.Close()
+	client, err := NewRunnableActionClient(server.URL, "internal-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.StoreExecutionOutput(context.Background(), credential, capture); err == nil || !strings.Contains(err.Error(), "another capture") {
+		t.Fatalf("mismatched reference error = %v", err)
+	}
+}
+
 func TestPostLongUsesRequestContextInsteadOfOrdinaryClientTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(25 * time.Millisecond)

@@ -24,6 +24,13 @@ type runnableSourceRequest struct {
 	Credential runnable.LeaseCredential `json:"credential"`
 }
 
+type runnableExecutionOutputRequest struct {
+	Credential runnable.LeaseCredential `json:"credential"`
+	Capture    runnable.OutputCapture   `json:"capture"`
+}
+
+const maxRunnableExecutionOutputRequestBytes = 1024 * 1024
+
 type runnableMaterializationCompleteRequest struct {
 	Credential runnable.LeaseCredential `json:"credential"`
 	Revision   runnable.StoredRevision  `json:"revision"`
@@ -107,6 +114,30 @@ func (h *Handler) InternalDownloadRunnableSource(c *gin.Context) {
 	c.JSON(http.StatusOK, struct {
 		Archive []byte `json:"archive"`
 	}{Archive: archive})
+}
+
+func (h *Handler) InternalStoreRunnableExecutionOutput(c *gin.Context) {
+	var request runnableExecutionOutputRequest
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRunnableExecutionOutputRequestBytes)
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+		return
+	}
+	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionVerify || request.Capture.Validate() != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "runnable execution output request is invalid"})
+		return
+	}
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runnable execution output store is unavailable"})
+		return
+	}
+	reference, err := h.db.Runnable.StoreRunnableExecutionOutput(c.Request.Context(), request.Credential, request.Capture, time.Now().UTC())
+	if err != nil {
+		h.writeInternalRuntimeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		Reference runnable.ImmutableReference `json:"reference"`
+	}{Reference: reference})
 }
 
 func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {

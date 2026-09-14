@@ -127,11 +127,11 @@ func TestVerificationProviderExecutesNodeTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output.ExitCode != 0 || string(output.Raw) != "ok\n" || node.request.LogicalName != "host" || strings.Join(node.request.Command, " ") != "/bin/bash /opt/breakfix/runnable/scripts/check.sh" {
+	if output.ExitCode != 0 || string(output.Raw) != "ok\n" || string(output.Stderr) != "diag\n" || node.request.LogicalName != "host" || strings.Join(node.request.Command, " ") != "/bin/bash /opt/breakfix/runnable/scripts/check.sh" {
 		t.Fatalf("output=%#v request=%#v", output, node.request)
 	}
-	if len(output.Outputs) != 1 || !strings.HasPrefix(output.Outputs[0].Reference, "runtime://env-uid/") {
-		t.Fatalf("output refs=%#v", output.Outputs)
+	if len(output.Outputs) != 0 {
+		t.Fatalf("provider unexpectedly created output references: %#v", output.Outputs)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestVerificationProviderExecutesK8sManagementTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output.ExitCode != 0 || string(output.Raw) != `{"assertions":[]}` || client.execNamespace != "runtime-ns" || client.execPod != "runtime-terminal" {
+	if output.ExitCode != 0 || string(output.Raw) != `{"assertions":[]}` || string(output.Stderr) != "diagnostic" || client.execNamespace != "runtime-ns" || client.execPod != "runtime-terminal" {
 		t.Fatalf("output=%#v exec=%s/%s", output, client.execNamespace, client.execPod)
 	}
 }

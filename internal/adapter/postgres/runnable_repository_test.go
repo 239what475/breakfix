@@ -84,7 +84,28 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verifyIdentity || verifyAction.Attempt != 1 || verifyAction.RunnableRevision == nil {
 		t.Fatalf("claim verification = %#v, %v", verifyAction, err)
 	}
-	wrongAttempt := storedReport
+	capture := runnable.OutputCapture{Stdout: []byte("verification stdout"), Stderr: []byte("verification stderr")}
+	outputRef, err := database.Runnable.StoreRunnableExecutionOutput(ctx, verifyAction.Credential, capture, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("store runnable execution output: %v", err)
+	}
+	expectedOutputRef, _, err := capture.Reference()
+	if err != nil || outputRef != expectedOutputRef {
+		t.Fatalf("stored output reference = %#v, %v", outputRef, err)
+	}
+	resolvedCapture, err := database.Runnable.ResolveRunnableExecutionOutput(ctx, outputRef)
+	if err != nil || !reflect.DeepEqual(resolvedCapture, capture) {
+		t.Fatalf("resolved output capture = %#v, %v", resolvedCapture, err)
+	}
+	verificationReport := storedReport
+	verificationReport.Reference.ID = "report-02"
+	verificationReport.Report.Phases[0].Actions[0].Outputs = []runnable.ImmutableReference{outputRef}
+	verificationReport.Report.Phases[1].Assertions[0].Outputs = []runnable.ImmutableReference{outputRef}
+	verificationReport.Reference.Digest, err = verificationReport.Report.Digest(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongAttempt := verificationReport
 	wrongAttempt.Report.Attempt++
 	wrongAttempt.Reference.Digest, err = wrongAttempt.Report.Digest(revision)
 	if err != nil {
@@ -93,8 +114,25 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, wrongAttempt, now.Add(5*time.Second)); err == nil || !strings.Contains(err.Error(), "attempt") {
 		t.Fatalf("complete verification with wrong attempt = %v", err)
 	}
-	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, storedReport, now.Add(5*time.Second)); err != nil {
+	missingOutput := verificationReport
+	missingOutput.Report.Phases = append([]runnable.PhaseResult(nil), verificationReport.Report.Phases...)
+	missingOutput.Report.Phases[0].Actions = append([]runnable.ActionResult(nil), verificationReport.Report.Phases[0].Actions...)
+	missingOutput.Report.Phases[0].Actions[0].Outputs = append([]runnable.ImmutableReference(nil), verificationReport.Report.Phases[0].Actions[0].Outputs...)
+	missingOutput.Reference.ID = "report-03"
+	missingOutput.Report.Phases[0].Actions[0].Outputs[0].Digest = testRunnableDigest("f")
+	missingOutput.Report.Phases[0].Actions[0].Outputs[0].Reference = "runnable-output://sha256/" + strings.TrimPrefix(testRunnableDigest("f"), "sha256:")
+	missingOutput.Reference.Digest, err = missingOutput.Report.Digest(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, missingOutput, now.Add(5*time.Second)); err == nil || !strings.Contains(err.Error(), "was not persisted") {
+		t.Fatalf("complete verification with missing output = %v", err)
+	}
+	if err := database.Runnable.CompleteRunnableVerification(ctx, verifyAction.Credential, verificationReport, now.Add(5*time.Second)); err != nil {
 		t.Fatalf("complete verification: %v", err)
+	}
+	if _, err := database.Runnable.StoreRunnableExecutionOutput(ctx, verifyAction.Credential, capture, now.Add(6*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
+		t.Fatalf("store output after verification completion = %v, want lease loss", err)
 	}
 
 	request := runnable.ReapRequest{
@@ -166,8 +204,8 @@ func testVerificationReport(t *testing.T, revision runnable.RunnableRevision) ru
 		Environment: runnable.EnvironmentIdentity{ID: "environment-01", Provider: "incus", ProfileDigest: profileDigest}, Attempt: 1, Passed: true,
 		CreatedAt: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
 		Phases: []runnable.PhaseResult{
-			{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialized", Outputs: []runnable.ImmutableReference{{Reference: "logs/initialize", Digest: testRunnableDigest("d"), SizeBytes: 1}}}}},
-			{ID: "observe", Assertions: []runnable.AssertionResult{{ID: "ready", Satisfied: true, Summary: "ready", Outputs: []runnable.ImmutableReference{{Reference: "logs/ready", Digest: testRunnableDigest("e"), SizeBytes: 1}}}}},
+			{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialized"}}},
+			{ID: "observe", Assertions: []runnable.AssertionResult{{ID: "ready", Satisfied: true, Summary: "ready"}}},
 		},
 	}
 }

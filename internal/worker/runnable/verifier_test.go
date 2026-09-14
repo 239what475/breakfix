@@ -103,11 +103,57 @@ func TestExecutorClassifiesProviderExecutionErrorAsInfrastructureFailure(t *test
 	}
 }
 
+func TestExecutorPersistsRawStreamsAndReplacesProviderReferences(t *testing.T) {
+	revision := runnable.RunnableRevision{FormatVersion: runnable.FormatVersion, Spec: validSpec(), Artifact: artifactFor(t, validSpec())}
+	provider := &fakeEnvironmentProvider{results: map[string]ExecutionOutput{
+		"scripts/init.sh":     output(0, "initialized", nil),
+		"scripts/exercise.sh": output(0, "exercised", nil),
+		"scripts/assert.sh":   {ExitCode: 0, Summary: "asserted", Raw: []byte(`{"assertions":[{"id":"ready","satisfied":true,"summary":"ready"}]}`), Stderr: []byte("assertion diagnostic"), Outputs: []runnable.ImmutableReference{{Reference: "provider://mutable", Digest: testDigest("f"), SizeBytes: 1}}},
+	}}
+	store := &fakeExecutionOutputStore{}
+	executor, err := NewExecutor(provider, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := executor.Verify(context.Background(), verifyRequest(t, revision, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.captures) != 3 || len(report.Phases) != 2 {
+		t.Fatalf("stored captures = %#v report = %#v", store.captures, report)
+	}
+	if string(store.captures[2].Stderr) != "assertion diagnostic" {
+		t.Fatalf("stderr was not persisted: %#v", store.captures[2])
+	}
+	for _, phase := range report.Phases {
+		for _, action := range phase.Actions {
+			if len(action.Outputs) != 1 || !strings.HasPrefix(action.Outputs[0].Reference, "runnable-output://sha256/") {
+				t.Fatalf("action retained provider output reference: %#v", action)
+			}
+		}
+		for _, assertion := range phase.Assertions {
+			if len(assertion.Outputs) != 1 || !strings.HasPrefix(assertion.Outputs[0].Reference, "runnable-output://sha256/") {
+				t.Fatalf("assertion retained provider output reference: %#v", assertion)
+			}
+		}
+	}
+}
+
 type fakeEnvironmentProvider struct {
 	results          map[string]ExecutionOutput
 	errForEntrypoint map[string]error
 	requests         []ExecutionRequest
 	createRequest    runnable.VerifyRequest
+}
+
+type fakeExecutionOutputStore struct {
+	captures []runnable.OutputCapture
+}
+
+func (s *fakeExecutionOutputStore) StoreExecutionOutput(_ context.Context, _ runnable.LeaseCredential, capture runnable.OutputCapture) (runnable.ImmutableReference, error) {
+	s.captures = append(s.captures, capture)
+	reference, _, err := capture.Reference()
+	return reference, err
 }
 
 func verifyRequest(t *testing.T, revision runnable.RunnableRevision, attempt int64) runnable.VerifyRequest {

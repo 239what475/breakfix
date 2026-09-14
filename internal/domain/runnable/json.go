@@ -60,3 +60,14 @@ func ParseRunnableRevision(raw []byte) (RunnableRevision, error) {
 	}
 	return value, nil
 }
+
+func ParseOutputCapture(raw []byte) (OutputCapture, error) {
+	value, err := DecodeStrictJSON[OutputCapture](raw)
+	if err != nil {
+		return OutputCapture{}, err
+	}
+	if err := value.Validate(); err != nil {
+		return OutputCapture{}, err
+	}
+	return value, nil
+}
