@@ -74,6 +74,17 @@ func TestEnvironmentProviderRejectsMismatchedInstalledProfile(t *testing.T) {
 	}
 }
 
+func TestEnvironmentProviderTreatsMissingNodeResourcesAsReleased(t *testing.T) {
+	revision := providerRevision(t, runnable.RuntimeNode)
+	node := &fakeNodeEnvironmentProvider{deleteErr: environment.ErrProviderNotFound}
+	provider := testEnvironmentProvider(t, node, &fakeK8sEnvironmentProvider{})
+	binding := runtimeenvironment.Binding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Purpose: runnable.PurposeLearning, RunnableRevision: revision}
+	done, err := provider.Release(context.Background(), binding)
+	if err != nil || !done {
+		t.Fatalf("missing Node release done=%v err=%v", done, err)
+	}
+}
+
 func testEnvironmentProvider(t *testing.T, node NodeEnvironmentProvider, k8s K8sEnvironmentProvider) *EnvironmentProvider {
 	t.Helper()
 	provider, err := NewEnvironmentProvider(node, k8s, EnvironmentProviderConfig{
@@ -105,6 +116,7 @@ type fakeNodeEnvironmentProvider struct {
 	request     incus.ProvisionNodeEnvironmentRequest
 	provisioned int
 	deleted     int
+	deleteErr   error
 }
 
 func (p *fakeNodeEnvironmentProvider) NodeEnvironmentIdentity(_ string, names []string) (incus.NodeEnvironmentIdentity, error) {
@@ -123,7 +135,7 @@ func (p *fakeNodeEnvironmentProvider) ProvisionNodeEnvironment(_ context.Context
 
 func (p *fakeNodeEnvironmentProvider) DeleteNodeEnvironment(_ context.Context, _ incus.ProvisionNodeEnvironmentRequest) error {
 	p.deleted++
-	return nil
+	return p.deleteErr
 }
 
 type fakeK8sEnvironmentProvider struct {

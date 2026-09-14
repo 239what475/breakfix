@@ -91,6 +91,9 @@ func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironm
 			return runtimeenvironment.Observation{}, err
 		}
 		if err := p.node.DeleteNodeEnvironment(ctx, request); err != nil {
+			if errors.Is(err, environment.ErrProviderNotFound) {
+				return p.provisionNode(ctx, binding)
+			}
 			return runtimeenvironment.Observation{}, fmt.Errorf("reset Node environment: %w", err)
 		}
 		return p.provisionNode(ctx, binding)
@@ -129,6 +132,9 @@ func (p *EnvironmentProvider) Release(ctx context.Context, binding runtimeenviro
 			return false, err
 		}
 		if err := p.node.DeleteNodeEnvironment(ctx, request); err != nil {
+			if errors.Is(err, environment.ErrProviderNotFound) {
+				return true, nil
+			}
 			return false, fmt.Errorf("release Node environment: %w", err)
 		}
 		return true, nil
