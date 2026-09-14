@@ -356,73 +356,75 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 以下任务按依赖顺序执行。每项完成后勾选对应验证；没有通过该项验证时，不进入下一项。任务中的“公共”只表示运行底座，不表示把两个产品合并成一个内容模块。
 
+勾选状态按当前代码与测试证据维护；未勾选项表示仍有实现或验收工作未完成。
+
 ### 1. 固定公共运行契约
 
-- [ ] 在 `internal/domain` 中定义 `RunnableSpec`、`ArtifactReference`、`RunnableRevision`、`ActionSpec`、`ActionResult`、`AssertionSpec`、`AssertionResult`、`ValidationPhase`、`ValidationPlan` 和 `VerificationReport`；`ArtifactReference` 作为 `RunnableRevision` 的内嵌值，不单独建业务 aggregate。
-- [ ] 为每个公共类型定义 JSON 字段、格式版本、必填字段、大小上限、枚举值、稳定 ID 规则和禁止字段；拒绝未知字段，避免 Agent 通过额外字段注入未声明行为。
-- [ ] 实现规范化序列化和 digest 计算，固定 `spec_digest`、source archive digest、artifact digest 和 `runnable_revision_digest` 的算法、输入范围及显示格式。
-- [ ] 实现 `RunnableSpec` 的完整校验：runtime profile、source、initialization、执行边界、validation plan 和 lifecycle policy 必须互相一致。
-- [ ] 实现 `ArtifactReference` 与 `built_from_spec_digest` 的绑定校验，禁止用另一个 spec 的构建产物拼接出新的 revision。
-- [ ] 实现 `RunnableRevision` 的不可变组合校验；验证环境、用户环境和内容发布只能接受完整且已核验的组合。
-- [ ] 固定平台执行边界：允许的目标位置、读写权限、网络范围、资源上限和超时上限；运行时重新校验，不信任 archive 中的自由文本声明，也不引入独立权限 Registry。
-- [ ] 实现通用断言协议解析：每个 ID 恰好一次，未知、重复、缺失、非 JSON 和超限输出分别返回确定性 artifact failure。
-- [ ] 实现公共 `passed` 计算，确保 Agent、适配器和上层产品不能覆盖机器结果；区分业务断言失败、协议失败和基础设施失败。
-- [ ] 为执行日志、原始输出、环境身份、attempt 和 artifact digest 定义不可变引用格式；阶段结果树是 `VerificationReport` 中唯一的动作/断言结果来源，不把清理状态写入报告。
-- [ ] 为上述类型补充纯 domain 单元测试、边界测试、digest 稳定性测试、未知字段测试和反序列化拒绝测试。
+- [x] 在 `internal/domain` 中定义 `RunnableSpec`、`ArtifactReference`、`RunnableRevision`、`ActionSpec`、`ActionResult`、`AssertionSpec`、`AssertionResult`、`ValidationPhase`、`ValidationPlan` 和 `VerificationReport`；`ArtifactReference` 作为 `RunnableRevision` 的内嵌值，不单独建业务 aggregate。
+- [x] 为每个公共类型定义 JSON 字段、格式版本、必填字段、大小上限、枚举值、稳定 ID 规则和禁止字段；拒绝未知字段，避免 Agent 通过额外字段注入未声明行为。
+- [x] 实现规范化序列化和 digest 计算，固定 `spec_digest`、source archive digest、artifact digest 和 `runnable_revision_digest` 的算法、输入范围及显示格式。
+- [x] 实现 `RunnableSpec` 的完整校验：runtime profile、source、initialization、执行边界、validation plan 和 lifecycle policy 必须互相一致。
+- [x] 实现 `ArtifactReference` 与 `built_from_spec_digest` 的绑定校验，禁止用另一个 spec 的构建产物拼接出新的 revision。
+- [x] 实现 `RunnableRevision` 的不可变组合校验；验证环境、用户环境和内容发布只能接受完整且已核验的组合。
+- [x] 固定平台执行边界：允许的目标位置、读写权限、网络范围、资源上限和超时上限；运行时重新校验，不信任 archive 中的自由文本声明，也不引入独立权限 Registry。
+- [x] 实现通用断言协议解析：每个 ID 恰好一次，未知、重复、缺失、非 JSON 和超限输出分别返回确定性 artifact failure。
+- [x] 实现公共 `passed` 计算，确保 Agent、适配器和上层产品不能覆盖机器结果；区分业务断言失败、协议失败和基础设施失败。
+- [x] 为执行日志、原始输出、环境身份、attempt 和 artifact digest 定义不可变引用格式；阶段结果树是 `VerificationReport` 中唯一的动作/断言结果来源，不把清理状态写入报告。
+- [x] 为上述类型补充纯 domain 单元测试、边界测试、digest 稳定性测试、未知字段测试和反序列化拒绝测试。
 
 ### 2. 将 Operations 编译为公共运行输入
 
-- [ ] 新增 Operations 内容适配器，将现有不可变场景 revision 编译为 `RunnableSpec`，并保留 Operations 自己的内容校验和展示投影。
-- [ ] 将现有 `reproduction`、`reference repair`、`answer`、`checkpoint` 和固定脚本路径编译为通用阶段、动作和断言；这些名称不进入公共 JSON。
-- [ ] 将 Node 多节点和 K8s management 位置映射为平台执行边界和 target location，禁止在公共 Worker 中出现 runtime/content 分支。
-- [ ] 将 Operations 的 archive、初始化入口、版本、拓扑、资源和网络快照完整写入 `RunnableSpec`，并为每次变更生成新 digest。
-- [ ] 保留 Operations 对验证结果的领域投影，使现有场景界面仍能显示复现证据和参考修复，但投影不得反向修改公共报告。
-- [ ] 用现有 Node、K8s、无参考修复和带参考修复 fixture 覆盖观察型、修复型和多阶段计划；补充编译失败和执行边界越权测试。
+- [x] 新增 Operations 内容适配器，将现有不可变场景 revision 编译为 `RunnableSpec`，并保留 Operations 自己的内容校验和展示投影。
+- [x] 将现有 `reproduction`、`reference repair`、`answer`、`checkpoint` 和固定脚本路径编译为通用阶段、动作和断言；这些名称不进入公共 JSON。
+- [x] 将 Node 多节点和 K8s management 位置映射为平台执行边界和 target location，禁止在公共 Worker 中出现 runtime/content 分支。
+- [x] 将 Operations 的 archive、初始化入口、版本、拓扑、资源和网络快照完整写入 `RunnableSpec`，并为每次变更生成新 digest。
+- [x] 保留 Operations 对验证结果的领域投影，使现有场景界面仍能显示复现证据和参考修复，但投影不得反向修改公共报告。
+- [x] 用现有 Node、K8s、无参考修复和带参考修复 fixture 覆盖观察型、修复型和多阶段计划；补充编译失败和执行边界越权测试。
 
 ### 3. 迁移 Runtime Worker 与 Provider 执行器
 
 - [ ] 将 Runtime Action 的输入改为 `RunnableSpec`、阶段结果和通用 artifact 引用；公共层以 `MaterializeArtifact` 表示构建与 artifact 发布，移除 `ScenarioID`、`ScenarioRevisionID`、`ScenarioPublishing` 及其专属状态分支。
-- [ ] 将 action identity 改为公共的 content kind/id/revision、spec digest、阶段和 state version；基础设施 retry 不改变外部资源 identity。
-- [ ] 让公共 `MaterializeArtifact` executor 消费 `RunnableSpec` 和 source archive，内部可以拆分 build/publish，但对上层只输出绑定 spec digest 的 `ArtifactReference`。
-- [ ] 只有 artifact 构建和发布完成后，编排器才写入不可变 `RunnableRevision`；Worker 不在 revision 中逐阶段回填字段。
-- [ ] 让 Verify executor 只消费完整 `RunnableRevision` 与 `ValidationPlan`，按阶段执行动作和只读断言，并返回通用 `VerificationReport`。
-- [ ] 将 Node、K8s、Registry、Incus 和环境 provider 的调用参数改为公共 target、执行边界和 lifecycle 数据；SDK 类型不得泄漏到 domain。
-- [ ] 将断言执行身份限制为只读权限，将动作执行身份限制为已批准的执行边界；增加执行前后的资源和权限边界检查。
-- [ ] 保留 lease fencing、动作 deadline、幂等创建/获取、attempt 上限和 artifact failure 分类；语义失败不得自动当作基础设施重试。
+- [x] 将 action identity 改为公共的 content kind/id/revision、spec digest、阶段和 state version；基础设施 retry 不改变外部资源 identity。
+- [x] 让公共 `MaterializeArtifact` executor 消费 `RunnableSpec` 和 source archive，内部可以拆分 build/publish，但对上层只输出绑定 spec digest 的 `ArtifactReference`。
+- [x] 只有 artifact 构建和发布完成后，编排器才写入不可变 `RunnableRevision`；Worker 不在 revision 中逐阶段回填字段。
+- [x] 让 Verify executor 只消费完整 `RunnableRevision` 与 `ValidationPlan`，按阶段执行动作和只读断言，并返回通用 `VerificationReport`。
+- [x] 将 Node、K8s、Registry、Incus 和环境 provider 的调用参数改为公共 target、执行边界和 lifecycle 数据；SDK 类型不得泄漏到 domain。
+- [x] 将断言执行身份限制为只读权限，将动作执行身份限制为已批准的执行边界；增加执行前后的资源和权限边界检查。
+- [x] 保留 lease fencing、动作 deadline、幂等创建/获取、attempt 上限和 artifact failure 分类；语义失败不得自动当作基础设施重试。
 - [ ] 将 Operations 的内容发布移回 Operations application service；Runtime Worker 只负责构建、artifact、环境、验证和资源生命周期。
-- [ ] 为 Worker 增加观察型、修复型、多阶段、断言失败、协议失败、lease 丢失、重启接管和重复结果测试。
+- [x] 为 Worker 增加观察型、修复型、多阶段、断言失败、协议失败、lease 丢失、重启接管和重复结果测试。
 
 ### 4. 迁移 Controller、Environment 与异步回收
 
-- [ ] 定义单一 `breakfix.dev/v2` `RuntimeEnvironment` CRD：`runnableRevisionRef`、purpose、lease、幂等 `resetNonce`、phase、operation、conditions、progress、failure 和稳定 resource/endpoint refs；Provider 从 `RunnableRevision.runtime_profile` 解析，不维护 Node/VK8s 两套 schema。
-- [ ] 为 CRD 增加严格 OpenAPI schema、admission/webhook 不可变性校验和合法 phase 单向转换；拒绝未知字段、digest/revision 不一致、倒退时间和超限生命周期参数。
-- [ ] 将 Controller 中 checkpoint 结果的 Operations 投影移出公共 Environment 状态；CRD progress 只保存当前阶段、attempt 和 `VerificationReport` 引用，不复制动作/断言结果树。
-- [ ] 明确 Server、Controller、Reaper 对 spec/status/finalizer/releaseAt 的写权限和并发条件，确保 Server 不能通过 CRD 修改绕过 Runtime Worker 的前置校验。
-- [ ] 为 reset、stop、reap 定义稳定资源 identity、lease fencing、超时、最大存活期和幂等完成协议。
-- [ ] 验证完成后只持久化“环境已可释放”事实，由独立 Reaper 异步领取和执行 stop/reap；清理失败不改变验证结果或发布状态。
-- [ ] 为 Reaper 增加断点恢复、lease 接管、重复执行、provider 暂时不可用、永久资源缺失和积压告警测试。
-- [ ] 验证终端、日志、事件、资源状态和只读观测接口不依赖 Operations 或 Documentation 的字段名称。
+- [x] 定义单一 `breakfix.dev/v2` `RuntimeEnvironment` CRD：`runnableRevisionRef`、purpose、lease、幂等 `resetNonce`、phase、operation、conditions、progress、failure 和稳定 resource/endpoint refs；Provider 从 `RunnableRevision.runtime_profile` 解析，不维护 Node/VK8s 两套 schema。
+- [x] 为 CRD 增加严格 OpenAPI schema、admission/webhook 不可变性校验和合法 phase 单向转换；拒绝未知字段、digest/revision 不一致、倒退时间和超限生命周期参数。
+- [x] 将 Controller 中 checkpoint 结果的 Operations 投影移出公共 Environment 状态；CRD progress 只保存当前阶段、attempt 和 `VerificationReport` 引用，不复制动作/断言结果树。
+- [x] 明确 Server、Controller、Reaper 对 spec/status/finalizer/releaseAt 的写权限和并发条件，确保 Server 不能通过 CRD 修改绕过 Runtime Worker 的前置校验。
+- [x] 为 reset、stop、reap 定义稳定资源 identity、lease fencing、超时、最大存活期和幂等完成协议。
+- [x] 验证完成后只持久化“环境已可释放”事实，由独立 Reaper 异步领取和执行 stop/reap；清理失败不改变验证结果或发布状态。
+- [x] 为 Reaper 增加断点恢复、lease 接管、重复执行、provider 暂时不可用、永久资源缺失和积压告警测试。
+- [x] 验证终端、日志、事件、资源状态和只读观测接口不依赖 Operations 或 Documentation 的字段名称。
 - [ ] 先排空并回收旧 `NodeEnvironment`/`VK8sEnvironment` v1 对象，再安装 `RuntimeEnvironment` v2 CRD、更新 RBAC/客户端和生成清单；不提供 conversion webhook、双写或旧字段兼容读取。
 - [ ] 在 Kind 和 Incus 目标上各完成一次从干净环境创建、阶段执行、验证、重置、停止和回收的真实测试。
 
 ### 5. 迁移持久化、内部 API 与发布边界
 
-- [ ] 新增保存 `RunnableSpec`、内嵌的 `ArtifactReference`、`RunnableRevision`、阶段结果、验证报告 digest 和审核/发布前置条件的持久化记录；不为 `ArtifactReference` 建独立业务状态表。
-- [ ] 将 Runtime Worker 内部 API 改为公共契约，所有请求校验 spec/revision digest、lease credential、state version 和 action identity。
-- [ ] 删除 Runtime Worker 对 `content/scenario`、Operations repository 和产品发布状态的依赖；产品 application 通过公共引用读取运行结果。
+- [x] 新增保存 `RunnableSpec`、内嵌的 `ArtifactReference`、`RunnableRevision`、阶段结果、验证报告 digest 和审核/发布前置条件的持久化记录；不为 `ArtifactReference` 建独立业务状态表。
+- [x] 将 Runtime Worker 内部 API 改为公共契约，所有请求校验 spec/revision digest、lease credential、state version 和 action identity。
+- [x] 删除 Runtime Worker 对 `content/scenario`、Operations repository 和产品发布状态的依赖；产品 application 通过公共引用读取运行结果。
 - [ ] 将 Operations 发布事务改为由 Operations application 原子写入自己的 revision、active pointer 和索引；为未来 Documentation 发布保留独立入口。
 - [ ] 提升 schema version，清理或重建明确可丢弃的本地数据库、候选 archive、临时运行记录和未发布 artifact；不提供旧公共模型的兼容读取。
 - [ ] 明确已发布内容、历史学习记录和仍被 Environment 引用的 artifact 的保留边界，迁移脚本不得默认删除这些数据。
-- [ ] 更新 OpenAPI、CRD、内部 API 客户端、生成代码、配置和部署清单，并通过 `make verify-generated` 和 `kubectl kustomize .`。
+- [x] 更新 OpenAPI、CRD、内部 API 客户端、生成代码、配置和部署清单，并通过 `make verify-generated` 和 `kubectl kustomize .`。
 
 ### 6. 公共底座验收
 
 - [ ] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
-- [ ] 运行公共 domain、application、adapter、worker 和 controller 单元测试，覆盖至少一个 Operations observation-only、repair-style 和 multi-stage 计划。
+- [x] 运行公共 domain、application、adapter、worker 和 controller 单元测试，覆盖至少一个 Operations observation-only、repair-style 和 multi-stage 计划。
 - [ ] 在专用 Kind target 上完成构建、artifact 发布、真实验证、lease 接管、重启恢复和异步回收验收。
 - [ ] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。
-- [ ] 验证任何 `VerificationReport` 都能由 `RunnableRevision` digest、artifact digest 和 environment profile revision 重现。
-- [ ] 验证 `RuntimeEnvironment v2` 的 strict schema、不可变字段、phase/operation 转换、稳定资源引用和 lease 回收语义；CRD 不包含内容专属字段或完整验证结果。
+- [x] 验证任何 `VerificationReport` 都能由 `RunnableRevision` digest、artifact digest 和 environment profile revision 重现。
+- [x] 验证 `RuntimeEnvironment v2` 的 strict schema、不可变字段、phase/operation 转换、稳定资源引用和 lease 回收语义；CRD 不包含内容专属字段或完整验证结果。
 - [ ] 新增一个仅依赖公共适配器接口的最小 fake content kind，证明无需修改 Runtime Worker 核心即可执行。
 - [ ] 完成公共底座切换后，再开始以下文档实践 Agent 任务；不在同一阶段并行引入文档领域字段。
 
@@ -500,4 +502,4 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 12. **文档实践真实验证与发布**：接入公共 Worker 构建/验证、验证审核 Agent、原子 PracticeRevision/索引发布和 PublicationManifest；完成固定 Pod 生命周期实践的真实 Kind 验收。
 13. **端到端验收与文档收尾**：补齐全链路 fixture、重启/重复请求/基础设施失败测试，更新 README、架构、API、运行和恢复文档，执行本阶段全部静态、构建、集成和真实环境检查。
 
-每个提交的提交说明应包含：变更边界、更新的公共或内容契约、执行过的测试命令、已知未完成任务和是否产生不兼容的 schema/API/artifact 变化。只有第 13 个提交完成后，才将本 TODO 中的任务统一标记为完成；中途提交应保留真实的未完成状态。
+每个提交的提交说明应包含：变更边界、更新的公共或内容契约、执行过的测试命令、已知未完成任务和是否产生不兼容的 schema/API/artifact 变化。每项任务在对应实现和验证完成后立即勾选；未完成项持续保留未勾选状态，不在最后一次提交中批量补勾。
