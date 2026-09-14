@@ -27,7 +27,7 @@ func TestRunnableSpecDigestIsStableAcrossMapConstruction(t *testing.T) {
 		t.Fatalf("equivalent specs produced different digests: %s != %s", firstDigest, secondDigest)
 	}
 
-	second.Initialization.Entrypoint = "scripts/other-init.sh"
+	second.Initialization[0].Entrypoint = "scripts/other-init.sh"
 	changedDigest, err := second.Digest()
 	if err != nil {
 		t.Fatalf("digest changed spec: %v", err)
@@ -124,9 +124,9 @@ func validSpec() RunnableSpec {
 			},
 		},
 		Source: SourceArchive{FormatVersion: FormatVersion, Reference: "archives/service-startup.tar.gz", Digest: testDigest("b")},
-		Initialization: ActionSpec{
+		Initialization: []ActionSpec{{
 			ID: "initialize", Entrypoint: "scripts/init.sh", Target: TargetLocation{Kind: "node", ID: "host"}, BoundaryID: "host-write", TimeoutSeconds: 300, ExpectedExitCodes: []int{0},
-		},
+		}},
 		ValidationPlan: ValidationPlan{FormatVersion: FormatVersion, Phases: []ValidationPhase{{
 			ID: "observe", TimeoutSeconds: 900, Execution: PhaseSequential,
 			Actions: []ActionSpec{{

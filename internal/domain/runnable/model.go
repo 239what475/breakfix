@@ -200,7 +200,7 @@ type RunnableSpec struct {
 	Identity        ContentIdentity `json:"identity"`
 	RuntimeProfile  RuntimeProfile  `json:"runtime_profile"`
 	Source          SourceArchive   `json:"source"`
-	Initialization  ActionSpec      `json:"initialization"`
+	Initialization  []ActionSpec    `json:"initialization"`
 	ValidationPlan  ValidationPlan  `json:"validation_plan"`
 	LifecyclePolicy LifecyclePolicy `json:"lifecycle_policy"`
 }

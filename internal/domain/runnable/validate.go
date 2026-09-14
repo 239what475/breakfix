@@ -282,8 +282,18 @@ func (s RunnableSpec) Validate() error {
 	if err := s.Source.Validate(); err != nil {
 		return err
 	}
-	if err := s.Initialization.Validate(s.RuntimeProfile, "initialization"); err != nil {
-		return err
+	if len(s.Initialization) == 0 || len(s.Initialization) > MaxActionsPerPhase {
+		return invalid("initialization", "must contain bounded initialization actions")
+	}
+	initializationIDs := make(map[string]struct{}, len(s.Initialization))
+	for index, action := range s.Initialization {
+		if err := action.Validate(s.RuntimeProfile, fmt.Sprintf("initialization[%d]", index)); err != nil {
+			return err
+		}
+		if _, exists := initializationIDs[action.ID]; exists {
+			return invalid("initialization", "contains a duplicate action id")
+		}
+		initializationIDs[action.ID] = struct{}{}
 	}
 	if err := s.ValidationPlan.Validate(s.RuntimeProfile); err != nil {
 		return err
