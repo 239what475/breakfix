@@ -91,6 +91,9 @@ func Decide(environment runtimev2.RuntimeEnvironment, revision runnable.Runnable
 	if environment.Status.Phase == runtimev2.PhaseReleased {
 		return DecisionNone, nil
 	}
+	if environment.Status.Operation != "" && environment.Status.Operation != runtimev2.OperationNone && environment.Status.Operation != runtimev2.OperationResetting {
+		return DecisionNone, fmt.Errorf("runtime environment has unsupported operation %q", environment.Status.Operation)
+	}
 	if !now.UTC().Before(expiresAt) || environment.Status.Phase == runtimev2.PhaseDraining {
 		if environment.Status.Phase == runtimev2.PhaseDraining {
 			return DecisionReap, nil
@@ -99,6 +102,12 @@ func Decide(environment runtimev2.RuntimeEnvironment, revision runnable.Runnable
 	}
 	if environment.Status.Phase == runtimev2.PhaseReady && environment.Spec.ResetNonce > observedResetNonce {
 		return DecisionReset, nil
+	}
+	if environment.Status.Operation == runtimev2.OperationResetting {
+		if environment.Status.Phase != runtimev2.PhaseReady && environment.Status.Phase != runtimev2.PhaseProvisioning {
+			return DecisionNone, fmt.Errorf("runtime environment reset is invalid in phase %q", environment.Status.Phase)
+		}
+		return DecisionProvision, nil
 	}
 	switch environment.Status.Phase {
 	case "", runtimev2.PhasePending, runtimev2.PhaseProvisioning:
