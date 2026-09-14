@@ -13,7 +13,6 @@ LDFLAGS := -s -w \
 
 CONTROLLER_GEN_VERSION := v0.21.0
 CONTROLLER_GEN := go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
-CRD_TYPES_DIR := api/v1
 OAPI_CODEGEN_VERSION := v2.7.1
 OAPI_CODEGEN := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 OPENAPI_SPEC := api/http/openapi.yaml
@@ -67,17 +66,22 @@ docs-check:
 	$(DOCS_SITE_SCRIPT) check
 
 generate: web-deps
-	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR)
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=deploy/crds
+	$(CONTROLLER_GEN) object paths=./api/v1
+	$(CONTROLLER_GEN) object paths=./api/v2
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v1 output:crd:dir=deploy/crds
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v2 output:crd:dir=deploy/crds
 	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
 	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
 
 verify-generated: web-deps
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
-	$(CONTROLLER_GEN) object paths=./$(CRD_TYPES_DIR) output:dir=$$tmp; \
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./$(CRD_TYPES_DIR) output:crd:dir=$$tmp/crd; \
-	diff -u $(CRD_TYPES_DIR)/zz_generated.deepcopy.go $$tmp/zz_generated.deepcopy.go; \
+	$(CONTROLLER_GEN) object paths=./api/v1 output:dir=$$tmp/v1; \
+	$(CONTROLLER_GEN) object paths=./api/v2 output:dir=$$tmp/v2; \
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v1 output:crd:dir=$$tmp/crd; \
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v2 output:crd:dir=$$tmp/crd; \
+	diff -u api/v1/zz_generated.deepcopy.go $$tmp/v1/zz_generated.deepcopy.go; \
+	diff -u api/v2/zz_generated.deepcopy.go $$tmp/v2/zz_generated.deepcopy.go; \
 	diff -ru deploy/crds $$tmp/crd; \
 	sed "s|^output:.*|output: $$tmp/server.gen.go|" $(OPENAPI_GO_CONFIG) >"$$tmp/oapi-codegen.yaml" && \
 	$(OAPI_CODEGEN) --config "$$tmp/oapi-codegen.yaml" $(OPENAPI_SPEC) && \
