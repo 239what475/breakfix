@@ -241,6 +241,10 @@ func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.R
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
+		// Retain the finalizer until the Reaper has durably reported success,
+		// then request CRD deletion. The deletion reconciliation below removes
+		// that finalizer only after observing the completed reap record.
+		return ctrl.Result{}, client.IgnoreNotFound(r.Delete(ctx, environment))
 	}
 	before := environment.DeepCopy()
 	controllerutil.RemoveFinalizer(environment, finalizer)

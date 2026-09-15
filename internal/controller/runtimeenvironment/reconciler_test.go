@@ -190,8 +190,14 @@ func TestReconcilerReapsAsynchronouslyAfterLeaseDrain(t *testing.T) {
 
 	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 1)
 	current = getRuntimeEnvironment(t, kubeClient, environment.Name)
-	if current.Status.Phase != runtimev2.PhaseReleased || current.Status.Lifecycle.ReleasedAt == nil || containsFinalizer(current.Finalizers, finalizer) {
-		t.Fatalf("released environment = %#v finalizers=%#v", current.Status, current.Finalizers)
+	if current.Status.Phase != runtimev2.PhaseReleased || current.Status.Lifecycle.ReleasedAt == nil || current.DeletionTimestamp.IsZero() || !containsFinalizer(current.Finalizers, finalizer) {
+		t.Fatalf("released environment = %#v deletion=%#v finalizers=%#v", current.Status, current.DeletionTimestamp, current.Finalizers)
+	}
+
+	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 1)
+	var deleted runtimev2.RuntimeEnvironment
+	if err := kubeClient.Get(context.Background(), client.ObjectKey{Namespace: environment.Namespace, Name: environment.Name}, &deleted); err == nil {
+		t.Fatalf("reaped environment remains: %#v", deleted)
 	}
 }
 
