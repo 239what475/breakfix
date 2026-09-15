@@ -3,18 +3,6 @@ package postgres
 // Document practice records are append-only. No update path is exposed for
 // these tables; a revised plan or candidate receives a new artifact digest.
 var schemaDocumentPracticeStatements = []string{
-	`CREATE TABLE document_snapshots (
-		source_id TEXT NOT NULL,
-		commit TEXT NOT NULL,
-		version TEXT NOT NULL,
-		language TEXT NOT NULL,
-		license TEXT NOT NULL,
-		mirror_origin TEXT NOT NULL,
-		content_digest TEXT NOT NULL,
-		context JSONB NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL,
-		PRIMARY KEY (source_id, commit, language, content_digest)
-	)`,
 	`CREATE TABLE document_artifact_ledger (
 		id TEXT PRIMARY KEY,
 		workflow_id TEXT NOT NULL,

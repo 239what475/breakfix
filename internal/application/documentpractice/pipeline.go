@@ -57,7 +57,7 @@ func (p Planner) Plan(ctx context.Context, path, anchor string) (domain.Learning
 	if err := plan.Validate(); err != nil {
 		return domain.LearningUnitPlan{}, fmt.Errorf("planner returned invalid plan: %w", err)
 	}
-	if plan.Context.SourceID != page.Context.SourceID || plan.Context.Repository != page.Context.Repository || plan.Context.Commit != page.Context.Commit || plan.Context.Version != page.Context.Version || plan.Context.Language != page.Context.Language || plan.Context.License != page.Context.License || plan.Context.MirrorOrigin != page.Context.MirrorOrigin || plan.Context.ContentDigest != page.Context.ContentDigest || plan.Context.PagePath != path {
+	if plan.Context.SourceID != page.Context.SourceID || plan.Context.Repository != page.Context.Repository || plan.Context.Commit != page.Context.Commit || plan.Context.Version != page.Context.Version || plan.Context.Language != page.Context.Language || plan.Context.License != page.Context.License || plan.Context.MirrorOrigin != page.Context.MirrorOrigin || plan.Context.PagePath != path {
 		return domain.LearningUnitPlan{}, errors.New("planner changed pinned document context")
 	}
 	return plan, nil
@@ -147,7 +147,7 @@ func ValidateCandidateAgainstPlan(candidate domain.PracticeCandidate, plan domai
 	if candidate.PlanID != plan.ID || candidate.PlanRevision != plan.Revision {
 		return errors.New("candidate is bound to another plan revision")
 	}
-	if candidate.Context.Commit != plan.Context.Commit || candidate.Context.ContentDigest != plan.Context.ContentDigest || candidate.Context.PagePath != plan.Context.PagePath {
+	if candidate.Context.Commit != plan.Context.Commit || candidate.Context.PagePath != plan.Context.PagePath {
 		return errors.New("candidate changed document evidence context")
 	}
 	profile := candidate.Spec.RuntimeProfile

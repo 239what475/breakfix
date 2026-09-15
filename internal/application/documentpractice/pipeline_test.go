@@ -31,7 +31,7 @@ func (a fakePlanAgent) Propose(context.Context, domain.Page, domain.Metadata, []
 }
 
 func validPlan() domain.LearningUnitPlan {
-	ctx := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", ContentDigest: "sha256:" + strings.Repeat("b", 64), PagePath: "docs/pods.md"}
+	ctx := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", PagePath: "docs/pods.md"}
 	return domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: "pod-lifecycle", Revision: 1, Context: ctx, Title: "Pod lifecycle", Objective: "Observe Pod state", Boundary: "One Pod", Runtime: domain.RuntimeConstraint{Runtime: "k8s", BaseImage: "kindest/node", Resources: runnable.ResourceLimits{CPU: "1", MemoryBytes: 256 << 20, EphemeralBytes: 512 << 20, MaxProcesses: 32, MaxConcurrentTasks: 1}, Network: "isolated", Topology: "single-cluster"}, Evidence: []domain.EvidenceReference{{ID: "page", Kind: domain.EvidencePage, Path: ctx.PagePath, Digest: "sha256:" + strings.Repeat("c", 64)}}, Observations: []domain.ObservationPoint{{ID: "phase", Description: "Pod reaches Running", EvidenceIDs: []string{"page"}}}, CreatedAt: time.Now().UTC()}
 }
 

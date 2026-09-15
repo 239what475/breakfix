@@ -33,9 +33,9 @@ func (k EvidenceKind) Valid() bool {
 	return k == EvidencePage || k == EvidenceRendered || k == EvidenceSource || k == EvidenceInclude || k == EvidenceResource
 }
 
-// DocumentContext identifies one immutable page scope. A URL is never used as
-// an identity: source revision and the rendered page content digest are
-// required. Site-wide output is intentionally outside this scope.
+// DocumentContext identifies one immutable document scope. The upstream
+// revision and fixed page coordinates are the identity; rendered HTML is
+// presentation, not an identity input.
 type DocumentContext struct {
 	FormatVersion string `json:"format_version"`
 	SourceID      string `json:"source_id"`
@@ -45,24 +45,11 @@ type DocumentContext struct {
 	Language      string `json:"language"`
 	License       string `json:"license"`
 	MirrorOrigin  string `json:"mirror_origin"`
-	ContentDigest string `json:"content_digest"`
 	PagePath      string `json:"page_path"`
 	Anchor        string `json:"anchor,omitempty"`
 }
 
 func (c DocumentContext) Validate() error {
-	if err := c.ValidateIdentity(); err != nil {
-		return err
-	}
-	if !runnable.ValidDigest(c.ContentDigest) {
-		return errors.New("document context requires rendered page content digest")
-	}
-	return nil
-}
-
-// ValidateIdentity checks the fixed source and page coordinates before the
-// Reader derives the rendered page content digest.
-func (c DocumentContext) ValidateIdentity() error {
 	if c.FormatVersion != FormatVersion || strings.TrimSpace(c.SourceID) == "" || strings.TrimSpace(c.Repository) == "" ||
 		strings.TrimSpace(c.Commit) == "" || strings.TrimSpace(c.Version) == "" || strings.TrimSpace(c.Language) == "" ||
 		strings.TrimSpace(c.License) == "" || strings.TrimSpace(c.MirrorOrigin) == "" {
@@ -452,5 +439,5 @@ func ValidateRelativePath(value string) error {
 }
 
 func sameContextIdentity(a, b DocumentContext) bool {
-	return a.SourceID == b.SourceID && a.Commit == b.Commit && a.ContentDigest == b.ContentDigest && a.PagePath == b.PagePath && a.Anchor == b.Anchor
+	return a.SourceID == b.SourceID && a.Commit == b.Commit && a.Language == b.Language && a.PagePath == b.PagePath && a.Anchor == b.Anchor
 }

@@ -10,7 +10,7 @@ import (
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )
 
-func TestNewPinnedSnapshotBindsBuildInfoAndPageContent(t *testing.T) {
+func TestNewPinnedSnapshotBindsBuildInfoWithoutHashingRenderedOutput(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := t.TempDir()
 	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\n")
@@ -21,38 +21,23 @@ func TestNewPinnedSnapshotBindsBuildInfoAndPageContent(t *testing.T) {
 	writeFile(t, filepath.Join(root, "build-info.json"), buildInfo)
 
 	snapshot, err := NewPinnedSnapshot(context, root, sourceRoot)
-	if err != nil || snapshot.Context.ContentDigest != contentDigest("# Pod lifecycle\n") || snapshot.BuildBaseURL != "https://docs.example.test/" {
+	if err != nil || snapshot.Context != context || snapshot.BuildBaseURL != "https://docs.example.test/" {
 		t.Fatalf("pinned snapshot = %#v, %v", snapshot, err)
 	}
 	writeFile(t, filepath.Join(root, "docs", "unrelated.md"), "changes outside the page scope are allowed\n")
-	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err != nil {
+	first, err := snapshot.ReadPage(context.PagePath, context.Anchor)
+	if err != nil {
 		t.Fatalf("unrelated page invalidated pinned content: %v", err)
 	}
-	writeFile(t, filepath.Join(root, "docs", "pods.md"), "changed\n")
-	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err == nil {
-		t.Fatal("pinned page accepted changed content")
+	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\nchanged\n")
+	second, err := snapshot.ReadPage(context.PagePath, context.Anchor)
+	if err != nil || second.Digest == first.Digest {
+		t.Fatalf("page evidence = %#v, %v", second, err)
 	}
 }
 
 func unboundContext() domain.DocumentContext {
 	return domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34.0", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
-}
-
-func boundContext(t *testing.T, root string, context domain.DocumentContext) domain.DocumentContext {
-	t.Helper()
-	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(context.PagePath)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.HasSuffix(context.PagePath, ".html") {
-		value, err := renderedPageContent(string(content))
-		if err != nil {
-			t.Fatal(err)
-		}
-		content = []byte(value)
-	}
-	context.ContentDigest = contentDigest(string(content))
-	return context
 }
 
 func TestSnapshotReadsPinnedFilesAndEvidence(t *testing.T) {
@@ -61,13 +46,13 @@ func TestSnapshotReadsPinnedFilesAndEvidence(t *testing.T) {
 	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\n\n## Running\n")
 	writeFile(t, filepath.Join(root, "docs", "other.md"), "# Other\n")
 	writeFile(t, filepath.Join(sourceRoot, "source.md"), "source evidence\ninclude evidence\n")
-	context := boundContext(t, root, unboundContext())
+	context := unboundContext()
 	snapshot, err := NewSnapshot(context, root, sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	page, err := snapshot.ReadPage(context.PagePath, context.Anchor)
-	if err != nil || page.Digest != context.ContentDigest || !strings.Contains(page.Content, "Pod lifecycle") {
+	if err != nil || !strings.Contains(page.Content, "Pod lifecycle") {
 		t.Fatalf("unexpected page: %#v, %v", page, err)
 	}
 	metadata, err := snapshot.ReadMetadata(context.PagePath)
@@ -97,7 +82,7 @@ func TestSnapshotReadsRenderedHTMLHeadingMetadata(t *testing.T) {
 	writeFile(t, path, "<html><body><main><h1>Pod lifecycle</h1><h2 id=\"pod-phase\">Pod phase</h2></main></body></html>")
 	context := unboundContext()
 	context.PagePath = "docs/pods/index.html"
-	context = boundContext(t, root, context)
+	context.Anchor = "pod-phase"
 	snapshot, err := NewSnapshot(context, root, sourceRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -106,23 +91,32 @@ func TestSnapshotReadsRenderedHTMLHeadingMetadata(t *testing.T) {
 	if err != nil || metadata.Title != "Pod lifecycle" || len(metadata.Anchors) != 1 || metadata.Anchors[0] != "pod-phase" {
 		t.Fatalf("HTML metadata = %#v, %v", metadata, err)
 	}
+	page, err := snapshot.ReadPage(context.PagePath, context.Anchor)
+	if err != nil || page.Content != "Pod phase" {
+		t.Fatalf("HTML page evidence = %#v, %v", page, err)
+	}
 }
 
 func TestSnapshotBoundsRenderedPageToMainContent(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := t.TempDir()
-	page := "<html><body><aside>" + strings.Repeat("x", MaxReadBytes) + "</aside><main><h1 id=\"pod-lifetime\">Pod lifetime</h1></main></body></html>"
+	page := "<html><body><aside>" + strings.Repeat("x", MaxReadBytes) + "</aside><main class=\"render-v1\"><h1 id=\"pod-lifetime\">Pod lifetime</h1><p>The Pod is alive.</p><h1 id=\"next\">Next section</h1><p>Do not include this.</p></main></body></html>"
 	writeFile(t, filepath.Join(root, "docs", "pods.html"), page)
 	context := unboundContext()
 	context.PagePath = "docs/pods.html"
-	context = boundContext(t, root, context)
+	context.Anchor = "pod-lifetime"
 	snapshot, err := NewSnapshot(context, root, sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	value, err := snapshot.ReadPage(context.PagePath, context.Anchor)
-	if err != nil || !strings.Contains(value.Content, "Pod lifetime") || strings.Contains(value.Content, strings.Repeat("x", 32)) {
+	if err != nil || value.Content != "Pod lifetime The Pod is alive." || strings.Contains(value.Content, "Next section") || strings.Contains(value.Content, strings.Repeat("x", 32)) {
 		t.Fatalf("bounded rendered page = %#v, %v", value, err)
+	}
+	writeFile(t, filepath.Join(root, "docs", "pods.html"), strings.Replace(page, "render-v1", "render-v2", 1))
+	unchanged, err := snapshot.ReadPage(context.PagePath, context.Anchor)
+	if err != nil || unchanged.Digest != value.Digest {
+		t.Fatalf("template-only page rebuild changed evidence = %#v, %v", unchanged, err)
 	}
 }
 
@@ -137,28 +131,42 @@ func TestSnapshotRejectsSymlinksAndOversizedPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	context := unboundContext()
-	context.ContentDigest = contentDigest("x")
-	if _, err := NewSnapshot(context, root, sourceRoot); err == nil {
+	snapshot, err := NewSnapshot(context, root, sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err == nil {
 		t.Fatal("symlink page accepted")
 	}
 
 	root = t.TempDir()
 	sourceRoot = t.TempDir()
 	writeFile(t, filepath.Join(root, "docs", "pods.md"), strings.Repeat("x", MaxReadBytes+1))
-	context.ContentDigest = contentDigest(strings.Repeat("x", MaxReadBytes+1))
-	if _, err := NewSnapshot(context, root, sourceRoot); err == nil {
+	snapshot, err = NewSnapshot(context, root, sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err == nil {
 		t.Fatal("oversized page accepted")
 	}
 }
 
-func TestSnapshotRejectsChangedPinnedPage(t *testing.T) {
+func TestSnapshotReturnsNewEvidenceForChangedTargetContent(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := t.TempDir()
-	writeFile(t, filepath.Join(root, "docs", "pods.md"), "first\n")
-	context := boundContext(t, root, unboundContext())
-	writeFile(t, filepath.Join(root, "docs", "pods.md"), "second\n")
-	if _, err := NewSnapshot(context, root, sourceRoot); err == nil {
-		t.Fatal("changed page accepted")
+	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\nfirst\n")
+	snapshot, err := NewSnapshot(unboundContext(), root, sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := snapshot.ReadPage(snapshot.Context.PagePath, snapshot.Context.Anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\nsecond\n")
+	second, err := snapshot.ReadPage(snapshot.Context.PagePath, snapshot.Context.Anchor)
+	if err != nil || first.Digest == second.Digest {
+		t.Fatalf("changed target evidence = %#v, %v", second, err)
 	}
 }
 
@@ -187,11 +195,11 @@ func TestPinnedKubernetesPodLifecycleSnapshotSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open pinned Kubernetes snapshot: %v", err)
 	}
-	if snapshot.BuildBaseURL == "" || snapshot.Context.ContentDigest == "" {
+	if snapshot.BuildBaseURL == "" {
 		t.Fatalf("pinned page context = %#v", snapshot)
 	}
 	page, err := snapshot.ReadPage(context.PagePath, context.Anchor)
-	if err != nil || !strings.Contains(page.Content, "Pod Lifecycle") {
+	if err != nil || !strings.Contains(page.Content, "Pod lifetime") {
 		t.Fatalf("read Pod lifecycle page = %#v, %v", page, err)
 	}
 	metadata, err := snapshot.ReadMetadata(context.PagePath)

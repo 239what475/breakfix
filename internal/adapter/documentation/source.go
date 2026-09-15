@@ -31,14 +31,14 @@ type Snapshot struct {
 	BuildBaseURL string
 }
 
-// NewPinnedSnapshot verifies the fixed source identity in build-info, then
-// derives one content digest from the configured page's rendered main element.
-// Unrelated pages and site chrome are deliberately outside the context scope.
+// NewPinnedSnapshot verifies the fixed source identity in build-info. The
+// rendered tree is an input for evidence reads only; it is never hashed as a
+// snapshot identity.
 func NewPinnedSnapshot(expected domain.DocumentContext, root, sourceRoot string) (Snapshot, error) {
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(sourceRoot) == "" {
 		return Snapshot{}, errors.New("documentation rendered and source roots are required")
 	}
-	if err := expected.ValidateIdentity(); err != nil {
+	if err := expected.Validate(); err != nil {
 		return Snapshot{}, fmt.Errorf("documentation pinned context: %w", err)
 	}
 	infoBytes, err := os.ReadFile(filepath.Join(filepath.Clean(root), "build-info.json"))
@@ -78,11 +78,6 @@ func NewPinnedSnapshot(expected domain.DocumentContext, root, sourceRoot string)
 	if _, err := snapshot.requireDirectory(snapshot.SourceRoot, "documentation source root"); err != nil {
 		return Snapshot{}, err
 	}
-	_, digest, err := snapshot.pageContent(expected.PagePath)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	snapshot.Context.ContentDigest = digest
 	return snapshot, nil
 }
 
@@ -100,13 +95,6 @@ func NewSnapshot(ctx domain.DocumentContext, root, sourceRoot string) (Snapshot,
 	if _, err := snapshot.requireDirectory(snapshot.SourceRoot, "documentation source root"); err != nil {
 		return Snapshot{}, err
 	}
-	_, digest, err := snapshot.pageContent(ctx.PagePath)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if digest != ctx.ContentDigest {
-		return Snapshot{}, errors.New("documentation page content does not match its pinned digest")
-	}
 	return snapshot, nil
 }
 
@@ -115,20 +103,20 @@ type Metadata = domain.Metadata
 type SourceFragment = domain.SourceFragment
 
 func (s Snapshot) ReadPage(path, anchor string) (Page, error) {
-	if path != s.Context.PagePath {
+	if path != s.Context.PagePath || anchor != s.Context.Anchor {
 		return Page{}, errors.New("documentation page is outside the pinned context")
 	}
-	content, digest, err := s.pageContent(path)
+	content, digest, err := s.pageEvidence(path, anchor)
 	if err != nil {
 		return Page{}, err
-	}
-	if digest != s.Context.ContentDigest {
-		return Page{}, errors.New("documentation page content changed after the snapshot was opened")
 	}
 	return Page{Context: s.Context, Path: path, Anchor: anchor, Content: content, Digest: digest}, nil
 }
 
-func (s Snapshot) pageContent(path string) (string, string, error) {
+// pageEvidence returns the fixed anchor's normalized text. This is the only
+// rendered content an Agent receives, so markup, site chrome, and unrelated
+// sections cannot change the evidence identity.
+func (s Snapshot) pageEvidence(path, anchor string) (string, string, error) {
 	limit := int64(MaxReadBytes)
 	if strings.HasSuffix(strings.ToLower(path), ".html") {
 		limit = MaxRenderedPageBytes
@@ -138,21 +126,44 @@ func (s Snapshot) pageContent(path string) (string, string, error) {
 		return "", "", err
 	}
 	if strings.HasSuffix(strings.ToLower(path), ".html") {
-		content, err = renderedPageContent(content)
+		content, err = renderedSectionText(content, anchor)
+		if err != nil {
+			return "", "", err
+		}
+	} else {
+		content, err = markdownSectionText(content, anchor)
 		if err != nil {
 			return "", "", err
 		}
 	}
-	return content, contentDigest(content), nil
+	return content, evidenceDigest(content), nil
 }
 
 func (s Snapshot) ReadMetadata(path string) (Metadata, error) {
-	page, err := s.ReadPage(path, "")
+	if path != s.Context.PagePath {
+		return Metadata{}, errors.New("documentation page is outside the pinned context")
+	}
+	content, err := s.pageMarkup(path)
 	if err != nil {
 		return Metadata{}, err
 	}
-	title, anchors := headings(page.Content, strings.HasSuffix(strings.ToLower(path), ".html"))
-	return Metadata{Context: page.Context, Path: path, Title: title, Anchors: anchors, Digest: page.Digest}, nil
+	title, anchors := headings(content, strings.HasSuffix(strings.ToLower(path), ".html"))
+	return Metadata{Context: s.Context, Path: path, Title: title, Anchors: anchors, Digest: evidenceDigest(content)}, nil
+}
+
+func (s Snapshot) pageMarkup(path string) (string, error) {
+	limit := int64(MaxReadBytes)
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		limit = MaxRenderedPageBytes
+	}
+	content, _, err := s.readFromLimit(s.Root, path, limit)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		return renderedMainContent(content)
+	}
+	return content, nil
 }
 
 func headings(content string, htmlDocument bool) (string, []string) {
@@ -290,18 +301,122 @@ func (s Snapshot) requireDirectory(root, description string) (os.FileInfo, error
 	return info, nil
 }
 
-func contentDigest(content string) string {
+func evidenceDigest(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return "sha256:" + hex.EncodeToString(h[:])
 }
 
-// renderedPageContent deliberately exposes the page body, not site chrome or
-// scripts. Its bounded main content is the evidence identity.
-func renderedPageContent(content string) (string, error) {
+// renderedMainContent excludes site chrome before metadata or a page section
+// is read. It does not contribute to DocumentContext identity.
+func renderedMainContent(content string) (string, error) {
 	document, err := html.Parse(strings.NewReader(content))
 	if err != nil {
 		return "", errors.New("documentation rendered page is not valid HTML")
 	}
+	main := findMain(document)
+	if main == nil {
+		return "", errors.New("documentation rendered page has no main content")
+	}
+	var body bytes.Buffer
+	if err := html.Render(&body, main); err != nil {
+		return "", err
+	}
+	if body.Len() > MaxReadBytes {
+		return "", errors.New("documentation rendered page body exceeds read limit")
+	}
+	return body.String(), nil
+}
+
+func renderedSectionText(content, anchor string) (string, error) {
+	document, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return "", errors.New("documentation rendered page is not valid HTML")
+	}
+	main := findMain(document)
+	if main == nil {
+		return "", errors.New("documentation rendered page has no main content")
+	}
+	if strings.TrimSpace(anchor) == "" {
+		return htmlText(main), nil
+	}
+	heading := findHeading(main, anchor)
+	if heading == nil {
+		return "", errors.New("documentation anchor is absent from the rendered page")
+	}
+	level := headingLevel(heading)
+	var text strings.Builder
+	collecting := false
+	stopped := false
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if stopped {
+			return
+		}
+		if node.Type == html.ElementNode && headingLevel(node) > 0 {
+			if node == heading {
+				collecting = true
+			} else if collecting && headingLevel(node) <= level {
+				stopped = true
+				return
+			}
+		}
+		if collecting && node.Type == html.TextNode {
+			text.WriteString(node.Data)
+			text.WriteByte(' ')
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(main)
+	section := strings.Join(strings.Fields(text.String()), " ")
+	if section == "" {
+		return "", errors.New("documentation anchor section has no text")
+	}
+	return section, nil
+}
+
+func markdownSectionText(content, anchor string) (string, error) {
+	if strings.TrimSpace(anchor) == "" {
+		return content, nil
+	}
+	lines := strings.Split(content, "\n")
+	start := -1
+	level := 0
+	for index, line := range lines {
+		candidateLevel, title := markdownHeading(line)
+		if candidateLevel > 0 && slug(title) == anchor {
+			start, level = index, candidateLevel
+			break
+		}
+	}
+	if start < 0 {
+		return "", errors.New("documentation anchor is absent from the page")
+	}
+	end := len(lines)
+	for index := start + 1; index < len(lines); index++ {
+		candidateLevel, _ := markdownHeading(lines[index])
+		if candidateLevel > 0 && candidateLevel <= level {
+			end = index
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), nil
+}
+
+func markdownHeading(line string) (int, string) {
+	trimmed := strings.TrimLeft(line, " ")
+	level := 0
+	for level < len(trimmed) && trimmed[level] == '#' {
+		level++
+	}
+	if level == 0 || level >= len(trimmed) || trimmed[level] != ' ' {
+		return 0, ""
+	}
+	return level, strings.TrimSpace(trimmed[level:])
+}
+
+func findMain(document *html.Node) *html.Node {
 	var main *html.Node
 	var walk func(*html.Node)
 	walk = func(node *html.Node) {
@@ -317,17 +432,37 @@ func renderedPageContent(content string) (string, error) {
 		}
 	}
 	walk(document)
-	if main == nil {
-		return "", errors.New("documentation rendered page has no main content")
+	return main
+}
+
+func findHeading(root *html.Node, anchor string) *html.Node {
+	var heading *html.Node
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if heading != nil {
+			return
+		}
+		if node.Type == html.ElementNode && headingLevel(node) > 0 {
+			for _, attribute := range node.Attr {
+				if attribute.Key == "id" && strings.TrimSpace(attribute.Val) == anchor {
+					heading = node
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
 	}
-	var body bytes.Buffer
-	if err := html.Render(&body, main); err != nil {
-		return "", err
+	walk(root)
+	return heading
+}
+
+func headingLevel(node *html.Node) int {
+	if node == nil || node.Type != html.ElementNode || len(node.Data) != 2 || node.Data[0] != 'h' || node.Data[1] < '1' || node.Data[1] > '6' {
+		return 0
 	}
-	if body.Len() > MaxReadBytes {
-		return "", errors.New("documentation rendered page body exceeds read limit")
-	}
-	return body.String(), nil
+	return int(node.Data[1] - '0')
 }
 
 func parseBuildBaseURL(value string) (string, error) {
