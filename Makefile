@@ -1,7 +1,7 @@
 .PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	test-e2e-documentation docs-sync docs-build docs-image docs-check
+	test-e2e-documentation docs-sync docs-build docs-image docs-check docs-metadata docs-smoke
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -64,6 +64,12 @@ docs-image:
 
 docs-check:
 	$(DOCS_SITE_SCRIPT) check
+
+docs-metadata:
+	$(DOCS_SITE_SCRIPT) metadata
+
+docs-smoke: docs-check
+	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT=$(CURDIR)/docs-site/public BREAKFIX_DOCUMENTATION_SOURCE_ROOT=$(CURDIR)/.local/docs/upstream go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycleSnapshotSmoke
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./api/v1

@@ -10,33 +10,36 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
-	"github.com/breakfix/breakfix/internal/domain/runnable"
 	"golang.org/x/net/html"
 )
 
-const MaxReadBytes = 256 * 1024
+const (
+	MaxReadBytes         = 256 * 1024
+	MaxRenderedPageBytes = 2 * 1024 * 1024
+)
 
 type Snapshot struct {
-	Context domain.DocumentContext
-	Root    string
+	Context      domain.DocumentContext
+	Root         string
+	SourceRoot   string
+	BuildBaseURL string
 }
 
-// NewPinnedSnapshot derives the tree digest from the mirror's own build-info
-// record and verifies every configured source identity before exposing files.
-// The digest is never accepted from deployment configuration alone.
-func NewPinnedSnapshot(expected domain.DocumentContext, root string) (Snapshot, error) {
-	if strings.TrimSpace(root) == "" {
-		return Snapshot{}, errors.New("documentation snapshot root is required")
+// NewPinnedSnapshot verifies the fixed source identity in build-info, then
+// derives one content digest from the configured page's rendered main element.
+// Unrelated pages and site chrome are deliberately outside the context scope.
+func NewPinnedSnapshot(expected domain.DocumentContext, root, sourceRoot string) (Snapshot, error) {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(sourceRoot) == "" {
+		return Snapshot{}, errors.New("documentation rendered and source roots are required")
 	}
-	if expected.FormatVersion != domain.FormatVersion || strings.TrimSpace(expected.SourceID) == "" || strings.TrimSpace(expected.Repository) == "" || strings.TrimSpace(expected.Commit) == "" || strings.TrimSpace(expected.Version) == "" || strings.TrimSpace(expected.Language) == "" || strings.TrimSpace(expected.License) == "" || strings.TrimSpace(expected.MirrorOrigin) == "" || strings.TrimSpace(expected.PagePath) == "" {
-		return Snapshot{}, errors.New("documentation pinned context is incomplete")
+	if err := expected.ValidateIdentity(); err != nil {
+		return Snapshot{}, fmt.Errorf("documentation pinned context: %w", err)
 	}
 	infoBytes, err := os.ReadFile(filepath.Join(filepath.Clean(root), "build-info.json"))
 	if err != nil {
@@ -46,14 +49,12 @@ func NewPinnedSnapshot(expected domain.DocumentContext, root string) (Snapshot, 
 		return Snapshot{}, errors.New("documentation build-info exceeds the read limit")
 	}
 	var info struct {
-		Source       string `json:"source"`
-		Repository   string `json:"repository"`
-		Revision     string `json:"revision"`
-		Version      string `json:"version"`
-		Locale       string `json:"locale"`
-		BaseURL      string `json:"base_url"`
-		MirrorDigest string `json:"mirror_digest"`
-		BuiltAt      string `json:"built_at"`
+		Source     string `json:"source"`
+		Repository string `json:"repository"`
+		Revision   string `json:"revision"`
+		Version    string `json:"version"`
+		Locale     string `json:"locale"`
+		BaseURL    string `json:"base_url"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(infoBytes))
 	decoder.DisallowUnknownFields()
@@ -63,80 +64,50 @@ func NewPinnedSnapshot(expected domain.DocumentContext, root string) (Snapshot, 
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return Snapshot{}, errors.New("documentation build-info contains multiple values")
 	}
-	if info.Source != expected.SourceID || info.Repository != expected.Repository || info.Revision != expected.Commit || info.Version != expected.Version || info.Locale != expected.Language || !runnable.ValidDigest(info.MirrorDigest) {
+	baseURL, err := parseBuildBaseURL(info.BaseURL)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if info.Source != expected.SourceID || info.Repository != expected.Repository || info.Revision != expected.Commit || info.Version != expected.Version || info.Locale != expected.Language {
 		return Snapshot{}, errors.New("documentation build-info does not match the configured pinned source")
 	}
-	expected.MirrorDigest = info.MirrorDigest
-	return NewSnapshot(expected, root)
+	snapshot := Snapshot{Context: expected, Root: filepath.Clean(root), SourceRoot: filepath.Clean(sourceRoot), BuildBaseURL: baseURL}
+	if _, err := snapshot.requireDirectory(snapshot.Root, "documentation snapshot root"); err != nil {
+		return Snapshot{}, err
+	}
+	if _, err := snapshot.requireDirectory(snapshot.SourceRoot, "documentation source root"); err != nil {
+		return Snapshot{}, err
+	}
+	_, digest, err := snapshot.pageContent(expected.PagePath)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.Context.ContentDigest = digest
+	return snapshot, nil
 }
 
-func NewSnapshot(ctx domain.DocumentContext, root string) (Snapshot, error) {
+func NewSnapshot(ctx domain.DocumentContext, root, sourceRoot string) (Snapshot, error) {
 	if err := ctx.Validate(); err != nil {
 		return Snapshot{}, err
 	}
-	if strings.TrimSpace(root) == "" {
-		return Snapshot{}, errors.New("documentation snapshot root is required")
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(sourceRoot) == "" {
+		return Snapshot{}, errors.New("documentation rendered and source roots are required")
 	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return Snapshot{}, errors.New("documentation snapshot root is not a directory")
+	snapshot := Snapshot{Context: ctx, Root: filepath.Clean(root), SourceRoot: filepath.Clean(sourceRoot)}
+	if _, err := snapshot.requireDirectory(snapshot.Root, "documentation snapshot root"); err != nil {
+		return Snapshot{}, err
 	}
-	cleanRoot := filepath.Clean(root)
-	digest, err := DirectoryDigest(cleanRoot)
+	if _, err := snapshot.requireDirectory(snapshot.SourceRoot, "documentation source root"); err != nil {
+		return Snapshot{}, err
+	}
+	_, digest, err := snapshot.pageContent(ctx.PagePath)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if digest != ctx.MirrorDigest {
-		return Snapshot{}, errors.New("documentation snapshot does not match its pinned mirror digest")
+	if digest != ctx.ContentDigest {
+		return Snapshot{}, errors.New("documentation page content does not match its pinned digest")
 	}
-	return Snapshot{Context: ctx, Root: cleanRoot}, nil
-}
-
-// DirectoryDigest matches the documentation build script: a sorted list of
-// per-file SHA-256 records rooted at the mirror output, excluding its mutable
-// build-info record. Symlinks and special files cannot enter the digest.
-func DirectoryDigest(root string) (string, error) {
-	root = filepath.Clean(root)
-	files := make([]string, 0)
-	err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("documentation tree contains a symlink: %s", name)
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if !entry.Type().IsRegular() {
-			return fmt.Errorf("documentation tree contains a non-regular file: %s", name)
-		}
-		rel, err := filepath.Rel(root, name)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if rel != "build-info.json" {
-			files = append(files, rel)
-		}
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	sort.Strings(files)
-	hashes := sha256.New()
-	for _, rel := range files {
-		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			return "", err
-		}
-		fileDigest := sha256.Sum256(contents)
-		if _, err := fmt.Fprintf(hashes, "%x  ./%s\n", fileDigest, rel); err != nil {
-			return "", err
-		}
-	}
-	return "sha256:" + hex.EncodeToString(hashes.Sum(nil)), nil
+	return snapshot, nil
 }
 
 type Page = domain.Page
@@ -144,11 +115,35 @@ type Metadata = domain.Metadata
 type SourceFragment = domain.SourceFragment
 
 func (s Snapshot) ReadPage(path, anchor string) (Page, error) {
-	content, digest, err := s.read(path)
+	if path != s.Context.PagePath {
+		return Page{}, errors.New("documentation page is outside the pinned context")
+	}
+	content, digest, err := s.pageContent(path)
 	if err != nil {
 		return Page{}, err
 	}
+	if digest != s.Context.ContentDigest {
+		return Page{}, errors.New("documentation page content changed after the snapshot was opened")
+	}
 	return Page{Context: s.Context, Path: path, Anchor: anchor, Content: content, Digest: digest}, nil
+}
+
+func (s Snapshot) pageContent(path string) (string, string, error) {
+	limit := int64(MaxReadBytes)
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		limit = MaxRenderedPageBytes
+	}
+	content, _, err := s.readFromLimit(s.Root, path, limit)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		content, err = renderedPageContent(content)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return content, contentDigest(content), nil
 }
 
 func (s Snapshot) ReadMetadata(path string) (Metadata, error) {
@@ -192,18 +187,11 @@ func headings(content string, htmlDocument bool) (string, []string) {
 				title = text
 			}
 			if text != "" {
-				anchor := ""
 				for _, attribute := range node.Attr {
-					if attribute.Key == "id" {
-						anchor = strings.TrimSpace(attribute.Val)
+					if attribute.Key == "id" && strings.TrimSpace(attribute.Val) != "" {
+						anchors = append(anchors, strings.TrimSpace(attribute.Val))
 						break
 					}
-				}
-				if anchor == "" {
-					anchor = slug(text)
-				}
-				if anchor != "" {
-					anchors = append(anchors, anchor)
 				}
 			}
 		}
@@ -231,14 +219,14 @@ func htmlText(node *html.Node) string {
 }
 
 func (s Snapshot) ReadSource(path string, startLine, endLine int) (SourceFragment, error) {
-	return s.readFragment(path, domain.EvidenceSource, startLine, endLine)
+	return s.readFragment(s.SourceRoot, path, domain.EvidenceSource, startLine, endLine)
 }
 func (s Snapshot) ReadInclude(path string, startLine, endLine int) (SourceFragment, error) {
-	return s.readFragment(path, domain.EvidenceInclude, startLine, endLine)
+	return s.readFragment(s.SourceRoot, path, domain.EvidenceInclude, startLine, endLine)
 }
 
-func (s Snapshot) readFragment(path string, kind domain.EvidenceKind, start, end int) (SourceFragment, error) {
-	content, digest, err := s.read(path)
+func (s Snapshot) readFragment(root, path string, kind domain.EvidenceKind, start, end int) (SourceFragment, error) {
+	content, digest, err := s.readFromLimit(root, path, MaxReadBytes)
 	if err != nil {
 		return SourceFragment{}, err
 	}
@@ -257,12 +245,12 @@ func (s Snapshot) readFragment(path string, kind domain.EvidenceKind, start, end
 	return SourceFragment{Context: s.Context, Evidence: domain.EvidenceReference{ID: id, Kind: kind, Path: path, Digest: digest, StartLine: start, EndLine: end, Quote: fragment}, Content: fragment}, nil
 }
 
-func (s Snapshot) read(path string) (string, string, error) {
+func (s Snapshot) readFromLimit(root, path string, limit int64) (string, string, error) {
 	if err := domain.ValidateRelativePath(path); err != nil {
 		return "", "", err
 	}
-	full := filepath.Join(s.Root, filepath.FromSlash(path))
-	root, err := filepath.Abs(s.Root)
+	full := filepath.Join(root, filepath.FromSlash(path))
+	root, err := filepath.Abs(root)
 	if err != nil {
 		return "", "", err
 	}
@@ -283,7 +271,7 @@ func (s Snapshot) read(path string) (string, string, error) {
 	if !info.Mode().IsRegular() {
 		return "", "", errors.New("documentation path is not a regular file")
 	}
-	if info.Size() > MaxReadBytes {
+	if info.Size() > limit {
 		return "", "", errors.New("documentation file exceeds read limit")
 	}
 	b, err := os.ReadFile(target)
@@ -292,6 +280,62 @@ func (s Snapshot) read(path string) (string, string, error) {
 	}
 	h := sha256.Sum256(b)
 	return string(b), "sha256:" + hex.EncodeToString(h[:]), nil
+}
+
+func (s Snapshot) requireDirectory(root, description string) (os.FileInfo, error) {
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", description)
+	}
+	return info, nil
+}
+
+func contentDigest(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(h[:])
+}
+
+// renderedPageContent deliberately exposes the page body, not site chrome or
+// scripts. Its bounded main content is the evidence identity.
+func renderedPageContent(content string) (string, error) {
+	document, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return "", errors.New("documentation rendered page is not valid HTML")
+	}
+	var main *html.Node
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if main != nil {
+			return
+		}
+		if node.Type == html.ElementNode && node.Data == "main" {
+			main = node
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(document)
+	if main == nil {
+		return "", errors.New("documentation rendered page has no main content")
+	}
+	var body bytes.Buffer
+	if err := html.Render(&body, main); err != nil {
+		return "", err
+	}
+	if body.Len() > MaxReadBytes {
+		return "", errors.New("documentation rendered page body exceeds read limit")
+	}
+	return body.String(), nil
+}
+
+func parseBuildBaseURL(value string) (string, error) {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !strings.HasSuffix(parsed.Path, "/") {
+		return "", errors.New("documentation build-info has an invalid base_url")
+	}
+	return parsed.String(), nil
 }
 
 func slug(value string) string {

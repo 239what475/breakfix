@@ -61,10 +61,12 @@ type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
 }
 
-// DocumentationConfig identifies one mounted immutable documentation mirror.
-// An empty snapshot_root disables the product; there is no fallback source.
+// DocumentationConfig identifies one mounted immutable rendered mirror and its
+// matching upstream source tree. An empty snapshot_root disables the product;
+// there is no fallback origin, revision, or source root.
 type DocumentationConfig struct {
 	SnapshotRoot string `yaml:"snapshot_root"`
+	SourceRoot   string `yaml:"source_root"`
 	MirrorOrigin string `yaml:"mirror_origin"`
 	SourceID     string `yaml:"source_id"`
 	Repository   string `yaml:"repository"`
@@ -84,6 +86,7 @@ func (c DocumentationConfig) Validate() error {
 	}
 	for name, value := range map[string]string{
 		"snapshot_root": c.SnapshotRoot,
+		"source_root":   c.SourceRoot,
 		"mirror_origin": c.MirrorOrigin,
 		"source_id":     c.SourceID,
 		"repository":    c.Repository,
@@ -396,6 +399,7 @@ func Load(path string) (Config, error) {
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
 	cfg.Documentation.SnapshotRoot = os.ExpandEnv(cfg.Documentation.SnapshotRoot)
+	cfg.Documentation.SourceRoot = os.ExpandEnv(cfg.Documentation.SourceRoot)
 	cfg.Documentation.MirrorOrigin = os.ExpandEnv(cfg.Documentation.MirrorOrigin)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)

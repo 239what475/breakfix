@@ -10,10 +10,10 @@ var schemaDocumentPracticeStatements = []string{
 		language TEXT NOT NULL,
 		license TEXT NOT NULL,
 		mirror_origin TEXT NOT NULL,
-		mirror_digest TEXT NOT NULL,
+		content_digest TEXT NOT NULL,
 		context JSONB NOT NULL,
 		created_at TIMESTAMPTZ NOT NULL,
-		PRIMARY KEY (source_id, commit, language, mirror_digest)
+		PRIMARY KEY (source_id, commit, language, content_digest)
 	)`,
 	`CREATE TABLE document_artifact_ledger (
 		id TEXT PRIMARY KEY,

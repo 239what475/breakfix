@@ -17,10 +17,12 @@ registry:
 catalog:
   release_reference: ${BREAKFIX_CATALOG_RELEASE_REFERENCE}
 
-# This remains disabled until a verified docs-site/public tree is mounted at
-# snapshot_root. The only initial workflow scope is the fixed Pod lifecycle page.
+# This remains disabled until a verified rendered tree and matching source tree
+# are mounted read-only. The only initial workflow scope is the fixed Pod
+# lifecycle page.
 documentation:
   snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
+  source_root: ${BREAKFIX_DOCUMENTATION_SOURCE_ROOT}
   mirror_origin: ${BREAKFIX_DOCUMENTATION_MIRROR_ORIGIN}
   source_id: kubernetes
   repository: https://github.com/kubernetes/website.git
@@ -29,7 +31,7 @@ documentation:
   language: en
   license: CC BY 4.0
   page_path: docs/concepts/workloads/pods/pod-lifecycle/index.html
-  anchor: pod-lifecycle
+  anchor: pod-lifetime
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh

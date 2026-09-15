@@ -36,12 +36,11 @@ docs_prefix=$(manifest_value docs_prefix)
 default_base_url=$(manifest_value default_base_url)
 default_parent_origin=$(manifest_value default_parent_origin)
 hugo_version=$(manifest_value hugo_version)
-manifest_mirror_digest=$(manifest_value mirror_digest)
 container_engine=${DOCS_CONTAINER_ENGINE:-docker}
 container_image=${DOCS_CONTAINER_IMAGE:-breakfix/k8s-website-hugo:hugo-${hugo_version}}
 runtime_image=${DOCS_RUNTIME_IMAGE:-breakfix/kubernetes-docs:${version}}
 
-for value_name in source_name repository revision version locale docs_prefix default_base_url default_parent_origin hugo_version manifest_mirror_digest; do
+for value_name in source_name repository revision version locale docs_prefix default_base_url default_parent_origin hugo_version; do
 	if [[ -z ${!value_name} ]]; then
 		echo "manifest value is empty: $value_name" >&2
 		exit 2
@@ -102,7 +101,7 @@ cleanup_overlay() {
 }
 
 prepare_overlay() {
-	local parent_origin=${BREAKFIX_PARENT_ORIGIN:-$default_parent_origin}
+	local parent_origin=$default_parent_origin
 	if [[ ! "$parent_origin" =~ ^https?://[A-Za-z0-9._:-]+$ ]]; then
 		echo "BREAKFIX_PARENT_ORIGIN must be an HTTP(S) origin without a path: $parent_origin" >&2
 		exit 2
@@ -147,10 +146,6 @@ sync_upstream() {
 
 write_build_info() {
 	local base_url=$1
-	local build_time
-	build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-	local mirror_digest
-	mirror_digest=$(cd "$public_dir" && find . -type f ! -name ./build-info.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "sha256:"$1}')
 	cat >"$public_dir/build-info.json" <<EOF
 {
   "source": "$source_name",
@@ -158,9 +153,7 @@ write_build_info() {
   "revision": "$revision",
   "version": "$version",
   "locale": "$locale",
-  "base_url": "$base_url",
-  "mirror_digest": "$mirror_digest",
-  "built_at": "$build_time"
+  "base_url": "$base_url"
 }
 EOF
 }
@@ -190,10 +183,6 @@ check_public() {
 		echo "build-info.json does not contain pinned revision" >&2
 		return 1
 	fi
-	if ! rg -q '"mirror_digest"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]{64}"' "$public_dir/build-info.json"; then
-		echo "build-info.json does not contain a mirror digest" >&2
-		return 1
-	fi
 	local built_base_url
 	built_base_url=$(awk -F'"' '/"base_url"/ { print $4; exit }' "$public_dir/build-info.json")
 	if [[ -z "$built_base_url" ]] || ! rg -F -q "$built_base_url${docs_prefix#/}" "$public_dir${docs_prefix}index.html"; then
@@ -206,7 +195,7 @@ check_public() {
 build_site() {
 	sync_upstream
 	build_container_image
-	local base_url=${DOCS_BASE_URL:-$default_base_url}
+	local base_url=$default_base_url
 	case "$base_url" in
 	*/)
 		;;
@@ -227,7 +216,7 @@ build_site() {
 		--env "HUGO_BASEURL=$base_url" \
 		--env HUGO_ENV=production \
 		"$container_image" \
-		hugo --destination /tmp/public --cleanDestinationDir --minify --environment production --noBuildLock
+		hugo --renderSegments "$locale" --destination /tmp/public --cleanDestinationDir --environment production --noBuildLock
 	trap - EXIT INT TERM
 	cleanup_overlay
 	if [[ -f "$public_dir/_headers" ]] && rg -F -q "noindex" "$public_dir/_headers"; then
@@ -237,6 +226,15 @@ build_site() {
 	write_build_info "$base_url"
 	check_public
 	echo "documentation mirror built at $public_dir"
+}
+
+write_metadata() {
+	sync_upstream
+	if [[ ! -f "$public_dir/index.html" ]]; then
+		echo "missing built documentation output; run make docs-build first" >&2
+		exit 1
+	fi
+	write_build_info "$default_base_url"
 }
 
 build_image() {
@@ -266,11 +264,14 @@ case "${1:-}" in
 	check)
 		check_public
 	;;
+	metadata)
+		write_metadata
+	;;
 	image)
 		build_image
 	;;
 	*)
-		echo "usage: $0 {sync|build|check|image}" >&2
+		echo "usage: $0 {sync|build|check|metadata|image}" >&2
 		exit 2
 		;;
 esac

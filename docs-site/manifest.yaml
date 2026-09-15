@@ -7,4 +7,3 @@ docs_prefix: /docs/
 default_base_url: http://localhost:1313/
 default_parent_origin: http://localhost:5173
 hugo_version: 0.144.2
-mirror_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

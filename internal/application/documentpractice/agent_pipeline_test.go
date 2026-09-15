@@ -90,6 +90,19 @@ func TestAgentPipelineEndsApprovedNoPracticeWithoutGeneration(t *testing.T) {
 	}
 }
 
+func TestMetadataContainsAnchorRequiresThePinnedHeading(t *testing.T) {
+	metadata := domain.Metadata{Anchors: []string{"pod-lifetime", "pod-phase"}}
+	if !metadataContainsAnchor(metadata, "pod-lifetime") {
+		t.Fatal("existing heading anchor was rejected")
+	}
+	if metadataContainsAnchor(metadata, "pod-lifecycle") {
+		t.Fatal("missing heading anchor was accepted")
+	}
+	if !metadataContainsAnchor(metadata, "") {
+		t.Fatal("page scope without an anchor was rejected")
+	}
+}
+
 type pipelineProfiles struct{ profile runnable.RuntimeProfile }
 
 func (p pipelineProfiles) DocumentationRuntimeConstraints() []domain.RuntimeConstraint {

@@ -108,7 +108,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		License: cfg.Documentation.License, MirrorOrigin: cfg.Documentation.MirrorOrigin, PagePath: cfg.Documentation.PagePath,
 		Anchor: cfg.Documentation.Anchor,
 	}
-	reader, err := docsource.NewPinnedSnapshot(context, cfg.Documentation.SnapshotRoot)
+	reader, err := docsource.NewPinnedSnapshot(context, cfg.Documentation.SnapshotRoot, cfg.Documentation.SourceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("load pinned documentation snapshot: %w", err)
 	}

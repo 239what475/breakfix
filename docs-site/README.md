@@ -7,17 +7,18 @@ tree.
 
 The initial snapshot is described by [`manifest.yaml`](manifest.yaml). The
 wrapper uses the upstream Hugo configuration and dependencies. It renders the
-complete upstream site without rewriting generated HTML, CSS, JavaScript, or
-links, then adds Breakfix build metadata at `build-info.json`.
+fixed `en` source tree without rewriting generated HTML, CSS, JavaScript, or
+links, then adds Breakfix build metadata at `build-info.json`. The metadata
+binds the rendered page scope to its fixed upstream source identity.
 
 From the repository root (Docker or Podman is the only Hugo/Node build
 dependency):
 
 ```bash
 make docs-sync
-DOCS_BASE_URL=http://localhost:1313/ make docs-build
 make docs-image
 make docs-check
+make docs-smoke
 ```
 
 `docs-build` builds the upstream Dockerfile with Hugo `0.144.2` and runs the
@@ -28,9 +29,13 @@ the host and the host does not need Hugo, Node.js, npm, or upstream
 `DOCS_CONTAINER_IMAGE` to use an already-built compatible image.
 Node.js and npm are used only inside the upstream Dockerfile image and are not
 installed or checked on the host.
-`DOCS_BASE_URL` must end in `/` and should be the docs origin used for
-deployment. The documentation entry point is `<docs-origin>/docs/`; generated
-build metadata is available at `<docs-origin>/build-info.json`.
+The base URL and embedded parent origin are fixed in `manifest.yaml`; environment
+variables cannot change either, because they would change the pinned mirror
+digest. The documentation entry point is `<docs-origin>/docs/`; generated build
+metadata is available at `<docs-origin>/build-info.json`.
+`docs-smoke` opens the rendered tree and matching pinned source checkout using
+the production Reader contract, then checks the fixed Pod lifecycle page,
+`pod-lifetime` heading, source evidence, include evidence, and build metadata.
 
 After `docs-build`, build the small runtime image that serves
 `docs-site/public` and deploy that image to the local machine or Kind.

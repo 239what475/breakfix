@@ -100,6 +100,9 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
+	if !metadataContainsAnchor(metadata, anchor) {
+		return PipelineStartResult{}, errors.New("documentation anchor is absent from the pinned page")
+	}
 	evidence := []domain.EvidenceReference{{ID: "page", Kind: domain.EvidencePage, Path: pagePath, Digest: page.Digest, Anchor: anchor, Quote: page.Content}}
 	input, err := NewAgentInput("pinned-document-planner", page.Content, evidence)
 	if err != nil {
@@ -410,6 +413,18 @@ func validatePlannedPage(plan domain.LearningUnitPlan, page domain.Page, pagePat
 		return errors.New("planner changed the pinned page context")
 	}
 	return nil
+}
+
+func metadataContainsAnchor(metadata domain.Metadata, anchor string) bool {
+	if strings.TrimSpace(anchor) == "" {
+		return true
+	}
+	for _, value := range metadata.Anchors {
+		if value == anchor {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowPublicationInputs(workflow domain.Workflow) (domain.LearningUnitPlan, domain.PracticeCandidate, domain.GateResult, domain.GateResult, error) {

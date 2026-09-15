@@ -435,7 +435,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 提供只读页面浏览、页面元数据、源码片段和 include 读取工具；工具只允许固定 origin、固定 revision 和受限路径。
 - [x] 拒绝任意公网访问、源码写入、文档命令执行、用户数据读取、生产 API、凭据和用户终端访问。
 - [x] 将文档内容作为不可信数据传给 Agent，与系统指令和工具权限隔离；为提示注入、超长页面、循环读取和越权路径补测试。
-- [ ] 对 Hugo 页面、标题锚点、源码证据和镜像 build-info 进行固定版本 smoke test；首版只覆盖一个 Pod 生命周期页面范围。
+- [x] 对 Hugo 页面、标题锚点、源码证据和镜像 build-info 进行固定版本 smoke test；首版只覆盖一个 Pod 生命周期页面范围。
 
 ### 8. 持久化 Agent WorkflowContext 与策略
 

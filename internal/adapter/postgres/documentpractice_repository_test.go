@@ -65,7 +65,7 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow); err != nil {
 		t.Fatal(err)
 	}
-	documentContext := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", MirrorDigest: testRunnableDigest("b"), PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
+	documentContext := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", ContentDigest: testRunnableDigest("b"), PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
 	runnableRevision := testRunnableRevision(t)
 	runnableRevision.Spec.Identity = runnable.ContentIdentity{Kind: "documentation-practice", ID: domain.ContentID(documentContext), Revision: "candidate-document-01"}
 	specDigest, err := runnableRevision.Spec.Digest()
