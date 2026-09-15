@@ -109,9 +109,8 @@ rules:
     resources: ["poddisruptionbudgets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ---
-# Runtime Worker owns verification Environment CRDs and the verification
-# terminal exec call. The Controller grants its namespace-local workspace Role
-# when it creates a VK8s verification environment.
+# Runtime Worker can observe Server-created verification environments and use
+# their terminal execution boundary. The Server is the only spec writer.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -119,7 +118,7 @@ metadata:
 rules:
   - apiGroups: ["breakfix.dev"]
     resources: ["runtimeenvironments"]
-    verbs: ["create", "get", "list", "delete"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get"]

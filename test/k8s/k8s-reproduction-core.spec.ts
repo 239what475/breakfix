@@ -9,9 +9,9 @@ import {
 } from "../support/live-helpers";
 import { k8sReproductionCoreFixture } from "../support/catalog-fixture";
 import {
-  attachEnvironmentIdentity,
-  expectVK8sEnvironmentPhase,
-  waitForEnvironmentDeletion,
+  attachRuntimeEnvironment,
+  expectRuntimeEnvironmentPhase,
+  waitForRuntimeEnvironmentDeletion,
 } from "../support/e2e-platform";
 
 test("Kubernetes reproduction core works without learning aids and is reclaimed after stop", async ({ page }, testInfo) => {
@@ -27,7 +27,7 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
     scenarioID = scenario.id;
     await expectTerminalConnected(page);
     environmentName = await activeEnvironmentName(page, scenarioID);
-    await expectVK8sEnvironmentPhase(environmentName, "Ready");
+    await expectRuntimeEnvironmentPhase(environmentName, "Ready");
 
     await expect(page.getByRole("heading", { name: "Scenario overview", exact: true })).toBeVisible();
     await expect(page.getByText("Target phenomenon", { exact: true })).toBeVisible();
@@ -40,7 +40,7 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(page.getByText("Environment stopped.", { exact: true })).toBeVisible({ timeout: 10 * 60_000 });
-    await waitForEnvironmentDeletion("vk8senvironment", environmentName);
+    await waitForRuntimeEnvironmentDeletion(environmentName);
     stopped = true;
 
     await page.getByRole("button", { name: "My space", exact: true }).click();
@@ -51,10 +51,10 @@ test("Kubernetes reproduction core works without learning aids and is reclaimed 
     }, { timeout: 30_000, intervals: [500, 1_000, 2_000] }).toBe(true);
     await expect(page.getByText(/^Attempt ended/)).toBeVisible();
   } finally {
-    if (environmentName) await attachEnvironmentIdentity(testInfo, "vk8senvironment", environmentName);
+    if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
     if (scenarioID && !stopped) {
       await stopScenario(page, scenarioID).catch(() => undefined);
-      if (environmentName) await waitForEnvironmentDeletion("vk8senvironment", environmentName);
+      if (environmentName) await waitForRuntimeEnvironmentDeletion(environmentName);
     }
   }
 });

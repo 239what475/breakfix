@@ -47,10 +47,10 @@ dump_diagnostics() {
 	diagnostics_dir=$state_dir/$suite-failure-$(date -u +%Y%m%dT%H%M%SZ)
 	mkdir -p "$diagnostics_dir"
 
-	kubectl -n "$namespace" get deployments,pods,persistentvolumeclaims,nodeenvironments,vk8senvironments \
+	kubectl -n "$namespace" get deployments,pods,persistentvolumeclaims,runtimeenvironments \
 		-o wide >"$diagnostics_dir/resources.txt" 2>&1 || true
 	kubectl -n "$namespace" get events --sort-by=.lastTimestamp >"$diagnostics_dir/events.txt" 2>&1 || true
-	kubectl -n "$namespace" get nodeenvironments,vk8senvironments -o name >"$diagnostics_dir/environment-identities.txt" 2>&1 || true
+	kubectl -n "$namespace" get runtimeenvironments -o name >"$diagnostics_dir/environment-identities.txt" 2>&1 || true
 
 	for deployment in breakfix-server breakfix-controller breakfix-runtime-worker breakfix-registry; do
 		kubectl -n "$namespace" logs "deployment/$deployment" --all-containers --prefix --tail=500 \

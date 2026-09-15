@@ -19,7 +19,7 @@ const (
 	workflowIDKey      = "user.breakfix.workflow_id"
 	workflowAttemptKey = "user.breakfix.workflow_attempt"
 	candidateIDKey     = "user.breakfix.candidate_revision_id"
-	scenarioBundleDir  = "/opt/breakfix/scenario"
+	runnableBundleDir  = "/opt/breakfix/runnable"
 )
 
 func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageRequest) (BuildNodeImageResult, error) {
@@ -72,9 +72,16 @@ func (c *Client) BuildNodeImage(ctx context.Context, request BuildNodeImageReque
 	if err := waitOperation(ctx, "create node image build instance", names.Instance, op); err != nil {
 		return BuildNodeImageResult{}, err
 	}
-	bundlePath := scenarioBundleDir
+	bundlePath := runnableBundleDir
 	if strings.TrimSpace(request.BundlePath) != "" {
 		bundlePath = request.BundlePath
+	}
+	// Create the approved bundle root before descendants: Incus does not create
+	// missing parents for CreateInstanceFile directory requests.
+	if err := server.CreateInstanceFile(names.Instance, bundlePath, incus.InstanceFileArgs{
+		UID: 0, GID: 0, Mode: 0o755, Type: "directory", WriteMode: "overwrite",
+	}); err != nil {
+		return BuildNodeImageResult{}, classify("create node image bundle root", bundlePath, err)
 	}
 	for _, directory := range imageDirectories(files) {
 		if err := server.CreateInstanceFile(names.Instance, path.Join(bundlePath, directory), incus.InstanceFileArgs{

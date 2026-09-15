@@ -3,7 +3,7 @@ set -eu
 
 state_dir=/var/lib/breakfix/runtime-init
 credentials_dir=${CREDENTIALS_DIRECTORY:-/dev/.incus-systemd-credentials}
-bundle=/opt/breakfix/scenario
+bundle=/opt/breakfix/runnable
 mkdir -p "$state_dir"
 
 fail() {
@@ -32,12 +32,6 @@ case "$node" in
     ;;
 esac
 
-generate="$bundle/nodes/$node/generate.sh"
-[ -f "$generate" ] || {
-  printf 'missing node generator %s\n' "$generate" >&2
-  exit 1
-}
-
 hosts_tmp=$(mktemp)
 awk '
   $0 == "# BEGIN BREAKFIX MANAGED HOSTS" { managed = 1; next }
@@ -59,7 +53,5 @@ rm -f "$hosts_tmp"
   exit 0
 }
 
-/bin/bash "$generate"
-printf 'state=success\nexit_code=0\n' >"$state_dir/result"
-touch "$state_dir/succeeded"
-trap - EXIT HUP INT TERM
+printf 'missing public runnable initialization marker\n' >&2
+exit 1

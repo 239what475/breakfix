@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNodeRuntimeInitReadsScenarioBundleDir(t *testing.T) {
+func TestNodeRuntimeInitReadsRunnableBundleDir(t *testing.T) {
 	projectRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -19,12 +19,11 @@ func TestNodeRuntimeInitReadsScenarioBundleDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "bundle=" + scenarioBundleDir
+	want := "bundle=" + runnableBundleDir
 	if !strings.Contains(string(script), want+"\n") {
 		t.Fatalf("%s must contain %q", scriptPath, want)
 	}
-	legacyBundlePath := "/opt/breakfix/" + "chal" + "lenge"
-	if strings.Contains(string(script), legacyBundlePath) {
-		t.Fatalf("%s still refers to the legacy bundle directory", scriptPath)
+	if strings.Contains(string(script), "/opt/breakfix/scenario") {
+		t.Fatalf("%s still refers to the retired scenario bundle directory", scriptPath)
 	}
 }

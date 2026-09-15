@@ -1,13 +1,19 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type runnableActionClaimRequest struct {
@@ -39,6 +45,15 @@ type runnableMaterializationCompleteRequest struct {
 type runnableVerificationCompleteRequest struct {
 	Credential runnable.LeaseCredential          `json:"credential"`
 	Report     runnable.StoredVerificationReport `json:"report"`
+}
+
+type runnableVerificationEnvironmentRequest struct {
+	Request runnable.VerifyRequest `json:"request"`
+}
+
+type runnableVerificationEnvironmentReleaseRequest struct {
+	Credential  runnable.LeaseCredential     `json:"credential"`
+	Environment runnable.EnvironmentIdentity `json:"environment"`
 }
 
 type runnableActionFailureRequest struct {
@@ -140,6 +155,88 @@ func (h *Handler) InternalStoreRunnableExecutionOutput(c *gin.Context) {
 	}{Reference: reference})
 }
 
+// InternalCreateRunnableVerificationEnvironment is the sole verification
+// environment spec creation path. The Worker submits a complete lease-fenced
+// request, while Server validates it against durable action state and creates
+// or adopts the deterministic RuntimeEnvironment on its behalf.
+func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) {
+	var request runnableVerificationEnvironmentRequest
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+		return
+	}
+	if err := request.Request.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "verification environment request is invalid"})
+		return
+	}
+	if h.db == nil || h.k8s == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "verification environment control plane is unavailable"})
+		return
+	}
+	now := time.Now().UTC()
+	if err := h.db.Runnable.ValidateRunnableVerificationLease(c.Request.Context(), request.Request.Credential, request.Request.RunnableRevisionRef, request.Request.Attempt, now); err != nil {
+		h.writeInternalRuntimeError(c, err)
+		return
+	}
+	name := runnable.VerificationEnvironmentName(request.Request.RunnableRevisionRef, request.Request.Attempt)
+	environment := &runtimev2.RuntimeEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: runtimev2.RuntimeEnvironmentSpec{
+			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.Request.RunnableRevisionRef.ID, Digest: request.Request.RunnableRevisionDigest},
+			Purpose:             runtimev2.PurposeVerification,
+			Lease:               runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(now)},
+		},
+	}
+	created, err := h.k8s.CreateRuntimeEnvironment(c.Request.Context(), h.crdNamespace, environment)
+	if apierrors.IsAlreadyExists(err) {
+		created, err = h.k8s.GetRuntimeEnvironment(c.Request.Context(), h.crdNamespace, name)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "create verification environment: " + err.Error()})
+		return
+	}
+	if created == nil || created.UID == "" || created.Spec.RunnableRevisionRef.ID != request.Request.RunnableRevisionRef.ID || created.Spec.RunnableRevisionRef.Digest != request.Request.RunnableRevisionDigest || created.Spec.Purpose != runtimev2.PurposeVerification {
+		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "verification environment is bound to another runnable revision"})
+		return
+	}
+	// Recheck after a potentially slow Kubernetes request. If the lease was
+	// lost, release the newly observed object rather than leaving an orphan.
+	if err := h.db.Runnable.ValidateRunnableVerificationLease(c.Request.Context(), request.Request.Credential, request.Request.RunnableRevisionRef, request.Request.Attempt, time.Now().UTC()); err != nil {
+		if releaseErr := h.markVerificationEnvironmentReleasable(c.Request.Context(), string(created.UID), request.Request.RunnableRevisionDigest); releaseErr != nil {
+			slog.Warn("release verification environment after lost lease", "environment", created.UID, "err", releaseErr)
+		}
+		h.writeInternalRuntimeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, struct {
+		Environment *runtimev2.RuntimeEnvironment `json:"environment"`
+	}{Environment: created})
+}
+
+func (h *Handler) InternalRequestRunnableVerificationEnvironmentRelease(c *gin.Context) {
+	var request runnableVerificationEnvironmentReleaseRequest
+	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+		return
+	}
+	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionVerify || request.Environment.Validate() != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "verification environment release request is invalid"})
+		return
+	}
+	if h.db == nil || h.k8s == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "verification environment control plane is unavailable"})
+		return
+	}
+	reference, _, err := h.db.Runnable.ResolveRunnableVerificationLease(c.Request.Context(), request.Credential, time.Now().UTC())
+	if err != nil {
+		h.writeInternalRuntimeError(c, err)
+		return
+	}
+	if err := h.markVerificationEnvironmentReleasable(c.Request.Context(), request.Environment.ID, reference.Digest); err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "request verification environment release: " + err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {
 	var request runnableMaterializationCompleteRequest
 	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
@@ -179,7 +276,39 @@ func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 		h.writeInternalRuntimeError(c, err)
 		return
 	}
+	if err := h.markVerificationEnvironmentReleasable(c.Request.Context(), request.Report.Report.Environment.ID, request.Report.Report.RunnableRevisionDigest); err != nil {
+		// Report persistence is the workflow boundary. Reaper handoff failures
+		// remain observable but cannot roll the immutable report back.
+		slog.Warn("request verification environment release", "environment", request.Report.Report.Environment.ID, "err", err)
+	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) markVerificationEnvironmentReleasable(ctx context.Context, environmentID, revisionDigest string) error {
+	if h == nil || h.k8s == nil || strings.TrimSpace(environmentID) == "" || !runnable.ValidDigest(revisionDigest) {
+		return errors.New("verification environment release request is invalid")
+	}
+	items, err := h.k8s.ListRuntimeEnvironments(ctx, h.crdNamespace, "")
+	if err != nil {
+		return err
+	}
+	for index := range items.Items {
+		environment := items.Items[index].DeepCopy()
+		if string(environment.UID) != environmentID {
+			continue
+		}
+		if environment.Spec.Purpose != runtimev2.PurposeVerification || environment.Spec.RunnableRevisionRef.Digest != revisionDigest {
+			return errors.New("verification environment is bound to another runnable revision")
+		}
+		if environment.Spec.Lease.ReleaseAt != nil {
+			return nil
+		}
+		now := metav1.NewTime(time.Now().UTC())
+		environment.Spec.Lease.ReleaseAt = &now
+		_, err := h.k8s.UpdateRuntimeEnvironment(ctx, h.crdNamespace, environment)
+		return err
+	}
+	return errors.New("verification environment was not found")
 }
 
 func (h *Handler) InternalReportRunnableActionFailure(c *gin.Context) {

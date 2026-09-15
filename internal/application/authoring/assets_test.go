@@ -27,7 +27,7 @@ func TestCandidateArchiveAssetsAndDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasAsset(assets, "nodes/host/checks.sh") || !hasAsset(assets, "solution.md") || !hasAsset(assets, "scenario.yaml") {
+	if !hasAsset(assets, "nodes/host/assertions/final-service-ready.sh") || !hasAsset(assets, "solution.md") || !hasAsset(assets, "scenario.yaml") {
 		t.Fatalf("candidate assets are incomplete: %#v", assets)
 	}
 	diffs, err := DiffAssets(second, first)
@@ -39,7 +39,7 @@ func TestCandidateArchiveAssetsAndDiff(t *testing.T) {
 	}
 	var checkpointDiff string
 	for _, diff := range diffs {
-		if diff.Path == "nodes/host/checks.sh" {
+		if diff.Path == "nodes/host/assertions/final-service-ready.sh" {
 			checkpointDiff = diff.Diff
 		}
 	}
@@ -88,14 +88,14 @@ func TestReadAssetsRejectsArchivePathTraversal(t *testing.T) {
 
 func writeCandidateAssets(t *testing.T, root, title, description, problem, checks, solution string) {
 	t.Helper()
-	writeCandidateAsset(t, filepath.Join(root, "scenario.yaml"), "title: "+title+"\nruntime: node\ndescription: "+description+"\nversions:\n  - component: authoring-fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh creates the broken state.\nreproduction:\n  objective: The service is initially unavailable.\n  evidence:\n    - id: service-unavailable\n      description: The service is initially unavailable.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
+	writeCandidateAsset(t, filepath.Join(root, "scenario.yaml"), "title: "+title+"\nruntime: node\ndescription: "+description+"\nversions:\n  - component: authoring-fixture\n    version: v1\ntopology: One host node.\ninitialization: initialize.sh creates the broken state.\nreproduction:\n  objective: The service is initially unavailable.\n  evidence:\n    - id: service-unavailable\n      description: The service is initially unavailable.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: service-ready\n    title: Service ready\n    description: The service responds successfully.\n    hint: hints/service-ready.md\n    node: host\n")
 	writeCandidateAsset(t, filepath.Join(root, "problem.md"), problem)
 	writeCandidateAsset(t, filepath.Join(root, "solution.md"), solution)
 	writeCandidateAsset(t, filepath.Join(root, "hints", "service-ready.md"), "hint\n")
-	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"service-unavailable\",\"observed\":true,\"summary\":\"unavailable\"}]}'\n")
-	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "checks.sh"), checks)
-	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "answer.sh"), "#!/bin/sh\n")
+	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "initialize.sh"), "#!/bin/sh\n")
+	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "assertions", "initial-service-unavailable.sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"service-unavailable\",\"satisfied\":true,\"summary\":\"unavailable\"}]}'\n")
+	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "assertions", "final-service-ready.sh"), checks)
+	writeCandidateAsset(t, filepath.Join(root, "nodes", "host", "actions", "apply.sh"), "#!/bin/sh\n")
 }
 
 func writeCandidateAsset(t *testing.T, path, content string) {

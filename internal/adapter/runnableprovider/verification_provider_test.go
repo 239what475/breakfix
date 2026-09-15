@@ -11,9 +11,7 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	runnableworker "github.com/breakfix/breakfix/internal/worker/runnable"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -30,7 +28,7 @@ func TestVerificationProviderCreatesAndPollsReadyEnvironment(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node", ProfileDigest: profileDigest}}},
 		},
 	}
-	provider, err := NewVerificationProvider(client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
+	provider, err := NewVerificationProvider(client, client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,22 +41,22 @@ func TestVerificationProviderCreatesAndPollsReadyEnvironment(t *testing.T) {
 	if identity.ID != "env-uid" || identity.Provider != "node" || identity.ProfileDigest != profileDigest {
 		t.Fatalf("identity = %#v", identity)
 	}
-	if client.createCalls != 1 || client.requested.Spec.RunnableRevisionRef.ID != request.RunnableRevisionRef.ID || client.requested.Spec.RunnableRevisionRef.Digest != request.RunnableRevisionDigest || client.requested.Spec.Purpose != runtimev2.PurposeVerification {
+	if client.createCalls != 1 || client.requested.RunnableRevisionRef.ID != request.RunnableRevisionRef.ID || client.requested.RunnableRevisionRef.Digest != request.RunnableRevisionDigest || client.requested.Attempt != request.Attempt {
 		t.Fatalf("create request = %#v calls=%d", client.requested, client.createCalls)
 	}
 }
 
-func TestVerificationProviderAdoptsExistingEnvironmentOnRetry(t *testing.T) {
+func TestVerificationProviderPollsServerProvisionedEnvironmentOnRetry(t *testing.T) {
 	revision := verificationRevision(t, runnable.RuntimeNode)
 	digest, err := revision.Spec.RuntimeProfile.Digest()
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := verificationRequest(t, revision)
-	name := verificationEnvironmentName(request.RunnableRevisionRef.ID, request.Attempt)
+	name := runnable.VerificationEnvironmentName(request.RunnableRevisionRef, request.Attempt)
 	existing := &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID("env-existing")}, Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest}, Purpose: runtimev2.PurposeVerification}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node", ProfileDigest: digest}}}
-	client := &fakeRuntimeEnvironmentClient{createErr: apierrors.NewAlreadyExists(schema.GroupResource{Group: "breakfix.dev", Resource: "runtimeenvironments"}, name), getResult: existing}
-	provider, err := NewVerificationProvider(client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
+	client := &fakeRuntimeEnvironmentClient{created: existing, getResult: existing}
+	provider, err := NewVerificationProvider(client, client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +64,7 @@ func TestVerificationProviderAdoptsExistingEnvironmentOnRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.ID != "env-existing" || client.getCalls != 2 {
+	if identity.ID != "env-existing" || client.getCalls != 1 || client.createCalls != 1 {
 		t.Fatalf("adopted identity=%#v get calls=%d", identity, client.getCalls)
 	}
 }
@@ -85,7 +83,7 @@ func TestVerificationProviderRejectsUIDAndProfileChanges(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			revision := verificationRevision(t, runnable.RuntimeNode)
 			client := &fakeRuntimeEnvironmentClient{created: &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}}, observations: []*runtimev2.RuntimeEnvironment{test.ready}}
-			provider, err := NewVerificationProvider(client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
+			provider, err := NewVerificationProvider(client, client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -115,7 +113,7 @@ func TestVerificationProviderExecutesNodeTarget(t *testing.T) {
 		}},
 	}
 	node := &fakeNodeRuntimeExecutor{result: incus.ExecNodeResult{Stdout: "ok\n", Stderr: "diag\n", ExitCode: 0}}
-	provider, err := NewVerificationProvider(client, node, "breakfix-system")
+	provider, err := NewVerificationProvider(client, client, node, "breakfix-system")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +140,7 @@ func TestVerificationProviderExecutesK8sManagementTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &fakeRuntimeEnvironmentClient{created: &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}}, observations: []*runtimev2.RuntimeEnvironment{{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "k8s", ProfileDigest: profileDigest, EndpointRefs: []runtimev2.EndpointReference{{Name: "terminal", Ref: "runtime-ns/runtime-terminal"}}}}}}, execResult: kubernetes.PodExecResult{ExitCode: 0, Stdout: `{"assertions":[]}`, Stderr: "diagnostic"}}
-	provider, err := NewVerificationProvider(client, nil, "breakfix-system")
+	provider, err := NewVerificationProvider(client, client, nil, "breakfix-system")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +164,7 @@ func TestVerificationProviderRejectsUnsafeEntrypointAndMissingNodeTarget(t *test
 		t.Fatal(err)
 	}
 	client := &fakeRuntimeEnvironmentClient{created: &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}}, observations: []*runtimev2.RuntimeEnvironment{{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node", ProfileDigest: digest}}}}}
-	provider, err := NewVerificationProvider(client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
+	provider, err := NewVerificationProvider(client, client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +184,7 @@ func TestVerificationProviderRejectsUnsafeEntrypointAndMissingNodeTarget(t *test
 
 type fakeRuntimeEnvironmentClient struct {
 	created       *runtimev2.RuntimeEnvironment
-	requested     *runtimev2.RuntimeEnvironment
-	createErr     error
+	requested     runnable.VerifyRequest
 	getResult     *runtimev2.RuntimeEnvironment
 	observations  []*runtimev2.RuntimeEnvironment
 	execResult    kubernetes.PodExecResult
@@ -197,18 +194,18 @@ type fakeRuntimeEnvironmentClient struct {
 	execPod       string
 }
 
-func (c *fakeRuntimeEnvironmentClient) CreateRuntimeEnvironment(_ context.Context, _ string, environment *runtimev2.RuntimeEnvironment) (*runtimev2.RuntimeEnvironment, error) {
+func (c *fakeRuntimeEnvironmentClient) CreateVerificationEnvironment(_ context.Context, request runnable.VerifyRequest) (*runtimev2.RuntimeEnvironment, error) {
 	c.createCalls++
-	c.requested = environment.DeepCopy()
-	if c.createErr != nil {
-		return nil, c.createErr
-	}
+	c.requested = request
 	if c.created == nil {
 		c.created = &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{UID: types.UID("env-uid")}}
 	}
 	created := c.created.DeepCopy()
-	created.Name = environment.Name
-	created.Spec = environment.Spec
+	created.Name = runnable.VerificationEnvironmentName(request.RunnableRevisionRef, request.Attempt)
+	created.Spec = runtimev2.RuntimeEnvironmentSpec{
+		RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest},
+		Purpose:             runtimev2.PurposeVerification,
+	}
 	return created, nil
 }
 
@@ -223,10 +220,6 @@ func (c *fakeRuntimeEnvironmentClient) GetRuntimeEnvironment(_ context.Context, 
 		return c.getResult.DeepCopy(), nil
 	}
 	return c.created.DeepCopy(), nil
-}
-
-func (c *fakeRuntimeEnvironmentClient) DeleteRuntimeEnvironmentWithUID(context.Context, string, string, types.UID) error {
-	return nil
 }
 
 func (c *fakeRuntimeEnvironmentClient) ExecInPodStreamsContext(_ context.Context, namespace, pod string, _ int, _ ...string) (kubernetes.PodExecResult, error) {

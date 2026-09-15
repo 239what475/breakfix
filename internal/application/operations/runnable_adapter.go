@@ -167,7 +167,7 @@ func locationFor(kind, id string) location {
 func compileInitialization(entry scenario.Entry, locations map[string]location) ([]runnable.ActionSpec, error) {
 	if entry.Runtime == scenario.RuntimeK8s {
 		item := locations[""]
-		return []runnable.ActionSpec{action("initialize", "k8s/generate.sh", item)}, nil
+		return []runnable.ActionSpec{action("initialize", scenario.InitializationEntrypoint(entry.Runtime, ""), item)}, nil
 	}
 	result := make([]runnable.ActionSpec, 0, len(entry.Nodes))
 	for _, node := range entry.Nodes {
@@ -175,7 +175,7 @@ func compileInitialization(entry scenario.Entry, locations map[string]location) 
 		if !exists {
 			return nil, fmt.Errorf("compile operations initialization: node %q has no execution location", node.Name)
 		}
-		result = append(result, action("initialize-"+node.Name, "nodes/"+node.Name+"/generate.sh", item))
+		result = append(result, action("initialize-"+node.Name, scenario.InitializationEntrypoint(entry.Runtime, node.Name), item))
 	}
 	return result, nil
 }
@@ -187,7 +187,7 @@ func compileValidationPlan(entry scenario.Entry, locations map[string]location) 
 		if err != nil {
 			return runnable.ValidationPlan{}, fmt.Errorf("compile operations observation %q: %w", evidence.ID, err)
 		}
-		initial.Assertions = append(initial.Assertions, assertion(evidence.ID, reproductionEntrypoint(entry.Runtime, evidence.Node), item))
+		initial.Assertions = append(initial.Assertions, assertion(evidence.ID, scenario.InitialAssertionEntrypoint(entry.Runtime, evidence.Node, evidence.ID), item))
 	}
 	plan := runnable.ValidationPlan{FormatVersion: runnable.FormatVersion, Phases: []runnable.ValidationPhase{initial}}
 	if !entry.HasReferenceRepair {
@@ -196,10 +196,10 @@ func compileValidationPlan(entry scenario.Entry, locations map[string]location) 
 	final := runnable.ValidationPhase{ID: "final-observation", TimeoutSeconds: 1800, Execution: runnable.PhaseSequential}
 	if entry.Runtime == scenario.RuntimeK8s {
 		item := locations[""]
-		final.Actions = append(final.Actions, action("apply-change", "k8s/answer.sh", item))
+		final.Actions = append(final.Actions, action("apply-change", scenario.ApplyEntrypoint(entry.Runtime, ""), item))
 	} else {
 		for _, node := range entry.Nodes {
-			final.Actions = append(final.Actions, action("apply-change-"+node.Name, "nodes/"+node.Name+"/answer.sh", locations[node.Name]))
+			final.Actions = append(final.Actions, action("apply-change-"+node.Name, scenario.ApplyEntrypoint(entry.Runtime, node.Name), locations[node.Name]))
 		}
 	}
 	for _, checkpoint := range entry.Checkpoints {
@@ -207,7 +207,7 @@ func compileValidationPlan(entry scenario.Entry, locations map[string]location) 
 		if err != nil {
 			return runnable.ValidationPlan{}, fmt.Errorf("compile operations conclusion %q: %w", checkpoint.ID, err)
 		}
-		final.Assertions = append(final.Assertions, assertion(checkpoint.ID, checksEntrypoint(entry.Runtime, checkpoint.Node), item))
+		final.Assertions = append(final.Assertions, assertion(checkpoint.ID, scenario.FinalAssertionEntrypoint(entry.Runtime, checkpoint.Node, checkpoint.ID), item))
 	}
 	plan.Phases = append(plan.Phases, final)
 	return plan, nil
@@ -234,20 +234,6 @@ func action(id, entrypoint string, item location) runnable.ActionSpec {
 
 func assertion(id, entrypoint string, item location) runnable.AssertionSpec {
 	return runnable.AssertionSpec{ID: id, Entrypoint: entrypoint, Target: item.target, BoundaryID: item.readBoundary, TimeoutSeconds: 900}
-}
-
-func reproductionEntrypoint(runtime, node string) string {
-	if runtime == scenario.RuntimeK8s {
-		return "k8s/reproduce.sh"
-	}
-	return "nodes/" + node + "/reproduce.sh"
-}
-
-func checksEntrypoint(runtime, node string) string {
-	if runtime == scenario.RuntimeK8s {
-		return "k8s/checks.sh"
-	}
-	return "nodes/" + node + "/checks.sh"
 }
 
 func runnableID(value string) error {

@@ -25,7 +25,6 @@ func BuildSourceArchive(root string) (runnable.SourceArchive, []byte, error) {
 	if len(files) == 0 {
 		return runnable.SourceArchive{}, nil, fmt.Errorf("operations source tree is empty")
 	}
-
 	var data bytes.Buffer
 	writer, err := gzip.NewWriterLevel(&data, gzip.BestCompression)
 	if err != nil {

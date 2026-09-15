@@ -57,8 +57,8 @@ func TestPortableSourceBuildsDeterministicBundle(t *testing.T) {
 		t.Fatalf("bundle media types = (%q, %q)", first.ArtifactType, first.LayerMediaType)
 	}
 	files := sourceLayerFiles(t, first.SourceLayer)
-	if mode := files["scenarios/linux/cleanup-logs/nodes/host/generate.sh"].Mode; mode != 0o755 {
-		t.Fatalf("generate.sh mode = %04o, want 0755", mode)
+	if mode := files["scenarios/linux/cleanup-logs/nodes/host/initialize.sh"].Mode; mode != 0o755 {
+		t.Fatalf("initialize.sh mode = %04o, want 0755", mode)
 	}
 	if got := string(files["scenarios/linux/cleanup-logs/scenario.yaml"].Content); !bytes.Contains([]byte(got), []byte("description: |")) {
 		t.Fatalf("source layer changed scenario YAML:\n%s", got)
@@ -212,7 +212,7 @@ versions:
   - component: cleanup-fixture
     version: v1
 topology: One host node.
-initialization: generate.sh removes the cleanup script.
+initialization: initialize.sh removes the cleanup script.
 reproduction:
   objective: The cleanup script is absent.
   evidence:
@@ -301,7 +301,7 @@ versions:
   - component: cleanup-fixture
     version: v1
 topology: One host node.
-initialization: generate.sh removes the cleanup script.
+initialization: initialize.sh removes the cleanup script.
 reproduction:
   objective: The cleanup script is absent.
   evidence:
@@ -333,7 +333,7 @@ versions:
   - component: cleanup-fixture
     version: v1
 topology: One host node.
-initialization: generate.sh removes the cleanup script.
+initialization: initialize.sh removes the cleanup script.
 reproduction:
   objective: The cleanup script is absent.
   evidence:
@@ -355,9 +355,10 @@ checkpoints:
 	writeCatalogFile(t, filepath.Join(root, "problem.md"), []byte("# Cleanup logs\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "solution.md"), []byte("<!-- checkpoint: cleanup-script-ready -->\n"), 0o644)
 	writeCatalogFile(t, filepath.Join(root, "hints", "cleanup-script-ready.md"), []byte("Create the script.\n"), 0o644)
-	for _, name := range []string{"generate.sh", "answer.sh", "checks.sh", "reproduce.sh"} {
-		writeCatalogFile(t, filepath.Join(root, "nodes", "host", name), []byte("#!/bin/sh\nexit 0\n"), 0o755)
-	}
+	writeCatalogFile(t, filepath.Join(root, "nodes", "host", "initialize.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	writeCatalogFile(t, filepath.Join(root, "nodes", "host", "actions", "apply.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	writeCatalogFile(t, filepath.Join(root, "nodes", "host", "assertions", "initial-cleanup-script-absent.sh"), []byte("#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"cleanup-script-absent\",\"satisfied\":true,\"summary\":\"absent\"}]}'\n"), 0o755)
+	writeCatalogFile(t, filepath.Join(root, "nodes", "host", "assertions", "final-cleanup-script-ready.sh"), []byte("#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"cleanup-script-ready\",\"satisfied\":true,\"summary\":\"ready\"}]}'\n"), 0o755)
 }
 
 func writeCatalogFile(t *testing.T, path string, content []byte, mode os.FileMode) {

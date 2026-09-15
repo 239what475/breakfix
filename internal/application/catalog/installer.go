@@ -14,11 +14,13 @@ import (
 	"time"
 
 	appexecution "github.com/breakfix/breakfix/internal/application/execution"
+	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	"github.com/breakfix/breakfix/internal/content/candidate"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 // BundlePuller and SourceLayerReader deliberately model only the two OCI
@@ -49,6 +51,19 @@ type ReleaseStore interface {
 	Commits(context.Context, string) ([]catalogdomain.Commit, error)
 	MarkCommitMaterialized(context.Context, string, string, string, time.Time) (*catalogdomain.Commit, error)
 	CompleteReleaseCommit(context.Context, string, time.Time) (*catalogdomain.Release, error)
+	MarkCatalogEntryVerified(context.Context, string, time.Time) error
+	RecordCatalogCommitArtifact(context.Context, string, string, execution.ArtifactReference, time.Time) error
+}
+
+// RunnableStore is the only runtime boundary used during Catalog installation.
+// Catalog owns source and publication state; the public Worker owns every
+// provider action and returns immutable values through this interface.
+type RunnableStore interface {
+	StoreRunnableSource(context.Context, runnable.SourceArchive, []byte, time.Time) error
+	ScheduleMaterialization(context.Context, runnable.RunnableSpec, int64, time.Time) (runnable.ActionIdentity, error)
+	ResolveMaterializedRunnableRevision(context.Context, runnable.ActionIdentity) (runnable.RevisionReference, error)
+	ScheduleVerification(context.Context, runnable.RevisionReference, int64, time.Time) (runnable.ActionIdentity, error)
+	ResolveVerificationForAction(context.Context, runnable.ActionIdentity) (runnable.StoredVerificationReport, error)
 }
 
 type InstallerConfig struct {
@@ -60,6 +75,8 @@ type InstallerConfig struct {
 	Puller           BundlePuller
 	LayerReader      SourceLayerReader
 	Store            ReleaseStore
+	Runnable         RunnableStore
+	Operations       appoperations.Config
 }
 
 // Installer is a Server-owned coordinator for configured Catalog Releases.
@@ -75,6 +92,8 @@ type Installer struct {
 	puller       BundlePuller
 	layerReader  SourceLayerReader
 	store        ReleaseStore
+	runnable     RunnableStore
+	operations   appoperations.Config
 	now          func() time.Time
 	sleep        func(context.Context, time.Duration) error
 	mu           sync.Mutex
@@ -122,6 +141,7 @@ func NewInstaller(config InstallerConfig) (*Installer, error) {
 		dataDir: filepath.Clean(config.DataDir), scenariosDir: filepath.Clean(config.ScenariosDir), reference: strings.TrimSpace(config.ReleaseReference),
 		digest: digest, pollInterval: config.PollInterval,
 		snapshot: config.Snapshot, puller: config.Puller, layerReader: config.LayerReader, store: config.Store,
+		runnable: config.Runnable, operations: config.Operations,
 		now: func() time.Time { return time.Now().UTC() }, sleep: sleepContext,
 	}, nil
 }
@@ -228,12 +248,71 @@ func (i *Installer) RunOnce(ctx context.Context) error {
 		return nil
 	}
 	if release.State == catalogdomain.ReleaseInstalling {
+		if err := i.advanceEntries(ctx, source, *release); err != nil {
+			return err
+		}
 		return i.prepareCommit(ctx, release)
 	}
 	if release.State == catalogdomain.ReleaseCommitting {
 		return i.finalizeCommit(ctx, source, *release)
 	}
 	return fmt.Errorf("catalog release %q has unsupported state %s", release.ID, release.State)
+}
+
+func (i *Installer) advanceEntries(ctx context.Context, source *PortableSource, release catalogdomain.Release) error {
+	if i.runnable == nil {
+		return errors.New("catalog installer requires a public runnable store")
+	}
+	entries, err := i.store.Entries(ctx, release.ID)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.State == catalogdomain.EntryReadyToCommit {
+			continue
+		}
+		if entry.State != catalogdomain.EntryBuilding {
+			return fmt.Errorf("catalog entry %q has unsupported public state %s", entry.ID, entry.State)
+		}
+		archive, spec, err := i.compileEntry(source, entry)
+		if err != nil {
+			return err
+		}
+		now := i.now().UTC()
+		if err := i.runnable.StoreRunnableSource(ctx, spec.Source, archive, now); err != nil {
+			return err
+		}
+		materialize, err := i.runnable.ScheduleMaterialization(ctx, spec, 1, now)
+		if err != nil {
+			return err
+		}
+		revision, err := i.runnable.ResolveMaterializedRunnableRevision(ctx, materialize)
+		if errors.Is(err, runnable.ErrMaterializationNotReady) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		verify, err := i.runnable.ScheduleVerification(ctx, revision, 1, now)
+		if err != nil {
+			return err
+		}
+		report, err := i.runnable.ResolveVerificationForAction(ctx, verify)
+		if errors.Is(err, runnable.ErrMaterializationNotReady) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !report.Report.Passed {
+			_, err = i.store.FailRelease(ctx, release.ID, "catalog runnable verification did not pass", now)
+			return err
+		}
+		if err := i.store.MarkCatalogEntryVerified(ctx, entry.ID, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, *PortableSource, error) {
@@ -411,6 +490,17 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 		}
 		switch commit.State {
 		case catalogdomain.CommitPrepared:
+			revision, err := i.resolveEntryRevision(ctx, source, entry)
+			if err != nil {
+				return i.handleFinalizerError(ctx, release, err)
+			}
+			artifact, err := catalogArtifact(revision.Artifact)
+			if err != nil {
+				return i.handleFinalizerError(ctx, release, deterministicCatalogFailure(err))
+			}
+			if err := i.store.RecordCatalogCommitArtifact(ctx, release.ID, commit.ID, artifact, i.now().UTC()); err != nil {
+				return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
+			}
 			allMaterialized = false
 			continue
 		case catalogdomain.CommitArtifactPublished:
@@ -451,6 +541,68 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
 	return nil
+}
+
+func (i *Installer) resolveEntryRevision(ctx context.Context, source *PortableSource, entry catalogdomain.Entry) (runnable.RunnableRevision, error) {
+	if i.runnable == nil {
+		return runnable.RunnableRevision{}, errors.New("catalog runnable store is unavailable")
+	}
+	_, spec, err := i.compileEntry(source, entry)
+	if err != nil {
+		return runnable.RunnableRevision{}, err
+	}
+	identity, err := i.runnable.ScheduleMaterialization(ctx, spec, 1, i.now().UTC())
+	if err != nil {
+		return runnable.RunnableRevision{}, err
+	}
+	reference, err := i.runnable.ResolveMaterializedRunnableRevision(ctx, identity)
+	if err != nil {
+		return runnable.RunnableRevision{}, err
+	}
+	// The immutable revision is returned by the public action store only after
+	// its digest binding has been checked there. Catalog needs its artifact
+	// projection solely to write the Operations manifest.
+	if resolver, ok := i.runnable.(interface {
+		ResolveRunnableRevision(context.Context, string, string) (runnable.RunnableRevision, error)
+	}); ok {
+		return resolver.ResolveRunnableRevision(ctx, reference.ID, reference.Digest)
+	}
+	return runnable.RunnableRevision{}, errors.New("catalog runnable store cannot resolve revisions")
+}
+
+func (i *Installer) compileEntry(source *PortableSource, entry catalogdomain.Entry) ([]byte, runnable.RunnableSpec, error) {
+	root := filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath))
+	candidateEntry, err := scenario.ValidateCandidateDir(root)
+	if err != nil {
+		return nil, runnable.RunnableSpec{}, err
+	}
+	publicSource, archive, err := appoperations.BuildSourceArchive(root)
+	if err != nil {
+		return nil, runnable.RunnableSpec{}, err
+	}
+	spec, err := appoperations.Compile(appoperations.Input{ContentID: entry.ID, ContentRevision: string(entry.ContentRevision), Entry: *candidateEntry, Source: publicSource}, i.operations)
+	if err != nil {
+		return nil, runnable.RunnableSpec{}, err
+	}
+	return archive, spec, nil
+}
+
+func catalogArtifact(value runnable.ArtifactReference) (execution.ArtifactReference, error) {
+	if err := value.Validate(); err != nil {
+		return execution.ArtifactReference{}, err
+	}
+	switch value.Runtime {
+	case runnable.RuntimeNode:
+		alias, digest, found := strings.Cut(strings.TrimPrefix(value.ProviderReference, "incus://"), "@")
+		if !found || strings.TrimSpace(alias) == "" || digest != value.ArtifactDigest {
+			return execution.ArtifactReference{}, errors.New("catalog Node artifact provider reference is invalid")
+		}
+		return execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: alias, IncusFingerprint: strings.TrimPrefix(digest, "sha256:")}, nil
+	case runnable.RuntimeK8s:
+		return execution.ArtifactReference{Runtime: scenario.RuntimeK8s, OCIReference: value.ProviderReference}, nil
+	default:
+		return execution.ArtifactReference{}, errors.New("catalog runnable artifact has unsupported runtime")
+	}
 }
 
 func (i *Installer) handleFinalizerError(ctx context.Context, release catalogdomain.Release, err error) error {

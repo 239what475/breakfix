@@ -332,14 +332,6 @@ func validateScenarioFiles(scenario *Entry, dir string) (bool, error) {
 			return false, fmt.Errorf("node scenario exceeds the %d node limit", MaxScenarioNodes)
 		}
 		declared := make(map[string]struct{}, len(scenario.Nodes))
-		checkpointNodes := make(map[string]struct{})
-		for _, checkpoint := range scenario.Checkpoints {
-			checkpointNodes[checkpoint.Node] = struct{}{}
-		}
-		reproductionNodes := make(map[string]struct{})
-		for _, evidence := range scenario.Reproduction.Evidence {
-			reproductionNodes[evidence.Node] = struct{}{}
-		}
 		for _, node := range scenario.Nodes {
 			name := strings.TrimSpace(node.Name)
 			if !ValidID(name) {
@@ -355,18 +347,18 @@ func validateScenarioFiles(scenario *Entry, dir string) (bool, error) {
 				return false, fmt.Errorf("node %q title is required", name)
 			}
 			declared[name] = struct{}{}
-			if err := requireRegularFile(dir, filepath.Join("nodes", name, "generate.sh")); err != nil {
+			if err := requireRegularFile(dir, InitializationEntrypoint(scenario.Runtime, name)); err != nil {
 				return false, err
 			}
-			if _, hasChecks := checkpointNodes[name]; hasChecks {
-				if err := requireRegularFile(dir, filepath.Join("nodes", name, "checks.sh")); err != nil {
-					return false, err
-				}
+		}
+		for _, evidence := range scenario.Reproduction.Evidence {
+			if err := requireRegularFile(dir, InitialAssertionEntrypoint(scenario.Runtime, evidence.Node, evidence.ID)); err != nil {
+				return false, err
 			}
-			if _, hasReproduction := reproductionNodes[name]; hasReproduction {
-				if err := requireRegularFile(dir, filepath.Join("nodes", name, "reproduce.sh")); err != nil {
-					return false, err
-				}
+		}
+		for _, checkpoint := range scenario.Checkpoints {
+			if err := requireRegularFile(dir, FinalAssertionEntrypoint(scenario.Runtime, checkpoint.Node, checkpoint.ID)); err != nil {
+				return false, err
 			}
 		}
 		entries, err := os.ReadDir(filepath.Join(dir, "nodes"))
@@ -391,16 +383,16 @@ func validateScenarioFiles(scenario *Entry, dir string) (bool, error) {
 		if len(scenario.Nodes) != 0 {
 			return false, fmt.Errorf("k8s scenario must not declare nodes")
 		}
-		if err := requireRegularFile(dir, filepath.Join("k8s", "generate.sh")); err != nil {
+		if err := requireRegularFile(dir, InitializationEntrypoint(scenario.Runtime, "")); err != nil {
 			return false, err
 		}
-		if len(scenario.Checkpoints) > 0 {
-			if err := requireRegularFile(dir, filepath.Join("k8s", "checks.sh")); err != nil {
+		for _, evidence := range scenario.Reproduction.Evidence {
+			if err := requireRegularFile(dir, InitialAssertionEntrypoint(scenario.Runtime, "", evidence.ID)); err != nil {
 				return false, err
 			}
 		}
-		if len(scenario.Reproduction.Evidence) > 0 {
-			if err := requireRegularFile(dir, filepath.Join("k8s", "reproduce.sh")); err != nil {
+		for _, checkpoint := range scenario.Checkpoints {
+			if err := requireRegularFile(dir, FinalAssertionEntrypoint(scenario.Runtime, "", checkpoint.ID)); err != nil {
 				return false, err
 			}
 		}
@@ -421,7 +413,7 @@ func validateNodeReferenceRepair(scenario *Entry, dir string) (bool, error) {
 	}
 	answers := 0
 	for _, node := range scenario.Nodes {
-		hasAnswer, err := hasRegularFile(dir, filepath.Join("nodes", node.Name, "answer.sh"))
+		hasAnswer, err := hasRegularFile(dir, ApplyEntrypoint(scenario.Runtime, node.Name))
 		if err != nil {
 			return false, err
 		}
@@ -433,7 +425,7 @@ func validateNodeReferenceRepair(scenario *Entry, dir string) (bool, error) {
 		return false, fmt.Errorf("solution.md and reference answer scripts must be provided together")
 	}
 	if answers > 0 && answers != len(scenario.Nodes) {
-		return false, fmt.Errorf("reference repair requires answer.sh for every declared node")
+		return false, fmt.Errorf("reference repair requires actions/apply.sh for every declared node")
 	}
 	if solution && len(scenario.Checkpoints) == 0 {
 		return false, fmt.Errorf("reference repair requires at least one checkpoint")
@@ -446,12 +438,12 @@ func validateK8sReferenceRepair(scenario *Entry, dir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	answer, err := hasRegularFile(dir, filepath.Join("k8s", "answer.sh"))
+	answer, err := hasRegularFile(dir, ApplyEntrypoint(scenario.Runtime, ""))
 	if err != nil {
 		return false, err
 	}
 	if solution != answer {
-		return false, fmt.Errorf("solution.md and k8s/answer.sh must be provided together")
+		return false, fmt.Errorf("solution.md and k8s/actions/apply.sh must be provided together")
 	}
 	if solution && len(scenario.Checkpoints) == 0 {
 		return false, fmt.Errorf("reference repair requires at least one checkpoint")

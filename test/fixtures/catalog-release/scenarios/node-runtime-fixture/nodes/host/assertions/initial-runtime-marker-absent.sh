@@ -2,10 +2,10 @@
 set -eu
 
 if [ ! -x /usr/local/bin/breakfix-runtime-fixture ]; then
-  observed=true
+  satisfied=true
   summary="运行时标记尚未创建"
 else
-  observed=false
+  satisfied=false
   summary="运行时标记已经存在"
 fi
-printf '{"evidence":[{"id":"runtime-marker-absent","observed":%s,"summary":"%s"}]}' "$observed" "$summary"
+printf '{"assertions":[{"id":"runtime-marker-absent","satisfied":%s,"summary":"%s"}]}' "$satisfied" "$summary"

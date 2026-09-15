@@ -7,7 +7,7 @@ import {
 	runTerminalCommand,
 	stopScenario,
 } from "../support/live-helpers";
-import { attachEnvironmentIdentity, waitForEnvironmentDeletion } from "../support/e2e-platform";
+import { attachRuntimeEnvironment, waitForRuntimeEnvironmentDeletion } from "../support/e2e-platform";
 import {
 	CandidateRejectedError,
 	currentAuthoringSessionID,
@@ -68,14 +68,14 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a k8s scenar
 		await card.getByRole("button", { name: "Start scenario", exact: true }).click();
 		await expectTerminalConnected(page);
 		environmentName = await activeEnvironmentName(page, scenarioID);
-		await runTerminalCommand(page, "/bin/bash /opt/breakfix/scenario/k8s/answer.sh");
+		await runTerminalCommand(page, "/bin/bash /opt/breakfix/runnable/k8s/actions/apply.sh");
 		await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 2 * 60_000 });
 		completed = true;
 	} finally {
-		if (environmentName) await attachEnvironmentIdentity(testInfo, "vk8senvironment", environmentName);
+		if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
 		if (completed && environmentName && scenarioID) {
 			await stopScenario(page, scenarioID);
-			await waitForEnvironmentDeletion("vk8senvironment", environmentName);
+			await waitForRuntimeEnvironmentDeletion(environmentName);
 		}
 	}
 });

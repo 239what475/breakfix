@@ -104,6 +104,32 @@ type Checkpoint struct {
 	Node        string `yaml:"node,omitempty" json:"node,omitempty"`
 }
 
+// Operations source paths are generic public execution inputs. The Operations
+// module maps its own evidence and checkpoint vocabulary to these paths; the
+// Runtime Worker only receives ActionSpec and AssertionSpec values.
+func InitializationEntrypoint(runtime, node string) string {
+	return operationsRuntimeRoot(runtime, node) + "/initialize.sh"
+}
+
+func ApplyEntrypoint(runtime, node string) string {
+	return operationsRuntimeRoot(runtime, node) + "/actions/apply.sh"
+}
+
+func InitialAssertionEntrypoint(runtime, node, id string) string {
+	return operationsRuntimeRoot(runtime, node) + "/assertions/initial-" + id + ".sh"
+}
+
+func FinalAssertionEntrypoint(runtime, node, id string) string {
+	return operationsRuntimeRoot(runtime, node) + "/assertions/final-" + id + ".sh"
+}
+
+func operationsRuntimeRoot(runtime, node string) string {
+	if runtime == RuntimeK8s {
+		return "k8s"
+	}
+	return "nodes/" + node
+}
+
 func List(root string) ([]Entry, error) {
 	sources, err := os.ReadDir(root)
 	if err != nil {

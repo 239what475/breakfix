@@ -583,14 +583,14 @@ func generatorServiceCandidateArchive(t *testing.T) []byte {
 		content string
 		mode    int64
 	}{
-		{"scenario.yaml", "runtime: node\ntitle: Generator service candidate\ndescription: Validate the shared generator service.\nversions:\n  - component: generator-service-fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh prepares the initial state.\nreproduction:\n  objective: The generated workspace starts incomplete.\n  evidence:\n    - id: workspace-incomplete\n      description: The workspace is initially incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
+		{"scenario.yaml", "runtime: node\ntitle: Generator service candidate\ndescription: Validate the shared generator service.\nversions:\n  - component: generator-service-fixture\n    version: v1\ntopology: One host node.\ninitialization: initialize.sh prepares the initial state.\nreproduction:\n  objective: The generated workspace starts incomplete.\n  evidence:\n    - id: workspace-incomplete\n      description: The workspace is initially incomplete.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: ready\n    title: Ready\n    description: The generated workspace is ready.\n    hint: hints/ready.md\n    node: host\n", 0o644},
 		{"problem.md", "# Problem\n\nMake the workspace ready.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host state.\n", 0o644},
-		{"nodes/host/generate.sh", "#!/bin/sh\nexit 0\n", 0o755},
-		{"nodes/host/reproduce.sh", "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workspace-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n", 0o755},
-		{"nodes/host/answer.sh", "#!/bin/sh\nexit 0\n", 0o755},
-		{"nodes/host/checks.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/initialize.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/assertions/initial-workspace-incomplete.sh", "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"workspace-incomplete\",\"satisfied\":true,\"summary\":\"incomplete\"}]}'\n", 0o755},
+		{"nodes/host/actions/apply.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/assertions/final-ready.sh", "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"ready\",\"satisfied\":true,\"summary\":\"ready\"}]}'\n", 0o755},
 	} {
 		header := &tar.Header{Name: file.name, Mode: file.mode, Size: int64(len(file.content)), Typeflag: tar.TypeReg}
 		if err := tarWriter.WriteHeader(header); err != nil {

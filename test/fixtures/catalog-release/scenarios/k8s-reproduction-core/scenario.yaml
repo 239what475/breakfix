@@ -10,7 +10,7 @@ description: |
   验证管理终端可观察到预期的缺失配置。
 versions:
   - component: kubernetes
-    version: v1.36
+    version: v1.36.2
 topology: 一个隔离的虚拟 Kubernetes 集群和管理终端。
 initialization: generate.sh 删除验收配置，建立未完成的初始状态。
 reproduction:

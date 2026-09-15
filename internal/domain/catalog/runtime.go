@@ -216,7 +216,10 @@ func (e Entry) Valid() bool {
 		return false
 	}
 	if e.State == EntryReadyToCommit {
-		return e.Build != nil && e.Artifact != nil && e.Verification != nil && e.Verification.Passed
+		// Legacy Catalog records may retain their historical projection, while
+		// new installs project only the completed public runnable action.
+		return (e.Build != nil && e.Artifact != nil && e.Verification != nil && e.Verification.Passed) ||
+			(e.Build == nil && e.Artifact == nil && e.VerifyEnvironment == nil && e.Verification == nil)
 	}
 	return true
 }

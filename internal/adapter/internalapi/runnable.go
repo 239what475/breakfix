@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -102,6 +103,43 @@ func (c *RunnableActionClient) StoreExecutionOutput(ctx context.Context, credent
 		return runnable.ImmutableReference{}, errors.New("server returned an execution output reference for another capture")
 	}
 	return response.Reference, nil
+}
+
+// CreateVerificationEnvironment delegates the only RuntimeEnvironment spec
+// creation path to the Server. The Worker receives an observed object and
+// never gains Kubernetes write permission for the control plane.
+func (c *RunnableActionClient) CreateVerificationEnvironment(ctx context.Context, request runnable.VerifyRequest) (*runtimev2.RuntimeEnvironment, error) {
+	if c == nil || c.server == nil || request.Validate() != nil {
+		return nil, errors.New("runnable verification environment request is invalid")
+	}
+	var response struct {
+		Environment *runtimev2.RuntimeEnvironment `json:"environment"`
+	}
+	if err := c.postLong(ctx, "/api/internal/runnable-actions/verification/environment", struct {
+		Request runnable.VerifyRequest `json:"request"`
+	}{request}, &response); err != nil {
+		return nil, err
+	}
+	if response.Environment == nil || response.Environment.UID == "" {
+		return nil, errors.New("Server returned an invalid verification environment")
+	}
+	if response.Environment.Spec.RunnableRevisionRef.ID != request.RunnableRevisionRef.ID || response.Environment.Spec.RunnableRevisionRef.Digest != request.RunnableRevisionDigest || response.Environment.Spec.Purpose != runtimev2.PurposeVerification {
+		return nil, errors.New("Server returned a verification environment for another runnable revision")
+	}
+	return response.Environment, nil
+}
+
+// RequestVerificationEnvironmentRelease asks the Server to persist the
+// release fact while the verification lease is still fenced. It is used only
+// when an infrastructure failure prevents normal report completion.
+func (c *RunnableActionClient) RequestVerificationEnvironmentRelease(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity) error {
+	if c == nil || c.server == nil || credential.Validate() != nil || credential.Identity.Phase != runnable.ActionVerify || environment.Validate() != nil {
+		return errors.New("runnable verification environment release request is invalid")
+	}
+	return c.post(ctx, "/api/internal/runnable-actions/verification/release", struct {
+		Credential  runnable.LeaseCredential     `json:"credential"`
+		Environment runnable.EnvironmentIdentity `json:"environment"`
+	}{credential, environment}, nil)
 }
 
 func (c *RunnableActionClient) CompleteMaterialization(ctx context.Context, credential runnable.LeaseCredential, revision runnable.StoredRevision) error {

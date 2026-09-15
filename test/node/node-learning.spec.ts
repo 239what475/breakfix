@@ -9,9 +9,10 @@ import {
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
 import {
-  attachNodeEnvironmentIdentity,
-  expectNodeEnvironmentPhase,
-  waitForNodeEnvironmentDeletion,
+  attachRuntimeEnvironment,
+  expectRuntimeEnvironmentPhase,
+  expectRuntimeEnvironmentVerification,
+  waitForRuntimeEnvironmentDeletion,
 } from "../support/e2e-platform";
 
 test("learner completes the prepared Node scenario and sees the learning record", async ({ page }, testInfo) => {
@@ -28,11 +29,11 @@ test("learner completes the prepared Node scenario and sees the learning record"
 
     await expectTerminalConnected(page);
     environmentName = await activeEnvironmentName(page, scenarioID);
-    await expectNodeEnvironmentPhase(environmentName, "Ready");
+    await expectRuntimeEnvironmentPhase(environmentName, "Ready");
 
     await runNodeRuntimeFixtureAnswer(page);
     await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expectNodeEnvironmentPhase(environmentName, "Completed");
+    await expectRuntimeEnvironmentVerification(environmentName);
 
     await page.getByRole("button", { name: "My space", exact: true }).click();
     await page.getByRole("button", { name: "Learning", exact: true }).first().click();
@@ -40,10 +41,10 @@ test("learner completes the prepared Node scenario and sees the learning record"
     await expect(page.getByLabel("Learning summary").getByText("Completed", { exact: true })).toBeVisible({ timeout: 90_000 });
     completed = true;
   } finally {
-    if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
+    if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
     if (completed && scenarioID) {
       await stopScenario(page, scenarioID);
-      if (environmentName) await waitForNodeEnvironmentDeletion(environmentName);
+      if (environmentName) await waitForRuntimeEnvironmentDeletion(environmentName);
     }
   }
 });

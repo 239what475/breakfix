@@ -29,6 +29,11 @@ spec:
           env:
             - name: HOME
               value: /tmp
+            - name: BREAKFIX_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: breakfix-runtime
+                  key: database_url
             - name: BREAKFIX_REGISTRY_PULL_SECRET
               valueFrom:
                 secretKeyRef:

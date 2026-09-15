@@ -5,6 +5,6 @@ metadata:
   version: 2026.08.01
 entries:
   - path: scenarios/node-runtime-fixture
-    contentRevision: sha256:591e5ce79fc04aba5ea168dde40b8cb003c87840bbc7afd5b159ded38aae887a
+    contentRevision: sha256:ba186fd2e97760e863a86c1c4a92dc35ac6d9e41bc53d5f36bfa89f271252def
   - path: scenarios/k8s-reproduction-core
-    contentRevision: sha256:b0676a7d302a95395fd722eab53bc0648701583dd86293e3bb16456ae8eca9f5
+    contentRevision: sha256:ec5b1c54fb8242cb2965d97a92983db99e59442e3d03b9ed6a584832c9fb8b17

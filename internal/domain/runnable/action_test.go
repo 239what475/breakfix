@@ -60,3 +60,14 @@ func TestVerifyRequestRequiresCompleteRevision(t *testing.T) {
 		t.Fatalf("expected revision binding rejection, got %v", err)
 	}
 }
+
+func TestVerificationEnvironmentNameIsStablePerRevisionAndAttempt(t *testing.T) {
+	reference := RevisionReference{ID: "revision-01", Digest: testDigest("a")}
+	first := VerificationEnvironmentName(reference, 2)
+	if first != VerificationEnvironmentName(reference, 2) || first == VerificationEnvironmentName(reference, 3) {
+		t.Fatalf("verification environment identity is not attempt-stable: %q", first)
+	}
+	if !strings.HasPrefix(first, "run-") || len(first) > MaxIDLength {
+		t.Fatalf("verification environment name is invalid: %q", first)
+	}
+}

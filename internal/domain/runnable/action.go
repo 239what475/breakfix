@@ -1,6 +1,8 @@
 package runnable
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,6 +57,22 @@ func (i ActionIdentity) Key() string {
 	return strings.Join([]string{
 		i.Content.Kind, i.Content.ID, i.Content.Revision, i.SpecDigest, string(i.Phase), fmt.Sprintf("%d", i.StateVersion),
 	}, "/")
+}
+
+// RecordID provides the deterministic immutable persistence ID for an action
+// result. It is shared by content coordinators that need to await their own
+// action without exposing a queue implementation.
+func RecordID(prefix string, identity ActionIdentity) string {
+	sum := sha256.Sum256([]byte(identity.Key()))
+	return prefix + "-" + hex.EncodeToString(sum[:])[:MaxIDLength-len(prefix)-1]
+}
+
+// VerificationEnvironmentName is the stable infrastructure identity for one
+// verification attempt. The Server owns creation of the matching CRD; a lease
+// takeover therefore adopts this name instead of allocating another runtime.
+func VerificationEnvironmentName(reference RevisionReference, attempt int64) string {
+	sum := sha256.Sum256([]byte(reference.ID + fmt.Sprintf("\x00%d", attempt)))
+	return "run-" + hex.EncodeToString(sum[:])[:24]
 }
 
 type LeaseCredential struct {

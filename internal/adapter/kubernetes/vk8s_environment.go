@@ -31,7 +31,6 @@ const (
 	vk8sTerminalNetworkPolicyName     = "breakfix-vk8s-terminal"
 	vk8sRuntimeServiceAccount         = "breakfix-runtime"
 	vk8sInitSentinel                  = "/var/lib/breakfix/.initialized"
-	vk8sScenarioRoot                  = "/opt/breakfix/scenario/k8s"
 )
 
 type vclusterCommand interface {
@@ -555,11 +554,8 @@ func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources core
 			ServiceAccountName:           vk8sRuntimeServiceAccount,
 			Containers: []corev1.Container{{
 				Name: "scenario", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
-				Resources: resources,
-				Env: []corev1.EnvVar{
-					{Name: "KUBECONFIG", Value: "/root/.kube/config"},
-					{Name: "BREAKFIX_GENERATE_SCRIPT", Value: vk8sScenarioRoot + "/generate.sh"},
-				},
+				Resources:    resources,
+				Env:          []corev1.EnvVar{{Name: "KUBECONFIG", Value: "/root/.kube/config"}},
 				VolumeMounts: []corev1.VolumeMount{{Name: "kubeconfig", MountPath: "/root/.kube", ReadOnly: true}},
 			}},
 			Volumes: []corev1.Volume{{Name: "kubeconfig", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{

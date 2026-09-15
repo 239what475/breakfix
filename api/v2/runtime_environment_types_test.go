@@ -1,6 +1,9 @@
 package v2
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,5 +24,20 @@ func TestRuntimeEnvironmentDeepCopyKeepsMutableFieldsIndependent(t *testing.T) {
 	copy.Status.Runtime.ResourceRefs[0].ID = "node-02"
 	if value.Spec.Lease.ReleaseAt.Equal(copy.Spec.Lease.ReleaseAt) || value.Status.Runtime.ResourceRefs[0].ID != "node-01" {
 		t.Fatalf("deep copy shared mutable fields: original=%#v copy=%#v", value, copy)
+	}
+}
+
+func TestRuntimeEnvironmentCRDAllowsStatusUpdatesWithoutResetNonce(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crd, err := os.ReadFile(filepath.Join(root, "deploy", "crds", "breakfix.dev_runtimeenvironments.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(crd)
+	if !strings.Contains(value, "!has(oldSelf.resetNonce)") || !strings.Contains(value, "self.resetNonce >= oldSelf.resetNonce") {
+		t.Fatalf("RuntimeEnvironment reset nonce CEL rule does not safely handle omitted values")
 	}
 }

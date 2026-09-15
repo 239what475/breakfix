@@ -15,6 +15,7 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 func TestInstallerCreatesCommitIntentsAfterRuntimeEntriesAreReady(t *testing.T) {
@@ -221,6 +222,20 @@ func TestInstallerValidateBootstrapRejectsPublishedAuthoringPlatform(t *testing.
 	}
 }
 
+func TestCatalogArtifactProjectsPublicProviderReferences(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	node, err := catalogArtifact(runnable.ArtifactReference{FormatVersion: runnable.FormatVersion, Runtime: runnable.RuntimeNode,
+		ProviderReference: "incus://catalog-image@" + digest, ArtifactDigest: digest, BuiltFromSpecDigest: "sha256:" + strings.Repeat("b", 64), BuilderVersion: "builder"})
+	if err != nil || node.IncusAlias != "catalog-image" || node.IncusFingerprint != strings.TrimPrefix(digest, "sha256:") {
+		t.Fatalf("project Node catalog artifact = %#v, %v", node, err)
+	}
+	k8s, err := catalogArtifact(runnable.ArtifactReference{FormatVersion: runnable.FormatVersion, Runtime: runnable.RuntimeK8s,
+		ProviderReference: "registry.example/catalog@" + digest, ArtifactDigest: digest, BuiltFromSpecDigest: "sha256:" + strings.Repeat("b", 64), BuilderVersion: "builder"})
+	if err != nil || k8s.OCIReference != "registry.example/catalog@"+digest {
+		t.Fatalf("project K8s catalog artifact = %#v, %v", k8s, err)
+	}
+}
+
 func readyFixtureEntry(t *testing.T, entry catalogdomain.Entry, now time.Time) catalogdomain.Entry {
 	t.Helper()
 	// Runtime details are irrelevant to commit preparation. This helper keeps
@@ -244,6 +259,27 @@ type installerStore struct {
 	commits              []catalogdomain.Commit
 	publishedScenarios   int
 	failedCleanupPending bool
+}
+
+func (s *installerStore) MarkCatalogEntryVerified(_ context.Context, entryID string, _ time.Time) error {
+	for index := range s.entries {
+		if s.entries[index].ID == entryID {
+			s.entries[index].State = catalogdomain.EntryReadyToCommit
+			s.entries[index].RuntimeAttempt = 0
+			return nil
+		}
+	}
+	return errors.New("catalog entry not found")
+}
+func (s *installerStore) RecordCatalogCommitArtifact(_ context.Context, _ string, commitID string, artifact execution.ArtifactReference, _ time.Time) error {
+	for index := range s.commits {
+		if s.commits[index].ID == commitID {
+			s.commits[index].State = catalogdomain.CommitArtifactPublished
+			s.commits[index].Artifact = &artifact
+			return nil
+		}
+	}
+	return errors.New("catalog commit not found")
 }
 
 func (s *installerStore) CreateOrGetRelease(_ context.Context, release catalogdomain.Release) (*catalogdomain.Release, bool, error) {

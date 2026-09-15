@@ -128,6 +128,9 @@ func TestRunnerRequeuesInfrastructureVerificationFailure(t *testing.T) {
 	if store.report != nil || store.failure.class != runnable.FailureInfrastructure || store.failure.code != "unavailable" {
 		t.Fatalf("stored action result = report %#v failure %#v", store.report, store.failure)
 	}
+	if len(store.released) != 1 || store.released[0].ID != "environment-01" {
+		t.Fatalf("verification release request = %#v", store.released)
+	}
 }
 
 func TestRunnerRenewsLongRunningActionLease(t *testing.T) {
@@ -184,6 +187,7 @@ type runnerStore struct {
 	revision   *runnable.StoredRevision
 	report     *runnable.StoredVerificationReport
 	failure    runnerFailure
+	released   []runnable.EnvironmentIdentity
 	renewCalls atomic.Int32
 }
 
@@ -225,6 +229,16 @@ func (s *runnerStore) CompleteVerification(_ context.Context, _ runnable.LeaseCr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.report = &value
+	return nil
+}
+
+func (s *runnerStore) RequestVerificationEnvironmentRelease(_ context.Context, _ runnable.LeaseCredential, environment runnable.EnvironmentIdentity) error {
+	if err := environment.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.released = append(s.released, environment)
 	return nil
 }
 

@@ -53,7 +53,7 @@ type LeaseSpec struct {
 // immutable RunnableRevision and never copied into the CRD.
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || self.runnableRevisionRef == oldSelf.runnableRevisionRef",message="runnableRevisionRef is immutable"
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || self.purpose == oldSelf.purpose",message="purpose is immutable"
-// +kubebuilder:validation:XValidation:rule="oldSelf == null || self.resetNonce >= oldSelf.resetNonce",message="resetNonce must be monotonic"
+// +kubebuilder:validation:XValidation:rule="oldSelf == null || !has(oldSelf.resetNonce) || (has(self.resetNonce) && self.resetNonce >= oldSelf.resetNonce)",message="resetNonce must be monotonic"
 type RuntimeEnvironmentSpec struct {
 	RunnableRevisionRef RunnableRevisionReference `json:"runnableRevisionRef"`
 	// +kubebuilder:validation:Enum=learning;verification

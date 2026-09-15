@@ -2,8 +2,6 @@ package runnableprovider
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
@@ -16,16 +14,18 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	runnableworker "github.com/breakfix/breakfix/internal/worker/runnable"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 type RuntimeEnvironmentClient interface {
-	CreateRuntimeEnvironment(context.Context, string, *runtimev2.RuntimeEnvironment) (*runtimev2.RuntimeEnvironment, error)
 	GetRuntimeEnvironment(context.Context, string, string) (*runtimev2.RuntimeEnvironment, error)
-	DeleteRuntimeEnvironmentWithUID(context.Context, string, string, types.UID) error
 	ExecInPodStreamsContext(context.Context, string, string, int, ...string) (kubernetes.PodExecResult, error)
+}
+
+// VerificationEnvironmentCreator is the Server-owned control-plane boundary.
+// The Runtime Worker may observe and execute in an environment, but it never
+// writes RuntimeEnvironment spec fields itself.
+type VerificationEnvironmentCreator interface {
+	CreateVerificationEnvironment(context.Context, runnable.VerifyRequest) (*runtimev2.RuntimeEnvironment, error)
 }
 
 type NodeRuntimeExecutor interface {
@@ -36,6 +36,7 @@ type NodeRuntimeExecutor interface {
 // execution clients to the public runnable verifier boundary.
 type VerificationProvider struct {
 	client    RuntimeEnvironmentClient
+	creator   VerificationEnvironmentCreator
 	node      NodeRuntimeExecutor
 	namespace string
 	pollEvery time.Duration
@@ -43,11 +44,11 @@ type VerificationProvider struct {
 	retained  map[string]*runtimev2.RuntimeEnvironment
 }
 
-func NewVerificationProvider(environments RuntimeEnvironmentClient, node NodeRuntimeExecutor, namespace string) (*VerificationProvider, error) {
-	if environments == nil || strings.TrimSpace(namespace) == "" {
-		return nil, errors.New("runnable verification provider requires RuntimeEnvironment client and namespace")
+func NewVerificationProvider(environments RuntimeEnvironmentClient, creator VerificationEnvironmentCreator, node NodeRuntimeExecutor, namespace string) (*VerificationProvider, error) {
+	if environments == nil || creator == nil || strings.TrimSpace(namespace) == "" {
+		return nil, errors.New("runnable verification provider requires RuntimeEnvironment client, Server creator, and namespace")
 	}
-	return &VerificationProvider{client: environments, node: node, namespace: namespace, pollEvery: time.Second, retained: make(map[string]*runtimev2.RuntimeEnvironment)}, nil
+	return &VerificationProvider{client: environments, creator: creator, node: node, namespace: namespace, pollEvery: time.Second, retained: make(map[string]*runtimev2.RuntimeEnvironment)}, nil
 }
 
 func (p *VerificationProvider) CreateVerificationEnvironment(ctx context.Context, request runnable.VerifyRequest) (runnable.EnvironmentIdentity, error) {
@@ -58,23 +59,7 @@ func (p *VerificationProvider) CreateVerificationEnvironment(ctx context.Context
 	if err != nil {
 		return runnable.EnvironmentIdentity{}, err
 	}
-	name := verificationEnvironmentName(request.RunnableRevisionRef.ID, request.Attempt)
-	now := time.Now().UTC()
-	environment := &runtimev2.RuntimeEnvironment{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: runtimev2.RuntimeEnvironmentSpec{
-			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest},
-			Purpose:             runtimev2.PurposeVerification,
-			Lease:               runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(now)},
-		},
-	}
-	created, err := p.client.CreateRuntimeEnvironment(ctx, p.namespace, environment)
-	if apierrors.IsAlreadyExists(err) {
-		// The name is derived from the immutable revision reference and attempt,
-		// so a retry must adopt the existing object rather than create another
-		// provider resource.
-		created, err = p.client.GetRuntimeEnvironment(ctx, p.namespace, name)
-	}
+	created, err := p.creator.CreateVerificationEnvironment(ctx, request)
 	if err != nil {
 		return runnable.EnvironmentIdentity{}, fmt.Errorf("create runnable verification environment: %w", err)
 	}
@@ -198,15 +183,6 @@ func resourceRef(refs []runtimev2.ResourceReference, kind string) string {
 		}
 	}
 	return ""
-}
-
-func verificationEnvironmentName(id string, attempt int64) string {
-	return verificationID("run", id, attempt)
-}
-
-func verificationID(prefix, id string, attempt int64) string {
-	sum := sha256.Sum256([]byte(id + fmt.Sprintf("\x00%d", attempt)))
-	return prefix + "-" + hex.EncodeToString(sum[:])[:24]
 }
 
 var _ runnableworker.EnvironmentProvider = (*VerificationProvider)(nil)

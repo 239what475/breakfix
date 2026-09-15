@@ -92,7 +92,7 @@ func TestLiveExecInPodStreamsK8sChecksJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new Kubernetes client: %v", err)
 	}
-	exitCode, output, err := client.ExecInPod(namespace, pod, "/bin/bash", "/opt/breakfix/scenario/k8s/checks.sh")
+	exitCode, output, err := client.ExecInPod(namespace, pod, "/bin/bash", "/opt/breakfix/runnable/k8s/assertions/initial-runtime-config-absent.sh")
 	if err != nil {
 		t.Fatalf("exec checkpoints: %v", err)
 	}

@@ -9,4 +9,4 @@ else
   passed=false
   details="client did not receive the expected response through proxy:8080"
 fi
-printf '{"checks":[{"id":"application-reachable","passed":%s,"summary":"Application reachability","details":"%s"}]}' "$passed" "$details"
+printf '{"assertions":[{"id":"application-reachable","satisfied":%s,"summary":"Application reachability","details":"%s"}]}' "$passed" "$details"

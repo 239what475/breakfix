@@ -58,7 +58,7 @@ func TestBuildSourceArchiveIsCanonicalAndPreservesExecutableBits(t *testing.T) {
 		paths = append(paths, header.Name)
 		modes[header.Name] = header.Mode
 	}
-	if !slices.IsSorted(paths) || modes["nodes/host/reproduce.sh"] != 0o755 || modes["scenario.yaml"] != 0o644 {
+	if !slices.IsSorted(paths) || modes["nodes/host/assertions/initial-runtime-marker-absent.sh"] != 0o755 || modes["scenario.yaml"] != 0o644 {
 		t.Fatalf("unexpected canonical archive entries: paths=%#v modes=%#v", paths, modes)
 	}
 }

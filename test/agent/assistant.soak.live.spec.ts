@@ -8,7 +8,7 @@ import {
 	stopScenario,
 } from "../support/live-helpers";
 import { nodeRuntimeFixture } from "../support/catalog-fixture";
-import { attachNodeEnvironmentIdentity, waitForNodeEnvironmentDeletion } from "../support/e2e-platform";
+import { attachRuntimeEnvironment, waitForRuntimeEnvironmentDeletion } from "../support/e2e-platform";
 
 const soakTest = process.env.RUN_AGENT_SOAK_E2E === "1" ? test : test.skip;
 
@@ -52,10 +52,10 @@ soakTest("assistant completes twenty real runs in one durable conversation", asy
 		}
 		completed = true;
 	} finally {
-		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
+		if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
 		if (completed) {
 			await stopScenario(page, scenario.id);
-			await waitForNodeEnvironmentDeletion(environmentName);
+			await waitForRuntimeEnvironmentDeletion(environmentName);
 		}
 	}
 });

@@ -351,6 +351,46 @@ func (d *CatalogRepository) Entry(ctx context.Context, id string) (*catalogdomai
 	return entry, nil
 }
 
+// MarkCatalogEntryVerified records only the content-layer projection of a
+// completed public verification action. Provider state, leases, and reports
+// remain exclusively in the runnable store.
+func (d *CatalogRepository) MarkCatalogEntryVerified(ctx context.Context, entryID string, now time.Time) error {
+	if strings.TrimSpace(entryID) == "" || now.IsZero() {
+		return errors.New("catalog entry verification completion is invalid")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE catalog_release_entries entry SET state = ?, state_version = state_version + 1,
+		runtime_attempt = 0, lease_owner = '', lease_expires_at = NULL, last_error = '', updated_at = ?
+		FROM catalog_releases release WHERE entry.id = ? AND entry.release_id = release.id AND release.state = ? AND entry.state = ?`,
+		catalogdomain.EntryReadyToCommit, now.UTC(), strings.TrimSpace(entryID), catalogdomain.ReleaseInstalling, catalogdomain.EntryBuilding)
+	if err != nil {
+		return fmt.Errorf("mark catalog entry verified: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return ErrCatalogLeaseLost
+	}
+	return nil
+}
+
+func (d *CatalogRepository) RecordCatalogCommitArtifact(ctx context.Context, releaseID, commitID string, artifact execution.ArtifactReference, now time.Time) error {
+	if strings.TrimSpace(releaseID) == "" || strings.TrimSpace(commitID) == "" || artifact.Validate(artifact.Runtime) != nil || now.IsZero() {
+		return errors.New("catalog commit artifact is invalid")
+	}
+	encoded, err := marshalJSON(artifact)
+	if err != nil {
+		return err
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE catalog_release_entry_commits commit SET state = ?, runtime_attempt = 0, artifact_reference = ?::jsonb, updated_at = ?
+		FROM catalog_releases release WHERE commit.id = ? AND commit.release_id = ? AND commit.release_id = release.id AND release.state = ? AND commit.state = ?`,
+		catalogdomain.CommitArtifactPublished, encoded, now.UTC(), strings.TrimSpace(commitID), strings.TrimSpace(releaseID), catalogdomain.ReleaseCommitting, catalogdomain.CommitPrepared)
+	if err != nil {
+		return fmt.Errorf("record catalog commit artifact: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return ErrCatalogLeaseLost
+	}
+	return nil
+}
+
 // ClaimCatalogRuntimeAction exposes exactly one lease-fenced Catalog Entry or
 // Commit external action. It never reads staged source bytes or calls a
 // provider; those remain respectively in Server and Runtime Worker.

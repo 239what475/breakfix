@@ -9,4 +9,4 @@ else
   observed=false
   details="client can already reach the application through the proxy"
 fi
-printf '{"evidence":[{"id":"application-unreachable","observed":%s,"summary":"Application is unreachable","details":"%s"}]}' "$observed" "$details"
+printf '{"assertions":[{"id":"application-unreachable","satisfied":%s,"summary":"Application is unreachable","details":"%s"}]}' "$observed" "$details"

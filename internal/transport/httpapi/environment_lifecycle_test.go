@@ -147,6 +147,18 @@ func (s *environmentAPITestState) serveEnvironment(w http.ResponseWriter, r *htt
 		}
 		delete(s.environments, name)
 		writeJSON(w, http.StatusOK, metav1.Status{Status: metav1.StatusSuccess})
+	case http.MethodPut:
+		var updated runtimev2.RuntimeEnvironment
+		if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+			writeKubernetesError(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+			return
+		}
+		if updated.UID != environment.UID {
+			writeKubernetesError(w, http.StatusConflict, metav1.StatusReasonConflict, "environment UID changed during update")
+			return
+		}
+		s.environments[name] = updated
+		writeJSON(w, http.StatusOK, updated)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -254,25 +266,52 @@ func TestConcurrentStartScenarioCreatesOneV2Environment(t *testing.T) {
 	}
 }
 
-func TestResetScenarioDoesNotCreateWhenUIDFencedDeletionFails(t *testing.T) {
+func TestServerMarksOnlyBoundVerificationEnvironmentReleasable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	state := newEnvironmentAPITestState()
-	state.deleteErr = true
+	verification := testReadyEnvironment("verification-environment")
+	verification.Spec.Purpose = runtimev2.PurposeVerification
+	verification.Labels = nil
+	state.environments[verification.Name] = verification
+	learning := testReadyEnvironment("learning-environment")
+	state.environments[learning.Name] = learning
+	handler := newEnvironmentLifecycleHandler(t, state)
+
+	if err := handler.markVerificationEnvironmentReleasable(context.Background(), string(verification.UID), verification.Spec.RunnableRevisionRef.Digest); err != nil {
+		t.Fatalf("mark verification environment releasable: %v", err)
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.environments[verification.Name].Spec.Lease.ReleaseAt == nil {
+		t.Fatalf("verification environment did not receive releaseAt: %#v", state.environments[verification.Name].Spec)
+	}
+	if state.environments[learning.Name].Spec.Lease.ReleaseAt != nil {
+		t.Fatalf("learning environment was modified by verification release: %#v", state.environments[learning.Name].Spec)
+	}
+	if err := handler.markVerificationEnvironmentReleasable(context.Background(), string(learning.UID), learning.Spec.RunnableRevisionRef.Digest); err == nil {
+		t.Fatal("learning environment was accepted for verification release")
+	}
+}
+
+func TestResetScenarioUsesSameUIDAndIncrementsNonce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	state := newEnvironmentAPITestState()
 	state.environments["old-environment"] = testReadyEnvironment("old-environment")
 	handler := newEnvironmentLifecycleHandler(t, state)
 
 	recorder := scenarioRequest(t, handler, http.MethodPost, "reset")
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("reset status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("reset status = %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.createSuccesses != 0 || len(state.environments) != 1 || state.deleteRequests != 1 || len(state.deleteUIDs) != 1 || state.deleteUIDs[0] != types.UID("old-environment-uid") {
-		t.Fatalf("reset lifecycle calls = creates:%d deletes:%d fenced:%#v environments:%#v", state.createSuccesses, state.deleteRequests, state.deleteUIDs, state.environments)
+	updated := state.environments["old-environment"]
+	if state.createSuccesses != 0 || state.deleteRequests != 0 || updated.UID != types.UID("old-environment-uid") || updated.Spec.ResetNonce != 1 {
+		t.Fatalf("reset lifecycle did not preserve the v2 identity: creates:%d deletes:%d environment:%#v", state.createSuccesses, state.deleteRequests, updated)
 	}
 }
 
-func TestResetAndStopRecordTerminalStateAfterV2Deletion(t *testing.T) {
+func TestResetPreservesAttemptAndStopRecordsTerminalState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Run("reset", func(t *testing.T) {
 		state := newEnvironmentAPITestState()
@@ -283,11 +322,18 @@ func TestResetAndStopRecordTerminalStateAfterV2Deletion(t *testing.T) {
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("reset status = %d: %s", recorder.Code, recorder.Body.String())
 		}
-		assertTerminalOutcome(t, handler.db.Environment, "old-environment-uid", postgres.AttemptReset)
 		state.mu.Lock()
 		defer state.mu.Unlock()
-		if state.deleteRequests != 1 || state.createSuccesses != 1 || len(state.environments) != 1 {
-			t.Fatalf("reset lifecycle calls = deletes:%d creates:%d environments:%#v", state.deleteRequests, state.createSuccesses, state.environments)
+		environment := state.environments["old-environment"]
+		if state.deleteRequests != 0 || state.createSuccesses != 0 || len(state.environments) != 1 || environment.Spec.ResetNonce != 1 {
+			t.Fatalf("reset lifecycle calls = deletes:%d creates:%d environment:%#v", state.deleteRequests, state.createSuccesses, environment)
+		}
+		history, err := handler.db.Environment.ListLearningHistory(context.Background(), "u-demo", postgres.LearningHistoryFilter{ScenarioIDs: []string{"demo"}}, 10, nil, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(history) != 0 {
+			t.Fatalf("reset must not close the stable environment attempt: %#v", history)
 		}
 	})
 

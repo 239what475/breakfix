@@ -5,12 +5,15 @@ import { expect, type TestInfo } from "@playwright/test";
 const execFile = promisify(execFileCallback);
 const namespace = process.env.BREAKFIX_NAMESPACE ?? process.env.BREAKFIX_E2E_NAMESPACE ?? "breakfix-system";
 
-type NodeEnvironment = {
-	metadata?: { name?: string; uid?: string };
-	status?: { environment?: { phase?: string } };
+type RuntimeEnvironment = {
+	metadata?: { name?: string; uid?: string; annotations?: Record<string, string> };
+	spec?: { resetNonce?: number };
+	status?: {
+		phase?: string;
+		operation?: string;
+		progress?: { reportRef?: { id?: string; digest?: string } };
+	};
 };
-
-type VK8sEnvironment = NodeEnvironment;
 
 async function kubectl(args: string[]) {
   return execFile("kubectl", args, { encoding: "utf8" });
@@ -54,69 +57,65 @@ export async function setServerAuthoringDeadline(deadline: string) {
   await restartDeployment("breakfix-server");
 }
 
-export async function nodeEnvironment(name: string): Promise<NodeEnvironment> {
-  const { stdout } = await kubectl(["-n", namespace, "get", "nodeenvironment", name, "-o", "json"]);
-  return JSON.parse(stdout) as NodeEnvironment;
+export async function runtimeEnvironment(name: string): Promise<RuntimeEnvironment> {
+	const { stdout } = await kubectl(["-n", namespace, "get", "runtimeenvironment", name, "-o", "json"]);
+	return JSON.parse(stdout) as RuntimeEnvironment;
 }
 
-export async function nodeEnvironmentPhase(name: string): Promise<string> {
-	return (await nodeEnvironment(name)).status?.environment?.phase ?? "";
+export async function runtimeEnvironmentPhase(name: string): Promise<string> {
+	return (await runtimeEnvironment(name)).status?.phase ?? "";
 }
 
-export async function nodeEnvironmentUID(name: string): Promise<string> {
-	return (await nodeEnvironment(name)).metadata?.uid ?? "";
+export async function runtimeEnvironmentUID(name: string): Promise<string> {
+	return (await runtimeEnvironment(name)).metadata?.uid ?? "";
 }
 
-// The Server owns normal activity renewal. This helper deliberately bypasses
-// that API so the E2E suite can exercise controller-owned idle reclamation.
-export async function expireNodeEnvironmentForIdleReclamation(name: string) {
-	const activityAt = new Date(Date.now() - 60_000).toISOString();
-	await kubectl([
-		"-n", namespace, "patch", "nodeenvironment", name, "--type", "merge", "--patch",
-		JSON.stringify({
-			spec: {
-				environment: {
-					lifecycle: {
-						activityAt,
-						idleTtlSeconds: 1,
-						drainGracePeriodSeconds: 1,
-					},
-				},
-			},
-		}),
-	]);
+export async function runtimeEnvironmentResetNonce(name: string): Promise<number> {
+	return (await runtimeEnvironment(name)).spec?.resetNonce ?? 0;
 }
 
-export async function expectNodeEnvironmentPhase(name: string, expected: "Ready" | "Completed") {
-  await expect.poll(() => nodeEnvironmentPhase(name), {
-    timeout: 90_000,
-    intervals: [500, 1_000, 2_000, 5_000],
-  }).toBe(expected);
-}
-
-export async function vk8sEnvironment(name: string): Promise<VK8sEnvironment> {
-	const { stdout } = await kubectl(["-n", namespace, "get", "vk8senvironment", name, "-o", "json"]);
-	return JSON.parse(stdout) as VK8sEnvironment;
-}
-
-export async function vk8sEnvironmentPhase(name: string): Promise<string> {
-	return (await vk8sEnvironment(name)).status?.environment?.phase ?? "";
-}
-
-export async function expectVK8sEnvironmentPhase(name: string, expected: "Ready" | "Completed") {
-	await expect.poll(() => vk8sEnvironmentPhase(name), {
+export async function expectRuntimeEnvironmentPhase(name: string, expected: "Ready") {
+	await expect.poll(() => runtimeEnvironmentPhase(name), {
 		timeout: 10 * 60_000,
-		intervals: [1_000, 2_000, 5_000],
+		intervals: [500, 1_000, 2_000, 5_000],
 	}).toBe(expected);
 }
 
-export async function waitForNodeEnvironmentDeletion(name: string) {
-	await waitForEnvironmentDeletion("nodeenvironment", name);
+export async function expectRuntimeEnvironmentVerification(name: string) {
+	await expect.poll(async () => {
+		const report = (await runtimeEnvironment(name)).status?.progress?.reportRef;
+		return Boolean(report?.id && report?.digest);
+	}, {
+		timeout: 2 * 60_000,
+		intervals: [500, 1_000, 2_000, 5_000],
+	}).toBe(true);
 }
 
-export async function waitForEnvironmentDeletion(kind: "nodeenvironment" | "vk8senvironment", name: string) {
+export async function expectRuntimeEnvironmentReset(name: string, nonce: number) {
+	await expect.poll(async () => {
+		const environment = await runtimeEnvironment(name);
+		return environment.spec?.resetNonce === nonce &&
+			environment.metadata?.annotations?.["breakfix.dev/observed-reset-nonce"] === String(nonce) &&
+			environment.status?.phase === "Ready" && environment.status?.operation === "None";
+	}, {
+		timeout: 10 * 60_000,
+		intervals: [500, 1_000, 2_000, 5_000],
+	}).toBe(true);
+}
+
+// The Server owns normal lease renewal. This helper deliberately bypasses the
+// API to exercise Controller drain and asynchronous reaping on the E2E target.
+export async function requestRuntimeEnvironmentRelease(name: string) {
+	const releaseAt = new Date(Date.now() - 60_000).toISOString();
+	await kubectl([
+		"-n", namespace, "patch", "runtimeenvironment", name, "--type", "merge", "--patch",
+		JSON.stringify({ spec: { lease: { releaseAt } } }),
+	]);
+}
+
+export async function waitForRuntimeEnvironmentDeletion(name: string) {
   await expect.poll(async () => {
-    const { stdout } = await kubectl(["-n", namespace, "get", kind, name, "--ignore-not-found", "-o", "name"]);
+		const { stdout } = await kubectl(["-n", namespace, "get", "runtimeenvironment", name, "--ignore-not-found", "-o", "name"]);
     return stdout.trim() === "";
   }, {
     timeout: 5 * 60_000,
@@ -126,33 +125,20 @@ export async function waitForEnvironmentDeletion(kind: "nodeenvironment" | "vk8s
 
 export async function expectNoRuntimeEnvironments() {
 	await expect.poll(async () => {
-		const names = await Promise.all(
-			(["nodeenvironment", "vk8senvironment"] as const).map(async (kind) => {
-				const { stdout } = await kubectl(["-n", namespace, "get", kind, "-o", "name"]);
-				return stdout.trim();
-			}),
-		);
-		return names.filter(Boolean);
+		const { stdout } = await kubectl(["-n", namespace, "get", "runtimeenvironment", "-o", "name"]);
+		return stdout.trim();
 	}, {
 		timeout: 5 * 60_000,
 		intervals: [1_000, 2_000, 5_000],
-	}).toEqual([]);
+	}).toBe("");
 }
 
-export async function attachEnvironmentIdentity(
-  testInfo: TestInfo,
-  kind: "nodeenvironment" | "vk8senvironment",
-  name: string,
-) {
+export async function attachRuntimeEnvironment(testInfo: TestInfo, name: string) {
   try {
-    const { stdout } = await kubectl(["-n", namespace, "get", kind, name, "-o", "yaml"]);
-    await testInfo.attach(`${kind}-${name}`, { body: stdout, contentType: "text/yaml" });
-    console.info(`Breakfix E2E ${kind}: ${namespace}/${name}`);
+		const { stdout } = await kubectl(["-n", namespace, "get", "runtimeenvironment", name, "-o", "yaml"]);
+		await testInfo.attach(`runtimeenvironment-${name}`, { body: stdout, contentType: "text/yaml" });
+		console.info(`Breakfix E2E runtimeenvironment: ${namespace}/${name}`);
   } catch (error) {
-    console.info(`Breakfix E2E ${kind} unavailable: ${namespace}/${name}: ${String(error)}`);
+		console.info(`Breakfix E2E runtimeenvironment unavailable: ${namespace}/${name}: ${String(error)}`);
   }
-}
-
-export async function attachNodeEnvironmentIdentity(testInfo: TestInfo, name: string) {
-  await attachEnvironmentIdentity(testInfo, "nodeenvironment", name);
 }

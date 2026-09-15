@@ -91,6 +91,16 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verifyIdentity || verifyAction.Attempt != 1 || verifyAction.RunnableRevision == nil {
 		t.Fatalf("claim verification = %#v, %v", verifyAction, err)
 	}
+	resolvedReference, resolvedAttempt, err := database.Runnable.ResolveRunnableVerificationLease(ctx, verifyAction.Credential, now.Add(4*time.Second))
+	if err != nil || resolvedReference != storedRevision.Reference || resolvedAttempt != verifyAction.Attempt {
+		t.Fatalf("resolved verification lease = %#v attempt=%d err=%v", resolvedReference, resolvedAttempt, err)
+	}
+	if err := database.Runnable.ValidateRunnableVerificationLease(ctx, verifyAction.Credential, storedRevision.Reference, verifyAction.Attempt, now.Add(4*time.Second)); err != nil {
+		t.Fatalf("validate verification lease: %v", err)
+	}
+	if err := database.Runnable.ValidateRunnableVerificationLease(ctx, verifyAction.Credential, storedRevision.Reference, verifyAction.Attempt+1, now.Add(4*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
+		t.Fatalf("validate verification lease with another attempt = %v", err)
+	}
 	capture := runnable.OutputCapture{Stdout: []byte("verification stdout"), Stderr: []byte("verification stderr")}
 	outputRef, err := database.Runnable.StoreRunnableExecutionOutput(ctx, verifyAction.Credential, capture, now.Add(4*time.Second))
 	if err != nil {
@@ -140,6 +150,9 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 	if _, err := database.Runnable.StoreRunnableExecutionOutput(ctx, verifyAction.Credential, capture, now.Add(6*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
 		t.Fatalf("store output after verification completion = %v, want lease loss", err)
+	}
+	if _, _, err := database.Runnable.ResolveRunnableVerificationLease(ctx, verifyAction.Credential, now.Add(6*time.Second)); !errors.Is(err, runnable.ErrActionLeaseLost) {
+		t.Fatalf("resolve lease after verification completion = %v, want lease loss", err)
 	}
 
 	request := runnable.ReapRequest{

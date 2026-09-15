@@ -2,8 +2,6 @@ package runnableworker
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +20,7 @@ type ActionStore interface {
 	Renew(context.Context, runnable.LeaseCredential, time.Duration) error
 	CompleteMaterialization(context.Context, runnable.LeaseCredential, runnable.StoredRevision) error
 	CompleteVerification(context.Context, runnable.LeaseCredential, runnable.StoredVerificationReport) error
+	RequestVerificationEnvironmentRelease(context.Context, runnable.LeaseCredential, runnable.EnvironmentIdentity) error
 	ReportFailure(context.Context, runnable.LeaseCredential, runnable.FailureClass, string, string) error
 }
 
@@ -139,7 +138,7 @@ func (r *Runner) execute(ctx context.Context, action runnable.ActionContext) err
 			return err
 		}
 		stored := runnable.StoredRevision{
-			Reference: runnable.RevisionReference{ID: actionRecordID("rr", action.Credential.Identity), Digest: digest},
+			Reference: runnable.RevisionReference{ID: runnable.RecordID("rr", action.Credential.Identity), Digest: digest},
 			Revision:  revision,
 			CreatedAt: r.now().UTC(),
 		}
@@ -153,6 +152,7 @@ func (r *Runner) execute(ctx context.Context, action runnable.ActionContext) err
 			return err
 		}
 		if report.Failure != nil && report.Failure.Class == runnable.FailureInfrastructure {
+			r.requestVerificationEnvironmentRelease(ctx, action.Credential, report.Environment)
 			return r.store.ReportFailure(ctx, action.Credential, report.Failure.Class, report.Failure.Reason, report.Failure.Message)
 		}
 		digest, err := report.Digest(revision)
@@ -160,14 +160,24 @@ func (r *Runner) execute(ctx context.Context, action runnable.ActionContext) err
 			return err
 		}
 		stored := runnable.StoredVerificationReport{
-			Reference:        runnable.VerificationReportReference{ID: actionRecordID("vr", action.Credential.Identity), Digest: digest},
+			Reference:        runnable.VerificationReportReference{ID: runnable.RecordID("vr", action.Credential.Identity), Digest: digest},
 			Report:           report,
 			RunnableRevision: revision,
 			CreatedAt:        r.now().UTC(),
 		}
-		return r.store.CompleteVerification(ctx, action.Credential, stored)
+		if err := r.store.CompleteVerification(ctx, action.Credential, stored); err != nil {
+			return err
+		}
+		return nil
 	default:
 		return runnable.NewArtifactFailure("action-phase", "runnable action has an unsupported phase")
+	}
+}
+
+func (r *Runner) requestVerificationEnvironmentRelease(ctx context.Context, credential runnable.LeaseCredential, environment runnable.EnvironmentIdentity) {
+	if err := r.store.RequestVerificationEnvironmentRelease(ctx, credential, environment); err != nil {
+		// Cleanup handoff is intentionally independent of the verification retry.
+		slog.Warn("request verification environment release", "environment", environment.ID, "err", err)
 	}
 }
 
@@ -236,9 +246,10 @@ func runnerActionTimeout(action runnable.ActionContext) (time.Duration, error) {
 	return time.Duration(seconds) * time.Second, nil
 }
 
+// Kept package-local for existing executor tests; production callers use the
+// public domain helper so content coordinators share the same stable ID.
 func actionRecordID(prefix string, identity runnable.ActionIdentity) string {
-	sum := sha256.Sum256([]byte(identity.Key()))
-	return prefix + "-" + hex.EncodeToString(sum[:])[:runnable.MaxIDLength-len(prefix)-1]
+	return runnable.RecordID(prefix, identity)
 }
 
 func runnerRetryDelay(attempt int) time.Duration {

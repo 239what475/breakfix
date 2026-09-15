@@ -197,6 +197,13 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		}
 	}
 
+	operationsConfig, err := operationsRuntimeConfig(cfg)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("configure Operations runnable publisher: %w", err)
+	}
+
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {
 		catalogInstaller, err = appcatalog.NewInstaller(appcatalog.InstallerConfig{
@@ -208,6 +215,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			Puller:           registryClient,
 			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
 			Store:            database.Catalog,
+			Runnable:         database.Runnable,
+			Operations:       operationsConfig,
 		})
 		if err != nil {
 			incusClient.Close()
@@ -232,12 +241,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("validate scenario catalog: %w", err)
-	}
-	operationsConfig, err := operationsRuntimeConfig(cfg)
-	if err != nil {
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("configure Operations runnable publisher: %w", err)
 	}
 	operationsPublisher, err := appoperations.NewRevisionPublisher(database.Runnable, database.Scenario, cfg.ScenariosDir(), operationsConfig)
 	if err != nil {

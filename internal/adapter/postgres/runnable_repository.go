@@ -362,6 +362,36 @@ func (d *RunnableRepository) ResolveMaterializedRunnableRevision(ctx context.Con
 	return reference, nil
 }
 
+// ResolveVerificationForAction returns the immutable report created for one
+// exact verification action. Content modules never need to manufacture a
+// Worker record ID or inspect arbitrary reports.
+func (d *RunnableRepository) ResolveVerificationForAction(ctx context.Context, identity runnable.ActionIdentity) (runnable.StoredVerificationReport, error) {
+	if err := identity.Validate(); err != nil || identity.Phase != runnable.ActionVerify {
+		return runnable.StoredVerificationReport{}, errors.New("runnable verification identity is invalid")
+	}
+	var value runnable.StoredVerificationReport
+	var report, revision []byte
+	err := d.conn.QueryRowContext(ctx, `SELECT reports.id, reports.verification_report_digest, reports.report, reports.created_at, revisions.revision
+		FROM runnable_verification_reports reports JOIN runnable_revisions revisions ON revisions.runnable_revision_digest = reports.runnable_revision_digest
+		WHERE reports.id = ?`, runnable.RecordID("vr", identity)).Scan(&value.Reference.ID, &value.Reference.Digest, &report, &value.CreatedAt, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runnable.StoredVerificationReport{}, runnable.ErrMaterializationNotReady
+	}
+	if err != nil {
+		return runnable.StoredVerificationReport{}, fmt.Errorf("resolve runnable verification action: %w", err)
+	}
+	if err := json.Unmarshal(report, &value.Report); err != nil {
+		return runnable.StoredVerificationReport{}, err
+	}
+	if err := json.Unmarshal(revision, &value.RunnableRevision); err != nil {
+		return runnable.StoredVerificationReport{}, err
+	}
+	if err := value.Validate(); err != nil {
+		return runnable.StoredVerificationReport{}, fmt.Errorf("stored runnable verification action is invalid: %w", err)
+	}
+	return value, nil
+}
+
 func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, credential runnable.LeaseCredential, value runnable.StoredVerificationReport, now time.Time) error {
 	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionVerify || now.IsZero() {
 		return errors.New("complete runnable verification is invalid")
@@ -406,6 +436,49 @@ func (d *RunnableRepository) CompleteRunnableVerification(ctx context.Context, c
 		return fmt.Errorf("commit runnable verification: %w", err)
 	}
 	return nil
+}
+
+// ValidateRunnableVerificationLease confirms that a Server control-plane
+// request is still owned by the caller's live verification lease and remains
+// bound to the exact immutable revision and attempt being executed.
+func (d *RunnableRepository) ValidateRunnableVerificationLease(ctx context.Context, credential runnable.LeaseCredential, reference runnable.RevisionReference, attempt int64, now time.Time) error {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionVerify || reference.Validate() != nil || attempt < 1 || now.IsZero() {
+		return runnable.ErrActionLeaseLost
+	}
+	resolved, resolvedAttempt, err := d.ResolveRunnableVerificationLease(ctx, credential, now)
+	if err != nil {
+		return err
+	}
+	if resolved != reference || resolvedAttempt != attempt {
+		return runnable.ErrActionLeaseLost
+	}
+	return nil
+}
+
+// ResolveRunnableVerificationLease returns only the immutable revision and
+// attempt bound to a live verification action. Server lifecycle endpoints use
+// it to avoid accepting a Worker-supplied resource binding.
+func (d *RunnableRepository) ResolveRunnableVerificationLease(ctx context.Context, credential runnable.LeaseCredential, now time.Time) (runnable.RevisionReference, int64, error) {
+	if err := credential.Validate(); err != nil || credential.Identity.Phase != runnable.ActionVerify || now.IsZero() {
+		return runnable.RevisionReference{}, 0, runnable.ErrActionLeaseLost
+	}
+	var revisionDigest, revisionID string
+	var actionAttempt int64
+	err := d.conn.QueryRowContext(ctx, `SELECT actions.runnable_revision_digest, revisions.id, actions.attempt
+		FROM runnable_actions actions JOIN runnable_revisions revisions ON revisions.runnable_revision_digest = actions.runnable_revision_digest
+		WHERE actions.action_key = ? AND actions.state = 'running' AND actions.lease_owner = ? AND actions.lease_expires_at > ?`,
+		credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&revisionDigest, &revisionID, &actionAttempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runnable.RevisionReference{}, 0, runnable.ErrActionLeaseLost
+	}
+	if err != nil {
+		return runnable.RevisionReference{}, 0, fmt.Errorf("resolve runnable verification lease: %w", err)
+	}
+	reference := runnable.RevisionReference{ID: revisionID, Digest: revisionDigest}
+	if err := reference.Validate(); err != nil {
+		return runnable.RevisionReference{}, 0, fmt.Errorf("stored runnable verification lease reference is invalid: %w", err)
+	}
+	return reference, actionAttempt, nil
 }
 
 type runnableActionRow struct {

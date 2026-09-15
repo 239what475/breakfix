@@ -78,7 +78,7 @@ dump_diagnostics() {
 	mkdir -p "$state_dir"
 	diagnostics=$state_dir/prepare-failure-$(date -u +%Y%m%dT%H%M%SZ)
 	mkdir -p "$diagnostics"
-	kubectl -n "$namespace" get deployments,pods,persistentvolumeclaims,nodeenvironments,vk8senvironments -o wide >"$diagnostics/resources.txt" 2>&1 || true
+	kubectl -n "$namespace" get deployments,pods,persistentvolumeclaims,runtimeenvironments -o wide >"$diagnostics/resources.txt" 2>&1 || true
 	for deployment in breakfix-server breakfix-controller breakfix-runtime-worker breakfix-registry; do
 		kubectl -n "$namespace" logs deployment/"$deployment" --all-containers --tail=300 >"$diagnostics/$deployment.log" 2>&1 || true
 	done

@@ -8,4 +8,4 @@ else
   passed=false
   details="breakfix-proxy.service is inactive or still uses the wrong upstream"
 fi
-printf '{"checks":[{"id":"proxy-service-ready","passed":%s,"summary":"Proxy service","details":"%s"}]}' "$passed" "$details"
+printf '{"assertions":[{"id":"proxy-service-ready","satisfied":%s,"summary":"Proxy service","details":"%s"}]}' "$passed" "$details"

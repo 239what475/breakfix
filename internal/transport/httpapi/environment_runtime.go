@@ -25,6 +25,7 @@ type environmentRuntimeAdapter struct {
 	list            func(context.Context, string) ([]activeEnvironment, error)
 	get             func(context.Context, string) (*activeEnvironment, error)
 	create          func(context.Context, *postgres.User, *scenario.Entry) (string, error)
+	requestReset    func(context.Context, string, types.UID) (int64, error)
 	requestDeletion func(context.Context, string, types.UID) error
 	updateLease     func(context.Context, string, metav1.Time) error
 }
@@ -109,6 +110,24 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 		item.Spec.Lease.RenewedAt = renewedAt
 		_, err = h.k8s.UpdateRuntimeEnvironment(ctx, h.crdNamespace, item)
 		return err
+	}
+	adapter.requestReset = func(ctx context.Context, name string, uid types.UID) (int64, error) {
+		item, err := h.k8s.GetRuntimeEnvironment(ctx, h.crdNamespace, name)
+		if err != nil {
+			return 0, err
+		}
+		if uid == "" || item.UID != uid {
+			return 0, fmt.Errorf("runtime environment UID no longer matches reset request")
+		}
+		if item.DeletionTimestamp != nil {
+			return 0, fmt.Errorf("runtime environment is already deleting")
+		}
+		item.Spec.ResetNonce++
+		updated, err := h.k8s.UpdateRuntimeEnvironment(ctx, h.crdNamespace, item)
+		if err != nil {
+			return 0, err
+		}
+		return updated.Spec.ResetNonce, nil
 	}
 	adapter.requestDeletion = func(ctx context.Context, name string, uid types.UID) error {
 		if uid != "" {

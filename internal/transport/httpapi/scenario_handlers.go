@@ -18,6 +18,7 @@ import (
 	environmentdomain "github.com/breakfix/breakfix/internal/domain/environment"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func (h *Handler) StartScenario(c *gin.Context, id string) {
@@ -83,19 +84,26 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 	if existing != nil {
-		if err := h.finishEnvironmentAttempt(c.Request.Context(), existing, postgres.AttemptReset, time.Now().UTC()); err != nil {
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("record reset attempt: %v", err)})
-			return
-		}
 		if err := h.assistant.DeleteEnvironment(c.Request.Context(), existing.UID); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("clear assistant session: %v", err)})
 			return
 		}
-		if err := h.destroyEnvironmentAndWait(c.Request.Context(), existing); err != nil {
-			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("reset environment: %v", err)})
+		adapter, err := h.environmentRuntimeAdapter(existing.Runtime)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("select reset runtime: %v", err)})
 			return
 		}
-		slog.Info("old environment deleted", "environment", existing.Name, "runtime", existing.Runtime)
+		if adapter.requestReset == nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "runtime does not support reset"})
+			return
+		}
+		if _, err := adapter.requestReset(c.Request.Context(), existing.Name, types.UID(existing.UID)); err != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("request environment reset: %v", err)})
+			return
+		}
+		slog.Info("environment reset requested", "environment", existing.Name, "runtime", existing.Runtime)
+		c.JSON(http.StatusOK, api.ResetResponse{ScenarioTitle: scenarioEntry.Title})
+		return
 	}
 
 	env, err := h.createEnvironment(c.Request.Context(), user, scenarioEntry)

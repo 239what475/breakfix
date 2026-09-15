@@ -45,6 +45,9 @@ func TestNewVK8sTerminalPodUsesRuntimeServiceAccountForRegistryPull(t *testing.T
 	if pod.Labels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue {
 		t.Fatalf("terminal component label = %q", pod.Labels[vk8sTerminalComponentLabel])
 	}
+	if len(pod.Spec.Containers[0].Env) != 1 || pod.Spec.Containers[0].Env[0].Name != "KUBECONFIG" {
+		t.Fatalf("terminal environment = %#v, want only kubeconfig", pod.Spec.Containers[0].Env)
+	}
 }
 
 func TestBuildVK8sValuesEnablesNativeNetworkPolicies(t *testing.T) {

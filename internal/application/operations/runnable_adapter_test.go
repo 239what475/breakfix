@@ -20,15 +20,15 @@ func TestCompileNodeOperationsRevisionCreatesGenericRepairPlan(t *testing.T) {
 	if spec.Identity.Kind != operationsContentKind || len(spec.Initialization) != 2 || len(spec.ValidationPlan.Phases) != 2 {
 		t.Fatalf("unexpected compiled node spec: %#v", spec)
 	}
-	if got := spec.Initialization[1]; got.Entrypoint != "nodes/client/generate.sh" || got.Target.ID != "client" || got.BoundaryID != "node-client-write" {
+	if got := spec.Initialization[1]; got.Entrypoint != "nodes/client/initialize.sh" || got.Target.ID != "client" || got.BoundaryID != "node-client-write" {
 		t.Fatalf("node initialization did not retain generic target boundary: %#v", got)
 	}
 	initial := spec.ValidationPlan.Phases[0]
-	if initial.ID != "initial-observation" || len(initial.Actions) != 0 || len(initial.Assertions) != 2 || initial.Assertions[0].Entrypoint != "nodes/host/reproduce.sh" {
+	if initial.ID != "initial-observation" || len(initial.Actions) != 0 || len(initial.Assertions) != 2 || initial.Assertions[0].Entrypoint != "nodes/host/assertions/initial-host-unready.sh" {
 		t.Fatalf("initial observation was not compiled from Operations evidence: %#v", initial)
 	}
 	final := spec.ValidationPlan.Phases[1]
-	if len(final.Actions) != 2 || final.Actions[0].Entrypoint != "nodes/host/answer.sh" || len(final.Assertions) != 2 || final.Assertions[1].Entrypoint != "nodes/client/checks.sh" {
+	if len(final.Actions) != 2 || final.Actions[0].Entrypoint != "nodes/host/actions/apply.sh" || len(final.Assertions) != 2 || final.Assertions[1].Entrypoint != "nodes/client/assertions/final-client-ready.sh" {
 		t.Fatalf("repair projection was not compiled as generic actions/assertions: %#v", final)
 	}
 	if err := spec.Validate(); err != nil {
@@ -46,10 +46,10 @@ func TestCompileK8sObservationOnlyOperationsRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile k8s operations revision: %v", err)
 	}
-	if spec.RuntimeProfile.Runtime != runnable.RuntimeK8s || len(spec.Initialization) != 1 || spec.Initialization[0].Entrypoint != "k8s/generate.sh" {
+	if spec.RuntimeProfile.Runtime != runnable.RuntimeK8s || len(spec.Initialization) != 1 || spec.Initialization[0].Entrypoint != "k8s/initialize.sh" {
 		t.Fatalf("k8s initialization = %#v", spec.Initialization)
 	}
-	if len(spec.ValidationPlan.Phases) != 1 || spec.ValidationPlan.Phases[0].Assertions[0].Entrypoint != "k8s/reproduce.sh" || spec.ValidationPlan.Phases[0].Assertions[0].Target.Kind != "management" {
+	if len(spec.ValidationPlan.Phases) != 1 || spec.ValidationPlan.Phases[0].Assertions[0].Entrypoint != "k8s/assertions/initial-config-absent.sh" || spec.ValidationPlan.Phases[0].Assertions[0].Target.Kind != "management" {
 		t.Fatalf("k8s observation plan = %#v", spec.ValidationPlan)
 	}
 }

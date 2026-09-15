@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -175,6 +176,15 @@ func listCRD[T any, L any](ctx context.Context, c *Client, gvr schema.GroupVersi
 			var env breakfixv1.VK8sEnvironment
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
 				return nil, fmt.Errorf("convert VK8s environment item: %w", err)
+			}
+			typed.Items = append(typed.Items, env)
+		}
+	case *runtimev2.RuntimeEnvironmentList:
+		typed.Items = make([]runtimev2.RuntimeEnvironment, 0, len(result.Items))
+		for _, item := range result.Items {
+			var env runtimev2.RuntimeEnvironment
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
+				return nil, fmt.Errorf("convert runtime environment item: %w", err)
 			}
 			typed.Items = append(typed.Items, env)
 		}

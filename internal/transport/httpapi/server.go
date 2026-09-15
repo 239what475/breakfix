@@ -235,6 +235,8 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.POST("/api/internal/runnable-actions/renew", h.InternalRenewRunnableAction)
 	router.POST("/api/internal/runnable-actions/source", h.InternalDownloadRunnableSource)
 	router.POST("/api/internal/runnable-actions/output", h.InternalStoreRunnableExecutionOutput)
+	router.POST("/api/internal/runnable-actions/verification/environment", h.InternalCreateRunnableVerificationEnvironment)
+	router.POST("/api/internal/runnable-actions/verification/release", h.InternalRequestRunnableVerificationEnvironmentRelease)
 	router.POST("/api/internal/runnable-actions/materialization/complete", h.InternalCompleteRunnableMaterialization)
 	router.POST("/api/internal/runnable-actions/verification/complete", h.InternalCompleteRunnableVerification)
 	router.POST("/api/internal/runnable-actions/failure", h.InternalReportRunnableActionFailure)

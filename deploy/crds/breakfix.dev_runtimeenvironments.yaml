@@ -101,7 +101,8 @@ spec:
             - message: purpose is immutable
               rule: oldSelf == null || self.purpose == oldSelf.purpose
             - message: resetNonce must be monotonic
-              rule: oldSelf == null || self.resetNonce >= oldSelf.resetNonce
+              rule: oldSelf == null || !has(oldSelf.resetNonce) || (has(self.resetNonce)
+                && self.resetNonce >= oldSelf.resetNonce)
           status:
             description: |-
               RuntimeEnvironmentStatus is exclusively Controller-owned. It projects

@@ -75,7 +75,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create runnable materializer: %w", err)
 	}
-	verificationProvider, err := runnableprovider.NewVerificationProvider(k8sClient, incusClient, cfg.CRDNamespace)
+	verificationProvider, err := runnableprovider.NewVerificationProvider(k8sClient, actionClient, incusClient, cfg.CRDNamespace)
 	if err != nil {
 		return fmt.Errorf("create runnable verification provider: %w", err)
 	}

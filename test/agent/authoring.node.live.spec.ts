@@ -8,8 +8,8 @@ import {
 	stopScenario,
 } from "../support/live-helpers";
 import {
-	attachNodeEnvironmentIdentity,
-	waitForNodeEnvironmentDeletion,
+	attachRuntimeEnvironment,
+	waitForRuntimeEnvironmentDeletion,
 } from "../support/e2e-platform";
 import {
 	CandidateRejectedError,
@@ -73,14 +73,14 @@ agentLiveTest("conversation confirms, verifies, publishes, and runs a node scena
 		await card.getByRole("button", { name: "Start scenario", exact: true }).click();
 		await expectTerminalConnected(page);
 		environmentName = await activeEnvironmentName(page, scenarioID);
-		await runTerminalCommand(page, "/bin/bash /opt/breakfix/scenario/nodes/host/answer.sh");
+		await runTerminalCommand(page, "/bin/bash /opt/breakfix/runnable/nodes/host/actions/apply.sh");
 		await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
 		completed = true;
 	} finally {
-		if (environmentName) await attachNodeEnvironmentIdentity(testInfo, environmentName);
+		if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
 		if (completed && environmentName && scenarioID) {
 			await stopScenario(page, scenarioID);
-			await waitForNodeEnvironmentDeletion(environmentName);
+			await waitForRuntimeEnvironmentDeletion(environmentName);
 		}
 	}
 });

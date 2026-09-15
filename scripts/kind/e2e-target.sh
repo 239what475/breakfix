@@ -444,7 +444,7 @@ wait_for_environment_deletion() {
 delete_environments() {
 	state_dir=$repo_root/.local/e2e/$target_id
 	mkdir -p "$state_dir"
-	for resource in nodeenvironments vk8senvironments; do
+	for resource in runtimeenvironments; do
 		if ! resource_available "$resource"; then
 			continue
 		fi
@@ -669,7 +669,7 @@ dump_reset_diagnostics() {
 	kubectl -n "$namespace" get deployments,statefulsets,pods,persistentvolumeclaims,configmaps \
 		-o wide >"$diagnostics/resources.txt" 2>&1 || true
 	kubectl -n "$namespace" get events --sort-by=.lastTimestamp >"$diagnostics/events.txt" 2>&1 || true
-	kubectl -n "$namespace" get nodeenvironments,vk8senvironments -o name >"$diagnostics/environment-identities.txt" 2>&1 || true
+	kubectl -n "$namespace" get runtimeenvironments -o name >"$diagnostics/environment-identities.txt" 2>&1 || true
 	if kubectl -n "$namespace" get pod breakfix-postgresql-0 >/dev/null 2>&1; then
 		kubectl -n "$namespace" exec breakfix-postgresql-0 -- sh -ec \
 			'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT workspace_id, workflow_id, namespace, pvc_name, sandbox_id, state FROM generator_workspaces WHERE state <> '\''deleted'\'' ORDER BY workspace_id;"' \

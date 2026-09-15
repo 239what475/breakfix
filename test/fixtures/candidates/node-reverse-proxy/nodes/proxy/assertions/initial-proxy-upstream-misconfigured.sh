@@ -8,4 +8,4 @@ else
   observed=false
   details="proxy service no longer targets the known bad upstream"
 fi
-printf '{"evidence":[{"id":"proxy-upstream-misconfigured","observed":%s,"summary":"Proxy upstream is wrong","details":"%s"}]}' "$observed" "$details"
+printf '{"assertions":[{"id":"proxy-upstream-misconfigured","satisfied":%s,"summary":"Proxy upstream is wrong","details":"%s"}]}' "$observed" "$details"
