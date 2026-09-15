@@ -36,11 +36,12 @@ docs_prefix=$(manifest_value docs_prefix)
 default_base_url=$(manifest_value default_base_url)
 default_parent_origin=$(manifest_value default_parent_origin)
 hugo_version=$(manifest_value hugo_version)
+manifest_mirror_digest=$(manifest_value mirror_digest)
 container_engine=${DOCS_CONTAINER_ENGINE:-docker}
 container_image=${DOCS_CONTAINER_IMAGE:-breakfix/k8s-website-hugo:hugo-${hugo_version}}
 runtime_image=${DOCS_RUNTIME_IMAGE:-breakfix/kubernetes-docs:${version}}
 
-for value_name in source_name repository revision version locale docs_prefix default_base_url default_parent_origin hugo_version; do
+for value_name in source_name repository revision version locale docs_prefix default_base_url default_parent_origin hugo_version manifest_mirror_digest; do
 	if [[ -z ${!value_name} ]]; then
 		echo "manifest value is empty: $value_name" >&2
 		exit 2
@@ -148,6 +149,8 @@ write_build_info() {
 	local base_url=$1
 	local build_time
 	build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+	local mirror_digest
+	mirror_digest=$(find "$public_dir" -type f ! -name build-info.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "sha256:"$1}')
 	cat >"$public_dir/build-info.json" <<EOF
 {
   "source": "$source_name",
@@ -156,6 +159,7 @@ write_build_info() {
   "version": "$version",
   "locale": "$locale",
   "base_url": "$base_url",
+  "mirror_digest": "$mirror_digest",
   "built_at": "$build_time"
 }
 EOF
@@ -184,6 +188,10 @@ check_public() {
 	fi
 	if ! rg -F -q "$revision" "$public_dir/build-info.json"; then
 		echo "build-info.json does not contain pinned revision" >&2
+		return 1
+	fi
+	if ! rg -q '"mirror_digest"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]{64}"' "$public_dir/build-info.json"; then
+		echo "build-info.json does not contain a mirror digest" >&2
 		return 1
 	fi
 	local built_base_url

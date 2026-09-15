@@ -20,3 +20,5 @@ type IdentityRepository struct{ conn *Conn }
 type ReportingRepository struct{ conn *Conn }
 
 type RunnableRepository struct{ conn *Conn }
+
+type DocumentPracticeRepository struct{ conn *Conn }
