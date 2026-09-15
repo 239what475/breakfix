@@ -47,6 +47,17 @@ async function postgres(sql: string) {
   return stdout.trim();
 }
 
+async function restartDeployment(name: string) {
+  await execFile("kubectl", ["-n", "breakfix-system", "rollout", "restart", `deployment/${name}`]);
+  await execFile("kubectl", ["-n", "breakfix-system", "rollout", "status", `deployment/${name}`, "--timeout=3m"]);
+}
+
+async function runtimeEnvironmentExists(uid: string) {
+  const { stdout } = await execFile("kubectl", ["-n", "breakfix-system", "get", "runtimeenvironments.breakfix.dev", "-o", "json"]);
+  const resources = JSON.parse(stdout) as { items?: Array<{ metadata?: { uid?: string } }> };
+  return resources.items?.some((item) => item.metadata?.uid === uid) ?? false;
+}
+
 test("guest can read fixture documentation and retain its location", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Documentation", exact: true })).toBeVisible();
@@ -134,7 +145,7 @@ test("documentation reader falls back from a non-document path", async ({ page }
 });
 
 test("fixed documentation practice runs through publication", async ({ request }) => {
-  test.setTimeout(10 * 60_000);
+  test.setTimeout(12 * 60_000);
   const apiBase = process.env.BREAKFIX_E2E_BASE_URL;
   if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the documentation workflow test");
   const username = `documentation-${Date.now()}`;
@@ -149,6 +160,15 @@ test("fixed documentation practice runs through publication", async ({ request }
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string; state: string };
   expect(started.workflow_id).toMatch(/^document-workflow-/);
+  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
+    timeout: 60_000,
+    intervals: [500, 1_000, 2_000],
+  }).toMatch(/^(MaterializingArtifact|Verifying)$/);
+  await expect.poll(async () => postgres(`SELECT state FROM runnable_actions WHERE content_kind = 'documentation-practice' AND phase = 'materialize-artifact'`), {
+    timeout: 60_000,
+    intervals: [500, 1_000, 2_000],
+  }).toBe("running");
+  await restartDeployment("breakfix-runtime-worker");
 
   await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
     timeout: 9 * 60_000,
@@ -160,4 +180,17 @@ test("fixed documentation practice runs through publication", async ({ request }
   expect(await postgres(`SELECT manifest->'document_context'->>'anchor' FROM document_publication_manifests WHERE workflow_id = '${started.workflow_id}'`)).toBe("pod-lifetime");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'learning-unit-plan' AND payload->'user_steps' @> '[{"id":"apply-pod","evidence_ids":["page"]}]'::jsonb`)).toBe("1");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'practice-candidate' AND payload->'user_steps' @> '[{"id":"apply-pod"}]'::jsonb AND payload #> '{spec,validation_plan,phases,0,actions}' @> '[{"id":"apply-pod"}]'::jsonb`)).toBe("1");
+
+  const replay = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` } });
+  expect(replay.status(), await replay.text()).toBe(202);
+  const replayed = await replay.json() as { workflow_id: string; state: string };
+  expect(replayed).toEqual({ workflow_id: started.workflow_id, state: "Published" });
+  expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}'`)).toBe("9");
+  expect(Number(await postgres(`SELECT attempt FROM runnable_actions WHERE content_kind = 'documentation-practice' AND phase = 'materialize-artifact'`))).toBeGreaterThanOrEqual(2);
+  const environmentUID = await postgres(`SELECT reports.report #>> '{environment,id}' FROM runnable_verification_reports reports JOIN document_practice_revisions revisions ON revisions.verification_report_id = reports.id WHERE revisions.workflow_id = '${started.workflow_id}'`);
+  expect(environmentUID).toMatch(/^[0-9a-f-]{36}$/);
+  await expect.poll(async () => runtimeEnvironmentExists(environmentUID), {
+    timeout: 2 * 60_000,
+    intervals: [500, 1_000, 2_000, 5_000],
+  }).toBe(false);
 });

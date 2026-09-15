@@ -135,6 +135,31 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.conn.ExecContext(ctx, `CREATE FUNCTION fail_document_practice_revision_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced document publication failure'; END; $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `CREATE TRIGGER fail_document_practice_revision_insert BEFORE INSERT ON document_practice_revisions FOR EACH ROW EXECUTE FUNCTION fail_document_practice_revision_insert()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(time.Second)); err == nil {
+		t.Fatal("forced publication failure succeeded")
+	}
+	if _, err := database.conn.ExecContext(ctx, `DROP TRIGGER fail_document_practice_revision_insert ON document_practice_revisions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `DROP FUNCTION fail_document_practice_revision_insert()`); err != nil {
+		t.Fatal(err)
+	}
+	var manifests, revisions, indexEntries int
+	if err := database.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM document_publication_manifests`).Scan(&manifests); err != nil || manifests != 0 {
+		t.Fatalf("failed publication committed a manifest: count=%d err=%v", manifests, err)
+	}
+	if err := database.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM document_practice_revisions`).Scan(&revisions); err != nil || revisions != 0 {
+		t.Fatalf("failed publication committed a revision: count=%d err=%v", revisions, err)
+	}
+	if err := database.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM document_practice_index`).Scan(&indexEntries); err != nil || indexEntries != 0 {
+		t.Fatalf("failed publication committed an index entry: count=%d err=%v", indexEntries, err)
+	}
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(time.Second)); err != nil {
 		t.Fatalf("publish practice revision: %v", err)
 	}

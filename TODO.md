@@ -473,15 +473,15 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 实现 Server 原子发布事务：只有计划门禁、产物门禁、构建、机器验证和验证审核全部通过，才能写入 PracticeRevision、RunnableRevision 引用和实践索引；发布由 Server finalizer 完成，不设置独立发布角色。
 - [x] `PublicationManifest` 保存 `DocumentContext`、practice revision、runnable revision、environment profile、verification report 和审核门禁结果的 ID/digest 引用及策略版本；不复制前序 artifact 的完整内容。
 - [x] 实践索引只保存页面/锚点到已发布实践 revision 的映射；阅读器仍通过独立 docs origin 和上下文脚本工作，不复制文档正文。
-- [ ] 对发布幂等、重复请求、状态过期、digest 不匹配、部分事务失败、Worker 重启和 Reaper 同步运行补集成测试。
+- [x] 对发布幂等、重复请求、状态过期、digest 不匹配、部分事务失败、Worker 重启和 Reaper 同步运行补集成测试。
 
 ### 12. 文档实践端到端验收
 
 - [x] 使用固定 Kubernetes 文档 fixture 验证页面浏览、证据读取、规划、审核、门禁、场景生成和产物门禁完整链路。
 - [x] 在真实固定文档镜像和目标 Kind 环境中完成至少一个 Pod 生命周期实践：从干净状态创建资源，执行自动步骤，观察状态并通过结论断言。
-- [ ] 验证无参考修复、无用户操作、多个阶段、断言失败、协议失败和环境基础设施失败的状态与报告语义。
+- [x] 验证无参考修复、无用户操作、多个阶段、断言失败、协议失败和环境基础设施失败的状态与报告语义。
 - [x] 验证用户步骤、自动回放和文档锚点的关联能由 `PublicationManifest` 复现；页面和实践索引均不能漂移到其他 revision。
-- [ ] 验证 Agent 无法通过文档提示、生成 archive、审核意见或发布请求扩大工具权限、访问用户数据或绕过机器前置条件。
+- [x] 验证 Agent 无法通过文档提示、生成 archive、审核意见或发布请求扩大工具权限、访问用户数据或绕过机器前置条件。
 - [x] 运行 `make test-unit`、文档构建/smoke test、Agent workflow 集成测试、Kind 真实运行测试和 `make verify-generated`。
 
 ## 提交清单

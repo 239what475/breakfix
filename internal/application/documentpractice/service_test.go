@@ -13,14 +13,23 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
-func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
+func TestServicePublishesMultiPhaseAutomatedDocumentationPracticeWithoutUserSteps(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 13, 0, 0, 0, time.UTC)
 	store := newMemoryDocumentStore()
 	plan := validPlan()
 	plan.CreatedAt = now
+	plan.UserSteps = nil
 	archive := []byte("documentation practice archive")
 	candidate := serviceCandidate(t, plan, archive, now)
+	candidate.UserSteps = nil
+	candidate.Spec.ValidationPlan.Phases = append(candidate.Spec.ValidationPlan.Phases, runnable.ValidationPhase{
+		ID: "conclude", TimeoutSeconds: 60, Execution: runnable.PhaseSequential,
+		Assertions: []runnable.AssertionSpec{{ID: "pod-conclusion", Entrypoint: "scripts/conclude.sh", Target: runnable.TargetLocation{Kind: "management", ID: "cluster"}, BoundaryID: "management-read", TimeoutSeconds: 60}},
+	})
+	if err := candidate.Validate(); err != nil {
+		t.Fatalf("multi-phase automated candidate: %v", err)
+	}
 	revision, report := serviceRevisionAndReport(t, candidate, now, true)
 	runnableStore := &memoryRunnableStore{revision: revision, report: report}
 	service, err := NewService(store, runnableStore)
@@ -98,7 +107,7 @@ func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
 		t.Fatalf("verification workflow binding = %q %t %v", workflowID, found, err)
 	}
 	workflow, storedReport, err := service.Verified(ctx, workflow.ID, verification)
-	if err != nil || workflow.State != domain.VerificationReviewing || !storedReport.Report.Passed {
+	if err != nil || workflow.State != domain.VerificationReviewing || !storedReport.Report.Passed || len(storedReport.Report.Phases) != 3 {
 		t.Fatalf("verified = %#v %#v, %v", workflow, storedReport, err)
 	}
 	verificationReview := VerificationReviewBundle{ArtifactID: "verification-review-input", ArtifactDigest: serviceDigest("a"), ReportDigest: storedReport.Reference.Digest, Opinions: []domain.ReviewOpinion{{ReviewerID: "verification-review", Role: "verification", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}}, CreatedAt: now}
@@ -108,7 +117,7 @@ func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
 		t.Fatalf("gate verification = %#v, %v", workflow, err)
 	}
 	workflow, practice, err := service.Publish(ctx, workflow.ID, candidate, plan, planGate, artifactGate, revisionRef, storedReport, verificationReview)
-	if err != nil || workflow.State != domain.Published || practice.CandidateID != candidate.ID || store.published == nil {
+	if err != nil || workflow.State != domain.Published || practice.CandidateID != candidate.ID || store.published == nil || len(candidate.UserSteps) != 0 {
 		t.Fatalf("publish = %#v %#v, %v", workflow, practice, err)
 	}
 }
@@ -429,7 +438,21 @@ func serviceRevisionAndReport(t *testing.T, candidate domain.PracticeCandidate, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := runnable.VerificationReport{FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: revisionDigest, Environment: runnable.EnvironmentIdentity{ID: "verification-environment", Provider: "k8s", ProfileDigest: profileDigest}, Attempt: 1, Passed: passed, CreatedAt: now, Phases: []runnable.PhaseResult{{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialized"}}}, {ID: "observe", Actions: []runnable.ActionResult{{ID: "apply", ExitCode: 0, Summary: "applied"}}, Assertions: []runnable.AssertionResult{{ID: "pod-running", Satisfied: passed, Summary: "Pod is observable"}}}}}
+	phases := []runnable.PhaseResult{{ID: "initialization"}}
+	for _, action := range candidate.Spec.Initialization {
+		phases[0].Actions = append(phases[0].Actions, runnable.ActionResult{ID: action.ID, ExitCode: 0, Summary: "initialized"})
+	}
+	for _, phase := range candidate.Spec.ValidationPlan.Phases {
+		result := runnable.PhaseResult{ID: phase.ID}
+		for _, action := range phase.Actions {
+			result.Actions = append(result.Actions, runnable.ActionResult{ID: action.ID, ExitCode: 0, Summary: "completed"})
+		}
+		for _, assertion := range phase.Assertions {
+			result.Assertions = append(result.Assertions, runnable.AssertionResult{ID: assertion.ID, Satisfied: passed, Summary: "observed"})
+		}
+		phases = append(phases, result)
+	}
+	report := runnable.VerificationReport{FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: revisionDigest, Environment: runnable.EnvironmentIdentity{ID: "verification-environment", Provider: "k8s", ProfileDigest: profileDigest}, Attempt: 1, Passed: passed, CreatedAt: now, Phases: phases}
 	reportDigest, err := report.Digest(revision)
 	if err != nil {
 		t.Fatal(err)
