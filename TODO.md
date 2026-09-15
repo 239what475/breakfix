@@ -289,7 +289,7 @@ Server 发布 finalizer：原子写入 PracticeRevision 与文档实践索引
 
 - Agent 不接收整个上游仓库作为一次性上下文；规划 Agent 通过受限只读工具按需浏览由固定 revision 构建的页面，并可读取同一 revision 的相关源码、示例或 include 文件。
 - 文档工具只能访问配置中固定的镜像 origin 和源码快照，不能访问任意公网地址、修改或执行上游内容，也不能接触 Breakfix 用户数据、生产 API、凭据或用户终端。
-- `DocumentContext` 固定来源、语言、版本、上游 commit、镜像 digest、渲染页面路径和标题锚点；源码证据另存 source path、内容 digest 和引用片段，不能混淆源码路径与渲染 URL。
+- `DocumentContext` 固定来源、语言、版本、上游 commit、渲染页面路径和标题锚点；上游 commit 是文档快照身份，构建产物和构建镜像不参与身份校验。源码证据另存 source path、内容 digest 和引用片段，不能混淆源码路径与渲染 URL。
 - `LearningUnitPlan` 必须包含学习目标、场景边界和所需的运行环境约束（运行时、资源、网络与拓扑），以及每个动作和预期结果的 evidence references。规划 Agent 可以明确返回 `no_practice`，不能默认每个段落或代码块都生成实践。
 - 场景 Agent 只能接收已批准的计划、其证据和由 Server 解析出的固定 runtime profile/执行边界，不能自行扩展目标、权限、网络访问或没有文档依据的行为。
 
@@ -430,7 +430,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 7. 固定文档来源与只读 Agent 工具
 
-- [x] 固定 Kubernetes website source、repository、commit、版本、语言、许可证和 Hugo 构建镜像 digest；将构建出的只读镜像 digest 写入 `DocumentContext`。
+- [x] 固定 Kubernetes website source、repository、commit、版本、语言和许可证；`DocumentContext` 只以固定上游 revision 与页面坐标标识文档，构建出的只读站点仅作为证据读取输入。
 - [x] 为文档页面、标题锚点、源码文件、include、示例资源和渲染片段定义来源 ID、路径、digest、行/片段范围和引用关系。
 - [x] 提供只读页面浏览、页面元数据、源码片段和 include 读取工具；工具只允许固定 origin、固定 revision 和受限路径。
 - [x] 拒绝任意公网访问、源码写入、文档命令执行、用户数据读取、生产 API、凭据和用户终端访问。
