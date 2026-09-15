@@ -5,12 +5,19 @@ import { expect, type TestInfo } from "@playwright/test";
 const execFile = promisify(execFileCallback);
 const namespace = process.env.BREAKFIX_NAMESPACE ?? process.env.BREAKFIX_E2E_NAMESPACE ?? "breakfix-system";
 
+type RuntimeResourceReference = {
+	provider?: string;
+	kind?: string;
+	id?: string;
+};
+
 type RuntimeEnvironment = {
 	metadata?: { name?: string; uid?: string; annotations?: Record<string, string> };
 	spec?: { resetNonce?: number };
 	status?: {
 		phase?: string;
 		operation?: string;
+		runtime?: { resourceRefs?: RuntimeResourceReference[] };
 		progress?: { reportRef?: { id?: string; digest?: string } };
 	};
 };
@@ -74,6 +81,10 @@ export async function runtimeEnvironmentResetNonce(name: string): Promise<number
 	return (await runtimeEnvironment(name)).spec?.resetNonce ?? 0;
 }
 
+export async function runtimeEnvironmentResourceRefs(name: string): Promise<RuntimeResourceReference[]> {
+	return (await runtimeEnvironment(name)).status?.runtime?.resourceRefs ?? [];
+}
+
 export async function expectRuntimeEnvironmentPhase(name: string, expected: "Ready") {
 	await expect.poll(() => runtimeEnvironmentPhase(name), {
 		timeout: 10 * 60_000,
@@ -101,6 +112,24 @@ export async function requestRuntimeEnvironmentRelease(name: string) {
 		"-n", namespace, "patch", "runtimeenvironment", name, "--type", "merge", "--patch",
 		JSON.stringify({ spec: { lease: { releaseAt } } }),
 	]);
+}
+
+// Reaper work is durable. Pausing the Controller before release proves that a
+// restarted controller acquires the queued work rather than relying on an
+// in-memory completion callback.
+export async function scaleController(replicas: 0 | 1) {
+	await kubectl(["-n", namespace, "scale", "deployment/breakfix-controller", `--replicas=${replicas}`]);
+	if (replicas === 1) {
+		await kubectl(["-n", namespace, "rollout", "status", "deployment/breakfix-controller", "--timeout=3m"]);
+		return;
+	}
+	await expect.poll(async () => {
+		const { stdout } = await kubectl(["-n", namespace, "get", "deployment", "breakfix-controller", "-o", "json"]);
+		return (JSON.parse(stdout) as { status?: { replicas?: number } }).status?.replicas ?? 0;
+	}, {
+		timeout: 3 * 60_000,
+		intervals: [500, 1_000, 2_000, 5_000],
+	}).toBe(0);
 }
 
 export async function waitForRuntimeEnvironmentDeletion(name: string) {

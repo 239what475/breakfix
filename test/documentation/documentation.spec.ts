@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 const execFile = promisify(execFileCallback);
 
@@ -56,6 +56,19 @@ async function runtimeEnvironmentExists(uid: string) {
   const { stdout } = await execFile("kubectl", ["-n", "breakfix-system", "get", "runtimeenvironments.breakfix.dev", "-o", "json"]);
   const resources = JSON.parse(stdout) as { items?: Array<{ metadata?: { uid?: string } }> };
   return resources.items?.some((item) => item.metadata?.uid === uid) ?? false;
+}
+
+async function postAfterServerRestart(request: APIRequestContext, url: string, token: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return await request.post(url, { headers: { Authorization: `Bearer ${token}` } });
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 test("guest can read fixture documentation and retain its location", async ({ page }) => {
@@ -169,6 +182,7 @@ test("fixed documentation practice runs through publication", async ({ request }
     intervals: [500, 1_000, 2_000],
   }).toBe("running");
   await restartDeployment("breakfix-runtime-worker");
+  await restartDeployment("breakfix-server");
 
   await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
     timeout: 9 * 60_000,
@@ -181,7 +195,7 @@ test("fixed documentation practice runs through publication", async ({ request }
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'learning-unit-plan' AND payload->'user_steps' @> '[{"id":"apply-pod","evidence_ids":["page"]}]'::jsonb`)).toBe("1");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'practice-candidate' AND payload->'user_steps' @> '[{"id":"apply-pod"}]'::jsonb AND payload #> '{spec,validation_plan,phases,0,actions}' @> '[{"id":"apply-pod"}]'::jsonb`)).toBe("1");
 
-  const replay = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` } });
+  const replay = await postAfterServerRestart(request, `${apiBase}/api/documentation/practice`, credentials.token);
   expect(replay.status(), await replay.text()).toBe(202);
   const replayed = await replay.json() as { workflow_id: string; state: string };
   expect(replayed).toEqual({ workflow_id: started.workflow_id, state: "Published" });

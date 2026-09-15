@@ -12,14 +12,16 @@ import {
   expectNoRuntimeEnvironments,
   expectRuntimeEnvironmentPhase,
   requestRuntimeEnvironmentRelease,
+  scaleController,
   waitForRuntimeEnvironmentDeletion,
 } from "../support/e2e-platform";
 
-test("released Node runtime is asynchronously reaped", async ({ page }, testInfo) => {
+test("released Node runtime is reaped after Controller recovery", async ({ page }, testInfo) => {
   test.setTimeout(8 * 60_000);
   let scenarioID = "";
   let environmentName = "";
   let reclaimed = false;
+  let controllerPaused = false;
 
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -34,12 +36,17 @@ test("released Node runtime is asynchronously reaped", async ({ page }, testInfo
     // Reaper path used after a lifecycle deadline.
     await page.getByRole("button", { name: "My space", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Your learning space", exact: true })).toBeVisible();
+    await scaleController(0);
+    controllerPaused = true;
     await requestRuntimeEnvironmentRelease(environmentName);
+    await scaleController(1);
+    controllerPaused = false;
     await waitForRuntimeEnvironmentDeletion(environmentName);
     reclaimed = true;
     await expectNoRuntimeEnvironments();
 
   } finally {
+    if (controllerPaused) await scaleController(1).catch(() => undefined);
     if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
     if (scenarioID && !reclaimed) {
       await stopScenario(page, scenarioID).catch(() => undefined);

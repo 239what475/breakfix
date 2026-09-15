@@ -405,7 +405,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 为 Reaper 增加断点恢复、lease 接管、重复执行、provider 暂时不可用、永久资源缺失和积压告警测试。
 - [x] 验证终端、日志、事件、资源状态和只读观测接口不依赖 Operations 或 Documentation 的字段名称。
 - [x] 先排空并回收旧 `NodeEnvironment`/`VK8sEnvironment` v1 对象，再安装 `RuntimeEnvironment` v2 CRD、更新 RBAC/客户端和生成清单；不提供 conversion webhook、双写或旧字段兼容读取。
-- [ ] 在 Kind 和 Incus 目标上各完成一次从干净环境创建、阶段执行、验证、重置、停止和回收的真实测试。
+- [x] 在 Kind 和 Incus 目标上各完成一次从干净环境创建、阶段执行、验证、重置、停止和回收的真实测试。
 
 ### 5. 迁移持久化、内部 API 与发布边界
 
@@ -421,8 +421,8 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 - [x] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
 - [x] 运行公共 domain、application、adapter、worker 和 controller 单元测试，覆盖至少一个 Operations observation-only、repair-style 和 multi-stage 计划。
-- [ ] 在专用 Kind target 上完成构建、artifact 发布、真实验证、lease 接管、重启恢复和异步回收验收。
-- [ ] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。
+- [x] 在专用 Kind target 上完成构建、artifact 发布、真实验证、lease 接管、重启恢复和异步回收验收。
+- [x] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。
 - [x] 验证任何 `VerificationReport` 都能由 `RunnableRevision` digest、artifact digest 和 environment profile revision 重现。
 - [x] 验证 `RuntimeEnvironment v2` 的 strict schema、不可变字段、phase/operation 转换、稳定资源引用和 lease 回收语义；CRD 不包含内容专属字段或完整验证结果。
 - [x] 新增一个仅依赖公共适配器接口的最小 fake content kind，证明无需修改 Runtime Worker 核心即可执行。
