@@ -2,11 +2,9 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
@@ -16,35 +14,9 @@ import (
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/execution"
-	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 	"github.com/gin-gonic/gin"
 )
-
-func TestReconcileDocumentationRunnableActionIsBestEffortAfterPublicCompletion(t *testing.T) {
-	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "documentation-practice", ID: "practice-document-01", Revision: "candidate-01"}, SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}
-	reconciler := &testDocumentationActionReconciler{}
-	h := &Handler{documentationActions: reconciler}
-	h.reconcileDocumentationRunnableAction(context.Background(), action)
-	if reconciler.action != action {
-		t.Fatalf("reconciled action = %#v", reconciler.action)
-	}
-	reconciler.err = errors.New("temporary document database outage")
-	h.reconcileDocumentationRunnableAction(context.Background(), action)
-	if reconciler.calls != 2 {
-		t.Fatalf("reconciler calls = %d", reconciler.calls)
-	}
-}
-
-func TestReconcileDocumentationRunnableActionIgnoresOtherContentKinds(t *testing.T) {
-	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "operations", ID: "scenario-01", Revision: "revision-01"}, SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}
-	reconciler := &testDocumentationActionReconciler{}
-	h := &Handler{documentationActions: reconciler}
-	h.reconcileDocumentationRunnableAction(context.Background(), action)
-	if reconciler.calls != 0 {
-		t.Fatalf("documentation reconciler received %d Operations actions", reconciler.calls)
-	}
-}
 
 func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T) {
 	application := &testDocumentationApplication{}
@@ -58,23 +30,11 @@ func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T)
 	}
 }
 
-type testDocumentationActionReconciler struct {
-	action runnable.ActionIdentity
-	calls  int
-	err    error
-}
-
 type testDocumentationApplication struct{ calls int }
 
 func (a *testDocumentationApplication) StartDocumentationPractice(context.Context) (documentdomain.Workflow, error) {
 	a.calls++
 	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
-}
-
-func (r *testDocumentationActionReconciler) ReconcileCompletedAction(_ context.Context, action runnable.ActionIdentity) error {
-	r.action = action
-	r.calls++
-	return r.err
 }
 
 func newHandlerForTest(t testing.TB, database *postgres.Store, client *kubernetes.Client, cfg config.Config) *Handler {

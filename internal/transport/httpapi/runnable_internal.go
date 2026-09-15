@@ -255,7 +255,6 @@ func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {
 		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	h.reconcileDocumentationRunnableAction(c.Request.Context(), request.Credential.Identity)
 	c.Status(http.StatusNoContent)
 }
 
@@ -277,24 +276,12 @@ func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 		h.writeInternalRuntimeError(c, err)
 		return
 	}
-	h.reconcileDocumentationRunnableAction(c.Request.Context(), request.Credential.Identity)
 	if err := h.markVerificationEnvironmentReleasable(c.Request.Context(), request.Report.Report.Environment.ID, request.Report.Report.RunnableRevisionDigest); err != nil {
 		// Report persistence is the workflow boundary. Reaper handoff failures
 		// remain observable but cannot roll the immutable report back.
 		slog.Warn("request verification environment release", "environment", request.Report.Report.Environment.ID, "err", err)
 	}
 	c.Status(http.StatusNoContent)
-}
-
-func (h *Handler) reconcileDocumentationRunnableAction(ctx context.Context, action runnable.ActionIdentity) {
-	if h == nil || action.Content.Kind != "documentation-practice" || h.documentationActions == nil {
-		return
-	}
-	if err := h.documentationActions.ReconcileCompletedAction(ctx, action); err != nil {
-		// Runnable completion is already durable. The Server recovery loop owns a
-		// retry so a Worker never needs to replay a completed public action.
-		slog.Error("reconcile documentation runnable action", "action", action.Key(), "err", err)
-	}
 }
 
 func (h *Handler) markVerificationEnvironmentReleasable(ctx context.Context, environmentID, revisionDigest string) error {

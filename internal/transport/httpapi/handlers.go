@@ -25,35 +25,34 @@ import (
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
 // by domain so routing stays stable while each endpoint's responsibility is local.
 type Handler struct {
-	runtimeContext       context.Context
-	db                   *postgres.Store
-	k8s                  *kubernetes.Client
-	runnableBindings     operationsRunnableBindingResolver
-	authoring            *appauthoring.RuntimeService
-	catalog              *appcatalog.Service
-	assistant            *appassistant.Service
-	registryRepository   string
-	namespace            string
-	crdNamespace         string
-	scenariosDir         string
-	dataDir              string
-	cooldownMin          int
-	llm                  config.AgentConfig
-	jwtSecret            []byte
-	internalWorkers      config.InternalWorkerKeys
-	port                 int
-	uiOrigin             string
-	terminals            *terminalConnectionTracker
-	serverInstance       string
-	runtimeConfig        config.RuntimeConfig
-	runtimeActions       runtimeClaimArbiter
-	runtimeReaps         runtimeClaimArbiter
-	incusConfig          incus.Config
-	nodeTerminal         NodeTerminalProvider
-	nodeProviderReady    NodeProviderReadiness
-	generator            generatorApplication
-	documentationActions documentationRunnableActionReconciler
-	documentation        documentationApplication
+	runtimeContext     context.Context
+	db                 *postgres.Store
+	k8s                *kubernetes.Client
+	runnableBindings   operationsRunnableBindingResolver
+	authoring          *appauthoring.RuntimeService
+	catalog            *appcatalog.Service
+	assistant          *appassistant.Service
+	registryRepository string
+	namespace          string
+	crdNamespace       string
+	scenariosDir       string
+	dataDir            string
+	cooldownMin        int
+	llm                config.AgentConfig
+	jwtSecret          []byte
+	internalWorkers    config.InternalWorkerKeys
+	port               int
+	uiOrigin           string
+	terminals          *terminalConnectionTracker
+	serverInstance     string
+	runtimeConfig      config.RuntimeConfig
+	runtimeActions     runtimeClaimArbiter
+	runtimeReaps       runtimeClaimArbiter
+	incusConfig        incus.Config
+	nodeTerminal       NodeTerminalProvider
+	nodeProviderReady  NodeProviderReadiness
+	generator          generatorApplication
+	documentation      documentationApplication
 }
 
 // generatorApplication is the HTTP consumer's view of GeneratorService. The
@@ -77,13 +76,6 @@ type generatorApplication interface {
 	CancelGeneration(context.Context, string, generationdomain.Cancellation) (*generationdomain.Workflow, error)
 }
 
-// documentationRunnableActionReconciler advances only documentation workflow
-// state after a public runnable action has already been made immutable.
-// Operations and future content kinds intentionally do not share this port.
-type documentationRunnableActionReconciler interface {
-	ReconcileCompletedAction(context.Context, runnable.ActionIdentity) error
-}
-
 // documentationApplication starts only the Server-configured fixed workflow.
 // It has no endpoint for Agent artifacts, arbitrary pages, or runtime policy.
 type documentationApplication interface {
@@ -91,15 +83,14 @@ type documentationApplication interface {
 }
 
 type Dependencies struct {
-	NodeTerminal         NodeTerminalProvider
-	Assistant            *appassistant.Service
-	Authoring            *appauthoring.RuntimeService
-	Catalog              *appcatalog.Service
-	AgentRuntimeContext  context.Context
-	Generator            generatorApplication
-	RunnableBindings     operationsRunnableBindingResolver
-	DocumentationActions documentationRunnableActionReconciler
-	Documentation        documentationApplication
+	NodeTerminal        NodeTerminalProvider
+	Assistant           *appassistant.Service
+	Authoring           *appauthoring.RuntimeService
+	Catalog             *appcatalog.Service
+	AgentRuntimeContext context.Context
+	Generator           generatorApplication
+	RunnableBindings    operationsRunnableBindingResolver
+	Documentation       documentationApplication
 }
 
 // operationsRunnableBindingResolver prevents Server-created environments from
@@ -132,30 +123,29 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		agentRuntimeContext = context.Background()
 	}
 	handler := &Handler{
-		runtimeContext:       agentRuntimeContext,
-		db:                   database,
-		k8s:                  client,
-		runnableBindings:     dependencies.RunnableBindings,
-		catalog:              catalogService,
-		registryRepository:   cfg.Registry.Repository,
-		namespace:            cfg.Namespace,
-		crdNamespace:         cfg.CRDNamespace,
-		scenariosDir:         cfg.ScenariosDir(),
-		dataDir:              cfg.DataDir,
-		cooldownMin:          cfg.CooldownMinutes,
-		llm:                  cfg.Agent,
-		jwtSecret:            []byte(cfg.JWTSecret),
-		internalWorkers:      cfg.InternalWorkers,
-		port:                 cfg.Port,
-		uiOrigin:             cfg.UIOrigin,
-		terminals:            newTerminalConnectionTracker(time.Second),
-		serverInstance:       newServerInstanceID(),
-		runtimeConfig:        cfg.Runtime,
-		incusConfig:          cfg.Incus,
-		nodeTerminal:         dependencies.NodeTerminal,
-		generator:            dependencies.Generator,
-		documentationActions: dependencies.DocumentationActions,
-		documentation:        dependencies.Documentation,
+		runtimeContext:     agentRuntimeContext,
+		db:                 database,
+		k8s:                client,
+		runnableBindings:   dependencies.RunnableBindings,
+		catalog:            catalogService,
+		registryRepository: cfg.Registry.Repository,
+		namespace:          cfg.Namespace,
+		crdNamespace:       cfg.CRDNamespace,
+		scenariosDir:       cfg.ScenariosDir(),
+		dataDir:            cfg.DataDir,
+		cooldownMin:        cfg.CooldownMinutes,
+		llm:                cfg.Agent,
+		jwtSecret:          []byte(cfg.JWTSecret),
+		internalWorkers:    cfg.InternalWorkers,
+		port:               cfg.Port,
+		uiOrigin:           cfg.UIOrigin,
+		terminals:          newTerminalConnectionTracker(time.Second),
+		serverInstance:     newServerInstanceID(),
+		runtimeConfig:      cfg.Runtime,
+		incusConfig:        cfg.Incus,
+		nodeTerminal:       dependencies.NodeTerminal,
+		generator:          dependencies.Generator,
+		documentation:      dependencies.Documentation,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable
