@@ -1,0 +1,403 @@
+package documentpractice
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
+)
+
+func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 13, 0, 0, 0, time.UTC)
+	store := newMemoryDocumentStore()
+	plan := validPlan()
+	plan.CreatedAt = now
+	archive := []byte("documentation practice archive")
+	candidate := serviceCandidate(t, plan, archive, now)
+	revision, report := serviceRevisionAndReport(t, candidate, now, true)
+	runnableStore := &memoryRunnableStore{revision: revision, report: report}
+	service, err := NewService(store, runnableStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+
+	workflow, err := service.Start(ctx, "document-service-full")
+	if err != nil || workflow.State != domain.Planning {
+		t.Fatalf("start = %#v, %v", workflow, err)
+	}
+	planAudit := serviceAudit(t, "planner-run", "planner", plan)
+	workflow, planArtifact, err := service.SubmitPlan(ctx, workflow.ID, plan, planAudit)
+	if err != nil || workflow.State != domain.PlanReviewing {
+		t.Fatalf("submit plan = %#v, %v", workflow, err)
+	}
+	// A network retry of the same planner result must not advance twice.
+	replay, replayArtifact, err := service.SubmitPlan(ctx, workflow.ID, plan, planAudit)
+	if err != nil || replay.StateVersion != workflow.StateVersion || replayArtifact.ID != planArtifact.ID || replayArtifact.Digest != planArtifact.Digest {
+		t.Fatalf("replay plan = %#v %#v, %v", replay, replayArtifact, err)
+	}
+	planReviews := []domain.AgentAudit{
+		serviceAudit(t, "plan-evidence", "plan-review", domain.ReviewOpinion{ReviewerID: "plan-evidence", Role: "evidence", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}),
+		serviceAudit(t, "plan-value", "plan-review", domain.ReviewOpinion{ReviewerID: "plan-value", Role: "value", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}),
+	}
+	planBundle := ReviewBundle{ArtifactID: planArtifact.ID, ArtifactDigest: planArtifact.Digest, Opinions: []domain.ReviewOpinion{
+		{ReviewerID: "plan-evidence", Role: "evidence", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+		{ReviewerID: "plan-value", Role: "value", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+	}, CreatedAt: now}
+	workflow, planGate, err := service.GatePlan(ctx, workflow.ID, planAudit.RunID, planArtifact, planBundle, planReviews)
+	if err != nil || !planGate.Approved() || workflow.State != domain.Generating {
+		t.Fatalf("gate plan = %#v %#v, %v", workflow, planGate, err)
+	}
+	candidateAudit := serviceAudit(t, "generator-run", "generator", candidate)
+	workflow, candidateArtifact, err := service.SubmitCandidate(ctx, workflow.ID, plan, candidate, archive, candidateAudit)
+	if err != nil || workflow.State != domain.ArtifactReviewing {
+		t.Fatalf("submit candidate = %#v, %v", workflow, err)
+	}
+	specDigest, err := candidate.Spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateReviews := []domain.AgentAudit{
+		serviceAudit(t, "artifact-safety", "artifact-review", domain.ReviewOpinion{ReviewerID: "artifact-safety", Role: "safety", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}),
+		serviceAudit(t, "artifact-consistency", "artifact-review", domain.ReviewOpinion{ReviewerID: "artifact-consistency", Role: "consistency", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}),
+	}
+	candidateBundle := ArtifactReviewBundle{CandidateID: candidate.ID, CandidateDigest: candidate.Source.Digest, SpecDigest: specDigest, PlanID: plan.ID, PlanRevision: plan.Revision, Opinions: []domain.ReviewOpinion{
+		{ReviewerID: "artifact-safety", Role: "safety", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+		{ReviewerID: "artifact-consistency", Role: "consistency", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+	}, CreatedAt: now}
+	workflow, artifactGate, err := service.GateCandidate(ctx, workflow.ID, candidateAudit.RunID, plan, candidate, candidateArtifact, candidateBundle, candidateReviews)
+	if err != nil || !artifactGate.Approved() || workflow.State != domain.MaterializingArtifact {
+		t.Fatalf("gate candidate = %#v %#v, %v", workflow, artifactGate, err)
+	}
+	materialize, err := service.ScheduleMaterialization(ctx, workflow.ID, candidate, archive)
+	if err != nil || materialize.Phase != runnable.ActionMaterializeArtifact {
+		t.Fatalf("schedule materialization = %#v, %v", materialize, err)
+	}
+	if replayAction, err := service.ScheduleMaterialization(ctx, workflow.ID, candidate, archive); err != nil || replayAction != materialize {
+		t.Fatalf("replay materialization = %#v, %v", replayAction, err)
+	}
+	workflow, revisionRef, err := service.Materialized(ctx, workflow.ID, materialize)
+	if err != nil || workflow.State != domain.Verifying {
+		t.Fatalf("materialized = %#v %#v, %v", workflow, revisionRef, err)
+	}
+	verification, err := service.ScheduleVerification(ctx, workflow.ID, revisionRef)
+	if err != nil || verification.Phase != runnable.ActionVerify {
+		t.Fatalf("schedule verification = %#v, %v", verification, err)
+	}
+	workflow, storedReport, err := service.Verified(ctx, workflow.ID, verification)
+	if err != nil || workflow.State != domain.VerificationReviewing || !storedReport.Report.Passed {
+		t.Fatalf("verified = %#v %#v, %v", workflow, storedReport, err)
+	}
+	verificationReview := VerificationReviewBundle{ArtifactID: "verification-review-input", ArtifactDigest: serviceDigest("a"), ReportDigest: storedReport.Reference.Digest, Opinions: []domain.ReviewOpinion{{ReviewerID: "verification-review", Role: "verification", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"}}, CreatedAt: now}
+	verificationAudits := []domain.AgentAudit{serviceAudit(t, "verification-review", "verification-review", verificationReview.Opinions[0])}
+	workflow, err = service.GateVerification(ctx, workflow.ID, "runtime-worker", storedReport, verificationReview, verificationAudits)
+	if err != nil || workflow.State != domain.Publishing {
+		t.Fatalf("gate verification = %#v, %v", workflow, err)
+	}
+	workflow, practice, err := service.Publish(ctx, workflow.ID, candidate, plan, planGate, artifactGate, revisionRef, storedReport, verificationReview)
+	if err != nil || workflow.State != domain.Published || practice.CandidateID != candidate.ID || store.published == nil {
+		t.Fatalf("publish = %#v %#v, %v", workflow, practice, err)
+	}
+}
+
+func TestServiceRejectsStaleActionsAndRecordsVerificationFailure(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 14, 0, 0, 0, time.UTC)
+	plan := validPlan()
+	plan.CreatedAt = now
+	archive := []byte("documentation practice archive")
+	candidate := serviceCandidate(t, plan, archive, now)
+	revision, failedReport := serviceRevisionAndReport(t, candidate, now, false)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{revision: revision, report: failedReport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	workflow, err := service.Start(ctx, "document-service-failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Set up just the public-runtime phase: this proves a stale Worker action
+	// cannot append a report to a newer workflow, while a failed report becomes
+	// an immutable terminal result rather than an unrecorded application error.
+	workflow.State = domain.Verifying
+	workflow.StateVersion = 6
+	store.workflows[workflow.ID] = workflow
+	stale := runnable.ActionIdentity{Content: candidate.Spec.Identity, SpecDigest: mustSpecDigest(t, candidate.Spec), Phase: runnable.ActionVerify, StateVersion: 5}
+	if _, _, err := service.Verified(ctx, workflow.ID, stale); err == nil {
+		t.Fatal("stale verification action was accepted")
+	}
+	current := stale
+	current.StateVersion = workflow.StateVersion
+	got, report, err := service.Verified(ctx, workflow.ID, current)
+	if err != nil || got.State != domain.Failed || report.Report.Passed {
+		t.Fatalf("failed verification = %#v %#v, %v", got, report, err)
+	}
+}
+
+func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 15, 0, 0, 0, time.UTC)
+	plan := validPlan()
+	plan.CreatedAt = now
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	workflow, err := service.Start(ctx, "document-service-reject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := serviceAudit(t, "planner-reject", "planner", plan)
+	workflow, artifact, err := service.SubmitPlan(ctx, workflow.ID, plan, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := ReviewBundle{ArtifactID: artifact.ID, ArtifactDigest: artifact.Digest, Opinions: []domain.ReviewOpinion{
+		{ReviewerID: "review-evidence", Role: "evidence", Decision: domain.ReviewReject, HardReject: true, PolicyVersion: "review-v1"},
+		{ReviewerID: "review-value", Role: "value", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+	}, CreatedAt: now}
+	audits := []domain.AgentAudit{
+		serviceAudit(t, "review-evidence", "plan-review", bundle.Opinions[0]),
+		serviceAudit(t, "review-value", "plan-review", bundle.Opinions[1]),
+	}
+	workflow, gate, err := service.GatePlan(ctx, workflow.ID, audit.RunID, artifact, bundle, audits)
+	if err != nil || gate.Approved() || workflow.State != domain.Rejected {
+		t.Fatalf("rejected plan = %#v %#v, %v", workflow, gate, err)
+	}
+
+	archive := []byte("correct archive")
+	candidate := serviceCandidate(t, plan, archive, now)
+	candidate.Source.Digest = serviceDigest("b")
+	candidate.Spec.Source.Digest = candidate.Source.Digest
+	if _, _, err := service.SubmitCandidate(ctx, workflow.ID, plan, candidate, archive, serviceAudit(t, "generator-bad", "generator", candidate)); err == nil {
+		t.Fatal("candidate with an archive digest mismatch was accepted")
+	}
+}
+
+type memoryDocumentStore struct {
+	workflows map[string]domain.Workflow
+	audits    map[string]domain.AgentAudit
+	published *domain.PracticeRevision
+}
+
+func newMemoryDocumentStore() *memoryDocumentStore {
+	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}}
+}
+
+func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow) error {
+	if _, exists := s.workflows[workflow.ID]; exists {
+		return errors.New("workflow already exists")
+	}
+	s.workflows[workflow.ID] = workflow
+	return nil
+}
+
+func (s *memoryDocumentStore) GetWorkflow(_ context.Context, id string) (domain.Workflow, error) {
+	workflow, exists := s.workflows[id]
+	if !exists {
+		return domain.Workflow{}, errors.New("workflow not found")
+	}
+	return workflow, nil
+}
+
+func (s *memoryDocumentStore) AppendArtifact(_ context.Context, id string, artifact domain.ArtifactRecord) error {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if err := workflow.Append(artifact, artifact.CreatedAt); err != nil {
+		return err
+	}
+	s.workflows[id] = workflow
+	return nil
+}
+
+func (s *memoryDocumentStore) AdvanceWorkflow(_ context.Context, id string, expected int64, next domain.WorkflowState, now time.Time, required ...string) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.StateVersion != expected {
+		return domain.Workflow{}, errors.New("stale state version")
+	}
+	if err := workflow.AdvanceAt(next, now, required...); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.workflows[id] = workflow
+	return workflow, nil
+}
+
+func (s *memoryDocumentStore) AcquireWorkflowLease(_ context.Context, id, owner string, ttl time.Duration, now time.Time) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.LeaseOwner != "" && workflow.LeaseOwner != owner && workflow.LeaseExpiresAt != nil && workflow.LeaseExpiresAt.After(now) {
+		return domain.Workflow{}, errors.New("lease held")
+	}
+	expires := now.Add(ttl)
+	workflow.LeaseOwner, workflow.LeaseExpiresAt = owner, &expires
+	s.workflows[id] = workflow
+	return workflow, nil
+}
+
+func (s *memoryDocumentStore) SaveAgentAudit(_ context.Context, _ string, audit domain.AgentAudit) error {
+	if err := audit.Validate(); err != nil {
+		return err
+	}
+	if existing, exists := s.audits[audit.RunID]; exists && existing != audit {
+		return errors.New("audit changed")
+	}
+	s.audits[audit.RunID] = audit
+	return nil
+}
+
+func (s *memoryDocumentStore) PublishPracticeRevision(_ context.Context, id string, expected int64, revision domain.PracticeRevision, _ domain.PublicationManifest, now time.Time) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.State == domain.Published && s.published != nil && *s.published == revision {
+		return workflow, nil
+	}
+	if workflow.State != domain.Publishing || workflow.StateVersion != expected {
+		return domain.Workflow{}, errors.New("publication state is stale")
+	}
+	if err := workflow.AdvanceAt(domain.Published, now); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.published = &revision
+	s.workflows[id] = workflow
+	return workflow, nil
+}
+
+type memoryRunnableStore struct {
+	source   []byte
+	revision runnable.RunnableRevision
+	report   runnable.StoredVerificationReport
+}
+
+func (s *memoryRunnableStore) StoreRunnableSource(_ context.Context, source runnable.SourceArchive, archive []byte, _ time.Time) error {
+	sum := sha256.Sum256(archive)
+	if source.Digest != "sha256:"+hex.EncodeToString(sum[:]) {
+		return errors.New("source digest mismatch")
+	}
+	s.source = append([]byte(nil), archive...)
+	return nil
+}
+
+func (s *memoryRunnableStore) ScheduleMaterialization(_ context.Context, spec runnable.RunnableSpec, stateVersion int64, _ time.Time) (runnable.ActionIdentity, error) {
+	digest, err := spec.Digest()
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	return runnable.ActionIdentity{Content: spec.Identity, SpecDigest: digest, Phase: runnable.ActionMaterializeArtifact, StateVersion: stateVersion}, nil
+}
+
+func (s *memoryRunnableStore) ResolveMaterializedRunnableRevision(_ context.Context, action runnable.ActionIdentity) (runnable.RevisionReference, error) {
+	if action.Phase != runnable.ActionMaterializeArtifact {
+		return runnable.RevisionReference{}, runnable.ErrMaterializationNotReady
+	}
+	digest, err := s.revision.Digest()
+	if err != nil {
+		return runnable.RevisionReference{}, err
+	}
+	return runnable.RevisionReference{ID: "runnable-document", Digest: digest}, nil
+}
+
+func (s *memoryRunnableStore) ScheduleVerification(_ context.Context, reference runnable.RevisionReference, stateVersion int64, _ time.Time) (runnable.ActionIdentity, error) {
+	if err := reference.Validate(); err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	specDigest, err := s.revision.Spec.Digest()
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	return runnable.ActionIdentity{Content: s.revision.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: stateVersion}, nil
+}
+
+func (s *memoryRunnableStore) ResolveVerificationForAction(_ context.Context, action runnable.ActionIdentity) (runnable.StoredVerificationReport, error) {
+	if action.Phase != runnable.ActionVerify {
+		return runnable.StoredVerificationReport{}, errors.New("wrong action")
+	}
+	return s.report, nil
+}
+
+func (s *memoryRunnableStore) ResolveRunnableRevision(_ context.Context, id, digest string) (runnable.RunnableRevision, error) {
+	actual, err := s.revision.Digest()
+	if err != nil || id != "runnable-document" || digest != actual {
+		return runnable.RunnableRevision{}, errors.New("revision not found")
+	}
+	return s.revision, nil
+}
+
+func serviceCandidate(t *testing.T, plan domain.LearningUnitPlan, archive []byte, now time.Time) domain.PracticeCandidate {
+	t.Helper()
+	sum := sha256.Sum256(archive)
+	source := runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "archives/document-practice.tar", Digest: "sha256:" + hex.EncodeToString(sum[:])}
+	target := runnable.TargetLocation{Kind: "management", ID: "cluster"}
+	profile := runnable.RuntimeProfile{Runtime: plan.Runtime.Runtime, ProfileRevision: "document-profile-01", BaseImage: plan.Runtime.BaseImage, SoftwareVersions: map[string]string{"kubernetes": "v1"}, Resources: plan.Runtime.Resources, Network: plan.Runtime.Network, Topology: plan.Runtime.Topology, ExecutionBoundaries: []runnable.ExecutionBoundary{
+		{ID: "management-write", Target: target, Permission: runnable.PermissionReadWrite, Network: plan.Runtime.Network, MaxTimeout: 60},
+		{ID: "management-read", Target: target, Permission: runnable.PermissionReadOnly, Network: plan.Runtime.Network, MaxTimeout: 60},
+	}}
+	candidate := domain.PracticeCandidate{FormatVersion: domain.FormatVersion, ID: "pod-lifecycle-practice", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, Context: plan.Context, Source: source, UserSteps: []domain.UserStep{{ID: "apply-pod", Instruction: "Apply the Pod manifest", EvidenceIDs: []string{"page"}}}, Observations: plan.Observations, CreatedAt: now}
+	candidate.Spec = runnable.RunnableSpec{FormatVersion: runnable.FormatVersion, Identity: runnable.ContentIdentity{Kind: "documentation-practice", ID: domain.ContentID(plan.Context), Revision: candidate.ID}, RuntimeProfile: profile, Source: source, Initialization: []runnable.ActionSpec{{ID: "initialize", Entrypoint: "scripts/init.sh", Target: target, BoundaryID: "management-write", TimeoutSeconds: 60, ExpectedExitCodes: []int{0}}}, ValidationPlan: runnable.ValidationPlan{FormatVersion: runnable.FormatVersion, Phases: []runnable.ValidationPhase{{ID: "observe", TimeoutSeconds: 60, Execution: runnable.PhaseSequential, Actions: []runnable.ActionSpec{{ID: "apply", Entrypoint: "scripts/apply.sh", Target: target, BoundaryID: "management-write", TimeoutSeconds: 60, ExpectedExitCodes: []int{0}}}, Assertions: []runnable.AssertionSpec{{ID: "pod-running", Entrypoint: "scripts/assert.sh", Target: target, BoundaryID: "management-read", TimeoutSeconds: 60}}}}}, LifecyclePolicy: runnable.LifecyclePolicy{CreateTimeoutSeconds: 60, ResetTimeoutSeconds: 60, StopTimeoutSeconds: 60, ReapTimeoutSeconds: 60, IdleTTLSeconds: 300, MaxLifetimeSeconds: 600}}
+	if err := candidate.Validate(); err != nil {
+		t.Fatalf("test candidate: %v", err)
+	}
+	return candidate
+}
+
+func serviceRevisionAndReport(t *testing.T, candidate domain.PracticeCandidate, now time.Time, passed bool) (runnable.RunnableRevision, runnable.StoredVerificationReport) {
+	t.Helper()
+	specDigest := mustSpecDigest(t, candidate.Spec)
+	revision := runnable.RunnableRevision{FormatVersion: runnable.FormatVersion, Spec: candidate.Spec, Artifact: runnable.ArtifactReference{FormatVersion: runnable.FormatVersion, Runtime: candidate.Spec.RuntimeProfile.Runtime, ProviderReference: "registry.example/document-practice@" + serviceDigest("c"), ArtifactDigest: serviceDigest("c"), BuiltFromSpecDigest: specDigest, BuilderVersion: "builder-01"}}
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileDigest, err := candidate.Spec.RuntimeProfile.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := runnable.VerificationReport{FormatVersion: runnable.FormatVersion, RunnableRevisionDigest: revisionDigest, Environment: runnable.EnvironmentIdentity{ID: "verification-environment", Provider: "k8s", ProfileDigest: profileDigest}, Attempt: 1, Passed: passed, CreatedAt: now, Phases: []runnable.PhaseResult{{ID: "initialization", Actions: []runnable.ActionResult{{ID: "initialize", ExitCode: 0, Summary: "initialized"}}}, {ID: "observe", Actions: []runnable.ActionResult{{ID: "apply", ExitCode: 0, Summary: "applied"}}, Assertions: []runnable.AssertionResult{{ID: "pod-running", Satisfied: passed, Summary: "Pod is observable"}}}}}
+	reportDigest, err := report.Digest(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return revision, runnable.StoredVerificationReport{Reference: runnable.VerificationReportReference{ID: "verification-report", Digest: reportDigest}, Report: report, RunnableRevision: revision, CreatedAt: now}
+}
+
+func serviceAudit(t *testing.T, runID, role string, output any) domain.AgentAudit {
+	t.Helper()
+	_, digest, err := artifactPayload(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.AgentAudit{RunID: runID, Role: role, Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1", InputDigest: serviceDigest("d"), OutputDigest: digest, CreatedAt: time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)}
+}
+
+func mustSpecDigest(t *testing.T, spec runnable.RunnableSpec) string {
+	t.Helper()
+	digest, err := spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+func serviceDigest(value string) string { return "sha256:" + strings.Repeat(value, 64) }
+
+var _ Store = (*memoryDocumentStore)(nil)
+var _ RunnableStore = (*memoryRunnableStore)(nil)

@@ -41,11 +41,52 @@ var schemaDocumentPracticeStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL,
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
+	`CREATE TABLE document_agent_audits (
+		run_id TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,
+		role TEXT NOT NULL,
+		model TEXT NOT NULL,
+		prompt_version TEXT NOT NULL,
+		tool_version TEXT NOT NULL,
+		policy_version TEXT NOT NULL,
+		input_digest TEXT NOT NULL,
+		output_digest TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL
+	)`,
+	`CREATE INDEX document_agent_audits_workflow ON document_agent_audits(workflow_id, created_at, run_id)`,
 	`CREATE TABLE document_publication_manifests (
 		id TEXT PRIMARY KEY,
 		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,
 		manifest JSONB NOT NULL,
 		manifest_digest TEXT NOT NULL UNIQUE,
 		created_at TIMESTAMPTZ NOT NULL
+	)`,
+	`CREATE TABLE document_practice_revisions (
+		id TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,
+		source_id TEXT NOT NULL,
+		commit TEXT NOT NULL,
+		language TEXT NOT NULL,
+		page_path TEXT NOT NULL,
+		anchor TEXT NOT NULL DEFAULT '',
+		candidate_id TEXT NOT NULL,
+		runnable_revision_id TEXT NOT NULL REFERENCES runnable_revisions(id) ON DELETE RESTRICT,
+		runnable_revision_digest TEXT NOT NULL REFERENCES runnable_revisions(runnable_revision_digest) ON DELETE RESTRICT,
+		verification_report_id TEXT NOT NULL REFERENCES runnable_verification_reports(id) ON DELETE RESTRICT,
+		verification_report_digest TEXT NOT NULL REFERENCES runnable_verification_reports(verification_report_digest) ON DELETE RESTRICT,
+		manifest_id TEXT NOT NULL REFERENCES document_publication_manifests(id) ON DELETE RESTRICT,
+		revision JSONB NOT NULL,
+		published_at TIMESTAMPTZ NOT NULL,
+		UNIQUE(workflow_id),
+		UNIQUE(source_id, commit, language, page_path, anchor)
+	)`,
+	`CREATE TABLE document_practice_index (
+		source_id TEXT NOT NULL,
+		commit TEXT NOT NULL,
+		language TEXT NOT NULL,
+		page_path TEXT NOT NULL,
+		anchor TEXT NOT NULL DEFAULT '',
+		practice_revision_id TEXT NOT NULL REFERENCES document_practice_revisions(id) ON DELETE RESTRICT,
+		PRIMARY KEY (source_id, commit, language, page_path, anchor)
 	)`,
 }

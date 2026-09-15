@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -57,7 +58,8 @@ func (c DocumentContext) Validate() error {
 	if err := ValidateRelativePath(c.PagePath); err != nil {
 		return fmt.Errorf("document context page path: %w", err)
 	}
-	if strings.HasPrefix(c.MirrorOrigin, "file:") || !strings.Contains(c.MirrorOrigin, "://") {
+	origin, err := url.Parse(c.MirrorOrigin)
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
 		return errors.New("document context mirror origin must be an HTTP(S) origin")
 	}
 	return nil
@@ -122,6 +124,9 @@ func (e EvidenceReference) Validate() error {
 	}
 	if e.StartLine < 0 || e.EndLine < 0 || (e.StartLine > 0 && e.EndLine > 0 && e.EndLine < e.StartLine) {
 		return errors.New("evidence line range is invalid")
+	}
+	if len(e.Quote) > 16*1024 {
+		return errors.New("evidence quote exceeds limit")
 	}
 	return nil
 }
@@ -263,17 +268,26 @@ func (c PracticeCandidate) Validate() error {
 	if strings.TrimSpace(c.PlanID) == "" {
 		return errors.New("candidate plan binding is required")
 	}
-	if err := c.Context.Validate(); err != nil || !sameContext(c.Context, c.Spec) {
-		return errors.New("candidate context is invalid or does not bind spec")
+	if err := c.Context.Validate(); err != nil {
+		return errors.New("candidate context is invalid")
 	}
 	if err := c.Source.Validate(); err != nil {
 		return err
 	}
-	return c.Spec.Validate()
+	if err := c.Spec.Validate(); err != nil {
+		return err
+	}
+	if c.Spec.Identity.Kind != "documentation-practice" || c.Spec.Identity.ID != ContentID(c.Context) || c.Spec.Source != c.Source {
+		return errors.New("candidate does not bind the documentation context and source to its spec")
+	}
+	return nil
 }
 
-func sameContext(ctx DocumentContext, spec runnable.RunnableSpec) bool {
-	return spec.Identity.Kind == "documentation-practice" && spec.Identity.ID == ctx.SourceID+"/"+ctx.PagePath
+// ContentID converts a source/page identity to the stable identifier required
+// by the public Runnable contract without placing a path in its ID field.
+func ContentID(ctx DocumentContext) string {
+	sum := sha256.Sum256([]byte(ctx.SourceID + "\x00" + ctx.Commit + "\x00" + ctx.Language + "\x00" + ctx.PagePath + "\x00" + ctx.Anchor))
+	return "practice-" + hex.EncodeToString(sum[:])[:16]
 }
 
 type ReviewDecision string
@@ -325,6 +339,36 @@ type PublicationManifest struct {
 	CreatedAt                time.Time                `json:"created_at"`
 }
 
+// PracticeRevision is the immutable product record made visible by the
+// documentation publication finalizer. It references, rather than copies,
+// the common runtime revision and report.
+type PracticeRevision struct {
+	FormatVersion         string                               `json:"format_version"`
+	ID                    string                               `json:"id"`
+	WorkflowID            string                               `json:"workflow_id"`
+	Context               DocumentContext                      `json:"document_context"`
+	PlanID                string                               `json:"plan_id"`
+	PlanRevision          int64                                `json:"plan_revision"`
+	CandidateID           string                               `json:"candidate_id"`
+	RunnableRevisionRef   runnable.RevisionReference           `json:"runnable_revision_ref"`
+	VerificationReportRef runnable.VerificationReportReference `json:"verification_report_ref"`
+	PublicationManifestID string                               `json:"publication_manifest_id"`
+	PublishedAt           time.Time                            `json:"published_at"`
+}
+
+func (r PracticeRevision) Validate() error {
+	if r.FormatVersion != FormatVersion || strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.WorkflowID) == "" || strings.TrimSpace(r.PlanID) == "" || r.PlanRevision < 1 || strings.TrimSpace(r.CandidateID) == "" || strings.TrimSpace(r.PublicationManifestID) == "" || r.PublishedAt.IsZero() {
+		return errors.New("practice revision is incomplete")
+	}
+	if err := r.Context.Validate(); err != nil {
+		return err
+	}
+	if err := r.RunnableRevisionRef.Validate(); err != nil {
+		return err
+	}
+	return r.VerificationReportRef.Validate()
+}
+
 func (b VerificationReviewBundle) Validate(report runnable.VerificationReport) error {
 	if strings.TrimSpace(b.ArtifactID) == "" || !runnable.ValidDigest(b.ArtifactDigest) || len(b.Opinions) == 0 || b.CreatedAt.IsZero() {
 		return errors.New("verification review bundle is incomplete")
@@ -346,6 +390,21 @@ func (m PublicationManifest) Validate(report runnable.VerificationReport) error 
 	}
 	if !m.PlanGate.Approved() || !m.ArtifactGate.Approved() || !report.Passed {
 		return errors.New("publication prerequisites are not satisfied")
+	}
+	if err := m.VerificationReview.Validate(report); err != nil {
+		return err
+	}
+	verified := false
+	for _, opinion := range m.VerificationReview.Opinions {
+		if strings.TrimSpace(opinion.ReviewerID) == "" || strings.TrimSpace(opinion.Role) == "" || strings.TrimSpace(opinion.PolicyVersion) == "" || (opinion.Decision != ReviewApprove && opinion.Decision != ReviewReject) || opinion.HardReject || opinion.Decision == ReviewReject {
+			return errors.New("verification review includes a rejected or invalid opinion")
+		}
+		if opinion.Role == "verification" {
+			verified = true
+		}
+	}
+	if !verified {
+		return errors.New("publication requires a verification review")
 	}
 	b, err := json.Marshal(report)
 	if err != nil {

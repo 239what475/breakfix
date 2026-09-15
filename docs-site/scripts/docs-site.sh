@@ -150,7 +150,7 @@ write_build_info() {
 	local build_time
 	build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	local mirror_digest
-	mirror_digest=$(find "$public_dir" -type f ! -name build-info.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "sha256:"$1}')
+	mirror_digest=$(cd "$public_dir" && find . -type f ! -name ./build-info.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print "sha256:"$1}')
 	cat >"$public_dir/build-info.json" <<EOF
 {
   "source": "$source_name",

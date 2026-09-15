@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
@@ -32,7 +34,62 @@ func NewSnapshot(ctx domain.DocumentContext, root string) (Snapshot, error) {
 	if err != nil || !info.IsDir() {
 		return Snapshot{}, errors.New("documentation snapshot root is not a directory")
 	}
-	return Snapshot{Context: ctx, Root: filepath.Clean(root)}, nil
+	cleanRoot := filepath.Clean(root)
+	digest, err := DirectoryDigest(cleanRoot)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if digest != ctx.MirrorDigest {
+		return Snapshot{}, errors.New("documentation snapshot does not match its pinned mirror digest")
+	}
+	return Snapshot{Context: ctx, Root: cleanRoot}, nil
+}
+
+// DirectoryDigest matches the documentation build script: a sorted list of
+// per-file SHA-256 records rooted at the mirror output, excluding its mutable
+// build-info record. Symlinks and special files cannot enter the digest.
+func DirectoryDigest(root string) (string, error) {
+	root = filepath.Clean(root)
+	files := make([]string, 0)
+	err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("documentation tree contains a symlink: %s", name)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("documentation tree contains a non-regular file: %s", name)
+		}
+		rel, err := filepath.Rel(root, name)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel != "build-info.json" {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+	hashes := sha256.New()
+	for _, rel := range files {
+		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return "", err
+		}
+		fileDigest := sha256.Sum256(contents)
+		if _, err := fmt.Fprintf(hashes, "%x  ./%s\n", fileDigest, rel); err != nil {
+			return "", err
+		}
+	}
+	return "sha256:" + hex.EncodeToString(hashes.Sum(nil)), nil
 }
 
 type Page = domain.Page

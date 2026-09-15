@@ -110,7 +110,9 @@ func Gate(bundle ReviewBundle, requiredRoles ...string) (domain.GateResult, erro
 	if hardReject {
 		decision = domain.ReviewReject
 	}
-	return domain.GateResult{ArtifactID: bundle.ArtifactID, ArtifactDigest: bundle.ArtifactDigest, Decision: decision, Reasons: reasons, PolicyVersion: "document-gate-v1", CreatedAt: time.Now().UTC()}, nil
+	// The gate result is itself an immutable ledger artifact. Its timestamp is
+	// derived from the reviewed bundle so an exact retry has the same digest.
+	return domain.GateResult{ArtifactID: bundle.ArtifactID, ArtifactDigest: bundle.ArtifactDigest, Decision: decision, Reasons: reasons, PolicyVersion: "document-gate-v1", CreatedAt: bundle.CreatedAt.UTC()}, nil
 }
 
 func ValidateReviewIndependence(producerRunID string, bundle ReviewBundle) error {
