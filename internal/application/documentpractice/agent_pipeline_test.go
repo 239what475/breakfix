@@ -16,7 +16,7 @@ func TestAgentPipelineRunsIndependentRolesAndPublishes(t *testing.T) {
 	page := domain.Page{Context: plan.Context, Path: plan.Context.PagePath, Digest: plan.Evidence[0].Digest, Content: "# Pod lifecycle"}
 	seed := serviceCandidate(t, plan, []byte("seed archive"), now)
 	blueprint := pipelineBlueprint(plan, seed)
-	compiled, _, err := CompileCandidate(plan, seed.Spec.RuntimeProfile, blueprint, now)
+	compiled, _, err := CompileCandidate(plan, seed.Spec.RuntimeProfile, seed.Spec.LifecyclePolicy, blueprint, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +81,10 @@ func (p pipelineProfiles) DocumentationRuntimeConstraints() []domain.RuntimeCons
 	return []domain.RuntimeConstraint{{Runtime: p.profile.Runtime, BaseImage: p.profile.BaseImage, Resources: p.profile.Resources, Network: p.profile.Network, Topology: p.profile.Topology}}
 }
 
+func (p pipelineProfiles) DocumentationLifecyclePolicy() runnable.LifecyclePolicy {
+	return runnable.LifecyclePolicy{CreateTimeoutSeconds: 60, ResetTimeoutSeconds: 60, StopTimeoutSeconds: 60, ReapTimeoutSeconds: 60, IdleTTLSeconds: 300, MaxLifetimeSeconds: 600}
+}
+
 func (p pipelineProfiles) ResolveDocumentationRuntimeProfile(domain.RuntimeConstraint) (runnable.RuntimeProfile, error) {
 	return p.profile, nil
 }
@@ -112,7 +116,7 @@ func (r pipelineReviewer) ReviewVerification(_ context.Context, runID string, _ 
 }
 
 func pipelineBlueprint(plan domain.LearningUnitPlan, seed domain.PracticeCandidate) CandidateBlueprint {
-	return CandidateBlueprint{ID: "pod-lifecycle-generated", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, UserSteps: plan.UserSteps, Observations: plan.Observations, Initialization: seed.Spec.Initialization, ValidationPlan: seed.Spec.ValidationPlan, LifecyclePolicy: seed.Spec.LifecyclePolicy, Files: []GeneratedFile{
+	return CandidateBlueprint{ID: "pod-lifecycle-generated", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, UserSteps: plan.UserSteps, Observations: plan.Observations, Initialization: seed.Spec.Initialization, ValidationPlan: seed.Spec.ValidationPlan, Files: []GeneratedFile{
 		{Path: "scripts/init.sh", Content: "#!/bin/sh\nexit 0\n", Executable: true},
 		{Path: "scripts/apply.sh", Content: "#!/bin/sh\nexit 0\n", Executable: true},
 		{Path: "scripts/assert.sh", Content: "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"pod-running\",\"satisfied\":true,\"summary\":\"running\"}]}'\n", Executable: true},

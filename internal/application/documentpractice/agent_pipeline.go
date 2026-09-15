@@ -34,6 +34,7 @@ type BlueprintGenerator interface {
 
 type RuntimeProfileResolver interface {
 	DocumentationRuntimeConstraints() []domain.RuntimeConstraint
+	DocumentationLifecyclePolicy() runnable.LifecyclePolicy
 	ResolveDocumentationRuntimeProfile(domain.RuntimeConstraint) (runnable.RuntimeProfile, error)
 }
 
@@ -147,7 +148,7 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
-	candidate, archive, err := CompileCandidate(plan, profile, blueprint, p.now())
+	candidate, archive, err := CompileCandidate(plan, profile, p.profiles.DocumentationLifecyclePolicy(), blueprint, p.now())
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
