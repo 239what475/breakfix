@@ -1,11 +1,42 @@
 package documentpractice
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+type AgentAudit struct {
+	RunID         string    `json:"run_id"`
+	Role          string    `json:"role"`
+	Model         string    `json:"model"`
+	PromptVersion string    `json:"prompt_version"`
+	ToolVersion   string    `json:"tool_version"`
+	PolicyVersion string    `json:"policy_version"`
+	InputDigest   string    `json:"input_digest"`
+	OutputDigest  string    `json:"output_digest"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (a AgentAudit) Validate() error {
+	if strings.TrimSpace(a.RunID) == "" || strings.TrimSpace(a.Role) == "" || strings.TrimSpace(a.Model) == "" || strings.TrimSpace(a.PromptVersion) == "" || strings.TrimSpace(a.ToolVersion) == "" || strings.TrimSpace(a.PolicyVersion) == "" || !validDigest(a.InputDigest) || !validDigest(a.OutputDigest) || a.CreatedAt.IsZero() {
+		return errors.New("agent audit metadata is incomplete")
+	}
+	return nil
+}
+
+func DigestAgentInput(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
 
 type WorkflowState string
 
@@ -107,6 +138,10 @@ func (w *Workflow) Append(a ArtifactRecord, now time.Time) error {
 }
 
 func (w *Workflow) Advance(next WorkflowState, requiredKinds ...string) error {
+	return w.AdvanceAt(next, time.Now().UTC(), requiredKinds...)
+}
+
+func (w *Workflow) AdvanceAt(next WorkflowState, now time.Time, requiredKinds ...string) error {
 	if w == nil || w.State.Terminal() {
 		return errors.New("workflow is terminal")
 	}
@@ -125,13 +160,20 @@ func (w *Workflow) Advance(next WorkflowState, requiredKinds ...string) error {
 			return fmt.Errorf("workflow transition requires artifact %q", kind)
 		}
 	}
+	if now.IsZero() {
+		return errors.New("workflow transition time is required")
+	}
 	w.State = next
 	w.StateVersion++
-	w.UpdatedAt = time.Now().UTC()
+	w.UpdatedAt = now.UTC()
 	return nil
 }
 
 func (w *Workflow) Revise() error {
+	return w.ReviseAt(time.Now().UTC())
+}
+
+func (w *Workflow) ReviseAt(now time.Time) error {
 	if w == nil || w.State.Terminal() {
 		return errors.New("workflow cannot be revised")
 	}
@@ -141,7 +183,10 @@ func (w *Workflow) Revise() error {
 	w.Revision++
 	w.State = Planning
 	w.StateVersion++
-	w.UpdatedAt = time.Now().UTC()
+	if now.IsZero() {
+		return errors.New("workflow revision time is required")
+	}
+	w.UpdatedAt = now.UTC()
 	return nil
 }
 

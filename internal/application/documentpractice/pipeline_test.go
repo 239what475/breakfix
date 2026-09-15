@@ -63,3 +63,23 @@ func TestNoPracticePlanCannotGenerateCandidate(t *testing.T) {
 		t.Fatal("no_practice generated a candidate")
 	}
 }
+
+func TestReviewCannotBeProducedByTheGeneratingRun(t *testing.T) {
+	bundle := ReviewBundle{ArtifactID: "candidate-1", ArtifactDigest: "sha256:" + strings.Repeat("a", 64), Opinions: []domain.ReviewOpinion{{ReviewerID: "run-1", Role: "safety", Decision: domain.ReviewApprove, PolicyVersion: "v1"}}, CreatedAt: time.Now().UTC()}
+	if err := ValidateReviewIndependence("run-1", bundle); err == nil {
+		t.Fatal("self-review accepted")
+	}
+}
+
+func TestOrchestratorEnforcesOrderedStates(t *testing.T) {
+	orchestrator, err := NewOrchestrator(NewLedger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orchestrator.Start("doc-workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orchestrator.Transition("doc-workflow", domain.Published); err == nil {
+		t.Fatal("state machine allowed skipped stages")
+	}
+}

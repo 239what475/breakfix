@@ -113,6 +113,21 @@ func Gate(bundle ReviewBundle, requiredRoles ...string) (domain.GateResult, erro
 	return domain.GateResult{ArtifactID: bundle.ArtifactID, ArtifactDigest: bundle.ArtifactDigest, Decision: decision, Reasons: reasons, PolicyVersion: "document-gate-v1", CreatedAt: time.Now().UTC()}, nil
 }
 
+func ValidateReviewIndependence(producerRunID string, bundle ReviewBundle) error {
+	if strings.TrimSpace(producerRunID) == "" {
+		return errors.New("producer AgentRun id is required")
+	}
+	if err := bundle.Validate(); err != nil {
+		return err
+	}
+	for _, opinion := range bundle.Opinions {
+		if opinion.ReviewerID == producerRunID {
+			return errors.New("an AgentRun cannot review its own artifact")
+		}
+	}
+	return nil
+}
+
 type CandidateGenerator interface {
 	Generate(context.Context, domain.LearningUnitPlan) (domain.PracticeCandidate, error)
 }
@@ -133,7 +148,98 @@ func ValidateCandidateAgainstPlan(candidate domain.PracticeCandidate, plan domai
 	if candidate.Context.Commit != plan.Context.Commit || candidate.Context.MirrorDigest != plan.Context.MirrorDigest || candidate.Context.PagePath != plan.Context.PagePath {
 		return errors.New("candidate changed document evidence context")
 	}
+	profile := candidate.Spec.RuntimeProfile
+	if profile.Runtime != plan.Runtime.Runtime || profile.BaseImage != plan.Runtime.BaseImage || profile.Network != plan.Runtime.Network || profile.Topology != plan.Runtime.Topology || profile.Resources != plan.Runtime.Resources {
+		return errors.New("candidate expanded the approved runtime profile")
+	}
 	return nil
+}
+
+type FrozenCandidate struct {
+	Candidate     domain.PracticeCandidate
+	ArchiveDigest string
+}
+
+func FreezeCandidate(candidate domain.PracticeCandidate, archive []byte) (FrozenCandidate, error) {
+	if len(archive) == 0 {
+		return FrozenCandidate{}, errors.New("candidate archive is empty")
+	}
+	digestBytes := sha256.Sum256(archive)
+	digest := "sha256:" + hex.EncodeToString(digestBytes[:])
+	candidate.Source.Digest = digest
+	if candidate.Spec.Source.Digest != digest {
+		return FrozenCandidate{}, errors.New("candidate spec source digest does not match archive")
+	}
+	if err := candidate.Validate(); err != nil {
+		return FrozenCandidate{}, err
+	}
+	return FrozenCandidate{Candidate: candidate, ArchiveDigest: digest}, nil
+}
+
+type ArtifactReviewBundle struct {
+	CandidateID     string                 `json:"candidate_id"`
+	CandidateDigest string                 `json:"candidate_digest"`
+	SpecDigest      string                 `json:"spec_digest"`
+	PlanID          string                 `json:"plan_id"`
+	PlanRevision    int64                  `json:"plan_revision"`
+	Opinions        []domain.ReviewOpinion `json:"opinions"`
+	CreatedAt       time.Time              `json:"created_at"`
+}
+
+func (b ArtifactReviewBundle) Validate(plan domain.LearningUnitPlan, candidate domain.PracticeCandidate) error {
+	if err := ValidateCandidateAgainstPlan(candidate, plan); err != nil {
+		return err
+	}
+	if b.CandidateID != candidate.ID || b.PlanID != plan.ID || b.PlanRevision != plan.Revision || !runnable.ValidDigest(b.CandidateDigest) || !runnable.ValidDigest(b.SpecDigest) || len(b.Opinions) == 0 || b.CreatedAt.IsZero() {
+		return errors.New("artifact review binding is invalid")
+	}
+	gotSpec, err := candidate.Spec.Digest()
+	if err != nil || gotSpec != b.SpecDigest {
+		return errors.New("artifact review spec digest mismatch")
+	}
+	archiveDigest := candidate.Source.Digest
+	if archiveDigest != b.CandidateDigest {
+		return errors.New("artifact review candidate digest mismatch")
+	}
+	return ReviewBundle{ArtifactID: b.CandidateID, ArtifactDigest: b.CandidateDigest, Opinions: b.Opinions, CreatedAt: b.CreatedAt}.Validate()
+}
+
+func ArtifactGate(bundle ArtifactReviewBundle, plan domain.LearningUnitPlan, candidate domain.PracticeCandidate, requiredRoles ...string) (domain.GateResult, error) {
+	if err := bundle.Validate(plan, candidate); err != nil {
+		return domain.GateResult{}, err
+	}
+	return Gate(ReviewBundle{ArtifactID: bundle.CandidateID, ArtifactDigest: bundle.CandidateDigest, Opinions: bundle.Opinions, CreatedAt: bundle.CreatedAt}, requiredRoles...)
+}
+
+// Publish validates every immutable prerequisite in one place. Callers can
+// persist the returned manifest atomically with their product index.
+func Publish(candidate domain.PracticeCandidate, planGate, artifactGate domain.GateResult, revision runnable.RunnableRevision, report runnable.VerificationReport, review VerificationReviewBundle, now time.Time) (domain.PublicationManifest, error) {
+	if !planGate.Approved() || !artifactGate.Approved() {
+		return domain.PublicationManifest{}, errors.New("publication requires approved plan and artifact gates")
+	}
+	if err := candidate.Validate(); err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	reportDigest, err := DigestJSON(report)
+	if err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	if err := review.Validate(report); err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+	if err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	manifest := domain.PublicationManifest{FormatVersion: domain.FormatVersion, ID: "publication-" + candidate.ID, Context: candidate.Context, PracticeCandidateID: candidate.ID, RunnableRevisionDigest: revisionDigest, EnvironmentProfileDigest: profileDigest, VerificationReportDigest: reportDigest, PlanGate: planGate, ArtifactGate: artifactGate, VerificationReview: review, CreatedAt: now.UTC()}
+	if err := manifest.Validate(report); err != nil {
+		return domain.PublicationManifest{}, err
+	}
+	return manifest, nil
 }
 
 type VerificationReviewBundle = domain.VerificationReviewBundle
@@ -147,6 +253,27 @@ func DigestJSON(value any) (string, error) {
 	}
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
+}
+
+// UntrustedDocument wraps page text as data. Callers pass SystemInstruction
+// separately to their model adapter; the wrapper makes it impossible to
+// accidentally concatenate document text into the instruction channel.
+type AgentInput struct {
+	SystemInstruction string                     `json:"system_instruction"`
+	DocumentData      string                     `json:"document_data"`
+	Evidence          []domain.EvidenceReference `json:"evidence"`
+}
+
+func NewAgentInput(systemInstruction, documentData string, evidence []domain.EvidenceReference) (AgentInput, error) {
+	if strings.TrimSpace(systemInstruction) == "" || strings.TrimSpace(documentData) == "" || len(documentData) > 512*1024 || len(evidence) == 0 {
+		return AgentInput{}, errors.New("agent input requires bounded instruction, document data, and evidence")
+	}
+	for _, ref := range evidence {
+		if err := ref.Validate(); err != nil {
+			return AgentInput{}, err
+		}
+	}
+	return AgentInput{SystemInstruction: systemInstruction, DocumentData: documentData, Evidence: append([]domain.EvidenceReference(nil), evidence...)}, nil
 }
 
 // Ledger is a small in-memory implementation used by workflow tests and
