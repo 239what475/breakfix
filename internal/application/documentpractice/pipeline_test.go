@@ -83,3 +83,25 @@ func TestOrchestratorEnforcesOrderedStates(t *testing.T) {
 		t.Fatal("state machine allowed skipped stages")
 	}
 }
+
+func TestIdempotentTransitionReturnsTheOriginalOutcome(t *testing.T) {
+	orchestrator, err := NewOrchestrator(NewLedger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orchestrator.Start("doc-workflow-idempotent"); err != nil {
+		t.Fatal(err)
+	}
+	request := TransitionRequest{WorkflowID: "doc-workflow-idempotent", IdempotencyKey: "transition-1", ExpectedStateVersion: 1, Next: domain.PlanReviewing}
+	first, err := orchestrator.TransitionIdempotent(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := orchestrator.TransitionIdempotent(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StateVersion != second.StateVersion || first.State != second.State {
+		t.Fatalf("idempotent transition changed result: %#v %#v", first, second)
+	}
+}

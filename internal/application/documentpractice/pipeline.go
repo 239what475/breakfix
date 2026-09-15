@@ -231,6 +231,13 @@ func Publish(candidate domain.PracticeCandidate, planGate, artifactGate domain.G
 	if err := review.Validate(report); err != nil {
 		return domain.PublicationManifest{}, err
 	}
+	if report.RunnableRevisionDigest != revisionDigest {
+		return domain.PublicationManifest{}, errors.New("verification report is bound to another runnable revision")
+	}
+	verificationGate, err := Gate(ReviewBundle{ArtifactID: review.ArtifactID, ArtifactDigest: review.ArtifactDigest, Opinions: review.Opinions, CreatedAt: review.CreatedAt}, "verification")
+	if err != nil || !verificationGate.Approved() {
+		return domain.PublicationManifest{}, errors.New("verification review gate is not approved")
+	}
 	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
 	if err != nil {
 		return domain.PublicationManifest{}, err

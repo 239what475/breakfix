@@ -412,9 +412,9 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 新增保存 `RunnableSpec`、内嵌的 `ArtifactReference`、`RunnableRevision`、阶段结果、验证报告 digest 和审核/发布前置条件的持久化记录；不为 `ArtifactReference` 建独立业务状态表。
 - [x] 将 Runtime Worker 内部 API 改为公共契约，所有请求校验 spec/revision digest、lease credential、state version 和 action identity。
 - [x] 删除 Runtime Worker 对 `content/scenario`、Operations repository 和产品发布状态的依赖；产品 application 通过公共引用读取运行结果。
-- [ ] 将 Operations 发布事务改为由 Operations application 原子写入自己的 revision、active pointer 和索引；为未来 Documentation 发布保留独立入口。
-- [ ] 提升 schema version，清理或重建明确可丢弃的本地数据库、候选 archive、临时运行记录和未发布 artifact；不提供旧公共模型的兼容读取。
-- [ ] 明确已发布内容、历史学习记录和仍被 Environment 引用的 artifact 的保留边界，迁移脚本不得默认删除这些数据。
+- [x] 将 Operations 发布事务改为由 Operations application 原子写入自己的 revision、active pointer 和索引；为未来 Documentation 发布保留独立入口。
+- [x] 提升 schema version，清理或重建明确可丢弃的本地数据库、候选 archive、临时运行记录和未发布 artifact；不提供旧公共模型的兼容读取。
+- [x] 明确已发布内容、历史学习记录和仍被 Environment 引用的 artifact 的保留边界，迁移脚本不得默认删除这些数据。
 - [x] 更新 OpenAPI、CRD、内部 API 客户端、生成代码、配置和部署清单，并通过 `make verify-generated` 和 `kubectl kustomize .`。
 
 ### 6. 公共底座验收
@@ -426,7 +426,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 验证任何 `VerificationReport` 都能由 `RunnableRevision` digest、artifact digest 和 environment profile revision 重现。
 - [x] 验证 `RuntimeEnvironment v2` 的 strict schema、不可变字段、phase/operation 转换、稳定资源引用和 lease 回收语义；CRD 不包含内容专属字段或完整验证结果。
 - [x] 新增一个仅依赖公共适配器接口的最小 fake content kind，证明无需修改 Runtime Worker 核心即可执行。
-- [ ] 完成公共底座切换后，再开始以下文档实践 Agent 任务；不在同一阶段并行引入文档领域字段。
+- [x] 完成公共底座切换后，再开始以下文档实践 Agent 任务；不在同一阶段并行引入文档领域字段。
 
 ### 7. 固定文档来源与只读 Agent 工具
 
