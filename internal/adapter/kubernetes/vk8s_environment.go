@@ -172,7 +172,7 @@ func (p *vk8sEnvironmentProvider) Delete(ctx context.Context, request environmen
 	if err != nil {
 		return false, fmt.Errorf("get VK8s namespace: %w", err)
 	}
-	if err := verifyVK8sNamespaceOwner(namespace, request); err != nil {
+	if err := verifyVK8sNamespaceOwner(namespace, request); err != nil && !vclusterNamespaceOwnershipCompatible(namespace, request) {
 		return false, err
 	}
 	_, err = p.vcluster.Delete(ctx, vcluster.DeleteOptions{
@@ -203,7 +203,12 @@ func (p *vk8sEnvironmentProvider) ensureNamespace(ctx context.Context, request e
 	namespaces := p.k8s.Clientset().CoreV1().Namespaces()
 	namespace, err := namespaces.Get(ctx, request.Identity.Namespace, metav1.GetOptions{})
 	if err == nil {
-		return verifyVK8sNamespaceOwner(namespace, request)
+		if err := verifyVK8sNamespaceOwner(namespace, request); err != nil {
+			if !vclusterNamespaceOwnershipCompatible(namespace, request) {
+				return err
+			}
+		}
+		return nil
 	}
 	if !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("get VK8s namespace: %w", err)
@@ -230,6 +235,28 @@ func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request environment.V
 		return fmt.Errorf("VK8s namespace %q has different ownership metadata", request.Identity.Namespace)
 	}
 	return nil
+}
+
+func vclusterNamespaceOwnershipCompatible(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) bool {
+	if namespace == nil || strings.TrimSpace(request.Identity.Namespace) == "" || namespace.Name != request.Identity.Namespace {
+		return false
+	}
+	if namespace.Annotations["vcluster.loft.sh/created"] != "true" {
+		return false
+	}
+	// A conflicting Breakfix owner is never adopted. The deterministic
+	// namespace name and vcluster marker cover the metadata that vcluster
+	// preserves across its own reset lifecycle.
+	if value := strings.TrimSpace(namespace.Annotations[vk8sEnvironmentUIDAnnotation]); value != "" && value != request.EnvironmentUID {
+		return false
+	}
+	if value := strings.TrimSpace(namespace.Annotations[vk8sEnvironmentRevisionAnnotation]); value != "" && value != request.Revision {
+		return false
+	}
+	if value := strings.TrimSpace(namespace.Labels[vk8sRuntimeLabel]); value != "" && value != vk8sRuntimeLabelValue {
+		return false
+	}
+	return true
 }
 
 func (p *vk8sEnvironmentProvider) ensureVCluster(ctx context.Context, request environment.VK8sProvisionRequest) error {

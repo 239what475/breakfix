@@ -20,6 +20,21 @@ func TestVClusterServiceAddressMatchesServingCertificateName(t *testing.T) {
 	}
 }
 
+func TestVClusterNamespaceOwnershipAcceptsChartMetadataAfterReset(t *testing.T) {
+	request := environment.VK8sProvisionRequest{EnvironmentUID: "environment-uid", Revision: "revision", Identity: environment.VK8sEnvironmentIdentity{Namespace: "breakfix-vk8s-environment"}}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: request.Identity.Namespace, Annotations: map[string]string{"vcluster.loft.sh/created": "true"}}}
+	if verifyVK8sNamespaceOwner(namespace, request) == nil {
+		t.Fatal("chart-owned namespace unexpectedly passed strict owner validation")
+	}
+	if !vclusterNamespaceOwnershipCompatible(namespace, request) {
+		t.Fatal("chart-owned namespace was not accepted for deterministic reset recovery")
+	}
+	namespace.Annotations[vk8sEnvironmentUIDAnnotation] = "another-environment"
+	if vclusterNamespaceOwnershipCompatible(namespace, request) {
+		t.Fatal("namespace with a conflicting Breakfix owner was adopted")
+	}
+}
+
 func TestNewVK8sTerminalPodUsesRuntimeServiceAccountForRegistryPull(t *testing.T) {
 	request := environment.VK8sProvisionRequest{
 		EnvironmentUID: "environment-uid",
