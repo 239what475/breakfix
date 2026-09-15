@@ -14,7 +14,7 @@ import (
 //
 // This is deliberately an internal adapter rather than a second provider
 // implementation. Resource ownership, request validation, and all Incus API
-// operations remain in Client.
+// calls remain in Client.
 type ReconnectableClient struct {
 	config Config
 	role   Role
