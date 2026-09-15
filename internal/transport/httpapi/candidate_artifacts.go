@@ -88,7 +88,7 @@ func (h *Handler) validateRuntimeFinalArtifact(action runtime.Context, artifact 
 		return nil
 
 	case scenario.RuntimeNode:
-		expected, err := incus.AliasForScenario(h.incusConfig.NamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
+		expected, err := incus.AliasForContentRevision(h.incusConfig.NamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}

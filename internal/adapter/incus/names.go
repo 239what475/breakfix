@@ -57,11 +57,11 @@ func AliasForCandidate(prefix, candidateRevisionID string) (string, error) {
 	return prefix + "-candidate-" + opaqueSuffix(candidateRevisionID, 24), nil
 }
 
-func AliasForScenario(prefix, scenarioID, scenarioRevisionID string) (string, error) {
-	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(scenarioID) == "" || strings.TrimSpace(scenarioRevisionID) == "" {
-		return "", fmt.Errorf("%w: name prefix, scenario ID, and scenario revision ID are required", ErrInvalid)
+func AliasForContentRevision(prefix, contentID, contentRevision string) (string, error) {
+	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(contentID) == "" || strings.TrimSpace(contentRevision) == "" {
+		return "", fmt.Errorf("%w: name prefix, content ID, and content revision are required", ErrInvalid)
 	}
-	return prefix + "-scenario-" + opaqueSuffix(scenarioID+"\x00"+scenarioRevisionID, 24), nil
+	return prefix + "-content-" + opaqueSuffix(contentID+"\x00"+contentRevision, 24), nil
 }
 
 func opaqueSuffix(value string, length int) string {

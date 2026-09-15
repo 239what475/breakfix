@@ -214,7 +214,7 @@ func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Conte
 		}
 		return nil
 	case scenario.RuntimeNode:
-		expected, err := incus.AliasForScenario(v.incusNamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
+		expected, err := incus.AliasForContentRevision(v.incusNamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
 		if err != nil {
 			return fmt.Errorf("derive scenario Incus alias: %w", err)
 		}

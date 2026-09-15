@@ -580,7 +580,7 @@ func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources core
 			RestartPolicy:                corev1.RestartPolicyNever,
 			ServiceAccountName:           vk8sRuntimeServiceAccount,
 			Containers: []corev1.Container{{
-				Name: "scenario", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
+				Name: "runtime", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:    resources,
 				Env:          []corev1.EnvVar{{Name: "KUBECONFIG", Value: "/root/.kube/config"}},
 				VolumeMounts: []corev1.VolumeMount{{Name: "kubeconfig", MountPath: "/root/.kube", ReadOnly: true}},
@@ -602,7 +602,7 @@ func (p *vk8sEnvironmentProvider) observeTerminal(ctx context.Context, request e
 		return environment.InitializationObservation{}, fmt.Errorf("get VK8s terminal pod: %w", err)
 	}
 	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name != "scenario" {
+		if status.Name != "runtime" {
 			continue
 		}
 		if status.State.Waiting != nil && terminalPodWaitingReason(status.State.Waiting.Reason) {
@@ -640,7 +640,7 @@ func terminalPodWaitingReason(reason string) bool {
 
 func terminalTerminationMessage(state *corev1.ContainerStateTerminated) string {
 	if state == nil {
-		return "scenario terminal terminated"
+		return "runtime terminal terminated"
 	}
 	parts := []string{fmt.Sprintf("runtime initialization exited with %d", state.ExitCode)}
 	if value := strings.TrimSpace(state.Reason); value != "" {

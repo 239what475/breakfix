@@ -115,16 +115,6 @@ func (c *ReconnectableClient) PublishNodeImage(ctx context.Context, request Publ
 	return result, err
 }
 
-func (c *ReconnectableClient) PublishScenarioNodeImage(ctx context.Context, request PublishScenarioNodeImageRequest) (PublishNodeImageResult, error) {
-	var result PublishNodeImageResult
-	err := c.use(ctx, func(client *Client) error {
-		var err error
-		result, err = client.PublishScenarioNodeImage(ctx, request)
-		return err
-	})
-	return result, err
-}
-
 func (c *ReconnectableClient) DeleteBuildNodeImage(ctx context.Context, result BuildNodeImageResult) error {
 	return c.use(ctx, func(client *Client) error {
 		return client.DeleteBuildNodeImage(ctx, result)
@@ -140,12 +130,6 @@ func (c *ReconnectableClient) DeleteBuildNodeImageAttempt(ctx context.Context, w
 func (c *ReconnectableClient) DeleteCandidateNodeImage(ctx context.Context, candidateRevisionID, fingerprint string) error {
 	return c.use(ctx, func(client *Client) error {
 		return client.DeleteCandidateNodeImage(ctx, candidateRevisionID, fingerprint)
-	})
-}
-
-func (c *ReconnectableClient) DeleteScenarioNodeImage(ctx context.Context, scenarioID, scenarioRevisionID, fingerprint string) error {
-	return c.use(ctx, func(client *Client) error {
-		return client.DeleteScenarioNodeImage(ctx, scenarioID, scenarioRevisionID, fingerprint)
 	})
 }
 

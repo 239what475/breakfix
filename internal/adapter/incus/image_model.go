@@ -12,8 +12,7 @@ type BuildNodeImageRequest struct {
 	Attempt             int64
 	Revision            string
 	Files               []ImageFile
-	// BundlePath is the absolute runtime path where files are installed. An
-	// empty value preserves the legacy scenario path for older callers.
+	// BundlePath is the absolute runtime path where files are installed.
 	BundlePath string
 }
 
@@ -35,11 +34,4 @@ type PublishNodeImageRequest struct {
 type PublishNodeImageResult struct {
 	Alias       string
 	Fingerprint string
-}
-
-type PublishScenarioNodeImageRequest struct {
-	CandidateRevisionID string
-	ScenarioID          string
-	ScenarioRevisionID  string
-	Staging             PublishNodeImageResult
 }

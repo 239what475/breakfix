@@ -415,7 +415,7 @@ func (c *Client) ensureEnvironmentInstance(ctx context.Context, server incus.Ins
 
 func (c *Client) readNodeInitialization(ctx context.Context, server incus.InstanceServer, request ProvisionNodeEnvironmentRequest, node NodeIdentity) (NodeInitialization, error) {
 	// The Incus SDK file endpoint does not attach the client context to its
-	// request. Use the same context-bound exec path as checkpoint execution so
+	// request. Use the same context-bound exec path as runtime assertion execution so
 	// a lost lease or reconciler cancellation can always stop this observation.
 	result, err := c.execNode(ctx, server, node.InstanceName, []string{"cat", runtimeInitResultPath}, nil, "")
 	if err != nil {

@@ -48,7 +48,7 @@ func TestRuntimeArtifactOwnershipAcceptsActionScopedReferences(t *testing.T) {
 	if err := handler.validateRuntimeStagingArtifact(nodeAction, nodeStaging); err != nil {
 		t.Fatalf("validate Node staging artifact: %v", err)
 	}
-	scenarioAlias, err := incus.AliasForScenario("bf", "scenario-node", "chrev-bbbbbbbbbbbbbbbb")
+	scenarioAlias, err := incus.AliasForContentRevision("bf", "scenario-node", "chrev-bbbbbbbbbbbbbbbb")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -419,7 +419,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 6. 公共底座验收
 
-- [ ] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
+- [x] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
 - [x] 运行公共 domain、application、adapter、worker 和 controller 单元测试，覆盖至少一个 Operations observation-only、repair-style 和 multi-stage 计划。
 - [ ] 在专用 Kind target 上完成构建、artifact 发布、真实验证、lease 接管、重启恢复和异步回收验收。
 - [ ] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。

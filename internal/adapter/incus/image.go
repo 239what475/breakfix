@@ -268,58 +268,6 @@ func (c *Client) deleteBuildNodeImageAttempt(ctx context.Context, server incus.I
 	})
 }
 
-func (c *Client) PublishScenarioNodeImage(ctx context.Context, request PublishScenarioNodeImageRequest) (PublishNodeImageResult, error) {
-	candidateAlias, err := AliasForCandidate(c.config.NamePrefix, request.CandidateRevisionID)
-	if err != nil {
-		return PublishNodeImageResult{}, err
-	}
-	scenarioAlias, err := AliasForScenario(c.config.NamePrefix, request.ScenarioID, request.ScenarioRevisionID)
-	if err != nil {
-		return PublishNodeImageResult{}, err
-	}
-	if request.Staging.Alias != candidateAlias || !fullFingerprintPattern.MatchString(request.Staging.Fingerprint) {
-		return PublishNodeImageResult{}, fmt.Errorf("%w: candidate image identity is invalid", ErrInvalid)
-	}
-	server, err := c.scoped(ctx, c.config.ImageProject)
-	if err != nil {
-		return PublishNodeImageResult{}, err
-	}
-	staging, _, err := server.GetImageAlias(candidateAlias)
-	if err != nil {
-		return PublishNodeImageResult{}, classify("get candidate image alias", candidateAlias, err)
-	}
-	if staging.Target != request.Staging.Fingerprint {
-		return PublishNodeImageResult{}, fmt.Errorf("%w: candidate image alias %q has unexpected target", ErrInvariant, candidateAlias)
-	}
-	image, _, err := server.GetImage(request.Staging.Fingerprint)
-	if err != nil {
-		return PublishNodeImageResult{}, classify("get candidate image", request.Staging.Fingerprint, err)
-	}
-	if err := validateEnvironmentImage(image, request.Staging.Fingerprint); err != nil {
-		return PublishNodeImageResult{}, err
-	}
-	formal, _, err := server.GetImageAlias(scenarioAlias)
-	if err == nil {
-		if formal.Target != request.Staging.Fingerprint {
-			return PublishNodeImageResult{}, fmt.Errorf("%w: scenario image alias %q points to another immutable revision", ErrInvariant, scenarioAlias)
-		}
-		return PublishNodeImageResult{Alias: scenarioAlias, Fingerprint: request.Staging.Fingerprint}, nil
-	}
-	classified := classify("get scenario image alias", scenarioAlias, err)
-	if !errors.Is(classified, ErrNotFound) {
-		return PublishNodeImageResult{}, classified
-	}
-	if err := server.CreateImageAlias(api.ImageAliasesPost{ImageAliasesEntry: api.ImageAliasesEntry{
-		Name: scenarioAlias,
-		ImageAliasesEntryPut: api.ImageAliasesEntryPut{
-			Target: request.Staging.Fingerprint, Description: "Breakfix published scenario image",
-		},
-	}}); err != nil {
-		return PublishNodeImageResult{}, classify("create scenario image alias", scenarioAlias, err)
-	}
-	return PublishNodeImageResult{Alias: scenarioAlias, Fingerprint: request.Staging.Fingerprint}, nil
-}
-
 func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevisionID, fingerprint string) error {
 	expectedAlias, err := AliasForCandidate(c.config.NamePrefix, candidateRevisionID)
 	if err != nil {
@@ -327,23 +275,6 @@ func (c *Client) DeleteCandidateNodeImage(ctx context.Context, candidateRevision
 	}
 	if !fullFingerprintPattern.MatchString(fingerprint) {
 		return fmt.Errorf("%w: published image identity is invalid", ErrInvalid)
-	}
-	server, err := c.scoped(ctx, c.config.ImageProject)
-	if err != nil {
-		return err
-	}
-	return deleteOwnedImageAlias(ctx, server, expectedAlias, fingerprint, func(image *api.Image) error {
-		return validateEnvironmentImage(image, fingerprint)
-	})
-}
-
-func (c *Client) DeleteScenarioNodeImage(ctx context.Context, scenarioID, scenarioRevisionID, fingerprint string) error {
-	expectedAlias, err := AliasForScenario(c.config.NamePrefix, scenarioID, scenarioRevisionID)
-	if err != nil {
-		return err
-	}
-	if !fullFingerprintPattern.MatchString(fingerprint) {
-		return fmt.Errorf("%w: published scenario image identity is invalid", ErrInvalid)
 	}
 	server, err := c.scoped(ctx, c.config.ImageProject)
 	if err != nil {
