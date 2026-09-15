@@ -143,7 +143,8 @@ test-e2e-recovery: test-deps
 	./scripts/kind/run-e2e.sh recovery
 
 test-e2e-documentation: test-deps
-	npm run test:e2e:documentation --prefix $(TEST_DIR)
+	./scripts/kind/e2e-documentation-prepare.sh
+	./scripts/kind/run-e2e.sh documentation
 
 test-acceptance-node: test-deps
 	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live Node acceptance" >&2; exit 2; }

@@ -100,7 +100,12 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1", Kind: "learning-unit-plan", ContentRevision: "1", Digest: planDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
+	contextPayload, err := json.Marshal(documentContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(documentContext), Kind: "document-context", ContentRevision: documentContext.Commit, Digest: domainDigest(contextPayload), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
+	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1", ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: planDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
 	planGate := domain.GateResult{ArtifactID: planArtifact.ID, ArtifactDigest: planArtifact.Digest, Decision: domain.ReviewApprove, PolicyVersion: "gate-v1", CreatedAt: now}
 	candidate := domain.PracticeCandidate{FormatVersion: domain.FormatVersion, ID: "candidate-document-01", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, Context: documentContext, Source: runnableRevision.Spec.Source, Spec: runnableRevision.Spec, Observations: plan.Observations, CreatedAt: now}
 	candidatePayload, err := json.Marshal(candidate)
@@ -111,6 +116,9 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	artifactGate := domain.GateResult{ArtifactID: candidate.ID, ArtifactDigest: candidate.Source.Digest, Decision: domain.ReviewApprove, PolicyVersion: "gate-v1", CreatedAt: now}
 	manifest := domain.PublicationManifest{FormatVersion: domain.FormatVersion, ID: "manifest-document-01", Context: documentContext, PracticeCandidateID: candidate.ID, RunnableRevisionDigest: runnableDigest, EnvironmentProfileDigest: report.Environment.ProfileDigest, VerificationReportDigest: reportDigest, PlanGate: planGate, ArtifactGate: artifactGate, VerificationReview: review, CreatedAt: now}
 	revision := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-revision-01", WorkflowID: workflow.ID, Context: documentContext, PlanID: plan.ID, PlanRevision: plan.Revision, CandidateID: candidate.ID, RunnableRevisionRef: storedRevision.Reference, VerificationReportRef: storedReport.Reference, PublicationManifestID: manifest.ID, PublishedAt: now}
+	if err := database.DocumentPractice.AppendArtifact(ctx, workflow.ID, contextArtifact); err != nil {
+		t.Fatal(err)
+	}
 	appendAndAdvanceDocumentWorkflow(t, database.DocumentPractice, ctx, workflow.ID, planArtifact, domain.PlanReviewing, now)
 	planGatePayload, _ := json.Marshal(planGate)
 	appendAndAdvanceDocumentWorkflow(t, database.DocumentPractice, ctx, workflow.ID, domain.ArtifactRecord{ID: "plan-gate-" + planArtifact.ID, ParentID: planArtifact.ID, Kind: "plan-gate", ContentRevision: "1", Digest: testRunnableDigest("e"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: planGatePayload}, domain.Generating, now)
@@ -130,6 +138,13 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(time.Second)); err != nil {
 		t.Fatalf("publish practice revision: %v", err)
 	}
+	artifacts, err := database.DocumentPractice.ListArtifacts(ctx, workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact, found := documentArtifactByKind(artifacts, "publication-manifest"); !found || artifact.ParentID != "verification-review-"+storedReport.Reference.ID || !sameJSON(artifact.Payload, manifest) {
+		t.Fatalf("publication manifest was not appended to the immutable ledger: %#v", artifact)
+	}
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("repeat publication: %v", err)
 	}
@@ -137,6 +152,31 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(3*time.Second)); err == nil {
 		t.Fatal("mismatched verification digest was published")
 	}
+}
+
+func TestSameJSONIgnoresObjectKeyOrder(t *testing.T) {
+	value := domain.GateResult{
+		ArtifactID:     "plan-pod-lifecycle-r1",
+		ArtifactDigest: testRunnableDigest("a"),
+		Decision:       domain.ReviewApprove,
+		PolicyVersion:  "document-gate-v1",
+		CreatedAt:      time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
+	}
+	// PostgreSQL jsonb returns objects in its canonical key order, which is
+	// intentionally different from the Go struct field order.
+	payload := []byte(`{"decision":"approve","created_at":"2026-09-15T12:00:00Z","artifact_id":"plan-pod-lifecycle-r1","policy_version":"document-gate-v1","artifact_digest":"` + testRunnableDigest("a") + `"}`)
+	if !sameJSON(payload, value) {
+		t.Fatal("equivalent JSON objects with a different key order did not match")
+	}
+}
+
+func documentArtifactByKind(artifacts []domain.ArtifactRecord, kind string) (domain.ArtifactRecord, bool) {
+	for _, artifact := range artifacts {
+		if artifact.Kind == kind {
+			return artifact, true
+		}
+	}
+	return domain.ArtifactRecord{}, false
 }
 
 func appendAndAdvanceDocumentWorkflow(t *testing.T, repository *DocumentPracticeRepository, ctx context.Context, workflowID string, artifact domain.ArtifactRecord, next domain.WorkflowState, now time.Time) {

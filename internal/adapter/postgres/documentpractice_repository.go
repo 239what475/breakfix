@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -398,6 +399,21 @@ func (d *DocumentPracticeRepository) PublishPracticeRevision(ctx context.Context
 	if !revisionExists {
 		return domain.Workflow{}, errors.New("practice publication references an unknown runnable revision")
 	}
+	publicationArtifact := domain.ArtifactRecord{
+		ID:              "publication-manifest-" + manifest.ID,
+		ParentID:        "verification-review-" + revision.VerificationReportRef.ID,
+		Kind:            "publication-manifest",
+		ContentRevision: revision.CandidateID,
+		Digest:          manifestDigest,
+		SchemaVersion:   domain.FormatVersion,
+		OwnerRole:       "server",
+		PolicyVersion:   manifest.PlanGate.PolicyVersion,
+		CreatedAt:       manifest.CreatedAt.UTC(),
+		Payload:         manifestJSON,
+	}
+	if err := insertImmutableDocumentArtifact(ctx, tx, workflowID, publicationArtifact); err != nil {
+		return domain.Workflow{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO document_publication_manifests (id, workflow_id, manifest, manifest_digest, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, manifest.ID, revision.WorkflowID, manifestJSON, manifestDigest, manifest.CreatedAt.UTC()); err != nil {
 		return domain.Workflow{}, err
 	}
@@ -450,6 +466,14 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 	if !ok || planArtifact.Kind != "learning-unit-plan" {
 		return errors.New("practice publication is missing its learning plan")
 	}
+	contextID := "document-context-" + domain.ContentID(revision.Context)
+	contextArtifact, ok := byID[contextID]
+	if !ok || contextArtifact.Kind != "document-context" || !sameJSON(contextArtifact.Payload, revision.Context) {
+		return errors.New("practice publication document context binding is invalid")
+	}
+	if planArtifact.ParentID != contextArtifact.ID {
+		return errors.New("practice publication learning plan is not bound to its document context")
+	}
 	var plan domain.LearningUnitPlan
 	if err := json.Unmarshal(planArtifact.Payload, &plan); err != nil || plan.Validate() != nil || plan.ID != revision.PlanID || plan.Revision != revision.PlanRevision || plan.Context != revision.Context {
 		return errors.New("practice publication learning plan binding is invalid")
@@ -493,7 +517,33 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 
 func sameJSON(payload []byte, value any) bool {
 	expected, err := json.Marshal(value)
-	return err == nil && bytes.Equal(payload, expected)
+	if err != nil {
+		return false
+	}
+	var actualValue any
+	var expectedValue any
+	return json.Unmarshal(payload, &actualValue) == nil &&
+		json.Unmarshal(expected, &expectedValue) == nil &&
+		reflect.DeepEqual(actualValue, expectedValue)
+}
+
+func insertImmutableDocumentArtifact(ctx context.Context, tx *Tx, workflowID string, artifact domain.ArtifactRecord) error {
+	if err := artifact.Validate(); err != nil {
+		return err
+	}
+	var previousDigest string
+	err := tx.QueryRowContext(ctx, `SELECT digest FROM document_artifact_ledger WHERE id = ? FOR UPDATE`, artifact.ID).Scan(&previousDigest)
+	if err == nil {
+		if previousDigest != artifact.Digest {
+			return errors.New("document artifact id already has another digest")
+		}
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO document_artifact_ledger (id, workflow_id, kind, parent_id, content_revision, digest, schema_version, owner_role, policy_version, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, artifact.ID, workflowID, artifact.Kind, artifact.ParentID, artifact.ContentRevision, artifact.Digest, artifact.SchemaVersion, artifact.OwnerRole, artifact.PolicyVersion, artifact.Payload, artifact.CreatedAt.UTC())
+	return err
 }
 
 func jsonDigest(value []byte) (string, error) {

@@ -85,12 +85,31 @@ func (s *Service) SubmitPlan(ctx context.Context, workflowID string, plan domain
 		return domain.Workflow{}, domain.ArtifactRecord{}, errors.New("planner audit does not bind the submitted plan")
 	}
 	artifact := domain.ArtifactRecord{ID: "plan-" + plan.ID + fmt.Sprintf("-r%d", plan.Revision), Kind: "learning-unit-plan", ContentRevision: fmt.Sprintf("%d", plan.Revision), Digest: digest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", PolicyVersion: audit.PolicyVersion, CreatedAt: s.now(), Payload: payload}
+	contextPayload, contextDigest, err := artifactPayload(plan.Context)
+	if err != nil {
+		return domain.Workflow{}, domain.ArtifactRecord{}, err
+	}
+	contextArtifact := domain.ArtifactRecord{
+		ID:              "document-context-" + domain.ContentID(plan.Context),
+		Kind:            "document-context",
+		ContentRevision: plan.Context.Commit,
+		Digest:          contextDigest,
+		SchemaVersion:   domain.FormatVersion,
+		OwnerRole:       "server",
+		PolicyVersion:   audit.PolicyVersion,
+		CreatedAt:       s.now(),
+		Payload:         contextPayload,
+	}
+	artifact.ParentID = contextArtifact.ID
 	workflow, replay, err := s.readyFor(ctx, workflowID, domain.Planning, domain.PlanReviewing, artifact)
 	if err != nil {
 		return domain.Workflow{}, domain.ArtifactRecord{}, err
 	}
 	if replay {
 		return workflow, artifact, nil
+	}
+	if err := s.store.AppendArtifact(ctx, workflowID, contextArtifact); err != nil {
+		return domain.Workflow{}, domain.ArtifactRecord{}, err
 	}
 	if err := s.store.AppendArtifact(ctx, workflowID, artifact); err != nil {
 		return domain.Workflow{}, domain.ArtifactRecord{}, err
