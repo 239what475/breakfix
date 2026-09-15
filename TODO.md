@@ -495,7 +495,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 5. **RuntimeEnvironment/Controller 与异步 Reaper**：切换单一 `breakfix.dev/v2` `RuntimeEnvironment` CRD、Controller、终端/观测状态、reset/stop/reap 和资源 lease；完成严格 schema、不可变字段、Kind/Incus 生命周期与清理不阻塞测试。
 6. **持久化和内部 API 切换**：迁移 schema、Runtime Worker HTTP、客户端、状态恢复和 artifact 记录；删除 `ScenarioPublishing`、Scenario identity 和旧报告字段，完成生成代码与 API 契约验证。
 7. **Operations 发布边界与底座收尾**：将 Operations 内容发布事务移回 Operations application，清理旧公共别名和不可迁移本地数据，补齐公共底座文档、测试和真实运行验收。
-8. **固定文档来源与只读工具**：固定文档 snapshot、镜像 digest、页面/锚点/源码证据模型和受限只读工具；完成提示注入、越权路径和固定页面 smoke test。
+8. **固定文档来源与只读工具**：固定文档 snapshot 的上游 repository、revision、version、locale 及页面/锚点坐标，建立页面/锚点/源码证据模型和受限只读工具；构建产物仅用于读取证据，不作为身份或 digest 输入；完成提示注入、越权路径和固定页面 smoke test。
 9. **Agent WorkflowContext 与状态机**：新增 append-only artifact ledger、状态转换、幂等/lease/retry、AgentRun 审计元数据和审核策略版本；完成失败恢复和拒绝修订测试。
 10. **规划与计划审核流水线**：实现规划 Agent、独立计划审核 Agent 和 Server 计划门禁；完成 `no_practice`、证据追溯、硬性否决和意见冲突测试。
 11. **场景生成与产物审核流水线**：实现 PracticeCandidate/source archive/RunnableSpec 生成、candidate digest 冻结、产物审核 Agent 集群和 Server 产物门禁；完成版本失效和执行边界越权测试。
