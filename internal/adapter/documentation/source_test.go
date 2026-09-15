@@ -21,7 +21,7 @@ func TestNewPinnedSnapshotBindsBuildInfoWithoutHashingRenderedOutput(t *testing.
 	writeFile(t, filepath.Join(root, "build-info.json"), buildInfo)
 
 	snapshot, err := NewPinnedSnapshot(context, root, sourceRoot)
-	if err != nil || snapshot.Context != context || snapshot.BuildBaseURL != "https://docs.example.test/" {
+	if err != nil || snapshot.Context != context {
 		t.Fatalf("pinned snapshot = %#v, %v", snapshot, err)
 	}
 	writeFile(t, filepath.Join(root, "docs", "unrelated.md"), "changes outside the page scope are allowed\n")
@@ -36,8 +36,22 @@ func TestNewPinnedSnapshotBindsBuildInfoWithoutHashingRenderedOutput(t *testing.
 	}
 }
 
+func TestNewPinnedSnapshotIgnoresRenderedBuildSettings(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := t.TempDir()
+	writeFile(t, filepath.Join(root, "docs", "pods.md"), "# Pod lifecycle\n")
+	context := unboundContext()
+	buildInfo := fmt.Sprintf(`{"source":%q,"repository":%q,"revision":%q,"version":%q,"locale":%q,"base_url":"rebuilt-at-a-different-origin","rendered_at":"2026-09-15T00:00:00Z"}`,
+		context.SourceID, context.Repository, context.Commit, context.Version, context.Language)
+	writeFile(t, filepath.Join(root, "build-info.json"), buildInfo)
+
+	if _, err := NewPinnedSnapshot(context, root, sourceRoot); err != nil {
+		t.Fatalf("rendered build settings changed document identity: %v", err)
+	}
+}
+
 func unboundContext() domain.DocumentContext {
-	return domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34.0", Language: "en", License: "CC BY 4.0", MirrorOrigin: "https://docs.example.test", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
+	return domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34.0", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
 }
 
 func TestSnapshotReadsPinnedFilesAndEvidence(t *testing.T) {
@@ -187,16 +201,12 @@ func TestPinnedKubernetesPodLifecycleSnapshotSmoke(t *testing.T) {
 		Version:       "snapshot-ce98a43",
 		Language:      "en",
 		License:       "CC BY 4.0",
-		MirrorOrigin:  "https://docs.breakfix.example",
 		PagePath:      "docs/concepts/workloads/pods/pod-lifecycle/index.html",
 		Anchor:        "pod-lifetime",
 	}
 	snapshot, err := NewPinnedSnapshot(context, renderedRoot, sourceRoot)
 	if err != nil {
 		t.Fatalf("open pinned Kubernetes snapshot: %v", err)
-	}
-	if snapshot.BuildBaseURL == "" {
-		t.Fatalf("pinned page context = %#v", snapshot)
 	}
 	page, err := snapshot.ReadPage(context.PagePath, context.Anchor)
 	if err != nil || !strings.Contains(page.Content, "Pod lifetime") {

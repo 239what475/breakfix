@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -44,7 +43,6 @@ type DocumentContext struct {
 	Version       string `json:"version"`
 	Language      string `json:"language"`
 	License       string `json:"license"`
-	MirrorOrigin  string `json:"mirror_origin"`
 	PagePath      string `json:"page_path"`
 	Anchor        string `json:"anchor,omitempty"`
 }
@@ -52,15 +50,11 @@ type DocumentContext struct {
 func (c DocumentContext) Validate() error {
 	if c.FormatVersion != FormatVersion || strings.TrimSpace(c.SourceID) == "" || strings.TrimSpace(c.Repository) == "" ||
 		strings.TrimSpace(c.Commit) == "" || strings.TrimSpace(c.Version) == "" || strings.TrimSpace(c.Language) == "" ||
-		strings.TrimSpace(c.License) == "" || strings.TrimSpace(c.MirrorOrigin) == "" {
+		strings.TrimSpace(c.License) == "" {
 		return errors.New("document context requires a complete pinned source")
 	}
 	if err := ValidateRelativePath(c.PagePath); err != nil {
 		return fmt.Errorf("document context page path: %w", err)
-	}
-	origin, err := url.Parse(c.MirrorOrigin)
-	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
-		return errors.New("document context mirror origin must be an HTTP(S) origin")
 	}
 	return nil
 }

@@ -29,10 +29,11 @@ the host and the host does not need Hugo, Node.js, npm, or upstream
 `DOCS_CONTAINER_IMAGE` to use an already-built compatible image.
 Node.js and npm are used only inside the upstream Dockerfile image and are not
 installed or checked on the host.
-The base URL and embedded parent origin are fixed in `manifest.yaml`; environment
-variables cannot change either, because they would change the pinned mirror
-digest. The documentation entry point is `<docs-origin>/docs/`; generated build
-metadata is available at `<docs-origin>/build-info.json`.
+The base URL and embedded parent origin are fixed build settings in
+`manifest.yaml`. They affect emitted links and embedding, but are not inputs to
+`DocumentContext` identity. The documentation entry point is
+`<docs-origin>/docs/`; generated build metadata is available at
+`<docs-origin>/build-info.json`.
 `docs-smoke` opens the rendered tree and matching pinned source checkout using
 the production Reader contract, then checks the fixed Pod lifecycle page,
 `pod-lifetime` heading, source evidence, include evidence, and build metadata.

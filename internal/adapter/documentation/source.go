@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +24,9 @@ const (
 )
 
 type Snapshot struct {
-	Context      domain.DocumentContext
-	Root         string
-	SourceRoot   string
-	BuildBaseURL string
+	Context    domain.DocumentContext
+	Root       string
+	SourceRoot string
 }
 
 // NewPinnedSnapshot verifies the fixed source identity in build-info. The
@@ -54,24 +52,18 @@ func NewPinnedSnapshot(expected domain.DocumentContext, root, sourceRoot string)
 		Revision   string `json:"revision"`
 		Version    string `json:"version"`
 		Locale     string `json:"locale"`
-		BaseURL    string `json:"base_url"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(infoBytes))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&info); err != nil {
 		return Snapshot{}, fmt.Errorf("decode documentation build-info: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return Snapshot{}, errors.New("documentation build-info contains multiple values")
 	}
-	baseURL, err := parseBuildBaseURL(info.BaseURL)
-	if err != nil {
-		return Snapshot{}, err
-	}
 	if info.Source != expected.SourceID || info.Repository != expected.Repository || info.Revision != expected.Commit || info.Version != expected.Version || info.Locale != expected.Language {
 		return Snapshot{}, errors.New("documentation build-info does not match the configured pinned source")
 	}
-	snapshot := Snapshot{Context: expected, Root: filepath.Clean(root), SourceRoot: filepath.Clean(sourceRoot), BuildBaseURL: baseURL}
+	snapshot := Snapshot{Context: expected, Root: filepath.Clean(root), SourceRoot: filepath.Clean(sourceRoot)}
 	if _, err := snapshot.requireDirectory(snapshot.Root, "documentation snapshot root"); err != nil {
 		return Snapshot{}, err
 	}
@@ -463,14 +455,6 @@ func headingLevel(node *html.Node) int {
 		return 0
 	}
 	return int(node.Data[1] - '0')
-}
-
-func parseBuildBaseURL(value string) (string, error) {
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !strings.HasSuffix(parsed.Path, "/") {
-		return "", errors.New("documentation build-info has an invalid base_url")
-	}
-	return parsed.String(), nil
 }
 
 func slug(value string) string {

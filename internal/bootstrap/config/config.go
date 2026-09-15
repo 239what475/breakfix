@@ -67,7 +67,6 @@ type CatalogConfig struct {
 type DocumentationConfig struct {
 	SnapshotRoot string `yaml:"snapshot_root"`
 	SourceRoot   string `yaml:"source_root"`
-	MirrorOrigin string `yaml:"mirror_origin"`
 	SourceID     string `yaml:"source_id"`
 	Repository   string `yaml:"repository"`
 	Revision     string `yaml:"revision"`
@@ -87,7 +86,6 @@ func (c DocumentationConfig) Validate() error {
 	for name, value := range map[string]string{
 		"snapshot_root": c.SnapshotRoot,
 		"source_root":   c.SourceRoot,
-		"mirror_origin": c.MirrorOrigin,
 		"source_id":     c.SourceID,
 		"repository":    c.Repository,
 		"revision":      c.Revision,
@@ -99,10 +97,6 @@ func (c DocumentationConfig) Validate() error {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("documentation %s is required when snapshot_root is configured", name)
 		}
-	}
-	mirror, err := url.ParseRequestURI(strings.TrimSpace(c.MirrorOrigin))
-	if err != nil || (mirror.Scheme != "http" && mirror.Scheme != "https") || mirror.Host == "" || mirror.User != nil || mirror.RawQuery != "" || mirror.Fragment != "" || (mirror.Path != "" && mirror.Path != "/") {
-		return fmt.Errorf("documentation mirror_origin must be an HTTP(S) origin")
 	}
 	page := strings.TrimSpace(c.PagePath)
 	if strings.HasPrefix(page, "/") || strings.Contains(page, "\\") || page == "." || strings.HasPrefix(page, "../") || strings.Contains(page, "/../") {
@@ -400,7 +394,6 @@ func Load(path string) (Config, error) {
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
 	cfg.Documentation.SnapshotRoot = os.ExpandEnv(cfg.Documentation.SnapshotRoot)
 	cfg.Documentation.SourceRoot = os.ExpandEnv(cfg.Documentation.SourceRoot)
-	cfg.Documentation.MirrorOrigin = os.ExpandEnv(cfg.Documentation.MirrorOrigin)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)

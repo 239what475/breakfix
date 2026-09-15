@@ -23,7 +23,6 @@ catalog:
 documentation:
   snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
   source_root: ${BREAKFIX_DOCUMENTATION_SOURCE_ROOT}
-  mirror_origin: ${BREAKFIX_DOCUMENTATION_MIRROR_ORIGIN}
   source_id: kubernetes
   repository: https://github.com/kubernetes/website.git
   revision: ce98a43f24257385a9766003a6dadc95e962dc63

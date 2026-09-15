@@ -57,7 +57,7 @@ func (p Planner) Plan(ctx context.Context, path, anchor string) (domain.Learning
 	if err := plan.Validate(); err != nil {
 		return domain.LearningUnitPlan{}, fmt.Errorf("planner returned invalid plan: %w", err)
 	}
-	if plan.Context.SourceID != page.Context.SourceID || plan.Context.Repository != page.Context.Repository || plan.Context.Commit != page.Context.Commit || plan.Context.Version != page.Context.Version || plan.Context.Language != page.Context.Language || plan.Context.License != page.Context.License || plan.Context.MirrorOrigin != page.Context.MirrorOrigin || plan.Context.PagePath != path {
+	if plan.Context.SourceID != page.Context.SourceID || plan.Context.Repository != page.Context.Repository || plan.Context.Commit != page.Context.Commit || plan.Context.Version != page.Context.Version || plan.Context.Language != page.Context.Language || plan.Context.License != page.Context.License || plan.Context.PagePath != path {
 		return domain.LearningUnitPlan{}, errors.New("planner changed pinned document context")
 	}
 	return plan, nil

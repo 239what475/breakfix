@@ -288,7 +288,7 @@ Server 发布 finalizer：原子写入 PracticeRevision 与文档实践索引
 ### 文档访问和计划约束
 
 - Agent 不接收整个上游仓库作为一次性上下文；规划 Agent 通过受限只读工具按需浏览由固定 revision 构建的页面，并可读取同一 revision 的相关源码、示例或 include 文件。
-- 文档工具只能访问配置中固定的镜像 origin 和源码快照，不能访问任意公网地址、修改或执行上游内容，也不能接触 Breakfix 用户数据、生产 API、凭据或用户终端。
+- 文档工具只能访问配置中固定的只读渲染快照和源码快照，不能访问任意公网地址、修改或执行上游内容，也不能接触 Breakfix 用户数据、生产 API、凭据或用户终端。
 - `DocumentContext` 固定来源、语言、版本、上游 commit、渲染页面路径和标题锚点；上游 commit 是文档快照身份，构建产物和构建镜像不参与身份校验。源码证据另存 source path、内容 digest 和引用片段，不能混淆源码路径与渲染 URL。
 - `LearningUnitPlan` 必须包含学习目标、场景边界和所需的运行环境约束（运行时、资源、网络与拓扑），以及每个动作和预期结果的 evidence references。规划 Agent 可以明确返回 `no_practice`，不能默认每个段落或代码块都生成实践。
 - 场景 Agent 只能接收已批准的计划、其证据和由 Server 解析出的固定 runtime profile/执行边界，不能自行扩展目标、权限、网络访问或没有文档依据的行为。

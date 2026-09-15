@@ -105,7 +105,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	context := domain.DocumentContext{
 		FormatVersion: domain.FormatVersion, SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
 		Commit: cfg.Documentation.Revision, Version: cfg.Documentation.Version, Language: cfg.Documentation.Language,
-		License: cfg.Documentation.License, MirrorOrigin: cfg.Documentation.MirrorOrigin, PagePath: cfg.Documentation.PagePath,
+		License: cfg.Documentation.License, PagePath: cfg.Documentation.PagePath,
 		Anchor: cfg.Documentation.Anchor,
 	}
 	reader, err := docsource.NewPinnedSnapshot(context, cfg.Documentation.SnapshotRoot, cfg.Documentation.SourceRoot)

@@ -120,7 +120,7 @@ func TestDocumentationConfigRequiresACompleteFixedSnapshot(t *testing.T) {
 	if err := (DocumentationConfig{}).Validate(); err != nil {
 		t.Fatalf("disabled documentation config = %v", err)
 	}
-	configured := DocumentationConfig{SnapshotRoot: "/var/lib/breakfix/docs", SourceRoot: "/var/lib/breakfix/docs-source", MirrorOrigin: "https://docs.breakfix.example", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle/", Anchor: "pod-lifecycle"}
+	configured := DocumentationConfig{SnapshotRoot: "/var/lib/breakfix/docs", SourceRoot: "/var/lib/breakfix/docs-source", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle/", Anchor: "pod-lifecycle"}
 	if err := configured.Validate(); err != nil {
 		t.Fatalf("fixed documentation config = %v", err)
 	}
