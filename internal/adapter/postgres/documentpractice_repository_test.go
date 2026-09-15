@@ -42,6 +42,16 @@ func TestDocumentPracticeRepositoryAppendsAndAdvancesAnImmutableLedger(t *testin
 	if _, err := database.DocumentPractice.AcquireWorkflowLease(context.Background(), workflow.ID, "server-b", time.Minute, now.Add(4*time.Second)); err == nil {
 		t.Fatal("active workflow lease was stolen")
 	}
+	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "documentation-practice", ID: "practice-document-01", Revision: "candidate-01"}, SpecDigest: testRunnableDigest("f"), Phase: runnable.ActionMaterializeArtifact, StateVersion: 2}
+	if err := database.DocumentPractice.BindRunnableAction(context.Background(), workflow.ID, action, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if workflowID, found, err := database.DocumentPractice.WorkflowForRunnableAction(context.Background(), action); err != nil || !found || workflowID != workflow.ID {
+		t.Fatalf("runnable action binding = %q %t %v", workflowID, found, err)
+	}
+	if err := database.DocumentPractice.MarkRunnableActionReconciled(context.Background(), action, now.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testing.T) {

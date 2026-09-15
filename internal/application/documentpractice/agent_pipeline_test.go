@@ -38,13 +38,28 @@ func TestAgentPipelineRunsIndependentRolesAndPublishes(t *testing.T) {
 	if err != nil || started.Workflow.State != domain.MaterializingArtifact || started.MaterializationAction.Phase != runnable.ActionMaterializeArtifact {
 		t.Fatalf("start pipeline = %#v, %v", started, err)
 	}
-	materialized, err := pipeline.Reconcile(context.Background(), started.Workflow.ID, started.MaterializationAction)
-	if err != nil || materialized.Workflow.State != domain.Verifying || materialized.VerificationAction.Phase != runnable.ActionVerify {
-		t.Fatalf("reconcile materialization = %#v, %v", materialized, err)
+	if err := pipeline.ReconcileCompletedAction(context.Background(), started.MaterializationAction); err != nil {
+		t.Fatalf("reconcile materialization = %v", err)
 	}
-	verified, err := pipeline.Reconcile(context.Background(), started.Workflow.ID, materialized.VerificationAction)
-	if err != nil || verified.Workflow.State != domain.Published || store.published == nil {
-		t.Fatalf("reconcile verification = %#v, %v", verified, err)
+	workflow, err := service.store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil || workflow.State != domain.Verifying || !store.actions[started.MaterializationAction.Key()].reconciled {
+		t.Fatalf("materialization workflow = %#v, binding = %#v, %v", workflow, store.actions[started.MaterializationAction.Key()], err)
+	}
+	var verification runnable.ActionIdentity
+	for _, action := range store.actions {
+		if action.action.Phase == runnable.ActionVerify {
+			verification = action.action
+		}
+	}
+	if verification == (runnable.ActionIdentity{}) {
+		t.Fatal("verification action was not durably bound")
+	}
+	if err := pipeline.ReconcileCompletedAction(context.Background(), verification); err != nil {
+		t.Fatalf("reconcile verification = %v", err)
+	}
+	workflow, err = service.store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil || workflow.State != domain.Published || store.published == nil || !store.actions[verification.Key()].reconciled {
+		t.Fatalf("verification workflow = %#v, binding = %#v, %v", workflow, store.actions[verification.Key()], err)
 	}
 	if len(store.audits) != 7 { // planner, two plan reviews, generator, two artifact reviews, verification review.
 		t.Fatalf("Agent audits = %d, want 7", len(store.audits))

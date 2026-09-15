@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
@@ -11,8 +13,36 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
+
+func TestReconcileDocumentationRunnableActionIsBestEffortAfterPublicCompletion(t *testing.T) {
+	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "documentation-practice", ID: "practice-document-01", Revision: "candidate-01"}, SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}
+	reconciler := &testDocumentationActionReconciler{}
+	h := &Handler{documentationActions: reconciler}
+	h.reconcileDocumentationRunnableAction(context.Background(), action)
+	if reconciler.action != action {
+		t.Fatalf("reconciled action = %#v", reconciler.action)
+	}
+	reconciler.err = errors.New("temporary document database outage")
+	h.reconcileDocumentationRunnableAction(context.Background(), action)
+	if reconciler.calls != 2 {
+		t.Fatalf("reconciler calls = %d", reconciler.calls)
+	}
+}
+
+type testDocumentationActionReconciler struct {
+	action runnable.ActionIdentity
+	calls  int
+	err    error
+}
+
+func (r *testDocumentationActionReconciler) ReconcileCompletedAction(_ context.Context, action runnable.ActionIdentity) error {
+	r.action = action
+	r.calls++
+	return r.err
+}
 
 func newHandlerForTest(t testing.TB, database *postgres.Store, client *kubernetes.Client, cfg config.Config) *Handler {
 	t.Helper()

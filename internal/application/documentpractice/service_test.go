@@ -80,6 +80,9 @@ func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
 	if err != nil || materialize.Phase != runnable.ActionMaterializeArtifact {
 		t.Fatalf("schedule materialization = %#v, %v", materialize, err)
 	}
+	if workflowID, found, err := service.WorkflowForRunnableAction(ctx, materialize); err != nil || !found || workflowID != workflow.ID {
+		t.Fatalf("materialization workflow binding = %q %t %v", workflowID, found, err)
+	}
 	if replayAction, err := service.ScheduleMaterialization(ctx, workflow.ID, candidate, archive); err != nil || replayAction != materialize {
 		t.Fatalf("replay materialization = %#v, %v", replayAction, err)
 	}
@@ -90,6 +93,9 @@ func TestServiceRunsAndPublishesACompleteDocumentationPractice(t *testing.T) {
 	verification, err := service.ScheduleVerification(ctx, workflow.ID, revisionRef)
 	if err != nil || verification.Phase != runnable.ActionVerify {
 		t.Fatalf("schedule verification = %#v, %v", verification, err)
+	}
+	if workflowID, found, err := service.WorkflowForRunnableAction(ctx, verification); err != nil || !found || workflowID != workflow.ID {
+		t.Fatalf("verification workflow binding = %q %t %v", workflowID, found, err)
 	}
 	workflow, storedReport, err := service.Verified(ctx, workflow.ID, verification)
 	if err != nil || workflow.State != domain.VerificationReviewing || !storedReport.Report.Passed {
@@ -188,11 +194,18 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 type memoryDocumentStore struct {
 	workflows map[string]domain.Workflow
 	audits    map[string]domain.AgentAudit
+	actions   map[string]memoryDocumentAction
 	published *domain.PracticeRevision
 }
 
+type memoryDocumentAction struct {
+	workflowID string
+	action     runnable.ActionIdentity
+	reconciled bool
+}
+
 func newMemoryDocumentStore() *memoryDocumentStore {
-	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}}
+	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}}
 }
 
 func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow) error {
@@ -260,6 +273,51 @@ func (s *memoryDocumentStore) SaveAgentAudit(_ context.Context, _ string, audit 
 		return errors.New("audit changed")
 	}
 	s.audits[audit.RunID] = audit
+	return nil
+}
+
+func (s *memoryDocumentStore) BindRunnableAction(_ context.Context, workflowID string, action runnable.ActionIdentity, _ time.Time) error {
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	if _, err := s.GetWorkflow(context.Background(), workflowID); err != nil {
+		return err
+	}
+	if existing, ok := s.actions[action.Key()]; ok {
+		if existing.workflowID != workflowID || existing.action != action {
+			return errors.New("runnable action already belongs to another workflow")
+		}
+		return nil
+	}
+	s.actions[action.Key()] = memoryDocumentAction{workflowID: workflowID, action: action}
+	return nil
+}
+
+func (s *memoryDocumentStore) WorkflowForRunnableAction(_ context.Context, action runnable.ActionIdentity) (string, bool, error) {
+	if err := action.Validate(); err != nil {
+		return "", false, err
+	}
+	value, ok := s.actions[action.Key()]
+	return value.workflowID, ok, nil
+}
+
+func (s *memoryDocumentStore) ListCompletedUnreconciledRunnableActions(_ context.Context) ([]runnable.ActionIdentity, error) {
+	result := make([]runnable.ActionIdentity, 0, len(s.actions))
+	for _, value := range s.actions {
+		if !value.reconciled {
+			result = append(result, value.action)
+		}
+	}
+	return result, nil
+}
+
+func (s *memoryDocumentStore) MarkRunnableActionReconciled(_ context.Context, action runnable.ActionIdentity, _ time.Time) error {
+	value, ok := s.actions[action.Key()]
+	if !ok || value.action != action {
+		return errors.New("runnable action binding not found")
+	}
+	value.reconciled = true
+	s.actions[action.Key()] = value
 	return nil
 }
 

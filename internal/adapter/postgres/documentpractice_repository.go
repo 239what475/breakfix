@@ -174,6 +174,103 @@ func (d *DocumentPracticeRepository) AcquireWorkflowLease(ctx context.Context, w
 	return d.GetWorkflow(ctx, workflowID)
 }
 
+// BindRunnableAction reserves the exact public runtime identity before it can
+// be claimed by a Worker. The binding is immutable and is intentionally a
+// documentation-product projection, not a runtime action field.
+func (d *DocumentPracticeRepository) BindRunnableAction(ctx context.Context, workflowID string, action runnable.ActionIdentity, now time.Time) error {
+	if strings.TrimSpace(workflowID) == "" || action.Validate() != nil || now.IsZero() {
+		return errors.New("document runnable action binding is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin bind document runnable action: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM document_workflows WHERE id = ? FOR UPDATE)`, workflowID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("document workflow not found")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO document_runnable_actions (action_key, workflow_id, content_kind, content_id, content_revision, spec_digest, phase, state_version, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (action_key) DO NOTHING`,
+		action.Key(), workflowID, action.Content.Kind, action.Content.ID, action.Content.Revision, action.SpecDigest, action.Phase, action.StateVersion, now.UTC()); err != nil {
+		return fmt.Errorf("insert document runnable action binding: %w", err)
+	}
+	var storedWorkflow, contentKind, contentID, contentRevision, specDigest string
+	var phase runnable.ActionPhase
+	var stateVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT workflow_id, content_kind, content_id, content_revision, spec_digest, phase, state_version
+		FROM document_runnable_actions WHERE action_key = ? FOR UPDATE`, action.Key()).Scan(&storedWorkflow, &contentKind, &contentID, &contentRevision, &specDigest, &phase, &stateVersion); err != nil {
+		return fmt.Errorf("read document runnable action binding: %w", err)
+	}
+	stored := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: contentKind, ID: contentID, Revision: contentRevision}, SpecDigest: specDigest, Phase: phase, StateVersion: stateVersion}
+	if storedWorkflow != workflowID || stored != action {
+		return errors.New("runnable action is already bound to another document workflow")
+	}
+	return tx.Commit()
+}
+
+func (d *DocumentPracticeRepository) WorkflowForRunnableAction(ctx context.Context, action runnable.ActionIdentity) (string, bool, error) {
+	if err := action.Validate(); err != nil {
+		return "", false, errors.New("document runnable action lookup is invalid")
+	}
+	var workflowID string
+	err := d.conn.QueryRowContext(ctx, `SELECT workflow_id FROM document_runnable_actions
+		WHERE action_key = ? AND content_kind = ? AND content_id = ? AND content_revision = ? AND spec_digest = ? AND phase = ? AND state_version = ?`,
+		action.Key(), action.Content.Kind, action.Content.ID, action.Content.Revision, action.SpecDigest, action.Phase, action.StateVersion).Scan(&workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("lookup document runnable action: %w", err)
+	}
+	return workflowID, true, nil
+}
+
+// ListCompletedUnreconciledRunnableActions is the Server restart outbox. It
+// joins the public action result before exposing it to the product pipeline.
+func (d *DocumentPracticeRepository) ListCompletedUnreconciledRunnableActions(ctx context.Context) ([]runnable.ActionIdentity, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT bindings.content_kind, bindings.content_id, bindings.content_revision, bindings.spec_digest, bindings.phase, bindings.state_version
+		FROM document_runnable_actions bindings
+		JOIN runnable_actions actions ON actions.action_key = bindings.action_key
+		WHERE bindings.reconciled_at IS NULL AND actions.state = 'completed'
+		ORDER BY bindings.created_at, bindings.action_key`)
+	if err != nil {
+		return nil, fmt.Errorf("list completed document runnable actions: %w", err)
+	}
+	defer rows.Close()
+	result := []runnable.ActionIdentity{}
+	for rows.Next() {
+		var action runnable.ActionIdentity
+		if err := rows.Scan(&action.Content.Kind, &action.Content.ID, &action.Content.Revision, &action.SpecDigest, &action.Phase, &action.StateVersion); err != nil {
+			return nil, err
+		}
+		if err := action.Validate(); err != nil {
+			return nil, errors.New("stored document runnable action is invalid")
+		}
+		result = append(result, action)
+	}
+	return result, rows.Err()
+}
+
+func (d *DocumentPracticeRepository) MarkRunnableActionReconciled(ctx context.Context, action runnable.ActionIdentity, now time.Time) error {
+	if err := action.Validate(); err != nil || now.IsZero() {
+		return errors.New("mark document runnable action reconciled is invalid")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE document_runnable_actions SET reconciled_at = COALESCE(reconciled_at, ?)
+		WHERE action_key = ? AND content_kind = ? AND content_id = ? AND content_revision = ? AND spec_digest = ? AND phase = ? AND state_version = ?`,
+		now.UTC(), action.Key(), action.Content.Kind, action.Content.ID, action.Content.Revision, action.SpecDigest, action.Phase, action.StateVersion)
+	if err != nil {
+		return fmt.Errorf("mark document runnable action reconciled: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return errors.New("document runnable action binding not found")
+	}
+	return nil
+}
+
 func (d *DocumentPracticeRepository) SaveAgentAudit(ctx context.Context, workflowID string, audit domain.AgentAudit) error {
 	if strings.TrimSpace(workflowID) == "" || audit.Validate() != nil {
 		return errors.New("document agent audit is invalid")

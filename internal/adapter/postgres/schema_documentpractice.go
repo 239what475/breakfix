@@ -41,6 +41,20 @@ var schemaDocumentPracticeStatements = []string{
 		updated_at TIMESTAMPTZ NOT NULL,
 		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
 	)`,
+	`CREATE TABLE document_runnable_actions (
+		action_key TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,
+		content_kind TEXT NOT NULL,
+		content_id TEXT NOT NULL,
+		content_revision TEXT NOT NULL,
+		spec_digest TEXT NOT NULL,
+		phase TEXT NOT NULL CHECK (phase IN ('materialize-artifact', 'verify')),
+		state_version BIGINT NOT NULL CHECK (state_version >= 1),
+		created_at TIMESTAMPTZ NOT NULL,
+		reconciled_at TIMESTAMPTZ,
+		UNIQUE(workflow_id, phase, state_version)
+	)`,
+	`CREATE INDEX document_runnable_actions_pending ON document_runnable_actions(reconciled_at, created_at) WHERE reconciled_at IS NULL`,
 	`CREATE TABLE document_agent_audits (
 		run_id TEXT PRIMARY KEY,
 		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,

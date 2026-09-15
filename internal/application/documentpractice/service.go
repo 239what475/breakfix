@@ -21,6 +21,10 @@ type Store interface {
 	AdvanceWorkflow(context.Context, string, int64, domain.WorkflowState, time.Time, ...string) (domain.Workflow, error)
 	AcquireWorkflowLease(context.Context, string, string, time.Duration, time.Time) (domain.Workflow, error)
 	SaveAgentAudit(context.Context, string, domain.AgentAudit) error
+	BindRunnableAction(context.Context, string, runnable.ActionIdentity, time.Time) error
+	WorkflowForRunnableAction(context.Context, runnable.ActionIdentity) (string, bool, error)
+	ListCompletedUnreconciledRunnableActions(context.Context) ([]runnable.ActionIdentity, error)
+	MarkRunnableActionReconciled(context.Context, runnable.ActionIdentity, time.Time) error
 	PublishPracticeRevision(context.Context, string, int64, domain.PracticeRevision, domain.PublicationManifest, time.Time) (domain.Workflow, error)
 }
 
@@ -232,7 +236,22 @@ func (s *Service) ScheduleMaterialization(ctx context.Context, workflowID string
 	if err := s.runnable.StoreRunnableSource(ctx, candidate.Source, archive, s.now()); err != nil {
 		return runnable.ActionIdentity{}, err
 	}
-	return s.runnable.ScheduleMaterialization(ctx, candidate.Spec, workflow.StateVersion, s.now())
+	specDigest, err := candidate.Spec.Digest()
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	expected := runnable.ActionIdentity{Content: candidate.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionMaterializeArtifact, StateVersion: workflow.StateVersion}
+	if err := s.store.BindRunnableAction(ctx, workflowID, expected, s.now()); err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	action, err := s.runnable.ScheduleMaterialization(ctx, candidate.Spec, workflow.StateVersion, s.now())
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	if action != expected {
+		return runnable.ActionIdentity{}, errors.New("materialization action does not match the bound workflow action")
+	}
+	return action, nil
 }
 
 func (s *Service) Materialized(ctx context.Context, workflowID string, action runnable.ActionIdentity) (domain.Workflow, runnable.RevisionReference, error) {
@@ -273,7 +292,47 @@ func (s *Service) ScheduleVerification(ctx context.Context, workflowID string, r
 	if workflow.State != domain.Verifying {
 		return runnable.ActionIdentity{}, errors.New("runnable revision is not ready for verification")
 	}
-	return s.runnable.ScheduleVerification(ctx, reference, workflow.StateVersion, s.now())
+	revision, err := s.runnable.ResolveRunnableRevision(ctx, reference.ID, reference.Digest)
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	specDigest, err := revision.Spec.Digest()
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	expected := runnable.ActionIdentity{Content: revision.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: workflow.StateVersion}
+	if err := s.store.BindRunnableAction(ctx, workflowID, expected, s.now()); err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	action, err := s.runnable.ScheduleVerification(ctx, reference, workflow.StateVersion, s.now())
+	if err != nil {
+		return runnable.ActionIdentity{}, err
+	}
+	if action != expected {
+		return runnable.ActionIdentity{}, errors.New("verification action does not match the bound workflow action")
+	}
+	return action, nil
+}
+
+// WorkflowForRunnableAction resolves only workflow actions explicitly bound by
+// this product. Other public runnable content kinds intentionally have no
+// documentation workflow association.
+func (s *Service) WorkflowForRunnableAction(ctx context.Context, action runnable.ActionIdentity) (string, bool, error) {
+	if err := action.Validate(); err != nil {
+		return "", false, err
+	}
+	return s.store.WorkflowForRunnableAction(ctx, action)
+}
+
+func (s *Service) CompletedUnreconciledRunnableActions(ctx context.Context) ([]runnable.ActionIdentity, error) {
+	return s.store.ListCompletedUnreconciledRunnableActions(ctx)
+}
+
+func (s *Service) MarkRunnableActionReconciled(ctx context.Context, action runnable.ActionIdentity) error {
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	return s.store.MarkRunnableActionReconciled(ctx, action, s.now())
 }
 
 func (s *Service) Verified(ctx context.Context, workflowID string, action runnable.ActionIdentity) (domain.Workflow, runnable.StoredVerificationReport, error) {

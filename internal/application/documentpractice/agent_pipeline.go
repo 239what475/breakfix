@@ -208,6 +208,9 @@ func (p *AgentPipeline) Reconcile(ctx context.Context, workflowID string, action
 	if err != nil {
 		return PipelineReconcileResult{}, err
 	}
+	if workflow.State.Terminal() {
+		return PipelineReconcileResult{Workflow: workflow}, nil
+	}
 	plan, candidate, planGate, artifactGate, err := workflowPublicationInputs(workflow)
 	if err != nil {
 		return PipelineReconcileResult{}, err
@@ -259,6 +262,37 @@ func (p *AgentPipeline) Reconcile(ctx context.Context, workflowID string, action
 	default:
 		return PipelineReconcileResult{}, errors.New("unsupported documentation runnable action")
 	}
+}
+
+// ReconcileCompletedAction routes one completed public runnable action through
+// its durable documentation binding. An unrelated content kind is a no-op.
+func (p *AgentPipeline) ReconcileCompletedAction(ctx context.Context, action runnable.ActionIdentity) error {
+	workflowID, found, err := p.service.WorkflowForRunnableAction(ctx, action)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if _, err := p.Reconcile(ctx, workflowID, action); err != nil {
+		return err
+	}
+	return p.service.MarkRunnableActionReconciled(ctx, action)
+}
+
+// Recover reconciles completed actions left unacknowledged after a Server
+// interruption. It never claims or executes Provider work.
+func (p *AgentPipeline) Recover(ctx context.Context) error {
+	actions, err := p.service.CompletedUnreconciledRunnableActions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, action := range actions {
+		if err := p.ReconcileCompletedAction(ctx, action); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *AgentPipeline) reviewPlan(ctx context.Context, plan domain.LearningUnitPlan) ([]domain.ReviewOpinion, []domain.AgentAudit, error) {
