@@ -104,13 +104,8 @@ func (s *Service) GatePlan(ctx context.Context, workflowID, producerRunID string
 	if err := ValidateReviewIndependence(producerRunID, bundle); err != nil {
 		return domain.Workflow{}, domain.GateResult{}, err
 	}
-	for _, audit := range audits {
-		if audit.Role != "plan-review" {
-			return domain.Workflow{}, domain.GateResult{}, errors.New("unexpected plan review AgentRun role")
-		}
-		if err := s.store.SaveAgentAudit(ctx, workflowID, audit); err != nil {
-			return domain.Workflow{}, domain.GateResult{}, err
-		}
+	if err := s.saveReviewAudits(ctx, workflowID, audits, bundle.Opinions, "plan-review"); err != nil {
+		return domain.Workflow{}, domain.GateResult{}, err
 	}
 	gate, err := Gate(bundle, "evidence", "value")
 	if err != nil {
@@ -124,6 +119,14 @@ func (s *Service) GatePlan(ctx context.Context, workflowID, producerRunID string
 	next := domain.Generating
 	if !gate.Approved() {
 		next = domain.Rejected
+	} else {
+		var plan domain.LearningUnitPlan
+		if err := json.Unmarshal(planArtifact.Payload, &plan); err != nil || plan.Validate() != nil {
+			return domain.Workflow{}, domain.GateResult{}, errors.New("plan ledger artifact is invalid")
+		}
+		if plan.NoPractice {
+			next = domain.NoPractice
+		}
 	}
 	workflow, replay, err := s.readyFor(ctx, workflowID, domain.PlanReviewing, next, gateArtifact)
 	if err != nil {
@@ -185,13 +188,8 @@ func (s *Service) GateCandidate(ctx context.Context, workflowID, producerRunID s
 	if err := ValidateReviewIndependence(producerRunID, base); err != nil {
 		return domain.Workflow{}, domain.GateResult{}, err
 	}
-	for _, audit := range audits {
-		if audit.Role != "artifact-review" {
-			return domain.Workflow{}, domain.GateResult{}, errors.New("unexpected artifact review AgentRun role")
-		}
-		if err := s.store.SaveAgentAudit(ctx, workflowID, audit); err != nil {
-			return domain.Workflow{}, domain.GateResult{}, err
-		}
+	if err := s.saveReviewAudits(ctx, workflowID, audits, bundle.Opinions, "artifact-review"); err != nil {
+		return domain.Workflow{}, domain.GateResult{}, err
 	}
 	gate, err := ArtifactGate(bundle, plan, candidate, "safety", "consistency")
 	if err != nil {
@@ -320,13 +318,8 @@ func (s *Service) GateVerification(ctx context.Context, workflowID, producerRunI
 	if err := ValidateReviewIndependence(producerRunID, base); err != nil {
 		return domain.Workflow{}, err
 	}
-	for _, audit := range audits {
-		if audit.Role != "verification-review" {
-			return domain.Workflow{}, errors.New("unexpected verification review AgentRun role")
-		}
-		if err := s.store.SaveAgentAudit(ctx, workflowID, audit); err != nil {
-			return domain.Workflow{}, err
-		}
+	if err := s.saveReviewAudits(ctx, workflowID, audits, bundle.Opinions, "verification-review"); err != nil {
+		return domain.Workflow{}, err
 	}
 	gate, err := Gate(base, "verification")
 	if err != nil {
@@ -406,6 +399,36 @@ func (s *Service) readyFor(ctx context.Context, workflowID string, expected, nex
 		}
 	}
 	return domain.Workflow{}, false, fmt.Errorf("documentation workflow is %s, expected %s", workflow.State, expected)
+}
+
+func (s *Service) saveReviewAudits(ctx context.Context, workflowID string, audits []domain.AgentAudit, opinions []domain.ReviewOpinion, role string) error {
+	if len(audits) != len(opinions) || len(audits) == 0 {
+		return errors.New("review opinions must each have one AgentRun audit")
+	}
+	byRun := make(map[string]domain.AgentAudit, len(audits))
+	for _, audit := range audits {
+		if audit.Role != role || audit.Validate() != nil {
+			return errors.New("unexpected or invalid review AgentRun audit")
+		}
+		if _, exists := byRun[audit.RunID]; exists {
+			return errors.New("duplicate review AgentRun audit")
+		}
+		byRun[audit.RunID] = audit
+	}
+	for _, opinion := range opinions {
+		audit, exists := byRun[opinion.ReviewerID]
+		if !exists {
+			return errors.New("review opinion is not bound to an AgentRun audit")
+		}
+		digest, err := DigestJSON(opinion)
+		if err != nil || audit.OutputDigest != digest {
+			return errors.New("review AgentRun audit does not bind its opinion")
+		}
+		if err := s.store.SaveAgentAudit(ctx, workflowID, audit); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func artifactPayload(value any) ([]byte, string, error) {

@@ -449,18 +449,18 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 9. 规划与审核 Agent
 
-- [ ] 实现规划 Agent：从页面和证据工具中提出 `LearningUnitPlan`，包含学习目标、边界、运行环境约束、用户步骤、观察点和逐项 evidence references。
+- [x] 实现规划 Agent：从页面和证据工具中提出 `LearningUnitPlan`，包含学习目标、边界、运行环境约束、用户步骤、观察点和逐项 evidence references。
 - [x] 允许规划 Agent 明确返回 `no_practice`；不按代码块、段落或页面数量强制生成场景。
-- [ ] 实现独立计划审核 Agent，覆盖文档证据一致性、学习价值和范围；执行安全、资源和步骤契约由 Server 及后续产物审核确定性校验。
+- [x] 实现独立计划审核 Agent，覆盖文档证据一致性、学习价值和范围；执行安全、资源和步骤契约由 Server 及后续产物审核确定性校验。
 - [x] 实现 Server 计划门禁：只根据结构化审核结果、引用证据和固定策略产生 `PlanGateResult` 的 `approve`/`reject`，保留意见、证据和策略版本，不得覆盖硬性否决。
 - [x] 限制场景 Agent 的输入视图为已批准计划、证据和由 Server 解析的固定 runtime profile/执行边界；测试其无法扩展目标、权限、网络或无证据行为。
 - [x] 为计划版本、审核 bundle 和门禁结果增加幂等、重试、拒绝后修订和最大修订次数测试。
 
 ### 10. 场景生成与实际产物审核
 
-- [ ] 实现场景 Agent：生成 `PracticeCandidate`、source archive、`RunnableSpec`、用户步骤、观察点、动作、断言和 lifecycle policy；发布通过后才冻结 `PracticeRevision`。
+- [x] 实现场景 Agent：生成 `PracticeCandidate`、source archive、`RunnableSpec`、用户步骤、观察点、动作、断言和 lifecycle policy；发布通过后才冻结 `PracticeRevision`。
 - [x] 生成后立即冻结 archive 和 spec digest；任何文件、计划引用、runtime profile、资源或验证计划变化都创建新 candidate 并使旧批准失效。
-- [ ] 实现独立产物审核 Agent 集群，逐项核对计划绑定、文件完整性、入口和 target、镜像/网络/资源/超时、只读断言、结果协议、凭据和下载边界。
+- [x] 实现独立产物审核 Agent 集群，逐项核对计划绑定、文件完整性、入口和 target、镜像/网络/资源/超时、只读断言、结果协议、凭据和下载边界。
 - [x] 实现 Server 产物门禁：只能批准所有审核针对的同一个 `candidate_digest + spec_digest`；缺少审核、版本不一致或硬性拒绝时必须拒绝。
 - [x] 将 candidate 编译为公共 `RunnableSpec`，通过公共 Worker 的 `MaterializeArtifact` 构建和发布 artifact，再冻结 `RunnableRevision`；不复制 Operations 的产品字段。
 - [x] 为生成、产物审核、候选修订、digest 失效、拒绝反馈和重新生成补充持久化与集成测试。
@@ -469,7 +469,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 - [ ] 在干净隔离环境中回放已批准 `RunnableRevision`，执行初始化、用户关键步骤的自动路径和结论断言；静态语法检查只能作为辅助。
 - [x] 持久化不可变 `VerificationReport`，绑定 runnable revision、artifact、环境 profile、阶段动作/断言结果和原始输出引用；不写清理状态或重复保存顶层机器断言。
-- [ ] 实现验证审核 Agent，核对文档证据、计划结论、机器断言和用户可观察现象；不能重写 assertion result 或机器 `passed`。
+- [x] 实现验证审核 Agent，核对文档证据、计划结论、机器断言和用户可观察现象；不能重写 assertion result 或机器 `passed`。
 - [x] 实现 Server 原子发布事务：只有计划门禁、产物门禁、构建、机器验证和验证审核全部通过，才能写入 PracticeRevision、RunnableRevision 引用和实践索引；发布由 Server finalizer 完成，不设置独立发布角色。
 - [x] `PublicationManifest` 保存 `DocumentContext`、practice revision、runnable revision、environment profile、verification report 和审核门禁结果的 ID/digest 引用及策略版本；不复制前序 artifact 的完整内容。
 - [x] 实践索引只保存页面/锚点到已发布实践 revision 的映射；阅读器仍通过独立 docs origin 和上下文脚本工作，不复制文档正文。

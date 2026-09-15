@@ -32,7 +32,7 @@ var schemaDocumentPracticeStatements = []string{
 	`CREATE INDEX document_artifact_ledger_workflow ON document_artifact_ledger(workflow_id, created_at, id)`,
 	`CREATE TABLE document_workflows (
 		id TEXT PRIMARY KEY,
-		state TEXT NOT NULL CHECK (state IN ('Planning','PlanReviewing','Generating','ArtifactReviewing','MaterializingArtifact','Verifying','VerificationReviewing','Publishing','Published','Rejected','Failed')),
+		state TEXT NOT NULL CHECK (state IN ('Planning','PlanReviewing','Generating','ArtifactReviewing','MaterializingArtifact','Verifying','VerificationReviewing','Publishing','Published','NoPractice','Rejected','Failed')),
 		state_version BIGINT NOT NULL CHECK (state_version >= 1),
 		revision BIGINT NOT NULL CHECK (revision >= 1),
 		max_revisions BIGINT NOT NULL CHECK (max_revisions >= 1),

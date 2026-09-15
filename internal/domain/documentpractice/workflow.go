@@ -50,11 +50,14 @@ const (
 	VerificationReviewing WorkflowState = "VerificationReviewing"
 	Publishing            WorkflowState = "Publishing"
 	Published             WorkflowState = "Published"
+	NoPractice            WorkflowState = "NoPractice"
 	Rejected              WorkflowState = "Rejected"
 	Failed                WorkflowState = "Failed"
 )
 
-func (s WorkflowState) Terminal() bool { return s == Published || s == Rejected || s == Failed }
+func (s WorkflowState) Terminal() bool {
+	return s == Published || s == NoPractice || s == Rejected || s == Failed
+}
 
 type ArtifactRecord struct {
 	ID              string    `json:"id"`
@@ -109,7 +112,7 @@ func (w Workflow) Validate() error {
 
 func validState(s WorkflowState) bool {
 	switch s {
-	case Planning, PlanReviewing, Generating, ArtifactReviewing, MaterializingArtifact, Verifying, VerificationReviewing, Publishing, Published, Rejected, Failed:
+	case Planning, PlanReviewing, Generating, ArtifactReviewing, MaterializingArtifact, Verifying, VerificationReviewing, Publishing, Published, NoPractice, Rejected, Failed:
 		return true
 	}
 	return false
@@ -195,7 +198,7 @@ func allowedTransition(from, to WorkflowState) bool {
 	case Planning:
 		return to == PlanReviewing || to == Rejected || to == Failed
 	case PlanReviewing:
-		return to == Generating || to == Rejected || to == Failed
+		return to == Generating || to == NoPractice || to == Rejected || to == Failed
 	case Generating:
 		return to == ArtifactReviewing || to == Failed
 	case ArtifactReviewing:

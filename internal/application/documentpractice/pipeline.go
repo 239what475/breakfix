@@ -169,9 +169,10 @@ func FreezeCandidate(candidate domain.PracticeCandidate, archive []byte) (Frozen
 	digestBytes := sha256.Sum256(archive)
 	digest := "sha256:" + hex.EncodeToString(digestBytes[:])
 	candidate.Source.Digest = digest
-	if candidate.Spec.Source.Digest != digest {
-		return FrozenCandidate{}, errors.New("candidate spec source digest does not match archive")
-	}
+	// The Server, not an Agent, derives both source digest fields from exact
+	// archive bytes before accepting a candidate. All other source fields remain
+	// part of the generated contract and are validated below.
+	candidate.Spec.Source.Digest = digest
 	if err := candidate.Validate(); err != nil {
 		return FrozenCandidate{}, err
 	}
