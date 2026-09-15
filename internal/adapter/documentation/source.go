@@ -3,10 +3,13 @@
 package docsource
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,6 +17,8 @@ import (
 	"strings"
 
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
+	"golang.org/x/net/html"
 )
 
 const MaxReadBytes = 256 * 1024
@@ -21,6 +26,48 @@ const MaxReadBytes = 256 * 1024
 type Snapshot struct {
 	Context domain.DocumentContext
 	Root    string
+}
+
+// NewPinnedSnapshot derives the tree digest from the mirror's own build-info
+// record and verifies every configured source identity before exposing files.
+// The digest is never accepted from deployment configuration alone.
+func NewPinnedSnapshot(expected domain.DocumentContext, root string) (Snapshot, error) {
+	if strings.TrimSpace(root) == "" {
+		return Snapshot{}, errors.New("documentation snapshot root is required")
+	}
+	if expected.FormatVersion != domain.FormatVersion || strings.TrimSpace(expected.SourceID) == "" || strings.TrimSpace(expected.Repository) == "" || strings.TrimSpace(expected.Commit) == "" || strings.TrimSpace(expected.Version) == "" || strings.TrimSpace(expected.Language) == "" || strings.TrimSpace(expected.License) == "" || strings.TrimSpace(expected.MirrorOrigin) == "" || strings.TrimSpace(expected.PagePath) == "" {
+		return Snapshot{}, errors.New("documentation pinned context is incomplete")
+	}
+	infoBytes, err := os.ReadFile(filepath.Join(filepath.Clean(root), "build-info.json"))
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("read documentation build-info: %w", err)
+	}
+	if len(infoBytes) == 0 || len(infoBytes) > MaxReadBytes {
+		return Snapshot{}, errors.New("documentation build-info exceeds the read limit")
+	}
+	var info struct {
+		Source       string `json:"source"`
+		Repository   string `json:"repository"`
+		Revision     string `json:"revision"`
+		Version      string `json:"version"`
+		Locale       string `json:"locale"`
+		BaseURL      string `json:"base_url"`
+		MirrorDigest string `json:"mirror_digest"`
+		BuiltAt      string `json:"built_at"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(infoBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&info); err != nil {
+		return Snapshot{}, fmt.Errorf("decode documentation build-info: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return Snapshot{}, errors.New("documentation build-info contains multiple values")
+	}
+	if info.Source != expected.SourceID || info.Repository != expected.Repository || info.Revision != expected.Commit || info.Version != expected.Version || info.Locale != expected.Language || !runnable.ValidDigest(info.MirrorDigest) {
+		return Snapshot{}, errors.New("documentation build-info does not match the configured pinned source")
+	}
+	expected.MirrorDigest = info.MirrorDigest
+	return NewSnapshot(expected, root)
 }
 
 func NewSnapshot(ctx domain.DocumentContext, root string) (Snapshot, error) {
@@ -109,22 +156,78 @@ func (s Snapshot) ReadMetadata(path string) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, err
 	}
-	var title string
-	var anchors []string
-	for _, line := range strings.Split(page.Content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if title == "" && strings.HasPrefix(trimmed, "# ") {
-			title = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
-		}
-		if strings.HasPrefix(trimmed, "#") {
-			value := strings.TrimLeft(trimmed, "#")
-			value = strings.TrimSpace(value)
-			if value != "" {
-				anchors = append(anchors, slug(value))
+	title, anchors := headings(page.Content, strings.HasSuffix(strings.ToLower(path), ".html"))
+	return Metadata{Context: page.Context, Path: path, Title: title, Anchors: anchors, Digest: page.Digest}, nil
+}
+
+func headings(content string, htmlDocument bool) (string, []string) {
+	if !htmlDocument {
+		var title string
+		var anchors []string
+		for _, line := range strings.Split(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if title == "" && strings.HasPrefix(trimmed, "# ") {
+				title = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
+			}
+			if strings.HasPrefix(trimmed, "#") {
+				value := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+				if value != "" {
+					anchors = append(anchors, slug(value))
+				}
 			}
 		}
+		return title, anchors
 	}
-	return Metadata{Context: page.Context, Path: path, Title: title, Anchors: anchors, Digest: page.Digest}, nil
+	document, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return "", nil
+	}
+	var title string
+	anchors := []string{}
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node.Type == html.ElementNode && len(node.Data) == 2 && node.Data[0] == 'h' && node.Data[1] >= '1' && node.Data[1] <= '6' {
+			text := strings.TrimSpace(htmlText(node))
+			if title == "" && node.Data == "h1" {
+				title = text
+			}
+			if text != "" {
+				anchor := ""
+				for _, attribute := range node.Attr {
+					if attribute.Key == "id" {
+						anchor = strings.TrimSpace(attribute.Val)
+						break
+					}
+				}
+				if anchor == "" {
+					anchor = slug(text)
+				}
+				if anchor != "" {
+					anchors = append(anchors, anchor)
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(document)
+	return title, anchors
+}
+
+func htmlText(node *html.Node) string {
+	var result strings.Builder
+	var walk func(*html.Node)
+	walk = func(current *html.Node) {
+		if current.Type == html.TextNode {
+			result.WriteString(current.Data)
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return strings.Join(strings.Fields(result.String()), " ")
 }
 
 func (s Snapshot) ReadSource(path string, startLine, endLine int) (SourceFragment, error) {

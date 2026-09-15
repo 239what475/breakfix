@@ -16,6 +16,7 @@ import (
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
+	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	"github.com/breakfix/breakfix/internal/domain/toolresult"
@@ -53,6 +54,7 @@ type Handler struct {
 	nodeProviderReady    NodeProviderReadiness
 	generator            generatorApplication
 	documentationActions documentationRunnableActionReconciler
+	documentation        documentationApplication
 }
 
 // generatorApplication is the HTTP consumer's view of GeneratorService. The
@@ -83,6 +85,12 @@ type documentationRunnableActionReconciler interface {
 	ReconcileCompletedAction(context.Context, runnable.ActionIdentity) error
 }
 
+// documentationApplication starts only the Server-configured fixed workflow.
+// It has no endpoint for Agent artifacts, arbitrary pages, or runtime policy.
+type documentationApplication interface {
+	StartDocumentationPractice(context.Context) (documentdomain.Workflow, error)
+}
+
 type Dependencies struct {
 	NodeTerminal         NodeTerminalProvider
 	Assistant            *appassistant.Service
@@ -93,6 +101,7 @@ type Dependencies struct {
 	RunnableBindings     operationsRunnableBindingResolver
 	RunnableReports      runtimeVerificationReportResolver
 	DocumentationActions documentationRunnableActionReconciler
+	Documentation        documentationApplication
 }
 
 // operationsRunnableBindingResolver prevents Server-created environments from
@@ -156,6 +165,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		nodeTerminal:         dependencies.NodeTerminal,
 		generator:            dependencies.Generator,
 		documentationActions: dependencies.DocumentationActions,
+		documentation:        dependencies.Documentation,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable

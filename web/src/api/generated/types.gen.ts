@@ -8,6 +8,11 @@ export type ErrorResponse = {
     error: string;
 };
 
+export type DocumentationPracticeStart = {
+    workflow_id: string;
+    state: string;
+};
+
 export type RegisterRequest = {
     username: string;
     password: string;
@@ -532,6 +537,39 @@ export type AuthoringSessionId = string;
 export type GeneratorWorkflowId = string;
 
 export type GeneratorTurnId = string;
+
+export type StartDocumentationPracticeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/practice';
+};
+
+export type StartDocumentationPracticeErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type StartDocumentationPracticeError = StartDocumentationPracticeErrors[keyof StartDocumentationPracticeErrors];
+
+export type StartDocumentationPracticeResponses = {
+    /**
+     * Fixed documentation practice workflow accepted
+     */
+    202: DocumentationPracticeStart;
+};
+
+export type StartDocumentationPracticeResponse = StartDocumentationPracticeResponses[keyof StartDocumentationPracticeResponses];
 
 export type RegisterData = {
     body: RegisterRequest;

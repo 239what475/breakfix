@@ -142,6 +142,9 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 			h.CreateTerminalTicket(c, c.Param("id"))
 		}
 	})
+	documentationRoutes := router.Group("/api/documentation")
+	documentationRoutes.Use(jwtMW)
+	documentationRoutes.POST("/practice", h.StartDocumentationPractice)
 	router.POST("/api/authoring/sessions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

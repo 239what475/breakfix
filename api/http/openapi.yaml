@@ -8,6 +8,27 @@ servers:
     description: Local dev
 
 paths:
+  /documentation/practice:
+    post:
+      operationId: startDocumentationPractice
+      summary: Start the fixed Kubernetes documentation practice workflow
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      responses:
+        "202":
+          description: Fixed documentation practice workflow accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeStart"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
   /auth/register:
     post:
       operationId: register
@@ -879,6 +900,15 @@ components:
       required: [error]
       properties:
         error:
+          type: string
+
+    DocumentationPracticeStart:
+      type: object
+      required: [workflow_id, state]
+      properties:
+        workflow_id:
+          type: string
+        state:
           type: string
 
     RegisterRequest:

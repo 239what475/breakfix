@@ -203,6 +203,12 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("configure Operations runnable publisher: %w", err)
 	}
+	documentationPipeline, err := newDocumentationPipeline(cfg, database)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("configure documentation practice pipeline: %w", err)
+	}
 
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {
@@ -303,12 +309,14 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	serviceContext := services.ctx
 	handler, err := httpapi.NewHandlerWithDependencies(database, k8sClient, cfg, httpapi.Dependencies{
-		NodeTerminal:        incusClient,
-		Assistant:           assistantService,
-		Authoring:           authoringService,
-		Catalog:             catalogService,
-		AgentRuntimeContext: serviceContext,
-		Generator:           generatorService,
+		NodeTerminal:         incusClient,
+		Assistant:            assistantService,
+		Authoring:            authoringService,
+		Catalog:              catalogService,
+		AgentRuntimeContext:  serviceContext,
+		Generator:            generatorService,
+		DocumentationActions: documentationPipeline,
+		Documentation:        newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
 	})
 	if err != nil {
 		services.stop()
@@ -355,6 +363,14 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("recover Operations runnable revisions: %w", err)
 	}
+	if documentationPipeline != nil {
+		if err := documentationPipeline.Recover(ctx); err != nil {
+			services.stop()
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("recover documentation practice workflow: %w", err)
+		}
+	}
 	if err := interactiveRecovery.Recover(ctx); err != nil {
 		services.stop()
 		incusClient.Close()
@@ -394,6 +410,9 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
 	services.start("generation publication finalizer", publicationFinalizer.Run)
 	services.start("Operations runnable revision reconciler", operationsReconciler.Run)
+	if documentationPipeline != nil {
+		services.start("documentation practice action reconciler", documentationPipeline.Run)
+	}
 	services.start("interactive agent recovery", interactiveRecovery.Run)
 
 	slog.Info("Breakfix Server starting", "version", buildinfo.Version, "data_dir", cfg.DataDir)

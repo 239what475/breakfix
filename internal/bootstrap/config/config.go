@@ -17,28 +17,29 @@ import (
 )
 
 type Config struct {
-	Port                      int                `yaml:"port"`
-	HealthPort                int                `yaml:"health_port"`
-	DataDir                   string             `yaml:"data_dir"`
-	DatabaseURL               string             `yaml:"database_url"`
-	Kubeconfig                string             `yaml:"kubeconfig"`
-	Registry                  RegistryConfig     `yaml:"registry"`
-	VClusterBinary            string             `yaml:"vcluster_binary"`
-	VClusterChartRepo         string             `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion      string             `yaml:"vcluster_chart_version"`
-	UIOrigin                  string             `yaml:"ui_origin"`
-	Namespace                 string             `yaml:"namespace"`
-	CRDNamespace              string             `yaml:"crd_namespace"`
-	CooldownMinutes           int                `yaml:"cooldown_minutes"`
-	JWTSecret                 string             `yaml:"jwt_secret"`
-	InternalWorkers           InternalWorkerKeys `yaml:"internal_workers"`
-	Worker                    WorkerConfig       `yaml:"worker"`
-	Agent                     AgentConfig        `yaml:"agent"`
-	OpenSandbox               OpenSandboxConfig  `yaml:"opensandbox"`
-	Incus                     incus.Config       `yaml:"incus"`
-	Runtime                   RuntimeConfig      `yaml:"runtime"`
-	Catalog                   CatalogConfig      `yaml:"catalog"`
-	GeneratorWorkspaceIdleTTL string             `yaml:"generator_workspace_idle_ttl"`
+	Port                      int                 `yaml:"port"`
+	HealthPort                int                 `yaml:"health_port"`
+	DataDir                   string              `yaml:"data_dir"`
+	DatabaseURL               string              `yaml:"database_url"`
+	Kubeconfig                string              `yaml:"kubeconfig"`
+	Registry                  RegistryConfig      `yaml:"registry"`
+	VClusterBinary            string              `yaml:"vcluster_binary"`
+	VClusterChartRepo         string              `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion      string              `yaml:"vcluster_chart_version"`
+	UIOrigin                  string              `yaml:"ui_origin"`
+	Namespace                 string              `yaml:"namespace"`
+	CRDNamespace              string              `yaml:"crd_namespace"`
+	CooldownMinutes           int                 `yaml:"cooldown_minutes"`
+	JWTSecret                 string              `yaml:"jwt_secret"`
+	InternalWorkers           InternalWorkerKeys  `yaml:"internal_workers"`
+	Worker                    WorkerConfig        `yaml:"worker"`
+	Agent                     AgentConfig         `yaml:"agent"`
+	OpenSandbox               OpenSandboxConfig   `yaml:"opensandbox"`
+	Incus                     incus.Config        `yaml:"incus"`
+	Runtime                   RuntimeConfig       `yaml:"runtime"`
+	Catalog                   CatalogConfig       `yaml:"catalog"`
+	Documentation             DocumentationConfig `yaml:"documentation"`
+	GeneratorWorkspaceIdleTTL string              `yaml:"generator_workspace_idle_ttl"`
 }
 
 // RegistryConfig identifies the only OCI repository root used by the platform.
@@ -58,6 +59,53 @@ type RegistryConfig struct {
 // or development catalog empty; there is no HTTP installation endpoint.
 type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
+}
+
+// DocumentationConfig identifies one mounted immutable documentation mirror.
+// An empty snapshot_root disables the product; there is no fallback source.
+type DocumentationConfig struct {
+	SnapshotRoot string `yaml:"snapshot_root"`
+	MirrorOrigin string `yaml:"mirror_origin"`
+	SourceID     string `yaml:"source_id"`
+	Repository   string `yaml:"repository"`
+	Revision     string `yaml:"revision"`
+	Version      string `yaml:"version"`
+	Language     string `yaml:"language"`
+	License      string `yaml:"license"`
+	PagePath     string `yaml:"page_path"`
+	Anchor       string `yaml:"anchor"`
+}
+
+func (c DocumentationConfig) Enabled() bool { return strings.TrimSpace(c.SnapshotRoot) != "" }
+
+func (c DocumentationConfig) Validate() error {
+	if !c.Enabled() {
+		return nil
+	}
+	for name, value := range map[string]string{
+		"snapshot_root": c.SnapshotRoot,
+		"mirror_origin": c.MirrorOrigin,
+		"source_id":     c.SourceID,
+		"repository":    c.Repository,
+		"revision":      c.Revision,
+		"version":       c.Version,
+		"language":      c.Language,
+		"license":       c.License,
+		"page_path":     c.PagePath,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("documentation %s is required when snapshot_root is configured", name)
+		}
+	}
+	mirror, err := url.ParseRequestURI(strings.TrimSpace(c.MirrorOrigin))
+	if err != nil || (mirror.Scheme != "http" && mirror.Scheme != "https") || mirror.Host == "" || mirror.User != nil || mirror.RawQuery != "" || mirror.Fragment != "" || (mirror.Path != "" && mirror.Path != "/") {
+		return fmt.Errorf("documentation mirror_origin must be an HTTP(S) origin")
+	}
+	page := strings.TrimSpace(c.PagePath)
+	if strings.HasPrefix(page, "/") || strings.Contains(page, "\\") || page == "." || strings.HasPrefix(page, "../") || strings.Contains(page, "/../") {
+		return fmt.Errorf("documentation page_path must be a safe relative path")
+	}
+	return nil
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
@@ -347,6 +395,8 @@ func Load(path string) (Config, error) {
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
+	cfg.Documentation.SnapshotRoot = os.ExpandEnv(cfg.Documentation.SnapshotRoot)
+	cfg.Documentation.MirrorOrigin = os.ExpandEnv(cfg.Documentation.MirrorOrigin)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
@@ -456,6 +506,9 @@ func (c Config) ValidateServer() error {
 	}
 	if err := c.Catalog.Validate(); err != nil {
 		return fmt.Errorf("server catalog: %w", err)
+	}
+	if err := c.Documentation.Validate(); err != nil {
+		return fmt.Errorf("server documentation: %w", err)
 	}
 	return nil
 }

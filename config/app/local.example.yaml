@@ -28,6 +28,21 @@ registry:
 catalog:
   release_reference: ""
 
+# Fixed Kubernetes documentation snapshot. Set snapshot_root only after
+# docs-site/public has been built and mounted read-only. Server verifies the
+# tree against build-info.json and does not use a fallback origin or revision.
+documentation:
+  snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
+  mirror_origin: ${BREAKFIX_DOCUMENTATION_MIRROR_ORIGIN}
+  source_id: kubernetes
+  repository: https://github.com/kubernetes/website.git
+  revision: ce98a43f24257385a9766003a6dadc95e962dc63
+  version: snapshot-ce98a43
+  language: en
+  license: CC BY 4.0
+  page_path: docs/concepts/workloads/pods/pod-lifecycle/index.html
+  anchor: pod-lifecycle
+
 # vcluster command and chart source.
 vcluster_binary: vcluster
 vcluster_chart_repo: https://charts.loft.sh

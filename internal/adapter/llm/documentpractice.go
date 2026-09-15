@@ -119,8 +119,11 @@ func NewDocumentGenerator(cfg config.AgentConfig) *DocumentGenerator {
 	return &DocumentGenerator{config: cfg}
 }
 
-func (g *DocumentGenerator) Generate(ctx context.Context, plan domain.LearningUnitPlan, profile runnable.RuntimeProfile) (app.CandidateBlueprint, error) {
+func (g *DocumentGenerator) Generate(ctx context.Context, plan domain.LearningUnitPlan, profile runnable.RuntimeProfile, lifecycle runnable.LifecyclePolicy) (app.CandidateBlueprint, error) {
 	if err := profile.Validate(); err != nil {
+		return app.CandidateBlueprint{}, err
+	}
+	if err := lifecycle.Validate(); err != nil {
 		return app.CandidateBlueprint{}, err
 	}
 	prompt, err := json.Marshal(struct {
@@ -132,7 +135,7 @@ func (g *DocumentGenerator) Generate(ctx context.Context, plan domain.LearningUn
 	}
 	return runDocumentResult[app.CandidateBlueprint](ctx, g.config, "document_generator", documentGeneratorInstruction(), string(prompt), "submit_candidate_blueprint", "提交文档实践候选文件和运行计划。", func(value app.CandidateBlueprint) error {
 		// Lifecycle is Server-owned and receives no model input.
-		return value.Validate(plan, profile, runnable.LifecyclePolicy{CreateTimeoutSeconds: 60, ResetTimeoutSeconds: 60, StopTimeoutSeconds: 60, ReapTimeoutSeconds: 60, IdleTTLSeconds: 300, MaxLifetimeSeconds: 600})
+		return value.Validate(plan, profile, lifecycle)
 	})
 }
 

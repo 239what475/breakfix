@@ -116,6 +116,20 @@ func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
 	}
 }
 
+func TestDocumentationConfigRequiresACompleteFixedSnapshot(t *testing.T) {
+	if err := (DocumentationConfig{}).Validate(); err != nil {
+		t.Fatalf("disabled documentation config = %v", err)
+	}
+	configured := DocumentationConfig{SnapshotRoot: "/var/lib/breakfix/docs", MirrorOrigin: "https://docs.breakfix.example", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle/", Anchor: "pod-lifecycle"}
+	if err := configured.Validate(); err != nil {
+		t.Fatalf("fixed documentation config = %v", err)
+	}
+	configured.PagePath = "../secret"
+	if err := configured.Validate(); err == nil {
+		t.Fatal("documentation path traversal was accepted")
+	}
+}
+
 func TestLoadExpandsHomeKubeconfigPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	if err := os.WriteFile(path, []byte("kubeconfig: ~/.kube/config\n"), 0o600); err != nil {

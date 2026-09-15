@@ -109,7 +109,7 @@ type pipelineGenerator struct {
 	fail      bool
 }
 
-func (g pipelineGenerator) Generate(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile) (CandidateBlueprint, error) {
+func (g pipelineGenerator) Generate(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile, runnable.LifecyclePolicy) (CandidateBlueprint, error) {
 	if g.fail {
 		return CandidateBlueprint{}, errPipelineGeneratorCalled
 	}

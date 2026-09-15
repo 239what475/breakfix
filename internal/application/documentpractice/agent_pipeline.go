@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ type VerificationReviewRole interface {
 }
 
 type BlueprintGenerator interface {
-	Generate(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile) (CandidateBlueprint, error)
+	Generate(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile, runnable.LifecyclePolicy) (CandidateBlueprint, error)
 }
 
 type RuntimeProfileResolver interface {
@@ -68,6 +69,8 @@ type AgentPipeline struct {
 	now                   func() time.Time
 	newRunID              func(string) (string, error)
 }
+
+const pipelineRecoveryInterval = 5 * time.Second
 
 func NewAgentPipeline(service *Service, reader Reader, planner PlanningAgent, planReviewers []PlanReviewRole, generator BlueprintGenerator, artifactReviewers []CandidateReviewRole, verificationReviewers []VerificationReviewRole, profiles RuntimeProfileResolver, cfg AgentPipelineConfig) (*AgentPipeline, error) {
 	if service == nil || reader == nil || planner == nil || generator == nil || profiles == nil || len(planReviewers) == 0 || len(artifactReviewers) == 0 || len(verificationReviewers) == 0 || strings.TrimSpace(cfg.Model) == "" || strings.TrimSpace(cfg.PromptVersion) == "" || strings.TrimSpace(cfg.ToolVersion) == "" || strings.TrimSpace(cfg.PolicyVersion) == "" {
@@ -144,11 +147,12 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
-	blueprint, err := p.generator.Generate(ctx, plan, profile)
+	lifecycle := p.profiles.DocumentationLifecyclePolicy()
+	blueprint, err := p.generator.Generate(ctx, plan, profile, lifecycle)
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
-	candidate, archive, err := CompileCandidate(plan, profile, p.profiles.DocumentationLifecyclePolicy(), blueprint, p.now())
+	candidate, archive, err := CompileCandidate(plan, profile, lifecycle, blueprint, p.now())
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
@@ -293,6 +297,27 @@ func (p *AgentPipeline) Recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Run retries post-completion product reconciliation. It never executes a
+// runtime action: Worker ownership and public result persistence remain
+// outside this loop.
+func (p *AgentPipeline) Run(ctx context.Context) error {
+	if p == nil {
+		return errors.New("documentation Agent pipeline is not configured")
+	}
+	ticker := time.NewTicker(pipelineRecoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := p.Recover(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("reconcile completed documentation runnable actions", "err", err)
+			}
+		}
+	}
 }
 
 func (p *AgentPipeline) reviewPlan(ctx context.Context, plan domain.LearningUnitPlan) ([]domain.ReviewOpinion, []domain.AgentAudit, error) {

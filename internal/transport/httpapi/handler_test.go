@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,9 +14,11 @@ import (
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
+	"github.com/gin-gonic/gin"
 )
 
 func TestReconcileDocumentationRunnableActionIsBestEffortAfterPublicCompletion(t *testing.T) {
@@ -32,10 +36,29 @@ func TestReconcileDocumentationRunnableActionIsBestEffortAfterPublicCompletion(t
 	}
 }
 
+func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T) {
+	application := &testDocumentationApplication{}
+	h := &Handler{documentation: application}
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/documentation/practice", nil)
+	h.StartDocumentationPractice(ginContext)
+	if recorder.Code != http.StatusAccepted || application.calls != 1 {
+		t.Fatalf("documentation start = %d, calls = %d", recorder.Code, application.calls)
+	}
+}
+
 type testDocumentationActionReconciler struct {
 	action runnable.ActionIdentity
 	calls  int
 	err    error
+}
+
+type testDocumentationApplication struct{ calls int }
+
+func (a *testDocumentationApplication) StartDocumentationPractice(context.Context) (documentdomain.Workflow, error) {
+	a.calls++
+	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
 }
 
 func (r *testDocumentationActionReconciler) ReconcileCompletedAction(_ context.Context, action runnable.ActionIdentity) error {
