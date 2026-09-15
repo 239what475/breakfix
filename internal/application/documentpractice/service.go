@@ -56,10 +56,11 @@ func (s *Service) Start(ctx context.Context, workflowID string) (domain.Workflow
 		return domain.Workflow{}, err
 	}
 	if err := s.store.CreateWorkflow(ctx, workflow); err != nil {
-		// Workflow identity is caller supplied, so retrying Start can safely
-		// return the durable value but cannot replace a different workflow.
+		// Workflow identity is caller supplied. Repeating a start request must
+		// return the durable workflow at every stage, never restart its Agent
+		// work or replace immutable ledger entries.
 		stored, getErr := s.store.GetWorkflow(ctx, workflowID)
-		if getErr == nil && stored.State == domain.Planning && stored.Revision == 1 {
+		if getErr == nil {
 			return stored, nil
 		}
 		return domain.Workflow{}, err

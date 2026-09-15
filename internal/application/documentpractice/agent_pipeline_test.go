@@ -38,6 +38,15 @@ func TestAgentPipelineRunsIndependentRolesAndPublishes(t *testing.T) {
 	if err != nil || started.Workflow.State != domain.MaterializingArtifact || started.MaterializationAction.Phase != runnable.ActionMaterializeArtifact {
 		t.Fatalf("start pipeline = %#v, %v", started, err)
 	}
+	// The fixed page can be requested again while the Worker owns the queued
+	// materialization. That retry must observe state, not invoke Agents again.
+	replay, err := pipeline.Start(context.Background(), "agent-pipeline-full", page.Path, "")
+	if err != nil || replay.Workflow.State != domain.MaterializingArtifact || replay.MaterializationAction != (runnable.ActionIdentity{}) {
+		t.Fatalf("replay pipeline start = %#v, %v", replay, err)
+	}
+	if len(store.actions) != 1 || len(store.audits) != 6 {
+		t.Fatalf("replayed pipeline start changed durable work: actions=%d audits=%d", len(store.actions), len(store.audits))
+	}
 	if err := pipeline.ReconcileCompletedAction(context.Background(), started.MaterializationAction); err != nil {
 		t.Fatalf("reconcile materialization = %v", err)
 	}

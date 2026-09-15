@@ -92,6 +92,12 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
+	// The workflow ID is deployment-owned and identifies one exact pinned page.
+	// A repeated request observes its durable state; it must not re-run any Agent
+	// role or create a second public runtime action.
+	if workflow.State != domain.Planning {
+		return PipelineStartResult{Workflow: workflow}, nil
+	}
 	page, err := p.reader.ReadPage(pagePath, anchor)
 	if err != nil {
 		return PipelineStartResult{}, err
