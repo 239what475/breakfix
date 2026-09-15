@@ -287,7 +287,7 @@ func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 }
 
 func (h *Handler) reconcileDocumentationRunnableAction(ctx context.Context, action runnable.ActionIdentity) {
-	if h == nil || h.documentationActions == nil {
+	if h == nil || action.Content.Kind != "documentation-practice" || h.documentationActions == nil {
 		return
 	}
 	if err := h.documentationActions.ReconcileCompletedAction(ctx, action); err != nil {

@@ -36,6 +36,16 @@ func TestReconcileDocumentationRunnableActionIsBestEffortAfterPublicCompletion(t
 	}
 }
 
+func TestReconcileDocumentationRunnableActionIgnoresOtherContentKinds(t *testing.T) {
+	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "operations", ID: "scenario-01", Revision: "revision-01"}, SpecDigest: "sha256:" + strings.Repeat("a", 64), Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}
+	reconciler := &testDocumentationActionReconciler{}
+	h := &Handler{documentationActions: reconciler}
+	h.reconcileDocumentationRunnableAction(context.Background(), action)
+	if reconciler.calls != 0 {
+		t.Fatalf("documentation reconciler received %d Operations actions", reconciler.calls)
+	}
+}
+
 func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T) {
 	application := &testDocumentationApplication{}
 	h := &Handler{documentation: application}
