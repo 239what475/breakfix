@@ -99,6 +99,130 @@ func TestAgentPipelineEndsApprovedNoPracticeWithoutGeneration(t *testing.T) {
 	}
 }
 
+func TestAgentPipelineRecoverySchedulesVerificationAfterMaterializationCommit(t *testing.T) {
+	now := time.Date(2026, 9, 15, 18, 0, 0, 0, time.UTC)
+	plan := validPlan()
+	plan.CreatedAt = now
+	page := domain.Page{Context: plan.Context, Path: plan.Context.PagePath, Digest: plan.Evidence[0].Digest, Content: "# Pod lifecycle"}
+	seed := serviceCandidate(t, plan, []byte("seed archive"), now)
+	blueprint := pipelineBlueprint(plan, seed)
+	compiled, _, err := CompileCandidate(plan, seed.Spec.RuntimeProfile, seed.Spec.LifecyclePolicy, blueprint, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, report := serviceRevisionAndReport(t, compiled, now, true)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{revision: revision, report: report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	pipeline, err := NewAgentPipeline(service, fakePlannerReader{page: page, metadata: domain.Metadata{Context: plan.Context, Path: page.Path, Title: plan.Title, Anchors: []string{"pod-lifecycle"}}}, fakePlanAgent{plan: plan}, []PlanReviewRole{pipelineReviewer{role: "evidence"}, pipelineReviewer{role: "value"}}, pipelineGenerator{blueprint: blueprint}, []CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}}, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{profile: seed.Spec.RuntimeProfile}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline.now = func() time.Time { return now }
+	pipeline.newRunID = sequentialRunIDs()
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-materialization-recovery", page.Path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This is the durable state after a Worker result has been stored but the
+	// Server stopped before it could queue verification.
+	if _, _, err := service.Materialized(context.Background(), started.Workflow.ID, started.MaterializationAction); err != nil {
+		t.Fatalf("persist materialization result: %v", err)
+	}
+	if err := pipeline.Recover(context.Background()); err != nil {
+		t.Fatalf("recover materialization completion: %v", err)
+	}
+	workflow, err := service.store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil || workflow.State != domain.Verifying || !store.actions[started.MaterializationAction.Key()].reconciled {
+		t.Fatalf("recovered materialization workflow = %#v, binding = %#v, %v", workflow, store.actions[started.MaterializationAction.Key()], err)
+	}
+	verificationActions := 0
+	for _, action := range store.actions {
+		if action.action.Phase == runnable.ActionVerify {
+			verificationActions++
+		}
+	}
+	if verificationActions != 1 {
+		t.Fatalf("verification actions after recovery = %d, want 1", verificationActions)
+	}
+}
+
+func TestAgentPipelineRecoveryPublishesAfterVerificationReviewCommit(t *testing.T) {
+	now := time.Date(2026, 9, 15, 19, 0, 0, 0, time.UTC)
+	plan := validPlan()
+	plan.CreatedAt = now
+	page := domain.Page{Context: plan.Context, Path: plan.Context.PagePath, Digest: plan.Evidence[0].Digest, Content: "# Pod lifecycle"}
+	seed := serviceCandidate(t, plan, []byte("seed archive"), now)
+	blueprint := pipelineBlueprint(plan, seed)
+	compiled, _, err := CompileCandidate(plan, seed.Spec.RuntimeProfile, seed.Spec.LifecyclePolicy, blueprint, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, report := serviceRevisionAndReport(t, compiled, now, true)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{revision: revision, report: report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	pipeline, err := NewAgentPipeline(service, fakePlannerReader{page: page, metadata: domain.Metadata{Context: plan.Context, Path: page.Path, Title: plan.Title, Anchors: []string{"pod-lifecycle"}}}, fakePlanAgent{plan: plan}, []PlanReviewRole{pipelineReviewer{role: "evidence"}, pipelineReviewer{role: "value"}}, pipelineGenerator{blueprint: blueprint}, []CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}}, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{profile: seed.Spec.RuntimeProfile}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline.now = func() time.Time { return now }
+	pipeline.newRunID = sequentialRunIDs()
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-publication-recovery", page.Path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, revisionRef, err := service.Materialized(context.Background(), started.Workflow.ID, started.MaterializationAction)
+	if err != nil || materialized.State != domain.Verifying {
+		t.Fatalf("persist materialization result = %#v %#v, %v", materialized, revisionRef, err)
+	}
+	verification, err := service.ScheduleVerification(context.Background(), started.Workflow.ID, revisionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, stored, err := service.Verified(context.Background(), started.Workflow.ID, verification)
+	if err != nil || verified.State != domain.VerificationReviewing {
+		t.Fatalf("persist verification result = %#v %#v, %v", verified, stored, err)
+	}
+	workflow, err := service.store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowPlan, _, _, _, err := workflowPublicationInputs(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportArtifact, found := artifactFor(workflow, "verification-report-"+stored.Reference.ID)
+	if !found {
+		t.Fatal("verification report artifact is missing")
+	}
+	opinion := domain.ReviewOpinion{ReviewerID: "recovery-verification-review", Role: "verification", Decision: domain.ReviewApprove, PolicyVersion: "policy-v1"}
+	review := domain.VerificationReviewBundle{ArtifactID: reportArtifact.ID, ArtifactDigest: reportArtifact.Digest, ReportDigest: stored.Reference.Digest, Opinions: []domain.ReviewOpinion{opinion}, CreatedAt: now}
+	audit, err := pipeline.audit(opinion.ReviewerID, "verification-review", workflowPlan, opinion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishing, err := service.GateVerification(context.Background(), started.Workflow.ID, "runtime-worker", stored, review, []domain.AgentAudit{audit})
+	if err != nil || publishing.State != domain.Publishing {
+		t.Fatalf("persist verification review = %#v, %v", publishing, err)
+	}
+	if err := pipeline.Recover(context.Background()); err != nil {
+		t.Fatalf("recover publication: %v", err)
+	}
+	workflow, err = service.store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil || workflow.State != domain.Published || store.published == nil || !store.actions[verification.Key()].reconciled {
+		t.Fatalf("recovered publication workflow = %#v, published = %#v, binding = %#v, %v", workflow, store.published, store.actions[verification.Key()], err)
+	}
+}
+
 func TestMetadataContainsAnchorRequiresThePinnedHeading(t *testing.T) {
 	metadata := domain.Metadata{Anchors: []string{"pod-lifetime", "pod-phase"}}
 	if !metadataContainsAnchor(metadata, "pod-lifetime") {

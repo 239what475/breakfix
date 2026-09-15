@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -224,29 +225,71 @@ func (p *AgentPipeline) Reconcile(ctx context.Context, workflowID string, action
 	if workflow.State.Terminal() {
 		return PipelineReconcileResult{Workflow: workflow}, nil
 	}
+	switch action.Phase {
+	case runnable.ActionMaterializeArtifact:
+		return p.reconcileMaterialization(ctx, workflowID, workflow, action)
+	case runnable.ActionVerify:
+		return p.reconcileVerification(ctx, workflowID, workflow, action)
+	default:
+		return PipelineReconcileResult{}, errors.New("unsupported documentation runnable action")
+	}
+}
+
+// reconcileMaterialization resumes at the durable state reached before an
+// interruption. The Worker result is immutable, so the only possible follow-up
+// is the same verification action bound to the same workflow state version.
+func (p *AgentPipeline) reconcileMaterialization(ctx context.Context, workflowID string, workflow domain.Workflow, action runnable.ActionIdentity) (PipelineReconcileResult, error) {
+	var reference runnable.RevisionReference
+	var err error
+	switch workflow.State {
+	case domain.MaterializingArtifact:
+		workflow, reference, err = p.service.Materialized(ctx, workflowID, action)
+		if err != nil {
+			return PipelineReconcileResult{}, err
+		}
+	case domain.Verifying, domain.VerificationReviewing, domain.Publishing:
+		reference, err = p.service.runnable.ResolveMaterializedRunnableRevision(ctx, action)
+		if err != nil {
+			return PipelineReconcileResult{}, err
+		}
+	default:
+		return PipelineReconcileResult{}, fmt.Errorf("cannot reconcile materialization while documentation workflow is %s", workflow.State)
+	}
+	if workflow.State != domain.Verifying {
+		return PipelineReconcileResult{Workflow: workflow}, nil
+	}
+	verification, err := p.service.ScheduleVerification(ctx, workflowID, reference)
+	if err != nil {
+		return PipelineReconcileResult{}, err
+	}
+	return PipelineReconcileResult{Workflow: workflow, VerificationAction: verification}, nil
+}
+
+// reconcileVerification never re-executes the Worker result. It resumes
+// review or publication from the append-only ledger after a Server restart.
+func (p *AgentPipeline) reconcileVerification(ctx context.Context, workflowID string, workflow domain.Workflow, action runnable.ActionIdentity) (PipelineReconcileResult, error) {
+	stored, err := p.service.runnable.ResolveVerificationForAction(ctx, action)
+	if err != nil {
+		return PipelineReconcileResult{}, err
+	}
+	if workflow.State == domain.Verifying {
+		workflow, stored, err = p.service.Verified(ctx, workflowID, action)
+		if err != nil {
+			return PipelineReconcileResult{}, err
+		}
+	}
+	if workflow.State == domain.Failed {
+		return PipelineReconcileResult{Workflow: workflow}, nil
+	}
+	if workflow.State != domain.VerificationReviewing && workflow.State != domain.Publishing {
+		return PipelineReconcileResult{}, fmt.Errorf("cannot reconcile verification while documentation workflow is %s", workflow.State)
+	}
 	plan, candidate, planGate, artifactGate, err := workflowPublicationInputs(workflow)
 	if err != nil {
 		return PipelineReconcileResult{}, err
 	}
-	switch action.Phase {
-	case runnable.ActionMaterializeArtifact:
-		workflow, reference, err := p.service.Materialized(ctx, workflowID, action)
-		if err != nil {
-			return PipelineReconcileResult{}, err
-		}
-		verification, err := p.service.ScheduleVerification(ctx, workflowID, reference)
-		if err != nil {
-			return PipelineReconcileResult{}, err
-		}
-		return PipelineReconcileResult{Workflow: workflow, VerificationAction: verification}, nil
-	case runnable.ActionVerify:
-		workflow, stored, err := p.service.Verified(ctx, workflowID, action)
-		if err != nil {
-			return PipelineReconcileResult{}, err
-		}
-		if workflow.State == domain.Failed {
-			return PipelineReconcileResult{Workflow: workflow}, nil
-		}
+	var review domain.VerificationReviewBundle
+	if workflow.State == domain.VerificationReviewing {
 		opinions, audits, err := p.reviewVerification(ctx, plan, stored.Report)
 		if err != nil {
 			return PipelineReconcileResult{}, err
@@ -255,7 +298,7 @@ func (p *AgentPipeline) Reconcile(ctx context.Context, workflowID string, action
 		if !ok {
 			return PipelineReconcileResult{}, errors.New("verification report is missing from the workflow ledger")
 		}
-		review := domain.VerificationReviewBundle{ArtifactID: reportArtifact.ID, ArtifactDigest: reportArtifact.Digest, ReportDigest: stored.Reference.Digest, Opinions: opinions, CreatedAt: p.now()}
+		review = domain.VerificationReviewBundle{ArtifactID: reportArtifact.ID, ArtifactDigest: reportArtifact.Digest, ReportDigest: stored.Reference.Digest, Opinions: opinions, CreatedAt: p.now()}
 		workflow, err = p.service.GateVerification(ctx, workflowID, "runtime-worker", stored, review, audits)
 		if err != nil {
 			return PipelineReconcileResult{}, err
@@ -263,18 +306,21 @@ func (p *AgentPipeline) Reconcile(ctx context.Context, workflowID string, action
 		if workflow.State == domain.Rejected {
 			return PipelineReconcileResult{Workflow: workflow}, nil
 		}
-		revisionRef, err := p.service.runnable.ResolveMaterializedRunnableRevision(ctx, actionForMaterialization(candidate, action))
+	} else {
+		review, err = verificationReviewFromLedger(workflow, stored)
 		if err != nil {
 			return PipelineReconcileResult{}, err
 		}
-		workflow, _, err = p.service.Publish(ctx, workflowID, candidate, plan, planGate, artifactGate, revisionRef, stored, review)
-		if err != nil {
-			return PipelineReconcileResult{}, err
-		}
-		return PipelineReconcileResult{Workflow: workflow}, nil
-	default:
-		return PipelineReconcileResult{}, errors.New("unsupported documentation runnable action")
 	}
+	revisionRef, err := p.service.runnable.ResolveMaterializedRunnableRevision(ctx, actionForMaterialization(candidate, action))
+	if err != nil {
+		return PipelineReconcileResult{}, err
+	}
+	workflow, _, err = p.service.Publish(ctx, workflowID, candidate, plan, planGate, artifactGate, revisionRef, stored, review)
+	if err != nil {
+		return PipelineReconcileResult{}, err
+	}
+	return PipelineReconcileResult{Workflow: workflow}, nil
 }
 
 // ReconcileCompletedAction routes one completed public runnable action through
@@ -463,6 +509,21 @@ func artifactFor(workflow domain.Workflow, id string) (domain.ArtifactRecord, bo
 		}
 	}
 	return domain.ArtifactRecord{}, false
+}
+
+func verificationReviewFromLedger(workflow domain.Workflow, report runnable.StoredVerificationReport) (domain.VerificationReviewBundle, error) {
+	artifact, found := artifactFor(workflow, "verification-review-"+report.Reference.ID)
+	if !found || artifact.Kind != "verification-review" {
+		return domain.VerificationReviewBundle{}, errors.New("verification review is missing from the workflow ledger")
+	}
+	var review domain.VerificationReviewBundle
+	if err := json.Unmarshal(artifact.Payload, &review); err != nil {
+		return domain.VerificationReviewBundle{}, errors.New("verification review ledger artifact is invalid")
+	}
+	if err := review.Validate(report.Report); err != nil {
+		return domain.VerificationReviewBundle{}, errors.New("verification review ledger binding is invalid")
+	}
+	return review, nil
 }
 
 func actionForMaterialization(candidate domain.PracticeCandidate, verify runnable.ActionIdentity) runnable.ActionIdentity {
