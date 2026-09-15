@@ -17,6 +17,7 @@ import (
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	"github.com/breakfix/breakfix/internal/domain/toolresult"
 )
 
@@ -26,6 +27,8 @@ type Handler struct {
 	runtimeContext     context.Context
 	db                 *postgres.Store
 	k8s                *kubernetes.Client
+	runnableBindings   operationsRunnableBindingResolver
+	runnableReports    runtimeVerificationReportResolver
 	authoring          *appauthoring.RuntimeService
 	catalog            *appcatalog.Service
 	assistant          *appassistant.Service
@@ -79,6 +82,21 @@ type Dependencies struct {
 	Catalog             *appcatalog.Service
 	AgentRuntimeContext context.Context
 	Generator           generatorApplication
+	RunnableBindings    operationsRunnableBindingResolver
+	RunnableReports     runtimeVerificationReportResolver
+}
+
+// operationsRunnableBindingResolver prevents Server-created environments from
+// reconstructing a runtime profile or artifact from mutable content data.
+type operationsRunnableBindingResolver interface {
+	ResolveOperationsRevisionBinding(context.Context, string) (runnable.RevisionReference, error)
+}
+
+// runtimeVerificationReportResolver reads immutable runtime evidence. The
+// HTTP layer may project it for Operations, but it never changes its meaning.
+type runtimeVerificationReportResolver interface {
+	ResolveRunnableRevision(context.Context, string, string) (runnable.RunnableRevision, error)
+	ResolveVerificationReport(context.Context, string, string, runnable.RunnableRevision) (runnable.VerificationReport, error)
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
@@ -108,6 +126,8 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		runtimeContext:     agentRuntimeContext,
 		db:                 database,
 		k8s:                client,
+		runnableBindings:   dependencies.RunnableBindings,
+		runnableReports:    dependencies.RunnableReports,
 		catalog:            catalogService,
 		registryRepository: cfg.Registry.Repository,
 		namespace:          cfg.Namespace,
@@ -126,6 +146,12 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		incusConfig:        cfg.Incus,
 		nodeTerminal:       dependencies.NodeTerminal,
 		generator:          dependencies.Generator,
+	}
+	if handler.runnableBindings == nil && database != nil {
+		handler.runnableBindings = database.Runnable
+	}
+	if handler.runnableReports == nil && database != nil {
+		handler.runnableReports = database.Runnable
 	}
 	handler.authoring = dependencies.Authoring
 	handler.assistant = dependencies.Assistant

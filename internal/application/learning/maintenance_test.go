@@ -48,7 +48,7 @@ type projectionTestSource struct{}
 func (projectionTestSource) ListEnvironmentProjections(context.Context) ([]EnvironmentProjection, error) {
 	return nil, nil
 }
-func (projectionTestSource) DeleteEnvironmentProjection(context.Context, string, string) error {
+func (projectionTestSource) DeleteEnvironmentProjection(context.Context, string, string, string) error {
 	return nil
 }
 

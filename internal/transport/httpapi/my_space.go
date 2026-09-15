@@ -96,6 +96,10 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 		if err != nil {
 			continue
 		}
+		checkpoints, err := h.checkpointStatus(ctx, &env, entry)
+		if err != nil {
+			return api.MySpace{}, fmt.Errorf("read environment progress: %w", err)
+		}
 		var expiresAt *time.Time
 		if env.ExpiresAt != nil {
 			expires := env.ExpiresAt.UTC()
@@ -106,7 +110,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 			Scenario:           mySpaceScenario(*entry),
 			Runtime:            api.MySpaceActiveEnvironmentRuntime(env.Runtime),
 			Phase:              string(env.Phase),
-			CheckpointProgress: checkpointProgressSummary(env.Checkpoints, len(entry.Checkpoints)),
+			CheckpointProgress: checkpointProgressSummary(checkpoints, len(entry.Checkpoints)),
 			ExpiresAt:          expiresAt,
 		})
 	}
@@ -149,22 +153,13 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 // namespace, Pod, or vcluster until the controller finalizer finishes.
 func (h *Handler) occupiedEnvironmentCount(ctx context.Context, userID string) (int, error) {
 	selector := fmt.Sprintf("breakfix.dev/user=%s", userID)
-	nodeEnvironments, err := h.k8s.ListNodeEnvironments(ctx, h.crdNamespace, selector)
-	if err != nil {
-		return 0, err
-	}
-	vk8sEnvironments, err := h.k8s.ListVK8sEnvironments(ctx, h.crdNamespace, selector)
+	environments, err := h.k8s.ListRuntimeEnvironments(ctx, h.crdNamespace, selector)
 	if err != nil {
 		return 0, err
 	}
 	occupied := 0
-	for _, environment := range nodeEnvironments.Items {
-		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
-			occupied++
-		}
-	}
-	for _, environment := range vk8sEnvironments.Items {
-		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
+	for _, environment := range environments.Items {
+		if environment.Status.Phase != "Released" {
 			occupied++
 		}
 	}

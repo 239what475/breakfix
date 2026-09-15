@@ -401,7 +401,7 @@ func (h *Handler) terminalStream(environment *activeEnvironment, nodeName, windo
 		}
 		return func(ctx context.Context, stdin io.Reader, stdout io.Writer, resize <-chan environmentdomain.Size) error {
 			return h.nodeTerminal.ExecNodePTY(ctx, incus.ExecNodePTYRequest{
-				EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
+				EnvironmentUID: environment.UID, Revision: environment.RunnableRevisionDigest, Identity: environment.NodeIdentity,
 				LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
 				Stdin: stdin, Stdout: stdout, Resize: resize,
 			})
@@ -419,7 +419,7 @@ func (h *Handler) closeTerminalWindow(ctx context.Context, environment *activeEn
 	sessionName := terminalSessionName(environment.UID)
 	if environment.Runtime == scenario.RuntimeNode {
 		return h.nodeTerminal.CloseNodePTYWindow(ctx, incus.CloseNodePTYWindowRequest{
-			EnvironmentUID: environment.UID, Revision: environment.SourceRevision, Identity: environment.NodeIdentity,
+			EnvironmentUID: environment.UID, Revision: environment.RunnableRevisionDigest, Identity: environment.NodeIdentity,
 			LogicalName: nodeName, SessionName: sessionName, WindowName: windowName,
 		})
 	}

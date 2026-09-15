@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -52,23 +52,14 @@ func (h *Handler) activeVerificationEnvironmentCount(ctx context.Context) (int, 
 	if h.k8s == nil {
 		return 0, nil
 	}
-	selector := "breakfix.dev/purpose=" + string(breakfixv1.EnvironmentPurposeVerification)
-	nodes, err := h.k8s.ListNodeEnvironments(ctx, h.crdNamespace, selector)
+	selector := "breakfix.dev/purpose=" + string(runtimev2.PurposeVerification)
+	environments, err := h.k8s.ListRuntimeEnvironments(ctx, h.crdNamespace, selector)
 	if err != nil {
-		return 0, fmt.Errorf("list Node verification environments: %w", err)
-	}
-	vk8s, err := h.k8s.ListVK8sEnvironments(ctx, h.crdNamespace, selector)
-	if err != nil {
-		return 0, fmt.Errorf("list VK8s verification environments: %w", err)
+		return 0, fmt.Errorf("list runtime verification environments: %w", err)
 	}
 	count := 0
-	for _, environment := range nodes.Items {
-		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
-			count++
-		}
-	}
-	for _, environment := range vk8s.Items {
-		if environment.Status.Environment.Phase != breakfixv1.EnvironmentDestroyed {
+	for _, environment := range environments.Items {
+		if environment.Status.Phase != runtimev2.PhaseReleased {
 			count++
 		}
 	}

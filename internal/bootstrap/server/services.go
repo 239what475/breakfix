@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
@@ -18,7 +18,7 @@ import (
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/execution"
 	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // serviceLifecycle is a process lifecycle primitive, not a scheduler. The
@@ -102,73 +102,54 @@ func (s environmentProjectionSource) ListEnvironmentProjections(ctx context.Cont
 	if s.client == nil {
 		return nil, errors.New("kubernetes client is required")
 	}
-	result := make([]applearning.EnvironmentProjection, 0)
-	nodes, err := s.client.ListNodeEnvironments(ctx, s.namespace, "")
+	environments, err := s.client.ListRuntimeEnvironments(ctx, s.namespace, "")
 	if err != nil {
 		return nil, err
 	}
-	for index := range nodes.Items {
-		result = append(result, nodeProjection(nodes.Items[index]))
-	}
-	vk8s, err := s.client.ListVK8sEnvironments(ctx, s.namespace, "")
-	if err != nil {
-		return nil, err
-	}
-	for index := range vk8s.Items {
-		result = append(result, vk8sProjection(vk8s.Items[index]))
+	result := make([]applearning.EnvironmentProjection, 0, len(environments.Items))
+	for index := range environments.Items {
+		if projection, ok := runtimeProjection(environments.Items[index]); ok {
+			result = append(result, projection)
+		}
 	}
 	return result, nil
 }
 
-func (s environmentProjectionSource) DeleteEnvironmentProjection(ctx context.Context, runtimeName, name string) error {
+func (s environmentProjectionSource) DeleteEnvironmentProjection(ctx context.Context, _ string, name, uid string) error {
 	if s.client == nil {
 		return errors.New("kubernetes client is required")
 	}
-	switch scenario.NormalizeRuntime(runtimeName) {
-	case scenario.RuntimeNode:
-		return s.client.DeleteNodeEnvironment(ctx, s.namespace, name)
-	case scenario.RuntimeK8s:
-		return s.client.DeleteVK8sEnvironment(ctx, s.namespace, name)
-	default:
-		return fmt.Errorf("unsupported projected environment runtime %q", runtimeName)
+	if name == "" || uid == "" {
+		return errors.New("runtime environment projection has no stable identity")
 	}
+	return s.client.DeleteRuntimeEnvironmentWithUID(ctx, s.namespace, name, types.UID(uid))
 }
 
-func nodeProjection(environment breakfixv1.NodeEnvironment) applearning.EnvironmentProjection {
-	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, scenario.RuntimeNode, environment.Spec.Environment, environment.Status.Environment)
-}
-
-func vk8sProjection(environment breakfixv1.VK8sEnvironment) applearning.EnvironmentProjection {
-	return environmentProjectionFromSpecStatus(string(environment.UID), environment.Name, scenario.RuntimeK8s, environment.Spec.Environment, environment.Status.Environment)
-}
-
-func environmentProjectionFromSpecStatus(uid, name, runtimeName string, spec breakfixv1.EnvironmentSpec, status breakfixv1.EnvironmentStatus) applearning.EnvironmentProjection {
-	checkpoints := make([]applearning.Checkpoint, 0)
-	if status.Checkpoints != nil {
-		checkpoints = make([]applearning.Checkpoint, 0, len(status.Checkpoints.Results))
-		for _, checkpoint := range status.Checkpoints.Results {
-			var firstPassedAt *time.Time
-			if checkpoint.FirstPassedAt != nil && !checkpoint.FirstPassedAt.IsZero() {
-				value := checkpoint.FirstPassedAt.UTC()
-				firstPassedAt = &value
-			}
-			checkpoints = append(checkpoints, applearning.Checkpoint{ID: checkpoint.ID, FirstPassedAt: firstPassedAt, Summary: checkpoint.Summary})
+func runtimeProjection(environment runtimev2.RuntimeEnvironment) (applearning.EnvironmentProjection, bool) {
+	labels := environment.Labels
+	if labels["breakfix.dev/content-kind"] != "operations" {
+		return applearning.EnvironmentProjection{}, false
+	}
+	projection := applearning.EnvironmentProjection{
+		UID: string(environment.UID), Name: environment.Name, Runtime: environment.Status.Runtime.Provider,
+		Purpose: string(environment.Spec.Purpose), UserID: labels["breakfix.dev/user"],
+		ScenarioID: labels["breakfix.dev/content-id"], ScenarioRevision: labels["breakfix.dev/content-revision"],
+		Phase: string(environment.Status.Phase), Checkpoints: []applearning.Checkpoint{},
+	}
+	if environment.Status.Phase == runtimev2.PhaseReady || environment.Status.Phase == runtimev2.PhaseDraining || environment.Status.Phase == runtimev2.PhaseReleased {
+		readyAt := environment.CreationTimestamp.UTC()
+		if !readyAt.IsZero() {
+			projection.ReadyAt = &readyAt
 		}
 	}
-	return applearning.EnvironmentProjection{
-		UID: uid, Name: name, Runtime: runtimeName, Purpose: string(spec.Purpose), UserID: spec.UserRef,
-		ScenarioID: spec.Source.Ref, ScenarioRevision: spec.Source.Revision, Phase: string(status.Phase),
-		ReadyAt: timeValue(status.ReadyAt), CompletedAt: timeValue(status.CompletedAt), DestroyedAt: timeValue(status.DestroyedAt),
-		Checkpoints: checkpoints,
+	if environment.Status.Phase == runtimev2.PhaseReleased {
+		projection.Phase = "Destroyed"
+		if environment.Status.Lifecycle.ReleasedAt != nil && !environment.Status.Lifecycle.ReleasedAt.IsZero() {
+			destroyedAt := environment.Status.Lifecycle.ReleasedAt.UTC()
+			projection.DestroyedAt = &destroyedAt
+		}
 	}
-}
-
-func timeValue(value *metav1.Time) *time.Time {
-	if value == nil || value.IsZero() {
-		return nil
-	}
-	result := value.UTC()
-	return &result
+	return projection, true
 }
 
 type scenarioArtifactValidator struct {

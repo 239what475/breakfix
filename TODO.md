@@ -404,7 +404,7 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 - [x] 验证完成后只持久化“环境已可释放”事实，由独立 Reaper 异步领取和执行 stop/reap；清理失败不改变验证结果或发布状态。
 - [x] 为 Reaper 增加断点恢复、lease 接管、重复执行、provider 暂时不可用、永久资源缺失和积压告警测试。
 - [x] 验证终端、日志、事件、资源状态和只读观测接口不依赖 Operations 或 Documentation 的字段名称。
-- [ ] 先排空并回收旧 `NodeEnvironment`/`VK8sEnvironment` v1 对象，再安装 `RuntimeEnvironment` v2 CRD、更新 RBAC/客户端和生成清单；不提供 conversion webhook、双写或旧字段兼容读取。
+- [x] 先排空并回收旧 `NodeEnvironment`/`VK8sEnvironment` v1 对象，再安装 `RuntimeEnvironment` v2 CRD、更新 RBAC/客户端和生成清单；不提供 conversion webhook、双写或旧字段兼容读取。
 - [ ] 在 Kind 和 Incus 目标上各完成一次从干净环境创建、阶段执行、验证、重置、停止和回收的真实测试。
 
 ### 5. 迁移持久化、内部 API 与发布边界

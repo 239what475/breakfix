@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
 	"github.com/breakfix/breakfix/internal/content/scenario"
@@ -19,11 +20,12 @@ type environmentAssistantReader struct {
 		ListPodFiles(context.Context, string, string, string, int, int) ([]string, int, error)
 		ReadPodFile(context.Context, string, string, string, int64, int) (string, int64, error)
 	}
-	node           NodeTerminalProvider
-	getEnvironment func(context.Context, string, string) (*activeEnvironment, error)
-	env            *activeEnvironment
-	entry          *scenario.Entry
-	content        *scenario.Content
+	node             NodeTerminalProvider
+	getEnvironment   func(context.Context, string, string) (*activeEnvironment, error)
+	checkpointStatus func(context.Context, *activeEnvironment, *scenario.Entry) (*breakfixv1.CheckpointStatus, error)
+	env              *activeEnvironment
+	entry            *scenario.Entry
+	content          *scenario.Content
 }
 
 func (r *environmentAssistantReader) TerminalScrollback(ctx context.Context, node, window string, offset, lines int) (assistant.Scrollback, error) {
@@ -54,6 +56,13 @@ func (r *environmentAssistantReader) CheckpointStatus(ctx context.Context) (assi
 	}
 	if env.UID != r.env.UID {
 		return assistant.CheckpointSnapshot{}, fmt.Errorf("assistant environment changed")
+	}
+	if r.checkpointStatus != nil {
+		checkpoints, err := r.checkpointStatus(ctx, env, r.entry)
+		if err != nil {
+			return assistant.CheckpointSnapshot{}, err
+		}
+		env.Checkpoints = checkpoints
 	}
 	return assistantCheckpointSnapshot(r.entry, env), nil
 }
@@ -218,7 +227,7 @@ func (r *environmentAssistantReader) execNode(ctx context.Context, node, script 
 	command = append(command, arguments...)
 	result, err := r.node.ExecNode(ctx, incus.ExecNodeRequest{
 		EnvironmentUID: r.env.UID,
-		Revision:       r.env.SourceRevision,
+		Revision:       r.env.RunnableRevisionDigest,
 		Identity:       r.env.NodeIdentity,
 		LogicalName:    node,
 		Command:        command,

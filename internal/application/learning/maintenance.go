@@ -129,7 +129,7 @@ type EnvironmentProjection struct {
 // after terminal learning facts have been persisted.
 type ProjectionSource interface {
 	ListEnvironmentProjections(context.Context) ([]EnvironmentProjection, error)
-	DeleteEnvironmentProjection(context.Context, string, string) error
+	DeleteEnvironmentProjection(context.Context, string, string, string) error
 }
 
 // ProjectionRepository is the durable learning history boundary. String
@@ -198,7 +198,7 @@ func (s *ProjectionService) RunOnce(ctx context.Context) error {
 		if !deleteAfter {
 			continue
 		}
-		if err := s.source.DeleteEnvironmentProjection(ctx, projection.Runtime, projection.Name); err != nil {
+		if err := s.source.DeleteEnvironmentProjection(ctx, projection.Runtime, projection.Name, projection.UID); err != nil {
 			return fmt.Errorf("delete projected %s environment %q: %w", projection.Runtime, projection.Name, err)
 		}
 	}

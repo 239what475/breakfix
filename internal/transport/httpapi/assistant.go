@@ -156,6 +156,11 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 	if err != nil {
 		return assistant.Request{}, err
 	}
+	checkpoints, err := h.checkpointStatus(ctx, env, entry)
+	if err != nil {
+		return assistant.Request{}, fmt.Errorf("read environment progress: %w", err)
+	}
+	env.Checkpoints = checkpoints
 	problem := ""
 	if content.Problem != nil {
 		problem = *content.Problem
@@ -176,12 +181,13 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 		IdleTTL:          environmentIdleTTL(env, time.Duration(h.cooldownMin)*time.Minute),
 		Checkpoints:      assistantCheckpointSnapshot(entry, env),
 		Reader: &environmentAssistantReader{
-			k8s:            h.k8s,
-			node:           h.nodeTerminal,
-			getEnvironment: h.getEnvironment,
-			env:            env,
-			entry:          entry,
-			content:        content,
+			k8s:              h.k8s,
+			node:             h.nodeTerminal,
+			getEnvironment:   h.getEnvironment,
+			checkpointStatus: h.checkpointStatus,
+			env:              env,
+			entry:            entry,
+			content:          content,
 		},
 	}, nil
 }

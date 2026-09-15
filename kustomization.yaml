@@ -5,8 +5,6 @@ namespace: breakfix-system
 
 resources:
   - deploy/crds/breakfix.dev_runtimeenvironments.yaml
-  - deploy/crds/breakfix.dev_nodeenvironments.yaml
-  - deploy/crds/breakfix.dev_vk8senvironments.yaml
   - deploy/manifests/namespace.yaml
   - deploy/manifests/rbac.yaml
   - deploy/manifests/runtime-worker-network-policy.yaml

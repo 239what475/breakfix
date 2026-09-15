@@ -36,17 +36,10 @@ func (h *Handler) ListScenarios(c *gin.Context) {
 			return
 		}
 		for _, env := range envs {
-			if env.Phase == breakfixv1.EnvironmentCompleted {
-				// The controller has already established the completion fact. Expose it
-				// immediately instead of waiting for the asynchronous SQL projector.
-				completed[env.ScenarioRef] = struct{}{}
-				continue
-			}
 			if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
 				continue
 			}
-			current, exists := active[env.ScenarioRef]
-			if !exists || passedCheckpointCount(env.Checkpoints) > passedCheckpointCount(current.Checkpoints) {
+			if _, exists := active[env.ScenarioRef]; !exists {
 				active[env.ScenarioRef] = env
 			}
 		}
@@ -72,7 +65,12 @@ func (h *Handler) ListScenarios(c *gin.Context) {
 			activeVal := isActive
 			s.Active = &activeVal
 			if isActive {
-				progress := checkpointProgressSummary(activeEnv.Checkpoints, len(ch.Checkpoints))
+				checkpoints, err := h.checkpointStatus(c.Request.Context(), &activeEnv, &ch)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read environment progress: %v", err)})
+					return
+				}
+				progress := checkpointProgressSummary(checkpoints, len(ch.Checkpoints))
 				s.Progress = &progress
 			}
 		}
@@ -182,7 +180,7 @@ func (h *Handler) GetScenarioProgress(c *gin.Context, id string) {
 	if user == nil {
 		return
 	}
-	_, env, err := h.resolveEnvironmentScenario(c.Request.Context(), user.ID, id, true)
+	entry, env, err := h.resolveEnvironmentScenario(c.Request.Context(), user.ID, id, true)
 	if err != nil {
 		if errors.Is(err, errAmbiguousEnvironment) {
 			c.JSON(http.StatusConflict, api.ErrorResponse{Error: scenarioEnvironmentError(err).Error()})
@@ -191,20 +189,25 @@ func (h *Handler) GetScenarioProgress(c *gin.Context, id string) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this scenario"})
 		return
 	}
-	if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining && env.Phase != breakfixv1.EnvironmentCompleted {
+	if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "environment is not ready for checkpoint checks"})
 		return
 	}
-	if env.Checkpoints == nil {
+	checkpoints, err := h.checkpointStatus(c.Request.Context(), env, entry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("read environment progress: %v", err)})
+		return
+	}
+	if checkpoints == nil {
 		checks := []api.CheckpointResult{}
 		c.JSON(http.StatusOK, api.ScenarioProgress{Checks: checks})
 		return
 	}
-	if env.Checkpoints.Error != "" {
-		c.JSON(http.StatusUnprocessableEntity, api.ErrorResponse{Error: env.Checkpoints.Error})
+	if checkpoints.Error != "" {
+		c.JSON(http.StatusUnprocessableEntity, api.ErrorResponse{Error: checkpoints.Error})
 		return
 	}
-	checks := toAPICheckStatusResults(env.Checkpoints.Results)
+	checks := toAPICheckStatusResults(checkpoints.Results)
 	c.JSON(http.StatusOK, api.ScenarioProgress{Checks: checks})
 }
 
