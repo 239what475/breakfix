@@ -178,7 +178,7 @@ ensure_project "$image_project"
 trust_certificate server ""
 trust_certificate controller ""
 # Runtime Worker builds and verifies provider-side artifacts, including work in
-# short-lived NodeEnvironment projects created by Controller. Those projects do
+# short-lived runtime projects created by Controller. Those projects do
 # not exist when this identity is provisioned, so a static project allowlist
 # cannot express the required verification access.
 trust_certificate runtime ""

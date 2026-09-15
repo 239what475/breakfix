@@ -42,14 +42,6 @@ func Run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	// Drain legacy v1 objects before the v2 controller begins managing new
-	// RuntimeEnvironment resources. Deletion is UID-fenced and scoped to the
-	// configured CRD namespace, so a reused name cannot remove a new object.
-	if err := (&runtimeenvironment.LegacyDrainer{
-		Client: kubernetes.LegacyEnvironmentDrainClient{Client: k8sClient}, Namespace: cfg.CRDNamespace,
-	}).Drain(ctx); err != nil {
-		return fmt.Errorf("drain legacy environment objects: %w", err)
-	}
 	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleController)
 	if err != nil {
 		return fmt.Errorf("create Controller Incus client: %w", err)

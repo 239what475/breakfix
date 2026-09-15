@@ -21,7 +21,7 @@ Browser / breakfix-mcp
      Runtime Worker ----------- Registry / Incus / Kubernetes
           |
           v
- Controller ------------------- NodeEnvironment / VK8sEnvironment CRDs
+ Controller ------------------- RuntimeEnvironment CRD
 ```
 
 ## 所有权

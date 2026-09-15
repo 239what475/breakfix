@@ -8,7 +8,7 @@
 | 主题 | 权威来源 |
 | --- | --- |
 | HTTP JSON 契约 | [`api/http/openapi.yaml`](../api/http/openapi.yaml) |
-| Kubernetes CRD | [`api/v1/`](../api/v1/) |
+| Kubernetes CRD | [`api/v2/`](../api/v2/) |
 | Scenario 文件契约 | [`internal/content/scenario/`](../internal/content/scenario/) |
 | 运行时配置 | [`config/app/local.example.yaml`](../config/app/local.example.yaml) |
 | 构建、生成与测试命令 | [`Makefile`](../Makefile) |
@@ -19,7 +19,7 @@
 - [代码布局](architecture/code-layout.md)：目录职责和依赖方向。
 - [工作流](architecture/workflows.md)：GenerationWorkflow、CatalogRelease、lease 与阶段语义。
 - [Catalog Release](architecture/catalog-release.md)：portable source、启动安装和原子提交。
-- [运行环境](architecture/runtime-environments.md)：`NodeEnvironment`、`VK8sEnvironment`、生命周期和检查点。
+- [运行环境](architecture/runtime-environments.md)：`RuntimeEnvironment`、生命周期和验证报告引用。
 - [Agent Runtime](architecture/agent-runtime.md)：Eino、AgentRun、直接对话与后台 Worker 边界。
 - [API 契约](architecture/api-contracts.md)：公开 HTTP、内部 Worker API 和终端流传输。
 

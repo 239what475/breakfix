@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
@@ -18,6 +17,31 @@ import (
 )
 
 var errNoActiveAssistantEnvironment = errors.New("no active environment for assistant run")
+
+// These are HTTP projections, not CRD or domain types. They retain only the
+// public lifecycle and Operations display data needed by this transport.
+type activeNode struct {
+	Name  string
+	Title string
+}
+
+type checkpointResult struct {
+	ID            string
+	Passed        bool
+	FirstPassedAt *metav1.Time
+	Summary       string
+	Details       string
+}
+
+type checkpointStatus struct {
+	Results   []checkpointResult
+	CheckedAt *metav1.Time
+	Error     string
+}
+
+type activeLifecycle struct {
+	IdleTTLSeconds *int64
+}
 
 type activeEnvironment struct {
 	UID                      string
@@ -30,18 +54,18 @@ type activeEnvironment struct {
 	RunnableRevisionDigest   string
 	VerificationReportID     string
 	VerificationReportDigest string
-	Purpose                  breakfixv1.EnvironmentPurpose
+	Purpose                  runtimev2.EnvironmentPurpose
 	Namespace                string
 	WorkspacePod             string
 	NodeIdentity             incus.NodeEnvironmentIdentity
-	Nodes                    []breakfixv1.NodeRuntimeNodeSpec
-	Phase                    breakfixv1.EnvironmentPhase
+	Nodes                    []activeNode
+	Phase                    runtimev2.EnvironmentPhase
 	Deleting                 bool
 	ReadyAt                  *metav1.Time
 	ExpiresAt                *metav1.Time
-	Checkpoints              *breakfixv1.CheckpointStatus
-	Failure                  *breakfixv1.EnvironmentFailureStatus
-	Lifecycle                breakfixv1.EnvironmentLifecycleSpec
+	Checkpoints              *checkpointStatus
+	Failure                  *runtimev2.EnvironmentFailure
+	Lifecycle                activeLifecycle
 }
 
 func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEnvironment {
@@ -49,20 +73,9 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		return nil
 	}
 	runtimeName := string(environment.Status.Runtime.Provider)
-	purpose := breakfixv1.EnvironmentPurposeLearning
-	if environment.Spec.Purpose == runtimev2.PurposeVerification {
-		purpose = breakfixv1.EnvironmentPurposeVerification
-	}
-	phase := breakfixv1.EnvironmentProvisioning
-	switch environment.Status.Phase {
-	case runtimev2.PhaseReady:
-		phase = breakfixv1.EnvironmentReady
-	case runtimev2.PhaseDraining:
-		phase = breakfixv1.EnvironmentDraining
-	case runtimev2.PhaseReleased:
-		phase = breakfixv1.EnvironmentDestroyed
-	case runtimev2.PhaseFailed:
-		phase = breakfixv1.EnvironmentFailed
+	phase := environment.Status.Phase
+	if phase == "" {
+		phase = runtimev2.PhasePending
 	}
 	labels := environment.Labels
 	active := &activeEnvironment{
@@ -70,7 +83,7 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		UserID: labels["breakfix.dev/user"], ScenarioRef: labels["breakfix.dev/content-id"], SourceRevision: labels["breakfix.dev/content-revision"],
 		RunnableRevisionID: environment.Spec.RunnableRevisionRef.ID, RunnableRevisionDigest: environment.Spec.RunnableRevisionRef.Digest,
 		VerificationReportID: environment.Status.Progress.ReportRef.ID, VerificationReportDigest: environment.Status.Progress.ReportRef.Digest,
-		Purpose: purpose, Phase: phase, Deleting: environment.DeletionTimestamp != nil,
+		Purpose: environment.Spec.Purpose, Phase: phase, Deleting: environment.DeletionTimestamp != nil,
 	}
 	if environment.Status.Lifecycle.ExpiresAt != nil {
 		expires := environment.Status.Lifecycle.ExpiresAt.DeepCopy()
@@ -83,7 +96,8 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		active.Namespace, active.WorkspacePod = runtimeK8sTerminal(environment)
 	}
 	if environment.Status.Failure != nil {
-		active.Failure = &breakfixv1.EnvironmentFailureStatus{Class: breakfixv1.EnvironmentFailureClass(environment.Status.Failure.Class), Reason: environment.Status.Failure.Reason, Message: environment.Status.Failure.Message}
+		failure := *environment.Status.Failure
+		active.Failure = &failure
 	}
 	return active
 }
@@ -91,7 +105,7 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 // checkpointStatus projects only the Operations conclusion assertions from a
 // referenced immutable report. Checkpoint data is deliberately not copied to
 // RuntimeEnvironment status.
-func (h *Handler) checkpointStatus(ctx context.Context, environment *activeEnvironment, entry *scenario.Entry) (*breakfixv1.CheckpointStatus, error) {
+func (h *Handler) checkpointStatus(ctx context.Context, environment *activeEnvironment, entry *scenario.Entry) (*checkpointStatus, error) {
 	if environment == nil || entry == nil || environment.VerificationReportID == "" || environment.VerificationReportDigest == "" {
 		return nil, nil
 	}
@@ -106,7 +120,7 @@ func (h *Handler) checkpointStatus(ctx context.Context, environment *activeEnvir
 	if err != nil {
 		return nil, fmt.Errorf("resolve environment verification report: %w", err)
 	}
-	status := &breakfixv1.CheckpointStatus{Results: make([]breakfixv1.CheckpointResultStatus, 0, len(entry.Checkpoints))}
+	status := &checkpointStatus{Results: make([]checkpointResult, 0, len(entry.Checkpoints))}
 	checkedAt := metav1.NewTime(report.CreatedAt.UTC())
 	status.CheckedAt = &checkedAt
 	if report.Failure != nil {
@@ -127,7 +141,7 @@ func (h *Handler) checkpointStatus(ctx context.Context, environment *activeEnvir
 				value := checkedAt
 				firstPassedAt = &value
 			}
-			status.Results = append(status.Results, breakfixv1.CheckpointResultStatus{ID: assertion.ID, Passed: assertion.Satisfied, FirstPassedAt: firstPassedAt, Summary: assertion.Summary, Details: assertion.Details})
+			status.Results = append(status.Results, checkpointResult{ID: assertion.ID, Passed: assertion.Satisfied, FirstPassedAt: firstPassedAt, Summary: assertion.Summary, Details: assertion.Details})
 		}
 	}
 	return status, nil
@@ -180,11 +194,11 @@ func nodeIdentityFromRuntime(environment *runtimev2.RuntimeEnvironment) incus.No
 	return identity
 }
 
-func nodeSpecsFromRuntime(environment *runtimev2.RuntimeEnvironment) []breakfixv1.NodeRuntimeNodeSpec {
+func nodeSpecsFromRuntime(environment *runtimev2.RuntimeEnvironment) []activeNode {
 	identity := nodeIdentityFromRuntime(environment)
-	result := make([]breakfixv1.NodeRuntimeNodeSpec, 0, len(identity.Nodes))
+	result := make([]activeNode, 0, len(identity.Nodes))
 	for _, node := range identity.Nodes {
-		result = append(result, breakfixv1.NodeRuntimeNodeSpec{Name: node.LogicalName, Title: node.LogicalName})
+		result = append(result, activeNode{Name: node.LogicalName, Title: node.LogicalName})
 	}
 	return result
 }
@@ -260,7 +274,7 @@ func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, en
 		}
 	}
 	for index := range environments {
-		if environments[index].SourceRevision == entry.RevisionID && environments[index].Phase == breakfixv1.EnvironmentCompleted {
+		if environments[index].SourceRevision == entry.RevisionID && environments[index].Phase == runtimev2.PhaseReleased {
 			return &environments[index], nil
 		}
 	}
@@ -383,10 +397,10 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 		if environment.Deleting {
 			return nil, errors.New("learning environment is shutting down; wait for deletion to finish before starting it again")
 		}
-		if environment.Phase == breakfixv1.EnvironmentReady {
+		if environment.Phase == runtimev2.PhaseReady {
 			return environment, nil
 		}
-		if environment.Phase == breakfixv1.EnvironmentDestroyed || environment.Phase == breakfixv1.EnvironmentFailed {
+		if environment.Phase == runtimev2.PhaseReleased || environment.Phase == runtimev2.PhaseFailed {
 			return nil, environmentUnavailableError(environment)
 		}
 		select {
@@ -402,7 +416,7 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 func environmentMatchesEntry(environment *activeEnvironment, userID string, entry *scenario.Entry) bool {
 	return environment != nil && entry != nil &&
 		environment.UserID == userID &&
-		environment.Purpose == breakfixv1.EnvironmentPurposeLearning &&
+		environment.Purpose == runtimev2.PurposeLearning &&
 		environment.ScenarioRef == entry.ID &&
 		environment.SourceRevision == entry.RevisionID &&
 		environment.Runtime == entry.Runtime
@@ -423,8 +437,8 @@ func (h *Handler) getEnvironment(ctx context.Context, runtime, name string) (*ac
 	return adapter.get(ctx, name)
 }
 
-func isLiveEnvironmentPhase(phase breakfixv1.EnvironmentPhase) bool {
-	return phase == "" || phase == breakfixv1.EnvironmentPending || phase == breakfixv1.EnvironmentProvisioning || phase == breakfixv1.EnvironmentReady || phase == breakfixv1.EnvironmentDraining
+func isLiveEnvironmentPhase(phase runtimev2.EnvironmentPhase) bool {
+	return phase == "" || phase == runtimev2.PhasePending || phase == runtimev2.PhaseProvisioning || phase == runtimev2.PhaseReady || phase == runtimev2.PhaseDraining
 }
 
 func environmentIdleTTL(environment *activeEnvironment, fallback time.Duration) time.Duration {
@@ -442,7 +456,7 @@ func environmentUnavailableError(environment *activeEnvironment) error {
 		// Provider diagnostics stay on the controller-facing CRD status. The
 		// browser only receives stable runtime-level failures, never transport
 		// details or implementation names.
-		if environment.Failure.Class == breakfixv1.EnvironmentFailureInfrastructure {
+		if environment.Failure.Class == runtimev2.FailureInfrastructure {
 			return errors.New("learning environment is temporarily unavailable; please try again")
 		}
 		if message := strings.TrimSpace(environment.Failure.Message); message != "" {

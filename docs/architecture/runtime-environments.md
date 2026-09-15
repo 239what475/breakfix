@@ -1,75 +1,34 @@
 # 运行环境
 
-Breakfix 的学习与真实验证都使用相同的 Environment 契约。Environment 是短生命周期 CRD；
-Server 写 `spec`，Controller 调和实际资源并写 `status`。Controller 不拥有候选、Workflow 或
-发布状态。
+Breakfix 使用单一 `breakfix.dev/v2` `RuntimeEnvironment` CRD 表示短生命周期的学习和验证环境。Server 创建经过公共运行契约校验的 `spec`；Controller 根据不可变 `RunnableRevision` 与 runtime profile 调和 provider 资源，并只写 `status`。Controller 不拥有内容、Workflow 或发布状态。
 
-## 两类环境
+## Provider
 
-| CRD | runtime | 学习者入口 | 底层资源 |
-| --- | --- | --- | --- |
-| `NodeEnvironment` | `node` | 可以进入场景声明的所有节点 | Incus system containers 与每环境隔离网络。 |
-| `VK8sEnvironment` | `k8s` | 进入管理 terminal，通过 kubeconfig 操作 vcluster | vcluster、管理 terminal 和场景工作负载。 |
+| provider | 学习者入口 | 底层资源 |
+| --- | --- | --- |
+| `node` | 场景声明的节点终端 | Incus system containers 与每环境隔离网络。 |
+| `k8s` | 管理 terminal，通过 kubeconfig 操作 Kubernetes | vcluster、管理 terminal 和工作负载。 |
 
-环境 `spec.environment.purpose` 是 `learning` 或 `verification`。学习环境来自当前 active scenario revision；
-验证环境来自 immutable CandidateRevision artifact。两者都复制运行时 profile、scenario revision、
-可选 checkpoint 定义和 artifact reference，因此后续配置或场景修改不会改变已运行环境。
-
-Environment 的 `spec.environment.source` 同时保存稳定 `scenario_id` 和不可变 `scenario_revision_id`。作者发布新
-revision 或弃用 Scenario 后，已有 Environment、Progress、Assistant 和 Terminal 仍按这个 revision 读取；只有新建
-Environment 才解析当前 Catalog。Deprecated Scenario 不出现在公开 Catalog，也不能创建新的学习 Environment。
+`spec.runnableRevisionRef`、`purpose`、lease、reset nonce 和生命周期边界在创建后不可变。Controller 从 revision 的 runtime profile 解析 provider，不维护按 provider 分叉的 CRD schema。`status` 只保存当前 phase、operation、条件、资源/endpoint 引用和 `VerificationReport` 引用，不复制内容层步骤或断言结果。
 
 ## 生命周期
 
 ```text
-Pending -> Provisioning -> Ready -> Draining -> Destroyed
-                              |
-                              +-> Completed
-                              +-> Failed
+Pending -> Provisioning -> Ready -> Draining -> Released
+                    |             |
+                    +-----------> Failed
 ```
 
-Controller 根据 CRD finalizer、用户停止、完成、空闲时间和 drain grace period 回收资源。Server 记录
-终端/学习活动并更新 Environment `spec` 中的 activity 信息；Controller 即使 Server 重启也能继续按已
-持久化的生命周期策略收敛。
+Server 不能借由直接修改 CRD 跳过 Runtime Worker 的前置校验。reset、stop 和回收使用稳定资源 identity、lease fencing、deadline 和幂等 operation。验证结束只记录环境可释放；独立 Reaper 异步停止和回收资源。回收失败不改变验证结果或内容发布状态。
 
-## 运行时初始化与检查点
+## 验证与观察
 
-每个运维场景携带 `generate.sh`，但它不是镜像构建步骤。基础镜像只包含平台运行时；Environment 启动后由
-runtime init 挂载场景 artifact、执行 `generate.sh` 并进入可交互状态。这样同一 scenario bundle 可以
-在学习与验证环境使用一致的初始化语义。
+验证器消费完整 `RunnableRevision`，按有序阶段执行允许写入的 action 和只读 assertion，并产生绑定 revision digest、artifact digest、环境 profile revision 与 attempt 的 `VerificationReport`。业务断言失败是有效验证结果；协议错误、越权或未声明的结果是 artifact failure。
 
-检查点没有人为 Submit。声明了 checkpoint 时，`internal/domain/checkpoint` 是 `checks.sh` JSON report 的唯一协议实现；Controller 与
-Runtime Worker Verifier 都用它校验字段、expected ID 完整性和整体通过状态。Controller 只额外把共享 Result 转换为
-包含 `FirstPassedAt` 的 Environment status，并将首次通过事件投影到学习记录。没有 checkpoint 的环境保持 Ready，不伪造完成记录；
-所有已声明检查点通过后，环境自动完成。
-
-Runtime Worker 在 `Verifying` state 创建 `purpose=verification` Environment；它等待 runtime init，先运行
-`reproduce.sh` 收集目标现象的结构化证据。任一证据未观察到时，验证以 artifact failure 结束且不会执行参考修复；只有全部证据
-成立后，若场景提供完整参考修复，才运行 `answer.sh` 并收集修复后相同检查点的结构化结果；没有参考修复时复现证据本身就是该次验证的
-终点。Environment identity 会先持久化到 CandidateRevision；验证报告持久化后由 Runtime Worker 的异步 reaper 删除该 Environment。
-删除失败只重试清理，不会重新执行验证。
+终端、日志、事件和资源状态只依赖 `RuntimeEnvironment` 的公共资源引用，不依赖 Operations 或 Documentation 字段。内容模块可以将验证报告投影为自己的展示数据，但不能回写 CRD 或改变公共结果。
 
 ## 网络与镜像
 
-NodeEnvironment 使用场景私有 Incus project/network；Node 名称与静态地址由平台生成并写入对应节点的
-`/etc/hosts`，避免向学习者暴露 Incus DNS 细节。VK8s 的 OCI image 由 Kubernetes node 按
-`registry_repository` 拉取；私有 Registry 必须让 node 与平台 Pod 使用同一个可解析、可访问且受信任的
-HTTPS authority，不能用 `.svc` 作为镜像引用。
+Node provider 使用每环境 Incus project/network；节点地址由平台生成。Kubernetes provider 的 OCI image 必须使用部署者提供的可达、受信任 Registry 的不可变 digest；不能以 `.svc` 地址作为 image reference。
 
-每个 `VK8sEnvironment` 的 immutable runtime snapshot 还包含 `network`：
-
-- `public_egress_cidr` 是允许对外连接的 IPv4 CIDR，通常为 `0.0.0.0/0`。
-- `protected_cidrs` 是从该 CIDR 中排除的部署边界。部署者必须明确包含实际 Service CIDR、Pod CIDR、平台私网、
-  云 metadata/link-local 和其他不应由学习者访问的网络；不能根据某个开发集群在代码中推断。
-
-vcluster chart 原生创建 control-plane 与同步 workload 的 NetworkPolicy。Breakfix 只创建 management terminal
-的最小策略，并通过 chart 的 control-plane ingress 扩展允许该 terminal 访问自己的虚拟控制面。学习者 workload
-只能访问同一虚拟集群的必要组件、DNS 和 `public_egress_cidr` 去除 `protected_cidrs` 后的地址。terminal 同样不能
-访问平台 Service、宿主 API、私网或 metadata。
-
-vcluster 启用 `baseline` Pod Security Standard，阻止 learner 通过 host network 或 privileged Pod 绕过该边界；虚拟
-NetworkPolicy 不同步到宿主集群，以免 learner 放宽 host-side 策略。当前外部出口契约仅支持 IPv4；双栈集群中的 IPv6
-不会获得默认公网放行，直到有单独、经过真实 CNI 验证的 IPv6 策略。
-
-NetworkPolicy 是否真正生效是底层 CNI 的职责。没有执行 NetworkPolicy 的 Kind 默认网络只能用于清单渲染，不能作为
-VK8s 隔离验收依据。
+Kubernetes provider 的 runtime profile 包含网络边界。`public_egress_cidr` 是允许对外连接的 IPv4 CIDR，`protected_cidrs` 是必须排除的平台、Service、Pod 和 metadata 网络。vcluster 使用 `baseline` Pod Security Standard；宿主侧 NetworkPolicy 必须由实际 CNI 执行。没有 NetworkPolicy 的 Kind 仅可用于清单渲染，不能作为隔离验收。

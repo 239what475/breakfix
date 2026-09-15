@@ -61,7 +61,7 @@ func TestDNSLabelNameWithLimitKeepsLongNamesDistinct(t *testing.T) {
 }
 
 func TestIsNotFoundRecognizesConcurrentDelete(t *testing.T) {
-	err := apierrors.NewNotFound(schema.GroupResource{Group: "breakfix.dev", Resource: "nodeenvironments"}, "example")
+	err := apierrors.NewNotFound(schema.GroupResource{Group: "breakfix.dev", Resource: "runtimeenvironments"}, "example")
 	if !isNotFound(err) {
 		t.Fatal("a resource removed by another reconciler must be treated as not found")
 	}

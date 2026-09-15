@@ -72,9 +72,7 @@ docs-smoke: docs-check
 	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT=$(CURDIR)/docs-site/public BREAKFIX_DOCUMENTATION_SOURCE_ROOT=$(CURDIR)/.local/docs/upstream go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycleSnapshotSmoke
 
 generate: web-deps
-	$(CONTROLLER_GEN) object paths=./api/v1
 	$(CONTROLLER_GEN) object paths=./api/v2
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v1 output:crd:dir=deploy/crds
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v2 output:crd:dir=deploy/crds
 	$(OAPI_CODEGEN) --config $(OPENAPI_GO_CONFIG) $(OPENAPI_SPEC)
 	$(OPENAPI_TS) $(OPENAPI_TS_ARGS) -o $(CURDIR)/$(OPENAPI_FRONTEND_OUTPUT)
@@ -82,11 +80,8 @@ generate: web-deps
 verify-generated: web-deps
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
-	$(CONTROLLER_GEN) object paths=./api/v1 output:dir=$$tmp/v1; \
 	$(CONTROLLER_GEN) object paths=./api/v2 output:dir=$$tmp/v2; \
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v1 output:crd:dir=$$tmp/crd; \
 	$(CONTROLLER_GEN) crd:crdVersions=v1 paths=./api/v2 output:crd:dir=$$tmp/crd; \
-	diff -u api/v1/zz_generated.deepcopy.go $$tmp/v1/zz_generated.deepcopy.go; \
 	diff -u api/v2/zz_generated.deepcopy.go $$tmp/v2/zz_generated.deepcopy.go; \
 	diff -ru deploy/crds $$tmp/crd; \
 	sed "s|^output:.*|output: $$tmp/server.gen.go|" $(OPENAPI_GO_CONFIG) >"$$tmp/oapi-codegen.yaml" && \

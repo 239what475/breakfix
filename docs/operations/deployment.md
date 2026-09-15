@@ -54,7 +54,7 @@ make catalog-package \
 
 ## 身份和最小权限
 
-Server 持有 `internal_workers.runtime` 密钥；Runtime Worker 只挂载该密钥，不持有 PostgreSQL DSN 或模型凭据。Runtime Worker 拥有构建、Registry、验证 Environment 与其 Incus 角色凭据；该 Incus 身份必须能够访问 Controller 为验证和学习动态创建的 NodeEnvironment project，不能只限定为 build/image 两个静态 project。
+Server 持有 `internal_workers.runtime` 密钥；Runtime Worker 只挂载该密钥，不持有 PostgreSQL DSN 或模型凭据。Runtime Worker 拥有构建、Registry、验证 Environment 与其 Incus 角色凭据；该 Incus 身份必须能够访问 Controller 为验证和学习动态创建的 runtime project，不能只限定为 build/image 两个静态 project。
 
 Controller 是唯一有权限调和 Environment CRD 的组件。Server 创建和更新 Environment `spec`，Controller 写 `status`。生产 CNI 必须真正执行 NetworkPolicy；Kind 的默认网络行为不能当作隔离验收。
 

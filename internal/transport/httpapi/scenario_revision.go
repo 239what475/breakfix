@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 )
 
@@ -102,7 +102,7 @@ func (h *Handler) findUniqueHistoricalEnvironment(ctx context.Context, userID, s
 			live = append(live, environment)
 			continue
 		}
-		if includeCompleted && environment.Phase == breakfixv1.EnvironmentCompleted {
+		if includeCompleted && environment.Phase == runtimev2.PhaseReleased {
 			completed = append(completed, environment)
 		}
 	}

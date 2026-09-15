@@ -11,8 +11,8 @@ Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` �
   PostgreSQL 和 immutable Scenario revision 的唯一写者。
 - **`breakfix-mcp`**：用户机器上的 stdio MCP Server；经 HTTPS 与用户 Token 调用远程 Server 的 Generator application API，
   并把不可变审核包原子投影到本机可丢弃的只读目录。
-- **Controller**：只调和 `NodeEnvironment` 与 `VK8sEnvironment` CRD，供应、检查和
-  回收真实环境。
+- **Controller**：只调和单一 `RuntimeEnvironment` CRD，根据不可变 runtime profile
+  供应、检查和回收真实环境。
 - **Runtime Worker**：独立运行 Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行构建、artifact
   promotion、验证 Environment 和正式发布，后者只执行 runtime resource reaping。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
@@ -63,5 +63,5 @@ kubectl kustomize .
 - [部署与运行](docs/operations/deployment.md)
 
 机器可验证的契约以代码为准：HTTP 接口见 `api/http/openapi.yaml`，CRD 见
-`api/v1/`，运维场景格式见 `internal/content/scenario/`，运行时配置见
+`api/v2/`，运维场景格式见 `internal/content/scenario/`，运行时配置见
 `config/app/local.example.yaml`，构建和运维命令见 `Makefile`。

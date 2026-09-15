@@ -147,7 +147,7 @@ incus:
   node_memory: 512MiB
   node_processes: 512
   node_root_disk: 5GiB
-  # Dedicated, unallocated RFC1918 range for one bridge per NodeEnvironment.
+  # Dedicated, unallocated RFC1918 range for one bridge per node runtime.
   node_network_pool: 10.240.0.0/16
   node_network_prefix: 24
   blocked_egress_cidrs:

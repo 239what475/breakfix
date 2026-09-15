@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
 	"github.com/breakfix/breakfix/internal/content/scenario"
@@ -135,7 +135,7 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 	if env.ScenarioRef != entry.ID {
 		return assistant.Request{}, fmt.Errorf("assistant environment scenario does not match the requested scenario")
 	}
-	if env.Phase == breakfixv1.EnvironmentDraining {
+	if env.Phase == runtimev2.PhaseDraining {
 		if err := h.resumeEnvironment(ctx, env); err != nil {
 			return assistant.Request{}, fmt.Errorf("resume environment: %w", err)
 		}
@@ -145,7 +145,7 @@ func (h *Handler) assistantRequestForEnvironment(ctx context.Context, userID str
 		}
 		env = refreshed
 	}
-	if env.Phase != breakfixv1.EnvironmentReady || !terminalEnvironmentReady(env, h.nodeTerminal) {
+	if env.Phase != runtimev2.PhaseReady || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		return assistant.Request{}, fmt.Errorf("environment is not ready for assistant context")
 	}
 	input, nodes, err := normalizeAssistantWorkspace(env, input)

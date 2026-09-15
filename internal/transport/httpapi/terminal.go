@@ -18,7 +18,7 @@ import (
 
 	"log/slog"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/domain/environment"
 	"github.com/gorilla/websocket"
@@ -127,7 +127,7 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request, uiOrigin string, env *act
 	stopLease := make(chan struct{})
 	defer close(stopLease)
 	idleTTL := environmentIdleTTL(env, time.Duration(cooldownMin)*time.Minute)
-	if env.Phase == breakfixv1.EnvironmentReady && runtime != nil {
+	if env.Phase == runtimev2.PhaseReady && runtime != nil {
 		go keepEnvironmentLeaseAlive(terminalCtx, runtime, env.Name, idleTTL, stopLease)
 	}
 	if stream == nil {

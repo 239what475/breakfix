@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
@@ -89,7 +89,7 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 	}
 	active := make([]api.MySpaceActiveEnvironment, 0, len(environments))
 	for _, env := range environments {
-		if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
+		if env.Phase != runtimev2.PhaseReady && env.Phase != runtimev2.PhaseDraining {
 			continue
 		}
 		entry, err := h.entryForScenarioRevision(ctx, catalog, env.ScenarioRef, env.SourceRevision)

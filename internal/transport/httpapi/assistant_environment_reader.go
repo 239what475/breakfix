@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	assistant "github.com/breakfix/breakfix/internal/application/assistant"
 	"github.com/breakfix/breakfix/internal/content/scenario"
@@ -22,7 +21,7 @@ type environmentAssistantReader struct {
 	}
 	node             NodeTerminalProvider
 	getEnvironment   func(context.Context, string, string) (*activeEnvironment, error)
-	checkpointStatus func(context.Context, *activeEnvironment, *scenario.Entry) (*breakfixv1.CheckpointStatus, error)
+	checkpointStatus func(context.Context, *activeEnvironment, *scenario.Entry) (*checkpointStatus, error)
 	env              *activeEnvironment
 	entry            *scenario.Entry
 	content          *scenario.Content

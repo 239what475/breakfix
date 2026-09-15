@@ -11,7 +11,7 @@ import (
 
 	"log/slog"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/content/scenario"
@@ -39,13 +39,13 @@ func (h *Handler) StartScenario(c *gin.Context, id string) {
 		return
 	}
 	if existing != nil {
-		if existing.Phase == breakfixv1.EnvironmentDraining {
+		if existing.Phase == runtimev2.PhaseDraining {
 			if err := h.resumeEnvironment(c.Request.Context(), existing); err != nil {
 				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("resume environment: %v", err)})
 				return
 			}
 		}
-		if existing.Phase != breakfixv1.EnvironmentReady {
+		if existing.Phase != runtimev2.PhaseReady {
 			if _, err := h.waitEnvironmentReady(c.Request.Context(), existing.Runtime, existing.Name, environmentDeletionTimeout(existing.Runtime)); err != nil {
 				c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("wait for existing environment: %v", err)})
 				return
@@ -265,12 +265,12 @@ func (h *Handler) HandleTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	if env.Phase == breakfixv1.EnvironmentDraining {
+	if env.Phase == runtimev2.PhaseDraining {
 		if err := h.resumeEnvironment(c.Request.Context(), env); err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("resume environment: %v", err)})
 			return
 		}
-		env.Phase = breakfixv1.EnvironmentReady
+		env.Phase = runtimev2.PhaseReady
 	}
 	stream, err := h.terminalStream(env, ticket.NodeName, windowName)
 	if err != nil {

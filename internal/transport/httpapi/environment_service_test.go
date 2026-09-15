@@ -4,15 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 )
 
 func TestEnvironmentUnavailableErrorHidesInfrastructureDiagnostics(t *testing.T) {
-	err := environmentUnavailableError(&activeEnvironment{Failure: &breakfixv1.EnvironmentFailureStatus{
-		Class:     breakfixv1.EnvironmentFailureInfrastructure,
-		Component: "incus",
-		Reason:    "ProviderUnavailable",
-		Message:   "dial https://incus.internal.example:8443: connection refused",
+	err := environmentUnavailableError(&activeEnvironment{Failure: &runtimev2.EnvironmentFailure{
+		Class:   runtimev2.FailureInfrastructure,
+		Reason:  "ProviderUnavailable",
+		Message: "dial https://incus.internal.example:8443: connection refused",
 	}})
 	if err == nil {
 		t.Fatal("expected an unavailable environment error")

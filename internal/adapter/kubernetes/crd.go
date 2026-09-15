@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,75 +13,8 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-var (
-	nodeEnvironmentGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "nodeenvironments"}
-	vk8sEnvironmentGVR = schema.GroupVersionResource{Group: "breakfix.dev", Version: "v1", Resource: "vk8senvironments"}
-)
-
 func (c *Client) crdClient() (dynamic.Interface, error) {
 	return dynamic.NewForConfig(c.restConfig)
-}
-
-func (c *Client) CreateNodeEnvironment(ctx context.Context, ns string, env *breakfixv1.NodeEnvironment) (*breakfixv1.NodeEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "NodeEnvironment"}
-	return createCRD[*breakfixv1.NodeEnvironment](ctx, c, nodeEnvironmentGVR, ns, env, "create node environment")
-}
-
-func (c *Client) GetNodeEnvironment(ctx context.Context, ns, name string) (*breakfixv1.NodeEnvironment, error) {
-	return getCRD[*breakfixv1.NodeEnvironment](ctx, c, nodeEnvironmentGVR, ns, name, "get node environment")
-}
-
-func (c *Client) UpdateNodeEnvironment(ctx context.Context, ns string, env *breakfixv1.NodeEnvironment) (*breakfixv1.NodeEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "NodeEnvironment"}
-	return updateCRD[*breakfixv1.NodeEnvironment](ctx, c, nodeEnvironmentGVR, ns, env, false, "update node environment")
-}
-
-func (c *Client) UpdateNodeEnvironmentStatus(ctx context.Context, ns string, env *breakfixv1.NodeEnvironment) (*breakfixv1.NodeEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "NodeEnvironment"}
-	return updateCRD[*breakfixv1.NodeEnvironment](ctx, c, nodeEnvironmentGVR, ns, env, true, "update node environment status")
-}
-
-func (c *Client) ListNodeEnvironments(ctx context.Context, ns, selector string) (*breakfixv1.NodeEnvironmentList, error) {
-	return listCRD[breakfixv1.NodeEnvironment, breakfixv1.NodeEnvironmentList](ctx, c, nodeEnvironmentGVR, ns, selector, "list node environments")
-}
-
-func (c *Client) DeleteNodeEnvironment(ctx context.Context, ns, name string) error {
-	return deleteCRD(ctx, c, nodeEnvironmentGVR, ns, name)
-}
-
-func (c *Client) DeleteNodeEnvironmentWithUID(ctx context.Context, ns, name string, uid types.UID) error {
-	return deleteCRDWithUID(ctx, c, nodeEnvironmentGVR, ns, name, uid)
-}
-
-func (c *Client) CreateVK8sEnvironment(ctx context.Context, ns string, env *breakfixv1.VK8sEnvironment) (*breakfixv1.VK8sEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VK8sEnvironment"}
-	return createCRD[*breakfixv1.VK8sEnvironment](ctx, c, vk8sEnvironmentGVR, ns, env, "create VK8s environment")
-}
-
-func (c *Client) GetVK8sEnvironment(ctx context.Context, ns, name string) (*breakfixv1.VK8sEnvironment, error) {
-	return getCRD[*breakfixv1.VK8sEnvironment](ctx, c, vk8sEnvironmentGVR, ns, name, "get VK8s environment")
-}
-
-func (c *Client) UpdateVK8sEnvironment(ctx context.Context, ns string, env *breakfixv1.VK8sEnvironment) (*breakfixv1.VK8sEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VK8sEnvironment"}
-	return updateCRD[*breakfixv1.VK8sEnvironment](ctx, c, vk8sEnvironmentGVR, ns, env, false, "update VK8s environment")
-}
-
-func (c *Client) UpdateVK8sEnvironmentStatus(ctx context.Context, ns string, env *breakfixv1.VK8sEnvironment) (*breakfixv1.VK8sEnvironment, error) {
-	env.TypeMeta = metav1.TypeMeta{APIVersion: "breakfix.dev/v1", Kind: "VK8sEnvironment"}
-	return updateCRD[*breakfixv1.VK8sEnvironment](ctx, c, vk8sEnvironmentGVR, ns, env, true, "update VK8s environment status")
-}
-
-func (c *Client) ListVK8sEnvironments(ctx context.Context, ns, selector string) (*breakfixv1.VK8sEnvironmentList, error) {
-	return listCRD[breakfixv1.VK8sEnvironment, breakfixv1.VK8sEnvironmentList](ctx, c, vk8sEnvironmentGVR, ns, selector, "list VK8s environments")
-}
-
-func (c *Client) DeleteVK8sEnvironment(ctx context.Context, ns, name string) error {
-	return deleteCRD(ctx, c, vk8sEnvironmentGVR, ns, name)
-}
-
-func (c *Client) DeleteVK8sEnvironmentWithUID(ctx context.Context, ns, name string, uid types.UID) error {
-	return deleteCRDWithUID(ctx, c, vk8sEnvironmentGVR, ns, name, uid)
 }
 
 func createCRD[T any](ctx context.Context, c *Client, gvr schema.GroupVersionResource, ns string, obj T, action string) (T, error) {
@@ -161,24 +93,6 @@ func listCRD[T any, L any](ctx context.Context, c *Client, gvr schema.GroupVersi
 
 	var converted any = list
 	switch typed := converted.(type) {
-	case *breakfixv1.NodeEnvironmentList:
-		typed.Items = make([]breakfixv1.NodeEnvironment, 0, len(result.Items))
-		for _, item := range result.Items {
-			var env breakfixv1.NodeEnvironment
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
-				return nil, fmt.Errorf("convert node environment item: %w", err)
-			}
-			typed.Items = append(typed.Items, env)
-		}
-	case *breakfixv1.VK8sEnvironmentList:
-		typed.Items = make([]breakfixv1.VK8sEnvironment, 0, len(result.Items))
-		for _, item := range result.Items {
-			var env breakfixv1.VK8sEnvironment
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &env); err != nil {
-				return nil, fmt.Errorf("convert VK8s environment item: %w", err)
-			}
-			typed.Items = append(typed.Items, env)
-		}
 	case *runtimev2.RuntimeEnvironmentList:
 		typed.Items = make([]runtimev2.RuntimeEnvironment, 0, len(result.Items))
 		for _, item := range result.Items {

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	breakfixv1 "github.com/breakfix/breakfix/api/v1"
+	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -36,7 +36,7 @@ func (h *Handler) ListScenarios(c *gin.Context) {
 			return
 		}
 		for _, env := range envs {
-			if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
+			if env.Phase != runtimev2.PhaseReady && env.Phase != runtimev2.PhaseDraining {
 				continue
 			}
 			if _, exists := active[env.ScenarioRef]; !exists {
@@ -189,7 +189,7 @@ func (h *Handler) GetScenarioProgress(c *gin.Context, id string) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this scenario"})
 		return
 	}
-	if env.Phase != breakfixv1.EnvironmentReady && env.Phase != breakfixv1.EnvironmentDraining {
+	if env.Phase != runtimev2.PhaseReady && env.Phase != runtimev2.PhaseDraining {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "environment is not ready for checkpoint checks"})
 		return
 	}
@@ -211,7 +211,7 @@ func (h *Handler) GetScenarioProgress(c *gin.Context, id string) {
 	c.JSON(http.StatusOK, api.ScenarioProgress{Checks: checks})
 }
 
-func passedCheckpointCount(status *breakfixv1.CheckpointStatus) int {
+func passedCheckpointCount(status *checkpointStatus) int {
 	if status == nil {
 		return 0
 	}
@@ -224,7 +224,7 @@ func passedCheckpointCount(status *breakfixv1.CheckpointStatus) int {
 	return passed
 }
 
-func checkpointProgressSummary(status *breakfixv1.CheckpointStatus, total int) api.CheckpointProgressSummary {
+func checkpointProgressSummary(status *checkpointStatus, total int) api.CheckpointProgressSummary {
 	passed := passedCheckpointCount(status)
 	if passed > total {
 		passed = total
@@ -268,7 +268,7 @@ func toAPIScenarioNodes(nodes []scenario.Node) []api.ScenarioNode {
 	return result
 }
 
-func toAPICheckStatusResults(checks []breakfixv1.CheckpointResultStatus) []api.CheckpointResult {
+func toAPICheckStatusResults(checks []checkpointResult) []api.CheckpointResult {
 	result := make([]api.CheckpointResult, 0, len(checks))
 	for _, check := range checks {
 		details := check.Details

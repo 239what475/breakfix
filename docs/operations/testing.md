@@ -50,7 +50,7 @@ make test-e2e-recovery  # Server 与 Controller restart
 - UI：未登录用户浏览固定 Catalog、搜索/空结果，登录用户查看 My Space 响应式导航；不创建 Environment 或调用模型。
 - Node 学习主路径：独立用户启动固定 Node fixture，执行 `answer.sh`，确认 checkpoint 完成、Environment 为 `Completed`，并在学习
   历史看到完成记录。
-- 平台恢复：Server restart 后已有 NodeEnvironment 保持 identity 并可完成 checkpoint；Controller restart 后仍能继续调和并提供终端。
+- 平台恢复：Server restart 后已有 RuntimeEnvironment 保持 identity 并可完成验证；Controller restart 后仍能继续调和并提供终端。
 
 发布验证与学习环境的运行顺序不同：发布 Verifier 在 runtime init 后先执行 `reproduce.sh`，确认每个目标现象证据都存在；只有这样才执行
 `answer.sh`，再执行 `checks.sh` 验证参考修复。复现证据缺失、脚本协议错误或执行失败时，发布失败且不会运行参考修复。学习环境仅执行
