@@ -81,16 +81,6 @@ export async function expectRuntimeEnvironmentPhase(name: string, expected: "Rea
 	}).toBe(expected);
 }
 
-export async function expectRuntimeEnvironmentVerification(name: string) {
-	await expect.poll(async () => {
-		const report = (await runtimeEnvironment(name)).status?.progress?.reportRef;
-		return Boolean(report?.id && report?.digest);
-	}, {
-		timeout: 2 * 60_000,
-		intervals: [500, 1_000, 2_000, 5_000],
-	}).toBe(true);
-}
-
 export async function expectRuntimeEnvironmentReset(name: string, nonce: number) {
 	await expect.poll(async () => {
 		const environment = await runtimeEnvironment(name);

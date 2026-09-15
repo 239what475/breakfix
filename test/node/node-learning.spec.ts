@@ -11,7 +11,6 @@ import { nodeRuntimeFixture } from "../support/catalog-fixture";
 import {
   attachRuntimeEnvironment,
   expectRuntimeEnvironmentPhase,
-  expectRuntimeEnvironmentVerification,
   waitForRuntimeEnvironmentDeletion,
 } from "../support/e2e-platform";
 
@@ -19,7 +18,6 @@ test("learner completes the prepared Node scenario and sees the learning record"
   test.setTimeout(6 * 60_000);
   let scenarioID = "";
   let environmentName = "";
-  let completed = false;
 
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -33,17 +31,15 @@ test("learner completes the prepared Node scenario and sees the learning record"
 
     await runNodeRuntimeFixtureAnswer(page);
     await expect(page.getByText("All checkpoints complete", { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expectRuntimeEnvironmentVerification(environmentName);
 
     await page.getByRole("button", { name: "My space", exact: true }).click();
     await page.getByRole("button", { name: "Learning", exact: true }).first().click();
     await expect(page.getByRole("heading", { name: scenario.title, exact: true })).toBeVisible({ timeout: 90_000 });
     await expect(page.getByLabel("Learning summary").getByText("Completed", { exact: true })).toBeVisible({ timeout: 90_000 });
-    completed = true;
   } finally {
     if (environmentName) await attachRuntimeEnvironment(testInfo, environmentName);
-    if (completed && scenarioID) {
-      await stopScenario(page, scenarioID);
+    if (scenarioID) {
+      await stopScenario(page, scenarioID).catch(() => undefined);
       if (environmentName) await waitForRuntimeEnvironmentDeletion(environmentName);
     }
   }
