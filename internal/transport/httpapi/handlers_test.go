@@ -13,10 +13,10 @@ import (
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/scenario"
-	"github.com/breakfix/breakfix/internal/domain/runnable"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -77,7 +77,7 @@ func TestAssistantWindowsIncludeOnlyValidatedWorkspaceTabs(t *testing.T) {
 
 func TestGetScenarioProgressRejectsNonReadyEnvironment(t *testing.T) {
 	handler := newProgressTestHandler(t, []runtimev2.RuntimeEnvironment{
-		testRuntimeEnvironment("environment-provisioning", runtimev2.PhaseProvisioning, nil),
+		testRuntimeEnvironment("environment-provisioning", runtimev2.PhaseProvisioning),
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -91,9 +91,9 @@ func TestGetScenarioProgressRejectsNonReadyEnvironment(t *testing.T) {
 	}
 }
 
-func TestGetScenarioProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
+func TestGetScenarioProgressReturnsPendingCheckpointFacts(t *testing.T) {
 	handler := newProgressTestHandler(t, []runtimev2.RuntimeEnvironment{
-		testRuntimeEnvironment("environment-check-failed", runtimev2.PhaseReady, &runnable.VerificationReport{Failure: &runnable.VerificationFailure{Message: "checkpoint runner exited with 1"}}),
+		testRuntimeEnvironment("environment-check-pending", runtimev2.PhaseReady),
 	})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -102,16 +102,26 @@ func TestGetScenarioProgressSurfacesCheckpointRunnerFailures(t *testing.T) {
 
 	handler.GetScenarioProgress(ctx, "demo")
 
-	if recorder.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 for failed checkpoint runner, got %d: %s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var progress api.ScenarioProgress
+	if err := json.Unmarshal(recorder.Body.Bytes(), &progress); err != nil {
+		t.Fatal(err)
+	}
+	if len(progress.Checks) != 1 || progress.Checks[0].Passed || progress.Checks[0].FirstPassedAt != nil {
+		t.Fatalf("unexpected pending checkpoint facts: %#v", progress.Checks)
 	}
 }
 
-func TestGetScenarioProgressReturnsControllerCheckpointSnapshot(t *testing.T) {
+func TestGetScenarioProgressReturnsDurableCheckpointSnapshot(t *testing.T) {
 	firstPassedAt := time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC)
 	handler := newProgressTestHandler(t, []runtimev2.RuntimeEnvironment{
-		testRuntimeEnvironment("environment-ready", runtimev2.PhaseReady, &runnable.VerificationReport{CreatedAt: firstPassedAt, Phases: []runnable.PhaseResult{{Assertions: []runnable.AssertionResult{{ID: "complete", Summary: "done", Satisfied: true}}}}}),
+		testRuntimeEnvironment("environment-ready", runtimev2.PhaseReady),
 	})
+	if err := handler.db.Environment.RecordCheckpointFirstPass(context.Background(), postgres.CheckpointFirstPassEvent{EnvironmentUID: "environment-ready-uid", UserID: "u-demo", ScenarioID: "demo", ScenarioRevision: testPublishedScenarioRevisionID, CheckpointID: "complete", FirstPassedAt: firstPassedAt, Summary: "done"}); err != nil {
+		t.Fatal(err)
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/operations/scenarios/demo/progress", nil)
@@ -287,8 +297,11 @@ func TestListScenariosIncludesRuntime(t *testing.T) {
 
 func TestListScenariosMergesCurrentProgressWithDurableCompletion(t *testing.T) {
 	handler := newProgressTestHandler(t, []runtimev2.RuntimeEnvironment{
-		testRuntimeEnvironment("environment-active", runtimev2.PhaseReady, &runnable.VerificationReport{CreatedAt: time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC), Phases: []runnable.PhaseResult{{Assertions: []runnable.AssertionResult{{ID: "complete", Summary: "done", Satisfied: true}}}}}),
+		testRuntimeEnvironment("environment-active", runtimev2.PhaseReady),
 	})
+	if err := handler.db.Environment.RecordCheckpointFirstPass(context.Background(), postgres.CheckpointFirstPassEvent{EnvironmentUID: "environment-active-uid", UserID: "u-demo", ScenarioID: "demo", ScenarioRevision: testPublishedScenarioRevisionID, CheckpointID: "complete", FirstPassedAt: time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC), Summary: "done"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := handler.db.Environment.RecordScenarioCompletion(context.Background(), "u-demo", "demo", testPublishedScenarioRevisionID, "previous-environment", time.Date(2026, time.July, 24, 10, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +333,7 @@ func TestListScenariosMergesCurrentProgressWithDurableCompletion(t *testing.T) {
 
 func TestListScenariosDoesNotTreatReleasedRuntimeAsCompletion(t *testing.T) {
 	handler := newProgressTestHandler(t, []runtimev2.RuntimeEnvironment{
-		testRuntimeEnvironment("environment-released", runtimev2.PhaseReleased, nil),
+		testRuntimeEnvironment("environment-released", runtimev2.PhaseReleased),
 	})
 
 	recorder := httptest.NewRecorder()
@@ -380,16 +393,6 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-type staticProgressReportResolver struct{ report runnable.VerificationReport }
-
-func (s staticProgressReportResolver) ResolveRunnableRevision(context.Context, string, string) (runnable.RunnableRevision, error) {
-	return runnable.RunnableRevision{}, nil
-}
-
-func (s staticProgressReportResolver) ResolveVerificationReport(context.Context, string, string, runnable.RunnableRevision) (runnable.VerificationReport, error) {
-	return s.report, nil
-}
-
 func newProgressTestHandler(t *testing.T, environments []runtimev2.RuntimeEnvironment) *Handler {
 	t.Helper()
 	root := t.TempDir()
@@ -428,12 +431,6 @@ func newProgressTestHandler(t *testing.T, environments []runtimev2.RuntimeEnviro
 		t.Fatal(err)
 	}
 	handler := newHandlerForTest(t, database, client, config.Config{DataDir: root, CRDNamespace: "breakfix-system"})
-	for _, environment := range environments {
-		if environment.Status.Progress.ReportRef.ID != "" {
-			handler.runnableReports = staticProgressReportResolver{report: reportForProgressEnvironment(environment)}
-			break
-		}
-	}
 	return handler
 }
 
@@ -456,23 +453,12 @@ func nodeTestManifest(title string) string {
 	return "id: demo\nrevision_id: " + testPublishedScenarioRevisionID + "\nsource_slug: demo\ntitle: " + title + "\nruntime: node\ndescription: demo\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nversions:\n  - component: fixture\n    version: v1\ntopology: One host node.\ninitialization: generate.sh creates the broken state.\nreproduction:\n  objective: The service is unavailable.\n  evidence:\n    - id: service-unavailable\n      description: The service is unavailable.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints:\n  - id: complete\n    title: Complete\n    description: Complete the task\n    hint: hints/complete.md\n    node: host\n"
 }
 
-func testRuntimeEnvironment(name string, phase runtimev2.EnvironmentPhase, report *runnable.VerificationReport) runtimev2.RuntimeEnvironment {
-	environment := runtimev2.RuntimeEnvironment{
+func testRuntimeEnvironment(name string, phase runtimev2.EnvironmentPhase) runtimev2.RuntimeEnvironment {
+	return runtimev2.RuntimeEnvironment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{
 			"breakfix.dev/user": "u-demo", "breakfix.dev/content-kind": "operations", "breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": testPublishedScenarioRevisionID,
 		}},
 		Spec:   runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.Now()}},
 		Status: runtimev2.RuntimeEnvironmentStatus{Phase: phase, Runtime: runtimev2.RuntimeStatus{Provider: "node"}},
 	}
-	if report != nil {
-		environment.Status.Progress.ReportRef = runtimev2.ReportReference{ID: "report-demo", Digest: testRunnableRevisionDigest}
-		progressReportByEnvironment[name] = *report
-	}
-	return environment
-}
-
-var progressReportByEnvironment = map[string]runnable.VerificationReport{}
-
-func reportForProgressEnvironment(environment runtimev2.RuntimeEnvironment) runnable.VerificationReport {
-	return progressReportByEnvironment[environment.Name]
 }

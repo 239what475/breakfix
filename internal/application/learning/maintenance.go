@@ -104,6 +104,7 @@ type CheckpointFirstPass struct {
 // Checkpoint is the status subset required to project first-pass facts.
 type Checkpoint struct {
 	ID            string
+	Passed        bool
 	FirstPassedAt *time.Time
 	Summary       string
 }
@@ -137,6 +138,7 @@ type ProjectionSource interface {
 type ProjectionRepository interface {
 	RecordScenarioAttempt(context.Context, string, string, string, string, string, time.Time) error
 	RecordCheckpointFirstPass(context.Context, CheckpointFirstPass) error
+	ListCheckpointFirstPasses(context.Context, string) ([]CheckpointFirstPass, error)
 	RecordScenarioCompletion(context.Context, string, string, string, string, time.Time) error
 	FinishScenarioAttempt(context.Context, string, string, time.Time) error
 }
@@ -223,7 +225,7 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 		}
 	}
 	for _, checkpoint := range projection.Checkpoints {
-		if checkpoint.FirstPassedAt == nil || checkpoint.FirstPassedAt.IsZero() {
+		if !checkpoint.passed() || checkpoint.FirstPassedAt == nil || checkpoint.FirstPassedAt.IsZero() {
 			continue
 		}
 		if err := s.repository.RecordCheckpointFirstPass(ctx, CheckpointFirstPass{
@@ -232,6 +234,15 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 			FirstPassedAt: checkpoint.FirstPassedAt.UTC(), Summary: checkpoint.Summary,
 		}); err != nil {
 			return false, fmt.Errorf("record checkpoint first pass %q: %w", checkpoint.ID, err)
+		}
+	}
+	passed, err := s.passedCheckpoints(ctx, projection)
+	if err != nil {
+		return false, err
+	}
+	if allCheckpointsPassed(projection.Checkpoints, passed) {
+		if err := s.repository.RecordScenarioCompletion(ctx, projection.UserID, projection.ScenarioID, projection.ScenarioRevision, projection.UID, s.now().UTC()); err != nil {
+			return false, fmt.Errorf("record checkpoint completion: %w", err)
 		}
 	}
 	switch projection.Phase {
@@ -248,6 +259,42 @@ func (s *ProjectionService) Project(ctx context.Context, projection EnvironmentP
 		return true, nil
 	}
 	return false, nil
+}
+
+func (c Checkpoint) passed() bool {
+	return c.Passed || (c.FirstPassedAt != nil && !c.FirstPassedAt.IsZero())
+}
+
+func (s *ProjectionService) passedCheckpoints(ctx context.Context, projection EnvironmentProjection) (map[string]struct{}, error) {
+	passed := make(map[string]struct{}, len(projection.Checkpoints))
+	if len(projection.Checkpoints) == 0 {
+		return passed, nil
+	}
+	for _, checkpoint := range projection.Checkpoints {
+		if checkpoint.passed() {
+			passed[checkpoint.ID] = struct{}{}
+		}
+	}
+	events, err := s.repository.ListCheckpointFirstPasses(ctx, projection.UID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoint first passes: %w", err)
+	}
+	for _, event := range events {
+		passed[event.CheckpointID] = struct{}{}
+	}
+	return passed, nil
+}
+
+func allCheckpointsPassed(checkpoints []Checkpoint, passed map[string]struct{}) bool {
+	if len(checkpoints) == 0 {
+		return false
+	}
+	for _, checkpoint := range checkpoints {
+		if _, exists := passed[checkpoint.ID]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *ProjectionService) lifecycleTime(value *time.Time) time.Time {

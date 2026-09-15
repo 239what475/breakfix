@@ -25,6 +25,18 @@ func (s projectionTestStore) RecordCheckpointFirstPass(ctx context.Context, even
 	})
 }
 
+func (s projectionTestStore) ListCheckpointFirstPasses(ctx context.Context, environmentUID string) ([]CheckpointFirstPass, error) {
+	events, err := s.repository.ListCheckpointFirstPasses(ctx, []string{environmentUID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CheckpointFirstPass, 0, len(events[environmentUID]))
+	for _, event := range events[environmentUID] {
+		result = append(result, CheckpointFirstPass{EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ScenarioID: event.ScenarioID, ScenarioRevisionID: event.ScenarioRevision, CheckpointID: event.CheckpointID, FirstPassedAt: event.FirstPassedAt, Summary: event.Summary})
+	}
+	return result, nil
+}
+
 func (s projectionTestStore) RecordScenarioCompletion(ctx context.Context, userID, scenarioID, revisionID, environmentUID string, completedAt time.Time) error {
 	return s.repository.RecordScenarioCompletion(ctx, userID, scenarioID, revisionID, environmentUID, completedAt)
 }
@@ -129,6 +141,42 @@ func TestProjectionRecordsCheckpointFirstPassOnce(t *testing.T) {
 	}
 	if got := events[projection.UID]; len(got) != 1 || got[0].ScenarioRevision != "chrev-aaaaaaaaaaaaaaaa" || got[0].CheckpointID != "proxy-ready" {
 		t.Fatalf("checkpoint events = %#v", got)
+	}
+}
+
+func TestProjectionCompletesOnlyWhenEveryCheckpointPasses(t *testing.T) {
+	service, database := newProjectionTestService(t)
+	ctx := context.Background()
+	readyAt := time.Date(2026, time.July, 28, 6, 0, 0, 0, time.UTC)
+	passedAt := readyAt.Add(time.Minute)
+	projection := learningProjection("environment-checkpoint-completion", "node", readyAt)
+	projection.Checkpoints = []Checkpoint{
+		{ID: "first", Passed: true, FirstPassedAt: &passedAt, Summary: "first passed"},
+		{ID: "second", Passed: false, Summary: "second pending"},
+	}
+	if _, err := service.Project(ctx, projection); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := database.Environment.LearningSummary(ctx, "u-demo", passedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.CompletedCount != 0 {
+		t.Fatalf("partial checkpoint result completed scenario: %#v", summary)
+	}
+	projection.Checkpoints[0].Passed = false
+	projection.Checkpoints[0].FirstPassedAt = nil
+	projection.Checkpoints[1].Passed = true
+	projection.Checkpoints[1].FirstPassedAt = &passedAt
+	if _, err := service.Project(ctx, projection); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = database.Environment.LearningSummary(ctx, "u-demo", passedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.CompletedCount != 1 {
+		t.Fatalf("completed checkpoint result was not recorded: %#v", summary)
 	}
 }
 

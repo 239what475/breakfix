@@ -85,6 +85,21 @@ func (s learningStore) RecordCheckpointFirstPass(ctx context.Context, event appl
 	})
 }
 
+func (s learningStore) ListCheckpointFirstPasses(ctx context.Context, environmentUID string) ([]applearning.CheckpointFirstPass, error) {
+	events, err := s.repository.ListCheckpointFirstPasses(ctx, []string{environmentUID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]applearning.CheckpointFirstPass, 0, len(events[environmentUID]))
+	for _, event := range events[environmentUID] {
+		result = append(result, applearning.CheckpointFirstPass{
+			EnvironmentUID: event.EnvironmentUID, UserID: event.UserID, ScenarioID: event.ScenarioID, ScenarioRevisionID: event.ScenarioRevision,
+			CheckpointID: event.CheckpointID, FirstPassedAt: event.FirstPassedAt, Summary: event.Summary,
+		})
+	}
+	return result, nil
+}
+
 func (s learningStore) RecordScenarioCompletion(ctx context.Context, userID, scenarioID, revisionID, environmentUID string, completedAt time.Time) error {
 	return s.repository.RecordScenarioCompletion(ctx, userID, scenarioID, revisionID, environmentUID, completedAt)
 }
@@ -96,6 +111,7 @@ func (s learningStore) FinishScenarioAttempt(ctx context.Context, environmentUID
 type environmentProjectionSource struct {
 	client    *kubernetes.Client
 	namespace string
+	evaluator operationsLearningEvaluator
 }
 
 func (s environmentProjectionSource) ListEnvironmentProjections(ctx context.Context) ([]applearning.EnvironmentProjection, error) {
@@ -108,7 +124,15 @@ func (s environmentProjectionSource) ListEnvironmentProjections(ctx context.Cont
 	}
 	result := make([]applearning.EnvironmentProjection, 0, len(environments.Items))
 	for index := range environments.Items {
-		if projection, ok := runtimeProjection(environments.Items[index]); ok {
+		environment := environments.Items[index]
+		if projection, ok := runtimeProjection(environment); ok {
+			if s.evaluator != nil && environment.Status.Phase == runtimev2.PhaseReady && environment.Spec.Purpose == runtimev2.PurposeLearning {
+				checkpoints, err := s.evaluator.Evaluate(ctx, environment)
+				if err != nil {
+					return nil, fmt.Errorf("evaluate Operations learning checkpoints for %q: %w", environment.Name, err)
+				}
+				projection.Checkpoints = checkpoints
+			}
 			result = append(result, projection)
 		}
 	}

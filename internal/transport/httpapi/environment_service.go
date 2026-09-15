@@ -44,28 +44,26 @@ type activeLifecycle struct {
 }
 
 type activeEnvironment struct {
-	UID                      string
-	UserID                   string
-	Runtime                  string
-	Name                     string
-	ScenarioRef              string
-	SourceRevision           string
-	RunnableRevisionID       string
-	RunnableRevisionDigest   string
-	VerificationReportID     string
-	VerificationReportDigest string
-	Purpose                  runtimev2.EnvironmentPurpose
-	Namespace                string
-	WorkspacePod             string
-	NodeIdentity             incus.NodeEnvironmentIdentity
-	Nodes                    []activeNode
-	Phase                    runtimev2.EnvironmentPhase
-	Deleting                 bool
-	ReadyAt                  *metav1.Time
-	ExpiresAt                *metav1.Time
-	Checkpoints              *checkpointStatus
-	Failure                  *runtimev2.EnvironmentFailure
-	Lifecycle                activeLifecycle
+	UID                    string
+	UserID                 string
+	Runtime                string
+	Name                   string
+	ScenarioRef            string
+	SourceRevision         string
+	RunnableRevisionID     string
+	RunnableRevisionDigest string
+	Purpose                runtimev2.EnvironmentPurpose
+	Namespace              string
+	WorkspacePod           string
+	NodeIdentity           incus.NodeEnvironmentIdentity
+	Nodes                  []activeNode
+	Phase                  runtimev2.EnvironmentPhase
+	Deleting               bool
+	ReadyAt                *metav1.Time
+	ExpiresAt              *metav1.Time
+	Checkpoints            *checkpointStatus
+	Failure                *runtimev2.EnvironmentFailure
+	Lifecycle              activeLifecycle
 }
 
 func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEnvironment {
@@ -82,7 +80,6 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		UID: string(environment.UID), Runtime: runtimeName, Name: environment.Name,
 		UserID: labels["breakfix.dev/user"], ScenarioRef: labels["breakfix.dev/content-id"], SourceRevision: labels["breakfix.dev/content-revision"],
 		RunnableRevisionID: environment.Spec.RunnableRevisionRef.ID, RunnableRevisionDigest: environment.Spec.RunnableRevisionRef.Digest,
-		VerificationReportID: environment.Status.Progress.ReportRef.ID, VerificationReportDigest: environment.Status.Progress.ReportRef.Digest,
 		Purpose: environment.Spec.Purpose, Phase: phase, Deleting: environment.DeletionTimestamp != nil,
 	}
 	if environment.Status.Lifecycle.ExpiresAt != nil {
@@ -102,47 +99,33 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 	return active
 }
 
-// checkpointStatus projects only the Operations conclusion assertions from a
-// referenced immutable report. Checkpoint data is deliberately not copied to
-// RuntimeEnvironment status.
+// checkpointStatus projects only durable learning facts. The Server's
+// background Operations evaluator is the sole writer; RuntimeEnvironment
+// status deliberately retains no copied assertion tree or learning report.
 func (h *Handler) checkpointStatus(ctx context.Context, environment *activeEnvironment, entry *scenario.Entry) (*checkpointStatus, error) {
-	if environment == nil || entry == nil || environment.VerificationReportID == "" || environment.VerificationReportDigest == "" {
+	if environment == nil || entry == nil {
 		return nil, nil
 	}
-	if h == nil || h.runnableReports == nil || environment.RunnableRevisionID == "" || environment.RunnableRevisionDigest == "" {
-		return nil, errors.New("verification report reader is unavailable")
+	if h == nil || h.db == nil {
+		return nil, errors.New("learning progress store is unavailable")
 	}
-	revision, err := h.runnableReports.ResolveRunnableRevision(ctx, environment.RunnableRevisionID, environment.RunnableRevisionDigest)
+	events, err := h.db.Environment.ListCheckpointFirstPasses(ctx, []string{environment.UID})
 	if err != nil {
-		return nil, fmt.Errorf("resolve runnable revision for environment report: %w", err)
-	}
-	report, err := h.runnableReports.ResolveVerificationReport(ctx, environment.VerificationReportID, environment.VerificationReportDigest, revision)
-	if err != nil {
-		return nil, fmt.Errorf("resolve environment verification report: %w", err)
+		return nil, fmt.Errorf("read checkpoint first-pass events: %w", err)
 	}
 	status := &checkpointStatus{Results: make([]checkpointResult, 0, len(entry.Checkpoints))}
-	checkedAt := metav1.NewTime(report.CreatedAt.UTC())
-	status.CheckedAt = &checkedAt
-	if report.Failure != nil {
-		status.Error = report.Failure.Message
-		return status, nil
+	passed := make(map[string]postgres.CheckpointFirstPassEvent, len(events[environment.UID]))
+	for _, event := range events[environment.UID] {
+		passed[event.CheckpointID] = event
 	}
-	declared := make(map[string]struct{}, len(entry.Checkpoints))
 	for _, checkpoint := range entry.Checkpoints {
-		declared[checkpoint.ID] = struct{}{}
-	}
-	for _, phase := range report.Phases {
-		for _, assertion := range phase.Assertions {
-			if _, exists := declared[assertion.ID]; !exists {
-				continue
-			}
-			firstPassedAt := (*metav1.Time)(nil)
-			if assertion.Satisfied {
-				value := checkedAt
-				firstPassedAt = &value
-			}
-			status.Results = append(status.Results, checkpointResult{ID: assertion.ID, Passed: assertion.Satisfied, FirstPassedAt: firstPassedAt, Summary: assertion.Summary, Details: assertion.Details})
+		result := checkpointResult{ID: checkpoint.ID}
+		if event, exists := passed[checkpoint.ID]; exists {
+			firstPassedAt := metav1.NewTime(event.FirstPassedAt.UTC())
+			result.Passed, result.FirstPassedAt, result.Summary = true, &firstPassedAt, event.Summary
+			status.CheckedAt = &firstPassedAt
 		}
+		status.Results = append(status.Results, result)
 	}
 	return status, nil
 }

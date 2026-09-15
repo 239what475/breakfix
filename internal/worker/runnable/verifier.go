@@ -1,19 +1,14 @@
 package runnableworker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
-
-const maxAssertionOutputBytes = 256 * 1024
 
 // EnvironmentProvider is the provider-neutral execution boundary. Provider
 // implementations create a fresh environment for the complete revision and
@@ -174,7 +169,7 @@ func (e *Executor) executeAssertion(ctx context.Context, credential runnable.Lea
 	if err := validateOutputReferences(output.Outputs); err != nil {
 		return runnable.AssertionResult{}, artifactFailure("assertion-output", err.Error())
 	}
-	result, err := parseAssertionOutput(output.Raw, assertion.ID, output.Outputs)
+	result, err := runnable.ParseAssertionOutput(output.Raw, assertion.ID, output.Outputs)
 	if err != nil {
 		return runnable.AssertionResult{}, artifactFailure("assertion-protocol", err.Error())
 	}
@@ -267,35 +262,4 @@ func validateOutputReferences(outputs []runnable.ImmutableReference) error {
 		}
 	}
 	return nil
-}
-
-func parseAssertionOutput(raw []byte, expectedID string, outputs []runnable.ImmutableReference) (runnable.AssertionResult, error) {
-	if len(raw) == 0 || len(raw) > maxAssertionOutputBytes {
-		return runnable.AssertionResult{}, errors.New("assertion output is empty or exceeds the protocol limit")
-	}
-	var document struct {
-		Assertions []struct {
-			ID        string `json:"id"`
-			Satisfied *bool  `json:"satisfied"`
-			Summary   string `json:"summary"`
-			Details   string `json:"details,omitempty"`
-		} `json:"assertions"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
-		return runnable.AssertionResult{}, fmt.Errorf("assertion output is not strict JSON: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return runnable.AssertionResult{}, errors.New("assertion output contains trailing JSON")
-	}
-	if len(document.Assertions) != 1 || document.Assertions[0].ID != expectedID || document.Assertions[0].Satisfied == nil {
-		return runnable.AssertionResult{}, errors.New("assertion output must report its declared id exactly once")
-	}
-	result := runnable.AssertionResult{ID: document.Assertions[0].ID, Satisfied: *document.Assertions[0].Satisfied, Summary: document.Assertions[0].Summary, Details: document.Assertions[0].Details, Outputs: outputs}
-	if err := result.Validate(); err != nil {
-		return runnable.AssertionResult{}, err
-	}
-	return result, nil
 }

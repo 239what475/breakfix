@@ -281,7 +281,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("create learning cleanup service: %w", err)
 	}
 	projectionService, err := applearning.NewProjectionService(
-		environmentProjectionSource{client: k8sClient, namespace: cfg.CRDNamespace},
+		environmentProjectionSource{client: k8sClient, namespace: cfg.CRDNamespace, evaluator: operationsLearningCheckpointEvaluator{revisions: database.Runnable, node: incusClient, pods: k8sClient}},
 		learningStore{repository: database.Environment},
 	)
 	if err != nil {
