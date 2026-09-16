@@ -43,7 +43,7 @@ func TestRedirectTableHandlesWildcardAndLoopsWithoutNetwork(t *testing.T) {
 	}
 }
 
-func TestPageNormalizerRejectsMissingOrExternalAssets(t *testing.T) {
+func TestPageNormalizerRejectsMissingAssetsAndDropsExternalAssets(t *testing.T) {
 	root := t.TempDir()
 	writeNormalizerFile(t, root, "build-info.json", `{"base_url":"https://docs.example.test/"}`)
 	writeNormalizerFile(t, root, "_redirects", "")
@@ -51,10 +51,12 @@ func TestPageNormalizerRejectsMissingOrExternalAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []string{"/docs/images/missing.svg", "https://example.test/image.svg"} {
-		if _, err := extractPageWithNormalizer([]byte(`<main><h1>Page</h1><img src="`+source+`"></main>`), context.forPage("docs/page/")); err == nil {
-			t.Fatalf("asset %q was accepted", source)
-		}
+	if _, err := extractPageWithNormalizer([]byte(`<main><h1>Page</h1><img src="/docs/images/missing.svg"></main>`), context.forPage("docs/page/")); err == nil {
+		t.Fatal("missing asset was accepted")
+	}
+	page, err := extractPageWithNormalizer([]byte(`<main><h1>Page</h1><img src="https://example.test/image.svg"></main>`), context.forPage("docs/page/"))
+	if err != nil || strings.Contains(string(page.Markdown), "image.svg") || page.DroppedElements != 1 {
+		t.Fatalf("external image page = %#v, error = %v", page, err)
 	}
 }
 

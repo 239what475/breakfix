@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 const formatVersion = 1
@@ -72,6 +73,25 @@ type Stats struct {
 	Assets     int `json:"assets"`
 }
 
+type FailureReport struct {
+	FormatVersion    int           `json:"format_version"`
+	GeneratorVersion string        `json:"generator_version"`
+	Failures         []PageFailure `json:"failures"`
+}
+
+type PageFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+type pageFailuresError struct {
+	count int
+}
+
+func (e *pageFailuresError) Error() string {
+	return fmt.Sprintf("%d page extraction failures; see report.json", e.count)
+}
+
 type upstreamBuildInfo struct {
 	Source   string `json:"source"`
 	Revision string `json:"revision"`
@@ -88,26 +108,16 @@ func runProjection(config Config, state treeState) error {
 	if err != nil {
 		return &InputError{Err: err}
 	}
-	indexPages := indexPageSet(state.Tree)
-	manifests := make([]PageManifest, 0, len(state.Pages))
-	for _, pagePath := range state.Pages {
-		content, err := os.ReadFile(pageFile(config.Root, pagePath))
-		if err != nil {
-			return fmt.Errorf("read page %q: %w", pagePath, err)
+	manifests, failures := projectPages(config, state, normalization, upstream)
+	if len(failures) > 0 {
+		if err := writeFailureReport(config.Out, config.Version, failures); err != nil {
+			return fmt.Errorf("write failure report: %w", err)
 		}
-		extracted, err := extractPageWithNormalizer(content, normalization.forPage(pagePath))
-		if err != nil {
-			return fmt.Errorf("extract page %q: %w", pagePath, err)
-		}
-		pageKind := "content"
-		if _, index := indexPages[pagePath]; index {
-			pageKind = "index"
-		}
-		manifest := newPageManifest(config.Version, upstream, pagePath, pageKind, extracted)
-		if err := writePage(config.Out, pagePath, extracted.Markdown, manifest); err != nil {
-			return fmt.Errorf("write page %q: %w", pagePath, err)
-		}
-		manifests = append(manifests, manifest)
+		_ = os.Remove(filepath.Join(config.Out, "manifest.json"))
+		return &pageFailuresError{count: len(failures)}
+	}
+	if err := os.Remove(filepath.Join(config.Out, "report.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale failure report: %w", err)
 	}
 	global, err := newGlobalManifest(config, state, upstream, rawBuildInfo, normalization, manifests)
 	if err != nil {
@@ -118,6 +128,107 @@ func runProjection(config Config, state treeState) error {
 		return fmt.Errorf("encode global manifest: %w", err)
 	}
 	return writeAtomically(filepath.Join(config.Out, "manifest.json"), encoded)
+}
+
+type pageResult struct {
+	path     string
+	manifest PageManifest
+	err      error
+}
+
+func projectPages(config Config, state treeState, normalization normalizationContext, upstream Upstream) ([]PageManifest, []PageFailure) {
+	indexPages := indexPageSet(state.Tree)
+	jobs := make(chan string)
+	results := make(chan pageResult, len(state.Pages))
+	var workers sync.WaitGroup
+	for worker := 0; worker < config.Workers; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for pagePath := range jobs {
+				manifest, err := projectPage(config, normalization, upstream, indexPages, pagePath)
+				results <- pageResult{path: pagePath, manifest: manifest, err: err}
+			}
+		}()
+	}
+	go func() {
+		for _, pagePath := range state.Pages {
+			jobs <- pagePath
+		}
+		close(jobs)
+		workers.Wait()
+		close(results)
+	}()
+	byPath := make(map[string]PageManifest, len(state.Pages))
+	var failures []PageFailure
+	for result := range results {
+		if result.err != nil {
+			failures = append(failures, PageFailure{Path: result.path, Error: result.err.Error()})
+			continue
+		}
+		byPath[result.path] = result.manifest
+	}
+	manifests := make([]PageManifest, 0, len(byPath))
+	for _, pagePath := range state.Pages {
+		if manifest, found := byPath[pagePath]; found {
+			manifests = append(manifests, manifest)
+		}
+	}
+	sort.Slice(failures, func(left, right int) bool { return failures[left].Path < failures[right].Path })
+	return manifests, failures
+}
+
+func projectPage(config Config, normalization normalizationContext, upstream Upstream, indexPages map[string]struct{}, pagePath string) (PageManifest, error) {
+	if config.Resume {
+		if existing, ok := existingPage(config.Out, pagePath, config.Version); ok {
+			return existing, nil
+		}
+	}
+	content, err := os.ReadFile(pageFile(config.Root, pagePath))
+	if err != nil {
+		return PageManifest{}, fmt.Errorf("read: %w", err)
+	}
+	extracted, err := extractPageWithNormalizer(content, normalization.forPage(pagePath))
+	if err != nil {
+		return PageManifest{}, fmt.Errorf("extract: %w", err)
+	}
+	pageKind := "content"
+	if _, index := indexPages[pagePath]; index {
+		pageKind = "index"
+	}
+	manifest := newPageManifest(config.Version, upstream, pagePath, pageKind, extracted)
+	if err := writePage(config.Out, pagePath, extracted.Markdown, manifest); err != nil {
+		return PageManifest{}, fmt.Errorf("write: %w", err)
+	}
+	return manifest, nil
+}
+
+func existingPage(out, pagePath, version string) (PageManifest, bool) {
+	directory := filepath.Join(out, filepath.FromSlash(pagePath))
+	content, err := os.ReadFile(filepath.Join(directory, "index.json"))
+	if err != nil {
+		return PageManifest{}, false
+	}
+	manifest, err := DecodePageManifest(content)
+	if err != nil {
+		return PageManifest{}, false
+	}
+	if manifest.GeneratorVersion != version || manifest.Path != pagePath {
+		return PageManifest{}, false
+	}
+	markdown, err := os.ReadFile(filepath.Join(directory, "index.md"))
+	if err != nil || manifest.Digest != digest(markdown) {
+		return PageManifest{}, false
+	}
+	return manifest, true
+}
+
+func writeFailureReport(out, version string, failures []PageFailure) error {
+	content, err := marshalJSON(FailureReport{FormatVersion: formatVersion, GeneratorVersion: version, Failures: failures})
+	if err != nil {
+		return err
+	}
+	return writeAtomically(filepath.Join(out, "report.json"), content)
 }
 
 func loadUpstream(root string) (Upstream, json.RawMessage, error) {

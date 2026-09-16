@@ -61,7 +61,12 @@ func extractPageWithNormalizer(content []byte, normalizer *pageNormalizer) (Extr
 	renderer := pageRenderer{labels: elementsByID(document), normalizer: normalizer}
 	markdown := renderer.blocks(main)
 	if renderer.title == "" {
-		return ExtractedPage{}, errors.New("rendered page has no h1 title")
+		fallback := fallbackTitle(document, renderer.headings)
+		if fallback == "" {
+			return ExtractedPage{}, errors.New("rendered page has no usable title")
+		}
+		renderer.title = fallback
+		markdown = "# " + fallback + "\n\n" + markdown
 	}
 	if renderer.err != nil {
 		return ExtractedPage{}, renderer.err
@@ -239,6 +244,11 @@ func (r *pageRenderer) inline(node *html.Node) string {
 			var err error
 			src, err = r.normalizer.image(src)
 			if err != nil {
+				var external *externalAssetError
+				if errors.As(err, &external) {
+					r.droppedElements++
+					return ""
+				}
 				r.err = err
 				return ""
 			}
@@ -249,6 +259,19 @@ func (r *pageRenderer) inline(node *html.Node) string {
 	default:
 		return value
 	}
+}
+
+func fallbackTitle(document *html.Node, headings []ExtractedHeading) string {
+	meta := findElement(document, func(node *html.Node) bool {
+		return node.Data == "meta" && attribute(node, "property") == "og:title"
+	})
+	if title := attribute(meta, "content"); title != "" && title != "Kubernetes" {
+		return title
+	}
+	if len(headings) > 0 {
+		return headings[0].Title
+	}
+	return ""
 }
 
 func (r *pageRenderer) list(list *html.Node, depth int, ordered bool) string {

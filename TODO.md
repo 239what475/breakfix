@@ -40,7 +40,7 @@ commit 经 Hugo 构建得到渲染树,再由离线解析程序把整棵渲染树
   可选 goquery/cascadia)。
 - Makefile 新增两个目标,归入现有 `docs-*` 族:
   - `docs-project`:执行生成(见下方 CLI 默认值),目标内固定传当前 `-version` 值
-    (当前为 `docs-project-v2`),版本递增时同步修改 Makefile;
+    (当前为 `docs-project-v3`),版本递增时同步修改 Makefile;
   - `docs-fixture`:把 1.11 清单中的页面从本地构建冻结拷贝到 `test/fixtures/docs-project/`。
 
 CLI 参数:
@@ -50,7 +50,7 @@ CLI 参数:
 | `-root` | `docs-site/public` | 渲染树根 |
 | `-out` | `docs-site/documents` | 输出根(追加进 `.gitignore`) |
 | `-workers` | `8` | 页面提取并行度 |
-| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v2`),写入全局 manifest;提取规则变更时必须递增 |
+| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v3`),写入全局 manifest;提取规则变更时必须递增 |
 | `-resume` | 关 | 跳过已存在且 generator_version 匹配的页面输出;版本不匹配强制全量 |
 | `-pages` | 空 | 逗号分隔站点路径,子集模式(调试/测试用) |
 
@@ -82,7 +82,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v2",
+  "generator_version": "docs-project-v3",
   "upstream": {"source": "kubernetes", "commit": "<sha>", "version": "snapshot-ce98a43", "locale": "en"},
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",            // content | index(在目录树中有子页面者为 index)
@@ -115,13 +115,13 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v2",
+  "generator_version": "docs-project-v3",
   "upstream": {/* 同页 manifest;commit 取自 docs-site/build-info.json,一并记录其内容 */},
   "tree": {"nodes": [                 // 目录树,来源见 1.7
     {"title": "Getting started", "path": "docs/setup/", "children": [ /* 递归 */ ]}
   ]},
   "pages": ["docs/concepts/...", /* 按字典序 */],
-  "orphans": ["docs/reference/generated/kubernetes-api/v1.23/", /* 字典序;219 基线 */],
+  "orphans": ["docs/reference/generated/kubernetes-api/v1.23/", /* 字典序;218 基线 */],
   "redirects": {"count": 433, "digest": "sha256:..."},   // _redirects 文件摘要
   "stats": {"pages": 854, "index_pages": 0, "anchors": 0, "assets": 0},
   "warnings": ["cross-page sidebar validation skipped for -pages subset"] // 仅 -pages 子集模式
@@ -145,6 +145,10 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 
 行内元素:`code` → `` `x` ``;`strong` → `**`;`em` → `*`;`a` → `[text](target)`;
 `img` → `![alt](path)`;`br` → 空格。
+
+上游渲染树中若内容区 `<h1>` 为空(v3 已知 3 页),使用非通用 `og:title`；若该值同样为
+`Kubernetes` 或缺失,则使用正文第一个非空章节标题,并在 Markdown 顶部合成 `# <title>`。这仅是
+固定渲染输入的容错,不重新推导 slug 或锚点。
 
 **库内路径形式**:`.md` 中的站内链接与图片一律使用**以输出根为基准的站点路径**
 (如 `docs/concepts/overview/`、`docs/images/ingress.svg`,页面路径保留尾部斜杠);
@@ -173,7 +177,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - **文件映射**:树路径 → `<root>/<路径>/index.html`,全部必须存在(基线 854/854 零缺失)。
 - **收录范围**:仅 `/docs/` 树;排除 `_print/`、`/en/` 镜像树(规范根为 `/docs/`,与
   kubernetes.io 规范 URL 一致)及 blog/careers 等非 docs 内容。
-- **孤儿页**:docs 树内、在磁盘但不在树中的页面(基线 219,如 v1.23–v1.36 API 参考归档),
+- **孤儿页**:docs 树内、在磁盘但不在树中的页面(基线 218,如 v1.23–v1.36 API 参考归档),
   记入全局 manifest,不处理。
 
 ### 1.8 链接与资产规范化(页面提取时内联完成)
@@ -190,7 +194,8 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
    - 页内(`#anchor`)→ 原样;
    - 外部(`http(s)`)→ 原样惰性文本,不提供任何跟随工具;
    - 其他 scheme(`javascript:` 等)→ 丢弃 href 只留文本,计 `dropped`;
-4. 图片:校验文件存在于渲染树,记 sha256 digest 进 `assets`;SVG 不解析。
+4. 图片:校验本地文件存在于渲染树,记 sha256 digest 进 `assets`;SVG 不解析。远程图片不能成为
+   离线库输入,丢弃节点并计 `dropped_elements`,不下载也不保留远程 URL。
 
 ### 1.9 digest 与确定性
 
@@ -238,9 +243,9 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 页面提取器:块级与行内规则、剥离清单、防御项(行号槽等)。
 - [x] 链接与资产规范化:base origin、重定向解析、分类与消毒、资产存在性与 digest。
 - [x] 页 manifest 与全局 manifest、全部 digest 计算。
-- [ ] 断点续跑与失败报告(`report.json`、退出码语义)。
+- [x] 断点续跑与失败报告(`report.json`、退出码语义)。
 - [ ] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
-- [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/219/433)吻合。
+- [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
 
 ### 1.13 提交计划与提交纪律
 
@@ -283,7 +288,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
    `-workers 1/8` 一致性。fixture 体积大,单独成提交便于审查。
    验证:golden 套件在 CI 通过。
 8. `docs(plan): close document library generator acceptance`
-   记录 854 页全量运行证据(零失败、复跑一致、统计与 854/219/433 基线吻合),
+   记录 854 页全量运行证据(零失败、复跑一致、统计与 854/218/433 基线吻合),
    勾选第 1 节全部任务;此后进入第 2 节运行时切换。
 
 ## 2. 运行时切换到文档库

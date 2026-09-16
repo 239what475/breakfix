@@ -296,6 +296,9 @@ func directChild(root *html.Node, name string) *html.Node {
 }
 
 func attribute(node *html.Node, key string) string {
+	if node == nil {
+		return ""
+	}
 	for _, item := range node.Attr {
 		if item.Key == key {
 			return strings.TrimSpace(item.Val)

@@ -152,6 +152,14 @@ type pageNormalizer struct {
 	assets  map[string]Asset
 }
 
+type externalAssetError struct {
+	value string
+}
+
+func (e *externalAssetError) Error() string {
+	return fmt.Sprintf("image %q is external", e.value)
+}
+
 func (context normalizationContext) forPage(page string) *pageNormalizer {
 	return &pageNormalizer{context: context, page: page, assets: map[string]Asset{}}
 }
@@ -186,6 +194,9 @@ func (normalizer *pageNormalizer) link(value string) (string, bool) {
 func (normalizer *pageNormalizer) image(value string) (string, error) {
 	resolved, kind := normalizer.resolve(value)
 	if kind != referenceDocs && kind != referenceLocal {
+		if kind == referenceExternal {
+			return "", &externalAssetError{value: value}
+		}
 		return "", fmt.Errorf("image %q is not a local rendered asset", value)
 	}
 	assetPath, _ := splitFragment(resolved)

@@ -62,3 +62,14 @@ func TestParsePageRejectsMissingMainTitleAndOversizedInput(t *testing.T) {
 		t.Fatal("oversized page was accepted")
 	}
 }
+
+func TestParsePageSynthesizesTitleForEmptyUpstreamH1(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<html><head><meta property="og:title" content="Kubernetes Documentation"></head><main><h1></h1><h2 id="start">Start</h2></main></html>`))
+	if err != nil || page.Title != "Kubernetes Documentation" || !strings.HasPrefix(string(page.Markdown), "# Kubernetes Documentation\n\n## Start") {
+		t.Fatalf("page = %#v, error = %v", page, err)
+	}
+	page, err = ParsePage(strings.NewReader(`<html><head><meta property="og:title" content="Kubernetes"></head><main><h1></h1><h3 id="requirements">Requirements</h3></main></html>`))
+	if err != nil || page.Title != "Requirements" || !strings.HasPrefix(string(page.Markdown), "# Requirements\n\n### Requirements") {
+		t.Fatalf("fallback page = %#v, error = %v", page, err)
+	}
+}
