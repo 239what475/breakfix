@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v5",
+  "generator_version": "docs-project-v6",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/concepts/services-networking/ingress/",
   "page_kind": "content",
   "title": "Ingress",
-  "digest": "sha256:ef4c2995a4184d01f095ad1d629f9a7e6c4a91f360f76d9c9cf787b98da24014",
+  "digest": "sha256:7510cf0df55dc3809e17ee445b2a558edc52fdfb66f7b97ea7c1cc3f3e40cb5b",
   "anchors": [
     {
       "id": "terminology",
@@ -37,7 +37,7 @@
       "id": "the-ingress-resource",
       "level": 2,
       "title": "The Ingress resource",
-      "digest": "sha256:fce65f0e163912744ed138b2608cf003986dfc8679106d2b921ed64e2987e324",
+      "digest": "sha256:3d904b3c40de3ea9e6d03def65b9dd3a07ad29b17ce6b7dc47801eb1edcaa5f7",
       "parent": ""
     },
     {
@@ -58,7 +58,7 @@
       "id": "resource-backend",
       "level": 3,
       "title": "Resource backends",
-      "digest": "sha256:62327df4750ed6e769b102e7e192ef4a5542c470cdb8e81fcf220906cf7cb52b",
+      "digest": "sha256:a4c74e75ea4ffc368f3bd72345038286d99b421e662ce6ce3b2086392b001f94",
       "parent": "the-ingress-resource"
     },
     {
@@ -86,21 +86,21 @@
       "id": "hostname-wildcards",
       "level": 2,
       "title": "Hostname wildcards",
-      "digest": "sha256:910a423b6069d6fbe773a266be3676a022cec6b72077370b231ce3026164db3a",
+      "digest": "sha256:b49e537f7da3d510cc013aef48c14d2b242c4820ae33944dd929ef3aa16fd345",
       "parent": ""
     },
     {
       "id": "ingress-class",
       "level": 2,
       "title": "Ingress class",
-      "digest": "sha256:cc5d11a818a195782006439950d60b48f2bd65533546e78a50c0a87960670f69",
+      "digest": "sha256:d64c099ee29476a8a7cc5e8bfe683d31ea1c04df58e95d5b4ac9e6c0a0394407",
       "parent": ""
     },
     {
       "id": "ingressclass-scope",
       "level": 3,
       "title": "IngressClass scope",
-      "digest": "sha256:db190a8d4a00b1831ac82bec5fa95921889a73eebff6c86db9ed44926bc68778",
+      "digest": "sha256:103094320b8b0b51033d593ec007e4df1f2eaf2a36de2b203a18916e88b1214a",
       "parent": "ingress-class"
     },
     {
@@ -114,42 +114,42 @@
       "id": "default-ingress-class",
       "level": 3,
       "title": "Default IngressClass",
-      "digest": "sha256:7da7c2865b01056e5f308b81139ada83f7b46e8702d517be30f078c7895bcf1e",
+      "digest": "sha256:70fdb1cf90e3d6cfc584e1daaec9d05b48eb3a1408709d9caf8ab14518470649",
       "parent": "ingress-class"
     },
     {
       "id": "types-of-ingress",
       "level": 2,
       "title": "Types of Ingress",
-      "digest": "sha256:b3b1340a9d86d5d77d22cb7e4f595b8b58adf97741cf4f49d2e21b7a5ef8eaa5",
+      "digest": "sha256:6deeda3d025cc4bd398f96e48edffa05cb91a45145d0018b53ced7fb109ce1fa",
       "parent": ""
     },
     {
       "id": "single-service-ingress",
       "level": 3,
       "title": "Ingress backed by a single Service",
-      "digest": "sha256:db90f17fb7e72e1c9f0eeaebf385b80bcb3a85527b10e816069691990822e1a0",
+      "digest": "sha256:be31558a77a1a93f6555d1c6521aa465e7d0692e3977e0fb0271f4f7b4ce45d7",
       "parent": "types-of-ingress"
     },
     {
       "id": "simple-fanout",
       "level": 3,
       "title": "Simple fanout",
-      "digest": "sha256:998f9e0086108f53ef2367e372ba7c312b0e1337818d4084fc8b6f3c10c32a93",
+      "digest": "sha256:48590966c7963f4aac8b44507e606124e742d7918af17286ed5dc68d1e61604c",
       "parent": "types-of-ingress"
     },
     {
       "id": "name-based-virtual-hosting",
       "level": 3,
       "title": "Name based virtual hosting",
-      "digest": "sha256:3accc53516626a5563ac8258642a9a409cc40c44640c91abe70f2413203aa724",
+      "digest": "sha256:0e3342c65abec69dffe20804911d51d0d50fc16a7091b35bd0aa6bd3a36719d0",
       "parent": "types-of-ingress"
     },
     {
       "id": "tls",
       "level": 3,
       "title": "TLS",
-      "digest": "sha256:b88f52837d76e01f54329b6bf53248ea6a73f2f53dcec59cbae3d55fe7731fa3",
+      "digest": "sha256:91e1de8a36a59ce3341d5bd567e26be4fe3f02c16c82751ce9c8bd3571488c80",
       "parent": "types-of-ingress"
     },
     {
@@ -163,7 +163,7 @@
       "id": "updating-an-ingress",
       "level": 2,
       "title": "Updating an Ingress",
-      "digest": "sha256:04120c05f52b96d3e85aba3162356b7a708b51ed1c107275ae71d502373fa3ea",
+      "digest": "sha256:11d089197f4e31c541bed1f42719edbcdbf3a3ec2bd5a423d04ec45fd6f73478",
       "parent": ""
     },
     {

@@ -33,6 +33,19 @@ func TestPageNormalizerNormalizesLinksAndAssets(t *testing.T) {
 	}
 }
 
+func TestRedirectTableResolvesTrailingSlashMismatch(t *testing.T) {
+	table := redirectTable{exact: map[string]string{"/docs/old/": "/docs/new/"}}
+	if got := table.resolve("/docs/old"); got != "/docs/new/" {
+		t.Fatalf("slashless source redirect = %q, want %q", got, "/docs/new/")
+	}
+	if got := table.resolve("/docs/old/"); got != "/docs/new/" {
+		t.Fatalf("redirect = %q, want %q", got, "/docs/new/")
+	}
+	if got := table.resolve("/docs/untouched"); got != "/docs/untouched" {
+		t.Fatalf("unknown path changed = %q", got)
+	}
+}
+
 func TestRedirectTableHandlesWildcardAndLoopsWithoutNetwork(t *testing.T) {
 	table := redirectTable{exact: map[string]string{"/docs/a/": "/docs/b/", "/docs/b/": "/docs/a/", "/docs/chain/": "/docs/a/"}, wildcard: []redirectRule{{from: "/docs/old/*", to: "/docs/new/:splat"}}}
 	if got := table.resolve("/docs/old/item/"); got != "/docs/new/item/" {

@@ -14,7 +14,7 @@ There is [walkthrough example](docs/tasks/run-application/horizontal-pod-autosca
 
 ## How does a HorizontalPodAutoscaler work?
 
-`
+```
 graph BT
 
 hpa[HorizontalPodAutoscaler] --> scale[Scale]
@@ -35,7 +35,7 @@ class hpa hpa;
 class rc rc;
 class scale scale;
 class pod1,pod2,pod3 pod
-`
+```
 
 Figure 1. HorizontalPodAutoscaler controls the scale of a Deployment and its ReplicaSet
 
@@ -133,14 +133,14 @@ If you perform a rolling update of a StatefulSet that has an autoscaled number o
 
 Any HPA target can be scaled based on the resource usage of the pods in the scaling target. When defining the pod specification the resource requests like `cpu` and `memory` should be specified. This is used to determine the resource utilization and used by the HPA controller to scale the target up or down. To use resource utilization based scaling specify a metric source like this:
 
-`yaml
+```yaml
 type: Resource
 resource:
   name: cpu
   target:
     type: Utilization
     averageUtilization: 60
-`
+```
 
 With this metric the HPA controller will keep the average utilization of the pods in the scaling target at 60%. Utilization is the ratio between the current usage of resource to the requested resources of the pod. See [Algorithm](#algorithm-details) for more details about how the utilization is calculated and averaged.
 
@@ -155,7 +155,7 @@ The HorizontalPodAutoscaler API also supports a container metric source where th
 
 If you revise the target resource to have a new Pod specification with a different set of containers, you should revise the HPA spec if that newly added container should also be used for scaling. If the specified container in the metric source is not present or only present in a subset of the pods then those pods are ignored and the recommendation is recalculated. See [Algorithm](#algorithm-details) for more details about the calculation. To use container resources for autoscaling define a metric source as follows:
 
-`yaml
+```yaml
 type: ContainerResource
 containerResource:
   name: cpu
@@ -163,7 +163,7 @@ containerResource:
   target:
     type: Utilization
     averageUtilization: 60
-`
+```
 
 In the above example the HPA controller scales the target such that the average utilization of the cpu in the `application` container of all the pods is 60%.
 
@@ -197,10 +197,10 @@ By default, the HorizontalPodAutoscaler controller retrieves metrics from a seri
 - The [API aggregation layer](docs/tasks/extend-kubernetes/configure-aggregation-layer/) is enabled.
 - The corresponding APIs are registered:
   - For resource metrics, this is the `metrics.k8s.io` [API](docs/reference/external-api/metrics.v1beta1/), generally provided by [metrics-server](https://github.com/kubernetes-sigs/metrics-server). It can be launched as a cluster add-on. > [!NOTE]
-> ``
+> ```
 > The HorizontalPodAutoscaler currently supports the `metrics.k8s.io/v1beta1`
 > API for resource metrics. It does not support `metrics.k8s.io/v1` yet.
-> ``
+> ```
   - For custom metrics, this is the `custom.metrics.k8s.io` [API](docs/reference/external-api/custom-metrics.v1beta2/). It's provided by "adapter" API servers provided by metrics solution vendors. Check with your metrics pipeline to see if there is a Kubernetes metrics adapter available.
   - For external metrics, this is the `external.metrics.k8s.io` [API](docs/reference/external-api/external-metrics.v1beta1/). It may be provided by the custom metrics adapters provided above.
 
@@ -222,7 +222,7 @@ Scaling policies let you control the rate of change of replicas while scaling. A
 
 One or more scaling policies can be specified in the `behavior` section of the spec. When multiple policies are specified the policy which allows the highest amount of change is the policy which is selected by default. The following example shows this behavior while scaling down:
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     policies:
@@ -232,7 +232,7 @@ behavior:
     - type: Percent
       value: 10
       periodSeconds: 60
-`
+```
 
 `periodSeconds` indicates the length of time in the past for which the policy must hold true. The maximum value that you can set for `periodSeconds` is 1800 (half an hour). The first policy *(Pods)* allows at most 4 replicas to be scaled down in one minute. The second policy *(Percent)* allows at most 10% of the current replicas to be scaled down in one minute.
 
@@ -246,11 +246,11 @@ The stabilization window is used to restrict the [flapping](#flapping) of replic
 
 For example, in the following example snippet, a stabilization window is specified for `scaleDown`.
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     stabilizationWindowSeconds: 300
-`
+```
 
 When the metrics indicate that the target should be scaled down the algorithm looks into previously computed desired states, and uses the highest value from the specified interval. In the above example, all desired states from the past 5 minutes will be considered.
 
@@ -268,11 +268,11 @@ The `tolerance` field configures a threshold for metric variations, preventing t
 
 This tolerance is defined as the amount of variation around the desired metric value under which no scaling will occur. For example, consider a HorizontalPodAutoscaler configured with a target memory consumption of 100MiB and a scale-up tolerance of 5%:
 
-`yaml
+```yaml
 behavior:
   scaleUp:
     tolerance: 0.05 # 5% tolerance for scale up
-`
+```
 
 With this configuration, the HPA algorithm will only consider scaling up if the memory consumption is higher than 105MiB (that is: 5% above the target).
 
@@ -282,7 +282,7 @@ If you don't set this field, the HPA applies the default cluster-wide tolerance 
 
 To use the custom scaling not all fields have to be specified. Only values which need to be customized can be specified. These custom values are merged with default values. The default values match the existing behavior in the HPA algorithm.
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     stabilizationWindowSeconds: 300
@@ -300,7 +300,7 @@ behavior:
       value: 4
       periodSeconds: 15
     selectPolicy: Max
-`
+```
 
 For scaling down the stabilization window is *300* seconds (or the value of the `--horizontal-pod-autoscaler-downscale-stabilization` command line option, if provided). There is only a single policy for scaling down which allows a 100% of the currently running replicas to be removed which means the scaling target can be scaled down to the minimum allowed replicas. For scaling up there is no stabilization window. When the metrics indicate that the target should be scaled up the target is scaled up immediately. There are 2 policies where 4 pods or a 100% of the currently running replicas may at most be added every 15 seconds till the HPA reaches its steady state.
 
@@ -308,28 +308,28 @@ For scaling down the stabilization window is *300* seconds (or the value of the 
 
 To provide a custom downscale stabilization window of 1 minute, the following behavior would be added to the HPA:
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     stabilizationWindowSeconds: 60
-`
+```
 
 ### Example: limit scale down rate
 
 To limit the rate at which pods are removed by the HPA to 10% per minute, the following behavior would be added to the HPA:
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     policies:
     - type: Percent
       value: 10
       periodSeconds: 60
-`
+```
 
 To ensure that no more than 5 Pods are removed per minute, you can add a second scale-down policy with a fixed size of 5, and set `selectPolicy` to minimum. Setting `selectPolicy` to `Min` means that the autoscaler chooses the policy that affects the smallest number of Pods:
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     policies:
@@ -340,17 +340,17 @@ behavior:
       value: 5
       periodSeconds: 60
     selectPolicy: Min
-`
+```
 
 ### Example: disable scale down
 
 The `selectPolicy` value of `Disabled` turns off scaling the given direction. So to prevent downscaling the following policy would be used:
 
-`yaml
+```yaml
 behavior:
   scaleDown:
     selectPolicy: Disabled
-`
+```
 
 ## Support for HorizontalPodAutoscaler in kubectl
 

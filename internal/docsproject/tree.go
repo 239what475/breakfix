@@ -77,6 +77,7 @@ func loadTree(root string, requested []string) (treeState, error) {
 	if err != nil {
 		return treeState{}, &InputError{Err: err}
 	}
+	warnings = append(warnings, "tree root docs/ redirects to docs/home/ and is excluded from pages and orphans")
 	return treeState{Tree: tree, AllPages: allPages, Pages: pages, Orphans: orphans, Warnings: warnings}, nil
 }
 
@@ -211,7 +212,9 @@ func findOrphans(root string, treePages map[string]struct{}) ([]string, error) {
 			return err
 		}
 		sitePath := filepath.ToSlash(relative) + "/"
-		if _, found := treePages[sitePath]; !found {
+		// The tree root itself redirects to docs/home/ and is neither a page
+		// nor an orphan.
+		if _, found := treePages[sitePath]; !found && sitePath != "docs/" {
 			orphans = append(orphans, sitePath)
 		}
 		return nil

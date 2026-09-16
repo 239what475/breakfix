@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v5",
+  "generator_version": "docs-project-v6",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,13 +10,13 @@
   "path": "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
   "page_kind": "content",
   "title": "Horizontal Pod Autoscaling",
-  "digest": "sha256:6208a31687bfda5f208a5fec17451de6e62decf3e6385a8a74b7beaaa81bb9eb",
+  "digest": "sha256:e381ef94cc1aa74be0a9dcd7f20eea69d9e6bb76c84a3abf1b333d72905b7757",
   "anchors": [
     {
       "id": "how-does-a-horizontalpodautoscaler-work",
       "level": 2,
       "title": "How does a HorizontalPodAutoscaler work?",
-      "digest": "sha256:995aa813578c25cff263a39e1357a9bf2e753874dae53d464963b7a3a36e6872",
+      "digest": "sha256:20438117a685272808e57184f1da1c3d18d5e63463ea6015a78e6823de3c62a9",
       "parent": ""
     },
     {
@@ -72,14 +72,14 @@
       "id": "support-for-resource-metrics",
       "level": 2,
       "title": "Support for resource metrics",
-      "digest": "sha256:fb3370b99d8e3d4a2245a978db51708b034b21ed15cc48747d2ab525510c151b",
+      "digest": "sha256:f64bb0e447e4434d3f91fce6ae265ac0af98739f379227193542f099e8206ee2",
       "parent": ""
     },
     {
       "id": "container-resource-metrics",
       "level": 3,
       "title": "Container resource metrics",
-      "digest": "sha256:b01d285c9516f6d0c3c1a6b54f123e48b169759dac47059203bcc42571a66aec",
+      "digest": "sha256:76a4bf6dc6007731a6ede35648c3abcd93e99a5a799dd6a7eb74acac2aef3f3c",
       "parent": "support-for-resource-metrics"
     },
     {
@@ -100,63 +100,63 @@
       "id": "support-for-metrics-apis",
       "level": 2,
       "title": "Support for metrics APIs",
-      "digest": "sha256:6b85b5ed904c32cfbef0ed85db4058b69447329e579d2fcb3f89d5445bea86b3",
+      "digest": "sha256:27d8d858fb27a4460418494c43f81b19b7e1a145b8a4c4e0c637f0029b6d71fe",
       "parent": ""
     },
     {
       "id": "configurable-scaling-behavior",
       "level": 2,
       "title": "Configurable scaling behavior",
-      "digest": "sha256:bfcad85a85476f107ec784678838323c7b7d078b8d9ac39bf4544d7e5993e202",
+      "digest": "sha256:0cbb5e2bef3fafa7705cbed4a0c77d930051a0d03e86ed1c71aaa8d5988bf951",
       "parent": ""
     },
     {
       "id": "scaling-policies",
       "level": 3,
       "title": "Scaling policies",
-      "digest": "sha256:aeeba5d930ccdbf87c25323bfbcd3959e6e51b12caddd5b1a214d340f228f263",
+      "digest": "sha256:265b711eb7b6e96347b7bb77a64ef36fde9223d508a364f600d4e7a3b5490a4d",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "stabilization-window",
       "level": 3,
       "title": "Stabilization window",
-      "digest": "sha256:3b849c2818660c2f1e4cc2d1a9a0f78cac61cfb08eee3352cfc5a031556615dc",
+      "digest": "sha256:9d1cad6d6a8098119388dfc8c78c623600c21c6c59f29e6ce72ad3dcbef59dd3",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "tolerance",
       "level": 3,
       "title": "Tolerance",
-      "digest": "sha256:d177f400641316e98f358239e67c8a9ef776ab454a36423bdab002c2a531e477",
+      "digest": "sha256:42665a0dcbe4398c4026dcfe65269b0aa20bb7ffe0808ec76fc189794d2b8cb4",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "default-behavior",
       "level": 3,
       "title": "Default behavior",
-      "digest": "sha256:f7e0bfbd6451238ac451dd71e44b5b9a1d5261af91e5295e650d4609e57adcbb",
+      "digest": "sha256:3cbf5846309e08a6b152f087d2874b676470a7ceffddf15438028f03b9de1397",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-change-downscale-stabilization-window",
       "level": 3,
       "title": "Example: change downscale stabilization window",
-      "digest": "sha256:888ccc5a24c57bcfb83e640682660a96cf0b2142cb4cec763f514f0f25715a88",
+      "digest": "sha256:ada74b2fe0c1f75f3731158cd846bee79f78ceba3634e80535ab2d6ff90f886a",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-limit-scale-down-rate",
       "level": 3,
       "title": "Example: limit scale down rate",
-      "digest": "sha256:2d17fae849453b2334fa0c188cdaecff6d0736d52274acaabcccab9d923dc063",
+      "digest": "sha256:c8d242958bd8d327b15adea09cdbda1c6bed0a765f60ad3bd8df2046e0ac0d89",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-disable-scale-down",
       "level": 3,
       "title": "Example: disable scale down",
-      "digest": "sha256:7a101d79b1f3b0a71e0540b61abe04605ed53a8b0520cddaf39f4dcc494d3edd",
+      "digest": "sha256:5550f7bceced98ad018df9292417ba3d420a92977fde4c2f278f069397d4853e",
       "parent": "configurable-scaling-behavior"
     },
     {

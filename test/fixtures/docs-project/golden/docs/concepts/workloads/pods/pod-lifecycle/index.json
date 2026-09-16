@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v5",
+  "generator_version": "docs-project-v6",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",
   "title": "Pod Lifecycle",
-  "digest": "sha256:ed53b4d233e47082b5052611dbfdcd01df62a40334f89396d2eed14d778e1a76",
+  "digest": "sha256:5e299475522e0aab2fbdc38646d65aa4700772cdc6722d5ca0e4eac445f23594",
   "anchors": [
     {
       "id": "pod-lifetime",
@@ -37,7 +37,7 @@
       "id": "pod-phase",
       "level": 2,
       "title": "Pod phase",
-      "digest": "sha256:f8e925cde02aedf6410b9f35515f2cc95fc63feeb27928cd1e81a9c80b309a5b",
+      "digest": "sha256:876565db83519e13f7f39a4dc9100d2bff44464802f04a1311b6a25f1cae79b5",
       "parent": ""
     },
     {
@@ -72,14 +72,14 @@
       "id": "container-restarts",
       "level": 2,
       "title": "How Pods handle problems with containers",
-      "digest": "sha256:0f739bd80a314314d34f6967106968bc5ec2ac4bc500b930007424b10398ffd6",
+      "digest": "sha256:abbea57388a9b735e951192a2bc6cda308f1dcfbb7ee6a09c2d63316c8dcc91d",
       "parent": ""
     },
     {
       "id": "restart-policy",
       "level": 3,
       "title": "Container restarts",
-      "digest": "sha256:17e6824c29c75aa2b08b5c1c66c7910981f961a7065840fdf6b26cb7763c9b8e",
+      "digest": "sha256:b7b095fb77487cb99c3a277a64c9f24fed5199cf0363a44fce4ddfa3ab919358",
       "parent": "container-restarts"
     },
     {
@@ -93,7 +93,7 @@
       "id": "pod-level-container-restart-policy",
       "level": 4,
       "title": "Pod-level container restart policy",
-      "digest": "sha256:a0e5b753e266c5c4c1b01b1865fa622f4b62c290ca7179d21fc91ce20ea7f6f0",
+      "digest": "sha256:c41618cec46c0c9d53ca5d56fd2d4b93ec5f3a0474e8654be7c8955e508e6b6d",
       "parent": "restart-policy"
     },
     {
@@ -107,35 +107,35 @@
       "id": "example-scenarios",
       "level": 5,
       "title": "Example scenarios",
-      "digest": "sha256:6779ab709040c2a6093c6f179461884423f5913a3557461b08eb3a03cfceede0",
+      "digest": "sha256:188b24ff9984e21f38da7d4c8863c18398c1b374fb28f278573c4766cecdff9c",
       "parent": "pod-level-container-restart-policy"
     },
     {
       "id": "sidecar-containers-and-restart-policies",
       "level": 5,
       "title": "Sidecar containers and restart policies",
-      "digest": "sha256:4b66497511dab4f3343b3f181ffcf4be31ace41c97a76249da36475362c0b3c8",
+      "digest": "sha256:c510b2f8842d8098ac64a29bc339016baa332a2124548bcf7ed76a35c467dc76",
       "parent": "pod-level-container-restart-policy"
     },
     {
       "id": "container-restart-rules",
       "level": 4,
       "title": "Individual container restart policy and rules",
-      "digest": "sha256:0e4175968b09b7f5424ebe8efeb2595b2e2a4e204f4eb237ea48bcad2b64a608",
+      "digest": "sha256:9d328ce74af6c33c2045234f32a232422b3a9db90bfa2159673cae27a0b42262",
       "parent": "restart-policy"
     },
     {
       "id": "restart-all-containers",
       "level": 4,
       "title": "Restart All Containers",
-      "digest": "sha256:3e8b57b6c7e74ef9407c46222cdab912ee81f290201dff4db82e4eb83f9362b4",
+      "digest": "sha256:cbc56a460abf1b1c2e91db91aebb85b78ba4b0ded7778e91c33bfd557023c732",
       "parent": "restart-policy"
     },
     {
       "id": "how-in-place-pod-restarts-work",
       "level": 5,
       "title": "How in-place Pod restarts work",
-      "digest": "sha256:f36960a7f0fee1394e75875ae6669af5322062461a2fd816b08b4f131cb82fca",
+      "digest": "sha256:46739c64bd1a1404451586240252ccd05eb8bc21c0748082d4b71ebdc75b9601",
       "parent": "restart-all-containers"
     },
     {
@@ -149,21 +149,21 @@
       "id": "configurable-container-restart-delay",
       "level": 3,
       "title": "Configurable container restart delay",
-      "digest": "sha256:52b4ee8d788e9ad2050970d68ca0d91361acf12e30b633515469b2ece034b0e0",
+      "digest": "sha256:7d9c5fb78cfaf4a25445e89e2c02638b0613c39614cc5a53157907df22cccbd8",
       "parent": "container-restarts"
     },
     {
       "id": "pod-conditions",
       "level": 2,
       "title": "Pod conditions",
-      "digest": "sha256:3cfb70332f1a4cfb40463aebe512c505afd1e5f8826939c0b2ed052eb738d50f",
+      "digest": "sha256:c82431f439d88a887b7a89fb253a5ea8595441a71c2e7eeaaf16b6e6a2f473ca",
       "parent": ""
     },
     {
       "id": "pod-readiness-gate",
       "level": 3,
       "title": "Pod readiness",
-      "digest": "sha256:ec556099b3646b2770db4191ad265422e8fdf88df131c9413d3ee871385c0b1b",
+      "digest": "sha256:9522e4550f9ea418e01d7428d56896527ebd44c10adffdba88f59c32bb7c9528",
       "parent": "pod-conditions"
     },
     {
@@ -177,7 +177,7 @@
       "id": "pod-ready-to-start-containers",
       "level": 3,
       "title": "Pod readiness to start containers",
-      "digest": "sha256:7cecd75a1254bb37a8945d3faeceadbd7b940e4b92fcd475fd8edbece64273b7",
+      "digest": "sha256:f37ea839f60675a772e432c359d97af34adb5c9fc267c4ee70d27c60d8e715a1",
       "parent": "pod-conditions"
     },
     {
@@ -233,7 +233,7 @@
       "id": "pod-termination",
       "level": 2,
       "title": "Termination of Pods",
-      "digest": "sha256:726cdefa224d946e8423aa2ce414185fb520a0b41556a3a0cc3bddaf318abd76",
+      "digest": "sha256:62096dce38104092993c2bd1bc119ac6bce7da32d4156b9a7df33f19a723f6b5",
       "parent": ""
     },
     {
@@ -247,7 +247,7 @@
       "id": "defining-custom-stop-signals",
       "level": 3,
       "title": "Defining custom stop signals",
-      "digest": "sha256:22fdd30bcc7c3d51fb090e1d414ea27a7a961da839545700b283cc9761edb22e",
+      "digest": "sha256:18629f219a9142c4d1902190bf41ddc36d23dd3fa4f55ccde3e73548bf312daf",
       "parent": "pod-termination"
     },
     {
@@ -374,12 +374,11 @@
     }
   ],
   "links": {
-    "internal": 79,
+    "internal": 80,
     "page_internal": 18,
     "external": 2,
     "to_orphans": 0,
     "out_of_tree": [
-      "docs/concepts/architecture/cri/",
       "docs/reference/generated/kubernetes-api/v1.37/"
     ],
     "dropped": 0

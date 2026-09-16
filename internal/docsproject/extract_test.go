@@ -20,7 +20,7 @@ fmt.Println(` + "`" + `tick` + "`" + `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# Example page\n\nText **strong**, *emphasis*, `x := 1`, and [next](/docs/next/). Continues.\n\n## Feature\n\n**[FEATURE STATE: Beta | gate: Demo | since: v1.35 | enabled by default]**\n\n> [!WARNING]\n> Pay attention.\n\n``go\nfmt.Println(`tick`)\n``\n\n| Name | Value |\n| --- | --- |\n| a\\|b | **yes** |\n\n> Quoted.\n\n> **More**\n>\n> Hidden text.\n"
+	want := "# Example page\n\nText **strong**, *emphasis*, `x := 1`, and [next](/docs/next/). Continues.\n\n## Feature\n\n**[FEATURE STATE: Beta | gate: Demo | since: v1.35 | enabled by default]**\n\n> [!WARNING]\n> Pay attention.\n\n```go\nfmt.Println(`tick`)\n```\n\n| Name | Value |\n| --- | --- |\n| a\\|b | **yes** |\n\n> Quoted.\n\n> **More**\n>\n> Hidden text.\n"
 	if got := string(page.Markdown); got != want {
 		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
 	}
@@ -47,6 +47,20 @@ func TestParsePageRendersListsTabsCardsAndDegradedTables(t *testing.T) {
 	}
 	if page.DegradedTables != 1 {
 		t.Fatalf("degraded tables = %d", page.DegradedTables)
+	}
+}
+
+func TestParsePageEmitsFencedCodeBlockWithMinimumFence(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Fences</h1><pre><code class="language-yaml">behavior:
+  scaleDown:
+    stabilizationWindowSeconds: 300
+</code></pre></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Fences\n\n```yaml\nbehavior:\n  scaleDown:\n    stabilizationWindowSeconds: 300\n```\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
 	}
 }
 

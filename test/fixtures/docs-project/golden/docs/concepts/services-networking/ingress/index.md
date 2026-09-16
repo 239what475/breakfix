@@ -55,7 +55,7 @@ A minimal Ingress resource example:
 
 [`service/networking/minimal-ingress.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/minimal-ingress.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -72,7 +72,7 @@ spec:
             name: test
             port:
               number: 80
-`
+```
 
 An Ingress needs `apiVersion`, `kind`, `metadata` and `spec` fields. The name of an Ingress object must be a valid [DNS subdomain name](docs/concepts/overview/working-with-objects/names/#dns-subdomain-names). For general information about working with config files, see [deploying applications](docs/tasks/run-application/run-stateless-application-deployment/), [configuring containers](docs/tasks/configure-pod-container/configure-pod-configmap/), [managing resources](docs/concepts/workloads/management/). Ingress controllers frequently use [annotations](docs/concepts/overview/working-with-objects/annotations/) to configure behavior. Review the documentation for your choice of ingress controller to learn which annotations are expected and / or supported.
 
@@ -104,7 +104,7 @@ A `Resource` backend is an ObjectRef to another Kubernetes resource within the s
 
 [`service/networking/ingress-resource-backend.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/ingress-resource-backend.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -125,15 +125,15 @@ spec:
                 apiGroup: k8s.example.com
                 kind: StorageBucket
                 name: icon-assets
-`
+```
 
 After creating the Ingress above, you can view it with the following command:
 
-`bash
+```bash
 kubectl describe ingress ingress-resource-backend
-`
+```
 
-`
+```
 Name:             ingress-resource-backend
 Namespace:        default
 Address:
@@ -145,7 +145,7 @@ Rules:
               /icons   APIGroup: k8s.example.com, Kind: StorageBucket, Name: icon-assets
 Annotations:  <none>
 Events:       <none>
-`
+```
 
 ### Path types
 
@@ -207,7 +207,7 @@ Hosts can be precise matches (for example “`foo.bar.com`”) or a wildcard (fo
 
 [`service/networking/ingress-wildcard-host.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/ingress-wildcard-host.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -234,7 +234,7 @@ spec:
             name: service2
             port:
               number: 80
-`
+```
 
 ## Ingress class
 
@@ -242,7 +242,7 @@ Ingresses can be implemented by different controllers, often with different conf
 
 [`service/networking/external-lb.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/external-lb.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata:
@@ -253,7 +253,7 @@ spec:
     apiGroup: k8s.example.com
     kind: IngressParameters
     name: external-lb
-`
+```
 
 The `.spec.parameters` field of an IngressClass lets you reference another resource that provides configuration related to that IngressClass.
 
@@ -274,7 +274,7 @@ If you set the `.spec.parameters` field and don't set `.spec.parameters.scope`, 
 
 For example:
 
-`yaml
+```yaml
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
@@ -291,18 +291,18 @@ spec:
     apiGroup: k8s.example.net
     kind: ClusterIngressParameter
     name: external-config-1
-`
+```
 
 **Panel: Namespaced**
 
-`
+```
 <div class="feature-state-notice feature-stable">
   <span class="feature-state-name">Feature state:</span>
   <span class="feature-state-details">
   <span class="feature-state-stage">Stable</span> since Kubernetes v1.23
   </span>
 </div>
-`
+```
 
 If you set the `.spec.parameters` field and set `.spec.parameters.scope` to `Namespace`, then the IngressClass refers to a namespaced-scoped resource. You must also set the `namespace` field within `.spec.parameters` to the namespace that contains the parameters you want to use.
 
@@ -317,7 +317,7 @@ The IngressClass API itself is always cluster-scoped.
 
 Here is an example of an IngressClass that refers to parameters that are namespaced:
 
-`yaml
+```yaml
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
@@ -334,7 +334,7 @@ spec:
     kind: IngressParameter
     namespace: external-configuration
     name: external-config
-`
+```
 
 ### Deprecated annotation
 
@@ -357,7 +357,7 @@ Start by defining a default IngressClass. It is recommended though, to specify t
 
 [`service/networking/default-ingressclass.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/default-ingressclass.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata:
@@ -368,7 +368,7 @@ metadata:
     ingressclass.kubernetes.io/is-default-class: "true"
 spec:
   controller: k8s.io/example-class
-`
+```
 
 ## Types of Ingress
 
@@ -378,7 +378,7 @@ There are existing Kubernetes concepts that allow you to expose a single Service
 
 [`service/networking/test-ingress.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/test-ingress.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -389,18 +389,18 @@ spec:
       name: test
       port:
         number: 80
-`
+```
 
 If you create it using `kubectl apply -f` you should be able to view the state of the Ingress you added:
 
-`bash
+```bash
 kubectl get ingress test-ingress
-`
+```
 
-`
+```
 NAME           CLASS         HOSTS   ADDRESS         PORTS   AGE
 test-ingress   external-lb   *       203.0.113.123   80      59s
-`
+```
 
 Where `203.0.113.123` is the IP allocated by the Ingress controller to satisfy this Ingress.
 
@@ -423,7 +423,7 @@ It would require an Ingress such as:
 
 [`service/networking/simple-fanout-example.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/simple-fanout-example.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -447,15 +447,15 @@ spec:
             name: service2
             port:
               number: 8080
-`
+```
 
 When you create the Ingress with `kubectl apply -f`:
 
-`shell
+```shell
 kubectl describe ingress simple-fanout-example
-`
+```
 
-`
+```
 Name:             simple-fanout-example
 Namespace:        default
 Address:          178.91.123.132
@@ -470,7 +470,7 @@ Events:
   Type     Reason  Age                From                     Message
   ----     ------  ----               ----                     -------
   Normal   ADD     22s                loadbalancer-controller  default/test
-`
+```
 
 The Ingress controller provisions an implementation-specific load balancer that satisfies the Ingress, as long as the Services (`service1`, `service2`) exist. When it has done so, you can see the address of the load balancer at the Address field.
 
@@ -497,7 +497,7 @@ The following Ingress tells the backing load balancer to route requests based on
 
 [`service/networking/name-virtual-host-ingress.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/name-virtual-host-ingress.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -524,7 +524,7 @@ spec:
             name: service2
             port:
               number: 80
-`
+```
 
 If you create an Ingress resource without any hosts defined in the rules, then any web traffic to the IP address of your Ingress controller can be matched without a name based virtual host being required.
 
@@ -532,7 +532,7 @@ For example, the following Ingress routes traffic requested for `first.bar.com` 
 
 [`service/networking/name-virtual-host-ingress-no-third-host.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/name-virtual-host-ingress-no-third-host.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -568,13 +568,13 @@ spec:
             name: service3
             port:
               number: 80
-`
+```
 
 ### TLS
 
 You can secure an Ingress by specifying a [Secret](docs/concepts/configuration/secret/) that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Secret
 metadata:
@@ -584,7 +584,7 @@ data:
   tls.crt: base64 encoded cert
   tls.key: base64 encoded key
 type: kubernetes.io/tls
-`
+```
 
 Referencing this secret in an Ingress tells the Ingress controller to secure the channel from the client to the load balancer using TLS. You need to make sure the TLS secret you created came from a certificate that contains a Common Name (CN), also known as a Fully Qualified Domain Name (FQDN) for `https-example.foo.com`.
 
@@ -609,7 +609,7 @@ Referencing this secret in an Ingress tells the Ingress controller to secure the
 
 [`service/networking/tls-example-ingress.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/tls-example-ingress.yaml)
 
-`yaml
+```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -630,7 +630,7 @@ spec:
             name: service1
             port:
               number: 80
-`
+```
 
 > [!NOTE]
 > There is a gap between TLS features supported by various ingress controllers. You should refer to the documentation for the ingress controller(s) you've chosen to understand how TLS works in your environment.
@@ -645,11 +645,11 @@ It's also worth noting that even though health checks are not exposed directly t
 
 To update an existing Ingress to add a new Host, you can update it by editing the resource:
 
-`shell
+```shell
 kubectl describe ingress test
-`
+```
 
-`
+```
 Name:             test
 Namespace:        default
 Address:          178.91.123.132
@@ -663,15 +663,15 @@ Events:
   Type     Reason  Age                From                     Message
   ----     ------  ----               ----                     -------
   Normal   ADD     35s                loadbalancer-controller  default/test
-`
+```
 
-`shell
+```shell
 kubectl edit ingress test
-`
+```
 
 This pops up an editor with the existing configuration in YAML format. Modify it to include the new Host:
 
-`yaml
+```yaml
 spec:
   rules:
   - host: foo.bar.com
@@ -695,17 +695,17 @@ spec:
         path: /foo
         pathType: Prefix
 ..
-`
+```
 
 After you save your changes, kubectl updates the resource in the API server, which tells the Ingress controller to reconfigure the load balancer.
 
 Verify this:
 
-`shell
+```shell
 kubectl describe ingress test
-`
+```
 
-`
+```
 Name:             test
 Namespace:        default
 Address:          178.91.123.132
@@ -721,7 +721,7 @@ Events:
   Type     Reason  Age                From                     Message
   ----     ------  ----               ----                     -------
   Normal   ADD     45s                loadbalancer-controller  default/test
-`
+```
 
 You can achieve the same outcome by invoking `kubectl replace -f` on a modified Ingress YAML file.
 

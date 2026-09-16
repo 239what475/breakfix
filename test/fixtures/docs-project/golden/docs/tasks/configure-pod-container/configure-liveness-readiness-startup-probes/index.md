@@ -20,7 +20,7 @@ In this exercise, you create a Pod that runs a container based on the `registry.
 
 [`pods/probe/exec-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/exec-liveness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -42,33 +42,33 @@ spec:
         - /tmp/healthy
       initialDelaySeconds: 5
       periodSeconds: 5
-`
+```
 
 In the configuration file, you can see that the Pod has a single `Container`. The `periodSeconds` field specifies that the kubelet should perform a liveness probe every 5 seconds. The `initialDelaySeconds` field tells the kubelet that it should wait 5 seconds before performing the first probe. To perform a probe, the kubelet executes the command `cat /tmp/healthy` in the target container. If the command succeeds, it returns 0, and the kubelet considers the container to be alive and healthy. If the command returns a non-zero value, the kubelet kills the container and restarts it.
 
 When the container starts, it executes this command:
 
-`shell
+```shell
 /bin/sh -c "touch /tmp/healthy; sleep 30; rm -f /tmp/healthy; sleep 600"
-`
+```
 
 For the first 30 seconds of the container's life, there is a `/tmp/healthy` file. So during the first 30 seconds, the command `cat /tmp/healthy` returns a success code. After 30 seconds, `cat /tmp/healthy` returns a failure code.
 
 Create the Pod:
 
-`shell
+```shell
 kubectl apply -f https://k8s.io/examples/pods/probe/exec-liveness.yaml
-`
+```
 
 Within 30 seconds, view the Pod events:
 
-`shell
+```shell
 kubectl describe pod liveness-exec
-`
+```
 
 The output indicates that no liveness probes have failed yet:
 
-`none
+```none
 Type    Reason     Age   From               Message
 ----    ------     ----  ----               -------
 Normal  Scheduled  11s   default-scheduler  Successfully assigned default/liveness-exec to node01
@@ -76,17 +76,17 @@ Normal  Pulling    9s    kubelet, node01    Pulling image "registry.k8s.io/busyb
 Normal  Pulled     7s    kubelet, node01    Successfully pulled image "registry.k8s.io/busybox:1.27.2"
 Normal  Created    7s    kubelet, node01    Created container liveness
 Normal  Started    7s    kubelet, node01    Started container liveness
-`
+```
 
 After 35 seconds, view the Pod events again:
 
-`shell
+```shell
 kubectl describe pod liveness-exec
-`
+```
 
 At the bottom of the output, there are messages indicating that the liveness probes have failed, and the failed containers have been killed and recreated.
 
-`none
+```none
 Type     Reason     Age                From               Message
 ----     ------     ----               ----               -------
 Normal   Scheduled  57s                default-scheduler  Successfully assigned default/liveness-exec to node01
@@ -96,20 +96,20 @@ Normal   Created    53s                kubelet, node01    Created container live
 Normal   Started    53s                kubelet, node01    Started container liveness
 Warning  Unhealthy  10s (x3 over 20s)  kubelet, node01    Liveness probe failed: cat: can't open '/tmp/healthy': No such file or directory
 Normal   Killing    10s                kubelet, node01    Container liveness failed liveness probe, will be restarted
-`
+```
 
 Wait another 30 seconds, and verify that the container has been restarted:
 
-`shell
+```shell
 kubectl get pod liveness-exec
-`
+```
 
 The output shows that `RESTARTS` has been incremented. Note that the `RESTARTS` counter increments as soon as a failed container comes back to the running state:
 
-`none
+```none
 NAME            READY     STATUS    RESTARTS   AGE
 liveness-exec   1/1       Running   1          1m
-`
+```
 
 ## Define a liveness HTTP request
 
@@ -117,7 +117,7 @@ Another kind of liveness probe uses an HTTP GET request. Here is the configurati
 
 [`pods/probe/http-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/http-liveness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -139,7 +139,7 @@ spec:
           value: Awesome
       initialDelaySeconds: 3
       periodSeconds: 3
-`
+```
 
 In the configuration file, you can see that the Pod has a single container. The `periodSeconds` field specifies that the kubelet should perform a liveness probe every 3 seconds. The `initialDelaySeconds` field tells the kubelet that it should wait 3 seconds before performing the first probe. To perform a probe, the kubelet sends an HTTP GET request to the server that is running in the container and listening on port 8080. If the handler for the server's `/healthz` path returns a success code, the kubelet considers the container to be alive and healthy. If the handler returns a failure code, the kubelet kills the container and restarts it.
 
@@ -149,7 +149,7 @@ You can see the source code for the server in [server.go](https://github.com/kub
 
 For the first 10 seconds that the container is alive, the `/healthz` handler returns a status of 200. After that, the handler returns a status of 500.
 
-`go
+```go
 http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
     duration := time.Now().Sub(started)
     if duration.Seconds() > 10 {
@@ -160,21 +160,21 @@ http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
         w.Write([]byte("ok"))
     }
 })
-`
+```
 
 The kubelet starts performing health checks 3 seconds after the container starts. So the first couple of health checks will succeed. But after 10 seconds, the health checks will fail, and the kubelet will kill and restart the container.
 
 To try the HTTP liveness check, create a Pod:
 
-`shell
+```shell
 kubectl apply -f https://k8s.io/examples/pods/probe/http-liveness.yaml
-`
+```
 
 After 10 seconds, view Pod events to verify that liveness probes have failed and the container has been restarted:
 
-`shell
+```shell
 kubectl describe pod liveness-http
-`
+```
 
 In releases after v1.13, local HTTP proxy environment variable settings do not affect the HTTP liveness probe.
 
@@ -192,7 +192,7 @@ By default the `kubelet` sends HTTP/1.1 requests when executing an HTTP probe. I
 
 [`pods/probe/h2c-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/h2c-liveness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -211,7 +211,7 @@ spec:
         protocol: HTTP2
       initialDelaySeconds: 5
       periodSeconds: 10
-`
+```
 
 When `protocol` is set to `HTTP2`, the `kubelet` connects using HTTP/2 cleartext (h2c) — HTTP/2 over plain TCP without TLS. The following configurations aren't supported:
 
@@ -226,7 +226,7 @@ A third type of liveness probe uses a TCP socket. With this configuration, the k
 
 [`pods/probe/tcp-liveness-readiness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/tcp-liveness-readiness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -249,7 +249,7 @@ spec:
         port: 8080
       initialDelaySeconds: 15
       periodSeconds: 10
-`
+```
 
 As you can see, configuration for a TCP check is quite similar to an HTTP check. This example uses both readiness and liveness probes. The kubelet will run the first liveness probe 15 seconds after the container starts. This will attempt to connect to the `goproxy` container on port 8080. If the liveness probe fails, the container will be restarted. The kubelet will continue to run this check every 10 seconds.
 
@@ -257,15 +257,15 @@ In addition to the liveness probe, this configuration includes a readiness probe
 
 To try the TCP liveness check, create a Pod:
 
-`shell
+```shell
 kubectl apply -f https://k8s.io/examples/pods/probe/tcp-liveness-readiness.yaml
-`
+```
 
 After 15 seconds, view Pod events to verify that liveness probes:
 
-`shell
+```shell
 kubectl describe pod goproxy
-`
+```
 
 ## Define a gRPC liveness probe
 
@@ -277,7 +277,7 @@ Here is an example manifest:
 
 [`pods/probe/grpc-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/grpc-liveness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -293,19 +293,19 @@ spec:
       grpc:
         port: 2379
       initialDelaySeconds: 10
-`
+```
 
 To try the gRPC liveness check, create a Pod using the command below. In the example below, the etcd pod is configured to use gRPC liveness probe.
 
-`shell
+```shell
 kubectl apply -f https://k8s.io/examples/pods/probe/grpc-liveness.yaml
-`
+```
 
 After 15 seconds, view Pod events to verify that the liveness check has not failed:
 
-`shell
+```shell
 kubectl describe pod etcd-with-grpc
-`
+```
 
 When using a gRPC probe, there are some technical details to be aware of:
 
@@ -328,7 +328,7 @@ By default the `kubelet` connects to gRPC health endpoints over plaintext. If yo
 
 [`pods/probe/grpc-tls-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/grpc-tls-liveness.yaml)
 
-`yaml
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -346,7 +346,7 @@ spec:
         mode: TLS
       initialDelaySeconds: 5
       periodSeconds: 10
-`
+```
 
 When `mode` is set to `TLS`, the `kubelet` connects over TLS with `InsecureSkipVerify` and does not verify the server certificate. This matches the behavior of HTTPS probes. Certificate verification is not supported.
 
@@ -358,7 +358,7 @@ You can use a named [`port`](docs/reference/kubernetes-api/core/pod-v1/#ports) f
 
 For example:
 
-`yaml
+```yaml
 ports:
 - name: liveness-port
   containerPort: 8080
@@ -367,7 +367,7 @@ livenessProbe:
   httpGet:
     path: /healthz
     port: liveness-port
-`
+```
 
 ## Protect slow starting containers with startup probes
 
@@ -375,7 +375,7 @@ Sometimes, you have to deal with applications that require additional startup ti
 
 So, the previous example would become:
 
-`yaml
+```yaml
 ports:
 - name: liveness-port
   containerPort: 8080
@@ -393,7 +393,7 @@ startupProbe:
     port: liveness-port
   failureThreshold: 30
   periodSeconds: 10
-`
+```
 
 Thanks to the startup probe, the application will have a maximum of 5 minutes (30 * 10 = 300s) to finish its startup. Once the startup probe has succeeded once, the liveness probe takes over to provide a fast response to container deadlocks. If the startup probe never succeeds, the container is killed after 300s and subject to the pod's `restartPolicy`.
 
@@ -417,7 +417,7 @@ Sometimes, applications are temporarily unable to serve traffic. For example, an
 
 Readiness probes are configured similarly to liveness probes. The only difference is that you use the `readinessProbe` field instead of the `livenessProbe` field.
 
-`yaml
+```yaml
 readinessProbe:
   exec:
     command:
@@ -425,7 +425,7 @@ readinessProbe:
     - /tmp/healthy
   initialDelaySeconds: 5
   periodSeconds: 5
-`
+```
 
 Configuration for HTTP and TCP readiness probes also remains identical to liveness probes.
 

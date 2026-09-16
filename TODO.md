@@ -40,7 +40,7 @@ commit 经 Hugo 构建得到渲染树,再由离线解析程序把整棵渲染树
   可选 goquery/cascadia)。
 - Makefile 新增两个目标,归入现有 `docs-*` 族:
   - `docs-project`:执行生成(见下方 CLI 默认值),目标内固定传当前 `-version` 值
-    (当前为 `docs-project-v5`),版本递增时同步修改 Makefile;
+    (当前为 `docs-project-v6`),版本递增时同步修改 Makefile;
   - `docs-fixture`:把 1.11 清单中的页面从本地构建冻结拷贝到 `test/fixtures/docs-project/`。
 
 CLI 参数:
@@ -50,7 +50,7 @@ CLI 参数:
 | `-root` | `docs-site/public` | 渲染树根 |
 | `-out` | `docs-site/documents` | 输出根(追加进 `.gitignore`) |
 | `-workers` | `8` | 页面提取并行度 |
-| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v5`),写入全局 manifest;提取规则变更时必须递增 |
+| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v6`),写入全局 manifest;提取规则变更时必须递增 |
 | `-resume` | 关 | 跳过已存在且 generator_version 匹配的页面输出;版本不匹配强制全量 |
 | `-pages` | 空 | 逗号分隔站点路径,子集模式(调试/测试用) |
 
@@ -82,7 +82,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v5",
+  "generator_version": "docs-project-v6",
   "upstream": {"source": "kubernetes", "commit": "<sha>", "version": "snapshot-ce98a43", "locale": "en"},
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",            // content | index(在目录树中有子页面者为 index)
@@ -115,13 +115,13 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v5",
+  "generator_version": "docs-project-v6",
   "upstream": {/* 同页 manifest;commit 取自 docs-site/build-info.json,一并记录其内容 */},
   "tree": {"nodes": [                 // 目录树,来源见 1.7
     {"title": "Getting started", "path": "docs/setup/", "children": [ /* 递归 */ ]}
   ]},
   "pages": ["docs/concepts/...", /* 按字典序 */],
-  "orphans": ["docs/reference/generated/kubernetes-api/v1.23/", /* 字典序;218 基线 */],
+  "orphans": ["docs/reference/generated/kubernetes-api/v1.23/", /* 字典序;217 基线 */],
   "redirects": {"count": 433, "digest": "sha256:..."},   // _redirects 文件摘要
   "stats": {"pages": 854, "index_pages": 0, "anchors": 0, "assets": 0},
   "warnings": ["cross-page sidebar validation skipped for -pages subset"] // 仅 -pages 子集模式
@@ -179,8 +179,10 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - **文件映射**:树路径 → `<root>/<路径>/index.html`,全部必须存在(基线 854/854 零缺失)。
 - **收录范围**:仅 `/docs/` 树;排除 `_print/`、`/en/` 镜像树(规范根为 `/docs/`,与
   kubernetes.io 规范 URL 一致)及 blog/careers 等非 docs 内容。
-- **孤儿页**:docs 树内、在磁盘但不在树中的页面(基线 218,如 v1.23–v1.36 API 参考归档),
-  记入全局 manifest,不处理。
+- **孤儿页**:docs 树内、在磁盘但不在树中的页面(基线 217,如 v1.23–v1.36 API 参考归档),
+  记入全局 manifest,不处理。**树根 `docs/` 例外**:它是目录树的根节点(301 重定向到
+  `docs/home/`),既不计入 `pages` 也不计入 `orphans`,在全局 manifest 的 `warnings` 中
+  记录一条说明。
 
 ### 1.8 链接与资产规范化(页面提取时内联完成)
 
@@ -201,8 +203,9 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 
 ### 1.9 digest 与确定性
 
-- 页 digest = `index.md` 字节 sha256;章节 digest = 该章节在 `index.md` 中字节段的 sha256;
-  资产 digest = 文件字节 sha256;redirects digest = `_redirects` 字节 sha256。
+- 页 digest = `index.md` 字节 sha256;**章节 digest 的字节段定义:从标题行第一个字节起,
+  到下一个 level ≤ 自身的标题行第一个字节之前(包含章节末尾的换行符),页面最后一个章节
+  到文件末尾**;资产 digest = 文件字节 sha256;redirects digest = `_redirects` 字节 sha256。
 - 生成物中**禁止墙钟时间、随机数、map 遍历序**;所有集合输出前排序。
 - 输出与 worker 数、处理顺序无关(纯函数 + 原子写 + 汇编按路径排序读取)。
 - 同一渲染树 + 同一 `-version` → 字节级相同输出(验收项)。
@@ -247,7 +250,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 页 manifest 与全局 manifest、全部 digest 计算。
 - [x] 断点续跑与失败报告(`report.json`、退出码语义)。
 - [x] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
-- [x] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
+- [x] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/217/433)吻合。
 
 ### 1.13 提交计划与提交纪律
 
@@ -295,7 +298,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 
 ### 验收记录(2026-09-16)
 
-- `go run ./cmd/docs-project -root docs-site/public -out <tmp> -workers 8 -version docs-project-v5`
+- `go run ./cmd/docs-project -root docs-site/public -out <tmp> -workers 8 -version docs-project-v6`
   连续运行两次,`diff -r` 为空;同一输入以 `-workers 1` 运行后与 8 worker 输出的 `diff -r` 也为空。
 - 两次全量运行均无 `report.json`;全局清单为 854 pages、218 orphans、433 docs redirects,
   另有 127 index pages、12,476 anchors、69 assets。

@@ -7,6 +7,26 @@ import (
 	"testing"
 )
 
+func TestFindOrphansExcludesTreeRoot(t *testing.T) {
+	root := t.TempDir()
+	dirs := []string{"docs", "docs/home", "docs/reference/generated/v1"}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(dir), "index.html"), []byte("<html></html>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orphans, err := findOrphans(root, map[string]struct{}{"docs/home/": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 1 || orphans[0] != "docs/reference/generated/v1/" {
+		t.Fatalf("orphans = %#v, want only docs/reference/generated/v1/", orphans)
+	}
+}
+
 func TestRunRejectsInvalidInvocationWithInputExitCode(t *testing.T) {
 	root := t.TempDir()
 	tests := []struct {
@@ -84,7 +104,7 @@ func TestLoadTreeSubsetSkipsCrossPageValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Warnings) != 1 || len(state.Pages) != 1 || state.Pages[0] != "docs/setup/" {
+	if len(state.Warnings) != 2 || state.Warnings[0] != "cross-page sidebar validation skipped for -pages subset" || len(state.Pages) != 1 || state.Pages[0] != "docs/setup/" {
 		t.Fatalf("subset state = %#v", state)
 	}
 }

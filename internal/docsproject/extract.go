@@ -314,7 +314,13 @@ func (r *pageRenderer) codeBlock(pre *html.Node) string {
 		code = pre
 	}
 	content := trimCodeNewlines(rawText(code))
-	fence := strings.Repeat("`", longestBacktickRun(content)+1)
+	// A code fence needs at least three backticks; one longer than any run
+	// inside the content when the content itself contains backticks.
+	fenceLength := longestBacktickRun(content) + 1
+	if fenceLength < 3 {
+		fenceLength = 3
+	}
+	fence := strings.Repeat("`", fenceLength)
 	language := ""
 	for _, class := range strings.Fields(attribute(code, "class")) {
 		if strings.HasPrefix(class, "language-") {

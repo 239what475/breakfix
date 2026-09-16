@@ -119,22 +119,31 @@ func loadRedirects(filename string) (redirectTable, error) {
 	return table, nil
 }
 
+// resolve maps a site path through the redirect table using a single hop.
+// Rendered hrefs and _redirects entries disagree on trailing slashes, so an
+// exact miss is retried with a trailing slash appended.
 func (table redirectTable) resolve(value string) string {
-	next, exists := table.exact[value]
-	if !exists {
-		for _, rule := range table.wildcard {
-			prefix := strings.TrimSuffix(rule.from, "*")
-			if strings.HasPrefix(value, prefix) {
-				next = strings.ReplaceAll(rule.to, ":splat", strings.TrimPrefix(value, prefix))
-				exists = true
-				break
-			}
-		}
+	next, exists := table.lookup(value)
+	if !exists && !strings.HasSuffix(value, "/") {
+		next, exists = table.lookup(value + "/")
 	}
 	if !exists || next == value {
 		return value
 	}
 	return next
+}
+
+func (table redirectTable) lookup(value string) (string, bool) {
+	if target, exists := table.exact[value]; exists {
+		return target, true
+	}
+	for _, rule := range table.wildcard {
+		prefix := strings.TrimSuffix(rule.from, "*")
+		if strings.HasPrefix(value, prefix) {
+			return strings.ReplaceAll(rule.to, ":splat", strings.TrimPrefix(value, prefix)), true
+		}
+	}
+	return "", false
 }
 
 type pageNormalizer struct {
