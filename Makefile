@@ -1,7 +1,8 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	test-e2e-documentation docs-sync docs-build docs-image docs-check docs-metadata docs-smoke
+	test-e2e-documentation docs-sync docs-build docs-image docs-check docs-metadata docs-smoke \
+	docs-project docs-fixture
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -34,6 +35,8 @@ TARGETARCH ?= amd64
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
 DOCS_SITE_SCRIPT := $(CURDIR)/docs-site/scripts/docs-site.sh
+DOCS_PROJECT_VERSION := docs-project-v1
+DOCS_PROJECT_FIXTURE := $(CURDIR)/test/fixtures/docs-project
 
 CATALOG_SOURCE ?=
 CATALOG_ARCHIVE ?= dist/catalog.oci.tar
@@ -70,6 +73,19 @@ docs-metadata:
 
 docs-smoke: docs-check
 	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT=$(CURDIR)/docs-site/public BREAKFIX_DOCUMENTATION_SOURCE_ROOT=$(CURDIR)/.local/docs/upstream go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycleSnapshotSmoke
+
+docs-project:
+	go run ./cmd/docs-project -root $(CURDIR)/docs-site/public -out $(CURDIR)/docs-site/documents -workers 8 -version $(DOCS_PROJECT_VERSION)
+
+docs-fixture:
+	@test -d $(CURDIR)/docs-site/public || { echo "docs-site/public is required; run make docs-build first" >&2; exit 2; }
+	@mkdir -p $(DOCS_PROJECT_FIXTURE)
+	@cp $(CURDIR)/docs-site/public/build-info.json $(DOCS_PROJECT_FIXTURE)/build-info.json
+	@cp $(CURDIR)/docs-site/public/_redirects $(DOCS_PROJECT_FIXTURE)/_redirects
+	@for page in docs/home docs/concepts/workloads/pods/pod-lifecycle docs/concepts/workloads/autoscaling/horizontal-pod-autoscale docs/concepts/services-networking/ingress docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes; do \
+		mkdir -p "$(DOCS_PROJECT_FIXTURE)/$$page"; \
+		cp "$(CURDIR)/docs-site/public/$$page/index.html" "$(DOCS_PROJECT_FIXTURE)/$$page/index.html"; \
+	done
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./api/v2

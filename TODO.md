@@ -231,7 +231,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 
 ### 实施任务
 
-- [ ] `cmd/docs-project` + `internal/docsproject` 骨架:CLI、Makefile 目标
+- [x] `cmd/docs-project` + `internal/docsproject` 骨架:CLI、Makefile 目标
       (`docs-project` / `docs-fixture`)、`.gitignore` 追加输出目录。
 - [ ] 目录树提取:语言块剥离、跨页一致性校验、文件映射、孤儿报告。
 - [ ] 页面提取器:块级与行内规则、剥离清单、防御项(行号槽等)。
