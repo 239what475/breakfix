@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -68,7 +67,7 @@ func (h *Handler) GetGeneratorReviewBundle(c *gin.Context, workflowID string, pa
 		WorkflowId:             view.Workflow.ID,
 		WorkflowState:          string(view.Workflow.State),
 		CandidateRevisionId:    view.Candidate.ID,
-		CandidateArchiveSha256: view.Candidate.ArchiveSHA256,
+		CandidateArchiveDigest: view.Candidate.ArchiveDigest,
 		PayloadSha256:          candidate.Digest(payload),
 		ExportedAt:             time.Now().UTC(),
 	}
@@ -96,7 +95,6 @@ func (h *Handler) buildContentReviewPayload(ctx context.Context, workflow genera
 	entries := make(map[string][]byte)
 	entries["overview.md"] = []byte(contentOverviewMarkdown(projection))
 	entries["judge.md"] = []byte(judgeReviewMarkdown(workflow))
-	entries["verification.md"] = []byte(verificationReviewMarkdown(projection.Verification))
 	for _, checkpoint := range verifiedCheckpoints(projection.Verified) {
 		entries["checkpoints/"+checkpoint.Id+".md"] = []byte(verifiedCheckpointMarkdown(checkpoint))
 	}
@@ -171,17 +169,6 @@ func judgeReviewMarkdown(workflow generation.Workflow) string {
 		out.WriteString("\n")
 	}
 	return out.String()
-}
-
-func verificationReviewMarkdown(value *api.AuthoringVerificationReport) string {
-	if value == nil {
-		return "# 验证\n\n当前没有验证报告。\n"
-	}
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return "# 验证\n\n验证报告无法序列化。\n"
-	}
-	return "# 验证\n\n```json\n" + string(data) + "\n```\n"
 }
 
 func reviewPath(prefix, value string) (string, error) {

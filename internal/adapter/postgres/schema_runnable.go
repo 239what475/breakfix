@@ -24,14 +24,6 @@ var schemaRunnableStatements = []string{
 		created_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX runnable_revisions_spec ON runnable_revisions (spec_digest, created_at DESC)`,
-	`CREATE TABLE scenario_runnable_revision_bindings (
-		scenario_revision_id TEXT PRIMARY KEY REFERENCES scenario_revisions(id) ON DELETE RESTRICT,
-		runnable_revision_id TEXT NOT NULL REFERENCES runnable_revisions(id) ON DELETE RESTRICT,
-		runnable_revision_digest TEXT NOT NULL REFERENCES runnable_revisions(runnable_revision_digest) ON DELETE RESTRICT,
-		created_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(runnable_revision_id),
-		UNIQUE(runnable_revision_digest)
-	)`,
 	`CREATE TABLE runnable_verification_reports (
 		id TEXT PRIMARY KEY,
 		verification_report_digest TEXT NOT NULL UNIQUE,

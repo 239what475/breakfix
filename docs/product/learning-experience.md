@@ -25,7 +25,7 @@ Catalog 展示当前 active revision 的场景摘要，可按全文搜索、简�
 
 作者在同一页面完成自然语言讨论、现场说明约定和已验证 revision 审核。修改现场说明或检查点只能通过 Agent 的受控领域操作，不能直接编辑
 已发布场景文件。作者确认某个 Plan revision 后，Authoring Agent 创建 workflow、操作远程 workspace 并提交 candidate；Judge 与
-`Build -> ArtifactPublish -> Verify` 由异步状态机推进。打回或验证失败的反馈返回作者对话，只有作者要求时才继续修复。
+`MaterializeArtifact -> Verify` 由公共 Runnable action 异步推进。打回或验证失败的反馈返回作者对话，只有作者要求时才继续修复。
 
 验证成功后，作者查看场景资产、检查点、diff 和验证摘要，并在对话中确认内容。确认后直接发布：对运维场景，标签来自 candidate
 manifest 并随 immutable revision 发布；对文档示例，后续契约会把其上游文档位置作为单独来源元数据。平台不自动分类、不生成关系图。

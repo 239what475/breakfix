@@ -155,14 +155,14 @@ func (unexpectedJudgeExecutor) Judge(context.Context, authoring.Plan, *Candidate
 }
 
 type agentRunnerStore struct {
-	claim                   domain.Claim
-	claimed                 bool
-	run                     agent.Run
-	candidate               domain.Revision
-	judgeCalls              int
-	retryCalls              int
-	interruptCalls          int
-	judgementFinalized      bool
+	claim              domain.Claim
+	claimed            bool
+	run                agent.Run
+	candidate          domain.Revision
+	judgeCalls         int
+	retryCalls         int
+	interruptCalls     int
+	judgementFinalized bool
 }
 
 type dispatchStore struct {
@@ -263,7 +263,7 @@ func (s *agentRunnerStore) FinalizeGenerationJudgement(context.Context, domain.C
 	return nil
 }
 
-func (s *agentRunnerStore) ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, *domain.VerificationReport, time.Time) error {
+func (s *agentRunnerStore) ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, time.Time) error {
 	return errors.New("unexpected artifact failure")
 }
 
@@ -272,10 +272,16 @@ func (s *agentRunnerStore) RenewGenerationLease(context.Context, domain.Claim, t
 }
 
 func testAgentWorkflow(id string, state domain.WorkflowState, candidateID string) domain.Workflow {
-	return domain.Workflow{
+	workflow := domain.Workflow{
 		ID: id, Source: domain.Source{Kind: domain.SourceAuthoring, Ref: "authoring-session"}, SourceRevision: "1",
 		State: state, CandidateRevisionID: candidateID, StateVersion: 1, NextRunAt: time.Now().UTC(),
 	}
+	if state.AgentState() {
+		expiresAt := time.Now().UTC().Add(time.Hour)
+		workflow.AgentLeaseOwner = "server-agent-lease"
+		workflow.AgentLeaseExpiresAt = &expiresAt
+	}
+	return workflow
 }
 
 func testAgentCandidate(t *testing.T) domain.Revision {
@@ -286,5 +292,5 @@ func testAgentCandidate(t *testing.T) domain.Revision {
 	if err != nil {
 		t.Fatalf("save candidate archive: %v", err)
 	}
-	return domain.Revision{ID: id, ArchivePath: path, ArchiveSHA256: digest}
+	return domain.Revision{ID: id, ArchivePath: path, ArchiveDigest: digest}
 }

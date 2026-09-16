@@ -133,7 +133,7 @@ func validateReviewManifest(manifest api.GeneratorReviewManifest) (kind, version
 	if !safeReviewID(manifest.WorkflowId) || !safeReviewID(manifest.CandidateRevisionId) {
 		return "", "", errors.New("review manifest has an invalid workflow or candidate revision ID")
 	}
-	if !validReviewSHA256(manifest.CandidateArchiveSha256) || !validReviewSHA256(manifest.PayloadSha256) {
+	if !validReviewSHA256(manifest.CandidateArchiveDigest) || !validReviewSHA256(manifest.PayloadSha256) {
 		return "", "", errors.New("review manifest has an invalid SHA-256 digest")
 	}
 	if manifest.ExportedAt.IsZero() {
@@ -211,7 +211,7 @@ func sameReviewManifest(left, right api.GeneratorReviewManifest) bool {
 		left.WorkflowId == right.WorkflowId &&
 		left.WorkflowState == right.WorkflowState &&
 		left.CandidateRevisionId == right.CandidateRevisionId &&
-		left.CandidateArchiveSha256 == right.CandidateArchiveSha256 &&
+		left.CandidateArchiveDigest == right.CandidateArchiveDigest &&
 		left.PayloadSha256 == right.PayloadSha256
 }
 
@@ -263,7 +263,7 @@ func safeReviewPayloadPath(kind, value string) (string, error) {
 		return "", errors.New("review payload must not contain manifest.json")
 	}
 	if kind == "content" {
-		if value == "overview.md" || value == "judge.md" || value == "verification.md" ||
+		if value == "overview.md" || value == "judge.md" ||
 			strings.HasPrefix(value, "checkpoints/") || strings.HasPrefix(value, "candidate/") || strings.HasPrefix(value, "diff/") {
 			return value, nil
 		}

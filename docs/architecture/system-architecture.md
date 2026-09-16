@@ -36,13 +36,13 @@ Browser / breakfix-mcp
 | Environment CRD 和 provider 资源 | Controller | Controller 只调和 Environment，不写 Catalog 或 authoring 状态。 |
 
 Server 是唯一的 HTTP、认证、Catalog、Authoring、Assistant 和 durable workflow 协调者。Authoring Agent 和本机
-`breakfix-mcp` 调用同一 GeneratorService；Judge 是唯一后台模型角色。Runtime Worker 只运行 lease-fenced 构建、artifact
-publish、验证、正式场景 publish 与资源清理。
+`breakfix-mcp` 调用同一 GeneratorService；Judge 是唯一后台模型角色。Runtime Worker 只运行 lease-fenced 公共 materialize、
+verify 与资源清理；Server application finalizer 原子写入产品发布状态。
 
 ## Catalog 与发布
 
-空平台可在 Server 启动时按 immutable `catalog.release_reference` 安装一个 Catalog Release。所有 entry 的真实验证和 artifact
-promotion 成功后，Server 在一个事务中写入 stable Scenario、active revision，并将 release 置为 Ready；因此不会公开部分 Catalog。
+空平台可在 Server 启动时按 immutable `catalog.release_reference` 安装一个 Catalog Release。所有 entry 的公共 materialize 和真实验证
+成功后，Server 在一个事务中写入 stable Scenario、active revision 及公共引用，并将 release 置为 Ready；因此不会公开部分 Catalog。
 基线建立后，新增与修订走 Authoring 的 `GenerationWorkflow`。详细的 portable source、bootstrap 和完整性契约见
 [Catalog Release](catalog-release.md)。
 

@@ -12,7 +12,7 @@ Deployment、CLI 兼容层或通用 Agent 队列。
 | Generator client (web) | 调用 GeneratorService 的 Server Authoring Agent | GenerationWorkflow、PlanRevision、CandidateRevision、workspace | 作者确认后的对话回合。 |
 | Generator client (external) | 本机 `breakfix-mcp` | 同一 GeneratorService 契约 | 每次操作一个显式 MCP workspace turn。 |
 | Judge | Server | GenerationWorkflow、PlanRevision、CandidateRevision | 独立领取 `Judging` workflow。 |
-| Build、artifact publish、verify、场景 publish、provider cleanup | Runtime Worker | lease-fenced runtime action | 仅 Runtime Worker。 |
+| materialize、verify、provider cleanup | Runtime Worker | lease-fenced public runnable action | 仅 Runtime Worker；产品发布由 Server finalizer 写入。 |
 
 `AgentRun` 是一次完整、可审计的逻辑执行，可以包含多个模型 HTTP 请求和工具调用；它不是常驻进程或通用队列。每个 typed result 的业务
 aggregate 才是权威状态。

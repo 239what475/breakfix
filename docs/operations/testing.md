@@ -63,7 +63,7 @@ Deployment/Pod/PVC/Environment、事件、组件日志、PostgreSQL 日志和 In
 ## Live Agent 验收
 
 真实 Authoring 是显式人工验收，不属于日常门禁。网页 Authoring Agent 与本机 `breakfix-mcp` 共用同一个 GeneratorService：作者确认
-Plan、提交 candidate，经历真实 `Build -> ArtifactPublish -> Verify`、内容审核和显式发布。打回后只有作者请求的修复会写入 workspace。
+Plan、提交 candidate，经历真实 `MaterializeArtifact -> Verify`、内容审核和显式发布。打回后只有作者请求的修复会写入 workspace。
 MCP 验收额外断言审核包校验并原子投影到临时目录，重复同步幂等、删除投影可恢复，目录没有用户 Token 或底层环境凭据，其他用户 Token
 不能读取 workflow。
 

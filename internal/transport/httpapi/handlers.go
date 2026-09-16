@@ -114,7 +114,11 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		} else if cfg.Catalog.Enabled() {
 			return nil, fmt.Errorf("configured catalog release requires a database")
 		}
-		catalogService = appcatalog.NewService(cfg.ScenariosDir(), availability, lifecycle)
+		var runnable appcatalog.RunnableRevisionResolver
+		if database != nil {
+			runnable = database.Runnable
+		}
+		catalogService = appcatalog.NewService(cfg.ScenariosDir(), availability, lifecycle, runnable)
 	}
 	agentRuntimeContext := dependencies.AgentRuntimeContext
 	if agentRuntimeContext == nil {

@@ -215,11 +215,11 @@ type connectorAPI struct {
 func newConnectorAPI(t *testing.T) *connectorAPI {
 	t.Helper()
 	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", map[string]string{
-		"overview.md": "# Candidate\n", "judge.md": "# Judge\n", "verification.md": "# Verification\n",
+		"overview.md": "# Candidate\n", "judge.md": "# Judge\n",
 		"checkpoints/ready.md": "# Ready\n", "candidate/problem.md": "# Problem\n",
 	})
 	workflow := api.GeneratorWorkflow{Id: "generation-workflow-one", SessionId: "authoring-session-one", PlanRevision: 1, State: "NeedsAuthorReview", StateVersion: 4, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	candidate := &api.AuthoringCandidate{Id: "candidate-revision-one", ArchiveSha256: bundle.Manifest.CandidateArchiveSha256}
+	candidate := &api.AuthoringCandidate{Id: "candidate-revision-one", ArchiveDigest: bundle.Manifest.CandidateArchiveDigest, ContentRevision: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
 	return &connectorAPI{generation: api.GeneratorGeneration{Workflow: workflow, Candidate: candidate, Assets: []api.AuthoringAsset{}, Diff: []api.AuthoringFileDiff{}}, bundle: bundle}
 }
 

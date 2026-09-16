@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
+	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
+	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	"github.com/breakfix/breakfix/internal/content/workspacearchive"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 // Candidate is the immutable archive inspected by the Generator and Judge
@@ -17,6 +20,36 @@ type Candidate struct {
 	Archive []byte
 	Entry   scenario.Entry
 	Files   []CandidateFile
+}
+
+// FreezeCandidateSource converts the accepted workspace archive into the
+// canonical public source format before any public materialization action is
+// scheduled. The private workspace archive remains only a Server read input.
+func FreezeCandidateSource(archive []byte) (runnable.SourceArchive, []byte, string, error) {
+	canonical, err := workspacearchive.Canonicalize(archive)
+	if err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	root, err := os.MkdirTemp("", "breakfix-freeze-candidate-")
+	if err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	defer os.RemoveAll(root) //nolint:errcheck
+	if err := workspacearchive.Extract(root, canonical); err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	if _, err := ValidateCandidateDir(root); err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	source, sourceBytes, err := appoperations.BuildSourceArchive(root)
+	if err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	revision, err := appcatalog.ContentRevision(root)
+	if err != nil {
+		return runnable.SourceArchive{}, nil, "", err
+	}
+	return source, sourceBytes, string(revision), nil
 }
 
 // CandidateFile is deliberately limited to regular workspace files. It is

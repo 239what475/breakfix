@@ -1511,11 +1511,14 @@ components:
 
     AuthoringCandidate:
       type: object
-      required: [id, archive_sha256]
+      required: [id, archive_digest, content_revision]
       properties:
         id:
           type: string
-        archive_sha256:
+        archive_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        content_revision:
           type: string
         failure:
           $ref: "#/components/schemas/AuthoringCandidateFailure"
@@ -1534,7 +1537,7 @@ components:
 
     GeneratorWorkflow:
       type: object
-      required: [id, session_id, plan_revision, state, state_version, runtime_attempt, created_at, updated_at]
+      required: [id, session_id, plan_revision, state, state_version, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1546,14 +1549,11 @@ components:
           minimum: 0
         state:
           type: string
-          enum: [Generating, Judging, Building, ArtifactPublishing, Verifying, NeedsAuthorReview, ScenarioPublishing, Published, Failed, Cancelled]
+          enum: [Generating, Judging, MaterializingArtifact, Verifying, NeedsAuthorReview, Publishing, Published, Failed, Cancelled]
         state_version:
           type: integer
           format: int64
           minimum: 1
-        runtime_attempt:
-          type: integer
-          minimum: 0
         candidate_revision_id:
           type: string
         last_error:
@@ -1580,66 +1580,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
-    AuthoringVerificationReport:
-      type: object
-      required: [passed, reproduction, answers, checkpoints, summary]
-      properties:
-        passed:
-          type: boolean
-        summary:
-          type: string
-        reproduction:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringReproductionEvidenceResult"
-        answers:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringExecutionResult"
-        checkpoints:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuthoringCheckpointResult"
-
-    AuthoringExecutionResult:
-      type: object
-      required: [location, exit_code]
-      properties:
-        location:
-          type: string
-        exit_code:
-          type: integer
-        stdout:
-          type: string
-        stderr:
-          type: string
-
-    AuthoringReproductionEvidenceResult:
-      type: object
-      required: [id, observed, summary]
-      properties:
-        id:
-          type: string
-        observed:
-          type: boolean
-        summary:
-          type: string
-        details:
-          type: string
-
-    AuthoringCheckpointResult:
-      type: object
-      required: [id, passed, summary]
-      properties:
-        id:
-          type: string
-        passed:
-          type: boolean
-        summary:
-          type: string
-        details:
-          type: string
 
     AuthoringChange:
       type: object
@@ -1797,8 +1737,6 @@ components:
           $ref: "#/components/schemas/AuthoringCandidate"
         verified:
           $ref: "#/components/schemas/VerifiedScenario"
-        verification:
-          $ref: "#/components/schemas/AuthoringVerificationReport"
         assets:
           type: array
           items:
@@ -1820,7 +1758,7 @@ components:
 
     GeneratorReviewManifest:
       type: object
-      required: [schema_version, kind, workflow_id, workflow_state, candidate_revision_id, candidate_archive_sha256, payload_sha256, exported_at]
+      required: [schema_version, kind, workflow_id, workflow_state, candidate_revision_id, candidate_archive_digest, payload_sha256, exported_at]
       properties:
         schema_version:
           type: integer
@@ -1834,7 +1772,7 @@ components:
           type: string
         candidate_revision_id:
           type: string
-        candidate_archive_sha256:
+        candidate_archive_digest:
           type: string
           pattern: '^sha256:[0-9a-f]{64}$'
         payload_sha256:

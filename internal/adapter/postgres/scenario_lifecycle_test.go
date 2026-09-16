@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/scenario"
-	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
@@ -33,7 +33,7 @@ func TestDeprecateAuthoringScenarioRetainsImmutableHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stable.ActiveRevisionID != fixture.revision.ID || revision.State != scenariodomain.RevisionActive || revision.Artifact != fixture.revision.Artifact {
+	if stable.ActiveRevisionID != fixture.revision.ID || revision.State != scenariodomain.RevisionActive || revision.RunnableRevisionRef != fixture.revision.RunnableRevisionRef || revision.VerificationReportRef != fixture.revision.VerificationReportRef {
 		t.Fatalf("deprecated lifecycle changed immutable history: scenario=%#v revision=%#v", stable, revision)
 	}
 	active, err := database.Scenario.ListActiveScenarioRevisions(ctx)
@@ -77,7 +77,30 @@ func insertScenarioLifecycleFixture(t *testing.T, database *Store, sourceKind sc
 	sourceSlug := "lifecycle-" + index
 	contentRevision := "sha256:" + strings.Repeat("a", 64)
 	materializedRevision := "sha256:" + strings.Repeat("b", 64)
-	artifact := execution.ArtifactReference{Runtime: scenario.RuntimeNode, IncusAlias: "lifecycle-" + index, IncusFingerprint: strings.Repeat("c", 64)}
+	publicRevision := testRunnableRevision(t)
+	publicRevision.Spec.Identity = runnable.ContentIdentity{Kind: "operations", ID: scenarioID, Revision: contentRevision}
+	specDigest, err := publicRevision.Spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicRevision.Artifact.BuiltFromSpecDigest = specDigest
+	revisionDigest, err := publicRevision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnableRef := runnable.RevisionReference{ID: "runnable-revision-" + index, Digest: revisionDigest}
+	if err := database.Runnable.StoreRunnableRevision(context.Background(), runnable.StoredRevision{Reference: runnableRef, Revision: publicRevision, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	report := testVerificationReport(t, publicRevision)
+	reportDigest, err := report.Digest(publicRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportRef := runnable.VerificationReportReference{ID: "verification-report-" + index, Digest: reportDigest}
+	if err := database.Runnable.StoreVerificationReport(context.Background(), runnable.StoredVerificationReport{Reference: reportRef, Report: report, RunnableRevision: publicRevision, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
 	fixture := scenarioLifecycleFixture{
 		scenario: scenariodomain.Scenario{
 			ID: scenarioID, SourceKind: sourceKind, SourceRef: "lifecycle/topic/" + index, OwnerUserID: owner,
@@ -85,8 +108,8 @@ func insertScenarioLifecycleFixture(t *testing.T, database *Store, sourceKind sc
 		},
 		revision: scenariodomain.Revision{
 			ID: revisionID, ScenarioID: scenarioID, SourceKind: sourceKind, SourceRef: "lifecycle/topic/" + index, SourceRevisionID: "1",
-			Title: "Lifecycle scenario " + index, Runtime: scenario.RuntimeNode, Type: scenario.ScenarioOperationsScenario, ContentRevision: contentRevision, SourceSlug: sourceSlug,
-			MaterializedPath: scenario.MaterializedPath(sourceSlug, revisionID), MaterializedRevision: materializedRevision, Artifact: artifact,
+			Title: "Lifecycle scenario " + index, Type: scenario.ScenarioOperationsScenario, ContentRevision: contentRevision, SourceSlug: sourceSlug,
+			MaterializedPath: scenario.MaterializedPath(sourceSlug, revisionID), MaterializedRevision: materializedRevision, RunnableRevisionRef: runnableRef, VerificationReportRef: reportRef,
 			State: scenariodomain.RevisionActive, PublishedAt: now, CreatedAt: now,
 		},
 	}

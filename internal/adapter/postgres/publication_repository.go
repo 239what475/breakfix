@@ -32,8 +32,8 @@ func (d *PublicationRepository) RetainedMaterializationPaths(ctx context.Context
 		FROM catalog_release_entry_commits commit
 		JOIN catalog_releases release ON release.id = commit.release_id
 		WHERE release.state = ? AND commit.state IN (?, ?, ?)`,
-		generation.StateScenarioPublishing, catalogdomain.ReleaseCommitting,
-		catalogdomain.CommitPrepared, catalogdomain.CommitArtifactPublished, catalogdomain.CommitMaterialized)
+		generation.StatePublishing, catalogdomain.ReleaseCommitting,
+		catalogdomain.CommitPrepared, catalogdomain.CommitMaterialized, catalogdomain.CommitCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("query retained materializations: %w", err)
 	}

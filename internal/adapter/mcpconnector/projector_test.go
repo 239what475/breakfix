@@ -28,7 +28,6 @@ func TestReviewProjectorAtomicallyProjectsAndResynchronizesContent(t *testing.T)
 		"candidate/nodes/host/checks.sh": "#!/bin/sh\n",
 		"diff/problem.md.diff":           "--- old\n+++ new\n",
 		"judge.md":                       "# Judge\n",
-		"verification.md":                "# Verification\n",
 	})
 	first, err := projector.Project(bundle)
 	if err != nil {
@@ -66,7 +65,7 @@ func TestReviewProjectorRejectsIncorrectPayloadDigest(t *testing.T) {
 		t.Fatalf("new review projector: %v", err)
 	}
 	bundle := testReviewBundle(t, "content", "NeedsAuthorReview", map[string]string{
-		"overview.md": "# Candidate\n", "judge.md": "# Judge\n", "verification.md": "# Verification\n",
+		"overview.md": "# Candidate\n", "judge.md": "# Judge\n",
 	})
 	bundle.Manifest.PayloadSha256 = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if _, err := projector.Project(bundle); err == nil || !strings.Contains(err.Error(), "digest") {
@@ -140,7 +139,7 @@ func testReviewBundle(t *testing.T, kind, state string, entries map[string]strin
 		WorkflowId:             "generation-workflow-one",
 		WorkflowState:          state,
 		CandidateRevisionId:    "candidate-revision-one",
-		CandidateArchiveSha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		CandidateArchiveDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		PayloadSha256:          reviewPayloadDigest(payload),
 		ExportedAt:             time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC),
 	}

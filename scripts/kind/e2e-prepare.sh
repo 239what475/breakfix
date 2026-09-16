@@ -118,10 +118,11 @@ make -C "$repo_root" images
 "$target_script" mark
 "$target_script" ensure-incus
 "$target_script" configure-runtime
-# Bring up the current Controller before cleanup. A stale target can contain
-# Environment finalizers, and those must be handled by the current code rather
-# than by an assumed old Deployment.
-"$repo_root/scripts/kind/runtime.sh"
+# Bring up the current Controller before cleanup. Server readiness is
+# deliberately skipped here: a destructive schema migration must be able to
+# remove the prior target database before the new Server accepts it. Runtime
+# Workers can run while Server is unavailable; they only retry public actions.
+BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
 "$target_script" reset
 # reset deliberately removes its marker and Secret snapshot. Mark the clean
 # target again so this prepare owns a fresh restore point for its deployment.

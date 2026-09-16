@@ -32,7 +32,6 @@ type GeneratorWorkspaceTools interface {
 // archive storage or runtime snapshot behavior.
 type GeneratorServiceConfig struct {
 	DataDir           string
-	FreezeExecution   ExecutionSnapshotter
 	SnapshotRequested func(string)
 }
 
@@ -53,7 +52,6 @@ type GeneratorService struct {
 	sandboxes         GeneratorWorkspaceTools
 	dataDir           string
 	snapshots         *workspacearchive.Store
-	freeze            ExecutionSnapshotter
 	now               func() time.Time
 	cleanupTTL        time.Duration
 	snapshotRequested func(string)
@@ -65,8 +63,8 @@ func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspa
 	if store == nil || plans == nil || workspace == nil || sandboxes == nil {
 		return nil, errors.New("generator service requires stores, workspace manager, and sandbox tools")
 	}
-	if strings.TrimSpace(config.DataDir) == "" || config.FreezeExecution == nil {
-		return nil, errors.New("generator service requires candidate data directory and runtime snapshotter")
+	if strings.TrimSpace(config.DataDir) == "" {
+		return nil, errors.New("generator service requires candidate data directory")
 	}
 	snapshots, err := workspacearchive.NewStore(config.DataDir)
 	if err != nil {
@@ -77,7 +75,7 @@ func NewGeneratorService(store GeneratorStore, plans GeneratorPlanStore, workspa
 	}
 	return &GeneratorService{
 		store: store, plans: plans, workspace: workspace, sandboxes: sandboxes,
-		dataDir: strings.TrimSpace(config.DataDir), snapshots: snapshots, freeze: config.FreezeExecution,
+		dataDir: strings.TrimSpace(config.DataDir), snapshots: snapshots,
 		now: func() time.Time { return time.Now().UTC() }, cleanupTTL: 10 * time.Second, snapshotRequested: config.SnapshotRequested,
 	}, nil
 }
@@ -402,9 +400,9 @@ func (s *GeneratorService) SubmitCandidate(ctx context.Context, userID string, s
 	if err != nil {
 		return nil, domain.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
-	snapshot, err := s.freeze(inspected.Entry)
+	sourceArchive, _, contentRevision, err := FreezeCandidateSource(inspected.Archive)
 	if err != nil {
-		return nil, domain.NewArtifactError("CANDIDATE_RUNTIME_INVALID", err.Error())
+		return nil, domain.NewArtifactError("CANDIDATE_SOURCE_INVALID", err.Error())
 	}
 	candidateID := domain.NewID("candidate-revision")
 	archivePath, digest, err := candidate.SaveArchiveAtomic(s.dataDir, candidateID, inspected.Archive)
@@ -412,7 +410,7 @@ func (s *GeneratorService) SubmitCandidate(ctx context.Context, userID string, s
 		return nil, fmt.Errorf("persist candidate archive: %w", err)
 	}
 	revision, err := s.store.SubmitGenerationCandidate(ctx, workflow.Source.Ref, userID, submission, domain.Revision{
-		ID: candidateID, ArchivePath: archivePath, ArchiveSHA256: digest, Snapshot: snapshot,
+		ID: candidateID, ArchivePath: archivePath, ArchiveDigest: digest, ContentRevision: contentRevision, SourceArchive: sourceArchive,
 	}, s.now())
 	if err != nil {
 		// A commit may have succeeded even when its response was lost. Preserve
@@ -441,7 +439,7 @@ func (s *GeneratorService) ConfirmContent(ctx context.Context, userID string, co
 	if err != nil {
 		return nil, err
 	}
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveDigest)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +448,7 @@ func (s *GeneratorService) ConfirmContent(ctx context.Context, userID string, co
 		return nil, domain.NewArtifactError("CANDIDATE_INVALID", err.Error())
 	}
 	return s.store.ConfirmGenerationContent(ctx, workflow.Source.Ref, userID, confirmation,
-		domain.PublicationMetadata{Title: inspected.Entry.Title, Runtime: inspected.Entry.Runtime}, s.now())
+		domain.PublicationMetadata{Title: inspected.Entry.Title}, s.now())
 }
 
 func (s *GeneratorService) RequestContentChanges(ctx context.Context, userID string, request domain.ContentChangeRequest) (*domain.Workflow, error) {
@@ -539,7 +537,7 @@ func (s *GeneratorService) workspaceSeed(ctx context.Context, userID string, wor
 	if revision.Source != workflow.Source || revision.SourceRevision != workflow.SourceRevision {
 		return nil, errors.New("generator repair candidate does not belong to workflow")
 	}
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveDigest)
 	if err != nil {
 		return nil, fmt.Errorf("read generator repair archive: %w", err)
 	}

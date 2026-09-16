@@ -52,7 +52,7 @@ func TestListTerminalGeneratorWorkspacesIncludesWorkflowWorkspace(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("create pending workspace: %v", err)
 	}
-	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1, runtime_attempt = 0 WHERE id = ?`, generation.StateFailed, workflow.ID); err != nil {
+	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1 WHERE id = ?`, generation.StateFailed, workflow.ID); err != nil {
 		t.Fatalf("finish generation workflow: %v", err)
 	}
 	workspaces, err := database.Generation.ListTerminalGeneratorWorkspaces(ctx)
@@ -228,16 +228,12 @@ func TestSubmitGenerationCandidateIsIdempotentAndReleasesWorkspaceTurn(t *testin
 	if _, err := database.conn.ExecContext(ctx, `UPDATE generation_workflows SET workspace_snapshot_digest = ? WHERE id = ?`, workflowTestDigest, workflow.ID); err != nil {
 		t.Fatalf("seed workspace snapshot pointer: %v", err)
 	}
-	revision := generation.Revision{
-		ID: "candidate-submit", ArchivePath: "/tmp/candidate-submit.tar.gz", ArchiveSHA256: workflowTestDigest, Snapshot: generationTestSnapshot(),
-	}
+	revision := generation.Revision{ID: "candidate-submit", ArchivePath: "/tmp/candidate-submit.tar.gz", ArchiveDigest: workflowTestDigest, ContentRevision: workflowTestDigest, SourceArchive: workspaceTestSource()}
 	first, err := database.Generation.SubmitGenerationCandidate(ctx, sessionID, userID, submission, revision, now)
 	if err != nil {
 		t.Fatalf("submit candidate: %v", err)
 	}
-	second, err := database.Generation.SubmitGenerationCandidate(ctx, sessionID, userID, submission, generation.Revision{
-		ID: "candidate-ignored", ArchivePath: "/tmp/candidate-ignored.tar.gz", ArchiveSHA256: workflowTestDigest, Snapshot: generationTestSnapshot(),
-	}, now.Add(time.Second))
+	second, err := database.Generation.SubmitGenerationCandidate(ctx, sessionID, userID, submission, generation.Revision{ID: "candidate-ignored", ArchivePath: "/tmp/candidate-ignored.tar.gz", ArchiveDigest: workflowTestDigest, ContentRevision: workflowTestDigest, SourceArchive: workspaceTestSource()}, now.Add(time.Second))
 	if err != nil {
 		t.Fatalf("repeat candidate submission: %v", err)
 	}

@@ -20,17 +20,12 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
-	appexecution "github.com/breakfix/breakfix/internal/application/execution"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
-	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	apppublication "github.com/breakfix/breakfix/internal/application/publication"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/bootstrap/runtimesnapshot"
 	"github.com/breakfix/breakfix/internal/buildinfo"
-	"github.com/breakfix/breakfix/internal/content/scenario"
-	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/ui"
 )
@@ -111,6 +106,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	var generatorWorkspace *appgeneration.Manager
 	var generatorService *appgeneration.GeneratorService
 	var generationAgents *appgeneration.AgentRunner
+	var generationRunnable *appgeneration.RunnableCoordinator
 	var workspaceReaper *appgeneration.WorkspaceReaper
 	var workspaceSnapshotter *appgeneration.WorkspaceSnapshotter
 	if cfg.OpenSandbox.APIKey != "" {
@@ -159,9 +155,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			appgeneration.GeneratorServiceConfig{
 				DataDir:           cfg.DataDir,
 				SnapshotRequested: workspaceSnapshotter.Request,
-				FreezeExecution: func(entry scenario.Entry) (generationdomain.ExecutionSnapshot, error) {
-					return appexecution.Freeze(entry, runtimesnapshot.From(cfg.Runtime, cfg.Incus))
-				},
 			},
 		)
 		if err != nil {
@@ -203,6 +196,17 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("configure Operations runnable publisher: %w", err)
 	}
+	generationRunnable, err = appgeneration.NewRunnableCoordinator(
+		database.Generation,
+		database.Runnable,
+		operationsConfig,
+		2*time.Second,
+	)
+	if err != nil {
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("create generation runnable coordinator: %w", err)
+	}
 	documentationPipeline, err := newDocumentationPipeline(cfg, database)
 	if err != nil {
 		incusClient.Close()
@@ -217,7 +221,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			ScenariosDir:     cfg.ScenariosDir(),
 			ReleaseReference: cfg.Catalog.ReleaseReference,
 			PollInterval:     2 * time.Second,
-			Snapshot:         runtimesnapshot.From(cfg.Runtime, cfg.Incus),
 			Puller:           registryClient,
 			LayerReader:      oci.ArtifactLayerReader{ArtifactType: appcatalog.ReleaseArtifactType, LayerType: appcatalog.ReleaseSourceLayerType},
 			Store:            database.Catalog,
@@ -242,25 +245,12 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create catalog availability gate: %w", err)
 	}
-	catalogService := appcatalog.NewService(cfg.ScenariosDir(), availability, database.Scenario)
+	catalogService := appcatalog.NewService(cfg.ScenariosDir(), availability, database.Scenario, database.Runnable)
 	if err := catalogService.CheckIntegrity(ctx); err != nil {
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("validate scenario catalog: %w", err)
 	}
-	operationsPublisher, err := appoperations.NewRevisionPublisher(database.Runnable, database.Scenario, cfg.ScenariosDir(), operationsConfig)
-	if err != nil {
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("create Operations runnable publisher: %w", err)
-	}
-	operationsReconciler, err := appoperations.NewBindingReconciler(database.Scenario, database.Runnable, operationsPublisher, 5*time.Second)
-	if err != nil {
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("create Operations runnable reconciler: %w", err)
-	}
-
 	if generatorService == nil {
 		incusClient.Close()
 		cleanupDatabase()
@@ -290,8 +280,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("create learning projection service: %w", err)
 	}
 	publicationFinalizer, err := appgeneration.NewPublicationFinalizer(appgeneration.PublicationFinalizerConfig{
-		Store: database.Generation, ScenariosDir: cfg.ScenariosDir(),
-		Validator: scenarioArtifactValidator{registryRepository: cfg.Registry.Repository, incusNamePrefix: cfg.Incus.NamePrefix},
+		Store: database.Generation, Runnable: database.Runnable, ScenariosDir: cfg.ScenariosDir(),
 	})
 	if err != nil {
 		incusClient.Close()
@@ -357,10 +346,11 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("recover generation publication finalizer: %w", err)
 	}
-	if err := operationsReconciler.Recover(ctx); err != nil {
+	if err := generationRunnable.Recover(ctx); err != nil {
+		services.stop()
 		incusClient.Close()
 		cleanupDatabase()
-		return nil, fmt.Errorf("recover Operations runnable revisions: %w", err)
+		return nil, fmt.Errorf("recover generation runnable coordinator: %w", err)
 	}
 	if documentationPipeline != nil {
 		if err := documentationPipeline.Recover(ctx); err != nil {
@@ -398,6 +388,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if generationAgents != nil {
 		services.start("generation agent runtime", generationAgents.Run)
 	}
+	services.start("generation runnable coordinator", generationRunnable.Run)
 	if workspaceReaper != nil {
 		services.start("generator workspace reaper", workspaceReaper.Run)
 	}
@@ -408,7 +399,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	services.start("learning environment projection", projectionService.Run)
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
 	services.start("generation publication finalizer", publicationFinalizer.Run)
-	services.start("Operations runnable revision reconciler", operationsReconciler.Run)
 	if documentationPipeline != nil {
 		services.start("documentation practice action reconciler", documentationPipeline.Run)
 	}

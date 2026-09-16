@@ -13,8 +13,8 @@ Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` �
   并把不可变审核包原子投影到本机可丢弃的只读目录。
 - **Controller**：只调和单一 `RuntimeEnvironment` CRD，根据不可变 runtime profile
   供应、检查和回收真实环境。
-- **Runtime Worker**：独立运行 Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行构建、artifact
-  promotion、验证 Environment 和正式发布，后者只执行 runtime resource reaping。
+- **Runtime Worker**：独立运行公共 Runnable Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行
+  materialize 与 verify，后者只执行 `RuntimeEnvironment` resource reaping。Worker 不 promotion 内容 artifact 或写产品发布状态。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、
   GenerationWorkflow、CatalogRelease、Scenario 及其 revision 的权威存储。
 - **Registry / Incus**：分别保存 K8s OCI 产物与 Node system-container image；它们不是

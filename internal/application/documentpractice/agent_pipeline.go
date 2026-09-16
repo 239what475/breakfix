@@ -55,7 +55,7 @@ type AgentPipelineConfig struct {
 }
 
 // AgentPipeline starts the Agent-only portion of a workflow and reconciles
-// completed public runtime actions. It owns no provider, queue, filesystem, or
+// completed public runnable actions. It owns no provider, queue, filesystem, or
 // database access beyond Service and Reader ports.
 type AgentPipeline struct {
 	service               *Service
@@ -95,7 +95,7 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	}
 	// The workflow ID is deployment-owned and identifies one exact pinned page.
 	// A repeated request observes its durable state; it must not re-run any Agent
-	// role or create a second public runtime action.
+	// role or create a second public runnable action.
 	if workflow.State != domain.Planning {
 		return PipelineStartResult{Workflow: workflow}, nil
 	}
@@ -213,7 +213,7 @@ type PipelineReconcileResult struct {
 	VerificationAction runnable.ActionIdentity
 }
 
-// Reconcile completes exactly one public runtime action for an already known
+// Reconcile completes exactly one public runnable action for an already known
 // workflow. Materialization schedules verification; a passed verification runs
 // independent review and atomically publishes. A failed verification remains a
 // terminal machine result without an Agent override.
@@ -355,7 +355,7 @@ func (p *AgentPipeline) Recover(ctx context.Context) error {
 }
 
 // Run retries post-completion product reconciliation. It never executes a
-// runtime action: Worker ownership and public result persistence remain
+// runnable action: Worker ownership and public result persistence remain
 // outside this loop.
 func (p *AgentPipeline) Run(ctx context.Context) error {
 	if p == nil {

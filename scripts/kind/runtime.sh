@@ -4,6 +4,7 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 runtime_worker_replicas=${BREAKFIX_KIND_RUNTIME_WORKER_REPLICAS:-1}
+skip_server_rollout=${BREAKFIX_KIND_SKIP_SERVER_ROLLOUT:-0}
 root_manifest=${BREAKFIX_KIND_ROOT_MANIFEST:-$repo_root}
 kind_overlay=${BREAKFIX_KIND_OVERLAY_MANIFEST:-$repo_root/deploy/overlays/kind}
 registry_node_port=30443
@@ -123,6 +124,14 @@ case "$runtime_worker_replicas" in
     exit 2
     ;;
 esac
+case "$skip_server_rollout" in
+  0|1)
+    ;;
+  *)
+    printf 'BREAKFIX_KIND_SKIP_SERVER_ROLLOUT must be 0 or 1\n' >&2
+    exit 2
+    ;;
+esac
 endpoint=$(kubectl -n "$namespace" get secret breakfix-runtime -o json |
   jq -r '.data.incus_endpoint | @base64d')
 incus_port=${endpoint##*:}
@@ -200,6 +209,9 @@ for deployment in server controller runtime-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
 for deployment in server controller runtime-worker; do
+  if [ "$deployment" = server ] && [ "$skip_server_rollout" -eq 1 ]; then
+    continue
+  fi
   if [ "$deployment" = runtime-worker ] && [ "$runtime_worker_replicas" -eq 0 ]; then
     continue
   fi
@@ -208,4 +220,7 @@ done
 
 printf 'Applied Kind runtime with %s Runtime Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
 	"$runtime_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
+if [ "$skip_server_rollout" -eq 1 ]; then
+	printf 'Skipped Server rollout readiness while preparing a destructive E2E state reset.\n'
+fi
 printf 'Kind nodes trust the Registry CA through their system trust store; no custom DNS or /etc/hosts entry is required.\n'

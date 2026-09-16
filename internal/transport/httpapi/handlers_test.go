@@ -164,10 +164,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "# Problem\nRepair it.\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "# Solution\n<!-- checkpoint: complete -->\nRepair it this way.\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "Look at the service.\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"service-unavailable\",\"observed\":true,\"summary\":\"unavailable\"}]}'\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeNodeRunnableAssets(t, scenarioDir, "service-unavailable", "complete")
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -211,8 +208,8 @@ func TestGetScenarioContentReturnsReproductionCoreWithoutLearningAids(t *testing
 	root := t.TempDir()
 	scenarioDir := filepath.Join(root, "scenarios", "minimal", testPublishedScenarioRevisionID)
 	writeTestFile(t, filepath.Join(scenarioDir, "scenario.yaml"), "id: minimal\nrevision_id: "+testPublishedScenarioRevisionID+"\nsource_slug: minimal\ntitle: Observe a failed service\nruntime: node\ndescription: A service was deployed but is not accepting requests.\nimage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ncontent_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\npublished_at: 2026-07-24T09:00:00Z\nversions:\n  - component: nginx\n    version: 1.27.0\ntopology: One host runs the service and its local client.\ninitialization: generate.sh installs the failed configuration.\nreproduction:\n  objective: A local request returns connection refused.\n  evidence:\n    - id: connection-refused\n      description: curl fails with connection refused.\n      node: host\nnodes:\n  - name: host\n    title: Host\ncheckpoints: []\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"connection-refused\",\"observed\":true,\"summary\":\"connection refused\"}]}'\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "initialize.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "assertions", "initial-connection-refused.sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"connection-refused\",\"satisfied\":true,\"summary\":\"connection refused\"}]}'\n")
 	database := testpostgres.New(t)
 	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
@@ -255,10 +252,10 @@ func TestListScenariosIncludesRuntime(t *testing.T) {
 	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workload-absent\",\"observed\":true,\"summary\":\"absent\"}]}'\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "initialize.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "assertions", "initial-workload-absent.sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"workload-absent\",\"satisfied\":true,\"summary\":\"absent\"}]}'\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "assertions", "final-complete.sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"complete\",\"satisfied\":true,\"summary\":\"complete\"}]}'\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "k8s", "actions", "apply.sh"), "#!/bin/sh\nexit 0\n")
 	cfg := config.Config{DataDir: root}
 	database := testpostgres.New(t)
 	handler := newHandlerForTest(t, database, nil, cfg)
@@ -441,10 +438,15 @@ func writeTestScenario(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(scenarioDir, "problem.md"), "problem\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "solution.md"), "<!-- checkpoint: complete -->\nsolution\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "hint\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "generate.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "reproduce.sh"), "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"service-unavailable\",\"observed\":true,\"summary\":\"unavailable\"}]}'\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "checks.sh"), "#!/bin/sh\n")
-	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "answer.sh"), "#!/bin/sh\nexit 0\n")
+	writeNodeRunnableAssets(t, scenarioDir, "service-unavailable", "complete")
+}
+
+func writeNodeRunnableAssets(t *testing.T, scenarioDir, evidenceID, checkpointID string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "initialize.sh"), "#!/bin/sh\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "assertions", "initial-"+evidenceID+".sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\""+evidenceID+"\",\"satisfied\":true,\"summary\":\"observed\"}]}'\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "assertions", "final-"+checkpointID+".sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\""+checkpointID+"\",\"satisfied\":true,\"summary\":\"complete\"}]}'\n")
+	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "actions", "apply.sh"), "#!/bin/sh\nexit 0\n")
 }
 
 const testPublishedScenarioRevisionID = "chrev-aaaaaaaaaaaaaaaa"

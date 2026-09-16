@@ -294,7 +294,8 @@ export type VerifiedScenario = {
 
 export type AuthoringCandidate = {
     id: string;
-    archive_sha256: string;
+    archive_digest: string;
+    content_revision: string;
     failure?: AuthoringCandidateFailure;
 };
 
@@ -308,9 +309,8 @@ export type GeneratorWorkflow = {
     id: string;
     session_id: string;
     plan_revision: number;
-    state: 'Generating' | 'Judging' | 'Building' | 'ArtifactPublishing' | 'Verifying' | 'NeedsAuthorReview' | 'ScenarioPublishing' | 'Published' | 'Failed' | 'Cancelled';
+    state: 'Generating' | 'Judging' | 'MaterializingArtifact' | 'Verifying' | 'NeedsAuthorReview' | 'Publishing' | 'Published' | 'Failed' | 'Cancelled';
     state_version: number;
-    runtime_attempt: number;
     candidate_revision_id?: string;
     last_error?: string | null;
     finalizer_error_category?: 'deterministic' | 'transient';
@@ -319,35 +319,6 @@ export type GeneratorWorkflow = {
     finalizer_next_retry_at?: string | null;
     created_at: string;
     updated_at: string;
-};
-
-export type AuthoringVerificationReport = {
-    passed: boolean;
-    summary: string;
-    reproduction: Array<AuthoringReproductionEvidenceResult>;
-    answers: Array<AuthoringExecutionResult>;
-    checkpoints: Array<AuthoringCheckpointResult>;
-};
-
-export type AuthoringExecutionResult = {
-    location: string;
-    exit_code: number;
-    stdout?: string;
-    stderr?: string;
-};
-
-export type AuthoringReproductionEvidenceResult = {
-    id: string;
-    observed: boolean;
-    summary: string;
-    details?: string;
-};
-
-export type AuthoringCheckpointResult = {
-    id: string;
-    passed: boolean;
-    summary: string;
-    details?: string;
 };
 
 export type AuthoringChange = {
@@ -421,7 +392,6 @@ export type GeneratorGeneration = {
     workflow: GeneratorWorkflow;
     candidate?: AuthoringCandidate;
     verified?: VerifiedScenario;
-    verification?: AuthoringVerificationReport;
     assets: Array<AuthoringAsset>;
     diff: Array<AuthoringFileDiff>;
 };
@@ -440,7 +410,7 @@ export type GeneratorReviewManifest = {
     workflow_id: string;
     workflow_state: string;
     candidate_revision_id: string;
-    candidate_archive_sha256: string;
+    candidate_archive_digest: string;
     payload_sha256: string;
     exported_at: string;
 };

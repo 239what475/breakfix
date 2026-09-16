@@ -378,7 +378,7 @@ func (h *Handler) toAPIGeneratorGeneration(ctx context.Context, workflow generat
 		return response, nil
 	}
 	response.Candidate = toAPIAuthoringCandidate(revision)
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveDigest)
 	if err != nil {
 		return api.GeneratorGeneration{}, err
 	}
@@ -395,7 +395,7 @@ func (h *Handler) toAPIGeneratorGeneration(ctx context.Context, workflow generat
 		if err != nil {
 			return api.GeneratorGeneration{}, err
 		}
-		previousArchive, err := candidate.ReadArchive(previous.ArchivePath, previous.ArchiveSHA256)
+		previousArchive, err := candidate.ReadArchive(previous.ArchivePath, previous.ArchiveDigest)
 		if err != nil {
 			return api.GeneratorGeneration{}, err
 		}
@@ -413,7 +413,6 @@ func (h *Handler) toAPIGeneratorGeneration(ctx context.Context, workflow generat
 		return api.GeneratorGeneration{}, err
 	}
 	response.Verified = toAPIVerifiedScenario(verified)
-	response.Verification = toAPIAuthoringVerificationReport(revision.Verification)
 	return response, nil
 }
 

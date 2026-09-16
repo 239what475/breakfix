@@ -12,32 +12,30 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 )
 
 const (
-	MaxRuntimeAttempts = runtime.MaxAttempts
+	MaxAgentAttempts = 5
 )
 
 var (
 	ErrWorkflowNotFound          = errors.New("generation workflow not found")
-	ErrLeaseLost                 = runtime.ErrLeaseLost
+	ErrLeaseLost                 = errors.New("generation agent lease lost")
 	ErrScenarioSourceRefConflict = errors.New("scenario source reference conflicts with an existing scenario")
 )
 
 type WorkflowState string
 
 const (
-	StateGenerating         WorkflowState = "Generating"
-	StateJudging            WorkflowState = "Judging"
-	StateBuilding           WorkflowState = "Building"
-	StateArtifactPublishing WorkflowState = "ArtifactPublishing"
-	StateVerifying          WorkflowState = "Verifying"
-	StateNeedsAuthorReview  WorkflowState = "NeedsAuthorReview"
-	StateScenarioPublishing WorkflowState = "ScenarioPublishing"
-	StatePublished          WorkflowState = "Published"
-	StateFailed             WorkflowState = "Failed"
-	StateCancelled          WorkflowState = "Cancelled"
+	StateGenerating            WorkflowState = "Generating"
+	StateJudging               WorkflowState = "Judging"
+	StateMaterializingArtifact WorkflowState = "MaterializingArtifact"
+	StateVerifying             WorkflowState = "Verifying"
+	StateNeedsAuthorReview     WorkflowState = "NeedsAuthorReview"
+	StatePublishing            WorkflowState = "Publishing"
+	StatePublished             WorkflowState = "Published"
+	StateFailed                WorkflowState = "Failed"
+	StateCancelled             WorkflowState = "Cancelled"
 )
 
 // StartConfirmation is the explicit, idempotent confirmation of one author
@@ -97,9 +95,8 @@ func validIdempotencyKey(value string) bool {
 
 func (s WorkflowState) Valid() bool {
 	switch s {
-	case StateGenerating, StateJudging, StateBuilding, StateArtifactPublishing,
-		StateVerifying, StateNeedsAuthorReview,
-		StateScenarioPublishing, StatePublished, StateFailed, StateCancelled:
+	case StateGenerating, StateJudging, StateMaterializingArtifact, StateVerifying,
+		StateNeedsAuthorReview, StatePublishing, StatePublished, StateFailed, StateCancelled:
 		return true
 	default:
 		return false
@@ -121,11 +118,11 @@ func (s WorkflowState) AgentState() bool {
 	}
 }
 
-// RuntimeState reports states whose external side effects are performed by
-// Runtime Worker. A Runtime state always has one Server-managed attempt.
-func (s WorkflowState) RuntimeState() bool {
+// RunnableState reports states that await a public Runnable action. Worker
+// leases and infrastructure retries remain in runnable_actions, not here.
+func (s WorkflowState) RunnableState() bool {
 	switch s {
-	case StateBuilding, StateArtifactPublishing, StateVerifying, StateScenarioPublishing:
+	case StateMaterializingArtifact, StateVerifying:
 		return true
 	default:
 		return false
@@ -158,10 +155,9 @@ func (f Failure) Validate() error {
 }
 
 // Workflow is the sole durable state machine for candidate generation and
-// publication. StateVersion changes only when State changes. RuntimeAttempt
-// is meaningful only while State is a RuntimeState and is incremented by
-// Server after an infrastructure failure or expired Runtime Worker lease.
-// LeaseOwner is randomized for every claim and fences late reports.
+// publication. StateVersion changes only when State changes. Agent leases are
+// randomized for every claim and fence late Judge reports. Public Worker
+// retries are represented only by runnable_actions.
 type Workflow struct {
 	ID                       string               `json:"id"`
 	Source                   Source               `json:"source"`
@@ -171,9 +167,8 @@ type Workflow struct {
 	WorkspaceSnapshotDigest  string               `json:"-"`
 	ActiveAgentRunID         string               `json:"active_agent_run_id,omitempty"`
 	StateVersion             int64                `json:"state_version"`
-	RuntimeAttempt           int                  `json:"runtime_attempt"`
-	LeaseOwner               string               `json:"-"`
-	LeaseExpiresAt           *time.Time           `json:"lease_expires_at,omitempty"`
+	AgentLeaseOwner          string               `json:"-"`
+	AgentLeaseExpiresAt      *time.Time           `json:"agent_lease_expires_at,omitempty"`
 	NextRunAt                time.Time            `json:"next_run_at"`
 	LastError                string               `json:"last_error,omitempty"`
 	FinalizerErrorCategory   publication.Category `json:"finalizer_error_category,omitempty"`
@@ -186,16 +181,18 @@ type Workflow struct {
 
 func (w Workflow) Valid() bool {
 	if strings.TrimSpace(w.ID) == "" || !w.Source.Valid() || strings.TrimSpace(w.SourceRevision) == "" || !w.State.Valid() ||
-		w.StateVersion < 1 || w.RuntimeAttempt < 0 || w.RuntimeAttempt > MaxRuntimeAttempts {
+		w.StateVersion < 1 {
 		return false
 	}
 	if w.WorkspaceSnapshotDigest != "" && !ValidSHA256(w.WorkspaceSnapshotDigest) {
 		return false
 	}
-	if w.State.RuntimeState() {
-		return w.RuntimeAttempt >= 1
+	hasAgentLeaseOwner := strings.TrimSpace(w.AgentLeaseOwner) != ""
+	hasAgentLeaseExpiry := w.AgentLeaseExpiresAt != nil
+	if hasAgentLeaseOwner != hasAgentLeaseExpiry || (hasAgentLeaseOwner && !w.State.AgentState()) {
+		return false
 	}
-	if w.RuntimeAttempt != 0 {
+	if w.AgentLeaseExpiresAt != nil && w.AgentLeaseExpiresAt.IsZero() {
 		return false
 	}
 	if w.FinalizerErrorCategory == publication.CategoryUnknown {

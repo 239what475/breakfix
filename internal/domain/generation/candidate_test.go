@@ -4,166 +4,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/breakfix/breakfix/internal/content/scenario"
-	"github.com/breakfix/breakfix/internal/domain/environment"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
-func TestVerificationReportRequiresExactAnswerCoverage(t *testing.T) {
-	snapshot := validNodeExecutionSnapshot()
-	valid := VerificationReport{
-		Passed: true,
-		Answers: []ExecutionResult{
-			{Location: "client", ExitCode: 0},
-			{Location: "server", ExitCode: 0},
-		},
-		Checkpoints: []CheckpointResult{{ID: "service-ready", Passed: true, Summary: "service is ready"}},
-		Summary:     "all checks passed",
+func TestRevisionRequiresFrozenPublicSource(t *testing.T) {
+	revision := Revision{
+		ID: "candidate-revision-01", Source: Source{Kind: SourceAuthoring, Ref: "authoring-session-01"}, SourceRevision: "1",
+		ArchivePath: "candidates/candidate-revision-01.tar.gz", ArchiveDigest: digest("a"), ContentRevision: digest("b"),
+		SourceArchive: runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "runnable-sources/candidate-revision-01.tar.gz", Digest: digest("c")},
 	}
-	if err := valid.Validate(snapshot); err != nil {
-		t.Fatalf("valid Node report: %v", err)
+	if err := revision.ValidateForCreate(); err != nil {
+		t.Fatalf("validate frozen revision: %v", err)
 	}
-
-	tests := []struct {
-		name    string
-		answers []ExecutionResult
-		want    string
-	}{
-		{
-			name:    "missing node",
-			answers: []ExecutionResult{{Location: "client", ExitCode: 0}},
-			want:    "does not cover every answer location",
-		},
-		{
-			name: "duplicate node",
-			answers: []ExecutionResult{
-				{Location: "client", ExitCode: 0},
-				{Location: "client", ExitCode: 0},
-			},
-			want: "duplicate answer location",
-		},
-		{
-			name: "unknown node",
-			answers: []ExecutionResult{
-				{Location: "client", ExitCode: 0},
-				{Location: "other", ExitCode: 0},
-			},
-			want: "unknown answer location",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			report := valid
-			report.Answers = test.answers
-			err := report.Validate(snapshot)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Validate() error = %v, want %q", err, test.want)
-			}
-		})
+	revision.SourceArchive.Digest = ""
+	if err := revision.ValidateForCreate(); err == nil {
+		t.Fatal("candidate without public source archive was accepted")
 	}
 }
 
-func TestVerificationReportRequiresManagementAnswerForK8s(t *testing.T) {
-	snapshot := ExecutionSnapshot{
-		Runtime:     scenario.RuntimeK8s,
-		Checkpoints: []CheckpointSnapshot{{ID: "deployment-ready"}},
-		K8s: &K8sRuntimeSnapshot{
-			BaseImageDigest:         "registry.example.com/base@sha256:" + strings.Repeat("a", 64),
-			ProfileRevision:         "k8s-profile-v1",
-			Version:                 "v0.28.0",
-			ManagementTerminalImage: "registry.example.com/terminal@sha256:" + strings.Repeat("b", 64),
-			Resources: K8sResources{
-				ControlPlaneCPU: "1", ControlPlaneMemory: "512Mi", ControlPlaneEphemeralStorage: "1Gi",
-				WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi",
-				QuotaCPU: "3", QuotaMemory: "3Gi", QuotaEphemeralStorage: "30Gi",
-			},
-			Network: environment.VK8sNetwork{
-				PublicEgressCIDR: "0.0.0.0/0",
-				ProtectedCIDRs:   []string{"10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"},
-			},
-		},
+func TestNewRevisionCannotContainLifecycleOutputs(t *testing.T) {
+	revision := Revision{
+		ID: "candidate-revision-02", Source: Source{Kind: SourceAuthoring, Ref: "authoring-session-02"}, SourceRevision: "1",
+		ArchivePath: "candidates/candidate-revision-02.tar.gz", ArchiveDigest: digest("a"), ContentRevision: digest("b"),
+		SourceArchive:       runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "runnable-sources/candidate-revision-02.tar.gz", Digest: digest("c")},
+		RunnableRevisionRef: &runnable.RevisionReference{ID: "runnable-revision-01", Digest: digest("d")},
 	}
-	report := VerificationReport{
-		Passed:      true,
-		Answers:     []ExecutionResult{{Location: "management", ExitCode: 0}},
-		Checkpoints: []CheckpointResult{{ID: "deployment-ready", Passed: true, Summary: "deployment is ready"}},
-		Summary:     "all checks passed",
-	}
-	if err := report.Validate(snapshot); err != nil {
-		t.Fatalf("valid K8s report: %v", err)
-	}
-	report.Answers = []ExecutionResult{{Location: "worker", ExitCode: 0}}
-	if err := report.Validate(snapshot); err == nil || !strings.Contains(err.Error(), "unknown answer location") {
-		t.Fatalf("K8s report error = %v", err)
+	if err := revision.ValidateForCreate(); err == nil {
+		t.Fatal("new candidate with materialized runnable revision was accepted")
 	}
 }
 
-func TestVerificationReportSeparatesReproductionFromRepair(t *testing.T) {
-	snapshot := validNodeExecutionSnapshot()
-	snapshot.Reproduction = []ReproductionEvidenceSnapshot{{ID: "service-unavailable", Node: "client"}}
-
-	unreproduced := VerificationReport{
-		Passed:       false,
-		Reproduction: []ReproductionEvidenceResult{{ID: "service-unavailable", Observed: false, Summary: "service is already ready"}},
-		Summary:      "target phenomenon was not reproduced",
-	}
-	if err := unreproduced.Validate(snapshot); err != nil {
-		t.Fatalf("unreproduced report: %v", err)
-	}
-
-	reproducedWithoutRepair := unreproduced
-	reproducedWithoutRepair.Reproduction[0].Observed = true
-	reproducedWithoutRepair.Summary = "target phenomenon was reproduced"
-	if err := reproducedWithoutRepair.Validate(snapshot); err == nil || !strings.Contains(err.Error(), "does not cover every answer location") {
-		t.Fatalf("reproduced report without repair error = %v", err)
-	}
-
-	complete := VerificationReport{
-		Passed:       true,
-		Reproduction: []ReproductionEvidenceResult{{ID: "service-unavailable", Observed: true, Summary: "service is unavailable"}},
-		Answers: []ExecutionResult{
-			{Location: "client", ExitCode: 0},
-			{Location: "server", ExitCode: 0},
-		},
-		Checkpoints: []CheckpointResult{{ID: "service-ready", Passed: true, Summary: "service is ready"}},
-		Summary:     "all verification stages passed",
-	}
-	if err := complete.Validate(snapshot); err != nil {
-		t.Fatalf("complete reproduced report: %v", err)
-	}
-}
-
-func TestVerificationReportAllowsReproductionOnlyScenario(t *testing.T) {
-	snapshot := validNodeExecutionSnapshot()
-	referenceRepair := false
-	snapshot.ReferenceRepair = &referenceRepair
-	snapshot.Reproduction = []ReproductionEvidenceSnapshot{{ID: "service-unavailable", Node: "client"}}
-	report := VerificationReport{
-		Passed:       true,
-		Reproduction: []ReproductionEvidenceResult{{ID: "service-unavailable", Observed: true, Summary: "service is unavailable"}},
-		Summary:      "all reproduction evidence passed; no reference repair was provided",
-	}
-	if err := report.Validate(snapshot); err != nil {
-		t.Fatalf("reproduction-only report: %v", err)
-	}
-	report.Answers = []ExecutionResult{{Location: "client", ExitCode: 0}}
-	if err := report.Validate(snapshot); err == nil || !strings.Contains(err.Error(), "without a reference repair") {
-		t.Fatalf("reproduction-only report with answer error = %v", err)
-	}
-}
-
-func validNodeExecutionSnapshot() ExecutionSnapshot {
-	return ExecutionSnapshot{
-		Runtime:     scenario.RuntimeNode,
-		Checkpoints: []CheckpointSnapshot{{ID: "service-ready", Node: "client"}},
-		Node: &NodeRuntimeSnapshot{
-			BaseImageFingerprint:  strings.Repeat("a", 64),
-			ProfileRevision:       "node-profile-v1",
-			NetworkPolicyRevision: "network-v1",
-			Nodes: []NodeSnapshot{
-				{Name: "client", Title: "Client"},
-				{Name: "server", Title: "Server"},
-			},
-			Resources: NodeResources{CPU: "1", Memory: "512MiB", Processes: 512, RootDisk: "5GiB"},
-		},
-	}
-}
+func digest(character string) string { return "sha256:" + strings.Repeat(character, 64) }

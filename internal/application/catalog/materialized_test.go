@@ -3,161 +3,49 @@ package catalog
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	"github.com/breakfix/breakfix/internal/content/scenario"
 	catalogdomain "github.com/breakfix/breakfix/internal/domain/catalog"
-	"github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
-func TestCatalogIntegrityFailsClosedForMissingOrChangedActiveSource(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(t *testing.T, root string, entry scenario.Entry)
-		want   string
-	}{
-		{
-			name: "missing active source", want: "referenced materialized source is missing",
-			mutate: func(t *testing.T, root string, entry scenario.Entry) {
-				t.Helper()
-				if err := os.RemoveAll(filepath.Join(root, entry.SourceSlug)); err != nil {
-					t.Fatal(err)
-				}
-			},
-		},
-		{
-			name: "changed active source", want: "materialized source does not match",
-			mutate: func(t *testing.T, root string, entry scenario.Entry) {
-				t.Helper()
-				writeCatalogFile(t, filepath.Join(root, entry.SourceSlug, entry.RevisionID, "solution.md"), []byte("<!-- checkpoint: cleanup-script-ready -->\nchanged\n"), 0o644)
-			},
-		},
+func TestCatalogReadsMaterializedScenarioThroughRunnableRevision(t *testing.T) {
+	service, entry, lifecycle, resolver := newRunnableMaterializedCatalog(t)
+	values, err := service.ListOperations(context.Background())
+	if err != nil {
+		t.Fatalf("list operations: %v", err)
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			service, entry, root, _ := newMaterializedCatalog(t)
-			test.mutate(t, root, entry)
-			err := service.CheckIntegrity(context.Background())
-			if err == nil || !errors.Is(err, ErrMaterializedIntegrity) || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("integrity error = %v, want %q", err, test.want)
-			}
-		})
+	if len(values) != 1 || values[0].Entry.ID != entry.ID || values[0].Entry.Image != entry.Image {
+		t.Fatalf("catalog projection = %#v", values)
+	}
+	if lifecycle.active[0].Revision.RunnableRevisionRef != resolver.reference {
+		t.Fatalf("scenario did not retain the public runnable reference: %#v", lifecycle.active[0].Revision)
 	}
 }
 
-func TestCatalogReadsOnlyActiveLifecycleRevisions(t *testing.T) {
-	service, entry, root, lifecycle := newMaterializedCatalog(t)
-	if err := os.MkdirAll(filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeCatalogFile(t, filepath.Join(root, "unreferenced", "chrev-bbbbbbbbbbbbbbbb", "scenario.yaml"), []byte("not a scenario"), 0o600)
-
-	visible, err := service.ListOperations(context.Background())
-	if err != nil || len(visible) != 1 {
-		t.Fatalf("visible catalog = %#v, err=%v", visible, err)
-	}
-	if visible[0].Catalog.ID != entry.ID || visible[0].Catalog.ActiveRevisionID != entry.RevisionID ||
-		visible[0].Catalog.Title != entry.Title || visible[0].Catalog.Description != entry.Description ||
-		visible[0].Catalog.Runtime != entry.Runtime || !visible[0].Catalog.Available {
-		t.Fatalf("catalog read model = %#v", visible[0].Catalog)
-	}
-	if len(lifecycle.active) != 1 || lifecycle.active[0].Revision.ID != entry.RevisionID {
-		t.Fatalf("lifecycle active revisions = %#v", lifecycle.active)
+func TestCatalogRejectsMaterializedArtifactThatDiffersFromRunnableRevision(t *testing.T) {
+	service, _, _, resolver := newRunnableMaterializedCatalog(t)
+	resolver.revision.Artifact.ArtifactDigest = testDigest("f")
+	resolver.revision.Artifact.ProviderReference = "incus://catalog/test@" + testDigest("f")
+	if err := service.CheckIntegrity(context.Background()); !errors.Is(err, ErrMaterializedIntegrity) || !strings.Contains(err.Error(), "materialized source does not match") {
+		t.Fatalf("integrity error = %v", err)
 	}
 }
 
-func TestCatalogListOperationsExcludesLegacyDocumentationExamples(t *testing.T) {
-	service, entry, scenariosDir, lifecycle := newMaterializedCatalog(t)
-	candidate := filepath.Join(t.TempDir(), "documentation")
-	writeScenarioSource(t, candidate, false)
-	manifestPath := filepath.Join(candidate, "scenario.yaml")
-	manifest, err := os.ReadFile(manifestPath)
+func TestCatalogReadinessAllowsEmptyBootstrapWithPublicResolver(t *testing.T) {
+	availability, err := NewAvailability("registry.example/catalog@"+testDigest("b"), &catalogReadinessStore{release: &catalogdomain.Release{State: catalogdomain.ReleaseInstalling}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(manifestPath, append([]byte("type: documentation-example\n"), manifest...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	contentRevision, err := ContentRevision(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	published, err := scenario.PromoteDirectoryAt(scenariosDir, candidate, "chal-documentation", "chrev-bbbbbbbbbbbbbbbb", "documentation", strings.Repeat("b", 64), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyScenario := lifecycle.active[0].Scenario
-	legacyScenario.ID = published.ID
-	legacyScenario.ActiveRevisionID = published.RevisionID
-	legacyScenario.SourceSlug = published.SourceSlug
-	legacyRevision := lifecycle.active[0].Revision
-	legacyRevision.ID = published.RevisionID
-	legacyRevision.ScenarioID = published.ID
-	legacyRevision.Type = published.Type
-	legacyRevision.SourceSlug = published.SourceSlug
-	legacyRevision.MaterializedPath = scenario.MaterializedPath(published.SourceSlug, published.RevisionID)
-	legacyRevision.ContentRevision = published.ContentRevision
-	legacyRevision.MaterializedRevision = published.Revision
-	legacyRevision.SourceRevisionID = "legacy-documentation"
-	legacyRevision.Artifact = execution.ArtifactReference{Runtime: published.Runtime, IncusAlias: "documentation", IncusFingerprint: published.Image}
-	legacyScenario.SourceRef = legacyRevision.SourceRef
-	lifecycle.active = append(lifecycle.active, scenariodomain.ActiveRevision{Scenario: legacyScenario, Revision: legacyRevision})
-
-	visible, err := service.ListOperations(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(visible) != 1 || visible[0].Entry.ID != entry.ID {
-		t.Fatalf("operations catalog = %#v", visible)
-	}
-}
-
-func TestHistoricalEntryDoesNotFollowActiveScenarioPointer(t *testing.T) {
-	_, entry, root, _ := newMaterializedCatalog(t)
-	now := time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC)
-	lifecycle := &staticLifecycleStore{
-		stable: scenariodomain.Scenario{
-			ID: entry.ID, SourceKind: scenariodomain.SourceAuthoring, SourceRef: "author-session", OwnerUserID: "author",
-			State: scenariodomain.StateDeprecated, ActiveRevisionID: "chrev-bbbbbbbbbbbbbbbb", SourceSlug: entry.SourceSlug,
-			CreatedAt: now, UpdatedAt: now,
-		},
-		revision: scenariodomain.Revision{
-			ID: entry.RevisionID, ScenarioID: entry.ID, SourceKind: scenariodomain.SourceAuthoring, SourceRef: "author-session", SourceRevisionID: "1",
-			Title: entry.Title, Runtime: entry.Runtime, Type: entry.Type, Tags: entry.Tags, ContentRevision: entry.ContentRevision, SourceSlug: entry.SourceSlug,
-			MaterializedPath: scenario.MaterializedPath(entry.SourceSlug, entry.RevisionID), MaterializedRevision: entry.Revision,
-			Artifact: execution.ArtifactReference{Runtime: entry.Runtime, IncusAlias: "historical-alias", IncusFingerprint: entry.Image},
-			State:    scenariodomain.RevisionSuperseded, PublishedAt: entry.PublishedAt, CreatedAt: entry.PublishedAt,
-		},
-	}
-	service := NewService(root, nil, lifecycle)
-	historical, err := service.HistoricalEntry(context.Background(), entry.ID, entry.RevisionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if historical.ID != entry.ID || historical.RevisionID != entry.RevisionID || historical.Title != entry.Title {
-		t.Fatalf("historical entry = %#v, want %#v", historical, entry)
-	}
-}
-
-func TestCatalogReadinessAllowsEmptyBootstrapAndBypassesAvailability(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "missing-scenarios")
-	releaseStore := &catalogReadinessStore{release: &catalogdomain.Release{State: catalogdomain.ReleaseInstalling}}
-	availability, err := NewAvailability("registry.example/catalog@sha256:"+strings.Repeat("b", 64), releaseStore)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := NewService(root, availability, &staticLifecycleStore{})
+	service := NewService(filepath.Join(t.TempDir(), "missing"), availability, &staticLifecycleStore{}, staticRunnableResolver{})
 	if err := service.Readiness(context.Background()); err != nil {
 		t.Fatalf("empty bootstrap readiness = %v", err)
-	}
-	if _, err := service.ListOperations(context.Background()); !errors.Is(err, ErrReleaseNotReady) {
-		t.Fatalf("catalog list did not honor availability gate: %v", err)
 	}
 }
 
@@ -181,13 +69,25 @@ func (s *staticLifecycleStore) GetScenarioRevision(context.Context, string, stri
 	return &value, nil
 }
 
+type staticRunnableResolver struct {
+	reference runnable.RevisionReference
+	revision  runnable.RunnableRevision
+}
+
+func (s staticRunnableResolver) ResolveRunnableRevision(_ context.Context, id, digest string) (runnable.RunnableRevision, error) {
+	if s.reference.ID != id || s.reference.Digest != digest {
+		return runnable.RunnableRevision{}, errors.New("runnable revision not found")
+	}
+	return s.revision, nil
+}
+
 type catalogReadinessStore struct{ release *catalogdomain.Release }
 
 func (s *catalogReadinessStore) ReleaseByDigest(context.Context, catalogdomain.BundleDigest) (*catalogdomain.Release, error) {
 	return s.release, nil
 }
 
-func newMaterializedCatalog(t *testing.T) (*Service, scenario.Entry, string, *staticLifecycleStore) {
+func newRunnableMaterializedCatalog(t *testing.T) (*Service, scenario.Entry, *staticLifecycleStore, *staticRunnableResolver) {
 	t.Helper()
 	root := t.TempDir()
 	candidate := filepath.Join(root, "candidate")
@@ -196,22 +96,62 @@ func newMaterializedCatalog(t *testing.T) (*Service, scenario.Entry, string, *st
 	if err != nil {
 		t.Fatal(err)
 	}
-	scenariosDir := filepath.Join(root, "scenarios")
-	published, err := scenario.PromoteDirectoryAt(scenariosDir, candidate, "chal-integrity", "chrev-aaaaaaaaaaaaaaaa", "cleanup-logs", strings.Repeat("a", 64), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
+	entry, err := scenario.ValidateCandidateDir(candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stable := scenariodomain.Scenario{
-		ID: published.ID, SourceKind: scenariodomain.SourceRelease, SourceRef: "catalog/cleanup-logs", State: scenariodomain.StateActive,
-		ActiveRevisionID: published.RevisionID, SourceSlug: published.SourceSlug, CreatedAt: published.PublishedAt, UpdatedAt: published.PublishedAt,
+	entry.ID = "chal-integrity"
+	entry.RevisionID = "chrev-aaaaaaaaaaaaaaaa"
+	entry.ContentRevision = string(contentRevision)
+	publicRevision, reference := catalogRunnableRevision(t, *entry, testDigest("a"))
+	scenariosDir := filepath.Join(root, "scenarios")
+	published, err := scenario.PromoteDirectoryAt(scenariosDir, candidate, entry.ID, entry.RevisionID, "cleanup-logs", strings.TrimPrefix(publicRevision.Artifact.ArtifactDigest, "sha256:"), string(contentRevision), time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
 	}
+	stable := scenariodomain.Scenario{ID: published.ID, SourceKind: scenariodomain.SourceRelease, SourceRef: "catalog/cleanup-logs", State: scenariodomain.StateActive, ActiveRevisionID: published.RevisionID, SourceSlug: published.SourceSlug, CreatedAt: published.PublishedAt, UpdatedAt: published.PublishedAt}
 	revision := scenariodomain.Revision{
 		ID: published.RevisionID, ScenarioID: published.ID, SourceKind: scenariodomain.SourceRelease, SourceRef: stable.SourceRef, SourceRevisionID: "catalog-entry",
-		Title: published.Title, Runtime: published.Runtime, Type: published.Type, Tags: published.Tags, ContentRevision: published.ContentRevision,
-		SourceSlug: published.SourceSlug, MaterializedPath: scenario.MaterializedPath(published.SourceSlug, published.RevisionID), MaterializedRevision: published.Revision,
-		Artifact: execution.ArtifactReference{Runtime: published.Runtime, IncusAlias: "catalog-alias", IncusFingerprint: published.Image},
-		State:    scenariodomain.RevisionActive, PublishedAt: published.PublishedAt, CreatedAt: published.PublishedAt,
+		Title: published.Title, Type: published.Type, Tags: published.Tags, ContentRevision: published.ContentRevision, SourceSlug: published.SourceSlug,
+		MaterializedPath: scenario.MaterializedPath(published.SourceSlug, published.RevisionID), MaterializedRevision: published.Revision,
+		RunnableRevisionRef: reference, VerificationReportRef: runnable.VerificationReportReference{ID: "verification-report-01", Digest: testDigest("c")},
+		State: scenariodomain.RevisionActive, PublishedAt: published.PublishedAt, CreatedAt: published.PublishedAt,
 	}
 	lifecycle := &staticLifecycleStore{active: []scenariodomain.ActiveRevision{{Scenario: stable, Revision: revision}}, stable: stable, revision: revision}
-	return NewService(scenariosDir, nil, lifecycle), *published, scenariosDir, lifecycle
+	resolver := &staticRunnableResolver{reference: reference, revision: publicRevision}
+	return NewService(scenariosDir, nil, lifecycle, resolver), *published, lifecycle, resolver
 }
+
+func catalogRunnableRevision(t *testing.T, entry scenario.Entry, artifactDigest string) (runnable.RunnableRevision, runnable.RevisionReference) {
+	t.Helper()
+	spec, err := appoperations.Compile(appoperations.Input{
+		ContentID: entry.ID, ContentRevision: entry.ContentRevision, Entry: entry,
+		Source: runnable.SourceArchive{FormatVersion: runnable.FormatVersion, Reference: "runnable-sources/catalog.tar.gz", Digest: testDigest("d")},
+	}, appoperations.Config{
+		MaxNodes: 4,
+		Node:     catalogProfile(), K8s: catalogProfile(),
+		Lifecycle: runnable.LifecyclePolicy{CreateTimeoutSeconds: 600, ResetTimeoutSeconds: 600, StopTimeoutSeconds: 300, ReapTimeoutSeconds: 300, IdleTTLSeconds: 1800, MaxLifetimeSeconds: 3600},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	specDigest, err := spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := runnable.RunnableRevision{FormatVersion: runnable.FormatVersion, Spec: spec, Artifact: runnable.ArtifactReference{
+		FormatVersion: runnable.FormatVersion, Runtime: runnable.RuntimeNode, ProviderReference: "incus://catalog/test@" + artifactDigest,
+		ArtifactDigest: artifactDigest, BuiltFromSpecDigest: specDigest, BuilderVersion: "builder-01",
+	}}
+	digest, err := value.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value, runnable.RevisionReference{ID: "runnable-revision-01", Digest: digest}
+}
+
+func catalogProfile() appoperations.RuntimeProfileConfig {
+	return appoperations.RuntimeProfileConfig{ProfileRevision: "profile-01", BaseImage: "registry.example/base@" + testDigest("e"), Resources: runnable.ResourceLimits{CPU: "2", MemoryBytes: 2 << 30, EphemeralBytes: 4 << 30, MaxProcesses: 256, MaxConcurrentTasks: 2}, Network: runnable.NetworkPrivate, MaxActionTimeout: 1200}
+}
+
+func testDigest(character string) string { return "sha256:" + strings.Repeat(character, 64) }

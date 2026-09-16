@@ -3,13 +3,13 @@ package generation
 import "testing"
 
 func TestGenerationStatesHaveOneExecutor(t *testing.T) {
-	if StateGenerating.AgentState() || StateGenerating.RuntimeState() {
+	if StateGenerating.AgentState() || StateGenerating.RunnableState() {
 		t.Fatal("Generating must be user-directed workspace activity")
 	}
-	if !StateBuilding.RuntimeState() || StateBuilding.AgentState() || !StateScenarioPublishing.RuntimeState() {
-		t.Fatal("external runtime states must belong only to Runtime Worker")
+	if !StateMaterializingArtifact.RunnableState() || !StateVerifying.RunnableState() || StateMaterializingArtifact.AgentState() {
+		t.Fatal("public runnable states must not be claimed by the generation Agent")
 	}
-	if StateNeedsAuthorReview.AgentState() || StateNeedsAuthorReview.RuntimeState() {
+	if StateNeedsAuthorReview.AgentState() || StateNeedsAuthorReview.RunnableState() {
 		t.Fatal("author review states must have no active executor")
 	}
 	if !StatePublished.Terminal() || !StateCancelled.Terminal() {
@@ -43,5 +43,15 @@ func TestClaimRequiresTheWorkflowStateVersion(t *testing.T) {
 	claim.StateVersion = workflow.StateVersion
 	if !claim.Valid() {
 		t.Fatalf("claim rejected matching state version: %#v", claim)
+	}
+}
+
+func TestJudgingWorkflowMayWaitWithoutAnAgentLease(t *testing.T) {
+	workflow := Workflow{
+		ID: "generation-judging", Source: Source{Kind: SourceAuthoring, Ref: "authoring-session"},
+		SourceRevision: "2", State: StateJudging, StateVersion: 1,
+	}
+	if !workflow.Valid() {
+		t.Fatalf("unclaimed judging workflow is invalid: %#v", workflow)
 	}
 }

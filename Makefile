@@ -1,4 +1,4 @@
-.PHONY: generate verify-generated web-deps test-deps build images deploy-kind reset-kind \
+.PHONY: generate verify-generated verify-legacy-removal web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
 	test-e2e-documentation docs-sync docs-build docs-image docs-check docs-metadata docs-smoke
@@ -113,7 +113,22 @@ deploy-kind: images
 reset-kind:
 	./scripts/kind/reset-state.sh
 
-test-unit:
+verify-legacy-removal:
+	@! rg -n \
+		-e 'internal/domain/(runtime|execution)' \
+		-e 'internal/application/execution' \
+		-e 'runtimesnapshot' \
+		-e 'ScenarioPublishing' \
+		-e 'ArtifactPublishing' \
+		-e 'ArchiveSHA256' \
+		-e 'FinalArtifactTarget' \
+		-e 'scenario_runnable_revision_bindings' \
+		-e 'PublishOperationsRevision' \
+		-e 'ClaimCatalogRuntimeAction' \
+		-e 'RuntimeAttempt' \
+		--glob '!TODO.md' --glob '!Makefile' --glob '!**/node_modules/**' .
+
+test-unit: verify-legacy-removal
 	go test -count=1 ./cmd/... ./api/... ./internal/...
 
 lint:

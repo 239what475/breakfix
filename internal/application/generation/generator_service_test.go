@@ -201,7 +201,7 @@ func TestGeneratorServiceSeedsReplacementWorkspaceFromSnapshotBeforeCandidate(t 
 	if err != nil {
 		t.Fatalf("save fallback candidate: %v", err)
 	}
-	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveSHA256: candidateDigest}
+	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveDigest: candidateDigest}
 	snapshotArchive, err := workspacearchive.Encode([]workspacearchive.Entry{{Path: "unfinished.md", Content: []byte("continue here\n")}})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestGeneratorServiceFallsBackToCandidateWhenSnapshotIsDamaged(t *testing.T)
 	if err != nil {
 		t.Fatalf("save fallback candidate: %v", err)
 	}
-	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveSHA256: candidateDigest}
+	store.candidates[candidateID] = domain.Revision{ID: candidateID, Source: workflow.Source, SourceRevision: workflow.SourceRevision, ArchivePath: candidatePath, ArchiveDigest: candidateDigest}
 	snapshotArchive := snapshotArchiveForService(t, "stale draft\n")
 	_, snapshotDigest, err := service.snapshots.Save(workflow.ID, snapshotArchive)
 	if err != nil {
@@ -280,12 +280,7 @@ func newGeneratorServiceForTest(t *testing.T, store *generatorServiceStore, plan
 	workspaceRepo := &memoryWorkspaceRepository{}
 	store.workspace = workspaceRepo
 	manager := newWorkspaceManager(t, workspaceRepo, &memoryWorkspacePVCs{}, &memoryWorkspaceSandboxes{nextID: "sandbox-test"}, &now)
-	service, err := NewGeneratorService(store, plans, manager, tools, GeneratorServiceConfig{
-		DataDir: t.TempDir(),
-		FreezeExecution: func(scenario.Entry) (domain.ExecutionSnapshot, error) {
-			return generatorServiceSnapshot(), nil
-		},
-	})
+	service, err := NewGeneratorService(store, plans, manager, tools, GeneratorServiceConfig{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("create generator service: %v", err)
 	}
@@ -558,18 +553,6 @@ func generatorServicePlan() authoring.Plan {
 		Metadata:    authoring.Metadata{Title: "Generator Service", Description: "Validate shared generation lifecycle.", Runtime: scenario.RuntimeNode},
 		Overview:    "Build a small node environment and validate a durable generation service.",
 		Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The service is ready.", Position: 1}},
-	}
-}
-
-func generatorServiceSnapshot() domain.ExecutionSnapshot {
-	return domain.ExecutionSnapshot{
-		Runtime:     scenario.RuntimeNode,
-		Checkpoints: []domain.CheckpointSnapshot{{ID: "ready", Node: "host"}},
-		Node: &domain.NodeRuntimeSnapshot{
-			BaseImageFingerprint: strings.Repeat("a", 64), ProfileRevision: "node-profile", NetworkPolicyRevision: "network-profile",
-			Nodes:     []domain.NodeSnapshot{{Name: "host", Title: "Host"}},
-			Resources: domain.NodeResources{CPU: "1", Memory: "512MiB", Processes: 64, RootDisk: "5GiB"},
-		},
 	}
 }
 

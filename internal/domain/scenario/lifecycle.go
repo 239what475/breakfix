@@ -10,7 +10,7 @@ import (
 	"time"
 
 	content "github.com/breakfix/breakfix/internal/content/scenario"
-	execution "github.com/breakfix/breakfix/internal/domain/execution"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 type SourceKind string
@@ -67,27 +67,28 @@ func (c Scenario) Valid() bool {
 }
 
 // Revision is the immutable published result of one complete generation and
-// verification lifecycle. Artifact and materialization facts are kept here so
-// an active pointer can move without rewriting history.
+// verification lifecycle. Provider artifacts remain embedded exclusively in
+// the referenced public RunnableRevision; Operations only retains immutable
+// public references alongside its materialized content facts.
 type Revision struct {
-	ID                   string
-	ScenarioID           string
-	SourceKind           SourceKind
-	SourceRef            string
-	SourceRevisionID     string
-	BaseActiveRevisionID string
-	Title                string
-	Runtime              string
-	Type                 content.ScenarioType
-	Tags                 []string
-	ContentRevision      string
-	SourceSlug           string
-	MaterializedPath     string
-	MaterializedRevision string
-	Artifact             execution.ArtifactReference
-	State                RevisionState
-	PublishedAt          time.Time
-	CreatedAt            time.Time
+	ID                    string
+	ScenarioID            string
+	SourceKind            SourceKind
+	SourceRef             string
+	SourceRevisionID      string
+	BaseActiveRevisionID  string
+	Title                 string
+	Type                  content.ScenarioType
+	Tags                  []string
+	ContentRevision       string
+	SourceSlug            string
+	MaterializedPath      string
+	MaterializedRevision  string
+	RunnableRevisionRef   runnable.RevisionReference
+	VerificationReportRef runnable.VerificationReportReference
+	State                 RevisionState
+	PublishedAt           time.Time
+	CreatedAt             time.Time
 }
 
 // ActiveRevision pairs a stable Scenario identity with the immutable
@@ -114,7 +115,7 @@ func (r Revision) Valid() bool {
 		strings.TrimSpace(r.Title) == "" || !r.Type.Valid() || !content.ValidRevision(r.ContentRevision) ||
 		!content.ValidSourceSlug(r.SourceSlug) || strings.TrimSpace(r.MaterializedPath) == "" ||
 		!content.ValidRevision(r.MaterializedRevision) || !r.State.Valid() || r.PublishedAt.IsZero() || r.CreatedAt.IsZero() ||
-		r.Artifact.Validate(r.Runtime) != nil {
+		r.RunnableRevisionRef.Validate() != nil || r.VerificationReportRef.Validate() != nil {
 		return false
 	}
 	if r.BaseActiveRevisionID != "" && !content.ValidRevisionID(r.BaseActiveRevisionID) {

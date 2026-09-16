@@ -18,10 +18,9 @@
 .authoring-status[data-state="NeedsAuthorReview"] i,
 .authoring-status[data-state="Generating"] i,
 .authoring-status[data-state="Judging"] i,
-.authoring-status[data-state="Building"] i,
-.authoring-status[data-state="ArtifactPublishing"] i,
+.authoring-status[data-state="MaterializingArtifact"] i,
 .authoring-status[data-state="Verifying"] i,
-.authoring-status[data-state="ScenarioPublishing"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
+.authoring-status[data-state="Publishing"] i { background: var(--amber); animation: authoring-pulse 1.3s ease-in-out infinite; }
 .authoring-status[data-state="Published"] i { background: var(--green); }
 .authoring-status[data-state="Failed"] i { background: #b8504c; }
 .authoring-plan-actions { justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
@@ -47,13 +46,6 @@
 .authoring-code-view { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 100%; }
 .authoring-code-view select { width: calc(100% - 34px); margin: 14px 17px 8px; border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; background: #fff; color: var(--ink); font: 11px "DM Mono", monospace; }
 .authoring-code-view pre { min-width: 0; margin: 0; padding: 18px; overflow: auto; border-top: 1px solid #edf0ed; background: #f7f9f7; color: #24312d; font: 12px/1.55 "DM Mono", monospace; white-space: pre; }
-.authoring-verification { max-width: 680px; padding: 28px clamp(20px, 4vw, 54px); color: var(--ink); }
-.authoring-verification > strong { color: var(--green); font-size: 15px; }
-.authoring-verification > p { margin: 8px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
-.authoring-verification dl { display: grid; margin: 0; border-top: 1px solid var(--line); }
-.authoring-verification dl div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
-.authoring-verification dt { color: var(--muted); }
-.authoring-verification dd { margin: 0; color: var(--green); font-weight: 700; }
 .authoring-chat-pane { grid-template-rows: auto minmax(0, 1fr) auto; background: #f7f9f7; }
 .authoring-chat-heading { display: flex; align-items: center; justify-content: space-between; min-height: 58px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: #fffefd; }
 .authoring-chat-heading strong { font-size: 13px; }

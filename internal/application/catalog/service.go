@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
@@ -17,6 +18,13 @@ type ScenarioLifecycleStore interface {
 	ListActiveScenarioRevisions(context.Context) ([]scenariodomain.ActiveRevision, error)
 	GetScenario(context.Context, string) (*scenariodomain.Scenario, error)
 	GetScenarioRevision(context.Context, string, string) (*scenariodomain.Revision, error)
+}
+
+// RunnableRevisionResolver is the sole source of provider artifact facts for
+// a published Operations revision. Scenario persistence stores only the
+// immutable reference, never a copied artifact projection.
+type RunnableRevisionResolver interface {
+	ResolveRunnableRevision(context.Context, string, string) (runnable.RunnableRevision, error)
 }
 
 type PublishedScenario struct {
@@ -43,12 +51,13 @@ type Service struct {
 	scenariosDir string
 	availability *Availability
 	lifecycle    ScenarioLifecycleStore
+	runnable     RunnableRevisionResolver
 }
 
 const readinessCheckTimeout = 2 * time.Second
 
-func NewService(scenariosDir string, availability *Availability, lifecycle ScenarioLifecycleStore) *Service {
-	return &Service{scenariosDir: scenariosDir, availability: availability, lifecycle: lifecycle}
+func NewService(scenariosDir string, availability *Availability, lifecycle ScenarioLifecycleStore, runnable RunnableRevisionResolver) *Service {
+	return &Service{scenariosDir: scenariosDir, availability: availability, lifecycle: lifecycle, runnable: runnable}
 }
 
 // Ready verifies the configured immutable release, when one exists. It is
@@ -136,7 +145,7 @@ func (s *Service) HistoricalEntry(ctx context.Context, scenarioID, revisionID st
 	if err != nil {
 		return nil, err
 	}
-	return validateMaterializedRevision(s.scenariosDir, *stable, *revision)
+	return validateMaterializedRevision(ctx, s.scenariosDir, *stable, *revision, s.runnable)
 }
 
 func (s *Service) currentMaterialized(ctx context.Context) ([]scenariodomain.ActiveRevision, map[string]scenario.Entry, error) {
@@ -147,7 +156,7 @@ func (s *Service) currentMaterialized(ctx context.Context) ([]scenariodomain.Act
 	if err != nil {
 		return nil, nil, fmt.Errorf("list active scenario revisions: %w", err)
 	}
-	entries, err := materializedScenarioIndex(revisions, s.scenariosDir)
+	entries, err := materializedScenarioIndex(ctx, revisions, s.scenariosDir, s.runnable)
 	if err != nil {
 		return nil, nil, err
 	}

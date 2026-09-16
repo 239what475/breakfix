@@ -241,7 +241,7 @@ func (s *authoringGeneratorToolsService) SubmitCandidate(_ context.Context, _ st
 func (s *authoringGeneratorToolsService) ConfirmContent(_ context.Context, _ string, confirmation generation.ContentConfirmation) (*generation.Workflow, error) {
 	s.contentConfirmation = confirmation
 	workflow := s.workflow
-	workflow.State = generation.StateScenarioPublishing
+	workflow.State = generation.StatePublishing
 	return &workflow, nil
 }
 

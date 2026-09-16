@@ -32,7 +32,7 @@ type GenerationAgentStore interface {
 	InterruptActiveGenerationAgentRuns(context.Context, string, time.Time) error
 	GetCandidateRevision(context.Context, string) (*domain.Revision, error)
 	FinalizeGenerationJudgement(context.Context, domain.Claim, string, bool, string, time.Time) error
-	ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, *domain.VerificationReport, time.Time) error
+	ReportGenerationArtifactFailure(context.Context, domain.Claim, domain.WorkflowState, domain.Failure, time.Time) error
 	RenewGenerationLease(context.Context, domain.Claim, time.Duration, time.Time) error
 }
 
@@ -209,7 +209,7 @@ func (r *AgentRunner) executeClaim(ctx context.Context, lease *agentLease) error
 		}
 		var artifact *domain.ArtifactError
 		if errors.As(err, &artifact) {
-			return r.store.ReportGenerationArtifactFailure(context.Background(), lease.current(), lease.current().Workflow.State, artifact.Failure, artifact.Report, r.now())
+			return r.store.ReportGenerationArtifactFailure(context.Background(), lease.current(), lease.current().Workflow.State, artifact.Failure, r.now())
 		}
 		next, retryErr := r.store.RetryGenerationAgentRun(context.Background(), lease.current(), run.ID, err.Error(), r.now())
 		if retryErr != nil {
@@ -256,7 +256,7 @@ func (r *AgentRunner) readCandidate(ctx context.Context, id string) (*Candidate,
 	if err != nil {
 		return nil, err
 	}
-	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveSHA256)
+	archive, err := candidate.ReadArchive(revision.ArchivePath, revision.ArchiveDigest)
 	if err != nil {
 		return nil, fmt.Errorf("read candidate archive: %w", err)
 	}

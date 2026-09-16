@@ -43,8 +43,8 @@ go run ./cmd/catalog-release \
 
 ## Scenario 生命周期
 
-平台为每个可运行内容分配稳定 `Scenario.id`，为每次完整 `Generate -> Build -> ArtifactPublish -> Verify` 结果分配不可变
-`ScenarioRevision.id`。Scenario 只保存当前 `active_revision_id` 指针；切换指针不会改写旧目录、artifact 或学习记录。作者修订
+平台为每个可运行内容分配稳定 `Scenario.id`，为每次完整 `Generate -> MaterializeArtifact -> Verify` 结果分配不可变
+`ScenarioRevision.id`。Scenario 只保存当前 `active_revision_id` 指针以及不可变 `RunnableRevision`、`VerificationReport` 引用；切换指针不会改写旧目录、public runnable revision 或学习记录。作者修订
 沿用稳定 Scenario ID 和 `source_slug`，但必须经过新 revision 的完整验证后才原子切换指针。
 
 作者可以弃用自己的 Scenario。弃用仅将 stable identity 标为 `deprecated`，阻止它进入公开 Catalog 和创建新学习 Environment；历史
@@ -62,18 +62,17 @@ Catalog bundle 是 OCI Image Spec artifact：一个 immutable manifest、空 con
 
 ```text
 CatalogRelease: Pending -> Installing -> Committing -> Ready | Failed
-CatalogEntry:   Building -> ArtifactPublishing -> Verifying -> ReadyToCommit | Failed
-Commit:         Pending -> Prepared -> ArtifactPublished -> Materialized -> Committed
+CatalogEntry:   MaterializingArtifact -> Verifying -> ReadyToCommit | Failed
+Commit:         Prepared -> Materialized -> Committed | Failed
 ```
 
-Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并将展开后的 source 持久化到 Server data directory。Runtime Worker
-执行每个 Entry 的真实 Build、artifact publish 与 Verify；它们不创建 `GenerationWorkflow`、Authoring Session 或 AgentRun。已完成阶段和
-外部资源 identity 都持久化，重启或 lease 接管只恢复未完成阶段。
+Server 为每个 bundle digest 创建确定性 Release 和 Entry identity，并将展开后的 source 持久化到 Server data directory。Catalog application
+将每个 Entry 编译为公共 `RunnableSpec`，并等待公共 Worker materialize 与 verify；它们不创建 `GenerationWorkflow`、Authoring Session
+或 AgentRun。已完成的 `RunnableRevision` 与 `VerificationReport` 引用持久化，重启或 lease 接管只恢复公共 action。
 
-只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 持久化每个 commit intent，Runtime Worker 发布最终 runtime
-artifact，Server 以 hash 校验和幂等 materialization 写入 source。最后在一个数据库事务中创建 stable Scenario、active immutable
-revision、标记所有 commit 为 `Committed` 并将 Release 置为 `Ready`。Catalog 不读取 staging 或部分 materialized 目录，因此不会暴露半次
-安装。
+只有全部 Entry 到达 `ReadyToCommit` 后，Release 才进入 `Committing`。Server 持久化每个 commit intent，以 hash 校验和幂等 materialization
+写入 source，并在一个数据库事务中创建 stable Scenario、active immutable revision、公共 runnable/report 引用，标记所有 commit 为
+`Committed` 并将 Release 置为 `Ready`。Catalog 不读取 staging 或部分 materialized 目录，因此不会暴露半次安装。
 
 ## Finalizer 与完整性
 
@@ -88,7 +87,7 @@ data_dir/scenarios/<source_slug>/<scenario_revision_id>/
 ```
 
 Catalog 读取会对每个 active revision 严格核对 stable ID、revision ID、title、runtime、type、tags、content revision、materialized
-revision、artifact 和发布时间。引用目录缺失、路径或内容变化、可执行位变化、元数据不一致都会报告 materialized integrity error，而不会
+revision、由 `RunnableRevision` 解析的 artifact 和发布时间。引用目录缺失、路径或内容变化、可执行位变化、元数据不一致都会报告 materialized integrity error，而不会
 静默过滤。未被当前 active pointer 引用的目录是历史或尚未公开内容，不能改变 Catalog 结果。
 
 Server 启动和 `/readyz` 使用同一完整性检查；没有发布 revision 时，缺少场景根目录是合法 bootstrap 状态。配置了

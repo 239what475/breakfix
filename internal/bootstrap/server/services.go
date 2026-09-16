@@ -9,15 +9,9 @@ import (
 	"time"
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
-	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
-	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
-	"github.com/breakfix/breakfix/internal/content/candidate"
-	"github.com/breakfix/breakfix/internal/content/scenario"
-	"github.com/breakfix/breakfix/internal/domain/execution"
-	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -176,58 +170,6 @@ func runtimeProjection(environment runtimev2.RuntimeEnvironment) (applearning.En
 	return projection, true
 }
 
-type scenarioArtifactValidator struct {
-	registryRepository string
-	incusNamePrefix    string
-}
-
-func (v scenarioArtifactValidator) ValidateScenarioArtifact(action runtime.Context, artifact execution.ArtifactReference) error {
-	if action.Artifact == nil || action.FinalArtifactTargetID == "" || action.FinalArtifactTargetRevision == "" {
-		return errors.New("runtime action has no scenario publication input")
-	}
-	if err := artifact.Validate(action.Snapshot.Runtime); err != nil {
-		return err
-	}
-	switch action.Snapshot.Runtime {
-	case scenario.RuntimeK8s:
-		expected, err := candidate.ScenarioOCIRepository(v.registryRepository, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
-		if err != nil {
-			return fmt.Errorf("derive scenario OCI repository: %w", err)
-		}
-		actual, err := candidate.OCIRepository(artifact.OCIReference)
-		if err != nil {
-			return err
-		}
-		if actual != expected {
-			return errors.New("scenario artifact OCI repository does not belong to publication")
-		}
-		stagingDigest, err := candidate.OCIDigest(action.Artifact.OCIReference)
-		if err != nil {
-			return fmt.Errorf("read candidate artifact digest: %w", err)
-		}
-		finalDigest, err := candidate.OCIDigest(artifact.OCIReference)
-		if err != nil {
-			return err
-		}
-		if finalDigest != stagingDigest {
-			return errors.New("scenario artifact digest differs from verified candidate artifact")
-		}
-		return nil
-	case scenario.RuntimeNode:
-		expected, err := incus.AliasForContentRevision(v.incusNamePrefix, action.FinalArtifactTargetID, action.FinalArtifactTargetRevision)
-		if err != nil {
-			return fmt.Errorf("derive scenario Incus alias: %w", err)
-		}
-		if artifact.IncusAlias != expected || artifact.IncusFingerprint != action.Artifact.IncusFingerprint {
-			return errors.New("scenario artifact does not match the verified Node artifact")
-		}
-		return nil
-	default:
-		return errors.New("runtime action has an unsupported scenario runtime")
-	}
-}
-
 var _ applearning.CleanupRepository = learningStore{}
 var _ applearning.ProjectionRepository = learningStore{}
 var _ applearning.ProjectionSource = environmentProjectionSource{}
-var _ appgeneration.ScenarioArtifactValidator = scenarioArtifactValidator{}

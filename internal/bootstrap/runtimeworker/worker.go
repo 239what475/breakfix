@@ -44,7 +44,7 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	}
 	actionClient, err := internalapi.NewRunnableActionClient(cfg.Worker.ServerURL, cfg.Worker.APIKey)
 	if err != nil {
-		return fmt.Errorf("create runtime action client: %w", err)
+		return fmt.Errorf("create runnable action client: %w", err)
 	}
 	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleRuntime)
 	if err != nil {

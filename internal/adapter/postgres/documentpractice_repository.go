@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -177,7 +176,7 @@ func (d *DocumentPracticeRepository) AcquireWorkflowLease(ctx context.Context, w
 
 // BindRunnableAction reserves the exact public runtime identity before it can
 // be claimed by a Worker. The binding is immutable and is intentionally a
-// documentation-product projection, not a runtime action field.
+// documentation-product projection, not a public runnable action field.
 func (d *DocumentPracticeRepository) BindRunnableAction(ctx context.Context, workflowID string, action runnable.ActionIdentity, now time.Time) error {
 	if strings.TrimSpace(workflowID) == "" || action.Validate() != nil || now.IsZero() {
 		return errors.New("document runnable action binding is invalid")
@@ -349,7 +348,7 @@ func (d *DocumentPracticeRepository) PublishPracticeRevision(ctx context.Context
 		if err := tx.QueryRowContext(ctx, `SELECT revision FROM document_practice_revisions WHERE workflow_id = ? FOR UPDATE`, workflowID).Scan(&stored); err != nil {
 			return domain.Workflow{}, err
 		}
-		if !bytes.Equal(stored, revisionJSON) {
+		if !sameJSON(stored, revision) {
 			return domain.Workflow{}, errors.New("published workflow has another practice revision")
 		}
 		if err := tx.Commit(); err != nil {
@@ -426,7 +425,7 @@ func (d *DocumentPracticeRepository) PublishPracticeRevision(ctx context.Context
 		if err := tx.QueryRowContext(ctx, `SELECT revision FROM document_practice_revisions WHERE id = ? FOR UPDATE`, revision.ID).Scan(&stored); err != nil {
 			return domain.Workflow{}, err
 		}
-		if !bytes.Equal(stored, revisionJSON) {
+		if !sameJSON(stored, revision) {
 			return domain.Workflow{}, errors.New("practice revision id already has another value")
 		}
 	}

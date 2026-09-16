@@ -44,7 +44,7 @@ func (f Feedback) Validate() error {
 type Context struct {
 	Workflow  Workflow       `json:"workflow"`
 	Plan      authoring.Plan `json:"plan"`
-	Candidate *WorkerView    `json:"candidate,omitempty"`
+	Candidate *Revision      `json:"candidate,omitempty"`
 	Feedback  Feedback       `json:"feedback"`
 }
 
@@ -53,18 +53,10 @@ type Context struct {
 // the workflow can return to the same generator session for repair.
 type ArtifactError struct {
 	Failure Failure
-	Report  *VerificationReport
 }
 
 func (e *ArtifactError) Error() string { return e.Failure.Summary }
 
 func NewArtifactError(code, summary string) error {
 	return &ArtifactError{Failure: Failure{Class: FailureArtifact, Code: code, Summary: summary}}
-}
-
-func NewArtifactErrorWithReport(code, summary string, report VerificationReport) error {
-	return &ArtifactError{
-		Failure: Failure{Class: FailureArtifact, Code: code, Summary: summary},
-		Report:  &report,
-	}
 }

@@ -125,7 +125,7 @@ func TestGeneratorHTTPAPIProjectsSafeGenerationReview(t *testing.T) {
 		Workflow: generatorHTTPWorkflow("workflow-review", "session-one", 2),
 		Candidate: &generation.Revision{
 			ID: "candidate-review", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
-			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
+			ArchivePath: archivePath, ArchiveDigest: candidate.Digest(archive),
 			Failure: &generation.Failure{Class: generation.FailureArtifact, Code: "JUDGE_REJECT", Summary: "the candidate does not satisfy the authoring policy"},
 		},
 	}
@@ -170,7 +170,7 @@ func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
 		Workflow: workflow,
 		Candidate: &generation.Revision{
 			ID: "candidate-review-bundle", Source: generation.Source{Kind: generation.SourceAuthoring, Ref: "session-one"}, SourceRevision: "2",
-			ArchivePath: archivePath, ArchiveSHA256: candidate.Digest(archive),
+			ArchivePath: archivePath, ArchiveDigest: candidate.Digest(archive),
 		},
 	}
 	router, cfg := newGeneratorHTTPRouter(t, service)
@@ -184,7 +184,7 @@ func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
 	if bundle.Manifest.SchemaVersion != reviewBundleSchemaVersion || bundle.Manifest.Kind != api.GeneratorReviewManifestKindContent ||
 		bundle.Manifest.WorkflowId != workflow.ID || bundle.Manifest.CandidateRevisionId != service.generation.Candidate.ID ||
 		bundle.Manifest.WorkflowState != string(generation.StateNeedsAuthorReview) ||
-		bundle.Manifest.CandidateArchiveSha256 != service.generation.Candidate.ArchiveSHA256 || bundle.Manifest.PayloadSha256 == "" {
+		bundle.Manifest.CandidateArchiveDigest != service.generation.Candidate.ArchiveDigest || bundle.Manifest.PayloadSha256 == "" {
 		t.Fatalf("review bundle manifest = %#v", bundle.Manifest)
 	}
 	payload, err := base64.StdEncoding.DecodeString(bundle.Payload)
@@ -196,7 +196,7 @@ func TestGeneratorHTTPAPIExportsImmutableContentReviewBundle(t *testing.T) {
 	}
 	entries := generatorHTTPReviewBundleEntries(t, payload)
 	for _, required := range []string{
-		"overview.md", "judge.md", "verification.md", "checkpoints/ready.md", "candidate/problem.md", "candidate/nodes/host/checks.sh",
+		"overview.md", "judge.md", "checkpoints/ready.md", "candidate/problem.md", "candidate/nodes/host/assertions/final-ready.sh",
 	} {
 		if _, found := entries[required]; !found {
 			t.Fatalf("review bundle is missing %q: %#v", required, entries)
@@ -319,10 +319,10 @@ func generatorHTTPReviewArchive(t *testing.T) []byte {
 		{"problem.md", "# Problem\n\nInspect the candidate.\n", 0o644},
 		{"solution.md", "# Solution\n\n<!-- checkpoint: ready -->\n", 0o644},
 		{"hints/ready.md", "# Hint\n\nInspect the host.\n", 0o644},
-		{"nodes/host/generate.sh", "#!/bin/sh\nexit 0\n", 0o755},
-		{"nodes/host/reproduce.sh", "#!/bin/sh\nprintf '{\"evidence\":[{\"id\":\"workspace-incomplete\",\"observed\":true,\"summary\":\"incomplete\"}]}'\n", 0o755},
-		{"nodes/host/answer.sh", "#!/bin/sh\nexit 0\n", 0o755},
-		{"nodes/host/checks.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/initialize.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/assertions/initial-workspace-incomplete.sh", "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"workspace-incomplete\",\"satisfied\":true,\"summary\":\"incomplete\"}]}'\n", 0o755},
+		{"nodes/host/actions/apply.sh", "#!/bin/sh\nexit 0\n", 0o755},
+		{"nodes/host/assertions/final-ready.sh", "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"ready\",\"satisfied\":true,\"summary\":\"ready\"}]}'\n", 0o755},
 	} {
 		header := &tar.Header{Name: file.name, Mode: file.mode, Size: int64(len(file.content)), Typeflag: tar.TypeReg}
 		if err := tarWriter.WriteHeader(header); err != nil {

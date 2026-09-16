@@ -181,7 +181,7 @@ func toAPIAuthoringCandidate(revision *generation.Revision) *api.AuthoringCandid
 	if revision == nil {
 		return nil
 	}
-	candidate := &api.AuthoringCandidate{Id: revision.ID, ArchiveSha256: revision.ArchiveSHA256}
+	candidate := &api.AuthoringCandidate{Id: revision.ID, ArchiveDigest: revision.ArchiveDigest, ContentRevision: revision.ContentRevision}
 	if revision.Failure != nil {
 		failure := api.AuthoringCandidateFailure{
 			Class:   api.AuthoringCandidateFailureClass(revision.Failure.Class),
@@ -205,7 +205,6 @@ func toAPIGeneratorWorkflow(workflow generation.Workflow) api.GeneratorWorkflow 
 		PlanRevision:             generatorPlanRevision(workflow.SourceRevision),
 		State:                    api.GeneratorWorkflowState(workflow.State),
 		StateVersion:             workflow.StateVersion,
-		RuntimeAttempt:           workflow.RuntimeAttempt,
 		CandidateRevisionId:      optionalString(workflow.CandidateRevisionID),
 		LastError:                optionalString(workflow.LastError),
 		FinalizerErrorCategory:   finalizerCategory,
@@ -223,25 +222,6 @@ func generatorPlanRevision(value string) int64 {
 		return 0
 	}
 	return revision
-}
-
-func toAPIAuthoringVerificationReport(report *generation.VerificationReport) *api.AuthoringVerificationReport {
-	if report == nil {
-		return nil
-	}
-	answers := make([]api.AuthoringExecutionResult, 0, len(report.Answers))
-	for _, answer := range report.Answers {
-		answers = append(answers, api.AuthoringExecutionResult{Location: answer.Location, ExitCode: answer.ExitCode, Stdout: optionalString(answer.Stdout), Stderr: optionalString(answer.Stderr)})
-	}
-	reproduction := make([]api.AuthoringReproductionEvidenceResult, 0, len(report.Reproduction))
-	for _, evidence := range report.Reproduction {
-		reproduction = append(reproduction, api.AuthoringReproductionEvidenceResult{Id: evidence.ID, Observed: evidence.Observed, Summary: evidence.Summary, Details: optionalString(evidence.Details)})
-	}
-	checkpoints := make([]api.AuthoringCheckpointResult, 0, len(report.Checkpoints))
-	for _, checkpoint := range report.Checkpoints {
-		checkpoints = append(checkpoints, api.AuthoringCheckpointResult{Id: checkpoint.ID, Passed: checkpoint.Passed, Summary: checkpoint.Summary, Details: optionalString(checkpoint.Details)})
-	}
-	return &api.AuthoringVerificationReport{Passed: report.Passed, Reproduction: reproduction, Summary: report.Summary, Answers: answers, Checkpoints: checkpoints}
 }
 
 func toAPIAuthoringPlan(plan authoringdomain.Plan) api.AuthoringPlan {

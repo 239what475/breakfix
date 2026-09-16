@@ -36,11 +36,10 @@ const sessionStateLabel: Record<string, string> = {
 const workflowStateLabel: Record<string, string> = {
   Generating: "等待生成回合",
   Judging: "正在审查",
-  Building: "正在构建",
-  ArtifactPublishing: "正在发布候选产物",
+	MaterializingArtifact: "正在构建候选产物",
   Verifying: "正在真实验证",
   NeedsAuthorReview: "等待内容审核",
-  ScenarioPublishing: "正在发布场景",
+	Publishing: "正在发布场景",
   Published: "已发布",
   Failed: "基础设施失败",
   Cancelled: "已取消",
@@ -57,7 +56,6 @@ const activeWorkflow = computed<GeneratorWorkflow | undefined>(() => {
 });
 const candidate = computed(() => generation.value?.candidate);
 const verified = computed(() => generation.value?.verified);
-const verification = computed(() => generation.value?.verification);
 const assets = computed(() => generation.value?.assets ?? []);
 const diff = computed(() => generation.value?.diff ?? []);
 const usingVerifiedRevision = computed(() => !!verified.value);
@@ -89,7 +87,6 @@ const tabs = computed(() => {
     entries.push({ id: "assets", label: "Assets" });
     entries.push({ id: "diff", label: "Diff" });
   }
-  if (verification.value) entries.push({ id: "verification", label: "验证" });
   return entries;
 });
 const overview = computed(() => {
@@ -137,10 +134,9 @@ function shouldPoll() {
   if (session.value?.authoring_turn_active) return true;
   return workflows.value.some((workflow) => [
     "Judging",
-    "Building",
-    "ArtifactPublishing",
+	"MaterializingArtifact",
     "Verifying",
-    "ScenarioPublishing",
+	"Publishing",
   ].includes(workflow.state));
 }
 
@@ -382,16 +378,6 @@ onScopeDispose(() => {
             </select>
             <div v-else class="authoring-empty"><strong>当前 candidate 没有可显示的文件差异</strong></div>
             <pre v-if="selectedDiff"><code>{{ selectedDiff.diff }}</code></pre>
-          </div>
-          <div v-else-if="activeTab === 'verification'" class="authoring-verification">
-            <strong>{{ verification?.passed ? "真实验证已通过" : "真实验证未通过" }}</strong>
-            <p>{{ verification?.summary || activeWorkflow?.last_error || "验证没有返回摘要" }}</p>
-            <dl>
-              <div><dt>生成工作流</dt><dd>{{ activeWorkflow?.state || "-" }}</dd></div>
-              <div><dt>目标现象</dt><dd>{{ verification?.reproduction.filter((entry) => entry.observed).length || 0 }} / {{ verification?.reproduction.length || 0 }}</dd></div>
-              <div><dt>参考修复</dt><dd>{{ verification?.answers.filter((entry) => entry.exit_code === 0).length || 0 }} / {{ verification?.answers.length || 0 }}</dd></div>
-              <div><dt>修复后检查点</dt><dd>{{ verification?.checkpoints.filter((entry) => entry.passed).length || 0 }} / {{ verification?.checkpoints.length || 0 }}</dd></div>
-            </dl>
           </div>
         </div>
       </section>

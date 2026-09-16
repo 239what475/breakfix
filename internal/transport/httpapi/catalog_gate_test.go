@@ -24,7 +24,7 @@ func TestCatalogGateWaitsForConfiguredReleaseWithoutAffectingOtherRoutes(t *test
 	if err != nil {
 		t.Fatalf("create catalog availability: %v", err)
 	}
-	handler := &Handler{catalog: appcatalog.NewService(t.TempDir(), availability, nil)}
+	handler := &Handler{catalog: appcatalog.NewService(t.TempDir(), availability, nil, nil)}
 	router := gin.New()
 	router.GET("/catalog", handler.requireCatalogReady, func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	router.GET("/healthz", func(c *gin.Context) { c.Status(http.StatusOK) })

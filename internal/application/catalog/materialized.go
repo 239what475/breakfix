@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
 )
 
@@ -54,7 +56,10 @@ func materializedIntegrity(scenarioID, sourceSlug, format string, args ...any) e
 // active revisions selected by the durable lifecycle. Directories not selected
 // by that query are historical or not-yet-published content and cannot alter
 // current Catalog reads.
-func materializedScenarioIndex(revisions []scenariodomain.ActiveRevision, scenariosDir string) (map[string]scenario.Entry, error) {
+func materializedScenarioIndex(ctx context.Context, revisions []scenariodomain.ActiveRevision, scenariosDir string, resolver RunnableRevisionResolver) (map[string]scenario.Entry, error) {
+	if resolver == nil {
+		return nil, materializedIntegrity("", "", "runnable revision resolver is unavailable")
+	}
 	rootInfo, err := os.Lstat(scenariosDir)
 	if err != nil {
 		if os.IsNotExist(err) && len(revisions) == 0 {
@@ -76,7 +81,7 @@ func materializedScenarioIndex(revisions []scenariodomain.ActiveRevision, scenar
 		if _, exists := result[active.Scenario.ID]; exists {
 			return nil, materializedIntegrity(active.Scenario.ID, active.Scenario.SourceSlug, "active lifecycle returned the scenario more than once")
 		}
-		entry, err := validateMaterializedRevision(scenariosDir, active.Scenario, active.Revision)
+		entry, err := validateMaterializedRevision(ctx, scenariosDir, active.Scenario, active.Revision, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +90,7 @@ func materializedScenarioIndex(revisions []scenariodomain.ActiveRevision, scenar
 	return result, nil
 }
 
-func validateMaterializedRevision(scenariosDir string, stable scenariodomain.Scenario, revision scenariodomain.Revision) (*scenario.Entry, error) {
+func validateMaterializedRevision(ctx context.Context, scenariosDir string, stable scenariodomain.Scenario, revision scenariodomain.Revision, resolver RunnableRevisionResolver) (*scenario.Entry, error) {
 	if !stable.Valid() || !revision.Valid() || stable.ID != revision.ScenarioID || stable.SourceKind != revision.SourceKind ||
 		stable.SourceRef != revision.SourceRef || stable.SourceSlug != revision.SourceSlug ||
 		scenario.ValidateMaterializedPath(revision.MaterializedPath, revision.SourceSlug, revision.ID) != nil {
@@ -98,9 +103,19 @@ func validateMaterializedRevision(scenariosDir string, stable scenariodomain.Sce
 		}
 		return nil, materializedIntegrity(stable.ID, revision.SourceSlug, "invalid materialized source: %v", err)
 	}
-	expectedImage := revision.Artifact.IncusFingerprint
-	if revision.Runtime == scenario.RuntimeK8s {
-		expectedImage = revision.Artifact.OCIReference
+	if resolver == nil {
+		return nil, materializedIntegrity(stable.ID, stable.SourceSlug, "runnable revision resolver is unavailable")
+	}
+	runnableRevision, err := resolver.ResolveRunnableRevision(ctx, revision.RunnableRevisionRef.ID, revision.RunnableRevisionRef.Digest)
+	if err != nil {
+		return nil, materializedIntegrity(stable.ID, stable.SourceSlug, "resolve runnable revision: %v", err)
+	}
+	if err := runnableRevision.Validate(); err != nil {
+		return nil, materializedIntegrity(stable.ID, stable.SourceSlug, "stored runnable revision is invalid: %v", err)
+	}
+	expectedImage, err := materializedArtifactImage(runnableRevision.Artifact)
+	if err != nil {
+		return nil, materializedIntegrity(stable.ID, stable.SourceSlug, "resolve runnable artifact: %v", err)
 	}
 	revisionTags := revision.Tags
 	if revisionTags == nil {
@@ -111,10 +126,28 @@ func validateMaterializedRevision(scenariosDir string, stable scenariodomain.Sce
 		entryTags = []string{}
 	}
 	if entry.ID != revision.ScenarioID || entry.RevisionID != revision.ID || entry.SourceSlug != revision.SourceSlug ||
-		entry.Title != revision.Title || entry.Runtime != revision.Runtime || entry.Type != revision.Type || !slices.Equal(entryTags, revisionTags) ||
+		entry.Title != revision.Title || entry.Runtime != string(runnableRevision.Spec.RuntimeProfile.Runtime) || entry.Type != revision.Type || !slices.Equal(entryTags, revisionTags) ||
 		entry.ContentRevision != revision.ContentRevision || entry.Revision != revision.MaterializedRevision || entry.Image != expectedImage ||
 		!entry.PublishedAt.UTC().Equal(revision.PublishedAt.UTC()) {
 		return nil, materializedIntegrity(stable.ID, revision.SourceSlug, "materialized source does not match its durable revision")
 	}
 	return entry, nil
+}
+
+func materializedArtifactImage(artifact runnable.ArtifactReference) (string, error) {
+	if err := artifact.Validate(); err != nil {
+		return "", err
+	}
+	switch artifact.Runtime {
+	case runnable.RuntimeNode:
+		_, digest, found := strings.Cut(strings.TrimPrefix(artifact.ProviderReference, "incus://"), "@")
+		if !found || digest != artifact.ArtifactDigest {
+			return "", errors.New("Node artifact reference is invalid")
+		}
+		return strings.TrimPrefix(digest, "sha256:"), nil
+	case runnable.RuntimeK8s:
+		return artifact.ProviderReference, nil
+	default:
+		return "", errors.New("unsupported runnable artifact runtime")
+	}
 }

@@ -81,7 +81,7 @@ opaque Scenario identity；`revision_id` 是本次不可变发布结果。API、
 `runtime: k8s` 的 `image` 是完整 `repository@sha256:<64 位小写摘要>` OCI 引用。Node checkpoint 必须声明执行节点，K8s checkpoint
 不能有节点字段；checkpoint 顺序只控制 UI 展示，不表达依赖或必须通过的先后关系。
 
-Server 只在真实验证成功后写入发布字段。作者流程在 `ScenarioPublishing` finalizer 中 materialize；Catalog Release 在全部 entry
+Server 只在真实验证成功后写入发布字段。作者流程在 `Publishing` finalizer 中 materialize；Catalog Release 在全部 entry
 验证完成后的原子 commit 中 materialize。作者修订为同一 `id` 创建新的 `<scenario_revision_id>`；旧目录和 artifact 保留。弃用仅切换
 stable Scenario 状态，不删除历史内容。
 

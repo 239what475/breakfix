@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/content/scenario"
-	execution "github.com/breakfix/breakfix/internal/domain/execution"
 	"github.com/breakfix/breakfix/internal/domain/publication"
-	runtime "github.com/breakfix/breakfix/internal/domain/runtime"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
 var ErrBaselineEstablished = errors.New("catalog baseline is already established")
@@ -41,16 +40,15 @@ func (s ReleaseState) Terminal() bool { return s == ReleaseReady || s == Release
 type EntryState string
 
 const (
-	EntryBuilding           EntryState = "Building"
-	EntryArtifactPublishing EntryState = "ArtifactPublishing"
-	EntryVerifying          EntryState = "Verifying"
-	EntryReadyToCommit      EntryState = "ReadyToCommit"
-	EntryFailed             EntryState = "Failed"
+	EntryMaterializing EntryState = "MaterializingArtifact"
+	EntryVerifying     EntryState = "Verifying"
+	EntryReadyToCommit EntryState = "ReadyToCommit"
+	EntryFailed        EntryState = "Failed"
 )
 
 func (s EntryState) Valid() bool {
 	switch s {
-	case EntryBuilding, EntryArtifactPublishing, EntryVerifying, EntryReadyToCommit, EntryFailed:
+	case EntryMaterializing, EntryVerifying, EntryReadyToCommit, EntryFailed:
 		return true
 	default:
 		return false
@@ -59,24 +57,18 @@ func (s EntryState) Valid() bool {
 
 func (s EntryState) Terminal() bool { return s == EntryReadyToCommit || s == EntryFailed }
 
-func (s EntryState) Leaseable() bool {
-	return s == EntryBuilding || s == EntryArtifactPublishing || s == EntryVerifying
-}
-
 type CommitState string
 
 const (
-	CommitPending           CommitState = "Pending"
-	CommitPrepared          CommitState = "Prepared"
-	CommitArtifactPublished CommitState = "ArtifactPublished"
-	CommitMaterialized      CommitState = "Materialized"
-	CommitCommitted         CommitState = "Committed"
-	CommitFailed            CommitState = "Failed"
+	CommitPrepared     CommitState = "Prepared"
+	CommitMaterialized CommitState = "Materialized"
+	CommitCommitted    CommitState = "Committed"
+	CommitFailed       CommitState = "Failed"
 )
 
 func (s CommitState) Valid() bool {
 	switch s {
-	case CommitPending, CommitPrepared, CommitArtifactPublished, CommitMaterialized, CommitCommitted, CommitFailed:
+	case CommitPrepared, CommitMaterialized, CommitCommitted, CommitFailed:
 		return true
 	default:
 		return false
@@ -104,14 +96,9 @@ type Release struct {
 	UpdatedAt                time.Time            `json:"updated_at"`
 }
 
-// BootstrapState is the complete durable view needed to decide whether one
-// configured release may establish the platform's initial Catalog baseline.
-// Failed releases remain as diagnostics; they do not become additional
-// baselines.
 type BootstrapState struct {
 	Releases               []Release
 	PublishedScenarioCount int
-	FailedCleanupPending   bool
 }
 
 func (r Release) Valid() bool {
@@ -145,164 +132,94 @@ func (r Release) validFinalizerDiagnostic() bool {
 	if r.FinalizerLastAttemptedAt != nil {
 		lastAttempted = *r.FinalizerLastAttemptedAt
 	}
-	return (publication.Diagnostic{
-		Category:        r.FinalizerErrorCategory,
-		LastError:       r.FinalizerLastError,
-		LastAttemptedAt: lastAttempted,
-		NextRetryAt:     r.FinalizerNextRetryAt,
-	}).Validate() == nil
+	return (publication.Diagnostic{Category: r.FinalizerErrorCategory, LastError: r.FinalizerLastError, LastAttemptedAt: lastAttempted, NextRetryAt: r.FinalizerNextRetryAt}).Validate() == nil
 }
 
-// Entry records every durable output needed to resume a single source path.
-// A successful stage remains durable while a later stage is retried.
+// Entry is a content-layer projection of public runnable progress. Leasing,
+// retry budgets, provider artifacts, and cleanup records belong only to the
+// runnable store and are never copied here.
 type Entry struct {
-	ID                string                             `json:"id"`
-	ReleaseID         string                             `json:"release_id"`
-	SourcePath        string                             `json:"source_path"`
-	SourceRef         string                             `json:"source_ref"`
-	Title             string                             `json:"title"`
-	Type              scenario.ScenarioType              `json:"type"`
-	Tags              []string                           `json:"tags"`
-	ContentRevision   ContentRevision                    `json:"content_revision"`
-	ArchiveSHA256     string                             `json:"archive_sha256"`
-	Snapshot          execution.Snapshot                 `json:"snapshot"`
-	State             EntryState                         `json:"state"`
-	StateVersion      int64                              `json:"state_version"`
-	RuntimeAttempt    int                                `json:"runtime_attempt"`
-	LeaseOwner        string                             `json:"-"`
-	LeaseExpires      *time.Time                         `json:"lease_expires_at,omitempty"`
-	NextRunAt         time.Time                          `json:"next_run_at"`
-	Build             *execution.BuildOutput             `json:"build,omitempty"`
-	Artifact          *execution.ArtifactReference       `json:"artifact,omitempty"`
-	VerifyEnvironment *execution.VerificationEnvironment `json:"verify_environment,omitempty"`
-	Verification      *execution.VerificationReport      `json:"verification,omitempty"`
-	LastError         string                             `json:"last_error,omitempty"`
-	CreatedAt         time.Time                          `json:"created_at"`
-	UpdatedAt         time.Time                          `json:"updated_at"`
+	ID                    string                                `json:"id"`
+	ReleaseID             string                                `json:"release_id"`
+	SourcePath            string                                `json:"source_path"`
+	SourceRef             string                                `json:"source_ref"`
+	Title                 string                                `json:"title"`
+	Type                  scenario.ScenarioType                 `json:"type"`
+	Tags                  []string                              `json:"tags"`
+	ContentRevision       ContentRevision                       `json:"content_revision"`
+	Source                runnable.SourceArchive                `json:"source"`
+	State                 EntryState                            `json:"state"`
+	StateVersion          int64                                 `json:"state_version"`
+	RunnableRevisionRef   *runnable.RevisionReference           `json:"runnable_revision_ref,omitempty"`
+	VerificationReportRef *runnable.VerificationReportReference `json:"verification_report_ref,omitempty"`
+	LastError             string                                `json:"last_error,omitempty"`
+	CreatedAt             time.Time                             `json:"created_at"`
+	UpdatedAt             time.Time                             `json:"updated_at"`
 }
 
 func (e Entry) Valid() bool {
-	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ReleaseID) == "" || !validSourcePath(e.SourcePath) || strings.TrimSpace(e.SourceRef) == "" || strings.TrimSpace(e.Title) == "" || !e.Type.Valid() ||
-		!e.ContentRevision.Valid() || !execution.ValidSHA256(e.ArchiveSHA256) || !e.State.Valid() || e.StateVersion < 1 || e.RuntimeAttempt < 0 || e.NextRunAt.IsZero() || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
-		return false
-	}
-	if (e.LeaseOwner == "") != (e.LeaseExpires == nil) {
-		return false
-	}
-	if err := e.Snapshot.Validate(); err != nil {
+	if strings.TrimSpace(e.ID) == "" || strings.TrimSpace(e.ReleaseID) == "" || !validSourcePath(e.SourcePath) || strings.TrimSpace(e.SourceRef) == "" || strings.TrimSpace(e.Title) == "" || !e.Type.Valid() || !e.ContentRevision.Valid() || e.Source.Validate() != nil || !e.State.Valid() || e.StateVersion < 1 || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
 		return false
 	}
 	canonicalTags, err := scenario.NormalizeTags(e.Tags)
 	if err != nil || !slices.Equal(canonicalTags, e.Tags) || (e.Type == scenario.ScenarioDocumentationExample && len(e.Tags) != 0) {
 		return false
 	}
-	if e.Build != nil && !validBuild(*e.Build, e.Snapshot.Runtime) {
+	if e.RunnableRevisionRef != nil && e.RunnableRevisionRef.Validate() != nil {
 		return false
 	}
-	if e.Artifact != nil && e.Artifact.Validate(e.Snapshot.Runtime) != nil {
+	if e.VerificationReportRef != nil && e.VerificationReportRef.Validate() != nil {
 		return false
 	}
-	if e.VerifyEnvironment != nil && e.VerifyEnvironment.Validate(e.Snapshot.Runtime) != nil {
+	switch e.State {
+	case EntryMaterializing:
+		return e.RunnableRevisionRef == nil && e.VerificationReportRef == nil
+	case EntryVerifying:
+		return e.RunnableRevisionRef != nil && e.VerificationReportRef == nil
+	case EntryReadyToCommit:
+		return e.RunnableRevisionRef != nil && e.VerificationReportRef != nil
+	case EntryFailed:
+		return strings.TrimSpace(e.LastError) != ""
+	default:
 		return false
 	}
-	if e.Verification != nil && e.Verification.Validate(e.Snapshot) != nil {
-		return false
-	}
-	if e.State.Leaseable() {
-		if e.RuntimeAttempt < 1 || e.RuntimeAttempt > runtime.MaxAttempts {
-			return false
-		}
-	} else if e.RuntimeAttempt != 0 {
-		return false
-	}
-	if e.State == EntryReadyToCommit {
-		// Legacy Catalog records may retain their historical projection, while
-		// new installs project only the completed public runnable action.
-		return (e.Build != nil && e.Artifact != nil && e.Verification != nil && e.Verification.Passed) ||
-			(e.Build == nil && e.Artifact == nil && e.VerifyEnvironment == nil && e.Verification == nil)
-	}
-	return true
 }
 
-// Commit reserves the final opaque Scenario identity before external final
-// artifact publication and filesystem materialization. The identity is never
-// regenerated after a restart.
+// Commit reserves content identities only. Materialization consumes the
+// immutable RunnableRevision already bound by its Entry; it never requests a
+// second provider artifact or promotion action.
 type Commit struct {
-	ID                   string                       `json:"id"`
-	ReleaseID            string                       `json:"release_id"`
-	EntryID              string                       `json:"entry_id"`
-	ScenarioID           string                       `json:"scenario_id,omitempty"`
-	ScenarioRevisionID   string                       `json:"scenario_revision_id,omitempty"`
-	SourceSlug           string                       `json:"source_slug,omitempty"`
-	State                CommitState                  `json:"state"`
-	StateVersion         int64                        `json:"state_version"`
-	RuntimeAttempt       int                          `json:"runtime_attempt"`
-	LeaseOwner           string                       `json:"-"`
-	LeaseExpires         *time.Time                   `json:"lease_expires_at,omitempty"`
-	NextRunAt            time.Time                    `json:"next_run_at"`
-	LastError            string                       `json:"last_error,omitempty"`
-	Artifact             *execution.ArtifactReference `json:"artifact,omitempty"`
-	MaterializedRevision string                       `json:"materialized_revision,omitempty"`
-	MaterializedAt       *time.Time                   `json:"materialized_at,omitempty"`
-	CommittedAt          *time.Time                   `json:"committed_at,omitempty"`
-	CreatedAt            time.Time                    `json:"created_at"`
-	UpdatedAt            time.Time                    `json:"updated_at"`
+	ID                   string      `json:"id"`
+	ReleaseID            string      `json:"release_id"`
+	EntryID              string      `json:"entry_id"`
+	ScenarioID           string      `json:"scenario_id"`
+	ScenarioRevisionID   string      `json:"scenario_revision_id"`
+	SourceSlug           string      `json:"source_slug"`
+	State                CommitState `json:"state"`
+	MaterializedRevision string      `json:"materialized_revision,omitempty"`
+	MaterializedAt       *time.Time  `json:"materialized_at,omitempty"`
+	CommittedAt          *time.Time  `json:"committed_at,omitempty"`
+	LastError            string      `json:"last_error,omitempty"`
+	CreatedAt            time.Time   `json:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at"`
 }
 
 func (c Commit) Valid() bool {
-	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.ReleaseID) == "" || strings.TrimSpace(c.EntryID) == "" || !c.State.Valid() || c.StateVersion < 1 || c.RuntimeAttempt < 0 || c.NextRunAt.IsZero() || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
+	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.ReleaseID) == "" || strings.TrimSpace(c.EntryID) == "" || !scenario.ValidID(c.ScenarioID) || !scenario.ValidRevisionID(c.ScenarioRevisionID) || !scenario.ValidSourceSlug(c.SourceSlug) || !c.State.Valid() || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return false
 	}
-	if (c.LeaseOwner == "") != (c.LeaseExpires == nil) {
-		return false
-	}
-	if c.State == CommitPending {
-		return c.ScenarioID == "" && c.ScenarioRevisionID == "" && c.SourceSlug == "" && c.RuntimeAttempt == 0 && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
-	}
-	if !scenario.ValidID(c.ScenarioID) || !scenario.ValidRevisionID(c.ScenarioRevisionID) || !scenario.ValidSourceSlug(c.SourceSlug) {
-		return false
-	}
-	if c.State == CommitPrepared {
-		return c.RuntimeAttempt >= 1 && c.RuntimeAttempt <= runtime.MaxAttempts && c.Artifact == nil && c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
-	}
-	if c.RuntimeAttempt != 0 {
-		return false
-	}
-	if c.State == CommitFailed {
-		return c.Artifact == nil || c.Artifact.Validate(c.Artifact.Runtime) == nil
-	}
-	if c.Artifact == nil || c.Artifact.Validate(c.Artifact.Runtime) != nil {
-		return false
-	}
-	if c.State == CommitArtifactPublished {
+	switch c.State {
+	case CommitPrepared:
 		return c.MaterializedRevision == "" && c.MaterializedAt == nil && c.CommittedAt == nil
-	}
-	if !scenario.ValidRevision(c.MaterializedRevision) || c.MaterializedAt == nil {
+	case CommitMaterialized:
+		return scenario.ValidRevision(c.MaterializedRevision) && c.MaterializedAt != nil && c.CommittedAt == nil
+	case CommitCommitted:
+		return scenario.ValidRevision(c.MaterializedRevision) && c.MaterializedAt != nil && c.CommittedAt != nil
+	case CommitFailed:
+		return strings.TrimSpace(c.LastError) != ""
+	default:
 		return false
 	}
-	if c.State == CommitMaterialized {
-		return c.CommittedAt == nil
-	}
-	return c.CommittedAt != nil
-}
-
-type EntryClaim struct {
-	Release Release `json:"release"`
-	Entry   Entry   `json:"entry"`
-}
-
-func (c EntryClaim) Valid() bool {
-	return c.Release.Valid() && c.Entry.Valid() && c.Entry.ReleaseID == c.Release.ID && c.Entry.State.Leaseable() && c.Entry.LeaseOwner != ""
-}
-
-type CommitClaim struct {
-	Release Release `json:"release"`
-	Entry   Entry   `json:"entry"`
-	Commit  Commit  `json:"commit"`
-}
-
-func (c CommitClaim) Valid() bool {
-	return c.Release.Valid() && c.Entry.Valid() && c.Commit.Valid() && c.Entry.ReleaseID == c.Release.ID && c.Commit.ReleaseID == c.Release.ID && c.Commit.EntryID == c.Entry.ID && c.Commit.State == CommitPrepared && c.Commit.LeaseOwner != ""
 }
 
 func ReleaseIDForBundle(digest BundleDigest) string {
@@ -332,10 +249,6 @@ func validSourcePath(value string) bool {
 	}
 	clean := path.Clean(value)
 	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../") && clean == value
-}
-
-func validBuild(output execution.BuildOutput, runtime string) bool {
-	return output.Validate(runtime) == nil
 }
 
 var ErrReleaseNotFound = errors.New("catalog release not found")
