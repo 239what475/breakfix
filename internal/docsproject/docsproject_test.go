@@ -35,6 +35,8 @@ func TestRunAcceptsDocumentedMinimumConfig(t *testing.T) {
 	config.Root = sidebarRoot(t, sidebar("Documentation", "/docs/", sidebar("Home", "/docs/home/")))
 	config.Out = t.TempDir()
 	config.Version = "docs-project-v1"
+	writeNormalizerFile(t, config.Root, "build-info.json", `{"source":"kubernetes","revision":"abc123","version":"snapshot","locale":"en","base_url":"http://localhost:1313/"}`)
+	writeNormalizerFile(t, config.Root, "_redirects", "")
 	if err := Run(config); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}

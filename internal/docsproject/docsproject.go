@@ -74,6 +74,9 @@ func Run(config Config) error {
 	if !info.IsDir() {
 		return &InputError{Err: errors.New("rendered root is not a directory")}
 	}
-	_, err = loadTree(filepath.Clean(config.Root), config.Pages)
-	return err
+	state, err := loadTree(filepath.Clean(config.Root), config.Pages)
+	if err != nil {
+		return err
+	}
+	return runProjection(config, state)
 }

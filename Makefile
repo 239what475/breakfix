@@ -35,7 +35,7 @@ TARGETARCH ?= amd64
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
 DOCS_SITE_SCRIPT := $(CURDIR)/docs-site/scripts/docs-site.sh
-DOCS_PROJECT_VERSION := docs-project-v1
+DOCS_PROJECT_VERSION := docs-project-v2
 DOCS_PROJECT_FIXTURE := $(CURDIR)/test/fixtures/docs-project
 
 CATALOG_SOURCE ?=

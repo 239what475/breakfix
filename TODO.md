@@ -40,7 +40,7 @@ commit 经 Hugo 构建得到渲染树,再由离线解析程序把整棵渲染树
   可选 goquery/cascadia)。
 - Makefile 新增两个目标,归入现有 `docs-*` 族:
   - `docs-project`:执行生成(见下方 CLI 默认值),目标内固定传当前 `-version` 值
-    (如 `docs-project-v1`),版本递增时同步修改 Makefile;
+    (当前为 `docs-project-v2`),版本递增时同步修改 Makefile;
   - `docs-fixture`:把 1.11 清单中的页面从本地构建冻结拷贝到 `test/fixtures/docs-project/`。
 
 CLI 参数:
@@ -50,7 +50,7 @@ CLI 参数:
 | `-root` | `docs-site/public` | 渲染树根 |
 | `-out` | `docs-site/documents` | 输出根(追加进 `.gitignore`) |
 | `-workers` | `8` | 页面提取并行度 |
-| `-version` | 必填 | 生成器版本串(如 `docs-project-v1`),写入全局 manifest;提取规则变更时必须递增 |
+| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v2`),写入全局 manifest;提取规则变更时必须递增 |
 | `-resume` | 关 | 跳过已存在且 generator_version 匹配的页面输出;版本不匹配强制全量 |
 | `-pages` | 空 | 逗号分隔站点路径,子集模式(调试/测试用) |
 
@@ -82,7 +82,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v1",
+  "generator_version": "docs-project-v2",
   "upstream": {"source": "kubernetes", "commit": "<sha>", "version": "snapshot-ce98a43", "locale": "en"},
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",            // content | index(在目录树中有子页面者为 index)
@@ -115,7 +115,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v1",
+  "generator_version": "docs-project-v2",
   "upstream": {/* 同页 manifest;commit 取自 docs-site/build-info.json,一并记录其内容 */},
   "tree": {"nodes": [                 // 目录树,来源见 1.7
     {"title": "Getting started", "path": "docs/setup/", "children": [ /* 递归 */ ]}
@@ -123,7 +123,8 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
   "pages": ["docs/concepts/...", /* 按字典序 */],
   "orphans": ["docs/reference/generated/kubernetes-api/v1.23/", /* 字典序;219 基线 */],
   "redirects": {"count": 433, "digest": "sha256:..."},   // _redirects 文件摘要
-  "stats": {"pages": 854, "index_pages": 0, "anchors": 0, "assets": 0}
+  "stats": {"pages": 854, "index_pages": 0, "anchors": 0, "assets": 0},
+  "warnings": ["cross-page sidebar validation skipped for -pages subset"] // 仅 -pages 子集模式
 }
 ```
 
@@ -236,7 +237,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 目录树提取:语言块剥离、跨页一致性校验、文件映射、孤儿报告。
 - [x] 页面提取器:块级与行内规则、剥离清单、防御项(行号槽等)。
 - [x] 链接与资产规范化:base origin、重定向解析、分类与消毒、资产存在性与 digest。
-- [ ] 页 manifest 与全局 manifest、全部 digest 计算。
+- [x] 页 manifest 与全局 manifest、全部 digest 计算。
 - [ ] 断点续跑与失败报告(`report.json`、退出码语义)。
 - [ ] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
 - [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/219/433)吻合。
