@@ -247,7 +247,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 页 manifest 与全局 manifest、全部 digest 计算。
 - [x] 断点续跑与失败报告(`report.json`、退出码语义)。
 - [x] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
-- [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
+- [x] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
 
 ### 1.13 提交计划与提交纪律
 
@@ -292,6 +292,13 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 8. `docs(plan): close document library generator acceptance`
    记录 854 页全量运行证据(零失败、复跑一致、统计与 854/218/433 基线吻合),
    勾选第 1 节全部任务;此后进入第 2 节运行时切换。
+
+### 验收记录(2026-09-16)
+
+- `go run ./cmd/docs-project -root docs-site/public -out <tmp> -workers 8 -version docs-project-v5`
+  连续运行两次,`diff -r` 为空;同一输入以 `-workers 1` 运行后与 8 worker 输出的 `diff -r` 也为空。
+- 两次全量运行均无 `report.json`;全局清单为 854 pages、218 orphans、433 docs redirects,
+  另有 127 index pages、12,476 anchors、69 assets。
 
 ## 2. 运行时切换到文档库
 
