@@ -62,20 +62,32 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 ### 1.2 验收标准
 
-- [ ] 全量运行后,库内资产文件集合与页 manifest 引用集合**双向一致**(无缺失、无多余文件);
+- [x] 全量运行后,库内资产文件集合与页 manifest 引用集合**双向一致**(无缺失、无多余文件);
       `stats.assets_copied` 与实际拷贝数一致。
-- [ ] 双跑 `diff -r` 一致(含资产文件);`-workers 1/8` 一致。
-- [ ] `-resume` 删除全部资产后重跑:资产恢复且字节不变,页面文件不受影响。
-- [ ] golden fixture 更新并断言资产出现在输出(fixture 目录已含真实图片文件,含站点根路径
+- [x] 双跑 `diff -r` 一致(含资产文件);`-workers 1/8` 一致。
+- [x] `-resume` 删除全部资产后重跑:资产恢复且字节不变,页面文件不受影响。
+- [x] golden fixture 更新并断言资产出现在输出(fixture 目录已含真实图片文件,含站点根路径
       下的 `images/docs/pod.svg`)。
-- [ ] 单元测试:digest 不匹配的失败路径、resume 跳过与重拷、只拷被引用集合。
+- [x] 单元测试:digest 不匹配的失败路径、resume 跳过与重拷、只拷被引用集合。
 
 ### 1.3 提交计划
 
-1. `feat(docsproject): copy referenced assets into the document library`
+1. [x] `feat(docsproject): copy referenced assets into the document library`
    规格同步(TODO 本节)、实现、单测、golden 更新、全量验收证据同提交;提交信息注明
    输出布局变化与版本 v7。验证:`go test ./internal/docsproject/`、双跑 `diff -r`、
    resume 测试、全量零失败。
+
+### 验收记录(2026-09-17,docs-project-v7)
+
+- `go test ./internal/docsproject/ -count=1` 通过;新增单测覆盖仅拷贝页 manifest 引用集合、
+  源资产 digest 失配写入 `report.json` 并以退出码 1 失败、`-resume` 命中跳过与删除资产后的原样恢复。
+  real-page golden 已纳入 `docs/images/{ingress.svg,ingressFanOut.svg,ingressNameBased.svg}` 与
+  站点根 `images/docs/pod.svg`;页面 Markdown 内容未改。
+- 从 `docs-site/public` 各执行两次 `-workers 8` 与一次 `-workers 1`,三个 v7 输出的
+  `diff -r` 均为空;全量清单为 854 pages、217 orphans、433 redirects、127 index pages、
+  12,476 anchors、69 页资产引用、63 个去重后拷入资产,无 `report.json`。
+- 从全量页 manifest 枚举并删除全部 63 个库内资产后以 `-resume` 重跑,资产集合和全部字节恢复;
+  与完整基线 `diff -r` 为空,1,708 个页面 `index.md`/`index.json` 文件摘要不变。
 
 ## 2. 运行时切换到文档库(前置:第 1 节资产入库完成)
 

@@ -67,10 +67,11 @@ type Redirects struct {
 }
 
 type Stats struct {
-	Pages      int `json:"pages"`
-	IndexPages int `json:"index_pages"`
-	Anchors    int `json:"anchors"`
-	Assets     int `json:"assets"`
+	Pages        int `json:"pages"`
+	IndexPages   int `json:"index_pages"`
+	Anchors      int `json:"anchors"`
+	Assets       int `json:"assets"`
+	AssetsCopied int `json:"assets_copied"`
 }
 
 type FailureReport struct {
@@ -89,7 +90,7 @@ type pageFailuresError struct {
 }
 
 func (e *pageFailuresError) Error() string {
-	return fmt.Sprintf("%d page extraction failures; see report.json", e.count)
+	return fmt.Sprintf("%d projection failures; see report.json", e.count)
 }
 
 type upstreamBuildInfo struct {
@@ -110,16 +111,16 @@ func runProjection(config Config, state treeState) error {
 	}
 	manifests, failures := projectPages(config, state, normalization, upstream)
 	if len(failures) > 0 {
-		if err := writeFailureReport(config.Out, config.Version, failures); err != nil {
-			return fmt.Errorf("write failure report: %w", err)
-		}
-		_ = os.Remove(filepath.Join(config.Out, "manifest.json"))
-		return &pageFailuresError{count: len(failures)}
+		return reportProjectionFailures(config, failures)
+	}
+	assetsCopied, failures := copyReferencedAssets(config, manifests)
+	if len(failures) > 0 {
+		return reportProjectionFailures(config, failures)
 	}
 	if err := os.Remove(filepath.Join(config.Out, "report.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale failure report: %w", err)
 	}
-	global, err := newGlobalManifest(config, state, upstream, rawBuildInfo, normalization, manifests)
+	global, err := newGlobalManifest(config, state, upstream, rawBuildInfo, normalization, manifests, assetsCopied)
 	if err != nil {
 		return err
 	}
@@ -128,6 +129,14 @@ func runProjection(config Config, state treeState) error {
 		return fmt.Errorf("encode global manifest: %w", err)
 	}
 	return writeAtomically(filepath.Join(config.Out, "manifest.json"), encoded)
+}
+
+func reportProjectionFailures(config Config, failures []PageFailure) error {
+	if err := writeFailureReport(config.Out, config.Version, failures); err != nil {
+		return fmt.Errorf("write failure report: %w", err)
+	}
+	_ = os.Remove(filepath.Join(config.Out, "manifest.json"))
+	return &pageFailuresError{count: len(failures)}
 }
 
 type pageResult struct {
@@ -336,7 +345,7 @@ func markdownAnchorSection(markdown []byte, headings []ExtractedHeading, id stri
 	return nil, fmt.Errorf("documentation anchor %q is absent from the page", id)
 }
 
-func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBuildInfo json.RawMessage, normalization normalizationContext, pages []PageManifest) (GlobalManifest, error) {
+func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBuildInfo json.RawMessage, normalization normalizationContext, pages []PageManifest, assetsCopied int) (GlobalManifest, error) {
 	redirectBytes, err := os.ReadFile(filepath.Join(config.Root, "_redirects"))
 	if err != nil {
 		return GlobalManifest{}, fmt.Errorf("read redirects for manifest: %w", err)
@@ -362,6 +371,7 @@ func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBui
 		manifest.Stats.Anchors += len(page.Anchors)
 		manifest.Stats.Assets += len(page.Assets)
 	}
+	manifest.Stats.AssetsCopied = assetsCopied
 	return manifest, nil
 }
 
