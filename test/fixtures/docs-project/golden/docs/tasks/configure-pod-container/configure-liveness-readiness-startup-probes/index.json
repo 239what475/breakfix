@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v4",
+  "generator_version": "docs-project-v5",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
   "page_kind": "content",
   "title": "Configure Liveness, Readiness and Startup Probes",
-  "digest": "sha256:d486f2bdc3b3ab4459e63845bf5a02f930ae5a220912c426cdf2fb2a46ca3ed5",
+  "digest": "sha256:4c91afb535e9f11b717e639d358feeeab43c9ee2f641696918ce93393f3bb588",
   "anchors": [
     {
       "id": "before-you-begin",
@@ -86,14 +86,7 @@
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:4bfccb616253bd00d80c2a3f3cca0482f0674ff46dad481cfc65be3990a0e468",
-      "parent": ""
-    },
-    {
-      "id": "feedback",
-      "level": 2,
-      "title": "Feedback",
-      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "digest": "sha256:897bf4b51f9a4f0f7a57408726c2dd5450b9fd33b7b1e72fff8038883ba7fbf7",
       "parent": ""
     }
   ],
@@ -122,12 +115,12 @@
   "links": {
     "internal": 12,
     "page_internal": 1,
-    "external": 17,
+    "external": 13,
     "to_orphans": 0,
     "out_of_tree": [],
     "dropped": 0
   },
   "code_blocks": 24,
   "degraded_tables": 0,
-  "dropped_elements": 3
+  "dropped_elements": 1
 }

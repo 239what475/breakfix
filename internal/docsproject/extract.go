@@ -556,7 +556,11 @@ func alertKind(node *html.Node) string {
 }
 
 func shouldStrip(node *html.Node) bool {
-	if hasClass(node, "icon-copycode") || hasClass(node, "td-heading-self-link") || hasClass(node, "breadcrumb") || hasClass(node, "feedback") || hasClass(node, "rating") {
+	classes := attribute(node, "class")
+	if attribute(node, "id") == "pre-footer" || strings.Contains(classes, "feedback") || strings.Contains(classes, "rating") {
+		return true
+	}
+	if hasClass(node, "icon-copycode") || hasClass(node, "td-heading-self-link") || hasClass(node, "breadcrumb") {
 		return true
 	}
 	if node.Data == "nav" && strings.Contains(attribute(node, "class"), "toc") {

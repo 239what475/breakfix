@@ -405,10 +405,4 @@ For more information on HorizontalPodAutoscaler:
 - If you would like to write your own custom metrics adapter, check out the [boilerplate](https://github.com/kubernetes-sigs/custom-metrics-apiserver) to get started.
 - Read the [API reference](docs/reference/kubernetes-api/autoscaling/horizontal-pod-autoscaler-v2/) for HorizontalPodAutoscaler.
 
-## Feedback
-
-Was this page helpful?
-
-Thanks for the feedback. If you have a specific, answerable question about how to use Kubernetes, ask it on [Stack Overflow](https://stackoverflow.com/questions/tagged/kubernetes). Open an issue in the [GitHub Repository](https://www.github.com/kubernetes/website/) if you want to [report a problem](https://github.com/kubernetes/website/issues/new?title=Issue%20with%20k8s.io) or [suggest an improvement](https://github.com/kubernetes/website/issues/new?title=Improvement%20for%20k8s.io).
-
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

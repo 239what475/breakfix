@@ -436,10 +436,4 @@ Readiness and liveness probes can be used in parallel for the same container. Us
 - Learn more about [Liveness, Readiness and Startup Probes](docs/concepts/workloads/pods/probes/).
 - For the full specification of probe-related fields, see the API reference: [Pod](docs/reference/kubernetes-api/core/pod-v1/), [Container](docs/reference/kubernetes-api/core/pod-v1/#Container), [Probe](docs/reference/kubernetes-api/core/pod-v1/#Probe)
 
-## Feedback
-
-Was this page helpful?
-
-Thanks for the feedback. If you have a specific, answerable question about how to use Kubernetes, ask it on [Stack Overflow](https://stackoverflow.com/questions/tagged/kubernetes). Open an issue in the [GitHub Repository](https://www.github.com/kubernetes/website/) if you want to [report a problem](https://github.com/kubernetes/website/issues/new?title=Issue%20with%20k8s.io) or [suggest an improvement](https://github.com/kubernetes/website/issues/new?title=Improvement%20for%20k8s.io).
-
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

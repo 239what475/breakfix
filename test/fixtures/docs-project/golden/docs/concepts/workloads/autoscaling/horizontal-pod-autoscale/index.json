@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v4",
+  "generator_version": "docs-project-v5",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
   "page_kind": "content",
   "title": "Horizontal Pod Autoscaling",
-  "digest": "sha256:6b4ae0a6df94f20f401fe81931fd2ab1d2dc2d13db0d7f8853ae978c784d36ee",
+  "digest": "sha256:6208a31687bfda5f208a5fec17451de6e62decf3e6385a8a74b7beaaa81bb9eb",
   "anchors": [
     {
       "id": "how-does-a-horizontalpodautoscaler-work",
@@ -191,14 +191,7 @@
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:863889251d8835764685bd4a766b28206977d36764bb39da763e567f19204ae1",
-      "parent": ""
-    },
-    {
-      "id": "feedback",
-      "level": 2,
-      "title": "Feedback",
-      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "digest": "sha256:2a2bf1c955d55ef9c1fa97753f899165136fe95bf8d1bd6bd1743fd37dbdaa96",
       "parent": ""
     }
   ],
@@ -236,7 +229,7 @@
   "links": {
     "internal": 35,
     "page_internal": 10,
-    "external": 10,
+    "external": 6,
     "to_orphans": 0,
     "out_of_tree": [
       "docs/reference/generated/kubernetes-api/v1.37/"
@@ -245,5 +238,5 @@
   },
   "code_blocks": 12,
   "degraded_tables": 0,
-  "dropped_elements": 3
+  "dropped_elements": 1
 }

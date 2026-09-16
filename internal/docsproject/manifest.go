@@ -310,6 +310,32 @@ func anchorsForMarkdown(markdown []byte, headings []ExtractedHeading) []Anchor {
 	return anchors
 }
 
+func markdownAnchorSection(markdown []byte, headings []ExtractedHeading, id string) ([]byte, error) {
+	anchors := anchorsForMarkdown(markdown, headings)
+	for _, anchor := range anchors {
+		if anchor.ID != id {
+			continue
+		}
+		needle := append(append(bytes.Repeat([]byte("#"), anchor.Level), ' '), []byte(anchor.Title)...)
+		start := bytes.Index(markdown, needle)
+		if start < 0 {
+			break
+		}
+		end := len(markdown)
+		for _, next := range anchors {
+			if next.Level <= anchor.Level {
+				candidate := bytes.Index(markdown[start+len(needle):], append(append(bytes.Repeat([]byte("#"), next.Level), ' '), []byte(next.Title)...))
+				if candidate >= 0 {
+					end = start + len(needle) + candidate
+					break
+				}
+			}
+		}
+		return markdown[start:end], nil
+	}
+	return nil, fmt.Errorf("documentation anchor %q is absent from the page", id)
+}
+
 func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBuildInfo json.RawMessage, normalization normalizationContext, pages []PageManifest) (GlobalManifest, error) {
 	redirectBytes, err := os.ReadFile(filepath.Join(config.Root, "_redirects"))
 	if err != nil {

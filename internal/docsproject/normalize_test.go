@@ -34,12 +34,15 @@ func TestPageNormalizerNormalizesLinksAndAssets(t *testing.T) {
 }
 
 func TestRedirectTableHandlesWildcardAndLoopsWithoutNetwork(t *testing.T) {
-	table := redirectTable{exact: map[string]string{"/docs/a/": "/docs/b/", "/docs/b/": "/docs/a/"}, wildcard: []redirectRule{{from: "/docs/old/*", to: "/docs/new/:splat"}}}
+	table := redirectTable{exact: map[string]string{"/docs/a/": "/docs/b/", "/docs/b/": "/docs/a/", "/docs/chain/": "/docs/a/"}, wildcard: []redirectRule{{from: "/docs/old/*", to: "/docs/new/:splat"}}}
 	if got := table.resolve("/docs/old/item/"); got != "/docs/new/item/" {
 		t.Fatalf("wildcard redirect = %q", got)
 	}
-	if got := table.resolve("/docs/a/"); got != "/docs/a/" && got != "/docs/b/" {
-		t.Fatalf("redirect loop escaped protection: %q", got)
+	if got := table.resolve("/docs/a/"); got != "/docs/b/" {
+		t.Fatalf("redirect did not resolve one hop: %q", got)
+	}
+	if got := table.resolve("/docs/chain/"); got != "/docs/a/" {
+		t.Fatalf("redirect followed more than one hop: %q", got)
 	}
 }
 

@@ -80,3 +80,13 @@ func TestParsePageStripsHeadingSelfLinks(t *testing.T) {
 		t.Fatalf("page = %#v, error = %v", page, err)
 	}
 }
+
+func TestParsePageStripsFeedbackAndRejectsMalformedTitleMarkup(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Page</h1><p>Keep.</p><div id="pre-footer"><h2 id="feedback">Feedback</h2><p class="feedback--prompt">Rate this.</p></div></main>`))
+	if err != nil || string(page.Markdown) != "# Page\n\nKeep.\n" {
+		t.Fatalf("page = %#v, error = %v", page, err)
+	}
+	if _, err := ParsePage(strings.NewReader(`<main><h1 title="unterminated`)); err == nil {
+		t.Fatal("malformed title markup was accepted")
+	}
+}

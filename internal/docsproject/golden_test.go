@@ -20,13 +20,13 @@ func TestRealPageFixtureMatchesGoldenAcrossRunsAndWorkers(t *testing.T) {
 	golden := filepath.Join(root, "golden")
 	for _, workers := range []int{1, 8} {
 		out := filepath.Join(t.TempDir(), "documents")
-		if err := Run(Config{Root: root, Out: out, Workers: workers, Version: "docs-project-v4", Pages: fixturePages}); err != nil {
+		if err := Run(Config{Root: root, Out: out, Workers: workers, Version: "docs-project-v5", Pages: fixturePages}); err != nil {
 			t.Fatalf("workers %d: %v", workers, err)
 		}
 		assertDirectoriesEqual(t, golden, out)
 	}
 	repeat := filepath.Join(t.TempDir(), "documents")
-	if err := Run(Config{Root: root, Out: repeat, Workers: 8, Version: "docs-project-v4", Pages: fixturePages}); err != nil {
+	if err := Run(Config{Root: root, Out: repeat, Workers: 8, Version: "docs-project-v5", Pages: fixturePages}); err != nil {
 		t.Fatal(err)
 	}
 	assertDirectoriesEqual(t, golden, repeat)
@@ -36,7 +36,7 @@ func TestRealPageFixtureResumeRebuildsOnlyMissingPairs(t *testing.T) {
 	root := docsProjectFixture(t)
 	golden := filepath.Join(root, "golden")
 	out := filepath.Join(t.TempDir(), "documents")
-	config := Config{Root: root, Out: out, Workers: 8, Version: "docs-project-v4", Pages: fixturePages}
+	config := Config{Root: root, Out: out, Workers: 8, Version: "docs-project-v5", Pages: fixturePages}
 	if err := Run(config); err != nil {
 		t.Fatal(err)
 	}

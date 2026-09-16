@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v4",
+  "generator_version": "docs-project-v5",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",
   "title": "Pod Lifecycle",
-  "digest": "sha256:338f03c0098590bd41f76ccae73b3bdad36754b45f32ee11462066f3c2db9703",
+  "digest": "sha256:ed53b4d233e47082b5052611dbfdcd01df62a40334f89396d2eed14d778e1a76",
   "anchors": [
     {
       "id": "pod-lifetime",
@@ -296,14 +296,7 @@
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:5123330b1dadb157d6eb487ba7c7ea9039db161ccf5776d653b6c9f189044810",
-      "parent": ""
-    },
-    {
-      "id": "feedback",
-      "level": 2,
-      "title": "Feedback",
-      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "digest": "sha256:884d58a41e2a644b6cb6671128d264558c7417701af61f0851546bef9b12dcea",
       "parent": ""
     }
   ],
@@ -383,7 +376,7 @@
   "links": {
     "internal": 79,
     "page_internal": 18,
-    "external": 6,
+    "external": 2,
     "to_orphans": 0,
     "out_of_tree": [
       "docs/concepts/architecture/cri/",
@@ -393,5 +386,5 @@
   },
   "code_blocks": 13,
   "degraded_tables": 0,
-  "dropped_elements": 4
+  "dropped_elements": 2
 }

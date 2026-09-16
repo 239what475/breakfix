@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v4",
+  "generator_version": "docs-project-v5",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,13 +10,13 @@
   "path": "docs/home/",
   "page_kind": "index",
   "title": "Kubernetes Documentation",
-  "digest": "sha256:9f173dabbbd70641d5a4aefc122c7fa46e1eead58781846109f6ae470d8ff7e7",
+  "digest": "sha256:26f09cff4244ac1828933de92318dfa73b214f55116e72a02c0c9df097689641",
   "anchors": [
     {
       "id": "understand-kubernetes",
       "level": 2,
       "title": "Understand Kubernetes",
-      "digest": "sha256:9f20d9cf3dbc456fb8ac6210643d219ebf769e6d5a1364298b9b7554af5031b0",
+      "digest": "sha256:69c7f17cd004208cfbc27fe812604b57e35773cfa1b6120e39b7726a5d91f061",
       "parent": ""
     },
     {
@@ -79,11 +79,13 @@
   "feature_states": null,
   "assets": [],
   "links": {
-    "internal": 39,
+    "internal": 38,
     "page_internal": 0,
     "external": 1,
     "to_orphans": 0,
-    "out_of_tree": [],
+    "out_of_tree": [
+      "docs/concepts/overview/what-is-kubernetes/"
+    ],
     "dropped": 0
   },
   "code_blocks": 0,

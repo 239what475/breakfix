@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v4",
+  "generator_version": "docs-project-v5",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,7 +10,7 @@
   "path": "docs/concepts/services-networking/ingress/",
   "page_kind": "content",
   "title": "Ingress",
-  "digest": "sha256:79a0b669e075d8ac29e9178ef824c77dbfa1f926550231f8d92b40100cf2769e",
+  "digest": "sha256:ef4c2995a4184d01f095ad1d629f9a7e6c4a91f360f76d9c9cf787b98da24014",
   "anchors": [
     {
       "id": "terminology",
@@ -184,14 +184,7 @@
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:87bfe86f58fd91076268bb8fb40bb3bec0b1fd7b4a29f3e8586e4438c2be1140",
-      "parent": ""
-    },
-    {
-      "id": "feedback",
-      "level": 2,
-      "title": "Feedback",
-      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "digest": "sha256:6919925a3714ae9fbff5c4ed55b1eea7174508cc049615360a3f58513373392d",
       "parent": ""
     }
   ],
@@ -217,17 +210,16 @@
     }
   ],
   "links": {
-    "internal": 29,
+    "internal": 30,
     "page_internal": 3,
-    "external": 20,
+    "external": 16,
     "to_orphans": 0,
     "out_of_tree": [
-      "docs/reference/generated/kubernetes-api/v1.37/",
-      "docs/reference/using-api/deprecation-policy/"
+      "docs/reference/generated/kubernetes-api/v1.37/"
     ],
     "dropped": 0
   },
   "code_blocks": 26,
   "degraded_tables": 0,
-  "dropped_elements": 3
+  "dropped_elements": 1
 }

@@ -6,7 +6,7 @@ Kubernetes is an open source container orchestration engine for automating deplo
 
 Learn about Kubernetes and its fundamental concepts.
 
-- [Why Kubernetes?](docs/concepts/overview/#why-you-need-kubernetes-and-what-can-it-do)
+- [Why Kubernetes?](docs/concepts/overview/what-is-kubernetes/#why-you-need-kubernetes-and-what-can-it-do)
 - [Components of a cluster](docs/concepts/overview/components/)
 - [The Kubernetes API](docs/concepts/overview/kubernetes-api/)
 - [Objects In Kubernetes](docs/concepts/overview/working-with-objects/)

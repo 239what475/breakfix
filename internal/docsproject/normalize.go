@@ -120,29 +120,21 @@ func loadRedirects(filename string) (redirectTable, error) {
 }
 
 func (table redirectTable) resolve(value string) string {
-	seen := map[string]struct{}{}
-	for steps := 0; steps < 16; steps++ {
-		if _, exists := seen[value]; exists {
-			return value
-		}
-		seen[value] = struct{}{}
-		next, exists := table.exact[value]
-		if !exists {
-			for _, rule := range table.wildcard {
-				prefix := strings.TrimSuffix(rule.from, "*")
-				if strings.HasPrefix(value, prefix) {
-					next = strings.ReplaceAll(rule.to, ":splat", strings.TrimPrefix(value, prefix))
-					exists = true
-					break
-				}
+	next, exists := table.exact[value]
+	if !exists {
+		for _, rule := range table.wildcard {
+			prefix := strings.TrimSuffix(rule.from, "*")
+			if strings.HasPrefix(value, prefix) {
+				next = strings.ReplaceAll(rule.to, ":splat", strings.TrimPrefix(value, prefix))
+				exists = true
+				break
 			}
 		}
-		if !exists {
-			return value
-		}
-		value = next
 	}
-	return value
+	if !exists || next == value {
+		return value
+	}
+	return next
 }
 
 type pageNormalizer struct {

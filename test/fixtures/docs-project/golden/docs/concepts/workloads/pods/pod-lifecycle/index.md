@@ -737,10 +737,4 @@ When the kubelet restarts, the container statuses are managed differently based 
 - Learn more about [sidecar containers](docs/concepts/workloads/pods/sidecar-containers/).
 - For detailed information about Pod and container status in the API, see the API reference documentation covering [`status`](docs/reference/kubernetes-api/core/pod-v1/#PodStatus) for Pod.
 
-## Feedback
-
-Was this page helpful?
-
-Thanks for the feedback. If you have a specific, answerable question about how to use Kubernetes, ask it on [Stack Overflow](https://stackoverflow.com/questions/tagged/kubernetes). Open an issue in the [GitHub Repository](https://www.github.com/kubernetes/website/) if you want to [report a problem](https://github.com/kubernetes/website/issues/new?title=Issue%20with%20k8s.io) or [suggest an improvement](https://github.com/kubernetes/website/issues/new?title=Improvement%20for%20k8s.io).
-
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

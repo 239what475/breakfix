@@ -11,7 +11,7 @@ Ingress may provide load balancing, SSL termination and name-based virtual hosti
 >
 > This means that:
 >
-> - The Ingress API is generally available, and is subject to the [stability guarantees](docs/reference/using-api/deprecation-policy/#deprecating-parts-of-the-api) for generally available APIs. The Kubernetes project has no plans to remove Ingress from Kubernetes.
+> - The Ingress API is generally available, and is subject to the [stability guarantees](docs/reference/deprecation-policy/#deprecating-parts-of-the-api) for generally available APIs. The Kubernetes project has no plans to remove Ingress from Kubernetes.
 > - The Ingress API is no longer being developed, and will have no further changes or updates made to it.
 
 ## Terminology
@@ -740,11 +740,5 @@ You can expose a Service in multiple ways that don't directly involve the Ingres
 
 - Learn about the [Ingress](docs/reference/kubernetes-api/networking/ingress-v1/) API
 - Learn about [Ingress controllers](docs/concepts/services-networking/ingress-controllers/)
-
-## Feedback
-
-Was this page helpful?
-
-Thanks for the feedback. If you have a specific, answerable question about how to use Kubernetes, ask it on [Stack Overflow](https://stackoverflow.com/questions/tagged/kubernetes). Open an issue in the [GitHub Repository](https://www.github.com/kubernetes/website/) if you want to [report a problem](https://github.com/kubernetes/website/issues/new?title=Issue%20with%20k8s.io) or [suggest an improvement](https://github.com/kubernetes/website/issues/new?title=Improvement%20for%20k8s.io).
 
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)
