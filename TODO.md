@@ -244,7 +244,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 链接与资产规范化:base origin、重定向解析、分类与消毒、资产存在性与 digest。
 - [x] 页 manifest 与全局 manifest、全部 digest 计算。
 - [x] 断点续跑与失败报告(`report.json`、退出码语义)。
-- [ ] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
+- [x] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
 - [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
 
 ### 1.13 提交计划与提交纪律

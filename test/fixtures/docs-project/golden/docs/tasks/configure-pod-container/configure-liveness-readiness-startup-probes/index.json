@@ -1,0 +1,133 @@
+{
+  "format_version": 1,
+  "generator_version": "docs-project-v3",
+  "upstream": {
+    "source": "kubernetes",
+    "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
+    "version": "snapshot-ce98a43",
+    "locale": "en"
+  },
+  "path": "docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
+  "page_kind": "content",
+  "title": "Configure Liveness, Readiness and Startup Probes",
+  "digest": "sha256:9b57aa065e8ed5cffbc78afcccb7b398f7104e721eaec02418f9de130bda64f9",
+  "anchors": [
+    {
+      "id": "before-you-begin",
+      "level": 2,
+      "title": "Before you begin[](#before-you-begin)",
+      "digest": "sha256:fdd60dfb2523f2c7ef8983e18fe0d2ab3a799892703b3d954ce11fa618e28617",
+      "parent": ""
+    },
+    {
+      "id": "define-a-liveness-command",
+      "level": 2,
+      "title": "Define a liveness command[](#define-a-liveness-command)",
+      "digest": "sha256:694481d021965446c661b20f676e92e4f7b20896ebc113226c9e12649a8c5a94",
+      "parent": ""
+    },
+    {
+      "id": "define-a-liveness-http-request",
+      "level": 2,
+      "title": "Define a liveness HTTP request[](#define-a-liveness-http-request)",
+      "digest": "sha256:bcc1b6882b27e73870f50410f2e38de015114c972cba1d5b99ba738cdfdaaf92",
+      "parent": ""
+    },
+    {
+      "id": "use-h2c-with-http-probes",
+      "level": 3,
+      "title": "Use HTTP/2 cleartext (h2c) with HTTP probes[](#use-h2c-with-http-probes)",
+      "digest": "sha256:a87499e403970248bb44f3589aa0a089485cc6a96cb5c0dc98d3a8f74d0227e2",
+      "parent": "define-a-liveness-http-request"
+    },
+    {
+      "id": "define-a-tcp-liveness-probe",
+      "level": 2,
+      "title": "Define a TCP liveness probe[](#define-a-tcp-liveness-probe)",
+      "digest": "sha256:9bc3b6d8dbbb9f13b1109bef6011384edff1eeb7be0b97715be007609923403f",
+      "parent": ""
+    },
+    {
+      "id": "define-a-grpc-liveness-probe",
+      "level": 2,
+      "title": "Define a gRPC liveness probe[](#define-a-grpc-liveness-probe)",
+      "digest": "sha256:fa3f39dff3f2162340978c39069340f5b4eb00eed6596e97716284e4bb0c5b44",
+      "parent": ""
+    },
+    {
+      "id": "grpc-probe-tls",
+      "level": 3,
+      "title": "Use TLS with gRPC probes[](#grpc-probe-tls)",
+      "digest": "sha256:306056a4100eab24f883b939c13ab8386babb1013a0970bc7a30cc3f06b7edf5",
+      "parent": "define-a-grpc-liveness-probe"
+    },
+    {
+      "id": "use-a-named-port",
+      "level": 2,
+      "title": "Use a named port[](#use-a-named-port)",
+      "digest": "sha256:e126d0b4167eed070f022b1df2568275a284422b01d3938f14bcee279b5d6817",
+      "parent": ""
+    },
+    {
+      "id": "define-startup-probes",
+      "level": 2,
+      "title": "Protect slow starting containers with startup probes[](#define-startup-probes)",
+      "digest": "sha256:a36afe66244b41f34e3fcf626eea39adddf0de393dce7a9dc201c3afbdf38cd0",
+      "parent": ""
+    },
+    {
+      "id": "define-readiness-probes",
+      "level": 2,
+      "title": "Define readiness probes[](#define-readiness-probes)",
+      "digest": "sha256:33df1cd882a54f1b793882b918608fcd327e6ada7a345330efac75a4c04c27eb",
+      "parent": ""
+    },
+    {
+      "id": "what-s-next",
+      "level": 2,
+      "title": "What's next[](#what-s-next)",
+      "digest": "sha256:26f35acfdde4893f02fd0a5627cc2ee77906b0435ef6da4b6b4ef758fe3bd79d",
+      "parent": ""
+    },
+    {
+      "id": "feedback",
+      "level": 2,
+      "title": "Feedback",
+      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "parent": ""
+    }
+  ],
+  "feature_states": [
+    {
+      "anchor": "use-h2c-with-http-probes",
+      "gate": "H2CContainerProbe",
+      "stage": "alpha",
+      "since": "v1.37",
+      "note": "disabled by default"
+    },
+    {
+      "anchor": "define-a-grpc-liveness-probe",
+      "stage": "stable",
+      "since": "v1.27"
+    },
+    {
+      "anchor": "grpc-probe-tls",
+      "gate": "GRPCContainerProbeTLS",
+      "stage": "alpha",
+      "since": "v1.37",
+      "note": "disabled by default"
+    }
+  ],
+  "assets": [],
+  "links": {
+    "internal": 12,
+    "page_internal": 12,
+    "external": 17,
+    "to_orphans": 0,
+    "out_of_tree": [],
+    "dropped": 0
+  },
+  "code_blocks": 24,
+  "degraded_tables": 0,
+  "dropped_elements": 3
+}

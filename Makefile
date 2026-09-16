@@ -86,6 +86,11 @@ docs-fixture:
 		mkdir -p "$(DOCS_PROJECT_FIXTURE)/$$page"; \
 		cp "$(CURDIR)/docs-site/public/$$page/index.html" "$(DOCS_PROJECT_FIXTURE)/$$page/index.html"; \
 	done
+	@mkdir -p $(DOCS_PROJECT_FIXTURE)/docs/images $(DOCS_PROJECT_FIXTURE)/images/docs
+	@cp $(CURDIR)/docs-site/public/docs/images/ingress.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingress.svg
+	@cp $(CURDIR)/docs-site/public/docs/images/ingressFanOut.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingressFanOut.svg
+	@cp $(CURDIR)/docs-site/public/docs/images/ingressNameBased.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingressNameBased.svg
+	@cp $(CURDIR)/docs-site/public/images/docs/pod.svg $(DOCS_PROJECT_FIXTURE)/images/docs/pod.svg
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./api/v2

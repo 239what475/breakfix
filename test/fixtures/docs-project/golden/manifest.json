@@ -1,0 +1,3713 @@
+{
+  "format_version": 1,
+  "generator_version": "docs-project-v3",
+  "upstream": {
+    "source": "kubernetes",
+    "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
+    "version": "snapshot-ce98a43",
+    "locale": "en"
+  },
+  "build_info": {
+    "source": "kubernetes",
+    "repository": "https://github.com/kubernetes/website.git",
+    "revision": "ce98a43f24257385a9766003a6dadc95e962dc63",
+    "version": "snapshot-ce98a43",
+    "locale": "en",
+    "base_url": "http://localhost:1313/"
+  },
+  "tree": {
+    "nodes": [
+      {
+        "title": "Documentation",
+        "path": "docs/home/",
+        "children": [
+          {
+            "title": "Available Documentation Versions",
+            "path": "docs/home/supported-doc-versions/"
+          }
+        ]
+      },
+      {
+        "title": "Getting started",
+        "path": "docs/setup/",
+        "children": [
+          {
+            "title": "Learning environment",
+            "path": "docs/setup/learning-environment/"
+          },
+          {
+            "title": "Production environment",
+            "path": "docs/setup/production-environment/",
+            "children": [
+              {
+                "title": "Container Runtimes",
+                "path": "docs/setup/production-environment/container-runtimes/"
+              },
+              {
+                "title": "Installing Kubernetes with deployment tools",
+                "path": "docs/setup/production-environment/tools/",
+                "children": [
+                  {
+                    "title": "Bootstrapping clusters with kubeadm",
+                    "path": "docs/setup/production-environment/tools/kubeadm/",
+                    "children": [
+                      {
+                        "title": "Installing kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/install-kubeadm/"
+                      },
+                      {
+                        "title": "Troubleshooting kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/"
+                      },
+                      {
+                        "title": "Creating a cluster with kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/"
+                      },
+                      {
+                        "title": "Customizing components with the kubeadm API",
+                        "path": "docs/setup/production-environment/tools/kubeadm/control-plane-flags/"
+                      },
+                      {
+                        "title": "Options for Highly Available Topology",
+                        "path": "docs/setup/production-environment/tools/kubeadm/ha-topology/"
+                      },
+                      {
+                        "title": "Creating Highly Available Clusters with kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/high-availability/"
+                      },
+                      {
+                        "title": "Set up a High Availability etcd Cluster with kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/setup-ha-etcd-with-kubeadm/"
+                      },
+                      {
+                        "title": "Configuring each kubelet in your cluster using kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/kubelet-integration/"
+                      },
+                      {
+                        "title": "Dual-stack support with kubeadm",
+                        "path": "docs/setup/production-environment/tools/kubeadm/dual-stack-support/"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "title": "Turnkey Cloud Solutions",
+                "path": "docs/setup/production-environment/turnkey-solutions/"
+              }
+            ]
+          },
+          {
+            "title": "Best practices",
+            "path": "docs/setup/best-practices/",
+            "children": [
+              {
+                "title": "Considerations for large clusters",
+                "path": "docs/setup/best-practices/cluster-large/"
+              },
+              {
+                "title": "Running in multiple zones",
+                "path": "docs/setup/best-practices/multiple-zones/"
+              },
+              {
+                "title": "Validate node setup",
+                "path": "docs/setup/best-practices/node-conformance/"
+              },
+              {
+                "title": "Enforcing Pod Security Standards",
+                "path": "docs/setup/best-practices/enforcing-pod-security-standards/"
+              },
+              {
+                "title": "PKI certificates and requirements",
+                "path": "docs/setup/best-practices/certificates/"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Concepts",
+        "path": "docs/concepts/",
+        "children": [
+          {
+            "title": "Overview",
+            "path": "docs/concepts/overview/",
+            "children": [
+              {
+                "title": "Kubernetes Components",
+                "path": "docs/concepts/overview/components/"
+              },
+              {
+                "title": "Objects In Kubernetes",
+                "path": "docs/concepts/overview/working-with-objects/",
+                "children": [
+                  {
+                    "title": "Kubernetes Object Management",
+                    "path": "docs/concepts/overview/working-with-objects/object-management/"
+                  },
+                  {
+                    "title": "Object Names and IDs",
+                    "path": "docs/concepts/overview/working-with-objects/names/"
+                  },
+                  {
+                    "title": "Labels and Selectors",
+                    "path": "docs/concepts/overview/working-with-objects/labels/"
+                  },
+                  {
+                    "title": "Namespaces",
+                    "path": "docs/concepts/overview/working-with-objects/namespaces/"
+                  },
+                  {
+                    "title": "Annotations",
+                    "path": "docs/concepts/overview/working-with-objects/annotations/"
+                  },
+                  {
+                    "title": "Field Selectors",
+                    "path": "docs/concepts/overview/working-with-objects/field-selectors/"
+                  },
+                  {
+                    "title": "Finalizers",
+                    "path": "docs/concepts/overview/working-with-objects/finalizers/"
+                  },
+                  {
+                    "title": "Owners and Dependents",
+                    "path": "docs/concepts/overview/working-with-objects/owners-dependents/"
+                  },
+                  {
+                    "title": "Recommended Labels",
+                    "path": "docs/concepts/overview/working-with-objects/common-labels/"
+                  },
+                  {
+                    "title": "Storage Versions",
+                    "path": "docs/concepts/overview/working-with-objects/storage-version/"
+                  }
+                ]
+              },
+              {
+                "title": "The Kubernetes API",
+                "path": "docs/concepts/overview/kubernetes-api/"
+              },
+              {
+                "title": "The kubectl command-line tool",
+                "path": "docs/concepts/overview/kubectl/"
+              }
+            ]
+          },
+          {
+            "title": "Cluster Architecture",
+            "path": "docs/concepts/architecture/",
+            "children": [
+              {
+                "title": "Nodes",
+                "path": "docs/concepts/architecture/nodes/"
+              },
+              {
+                "title": "Communication between Nodes and the Control Plane",
+                "path": "docs/concepts/architecture/control-plane-node-communication/"
+              },
+              {
+                "title": "Controllers",
+                "path": "docs/concepts/architecture/controller/"
+              },
+              {
+                "title": "Leases",
+                "path": "docs/concepts/architecture/leases/"
+              },
+              {
+                "title": "Cloud Controller Manager",
+                "path": "docs/concepts/architecture/cloud-controller/"
+              },
+              {
+                "title": "About cgroup v2",
+                "path": "docs/concepts/architecture/cgroups/"
+              },
+              {
+                "title": "Kubernetes Self-Healing",
+                "path": "docs/concepts/architecture/self-healing/"
+              },
+              {
+                "title": "Garbage Collection",
+                "path": "docs/concepts/architecture/garbage-collection/"
+              },
+              {
+                "title": "Mixed Version Proxy",
+                "path": "docs/concepts/architecture/mixed-version-proxy/"
+              }
+            ]
+          },
+          {
+            "title": "Containers",
+            "path": "docs/concepts/containers/",
+            "children": [
+              {
+                "title": "Images",
+                "path": "docs/concepts/containers/images/"
+              },
+              {
+                "title": "Container Environment",
+                "path": "docs/concepts/containers/container-environment/"
+              },
+              {
+                "title": "Runtime Class",
+                "path": "docs/concepts/containers/runtime-class/"
+              },
+              {
+                "title": "Container Lifecycle Hooks",
+                "path": "docs/concepts/containers/container-lifecycle-hooks/"
+              },
+              {
+                "title": "Container Runtime Interface (CRI)",
+                "path": "docs/concepts/containers/cri/"
+              }
+            ]
+          },
+          {
+            "title": "Workloads",
+            "path": "docs/concepts/workloads/",
+            "children": [
+              {
+                "title": "Pods",
+                "path": "docs/concepts/workloads/pods/",
+                "children": [
+                  {
+                    "title": "Pod Lifecycle",
+                    "path": "docs/concepts/workloads/pods/pod-lifecycle/"
+                  },
+                  {
+                    "title": "Pod Conditions",
+                    "path": "docs/concepts/workloads/pods/pod-condition/"
+                  },
+                  {
+                    "title": "Init Containers",
+                    "path": "docs/concepts/workloads/pods/init-containers/"
+                  },
+                  {
+                    "title": "Sidecar Containers",
+                    "path": "docs/concepts/workloads/pods/sidecar-containers/"
+                  },
+                  {
+                    "title": "Ephemeral Containers",
+                    "path": "docs/concepts/workloads/pods/ephemeral-containers/"
+                  },
+                  {
+                    "title": "Liveness, Readiness, and Startup Probes",
+                    "path": "docs/concepts/workloads/pods/probes/"
+                  },
+                  {
+                    "title": "Disruptions",
+                    "path": "docs/concepts/workloads/pods/disruptions/"
+                  },
+                  {
+                    "title": "Pod Hostname",
+                    "path": "docs/concepts/workloads/pods/pod-hostname/"
+                  },
+                  {
+                    "title": "Pod Quality of Service Classes",
+                    "path": "docs/concepts/workloads/pods/pod-qos/"
+                  },
+                  {
+                    "title": "Scheduling Group",
+                    "path": "docs/concepts/workloads/pods/scheduling-group/"
+                  },
+                  {
+                    "title": "Static Pods",
+                    "path": "docs/concepts/workloads/pods/static-pods/"
+                  },
+                  {
+                    "title": "User Namespaces",
+                    "path": "docs/concepts/workloads/pods/user-namespaces/"
+                  },
+                  {
+                    "title": "Downward API",
+                    "path": "docs/concepts/workloads/pods/downward-api/"
+                  },
+                  {
+                    "title": "Advanced Pod Configuration",
+                    "path": "docs/concepts/workloads/pods/advanced-pod-config/"
+                  }
+                ]
+              },
+              {
+                "title": "Workload API",
+                "path": "docs/concepts/workloads/workload-api/",
+                "children": [
+                  {
+                    "title": "Pod Group Disruption and Priority",
+                    "path": "docs/concepts/workloads/workload-api/disruption-and-priority/"
+                  },
+                  {
+                    "title": "PodGroup Scheduling Policies",
+                    "path": "docs/concepts/workloads/workload-api/policies/"
+                  },
+                  {
+                    "title": "Topology-Aware Workload Scheduling",
+                    "path": "docs/concepts/workloads/workload-api/topology-aware-scheduling/"
+                  },
+                  {
+                    "title": "Scheduling Building Block APIs and the workloadbuilder Library",
+                    "path": "docs/concepts/workloads/workload-api/workloadbuilder/"
+                  }
+                ]
+              },
+              {
+                "title": "Workload Management",
+                "path": "docs/concepts/workloads/controllers/",
+                "children": [
+                  {
+                    "title": "Deployments",
+                    "path": "docs/concepts/workloads/controllers/deployment/"
+                  },
+                  {
+                    "title": "ReplicaSet",
+                    "path": "docs/concepts/workloads/controllers/replicaset/"
+                  },
+                  {
+                    "title": "StatefulSets",
+                    "path": "docs/concepts/workloads/controllers/statefulset/"
+                  },
+                  {
+                    "title": "DaemonSet",
+                    "path": "docs/concepts/workloads/controllers/daemonset/"
+                  },
+                  {
+                    "title": "Jobs",
+                    "path": "docs/concepts/workloads/controllers/job/"
+                  },
+                  {
+                    "title": "Automatic Cleanup for Finished Jobs",
+                    "path": "docs/concepts/workloads/controllers/ttlafterfinished/"
+                  },
+                  {
+                    "title": "CronJob",
+                    "path": "docs/concepts/workloads/controllers/cron-jobs/"
+                  },
+                  {
+                    "title": "ReplicationController",
+                    "path": "docs/concepts/workloads/controllers/replicationcontroller/"
+                  }
+                ]
+              },
+              {
+                "title": "CompositePodGroup API",
+                "path": "docs/concepts/workloads/compositepodgroup-api/",
+                "children": [
+                  {
+                    "title": "CompositePodGroup Lifecycle",
+                    "path": "docs/concepts/workloads/compositepodgroup-api/lifecycle/"
+                  }
+                ]
+              },
+              {
+                "title": "PodGroup API",
+                "path": "docs/concepts/workloads/podgroup-api/",
+                "children": [
+                  {
+                    "title": "PodGroup Lifecycle",
+                    "path": "docs/concepts/workloads/podgroup-api/lifecycle/"
+                  }
+                ]
+              },
+              {
+                "title": "Managing Workloads",
+                "path": "docs/concepts/workloads/management/"
+              },
+              {
+                "title": "Autoscaling Workloads",
+                "path": "docs/concepts/workloads/autoscaling/"
+              },
+              {
+                "title": "Horizontal Pod Autoscaling",
+                "path": "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"
+              },
+              {
+                "title": "Vertical Pod Autoscaling",
+                "path": "docs/concepts/workloads/autoscaling/vertical-pod-autoscale/"
+              }
+            ]
+          },
+          {
+            "title": "Services, Load Balancing, and Networking",
+            "path": "docs/concepts/services-networking/",
+            "children": [
+              {
+                "title": "Service",
+                "path": "docs/concepts/services-networking/service/"
+              },
+              {
+                "title": "Ingress",
+                "path": "docs/concepts/services-networking/ingress/"
+              },
+              {
+                "title": "Ingress Controllers",
+                "path": "docs/concepts/services-networking/ingress-controllers/"
+              },
+              {
+                "title": "Gateway API",
+                "path": "docs/concepts/services-networking/gateway/"
+              },
+              {
+                "title": "EndpointSlices",
+                "path": "docs/concepts/services-networking/endpoint-slices/"
+              },
+              {
+                "title": "Network Policies",
+                "path": "docs/concepts/services-networking/network-policies/"
+              },
+              {
+                "title": "DNS for Services and Pods",
+                "path": "docs/concepts/services-networking/dns-pod-service/"
+              },
+              {
+                "title": "IPv4/IPv6 dual-stack",
+                "path": "docs/concepts/services-networking/dual-stack/"
+              },
+              {
+                "title": "Topology Aware Routing",
+                "path": "docs/concepts/services-networking/topology-aware-routing/"
+              },
+              {
+                "title": "Networking on Windows",
+                "path": "docs/concepts/services-networking/windows-networking/"
+              },
+              {
+                "title": "Service ClusterIP allocation",
+                "path": "docs/concepts/services-networking/cluster-ip-allocation/"
+              },
+              {
+                "title": "Service Internal Traffic Policy",
+                "path": "docs/concepts/services-networking/service-traffic-policy/"
+              }
+            ]
+          },
+          {
+            "title": "Storage",
+            "path": "docs/concepts/storage/",
+            "children": [
+              {
+                "title": "Volumes",
+                "path": "docs/concepts/storage/volumes/"
+              },
+              {
+                "title": "Persistent Volumes",
+                "path": "docs/concepts/storage/persistent-volumes/"
+              },
+              {
+                "title": "Projected Volumes",
+                "path": "docs/concepts/storage/projected-volumes/"
+              },
+              {
+                "title": "Ephemeral Volumes",
+                "path": "docs/concepts/storage/ephemeral-volumes/"
+              },
+              {
+                "title": "Storage Classes",
+                "path": "docs/concepts/storage/storage-classes/"
+              },
+              {
+                "title": "Volume Attributes Classes",
+                "path": "docs/concepts/storage/volume-attributes-classes/"
+              },
+              {
+                "title": "Dynamic Volume Provisioning",
+                "path": "docs/concepts/storage/dynamic-provisioning/"
+              },
+              {
+                "title": "Volume Snapshots",
+                "path": "docs/concepts/storage/volume-snapshots/"
+              },
+              {
+                "title": "Volume Snapshot Classes",
+                "path": "docs/concepts/storage/volume-snapshot-classes/"
+              },
+              {
+                "title": "CSI Volume Cloning",
+                "path": "docs/concepts/storage/volume-pvc-datasource/"
+              },
+              {
+                "title": "Volume Populators and Data Sources",
+                "path": "docs/concepts/storage/volume-populators-and-data-sources/"
+              },
+              {
+                "title": "Storage Capacity",
+                "path": "docs/concepts/storage/storage-capacity/"
+              },
+              {
+                "title": "Node-specific Volume Limits",
+                "path": "docs/concepts/storage/storage-limits/"
+              },
+              {
+                "title": "Local ephemeral storage",
+                "path": "docs/concepts/storage/ephemeral-storage/"
+              },
+              {
+                "title": "Volume Health Monitoring",
+                "path": "docs/concepts/storage/volume-health-monitoring/"
+              },
+              {
+                "title": "Windows Storage",
+                "path": "docs/concepts/storage/windows-storage/"
+              }
+            ]
+          },
+          {
+            "title": "Configuration",
+            "path": "docs/concepts/configuration/",
+            "children": [
+              {
+                "title": "ConfigMaps",
+                "path": "docs/concepts/configuration/configmap/"
+              },
+              {
+                "title": "Secrets",
+                "path": "docs/concepts/configuration/secret/"
+              },
+              {
+                "title": "Resource Management for Pods and Containers",
+                "path": "docs/concepts/configuration/manage-resources-containers/"
+              },
+              {
+                "title": "Organizing Cluster Access Using kubeconfig Files",
+                "path": "docs/concepts/configuration/organize-cluster-access-kubeconfig/"
+              },
+              {
+                "title": "Resource Management for Windows nodes",
+                "path": "docs/concepts/configuration/windows-resource-management/"
+              }
+            ]
+          },
+          {
+            "title": "Security",
+            "path": "docs/concepts/security/",
+            "children": [
+              {
+                "title": "Cloud Native Security",
+                "path": "docs/concepts/security/cloud-native-security/"
+              },
+              {
+                "title": "Pod Security Standards",
+                "path": "docs/concepts/security/pod-security-standards/"
+              },
+              {
+                "title": "Pod Security Admission",
+                "path": "docs/concepts/security/pod-security-admission/"
+              },
+              {
+                "title": "Service Accounts",
+                "path": "docs/concepts/security/service-accounts/"
+              },
+              {
+                "title": "Pod Security Policies",
+                "path": "docs/concepts/security/pod-security-policy/"
+              },
+              {
+                "title": "Security For Linux Nodes",
+                "path": "docs/concepts/security/linux-security/"
+              },
+              {
+                "title": "Security For Windows Nodes",
+                "path": "docs/concepts/security/windows-security/"
+              },
+              {
+                "title": "Controlling Access to the Kubernetes API",
+                "path": "docs/concepts/security/controlling-access/"
+              },
+              {
+                "title": "Role Based Access Control Good Practices",
+                "path": "docs/concepts/security/rbac-good-practices/"
+              },
+              {
+                "title": "Good practices for Kubernetes Secrets",
+                "path": "docs/concepts/security/secrets-good-practices/"
+              },
+              {
+                "title": "Multi-tenancy",
+                "path": "docs/concepts/security/multi-tenancy/"
+              },
+              {
+                "title": "Hardening Guide - Authentication Mechanisms",
+                "path": "docs/concepts/security/hardening-guide/authentication-mechanisms/"
+              },
+              {
+                "title": "Hardening Guide - Dynamic Resource Allocation",
+                "path": "docs/concepts/security/hardening-guide/dynamic-resource-allocation/"
+              },
+              {
+                "title": "Hardening Guide - Scheduler Configuration",
+                "path": "docs/concepts/security/hardening-guide/scheduler/"
+              },
+              {
+                "title": "Kubernetes API Server Bypass Risks",
+                "path": "docs/concepts/security/api-server-bypass-risks/"
+              },
+              {
+                "title": "Linux kernel security constraints for Pods and containers",
+                "path": "docs/concepts/security/linux-kernel-security-constraints/"
+              },
+              {
+                "title": "Security Checklist",
+                "path": "docs/concepts/security/security-checklist/"
+              },
+              {
+                "title": "Application Security Checklist",
+                "path": "docs/concepts/security/application-security-checklist/"
+              }
+            ]
+          },
+          {
+            "title": "Policies",
+            "path": "docs/concepts/policy/",
+            "children": [
+              {
+                "title": "Limit Ranges",
+                "path": "docs/concepts/policy/limit-range/"
+              },
+              {
+                "title": "Resource Quotas",
+                "path": "docs/concepts/policy/resource-quotas/"
+              },
+              {
+                "title": "Process ID Limits And Reservations",
+                "path": "docs/concepts/policy/pid-limiting/"
+              }
+            ]
+          },
+          {
+            "title": "Scheduling, Preemption and Eviction",
+            "path": "docs/concepts/scheduling-eviction/",
+            "children": [
+              {
+                "title": "Kubernetes Scheduler",
+                "path": "docs/concepts/scheduling-eviction/kube-scheduler/"
+              },
+              {
+                "title": "Topology-Aware Workload Scheduling",
+                "path": "docs/concepts/scheduling-eviction/topology-aware-scheduling/"
+              },
+              {
+                "title": "Assigning Pods to Nodes",
+                "path": "docs/concepts/scheduling-eviction/assign-pod-node/"
+              },
+              {
+                "title": "Pod Overhead",
+                "path": "docs/concepts/scheduling-eviction/pod-overhead/"
+              },
+              {
+                "title": "Pod Scheduling Readiness",
+                "path": "docs/concepts/scheduling-eviction/pod-scheduling-readiness/"
+              },
+              {
+                "title": "Pod Topology Spread Constraints",
+                "path": "docs/concepts/scheduling-eviction/topology-spread-constraints/"
+              },
+              {
+                "title": "Taints and Tolerations",
+                "path": "docs/concepts/scheduling-eviction/taint-and-toleration/"
+              },
+              {
+                "title": "Scheduling Framework",
+                "path": "docs/concepts/scheduling-eviction/scheduling-framework/"
+              },
+              {
+                "title": "Gang Scheduling",
+                "path": "docs/concepts/scheduling-eviction/gang-scheduling/"
+              },
+              {
+                "title": "Scheduler Performance Tuning",
+                "path": "docs/concepts/scheduling-eviction/scheduler-perf-tuning/"
+              },
+              {
+                "title": "PodGroup Scheduling",
+                "path": "docs/concepts/scheduling-eviction/podgroup-scheduling/"
+              },
+              {
+                "title": "Resource Bin Packing",
+                "path": "docs/concepts/scheduling-eviction/resource-bin-packing/"
+              },
+              {
+                "title": "Workload-Aware Preemption",
+                "path": "docs/concepts/scheduling-eviction/workload-aware-preemption/"
+              },
+              {
+                "title": "Pod Priority and Preemption",
+                "path": "docs/concepts/scheduling-eviction/pod-priority-preemption/"
+              },
+              {
+                "title": "Node-pressure Eviction",
+                "path": "docs/concepts/scheduling-eviction/node-pressure-eviction/"
+              },
+              {
+                "title": "API-initiated Eviction",
+                "path": "docs/concepts/scheduling-eviction/api-eviction/"
+              },
+              {
+                "title": "Node Declared Features",
+                "path": "docs/concepts/scheduling-eviction/node-declared-features/"
+              }
+            ]
+          },
+          {
+            "title": "Resource Management",
+            "path": "docs/concepts/resource-management/",
+            "children": [
+              {
+                "title": "Resource managers",
+                "path": "docs/concepts/resource-management/resource-managers/"
+              },
+              {
+                "title": "Dynamic Resource Allocation",
+                "path": "docs/concepts/resource-management/dynamic-resource-allocation/",
+                "children": [
+                  {
+                    "title": "DRA API Objects",
+                    "path": "docs/concepts/resource-management/dynamic-resource-allocation/dra-api/"
+                  },
+                  {
+                    "title": "How DRA Works",
+                    "path": "docs/concepts/resource-management/dynamic-resource-allocation/how-dra-works/"
+                  },
+                  {
+                    "title": "Observability of Dynamic Resources",
+                    "path": "docs/concepts/resource-management/dynamic-resource-allocation/dra-observability/"
+                  },
+                  {
+                    "title": "DRA Features",
+                    "path": "docs/concepts/resource-management/dynamic-resource-allocation/dra-features/"
+                  },
+                  {
+                    "title": "Device Taints and Tolerations",
+                    "path": "docs/concepts/resource-management/dynamic-resource-allocation/device-taints/"
+                  }
+                ]
+              },
+              {
+                "title": "Pod-level resource managers",
+                "path": "docs/concepts/resource-management/pod-level-resource-managers/"
+              }
+            ]
+          },
+          {
+            "title": "Cluster Administration",
+            "path": "docs/concepts/cluster-administration/",
+            "children": [
+              {
+                "title": "Node Shutdowns",
+                "path": "docs/concepts/cluster-administration/node-shutdown/"
+              },
+              {
+                "title": "Swap memory management",
+                "path": "docs/concepts/cluster-administration/swap-memory-management/"
+              },
+              {
+                "title": "Node Autoscaling",
+                "path": "docs/concepts/cluster-administration/node-autoscaling/"
+              },
+              {
+                "title": "Certificates",
+                "path": "docs/concepts/cluster-administration/certificates/"
+              },
+              {
+                "title": "Cluster Networking",
+                "path": "docs/concepts/cluster-administration/networking/"
+              },
+              {
+                "title": "Observability",
+                "path": "docs/concepts/cluster-administration/observability/"
+              },
+              {
+                "title": "Admission Webhook Good Practices",
+                "path": "docs/concepts/cluster-administration/admission-webhooks-good-practices/"
+              },
+              {
+                "title": "Good practices for Dynamic Resource Allocation as a Cluster Admin",
+                "path": "docs/concepts/cluster-administration/dra/"
+              },
+              {
+                "title": "Logging Architecture",
+                "path": "docs/concepts/cluster-administration/logging/"
+              },
+              {
+                "title": "Compatibility Version For Kubernetes Control Plane Components",
+                "path": "docs/concepts/cluster-administration/compatibility-version/"
+              },
+              {
+                "title": "Metrics For Kubernetes System Components",
+                "path": "docs/concepts/cluster-administration/system-metrics/"
+              },
+              {
+                "title": "Metrics for Kubernetes Object States",
+                "path": "docs/concepts/cluster-administration/kube-state-metrics/"
+              },
+              {
+                "title": "System Logs",
+                "path": "docs/concepts/cluster-administration/system-logs/"
+              },
+              {
+                "title": "Traces For Kubernetes System Components",
+                "path": "docs/concepts/cluster-administration/system-traces/"
+              },
+              {
+                "title": "Proxies in Kubernetes",
+                "path": "docs/concepts/cluster-administration/proxies/"
+              },
+              {
+                "title": "API Priority and Fairness",
+                "path": "docs/concepts/cluster-administration/flow-control/"
+              },
+              {
+                "title": "Installing Addons",
+                "path": "docs/concepts/cluster-administration/addons/"
+              },
+              {
+                "title": "Coordinated Leader Election",
+                "path": "docs/concepts/cluster-administration/coordinated-leader-election/"
+              }
+            ]
+          },
+          {
+            "title": "Windows in Kubernetes",
+            "path": "docs/concepts/windows/",
+            "children": [
+              {
+                "title": "Windows containers in Kubernetes",
+                "path": "docs/concepts/windows/intro/"
+              },
+              {
+                "title": "Guide for Running Windows Containers in Kubernetes",
+                "path": "docs/concepts/windows/user-guide/"
+              }
+            ]
+          },
+          {
+            "title": "Extending Kubernetes",
+            "path": "docs/concepts/extend-kubernetes/",
+            "children": [
+              {
+                "title": "Compute, Storage, and Networking Extensions",
+                "path": "docs/concepts/extend-kubernetes/compute-storage-net/",
+                "children": [
+                  {
+                    "title": "Network Plugins",
+                    "path": "docs/concepts/extend-kubernetes/compute-storage-net/network-plugins/"
+                  },
+                  {
+                    "title": "Device Plugins",
+                    "path": "docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/"
+                  }
+                ]
+              },
+              {
+                "title": "Extending the Kubernetes API",
+                "path": "docs/concepts/extend-kubernetes/api-extension/",
+                "children": [
+                  {
+                    "title": "Custom Resources",
+                    "path": "docs/concepts/extend-kubernetes/api-extension/custom-resources/"
+                  },
+                  {
+                    "title": "Kubernetes API Aggregation Layer",
+                    "path": "docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/"
+                  }
+                ]
+              },
+              {
+                "title": "Operator pattern",
+                "path": "docs/concepts/extend-kubernetes/operator/"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Tasks",
+        "path": "docs/tasks/",
+        "children": [
+          {
+            "title": "Install Tools",
+            "path": "docs/tasks/tools/",
+            "children": [
+              {
+                "title": "Install and Set Up kubectl on Linux",
+                "path": "docs/tasks/tools/install-kubectl-linux/"
+              },
+              {
+                "title": "Install and Set Up kubectl on macOS",
+                "path": "docs/tasks/tools/install-kubectl-macos/"
+              },
+              {
+                "title": "Install and Set Up kubectl on Windows",
+                "path": "docs/tasks/tools/install-kubectl-windows/"
+              }
+            ]
+          },
+          {
+            "title": "Administer a Cluster",
+            "path": "docs/tasks/administer-cluster/",
+            "children": [
+              {
+                "title": "Administration with kubeadm",
+                "path": "docs/tasks/administer-cluster/kubeadm/",
+                "children": [
+                  {
+                    "title": "Adding Linux worker nodes",
+                    "path": "docs/tasks/administer-cluster/kubeadm/adding-linux-nodes/"
+                  },
+                  {
+                    "title": "Adding Windows worker nodes",
+                    "path": "docs/tasks/administer-cluster/kubeadm/adding-windows-nodes/"
+                  },
+                  {
+                    "title": "Upgrading kubeadm clusters",
+                    "path": "docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/"
+                  },
+                  {
+                    "title": "Upgrading Linux nodes",
+                    "path": "docs/tasks/administer-cluster/kubeadm/upgrading-linux-nodes/"
+                  },
+                  {
+                    "title": "Upgrading Windows nodes",
+                    "path": "docs/tasks/administer-cluster/kubeadm/upgrading-windows-nodes/"
+                  },
+                  {
+                    "title": "Certificate Management with kubeadm",
+                    "path": "docs/tasks/administer-cluster/kubeadm/kubeadm-certs/"
+                  },
+                  {
+                    "title": "Reconfiguring a kubeadm cluster",
+                    "path": "docs/tasks/administer-cluster/kubeadm/kubeadm-reconfigure/"
+                  },
+                  {
+                    "title": "Changing The Kubernetes Package Repository",
+                    "path": "docs/tasks/administer-cluster/kubeadm/change-package-repository/"
+                  }
+                ]
+              },
+              {
+                "title": "Overprovision Node Capacity For A Cluster",
+                "path": "docs/tasks/administer-cluster/node-overprovisioning/"
+              },
+              {
+                "title": "Migrating from dockershim",
+                "path": "docs/tasks/administer-cluster/migrating-from-dockershim/",
+                "children": [
+                  {
+                    "title": "Changing the Container Runtime on a Node from Docker Engine to containerd",
+                    "path": "docs/tasks/administer-cluster/migrating-from-dockershim/change-runtime-containerd/"
+                  },
+                  {
+                    "title": "Find Out What Container Runtime is Used on a Node",
+                    "path": "docs/tasks/administer-cluster/migrating-from-dockershim/find-out-runtime-you-use/"
+                  },
+                  {
+                    "title": "Troubleshooting CNI plugin-related errors",
+                    "path": "docs/tasks/administer-cluster/migrating-from-dockershim/troubleshooting-cni-plugin-related-errors/"
+                  },
+                  {
+                    "title": "Check whether dockershim removal affects you",
+                    "path": "docs/tasks/administer-cluster/migrating-from-dockershim/check-if-dockershim-removal-affects-you/"
+                  },
+                  {
+                    "title": "Migrating telemetry and security agents from dockershim",
+                    "path": "docs/tasks/administer-cluster/migrating-from-dockershim/migrating-telemetry-and-security-agents/"
+                  }
+                ]
+              },
+              {
+                "title": "Generate Certificates Manually",
+                "path": "docs/tasks/administer-cluster/certificates/"
+              },
+              {
+                "title": "Manage Memory, CPU, and API Resources",
+                "path": "docs/tasks/administer-cluster/manage-resources/",
+                "children": [
+                  {
+                    "title": "Configure Default Memory Requests and Limits for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/memory-default-namespace/"
+                  },
+                  {
+                    "title": "Configure Default CPU Requests and Limits for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/cpu-default-namespace/"
+                  },
+                  {
+                    "title": "Configure Minimum and Maximum Memory Constraints for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/memory-constraint-namespace/"
+                  },
+                  {
+                    "title": "Configure Minimum and Maximum CPU Constraints for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/cpu-constraint-namespace/"
+                  },
+                  {
+                    "title": "Configure Memory and CPU Quotas for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/quota-memory-cpu-namespace/"
+                  },
+                  {
+                    "title": "Configure a Pod Quota for a Namespace",
+                    "path": "docs/tasks/administer-cluster/manage-resources/quota-pod-namespace/"
+                  }
+                ]
+              },
+              {
+                "title": "Install a Network Policy Provider",
+                "path": "docs/tasks/administer-cluster/network-policy-provider/",
+                "children": [
+                  {
+                    "title": "Use Antrea for NetworkPolicy",
+                    "path": "docs/tasks/administer-cluster/network-policy-provider/antrea-network-policy/"
+                  },
+                  {
+                    "title": "Use Calico for NetworkPolicy",
+                    "path": "docs/tasks/administer-cluster/network-policy-provider/calico-network-policy/"
+                  },
+                  {
+                    "title": "Use Cilium for NetworkPolicy",
+                    "path": "docs/tasks/administer-cluster/network-policy-provider/cilium-network-policy/"
+                  },
+                  {
+                    "title": "Use Kube-router for NetworkPolicy",
+                    "path": "docs/tasks/administer-cluster/network-policy-provider/kube-router-network-policy/"
+                  }
+                ]
+              },
+              {
+                "title": "Access Clusters Using the Kubernetes API",
+                "path": "docs/tasks/administer-cluster/access-cluster-api/"
+              },
+              {
+                "title": "Enable Or Disable Feature Gates",
+                "path": "docs/tasks/administer-cluster/configure-feature-gates/"
+              },
+              {
+                "title": "Advertise Extended Resources for a Node",
+                "path": "docs/tasks/administer-cluster/extended-resource-node/"
+              },
+              {
+                "title": "Autoscale the DNS Service in a Cluster",
+                "path": "docs/tasks/administer-cluster/dns-horizontal-autoscaling/"
+              },
+              {
+                "title": "Change the Access Mode of a PersistentVolume to ReadWriteOncePod",
+                "path": "docs/tasks/administer-cluster/change-pv-access-mode-readwriteoncepod/"
+              },
+              {
+                "title": "Change the default StorageClass",
+                "path": "docs/tasks/administer-cluster/change-default-storage-class/"
+              },
+              {
+                "title": "Switching from Polling to CRI Event-based Updates to Container Status",
+                "path": "docs/tasks/administer-cluster/switch-to-evented-pleg/"
+              },
+              {
+                "title": "Change the Reclaim Policy of a PersistentVolume",
+                "path": "docs/tasks/administer-cluster/change-pv-reclaim-policy/"
+              },
+              {
+                "title": "Cloud Controller Manager Administration",
+                "path": "docs/tasks/administer-cluster/running-cloud-controller/"
+              },
+              {
+                "title": "Configure a kubelet image credential provider",
+                "path": "docs/tasks/administer-cluster/kubelet-credential-provider/"
+              },
+              {
+                "title": "Configure Quotas for API Objects",
+                "path": "docs/tasks/administer-cluster/quota-api-object/"
+              },
+              {
+                "title": "Control CPU Management Policies on the Node",
+                "path": "docs/tasks/administer-cluster/cpu-management-policies/"
+              },
+              {
+                "title": "Control Memory Management Policies on a Node",
+                "path": "docs/tasks/administer-cluster/memory-manager/"
+              },
+              {
+                "title": "Control Topology Management Policies on a node",
+                "path": "docs/tasks/administer-cluster/topology-manager/"
+              },
+              {
+                "title": "Customizing DNS Service",
+                "path": "docs/tasks/administer-cluster/dns-custom-nameservers/"
+              },
+              {
+                "title": "Debugging DNS Resolution",
+                "path": "docs/tasks/administer-cluster/dns-debugging-resolution/"
+              },
+              {
+                "title": "Declare Network Policy",
+                "path": "docs/tasks/administer-cluster/declare-network-policy/"
+              },
+              {
+                "title": "Developing Cloud Controller Manager",
+                "path": "docs/tasks/administer-cluster/developing-cloud-controller-manager/"
+              },
+              {
+                "title": "Enable Or Disable A Kubernetes API",
+                "path": "docs/tasks/administer-cluster/enable-disable-api/"
+              },
+              {
+                "title": "Encrypting Confidential Data at Rest",
+                "path": "docs/tasks/administer-cluster/encrypt-data/"
+              },
+              {
+                "title": "Decrypt Confidential Data that is Already Encrypted at Rest",
+                "path": "docs/tasks/administer-cluster/decrypt-data/"
+              },
+              {
+                "title": "Guaranteed Scheduling For Critical Add-On Pods",
+                "path": "docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/"
+              },
+              {
+                "title": "IP Masquerade Agent User Guide",
+                "path": "docs/tasks/administer-cluster/ip-masq-agent/"
+              },
+              {
+                "title": "Limit Storage Consumption",
+                "path": "docs/tasks/administer-cluster/limit-storage-consumption/"
+              },
+              {
+                "title": "Migrate Replicated Control Plane To Use Cloud Controller Manager",
+                "path": "docs/tasks/administer-cluster/controller-manager-leader-migration/"
+              },
+              {
+                "title": "Operating etcd clusters for Kubernetes",
+                "path": "docs/tasks/administer-cluster/configure-upgrade-etcd/"
+              },
+              {
+                "title": "Reserve Compute Resources for System Daemons",
+                "path": "docs/tasks/administer-cluster/reserve-compute-resources/"
+              },
+              {
+                "title": "Running Kubernetes Node Components as a Non-root User",
+                "path": "docs/tasks/administer-cluster/kubelet-in-userns/"
+              },
+              {
+                "title": "Safely Drain a Node",
+                "path": "docs/tasks/administer-cluster/safely-drain-node/"
+              },
+              {
+                "title": "Securing a Cluster",
+                "path": "docs/tasks/administer-cluster/securing-a-cluster/"
+              },
+              {
+                "title": "Harden Dynamic Resource Allocation in Your Cluster",
+                "path": "docs/tasks/administer-cluster/hardening-dra/"
+              },
+              {
+                "title": "Set Kubelet Parameters Via A Configuration File",
+                "path": "docs/tasks/administer-cluster/kubelet-config-file/"
+              },
+              {
+                "title": "Share a Cluster with Namespaces",
+                "path": "docs/tasks/administer-cluster/namespaces/"
+              },
+              {
+                "title": "Upgrade A Cluster",
+                "path": "docs/tasks/administer-cluster/cluster-upgrade/"
+              },
+              {
+                "title": "Use Cascading Deletion in a Cluster",
+                "path": "docs/tasks/administer-cluster/use-cascading-deletion/"
+              },
+              {
+                "title": "Using a KMS provider for data encryption",
+                "path": "docs/tasks/administer-cluster/kms-provider/"
+              },
+              {
+                "title": "Using CoreDNS for Service Discovery",
+                "path": "docs/tasks/administer-cluster/coredns/"
+              },
+              {
+                "title": "Using NodeLocal DNSCache in Kubernetes Clusters",
+                "path": "docs/tasks/administer-cluster/nodelocaldns/"
+              },
+              {
+                "title": "Using sysctls in a Kubernetes Cluster",
+                "path": "docs/tasks/administer-cluster/sysctl-cluster/"
+              },
+              {
+                "title": "Verify Signed Kubernetes Artifacts",
+                "path": "docs/tasks/administer-cluster/verify-signed-artifacts/"
+              }
+            ]
+          },
+          {
+            "title": "Configure Pods and Containers",
+            "path": "docs/tasks/configure-pod-container/",
+            "children": [
+              {
+                "title": "Assign Memory Resources to Containers and Pods",
+                "path": "docs/tasks/configure-pod-container/assign-memory-resource/"
+              },
+              {
+                "title": "Assign CPU Resources to Containers and Pods",
+                "path": "docs/tasks/configure-pod-container/assign-cpu-resource/"
+              },
+              {
+                "title": "Assign Devices to Pods and Containers",
+                "path": "docs/tasks/configure-pod-container/assign-resources/",
+                "children": [
+                  {
+                    "title": "Set Up DRA in a Cluster",
+                    "path": "docs/tasks/configure-pod-container/assign-resources/set-up-dra-cluster/"
+                  },
+                  {
+                    "title": "Allocate Devices to Workloads with DRA",
+                    "path": "docs/tasks/configure-pod-container/assign-resources/allocate-devices-dra/"
+                  },
+                  {
+                    "title": "Access DRA Device Metadata",
+                    "path": "docs/tasks/configure-pod-container/assign-resources/access-dra-device-metadata/"
+                  }
+                ]
+              },
+              {
+                "title": "Assign Pod-level CPU and memory resources",
+                "path": "docs/tasks/configure-pod-container/assign-pod-level-resources/"
+              },
+              {
+                "title": "Configure GMSA for Windows Pods and containers",
+                "path": "docs/tasks/configure-pod-container/configure-gmsa/"
+              },
+              {
+                "title": "Resize CPU and Memory Resources assigned to Containers",
+                "path": "docs/tasks/configure-pod-container/resize-container-resources/"
+              },
+              {
+                "title": "Resize CPU and Memory Resources assigned to Pods",
+                "path": "docs/tasks/configure-pod-container/resize-pod-resources/"
+              },
+              {
+                "title": "Configure RunAsUserName for Windows pods and containers",
+                "path": "docs/tasks/configure-pod-container/configure-runasusername/"
+              },
+              {
+                "title": "Create a Windows HostProcess Pod",
+                "path": "docs/tasks/configure-pod-container/create-hostprocess-pod/"
+              },
+              {
+                "title": "Configure Quality of Service for Pods",
+                "path": "docs/tasks/configure-pod-container/quality-service-pod/"
+              },
+              {
+                "title": "Assign Extended Resources to a Container",
+                "path": "docs/tasks/configure-pod-container/extended-resource/"
+              },
+              {
+                "title": "Configure a Pod to Use a Volume for Storage",
+                "path": "docs/tasks/configure-pod-container/configure-volume-storage/"
+              },
+              {
+                "title": "Configure a Pod to Use a Projected Volume for Storage",
+                "path": "docs/tasks/configure-pod-container/configure-projected-volume-storage/"
+              },
+              {
+                "title": "Configure a Security Context for a Pod or Container",
+                "path": "docs/tasks/configure-pod-container/security-context/"
+              },
+              {
+                "title": "Configure Service Accounts for Pods",
+                "path": "docs/tasks/configure-pod-container/configure-service-account/"
+              },
+              {
+                "title": "Pull an Image from a Private Registry",
+                "path": "docs/tasks/configure-pod-container/pull-image-private-registry/"
+              },
+              {
+                "title": "Configure Liveness, Readiness and Startup Probes",
+                "path": "docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+              },
+              {
+                "title": "Assign Pods to Nodes",
+                "path": "docs/tasks/configure-pod-container/assign-pods-nodes/"
+              },
+              {
+                "title": "Assign Pods to Nodes using Node Affinity",
+                "path": "docs/tasks/configure-pod-container/assign-pods-nodes-using-node-affinity/"
+              },
+              {
+                "title": "Configure Pod Initialization",
+                "path": "docs/tasks/configure-pod-container/configure-pod-initialization/"
+              },
+              {
+                "title": "Attach Handlers to Container Lifecycle Events",
+                "path": "docs/tasks/configure-pod-container/attach-handler-lifecycle-event/"
+              },
+              {
+                "title": "Configure a Pod to Use a ConfigMap",
+                "path": "docs/tasks/configure-pod-container/configure-pod-configmap/"
+              },
+              {
+                "title": "Share Process Namespace between Containers in a Pod",
+                "path": "docs/tasks/configure-pod-container/share-process-namespace/"
+              },
+              {
+                "title": "Use a User Namespace With a Pod",
+                "path": "docs/tasks/configure-pod-container/user-namespaces/"
+              },
+              {
+                "title": "Use an Image Volume With a Pod",
+                "path": "docs/tasks/configure-pod-container/image-volumes/"
+              },
+              {
+                "title": "Set Permissions on an emptyDir Volume",
+                "path": "docs/tasks/configure-pod-container/configure-emptydir-volume-mode/"
+              },
+              {
+                "title": "Set Bind Mount Options on Volume Mounts",
+                "path": "docs/tasks/configure-pod-container/configure-bind-mount-options/"
+              },
+              {
+                "title": "Create static Pods",
+                "path": "docs/tasks/configure-pod-container/static-pod/"
+              },
+              {
+                "title": "Translate a Docker Compose File to Kubernetes Resources",
+                "path": "docs/tasks/configure-pod-container/translate-compose-kubernetes/"
+              },
+              {
+                "title": "Enforce Pod Security Standards by Configuring the Built-in Admission Controller",
+                "path": "docs/tasks/configure-pod-container/enforce-standards-admission-controller/"
+              },
+              {
+                "title": "Enforce Pod Security Standards with Namespace Labels",
+                "path": "docs/tasks/configure-pod-container/enforce-standards-namespace-labels/"
+              },
+              {
+                "title": "Migrate from PodSecurityPolicy to the Built-In PodSecurity Admission Controller",
+                "path": "docs/tasks/configure-pod-container/migrate-from-psp/"
+              }
+            ]
+          },
+          {
+            "title": "Monitoring, Logging, and Debugging",
+            "path": "docs/tasks/debug/",
+            "children": [
+              {
+                "title": "Logging in Kubernetes",
+                "path": "docs/tasks/debug/logging/"
+              },
+              {
+                "title": "Monitoring in Kubernetes",
+                "path": "docs/tasks/debug/monitoring/"
+              },
+              {
+                "title": "Troubleshooting Applications",
+                "path": "docs/tasks/debug/debug-application/",
+                "children": [
+                  {
+                    "title": "Debug Pods",
+                    "path": "docs/tasks/debug/debug-application/debug-pods/"
+                  },
+                  {
+                    "title": "Debug Services",
+                    "path": "docs/tasks/debug/debug-application/debug-service/"
+                  },
+                  {
+                    "title": "Debug a StatefulSet",
+                    "path": "docs/tasks/debug/debug-application/debug-statefulset/"
+                  },
+                  {
+                    "title": "Determine the Reason for Pod Failure",
+                    "path": "docs/tasks/debug/debug-application/determine-reason-pod-failure/"
+                  },
+                  {
+                    "title": "Debug Init Containers",
+                    "path": "docs/tasks/debug/debug-application/debug-init-containers/"
+                  },
+                  {
+                    "title": "Debug Running Pods",
+                    "path": "docs/tasks/debug/debug-application/debug-running-pod/"
+                  },
+                  {
+                    "title": "Get a Shell to a Running Container",
+                    "path": "docs/tasks/debug/debug-application/get-shell-running-container/"
+                  }
+                ]
+              },
+              {
+                "title": "Troubleshooting Clusters",
+                "path": "docs/tasks/debug/debug-cluster/",
+                "children": [
+                  {
+                    "title": "Troubleshooting kubectl",
+                    "path": "docs/tasks/debug/debug-cluster/troubleshoot-kubectl/"
+                  },
+                  {
+                    "title": "Resource metrics pipeline",
+                    "path": "docs/tasks/debug/debug-cluster/resource-metrics-pipeline/"
+                  },
+                  {
+                    "title": "Tools for Monitoring Resources",
+                    "path": "docs/tasks/debug/debug-cluster/resource-usage-monitoring/"
+                  },
+                  {
+                    "title": "Monitor Node Health",
+                    "path": "docs/tasks/debug/debug-cluster/monitor-node-health/"
+                  },
+                  {
+                    "title": "Debugging Kubernetes nodes with crictl",
+                    "path": "docs/tasks/debug/debug-cluster/crictl/"
+                  },
+                  {
+                    "title": "Troubleshooting Topology Management",
+                    "path": "docs/tasks/debug/debug-cluster/topology/"
+                  },
+                  {
+                    "title": "Auditing",
+                    "path": "docs/tasks/debug/debug-cluster/audit/"
+                  },
+                  {
+                    "title": "Debugging Kubernetes Nodes With Kubectl",
+                    "path": "docs/tasks/debug/debug-cluster/kubectl-node-debug/"
+                  },
+                  {
+                    "title": "Developing and debugging services locally using telepresence",
+                    "path": "docs/tasks/debug/debug-cluster/local-debugging/"
+                  },
+                  {
+                    "title": "Windows debugging tips",
+                    "path": "docs/tasks/debug/debug-cluster/windows/"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "title": "Manage Kubernetes Objects",
+            "path": "docs/tasks/manage-kubernetes-objects/",
+            "children": [
+              {
+                "title": "Declarative Management of Kubernetes Objects Using Configuration Files",
+                "path": "docs/tasks/manage-kubernetes-objects/declarative-config/"
+              },
+              {
+                "title": "Declarative Management of Kubernetes Objects Using Kustomize",
+                "path": "docs/tasks/manage-kubernetes-objects/kustomization/"
+              },
+              {
+                "title": "Managing Kubernetes Objects Using Imperative Commands",
+                "path": "docs/tasks/manage-kubernetes-objects/imperative-command/"
+              },
+              {
+                "title": "Imperative Management of Kubernetes Objects Using Configuration Files",
+                "path": "docs/tasks/manage-kubernetes-objects/imperative-config/"
+              },
+              {
+                "title": "Update API Objects in Place Using kubectl patch",
+                "path": "docs/tasks/manage-kubernetes-objects/update-api-object-kubectl-patch/"
+              },
+              {
+                "title": "Migrate Kubernetes Objects Using Storage Version Migration",
+                "path": "docs/tasks/manage-kubernetes-objects/storage-version-migration/"
+              }
+            ]
+          },
+          {
+            "title": "Managing Secrets",
+            "path": "docs/tasks/configmap-secret/",
+            "children": [
+              {
+                "title": "Managing Secrets using kubectl",
+                "path": "docs/tasks/configmap-secret/managing-secret-using-kubectl/"
+              },
+              {
+                "title": "Managing Secrets using Configuration File",
+                "path": "docs/tasks/configmap-secret/managing-secret-using-config-file/"
+              },
+              {
+                "title": "Managing Secrets using Kustomize",
+                "path": "docs/tasks/configmap-secret/managing-secret-using-kustomize/"
+              }
+            ]
+          },
+          {
+            "title": "Inject Data Into Applications",
+            "path": "docs/tasks/inject-data-application/",
+            "children": [
+              {
+                "title": "Define a Command and Arguments for a Container",
+                "path": "docs/tasks/inject-data-application/define-command-argument-container/"
+              },
+              {
+                "title": "Define Dependent Environment Variables",
+                "path": "docs/tasks/inject-data-application/define-interdependent-environment-variables/"
+              },
+              {
+                "title": "Define Environment Variables for a Container",
+                "path": "docs/tasks/inject-data-application/define-environment-variable-container/"
+              },
+              {
+                "title": "Define Environment Variable Values Using An Init Container",
+                "path": "docs/tasks/inject-data-application/define-environment-variable-via-file/"
+              },
+              {
+                "title": "Expose Pod Information to Containers Through Environment Variables",
+                "path": "docs/tasks/inject-data-application/environment-variable-expose-pod-information/"
+              },
+              {
+                "title": "Expose Pod Information to Containers Through Files",
+                "path": "docs/tasks/inject-data-application/downward-api-volume-expose-pod-information/"
+              },
+              {
+                "title": "Distribute Credentials Securely Using Secrets",
+                "path": "docs/tasks/inject-data-application/distribute-credentials-secure/"
+              }
+            ]
+          },
+          {
+            "title": "Run Applications",
+            "path": "docs/tasks/run-application/",
+            "children": [
+              {
+                "title": "Run a Stateless Application Using a Deployment",
+                "path": "docs/tasks/run-application/run-stateless-application-deployment/"
+              },
+              {
+                "title": "Horizontal Manual Scaling for a Deployment",
+                "path": "docs/tasks/run-application/scale-deployment/"
+              },
+              {
+                "title": "Update a Deployment Without Downtime",
+                "path": "docs/tasks/run-application/update-deployment-rolling/"
+              },
+              {
+                "title": "Run a Single-Instance Stateful Application",
+                "path": "docs/tasks/run-application/run-single-instance-stateful-application/"
+              },
+              {
+                "title": "Run a Replicated Stateful Application",
+                "path": "docs/tasks/run-application/run-replicated-stateful-application/"
+              },
+              {
+                "title": "Scale a StatefulSet",
+                "path": "docs/tasks/run-application/scale-stateful-set/"
+              },
+              {
+                "title": "Delete a StatefulSet",
+                "path": "docs/tasks/run-application/delete-stateful-set/"
+              },
+              {
+                "title": "Force Delete StatefulSet Pods",
+                "path": "docs/tasks/run-application/force-delete-stateful-set-pod/"
+              },
+              {
+                "title": "HorizontalPodAutoscaler Walkthrough",
+                "path": "docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/"
+              },
+              {
+                "title": "Specifying a Disruption Budget for your Application",
+                "path": "docs/tasks/run-application/configure-pdb/"
+              },
+              {
+                "title": "Accessing the Kubernetes API from a Pod",
+                "path": "docs/tasks/run-application/access-api-from-pod/"
+              }
+            ]
+          },
+          {
+            "title": "Run Jobs",
+            "path": "docs/tasks/job/",
+            "children": [
+              {
+                "title": "Running Automated Tasks with a CronJob",
+                "path": "docs/tasks/job/automated-tasks-with-cron-jobs/"
+              },
+              {
+                "title": "Coarse Parallel Processing Using a Work Queue",
+                "path": "docs/tasks/job/coarse-parallel-processing-work-queue/"
+              },
+              {
+                "title": "Fine Parallel Processing Using a Work Queue",
+                "path": "docs/tasks/job/fine-parallel-processing-work-queue/"
+              },
+              {
+                "title": "Indexed Job for Parallel Processing with Static Work Assignment",
+                "path": "docs/tasks/job/indexed-parallel-processing-static/"
+              },
+              {
+                "title": "Job with Pod-to-Pod Communication",
+                "path": "docs/tasks/job/job-with-pod-to-pod-communication/"
+              },
+              {
+                "title": "Parallel Processing using Expansions",
+                "path": "docs/tasks/job/parallel-processing-expansion/"
+              },
+              {
+                "title": "Handling retriable and non-retriable pod failures with Pod failure policy",
+                "path": "docs/tasks/job/pod-failure-policy/"
+              }
+            ]
+          },
+          {
+            "title": "Access Applications in a Cluster",
+            "path": "docs/tasks/access-application-cluster/",
+            "children": [
+              {
+                "title": "Deploy and Access the Kubernetes Dashboard",
+                "path": "docs/tasks/access-application-cluster/web-ui-dashboard/"
+              },
+              {
+                "title": "Accessing Clusters",
+                "path": "docs/tasks/access-application-cluster/access-cluster/"
+              },
+              {
+                "title": "Configure Access to Multiple Clusters",
+                "path": "docs/tasks/access-application-cluster/configure-access-multiple-clusters/"
+              },
+              {
+                "title": "Use Port Forwarding to Access Applications in a Cluster",
+                "path": "docs/tasks/access-application-cluster/port-forward-access-application-cluster/"
+              },
+              {
+                "title": "Use a Service to Access an Application in a Cluster",
+                "path": "docs/tasks/access-application-cluster/service-access-application-cluster/"
+              },
+              {
+                "title": "Connect a Frontend to a Backend Using Services",
+                "path": "docs/tasks/access-application-cluster/connecting-frontend-backend/"
+              },
+              {
+                "title": "Create an External Load Balancer",
+                "path": "docs/tasks/access-application-cluster/create-external-load-balancer/"
+              },
+              {
+                "title": "List All Container Images Running in a Cluster",
+                "path": "docs/tasks/access-application-cluster/list-all-running-container-images/"
+              },
+              {
+                "title": "Communicate Between Containers in the Same Pod Using a Shared Volume",
+                "path": "docs/tasks/access-application-cluster/communicate-containers-same-pod-shared-volume/"
+              },
+              {
+                "title": "Configure DNS for a Cluster",
+                "path": "docs/tasks/access-application-cluster/configure-dns-cluster/"
+              },
+              {
+                "title": "Access Services Running on Clusters",
+                "path": "docs/tasks/access-application-cluster/access-cluster-services/"
+              }
+            ]
+          },
+          {
+            "title": "Extend Kubernetes",
+            "path": "docs/tasks/extend-kubernetes/",
+            "children": [
+              {
+                "title": "Configure the Aggregation Layer",
+                "path": "docs/tasks/extend-kubernetes/configure-aggregation-layer/"
+              },
+              {
+                "title": "Use Custom Resources",
+                "path": "docs/tasks/extend-kubernetes/custom-resources/",
+                "children": [
+                  {
+                    "title": "Extend the Kubernetes API with CustomResourceDefinitions",
+                    "path": "docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/"
+                  },
+                  {
+                    "title": "Versions in CustomResourceDefinitions",
+                    "path": "docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/"
+                  }
+                ]
+              },
+              {
+                "title": "Set up an Extension API Server",
+                "path": "docs/tasks/extend-kubernetes/setup-extension-api-server/"
+              },
+              {
+                "title": "Configure Multiple Schedulers",
+                "path": "docs/tasks/extend-kubernetes/configure-multiple-schedulers/"
+              },
+              {
+                "title": "Use an HTTP Proxy to Access the Kubernetes API",
+                "path": "docs/tasks/extend-kubernetes/http-proxy-access-api/"
+              },
+              {
+                "title": "Use a SOCKS5 Proxy to Access the Kubernetes API",
+                "path": "docs/tasks/extend-kubernetes/socks5-proxy-access-api/"
+              },
+              {
+                "title": "Set up Konnectivity service",
+                "path": "docs/tasks/extend-kubernetes/setup-konnectivity/"
+              }
+            ]
+          },
+          {
+            "title": "TLS",
+            "path": "docs/tasks/tls/",
+            "children": [
+              {
+                "title": "Issue a Certificate for a Kubernetes API Client Using a CertificateSigningRequest",
+                "path": "docs/tasks/tls/certificate-issue-client-csr/"
+              },
+              {
+                "title": "Configure Certificate Rotation for the Kubelet",
+                "path": "docs/tasks/tls/certificate-rotation/"
+              },
+              {
+                "title": "Manage TLS Certificates in a Cluster",
+                "path": "docs/tasks/tls/managing-tls-in-a-cluster/"
+              },
+              {
+                "title": "Manual Rotation of CA Certificates",
+                "path": "docs/tasks/tls/manual-rotation-of-ca-certificates/"
+              }
+            ]
+          },
+          {
+            "title": "Manage Cluster Daemons",
+            "path": "docs/tasks/manage-daemon/",
+            "children": [
+              {
+                "title": "Building a Basic DaemonSet",
+                "path": "docs/tasks/manage-daemon/create-daemon-set/"
+              },
+              {
+                "title": "Perform a Rolling Update on a DaemonSet",
+                "path": "docs/tasks/manage-daemon/update-daemon-set/"
+              },
+              {
+                "title": "Perform a Rollback on a DaemonSet",
+                "path": "docs/tasks/manage-daemon/rollback-daemon-set/"
+              },
+              {
+                "title": "Running Pods on Only Some Nodes",
+                "path": "docs/tasks/manage-daemon/pods-some-nodes/"
+              }
+            ]
+          },
+          {
+            "title": "Networking",
+            "path": "docs/tasks/network/",
+            "children": [
+              {
+                "title": "Adding entries to Pod /etc/hosts with HostAliases",
+                "path": "docs/tasks/network/customize-hosts-file-for-pods/"
+              },
+              {
+                "title": "Extend Service IP Ranges",
+                "path": "docs/tasks/network/extend-service-ip-ranges/"
+              },
+              {
+                "title": "Kubernetes Default ServiceCIDR Reconfiguration",
+                "path": "docs/tasks/network/reconfigure-default-service-ip-ranges/"
+              },
+              {
+                "title": "Validate IPv4/IPv6 dual-stack",
+                "path": "docs/tasks/network/validate-dual-stack/"
+              }
+            ]
+          },
+          {
+            "title": "Extend kubectl with plugins",
+            "path": "docs/tasks/extend-kubectl/kubectl-plugins/"
+          },
+          {
+            "title": "Manage HugePages",
+            "path": "docs/tasks/manage-hugepages/scheduling-hugepages/"
+          },
+          {
+            "title": "Schedule GPUs",
+            "path": "docs/tasks/manage-gpus/scheduling-gpus/"
+          }
+        ]
+      },
+      {
+        "title": "Tutorials",
+        "path": "docs/tutorials/",
+        "children": [
+          {
+            "title": "Hello Minikube",
+            "path": "docs/tutorials/hello-minikube/"
+          },
+          {
+            "title": "Learn Kubernetes Basics",
+            "path": "docs/tutorials/kubernetes-basics/",
+            "children": [
+              {
+                "title": "Create a Cluster",
+                "path": "docs/tutorials/kubernetes-basics/create-cluster/",
+                "children": [
+                  {
+                    "title": "Using Minikube to Create a Cluster",
+                    "path": "docs/tutorials/kubernetes-basics/create-cluster/cluster-intro/"
+                  }
+                ]
+              },
+              {
+                "title": "Deploy an App",
+                "path": "docs/tutorials/kubernetes-basics/deploy-app/",
+                "children": [
+                  {
+                    "title": "Using kubectl to Create a Deployment",
+                    "path": "docs/tutorials/kubernetes-basics/deploy-app/deploy-intro/"
+                  }
+                ]
+              },
+              {
+                "title": "Explore Your App",
+                "path": "docs/tutorials/kubernetes-basics/explore/",
+                "children": [
+                  {
+                    "title": "Viewing Pods and Nodes",
+                    "path": "docs/tutorials/kubernetes-basics/explore/explore-intro/"
+                  }
+                ]
+              },
+              {
+                "title": "Expose Your App Publicly",
+                "path": "docs/tutorials/kubernetes-basics/expose/",
+                "children": [
+                  {
+                    "title": "Using a Service to Expose Your App",
+                    "path": "docs/tutorials/kubernetes-basics/expose/expose-intro/"
+                  }
+                ]
+              },
+              {
+                "title": "Scale Your App",
+                "path": "docs/tutorials/kubernetes-basics/scale/",
+                "children": [
+                  {
+                    "title": "Running Multiple Instances of Your App",
+                    "path": "docs/tutorials/kubernetes-basics/scale/scale-intro/"
+                  }
+                ]
+              },
+              {
+                "title": "Update Your App",
+                "path": "docs/tutorials/kubernetes-basics/update/",
+                "children": [
+                  {
+                    "title": "Performing a Rolling Update",
+                    "path": "docs/tutorials/kubernetes-basics/update/update-intro/"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "title": "Configuration",
+            "path": "docs/tutorials/configuration/",
+            "children": [
+              {
+                "title": "Updating Configuration via a ConfigMap",
+                "path": "docs/tutorials/configuration/updating-configuration-via-a-configmap/"
+              },
+              {
+                "title": "Configuring Redis using a ConfigMap",
+                "path": "docs/tutorials/configuration/configure-redis-using-configmap/"
+              },
+              {
+                "title": "Adopting Sidecar Containers",
+                "path": "docs/tutorials/configuration/pod-sidecar-containers/"
+              },
+              {
+                "title": "Configure a Pod to Use a PersistentVolume for Storage",
+                "path": "docs/tutorials/configuration/configure-persistent-volume-storage/"
+              }
+            ]
+          },
+          {
+            "title": "Security",
+            "path": "docs/tutorials/security/",
+            "children": [
+              {
+                "title": "Apply Pod Security Standards at the Cluster Level",
+                "path": "docs/tutorials/security/cluster-level-pss/"
+              },
+              {
+                "title": "Apply Pod Security Standards at the Namespace Level",
+                "path": "docs/tutorials/security/ns-level-pss/"
+              },
+              {
+                "title": "Restrict a Container's Access to Resources with AppArmor",
+                "path": "docs/tutorials/security/apparmor/"
+              },
+              {
+                "title": "Restrict a Container's Syscalls with seccomp",
+                "path": "docs/tutorials/security/seccomp/"
+              }
+            ]
+          },
+          {
+            "title": "Stateless Applications",
+            "path": "docs/tutorials/stateless-application/",
+            "children": [
+              {
+                "title": "Exposing an External IP Address to Access an Application in a Cluster",
+                "path": "docs/tutorials/stateless-application/expose-external-ip-address/"
+              },
+              {
+                "title": "Example: Deploying PHP Guestbook application with Redis",
+                "path": "docs/tutorials/stateless-application/guestbook/"
+              }
+            ]
+          },
+          {
+            "title": "Stateful Applications",
+            "path": "docs/tutorials/stateful-application/",
+            "children": [
+              {
+                "title": "StatefulSet Basics",
+                "path": "docs/tutorials/stateful-application/basic-stateful-set/"
+              },
+              {
+                "title": "Example: Deploying WordPress and MySQL with Persistent Volumes",
+                "path": "docs/tutorials/stateful-application/mysql-wordpress-persistent-volume/"
+              },
+              {
+                "title": "Example: Deploying Cassandra with a StatefulSet",
+                "path": "docs/tutorials/stateful-application/cassandra/"
+              },
+              {
+                "title": "Running ZooKeeper, A Distributed System Coordinator",
+                "path": "docs/tutorials/stateful-application/zookeeper/"
+              }
+            ]
+          },
+          {
+            "title": "Cluster Management",
+            "path": "docs/tutorials/cluster-management/",
+            "children": [
+              {
+                "title": "Running Kubelet in Standalone Mode",
+                "path": "docs/tutorials/cluster-management/kubelet-standalone/"
+              },
+              {
+                "title": "Configuring swap memory on Kubernetes nodes",
+                "path": "docs/tutorials/cluster-management/provision-swap-memory/"
+              },
+              {
+                "title": "Use Pod-Level Resources with kubelet Resource Managers",
+                "path": "docs/tutorials/cluster-management/use-pod-level-resource-managers/"
+              },
+              {
+                "title": "Install Drivers and Allocate Devices with DRA",
+                "path": "docs/tutorials/cluster-management/install-use-dra/"
+              },
+              {
+                "title": "Explore Validating and Mutating Admission Policies",
+                "path": "docs/tutorials/cluster-management/admission-policies/"
+              },
+              {
+                "title": "Namespaces Walkthrough",
+                "path": "docs/tutorials/cluster-management/namespaces-walkthrough/"
+              }
+            ]
+          },
+          {
+            "title": "Services",
+            "path": "docs/tutorials/services/",
+            "children": [
+              {
+                "title": "Connecting Applications with Services",
+                "path": "docs/tutorials/services/connect-applications-service/"
+              },
+              {
+                "title": "Using Source IP",
+                "path": "docs/tutorials/services/source-ip/"
+              },
+              {
+                "title": "Explore Termination Behavior for Pods And Their Endpoints",
+                "path": "docs/tutorials/services/pods-and-endpoint-termination-flow/"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Reference",
+        "path": "docs/reference/",
+        "children": [
+          {
+            "title": "Glossary",
+            "path": "docs/reference/glossary/"
+          },
+          {
+            "title": "API Overview",
+            "path": "docs/reference/using-api/",
+            "children": [
+              {
+                "title": "Declarative API Validation",
+                "path": "docs/reference/using-api/declarative-validation/"
+              },
+              {
+                "title": "Kubernetes API Concepts",
+                "path": "docs/reference/using-api/api-concepts/"
+              },
+              {
+                "title": "Server-Side Apply",
+                "path": "docs/reference/using-api/server-side-apply/"
+              },
+              {
+                "title": "Client Libraries",
+                "path": "docs/reference/using-api/client-libraries/"
+              },
+              {
+                "title": "Common Expression Language in Kubernetes",
+                "path": "docs/reference/using-api/cel/"
+              },
+              {
+                "title": "Deprecated API Migration Guide",
+                "path": "docs/reference/using-api/deprecation-guide/"
+              },
+              {
+                "title": "Kubernetes API health endpoints",
+                "path": "docs/reference/using-api/health-checks/"
+              }
+            ]
+          },
+          {
+            "title": "API Access Control",
+            "path": "docs/reference/access-authn-authz/",
+            "children": [
+              {
+                "title": "Authenticating",
+                "path": "docs/reference/access-authn-authz/authentication/"
+              },
+              {
+                "title": "Authenticating with Bootstrap Tokens",
+                "path": "docs/reference/access-authn-authz/bootstrap-tokens/"
+              },
+              {
+                "title": "Authorization",
+                "path": "docs/reference/access-authn-authz/authorization/"
+              },
+              {
+                "title": "Using RBAC Authorization",
+                "path": "docs/reference/access-authn-authz/rbac/"
+              },
+              {
+                "title": "Using Node Authorization",
+                "path": "docs/reference/access-authn-authz/node/"
+              },
+              {
+                "title": "Webhook Mode",
+                "path": "docs/reference/access-authn-authz/webhook/"
+              },
+              {
+                "title": "Using ABAC Authorization",
+                "path": "docs/reference/access-authn-authz/abac/"
+              },
+              {
+                "title": "Admission Control",
+                "path": "docs/reference/access-authn-authz/admission-controllers/"
+              },
+              {
+                "title": "Dynamic Admission Control",
+                "path": "docs/reference/access-authn-authz/extensible-admission-controllers/"
+              },
+              {
+                "title": "Managing Service Accounts",
+                "path": "docs/reference/access-authn-authz/service-accounts-admin/"
+              },
+              {
+                "title": "User Impersonation",
+                "path": "docs/reference/access-authn-authz/user-impersonation/"
+              },
+              {
+                "title": "Certificates and Certificate Signing Requests",
+                "path": "docs/reference/access-authn-authz/certificate-signing-requests/"
+              },
+              {
+                "title": "Mapping PodSecurityPolicies to Pod Security Standards",
+                "path": "docs/reference/access-authn-authz/psp-to-pod-security-standards/"
+              },
+              {
+                "title": "Kubelet authentication/authorization",
+                "path": "docs/reference/access-authn-authz/kubelet-authn-authz/"
+              },
+              {
+                "title": "TLS bootstrapping",
+                "path": "docs/reference/access-authn-authz/kubelet-tls-bootstrapping/"
+              },
+              {
+                "title": "Manifest-Based Admission Control",
+                "path": "docs/reference/access-authn-authz/manifest-admission-control/"
+              },
+              {
+                "title": "Mutating Admission Policy",
+                "path": "docs/reference/access-authn-authz/mutating-admission-policy/"
+              },
+              {
+                "title": "Validating Admission Policy",
+                "path": "docs/reference/access-authn-authz/validating-admission-policy/"
+              }
+            ]
+          },
+          {
+            "title": "Kubernetes Deprecation Policy",
+            "path": "docs/reference/deprecation-policy/"
+          },
+          {
+            "title": "Well-Known Labels, Annotations and Taints",
+            "path": "docs/reference/labels-annotations-taints/",
+            "children": [
+              {
+                "title": "Audit Annotations",
+                "path": "docs/reference/labels-annotations-taints/audit-annotations/"
+              }
+            ]
+          },
+          {
+            "title": "Kubernetes API",
+            "path": "docs/reference/kubernetes-api/",
+            "children": [
+              {
+                "title": "API Groups",
+                "path": "docs/reference/kubernetes-api/group-versions/"
+              },
+              {
+                "title": "Admissionregistration",
+                "path": "docs/reference/kubernetes-api/admissionregistration/",
+                "children": [
+                  {
+                    "title": "MutatingAdmissionPolicy",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/mutating-admission-policy-v1/"
+                  },
+                  {
+                    "title": "MutatingAdmissionPolicyBinding",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/mutating-admission-policy-binding-v1/"
+                  },
+                  {
+                    "title": "MutatingWebhookConfiguration",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/mutating-webhook-configuration-v1/"
+                  },
+                  {
+                    "title": "ValidatingAdmissionPolicy",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/validating-admission-policy-v1/"
+                  },
+                  {
+                    "title": "ValidatingAdmissionPolicyBinding",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/validating-admission-policy-binding-v1/"
+                  },
+                  {
+                    "title": "ValidatingWebhookConfiguration",
+                    "path": "docs/reference/kubernetes-api/admissionregistration/validating-webhook-configuration-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Apiextensions",
+                "path": "docs/reference/kubernetes-api/apiextensions/",
+                "children": [
+                  {
+                    "title": "CustomResourceDefinition",
+                    "path": "docs/reference/kubernetes-api/apiextensions/custom-resource-definition-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Apiregistration",
+                "path": "docs/reference/kubernetes-api/apiregistration/",
+                "children": [
+                  {
+                    "title": "APIService",
+                    "path": "docs/reference/kubernetes-api/apiregistration/api-service-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Apiserverinternal",
+                "path": "docs/reference/kubernetes-api/apiserverinternal/",
+                "children": [
+                  {
+                    "title": "StorageVersion",
+                    "path": "docs/reference/kubernetes-api/apiserverinternal/storage-version-v1alpha1/"
+                  }
+                ]
+              },
+              {
+                "title": "Apps",
+                "path": "docs/reference/kubernetes-api/apps/",
+                "children": [
+                  {
+                    "title": "ControllerRevision",
+                    "path": "docs/reference/kubernetes-api/apps/controller-revision-v1/"
+                  },
+                  {
+                    "title": "DaemonSet",
+                    "path": "docs/reference/kubernetes-api/apps/daemon-set-v1/"
+                  },
+                  {
+                    "title": "Deployment",
+                    "path": "docs/reference/kubernetes-api/apps/deployment-v1/"
+                  },
+                  {
+                    "title": "ReplicaSet",
+                    "path": "docs/reference/kubernetes-api/apps/replica-set-v1/"
+                  },
+                  {
+                    "title": "StatefulSet",
+                    "path": "docs/reference/kubernetes-api/apps/stateful-set-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Autoscaling",
+                "path": "docs/reference/kubernetes-api/autoscaling/",
+                "children": [
+                  {
+                    "title": "HorizontalPodAutoscaler",
+                    "path": "docs/reference/kubernetes-api/autoscaling/horizontal-pod-autoscaler-v2/"
+                  }
+                ]
+              },
+              {
+                "title": "Batch",
+                "path": "docs/reference/kubernetes-api/batch/",
+                "children": [
+                  {
+                    "title": "CronJob",
+                    "path": "docs/reference/kubernetes-api/batch/cron-job-v1/"
+                  },
+                  {
+                    "title": "Job",
+                    "path": "docs/reference/kubernetes-api/batch/job-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Certificates",
+                "path": "docs/reference/kubernetes-api/certificates/",
+                "children": [
+                  {
+                    "title": "CertificateSigningRequest",
+                    "path": "docs/reference/kubernetes-api/certificates/certificate-signing-request-v1/"
+                  },
+                  {
+                    "title": "ClusterTrustBundle",
+                    "path": "docs/reference/kubernetes-api/certificates/cluster-trust-bundle-v1/"
+                  },
+                  {
+                    "title": "PodCertificateRequest",
+                    "path": "docs/reference/kubernetes-api/certificates/pod-certificate-request-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Coordination",
+                "path": "docs/reference/kubernetes-api/coordination/",
+                "children": [
+                  {
+                    "title": "Lease",
+                    "path": "docs/reference/kubernetes-api/coordination/lease-v1/"
+                  },
+                  {
+                    "title": "LeaseCandidate",
+                    "path": "docs/reference/kubernetes-api/coordination/lease-candidate-v1beta1/"
+                  }
+                ]
+              },
+              {
+                "title": "Discovery",
+                "path": "docs/reference/kubernetes-api/discovery/",
+                "children": [
+                  {
+                    "title": "EndpointSlice",
+                    "path": "docs/reference/kubernetes-api/discovery/endpoint-slice-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Events",
+                "path": "docs/reference/kubernetes-api/events/",
+                "children": [
+                  {
+                    "title": "Event",
+                    "path": "docs/reference/kubernetes-api/events/event-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Core",
+                "path": "docs/reference/kubernetes-api/core/",
+                "children": [
+                  {
+                    "title": "ComponentStatus",
+                    "path": "docs/reference/kubernetes-api/core/component-status-v1/"
+                  },
+                  {
+                    "title": "ConfigMap",
+                    "path": "docs/reference/kubernetes-api/core/config-map-v1/"
+                  },
+                  {
+                    "title": "Endpoints",
+                    "path": "docs/reference/kubernetes-api/core/endpoints-v1/"
+                  },
+                  {
+                    "title": "Event",
+                    "path": "docs/reference/kubernetes-api/core/event-v1/"
+                  },
+                  {
+                    "title": "LimitRange",
+                    "path": "docs/reference/kubernetes-api/core/limit-range-v1/"
+                  },
+                  {
+                    "title": "Namespace",
+                    "path": "docs/reference/kubernetes-api/core/namespace-v1/"
+                  },
+                  {
+                    "title": "Node",
+                    "path": "docs/reference/kubernetes-api/core/node-v1/"
+                  },
+                  {
+                    "title": "PersistentVolume",
+                    "path": "docs/reference/kubernetes-api/core/persistent-volume-v1/"
+                  },
+                  {
+                    "title": "PersistentVolumeClaim",
+                    "path": "docs/reference/kubernetes-api/core/persistent-volume-claim-v1/"
+                  },
+                  {
+                    "title": "Pod",
+                    "path": "docs/reference/kubernetes-api/core/pod-v1/"
+                  },
+                  {
+                    "title": "PodTemplate",
+                    "path": "docs/reference/kubernetes-api/core/pod-template-v1/"
+                  },
+                  {
+                    "title": "ReplicationController",
+                    "path": "docs/reference/kubernetes-api/core/replication-controller-v1/"
+                  },
+                  {
+                    "title": "ResourceQuota",
+                    "path": "docs/reference/kubernetes-api/core/resource-quota-v1/"
+                  },
+                  {
+                    "title": "Secret",
+                    "path": "docs/reference/kubernetes-api/core/secret-v1/"
+                  },
+                  {
+                    "title": "Service",
+                    "path": "docs/reference/kubernetes-api/core/service-v1/"
+                  },
+                  {
+                    "title": "ServiceAccount",
+                    "path": "docs/reference/kubernetes-api/core/service-account-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Flowcontrol",
+                "path": "docs/reference/kubernetes-api/flowcontrol/",
+                "children": [
+                  {
+                    "title": "FlowSchema",
+                    "path": "docs/reference/kubernetes-api/flowcontrol/flow-schema-v1/"
+                  },
+                  {
+                    "title": "PriorityLevelConfiguration",
+                    "path": "docs/reference/kubernetes-api/flowcontrol/priority-level-configuration-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Lifecycle",
+                "path": "docs/reference/kubernetes-api/lifecycle/",
+                "children": [
+                  {
+                    "title": "Eviction",
+                    "path": "docs/reference/kubernetes-api/lifecycle/eviction-v1alpha1/"
+                  },
+                  {
+                    "title": "EvictionRequest",
+                    "path": "docs/reference/kubernetes-api/lifecycle/eviction-request-v1alpha1/"
+                  }
+                ]
+              },
+              {
+                "title": "Networking",
+                "path": "docs/reference/kubernetes-api/networking/",
+                "children": [
+                  {
+                    "title": "IPAddress",
+                    "path": "docs/reference/kubernetes-api/networking/ip-address-v1/"
+                  },
+                  {
+                    "title": "Ingress",
+                    "path": "docs/reference/kubernetes-api/networking/ingress-v1/"
+                  },
+                  {
+                    "title": "IngressClass",
+                    "path": "docs/reference/kubernetes-api/networking/ingress-class-v1/"
+                  },
+                  {
+                    "title": "NetworkPolicy",
+                    "path": "docs/reference/kubernetes-api/networking/network-policy-v1/"
+                  },
+                  {
+                    "title": "ServiceCIDR",
+                    "path": "docs/reference/kubernetes-api/networking/service-cidr-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Node",
+                "path": "docs/reference/kubernetes-api/node/",
+                "children": [
+                  {
+                    "title": "RuntimeClass",
+                    "path": "docs/reference/kubernetes-api/node/runtime-class-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Policy",
+                "path": "docs/reference/kubernetes-api/policy/",
+                "children": [
+                  {
+                    "title": "PodDisruptionBudget",
+                    "path": "docs/reference/kubernetes-api/policy/pod-disruption-budget-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Rbac",
+                "path": "docs/reference/kubernetes-api/rbac/",
+                "children": [
+                  {
+                    "title": "ClusterRole",
+                    "path": "docs/reference/kubernetes-api/rbac/cluster-role-v1/"
+                  },
+                  {
+                    "title": "ClusterRoleBinding",
+                    "path": "docs/reference/kubernetes-api/rbac/cluster-role-binding-v1/"
+                  },
+                  {
+                    "title": "Role",
+                    "path": "docs/reference/kubernetes-api/rbac/role-v1/"
+                  },
+                  {
+                    "title": "RoleBinding",
+                    "path": "docs/reference/kubernetes-api/rbac/role-binding-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Resource",
+                "path": "docs/reference/kubernetes-api/resource/",
+                "children": [
+                  {
+                    "title": "DeviceClass",
+                    "path": "docs/reference/kubernetes-api/resource/device-class-v1/"
+                  },
+                  {
+                    "title": "DeviceTaintRule",
+                    "path": "docs/reference/kubernetes-api/resource/device-taint-rule-v1/"
+                  },
+                  {
+                    "title": "ResourceClaim",
+                    "path": "docs/reference/kubernetes-api/resource/resource-claim-v1/"
+                  },
+                  {
+                    "title": "ResourceClaimTemplate",
+                    "path": "docs/reference/kubernetes-api/resource/resource-claim-template-v1/"
+                  },
+                  {
+                    "title": "ResourcePoolStatusRequest",
+                    "path": "docs/reference/kubernetes-api/resource/resource-pool-status-request-v1alpha3/"
+                  },
+                  {
+                    "title": "ResourceSlice",
+                    "path": "docs/reference/kubernetes-api/resource/resource-slice-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Scheduling",
+                "path": "docs/reference/kubernetes-api/scheduling/",
+                "children": [
+                  {
+                    "title": "CompositePodGroup",
+                    "path": "docs/reference/kubernetes-api/scheduling/composite-pod-group-v1alpha3/"
+                  },
+                  {
+                    "title": "PodGroup",
+                    "path": "docs/reference/kubernetes-api/scheduling/pod-group-v1beta1/"
+                  },
+                  {
+                    "title": "PriorityClass",
+                    "path": "docs/reference/kubernetes-api/scheduling/priority-class-v1/"
+                  },
+                  {
+                    "title": "Workload",
+                    "path": "docs/reference/kubernetes-api/scheduling/workload-v1beta1/"
+                  }
+                ]
+              },
+              {
+                "title": "Storage",
+                "path": "docs/reference/kubernetes-api/storage/",
+                "children": [
+                  {
+                    "title": "CSIDriver",
+                    "path": "docs/reference/kubernetes-api/storage/csi-driver-v1/"
+                  },
+                  {
+                    "title": "CSINode",
+                    "path": "docs/reference/kubernetes-api/storage/csi-node-v1/"
+                  },
+                  {
+                    "title": "CSIStorageCapacity",
+                    "path": "docs/reference/kubernetes-api/storage/csi-storage-capacity-v1/"
+                  },
+                  {
+                    "title": "StorageClass",
+                    "path": "docs/reference/kubernetes-api/storage/storage-class-v1/"
+                  },
+                  {
+                    "title": "VolumeAttachment",
+                    "path": "docs/reference/kubernetes-api/storage/volume-attachment-v1/"
+                  },
+                  {
+                    "title": "VolumeAttributesClass",
+                    "path": "docs/reference/kubernetes-api/storage/volume-attributes-class-v1/"
+                  }
+                ]
+              },
+              {
+                "title": "Storagemigration",
+                "path": "docs/reference/kubernetes-api/storagemigration/",
+                "children": [
+                  {
+                    "title": "StorageVersionMigration",
+                    "path": "docs/reference/kubernetes-api/storagemigration/storage-version-migration-v1/"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "title": "Instrumentation",
+            "path": "docs/reference/instrumentation/",
+            "children": [
+              {
+                "title": "Service Level Indicator Metrics",
+                "path": "docs/reference/instrumentation/slis/"
+              },
+              {
+                "title": "CRI Pod \u0026 Container Metrics",
+                "path": "docs/reference/instrumentation/cri-pod-container-metrics/"
+              },
+              {
+                "title": "Native Histograms",
+                "path": "docs/reference/instrumentation/native-histograms/"
+              },
+              {
+                "title": "Node metrics data",
+                "path": "docs/reference/instrumentation/node-metrics/"
+              },
+              {
+                "title": "Understand Pressure Stall Information (PSI) Metrics",
+                "path": "docs/reference/instrumentation/understand-psi-metrics/"
+              },
+              {
+                "title": "Kubernetes z-pages",
+                "path": "docs/reference/instrumentation/zpages/"
+              },
+              {
+                "title": "Kubernetes Metrics Reference",
+                "path": "docs/reference/instrumentation/metrics/"
+              }
+            ]
+          },
+          {
+            "title": "Kubernetes Issues and Security",
+            "path": "docs/reference/issues-security/",
+            "children": [
+              {
+                "title": "Kubernetes Issue Tracker",
+                "path": "docs/reference/issues-security/issues/"
+              },
+              {
+                "title": "Kubernetes Security and Disclosure Information",
+                "path": "docs/reference/issues-security/security/"
+              },
+              {
+                "title": "CVE feed",
+                "path": "docs/reference/issues-security/official-cve-feed/"
+              }
+            ]
+          },
+          {
+            "title": "Node Reference Information",
+            "path": "docs/reference/node/",
+            "children": [
+              {
+                "title": "Kubelet Checkpoint API",
+                "path": "docs/reference/node/kubelet-checkpoint-api/"
+              },
+              {
+                "title": "Linux Kernel Version Requirements",
+                "path": "docs/reference/node/kernel-version-requirements/"
+              },
+              {
+                "title": "Standard Device Attributes for Dynamic Resource Allocation",
+                "path": "docs/reference/node/dra-standard-device-attributes/"
+              },
+              {
+                "title": "Articles on dockershim Removal and on Using CRI-compatible Runtimes",
+                "path": "docs/reference/node/topics-on-dockershim-and-cri-compatible-runtimes/"
+              },
+              {
+                "title": "Kubelet Pods API",
+                "path": "docs/reference/node/kubelet-pods-api/"
+              },
+              {
+                "title": "Pod-level resource managers reference",
+                "path": "docs/reference/node/pod-level-resource-managers/"
+              },
+              {
+                "title": "Node Labels Populated By The Kubelet",
+                "path": "docs/reference/node/node-labels/"
+              },
+              {
+                "title": "Kubelet Sync Loop",
+                "path": "docs/reference/node/kubelet-sync-loop/"
+              },
+              {
+                "title": "Local Files And Paths Used By The Kubelet",
+                "path": "docs/reference/node/kubelet-files/"
+              },
+              {
+                "title": "Kubelet Configuration Directory Merging",
+                "path": "docs/reference/node/kubelet-config-directory-merging/"
+              },
+              {
+                "title": "Kubelet Device Manager API Versions",
+                "path": "docs/reference/node/device-plugin-api-versions/"
+              },
+              {
+                "title": "Kubelet Systemd Watchdog",
+                "path": "docs/reference/node/systemd-watchdog/"
+              },
+              {
+                "title": "Node Status",
+                "path": "docs/reference/node/node-status/"
+              },
+              {
+                "title": "Seccomp and Kubernetes",
+                "path": "docs/reference/node/seccomp/"
+              },
+              {
+                "title": "What Happens After A Node Restart",
+                "path": "docs/reference/node/what-happens-on-restart/"
+              },
+              {
+                "title": "Linux Node Swap Behaviors",
+                "path": "docs/reference/node/swap-behavior/"
+              },
+              {
+                "title": "",
+                "path": "docs/reference/node/node-lifecycle-conditions/"
+              }
+            ]
+          },
+          {
+            "title": "Networking Reference",
+            "path": "docs/reference/networking/",
+            "children": [
+              {
+                "title": "Protocols for Services",
+                "path": "docs/reference/networking/service-protocols/"
+              },
+              {
+                "title": "Ports and Protocols",
+                "path": "docs/reference/networking/ports-and-protocols/"
+              },
+              {
+                "title": "Virtual IPs and Service Proxies",
+                "path": "docs/reference/networking/virtual-ips/"
+              }
+            ]
+          },
+          {
+            "title": "Setup tools",
+            "path": "docs/reference/setup-tools/",
+            "children": [
+              {
+                "title": "Kubeadm",
+                "path": "docs/reference/setup-tools/kubeadm/",
+                "children": [
+                  {
+                    "title": "kubeadm init",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-init/"
+                  },
+                  {
+                    "title": "kubeadm join",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-join/"
+                  },
+                  {
+                    "title": "kubeadm upgrade",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-upgrade/"
+                  },
+                  {
+                    "title": "kubeadm upgrade phases",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-upgrade-phase/"
+                  },
+                  {
+                    "title": "kubeadm config",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-config/"
+                  },
+                  {
+                    "title": "kubeadm reset",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-reset/"
+                  },
+                  {
+                    "title": "kubeadm token",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-token/"
+                  },
+                  {
+                    "title": "kubeadm version",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-version/"
+                  },
+                  {
+                    "title": "kubeadm alpha",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-alpha/"
+                  },
+                  {
+                    "title": "kubeadm certs",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-certs/"
+                  },
+                  {
+                    "title": "kubeadm init phase",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-init-phase/"
+                  },
+                  {
+                    "title": "kubeadm join phase",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-join-phase/"
+                  },
+                  {
+                    "title": "kubeadm kubeconfig",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-kubeconfig/"
+                  },
+                  {
+                    "title": "kubeadm reset phase",
+                    "path": "docs/reference/setup-tools/kubeadm/kubeadm-reset-phase/"
+                  },
+                  {
+                    "title": "Implementation details",
+                    "path": "docs/reference/setup-tools/kubeadm/implementation-details/"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "title": "Command line tool (kubectl)",
+            "path": "docs/reference/kubectl/",
+            "children": [
+              {
+                "title": "Introduction to kubectl",
+                "path": "docs/reference/kubectl/introduction/"
+              },
+              {
+                "title": "kubectl Quick Reference",
+                "path": "docs/reference/kubectl/quick-reference/"
+              },
+              {
+                "title": "kubectl reference",
+                "path": "docs/reference/kubectl/generated/",
+                "children": [
+                  {
+                    "title": "kubectl",
+                    "path": "docs/reference/kubectl/generated/kubectl/"
+                  },
+                  {
+                    "title": "kubectl annotate",
+                    "path": "docs/reference/kubectl/generated/kubectl_annotate/"
+                  },
+                  {
+                    "title": "kubectl api-resources",
+                    "path": "docs/reference/kubectl/generated/kubectl_api-resources/"
+                  },
+                  {
+                    "title": "kubectl api-versions",
+                    "path": "docs/reference/kubectl/generated/kubectl_api-versions/"
+                  },
+                  {
+                    "title": "kubectl apply",
+                    "path": "docs/reference/kubectl/generated/kubectl_apply/",
+                    "children": [
+                      {
+                        "title": "kubectl apply edit-last-applied",
+                        "path": "docs/reference/kubectl/generated/kubectl_apply/kubectl_apply_edit-last-applied/"
+                      },
+                      {
+                        "title": "kubectl apply set-last-applied",
+                        "path": "docs/reference/kubectl/generated/kubectl_apply/kubectl_apply_set-last-applied/"
+                      },
+                      {
+                        "title": "kubectl apply view-last-applied",
+                        "path": "docs/reference/kubectl/generated/kubectl_apply/kubectl_apply_view-last-applied/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl attach",
+                    "path": "docs/reference/kubectl/generated/kubectl_attach/"
+                  },
+                  {
+                    "title": "kubectl auth",
+                    "path": "docs/reference/kubectl/generated/kubectl_auth/",
+                    "children": [
+                      {
+                        "title": "kubectl auth can-i",
+                        "path": "docs/reference/kubectl/generated/kubectl_auth/kubectl_auth_can-i/"
+                      },
+                      {
+                        "title": "kubectl auth reconcile",
+                        "path": "docs/reference/kubectl/generated/kubectl_auth/kubectl_auth_reconcile/"
+                      },
+                      {
+                        "title": "kubectl auth whoami",
+                        "path": "docs/reference/kubectl/generated/kubectl_auth/kubectl_auth_whoami/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl autoscale",
+                    "path": "docs/reference/kubectl/generated/kubectl_autoscale/"
+                  },
+                  {
+                    "title": "kubectl certificate",
+                    "path": "docs/reference/kubectl/generated/kubectl_certificate/",
+                    "children": [
+                      {
+                        "title": "kubectl certificate approve",
+                        "path": "docs/reference/kubectl/generated/kubectl_certificate/kubectl_certificate_approve/"
+                      },
+                      {
+                        "title": "kubectl certificate deny",
+                        "path": "docs/reference/kubectl/generated/kubectl_certificate/kubectl_certificate_deny/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl cluster-info",
+                    "path": "docs/reference/kubectl/generated/kubectl_cluster-info/",
+                    "children": [
+                      {
+                        "title": "kubectl cluster-info dump",
+                        "path": "docs/reference/kubectl/generated/kubectl_cluster-info/kubectl_cluster-info_dump/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl completion",
+                    "path": "docs/reference/kubectl/generated/kubectl_completion/"
+                  },
+                  {
+                    "title": "kubectl config",
+                    "path": "docs/reference/kubectl/generated/kubectl_config/",
+                    "children": [
+                      {
+                        "title": "kubectl config current-context",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_current-context/"
+                      },
+                      {
+                        "title": "kubectl config delete-cluster",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_delete-cluster/"
+                      },
+                      {
+                        "title": "kubectl config delete-context",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_delete-context/"
+                      },
+                      {
+                        "title": "kubectl config delete-user",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_delete-user/"
+                      },
+                      {
+                        "title": "kubectl config get-clusters",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_get-clusters/"
+                      },
+                      {
+                        "title": "kubectl config get-contexts",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_get-contexts/"
+                      },
+                      {
+                        "title": "kubectl config get-users",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_get-users/"
+                      },
+                      {
+                        "title": "kubectl config rename-context",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_rename-context/"
+                      },
+                      {
+                        "title": "kubectl config set",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_set/"
+                      },
+                      {
+                        "title": "kubectl config set-cluster",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_set-cluster/"
+                      },
+                      {
+                        "title": "kubectl config set-context",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_set-context/"
+                      },
+                      {
+                        "title": "kubectl config set-credentials",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_set-credentials/"
+                      },
+                      {
+                        "title": "kubectl config unset",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_unset/"
+                      },
+                      {
+                        "title": "kubectl config use-context",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_use-context/"
+                      },
+                      {
+                        "title": "kubectl config view",
+                        "path": "docs/reference/kubectl/generated/kubectl_config/kubectl_config_view/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl cordon",
+                    "path": "docs/reference/kubectl/generated/kubectl_cordon/"
+                  },
+                  {
+                    "title": "kubectl cp",
+                    "path": "docs/reference/kubectl/generated/kubectl_cp/"
+                  },
+                  {
+                    "title": "kubectl create",
+                    "path": "docs/reference/kubectl/generated/kubectl_create/",
+                    "children": [
+                      {
+                        "title": "kubectl create clusterrole",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_clusterrole/"
+                      },
+                      {
+                        "title": "kubectl create clusterrolebinding",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_clusterrolebinding/"
+                      },
+                      {
+                        "title": "kubectl create configmap",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_configmap/"
+                      },
+                      {
+                        "title": "kubectl create cronjob",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_cronjob/"
+                      },
+                      {
+                        "title": "kubectl create deployment",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_deployment/"
+                      },
+                      {
+                        "title": "kubectl create ingress",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/"
+                      },
+                      {
+                        "title": "kubectl create job",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_job/"
+                      },
+                      {
+                        "title": "kubectl create namespace",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_namespace/"
+                      },
+                      {
+                        "title": "kubectl create poddisruptionbudget",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_poddisruptionbudget/"
+                      },
+                      {
+                        "title": "kubectl create priorityclass",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_priorityclass/"
+                      },
+                      {
+                        "title": "kubectl create quota",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_quota/"
+                      },
+                      {
+                        "title": "kubectl create role",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_role/"
+                      },
+                      {
+                        "title": "kubectl create rolebinding",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_rolebinding/"
+                      },
+                      {
+                        "title": "kubectl create secret",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret/"
+                      },
+                      {
+                        "title": "kubectl create secret docker-registry",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret_docker-registry/"
+                      },
+                      {
+                        "title": "kubectl create secret generic",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret_generic/"
+                      },
+                      {
+                        "title": "kubectl create secret tls",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_secret_tls/"
+                      },
+                      {
+                        "title": "kubectl create service",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_service/"
+                      },
+                      {
+                        "title": "kubectl create service clusterip",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_service_clusterip/"
+                      },
+                      {
+                        "title": "kubectl create service externalname",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_service_externalname/"
+                      },
+                      {
+                        "title": "kubectl create service loadbalancer",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_service_loadbalancer/"
+                      },
+                      {
+                        "title": "kubectl create service nodeport",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_service_nodeport/"
+                      },
+                      {
+                        "title": "kubectl create serviceaccount",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_serviceaccount/"
+                      },
+                      {
+                        "title": "kubectl create token",
+                        "path": "docs/reference/kubectl/generated/kubectl_create/kubectl_create_token/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl debug",
+                    "path": "docs/reference/kubectl/generated/kubectl_debug/"
+                  },
+                  {
+                    "title": "kubectl delete",
+                    "path": "docs/reference/kubectl/generated/kubectl_delete/"
+                  },
+                  {
+                    "title": "kubectl describe",
+                    "path": "docs/reference/kubectl/generated/kubectl_describe/"
+                  },
+                  {
+                    "title": "kubectl diff",
+                    "path": "docs/reference/kubectl/generated/kubectl_diff/"
+                  },
+                  {
+                    "title": "kubectl drain",
+                    "path": "docs/reference/kubectl/generated/kubectl_drain/"
+                  },
+                  {
+                    "title": "kubectl edit",
+                    "path": "docs/reference/kubectl/generated/kubectl_edit/"
+                  },
+                  {
+                    "title": "kubectl events",
+                    "path": "docs/reference/kubectl/generated/kubectl_events/"
+                  },
+                  {
+                    "title": "kubectl exec",
+                    "path": "docs/reference/kubectl/generated/kubectl_exec/"
+                  },
+                  {
+                    "title": "kubectl explain",
+                    "path": "docs/reference/kubectl/generated/kubectl_explain/"
+                  },
+                  {
+                    "title": "kubectl expose",
+                    "path": "docs/reference/kubectl/generated/kubectl_expose/"
+                  },
+                  {
+                    "title": "kubectl get",
+                    "path": "docs/reference/kubectl/generated/kubectl_get/"
+                  },
+                  {
+                    "title": "kubectl kuberc",
+                    "path": "docs/reference/kubectl/generated/kubectl_kuberc/",
+                    "children": [
+                      {
+                        "title": "kubectl kuberc set",
+                        "path": "docs/reference/kubectl/generated/kubectl_kuberc/kubectl_kuberc_set/"
+                      },
+                      {
+                        "title": "kubectl kuberc view",
+                        "path": "docs/reference/kubectl/generated/kubectl_kuberc/kubectl_kuberc_view/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl kustomize",
+                    "path": "docs/reference/kubectl/generated/kubectl_kustomize/"
+                  },
+                  {
+                    "title": "kubectl label",
+                    "path": "docs/reference/kubectl/generated/kubectl_label/"
+                  },
+                  {
+                    "title": "kubectl logs",
+                    "path": "docs/reference/kubectl/generated/kubectl_logs/"
+                  },
+                  {
+                    "title": "kubectl options",
+                    "path": "docs/reference/kubectl/generated/kubectl_options/"
+                  },
+                  {
+                    "title": "kubectl patch",
+                    "path": "docs/reference/kubectl/generated/kubectl_patch/"
+                  },
+                  {
+                    "title": "kubectl plugin",
+                    "path": "docs/reference/kubectl/generated/kubectl_plugin/",
+                    "children": [
+                      {
+                        "title": "kubectl plugin list",
+                        "path": "docs/reference/kubectl/generated/kubectl_plugin/kubectl_plugin_list/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl port-forward",
+                    "path": "docs/reference/kubectl/generated/kubectl_port-forward/"
+                  },
+                  {
+                    "title": "kubectl proxy",
+                    "path": "docs/reference/kubectl/generated/kubectl_proxy/"
+                  },
+                  {
+                    "title": "kubectl replace",
+                    "path": "docs/reference/kubectl/generated/kubectl_replace/"
+                  },
+                  {
+                    "title": "kubectl rollout",
+                    "path": "docs/reference/kubectl/generated/kubectl_rollout/",
+                    "children": [
+                      {
+                        "title": "kubectl rollout history",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_history/"
+                      },
+                      {
+                        "title": "kubectl rollout pause",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_pause/"
+                      },
+                      {
+                        "title": "kubectl rollout restart",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_restart/"
+                      },
+                      {
+                        "title": "kubectl rollout resume",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_resume/"
+                      },
+                      {
+                        "title": "kubectl rollout status",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/"
+                      },
+                      {
+                        "title": "kubectl rollout undo",
+                        "path": "docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_undo/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl run",
+                    "path": "docs/reference/kubectl/generated/kubectl_run/"
+                  },
+                  {
+                    "title": "kubectl scale",
+                    "path": "docs/reference/kubectl/generated/kubectl_scale/"
+                  },
+                  {
+                    "title": "kubectl set",
+                    "path": "docs/reference/kubectl/generated/kubectl_set/",
+                    "children": [
+                      {
+                        "title": "kubectl set env",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_env/"
+                      },
+                      {
+                        "title": "kubectl set image",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_image/"
+                      },
+                      {
+                        "title": "kubectl set resources",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_resources/"
+                      },
+                      {
+                        "title": "kubectl set selector",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_selector/"
+                      },
+                      {
+                        "title": "kubectl set serviceaccount",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_serviceaccount/"
+                      },
+                      {
+                        "title": "kubectl set subject",
+                        "path": "docs/reference/kubectl/generated/kubectl_set/kubectl_set_subject/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl taint",
+                    "path": "docs/reference/kubectl/generated/kubectl_taint/"
+                  },
+                  {
+                    "title": "kubectl top",
+                    "path": "docs/reference/kubectl/generated/kubectl_top/",
+                    "children": [
+                      {
+                        "title": "kubectl top node",
+                        "path": "docs/reference/kubectl/generated/kubectl_top/kubectl_top_node/"
+                      },
+                      {
+                        "title": "kubectl top pod",
+                        "path": "docs/reference/kubectl/generated/kubectl_top/kubectl_top_pod/"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "kubectl uncordon",
+                    "path": "docs/reference/kubectl/generated/kubectl_uncordon/"
+                  },
+                  {
+                    "title": "kubectl version",
+                    "path": "docs/reference/kubectl/generated/kubectl_version/"
+                  },
+                  {
+                    "title": "kubectl wait",
+                    "path": "docs/reference/kubectl/generated/kubectl_wait/"
+                  }
+                ]
+              },
+              {
+                "title": "kubectl Commands",
+                "path": "docs/reference/kubectl/kubectl-cmds/"
+              },
+              {
+                "title": "kubectl",
+                "path": "docs/reference/kubectl/kubectl/"
+              },
+              {
+                "title": "JSONPath Support",
+                "path": "docs/reference/kubectl/jsonpath/"
+              },
+              {
+                "title": "kubectl for Docker Users",
+                "path": "docs/reference/kubectl/docker-cli-to-kubectl/"
+              },
+              {
+                "title": "kubectl Usage Conventions",
+                "path": "docs/reference/kubectl/conventions/"
+              },
+              {
+                "title": "Kubectl user preferences (kuberc)",
+                "path": "docs/reference/kubectl/kuberc/"
+              }
+            ]
+          },
+          {
+            "title": "Encodings",
+            "path": "docs/reference/encodings/",
+            "children": [
+              {
+                "title": "KYAML Reference",
+                "path": "docs/reference/encodings/kyaml/"
+              }
+            ]
+          },
+          {
+            "title": "Component tools",
+            "path": "docs/reference/command-line-tools-reference/",
+            "children": [
+              {
+                "title": "Feature Gates",
+                "path": "docs/reference/command-line-tools-reference/feature-gates/"
+              },
+              {
+                "title": "Feature Gates (removed)",
+                "path": "docs/reference/command-line-tools-reference/feature-gates-removed/"
+              },
+              {
+                "title": "kube-apiserver",
+                "path": "docs/reference/command-line-tools-reference/kube-apiserver/"
+              },
+              {
+                "title": "kube-controller-manager",
+                "path": "docs/reference/command-line-tools-reference/kube-controller-manager/"
+              },
+              {
+                "title": "kube-proxy",
+                "path": "docs/reference/command-line-tools-reference/kube-proxy/"
+              },
+              {
+                "title": "kube-scheduler",
+                "path": "docs/reference/command-line-tools-reference/kube-scheduler/"
+              },
+              {
+                "title": "kubelet",
+                "path": "docs/reference/command-line-tools-reference/kubelet/"
+              }
+            ]
+          },
+          {
+            "title": "Debug cluster",
+            "path": "docs/reference/debug-cluster/",
+            "children": [
+              {
+                "title": "Flow control",
+                "path": "docs/reference/debug-cluster/flow-control/"
+              }
+            ]
+          },
+          {
+            "title": "Configuration APIs",
+            "path": "docs/reference/config-api/",
+            "children": [
+              {
+                "title": "Client Authentication (v1)",
+                "path": "docs/reference/config-api/client-authentication.v1/"
+              },
+              {
+                "title": "Client Authentication (v1beta1)",
+                "path": "docs/reference/config-api/client-authentication.v1beta1/"
+              },
+              {
+                "title": "Event Rate Limit Configuration (v1alpha1)",
+                "path": "docs/reference/config-api/apiserver-eventratelimit.v1alpha1/"
+              },
+              {
+                "title": "Image Policy API (v1alpha1)",
+                "path": "docs/reference/config-api/imagepolicy.v1alpha1/"
+              },
+              {
+                "title": "kube-apiserver Admission (v1)",
+                "path": "docs/reference/config-api/apiserver-admission.v1/"
+              },
+              {
+                "title": "kube-apiserver Audit Configuration (v1)",
+                "path": "docs/reference/config-api/apiserver-audit.v1/"
+              },
+              {
+                "title": "kube-apiserver Configuration (v1)",
+                "path": "docs/reference/config-api/apiserver-config.v1/"
+              },
+              {
+                "title": "kube-apiserver Configuration (v1alpha1)",
+                "path": "docs/reference/config-api/apiserver-config.v1alpha1/"
+              },
+              {
+                "title": "kube-apiserver Configuration (v1beta1)",
+                "path": "docs/reference/config-api/apiserver-config.v1beta1/"
+              },
+              {
+                "title": "kube-controller-manager Configuration (v1alpha1)",
+                "path": "docs/reference/config-api/kube-controller-manager-config.v1alpha1/"
+              },
+              {
+                "title": "kube-proxy Configuration (v1alpha1)",
+                "path": "docs/reference/config-api/kube-proxy-config.v1alpha1/"
+              },
+              {
+                "title": "kube-scheduler Configuration (v1)",
+                "path": "docs/reference/config-api/kube-scheduler-config.v1/"
+              },
+              {
+                "title": "kubeadm Configuration (v1beta3)",
+                "path": "docs/reference/config-api/kubeadm-config.v1beta3/"
+              },
+              {
+                "title": "kubeadm Configuration (v1beta4)",
+                "path": "docs/reference/config-api/kubeadm-config.v1beta4/"
+              },
+              {
+                "title": "kubeconfig (v1)",
+                "path": "docs/reference/config-api/kubeconfig.v1/"
+              },
+              {
+                "title": "Kubelet Configuration (v1)",
+                "path": "docs/reference/config-api/kubelet-config.v1/"
+              },
+              {
+                "title": "Kubelet Configuration (v1alpha1)",
+                "path": "docs/reference/config-api/kubelet-config.v1alpha1/"
+              },
+              {
+                "title": "Kubelet Configuration (v1beta1)",
+                "path": "docs/reference/config-api/kubelet-config.v1beta1/"
+              },
+              {
+                "title": "Kubelet CredentialProvider (v1)",
+                "path": "docs/reference/config-api/kubelet-credentialprovider.v1/"
+              },
+              {
+                "title": "kuberc (v1alpha1)",
+                "path": "docs/reference/config-api/kuberc.v1alpha1/"
+              },
+              {
+                "title": "kuberc (v1beta1)",
+                "path": "docs/reference/config-api/kuberc.v1beta1/"
+              },
+              {
+                "title": "WebhookAdmission Configuration (v1)",
+                "path": "docs/reference/config-api/apiserver-webhookadmission.v1/"
+              }
+            ]
+          },
+          {
+            "title": "External APIs",
+            "path": "docs/reference/external-api/",
+            "children": [
+              {
+                "title": "Kubernetes Custom Metrics (v1beta2)",
+                "path": "docs/reference/external-api/custom-metrics.v1beta2/"
+              },
+              {
+                "title": "Kubernetes External Metrics (v1beta1)",
+                "path": "docs/reference/external-api/external-metrics.v1beta1/"
+              },
+              {
+                "title": "Kubernetes Metrics (v1)",
+                "path": "docs/reference/external-api/metrics.v1/"
+              },
+              {
+                "title": "Kubernetes Metrics (v1beta1)",
+                "path": "docs/reference/external-api/metrics.v1beta1/"
+              }
+            ]
+          },
+          {
+            "title": "Kubelet APIs",
+            "path": "docs/reference/kubelet-api/",
+            "children": [
+              {
+                "title": "Kubelet Summary API (v1alpha1)",
+                "path": "docs/reference/kubelet-api/stats.v1alpha1/"
+              }
+            ]
+          },
+          {
+            "title": "Scheduling",
+            "path": "docs/reference/scheduling/",
+            "children": [
+              {
+                "title": "Scheduler Configuration",
+                "path": "docs/reference/scheduling/config/"
+              },
+              {
+                "title": "Scheduling Policies",
+                "path": "docs/reference/scheduling/policies/"
+              }
+            ]
+          },
+          {
+            "title": "Other Tools",
+            "path": "docs/reference/tools/"
+          }
+        ]
+      },
+      {
+        "title": "Contribute",
+        "path": "docs/contribute/",
+        "children": [
+          {
+            "title": "Contribute to Kubernetes Documentation",
+            "path": "docs/contribute/docs/"
+          },
+          {
+            "title": "Contributing to Kubernetes blogs",
+            "path": "docs/contribute/blog/",
+            "children": [
+              {
+                "title": "Submitting articles to Kubernetes blogs",
+                "path": "docs/contribute/blog/article-submission/"
+              },
+              {
+                "title": "Blog guidelines",
+                "path": "docs/contribute/blog/guidelines/"
+              },
+              {
+                "title": "Blog article mirroring",
+                "path": "docs/contribute/blog/article-mirroring/"
+              },
+              {
+                "title": "Post-release communications",
+                "path": "docs/contribute/blog/release-comms/"
+              },
+              {
+                "title": "Helping as a blog writing buddy",
+                "path": "docs/contribute/blog/writing-buddy/"
+              }
+            ]
+          },
+          {
+            "title": "Suggesting content improvements",
+            "path": "docs/contribute/suggesting-improvements/"
+          },
+          {
+            "title": "Contributing new content",
+            "path": "docs/contribute/new-content/",
+            "children": [
+              {
+                "title": "Opening a pull request",
+                "path": "docs/contribute/new-content/open-a-pr/"
+              },
+              {
+                "title": "Previewing locally",
+                "path": "docs/contribute/new-content/preview-locally/"
+              },
+              {
+                "title": "Documenting for a release",
+                "path": "docs/contribute/new-content/new-features/"
+              },
+              {
+                "title": "Case studies",
+                "path": "docs/contribute/new-content/case-studies/"
+              }
+            ]
+          },
+          {
+            "title": "Reviewing changes",
+            "path": "docs/contribute/review/",
+            "children": [
+              {
+                "title": "Reviewing pull requests",
+                "path": "docs/contribute/review/reviewing-prs/"
+              },
+              {
+                "title": "For approvers and reviewers",
+                "path": "docs/contribute/review/for-approvers/"
+              }
+            ]
+          },
+          {
+            "title": "Localizing Kubernetes documentation",
+            "path": "docs/contribute/localization/"
+          },
+          {
+            "title": "Participating in SIG Docs",
+            "path": "docs/contribute/participate/",
+            "children": [
+              {
+                "title": "Roles and responsibilities",
+                "path": "docs/contribute/participate/roles-and-responsibilities/"
+              },
+              {
+                "title": "Issue Wranglers",
+                "path": "docs/contribute/participate/issue-wrangler/"
+              },
+              {
+                "title": "PR wranglers",
+                "path": "docs/contribute/participate/pr-wranglers/"
+              }
+            ]
+          },
+          {
+            "title": "Documentation style overview",
+            "path": "docs/contribute/style/",
+            "children": [
+              {
+                "title": "Content guide",
+                "path": "docs/contribute/style/content-guide/"
+              },
+              {
+                "title": "Style guide",
+                "path": "docs/contribute/style/style-guide/"
+              },
+              {
+                "title": "Diagram guide",
+                "path": "docs/contribute/style/diagram-guide/"
+              },
+              {
+                "title": "Writing a new topic",
+                "path": "docs/contribute/style/write-new-topic/"
+              },
+              {
+                "title": "Page content types",
+                "path": "docs/contribute/style/page-content-types/"
+              },
+              {
+                "title": "Content organization",
+                "path": "docs/contribute/style/content-organization/"
+              },
+              {
+                "title": "Custom Hugo Shortcodes",
+                "path": "docs/contribute/style/hugo-shortcodes/"
+              }
+            ]
+          },
+          {
+            "title": "Updating Reference Documentation",
+            "path": "docs/contribute/generate-ref-docs/",
+            "children": [
+              {
+                "title": "Quickstart",
+                "path": "docs/contribute/generate-ref-docs/quickstart/"
+              },
+              {
+                "title": "Release generation",
+                "path": "docs/contribute/generate-ref-docs/release-generation/"
+              },
+              {
+                "title": "Contributing to the Upstream Kubernetes Code",
+                "path": "docs/contribute/generate-ref-docs/contribute-upstream/"
+              },
+              {
+                "title": "Generating Reference Documentation for the Kubernetes API",
+                "path": "docs/contribute/generate-ref-docs/kubernetes-api/"
+              },
+              {
+                "title": "Generating Reference Documentation for Configuration APIs",
+                "path": "docs/contribute/generate-ref-docs/config-api/"
+              },
+              {
+                "title": "Generating Reference Documentation for kubectl Commands",
+                "path": "docs/contribute/generate-ref-docs/kubectl/"
+              },
+              {
+                "title": "Generating Reference Documentation for Metrics",
+                "path": "docs/contribute/generate-ref-docs/metrics-reference/"
+              },
+              {
+                "title": "Generating Reference Pages for Kubernetes Components and Tools",
+                "path": "docs/contribute/generate-ref-docs/kubernetes-components/"
+              },
+              {
+                "title": "",
+                "path": "docs/contribute/generate-ref-docs/prerequisites-ref-docs/"
+              }
+            ]
+          },
+          {
+            "title": "Advanced contributing",
+            "path": "docs/contribute/advanced/"
+          },
+          {
+            "title": "Viewing Site Analytics",
+            "path": "docs/contribute/analytics/"
+          }
+        ]
+      },
+      {
+        "title": "Docs smoke test page",
+        "path": "docs/test/"
+      }
+    ]
+  },
+  "pages": [
+    "docs/concepts/services-networking/ingress/",
+    "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
+    "docs/concepts/workloads/pods/pod-lifecycle/",
+    "docs/home/",
+    "docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+  ],
+  "orphans": null,
+  "redirects": {
+    "count": 433,
+    "digest": "sha256:37ed84ac9e4479cbdca4ca4ff31e26ac597c20e5f43bffb1adfce1b595ff9a87"
+  },
+  "stats": {
+    "pages": 5,
+    "index_pages": 1,
+    "anchors": 116,
+    "assets": 4
+  },
+  "warnings": [
+    "cross-page sidebar validation skipped for -pages subset"
+  ]
+}

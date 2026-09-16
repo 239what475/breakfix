@@ -1,0 +1,233 @@
+{
+  "format_version": 1,
+  "generator_version": "docs-project-v3",
+  "upstream": {
+    "source": "kubernetes",
+    "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
+    "version": "snapshot-ce98a43",
+    "locale": "en"
+  },
+  "path": "docs/concepts/services-networking/ingress/",
+  "page_kind": "content",
+  "title": "Ingress",
+  "digest": "sha256:13b31a2d483d1dd184fc8ec348d08909937481e34d3c87943582153ab641ca5e",
+  "anchors": [
+    {
+      "id": "terminology",
+      "level": 2,
+      "title": "Terminology[](#terminology)",
+      "digest": "sha256:1dae15a4d53c4b7bab61c814294472f613aa125216a501b4a062bd9e1a64cb23",
+      "parent": ""
+    },
+    {
+      "id": "what-is-ingress",
+      "level": 2,
+      "title": "What is Ingress?[](#what-is-ingress)",
+      "digest": "sha256:1f55b90c0c41911d8986724e516242204a6558352d4e4dd5bca9c3a638e36f1a",
+      "parent": ""
+    },
+    {
+      "id": "prerequisites",
+      "level": 2,
+      "title": "Prerequisites[](#prerequisites)",
+      "digest": "sha256:1754f4573dd5547ad049a72df354cd8be0b40b04ce1d3ff443b7fb4b79c50ab0",
+      "parent": ""
+    },
+    {
+      "id": "the-ingress-resource",
+      "level": 2,
+      "title": "The Ingress resource[](#the-ingress-resource)",
+      "digest": "sha256:d84ba097bdf7165f33c0452901a933c8e58cbb6420761c9980845e30e984b406",
+      "parent": ""
+    },
+    {
+      "id": "ingress-rules",
+      "level": 3,
+      "title": "Ingress rules[](#ingress-rules)",
+      "digest": "sha256:42174e96c8b6772ca6b9c6e91d29af11afe1dd624f39523206b595af03ea2ce7",
+      "parent": "the-ingress-resource"
+    },
+    {
+      "id": "default-backend",
+      "level": 3,
+      "title": "DefaultBackend[](#default-backend)",
+      "digest": "sha256:f52132a661f392ad84dac09acfa8090a0d15787a785733bdba70593db699142a",
+      "parent": "the-ingress-resource"
+    },
+    {
+      "id": "resource-backend",
+      "level": 3,
+      "title": "Resource backends[](#resource-backend)",
+      "digest": "sha256:172135b4760cef8ecd0a0b7b27c371b16238955258bfeb2cd956c07d8a5fc0da",
+      "parent": "the-ingress-resource"
+    },
+    {
+      "id": "path-types",
+      "level": 3,
+      "title": "Path types[](#path-types)",
+      "digest": "sha256:53e17534f8a1b7e2b07a7a319298b78a9ac05c546b18bc814cd6a5a1cd7e6cd1",
+      "parent": "the-ingress-resource"
+    },
+    {
+      "id": "examples",
+      "level": 3,
+      "title": "Examples[](#examples)",
+      "digest": "sha256:5b8674ad10cd7a51b624c30dab2d459e337a364a4dc1152fd03cd6550b256645",
+      "parent": "the-ingress-resource"
+    },
+    {
+      "id": "multiple-matches",
+      "level": 4,
+      "title": "Multiple matches[](#multiple-matches)",
+      "digest": "sha256:e50b2ec81a793027bdd95e00088c321c5425e3921d1bed2cb87e3872e14ee7d3",
+      "parent": "examples"
+    },
+    {
+      "id": "hostname-wildcards",
+      "level": 2,
+      "title": "Hostname wildcards[](#hostname-wildcards)",
+      "digest": "sha256:16c05227a055c06eb11abb7f255405f7b9acd3fae7daeebe3efff7bf59cfdbc3",
+      "parent": ""
+    },
+    {
+      "id": "ingress-class",
+      "level": 2,
+      "title": "Ingress class[](#ingress-class)",
+      "digest": "sha256:fa67f717e22ec94d5ec2a9fff8e3e527eafe2e27eb80a26b08508d3f0649eec1",
+      "parent": ""
+    },
+    {
+      "id": "ingressclass-scope",
+      "level": 3,
+      "title": "IngressClass scope[](#ingressclass-scope)",
+      "digest": "sha256:e0911c0a3d7700eab1e618d93a3e1ceb9a2707fc62dc4edb5bd8d35068bb9fd5",
+      "parent": "ingress-class"
+    },
+    {
+      "id": "deprecated-annotation",
+      "level": 3,
+      "title": "Deprecated annotation[](#deprecated-annotation)",
+      "digest": "sha256:6cd1f584d281eccd4c9a8420257edcd6d3f3578037db8b97672361d83e11a312",
+      "parent": "ingress-class"
+    },
+    {
+      "id": "default-ingress-class",
+      "level": 3,
+      "title": "Default IngressClass[](#default-ingress-class)",
+      "digest": "sha256:313efba0ac1e0de64330ea34f0725d6f28ab222187fcacc88a31419e51c2fc41",
+      "parent": "ingress-class"
+    },
+    {
+      "id": "types-of-ingress",
+      "level": 2,
+      "title": "Types of Ingress[](#types-of-ingress)",
+      "digest": "sha256:0cbaf380847bebcfd70a8de2d986fe6c3a35b5712cdc8a95d18ec111057a6a3b",
+      "parent": ""
+    },
+    {
+      "id": "single-service-ingress",
+      "level": 3,
+      "title": "Ingress backed by a single Service[](#single-service-ingress)",
+      "digest": "sha256:4d31afe964e2be8b68357d9061d79644e8a03219b9fde7a2e0da54b4ba908ad5",
+      "parent": "types-of-ingress"
+    },
+    {
+      "id": "simple-fanout",
+      "level": 3,
+      "title": "Simple fanout[](#simple-fanout)",
+      "digest": "sha256:c4afa42ce0ce8a9a9978f58a96b9e35d4f997c6e4ef5cf2b8534468a3150f49d",
+      "parent": "types-of-ingress"
+    },
+    {
+      "id": "name-based-virtual-hosting",
+      "level": 3,
+      "title": "Name based virtual hosting[](#name-based-virtual-hosting)",
+      "digest": "sha256:d7167557c1cb4b09329a12d89d653abe065c12a04f89ccc89b385bc0f9fecff5",
+      "parent": "types-of-ingress"
+    },
+    {
+      "id": "tls",
+      "level": 3,
+      "title": "TLS[](#tls)",
+      "digest": "sha256:45c1f47f6049b52b38a9044007cd6a0906f552d46ce92ad8d7ae2eb4f1b14cd4",
+      "parent": "types-of-ingress"
+    },
+    {
+      "id": "load-balancing",
+      "level": 3,
+      "title": "Load balancing[](#load-balancing)",
+      "digest": "sha256:59d04cfb9706aca1e965d6c6dad618567125948adf36b4e26c7abd5c76f0a1f9",
+      "parent": "types-of-ingress"
+    },
+    {
+      "id": "updating-an-ingress",
+      "level": 2,
+      "title": "Updating an Ingress[](#updating-an-ingress)",
+      "digest": "sha256:896f0ba9ff33a44f6f3888a00098df7922eb81a4f017da6b1bfd9e3c6e1ea487",
+      "parent": ""
+    },
+    {
+      "id": "failing-across-availability-zones",
+      "level": 2,
+      "title": "Failing across availability zones[](#failing-across-availability-zones)",
+      "digest": "sha256:15b86c9d1e92b7264d9fcc27eca9bbd0db00f6353caeb2cc8ec4cdcdd2470fdc",
+      "parent": ""
+    },
+    {
+      "id": "alternatives",
+      "level": 2,
+      "title": "Alternatives[](#alternatives)",
+      "digest": "sha256:7e942473172b6f7e6ac4596bcfbd8699d281895db73001d7cf46a093c9fe0afe",
+      "parent": ""
+    },
+    {
+      "id": "what-s-next",
+      "level": 2,
+      "title": "What's next[](#what-s-next)",
+      "digest": "sha256:d44867da1eaf121e4e085d742ea67cd1412de89b4c485ee54c087b97b85a7982",
+      "parent": ""
+    },
+    {
+      "id": "feedback",
+      "level": 2,
+      "title": "Feedback",
+      "digest": "sha256:c2e4f08129dc48a9e544cf87d3305bc9f269c0bcc465c5cd30fb181b823bc8f0",
+      "parent": ""
+    }
+  ],
+  "feature_states": [
+    {
+      "anchor": "",
+      "stage": "stable",
+      "since": "v1.19"
+    }
+  ],
+  "assets": [
+    {
+      "path": "docs/images/ingress.svg",
+      "digest": "sha256:5bfa777f0a863741565d6392d76d1e7742566488fa2487c0c1054f1fd313fb31"
+    },
+    {
+      "path": "docs/images/ingressFanOut.svg",
+      "digest": "sha256:8363614d7290d823c7769b961fd29139000d319906ff113aaa6feae660478431"
+    },
+    {
+      "path": "docs/images/ingressNameBased.svg",
+      "digest": "sha256:213ea504fc0e9a7e086ea5d4da2016db08f2b3e958c5c38b16c7608dddac23e3"
+    }
+  ],
+  "links": {
+    "internal": 29,
+    "page_internal": 28,
+    "external": 20,
+    "to_orphans": 0,
+    "out_of_tree": [
+      "docs/reference/generated/kubernetes-api/v1.37/",
+      "docs/reference/using-api/deprecation-policy/"
+    ],
+    "dropped": 0
+  },
+  "code_blocks": 26,
+  "degraded_tables": 0,
+  "dropped_elements": 3
+}

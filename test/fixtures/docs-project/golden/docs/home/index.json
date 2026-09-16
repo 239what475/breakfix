@@ -1,0 +1,92 @@
+{
+  "format_version": 1,
+  "generator_version": "docs-project-v3",
+  "upstream": {
+    "source": "kubernetes",
+    "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
+    "version": "snapshot-ce98a43",
+    "locale": "en"
+  },
+  "path": "docs/home/",
+  "page_kind": "index",
+  "title": "Kubernetes Documentation",
+  "digest": "sha256:9f173dabbbd70641d5a4aefc122c7fa46e1eead58781846109f6ae470d8ff7e7",
+  "anchors": [
+    {
+      "id": "understand-kubernetes",
+      "level": 2,
+      "title": "Understand Kubernetes",
+      "digest": "sha256:9f20d9cf3dbc456fb8ac6210643d219ebf769e6d5a1364298b9b7554af5031b0",
+      "parent": ""
+    },
+    {
+      "id": "try-kubernetes",
+      "level": 2,
+      "title": "Try Kubernetes",
+      "digest": "sha256:5677d29fff0633146e7306dcedc2bcfd516c6838dcca68bc383441eb2690203c",
+      "parent": ""
+    },
+    {
+      "id": "set-up-a-k8s-cluster",
+      "level": 2,
+      "title": "Set up a K8s cluster",
+      "digest": "sha256:bd56616f785829b300d405476e1162a017d0a60d33f6d86ff712d68bb6d82c66",
+      "parent": ""
+    },
+    {
+      "id": "learn-how-to-use-kubernetes",
+      "level": 2,
+      "title": "Learn how to use Kubernetes",
+      "digest": "sha256:e2257f639aab95f467d6890c04bf9a0669b046d5ad2b52efe0a0724003fd9243",
+      "parent": ""
+    },
+    {
+      "id": "look-up-reference-information",
+      "level": 2,
+      "title": "Look up reference information",
+      "digest": "sha256:ac736cbf11e9a425001bc2143502c05faf8823e2e50749386861f02fbaac4ea2",
+      "parent": ""
+    },
+    {
+      "id": "contribute-to-kubernetes",
+      "level": 2,
+      "title": "Contribute to Kubernetes",
+      "digest": "sha256:f5ef8a3f6605ca074bb13786f4668838f384e6e75d1ed5eb00bdbebeb807bd39",
+      "parent": ""
+    },
+    {
+      "id": "training",
+      "level": 2,
+      "title": "Training",
+      "digest": "sha256:cbdbc9f95d4fcd960d5a30ce955325580d969ef43c5360f720b4dcca6d77e0b6",
+      "parent": ""
+    },
+    {
+      "id": "download-kubernetes",
+      "level": 2,
+      "title": "Download Kubernetes",
+      "digest": "sha256:287023e432464709687011edf228227d495ca076cfbe2fee58e389a0ef9bd87c",
+      "parent": ""
+    },
+    {
+      "id": "about-the-documentation",
+      "level": 2,
+      "title": "About the documentation",
+      "digest": "sha256:25288e49c71f5bd764f6c71bc0be65964d477faafec297a08abe14f390a4711f",
+      "parent": ""
+    }
+  ],
+  "feature_states": null,
+  "assets": [],
+  "links": {
+    "internal": 39,
+    "page_internal": 0,
+    "external": 1,
+    "to_orphans": 0,
+    "out_of_tree": [],
+    "dropped": 0
+  },
+  "code_blocks": 0,
+  "degraded_tables": 0,
+  "dropped_elements": 9
+}
