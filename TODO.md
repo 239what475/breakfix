@@ -296,12 +296,18 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
    记录 854 页全量运行证据(零失败、复跑一致、统计与 854/218/433 基线吻合),
    勾选第 1 节全部任务;此后进入第 2 节运行时切换。
 
-### 验收记录(2026-09-16)
+### 验收记录(2026-09-16,docs-project-v6)
 
+- 独立验收发现三处规格偏差:代码块输出为单反引号行内码(语言标记混入内容、238 页存在
+  反引号配对污染)、正文链接未应用 `_redirects`(尾斜杠不一致导致旧路径残留并误入
+  `out_of_tree`)、树根 `docs/` 被计入孤儿。已全部修复,版本升至 docs-project-v6,
+  golden 按 v6 重新生成。
 - `go run ./cmd/docs-project -root docs-site/public -out <tmp> -workers 8 -version docs-project-v6`
-  连续运行两次,`diff -r` 为空;同一输入以 `-workers 1` 运行后与 8 worker 输出的 `diff -r` 也为空。
-- 两次全量运行均无 `report.json`;全局清单为 854 pages、218 orphans、433 docs redirects,
-  另有 127 index pages、12,476 anchors、69 assets。
+  连续运行两次,`diff -r` 为空;全量 854 pages、217 orphans、433 docs redirects、
+  127 index pages、12,476 anchors、69 assets;无 `report.json`;manifest `warnings` 含树根说明。
+- 抽查:HPA 页 `yaml` 围栏逐字保真;pod-lifecycle 的旧路径链接已改写为
+  `docs/concepts/containers/cri/` 并计入 `internal`,`out_of_tree` 为空;页 digest 与
+  章节 digest 均可按 1.9 定义复算。
 
 ## 2. 运行时切换到文档库
 
