@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v7",
+  "generator_version": "docs-project-v8",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,48 +10,48 @@
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",
   "title": "Pod Lifecycle",
-  "digest": "sha256:5e299475522e0aab2fbdc38646d65aa4700772cdc6722d5ca0e4eac445f23594",
+  "digest": "sha256:2d3b635111ac5b2b175427b96a7b5b17ebf3afed4c438ca93831b7d340007ee0",
   "anchors": [
     {
       "id": "pod-lifetime",
       "level": 2,
       "title": "Pod lifetime",
-      "digest": "sha256:1110a00caaf951f51a65d1f97077e0a145a3dac3a55c3c35ef133d456e456be1",
+      "digest": "sha256:065fe97245c04cd7883b8abf03e7b786e8de25ba85f14baaeebda904a408f6a5",
       "parent": ""
     },
     {
       "id": "pod-fault-recovery",
       "level": 3,
       "title": "Pods and fault recovery",
-      "digest": "sha256:2fb2069a1fcf6b917d217f3f387fe7ce4f659359333dc3ee32fd0adaba5bed96",
+      "digest": "sha256:c0be1f05d88f80b834aa48d20fb7da4eb4decd8a1bcbe6bbcb1cfbe38df5ce54",
       "parent": "pod-lifetime"
     },
     {
       "id": "associated-lifetimes",
       "level": 3,
       "title": "Associated lifetimes",
-      "digest": "sha256:bb2ac3816fa6d607994c9026c67dd987cf72dd2d49cfa9f9289bc4b560ceab11",
+      "digest": "sha256:25bf19cf6772b0c1586275239e217b992b2f081d9f7fbef277ffa069e7c40723",
       "parent": "pod-lifetime"
     },
     {
       "id": "pod-phase",
       "level": 2,
       "title": "Pod phase",
-      "digest": "sha256:876565db83519e13f7f39a4dc9100d2bff44464802f04a1311b6a25f1cae79b5",
+      "digest": "sha256:5d5213bfe72fc1a829b12a81891c69899918158ecba1b470f92cb7631fc785c2",
       "parent": ""
     },
     {
       "id": "container-states",
       "level": 2,
       "title": "Container states",
-      "digest": "sha256:92c8f0f7cf7192e7cc089385ea874302109afb82e2147eddf2434319b7c072d8",
+      "digest": "sha256:3c81ce9b087cb204f8cd834258c6aee6ff8ba385eccb70db172ef6e804b450f5",
       "parent": ""
     },
     {
       "id": "container-state-waiting",
       "level": 3,
       "title": "`Waiting`",
-      "digest": "sha256:1cbcaf96de5d9214f82315f6c6b47b94e47e4ff1f670c200d24f3d45e523ed6f",
+      "digest": "sha256:fa9d6407a4cda10ba30896b17dec23f9c260da7e8975c1749018bdbcc263ef5e",
       "parent": "container-states"
     },
     {
@@ -72,28 +72,28 @@
       "id": "container-restarts",
       "level": 2,
       "title": "How Pods handle problems with containers",
-      "digest": "sha256:abbea57388a9b735e951192a2bc6cda308f1dcfbb7ee6a09c2d63316c8dcc91d",
+      "digest": "sha256:49c8e3273a3d4afa673cb729a773ab2bbc7cf0e966e6b7e74b76fa45593c756f",
       "parent": ""
     },
     {
       "id": "restart-policy",
       "level": 3,
       "title": "Container restarts",
-      "digest": "sha256:b7b095fb77487cb99c3a277a64c9f24fed5199cf0363a44fce4ddfa3ab919358",
+      "digest": "sha256:8d2f5fb7d96e6df8343af99a378c8a7e5ca6c76c8300e775197f5777818c7e15",
       "parent": "container-restarts"
     },
     {
       "id": "container-restart-resilience",
       "level": 4,
       "title": "Container restarts and resilience",
-      "digest": "sha256:22e98542f19bece6098eeb7ea52759b456cd20c3b873197fa13355d4c080e6e4",
+      "digest": "sha256:2e0930613788201b088d4bd1d41454fcb5a350d7f8d70bf5ad687b2fe65dc0ec",
       "parent": "restart-policy"
     },
     {
       "id": "pod-level-container-restart-policy",
       "level": 4,
       "title": "Pod-level container restart policy",
-      "digest": "sha256:c41618cec46c0c9d53ca5d56fd2d4b93ec5f3a0474e8654be7c8955e508e6b6d",
+      "digest": "sha256:18c911ae0248fa37e6a3f182de4d32e8d1a527bd9152ca29bde26f2ed5a962cb",
       "parent": "restart-policy"
     },
     {
@@ -114,14 +114,14 @@
       "id": "sidecar-containers-and-restart-policies",
       "level": 5,
       "title": "Sidecar containers and restart policies",
-      "digest": "sha256:c510b2f8842d8098ac64a29bc339016baa332a2124548bcf7ed76a35c467dc76",
+      "digest": "sha256:852acbfd7502df612e890d6734380f92e6c6432dd44571f9d42621dd20ab0065",
       "parent": "pod-level-container-restart-policy"
     },
     {
       "id": "container-restart-rules",
       "level": 4,
       "title": "Individual container restart policy and rules",
-      "digest": "sha256:9d328ce74af6c33c2045234f32a232422b3a9db90bfa2159673cae27a0b42262",
+      "digest": "sha256:677fdeada88bcbbfcc34f9c7012eace78614fc7266a687b7a178697893f8a383",
       "parent": "restart-policy"
     },
     {
@@ -142,77 +142,77 @@
       "id": "reduced-container-restart-delay",
       "level": 3,
       "title": "Reduced container restart delay",
-      "digest": "sha256:ca80c82275a017df63469b752eac3683a77aec9b8213ade9c2acb7730e69612b",
+      "digest": "sha256:b78c590e77e1333a7dfdcd49924880f39907e8e708aebc86269de7ae3b6de92f",
       "parent": "container-restarts"
     },
     {
       "id": "configurable-container-restart-delay",
       "level": 3,
       "title": "Configurable container restart delay",
-      "digest": "sha256:7d9c5fb78cfaf4a25445e89e2c02638b0613c39614cc5a53157907df22cccbd8",
+      "digest": "sha256:9d778a24eca0a03c520a84d0acedfe597bc1816c01c1a2e9e166f3074092223a",
       "parent": "container-restarts"
     },
     {
       "id": "pod-conditions",
       "level": 2,
       "title": "Pod conditions",
-      "digest": "sha256:c82431f439d88a887b7a89fb253a5ea8595441a71c2e7eeaaf16b6e6a2f473ca",
+      "digest": "sha256:c89e574a29397565c173fcf7aa383848ddb0e01ca2cf6575d6f43dc71c64afc9",
       "parent": ""
     },
     {
       "id": "pod-readiness-gate",
       "level": 3,
       "title": "Pod readiness",
-      "digest": "sha256:9522e4550f9ea418e01d7428d56896527ebd44c10adffdba88f59c32bb7c9528",
+      "digest": "sha256:e17e81a089090e63a6610c0850eea3420b01fb0af90d207922aa66a294c46442",
       "parent": "pod-conditions"
     },
     {
       "id": "pod-readiness-status",
       "level": 3,
       "title": "Status for Pod readiness",
-      "digest": "sha256:a6c063f85a7cb596c49af19ad49651d846732fd3074f6b3c0b0fec65372aaa13",
+      "digest": "sha256:1de50b898d4fc1e21f0bcc047dabfafd3aaa801926ef3f6bdd1988913a146538",
       "parent": "pod-conditions"
     },
     {
       "id": "pod-ready-to-start-containers",
       "level": 3,
       "title": "Pod readiness to start containers",
-      "digest": "sha256:f37ea839f60675a772e432c359d97af34adb5c9fc267c4ee70d27c60d8e715a1",
+      "digest": "sha256:8978698da6b797bd9a51744a9fca66e3464be04dbc04ad0f8fd2ce3a4544c85f",
       "parent": "pod-conditions"
     },
     {
       "id": "pod-resize",
       "level": 2,
       "title": "Resizing Pods",
-      "digest": "sha256:d0411dc47c925d73d97062cbe32535d4b0bf79e16c4a08c234c8761069e5f7dc",
+      "digest": "sha256:a738ca3a1d3ad3123046c120b667eb5936b46d1c5101b5c6328d83511c23a637",
       "parent": ""
     },
     {
       "id": "pod-resize-inplace",
       "level": 3,
       "title": "In-place Pod resize",
-      "digest": "sha256:257649fb2dadec31223eb42ff0eab28d679aca37c0f15cfcf2ec95a09a75ec9f",
+      "digest": "sha256:55b81571c9c63801aa7d57da91c8b9880b421497a7644bf609a19d4e9146e388",
       "parent": "pod-resize"
     },
     {
       "id": "resizing-by-launching-replacement-pods",
       "level": 3,
       "title": "Resizing by launching replacement Pods",
-      "digest": "sha256:7ee631a7caadac0dd03f8585cd31de36d8b882ca389d96a4abc788204140732b",
+      "digest": "sha256:93266b36ae82339fa65463a5b22ac27a7170c2bf2c70545f5b7de9af3f4b8438",
       "parent": "pod-resize"
     },
     {
       "id": "container-probes",
       "level": 2,
       "title": "Container probes",
-      "digest": "sha256:68b709252d478b1a6bcc69dc2952620a230d0d2cdeedcc15f581ebbb092a04e7",
+      "digest": "sha256:ff3d24affcf07ddeaad6ed4e262e5e6a3f5766e38015de51aab7a504c262941b",
       "parent": ""
     },
     {
       "id": "startup-probe",
       "level": 3,
       "title": "Startup probe",
-      "digest": "sha256:dbf813e52236073aaa102f3c690b695bba5887d09a3f81269cba672516914210",
+      "digest": "sha256:3d9ae4b87bad6719b8be7697cf860d2d01398d0243e36faca6a9c26bec42878f",
       "parent": "container-probes"
     },
     {
@@ -226,14 +226,14 @@
       "id": "readiness-probe",
       "level": 3,
       "title": "Readiness probe",
-      "digest": "sha256:47cd599642228143773d0e627f3eb98d01ec11070dc8e5045da76dece4ed743f",
+      "digest": "sha256:8fb710325fe1dfb812a8ff9f60301bf6da78fc9d29cb6b265201c3c96fc38baa",
       "parent": "container-probes"
     },
     {
       "id": "pod-termination",
       "level": 2,
       "title": "Termination of Pods",
-      "digest": "sha256:62096dce38104092993c2bd1bc119ac6bce7da32d4156b9a7df33f19a723f6b5",
+      "digest": "sha256:35c88ad08a83a9150104a01d9568f91ef73dca2578022ca9a977bb9f58bc0578",
       "parent": ""
     },
     {
@@ -247,56 +247,56 @@
       "id": "defining-custom-stop-signals",
       "level": 3,
       "title": "Defining custom stop signals",
-      "digest": "sha256:18629f219a9142c4d1902190bf41ddc36d23dd3fa4f55ccde3e73548bf312daf",
+      "digest": "sha256:7d837be4cccf70d8f706e50305c8988f5f9691900b813d1d98a0e45510f898e0",
       "parent": "pod-termination"
     },
     {
       "id": "pod-termination-flow",
       "level": 3,
       "title": "Pod Termination Flow",
-      "digest": "sha256:f9e8596d2c7ff930301b0a4736ed6e681ef0d563241d21f34fbcc26f37878611",
+      "digest": "sha256:c38fb285abd556e2a85bb1f66101b032fa60f8563e3e13fe6964a2b05479aaca",
       "parent": "pod-termination"
     },
     {
       "id": "pod-termination-forced",
       "level": 3,
       "title": "Forced Pod termination",
-      "digest": "sha256:aebaf539adbe37001c63bb3cb3259775422fe4deb21d7393cf0336b179c654df",
+      "digest": "sha256:05eb2300af5ee8e1863acc232b1db7e630c947f46a46ae0d7e1d3a2d89cacb0a",
       "parent": "pod-termination"
     },
     {
       "id": "termination-with-sidecars",
       "level": 3,
       "title": "Pod shutdown and sidecar containers",
-      "digest": "sha256:31de7ff13149e593be86bc3053e7a3c782af9a168b4b95e532fae129f3a83dbf",
+      "digest": "sha256:e05fc430b913924b1395e832350d42f01db22e30ab33dbe6fc46f965b0a22810",
       "parent": "pod-termination"
     },
     {
       "id": "pod-garbage-collection",
       "level": 3,
       "title": "Garbage collection of Pods",
-      "digest": "sha256:d8ddc5f5c038db4c125d7f1fcf9b982cbbc9157dfabe5c486ab5e99364713a37",
+      "digest": "sha256:f25fdeaa86ca55db0d45cea713640430d2c98b9fd607f5f6dd771c295c9743ec",
       "parent": "pod-termination"
     },
     {
       "id": "kubelet-restarts",
       "level": 2,
       "title": "Pod behavior during kubelet restarts",
-      "digest": "sha256:1393948ffa38d69b23dbb52c7b2e9bf9e67c0648453e3ca42df7500a6ace0f2a",
+      "digest": "sha256:0b77dba930713b81b65dd773fdbdb8341a9f23c1a40e4819021c2072aae8ef0a",
       "parent": ""
     },
     {
       "id": "detection-of-kubelet-restarts",
       "level": 3,
       "title": "Detection of kubelet restarts",
-      "digest": "sha256:594bbf9e230176e9a2b0991b6ff558d22e853e7017e354f24adb9d731ab51d79",
+      "digest": "sha256:2b11a80522cc42d2ffaf721f836f21a0246e943d978403c4e616cc97107d53da",
       "parent": "kubelet-restarts"
     },
     {
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:884d58a41e2a644b6cb6671128d264558c7417701af61f0851546bef9b12dcea",
+      "digest": "sha256:e2bb787b99136ff5f07382e385347a034d1759419c7e395d2748c9975b9d2942",
       "parent": ""
     }
   ],

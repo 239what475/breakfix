@@ -2,7 +2,7 @@
 
 This page shows how to configure liveness, readiness and startup probes for containers.
 
-For more information about probes, see [Liveness, Readiness and Startup Probes](docs/concepts/workloads/pods/probes/).
+For more information about probes, see [Liveness, Readiness and Startup Probes](../../../concepts/workloads/pods/probes/).
 
 ## Before you begin
 
@@ -184,11 +184,11 @@ In releases after v1.13, local HTTP proxy environment variable settings do not a
 
 > **More information about this feature**
 >
-> To use this feature, you (or a cluster administrator) will need to enable the [H2CContainerProbe](docs/reference/command-line-tools-reference/feature-gates/#H2CContainerProbe) feature gate for all relevant components in your cluster.
+> To use this feature, you (or a cluster administrator) will need to enable the [H2CContainerProbe](../../../reference/command-line-tools-reference/feature-gates/#H2CContainerProbe) feature gate for all relevant components in your cluster.
 >
-> See [Enable Or Disable Feature Gates](docs/tasks/administer-cluster/configure-feature-gates/) for more information.
+> See [Enable Or Disable Feature Gates](../../administer-cluster/configure-feature-gates/) for more information.
 
-By default the `kubelet` sends HTTP/1.1 requests when executing an HTTP probe. If your application serves health endpoints only over HTTP/2 cleartext (h2c), you can add the `protocol` field to the `httpGet` field in the probe specification and specify a value of `HTTP2`. This requires the `H2CContainerProbe` [feature gate](docs/reference/command-line-tools-reference/feature-gates/) to be enabled on both the `kube-apiserver` and the `kubelet`.
+By default the `kubelet` sends HTTP/1.1 requests when executing an HTTP probe. If your application serves health endpoints only over HTTP/2 cleartext (h2c), you can add the `protocol` field to the `httpGet` field in the probe specification and specify a value of `HTTP2`. This requires the `H2CContainerProbe` [feature gate](../../../reference/command-line-tools-reference/feature-gates/) to be enabled on both the `kube-apiserver` and the `kubelet`.
 
 [`pods/probe/h2c-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/h2c-liveness.yaml)
 
@@ -320,11 +320,11 @@ When using a gRPC probe, there are some technical details to be aware of:
 
 > **More information about this feature**
 >
-> To use this feature, you (or a cluster administrator) will need to enable the [GRPCContainerProbeTLS](docs/reference/command-line-tools-reference/feature-gates/#GRPCContainerProbeTLS) feature gate for all relevant components in your cluster.
+> To use this feature, you (or a cluster administrator) will need to enable the [GRPCContainerProbeTLS](../../../reference/command-line-tools-reference/feature-gates/#GRPCContainerProbeTLS) feature gate for all relevant components in your cluster.
 >
-> See [Enable Or Disable Feature Gates](docs/tasks/administer-cluster/configure-feature-gates/) for more information.
+> See [Enable Or Disable Feature Gates](../../administer-cluster/configure-feature-gates/) for more information.
 
-By default the `kubelet` connects to gRPC health endpoints over plaintext. If your application serves gRPC only over TLS, you can add the `mode` field to the `grpc` field in the probe specification and specify a value of `TLS`. This requires the `GRPCContainerProbeTLS` [feature gate](docs/reference/command-line-tools-reference/feature-gates/) to be enabled on both the `kube-apiserver` and the `kubelet`.
+By default the `kubelet` connects to gRPC health endpoints over plaintext. If your application serves gRPC only over TLS, you can add the `mode` field to the `grpc` field in the probe specification and specify a value of `TLS`. This requires the `GRPCContainerProbeTLS` [feature gate](../../../reference/command-line-tools-reference/feature-gates/) to be enabled on both the `kube-apiserver` and the `kubelet`.
 
 [`pods/probe/grpc-tls-liveness.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/pods/probe/grpc-tls-liveness.yaml)
 
@@ -354,7 +354,7 @@ If the feature gate is disabled, the `kube-apiserver` removes the `mode` field f
 
 ## Use a named port
 
-You can use a named [`port`](docs/reference/kubernetes-api/core/pod-v1/#ports) for HTTP and TCP probes. gRPC probes do not support named ports.
+You can use a named [`port`](../../../reference/kubernetes-api/core/pod-v1/#ports) for HTTP and TCP probes. gRPC probes do not support named ports.
 
 For example:
 
@@ -433,7 +433,7 @@ Readiness and liveness probes can be used in parallel for the same container. Us
 
 ## What's next
 
-- Learn more about [Liveness, Readiness and Startup Probes](docs/concepts/workloads/pods/probes/).
-- For the full specification of probe-related fields, see the API reference: [Pod](docs/reference/kubernetes-api/core/pod-v1/), [Container](docs/reference/kubernetes-api/core/pod-v1/#Container), [Probe](docs/reference/kubernetes-api/core/pod-v1/#Probe)
+- Learn more about [Liveness, Readiness and Startup Probes](../../../concepts/workloads/pods/probes/).
+- For the full specification of probe-related fields, see the API reference: [Pod](../../../reference/kubernetes-api/core/pod-v1/), [Container](../../../reference/kubernetes-api/core/pod-v1/#Container), [Probe](../../../reference/kubernetes-api/core/pod-v1/#Probe)
 
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

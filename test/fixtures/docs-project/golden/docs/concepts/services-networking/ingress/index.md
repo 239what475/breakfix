@@ -7,11 +7,11 @@ An API object that manages external access to the services in a cluster, typical
 Ingress may provide load balancing, SSL termination and name-based virtual hosting.
 
 > [!NOTE]
-> The Kubernetes project recommends using [Gateway](https://gateway-api.sigs.k8s.io/) instead of [Ingress](docs/concepts/services-networking/ingress/). The Ingress API has been frozen.
+> The Kubernetes project recommends using [Gateway](https://gateway-api.sigs.k8s.io/) instead of [Ingress](./). The Ingress API has been frozen.
 >
 > This means that:
 >
-> - The Ingress API is generally available, and is subject to the [stability guarantees](docs/reference/deprecation-policy/#deprecating-parts-of-the-api) for generally available APIs. The Kubernetes project has no plans to remove Ingress from Kubernetes.
+> - The Ingress API is generally available, and is subject to the [stability guarantees](../../../reference/deprecation-policy/#deprecating-parts-of-the-api) for generally available APIs. The Kubernetes project has no plans to remove Ingress from Kubernetes.
 > - The Ingress API is no longer being developed, and will have no further changes or updates made to it.
 
 ## Terminology
@@ -21,28 +21,28 @@ For clarity, this guide defines the following terms:
 - Node: A worker machine in Kubernetes, part of a cluster.
 - Cluster: A set of Nodes that run containerized applications managed by Kubernetes. For this example, and in most common Kubernetes deployments, nodes in the cluster are not part of the public internet.
 - Edge router: A router that enforces the firewall policy for your cluster. This could be a gateway managed by a cloud provider or a physical piece of hardware.
-- Cluster network: A set of links, logical or physical, that facilitate communication within a cluster according to the Kubernetes [networking model](docs/concepts/cluster-administration/networking/).
-- Service: A Kubernetes [Service](docs/concepts/services-networking/service/) that identifies a set of Pods using [label](docs/concepts/overview/working-with-objects/labels/) selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
+- Cluster network: A set of links, logical or physical, that facilitate communication within a cluster according to the Kubernetes [networking model](../../cluster-administration/networking/).
+- Service: A Kubernetes [Service](../service/) that identifies a set of Pods using [label](../../overview/working-with-objects/labels/) selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
 
 ## What is Ingress?
 
-[Ingress](docs/reference/generated/kubernetes-api/v1.37/#ingress-v1-networking-k8s-io) exposes HTTP and HTTPS routes from outside the cluster to [services](docs/concepts/services-networking/service/) within the cluster. Traffic routing is controlled by rules defined on the Ingress resource.
+[Ingress](../../../reference/generated/kubernetes-api/v1.37/#ingress-v1-networking-k8s-io) exposes HTTP and HTTPS routes from outside the cluster to [services](../service/) within the cluster. Traffic routing is controlled by rules defined on the Ingress resource.
 
 Here is a simple example where an Ingress sends all its traffic to one Service:
 
-[![ingress-diagram](docs/images/ingress.svg)](https://mermaid.live/edit#pako:eNqNkstuwyAQRX8F4U0r2VHqPlSRKqt0UamLqlnaWWAYJygYLB59KMm_Fxcix-qmGwbuXA7DwAEzzQETXKutof0Ovb4vaoUQkwKUu6pi3FwXM_QSHGBt0VFFt8DRU2OWSGrKUUMlVQwMmhVLEV1Vcm9-aUksiuXRaO_CEhkv4WjBfAgG1TrGaLa-iaUw6a0DcwGI-WgOsF7zm-pN881fvRx1UDzeiFq7ghb1kgqFWiElyTjnuXVG74FkbdumefEpuNuRu_4rZ1pqQ7L5fL6YQPaPNiFuywcG9_-ihNyUkm6YSONWkjVNM8WUIyaeOJLO3clTB_KhL8NQDmVe-OJjxgZM5FhFiiFTK5zjDkxHBQ9_4zB4a-x20EGNSZhyaKmXrg7f5hSsvufUwTMXThtMWiot5Jh6p9ffimHijIezaSVoeN0uiqcfMJvf7w)
+[![ingress-diagram](../../../images/ingress.svg)](https://mermaid.live/edit#pako:eNqNkstuwyAQRX8F4U0r2VHqPlSRKqt0UamLqlnaWWAYJygYLB59KMm_Fxcix-qmGwbuXA7DwAEzzQETXKutof0Ovb4vaoUQkwKUu6pi3FwXM_QSHGBt0VFFt8DRU2OWSGrKUUMlVQwMmhVLEV1Vcm9-aUksiuXRaO_CEhkv4WjBfAgG1TrGaLa-iaUw6a0DcwGI-WgOsF7zm-pN881fvRx1UDzeiFq7ghb1kgqFWiElyTjnuXVG74FkbdumefEpuNuRu_4rZ1pqQ7L5fL6YQPaPNiFuywcG9_-ihNyUkm6YSONWkjVNM8WUIyaeOJLO3clTB_KhL8NQDmVe-OJjxgZM5FhFiiFTK5zjDkxHBQ9_4zB4a-x20EGNSZhyaKmXrg7f5hSsvufUwTMXThtMWiot5Jh6p9ffimHijIezaSVoeN0uiqcfMJvf7w)
 
 Figure. Ingress
 
-An Ingress may be configured to give Services externally-reachable URLs, load balance traffic, terminate SSL / TLS, and offer name-based virtual hosting. An [Ingress controller](docs/concepts/services-networking/ingress-controllers/) is responsible for fulfilling the Ingress, usually with a load balancer, though it may also configure your edge router or additional frontends to help handle the traffic.
+An Ingress may be configured to give Services externally-reachable URLs, load balance traffic, terminate SSL / TLS, and offer name-based virtual hosting. An [Ingress controller](../ingress-controllers/) is responsible for fulfilling the Ingress, usually with a load balancer, though it may also configure your edge router or additional frontends to help handle the traffic.
 
-An Ingress does not expose arbitrary ports or protocols. Exposing services other than HTTP and HTTPS to the internet typically uses a service of type [Service.Type=NodePort](docs/concepts/services-networking/service/#type-nodeport) or [Service.Type=LoadBalancer](docs/concepts/services-networking/service/#loadbalancer).
+An Ingress does not expose arbitrary ports or protocols. Exposing services other than HTTP and HTTPS to the internet typically uses a service of type [Service.Type=NodePort](../service/#type-nodeport) or [Service.Type=LoadBalancer](../service/#loadbalancer).
 
 ## Prerequisites
 
-You must have an [Ingress controller](docs/concepts/services-networking/ingress-controllers/) to satisfy an Ingress. Only creating an Ingress resource has no effect.
+You must have an [Ingress controller](../ingress-controllers/) to satisfy an Ingress. Only creating an Ingress resource has no effect.
 
-You can choose from a number of [Ingress controllers](docs/concepts/services-networking/ingress-controllers/).
+You can choose from a number of [Ingress controllers](../ingress-controllers/).
 
 Ideally, all Ingress controllers should fit the reference specification. In reality, the various Ingress controllers operate slightly differently.
 
@@ -74,9 +74,9 @@ spec:
               number: 80
 ```
 
-An Ingress needs `apiVersion`, `kind`, `metadata` and `spec` fields. The name of an Ingress object must be a valid [DNS subdomain name](docs/concepts/overview/working-with-objects/names/#dns-subdomain-names). For general information about working with config files, see [deploying applications](docs/tasks/run-application/run-stateless-application-deployment/), [configuring containers](docs/tasks/configure-pod-container/configure-pod-configmap/), [managing resources](docs/concepts/workloads/management/). Ingress controllers frequently use [annotations](docs/concepts/overview/working-with-objects/annotations/) to configure behavior. Review the documentation for your choice of ingress controller to learn which annotations are expected and / or supported.
+An Ingress needs `apiVersion`, `kind`, `metadata` and `spec` fields. The name of an Ingress object must be a valid [DNS subdomain name](../../overview/working-with-objects/names/#dns-subdomain-names). For general information about working with config files, see [deploying applications](../../../tasks/run-application/run-stateless-application-deployment/), [configuring containers](../../../tasks/configure-pod-container/configure-pod-configmap/), [managing resources](../../workloads/management/). Ingress controllers frequently use [annotations](../../overview/working-with-objects/annotations/) to configure behavior. Review the documentation for your choice of ingress controller to learn which annotations are expected and / or supported.
 
-The [Ingress spec](docs/reference/kubernetes-api/networking/ingress-v1/#IngressSpec) has all the information needed to configure a load balancer or proxy server. Most importantly, it contains a list of rules matched against all incoming requests. Ingress resource only supports rules for directing HTTP(S) traffic.
+The [Ingress spec](../../../reference/kubernetes-api/networking/ingress-v1/#IngressSpec) has all the information needed to configure a load balancer or proxy server. Most importantly, it contains a list of rules matched against all incoming requests. Ingress resource only supports rules for directing HTTP(S) traffic.
 
 If the `ingressClassName` is omitted, a [default Ingress class](#default-ingress-class) should be defined.
 
@@ -88,13 +88,13 @@ Each HTTP rule contains the following information:
 
 - An optional host. In this example, no host is specified, so the rule applies to all inbound HTTP traffic through the IP address specified. If a host is provided (for example, foo.bar.com), the rules apply to that host.
 - A list of paths (for example, `/testpath`), each of which has an associated backend defined with a `service.name` and a `service.port.name` or `service.port.number`. Both the host and path must match the content of an incoming request before the load balancer directs traffic to the referenced Service.
-- A backend is a combination of Service and port names as described in the [Service doc](docs/concepts/services-networking/service/) or a [custom resource backend](#resource-backend) by way of a [CRD](docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). HTTP (and HTTPS) requests to the Ingress that match the host and path of the rule are sent to the listed backend.
+- A backend is a combination of Service and port names as described in the [Service doc](../service/) or a [custom resource backend](#resource-backend) by way of a [CRD](../../../tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). HTTP (and HTTPS) requests to the Ingress that match the host and path of the rule are sent to the listed backend.
 
 A `defaultBackend` is often configured in an Ingress controller to service any requests that do not match a path in the spec.
 
 ### DefaultBackend
 
-An Ingress with no rules sends all traffic to a single default backend and `.spec.defaultBackend` is the backend that should handle requests in that case. The `defaultBackend` is conventionally a configuration option of the [Ingress controller](docs/concepts/services-networking/ingress-controllers/) and is not specified in your Ingress resources. If no `.spec.rules` are specified, `.spec.defaultBackend` must be specified. If `defaultBackend` is not set, the handling of requests that do not match any of the rules will be up to the ingress controller (consult the documentation for your ingress controller to find out how it handles this case).
+An Ingress with no rules sends all traffic to a single default backend and `.spec.defaultBackend` is the backend that should handle requests in that case. The `defaultBackend` is conventionally a configuration option of the [Ingress controller](../ingress-controllers/) and is not specified in your Ingress resources. If no `.spec.rules` are specified, `.spec.defaultBackend` must be specified. If `defaultBackend` is not set, the handling of requests that do not match any of the rules will be up to the ingress controller (consult the documentation for your ingress controller to find out how it handles this case).
 
 If none of the hosts or paths match the HTTP request in the Ingress objects, the traffic is routed to your default backend.
 
@@ -311,7 +311,7 @@ The `kind` (in combination the `apiGroup`) of the parameters refers to a namespa
 Namespace-scoped parameters help the cluster operator delegate control over the configuration (for example: load balancer settings, API gateway definition) that is used for a workload. If you used a cluster-scoped parameter then either:
 
 - the cluster operator team needs to approve a different team's changes every time there's a new configuration change being applied.
-- the cluster operator must define specific access controls, such as [RBAC](docs/reference/access-authn-authz/rbac/) roles and bindings, that let the application team make changes to the cluster-scoped parameters resource.
+- the cluster operator must define specific access controls, such as [RBAC](../../../reference/access-authn-authz/rbac/) roles and bindings, that let the application team make changes to the cluster-scoped parameters resource.
 
 The IngressClass API itself is always cluster-scoped.
 
@@ -415,7 +415,7 @@ Where `203.0.113.123` is the IP allocated by the Ingress controller to satisfy t
 
 A fanout configuration routes traffic from a single IP address to more than one Service, based on the HTTP URI being requested. An Ingress allows you to keep the number of load balancers down to a minimum. For example, a setup like:
 
-[![ingress-fanout-diagram](docs/images/ingressFanOut.svg)](https://mermaid.live/edit#pako:eNqNUslOwzAQ_RXLvYCUhMQpUFzUUzkgcUBwbHpw4klr4diR7bCo8O8k2FFbFomLPZq3jP00O1xpDpjijWHtFt09zAuFUCUFKHey8vf6NE7QrdoYsDZumGIb4Oi6NAskNeOoZJKpCgxK4oXwrFVgRyi7nCVXWZKRPMlysv5yD6Q4Xryf1Vq_WzDPooJs9egLNDbolKTpT03JzKgh3zWEztJZ0Niu9L-qZGcdmAMfj4cxvWmreba613z9C0B-AMQD-V_AdA-A4j5QZu0SatRKJhSqhZR0wjmPrDP6CeikrutQxy-Cuy2dtq9RpaU2dJKm6fzI5Glmg0VOLio4_5dLjx27hFSC015KJ2VZHtuQvY2fuHcaE43G0MaCREOow_FV5cMxHZ5-oPX75UM5avuXhXuOI9yAaZjg_aLuBl6B3RYaKDDtSw4166QrcKE-emrXcubghgunDaY1kxYizDqnH99UhakzHYykpWD9hjS--fEJoIELqQ)
+[![ingress-fanout-diagram](../../../images/ingressFanOut.svg)](https://mermaid.live/edit#pako:eNqNUslOwzAQ_RXLvYCUhMQpUFzUUzkgcUBwbHpw4klr4diR7bCo8O8k2FFbFomLPZq3jP00O1xpDpjijWHtFt09zAuFUCUFKHey8vf6NE7QrdoYsDZumGIb4Oi6NAskNeOoZJKpCgxK4oXwrFVgRyi7nCVXWZKRPMlysv5yD6Q4Xryf1Vq_WzDPooJs9egLNDbolKTpT03JzKgh3zWEztJZ0Niu9L-qZGcdmAMfj4cxvWmreba613z9C0B-AMQD-V_AdA-A4j5QZu0SatRKJhSqhZR0wjmPrDP6CeikrutQxy-Cuy2dtq9RpaU2dJKm6fzI5Glmg0VOLio4_5dLjx27hFSC015KJ2VZHtuQvY2fuHcaE43G0MaCREOow_FV5cMxHZ5-oPX75UM5avuXhXuOI9yAaZjg_aLuBl6B3RYaKDDtSw4166QrcKE-emrXcubghgunDaY1kxYizDqnH99UhakzHYykpWD9hjS--fEJoIELqQ)
 
 Figure. Ingress Fan Out
 
@@ -477,11 +477,11 @@ The Ingress controller provisions an implementation-specific load balancer that 
 > [!NOTE]
 > Depending on the
 >
-> [Ingress controller](docs/concepts/services-networking/ingress-controllers/)
+> [Ingress controller](../ingress-controllers/)
 >
 > you are using, you may need to create a default-http-backend
 >
-> [Service](docs/concepts/services-networking/service/)
+> [Service](../service/)
 >
 > .
 
@@ -489,7 +489,7 @@ The Ingress controller provisions an implementation-specific load balancer that 
 
 Name-based virtual hosts support routing HTTP traffic to multiple host names at the same IP address.
 
-[![ingress-namebase-diagram](docs/images/ingressNameBased.svg)](https://mermaid.live/edit#pako:eNqNkl9PwyAUxb8KYS-atM1Kp05m9qSJJj4Y97jugcLtRqTQAPVPdN_dVlq3qUt8gZt7zvkBN7xjbgRgiteW1Rt0_zjLNUJcSdD-ZBn21WmcoDu9tuBcXDHN1iDQVWHnSBkmUMEU0xwsSuK5DK5l745QejFNLtMkJVmSZmT1Re9NcTz_uDXOU1QakxTMJtxUHw7ss-SQLhehQEODTsdH4l20Q-zFyc84-Y67pghv5apxHuweMuj9eS2_NiJdPhix-kMgvwQShOyYMNkJoEUYM3PuGkpUKyY1KqVSdCSEiJy35gnoqCzLvo5fpPAbOqlfI26UsXQ0Ho9nB5CnqesRGTnncPYvSqsdUvqp9KRdlI6KojjEkB0mnLgjDRONhqENBYm6oXbLV5V1y6S7-l42_LowlIN2uFm_twqOcAW2YlK0H_i9c-bYb6CCHNO2FFCyRvkc53rbWptaMA83QnpjMS2ZchBh1nizeNMcU28bGEzXkrV_pArN7Sc0rBTu)
+[![ingress-namebase-diagram](../../../images/ingressNameBased.svg)](https://mermaid.live/edit#pako:eNqNkl9PwyAUxb8KYS-atM1Kp05m9qSJJj4Y97jugcLtRqTQAPVPdN_dVlq3qUt8gZt7zvkBN7xjbgRgiteW1Rt0_zjLNUJcSdD-ZBn21WmcoDu9tuBcXDHN1iDQVWHnSBkmUMEU0xwsSuK5DK5l745QejFNLtMkJVmSZmT1Re9NcTz_uDXOU1QakxTMJtxUHw7ss-SQLhehQEODTsdH4l20Q-zFyc84-Y67pghv5apxHuweMuj9eS2_NiJdPhix-kMgvwQShOyYMNkJoEUYM3PuGkpUKyY1KqVSdCSEiJy35gnoqCzLvo5fpPAbOqlfI26UsXQ0Ho9nB5CnqesRGTnncPYvSqsdUvqp9KRdlI6KojjEkB0mnLgjDRONhqENBYm6oXbLV5V1y6S7-l42_LowlIN2uFm_twqOcAW2YlK0H_i9c-bYb6CCHNO2FFCyRvkc53rbWptaMA83QnpjMS2ZchBh1nizeNMcU28bGEzXkrV_pArN7Sc0rBTu)
 
 Figure. Ingress Name Based Virtual hosting
 
@@ -572,7 +572,7 @@ spec:
 
 ### TLS
 
-You can secure an Ingress by specifying a [Secret](docs/concepts/configuration/secret/) that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
+You can secure an Ingress by specifying a [Secret](../../configuration/secret/) that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
 
 ```yaml
 apiVersion: v1
@@ -639,7 +639,7 @@ spec:
 
 An Ingress controller is bootstrapped with some load balancing policy settings that it applies to all Ingress, such as the load balancing algorithm, backend weight scheme, and others. More advanced load balancing concepts (e.g. persistent sessions, dynamic weights) are not yet exposed through the Ingress. You can instead get these features through the load balancer used for a Service.
 
-It's also worth noting that even though health checks are not exposed directly through the Ingress, there exist parallel concepts in Kubernetes such as [readiness probes](docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) that allow you to achieve the same end result. Please review the controller specific documentation to see how they handle health checks.
+It's also worth noting that even though health checks are not exposed directly through the Ingress, there exist parallel concepts in Kubernetes such as [readiness probes](../../../tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) that allow you to achieve the same end result. Please review the controller specific documentation to see how they handle health checks.
 
 ## Updating an Ingress
 
@@ -727,18 +727,18 @@ You can achieve the same outcome by invoking `kubectl replace -f` on a modified 
 
 ## Failing across availability zones
 
-Techniques for spreading traffic across failure domains differ between cloud providers. Please check the documentation of the relevant [Ingress controller](docs/concepts/services-networking/ingress-controllers/) for details.
+Techniques for spreading traffic across failure domains differ between cloud providers. Please check the documentation of the relevant [Ingress controller](../ingress-controllers/) for details.
 
 ## Alternatives
 
 You can expose a Service in multiple ways that don't directly involve the Ingress resource:
 
-- Use [Service.Type=LoadBalancer](docs/concepts/services-networking/service/#loadbalancer)
-- Use [Service.Type=NodePort](docs/concepts/services-networking/service/#type-nodeport)
+- Use [Service.Type=LoadBalancer](../service/#loadbalancer)
+- Use [Service.Type=NodePort](../service/#type-nodeport)
 
 ## What's next
 
-- Learn about the [Ingress](docs/reference/kubernetes-api/networking/ingress-v1/) API
-- Learn about [Ingress controllers](docs/concepts/services-networking/ingress-controllers/)
+- Learn about the [Ingress](../../../reference/kubernetes-api/networking/ingress-v1/) API
+- Learn about [Ingress controllers](../ingress-controllers/)
 
 [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

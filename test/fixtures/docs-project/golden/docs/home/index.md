@@ -6,70 +6,70 @@ Kubernetes is an open source container orchestration engine for automating deplo
 
 Learn about Kubernetes and its fundamental concepts.
 
-- [Why Kubernetes?](docs/concepts/overview/what-is-kubernetes/#why-you-need-kubernetes-and-what-can-it-do)
-- [Components of a cluster](docs/concepts/overview/components/)
-- [The Kubernetes API](docs/concepts/overview/kubernetes-api/)
-- [Objects In Kubernetes](docs/concepts/overview/working-with-objects/)
-- [kubectl](docs/concepts/overview/kubectl/)
-- [Containers](docs/concepts/containers/)
-- [Workloads and Pods](docs/concepts/workloads/)
+- [Why Kubernetes?](../concepts/overview/what-is-kubernetes/#why-you-need-kubernetes-and-what-can-it-do)
+- [Components of a cluster](../concepts/overview/components/)
+- [The Kubernetes API](../concepts/overview/kubernetes-api/)
+- [Objects In Kubernetes](../concepts/overview/working-with-objects/)
+- [kubectl](../concepts/overview/kubectl/)
+- [Containers](../concepts/containers/)
+- [Workloads and Pods](../concepts/workloads/)
 
 ## Try Kubernetes
 
 Follow tutorials to learn how to deploy applications in Kubernetes.
 
-- [Hello Minikube](docs/tutorials/hello-minikube/)
-- [Walkthrough the basics](docs/tutorials/kubernetes-basics/)
-- [Stateless Example: PHP Guestbook with Redis](docs/tutorials/stateless-application/guestbook/)
-- [Stateful Example: Wordpress with Persistent Volumes](docs/tutorials/stateful-application/mysql-wordpress-persistent-volume/)
+- [Hello Minikube](../tutorials/hello-minikube/)
+- [Walkthrough the basics](../tutorials/kubernetes-basics/)
+- [Stateless Example: PHP Guestbook with Redis](../tutorials/stateless-application/guestbook/)
+- [Stateful Example: Wordpress with Persistent Volumes](../tutorials/stateful-application/mysql-wordpress-persistent-volume/)
 
 ## Set up a K8s cluster
 
 Get Kubernetes running based on your resources and needs.
 
-- [Learning environment](docs/setup/#learning-environment)
-- [Production environment](docs/setup/#production-environment)
-- [Install the kubeadm setup tool](docs/setup/production-environment/tools/kubeadm/install-kubeadm/)
-- [Metrics](docs/concepts/cluster-administration/observability/#metrics)
-- [Logs](docs/concepts/cluster-administration/observability/#logs)
-- [Traces](docs/concepts/cluster-administration/observability/#traces)
-- [Securing a cluster](docs/concepts/cluster-administration/#securing-a-cluster)
-- [kubeadm command reference](docs/reference/setup-tools/kubeadm/)
+- [Learning environment](../setup/#learning-environment)
+- [Production environment](../setup/#production-environment)
+- [Install the kubeadm setup tool](../setup/production-environment/tools/kubeadm/install-kubeadm/)
+- [Metrics](../concepts/cluster-administration/observability/#metrics)
+- [Logs](../concepts/cluster-administration/observability/#logs)
+- [Traces](../concepts/cluster-administration/observability/#traces)
+- [Securing a cluster](../concepts/cluster-administration/#securing-a-cluster)
+- [kubeadm command reference](../reference/setup-tools/kubeadm/)
 
 ## Learn how to use Kubernetes
 
 Look up common tasks and how to perform them using a short sequence of steps.
 
-- [kubectl Quick Reference](docs/reference/kubectl/quick-reference/)
-- [Install kubectl](docs/tasks/tools/#kubectl)
-- [Configure access to clusters](docs/tasks/access-application-cluster/configure-access-multiple-clusters/)
-- [Use the Web UI Dashboard](docs/tasks/access-application-cluster/web-ui-dashboard/)
-- [Configure a Pod to Use a ConfigMap](docs/tasks/configure-pod-container/configure-pod-configmap/)
-- [Getting help](docs/tasks/debug/)
+- [kubectl Quick Reference](../reference/kubectl/quick-reference/)
+- [Install kubectl](../tasks/tools/#kubectl)
+- [Configure access to clusters](../tasks/access-application-cluster/configure-access-multiple-clusters/)
+- [Use the Web UI Dashboard](../tasks/access-application-cluster/web-ui-dashboard/)
+- [Configure a Pod to Use a ConfigMap](../tasks/configure-pod-container/configure-pod-configmap/)
+- [Getting help](../tasks/debug/)
 
 ## Look up reference information
 
 Browse terminology, command line syntax, API resource types, and setup tool documentation.
 
-- [Glossary](docs/reference/glossary/)
-- [kubectl command line tool](docs/reference/kubectl/)
-- [Labels, annotations and taints](docs/reference/labels-annotations-taints/#labels-annotations-and-taints-used-on-api-objects)
-- [Kubernetes API reference](docs/reference/kubernetes-api/)
-- [Overview of API](docs/reference/using-api/)
-- [Feature Gates](docs/reference/command-line-tools-reference/feature-gates/)
+- [Glossary](../reference/glossary/)
+- [kubectl command line tool](../reference/kubectl/)
+- [Labels, annotations and taints](../reference/labels-annotations-taints/#labels-annotations-and-taints-used-on-api-objects)
+- [Kubernetes API reference](../reference/kubernetes-api/)
+- [Overview of API](../reference/using-api/)
+- [Feature Gates](../reference/command-line-tools-reference/feature-gates/)
 
 ## Contribute to Kubernetes
 
 Find out how you can help make Kubernetes better.
 
-- [Contribute to Kubernetes](docs/contribute/)
-- [Contribute to documentation](docs/contribute/docs/)
-- [Suggest content improvements](docs/contribute/suggesting-improvements/#opening-an-issue)
-- [Opening a pull request](docs/contribute/new-content/open-a-pr/)
-- [Documenting a feature for a release](docs/contribute/new-content/new-features/)
-- [Localizing the docs](docs/contribute/localization/)
-- [Participating in SIG Docs](docs/contribute/participate/)
-- [Viewing Site Analytics](docs/contribute/analytics/)
+- [Contribute to Kubernetes](../contribute/)
+- [Contribute to documentation](../contribute/docs/)
+- [Suggest content improvements](../contribute/suggesting-improvements/#opening-an-issue)
+- [Opening a pull request](../contribute/new-content/open-a-pr/)
+- [Documenting a feature for a release](../contribute/new-content/new-features/)
+- [Localizing the docs](../contribute/localization/)
+- [Participating in SIG Docs](../contribute/participate/)
+- [Viewing Site Analytics](../contribute/analytics/)
 
 ## Training
 

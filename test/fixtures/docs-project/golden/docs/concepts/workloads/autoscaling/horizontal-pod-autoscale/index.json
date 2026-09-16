@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v7",
+  "generator_version": "docs-project-v8",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,20 +10,20 @@
   "path": "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
   "page_kind": "content",
   "title": "Horizontal Pod Autoscaling",
-  "digest": "sha256:e381ef94cc1aa74be0a9dcd7f20eea69d9e6bb76c84a3abf1b333d72905b7757",
+  "digest": "sha256:25b030e199a26cbd97d36d655118baaeaabc137ef5dd24e4ec9703ea67b0113c",
   "anchors": [
     {
       "id": "how-does-a-horizontalpodautoscaler-work",
       "level": 2,
       "title": "How does a HorizontalPodAutoscaler work?",
-      "digest": "sha256:20438117a685272808e57184f1da1c3d18d5e63463ea6015a78e6823de3c62a9",
+      "digest": "sha256:e372593b1506acda6df69e065a598a59c3b897ea8c82e2bad2da4422f5dcb20a",
       "parent": ""
     },
     {
       "id": "algorithm-details",
       "level": 3,
       "title": "Algorithm details",
-      "digest": "sha256:0d84005ceb579e2d5967a0b12da5c18a8a128af886a98fe981fb044f1f88e278",
+      "digest": "sha256:0283fb720f9ee9be4406e3849c17fb0ea51f283c91519f2643ec6380adebf429",
       "parent": "how-does-a-horizontalpodautoscaler-work"
     },
     {
@@ -51,7 +51,7 @@
       "id": "api-object",
       "level": 2,
       "title": "API object",
-      "digest": "sha256:f46f64b9e46eab5327024671a3b9165c5ed335acee800e913619d58281af9e36",
+      "digest": "sha256:8ef4c2b62b7bf5f9754a553e17d3b4be36a02882fb8577177a419408cc73ca16",
       "parent": ""
     },
     {
@@ -72,14 +72,14 @@
       "id": "support-for-resource-metrics",
       "level": 2,
       "title": "Support for resource metrics",
-      "digest": "sha256:f64bb0e447e4434d3f91fce6ae265ac0af98739f379227193542f099e8206ee2",
+      "digest": "sha256:851faed0717f55b3715531001c486bfaa2a0d0e5fbab710d7c17b5e7309d4549",
       "parent": ""
     },
     {
       "id": "container-resource-metrics",
       "level": 3,
       "title": "Container resource metrics",
-      "digest": "sha256:76a4bf6dc6007731a6ede35648c3abcd93e99a5a799dd6a7eb74acac2aef3f3c",
+      "digest": "sha256:ce92c68dd67b35f5e377bf4a82b638d17ca1d527fd4ac9d67c86e66b09e531f5",
       "parent": "support-for-resource-metrics"
     },
     {
@@ -100,14 +100,14 @@
       "id": "support-for-metrics-apis",
       "level": 2,
       "title": "Support for metrics APIs",
-      "digest": "sha256:27d8d858fb27a4460418494c43f81b19b7e1a145b8a4c4e0c637f0029b6d71fe",
+      "digest": "sha256:bdd72ad66e1e74ce5433fae32f8d9f54914ab38feca4b22db9cd0bfa894ecf35",
       "parent": ""
     },
     {
       "id": "configurable-scaling-behavior",
       "level": 2,
       "title": "Configurable scaling behavior",
-      "digest": "sha256:0cbb5e2bef3fafa7705cbed4a0c77d930051a0d03e86ed1c71aaa8d5988bf951",
+      "digest": "sha256:378036045622de8d346beb7799605c00ca90d055bd02649d525faed3760f0899",
       "parent": ""
     },
     {
@@ -128,7 +128,7 @@
       "id": "tolerance",
       "level": 3,
       "title": "Tolerance",
-      "digest": "sha256:42665a0dcbe4398c4026dcfe65269b0aa20bb7ffe0808ec76fc189794d2b8cb4",
+      "digest": "sha256:a53678dc33ade49771acc5d713dc5bd0b3a6ac789ba21428546934808c8ce3fc",
       "parent": "configurable-scaling-behavior"
     },
     {
@@ -170,28 +170,28 @@
       "id": "scaling-to-and-from-zero",
       "level": 2,
       "title": "Scaling to and from zero",
-      "digest": "sha256:b6f3c7a4fa822746d06bd6eeee7fbb9c0ad40d2a4da149bbc5d8ecb2d8571105",
+      "digest": "sha256:c39d48268f0bfd246d69bb40aa2eab293c44bb049a0ac829dab8243df3db8df0",
       "parent": ""
     },
     {
       "id": "implicit-maintenance-mode-deactivation",
       "level": 2,
       "title": "Implicit maintenance-mode deactivation",
-      "digest": "sha256:5d1c4d90197896839c4827e9dac6b896b95eaabb7bfdbe8863886fa088fac4da",
+      "digest": "sha256:f939ecda81ccde21e82c1fba46174954eb1af74430da13e81269613dbf6b29ec",
       "parent": ""
     },
     {
       "id": "migrating-deployments-and-statefulsets-to-horizontal-autoscaling",
       "level": 3,
       "title": "Migrating Deployments and StatefulSets to horizontal autoscaling",
-      "digest": "sha256:0eeaee99afacdca55b5fc209a1dbaaf353dea87480a82bcbb9548398b0b85f77",
+      "digest": "sha256:baaccdc508aef139b3f25337f459d104f98e49d95cc17a2f1f42ed5cfc90bf2f",
       "parent": "implicit-maintenance-mode-deactivation"
     },
     {
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:2a2bf1c955d55ef9c1fa97753f899165136fe95bf8d1bd6bd1743fd37dbdaa96",
+      "digest": "sha256:9026101a2de90208e4f6329df0378f30448ff926df4f797ecd83cbb6357fcbaa",
       "parent": ""
     }
   ],

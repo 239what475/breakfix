@@ -176,16 +176,17 @@ func (normalizer *pageNormalizer) link(value string) (string, bool) {
 		return resolved, true
 	case referenceDocs:
 		page, fragment := splitFragment(resolved)
+		reference := relativePageReference(normalizer.page, page) + fragment
 		if _, exists := normalizer.context.tree[page]; exists {
 			normalizer.links.Internal++
-			return page + fragment, true
+			return reference, true
 		}
 		if _, exists := normalizer.context.orphans[page]; exists {
 			normalizer.links.ToOrphans++
-			return page + fragment, true
+			return reference, true
 		}
 		normalizer.links.OutOfTree = append(normalizer.links.OutOfTree, page)
-		return page + fragment, true
+		return reference, true
 	default:
 		normalizer.links.Dropped++
 		return "", false
@@ -225,7 +226,37 @@ func (normalizer *pageNormalizer) image(value string) (string, error) {
 	}
 	digest := sha256.Sum256(content)
 	normalizer.assets[assetPath] = Asset{Path: assetPath, Digest: "sha256:" + hex.EncodeToString(digest[:])}
-	return assetPath, nil
+	return relativeAssetReference(normalizer.page, assetPath), nil
+}
+
+// relativePageReference renders a canonical site path as a page reference
+// relative to the page's own directory, so plain Markdown renderers and
+// editors resolve links without knowing the library root.
+func relativePageReference(page, target string) string {
+	return relativeReference(page, target, true)
+}
+
+func relativeAssetReference(page, target string) string {
+	return relativeReference(page, target, false)
+}
+
+func relativeReference(page, target string, directory bool) string {
+	from := strings.TrimSuffix(page, "/")
+	rel, err := filepath.Rel(from, path.Clean(target))
+	if err != nil {
+		return target
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		if directory {
+			return "./"
+		}
+		return target
+	}
+	if directory {
+		return rel + "/"
+	}
+	return rel
 }
 
 type referenceKind uint8

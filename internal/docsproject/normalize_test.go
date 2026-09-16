@@ -21,7 +21,7 @@ func TestPageNormalizerNormalizesLinksAndAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "# Current\n\n[Old](docs/new/#section) [Here](#here) [External](https://example.test) [Archive](docs/archive/) [Missing](docs/missing/) Bad![diagram](docs/images/diagram.svg)\n"
+	want := "# Current\n\n[Old](../new/#section) [Here](#here) [External](https://example.test) [Archive](../archive/) [Missing](../missing/) Bad![diagram](../images/diagram.svg)\n"
 	if got := string(page.Markdown); got != want {
 		t.Fatalf("markdown = %q, want %q", got, want)
 	}
@@ -30,6 +30,26 @@ func TestPageNormalizerNormalizesLinksAndAssets(t *testing.T) {
 	}
 	if len(page.Assets) != 1 || page.Assets[0].Path != "docs/images/diagram.svg" || page.Assets[0].Digest != "sha256:d59386e0ae435e292fbe0ebcdb954b75ed5fb3922091277cb19f798fc5d50718" {
 		t.Fatalf("assets = %#v", page.Assets)
+	}
+}
+
+func TestRelativeReferenceEdgeCases(t *testing.T) {
+	cases := []struct {
+		page      string
+		target    string
+		directory bool
+		want      string
+	}{
+		{page: "docs/a/page/", target: "docs/a/page/", directory: true, want: "./"},
+		{page: "docs/a/page/", target: "docs/reference/glossary/", directory: true, want: "../../reference/glossary/"},
+		{page: "docs/home/", target: "images/docs/pod.svg", directory: false, want: "../../images/docs/pod.svg"},
+		{page: "docs/a/", target: "docs/a/x.svg", directory: false, want: "x.svg"},
+	}
+	for _, test := range cases {
+		got := relativeReference(test.page, test.target, test.directory)
+		if got != test.want {
+			t.Fatalf("relativeReference(%q, %q, %v) = %q, want %q", test.page, test.target, test.directory, got, test.want)
+		}
 	}
 }
 
@@ -90,7 +110,7 @@ func TestLoadRedirectsCountsOnlyDocsRules(t *testing.T) {
 func TestPageNormalizerNormalizesCardLinks(t *testing.T) {
 	context := normalizationContext{tree: map[string]struct{}{"docs/new/": {}}}
 	page, err := extractPageWithNormalizer([]byte(`<main><h1>Index</h1><div class="card-group"><a href="/docs/new/">New</a><a href="javascript:bad()">Bad</a></div></main>`), context.forPage("docs/index/"))
-	if err != nil || string(page.Markdown) != "# Index\n\n- [New](docs/new/)\n" || page.Links.Internal != 1 || page.Links.Dropped != 1 {
+	if err != nil || string(page.Markdown) != "# Index\n\n- [New](../new/)\n" || page.Links.Internal != 1 || page.Links.Dropped != 1 {
 		t.Fatalf("page = %#v, error = %v", page, err)
 	}
 }

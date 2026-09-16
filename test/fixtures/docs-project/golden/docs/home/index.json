@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v7",
+  "generator_version": "docs-project-v8",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,48 +10,48 @@
   "path": "docs/home/",
   "page_kind": "index",
   "title": "Kubernetes Documentation",
-  "digest": "sha256:26f09cff4244ac1828933de92318dfa73b214f55116e72a02c0c9df097689641",
+  "digest": "sha256:7dc5c3dd54c9510ff360bca604737b926b736abf84a120b969c2928e65d5cc63",
   "anchors": [
     {
       "id": "understand-kubernetes",
       "level": 2,
       "title": "Understand Kubernetes",
-      "digest": "sha256:69c7f17cd004208cfbc27fe812604b57e35773cfa1b6120e39b7726a5d91f061",
+      "digest": "sha256:c9f3777059b0829d1aefffede6794b5646418864d90cbe8267c4ad87445e0bf3",
       "parent": ""
     },
     {
       "id": "try-kubernetes",
       "level": 2,
       "title": "Try Kubernetes",
-      "digest": "sha256:5677d29fff0633146e7306dcedc2bcfd516c6838dcca68bc383441eb2690203c",
+      "digest": "sha256:0a1fbc72e5d4afd2f45a40814ae297423d401332f683094db8bd4d8ee9c70e97",
       "parent": ""
     },
     {
       "id": "set-up-a-k8s-cluster",
       "level": 2,
       "title": "Set up a K8s cluster",
-      "digest": "sha256:bd56616f785829b300d405476e1162a017d0a60d33f6d86ff712d68bb6d82c66",
+      "digest": "sha256:be8176e9d0da23b79acdaf10e3579527dc1ac4319e20e74dc062a8f6855fa4e2",
       "parent": ""
     },
     {
       "id": "learn-how-to-use-kubernetes",
       "level": 2,
       "title": "Learn how to use Kubernetes",
-      "digest": "sha256:e2257f639aab95f467d6890c04bf9a0669b046d5ad2b52efe0a0724003fd9243",
+      "digest": "sha256:f41f2b6afd801f48daad67116b1203844ab40ac2f5c4eee514f0cf9bed0f2f4c",
       "parent": ""
     },
     {
       "id": "look-up-reference-information",
       "level": 2,
       "title": "Look up reference information",
-      "digest": "sha256:ac736cbf11e9a425001bc2143502c05faf8823e2e50749386861f02fbaac4ea2",
+      "digest": "sha256:9c66dbe6cc4962369e1b1db50ed9d66da3d56173112056cea2808ee20e7ceee6",
       "parent": ""
     },
     {
       "id": "contribute-to-kubernetes",
       "level": 2,
       "title": "Contribute to Kubernetes",
-      "digest": "sha256:f5ef8a3f6605ca074bb13786f4668838f384e6e75d1ed5eb00bdbebeb807bd39",
+      "digest": "sha256:e5fb7565f16e19d688d76d2883b653859f417a1547ab53102d2c3296e295ed09",
       "parent": ""
     },
     {
