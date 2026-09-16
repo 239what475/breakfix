@@ -73,3 +73,10 @@ func TestParsePageSynthesizesTitleForEmptyUpstreamH1(t *testing.T) {
 		t.Fatalf("fallback page = %#v, error = %v", page, err)
 	}
 }
+
+func TestParsePageStripsHeadingSelfLinks(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Page<a class="td-heading-self-link" href="#page"></a></h1><h2 id="section">Section<a class="td-heading-self-link" href="#section"></a></h2></main>`))
+	if err != nil || string(page.Markdown) != "# Page\n\n## Section\n" || len(page.Headings) != 1 || page.Headings[0].Title != "Section" {
+		t.Fatalf("page = %#v, error = %v", page, err)
+	}
+}

@@ -12,7 +12,7 @@ The HorizontalPodAutoscaler is implemented as a Kubernetes API resource and a [c
 
 There is [walkthrough example](docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/) of using horizontal pod autoscaling.
 
-## How does a HorizontalPodAutoscaler work?[](#how-does-a-horizontalpodautoscaler-work)
+## How does a HorizontalPodAutoscaler work?
 
 `
 graph BT
@@ -53,7 +53,7 @@ The common use for HorizontalPodAutoscaler is to configure it to fetch metrics f
 
 The HorizontalPodAutoscaler controller accesses corresponding workload resources that support scaling (such as Deployments and StatefulSet). These resources each have a subresource named `scale`, an interface that allows you to dynamically set the number of replicas and examine each of their current states. For general information about subresources in the Kubernetes API, see [Kubernetes API Concepts](docs/reference/using-api/api-concepts/).
 
-### Algorithm details[](#algorithm-details)
+### Algorithm details
 
 From the most basic perspective, the HorizontalPodAutoscaler controller operates on the ratio between desired metric value and current metric value:
 
@@ -83,7 +83,7 @@ If multiple metrics are specified in a HorizontalPodAutoscaler, this calculation
 
 Finally, right before HPA scales the target, the scale recommendation is recorded. The controller considers all recommendations within a configurable window choosing the highest recommendation from within that window. You can configure this value using the `--horizontal-pod-autoscaler-downscale-stabilization` command line option, which defaults to 5 minutes. This means that scaledowns will occur gradually, smoothing out the impact of rapidly fluctuating metric values.
 
-## Pod readiness and autoscaling metrics[](#pod-readiness-and-autoscaling-metrics)
+## Pod readiness and autoscaling metrics
 
 The HorizontalPodAutoscaler (HPA) controller includes two command line options that influence how CPU metrics are collected from Pods during startup:
 
@@ -101,35 +101,35 @@ It is designed to: - Avoid including Pods that rapidly fluctuate between `Ready`
 
 You can only set these command line options cluster-wide.
 
-### Key behaviors for pod readiness[](#pod-readiness-key-behaviors)
+### Key behaviors for pod readiness
 
 - If a Pod is `Ready` and remains `Ready`, it can be counted as contributing metrics even within the delay.
 - If a Pod rapidly toggles between `Ready` and `Unready`, metrics are ignored until it’s considered stably `Ready`.
 
-### Good practice for pod readiness[](#pod-readiness-good-practices)
+### Good practice for pod readiness
 
 - Configure a `startupProbe` that doesn't pass until the high CPU usage has passed, or
 - Ensure your `readinessProbe` only reports `Ready` **after** the CPU spike subsides, using `initialDelaySeconds`.
 
 And ideally also set `--horizontal-pod-autoscaler-cpu-initialization-period` to **cover the startup duration**.
 
-## API object[](#api-object)
+## API object
 
 The HorizontalPodAutoscaler is an API kind in the Kubernetes `autoscaling` API group. The current stable version can be found in the `autoscaling/v2` API version which includes support for scaling on memory and custom metrics. The new fields introduced in `autoscaling/v2` are preserved as annotations when working with `autoscaling/v1`.
 
 When you create a HorizontalPodAutoscaler API object, make sure the name specified is a valid [DNS subdomain name](docs/concepts/overview/working-with-objects/names/#dns-subdomain-names). More details about the API object can be found at [HorizontalPodAutoscaler Object](docs/reference/generated/kubernetes-api/v1.37/#horizontalpodautoscaler-v2-autoscaling).
 
-## Stability of workload scale[](#flapping)
+## Stability of workload scale
 
 When managing the scale of a group of replicas using the HorizontalPodAutoscaler, it is possible that the number of replicas keeps fluctuating frequently due to the dynamic nature of the metrics evaluated. This is sometimes referred to as *thrashing*, or *flapping*. It's similar to the concept of *hysteresis* in cybernetics.
 
-## Autoscaling during rolling update[](#autoscaling-during-rolling-update)
+## Autoscaling during rolling update
 
 Kubernetes lets you perform a rolling update on a Deployment. In that case, the Deployment manages the underlying ReplicaSets for you. When you configure autoscaling for a Deployment, you bind a HorizontalPodAutoscaler to a single Deployment. The HorizontalPodAutoscaler manages the `replicas` field of the Deployment. The deployment controller is responsible for setting the `replicas` of the underlying ReplicaSets so that they add up to a suitable number during the rollout and also afterwards.
 
 If you perform a rolling update of a StatefulSet that has an autoscaled number of replicas, the StatefulSet directly manages its set of Pods (there is no intermediate resource similar to ReplicaSet).
 
-## Support for resource metrics[](#support-for-resource-metrics)
+## Support for resource metrics
 
 Any HPA target can be scaled based on the resource usage of the pods in the scaling target. When defining the pod specification the resource requests like `cpu` and `memory` should be specified. This is used to determine the resource utilization and used by the HPA controller to scale the target up or down. To use resource utilization based scaling specify a metric source like this:
 
@@ -147,7 +147,7 @@ With this metric the HPA controller will keep the average utilization of the pod
 > [!NOTE]
 > Since the resource usages of all the containers are summed up the total pod utilization may not accurately represent the individual container resource usage. This could lead to situations where a single container might be running with high usage and the HPA will not scale out because the overall pod usage is still within acceptable limits.
 
-### Container resource metrics[](#container-resource-metrics)
+### Container resource metrics
 
 *This is a stable feature in Kubernetes, and has been since the 1.30 release. You can no longer toggle this feature (the associated [feature gate](docs/reference/command-line-tools-reference/feature-gates-removed/) has been removed).*
 
@@ -172,7 +172,7 @@ In the above example the HPA controller scales the target such that the average 
 >
 > Once you have rolled out the container name change to the workload resource, tidy up by removing the old container name from the HPA specification.
 
-## Scaling on custom metrics[](#scaling-on-custom-metrics)
+## Scaling on custom metrics
 
 **[FEATURE STATE: Stable | since: v1.23]**
 
@@ -182,7 +182,7 @@ Provided that you use the `autoscaling/v2` API version, you can configure a Hori
 
 See [Support for metrics APIs](#support-for-metrics-apis) for the requirements.
 
-## Scaling on multiple metrics[](#scaling-on-multiple-metrics)
+## Scaling on multiple metrics
 
 **[FEATURE STATE: Stable | since: v1.23]**
 
@@ -190,7 +190,7 @@ See [Support for metrics APIs](#support-for-metrics-apis) for the requirements.
 
 Provided that you use the `autoscaling/v2` API version, you can specify multiple metrics for a HorizontalPodAutoscaler to scale on. Then, the HorizontalPodAutoscaler controller evaluates each metric, and proposes a new scale based on that metric. The HorizontalPodAutoscaler takes the maximum scale recommended for each metric and sets the workload to that size (provided that this isn't larger than the overall maximum that you configured).
 
-## Support for metrics APIs[](#support-for-metrics-apis)
+## Support for metrics APIs
 
 By default, the HorizontalPodAutoscaler controller retrieves metrics from a series of APIs. In order for it to access these APIs, cluster administrators must ensure that:
 
@@ -208,7 +208,7 @@ For more information on these different metrics paths and how they differ please
 
 For examples of how to use them see [the walkthrough for using custom metrics](docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/#autoscaling-on-multiple-metrics-and-custom-metrics) and [the walkthrough for using external metrics](docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/#autoscaling-on-metrics-not-related-to-kubernetes-objects).
 
-## Configurable scaling behavior[](#configurable-scaling-behavior)
+## Configurable scaling behavior
 
 **[FEATURE STATE: Stable | since: v1.23]**
 
@@ -218,7 +218,7 @@ If you use the `v2` HorizontalPodAutoscaler API, you can use the `behavior` fiel
 
 Scaling policies let you control the rate of change of replicas while scaling. Also two settings can be used to prevent [flapping](#flapping): you can specify a *stabilization window* for smoothing replica counts, and a tolerance to ignore minor metric fluctuations below a specified threshold.
 
-### Scaling policies[](#scaling-policies)
+### Scaling policies
 
 One or more scaling policies can be specified in the `behavior` section of the spec. When multiple policies are specified the policy which allows the highest amount of change is the policy which is selected by default. The following example shows this behavior while scaling down:
 
@@ -240,7 +240,7 @@ Since by default the policy which allows the highest amount of change is selecte
 
 The policy selection can be changed by specifying the `selectPolicy` field for a scaling direction. By setting the value to `Min` which would select the policy which allows the smallest change in the replica count. Setting the value to `Disabled` completely disables scaling in that direction.
 
-### Stabilization window[](#stabilization-window)
+### Stabilization window
 
 The stabilization window is used to restrict the [flapping](#flapping) of replica count when the metrics used for scaling keep fluctuating. The autoscaling algorithm uses this window to infer a previous desired state and avoid unwanted changes to workload scale.
 
@@ -256,7 +256,7 @@ When the metrics indicate that the target should be scaled down the algorithm lo
 
 This approximates a rolling maximum, and avoids having the scaling algorithm frequently remove Pods only to trigger recreating an equivalent Pod just moments later.
 
-### Tolerance[](#tolerance)
+### Tolerance
 
 **[FEATURE STATE: Stable | gate: HPAConfigurableTolerance | since: v1.37]**
 
@@ -278,7 +278,7 @@ With this configuration, the HPA algorithm will only consider scaling up if the 
 
 If you don't set this field, the HPA applies the default cluster-wide tolerance of 10%. This default can be updated for both scale-up and scale-down using the [kube-controller-manager](docs/reference/command-line-tools-reference/kube-controller-manager/) `--horizontal-pod-autoscaler-tolerance` command line argument. (You can't use the Kubernetes API to configure this default value.)
 
-### Default behavior[](#default-behavior)
+### Default behavior
 
 To use the custom scaling not all fields have to be specified. Only values which need to be customized can be specified. These custom values are merged with default values. The default values match the existing behavior in the HPA algorithm.
 
@@ -304,7 +304,7 @@ behavior:
 
 For scaling down the stabilization window is *300* seconds (or the value of the `--horizontal-pod-autoscaler-downscale-stabilization` command line option, if provided). There is only a single policy for scaling down which allows a 100% of the currently running replicas to be removed which means the scaling target can be scaled down to the minimum allowed replicas. For scaling up there is no stabilization window. When the metrics indicate that the target should be scaled up the target is scaled up immediately. There are 2 policies where 4 pods or a 100% of the currently running replicas may at most be added every 15 seconds till the HPA reaches its steady state.
 
-### Example: change downscale stabilization window[](#example-change-downscale-stabilization-window)
+### Example: change downscale stabilization window
 
 To provide a custom downscale stabilization window of 1 minute, the following behavior would be added to the HPA:
 
@@ -314,7 +314,7 @@ behavior:
     stabilizationWindowSeconds: 60
 `
 
-### Example: limit scale down rate[](#example-limit-scale-down-rate)
+### Example: limit scale down rate
 
 To limit the rate at which pods are removed by the HPA to 10% per minute, the following behavior would be added to the HPA:
 
@@ -342,7 +342,7 @@ behavior:
     selectPolicy: Min
 `
 
-### Example: disable scale down[](#example-disable-scale-down)
+### Example: disable scale down
 
 The `selectPolicy` value of `Disabled` turns off scaling the given direction. So to prevent downscaling the following policy would be used:
 
@@ -352,13 +352,13 @@ behavior:
     selectPolicy: Disabled
 `
 
-## Support for HorizontalPodAutoscaler in kubectl[](#support-for-horizontalpodautoscaler-in-kubectl)
+## Support for HorizontalPodAutoscaler in kubectl
 
 HorizontalPodAutoscaler, like every API resource, is supported in a standard way by `kubectl`. You can create a new autoscaler using `kubectl create` command. You can list autoscalers by `kubectl get hpa` or get detailed description by `kubectl describe hpa`. Finally, you can delete an autoscaler using `kubectl delete hpa`.
 
 In addition, there is a special `kubectl autoscale` command for creating a HorizontalPodAutoscaler object. For instance, executing `kubectl autoscale rs foo --min=2 --max=5 --cpu=80%` will create an autoscaler for ReplicaSet *foo*, with target CPU utilization set to `80%` and the number of replicas between 2 and 5.
 
-## Scaling to and from zero[](#scaling-to-and-from-zero)
+## Scaling to and from zero
 
 **[FEATURE STATE: Beta | gate: HPAScaleToZero | since: v1.37 | enabled by default]**
 
@@ -370,11 +370,11 @@ This behavior is controlled by the `HPAScaleToZero` [feature gate](docs/referenc
 
 While the HPA is holding a workload at zero replicas, it records a `ScaledToZero` condition set to `True` on the HorizontalPodAutoscaler's status. The HPA uses this condition to distinguish a workload that it scaled to zero (and will scale back up when the metric returns) from one that was [manually deactivated](#implicit-maintenance-mode-deactivation) by setting its replica count to `0`. Once the workload is scaled back up, the condition is set to `False` with the reason `NotScaledToZero`.
 
-## Implicit maintenance-mode deactivation[](#implicit-maintenance-mode-deactivation)
+## Implicit maintenance-mode deactivation
 
 You can implicitly deactivate the HPA for a target without the need to change the HPA configuration itself. If the target's desired replica count is set to 0, and the HPA's minimum replica count is greater than 0, the HPA stops adjusting the target (and sets the `ScalingActive` Condition on itself to `false`) until you reactivate it by manually adjusting the target's desired replica count or HPA's minimum replica count.
 
-### Migrating Deployments and StatefulSets to horizontal autoscaling[](#migrating-deployments-and-statefulsets-to-horizontal-autoscaling)
+### Migrating Deployments and StatefulSets to horizontal autoscaling
 
 When an HPA is enabled, it is recommended that the value of `spec.replicas` of the Deployment and / or StatefulSet be removed from their [manifest(s)](docs/reference/glossary/#term-manifest). If this isn't done, any time a change to that object is applied, for example via `kubectl apply -f deployment.yaml`, this will instruct Kubernetes to scale the current number of Pods to the value of the `spec.replicas` key. This may not be desired and could be troublesome when an HPA is active, resulting in thrashing or flapping behavior.
 
@@ -394,7 +394,7 @@ Keep in mind that the removal of `spec.replicas` may incur a one-time degradatio
 
 When using the [Server-Side Apply](docs/reference/using-api/server-side-apply/) you can follow the [transferring ownership](docs/reference/using-api/server-side-apply/#transferring-ownership) guidelines, which cover this exact use case.
 
-## What's next[](#what-s-next)
+## What's next
 
 If you configure autoscaling in your cluster, you may also want to consider using [node autoscaling](docs/concepts/cluster-administration/node-autoscaling/) to ensure you are running the right number of nodes. You can also read more about [*vertical* Pod autoscaling](docs/concepts/workloads/autoscaling/vertical-pod-autoscale/).
 

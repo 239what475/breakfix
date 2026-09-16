@@ -71,6 +71,14 @@ func TestLoadRedirectsCountsOnlyDocsRules(t *testing.T) {
 	}
 }
 
+func TestPageNormalizerNormalizesCardLinks(t *testing.T) {
+	context := normalizationContext{tree: map[string]struct{}{"docs/new/": {}}}
+	page, err := extractPageWithNormalizer([]byte(`<main><h1>Index</h1><div class="card-group"><a href="/docs/new/">New</a><a href="javascript:bad()">Bad</a></div></main>`), context.forPage("docs/index/"))
+	if err != nil || string(page.Markdown) != "# Index\n\n- [New](docs/new/)\n" || page.Links.Internal != 1 || page.Links.Dropped != 1 {
+		t.Fatalf("page = %#v, error = %v", page, err)
+	}
+}
+
 func writeNormalizerFile(t *testing.T, root, name, content string) {
 	t.Helper()
 	file := filepath.Join(root, filepath.FromSlash(name))

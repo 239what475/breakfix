@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v3",
+  "generator_version": "docs-project-v4",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,188 +10,188 @@
   "path": "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/",
   "page_kind": "content",
   "title": "Horizontal Pod Autoscaling",
-  "digest": "sha256:fb7d7052251bf05d844c22292e82d6cffea2d3f766d1bbcd6d35dfe3648f68f7",
+  "digest": "sha256:6b4ae0a6df94f20f401fe81931fd2ab1d2dc2d13db0d7f8853ae978c784d36ee",
   "anchors": [
     {
       "id": "how-does-a-horizontalpodautoscaler-work",
       "level": 2,
-      "title": "How does a HorizontalPodAutoscaler work?[](#how-does-a-horizontalpodautoscaler-work)",
-      "digest": "sha256:012fda0b251fa97bc9129038fb68fce4d47df378d416a113c167b962fbff8509",
+      "title": "How does a HorizontalPodAutoscaler work?",
+      "digest": "sha256:995aa813578c25cff263a39e1357a9bf2e753874dae53d464963b7a3a36e6872",
       "parent": ""
     },
     {
       "id": "algorithm-details",
       "level": 3,
-      "title": "Algorithm details[](#algorithm-details)",
-      "digest": "sha256:029efd1b78f32bcf815ca431d92011ffbde45caa7afa60ece431de5f2823b02f",
+      "title": "Algorithm details",
+      "digest": "sha256:0d84005ceb579e2d5967a0b12da5c18a8a128af886a98fe981fb044f1f88e278",
       "parent": "how-does-a-horizontalpodautoscaler-work"
     },
     {
       "id": "pod-readiness-and-autoscaling-metrics",
       "level": 2,
-      "title": "Pod readiness and autoscaling metrics[](#pod-readiness-and-autoscaling-metrics)",
-      "digest": "sha256:533b2965494385e48a34626fad5f747abeab5f08a50ef1489f04b8167b7fcb8d",
+      "title": "Pod readiness and autoscaling metrics",
+      "digest": "sha256:8f56bfab66598cd52de032d53ddbbc1d7b1c2c903d8a37453bda65b538e775ac",
       "parent": ""
     },
     {
       "id": "pod-readiness-key-behaviors",
       "level": 3,
-      "title": "Key behaviors for pod readiness[](#pod-readiness-key-behaviors)",
-      "digest": "sha256:563bc7cd5ba5334f4950cebf16635d27e02e71ec27391b1c98bc97044b2b6f68",
+      "title": "Key behaviors for pod readiness",
+      "digest": "sha256:5048cdf5c7650f2d7fe93273f0ec456b0bbf26bd67ddc842ec3cb11dc70a391b",
       "parent": "pod-readiness-and-autoscaling-metrics"
     },
     {
       "id": "pod-readiness-good-practices",
       "level": 3,
-      "title": "Good practice for pod readiness[](#pod-readiness-good-practices)",
-      "digest": "sha256:332bcaa2eadbe576236c8bb0903fbc84c7d253c73e1301e2820649315ac52c91",
+      "title": "Good practice for pod readiness",
+      "digest": "sha256:d6ca77e4657a28026d002f16cbeafbb932f4fa130e2c1ccead43d32bd4fbf24d",
       "parent": "pod-readiness-and-autoscaling-metrics"
     },
     {
       "id": "api-object",
       "level": 2,
-      "title": "API object[](#api-object)",
-      "digest": "sha256:7ff1b8769b904c419c9a47ee65e0eef9a9fa4701259eedc9743de3e66349ccca",
+      "title": "API object",
+      "digest": "sha256:f46f64b9e46eab5327024671a3b9165c5ed335acee800e913619d58281af9e36",
       "parent": ""
     },
     {
       "id": "flapping",
       "level": 2,
-      "title": "Stability of workload scale[](#flapping)",
-      "digest": "sha256:c8b787b93066343743d8930c4a094180e2b4ea3a39cab34b7998b3fc9693630c",
+      "title": "Stability of workload scale",
+      "digest": "sha256:e5e0ee51dd0fbbb67de46ecc003220a5c82aa760cc4dc76203e9df77c265d3c0",
       "parent": ""
     },
     {
       "id": "autoscaling-during-rolling-update",
       "level": 2,
-      "title": "Autoscaling during rolling update[](#autoscaling-during-rolling-update)",
-      "digest": "sha256:f19b6d0d4afb3606617606f539057cf93eb36defc4f123a4c2f5ebd4eae91a92",
+      "title": "Autoscaling during rolling update",
+      "digest": "sha256:a6d289f5676998880fea17e7b5528d4277d0786cd1958f6ea4edd55cf1963beb",
       "parent": ""
     },
     {
       "id": "support-for-resource-metrics",
       "level": 2,
-      "title": "Support for resource metrics[](#support-for-resource-metrics)",
-      "digest": "sha256:124a315a289b5e085e362165e30c9f128784d82c85955341ae64474e4b52ac61",
+      "title": "Support for resource metrics",
+      "digest": "sha256:fb3370b99d8e3d4a2245a978db51708b034b21ed15cc48747d2ab525510c151b",
       "parent": ""
     },
     {
       "id": "container-resource-metrics",
       "level": 3,
-      "title": "Container resource metrics[](#container-resource-metrics)",
-      "digest": "sha256:b4f8a5b0adaabcef830066845faf0fd35f9e9e2b31cf6944bdc513f5d2a7a600",
+      "title": "Container resource metrics",
+      "digest": "sha256:b01d285c9516f6d0c3c1a6b54f123e48b169759dac47059203bcc42571a66aec",
       "parent": "support-for-resource-metrics"
     },
     {
       "id": "scaling-on-custom-metrics",
       "level": 2,
-      "title": "Scaling on custom metrics[](#scaling-on-custom-metrics)",
-      "digest": "sha256:a19b1ee44cae81b41eec98ae6d8f7f7d133ddb3a53ffcd785e8ce4dfcd08b89f",
+      "title": "Scaling on custom metrics",
+      "digest": "sha256:9e7cd9c70f6097941c9d76bb584c9331cec85419c6fd681217aabd766ec6ac95",
       "parent": ""
     },
     {
       "id": "scaling-on-multiple-metrics",
       "level": 2,
-      "title": "Scaling on multiple metrics[](#scaling-on-multiple-metrics)",
-      "digest": "sha256:9a319d81eac6a7f18e187e9d1187d9c1463006821e7bc2f99a01dd6d3ad1f3c1",
+      "title": "Scaling on multiple metrics",
+      "digest": "sha256:bbd8f8c25acd7c43980fd962a2a552036b034e01b8b0e4510a82f364f5407968",
       "parent": ""
     },
     {
       "id": "support-for-metrics-apis",
       "level": 2,
-      "title": "Support for metrics APIs[](#support-for-metrics-apis)",
-      "digest": "sha256:21d6f71c33b1d28b0cf54746ab30fb94982a9315ef720f8dc9a4ed00bfbf22f7",
+      "title": "Support for metrics APIs",
+      "digest": "sha256:6b85b5ed904c32cfbef0ed85db4058b69447329e579d2fcb3f89d5445bea86b3",
       "parent": ""
     },
     {
       "id": "configurable-scaling-behavior",
       "level": 2,
-      "title": "Configurable scaling behavior[](#configurable-scaling-behavior)",
-      "digest": "sha256:4e7a96ca7aa361d73e14332c758c5144423c942a853b0ecd265900be4032bdc0",
+      "title": "Configurable scaling behavior",
+      "digest": "sha256:bfcad85a85476f107ec784678838323c7b7d078b8d9ac39bf4544d7e5993e202",
       "parent": ""
     },
     {
       "id": "scaling-policies",
       "level": 3,
-      "title": "Scaling policies[](#scaling-policies)",
-      "digest": "sha256:11ff6076f2f4470bdd9abb9d21463fd94e392f1307f5b72bb744445edc3ad44b",
+      "title": "Scaling policies",
+      "digest": "sha256:aeeba5d930ccdbf87c25323bfbcd3959e6e51b12caddd5b1a214d340f228f263",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "stabilization-window",
       "level": 3,
-      "title": "Stabilization window[](#stabilization-window)",
-      "digest": "sha256:d8bec334ffad6333a3d651db2519292b914d4a95ed894eedbae1ab995a59d4a2",
+      "title": "Stabilization window",
+      "digest": "sha256:3b849c2818660c2f1e4cc2d1a9a0f78cac61cfb08eee3352cfc5a031556615dc",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "tolerance",
       "level": 3,
-      "title": "Tolerance[](#tolerance)",
-      "digest": "sha256:e9be2469c4f56980ccb735a6ea3d5e25f00cec93acbe5d5687367a865f4e9100",
+      "title": "Tolerance",
+      "digest": "sha256:d177f400641316e98f358239e67c8a9ef776ab454a36423bdab002c2a531e477",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "default-behavior",
       "level": 3,
-      "title": "Default behavior[](#default-behavior)",
-      "digest": "sha256:d82db62b161707028f0a5764124c1a487ff79dac52e215e25215873780a4914b",
+      "title": "Default behavior",
+      "digest": "sha256:f7e0bfbd6451238ac451dd71e44b5b9a1d5261af91e5295e650d4609e57adcbb",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-change-downscale-stabilization-window",
       "level": 3,
-      "title": "Example: change downscale stabilization window[](#example-change-downscale-stabilization-window)",
-      "digest": "sha256:d47d445f6eafc9eec62efbb0d76972cebde96c286fdd76bb2eb28485eb9f5839",
+      "title": "Example: change downscale stabilization window",
+      "digest": "sha256:888ccc5a24c57bcfb83e640682660a96cf0b2142cb4cec763f514f0f25715a88",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-limit-scale-down-rate",
       "level": 3,
-      "title": "Example: limit scale down rate[](#example-limit-scale-down-rate)",
-      "digest": "sha256:920d3cdefc3c71f5e5465e81f1325a56ef3fb4d80b52f2555ec9ad46c7171287",
+      "title": "Example: limit scale down rate",
+      "digest": "sha256:2d17fae849453b2334fa0c188cdaecff6d0736d52274acaabcccab9d923dc063",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "example-disable-scale-down",
       "level": 3,
-      "title": "Example: disable scale down[](#example-disable-scale-down)",
-      "digest": "sha256:3ed8400a2c3a425ae97a5f4b5ad0cbe185363a518796ceeaa653a809c97e44da",
+      "title": "Example: disable scale down",
+      "digest": "sha256:7a101d79b1f3b0a71e0540b61abe04605ed53a8b0520cddaf39f4dcc494d3edd",
       "parent": "configurable-scaling-behavior"
     },
     {
       "id": "support-for-horizontalpodautoscaler-in-kubectl",
       "level": 2,
-      "title": "Support for HorizontalPodAutoscaler in kubectl[](#support-for-horizontalpodautoscaler-in-kubectl)",
-      "digest": "sha256:a8e9a6c265920866f9b206f87d18705ae3090c377307e2fb9fcc569cb1d454ec",
+      "title": "Support for HorizontalPodAutoscaler in kubectl",
+      "digest": "sha256:7da0f8ab3296f56fe0cac336318401459acb5caf554094c48ec1186ed53380f7",
       "parent": ""
     },
     {
       "id": "scaling-to-and-from-zero",
       "level": 2,
-      "title": "Scaling to and from zero[](#scaling-to-and-from-zero)",
-      "digest": "sha256:1aab8ed0ce9a0337b1c21d49b8048c5ebdd52abfa4c4ef0d1540441abddcc339",
+      "title": "Scaling to and from zero",
+      "digest": "sha256:b6f3c7a4fa822746d06bd6eeee7fbb9c0ad40d2a4da149bbc5d8ecb2d8571105",
       "parent": ""
     },
     {
       "id": "implicit-maintenance-mode-deactivation",
       "level": 2,
-      "title": "Implicit maintenance-mode deactivation[](#implicit-maintenance-mode-deactivation)",
-      "digest": "sha256:bcb42dd1104bb2f0b74ca3add3f88b2d4a2708a5a15b3908d5e67d7e4135e4c5",
+      "title": "Implicit maintenance-mode deactivation",
+      "digest": "sha256:5d1c4d90197896839c4827e9dac6b896b95eaabb7bfdbe8863886fa088fac4da",
       "parent": ""
     },
     {
       "id": "migrating-deployments-and-statefulsets-to-horizontal-autoscaling",
       "level": 3,
-      "title": "Migrating Deployments and StatefulSets to horizontal autoscaling[](#migrating-deployments-and-statefulsets-to-horizontal-autoscaling)",
-      "digest": "sha256:caaa213b621a138fc6cb815e251b6b30c708e263538ea18137f2e330b26c6364",
+      "title": "Migrating Deployments and StatefulSets to horizontal autoscaling",
+      "digest": "sha256:0eeaee99afacdca55b5fc209a1dbaaf353dea87480a82bcbb9548398b0b85f77",
       "parent": "implicit-maintenance-mode-deactivation"
     },
     {
       "id": "what-s-next",
       "level": 2,
-      "title": "What's next[](#what-s-next)",
-      "digest": "sha256:00d4f3ae3a4361a35932fda65f3a4450537c7b424cbe581f6a1f571c32dfba28",
+      "title": "What's next",
+      "digest": "sha256:863889251d8835764685bd4a766b28206977d36764bb39da763e567f19204ae1",
       "parent": ""
     },
     {
@@ -235,7 +235,7 @@
   "assets": [],
   "links": {
     "internal": 35,
-    "page_internal": 36,
+    "page_internal": 10,
     "external": 10,
     "to_orphans": 0,
     "out_of_tree": [

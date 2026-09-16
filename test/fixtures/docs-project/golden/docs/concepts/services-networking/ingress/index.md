@@ -14,7 +14,7 @@ Ingress may provide load balancing, SSL termination and name-based virtual hosti
 > - The Ingress API is generally available, and is subject to the [stability guarantees](docs/reference/using-api/deprecation-policy/#deprecating-parts-of-the-api) for generally available APIs. The Kubernetes project has no plans to remove Ingress from Kubernetes.
 > - The Ingress API is no longer being developed, and will have no further changes or updates made to it.
 
-## Terminology[](#terminology)
+## Terminology
 
 For clarity, this guide defines the following terms:
 
@@ -24,7 +24,7 @@ For clarity, this guide defines the following terms:
 - Cluster network: A set of links, logical or physical, that facilitate communication within a cluster according to the Kubernetes [networking model](docs/concepts/cluster-administration/networking/).
 - Service: A Kubernetes [Service](docs/concepts/services-networking/service/) that identifies a set of Pods using [label](docs/concepts/overview/working-with-objects/labels/) selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
 
-## What is Ingress?[](#what-is-ingress)
+## What is Ingress?
 
 [Ingress](docs/reference/generated/kubernetes-api/v1.37/#ingress-v1-networking-k8s-io) exposes HTTP and HTTPS routes from outside the cluster to [services](docs/concepts/services-networking/service/) within the cluster. Traffic routing is controlled by rules defined on the Ingress resource.
 
@@ -38,7 +38,7 @@ An Ingress may be configured to give Services externally-reachable URLs, load ba
 
 An Ingress does not expose arbitrary ports or protocols. Exposing services other than HTTP and HTTPS to the internet typically uses a service of type [Service.Type=NodePort](docs/concepts/services-networking/service/#type-nodeport) or [Service.Type=LoadBalancer](docs/concepts/services-networking/service/#loadbalancer).
 
-## Prerequisites[](#prerequisites)
+## Prerequisites
 
 You must have an [Ingress controller](docs/concepts/services-networking/ingress-controllers/) to satisfy an Ingress. Only creating an Ingress resource has no effect.
 
@@ -49,7 +49,7 @@ Ideally, all Ingress controllers should fit the reference specification. In real
 > [!NOTE]
 > Make sure you review your Ingress controller's documentation to understand the caveats of choosing it.
 
-## The Ingress resource[](#the-ingress-resource)
+## The Ingress resource
 
 A minimal Ingress resource example:
 
@@ -82,7 +82,7 @@ If the `ingressClassName` is omitted, a [default Ingress class](#default-ingress
 
 Some ingress controllers work even without the definition of a default IngressClass. Even if you use an ingress controller that is able to operate without any IngressClass, the Kubernetes project still recommends that you define a default IngressClass.
 
-### Ingress rules[](#ingress-rules)
+### Ingress rules
 
 Each HTTP rule contains the following information:
 
@@ -92,13 +92,13 @@ Each HTTP rule contains the following information:
 
 A `defaultBackend` is often configured in an Ingress controller to service any requests that do not match a path in the spec.
 
-### DefaultBackend[](#default-backend)
+### DefaultBackend
 
 An Ingress with no rules sends all traffic to a single default backend and `.spec.defaultBackend` is the backend that should handle requests in that case. The `defaultBackend` is conventionally a configuration option of the [Ingress controller](docs/concepts/services-networking/ingress-controllers/) and is not specified in your Ingress resources. If no `.spec.rules` are specified, `.spec.defaultBackend` must be specified. If `defaultBackend` is not set, the handling of requests that do not match any of the rules will be up to the ingress controller (consult the documentation for your ingress controller to find out how it handles this case).
 
 If none of the hosts or paths match the HTTP request in the Ingress objects, the traffic is routed to your default backend.
 
-### Resource backends[](#resource-backend)
+### Resource backends
 
 A `Resource` backend is an ObjectRef to another Kubernetes resource within the same namespace as the Ingress object. A `Resource` is a mutually exclusive setting with Service, and will fail validation if both are specified. A common usage for a `Resource` backend is to ingress data to an object storage backend with static assets.
 
@@ -147,7 +147,7 @@ Annotations:  <none>
 Events:       <none>
 `
 
-### Path types[](#path-types)
+### Path types
 
 Each path in an Ingress is required to have a corresponding path type. Paths that do not include an explicit `pathType` will fail validation. There are three supported path types:
 
@@ -168,7 +168,7 @@ Each path in an Ingress is required to have a corresponding path type. Paths tha
 >
 > ).
 
-### Examples[](#examples)
+### Examples
 
 | Kind | Path(s) | Request path(s) | Matches? |
 | --- | --- | --- | --- |
@@ -191,11 +191,11 @@ Each path in an Ingress is required to have a corresponding path type. Paths tha
 | Prefix | `/aaa` | `/ccc` | No, uses default backend |
 | Mixed | `/foo` (Prefix), `/foo` (Exact) | `/foo` | Yes, prefers Exact |
 
-#### Multiple matches[](#multiple-matches)
+#### Multiple matches
 
 In some cases, multiple paths within an Ingress will match a request. In those cases precedence will be given first to the longest matching path. If two paths are still equally matched, precedence will be given to paths with an exact path type over prefix path type.
 
-## Hostname wildcards[](#hostname-wildcards)
+## Hostname wildcards
 
 Hosts can be precise matches (for example “`foo.bar.com`”) or a wildcard (for example “`*.foo.com`”). Precise matches require that the HTTP `host` header matches the `host` field. Wildcard matches require the HTTP `host` header is equal to the suffix of the wildcard rule.
 
@@ -236,7 +236,7 @@ spec:
               number: 80
 `
 
-## Ingress class[](#ingress-class)
+## Ingress class
 
 Ingresses can be implemented by different controllers, often with different configuration. Each Ingress should specify a class, a reference to an IngressClass resource that contains additional configuration including the name of the controller that should implement the class.
 
@@ -259,7 +259,7 @@ The `.spec.parameters` field of an IngressClass lets you reference another resou
 
 The specific type of parameters to use depends on the ingress controller that you specify in the `.spec.controller` field of the IngressClass.
 
-### IngressClass scope[](#ingressclass-scope)
+### IngressClass scope
 
 Depending on your ingress controller, you may be able to use parameters that you set cluster-wide, or just for one namespace.
 
@@ -336,13 +336,13 @@ spec:
     name: external-config
 `
 
-### Deprecated annotation[](#deprecated-annotation)
+### Deprecated annotation
 
 Before the IngressClass resource and `ingressClassName` field were added in Kubernetes 1.18, Ingress classes were specified with a `kubernetes.io/ingress.class` annotation on the Ingress. This annotation was never formally defined, but was widely supported by Ingress controllers.
 
 The newer `ingressClassName` field on Ingresses is a replacement for that annotation, but is not a direct equivalent. While the annotation was generally used to reference the name of the Ingress controller that should implement the Ingress, the field is a reference to an IngressClass resource that contains additional Ingress configuration, including the name of the Ingress controller.
 
-### Default IngressClass[](#default-ingress-class)
+### Default IngressClass
 
 You can mark a particular IngressClass as default for your cluster. Setting the `ingressclass.kubernetes.io/is-default-class` annotation to `true` on an IngressClass resource will ensure that new Ingresses without an `ingressClassName` field specified will be assigned this default IngressClass.
 
@@ -370,9 +370,9 @@ spec:
   controller: k8s.io/example-class
 `
 
-## Types of Ingress[](#types-of-ingress)
+## Types of Ingress
 
-### Ingress backed by a single Service[](#single-service-ingress)
+### Ingress backed by a single Service
 
 There are existing Kubernetes concepts that allow you to expose a single Service (see [alternatives](#alternatives)). You can also do this with an Ingress by specifying a *default backend* with no rules.
 
@@ -411,7 +411,7 @@ Where `203.0.113.123` is the IP allocated by the Ingress controller to satisfy t
 >
 > .
 
-### Simple fanout[](#simple-fanout)
+### Simple fanout
 
 A fanout configuration routes traffic from a single IP address to more than one Service, based on the HTTP URI being requested. An Ingress allows you to keep the number of load balancers down to a minimum. For example, a setup like:
 
@@ -485,7 +485,7 @@ The Ingress controller provisions an implementation-specific load balancer that 
 >
 > .
 
-### Name based virtual hosting[](#name-based-virtual-hosting)
+### Name based virtual hosting
 
 Name-based virtual hosts support routing HTTP traffic to multiple host names at the same IP address.
 
@@ -570,7 +570,7 @@ spec:
               number: 80
 `
 
-### TLS[](#tls)
+### TLS
 
 You can secure an Ingress by specifying a [Secret](docs/concepts/configuration/secret/) that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
 
@@ -635,13 +635,13 @@ spec:
 > [!NOTE]
 > There is a gap between TLS features supported by various ingress controllers. You should refer to the documentation for the ingress controller(s) you've chosen to understand how TLS works in your environment.
 
-### Load balancing[](#load-balancing)
+### Load balancing
 
 An Ingress controller is bootstrapped with some load balancing policy settings that it applies to all Ingress, such as the load balancing algorithm, backend weight scheme, and others. More advanced load balancing concepts (e.g. persistent sessions, dynamic weights) are not yet exposed through the Ingress. You can instead get these features through the load balancer used for a Service.
 
 It's also worth noting that even though health checks are not exposed directly through the Ingress, there exist parallel concepts in Kubernetes such as [readiness probes](docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) that allow you to achieve the same end result. Please review the controller specific documentation to see how they handle health checks.
 
-## Updating an Ingress[](#updating-an-ingress)
+## Updating an Ingress
 
 To update an existing Ingress to add a new Host, you can update it by editing the resource:
 
@@ -725,18 +725,18 @@ Events:
 
 You can achieve the same outcome by invoking `kubectl replace -f` on a modified Ingress YAML file.
 
-## Failing across availability zones[](#failing-across-availability-zones)
+## Failing across availability zones
 
 Techniques for spreading traffic across failure domains differ between cloud providers. Please check the documentation of the relevant [Ingress controller](docs/concepts/services-networking/ingress-controllers/) for details.
 
-## Alternatives[](#alternatives)
+## Alternatives
 
 You can expose a Service in multiple ways that don't directly involve the Ingress resource:
 
 - Use [Service.Type=LoadBalancer](docs/concepts/services-networking/service/#loadbalancer)
 - Use [Service.Type=NodePort](docs/concepts/services-networking/service/#type-nodeport)
 
-## What's next[](#what-s-next)
+## What's next
 
 - Learn about the [Ingress](docs/reference/kubernetes-api/networking/ingress-v1/) API
 - Learn about [Ingress controllers](docs/concepts/services-networking/ingress-controllers/)

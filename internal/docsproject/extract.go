@@ -464,7 +464,15 @@ func (r *pageRenderer) cardLinks(node *html.Node) []string {
 		if current.Type == html.ElementNode && current.Data == "a" && attribute(current, "href") != "" {
 			label := strings.TrimSpace(r.inlineChildren(current))
 			if label != "" {
-				links = append(links, "- ["+label+"]("+attribute(current, "href")+")")
+				href := attribute(current, "href")
+				if r.normalizer != nil {
+					var keep bool
+					href, keep = r.normalizer.link(href)
+					if !keep {
+						return
+					}
+				}
+				links = append(links, "- ["+label+"]("+href+")")
 			}
 			return
 		}
@@ -548,7 +556,7 @@ func alertKind(node *html.Node) string {
 }
 
 func shouldStrip(node *html.Node) bool {
-	if hasClass(node, "icon-copycode") || hasClass(node, "breadcrumb") || hasClass(node, "feedback") || hasClass(node, "rating") {
+	if hasClass(node, "icon-copycode") || hasClass(node, "td-heading-self-link") || hasClass(node, "breadcrumb") || hasClass(node, "feedback") || hasClass(node, "rating") {
 		return true
 	}
 	if node.Data == "nav" && strings.Contains(attribute(node, "class"), "toc") {

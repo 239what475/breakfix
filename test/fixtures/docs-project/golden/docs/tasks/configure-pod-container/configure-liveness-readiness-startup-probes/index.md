@@ -4,7 +4,7 @@ This page shows how to configure liveness, readiness and startup probes for cont
 
 For more information about probes, see [Liveness, Readiness and Startup Probes](docs/concepts/workloads/pods/probes/).
 
-## Before you begin[](#before-you-begin)
+## Before you begin
 
 You need to have a Kubernetes cluster, and the kubectl command-line tool must be configured to communicate with your cluster. It is recommended to run this tutorial on a cluster with at least two nodes that are not acting as control plane hosts. If you do not already have a cluster, you can create one by using [minikube](https://minikube.sigs.k8s.io/docs/tutorials/multi_node/) or you can use one of these Kubernetes playgrounds:
 
@@ -12,7 +12,7 @@ You need to have a Kubernetes cluster, and the kubectl command-line tool must be
 - [Killercoda](https://killercoda.com/playgrounds/scenario/kubernetes)
 - [KodeKloud](https://kodekloud.com/public-playgrounds)
 
-## Define a liveness command[](#define-a-liveness-command)
+## Define a liveness command
 
 Many applications running for long periods of time eventually transition to broken states, and cannot recover except by being restarted. Kubernetes provides liveness probes to detect and remedy such situations.
 
@@ -111,7 +111,7 @@ NAME            READY     STATUS    RESTARTS   AGE
 liveness-exec   1/1       Running   1          1m
 `
 
-## Define a liveness HTTP request[](#define-a-liveness-http-request)
+## Define a liveness HTTP request
 
 Another kind of liveness probe uses an HTTP GET request. Here is the configuration file for a Pod that runs a container based on the `registry.k8s.io/e2e-test-images/agnhost` image.
 
@@ -178,7 +178,7 @@ kubectl describe pod liveness-http
 
 In releases after v1.13, local HTTP proxy environment variable settings do not affect the HTTP liveness probe.
 
-### Use HTTP/2 cleartext (h2c) with HTTP probes[](#use-h2c-with-http-probes)
+### Use HTTP/2 cleartext (h2c) with HTTP probes
 
 **[FEATURE STATE: Alpha | gate: H2CContainerProbe | since: v1.37 | disabled by default]**
 
@@ -220,7 +220,7 @@ When `protocol` is set to `HTTP2`, the `kubelet` connects using HTTP/2 cleartext
 
 If the feature gate is disabled, the API server removes the `protocol` field from new or updated Pods.
 
-## Define a TCP liveness probe[](#define-a-tcp-liveness-probe)
+## Define a TCP liveness probe
 
 A third type of liveness probe uses a TCP socket. With this configuration, the kubelet will attempt to open a socket to your container on the specified port. If it can establish a connection, the container is considered healthy, if it can't it is considered a failure.
 
@@ -267,7 +267,7 @@ After 15 seconds, view Pod events to verify that liveness probes:
 kubectl describe pod goproxy
 `
 
-## Define a gRPC liveness probe[](#define-a-grpc-liveness-probe)
+## Define a gRPC liveness probe
 
 **[FEATURE STATE: Stable | since: v1.27]**
 
@@ -314,7 +314,7 @@ When using a gRPC probe, there are some technical details to be aware of:
 - There are no error codes for built-in probes. All errors are considered as probe failures.
 - If `ExecProbeTimeout` feature gate is set to `false`, grpc-health-probe does **not** respect the `timeoutSeconds` setting (which defaults to 1s), while built-in probe would fail on timeout.
 
-### Use TLS with gRPC probes[](#grpc-probe-tls)
+### Use TLS with gRPC probes
 
 **[FEATURE STATE: Alpha | gate: GRPCContainerProbeTLS | since: v1.37 | disabled by default]**
 
@@ -352,7 +352,7 @@ When `mode` is set to `TLS`, the `kubelet` connects over TLS with `InsecureSkipV
 
 If the feature gate is disabled, the `kube-apiserver` removes the `mode` field from new or updated Pods.
 
-## Use a named port[](#use-a-named-port)
+## Use a named port
 
 You can use a named [`port`](docs/reference/kubernetes-api/core/pod-v1/#ports) for HTTP and TCP probes. gRPC probes do not support named ports.
 
@@ -369,7 +369,7 @@ livenessProbe:
     port: liveness-port
 `
 
-## Protect slow starting containers with startup probes[](#define-startup-probes)
+## Protect slow starting containers with startup probes
 
 Sometimes, you have to deal with applications that require additional startup time on their first initialization. In such cases, it can be tricky to set up liveness probe parameters without compromising the fast response to deadlocks that motivated such a probe. The solution is to set up a startup probe with the same command, HTTP or TCP check, with a `failureThreshold * periodSeconds` long enough to cover the worst case startup time.
 
@@ -397,7 +397,7 @@ startupProbe:
 
 Thanks to the startup probe, the application will have a maximum of 5 minutes (30 * 10 = 300s) to finish its startup. Once the startup probe has succeeded once, the liveness probe takes over to provide a fast response to container deadlocks. If the startup probe never succeeds, the container is killed after 300s and subject to the pod's `restartPolicy`.
 
-## Define readiness probes[](#define-readiness-probes)
+## Define readiness probes
 
 Sometimes, applications are temporarily unable to serve traffic. For example, an application might need to load large data or configuration files during startup, or depend on external services after startup. In such cases, you don't want to kill the application, but you don't want to send it requests either. Kubernetes provides readiness probes to detect and mitigate these situations. A pod with containers reporting that they are not ready does not receive traffic through Kubernetes Services.
 
@@ -431,7 +431,7 @@ Configuration for HTTP and TCP readiness probes also remains identical to livene
 
 Readiness and liveness probes can be used in parallel for the same container. Using both can ensure that traffic does not reach a container that is not ready for it, and that containers are restarted when they fail.
 
-## What's next[](#what-s-next)
+## What's next
 
 - Learn more about [Liveness, Readiness and Startup Probes](docs/concepts/workloads/pods/probes/).
 - For the full specification of probe-related fields, see the API reference: [Pod](docs/reference/kubernetes-api/core/pod-v1/), [Container](docs/reference/kubernetes-api/core/pod-v1/#Container), [Probe](docs/reference/kubernetes-api/core/pod-v1/#Probe)

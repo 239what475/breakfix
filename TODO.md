@@ -40,7 +40,7 @@ commit 经 Hugo 构建得到渲染树,再由离线解析程序把整棵渲染树
   可选 goquery/cascadia)。
 - Makefile 新增两个目标,归入现有 `docs-*` 族:
   - `docs-project`:执行生成(见下方 CLI 默认值),目标内固定传当前 `-version` 值
-    (当前为 `docs-project-v3`),版本递增时同步修改 Makefile;
+    (当前为 `docs-project-v4`),版本递增时同步修改 Makefile;
   - `docs-fixture`:把 1.11 清单中的页面从本地构建冻结拷贝到 `test/fixtures/docs-project/`。
 
 CLI 参数:
@@ -50,7 +50,7 @@ CLI 参数:
 | `-root` | `docs-site/public` | 渲染树根 |
 | `-out` | `docs-site/documents` | 输出根(追加进 `.gitignore`) |
 | `-workers` | `8` | 页面提取并行度 |
-| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v3`),写入全局 manifest;提取规则变更时必须递增 |
+| `-version` | 必填 | 生成器版本串(当前为 `docs-project-v4`),写入全局 manifest;提取规则变更时必须递增 |
 | `-resume` | 关 | 跳过已存在且 generator_version 匹配的页面输出;版本不匹配强制全量 |
 | `-pages` | 空 | 逗号分隔站点路径,子集模式(调试/测试用) |
 
@@ -82,7 +82,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v3",
+  "generator_version": "docs-project-v4",
   "upstream": {"source": "kubernetes", "commit": "<sha>", "version": "snapshot-ce98a43", "locale": "en"},
   "path": "docs/concepts/workloads/pods/pod-lifecycle/",
   "page_kind": "content",            // content | index(在目录树中有子页面者为 index)
@@ -115,7 +115,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 ```jsonc
 {
   "format_version": 1,
-  "generator_version": "docs-project-v3",
+  "generator_version": "docs-project-v4",
   "upstream": {/* 同页 manifest;commit 取自 docs-site/build-info.json,一并记录其内容 */},
   "tree": {"nodes": [                 // 目录树,来源见 1.7
     {"title": "Getting started", "path": "docs/setup/", "children": [ /* 递归 */ ]}
@@ -146,9 +146,11 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 行内元素:`code` → `` `x` ``;`strong` → `**`;`em` → `*`;`a` → `[text](target)`;
 `img` → `![alt](path)`;`br` → 空格。
 
-上游渲染树中若内容区 `<h1>` 为空(v3 已知 3 页),使用非通用 `og:title`；若该值同样为
+上游渲染树中若内容区 `<h1>` 为空(v4 已知 3 页),使用非通用 `og:title`；若该值同样为
 `Kubernetes` 或缺失,则使用正文第一个非空章节标题,并在 Markdown 顶部合成 `# <title>`。这仅是
 固定渲染输入的容错,不重新推导 slug 或锚点。
+
+标题后的 `td-heading-self-link` 控件属于站点交互 chrome,不进入标题文本或 Markdown 链接。
 
 **库内路径形式**:`.md` 中的站内链接与图片一律使用**以输出根为基准的站点路径**
 (如 `docs/concepts/overview/`、`docs/images/ingress.svg`,页面路径保留尾部斜杠);
@@ -245,7 +247,7 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 - [x] 页 manifest 与全局 manifest、全部 digest 计算。
 - [x] 断点续跑与失败报告(`report.json`、退出码语义)。
 - [x] 单元测试、golden fixture、确定性与并行一致性测试、断点续跑测试。
-- [x] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
+- [ ] 854 页全量生成验证:零失败、`diff -r` 复跑一致、统计与基线数(854/218/433)吻合。
 
 ### 1.13 提交计划与提交纪律
 
@@ -290,13 +292,6 @@ docs-site/documents/docs/concepts/workloads/pods/pod-lifecycle/index.json
 8. `docs(plan): close document library generator acceptance`
    记录 854 页全量运行证据(零失败、复跑一致、统计与 854/218/433 基线吻合),
    勾选第 1 节全部任务;此后进入第 2 节运行时切换。
-
-### 验收记录(2026-09-16)
-
-- `go run ./cmd/docs-project -root docs-site/public -out <tmp> -workers 8 -version docs-project-v3`
-  连续运行两次,`diff -r` 为空;同一输入以 `-workers 1` 运行后与 8 worker 输出的 `diff -r` 也为空。
-- 两次全量运行均无 `report.json`;全局清单为 854 pages、218 orphans、433 docs redirects,
-  另有 127 index pages、13,326 anchors、69 assets。
 
 ## 2. 运行时切换到文档库
 
