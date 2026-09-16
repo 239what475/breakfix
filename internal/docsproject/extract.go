@@ -21,6 +21,8 @@ type ExtractedPage struct {
 	Markdown        []byte
 	Headings        []ExtractedHeading
 	FeatureStates   []FeatureState
+	Assets          []Asset
+	Links           LinkStats
 	CodeBlocks      int
 	DegradedTables  int
 	DroppedElements int
@@ -41,6 +43,10 @@ type FeatureState struct {
 }
 
 func extractPage(content []byte) (ExtractedPage, error) {
+	return extractPageWithNormalizer(content, nil)
+}
+
+func extractPageWithNormalizer(content []byte, normalizer *pageNormalizer) (ExtractedPage, error) {
 	if len(content) > maxRenderedPageBytes {
 		return ExtractedPage{}, errors.New("rendered page exceeds the read limit")
 	}
@@ -52,16 +58,25 @@ func extractPage(content []byte) (ExtractedPage, error) {
 	if main == nil {
 		return ExtractedPage{}, errors.New("rendered page has no main content")
 	}
-	renderer := pageRenderer{labels: elementsByID(document)}
+	renderer := pageRenderer{labels: elementsByID(document), normalizer: normalizer}
 	markdown := renderer.blocks(main)
 	if renderer.title == "" {
 		return ExtractedPage{}, errors.New("rendered page has no h1 title")
+	}
+	if renderer.err != nil {
+		return ExtractedPage{}, renderer.err
+	}
+	links, assets := LinkStats{}, []Asset(nil)
+	if normalizer != nil {
+		links, assets = normalizer.result()
 	}
 	return ExtractedPage{
 		Title:           renderer.title,
 		Markdown:        []byte(markdown),
 		Headings:        renderer.headings,
 		FeatureStates:   renderer.featureStates,
+		Assets:          assets,
+		Links:           links,
 		CodeBlocks:      renderer.codeBlocks,
 		DegradedTables:  renderer.degradedTables,
 		DroppedElements: renderer.droppedElements,
@@ -77,6 +92,8 @@ type pageRenderer struct {
 	codeBlocks      int
 	degradedTables  int
 	droppedElements int
+	normalizer      *pageNormalizer
+	err             error
 }
 
 func (r *pageRenderer) blocks(root *html.Node) string {
@@ -203,6 +220,13 @@ func (r *pageRenderer) inline(node *html.Node) string {
 		return wrap("*", strings.TrimSpace(value))
 	case "a":
 		if href := attribute(node, "href"); href != "" {
+			if r.normalizer != nil {
+				normalized, keep := r.normalizer.link(href)
+				if !keep {
+					return value
+				}
+				href = normalized
+			}
 			return "[" + strings.TrimSpace(value) + "](" + href + ")"
 		}
 		return value
@@ -210,7 +234,16 @@ func (r *pageRenderer) inline(node *html.Node) string {
 		if attribute(node, "onclick") != "" {
 			return ""
 		}
-		return "![" + escapeText(attribute(node, "alt")) + "](" + attribute(node, "src") + ")"
+		src := attribute(node, "src")
+		if r.normalizer != nil {
+			var err error
+			src, err = r.normalizer.image(src)
+			if err != nil {
+				r.err = err
+				return ""
+			}
+		}
+		return "![" + escapeText(attribute(node, "alt")) + "](" + src + ")"
 	case "span", "small", "sup", "sub", "mark", "time", "abbr", "cite", "label":
 		return value
 	default:
