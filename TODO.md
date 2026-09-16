@@ -385,15 +385,15 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 3. 迁移 Runtime Worker 与 Provider 执行器
 
-- [ ] 将 Runtime Action 的输入改为 `RunnableSpec`、阶段结果和通用 artifact 引用；公共层以 `MaterializeArtifact` 表示构建与 artifact 发布，移除 `ScenarioID`、`ScenarioRevisionID`、`ScenarioPublishing` 及其专属状态分支。
-- [ ] 将 action identity 改为公共的 content kind/id/revision、spec digest、阶段和 state version；基础设施 retry 不改变外部资源 identity。
+- [x] 将 Runtime Action 的输入改为 `RunnableSpec`、阶段结果和通用 artifact 引用；公共层以 `MaterializeArtifact` 表示构建与 artifact 发布，移除 `ScenarioID`、`ScenarioRevisionID`、`ScenarioPublishing` 及其专属状态分支。
+- [x] 将 action identity 改为公共的 content kind/id/revision、spec digest、阶段和 state version；基础设施 retry 不改变外部资源 identity。
 - [x] 让公共 `MaterializeArtifact` executor 消费 `RunnableSpec` 和 source archive，内部可以拆分 build/publish，但对上层只输出绑定 spec digest 的 `ArtifactReference`。
 - [x] 只有 artifact 构建和发布完成后，编排器才写入不可变 `RunnableRevision`；Worker 不在 revision 中逐阶段回填字段。
 - [x] 让 Verify executor 只消费完整 `RunnableRevision` 与 `ValidationPlan`，按阶段执行动作和只读断言，并返回通用 `VerificationReport`。
 - [x] 将 Node、K8s、Registry、Incus 和环境 provider 的调用参数改为公共 target、执行边界和 lifecycle 数据；SDK 类型不得泄漏到 domain。
 - [x] 将断言执行身份限制为只读权限，将动作执行身份限制为已批准的执行边界；增加执行前后的资源和权限边界检查。
 - [x] 保留 lease fencing、动作 deadline、幂等创建/获取、attempt 上限和 artifact failure 分类；语义失败不得自动当作基础设施重试。
-- [ ] 将 Operations 的内容发布移回 Operations application service；Runtime Worker 只负责构建、artifact、环境、验证和资源生命周期。
+- [x] 将 Operations 的内容发布移回 Operations application service；Runtime Worker 只负责构建、artifact、环境、验证和资源生命周期。
 - [x] 为 Worker 增加观察型、修复型、多阶段、断言失败、协议失败、lease 丢失、重启接管和重复结果测试。
 
 ### 4. 迁移 Controller、Environment 与异步回收
@@ -412,16 +412,16 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 ### 5. 迁移持久化、内部 API 与发布边界
 
 - [x] 新增保存 `RunnableSpec`、内嵌的 `ArtifactReference`、`RunnableRevision`、阶段结果、验证报告 digest 和审核/发布前置条件的持久化记录；不为 `ArtifactReference` 建独立业务状态表。
-- [ ] 将 Runtime Worker 内部 API 改为公共契约，所有请求校验 spec/revision digest、lease credential、state version 和 action identity。
-- [ ] 删除 Runtime Worker 对 `content/scenario`、Operations repository 和产品发布状态的依赖；产品 application 通过公共引用读取运行结果。
-- [ ] 将 Operations 发布事务改为由 Operations application 原子写入自己的 revision、active pointer 和索引；为未来 Documentation 发布保留独立入口。
+- [x] 将 Runtime Worker 内部 API 改为公共契约，所有请求校验 spec/revision digest、lease credential、state version 和 action identity。
+- [x] 删除 Runtime Worker 对 `content/scenario`、Operations repository 和产品发布状态的依赖；产品 application 通过公共引用读取运行结果。
+- [x] 将 Operations 发布事务改为由 Operations application 原子写入自己的 revision、active pointer 和索引；为未来 Documentation 发布保留独立入口。
 - [x] 提升 schema version，清理或重建明确可丢弃的本地数据库、候选 archive、临时运行记录和未发布 artifact；不提供旧公共模型的兼容读取。
 - [x] 明确已发布内容、历史学习记录和仍被 Environment 引用的 artifact 的保留边界，迁移脚本不得默认删除这些数据。
 - [x] 更新 OpenAPI、CRD、内部 API 客户端、生成代码、配置和部署清单，并通过 `make verify-generated` 和 `kubectl kustomize .`。
 
 ### 6. 公共底座验收
 
-- [ ] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
+- [x] 全仓确认 Runtime Worker、Controller、Environment、artifact、terminal、logs、events、state、reset、stop、reap 和 retry 逻辑不包含产品词汇或内容分支。
 - [x] 运行公共 domain、application、adapter、worker 和 controller 单元测试，覆盖至少一个 Operations observation-only、repair-style 和 multi-stage 计划。
 - [x] 在专用 Kind target 上完成构建、artifact 发布、真实验证、lease 接管、重启恢复和异步回收验收。
 - [x] 在 Node/Incus target 上完成相同流程，并确认完整 fingerprint、资源限制和回收重试行为。
@@ -488,16 +488,16 @@ Planning -> PlanReviewing -> Generating -> ArtifactReviewing
 
 ### 13. 清理旧 Runtime Action 与发布栈
 
-- [ ] 建立旧栈删除清单并用负向静态检查锁定边界：生产代码不得再导入 `internal/domain/runtime` 或旧 `internal/domain/execution` Runtime Action/Work/Artifact/VerificationEnvironment 类型；允许的 Operations、Documentation、Catalog 内容模型必须位于各自 application/content 边界。
-- [ ] 将 Generation 和 Catalog 的构建、artifact、验证、发布状态转换改为各自 application service 使用 `RunnableSpec`、`RunnableRevision`、`VerificationReport` 和公共 Worker 内部 API；删除按 `generation-workflow`、`catalog-entry`、`catalog-commit` scope 分派的 Worker 行为。
-- [ ] 删除 `internal/domain/runtime`、旧 `execution` Runtime Action 协议、`internal/transport/httpapi/runtime_internal.go`、`internal/adapter/internalapi/runtime.go` 及其 claim/renew/complete/reap routes、客户端、测试和启动 wiring；不保留 HTTP alias 或请求/响应转换。
-- [ ] 从 Generation、Catalog、Operations 相关 domain 与 repository 中移除 `ScenarioPublishing`、`ArtifactFinalizing`、`FinalArtifactTarget*`、旧 `execution.ArtifactReference`/`Snapshot`/`VerificationEnvironment`、旧 runtime attempt/lease/reaper 表达；产品发布只保存对不可变 `RunnableRevision` 和 `VerificationReport` 的引用。
-- [ ] 提升 schema 版本并在干净目标重建旧 generation/catalog/runtime 临时记录、候选 archive 与未发布 artifact；已发布内容、学习记录和仍被 `RuntimeEnvironment` 引用的 artifact 按显式保留策略处理，不为旧行提供读取或转换兼容。
-- [ ] 从 OpenAPI、生成客户端、Web Authoring 状态、配置、部署清单、README、架构和格式文档中删除 `ScenarioPublishing` 与旧 Runtime Action 内容；重新生成代码并拒绝旧状态/API。
-- [ ] 让 Operations 和 Catalog 的发布 finalizer 在 Server application transaction 内原子写入内容 revision、active pointer、索引和公共引用；Runtime Worker 只能完成通用 materialize/verify/reap，不能 promotion 内容 artifact 或写产品发布状态。
-- [ ] 为删除后的恢复语义补充单元与集成测试：Worker/Server 重启、lease 接管、重复请求、失败重试、发布部分失败和 Reaper 并发只能沿公共 runnable/RuntimeEnvironment 路径恢复。
-- [ ] 在从零重建的 Kind 和 Incus 目标完成 Operations、Catalog 和 Documentation 的 build、materialize、真实验证、发布、reset、stop、reap 验收；验证旧 Runtime Action endpoint、旧数据库状态和旧 artifact identity 均不可用。
-- [ ] 最终执行全仓负向审计、`make test-unit`、`make verify-generated`、`make docs-smoke`、`kubectl kustomize .` 和所有真实 E2E；确认生产代码、schema、OpenAPI、生成物、部署清单和文档均无旧设计引用后才勾选第 3、5、6 节的收口项。
+- [x] 建立旧栈删除清单并用负向静态检查锁定边界：生产代码不得再导入 `internal/domain/runtime` 或旧 `internal/domain/execution` Runtime Action/Work/Artifact/VerificationEnvironment 类型；允许的 Operations、Documentation、Catalog 内容模型必须位于各自 application/content 边界。
+- [x] 将 Generation 和 Catalog 的构建、artifact、验证、发布状态转换改为各自 application service 使用 `RunnableSpec`、`RunnableRevision`、`VerificationReport` 和公共 Worker 内部 API；删除按 `generation-workflow`、`catalog-entry`、`catalog-commit` scope 分派的 Worker 行为。
+- [x] 删除 `internal/domain/runtime`、旧 `execution` Runtime Action 协议、`internal/transport/httpapi/runtime_internal.go`、`internal/adapter/internalapi/runtime.go` 及其 claim/renew/complete/reap routes、客户端、测试和启动 wiring；不保留 HTTP alias 或请求/响应转换。
+- [x] 从 Generation、Catalog、Operations 相关 domain 与 repository 中移除 `ScenarioPublishing`、`ArtifactFinalizing`、`FinalArtifactTarget*`、旧 `execution.ArtifactReference`/`Snapshot`/`VerificationEnvironment`、旧 runtime attempt/lease/reaper 表达；产品发布只保存对不可变 `RunnableRevision` 和 `VerificationReport` 的引用。
+- [x] 提升 schema 版本并在干净目标重建旧 generation/catalog/runtime 临时记录、候选 archive 与未发布 artifact；已发布内容、学习记录和仍被 `RuntimeEnvironment` 引用的 artifact 按显式保留策略处理，不为旧行提供读取或转换兼容。
+- [x] 从 OpenAPI、生成客户端、Web Authoring 状态、配置、部署清单、README、架构和格式文档中删除 `ScenarioPublishing` 与旧 Runtime Action 内容；重新生成代码并拒绝旧状态/API。
+- [x] 让 Operations 和 Catalog 的发布 finalizer 在 Server application transaction 内原子写入内容 revision、active pointer、索引和公共引用；Runtime Worker 只能完成通用 materialize/verify/reap，不能 promotion 内容 artifact 或写产品发布状态。
+- [x] 为删除后的恢复语义补充单元与集成测试：Worker/Server 重启、lease 接管、重复请求、失败重试、发布部分失败和 Reaper 并发只能沿公共 runnable/RuntimeEnvironment 路径恢复。
+- [x] 在从零重建的 Kind 和 Incus 目标完成 Operations、Catalog 和 Documentation 的 build、materialize、真实验证、发布、reset、stop、reap 验收；验证旧 Runtime Action endpoint、旧数据库状态和旧 artifact identity 均不可用。
+- [x] 最终执行全仓负向审计、`make test-unit`、`make verify-generated`、`make docs-smoke`、`kubectl kustomize .` 和所有真实 E2E；确认生产代码、schema、OpenAPI、生成物、部署清单和文档均无旧设计引用后才勾选第 3、5、6 节的收口项。
 
 ## 提交清单
 
