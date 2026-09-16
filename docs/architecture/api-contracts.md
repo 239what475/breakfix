@@ -35,26 +35,24 @@ HTTPS 和用户 Token 调用同一组 `/generator/...` 端点。所有有副作�
 
 ## 内部 Worker HTTP
 
-内部 API 不属于 OpenAPI 公开契约，只供 Runtime Worker 以独立 role key 调用：
+内部 API 不属于 OpenAPI 公开契约，只供 Runtime Worker 以独立 role key 调用。Worker 只处理公共
+`RunnableSpec`、`RunnableRevision`、验证报告和环境释放，不处理内容发布或产品状态：
 
 ```text
-POST /api/internal/runtime-actions/claim
-POST /api/internal/runtime-actions/:id/renew
-POST /api/internal/runtime-actions/:id/source/archive
-POST /api/internal/runtime-actions/:id/build/complete
-POST /api/internal/runtime-actions/:id/artifact-publish/complete
-POST /api/internal/runtime-actions/:id/verification/environment
-POST /api/internal/runtime-actions/:id/verification/complete
-POST /api/internal/runtime-actions/:id/scenario-publish/complete
-POST /api/internal/runtime-actions/:id/failure/infrastructure
-POST /api/internal/runtime-actions/:id/failure/artifact
-POST /api/internal/runtime-resource-reaps/claim
-POST /api/internal/runtime-resource-reaps/complete
+POST /api/internal/runnable-actions/claim
+POST /api/internal/runnable-actions/renew
+POST /api/internal/runnable-actions/source
+POST /api/internal/runnable-actions/output
+POST /api/internal/runnable-actions/verification/environment
+POST /api/internal/runnable-actions/verification/release
+POST /api/internal/runnable-actions/materialization/complete
+POST /api/internal/runnable-actions/verification/complete
+POST /api/internal/runnable-actions/failure
 ```
 
-没有 AgentRun、Generator workspace proxy、Kubernetes base image 或 build archive 下载接口。每个 Runtime Action 使用稳定的
-`scope + parent_id + owner_id + candidate_id + state + state_version` identity 和 lease owner；`runtime_attempt` 不进入资源
-identity。`scope` 只允许 GenerationWorkflow、Catalog Entry 与 Catalog Commit，Server 只接受当前 lease 的对应 typed result。
+没有 AgentRun、Generator workspace proxy、Kubernetes base image 或任意内容发布接口。每个 runnable action 使用
+内容 identity、spec digest、phase 和 state version 构成稳定 identity，lease takeover 不创建新的 Provider 资源。验证环境释放由
+Server 写入 `RuntimeEnvironment`，异步 Reaper 收敛资源，报告和内容发布不被清理结果回滚。
 
 ## 终端与流传输
 

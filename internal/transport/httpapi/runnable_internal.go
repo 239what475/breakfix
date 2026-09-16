@@ -9,11 +9,18 @@ import (
 	"time"
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
+	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	internalRunnableWorkerRole = config.InternalWorkerRuntime
+	runnableMinLease           = 5 * time.Second
+	runnableMaxLease           = 2 * time.Minute
 )
 
 type runnableActionClaimRequest struct {
@@ -65,11 +72,11 @@ type runnableActionFailureRequest struct {
 
 func (h *Handler) InternalClaimRunnableAction(c *gin.Context) {
 	var request runnableActionClaimRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
-	if strings.TrimSpace(request.WorkerID) == "" || leaseTTL < runtimeMinLease || leaseTTL > runtimeMaxLease {
+	if strings.TrimSpace(request.WorkerID) == "" || leaseTTL < runnableMinLease || leaseTTL > runnableMaxLease {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "worker_id and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
@@ -79,7 +86,7 @@ func (h *Handler) InternalClaimRunnableAction(c *gin.Context) {
 	}
 	action, err := h.db.Runnable.ClaimRunnableAction(c.Request.Context(), request.WorkerID, leaseTTL, time.Now().UTC())
 	if err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
@@ -89,11 +96,11 @@ func (h *Handler) InternalClaimRunnableAction(c *gin.Context) {
 
 func (h *Handler) InternalRenewRunnableAction(c *gin.Context) {
 	var request runnableActionRenewRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	leaseTTL := time.Duration(request.LeaseTTLMillis) * time.Millisecond
-	if err := request.Credential.Validate(); err != nil || leaseTTL < runtimeMinLease || leaseTTL > runtimeMaxLease {
+	if err := request.Credential.Validate(); err != nil || leaseTTL < runnableMinLease || leaseTTL > runnableMaxLease {
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "valid credential and a lease between 5 seconds and 2 minutes are required"})
 		return
 	}
@@ -102,7 +109,7 @@ func (h *Handler) InternalRenewRunnableAction(c *gin.Context) {
 		return
 	}
 	if err := h.db.Runnable.RenewRunnableAction(c.Request.Context(), request.Credential, leaseTTL, time.Now().UTC()); err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -110,7 +117,7 @@ func (h *Handler) InternalRenewRunnableAction(c *gin.Context) {
 
 func (h *Handler) InternalDownloadRunnableSource(c *gin.Context) {
 	var request runnableSourceRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionMaterializeArtifact {
@@ -123,7 +130,7 @@ func (h *Handler) InternalDownloadRunnableSource(c *gin.Context) {
 	}
 	archive, err := h.db.Runnable.ReadRunnableActionSource(c.Request.Context(), request.Credential, time.Now().UTC())
 	if err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
@@ -134,7 +141,7 @@ func (h *Handler) InternalDownloadRunnableSource(c *gin.Context) {
 func (h *Handler) InternalStoreRunnableExecutionOutput(c *gin.Context) {
 	var request runnableExecutionOutputRequest
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRunnableExecutionOutputRequestBytes)
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionVerify || request.Capture.Validate() != nil {
@@ -147,7 +154,7 @@ func (h *Handler) InternalStoreRunnableExecutionOutput(c *gin.Context) {
 	}
 	reference, err := h.db.Runnable.StoreRunnableExecutionOutput(c.Request.Context(), request.Credential, request.Capture, time.Now().UTC())
 	if err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
@@ -161,7 +168,7 @@ func (h *Handler) InternalStoreRunnableExecutionOutput(c *gin.Context) {
 // or adopts the deterministic RuntimeEnvironment on its behalf.
 func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) {
 	var request runnableVerificationEnvironmentRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	if err := request.Request.Validate(); err != nil {
@@ -174,7 +181,7 @@ func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) 
 	}
 	now := time.Now().UTC()
 	if err := h.db.Runnable.ValidateRunnableVerificationLease(c.Request.Context(), request.Request.Credential, request.Request.RunnableRevisionRef, request.Request.Attempt, now); err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	name := runnable.VerificationEnvironmentName(request.Request.RunnableRevisionRef, request.Request.Attempt)
@@ -204,7 +211,7 @@ func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) 
 		if releaseErr := h.markVerificationEnvironmentReleasable(c.Request.Context(), string(created.UID), request.Request.RunnableRevisionDigest); releaseErr != nil {
 			slog.Warn("release verification environment after lost lease", "environment", created.UID, "err", releaseErr)
 		}
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, struct {
@@ -214,7 +221,7 @@ func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) 
 
 func (h *Handler) InternalRequestRunnableVerificationEnvironmentRelease(c *gin.Context) {
 	var request runnableVerificationEnvironmentReleaseRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	if err := request.Credential.Validate(); err != nil || request.Credential.Identity.Phase != runnable.ActionVerify || request.Environment.Validate() != nil {
@@ -227,7 +234,7 @@ func (h *Handler) InternalRequestRunnableVerificationEnvironmentRelease(c *gin.C
 	}
 	reference, _, err := h.db.Runnable.ResolveRunnableVerificationLease(c.Request.Context(), request.Credential, time.Now().UTC())
 	if err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	if err := h.markVerificationEnvironmentReleasable(c.Request.Context(), request.Environment.ID, reference.Digest); err != nil {
@@ -239,7 +246,7 @@ func (h *Handler) InternalRequestRunnableVerificationEnvironmentRelease(c *gin.C
 
 func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {
 	var request runnableMaterializationCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	request.Revision.CreatedAt = time.Now().UTC()
@@ -252,7 +259,7 @@ func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {
 		return
 	}
 	if err := h.db.Runnable.CompleteRunnableMaterialization(c.Request.Context(), request.Credential, request.Revision, request.Revision.CreatedAt); err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -260,7 +267,7 @@ func (h *Handler) InternalCompleteRunnableMaterialization(c *gin.Context) {
 
 func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 	var request runnableVerificationCompleteRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	request.Report.CreatedAt = time.Now().UTC()
@@ -273,7 +280,7 @@ func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 		return
 	}
 	if err := h.db.Runnable.CompleteRunnableVerification(c.Request.Context(), request.Credential, request.Report, request.Report.CreatedAt); err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	if err := h.markVerificationEnvironmentReleasable(c.Request.Context(), request.Report.Report.Environment.ID, request.Report.Report.RunnableRevisionDigest); err != nil {
@@ -282,6 +289,19 @@ func (h *Handler) InternalCompleteRunnableVerification(c *gin.Context) {
 		slog.Warn("request verification environment release", "environment", request.Report.Report.Environment.ID, "err", err)
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) writeInternalRunnableError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	switch {
+	case errors.Is(err, runnable.ErrSourceNotFound), errors.Is(err, runnable.ErrOutputNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, runnable.ErrActionLeaseLost):
+		status = http.StatusConflict
+	case strings.Contains(err.Error(), "unavailable"):
+		status = http.StatusServiceUnavailable
+	}
+	c.JSON(status, api.ErrorResponse{Error: err.Error()})
 }
 
 func (h *Handler) markVerificationEnvironmentReleasable(ctx context.Context, environmentID, revisionDigest string) error {
@@ -313,7 +333,7 @@ func (h *Handler) markVerificationEnvironmentReleasable(ctx context.Context, env
 
 func (h *Handler) InternalReportRunnableActionFailure(c *gin.Context) {
 	var request runnableActionFailureRequest
-	if !h.decodeInternalWorkerRequest(c, internalRuntimeRole, &request) {
+	if !h.decodeInternalWorkerRequest(c, internalRunnableWorkerRole, &request) {
 		return
 	}
 	if err := request.Credential.Validate(); err != nil || !request.Class.Valid() || strings.TrimSpace(request.Code) == "" || strings.TrimSpace(request.Summary) == "" {
@@ -325,7 +345,7 @@ func (h *Handler) InternalReportRunnableActionFailure(c *gin.Context) {
 		return
 	}
 	if err := h.db.Runnable.ReportRunnableActionFailure(c.Request.Context(), request.Credential, request.Class, request.Code, request.Summary, time.Now().UTC()); err != nil {
-		h.writeInternalRuntimeError(c, err)
+		h.writeInternalRunnableError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
