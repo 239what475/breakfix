@@ -118,6 +118,31 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 提交:`fix(docsproject): emit file-relative references in page markdown`,规格同步、
 实现、单测、golden 同提交;提交信息注明 md 输出契约变化与版本 v8。
 
+### 1.5 定义列表 `<dl>` 的无损提取(docs-project-v9)
+
+背景:v8 及之前把 `dl`/`dt`/`dd` 当作透明容器,块级遍历会**丢弃 `<dd>` 内的纯文本节点**,
+仅行内元素侥幸成为独立段落——实测 `docs/concepts/containers/images/` 的
+`imagePullPolicy` 定义列表三条描述全部丢失,全库 **45 页、78 处 `<dl>`** 受影响。
+
+行为规格:
+
+- `<dl>` 映射为:每个 `<dt>` 渲染为一行 `**术语**`(术语内保留行内规则,如
+  `` **`IfNotPresent`** ``);每个 `<dd>` 渲染为其后的独立段落——`<dd>` 仅含行内内容时
+  按行内规则合成为一段,含块级子元素(`p`/`ul`/`pre`/`table` 等)时按块规则展开。
+- 孤立于 `<dl>` 之外的 `dt`/`dd` 按同样规则单独渲染,不丢弃、不计 `dropped_elements`。
+- 版本串升 **docs-project-v9**;仅含 `<dl>` 的页面 digest 变化,其余页面字节不变;
+  链接分类与统计不受影响。
+
+验收标准:
+
+- [x] `docs/concepts/containers/images/` 的三条 `imagePullPolicy` 描述完整出现在
+      `index.md`,术语为加粗行、描述为后续段落、行内链接正常;
+- [x] 全库 78 处 `<dl>` 所在页面的 `<dd>` 文本不再丢失(抽样若干页比对渲染 HTML 正文);
+- [x] 不含 `<dl>` 的页面输出与 v8 字节一致;双跑 `diff -r` 一致;golden 按 v9 重新生成。
+- [x] 单测:行内型 dd、块级子元素型 dd、孤立 dt/dd、多组 dt-dd 交错。
+
+提交:`fix(docsproject): render definition lists without dropping term text`。
+
 ## 2. 运行时切换到文档库(前置:第 1 节资产入库完成)
 
 - [ ] Server 端文档 Reader 改为读取文档库并校验 digest,移除运行时 HTML 解析路径。

@@ -64,6 +64,23 @@ func TestParsePageEmitsFencedCodeBlockWithMinimumFence(t *testing.T) {
 	}
 }
 
+func TestParsePageRendersDefinitionLists(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Demo</h1><dl>
+<dt><code>IfNotPresent</code></dt><dd>the image is pulled only if it is not already present locally.</dd>
+<dt><code>Always</code></dt><dd>every time the kubelet requests the <a href="/docs/runtime/">container runtime</a> to pull the image.</dd>
+<dt><code>Never</code></dt><dd><p>first block</p><ul><li>item</li></ul></dd>
+</dl><dt>Orphan term</dt><dd>orphan definition</dd></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Demo\n\n**`IfNotPresent`**\n\nthe image is pulled only if it is not already present locally.\n\n" +
+		"**`Always`**\n\nevery time the kubelet requests the [container runtime](/docs/runtime/) to pull the image.\n\n" +
+		"**`Never`**\n\nfirst block\n\n- item\n\n**Orphan term**\n\norphan definition\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestParsePageRejectsMissingMainTitleAndOversizedInput(t *testing.T) {
 	if _, err := ParsePage(strings.NewReader("<html><body><h1>Outside</h1></body></html>")); err == nil {
 		t.Fatal("page without main was accepted")

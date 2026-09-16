@@ -161,6 +161,12 @@ func (r *pageRenderer) block(node *html.Node) string {
 		return r.details(node)
 	case "hr":
 		return "---"
+	case "dl":
+		return r.definitionList(node)
+	case "dt":
+		return r.term(node)
+	case "dd":
+		return r.definition(node)
 	case "img", "a", "code", "strong", "b", "em", "i", "br":
 		return strings.TrimSpace(r.inline(node))
 	case "nav":
@@ -168,7 +174,7 @@ func (r *pageRenderer) block(node *html.Node) string {
 	case "script", "style", "svg", "canvas", "button", "form", "input", "iframe":
 		r.droppedElements++
 		return ""
-	case "div", "section", "article", "header", "footer", "figure", "figcaption", "aside", "dl", "dt", "dd", "fieldset", "legend":
+	case "div", "section", "article", "header", "footer", "figure", "figcaption", "aside", "fieldset", "legend":
 		if feature := r.featureState(node); feature != nil {
 			r.featureStates = append(r.featureStates, *feature)
 			return featureMarkdown(*feature)
@@ -197,6 +203,56 @@ func (r *pageRenderer) inlineChildren(node *html.Node) string {
 		result.WriteString(r.inline(child))
 	}
 	return strings.TrimSpace(result.String())
+}
+
+// definitionList keeps definition-list semantics readable in plain Markdown:
+// each term renders as a bold line followed by its definition paragraphs.
+func (r *pageRenderer) definitionList(node *html.Node) string {
+	var blocks []string
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != html.ElementNode {
+			continue
+		}
+		switch child.Data {
+		case "dt":
+			if term := r.term(child); term != "" {
+				blocks = append(blocks, term)
+			}
+		case "dd":
+			if definition := strings.TrimSpace(r.definition(child)); definition != "" {
+				blocks = append(blocks, definition)
+			}
+		}
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func (r *pageRenderer) term(node *html.Node) string {
+	title := strings.TrimSpace(r.inlineChildren(node))
+	if title == "" {
+		return ""
+	}
+	return "**" + title + "**"
+}
+
+func (r *pageRenderer) definition(node *html.Node) string {
+	if hasBlockChild(node) {
+		return r.blocks(node)
+	}
+	return strings.TrimSpace(r.inlineChildren(node))
+}
+
+func hasBlockChild(node *html.Node) bool {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != html.ElementNode {
+			continue
+		}
+		switch child.Data {
+		case "p", "ul", "ol", "pre", "table", "blockquote", "dl", "details", "div", "figure", "section":
+			return true
+		}
+	}
+	return false
 }
 
 func (r *pageRenderer) inline(node *html.Node) string {

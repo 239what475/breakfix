@@ -143,7 +143,7 @@ func assetProjectionFixture(t *testing.T) (string, string, Config) {
 	writeAsset(t, root, "docs/images/unreferenced.svg", []byte("unreferenced asset\n"))
 	writeAsset(t, root, "images/docs/pod.svg", []byte("pod asset\n"))
 	out := filepath.Join(t.TempDir(), "documents")
-	return root, out, Config{Root: root, Out: out, Workers: 2, Version: "docs-project-v8"}
+	return root, out, Config{Root: root, Out: out, Workers: 2, Version: "docs-project-v9"}
 }
 
 func writeAsset(t *testing.T, root, path string, content []byte) {
