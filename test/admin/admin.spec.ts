@@ -231,6 +231,5 @@ async function resolveMemberUserId(request: APIRequestContext, memberUsername: s
   const users = await response.json() as { users: Array<{ id: string; subject: string; role: string }> };
   const found = users.users.find((entry) => entry.subject === memberUsername && entry.role === "user");
   expect(found, "member account missing from the admin user list").toBeDefined();
-  memberUserId = found!.id;
-  return memberUserId;
+  return found!.id;
 }
