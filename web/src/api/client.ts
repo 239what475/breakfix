@@ -22,6 +22,12 @@ import type {
 	StartResponse,
 	StopResponse,
 	TerminalTicketResponse,
+	AdminAuditPage,
+	AdminDocumentationWorkflow,
+	AdminDocumentationWorkflowDetail,
+	AdminDocumentationWorkflowList,
+	AdminRunnableActionPage,
+	AdminUserList,
 } from "./generated";
 
 export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
@@ -68,6 +74,19 @@ export function tokenUserName(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function tokenUserRole(): "admin" | "user" | undefined {
+	const payload = token()?.split(".")[1];
+	if (!payload) return undefined;
+	try {
+		const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+		const bytes = Uint8Array.from(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")), (value) => value.charCodeAt(0));
+		const value = JSON.parse(new TextDecoder().decode(bytes)) as { role?: unknown };
+		return value.role === "admin" ? "admin" : "user";
+	} catch {
+		return undefined;
+	}
 }
 
 async function request<T>(
@@ -268,4 +287,29 @@ export const api = {
     request<AuthoringSession>("GET", `/authoring/sessions/${id}`),
   getGeneration: (workflowID: string) =>
     request<GeneratorGeneration>("GET", `/generator/workflows/${workflowID}`),
+	listAdminUsers: () => request<AdminUserList>("GET", "/admin/users"),
+	resetAdminUserTOTP: (id: string, password: string) =>
+		request<RegisterResponse>("POST", `/admin/users/${id}/totp-reset`, { password }),
+	listAdminWorkflows: () =>
+		request<AdminDocumentationWorkflowList>("GET", "/admin/documentation/workflows"),
+	getAdminWorkflow: (id: string) =>
+		request<AdminDocumentationWorkflowDetail>("GET", `/admin/documentation/workflows/${id}`),
+	forceFailAdminWorkflow: (id: string, reason: string) =>
+		request<AdminDocumentationWorkflow>("POST", `/admin/documentation/workflows/${id}/force-fail`, { reason }),
+	restartAdminWorkflow: (id: string, reason: string) =>
+		request<AdminDocumentationWorkflow>("POST", `/admin/documentation/workflows/${id}/restart`, { reason }),
+	listAdminAudit: ({ cursor, limit = 20, action, user_id }: { cursor?: string; limit?: number; action?: string; user_id?: string }) => {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (cursor) query.set("cursor", cursor);
+		if (action) query.set("action", action);
+		if (user_id) query.set("user_id", user_id);
+		return request<AdminAuditPage>("GET", `/admin/audit?${query.toString()}`);
+	},
+	listAdminRunnableActions: (state?: string, phase?: string) => {
+		const query = new URLSearchParams();
+		if (state) query.set("state", state);
+		if (phase) query.set("phase", phase);
+		const suffix = query.size ? `?${query.toString()}` : "";
+		return request<AdminRunnableActionPage>("GET", `/admin/runnable-actions${suffix}`);
+	},
 };

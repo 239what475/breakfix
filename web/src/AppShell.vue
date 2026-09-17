@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppTopbar from "./AppTopbar.vue";
 import AuthDialog from "./features/auth/AuthDialog.vue";
 import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
@@ -7,6 +7,8 @@ import ScenarioCatalogPage from "./features/catalog/ScenarioCatalogPage.vue";
 import MySpacePage from "./features/my-space/MySpacePage.vue";
 import DocumentationPage from "./features/documentation/DocumentationPage.vue";
 import { documentationSource } from "./features/documentation/documentation";
+import AdminPage from "./features/admin/AdminPage.vue";
+import { isLoggedIn, tokenUserRole } from "./api/client";
 import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
 import { useScenarioSession } from "./features/workspace/useScenarioSession";
 
@@ -14,7 +16,25 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-const page = ref<"operations" | "my-space" | "documentation">(window.location.pathname === "/documentation" ? "documentation" : "operations");
+type AdminSection = "workflows" | "users" | "audit";
+
+function adminSectionFromPath(): AdminSection {
+	const match = window.location.pathname.match(/^\/admin\/(workflows|users|audit)$/);
+	return (match?.[1] as AdminSection) ?? "workflows";
+}
+
+const page = ref<"operations" | "my-space" | "documentation" | "admin">(window.location.pathname.startsWith("/admin/") ? "admin" : window.location.pathname === "/documentation" ? "documentation" : "operations");
+const adminSection = ref<AdminSection>(adminSectionFromPath());
+// Display-layer guard: the admin surface only renders for the admin role.
+// The backend independently enforces requireAdmin on every admin endpoint.
+const isAdmin = ref(isLoggedIn() && tokenUserRole() === "admin");
+
+watch(isAdmin, (admin) => {
+	if (!admin && page.value === "admin") {
+		page.value = "operations";
+		window.history.pushState({}, "", "/");
+	}
+});
 const mySpaceRefreshRequest = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
@@ -71,6 +91,15 @@ function openMySpace() {
 	page.value = "my-space";
 }
 
+function openAdmin(section: AdminSection = "workflows") {
+	if (!isAdmin.value) return;
+	closeAuthoring();
+	closeWorkspace();
+	adminSection.value = section;
+	if (page.value !== "admin") window.history.pushState({}, "", `/admin/${section}`);
+	page.value = "admin";
+}
+
 function openDocumentation() {
 	closeAuthoring();
 	closeWorkspace();
@@ -102,10 +131,16 @@ function handleWorkspaceStopped() {
 
 function signOut() {
 	page.value = "operations";
+	isAdmin.value = false;
 	logout();
 }
 
-const topbarActive = computed<"operations" | "my-space" | "documentation" | "none">(() => {
+function handleAuthenticated(name: string) {
+	isAdmin.value = isLoggedIn() && tokenUserRole() === "admin";
+	authenticated(name);
+}
+
+const topbarActive = computed<"operations" | "my-space" | "documentation" | "admin" | "none">(() => {
   if (authoringOpen.value) return "none";
   if (workspace.value) return "none";
 	return page.value;
@@ -114,6 +149,15 @@ const topbarActive = computed<"operations" | "my-space" | "documentation" | "non
 function handlePopState() {
   if (window.location.pathname === "/documentation") {
     page.value = "documentation";
+    return;
+  }
+  if (window.location.pathname.startsWith("/admin/")) {
+    if (!isAdmin.value) {
+      page.value = "operations";
+      return;
+    }
+    adminSection.value = adminSectionFromPath();
+    page.value = "admin";
     return;
   }
   page.value = new URLSearchParams(window.location.search).get("page") === "my-space" ? "my-space" : "operations";
@@ -125,7 +169,7 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
 
 <template>
   <div class="app-root">
-    <AppTopbar :active="topbarActive" :show-navigation="true" :logged-in="loggedIn" :account-name="accountName" @operations="navigateOperations" @my-space="navigateMySpace" @documentation="openDocumentation" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
+    <AppTopbar :active="topbarActive" :show-navigation="true" :logged-in="loggedIn" :is-admin="isAdmin" :account-name="accountName" @operations="navigateOperations" @my-space="navigateMySpace" @documentation="openDocumentation" @admin="openAdmin()" @login="openAuth('login')" @register="openAuth('register')" @logout="signOut" />
     <div
       v-if="notice"
       class="toast"
@@ -146,6 +190,13 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
 		@studio="openAuthoring"
       @focused="catalogFocusId = undefined"
 			/>
+      <AdminPage
+        v-if="!workspace && !authoringOpen && page === 'admin'"
+        :active="!workspace && !authoringOpen && page === 'admin'"
+        :logged-in="loggedIn"
+        :section="adminSection"
+        @navigate="openAdmin($event)"
+      />
       <MySpacePage
 		v-show="!workspace && !authoringOpen && page === 'my-space'"
 		:active="!workspace && !authoringOpen && page === 'my-space'"
@@ -165,7 +216,7 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
       :open="authOpen"
       :initial-mode="authMode"
       @close="authOpen = false"
-      @authenticated="authenticated"
+      @authenticated="handleAuthenticated"
     />
   </div>
 </template>

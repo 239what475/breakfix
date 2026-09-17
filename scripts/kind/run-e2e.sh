@@ -25,7 +25,7 @@ require_command() {
 }
 
 case "$suite" in
-	ui|node|k8s|recovery|documentation|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
+	ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
 		printf 'Usage: %s {ui|node|k8s|recovery|documentation|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
@@ -203,6 +203,9 @@ run_suite() {
 			;;
 		documentation)
 			npm run test:e2e:documentation --prefix "$repo_root/test"
+			;;
+		admin)
+			npm run test:e2e:admin --prefix "$repo_root/test"
 			;;
 		acceptance-node)
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
