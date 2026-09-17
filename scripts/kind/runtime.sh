@@ -209,7 +209,10 @@ for deployment in server controller runtime-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
 for deployment in server controller runtime-worker; do
-  if [ "$deployment" = server ] && [ "$skip_server_rollout" -eq 1 ]; then
+  # Server and Controller both validate the database schema marker, so a
+  # destructive state reset must bring them up without waiting: they stay in
+  # CrashLoopBackOff until the reset has removed the prior database.
+  if [ "$deployment" != runtime-worker ] && [ "$skip_server_rollout" -eq 1 ]; then
     continue
   fi
   if [ "$deployment" = runtime-worker ] && [ "$runtime_worker_replicas" -eq 0 ]; then
