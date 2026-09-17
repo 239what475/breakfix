@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v9",
+  "generator_version": "docs-project-v10",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",

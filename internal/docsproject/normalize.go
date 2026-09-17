@@ -30,14 +30,15 @@ type LinkStats struct {
 }
 
 type normalizationContext struct {
-	root      string
-	baseURL   *url.URL
-	redirects redirectTable
-	tree      map[string]struct{}
-	orphans   map[string]struct{}
+	root       string
+	baseURL    *url.URL
+	siteOrigin *url.URL
+	redirects  redirectTable
+	tree       map[string]struct{}
+	orphans    map[string]struct{}
 }
 
-func loadNormalization(root string, state treeState) (normalizationContext, error) {
+func loadNormalization(root string, state treeState, siteOrigin string) (normalizationContext, error) {
 	baseURL, err := loadBaseURL(root)
 	if err != nil {
 		return normalizationContext{}, err
@@ -46,7 +47,14 @@ func loadNormalization(root string, state treeState) (normalizationContext, erro
 	if err != nil {
 		return normalizationContext{}, err
 	}
-	context := normalizationContext{root: root, baseURL: baseURL, redirects: redirects, tree: map[string]struct{}{}, orphans: map[string]struct{}{}}
+	context := normalizationContext{root: root, baseURL: baseURL, siteOrigin: baseURL, redirects: redirects, tree: map[string]struct{}{}, orphans: map[string]struct{}{}}
+	if strings.TrimSpace(siteOrigin) != "" {
+		origin, err := url.Parse(strings.TrimSpace(siteOrigin))
+		if err != nil || origin.Scheme == "" || origin.Host == "" || origin.Path != "" && origin.Path != "/" {
+			return normalizationContext{}, errors.New("site origin must be an absolute URL without a path")
+		}
+		context.siteOrigin = origin
+	}
 	for _, page := range state.AllPages {
 		context.tree[page] = struct{}{}
 	}
@@ -174,6 +182,13 @@ func (normalizer *pageNormalizer) link(value string) (string, bool) {
 	case referenceExternal:
 		normalizer.links.External++
 		return resolved, true
+	case referenceLocal:
+		// Same-origin site paths outside /docs/ (the blog, release notes,
+		// site-level pages) are not part of the offline library; keep them
+		// as absolute references to the live site instead of dropping the
+		// link text onto the page.
+		normalizer.links.External++
+		return normalizer.context.absoluteReference(resolved), true
 	case referenceDocs:
 		page, fragment := splitFragment(resolved)
 		reference := relativePageReference(normalizer.page, page) + fragment
@@ -297,12 +312,27 @@ func (normalizer *pageNormalizer) resolve(value string) (string, referenceKind) 
 		parsed.Path = path.Join("/"+normalizer.page, parsed.Path)
 	}
 	if strings.HasPrefix(parsed.Path, "/docs/") {
-		parsed.Path = normalizer.context.redirects.resolve(parsed.Path)
-		page, err := normalizeSitePath(parsed.Path)
-		if err != nil {
-			return "", referenceDropped
+		target := normalizer.context.redirects.resolve(parsed.Path)
+		// A redirect target may carry its own anchor (for example
+		// …/csi-driver-v1/#TokenRequest); that anchor wins, and without one
+		// the source anchor survives — matching how the live site's
+		// redirects treat fragments.
+		targetPath, targetFragment := splitFragment(target)
+		fragment := targetFragment
+		if fragment == "" {
+			fragment = fragmentSuffix(parsed)
 		}
-		return page + fragmentSuffix(parsed), referenceDocs
+		page, err := normalizeSitePath(targetPath)
+		if err == nil {
+			return page + fragment, referenceDocs
+		}
+		// The redirect moved the link out of the docs tree (for example
+		// …/setup/release/version-skew-policy/ → /releases/…); keep it as
+		// a site link the caller can resolve absolutely.
+		if target != parsed.Path && strings.HasPrefix(targetPath, "/") {
+			return strings.TrimPrefix(targetPath, "/") + fragment, referenceLocal
+		}
+		return "", referenceDropped
 	}
 	assetPath := strings.TrimPrefix(path.Clean(parsed.Path), "/")
 	if assetPath == "." || strings.HasPrefix(assetPath, "../") {
@@ -323,6 +353,17 @@ func (normalizer *pageNormalizer) result() (LinkStats, []Asset) {
 
 func sameOrigin(left, right *url.URL) bool {
 	return left.Scheme == right.Scheme && left.Host == right.Host
+}
+
+// absoluteReference renders a site-root-relative reference outside /docs/ as
+// an absolute URL against the projection's site origin.
+func (context normalizationContext) absoluteReference(resolved string) string {
+	sitePath, fragment := splitFragment(resolved)
+	target := *context.siteOrigin
+	target.Path = path.Join("/", sitePath)
+	target.Fragment = strings.TrimPrefix(fragment, "#")
+	target.RawQuery = ""
+	return target.String()
 }
 
 func fragmentSuffix(parsed *url.URL) string {

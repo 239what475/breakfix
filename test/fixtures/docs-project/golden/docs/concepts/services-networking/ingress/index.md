@@ -1,5 +1,7 @@
 # Ingress
 
+Make your HTTP (or HTTPS) network service available using a protocol-aware configuration mechanism, that understands web concepts like URIs, hostnames, paths, and more. The Ingress concept lets you map traffic to different backends based on rules you define via the Kubernetes API.
+
 **[FEATURE STATE: Stable | since: v1.19]**
 
 An API object that manages external access to the services in a cluster, typically HTTP.
@@ -22,7 +24,7 @@ For clarity, this guide defines the following terms:
 - Cluster: A set of Nodes that run containerized applications managed by Kubernetes. For this example, and in most common Kubernetes deployments, nodes in the cluster are not part of the public internet.
 - Edge router: A router that enforces the firewall policy for your cluster. This could be a gateway managed by a cloud provider or a physical piece of hardware.
 - Cluster network: A set of links, logical or physical, that facilitate communication within a cluster according to the Kubernetes [networking model](../../cluster-administration/networking/).
-- Service: A Kubernetes [Service](../service/) that identifies a set of Pods using [label](../../overview/working-with-objects/labels/) selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
+- Service: A Kubernetes Service that identifies a set of Pods using label selectors. Unless mentioned otherwise, Services are assumed to have virtual IPs only routable within the cluster network.
 
 ## What is Ingress?
 
@@ -88,7 +90,7 @@ Each HTTP rule contains the following information:
 
 - An optional host. In this example, no host is specified, so the rule applies to all inbound HTTP traffic through the IP address specified. If a host is provided (for example, foo.bar.com), the rules apply to that host.
 - A list of paths (for example, `/testpath`), each of which has an associated backend defined with a `service.name` and a `service.port.name` or `service.port.number`. Both the host and path must match the content of an incoming request before the load balancer directs traffic to the referenced Service.
-- A backend is a combination of Service and port names as described in the [Service doc](../service/) or a [custom resource backend](#resource-backend) by way of a [CRD](../../../tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). HTTP (and HTTPS) requests to the Ingress that match the host and path of the rule are sent to the listed backend.
+- A backend is a combination of Service and port names as described in the [Service doc](../service/) or a [custom resource backend](#resource-backend) by way of a CRD. HTTP (and HTTPS) requests to the Ingress that match the host and path of the rule are sent to the listed backend.
 
 A `defaultBackend` is often configured in an Ingress controller to service any requests that do not match a path in the spec.
 
@@ -153,20 +155,9 @@ Each path in an Ingress is required to have a corresponding path type. Paths tha
 
 - `ImplementationSpecific`: With this path type, matching is up to the IngressClass. Implementations can treat this as a separate `pathType` or treat it identically to `Prefix` or `Exact` path types.
 - `Exact`: Matches the URL path exactly and with case sensitivity.
-- `Prefix`: Matches based on a URL path prefix split by `/`. Matching is case sensitive and done on a path element by element basis. A path element refers to the list of labels in the path split by the `/` separator. A request is a match for path *p* if every *p* is an element-wise prefix of *p* of the request path. > [!NOTE]
-> If the last element of the path is a substring of the last element in request path, it is not a match (for example:
->
-> `/foo/bar`
->
-> matches
->
-> `/foo/bar/baz`
->
-> , but does not match
->
-> `/foo/barbaz`
->
-> ).
+- `Prefix`: Matches based on a URL path prefix split by `/`. Matching is case sensitive and done on a path element by element basis. A path element refers to the list of labels in the path split by the `/` separator. A request is a match for path *p* if every *p* is an element-wise prefix of *p* of the request path.
+  > [!NOTE]
+  > If the last element of the path is a substring of the last element in request path, it is not a match (for example: `/foo/bar` matches `/foo/bar/baz`, but does not match `/foo/barbaz`).
 
 ### Examples
 
@@ -263,9 +254,6 @@ The specific type of parameters to use depends on the ingress controller that yo
 
 Depending on your ingress controller, you may be able to use parameters that you set cluster-wide, or just for one namespace.
 
-- Cluster
-- Namespaced
-
 **Panel: Cluster**
 
 The default scope for IngressClass parameters is cluster-wide.
@@ -347,11 +335,7 @@ The newer `ingressClassName` field on Ingresses is a replacement for that annota
 You can mark a particular IngressClass as default for your cluster. Setting the `ingressclass.kubernetes.io/is-default-class` annotation to `true` on an IngressClass resource will ensure that new Ingresses without an `ingressClassName` field specified will be assigned this default IngressClass.
 
 > [!CAUTION]
-> If you have more than one IngressClass marked as the default for your cluster, the admission controller prevents creating new Ingress objects that don't have an
->
-> `ingressClassName`
->
-> specified. You can resolve this by ensuring that at most 1 IngressClass is marked as default in your cluster.
+> If you have more than one IngressClass marked as the default for your cluster, the admission controller prevents creating new Ingress objects that don't have an `ingressClassName` specified. You can resolve this by ensuring that at most 1 IngressClass is marked as default in your cluster.
 
 Start by defining a default IngressClass. It is recommended though, to specify the default IngressClass:
 
@@ -405,11 +389,7 @@ test-ingress   external-lb   *       203.0.113.123   80      59s
 Where `203.0.113.123` is the IP allocated by the Ingress controller to satisfy this Ingress.
 
 > [!NOTE]
-> Ingress controllers and load balancers may take a minute or two to allocate an IP address. Until that time, you often see the address listed as
->
-> `<pending>`
->
-> .
+> Ingress controllers and load balancers may take a minute or two to allocate an IP address. Until that time, you often see the address listed as `<pending>`.
 
 ### Simple fanout
 
@@ -475,15 +455,7 @@ Events:
 The Ingress controller provisions an implementation-specific load balancer that satisfies the Ingress, as long as the Services (`service1`, `service2`) exist. When it has done so, you can see the address of the load balancer at the Address field.
 
 > [!NOTE]
-> Depending on the
->
-> [Ingress controller](../ingress-controllers/)
->
-> you are using, you may need to create a default-http-backend
->
-> [Service](../service/)
->
-> .
+> Depending on the [Ingress controller](../ingress-controllers/) you are using, you may need to create a default-http-backend [Service](../service/).
 
 ### Name based virtual hosting
 
@@ -572,7 +544,7 @@ spec:
 
 ### TLS
 
-You can secure an Ingress by specifying a [Secret](../../configuration/secret/) that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
+You can secure an Ingress by specifying a Secret that contains a TLS private key and certificate. The Ingress resource only supports a single TLS port, 443, and assumes TLS termination at the ingress point (traffic to the Service and its Pods is in plaintext). If the TLS configuration section in an Ingress specifies different hosts, they are multiplexed on the same port according to the hostname specified through the SNI TLS extension (provided the Ingress controller supports SNI). The TLS secret must contain keys named `tls.crt` and `tls.key` that contain the certificate and private key to use for TLS. For example:
 
 ```yaml
 apiVersion: v1
@@ -589,23 +561,7 @@ type: kubernetes.io/tls
 Referencing this secret in an Ingress tells the Ingress controller to secure the channel from the client to the load balancer using TLS. You need to make sure the TLS secret you created came from a certificate that contains a Common Name (CN), also known as a Fully Qualified Domain Name (FQDN) for `https-example.foo.com`.
 
 > [!NOTE]
-> Keep in mind that TLS will not work on the default rule because the certificates would have to be issued for all the possible sub-domains. Therefore,
->
-> `hosts`
->
-> in the
->
-> `tls`
->
-> section need to explicitly match the
->
-> `host`
->
-> in the
->
-> `rules`
->
-> section.
+> Keep in mind that TLS will not work on the default rule because the certificates would have to be issued for all the possible sub-domains. Therefore, `hosts` in the `tls` section need to explicitly match the `host` in the `rules` section.
 
 [`service/networking/tls-example-ingress.yaml`](https://raw.githubusercontent.com/kubernetes/website/main/content/en/examples/service/networking/tls-example-ingress.yaml)
 
@@ -741,4 +697,4 @@ You can expose a Service in multiple ways that don't directly involve the Ingres
 - Learn about the [Ingress](../../../reference/kubernetes-api/networking/ingress-v1/) API
 - Learn about [Ingress controllers](../ingress-controllers/)
 
-[Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)
+Last modified September 13, 2026 at 7:43 AM PST: [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

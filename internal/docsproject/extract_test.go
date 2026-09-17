@@ -40,7 +40,7 @@ func TestParsePageRendersListsTabsCardsAndDegradedTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"- one\n  - nested\n- two", "- [A](/docs/a/)\n- [B](/docs/b/)", "**Panel: Linux**\n\nPanel text.", "A | B\nC"} {
+	for _, expected := range []string{"- one\n  - nested\n- two", "- [A](/docs/a/)\n- [B](/docs/b/)", "**Panel: Linux**\n\nPanel text.", "| A | B |\n| --- | --- |\n| C |  |"} {
 		if !strings.Contains(string(page.Markdown), expected) {
 			t.Fatalf("markdown missing %q:\n%s", expected, page.Markdown)
 		}
@@ -119,5 +119,129 @@ func TestParsePageStripsFeedbackAndRejectsMalformedTitleMarkup(t *testing.T) {
 	}
 	if _, err := ParsePage(strings.NewReader(`<main><h1 title="unterminated`)); err == nil {
 		t.Fatal("malformed title markup was accepted")
+	}
+}
+
+func TestParsePageGroupsBareTextRunsIntoParagraphs(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Arch</h1>
+<div class="lead">The architectural concepts behind Kubernetes.</div>
+<h3 id="ccm">cloud-controller-manager</h3>A Kubernetes <a class='glossary-tooltip' href='/docs/reference/glossary/?all=true#term-control-plane'>control plane</a> component that embeds cloud-specific control logic.
+<div class="alert alert-secondary callout third-party-content"><strong>Note:</strong> This section links to third party projects. To add a project, read the <a href="/docs/contribute/style/content-guide/">content guide</a> before submitting a change.</div></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Arch\n\nThe architectural concepts behind Kubernetes.\n\n### cloud-controller-manager\n\nA Kubernetes control plane component that embeds cloud-specific control logic.\n\n**Note:** This section links to third party projects. To add a project, read the [content guide](/docs/contribute/style/content-guide/) before submitting a change.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageKeepsAlertBareTextInOneParagraph(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Notes</h1><div class="alert alert-info" role="note"><h4 class="alert-heading">Note:</h4>You can also run the manager as a Kubernetes <a href="/docs/concepts/cluster-administration/addons/">addon</a> rather than as part of the control plane.</div></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Notes\n\n> [!NOTE]\n> You can also run the manager as a Kubernetes [addon](/docs/concepts/cluster-administration/addons/) rather than as part of the control plane.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageUnwrapsSelfClosedAnchors(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Auth</h1><a id="warning-always-allow" /><div class="alert alert-danger" role="note"><h4 class="alert-heading">Warning:</h4><p>Enabling the mode bypasses authorization.</p></div></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Auth\n\n> [!CAUTION]\n> Enabling the mode bypasses authorization.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageRendersListItemBlockChildrenInOrder(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Flow</h1><ol><li>Start the agent:<pre><code class="language-shell">agent --start</code></pre><div class="alert alert-info"><h4 class="alert-heading">Note:</h4>The socket is per-node.</div>Then verify.</li><li>Second.</li></ol><ul><li>Outer text<ul><li>inner</li></ul>Tail after the sublist.</li></ul></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Flow\n\n" +
+		"1. Start the agent:\n" +
+		"   ```shell\n" +
+		"   agent --start\n" +
+		"   ```\n" +
+		"   > [!NOTE]\n" +
+		"   > The socket is per-node.\n" +
+		"   Then verify.\n" +
+		"2. Second.\n\n" +
+		"- Outer text\n" +
+		"  - inner\n" +
+		"  Tail after the sublist.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageRendersGlossaryTooltipAsPlainText(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Gloss</h1><p>A <a class='glossary-tooltip' title='definition' data-bs-toggle='tooltip' href='/docs/reference/glossary/?all=true#term-cluster' target='_blank'>cluster</a> of nodes.</p></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Gloss\n\nA cluster of nodes.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePagePreservesMultibyteSpaceBoundaries(t *testing.T) {
+	page, err := ParsePage(strings.NewReader("<main><h1>Steps</h1><p>This is shown as step\u00a0<strong>2</strong>\u00a0in the diagram.</p></main>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Steps\n\nThis is shown as step **2** in the diagram.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
+	}
+}
+
+func TestParsePageMapsScriptElementsToUnicode(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Units</h1><p>2<sup>26</sup> bytes and H<sub>2</sub>O plus <sup>v1.2</sup> fallback.</p></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Units\n\n2²⁶ bytes and H₂O plus v1.2 fallback.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageSpacesBadgeLabelRuns(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Metrics</h1><ul><li><label class="metric_detail">Labels:</label><span class="metric_label">name</span><span class="metric_label">verb</span></li></ul></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Metrics\n\n- Labels: name verb\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageRendersMetricNameAndHelp(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Metrics</h1><div class="metric" data-stability="stable"><div class="metric_name">apiserver_requests_total</div><div class="metric_help">Counter of requests.</div><ul><li><label>Stability Level:</label><span>STABLE</span></li></ul></div></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Metrics\n\napiserver_requests_total\n\nCounter of requests.\n\n- Stability Level: STABLE\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestParsePageDropsEmptyTextAnchors(t *testing.T) {
+	page, err := ParsePage(strings.NewReader(`<main><h1>Gloss</h1><p>Dockershim<a href="#term-dockershim" class="permalink"></a> is gone.</p></main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Gloss\n\nDockershim is gone.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown =\n%s\nwant:\n%s", got, want)
 	}
 }

@@ -143,6 +143,83 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 提交:`fix(docsproject): render definition lists without dropping term text`。
 
+### 1.6 全库逐页审查修复(docs-project-v10)
+
+背景:按 `docs-site/document-checklist.md` 的任务规格完成了**全库 854 页**逐页对照审查
+(2026-09-17,基线 v9)。审查确认内容面总体可靠(链接改写、代码块、feature-state、图片
+入库、genref 大表等大面积通过),同时暴露出一批**共性问题模式**。本节把确认为生成器
+缺陷的模式统一修复;审查中的误报经复核后不予修改,记录在案。
+
+确认的缺陷模式与修复规格:
+
+1. **块级裸文本与行内碎片化(①②④⑤ 的共同根因)**:`blocks()` 直接丢弃块级 `TextNode`,
+   行内元素(`a`/`code`/`strong`/`span`…)又各自成段。后果:h3 后无 `<p>` 包裹的正文整段
+   丢失(architecture/controller);`div.lead` 副标题丢失(多数索引页);
+   `alert-secondary` 第三方 callout 正文丢失(addons 等十余页);`dd` 内裸文本丢失
+   (statefulset `Recreate`、taint `NoExecute` 引导句);`metric_name`/`metric_help` 丢失
+   (instrumentation/metrics 全部 605 项);glossary "Also known as:" 标签丢失;警示框内
+   裸文本+链接被拆成多段(全库高频"碎片化")。修复:`blocks()` 把**连续的行内节点与
+   文本节点合成为一个段落**,块级元素仍按块渲染;`alert()`/`details()` 的内容遍历使用
+   同样的分组规则。
+2. **自闭合锚吞块**:上游使用 XHTML 风格 `<a id="x" />`,HTML5 解析器视为未闭合标签,
+   其后的标题/段落被吞入该 `<a>`,经行内路径渲染后粘连(授权页 "Warning:Enabling")。
+   修复:块级遍历把**无 `href` 的 `<a>` 视为透明容器**展开处理。
+3. **列表项内块级子元素粘连与乱序(⑥ 及概念框粘连)**:`list()` 把 `li` 的块级子元素
+   (`p`/`pre`/警示框/子列表)拼接进同一行——围栏与 `> [!NOTE]` 粘在条目文字行尾、围栏
+   配对错位;子列表统一后移导致"尾段并入首段、子列表乱序"。修复:重写列表渲染,`li`
+   内容按**文档序**渲染为块序列,首行挂条目标记,后续行按内容列缩进;嵌套列表保持原位。
+4. **同源非 `/docs/` 链接被丢弃(③)**:`/blog/…`、`/releases/…`、`/dockershim` 等站点
+   根路径(含重定向目标跳出 `/docs/` 树的链接,如 `setup/release/version-skew-policy/`)
+   落入 `referenceLocal` 分类后被 `link()` 丢弃,全库数十处博客/版本偏差策略链接
+   退化为纯文本。修复:此类链接以**站点正式 origin** 拼成绝对外部链接保留(计入
+   `external`);origin 由生成器参数 `-site-origin` 显式钉住(Makefile 传
+   `https://kubernetes.io`,记入 manifest 的 `site_origin` 字段)——渲染树自带的
+   `build-info.json` base_url 是本地 Hugo 地址,仅在未传参时兜底。空文本锚点
+   (glossary permalink 等)不再输出 `[](#…)` 噪音。
+5. **重定向目标自带锚点丢失(⑧)**:`_redirects` 目标本身携带锚点(如
+   `…/storage/csi-driver-v1/#TokenRequest`)时,路径规范化把 `#…` 一并吞掉。修复:
+   重定向解析分离路径与锚点——**目标锚点优先,无目标锚点时保留来源锚点**(与 Netlify
+   语义一致)。
+6. **glossary 术语链接化(已知问题 1)**:`a.glossary-tooltip` 在官网视觉上是纯文本+悬停
+   释义(294 页、1,333 处)。修复:该类锚点渲染为**纯术语文本**,不输出链接。
+7. **不换行空格丢失**:块边界/行内拼接用首**字节**判断空白,U+00A0(及任何多字节空白)
+   首字节非空白导致前导空格被吞("step **2**in")。修复:按**码点**判断边界。
+8. **上标/下标丢失(⑩)**:`2<sup>26</sup>` 退化为 "226"。修复:`sup`/`sub` 内容映射为
+   Unicode 上/下标字符(数字、`+` `-` `(` `)` `=` `n` `i` 等),无法映射时回退纯文本。
+9. **degraded 表格不可渲染(⑪)**:含 rowspan/colspan 的表格降级输出为无表头分隔行的
+   竖线文本,渲染器不识别为表格。修复:降级路径同样输出 GFM 形态(首行作表头 +
+   `| --- |` 分隔行 + 单元格转义),合并单元格信息仍按既有规则拉平,
+   `degraded_tables` 统计不变。
+10. **metrics 标签连写**:`label`/`span` 相邻无源码空格时(CSS 徽章式排版)值粘连
+    ("nameoperationrejectedtype")。修复:行内拼接在相邻 `label`/`span` 边界且两侧
+    无空白时补一个空格;`sup`/`sub`/`code` 边界不补(避免破坏 `2²⁶` 与行内码)。
+
+复核后的审查误报(不改,记录结论):cluster-administration/networking 的图片相对路径
+`../../../images/` 实际正确解析到 `docs/images/`(审查者层级算错);workload-api 尾部
+列表标记存在;cpu-management-policies 的 node-resource-managers 链接被 `_redirects`
+正确改写为新路径;`kubectl-commands#命令` 类锚经 `_redirects` 改写后悬空与线上行为
+一致(重定向表即如此指定),视为上游等效。表格 `<caption>` 仍不输出——caption 常为
+`display:none`,渲染树内无法可靠判断可见性,记为已知限制。
+
+验收标准:
+
+- [x] 审查记录中标注①②④⑤⑥⑧⑩⑪ 与 glossary/metrics/博客链接问题的代表页
+      (architecture、addons、cloud-controller、lead 索引页、statefulset、
+      instrumentation/metrics、authorization、secret、cluster-ip-allocation、
+      system-metrics、flow-control、endpoint-slices、glossary)逐一复验通过;
+- [x] v9→v10 全库 diff 中**变化的行均可归因**于上述模式之一(抽样比对),无意外页面变化
+      (854 页集合不变,唯一字节不变页为 `docs/home` 纯索引页);
+- [x] 链接统计口径更新:同源非 `/docs/` 链接从 `dropped` 移入 `external`
+      (全库 dropped 294→179);internal 减少约 1,289 为 glossary tooltip 转纯文本;
+      资产集合与 v9 一致;锚点总数 12,476 不变;
+- [x] 双跑 `diff -r` 一致;workers 1/8 一致;golden 按 v10 重新生成;
+      新增单测覆盖各模式(裸文本合段、自闭合锚、列表块序、tooltip 纯文本、
+      多字节空格、上/下标、降级表格、越树重定向、空锚丢弃);
+- [x] `make docs-project` 刷新本地产物,`document-checklist.md` 末尾追加修复闭环记录。
+
+提交:`fix(docsproject): restore bare text, list blocks, and site links from review`,
+规格、实现、单测、golden 同提交;版本串升 **docs-project-v10**。
+
 ## 2. 运行时切换到文档库(前置:第 1 节资产入库完成)
 
 - [ ] Server 端文档 Reader 改为读取文档库并校验 digest,移除运行时 HTML 解析路径。

@@ -1,14 +1,14 @@
 # Horizontal Pod Autoscaling
 
-In Kubernetes, a *HorizontalPodAutoscaler* automatically updates a workload resource (such as a [Deployment](../../controllers/deployment/) or [StatefulSet](../../controllers/statefulset/)), with the aim of automatically scaling capacity to match demand.
+In Kubernetes, a *HorizontalPodAutoscaler* automatically updates a workload resource (such as a Deployment or StatefulSet), with the aim of automatically scaling capacity to match demand.
 
-Horizontal scaling means that the response to increased load is to deploy more [Pods](../../pods/). This is different from *vertical* scaling, which for Kubernetes would mean assigning more resources (for example: memory or CPU) to the Pods that are already running for the workload.
+Horizontal scaling means that the response to increased load is to deploy more Pods. This is different from *vertical* scaling, which for Kubernetes would mean assigning more resources (for example: memory or CPU) to the Pods that are already running for the workload.
 
 If the load decreases, and the number of Pods is above the configured minimum, the HorizontalPodAutoscaler instructs the workload resource (the Deployment, StatefulSet, or other similar resource) to scale back down.
 
-Horizontal pod autoscaling does not apply to objects that can't be scaled (for example: a [DaemonSet](../../controllers/daemonset/).)
+Horizontal pod autoscaling does not apply to objects that can't be scaled (for example: a DaemonSet.)
 
-The HorizontalPodAutoscaler is implemented as a Kubernetes API resource and a [controller](../../../architecture/controller/). The resource determines the behavior of the controller. The horizontal pod autoscaling controller, running within the Kubernetes [control plane](../../../../reference/glossary/#term-control-plane), periodically adjusts the desired scale of its target (for example, a Deployment) to match observed metrics such as average CPU utilization, average memory utilization, or any other custom metric you specify.
+The HorizontalPodAutoscaler is implemented as a Kubernetes API resource and a controller. The resource determines the behavior of the controller. The horizontal pod autoscaling controller, running within the Kubernetes control plane, periodically adjusts the desired scale of its target (for example, a Deployment) to match observed metrics such as average CPU utilization, average memory utilization, or any other custom metric you specify.
 
 There is [walkthrough example](../../../../tasks/run-application/horizontal-pod-autoscale-walkthrough/) of using horizontal pod autoscaling.
 
@@ -43,11 +43,13 @@ Kubernetes implements horizontal pod autoscaling as a control loop that runs int
 
 Once during each period, the controller manager queries the resource utilization against the metrics specified in each HorizontalPodAutoscaler definition. The controller manager finds the target resource defined by the `scaleTargetRef`, then selects the pods based on the target resource's `.spec.selector` labels, and obtains the metrics from either the resource metrics API (for per-pod resource metrics), or the custom metrics API (for all other metrics).
 
-- For per-pod resource metrics (like CPU), the controller fetches the metrics from the resource metrics API for each Pod targeted by the HorizontalPodAutoscaler. Then, if a target utilization value is set, the controller calculates the utilization value as a percentage of the equivalent [resource request](../../../configuration/manage-resources-containers/#requests-and-limits) on the containers in each Pod. If a target raw value is set, the raw metric values are used directly. The controller then takes the mean of the utilization or the raw value (depending on the type of target specified) across all targeted Pods, and produces a ratio used to scale the number of desired replicas. Please note that if some of the Pod's containers do not have the relevant resource request set, CPU utilization for the Pod will not be defined and the autoscaler will not take any action for that metric. See the [algorithm details](#algorithm-details) section below for more information about how the autoscaling algorithm works.
+- For per-pod resource metrics (like CPU), the controller fetches the metrics from the resource metrics API for each Pod targeted by the HorizontalPodAutoscaler. Then, if a target utilization value is set, the controller calculates the utilization value as a percentage of the equivalent [resource request](../../../configuration/manage-resources-containers/#requests-and-limits) on the containers in each Pod. If a target raw value is set, the raw metric values are used directly. The controller then takes the mean of the utilization or the raw value (depending on the type of target specified) across all targeted Pods, and produces a ratio used to scale the number of desired replicas.
+
+  Please note that if some of the Pod's containers do not have the relevant resource request set, CPU utilization for the Pod will not be defined and the autoscaler will not take any action for that metric. See the [algorithm details](#algorithm-details) section below for more information about how the autoscaling algorithm works.
 - For per-pod custom metrics, the controller functions similarly to per-pod resource metrics, except that it works with raw values, not utilization values.
 - For object metrics and external metrics, a single metric is fetched, which describes the object in question. This metric is compared to the target value, to produce a ratio as above. In the `autoscaling/v2` API version, this value can optionally be divided by the number of Pods before the comparison is made.
 
-The common use for HorizontalPodAutoscaler is to configure it to fetch metrics from [aggregated APIs](../../../extend-kubernetes/api-extension/apiserver-aggregation/) (`metrics.k8s.io`, `custom.metrics.k8s.io`, or `external.metrics.k8s.io`). The `metrics.k8s.io` API is usually provided by an add-on named Metrics Server, which needs to be launched separately. For more information about resource metrics, see [Metrics Server](../../../../tasks/debug/debug-cluster/resource-metrics-pipeline/#metrics-server).
+The common use for HorizontalPodAutoscaler is to configure it to fetch metrics from aggregated APIs (`metrics.k8s.io`, `custom.metrics.k8s.io`, or `external.metrics.k8s.io`). The `metrics.k8s.io` API is usually provided by an add-on named Metrics Server, which needs to be launched separately. For more information about resource metrics, see [Metrics Server](../../../../tasks/debug/debug-cluster/resource-metrics-pipeline/#metrics-server).
 
 [Support for metrics APIs](#support-for-metrics-apis) explains the stability guarantees and support status for these different APIs.
 
@@ -56,6 +58,8 @@ The HorizontalPodAutoscaler controller accesses corresponding workload resources
 ### Algorithm details
 
 From the most basic perspective, the HorizontalPodAutoscaler controller operates on the ratio between desired metric value and current metric value:
+
+$$\\begin{equation*} desiredReplicas = ceil\\left\\lceil currentReplicas \\times \\frac{currentMetricValue}{desiredMetricValue} \\right\\rceil \\end{equation*}$$
 
 For example, if the current metric value is `200m`, and the desired value is `100m`, the number of replicas will be doubled, since \\( { 200.0 \\div 100.0 } = 2.0 \\).  If the current value is instead `50m`, you'll halve the number of replicas, since \\( { 50.0 \\div 100.0 } = 0.5 \\). The control plane skips any scaling action if the ratio is sufficiently close to 1.0 (within a [configurable tolerance](#tolerance), 0.1 by default).
 
@@ -196,11 +200,12 @@ By default, the HorizontalPodAutoscaler controller retrieves metrics from a seri
 
 - The [API aggregation layer](../../../../tasks/extend-kubernetes/configure-aggregation-layer/) is enabled.
 - The corresponding APIs are registered:
-  - For resource metrics, this is the `metrics.k8s.io` [API](../../../../reference/external-api/metrics.v1beta1/), generally provided by [metrics-server](https://github.com/kubernetes-sigs/metrics-server). It can be launched as a cluster add-on. > [!NOTE]
-> ```
-> The HorizontalPodAutoscaler currently supports the `metrics.k8s.io/v1beta1`
-> API for resource metrics. It does not support `metrics.k8s.io/v1` yet.
-> ```
+  - For resource metrics, this is the `metrics.k8s.io` [API](../../../../reference/external-api/metrics.v1beta1/), generally provided by [metrics-server](https://github.com/kubernetes-sigs/metrics-server). It can be launched as a cluster add-on.
+    > [!NOTE]
+    > ```
+    > The HorizontalPodAutoscaler currently supports the `metrics.k8s.io/v1beta1`
+    > API for resource metrics. It does not support `metrics.k8s.io/v1` yet.
+    > ```
   - For custom metrics, this is the `custom.metrics.k8s.io` [API](../../../../reference/external-api/custom-metrics.v1beta2/). It's provided by "adapter" API servers provided by metrics solution vendors. Check with your metrics pipeline to see if there is a Kubernetes metrics adapter available.
   - For external metrics, this is the `external.metrics.k8s.io` [API](../../../../reference/external-api/external-metrics.v1beta1/). It may be provided by the custom metrics adapters provided above.
 
@@ -366,7 +371,7 @@ For HorizontalPodAutoscalers that scale on [custom](#scaling-on-custom-metrics) 
 
 Scaling to zero is only supported for object and external metrics. It is not available for resource metrics (such as CPU or memory utilization), because those can only be measured on running Pods. Setting `minReplicas: 0` requires at least one object or external metric to be configured; the API server rejects the HorizontalPodAutoscaler otherwise.
 
-This behavior is controlled by the `HPAScaleToZero` [feature gate](../../../../reference/command-line-tools-reference/feature-gates/), which is enabled by default. The feature gate must be enabled on both the [kube-apiserver](../../../architecture/#kube-apiserver) (which allows `minReplicas: 0`) and the [kube-controller-manager](../../../../reference/command-line-tools-reference/kube-controller-manager/) (which performs the scaling).
+This behavior is controlled by the `HPAScaleToZero` [feature gate](../../../../reference/command-line-tools-reference/feature-gates/), which is enabled by default. The feature gate must be enabled on both the kube-apiserver (which allows `minReplicas: 0`) and the kube-controller-manager (which performs the scaling).
 
 While the HPA is holding a workload at zero replicas, it records a `ScaledToZero` condition set to `True` on the HorizontalPodAutoscaler's status. The HPA uses this condition to distinguish a workload that it scaled to zero (and will scale back up when the metric returns) from one that was [manually deactivated](#implicit-maintenance-mode-deactivation) by setting its replica count to `0`. Once the workload is scaled back up, the condition is set to `False` with the reason `NotScaledToZero`.
 
@@ -376,12 +381,9 @@ You can implicitly deactivate the HPA for a target without the need to change th
 
 ### Migrating Deployments and StatefulSets to horizontal autoscaling
 
-When an HPA is enabled, it is recommended that the value of `spec.replicas` of the Deployment and / or StatefulSet be removed from their [manifest(s)](../../../../reference/glossary/#term-manifest). If this isn't done, any time a change to that object is applied, for example via `kubectl apply -f deployment.yaml`, this will instruct Kubernetes to scale the current number of Pods to the value of the `spec.replicas` key. This may not be desired and could be troublesome when an HPA is active, resulting in thrashing or flapping behavior.
+When an HPA is enabled, it is recommended that the value of `spec.replicas` of the Deployment and / or StatefulSet be removed from their manifest(s). If this isn't done, any time a change to that object is applied, for example via `kubectl apply -f deployment.yaml`, this will instruct Kubernetes to scale the current number of Pods to the value of the `spec.replicas` key. This may not be desired and could be troublesome when an HPA is active, resulting in thrashing or flapping behavior.
 
 Keep in mind that the removal of `spec.replicas` may incur a one-time degradation of Pod counts as the default value of this key is 1 (reference [Deployment Replicas](../../controllers/deployment/#replicas)). Upon the update, all Pods except 1 will begin their termination procedures. Any deployment application afterwards will behave as normal and respect a rolling update configuration as desired. You can avoid this degradation by choosing one of the following two methods based on how you are modifying your deployments:
-
-- Client Side Apply (this is the default)
-- Server Side Apply
 
 **Panel: Client Side Apply (this is the default)**
 
@@ -405,4 +407,4 @@ For more information on HorizontalPodAutoscaler:
 - If you would like to write your own custom metrics adapter, check out the [boilerplate](https://github.com/kubernetes-sigs/custom-metrics-apiserver) to get started.
 - Read the [API reference](../../../../reference/kubernetes-api/autoscaling/horizontal-pod-autoscaler-v2/) for HorizontalPodAutoscaler.
 
-[Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)
+Last modified September 13, 2026 at 7:43 AM PST: [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

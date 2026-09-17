@@ -18,6 +18,7 @@ func main() {
 	flag.IntVar(&config.Workers, "workers", config.Workers, "parallel page extraction workers")
 	flag.StringVar(&config.Version, "version", "", "required generator version")
 	flag.BoolVar(&config.Resume, "resume", false, "reuse matching page outputs")
+	flag.StringVar(&config.SiteOrigin, "site-origin", "", "canonical site origin for links outside /docs/ (for example https://kubernetes.io)")
 	flag.Parse()
 	config.Pages = splitPages(*pages)
 

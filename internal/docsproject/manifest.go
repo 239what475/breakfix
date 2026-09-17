@@ -53,6 +53,7 @@ type GlobalManifest struct {
 	GeneratorVersion string          `json:"generator_version"`
 	Upstream         Upstream        `json:"upstream"`
 	BuildInfo        json.RawMessage `json:"build_info"`
+	SiteOrigin       string          `json:"site_origin"`
 	Tree             Tree            `json:"tree"`
 	Pages            []string        `json:"pages"`
 	Orphans          []string        `json:"orphans"`
@@ -101,7 +102,7 @@ type upstreamBuildInfo struct {
 }
 
 func runProjection(config Config, state treeState) error {
-	normalization, err := loadNormalization(config.Root, state)
+	normalization, err := loadNormalization(config.Root, state, config.SiteOrigin)
 	if err != nil {
 		return &InputError{Err: err}
 	}
@@ -355,6 +356,7 @@ func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBui
 		GeneratorVersion: config.Version,
 		Upstream:         upstream,
 		BuildInfo:        rawBuildInfo,
+		SiteOrigin:       normalization.siteOrigin.String(),
 		Tree:             state.Tree,
 		Pages:            append([]string(nil), state.Pages...),
 		Orphans:          append([]string(nil), state.Orphans...),

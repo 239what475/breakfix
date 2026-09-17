@@ -1,6 +1,7 @@
 package docsproject
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ func TestPageNormalizerNormalizesLinksAndAssets(t *testing.T) {
 	writeNormalizerFile(t, root, "build-info.json", `{"base_url":"http://localhost:1313/"}`)
 	writeNormalizerFile(t, root, "_redirects", "/docs/old/ /docs/new/ 301\n")
 	writeNormalizerFile(t, root, "docs/images/diagram.svg", "asset")
-	context, err := loadNormalization(root, treeState{AllPages: []string{"docs/new/"}, Orphans: []string{"docs/archive/"}})
+	context, err := loadNormalization(root, treeState{AllPages: []string{"docs/new/"}, Orphans: []string{"docs/archive/"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestPageNormalizerRejectsMissingAssetsAndDropsExternalAssets(t *testing.T) 
 	root := t.TempDir()
 	writeNormalizerFile(t, root, "build-info.json", `{"base_url":"https://docs.example.test/"}`)
 	writeNormalizerFile(t, root, "_redirects", "")
-	context, err := loadNormalization(root, treeState{})
+	context, err := loadNormalization(root, treeState{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,4 +125,71 @@ func writeNormalizerFile(t *testing.T, root, name, content string) {
 	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPageNormalizerKeepsRedirectTargetFragments(t *testing.T) {
+	table := redirectTable{exact: map[string]string{
+		"/docs/reference/kubernetes-api/authentication-resources/token-request-v1/": "/docs/reference/kubernetes-api/storage/csi-driver-v1/#TokenRequest",
+		"/docs/old/": "/docs/new/",
+	}}
+	context := normalizationContext{tree: map[string]struct{}{"docs/reference/kubernetes-api/storage/csi-driver-v1/": {}, "docs/new/": {}}, redirects: table}
+	normalizer := context.forPage("docs/concepts/configuration/secret/")
+	page, err := extractPageWithNormalizer([]byte(`<main><h1>Secrets</h1><p><a href="/docs/reference/kubernetes-api/authentication-resources/token-request-v1/">TokenRequest</a> and <a href="/docs/old/#keep">old anchor</a>.</p></main>`), normalizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Secrets\n\n[TokenRequest](../../../reference/kubernetes-api/storage/csi-driver-v1/#TokenRequest) and [old anchor](../../../new/#keep).\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
+	}
+}
+
+func TestPageNormalizerKeepsSameOriginNonDocsLinks(t *testing.T) {
+	root := t.TempDir()
+	writeNormalizerFile(t, root, "build-info.json", `{"base_url":"https://kubernetes.io/"}`)
+	writeNormalizerFile(t, root, "_redirects", "")
+	context, err := loadNormalization(root, treeState{AllPages: []string{"docs/current/"}}, "https://kubernetes.io")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer := context.forPage("docs/current/")
+	page, err := extractPageWithNormalizer([]byte(`<main><h1>Current</h1><p>Read the <a href="/blog/2021/05/14/using-finalizers/">blog post</a> and the <a href="/releases/version-skew-policy/">skew policy</a>.</p></main>`), normalizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Current\n\nRead the [blog post](https://kubernetes.io/blog/2021/05/14/using-finalizers) and the [skew policy](https://kubernetes.io/releases/version-skew-policy).\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
+	}
+	if page.Links.External != 2 || page.Links.Dropped != 0 {
+		t.Fatalf("links = %#v", page.Links)
+	}
+}
+
+func TestPageNormalizerFollowsRedirectsOutOfDocsTree(t *testing.T) {
+	table := redirectTable{exact: map[string]string{
+		"/docs/setup/release/version-skew-policy/": "/releases/version-skew-policy/",
+	}}
+	context := normalizationContext{tree: map[string]struct{}{}, redirects: table, siteOrigin: mustURL(t, "https://kubernetes.io")}
+	normalizer := context.forPage("docs/concepts/windows/intro/")
+	page, err := extractPageWithNormalizer([]byte(`<main><h1>Intro</h1><p>The Kubernetes <a href="/docs/setup/release/version-skew-policy/">version-skew policy</a> also applies.</p></main>`), normalizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Intro\n\nThe Kubernetes [version-skew policy](https://kubernetes.io/releases/version-skew-policy) also applies.\n"
+	if got := string(page.Markdown); got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
+	}
+	if page.Links.External != 1 || page.Links.Dropped != 0 {
+		t.Fatalf("links = %#v", page.Links)
+	}
+}
+
+func mustURL(t *testing.T, value string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

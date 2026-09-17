@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/net/html"
 )
@@ -102,16 +103,58 @@ type pageRenderer struct {
 }
 
 func (r *pageRenderer) blocks(root *html.Node) string {
-	var blocks []string
-	for child := root.FirstChild; child != nil; child = child.NextSibling {
-		if block := r.block(child); block != "" {
-			blocks = append(blocks, strings.TrimSpace(block))
-		}
-	}
+	blocks := r.contentBlocks(root, nil)
 	if len(blocks) == 0 {
 		return ""
 	}
 	return strings.Join(blocks, "\n\n") + "\n"
+}
+
+// contentBlocks renders a container's children as a sequence of Markdown
+// blocks. Consecutive inline nodes (text plus inline elements) merge into a
+// single paragraph — the pinned tree routinely leaves body text unwrapped
+// next to headings, inside lead divs, callouts, and definitions, and those
+// bare runs must not fragment or vanish. skip hides children the caller
+// renders itself (alert headings, summaries).
+func (r *pageRenderer) contentBlocks(root *html.Node, skip func(*html.Node) bool) []string {
+	var blocks []string
+	var pending strings.Builder
+	var pendingLast *html.Node
+	flush := func() {
+		if text := strings.TrimSpace(pending.String()); text != "" {
+			blocks = append(blocks, text)
+		}
+		pending.Reset()
+		pendingLast = nil
+	}
+	for child := root.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.CommentNode || skip != nil && skip(child) {
+			continue
+		}
+		if isTransparentAnchor(child) {
+			flush()
+			blocks = append(blocks, r.contentBlocks(child, skip)...)
+			continue
+		}
+		if isInlineNode(child) {
+			value := r.inline(child)
+			if value == "" {
+				continue
+			}
+			if pending.Len() > 0 {
+				pending.WriteString(boundary(pendingLast, pending.String(), value, child))
+			}
+			pending.WriteString(value)
+			pendingLast = child
+			continue
+		}
+		flush()
+		if block := r.block(child); block != "" {
+			blocks = append(blocks, strings.TrimSpace(block))
+		}
+	}
+	flush()
+	return blocks
 }
 
 func (r *pageRenderer) block(node *html.Node) string {
@@ -199,10 +242,43 @@ func (r *pageRenderer) block(node *html.Node) string {
 
 func (r *pageRenderer) inlineChildren(node *html.Node) string {
 	var result strings.Builder
+	var last *html.Node
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		result.WriteString(r.inline(child))
+		value := r.inline(child)
+		if value == "" {
+			continue
+		}
+		if result.Len() > 0 {
+			result.WriteString(boundary(last, result.String(), value, child))
+		}
+		result.WriteString(value)
+		last = child
 	}
 	return strings.TrimSpace(result.String())
+}
+
+// boundary inserts a separating space between two adjacent inline siblings
+// when both are badge-styled containers (label/span, as in the metrics
+// reference) and the rendered HTML carries no whitespace of its own there.
+func boundary(last *html.Node, previous, next string, node *html.Node) string {
+	if badgeNode(last) && badgeNode(node) && !endsWithSpace(previous) && !startsWithSpace(next) {
+		return " "
+	}
+	return ""
+}
+
+func badgeNode(node *html.Node) bool {
+	return node != nil && node.Type == html.ElementNode && (node.Data == "span" || node.Data == "label")
+}
+
+func endsWithSpace(value string) bool {
+	last, _ := utf8.DecodeLastRuneInString(value)
+	return unicode.IsSpace(last)
+}
+
+func startsWithSpace(value string) bool {
+	first, _ := utf8.DecodeRuneInString(value)
+	return unicode.IsSpace(first)
 }
 
 // definitionList keeps definition-list semantics readable in plain Markdown:
@@ -279,7 +355,16 @@ func (r *pageRenderer) inline(node *html.Node) string {
 		return wrap("**", strings.TrimSpace(value))
 	case "em", "i":
 		return wrap("*", strings.TrimSpace(value))
+	case "sup":
+		return scriptValue(value, superscripts)
+	case "sub":
+		return scriptValue(value, subscripts)
 	case "a":
+		if hasClass(node, "glossary-tooltip") {
+			// The pinned site renders glossary tooltips as plain terms with
+			// a hover definition; they are not navigation links.
+			return value
+		}
 		if href := attribute(node, "href"); href != "" {
 			if r.normalizer != nil {
 				normalized, keep := r.normalizer.link(href)
@@ -288,7 +373,13 @@ func (r *pageRenderer) inline(node *html.Node) string {
 				}
 				href = normalized
 			}
-			return "[" + strings.TrimSpace(value) + "](" + href + ")"
+			text := strings.TrimSpace(value)
+			if text == "" {
+				// Anchors without visible text (permalink hooks and the
+				// like) render as nothing in a browser.
+				return ""
+			}
+			return "[" + text + "](" + href + ")"
 		}
 		return value
 	case "img":
@@ -310,11 +401,42 @@ func (r *pageRenderer) inline(node *html.Node) string {
 			}
 		}
 		return "![" + escapeText(attribute(node, "alt")) + "](" + src + ")"
-	case "span", "small", "sup", "sub", "mark", "time", "abbr", "cite", "label":
+	case "span", "small", "mark", "time", "abbr", "cite", "label":
 		return value
 	default:
 		return value
 	}
+}
+
+// superscripts and subscripts map script content to the Unicode characters
+// plain Markdown needs to keep exponents (2<sup>26</sup> bytes) readable.
+var superscripts = map[rune]rune{
+	'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+	'+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', 'n': 'ⁿ', 'i': 'ⁱ',
+}
+
+var subscripts = map[rune]rune{
+	'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+	'+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎', 'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ',
+	'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ',
+	'v': 'ᵥ', 'x': 'ₓ',
+}
+
+// scriptValue maps every rune through the script table or falls back to the
+// plain value, so unmappable exponents degrade to text instead of noise.
+func scriptValue(value string, mapping map[rune]rune) string {
+	if value == "" {
+		return ""
+	}
+	var out strings.Builder
+	for _, character := range value {
+		mapped, ok := mapping[character]
+		if !ok {
+			return value
+		}
+		out.WriteRune(mapped)
+	}
+	return out.String()
 }
 
 func fallbackTitle(document *html.Node, headings []ExtractedHeading) string {
@@ -342,26 +464,97 @@ func (r *pageRenderer) list(list *html.Node, depth int, ordered bool) string {
 		if ordered {
 			prefix = fmt.Sprintf("%d. ", itemNumber)
 		}
-		var body strings.Builder
-		var nested []string
-		for itemChild := child.FirstChild; itemChild != nil; itemChild = itemChild.NextSibling {
-			if itemChild.Type == html.ElementNode && (itemChild.Data == "ul" || itemChild.Data == "ol") {
-				nested = append(nested, r.list(itemChild, depth+1, itemChild.Data == "ol"))
-				continue
-			}
-			if itemChild.Type == html.ElementNode && isBlockElement(itemChild.Data) {
-				body.WriteString(r.block(itemChild))
-			} else {
-				body.WriteString(r.inline(itemChild))
-			}
-		}
-		line := strings.Repeat("  ", depth) + prefix + strings.TrimSpace(body.String())
-		lines = append(lines, strings.TrimRight(line, " \t\n"))
-		for _, nestedList := range nested {
-			lines = append(lines, nestedList)
-		}
+		lines = append(lines, r.listItem(child, depth, prefix)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// listItem renders one item's children in document order as a block
+// sequence: paragraphs and fenced code stay on their own lines (indented to
+// the content column), nested lists keep their position instead of being
+// hoisted behind the item text. Only consecutive paragraphs need a blank
+// line between them; every other block boundary starts unambiguously.
+func (r *pageRenderer) listItem(item *html.Node, depth int, prefix string) []string {
+	type itemBlock struct {
+		text       string
+		paragraph  bool
+		selfIndent bool // nested lists already carry their own indentation
+	}
+	var itemBlocks []itemBlock
+	var pending strings.Builder
+	var pendingLast *html.Node
+	flush := func() {
+		if text := strings.TrimSpace(pending.String()); text != "" {
+			itemBlocks = append(itemBlocks, itemBlock{text: text, paragraph: true})
+		}
+		pending.Reset()
+		pendingLast = nil
+	}
+	for child := item.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.CommentNode {
+			continue
+		}
+		if isTransparentAnchor(child) {
+			flush()
+			for _, block := range r.contentBlocks(child, nil) {
+				itemBlocks = append(itemBlocks, itemBlock{text: block})
+			}
+			continue
+		}
+		if child.Type == html.ElementNode && (child.Data == "ul" || child.Data == "ol") {
+			flush()
+			itemBlocks = append(itemBlocks, itemBlock{text: r.list(child, depth+1, child.Data == "ol"), selfIndent: true})
+			continue
+		}
+		if isInlineNode(child) {
+			value := r.inline(child)
+			if value == "" {
+				continue
+			}
+			if pending.Len() > 0 {
+				pending.WriteString(boundary(pendingLast, pending.String(), value, child))
+			}
+			pending.WriteString(value)
+			pendingLast = child
+			continue
+		}
+		flush()
+		if block := r.block(child); block != "" {
+			itemBlocks = append(itemBlocks, itemBlock{text: strings.TrimSpace(block), paragraph: child.Data == "p"})
+		}
+	}
+	flush()
+
+	var lines []string
+	marker := strings.Repeat("  ", depth) + prefix
+	indent := strings.Repeat("  ", depth) + strings.Repeat(" ", len(prefix))
+	previousParagraph := false
+	for index, block := range itemBlocks {
+		text := strings.TrimRight(block.text, "\n")
+		if text == "" {
+			continue
+		}
+		if index > 0 && previousParagraph && block.paragraph && len(lines) > 0 && lines[len(lines)-1] != "" {
+			lines = append(lines, "")
+		}
+		previousParagraph = block.paragraph
+		for lineIndex, line := range strings.Split(text, "\n") {
+			switch {
+			case block.selfIndent:
+				if index == 0 && lineIndex == 0 {
+					lines = append(lines, strings.TrimRight(marker, " "))
+				}
+				lines = append(lines, line)
+			case index == 0 && lineIndex == 0:
+				lines = append(lines, marker+line)
+			case line == "":
+				lines = append(lines, "")
+			default:
+				lines = append(lines, indent+line)
+			}
+		}
+	}
+	return lines
 }
 
 func (r *pageRenderer) codeBlock(pre *html.Node) string {
@@ -403,13 +596,34 @@ func (r *pageRenderer) table(table *html.Node) string {
 	}
 	if degraded {
 		r.degradedTables++
-		var lines []string
+		// Merged-cell tables still emit GFM shape so renderers recognize
+		// them; rowspan/colspan content flattens into the owning cell.
+		width := 0
 		for _, row := range rows {
-			var cells []string
-			for _, cell := range row.cells {
-				cells = append(cells, flattenMarkdown(r.inlineChildren(cell)))
+			if len(row.cells) > width {
+				width = len(row.cells)
 			}
-			lines = append(lines, strings.Join(cells, " | "))
+		}
+		if width == 0 {
+			return ""
+		}
+		cells := func(row tableRow) []string {
+			values := make([]string, 0, len(row.cells))
+			for _, cell := range row.cells {
+				values = append(values, strings.ReplaceAll(flattenMarkdown(r.inlineChildren(cell)), "|", "\\|"))
+			}
+			return values
+		}
+		var lines []string
+		for index, row := range rows {
+			row := cells(row)
+			for len(row) < width {
+				row = append(row, "")
+			}
+			lines = append(lines, "| "+strings.Join(row, " | ")+" |")
+			if index == 0 {
+				lines = append(lines, "| "+strings.TrimRight(strings.Repeat("--- | ", width), " "))
+			}
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -464,30 +678,34 @@ func tableRows(root *html.Node) []tableRow {
 }
 
 func (r *pageRenderer) alert(node *html.Node, kind string) string {
-	var parts []string
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if hasClass(child, "alert-heading") {
-			continue
-		}
-		if block := r.block(child); block != "" {
-			parts = append(parts, block)
-		} else if text := strings.TrimSpace(r.inline(child)); text != "" {
-			parts = append(parts, text)
-		}
+	blocks := r.contentBlocks(node, func(child *html.Node) bool {
+		return hasClass(child, "alert-heading")
+	})
+	if len(blocks) == 0 {
+		return ""
 	}
-	return "> [!" + kind + "]\n" + quote(strings.Join(parts, "\n\n"))
+	return "> [!" + kind + "]\n" + quote(strings.Join(blocks, "\n\n"))
 }
 
 func (r *pageRenderer) details(node *html.Node) string {
-	var parts []string
+	var summary *html.Node
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type == html.ElementNode && child.Data == "summary" {
-			parts = append(parts, "**"+strings.TrimSpace(r.inlineChildren(child))+"**")
-			continue
+			summary = child
+			break
 		}
-		if block := r.block(child); block != "" {
-			parts = append(parts, block)
+	}
+	parts := []string{}
+	if summary != nil {
+		if title := strings.TrimSpace(r.inlineChildren(summary)); title != "" {
+			parts = append(parts, "**"+title+"**")
 		}
+	}
+	parts = append(parts, r.contentBlocks(node, func(child *html.Node) bool {
+		return child == summary
+	})...)
+	if len(parts) == 0 {
+		return ""
 	}
 	return quote(strings.Join(parts, "\n\n"))
 }
@@ -677,8 +895,10 @@ func collapseWhitespace(value string) string {
 	if value == "" {
 		return ""
 	}
-	leading := unicode.IsSpace(rune(value[0]))
-	trailing := unicode.IsSpace(rune(value[len(value)-1]))
+	first, _ := utf8.DecodeRuneInString(value)
+	last, _ := utf8.DecodeLastRuneInString(value)
+	leading := unicode.IsSpace(first)
+	trailing := unicode.IsSpace(last)
 	result := strings.Join(strings.Fields(value), " ")
 	if result == "" {
 		return " "
@@ -767,6 +987,34 @@ func isBlockElement(name string) bool {
 	default:
 		return false
 	}
+}
+
+// isInlineNode reports whether a node participates in an inline run during
+// block iteration: text plus the inline-level elements of the pinned tree.
+func isInlineNode(node *html.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Type == html.TextNode {
+		return true
+	}
+	if node.Type != html.ElementNode {
+		return false
+	}
+	switch node.Data {
+	case "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "del", "dfn", "em", "i", "img", "ins", "kbd", "label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "tt", "u", "var":
+		return true
+	default:
+		return false
+	}
+}
+
+// isTransparentAnchor matches the XHTML-style deep-link anchors upstream
+// pages write as <a id="x" />. The HTML5 parser keeps them open and swallows
+// following blocks, so block iteration unwraps them instead of letting the
+// swallowed content collapse into one inline run.
+func isTransparentAnchor(node *html.Node) bool {
+	return node != nil && node.Type == html.ElementNode && node.Data == "a" && attribute(node, "href") == ""
 }
 
 // ParsePage is exported for consumers that need to validate fixture inputs

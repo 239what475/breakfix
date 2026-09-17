@@ -405,15 +405,7 @@ Sometimes, applications are temporarily unable to serve traffic. For example, an
 > Readiness probes run on the container during its whole lifecycle.
 
 > [!CAUTION]
-> The readiness and liveness probes do not depend on each other to succeed. If you want to wait before executing a readiness probe, you should use
->
-> `initialDelaySeconds`
->
-> or a
->
-> `startupProbe`
->
-> .
+> The readiness and liveness probes do not depend on each other to succeed. If you want to wait before executing a readiness probe, you should use `initialDelaySeconds` or a `startupProbe`.
 
 Readiness probes are configured similarly to liveness probes. The only difference is that you use the `readinessProbe` field instead of the `livenessProbe` field.
 
@@ -436,4 +428,4 @@ Readiness and liveness probes can be used in parallel for the same container. Us
 - Learn more about [Liveness, Readiness and Startup Probes](../../../concepts/workloads/pods/probes/).
 - For the full specification of probe-related fields, see the API reference: [Pod](../../../reference/kubernetes-api/core/pod-v1/), [Container](../../../reference/kubernetes-api/core/pod-v1/#Container), [Probe](../../../reference/kubernetes-api/core/pod-v1/#Probe)
 
-[Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)
+Last modified September 13, 2026 at 7:43 AM PST: [Merge pull request #52658 from tengqm/configapi-kinds (ce98a43)](https://github.com/kubernetes/website/commit/ce98a43f24257385a9766003a6dadc95e962dc63)

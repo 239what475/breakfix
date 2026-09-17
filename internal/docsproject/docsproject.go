@@ -24,6 +24,11 @@ type Config struct {
 	Version string
 	Resume  bool
 	Pages   []string
+	// SiteOrigin is the canonical origin (for example https://kubernetes.io)
+	// used to resolve same-origin site paths outside the /docs/ tree, such
+	// as /blog/ or /releases/. The rendered build's own base_url is usually
+	// a local Hugo address, so production projections pin the real site.
+	SiteOrigin string
 }
 
 // DefaultConfig supplies the command's documented defaults.

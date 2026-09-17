@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generator_version": "docs-project-v9",
+  "generator_version": "docs-project-v10",
   "upstream": {
     "source": "kubernetes",
     "commit": "ce98a43f24257385a9766003a6dadc95e962dc63",
@@ -10,13 +10,13 @@
   "path": "docs/concepts/services-networking/ingress/",
   "page_kind": "content",
   "title": "Ingress",
-  "digest": "sha256:fad35d4564dbc9c5e8bfc3dbbaed85b8b521170719a826b74c761589fea8e53f",
+  "digest": "sha256:3ca102cb4ee687cf24d4a554703636fd93be69b9a17cb24574789164e3121ef9",
   "anchors": [
     {
       "id": "terminology",
       "level": 2,
       "title": "Terminology",
-      "digest": "sha256:e91ca59ecde36029f81bccf6f502908ae0eb893b4e71e40ea9b3669545b11a8a",
+      "digest": "sha256:83bab78c93be2c8e58b8bf5d8054c93758d062d41ab135db07df7334f33ac46e",
       "parent": ""
     },
     {
@@ -37,14 +37,14 @@
       "id": "the-ingress-resource",
       "level": 2,
       "title": "The Ingress resource",
-      "digest": "sha256:a6234e5b7921b075591b067f8ae2f6d4d81ecb7804fdf023d3fd4dc87750b2a0",
+      "digest": "sha256:7c093216a775b47166d5a3af7d3757608caea30a5d113cce2557e1533feafda0",
       "parent": ""
     },
     {
       "id": "ingress-rules",
       "level": 3,
       "title": "Ingress rules",
-      "digest": "sha256:7faa6545d9b76967de606e38f9ee4ef068a877773b9328f78dadfafc04b958be",
+      "digest": "sha256:3bdf658929f8d383c60f6776522d348406f268cfa99f2ed3954cfecc772f0ae9",
       "parent": "the-ingress-resource"
     },
     {
@@ -65,7 +65,7 @@
       "id": "path-types",
       "level": 3,
       "title": "Path types",
-      "digest": "sha256:23549d2c0cb465947f4cfdad727fd2b6d57b76966564a7418ff61dfba2182943",
+      "digest": "sha256:8479e502efc49171ceb9a8c77ae3c7673015bbf22417a958a22d123946aa31b3",
       "parent": "the-ingress-resource"
     },
     {
@@ -93,14 +93,14 @@
       "id": "ingress-class",
       "level": 2,
       "title": "Ingress class",
-      "digest": "sha256:eaf6c69f82d1528ef3bccd1f02bc0b27298b7fb050ab8c5fea8962e6fd44294d",
+      "digest": "sha256:70d180ea488fb9c2a0969522ffcad2b952dab1008e91c12ae4216bdbd95b0de1",
       "parent": ""
     },
     {
       "id": "ingressclass-scope",
       "level": 3,
       "title": "IngressClass scope",
-      "digest": "sha256:538dee83a4ae1c0178322f0a61dbee48ab1a7d64eb5e53c29a68906e20fc8c8c",
+      "digest": "sha256:59bdcbff0a17f6423cb8422f239b512bd1cfcf32ed82b34cd81ab6cde67ab09e",
       "parent": "ingress-class"
     },
     {
@@ -114,28 +114,28 @@
       "id": "default-ingress-class",
       "level": 3,
       "title": "Default IngressClass",
-      "digest": "sha256:70fdb1cf90e3d6cfc584e1daaec9d05b48eb3a1408709d9caf8ab14518470649",
+      "digest": "sha256:919c25c5a95f8289d4af44613e0b434a2ec0683cea25b7cadbc783a82c363015",
       "parent": "ingress-class"
     },
     {
       "id": "types-of-ingress",
       "level": 2,
       "title": "Types of Ingress",
-      "digest": "sha256:44664c04ab3090a69d61d45276b20f01113a5c6ce58b3250160f654d9a4db99d",
+      "digest": "sha256:3fe5c83a8fb52c432282de07a64a11e7ba6f1d248e25ade764a2c8d582968575",
       "parent": ""
     },
     {
       "id": "single-service-ingress",
       "level": 3,
       "title": "Ingress backed by a single Service",
-      "digest": "sha256:be31558a77a1a93f6555d1c6521aa465e7d0692e3977e0fb0271f4f7b4ce45d7",
+      "digest": "sha256:986f7c19143fdd4223de3d24220ab86a115f9de649f3cd7a66806821cfa2c0dc",
       "parent": "types-of-ingress"
     },
     {
       "id": "simple-fanout",
       "level": 3,
       "title": "Simple fanout",
-      "digest": "sha256:aadb6155cd46472f216e7df550fb247b1a4228a46717425457380c2179b47a7e",
+      "digest": "sha256:ea883047c60452bd3dd67ccf5c160b61925a17bd71f0824f8ccfd8eeff1dab2c",
       "parent": "types-of-ingress"
     },
     {
@@ -149,7 +149,7 @@
       "id": "tls",
       "level": 3,
       "title": "TLS",
-      "digest": "sha256:d3bf833f4fd1a2d27541840dcc7070012d82592143065ee5ce4a680912014c02",
+      "digest": "sha256:35c80886d42921fb001c0e0531fdf4a62a1864ef952bc27ca03c49d1f09b7a91",
       "parent": "types-of-ingress"
     },
     {
@@ -184,7 +184,7 @@
       "id": "what-s-next",
       "level": 2,
       "title": "What's next",
-      "digest": "sha256:e974525595ba76a4425d4cf56024e7c718ca826f8d2f28295d521e22b7f443da",
+      "digest": "sha256:381b281f3a625fa5d4f4666bec35acf6b5d5cec8a957367fb7e7b9c669a0fb5e",
       "parent": ""
     }
   ],
@@ -210,7 +210,7 @@
     }
   ],
   "links": {
-    "internal": 30,
+    "internal": 26,
     "page_internal": 3,
     "external": 16,
     "to_orphans": 0,
@@ -221,5 +221,5 @@
   },
   "code_blocks": 26,
   "degraded_tables": 0,
-  "dropped_elements": 1
+  "dropped_elements": 3
 }
