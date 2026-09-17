@@ -7,6 +7,9 @@
 文档工作流的后续推进(运行时切换到文档库、多页批次铺开)**移至 NEXT.md 记录方向**,不在
 本 TODO 内;管理员控制面与其无依赖关系,可独立推进、先行实施。
 
+本规格为交付级:实现者不应再做设计决策,一切命名、形状、语义以本文为准;发现规格与代码
+现实冲突时,先改规格再改实现,同一提交内同步。
+
 ## 背景:摸底结论(2026-09-17)
 
 现状缺口,均经代码核实:
@@ -23,15 +26,22 @@
 - **环境与队列观测只有 kubectl/DB**:RuntimeEnvironment 跨用户列表、runnable 队列积压、
   13 个后台服务运行状态均无 API 面。
 
-## 设计决策(已确认)
+## 设计决策(2026-09-17 与维护者确认)
 
-- 单一 admin 角色,**首注册用户即管理员**(memos 模式);已有部署迁移按 `created_at`
-  最早用户提为 admin。不做 RBAC、不做团队管理。
+- **破坏性 schema 变更**(仓库纪律,`schema.go` 注释:不写 ALTER 兼容语句,旧库必须重置):
+  无存量部署负担,角色列与新表随 `currentSchemaVersion` bump 直接落地,不做非破坏迁移。
+- 单一 admin 角色,**首注册用户即管理员**(memos 模式);不做 RBAC、不做团队管理。
+- `requireAdmin` **纯 JWT claim 判定**,不逐请求查库(系统无角色管理面,role 只可能随库
+  重置变化);无 role claim 的旧 token 一律按普通用户。
+- 解卡为 **force-fail + restart 双动词**;worker 迟到/陈旧的完成上报一律"标记 reconciled、
+  不推进状态、留日志";验证环境不显式取消,靠既有 1800s MaxLifetime TTL 兜底。
+- force-fail/restart **双记录**:artifact ledger 条目(工作流唯一历史)+ 人操作审计(操作者)。
+- Agent 阶段 stuck 阈值默认 **15 分钟**,config 可覆盖。
 - 管理员定位是**操作者+观察者**,不进内容门禁——门禁仍由 Agent 评审承担。
-- 控制动词最小集:点火(升权)、解卡、TOTP 重置、环境释放;不新增绕过状态机的旁路。
+- 控制动词最小集:点火(升权)、解卡、重启、TOTP 重置、环境释放;不新增绕过状态机的旁路。
 - 内容治理(场景/实践内容紧急下架)与 append-only 证据链设计冲突,**挂起待决策**(1.7)。
 - 不做:维护模式(维持 runbook"停 ingress"的处置)、配置热改、管理员重置密码(需要时按
-  runbook 走数据库)。
+  runbook 走数据库)、system 端点的外部二进制存活检测(v1 只做 server 内,见 1.6)。
 
 提交纪律(全程有效):做完一个可审查单元立即提交,不攒批;每提交保持构建与当包测试通过;
 TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更在同一提交内同步;提交信息沿用
@@ -45,27 +55,37 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 行为规格:
 
-- `users` 新增 `role` 列(`admin`/`user`,默认 `user`)。注册在**同一事务内**判定用户数为
-  零 → admin;存量库迁移将 `created_at` 最早的用户提为 admin。
-- JWT claims 新增 `role`;**无 role claim 的旧 token 一律按普通用户**(24h 过期自然收敛,
-  不强制重登)。新增 `requireAdmin` 中间件。
-- config 新增 `allow_registration`(默认 `true`;部署可钉 `false` 关闭注册,关闭时
-  register 返回 403,登录不受影响)。
-- `POST /api/documentation/practice` 由"登录即可"升为 admin-only。
-- `GET /api/admin/users`(admin):只读列表(id/用户名/角色/创建时间);不做启停、删除、
-  角色提升。
-- `POST /api/admin/users/:id/totp-reset`(admin):重置目标用户 TOTP,调用方须重新提交
-  **自己的登录密码**确认;成功返回一次性新 secret/URL,目标用户旧 TOTP 立即失效;
-  写审计(1.2)。
+- **DDL**(`schema_identity.go`):`users` 增列
+  `role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin'))`;
+  `currentSchemaVersion` bump(破坏性,无迁移语句)。
+- **JWT**(`middleware/jwt.go`):`Claims` 增 `Role string \`json:"role,omitempty"\``;
+  `GenerateJWT(userID, userName, role)`;`setClaims` 增设 `"role"`。旧 token 无该字段解析为
+  空串,语义即 `user`,无需兼容分支。前端为隐藏入口可 base64 解码 payload 读 role(权限
+  由后端保证,前端只做展示层)。
+- **requireAdmin 中间件**:读 context role,非 `admin` → 403;纯 claim,不查库。
+- **首注册判定**:register 事务内先 `pg_advisory_xact_lock(<固定 key>)` 再
+  `count(*) FROM users`,为 0 → `role='admin'`,否则 `'user'`。咨询锁关死并发首注册竞态。
+- **注册开关**:config 顶层新增 `allow_registration`(bool,默认 `true`);`ValidateServer`
+  校验;`false` 时 register 返回 403,login 不受影响。
+- **点火升权**:`POST /api/documentation/practice` 从 JWT 组移入 requireAdmin 组。
+- `GET /api/admin/users`(admin):`{users: [{id, subject, name, role, created_at}]}`,
+  不含 password_hash/totp_secret;只读,无启停/删除/提升。
+- `POST /api/admin/users/:id/totp-reset`(admin):请求体为空;服务端**对调用方自己的
+  password 做 bcrypt 比对**(防 token 窃取后的静默重置),失败 403 且不重置;通过则
+  `GenerateTOTPSecret` 新密钥、UPDATE 目标用户、一次性返回 `{totp_secret, totp_url}`
+  (与注册响应同一形态);目标用户旧 TOTP 即刻失效;允许 admin 重置自己(密码确认即门槛);
+  写审计(1.2,action=`user.totp.reset`)。
+- OpenAPI(`api/http/openapi.yaml`)同步全部新端点与 bearerAuth 语义,`make generate`
+  重新生成服务端与前端客户端;前端 `AuthDialog`/导航按 role 适配。
 
 验收标准:
 
-- [ ] 空库首注册得 admin、次注册得 user;存量库迁移后最早用户为 admin。
-- [ ] 旧 JWT(无 role)在用户级端点正常、在 admin 端点 403。
-- [ ] `allow_registration: false` 时注册 403,登录正常。
+- [ ] 空库并发首注册(构造两并发 register):恰好一人 admin;次注册恒为 user。
+- [ ] 旧 JWT(无 role)在用户级端点正常、在 admin 端点 403;admin 正常放行。
+- [ ] `allow_registration: false` 时注册 403,登录正常;缺省 true 行为不变。
 - [ ] 非 admin 调用点火 / users / totp-reset 均 403。
-- [ ] totp-reset 后旧 TOTP 登录失败、新 TOTP 成功;密码确认错误时不重置且留痕。
-- [ ] OpenAPI 规格与生成代码同步;单测覆盖上述路径(含首注册并发的同事务判定)。
+- [ ] totp-reset 后:旧 TOTP 登录失败、新 TOTP 成功;调用方密码错误时不重置且留审计。
+- [ ] 单测覆盖上述路径;OpenAPI 与生成代码同步提交。
 
 提交:`feat(auth): bootstrap first-user admin with role claims`。
 
@@ -73,65 +93,133 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 行为规格:
 
-- 新表 append-only `human_action_audits(id, user_id, action, target_type, target_id,
-  detail, created_at)`,只增不改,与状态变更同事务写入。
-- 首批记录动作:点火、解卡、TOTP 重置、环境释放;后续新动词随实现登记。
-- `GET /api/admin/audit`(admin):分页列表,可按 action/target/user 过滤。
-- 机器侧审计(document_agent_audits)不变;两者互补——一个回答"谁点的火",一个回答
-  "机器怎么跑的"。
+- **DDL**(新 schema group):append-only,无任何 update/delete 路径:
+
+```sql
+CREATE TABLE human_action_audits (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  detail JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX human_action_audits_time ON human_action_audits (created_at DESC, id);
+CREATE INDEX human_action_audits_action ON human_action_audits (action, created_at DESC);
+```
+
+- id 沿用仓库风格(`audit-<unixnano>`)。
+- **动作词表(封闭集合,新增动词必须先登记本文)**:`documentation.practice.start`、
+  `documentation.workflow.force_fail`、`documentation.workflow.restart`、
+  `user.totp.reset`、`environment.release`。
+- `detail` 形状:`{"reason": "...", "from_state": "...", "to_state": "...", ...}`;
+  force-fail/restart 的 reason 必填(请求体携带,非空,长度上限 500)。
+- 写入路径:service 层与状态变更**同一事务**,repo 提供 `RecordHumanAction`;只读端点不审计。
+- `GET /api/admin/audit?limit&cursor&action&user_id`(admin):分页信封沿用
+  `/api/me/space/learning` 的 limit/cursor 形态。
+- 机器侧审计(`document_agent_audits`)不变;两者互补——人审计答"谁点的火",
+  Agent 审计答"机器怎么跑的"。
 
 验收标准:
 
-- [ ] 每个管理动词落地一行审计,字段完整;审计表无更新/删除路径。
-- [ ] 列表过滤与分页可用;非 admin 403。
-- [ ] 单测:写入、过滤、append-only 约束。
+- [ ] 1.1/1.3/1.6 的每个管理动词各落地一行审计,字段完整、事务一致(状态变更失败则审计不落)。
+- [ ] 列表 action/user_id 过滤与 cursor 分页可用;非 admin 403。
+- [ ] 单测:写入、过滤、分页;确认无 update/delete 代码路径。
 
 提交:`feat(audit): append-only human action ledger`。
 
-### 1.3 文档工作流观测与解卡
+### 1.3 工作流观测、解卡与重启
+
+前置事实(已核实,实现者不必重查):`allowedTransition` 已允许**所有非终态 → Failed**
+(`workflow.go` allowedTransition),`AdvanceAt(Failed, now)` 不传 requiredKinds 即合法;
+**状态机表无需改动**。`document_workflows.updated_at` 即状态进入时间,dwell = now −
+updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
 
 行为规格:
 
-- `GET /api/admin/documentation/workflows`(admin):列表——id、状态、进入当前状态时间、
-  停留时长、修订版本、`stuck` 标记。
-- `GET /api/admin/documentation/workflows/:id`(admin):详情 + artifact ledger 时间线 +
-  AgentRun 审计 + 发布清单(已发布时)。
-- **卡死判定**(只读推导,不改状态):Agent 阶段(Planning/PlanReviewing/Generating/
-  ArtifactReviewing)停留超过由 Agent 超时推导的阈值,或 MaterializingArtifact/Verifying
-  对应 runnable action 已终态失败 / 重试耗尽(attempt 达上限)且未 reconciled → 详情标记
-  `stuck:true` 并给出原因。阈值常量由现有配置(Agent 超时、物化/验证生命周期 1800s、重试
-  上限 5)推导,实现时定稿。
-- **解卡**:`POST /api/admin/documentation/workflows/:id/force-fail`(admin)——状态机补齐
-  各非终态(Planning/PlanReviewing/Generating/ArtifactReviewing/MaterializingArtifact/
-  Verifying/VerificationReviewing)→ Failed 的受控转换;仅非终态可解,终态 409;写账本与
-  审计。**不做自动看门狗**(自动失败映射随多页批次设计,见 NEXT)。
-- 解卡不删除任何数据:工作流、账本、action 记录全部保留,只推进状态。
+- `GET /api/admin/documentation/workflows`(admin):列表
+  `{workflows: [{id, state, state_version, revision, updated_at, dwell_seconds, stuck}]}`;
+  当前部署 ≤1 行,形状为多页预留。
+- `GET /api/admin/documentation/workflows/:id`(admin):详情 = 上述字段 +
+  `ledger`(document_artifact_ledger 按 created_at 升序)+ `agent_audits`
+  (document_agent_audits 升序)+ `publication`(已发布时的 manifest)。单工作流 ledger/
+  audit 有界,不分页。
+- **stuck 判定(只读推导,绝不写状态)**:
+  - 可运行阶段(MaterializingArtifact/Verifying/VerificationReviewing):取
+    `document_runnable_actions` 中 `(workflow_id, phase, state_version)` 当前绑定行,按
+    action_key 联 `runnable_actions`:`state='failed'` →
+    `{"flag":true,"reason":"action_failed","failure_class":...,"failure_code":...,
+    "failure_summary":...}`;`attempt=5` 且 state ∈ {queued,running} →
+    `reason:"attempts_exhausted"`;否则 dwell > 1800s+300s 余量 →
+    `reason:"dwell_timeout"`。
+  - Agent 阶段(Planning/PlanReviewing/Generating/ArtifactReviewing/Publishing):
+    dwell > config 顶层 `agent_stuck_after`(默认 `15m`) → `reason:"dwell_timeout"`。
+  - 正常时 `{"flag":false}`。
+- **force-fail** `POST /api/admin/documentation/workflows/:id/force-fail`(admin):
+  请求体 `{"reason": string}` 必填;仅非终态可解,终态 409;并发纪律沿用 service 层既有
+  状态推进方式(state_version 条件更新或既有租约助手),不得与 5s 恢复循环竞态。
+  成功:state→Failed、state_version+1;**双记录**——artifact ledger 追加
+  `kind='admin.force_fail'`、`owner_role='admin'`、digest=`DigestAgentInput(规范化payload)`、
+  payload=`{actor, from_state, reason, at}`(工作流无状态历史表,ledger 是唯一历史);
+  人审计 `documentation.workflow.force_fail`。
+- **restart** `POST /api/admin/documentation/workflows/:id/restart`(admin):
+  请求体 `{"reason": string}` 必填;域模型新增 `RestartAt(now)`(ReviseAt 姊妹方法):
+  仅 `Failed`/`Rejected` → `Planning`,revision+1、state_version+1;**不受 MaxRevisions
+  上限约束**(该上限为自动修订循环设计,管理员重启是人工判断);`Published`/`NoPractice`
+  与一切非终态 409。重启只重置状态、**不调 Agent**——随后的 `POST /api/documentation/
+  practice`(既有点火端点)在 Planning 状态自然驱动重跑,点火照常写审计。双记录同
+  force-fail(ledger `kind='admin.restart'`)。
+- **迟到/陈旧完成统一规则**:`Reconcile` 在推进前必须校验工作流非终态**且** action 的
+  state_version 等于工作流当前 state_version;任一不满足 → 仅将绑定标记 reconciled、
+  不推进状态、留日志。该规则同时覆盖 force-fail 后的迟到完成与 restart 后的陈旧完成。
+- force-fail/restart 不删除任何数据;在途验证环境不显式取消,靠 1800s MaxLifetime TTL。
 
 验收标准:
 
 - [ ] 构造 PlanReviewing 停滞(模拟 Server 中途崩溃):列表/详情可见、stuck 原因正确;
-      force-fail 后转 Failed、账本+审计有记录、重复调用 409。
-- [ ] 构造物化 action 终态失败/attempt 耗尽:详情正确归因;force-fail 同上。
-- [ ] 终态(Published 等)不可 force-fail(409);后端不依赖 stuck 标记,允许对任意
-      非终态解卡,前端仅在标记 stuck 时展示入口。
-- [ ] 单测:各非终态→Failed 的转换合法性、终态拒绝、审计与账本写入。
+      force-fail 后转 Failed、ledger 与审计各有一条、重复调用 409。
+- [ ] 构造物化 action 终态失败与 attempt 耗尽:详情分别归因 action_failed /
+      attempts_exhausted;force-fail 同上。
+- [ ] restart:Failed/Rejected → Planning(revision+1),再点火完整重跑;Published /
+      NoPractice / 非终态 restart 均 409;MaxRevisions=3 耗尽后仍可 restart。
+- [ ] 迟到完成:force-fail 后补报 action 完成 → 绑定变 reconciled、状态不推进;
+      restart 后旧 state_version 的完成同样不推进。
+- [ ] dwell 阈值:agent 阶段默认 15m、config 覆盖生效;runnable 阶段 1800s+余量。
+- [ ] 单测:force-fail/restart 全部合法与非法转换、迟到/陈旧完成规则、双记录事务一致性
+      (状态变更失败则 ledger/审计不落)。
 
-提交:`feat(documentpractice): admin workflow observation and force-fail`。
+提交:`feat(documentpractice): admin workflow observation, force-fail, and restart`。
 
 ### 1.4 队列观测与指标
 
 行为规格:
 
-- `GET /api/admin/runnable-actions`(admin):按 state(queued/running/completed/failed)
-  的计数与 attempt 分布,附明细(目标、attempt、lease 到期时间、绑定工作流);重点暴露
-  attempt≥4 与 failed 未映射工作流的行。
-- `/metrics` 新增 `breakfix_document_workflows{state}` 计数;runnable 队列深度以
-  `breakfix_runnable_actions{state}` 计数(标签形状实现时定稿)。
+- `GET /api/admin/runnable-actions?state=&phase=`(admin):
+
+```json
+{
+  "summary": {"by_state": {"queued": 0, "running": 1, "failed": 0, "completed": 3},
+               "by_attempt": {"0": 3, "4": 1}},
+  "items": [{"action_key": "...", "content_kind": "...", "content_id": "...",
+              "phase": "verify", "state": "running", "attempt": 4,
+              "lease_expires_at": "...", "next_run_at": "...",
+              "failure_class": "", "failure_code": "", "failure_summary": "",
+              "document_workflow_id": "...", "reconciled": null, "flag": "attempt-high"}]
+}
+```
+
+- `flag` 服务端判定:`attempt-high`(attempt ≥ 4)、`failed-unreconciled`
+  (runnable_actions.state='failed' 且 document 绑定 reconciled_at IS NULL——即"action 已死、
+  工作流还挂着"的精确信号);无 flag 时为空串。
+- `/metrics` 新增 gauge:`breakfix_document_workflows{state}`(12 状态全量计数)、
+  `breakfix_runnable_actions{state}`。
 
 验收标准:
 
-- [ ] 队列端点数字与数据库实况一致(单测构造多态 action 断言);非 admin 403。
-- [ ] `/metrics` 文本含新增指标,文档工作流状态计数与库中一致。
+- [ ] 队列端点 summary/items 与数据库实况一致(单测构造多态 action 断言,含两类 flag);
+      非 admin 403。
+- [ ] `/metrics` 文本含两个新指标,计数与库中一致。
 
 提交:`feat(ops): runnable queue observation and workflow metrics`。
 
@@ -139,19 +227,24 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 行为规格:
 
-- 顶部导航新增"管理",仅 admin 可见(前端读 JWT role;前端隐藏不承担权限,后端中间件
-  已保证)。
-- 工作流页:列表(状态、停留时长、stuck)+ 详情(账本时间线、AgentRun 审计、发布清单)
-  + force-fail 按钮(二次确认,展示将写入的审计内容)。
-- 用户页:列表 + TOTP 重置(密码确认;新 secret 一次性展示)。
-- 审计页:列表与过滤。
-- 队列积压摘要并入工作流页或独立页,按信息密度实现时定。
+- `web/src/features/admin/`,路由 `/admin/workflows|users|audit`;router guard 解析 JWT
+  payload 的 role,非 admin 重定向;顶部导航"管理"仅 admin 可见(展示层,权限在后端)。
+- 工作流页:列表(状态、dwell、stuck 徽标)+ 详情(状态头、ledger 时间线、AgentRun 审计、
+  发布清单)+ force-fail / restart 按钮——二次确认框含 **reason 必填输入**,确认框展示
+  将写入的审计摘要。
+- 用户页:列表 + TOTP 重置(输入操作者密码;结果一次性展示新 secret/URL,刷新即不再出现)。
+- 审计页:按 action / user 过滤 + cursor 分页。
+- 队列积压摘要卡(summary + flag 计数)置于工作流页顶部;明细由 1.4 端点呈现,是否独立
+  页面按信息密度由实现者定,不新增设计。
 - 最小实现,不做设置系统。
 
 验收标准:
 
-- [ ] admin 登录可见"管理",可完成:查看工作流列表/详情、解卡、重置 TOTP、查审计;
-- [ ] 普通用户不可见"管理"入口,直调 admin API 由后端 403;
+- [ ] admin 登录可见"管理",可完成:查看工作流列表/详情、force-fail、restart、重置 TOTP、
+      查审计、看队列摘要。
+- [ ] 普通用户不可见"管理"入口,直调 admin API 由后端 403。
+- [ ] E2E(复用 kind 流程):空库注册 → admin → 点火 → 模拟卡死 → force-fail →
+      restart → 再点火,全链路通过。
 - [ ] 现有页面回归无变化。
 
 提交:`feat(web): admin console for workflows, users, and audit`。
@@ -161,19 +254,26 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 行为规格:
 
 - `GET /api/admin/environments`(admin):全量 RuntimeEnvironment(跨用户 learning +
-  verification),字段:名称、phase、purpose、绑定内容/用户、创建时间、到期时间;Failed
-  堆积一眼可见。
-- `POST /api/admin/environments/:name/release`(admin):设置 `lease.releaseAt` 触发受控
-  排空——复用既有 Draining→Reaper 机制,不旁路;已 Released 409、不存在 404;写审计。
-- `GET /api/admin/system`(admin):后台服务清单与运行状态、catalog 完整性(复用
-  CheckIntegrity 只读执行)、controller/runtime-worker 存活、版本与钉住配置摘要(上游
-  commit、页面/锚、catalog release 引用、generator 版本)。
+  verification,k8s adapter 既有 List),按 label 补 purpose/绑定用户与内容;字段:名称、
+  namespace、phase、purpose、创建时间、到期时间(ExpiresAt 语义见
+  controller state.Decide);Failed 堆积一眼可见。
+- `POST /api/admin/environments/:name/release`(admin):设置 `spec.lease.releaseAt`
+  (adapter Update;LeaseSpec 有 immutable-monotonic CEL 约束,设为当前时间即可),之后由
+  既有 Draining→Reaper 机制接管,**不旁路**;已 Released 409、不存在 404;写审计
+  `environment.release`。
+- `GET /api/admin/system`(admin):
+  - 后台服务状态:给 bootstrap 的 service runner 加**内存注册表**(name、started_at、
+    last_tick_at、last_error),各服务 tick 时上报——本节唯一新框架件;
+  - catalog 完整性:复用 `CheckIntegrity` 只读执行,异常时定位到具体 revision;
+  - 版本与钉住配置摘要:上游 commit、页面/锚、catalog release 引用、generator 版本。
+  - **不做**外部二进制(controller/runtime-worker)存活检测——server 看不到其心跳,v1
+    明确缺席,留待需要时另行设计。
 
 验收标准:
 
-- [ ] 环境列表与集群实况一致;release 后走完既有 Draining→Released 流程,不产生旁路状态;
-- [ ] system 端点各字段为真实值;catalog 完整性异常时可定位到具体 revision;
-- [ ] release 动作有审计;非 admin 403。
+- [ ] 环境列表与集群实况一致;release 后走完既有 Draining→Released,无旁路状态;
+- [ ] system 端点各字段为真实值;人为破坏一个物化目录后完整性项可定位到 revision;
+- [ ] release 有审计;非 admin 403。
 
 提交:`feat(ops): environment and system observation for admins`。
 
