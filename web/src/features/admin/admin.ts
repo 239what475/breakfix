@@ -21,7 +21,7 @@ export function useAdminAuthorization(active: Ref<boolean>, loggedIn: Ref<boolea
 	watch([active, loggedIn], ([activeNow, loggedInNow]) => {
 		if (!activeNow || !loggedInNow) return;
 		refresh();
-	});
+	}, { immediate: true });
 
 	refresh();
 	return { isAdministrator, refresh };
@@ -84,7 +84,7 @@ export function useAdminWorkflows(active: Ref<boolean>) {
 
 	watch(active, (activeNow) => {
 		if (activeNow) void refresh();
-	});
+	}, { immediate: true });
 
 	return { workflows, detail, queue, loading, error, busy, refresh, openDetail, runAction };
 }
@@ -113,7 +113,7 @@ export function useAdminUsers(active: Ref<boolean>, loggedIn: Ref<boolean>) {
 
 	watch([active, loggedIn], ([activeNow, loggedInNow]) => {
 		if (activeNow && loggedInNow) void refresh();
-	});
+	}, { immediate: true });
 
 	return { users, loading, error, refresh };
 }
@@ -172,7 +172,7 @@ export function useAdminAudit(active: Ref<boolean>, loggedIn: Ref<boolean>) {
 
 	watch([active, loggedIn], ([activeNow, loggedInNow]) => {
 		if (activeNow && loggedInNow) void refresh();
-	});
+	}, { immediate: true });
 
 	return { actions, nextCursor, loading, loadingMore, error, actionFilter, userFilter, refresh, loadMore };
 }
