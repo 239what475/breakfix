@@ -339,3 +339,49 @@ func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
 		t.Fatalf("filtered observations = %#v, %v", filtered, err)
 	}
 }
+
+func TestStoreRunnableRevisionIsIdempotentByDigest(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, runnable.StoredRevision{
+		Reference: runnable.RevisionReference{ID: "revision-original", Digest: revisionDigest}, Revision: revision, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("store original revision: %v", err)
+	}
+	// A restarted workflow re-materializes the same bytes under a fresh
+	// storage id; the digest is the durable identity and must win.
+	if err := database.Runnable.StoreRunnableRevision(ctx, runnable.StoredRevision{
+		Reference: runnable.RevisionReference{ID: "revision-rematerialized", Digest: revisionDigest}, Revision: revision, CreatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("store re-materialized revision: %v", err)
+	}
+	resolved, err := database.Runnable.ResolveRunnableRevision(ctx, "revision-original", revisionDigest)
+	if err != nil {
+		t.Fatalf("resolve original revision: %v", err)
+	}
+	if !reflect.DeepEqual(resolved, revision) {
+		t.Fatalf("resolved revision = %#v", resolved)
+	}
+	// The same id bound to another digest remains an integrity error.
+	mutated := testRunnableRevision(t)
+	mutated.Artifact.ArtifactDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	mutated.Artifact.ProviderReference = "incus://breakfix/image@" + mutated.Artifact.ArtifactDigest
+	otherDigest, err := mutated.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherDigest == revisionDigest {
+		t.Skip("fixture revisions are not unique")
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, runnable.StoredRevision{
+		Reference: runnable.RevisionReference{ID: "revision-original", Digest: otherDigest}, Revision: mutated, CreatedAt: now.Add(2 * time.Second),
+	}); err == nil {
+		t.Fatalf("rebinding an id to another digest was accepted")
+	}
+}

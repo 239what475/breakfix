@@ -183,6 +183,10 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
     candidate(archive digest 不变),新 ID 旧 digest 撞 `UNIQUE(workflow_id, kind,
     digest)`。该约束把"两次 attempt 提交相同内容"误判为重复,与 attempt 命名空间冲突;
     schema 48 起移除该约束(ID 主键 + ID 等值去重已足够),SaveArtifact 改为按 id 幂等。
+  - 规格修订(同日,同源问题):重跑物化出字节相同的 runnable revision(新存储 id、旧
+    digest)时,`StoreRunnableRevision` 的 INSERT 撞 `UNIQUE(runnable_revision_digest)`,
+    worker 连败 5 次后 attempt 耗尽,工作流停在 MaterializingArtifact。digest 是内容身份:
+    同 digest 已存在(无论何 id)即视为存储成功;同 id 绑定不同 digest 仍为完整性错误。
 - **迟到/陈旧完成统一规则**(规格修订 2026-09-17:原文单一 state_version 相等校验与
   崩溃恢复的续跑语义冲突——工作流常因同一 action 的先前处理已推进过状态版本,故按状态
   判别):完成上报到达时,若工作流已终态(force-fail 后)、或处于 Planning(restart 重置

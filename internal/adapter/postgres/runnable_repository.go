@@ -564,21 +564,32 @@ func (d *RunnableRepository) StoreRunnableRevision(ctx context.Context, value ru
 	if err != nil {
 		return fmt.Errorf("encode runnable revision: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO runnable_revisions
-		(id, runnable_revision_digest, spec_digest, revision, created_at)
-		VALUES (?, ?, ?, ?::jsonb, ?)
-		ON CONFLICT (id) DO NOTHING`, value.Reference.ID, value.Reference.Digest, specDigest, encoded, value.CreatedAt.UTC())
-	if err != nil {
-		return fmt.Errorf("store runnable revision: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		var existing string
-		if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_revisions WHERE id = ? FOR UPDATE`, value.Reference.ID).Scan(&existing); err != nil {
-			return fmt.Errorf("read stored runnable revision: %w", err)
+	// A restarted workflow re-materializes byte-identical content under a
+	// fresh storage id. The digest is the durable identity, so an existing
+	// row that already holds this digest — under any id — satisfies the
+	// store, while the same id bound to another digest stays an error.
+	var existingID string
+	digestErr := tx.QueryRowContext(ctx, `SELECT id FROM runnable_revisions WHERE runnable_revision_digest = ? FOR UPDATE`, value.Reference.Digest).Scan(&existingID)
+	switch {
+	case errors.Is(digestErr, sql.ErrNoRows):
+		result, err := tx.ExecContext(ctx, `INSERT INTO runnable_revisions
+			(id, runnable_revision_digest, spec_digest, revision, created_at)
+			VALUES (?, ?, ?, ?::jsonb, ?)
+			ON CONFLICT (id) DO NOTHING`, value.Reference.ID, value.Reference.Digest, specDigest, encoded, value.CreatedAt.UTC())
+		if err != nil {
+			return fmt.Errorf("store runnable revision: %w", err)
 		}
-		if existing != value.Reference.Digest {
-			return errors.New("runnable revision id is already bound to another digest")
+		if changed, _ := result.RowsAffected(); changed == 0 {
+			var existing string
+			if err := tx.QueryRowContext(ctx, `SELECT runnable_revision_digest FROM runnable_revisions WHERE id = ? FOR UPDATE`, value.Reference.ID).Scan(&existing); err != nil {
+				return fmt.Errorf("read stored runnable revision: %w", err)
+			}
+			if existing != value.Reference.Digest {
+				return errors.New("runnable revision id is already bound to another digest")
+			}
 		}
+	case digestErr != nil:
+		return fmt.Errorf("read stored runnable revision by digest: %w", digestErr)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit runnable revision: %w", err)
