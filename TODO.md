@@ -227,9 +227,9 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
 
 验收标准:
 
-- [ ] 队列端点 summary/items 与数据库实况一致(单测构造多态 action 断言,含两类 flag);
+- [x] 队列端点 summary/items 与数据库实况一致(单测构造多态 action 断言,含两类 flag);
       非 admin 403。
-- [ ] `/metrics` 文本含两个新指标,计数与库中一致。
+- [x] `/metrics` 文本含两个新指标,计数与库中一致。
 
 提交:`feat(ops): runnable queue observation and workflow metrics`。
 

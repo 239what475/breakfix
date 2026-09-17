@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -933,4 +934,112 @@ func truncateRunnableDiagnostic(value string) string {
 func runnableArchiveDigest(archive []byte) string {
 	sum := sha256.Sum256(archive)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// RunnableActionObservation is the admin queue read model: the public action
+// joined with its documentation binding, when one exists.
+type RunnableActionObservation struct {
+	ActionKey          string
+	ContentKind        string
+	ContentID          string
+	ContentRevision    string
+	Phase              runnable.ActionPhase
+	State              string
+	Attempt            int
+	LeaseExpiresAt     *time.Time
+	NextRunAt          time.Time
+	FailureClass       string
+	FailureCode        string
+	FailureSummary     string
+	CreatedAt          time.Time
+	DocumentWorkflowID *string
+	ReconciledAt       *time.Time
+}
+
+// ListRunnableActionObservations lists the queue, optionally filtered by
+// state and phase, newest first. The document binding columns stay nil for
+// public runnable content that has no documentation workflow.
+func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context, state, phase string) ([]RunnableActionObservation, error) {
+	query := `SELECT a.action_key, a.content_kind, a.content_id, a.content_revision, a.phase, a.state, a.attempt,
+		a.lease_expires_at, a.next_run_at, a.failure_class, a.failure_code, a.failure_summary, a.created_at,
+		b.workflow_id, b.reconciled_at
+		FROM runnable_actions a
+		LEFT JOIN document_runnable_actions b ON b.action_key = a.action_key`
+	conditions := make([]string, 0, 2)
+	args := make([]any, 0, 2)
+	if state != "" {
+		conditions = append(conditions, `a.state = ?`)
+		args = append(args, state)
+	}
+	if phase != "" {
+		conditions = append(conditions, `a.phase = ?`)
+		args = append(args, phase)
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	query += ` ORDER BY a.created_at DESC, a.action_key`
+	rows, err := d.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list runnable action observations: %w", err)
+	}
+	defer rows.Close()
+	result := []RunnableActionObservation{}
+	for rows.Next() {
+		var observation RunnableActionObservation
+		var workflowID sql.NullString
+		var reconciledTime sql.NullTime
+		if err := rows.Scan(&observation.ActionKey, &observation.ContentKind, &observation.ContentID, &observation.ContentRevision, &observation.Phase, &observation.State, &observation.Attempt,
+			&observation.LeaseExpiresAt, &observation.NextRunAt, &observation.FailureClass, &observation.FailureCode, &observation.FailureSummary, &observation.CreatedAt,
+			&workflowID, &reconciledTime); err != nil {
+			return nil, err
+		}
+		if workflowID.Valid {
+			observation.DocumentWorkflowID = &workflowID.String
+			if reconciledTime.Valid {
+				reconciled := reconciledTime.Time
+				observation.ReconciledAt = &reconciled
+			}
+		}
+		result = append(result, observation)
+	}
+	return result, rows.Err()
+}
+
+// CountRunnableActionsByState returns one durable count per queue state.
+func (d *RunnableRepository) CountRunnableActionsByState(ctx context.Context) (map[string]int64, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT state, COUNT(*) FROM runnable_actions GROUP BY state`)
+	if err != nil {
+		return nil, fmt.Errorf("count runnable actions by state: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]int64{}
+	for rows.Next() {
+		var state string
+		var count int64
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		counts[state] = count
+	}
+	return counts, rows.Err()
+}
+
+// CountRunnableActionsByAttempt groups the queue by retry attempt.
+func (d *RunnableRepository) CountRunnableActionsByAttempt(ctx context.Context) (map[string]int64, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT attempt, COUNT(*) FROM runnable_actions GROUP BY attempt`)
+	if err != nil {
+		return nil, fmt.Errorf("count runnable actions by attempt: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]int64{}
+	for rows.Next() {
+		var attempt int
+		var count int64
+		if err := rows.Scan(&attempt, &count); err != nil {
+			return nil, err
+		}
+		counts[strconv.Itoa(attempt)] = count
+	}
+	return counts, rows.Err()
 }

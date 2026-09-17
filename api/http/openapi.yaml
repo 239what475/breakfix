@@ -281,6 +281,40 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  /admin/runnable-actions:
+    get:
+      operationId: listAdminRunnableActions
+      summary: Observe the runnable action queue with backlog summary and flags (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          description: Filter items by queue state; the summary always covers the whole queue
+          schema:
+            type: string
+            enum: [queued, running, completed, failed]
+        - name: phase
+          in: query
+          description: Filter items by action phase
+          schema:
+            type: string
+            enum: [materialize-artifact, verify]
+      responses:
+        "200":
+          description: Queue summary and items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRunnableActionPage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
   /me/space:
     get:
       operationId: getMySpace
@@ -1363,6 +1397,76 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+
+    AdminRunnableActionSummary:
+      type: object
+      required: [by_state, by_attempt]
+      properties:
+        by_state:
+          type: object
+          description: Queue counts keyed by state
+          additionalProperties:
+            type: integer
+        by_attempt:
+          type: object
+          description: Queue counts keyed by retry attempt
+          additionalProperties:
+            type: integer
+
+    AdminRunnableActionItem:
+      type: object
+      required: [action_key, content_kind, content_id, content_revision, phase, state, attempt, next_run_at, failure_class, failure_code, failure_summary, flag]
+      properties:
+        action_key:
+          type: string
+        content_kind:
+          type: string
+        content_id:
+          type: string
+        content_revision:
+          type: string
+        phase:
+          type: string
+        state:
+          type: string
+        attempt:
+          type: integer
+        lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        next_run_at:
+          type: string
+          format: date-time
+        failure_class:
+          type: string
+        failure_code:
+          type: string
+        failure_summary:
+          type: string
+        document_workflow_id:
+          type: string
+          nullable: true
+          description: Present only for actions bound to a documentation workflow
+        reconciled:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the documentation product acknowledged the result
+        flag:
+          type: string
+          enum: [attempt-high, failed-unreconciled, ""]
+
+    AdminRunnableActionPage:
+      type: object
+      required: [summary, items]
+      properties:
+        summary:
+          $ref: "#/components/schemas/AdminRunnableActionSummary"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminRunnableActionItem"
 
     LoginRequest:
       type: object

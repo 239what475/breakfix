@@ -140,6 +140,50 @@ export type AdminWorkflowReasonRequest = {
     reason: string;
 };
 
+export type AdminRunnableActionSummary = {
+    /**
+     * Queue counts keyed by state
+     */
+    by_state: {
+        [key: string]: number;
+    };
+    /**
+     * Queue counts keyed by retry attempt
+     */
+    by_attempt: {
+        [key: string]: number;
+    };
+};
+
+export type AdminRunnableActionItem = {
+    action_key: string;
+    content_kind: string;
+    content_id: string;
+    content_revision: string;
+    phase: string;
+    state: string;
+    attempt: number;
+    lease_expires_at?: string | null;
+    next_run_at: string;
+    failure_class: string;
+    failure_code: string;
+    failure_summary: string;
+    /**
+     * Present only for actions bound to a documentation workflow
+     */
+    document_workflow_id?: string | null;
+    /**
+     * When the documentation product acknowledged the result
+     */
+    reconciled?: string | null;
+    flag: 'attempt-high' | 'failed-unreconciled' | '';
+};
+
+export type AdminRunnableActionPage = {
+    summary: AdminRunnableActionSummary;
+    items: Array<AdminRunnableActionItem>;
+};
+
 export type LoginRequest = {
     username: string;
     password: string;
@@ -982,6 +1026,48 @@ export type RestartAdminDocumentationWorkflowResponses = {
 };
 
 export type RestartAdminDocumentationWorkflowResponse = RestartAdminDocumentationWorkflowResponses[keyof RestartAdminDocumentationWorkflowResponses];
+
+export type ListAdminRunnableActionsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter items by queue state; the summary always covers the whole queue
+         */
+        state?: 'queued' | 'running' | 'completed' | 'failed';
+        /**
+         * Filter items by action phase
+         */
+        phase?: 'materialize-artifact' | 'verify';
+    };
+    url: '/admin/runnable-actions';
+};
+
+export type ListAdminRunnableActionsErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type ListAdminRunnableActionsError = ListAdminRunnableActionsErrors[keyof ListAdminRunnableActionsErrors];
+
+export type ListAdminRunnableActionsResponses = {
+    /**
+     * Queue summary and items
+     */
+    200: AdminRunnableActionPage;
+};
+
+export type ListAdminRunnableActionsResponse = ListAdminRunnableActionsResponses[keyof ListAdminRunnableActionsResponses];
 
 export type GetMySpaceData = {
     body?: never;

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -232,4 +233,109 @@ func testVerificationReport(t *testing.T, revision runnable.RunnableRevision) ru
 
 func testRunnableDigest(character string) string {
 	return "sha256:" + strings.Repeat(character, 64)
+}
+
+func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, runnable.StoredRevision{Reference: runnable.RevisionReference{ID: "revision-queue", Digest: revisionDigest}, Revision: revision, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.StoreRunnableSource(ctx, revision.Spec.Source, []byte("source archive"), now); err != nil {
+		t.Fatal(err)
+	}
+
+	// queued attempt 0, running attempt 4 (attempt-high), completed attempt 0,
+	// and a failed action bound to an unreconciled document workflow
+	// (failed-unreconciled).
+	queued, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 1, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := queued
+	running.Phase = runnable.ActionVerify
+	running.StateVersion = 2
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_actions (action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, runnable_revision_digest, state, attempt, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 4, ?, ?, ?)`,
+		running.Key(), running.Content.Kind, running.Content.ID, running.Content.Revision, running.SpecDigest, running.Phase, running.StateVersion, revisionDigest, now.UTC(), now.UTC(), now.UTC()); err != nil {
+		t.Fatalf("insert running action: %v", err)
+	}
+	completed, err := database.Runnable.ScheduleVerification(ctx, runnable.RevisionReference{ID: "revision-queue", Digest: revisionDigest}, 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = 'completed', completed_at = ? WHERE action_key = ?`, now.UTC(), completed.Key()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A documentation workflow with a failed, unreconciled verification action.
+	docWorkflow, err := documentdomain.NewWorkflow("document-workflow-queue", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, docWorkflow, nil); err != nil {
+		t.Fatal(err)
+	}
+	failed := runnable.ActionIdentity{
+		Content:      revision.Spec.Identity,
+		SpecDigest:   queued.SpecDigest,
+		Phase:        runnable.ActionVerify,
+		StateVersion: 7,
+	}
+	if err := database.DocumentPractice.BindRunnableAction(ctx, docWorkflow.ID, failed, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_actions (action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, runnable_revision_digest, state, attempt, next_run_at, failure_class, failure_code, failure_summary, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'failed', 2, ?, 'infrastructure', 'env-lost', 'environment vanished', ?, ?)`,
+		failed.Key(), failed.Content.Kind, failed.Content.ID, failed.Content.Revision, failed.SpecDigest, failed.Phase, failed.StateVersion, revisionDigest, now.UTC(), now.UTC(), now.UTC()); err != nil {
+		t.Fatalf("insert failed action: %v", err)
+	}
+
+	byState, err := database.Runnable.CountRunnableActionsByState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byState["queued"] != 1 || byState["running"] != 1 || byState["completed"] != 1 || byState["failed"] != 1 {
+		t.Fatalf("by state = %#v", byState)
+	}
+	byAttempt, err := database.Runnable.CountRunnableActionsByAttempt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byAttempt["0"] != 2 || byAttempt["2"] != 1 || byAttempt["4"] != 1 {
+		t.Fatalf("by attempt = %#v", byAttempt)
+	}
+
+	observations, err := database.Runnable.ListRunnableActionObservations(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observations) != 4 {
+		t.Fatalf("observations = %d, want 4", len(observations))
+	}
+	flags := map[string]string{}
+	for _, observation := range observations {
+		switch observation.ActionKey {
+		case running.Key():
+			flags["attempt-high"] = "attempt-high"
+		case failed.Key():
+			if observation.DocumentWorkflowID == nil || *observation.DocumentWorkflowID != docWorkflow.ID || observation.ReconciledAt != nil {
+				t.Fatalf("failed binding observation = %#v", observation)
+			}
+			flags["failed-unreconciled"] = "failed-unreconciled"
+		}
+	}
+	if len(flags) != 2 {
+		t.Fatalf("expected both flag conditions in the queue, got %v", flags)
+	}
+	filtered, err := database.Runnable.ListRunnableActionObservations(ctx, "failed", "verify")
+	if err != nil || len(filtered) != 1 || filtered[0].ActionKey != failed.Key() {
+		t.Fatalf("filtered observations = %#v, %v", filtered, err)
+	}
 }

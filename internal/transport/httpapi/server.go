@@ -161,6 +161,18 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.POST("/documentation/workflows/:workflow_id/restart", func(c *gin.Context) {
 		h.RestartAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
 	})
+	adminRoutes.GET("/runnable-actions", func(c *gin.Context) {
+		params := api.ListAdminRunnableActionsParams{}
+		if raw := c.Query("state"); raw != "" {
+			state := api.ListAdminRunnableActionsParamsState(raw)
+			params.State = &state
+		}
+		if raw := c.Query("phase"); raw != "" {
+			phase := api.ListAdminRunnableActionsParamsPhase(raw)
+			params.Phase = &phase
+		}
+		h.ListAdminRunnableActions(c, params)
+	})
 	adminRoutes.GET("/audit", func(c *gin.Context) {
 		params := api.ListAdminAuditParams{}
 		if raw := c.Query("limit"); raw != "" {

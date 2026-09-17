@@ -218,3 +218,52 @@ func TestAdminDocumentationWorkflowObservationForceFailAndRestart(t *testing.T) 
 		t.Fatalf("restart audits = %#v, %v", auditRows, err)
 	}
 }
+
+func TestAdminRunnableActionsEndpointAndMetrics(t *testing.T) {
+	server := newAuthTestServerSimple(t, nil)
+	adminRegister := server.register(t, "alice", "alice-password")
+	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
+	userRegister := server.register(t, "bob", "bob-password")
+	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
+
+	recorder := server.do(t, http.MethodGet, "/api/admin/runnable-actions", userToken, nil)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-admin queue = %d, want 403", recorder.Code)
+	}
+	recorder = server.do(t, http.MethodGet, "/api/admin/runnable-actions?state=bogus", adminToken, nil)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("bogus state filter = %d, want 400", recorder.Code)
+	}
+
+	// An empty queue still answers with an explicit summary.
+	recorder = server.do(t, http.MethodGet, "/api/admin/runnable-actions", adminToken, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("queue = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var page api.AdminRunnableActionPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 0 || page.Summary.ByState == nil {
+		t.Fatalf("empty queue page = %#v", page)
+	}
+
+	// The metrics document carries the two new gauges with full state series.
+	recorder = server.do(t, http.MethodGet, "/metrics", "", nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("metrics = %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		"# TYPE breakfix_document_workflows gauge",
+		"# TYPE breakfix_runnable_actions gauge",
+		`breakfix_document_workflows{state="Planning"} 0`,
+		`breakfix_document_workflows{state="Failed"} 0`,
+		`breakfix_runnable_actions{state="queued"} 0`,
+		`breakfix_runnable_actions{state="failed"} 0`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("metrics missing %q in:\n%s", expected, body)
+		}
+	}
+}

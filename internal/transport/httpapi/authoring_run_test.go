@@ -108,7 +108,7 @@ func TestAuthoringRunEventProjectsAsTypedAPIState(t *testing.T) {
 		ID: "authoring-event", Role: "event", Content: "persisted event JSON", Event: &event, CreatedAt: time.Now().UTC(),
 	}})
 	if len(messages) != 1 || messages[0].Event == nil || messages[0].Event.Reason != api.DeadlineExceeded ||
-		messages[0].Event.Recovery != api.Workspace || messages[0].Event.Kind != api.AuthoringRunInterrupted {
+		messages[0].Event.Recovery != api.AuthoringRunEventRecoveryWorkspace || messages[0].Event.Kind != api.AuthoringRunInterrupted {
 		t.Fatalf("projected authoring event = %#v", messages)
 	}
 }

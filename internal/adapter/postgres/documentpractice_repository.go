@@ -841,3 +841,23 @@ func listDocumentArtifacts(ctx context.Context, query interface {
 	}
 	return result, rows.Err()
 }
+
+// CountDocumentWorkflowsByState returns one durable count per state. The
+// metrics endpoint fills absent states with zeros to keep the series stable.
+func (d *DocumentPracticeRepository) CountDocumentWorkflowsByState(ctx context.Context) (map[string]int64, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT state, COUNT(*) FROM document_workflows GROUP BY state`)
+	if err != nil {
+		return nil, fmt.Errorf("count document workflows by state: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]int64{}
+	for rows.Next() {
+		var state string
+		var count int64
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		counts[state] = count
+	}
+	return counts, rows.Err()
+}
