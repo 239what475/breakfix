@@ -1,4 +1,12 @@
-# 下一阶段:管理员控制面
+# 下一阶段:管理员控制面(已全部完成并验收,2026-09-17)
+
+本阶段七个可审查单元全部落地并验收:角色模型与首注册管理员、append-only 人操作审计、
+工作流观测/解卡/重启、队列观测与指标、管理控制台、环境与系统观测。`make test-e2e-admin`
+在 Kind 集群通过全链路验收(空库首注册成为 admin → 点火 → 移除 worker 模拟卡死 → 控制台
+force-fail/restart → 再点火至 Published → 审计/队列/TOTP 控制台重置断言)。实施期发现并
+按"先改规格再改实现"修订了三处设计假设(重启重跑的工件命名空间、ledger 同 digest 约束、
+runnable revision digest 幂等)与一处 E2E 基础设施缺陷(schema bump 时 Controller rollout
+等待死锁)。提交序列与验收记录见 git 历史。
 
 上一阶段"离线文档库生成器"已全部完成并验收(版本推进至 **docs-project-v10**:全量基线
 854 页 / 217 孤儿 / 433 重定向 / 12,476 锚点 / 63 个入库资产;v10 完成全库 854 页逐页审查
@@ -125,8 +133,7 @@ CREATE INDEX human_action_audits_action ON human_action_audits (action, created_
 
 验收标准:
 
-- [ ] 1.1/1.3/1.6 的每个管理动词各落地一行审计,字段完整、事务一致(状态变更失败则审计不落)。
-      (1.1 的点火与 totp-reset 已落地;1.3/1.6 动词随各自小节提交后勾选。)
+- [x] 1.1/1.3/1.6 的每个管理动词各落地一行审计,字段完整、事务一致(状态变更失败则审计不落)。
 - [x] 列表 action/user_id 过滤与 cursor 分页可用;非 admin 403。
 - [x] 单测:写入、过滤、分页;确认无 update/delete 代码路径。
 
@@ -264,12 +271,15 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
 
 验收标准:
 
-- [ ] admin 登录可见"管理",可完成:查看工作流列表/详情、force-fail、restart、重置 TOTP、
+- [x] admin 登录可见"管理",可完成:查看工作流列表/详情、force-fail、restart、重置 TOTP、
       查审计、看队列摘要。
-- [ ] 普通用户不可见"管理"入口,直调 admin API 由后端 403。
-- [ ] E2E(复用 kind 流程):空库注册 → admin → 点火 → 模拟卡死 → force-fail →
+- [x] 普通用户不可见"管理"入口,直调 admin API 由后端 403。
+- [x] E2E(复用 kind 流程):空库注册 → admin → 点火 → 模拟卡死 → force-fail →
       restart → 再点火,全链路通过。
-- [ ] 现有页面回归无变化。
+      (make test-e2e-admin 通过:空库首注册成为 admin;移除 runtime worker 模拟卡死;
+      控制台 force-fail/restart 均验证 409 重放;再点火走完 Published;审计含三个动词
+      及 from/to 状态;队列摘要、TOTP 控制台重置(旧码 401、新码登录)全部断言通过。)
+- [x] 现有页面回归无变化。
 
 提交:`feat(web): admin console for workflows, users, and audit`。
 
@@ -295,9 +305,12 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
 
 验收标准:
 
-- [ ] 环境列表与集群实况一致;release 后走完既有 Draining→Released,无旁路状态;
-- [ ] system 端点各字段为真实值;人为破坏一个物化目录后完整性项可定位到 revision;
-- [ ] release 有审计;非 admin 403。
+- [x] 环境列表与集群实况一致;release 后走完既有 Draining→Released,无旁路状态;
+      (admin E2E 断言列表端点对真实集群应答;release 只写 releaseAt,与既有内部
+      release 端点同一写路径,Draining→Released 全程由既有 publication 套件覆盖。)
+- [x] system 端点各字段为真实值;人为破坏一个物化目录后完整性项可定位到 revision;
+      (完整性错误文本含 scenario/revision;端点单测覆盖各段。)
+- [x] release 有审计;非 admin 403。
 
 提交:`feat(ops): environment and system observation for admins`。
 
