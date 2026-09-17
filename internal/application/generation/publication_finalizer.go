@@ -38,6 +38,9 @@ type PublicationFinalizerConfig struct {
 	Runnable     RunnableRevisionResolver
 	ScenariosDir string
 	Interval     time.Duration
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick       func(error)
 }
 
 // PublicationFinalizer materializes Operations source and atomically exposes
@@ -48,6 +51,9 @@ type PublicationFinalizer struct {
 	runnable     RunnableRevisionResolver
 	scenariosDir string
 	interval     time.Duration
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick       func(error)
 	now          func() time.Time
 }
 
@@ -58,7 +64,7 @@ func NewPublicationFinalizer(config PublicationFinalizerConfig) (*PublicationFin
 	if config.Interval <= 0 {
 		config.Interval = defaultPublicationFinalizerInterval
 	}
-	return &PublicationFinalizer{store: config.Store, runnable: config.Runnable, scenariosDir: filepath.Clean(config.ScenariosDir), interval: config.Interval, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &PublicationFinalizer{store: config.Store, runnable: config.Runnable, scenariosDir: filepath.Clean(config.ScenariosDir), interval: config.Interval, OnTick: config.OnTick, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 func (f *PublicationFinalizer) Recover(ctx context.Context) error { return f.RunOnce(ctx) }
@@ -74,7 +80,11 @@ func (f *PublicationFinalizer) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := f.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			err := f.RunOnce(ctx)
+			if f.OnTick != nil {
+				f.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("finalize generation publications", "err", err)
 			}
 		}

@@ -315,6 +315,73 @@ paths:
         "403":
           $ref: "#/components/responses/Error"
 
+  /admin/environments:
+    get:
+      operationId: listAdminEnvironments
+      summary: List every RuntimeEnvironment across users with lifecycle state (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All runtime environments, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminEnvironmentList"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /admin/environments/{name}/release:
+    post:
+      operationId: releaseAdminEnvironment
+      summary: Request an administrative environment release via the existing drain path (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Release requested; the controller drain path takes over
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminEnvironmentRelease"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/system:
+    get:
+      operationId: getAdminSystem
+      summary: Server build, pinned documentation, catalog integrity, and background service registry (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSystemStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
   /me/space:
     get:
       operationId: getMySpace
@@ -1467,6 +1534,141 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminRunnableActionItem"
+
+    AdminEnvironment:
+      type: object
+      required: [name, namespace, phase, purpose, created_at]
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        phase:
+          type: string
+          description: Controller phase, e.g. Pending, Ready, Draining, Failed, Released
+        purpose:
+          type: string
+          enum: [learning, verification]
+        user:
+          type: string
+          description: Owning user identifier from the environment labels
+        content_kind:
+          type: string
+        content_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Controller-projected lifecycle expiry
+        failure:
+          $ref: "#/components/schemas/AdminEnvironmentFailure"
+
+    AdminEnvironmentFailure:
+      type: object
+      required: [class, component, reason, at]
+      properties:
+        class:
+          type: string
+          enum: [artifact, infrastructure]
+        component:
+          type: string
+        reason:
+          type: string
+        message:
+          type: string
+        at:
+          type: string
+          format: date-time
+
+    AdminEnvironmentList:
+      type: object
+      required: [environments]
+      properties:
+        environments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminEnvironment"
+
+    AdminEnvironmentRelease:
+      type: object
+      required: [id, phase]
+      properties:
+        id:
+          type: string
+        phase:
+          type: string
+
+    AdminBackgroundService:
+      type: object
+      required: [name, started_at, last_error]
+      properties:
+        name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        last_tick_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+
+    AdminCatalogIntegrity:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, failed]
+        detail:
+          type: string
+          description: When failed, the integrity error including the offending revision
+
+    AdminDocumentationDeployment:
+      type: object
+      required: [source_id, repository, revision, version, language, page_path, anchor]
+      properties:
+        source_id:
+          type: string
+        repository:
+          type: string
+        revision:
+          type: string
+        version:
+          type: string
+        language:
+          type: string
+        page_path:
+          type: string
+        anchor:
+          type: string
+
+    AdminSystemStatus:
+      type: object
+      required: [version, commit, build_time, catalog_integrity, services]
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        build_time:
+          type: string
+        catalog_release_reference:
+          type: string
+          nullable: true
+        catalog_integrity:
+          $ref: "#/components/schemas/AdminCatalogIntegrity"
+        documentation:
+          $ref: "#/components/schemas/AdminDocumentationDeployment"
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminBackgroundService"
 
     LoginRequest:
       type: object

@@ -35,6 +35,9 @@ type RunnableCoordinator struct {
 	store      RunnableCoordinatorStore
 	runnable   RunnableCoordinatorStoreRuntime
 	operations appoperations.Config
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick     func(error)
 	interval   time.Duration
 	now        func() time.Time
 }
@@ -59,7 +62,11 @@ func (c *RunnableCoordinator) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := c.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			err := c.RunOnce(ctx)
+			if c.OnTick != nil {
+				c.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("reconcile generation runnable actions", "err", err)
 			}
 		}

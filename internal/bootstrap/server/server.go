@@ -305,6 +305,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		AgentRuntimeContext: serviceContext,
 		Generator:           generatorService,
 		Documentation:       newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
+		SystemReport:        newSystemReportProvider(cfg, services.registry).Report,
 	})
 	if err != nil {
 		services.stop()
@@ -381,25 +382,38 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 
 	// Every process-scoped loop is started explicitly and is waited by Close.
+	// Each service also reports its passes into the in-memory registry so the
+	// admin system endpoint can show real tick times and errors.
 	if catalogInstaller != nil {
+		catalogInstaller.OnTick = services.tickObserver("catalog installer")
 		services.start("catalog installer", catalogInstaller.Run)
 	}
+	materializations.OnTick = services.tickObserver("scenario materialization reconciler")
 	services.start("scenario materialization reconciler", materializations.Run)
 	if generationAgents != nil {
+		generationAgents.OnTick = services.tickObserver("generation agent runtime")
 		services.start("generation agent runtime", generationAgents.Run)
 	}
+	generationRunnable.OnTick = services.tickObserver("generation runnable coordinator")
 	services.start("generation runnable coordinator", generationRunnable.Run)
 	if workspaceReaper != nil {
+		workspaceReaper.OnTick = services.tickObserver("generator workspace reaper")
 		services.start("generator workspace reaper", workspaceReaper.Run)
 	}
 	if workspaceSnapshotter != nil {
+		workspaceSnapshotter.OnTick = services.tickObserver("generator workspace snapshotter")
 		services.start("generator workspace snapshotter", workspaceSnapshotter.Run)
 	}
+	cleanupService.OnTick = services.tickObserver("learning cleanup")
 	services.start("learning cleanup", cleanupService.Run)
+	projectionService.OnTick = services.tickObserver("learning environment projection")
 	services.start("learning environment projection", projectionService.Run)
+	leaseMaintainer.OnTick = services.tickObserver("assistant environment lease maintenance")
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
+	publicationFinalizer.OnTick = services.tickObserver("generation publication finalizer")
 	services.start("generation publication finalizer", publicationFinalizer.Run)
 	if documentationPipeline != nil {
+		documentationPipeline.OnTick = services.tickObserver("documentation practice action reconciler")
 		services.start("documentation practice action reconciler", documentationPipeline.Run)
 	}
 	services.start("interactive agent recovery", interactiveRecovery.Run)

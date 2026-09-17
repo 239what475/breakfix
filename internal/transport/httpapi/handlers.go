@@ -54,6 +54,7 @@ type Handler struct {
 	nodeProviderReady  NodeProviderReadiness
 	generator          generatorApplication
 	documentation      documentationApplication
+	systemReport       SystemReportProvider
 }
 
 // generatorApplication is the HTTP consumer's view of GeneratorService. The
@@ -95,6 +96,10 @@ type Dependencies struct {
 	Generator           generatorApplication
 	RunnableBindings    operationsRunnableBindingResolver
 	Documentation       documentationApplication
+	// SystemReport assembles the admin system status from process-scoped state
+	// that only the bootstrap owns: build information and the background
+	// service registry.
+	SystemReport SystemReportProvider
 }
 
 // operationsRunnableBindingResolver prevents Server-created environments from
@@ -160,6 +165,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		nodeTerminal:       dependencies.NodeTerminal,
 		generator:          dependencies.Generator,
 		documentation:      dependencies.Documentation,
+		systemReport:       dependencies.SystemReport,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable

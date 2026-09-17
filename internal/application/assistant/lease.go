@@ -31,6 +31,9 @@ type EnvironmentLeaseRenewer interface {
 type LeaseMaintainer struct {
 	repository LeaseRepository
 	renewer    EnvironmentLeaseRenewer
+	// OnTick optionally reports each renewal pass to the bootstrap's in-memory
+	// service registry.
+	OnTick     func(error)
 	interval   time.Duration
 }
 
@@ -55,7 +58,11 @@ func (m *LeaseMaintainer) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := m.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			err := m.RunOnce(ctx)
+			if m.OnTick != nil {
+				m.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("renew assistant environment leases", "err", err)
 			}
 		}

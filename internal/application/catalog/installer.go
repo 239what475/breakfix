@@ -83,6 +83,9 @@ type Installer struct {
 	reference    string
 	digest       catalogdomain.BundleDigest
 	pollInterval time.Duration
+	// OnTick optionally reports each installation pass to the bootstrap's
+	// in-memory service registry.
+	OnTick       func(error)
 	puller       BundlePuller
 	layerReader  SourceLayerReader
 	store        ReleaseStore
@@ -206,7 +209,11 @@ func selectBootstrapRelease(state catalogdomain.BootstrapState, digest catalogdo
 // artifact failures are recorded as terminal release failures.
 func (i *Installer) Run(ctx context.Context) error {
 	for {
-		if err := i.RunOnce(ctx); err != nil && ctx.Err() == nil {
+		err := i.RunOnce(ctx)
+		if i.OnTick != nil {
+			i.OnTick(err)
+		}
+		if err != nil && ctx.Err() == nil {
 			slog.Error("catalog release installation pass failed", "reference", i.reference, "err", err)
 		}
 		if err := i.sleep(ctx, i.pollInterval); err != nil {

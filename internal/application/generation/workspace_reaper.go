@@ -13,6 +13,9 @@ const defaultWorkspaceReaperInterval = time.Minute
 // cleanup. The workspace manager remains the sole owner of actual deletion.
 type WorkspaceReaper struct {
 	manager  *Manager
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick   func(error)
 	interval time.Duration
 }
 
@@ -45,7 +48,11 @@ func (r *WorkspaceReaper) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := r.manager.CleanupDue(ctx); err != nil && ctx.Err() == nil {
+			err := r.manager.CleanupDue(ctx)
+			if r.OnTick != nil {
+				r.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("clean generator workspaces", "err", err)
 			}
 		}

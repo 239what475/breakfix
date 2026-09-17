@@ -26,6 +26,9 @@ type workspaceArchiver interface {
 // from a user turn. It owns no Sandbox/PVC deletion; WorkspaceReaper remains
 // the only process that performs those provider-side operations.
 type WorkspaceSnapshotter struct {
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick       func(error)
 	repo         WorkspaceRepository
 	archiver     workspaceArchiver
 	store        *workspacearchive.Store
@@ -88,7 +91,11 @@ func (s *WorkspaceSnapshotter) Run(ctx context.Context) error {
 				slog.Warn("snapshot generator workspace after turn", "workflow_id", workflowID, "err", err)
 			}
 		case <-ticker.C:
-			if err := s.SnapshotDue(ctx); err != nil && ctx.Err() == nil {
+			err := s.SnapshotDue(ctx)
+			if s.OnTick != nil {
+				s.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("snapshot generator workspaces", "err", err)
 			}
 		}

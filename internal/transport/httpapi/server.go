@@ -161,6 +161,11 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.POST("/documentation/workflows/:workflow_id/restart", func(c *gin.Context) {
 		h.RestartAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
 	})
+	adminRoutes.GET("/environments", h.ListAdminEnvironments)
+	adminRoutes.POST("/environments/:name/release", func(c *gin.Context) {
+		h.ReleaseAdminEnvironment(c, c.Param("name"))
+	})
+	adminRoutes.GET("/system", h.GetAdminSystem)
 	adminRoutes.GET("/runnable-actions", func(c *gin.Context) {
 		params := api.ListAdminRunnableActionsParams{}
 		if raw := c.Query("state"); raw != "" {

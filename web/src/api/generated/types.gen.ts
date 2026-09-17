@@ -184,6 +184,80 @@ export type AdminRunnableActionPage = {
     items: Array<AdminRunnableActionItem>;
 };
 
+export type AdminEnvironment = {
+    name: string;
+    namespace: string;
+    /**
+     * Controller phase, e.g. Pending, Ready, Draining, Failed, Released
+     */
+    phase: string;
+    purpose: 'learning' | 'verification';
+    /**
+     * Owning user identifier from the environment labels
+     */
+    user?: string;
+    content_kind?: string;
+    content_id?: string;
+    created_at: string;
+    /**
+     * Controller-projected lifecycle expiry
+     */
+    expires_at?: string | null;
+    failure?: AdminEnvironmentFailure;
+};
+
+export type AdminEnvironmentFailure = {
+    class: 'artifact' | 'infrastructure';
+    component: string;
+    reason: string;
+    message?: string;
+    at: string;
+};
+
+export type AdminEnvironmentList = {
+    environments: Array<AdminEnvironment>;
+};
+
+export type AdminEnvironmentRelease = {
+    id: string;
+    phase: string;
+};
+
+export type AdminBackgroundService = {
+    name: string;
+    started_at: string;
+    last_tick_at?: string | null;
+    last_error: string;
+};
+
+export type AdminCatalogIntegrity = {
+    state: 'ok' | 'failed';
+    /**
+     * When failed, the integrity error including the offending revision
+     */
+    detail?: string;
+};
+
+export type AdminDocumentationDeployment = {
+    source_id: string;
+    repository: string;
+    revision: string;
+    version: string;
+    language: string;
+    page_path: string;
+    anchor: string;
+};
+
+export type AdminSystemStatus = {
+    version: string;
+    commit: string;
+    build_time: string;
+    catalog_release_reference?: string | null;
+    catalog_integrity: AdminCatalogIntegrity;
+    documentation?: AdminDocumentationDeployment;
+    services: Array<AdminBackgroundService>;
+};
+
 export type LoginRequest = {
     username: string;
     password: string;
@@ -1068,6 +1142,103 @@ export type ListAdminRunnableActionsResponses = {
 };
 
 export type ListAdminRunnableActionsResponse = ListAdminRunnableActionsResponses[keyof ListAdminRunnableActionsResponses];
+
+export type ListAdminEnvironmentsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/environments';
+};
+
+export type ListAdminEnvironmentsErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type ListAdminEnvironmentsError = ListAdminEnvironmentsErrors[keyof ListAdminEnvironmentsErrors];
+
+export type ListAdminEnvironmentsResponses = {
+    /**
+     * All runtime environments, newest first
+     */
+    200: AdminEnvironmentList;
+};
+
+export type ListAdminEnvironmentsResponse = ListAdminEnvironmentsResponses[keyof ListAdminEnvironmentsResponses];
+
+export type ReleaseAdminEnvironmentData = {
+    body?: never;
+    path: {
+        name: string;
+    };
+    query?: never;
+    url: '/admin/environments/{name}/release';
+};
+
+export type ReleaseAdminEnvironmentErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ReleaseAdminEnvironmentError = ReleaseAdminEnvironmentErrors[keyof ReleaseAdminEnvironmentErrors];
+
+export type ReleaseAdminEnvironmentResponses = {
+    /**
+     * Release requested; the controller drain path takes over
+     */
+    200: AdminEnvironmentRelease;
+};
+
+export type ReleaseAdminEnvironmentResponse = ReleaseAdminEnvironmentResponses[keyof ReleaseAdminEnvironmentResponses];
+
+export type GetAdminSystemData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/system';
+};
+
+export type GetAdminSystemErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type GetAdminSystemError = GetAdminSystemErrors[keyof GetAdminSystemErrors];
+
+export type GetAdminSystemResponses = {
+    /**
+     * System status
+     */
+    200: AdminSystemStatus;
+};
+
+export type GetAdminSystemResponse = GetAdminSystemResponses[keyof GetAdminSystemResponses];
 
 export type GetMySpaceData = {
     body?: never;

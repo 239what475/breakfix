@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	appdocument "github.com/breakfix/breakfix/internal/application/documentpractice"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/audit"
@@ -83,13 +84,14 @@ func TestDeriveDocumentationStuckCoversEveryAttribution(t *testing.T) {
 
 func TestAdminDocumentationWorkflowObservationForceFailAndRestart(t *testing.T) {
 	var application *liveDocumentationAdminApplication
-	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store) {
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store) *kubernetes.Client {
 		service, err := appdocument.NewService(database.DocumentPractice, database.Runnable)
 		if err != nil {
 			t.Fatalf("create document practice service: %v", err)
 		}
 		application = &liveDocumentationAdminApplication{service: service}
 		dependencies.Documentation = application
+		return nil
 	})
 	adminRegister := server.register(t, "alice", "alice-password")
 	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)

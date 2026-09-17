@@ -28,6 +28,9 @@ type MaterializationReconcilerConfig struct {
 	ScenariosDir  string
 	Interval      time.Duration
 	StagingMaxAge time.Duration
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick        func(error)
 }
 
 // MaterializationReconciler removes only scenario directories that have no
@@ -38,6 +41,9 @@ type MaterializationReconciler struct {
 	interval      time.Duration
 	stagingMaxAge time.Duration
 	store         MaterializationStore
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick        func(error)
 	now           func() time.Time
 }
 
@@ -58,6 +64,7 @@ func NewMaterializationReconciler(store MaterializationStore, config Materializa
 	return &MaterializationReconciler{
 		scenariosDir:  filepath.Clean(root),
 		interval:      config.Interval,
+		OnTick:        config.OnTick,
 		stagingMaxAge: config.StagingMaxAge,
 		store:         store,
 		now:           func() time.Time { return time.Now().UTC() },
@@ -81,7 +88,11 @@ func (r *MaterializationReconciler) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := r.reconcile(ctx, false); err != nil && ctx.Err() == nil {
+			err := r.reconcile(ctx, false)
+			if r.OnTick != nil {
+				r.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("reconcile scenario materializations", "err", err)
 			}
 		}

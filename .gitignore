@@ -42,3 +42,6 @@ test/node_modules/
 test/results/
 test/report/
 web/test-results/
+
+# Playwright local artifacts
+test/test-results/

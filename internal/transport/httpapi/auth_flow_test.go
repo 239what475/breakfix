@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/breakfix/breakfix/internal/adapter/auth"
+	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/audit"
@@ -29,15 +30,16 @@ type authTestServer struct {
 	cfg    config.Config
 }
 
-func newAuthTestServer(t *testing.T, mutate func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store)) *authTestServer {
+func newAuthTestServer(t *testing.T, mutate func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store) *kubernetes.Client) *authTestServer {
 	t.Helper()
 	database := testpostgres.New(t)
 	cfg := config.Config{JWTSecret: "auth-flow-jwt-secret", AllowRegistration: true}
 	dependencies := Dependencies{}
+	var client *kubernetes.Client
 	if mutate != nil {
-		mutate(&cfg, &dependencies, database)
+		client = mutate(&cfg, &dependencies, database)
 	}
-	handler, err := NewHandlerWithDependencies(database, nil, cfg, dependencies)
+	handler, err := NewHandlerWithDependencies(database, client, cfg, dependencies)
 	if err != nil {
 		t.Fatalf("create auth API handler: %v", err)
 	}
@@ -50,10 +52,11 @@ func newAuthTestServer(t *testing.T, mutate func(cfg *config.Config, dependencie
 
 func newAuthTestServerSimple(t *testing.T, mutate func(*config.Config)) *authTestServer {
 	t.Helper()
-	return newAuthTestServer(t, func(cfg *config.Config, _ *Dependencies, _ *postgres.Store) {
+	return newAuthTestServer(t, func(cfg *config.Config, _ *Dependencies, _ *postgres.Store) *kubernetes.Client {
 		if mutate != nil {
 			mutate(cfg)
 		}
+		return nil
 	})
 }
 
@@ -385,8 +388,9 @@ func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx 
 
 func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
 	application := &auditRecordingDocumentationApplication{}
-	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, _ *postgres.Store) {
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, _ *postgres.Store) *kubernetes.Client {
 		dependencies.Documentation = application
+		return nil
 	})
 	application.db = server.db
 	adminRegister := server.register(t, "alice", "alice-password")

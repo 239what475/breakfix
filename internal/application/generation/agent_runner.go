@@ -55,6 +55,9 @@ type AgentRunnerConfig struct {
 // independently; the database workflow remains the scheduling authority.
 type AgentRunner struct {
 	store  GenerationAgentStore
+	// OnTick optionally reports each claim poll to the bootstrap's in-memory
+	// service registry.
+	OnTick func(error)
 	judge  JudgeRoleExecutor
 	config AgentRunnerConfig
 	now    func() time.Time
@@ -107,6 +110,9 @@ func (r *AgentRunner) Run(ctx context.Context) error {
 		default:
 		}
 		claim, err := r.claimOne(ctx)
+		if r.OnTick != nil {
+			r.OnTick(err)
+		}
 		if err != nil {
 			failures++
 			delay := domain.NextRetry(failures, r.now()).Sub(r.now())

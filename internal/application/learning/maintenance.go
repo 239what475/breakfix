@@ -34,6 +34,9 @@ type CleanupRepository interface {
 // lost terminal close frame.
 type CleanupService struct {
 	repository CleanupRepository
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick     func(error)
 	interval   time.Duration
 	heartbeat  time.Duration
 	retention  time.Duration
@@ -82,7 +85,11 @@ func (s *CleanupService) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := s.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			err := s.RunOnce(ctx)
+			if s.OnTick != nil {
+				s.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("cleanup learning terminal activity", "err", err)
 			}
 		}
@@ -148,6 +155,9 @@ type ProjectionRepository interface {
 type ProjectionService struct {
 	source     ProjectionSource
 	repository ProjectionRepository
+	// OnTick optionally reports each background pass to the bootstrap's
+	// in-memory service registry.
+	OnTick     func(error)
 	interval   time.Duration
 	now        func() time.Time
 }
@@ -177,7 +187,11 @@ func (s *ProjectionService) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := s.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			err := s.RunOnce(ctx)
+			if s.OnTick != nil {
+				s.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("project learning environment statuses", "err", err)
 			}
 		}

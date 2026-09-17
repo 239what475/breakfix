@@ -60,6 +60,9 @@ type AgentPipelineConfig struct {
 // database access beyond Service and Reader ports.
 type AgentPipeline struct {
 	service               *Service
+	// OnTick optionally reports each reconciliation pass to the bootstrap's
+	// in-memory service registry.
+	OnTick                func(error)
 	reader                Reader
 	planner               PlanningAgent
 	planReviewers         []PlanReviewRole
@@ -425,7 +428,11 @@ func (p *AgentPipeline) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := p.Recover(ctx); err != nil && ctx.Err() == nil {
+			err := p.Recover(ctx)
+			if p.OnTick != nil {
+				p.OnTick(err)
+			}
+			if err != nil && ctx.Err() == nil {
 				slog.Warn("reconcile completed documentation runnable actions", "err", err)
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,21 +20,23 @@ import (
 // bootstrap lists every known Server service explicitly and waits for all of
 // them before closing shared providers.
 type serviceLifecycle struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	group  sync.WaitGroup
-	once   sync.Once
+	ctx      context.Context
+	cancel   context.CancelFunc
+	group    sync.WaitGroup
+	once     sync.Once
+	registry *serviceRegistry
 }
 
 func newServiceLifecycle() *serviceLifecycle {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &serviceLifecycle{ctx: ctx, cancel: cancel}
+	return &serviceLifecycle{ctx: ctx, cancel: cancel, registry: newServiceRegistry()}
 }
 
 func (l *serviceLifecycle) start(name string, run func(context.Context) error) {
 	if l == nil || run == nil {
 		return
 	}
+	l.registry.register(name)
 	l.group.Add(1)
 	go func() {
 		defer l.group.Done()
@@ -41,8 +44,92 @@ func (l *serviceLifecycle) start(name string, run func(context.Context) error) {
 			// A background service logs its own pass failures. This log catches a
 			// service that unexpectedly returned and would otherwise disappear.
 			slog.Error("server background service stopped", "service", name, "err", err)
+			l.registry.recordError(name, err.Error())
 		}
 	}()
+}
+
+// tickObserver returns the reporter a background service calls after each of
+// its passes. The function may be called concurrently; nil errors record a
+// clean tick.
+func (l *serviceLifecycle) tickObserver(name string) func(error) {
+	return l.registry.tickObserver(name)
+}
+
+func (l *serviceLifecycle) statuses() []ServiceStatus {
+	if l == nil || l.registry == nil {
+		return nil
+	}
+	return l.registry.snapshot()
+}
+
+// serviceStatus is the in-memory observation of one background service. It is
+// deliberately process-local: nothing here survives a restart, and no
+// external component is contacted.
+type ServiceStatus struct {
+	Name       string     `json:"name"`
+	StartedAt  time.Time  `json:"started_at"`
+	LastTickAt *time.Time `json:"last_tick_at"`
+	LastError  string     `json:"last_error"`
+}
+
+// serviceRegistry is the in-memory status table for the Server's background
+// services. Bootstrap registers every service when it starts one; services
+// report their ticks through the observer returned by tickObserver.
+type serviceRegistry struct {
+	mu       sync.Mutex
+	services map[string]*ServiceStatus
+}
+
+func newServiceRegistry() *serviceRegistry {
+	return &serviceRegistry{services: make(map[string]*ServiceStatus)}
+}
+
+func (r *serviceRegistry) register(name string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.services[name]; !exists {
+		r.services[name] = &ServiceStatus{Name: name, StartedAt: time.Now().UTC()}
+	}
+}
+
+func (r *serviceRegistry) tickObserver(name string) func(error) {
+	return func(err error) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		status, exists := r.services[name]
+		if !exists {
+			return
+		}
+		now := time.Now().UTC()
+		status.LastTickAt = &now
+		if err != nil {
+			status.LastError = err.Error()
+		}
+	}
+}
+
+func (r *serviceRegistry) recordError(name, message string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if status, exists := r.services[name]; exists {
+		status.LastError = message
+	}
+}
+
+func (r *serviceRegistry) snapshot() []ServiceStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	statuses := make([]ServiceStatus, 0, len(r.services))
+	for _, status := range r.services {
+		copyValue := *status
+		statuses = append(statuses, copyValue)
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	return statuses
 }
 
 func (l *serviceLifecycle) stop() {
