@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -156,6 +157,67 @@ func TestServiceRejectsStaleActionsAndRecordsVerificationFailure(t *testing.T) {
 	got, report, err := service.Verified(ctx, workflow.ID, current)
 	if err != nil || got.State != domain.Failed || report.Report.Passed {
 		t.Fatalf("failed verification = %#v %#v, %v", got, report, err)
+	}
+}
+
+func TestRestartedWorkflowReplansIntoFreshLedgerEntries(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 17, 15, 0, 0, 0, time.UTC)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	workflow, err := service.Start(ctx, "document-restart-replan", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := validPlan()
+	plan.CreatedAt = now
+	firstAudit := serviceAudit(t, "planner-first", "planner", plan)
+	if _, _, err := service.SubmitPlan(ctx, workflow.ID, plan, firstAudit); err != nil {
+		t.Fatalf("first plan submission: %v", err)
+	}
+	forceAction := audit.HumanAction{ID: "audit-force", UserID: "u-admin", Action: audit.ActionDocumentationWorkflowForceFail, TargetType: audit.TargetDocumentWorkflow, TargetID: workflow.ID, Detail: json.RawMessage(`{}`), CreatedAt: now}
+	if _, err := service.ForceFail(ctx, workflow.ID, "stuck", &forceAction); err != nil {
+		t.Fatalf("force fail: %v", err)
+	}
+	restartAction := audit.HumanAction{ID: "audit-restart", UserID: "u-admin", Action: audit.ActionDocumentationWorkflowRestart, TargetType: audit.TargetDocumentWorkflow, TargetID: workflow.ID, Detail: json.RawMessage(`{}`), CreatedAt: now}
+	restarted, err := service.Restart(ctx, workflow.ID, "retry", &restartAction)
+	if err != nil || restarted.Revision != 2 {
+		t.Fatalf("restart = %#v, %v", restarted, err)
+	}
+
+	// A re-planning attempt produces new plan bytes (any planner output with a
+	// timestamp differs) and must land in fresh ledger entries instead of
+	// colliding with the immutable artifacts of the failed attempt.
+	replan := plan
+	replan.CreatedAt = now.Add(time.Minute)
+	if err := replan.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	secondAudit := serviceAudit(t, "planner-second", "planner", replan)
+	submitted, artifact, err := service.SubmitPlan(ctx, workflow.ID, replan, secondAudit)
+	if err != nil {
+		t.Fatalf("restarted plan submission = %v", err)
+	}
+	if submitted.State != domain.PlanReviewing || submitted.Revision != 2 {
+		t.Fatalf("restarted workflow = %#v", submitted)
+	}
+	if artifact.ID != "plan-"+plan.ID+"-r1-a2" {
+		t.Fatalf("re-planned artifact = %q, want the attempt-namespaced id", artifact.ID)
+	}
+	entries, err := store.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]int{}
+	for _, entry := range entries.Artifacts {
+		kinds[entry.Kind]++
+	}
+	if kinds["learning-unit-plan"] != 2 {
+		t.Fatalf("ledger plans = %d, want the failed attempt's plan and the new one", kinds["learning-unit-plan"])
 	}
 }
 

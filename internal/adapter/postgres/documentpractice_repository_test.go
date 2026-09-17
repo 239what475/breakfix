@@ -107,17 +107,17 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 		t.Fatal(err)
 	}
 	contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(documentContext), Kind: "document-context", ContentRevision: documentContext.Commit, Digest: domainDigest(contextPayload), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
-	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1", ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: planDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
+	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1-a1", ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: planDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
 	planGate := domain.GateResult{ArtifactID: planArtifact.ID, ArtifactDigest: planArtifact.Digest, Decision: domain.ReviewApprove, PolicyVersion: "gate-v1", CreatedAt: now}
 	candidate := domain.PracticeCandidate{FormatVersion: domain.FormatVersion, ID: "candidate-document-01", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, Context: documentContext, Source: runnableRevision.Spec.Source, Spec: runnableRevision.Spec, Observations: plan.Observations, CreatedAt: now}
 	candidatePayload, err := json.Marshal(candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidateArtifact := domain.ArtifactRecord{ID: "candidate-candidate-document-01-r1", ParentID: planArtifact.ID, Kind: "practice-candidate", ContentRevision: "1", Digest: candidate.Source.Digest, SchemaVersion: domain.FormatVersion, OwnerRole: "generator", CreatedAt: now, Payload: candidatePayload}
+	candidateArtifact := domain.ArtifactRecord{ID: "candidate-candidate-document-01-r1-a1", ParentID: planArtifact.ID, Kind: "practice-candidate", ContentRevision: "1", Digest: candidate.Source.Digest, SchemaVersion: domain.FormatVersion, OwnerRole: "generator", CreatedAt: now, Payload: candidatePayload}
 	artifactGate := domain.GateResult{ArtifactID: candidate.ID, ArtifactDigest: candidate.Source.Digest, Decision: domain.ReviewApprove, PolicyVersion: "gate-v1", CreatedAt: now}
 	manifest := domain.PublicationManifest{FormatVersion: domain.FormatVersion, ID: "manifest-document-01", Context: documentContext, PracticeCandidateID: candidate.ID, RunnableRevisionDigest: runnableDigest, EnvironmentProfileDigest: report.Environment.ProfileDigest, VerificationReportDigest: reportDigest, PlanGate: planGate, ArtifactGate: artifactGate, VerificationReview: review, CreatedAt: now}
-	revision := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-revision-01", WorkflowID: workflow.ID, Context: documentContext, PlanID: plan.ID, PlanRevision: plan.Revision, CandidateID: candidate.ID, RunnableRevisionRef: storedRevision.Reference, VerificationReportRef: storedReport.Reference, PublicationManifestID: manifest.ID, PublishedAt: now}
+	revision := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-revision-01", WorkflowID: workflow.ID, Context: documentContext, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: 1, CandidateID: candidate.ID, RunnableRevisionRef: storedRevision.Reference, VerificationReportRef: storedReport.Reference, PublicationManifestID: manifest.ID, PublishedAt: now}
 	if err := database.DocumentPractice.AppendArtifact(ctx, workflow.ID, contextArtifact); err != nil {
 		t.Fatal(err)
 	}

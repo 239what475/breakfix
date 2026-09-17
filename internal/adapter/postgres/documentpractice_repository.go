@@ -716,7 +716,7 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 	for _, artifact := range artifacts {
 		byID[artifact.ID] = artifact
 	}
-	planID := "plan-" + revision.PlanID + fmt.Sprintf("-r%d", revision.PlanRevision)
+	planID := fmt.Sprintf("plan-%s-r%d-a%d", revision.PlanID, revision.PlanRevision, revision.WorkflowRevision)
 	planArtifact, ok := byID[planID]
 	if !ok || planArtifact.Kind != "learning-unit-plan" {
 		return errors.New("practice publication is missing its learning plan")
@@ -753,7 +753,7 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 	if !foundCandidate || candidate.Context != revision.Context || candidate.PlanID != plan.ID || candidate.PlanRevision != plan.Revision || candidate.ID != manifest.PracticeCandidateID {
 		return errors.New("practice publication candidate binding is invalid")
 	}
-	candidateID := "candidate-" + candidate.ID + fmt.Sprintf("-r%d", candidate.Revision)
+	candidateID := fmt.Sprintf("candidate-%s-r%d-a%d", candidate.ID, candidate.Revision, revision.WorkflowRevision)
 	artifactGate, ok := byID["artifact-gate-"+candidateID]
 	if !ok || artifactGate.Kind != "artifact-gate" || artifactGate.ParentID != candidateID || !sameJSON(artifactGate.Payload, manifest.ArtifactGate) {
 		return errors.New("practice publication artifact gate binding is invalid")

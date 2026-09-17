@@ -343,6 +343,10 @@ type PracticeRevision struct {
 	Context               DocumentContext                      `json:"document_context"`
 	PlanID                string                               `json:"plan_id"`
 	PlanRevision          int64                                `json:"plan_revision"`
+	// WorkflowRevision records the workflow revision whose Agent run produced
+	// this practice. Ledger artifact IDs derive from it so a workflow that was
+	// administratively restarted can re-plan into fresh ledger entries.
+	WorkflowRevision      int64                                `json:"workflow_revision"`
 	CandidateID           string                               `json:"candidate_id"`
 	RunnableRevisionRef   runnable.RevisionReference           `json:"runnable_revision_ref"`
 	VerificationReportRef runnable.VerificationReportReference `json:"verification_report_ref"`
@@ -351,7 +355,7 @@ type PracticeRevision struct {
 }
 
 func (r PracticeRevision) Validate() error {
-	if r.FormatVersion != FormatVersion || strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.WorkflowID) == "" || strings.TrimSpace(r.PlanID) == "" || r.PlanRevision < 1 || strings.TrimSpace(r.CandidateID) == "" || strings.TrimSpace(r.PublicationManifestID) == "" || r.PublishedAt.IsZero() {
+	if r.FormatVersion != FormatVersion || strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.WorkflowID) == "" || strings.TrimSpace(r.PlanID) == "" || r.PlanRevision < 1 || r.WorkflowRevision < 1 || strings.TrimSpace(r.CandidateID) == "" || strings.TrimSpace(r.PublicationManifestID) == "" || r.PublishedAt.IsZero() {
 		return errors.New("practice revision is incomplete")
 	}
 	if err := r.Context.Validate(); err != nil {

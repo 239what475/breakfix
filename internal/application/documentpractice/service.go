@@ -97,7 +97,15 @@ func (s *Service) SubmitPlan(ctx context.Context, workflowID string, plan domain
 	if audit.OutputDigest != digest {
 		return domain.Workflow{}, domain.ArtifactRecord{}, errors.New("planner audit does not bind the submitted plan")
 	}
-	artifact := domain.ArtifactRecord{ID: "plan-" + plan.ID + fmt.Sprintf("-r%d", plan.Revision), Kind: "learning-unit-plan", ContentRevision: fmt.Sprintf("%d", plan.Revision), Digest: digest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", PolicyVersion: audit.PolicyVersion, CreatedAt: s.now(), Payload: payload}
+	// The plan artifact is namespaced by the workflow revision that produced
+	// it: a restarted workflow re-plans into fresh ledger entries instead of
+	// colliding with the immutable artifacts of its failed attempt.
+	current, err := s.store.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return domain.Workflow{}, domain.ArtifactRecord{}, err
+	}
+	attempt := current.Revision
+	artifact := domain.ArtifactRecord{ID: fmt.Sprintf("plan-%s-r%d-a%d", plan.ID, plan.Revision, attempt), Kind: "learning-unit-plan", ContentRevision: fmt.Sprintf("%d", plan.Revision), Digest: digest, SchemaVersion: domain.FormatVersion, OwnerRole: "planner", PolicyVersion: audit.PolicyVersion, CreatedAt: s.now(), Payload: payload}
 	contextPayload, contextDigest, err := artifactPayload(plan.Context)
 	if err != nil {
 		return domain.Workflow{}, domain.ArtifactRecord{}, err
@@ -199,7 +207,13 @@ func (s *Service) SubmitCandidate(ctx context.Context, workflowID string, plan d
 	if audit.OutputDigest != digest {
 		return domain.Workflow{}, domain.ArtifactRecord{}, errors.New("generator audit does not bind the submitted candidate")
 	}
-	artifact := domain.ArtifactRecord{ID: "candidate-" + candidate.ID + fmt.Sprintf("-r%d", candidate.Revision), ParentID: "plan-" + plan.ID + fmt.Sprintf("-r%d", plan.Revision), Kind: "practice-candidate", ContentRevision: fmt.Sprintf("%d", candidate.Revision), Digest: frozen.ArchiveDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "generator", PolicyVersion: audit.PolicyVersion, CreatedAt: s.now(), Payload: payload}
+	current, err := s.store.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return domain.Workflow{}, domain.ArtifactRecord{}, err
+	}
+	attempt := current.Revision
+	planArtifactID := fmt.Sprintf("plan-%s-r%d-a%d", plan.ID, plan.Revision, attempt)
+	artifact := domain.ArtifactRecord{ID: fmt.Sprintf("candidate-%s-r%d-a%d", candidate.ID, candidate.Revision, attempt), ParentID: planArtifactID, Kind: "practice-candidate", ContentRevision: fmt.Sprintf("%d", candidate.Revision), Digest: frozen.ArchiveDigest, SchemaVersion: domain.FormatVersion, OwnerRole: "generator", PolicyVersion: audit.PolicyVersion, CreatedAt: s.now(), Payload: payload}
 	workflow, replay, err := s.readyFor(ctx, workflowID, domain.Generating, domain.ArtifactReviewing, artifact)
 	if err != nil {
 		return domain.Workflow{}, domain.ArtifactRecord{}, err
@@ -455,7 +469,7 @@ func (s *Service) Publish(ctx context.Context, workflowID string, candidate doma
 	if err != nil {
 		return domain.Workflow{}, domain.PracticeRevision{}, err
 	}
-	practice := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-" + candidate.ID, WorkflowID: workflowID, Context: candidate.Context, PlanID: plan.ID, PlanRevision: plan.Revision, CandidateID: candidate.ID, RunnableRevisionRef: revisionRef, VerificationReportRef: report.Reference, PublicationManifestID: manifest.ID, PublishedAt: s.now()}
+	practice := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-" + candidate.ID, WorkflowID: workflowID, Context: candidate.Context, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: workflow.Revision, CandidateID: candidate.ID, RunnableRevisionRef: revisionRef, VerificationReportRef: report.Reference, PublicationManifestID: manifest.ID, PublishedAt: s.now()}
 	final, err := s.store.PublishPracticeRevision(ctx, workflowID, workflow.StateVersion, practice, manifest, s.now())
 	return final, practice, err
 }

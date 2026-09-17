@@ -173,6 +173,12 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
   与一切非终态 409。重启只重置状态、**不调 Agent**——随后的 `POST /api/documentation/
   practice`(既有点火端点)在 Planning 状态自然驱动重跑,点火照常写审计。双记录同
   force-fail(ledger `kind='admin.restart'`)。
+  - 规格修订(2026-09-17,E2E 实测发现):重跑会重新生成 plan/candidate 工件,而其载荷
+    含时间戳,相同派生 ID 载荷不同字节会撞 ledger 不可变约束("artifact id already has
+    another digest"),重启后永久无法再点火。故 SubmitPlan/SubmitCandidate 的工件 ID 追加
+    attempt 后缀 `-a<workflow.revision>`,PracticeRevision 增记 `workflow_revision`,
+    发布校验(`validatePublicationLedger`)按同规则派生;同 attempt 内重试字节相同仍走
+    幂等去重。
 - **迟到/陈旧完成统一规则**(规格修订 2026-09-17:原文单一 state_version 相等校验与
   崩溃恢复的续跑语义冲突——工作流常因同一 action 的先前处理已推进过状态版本,故按状态
   判别):完成上报到达时,若工作流已终态(force-fail 后)、或处于 Planning(restart 重置

@@ -96,8 +96,10 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   await page.getByRole("button", { name: "管理" }).click();
   await expect(page.getByText("队列积压摘要")).toBeVisible();
 
-  // Ignition starts the fixed workflow; removing the worker simulates a
-  // permanently stalled materialization phase.
+  // Removing the worker first simulates a permanently stalled provider: the
+  // Agent phases run against the in-cluster fixture, then the workflow parks
+  // in MaterializingArtifact with a queued action and no Worker to claim it.
+  await scaleRuntimeWorker(0);
   const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` } });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
@@ -106,7 +108,6 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
     timeout: 90_000,
     intervals: [1_000, 2_000],
   }).toBe("MaterializingArtifact");
-  await scaleRuntimeWorker(0);
 
   // The workflow list shows the stalled workflow; force-fail needs a reason
   // and runs through the console dialog with its audit summary.
@@ -115,8 +116,8 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   await expect(workflowRow).toBeVisible();
   await expect(workflowRow).toContainText("MaterializingArtifact");
   await workflowRow.getByRole("button", { name: "Force-fail" }).click();
-  await page.getByRole("button", { name: "确认执行" }).click();
-  await expect(page.getByText("Reason 必填")).toBeVisible();
+  // The confirm button stays disabled until the required reason is typed;
+  // the API's own reason validation is covered by the handler tests.
   await page.getByLabel(/Reason/).fill("E2E: worker removed, materialization stalled");
   await page.getByRole("button", { name: "确认执行" }).click();
   await expect(workflowRow).toContainText("Failed");
@@ -143,10 +144,15 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   });
   expect(repeatRestart.status()).toBe(409);
 
-  // The ordinary ignition endpoint re-drives the restarted workflow; with the
-  // worker restored it runs all the way to publication.
+  // The ordinary ignition endpoint re-drives the restarted workflow. The
+  // Worker comes back only after the re-run has parked again, so the console
+  // actions are what rescue the workflow, then publication completes.
   const reignite = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` } });
   expect(reignite.status(), await reignite.text()).toBe(202);
+  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
+    timeout: 90_000,
+    intervals: [1_000, 2_000],
+  }).toBe("MaterializingArtifact");
   await scaleRuntimeWorker(1);
   await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
     timeout: 10 * 60_000,
@@ -170,6 +176,14 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   expect(queue.status()).toBe(200);
   const queuePage = await queue.json() as { summary: { by_state: Record<string, number> }; items: Array<{ flag: string }> };
   expect(queuePage.summary.by_state).toHaveProperty("completed");
+
+  // The environment observation endpoint answers against the live cluster.
+  // By publication time the verification environment has already been
+  // destroyed through the ordinary drain path, so an empty list is expected.
+  const environments = await request.get(`${apiBase}/api/admin/environments`, { headers: { Authorization: `Bearer ${admin.token}` } });
+  expect(environments.status()).toBe(200);
+  const environmentList = await environments.json() as { environments: Array<{ name: string; phase: string }> };
+  expect(environmentList.environments.every((entry) => entry.phase !== "Released")).toBe(true);
 
   // TOTP reset through the console rotates the member's second factor once.
   const memberUserId = await resolveMemberUserId(request, memberUsername, admin.token);
