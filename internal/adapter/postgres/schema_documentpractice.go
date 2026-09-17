@@ -2,6 +2,8 @@ package postgres
 
 // Document practice records are append-only. No update path is exposed for
 // these tables; a revised plan or candidate receives a new artifact digest.
+// Distinct ledger entries may share a digest when a restarted workflow
+// re-proposes byte-identical content under a new attempt-scoped identifier.
 var schemaDocumentPracticeStatements = []string{
 	`CREATE TABLE document_artifact_ledger (
 		id TEXT PRIMARY KEY,
@@ -14,8 +16,7 @@ var schemaDocumentPracticeStatements = []string{
 		owner_role TEXT NOT NULL,
 		policy_version TEXT NOT NULL DEFAULT '',
 		payload JSONB NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL,
-		UNIQUE(workflow_id, kind, digest)
+		created_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE INDEX document_artifact_ledger_workflow ON document_artifact_ledger(workflow_id, created_at, id)`,
 	`CREATE TABLE document_workflows (

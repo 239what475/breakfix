@@ -31,7 +31,7 @@ func (d *DocumentPracticeRepository) SaveArtifact(ctx context.Context, workflowI
 	if !json.Valid(payload) {
 		return errors.New("document artifact payload must be JSON")
 	}
-	_, err := d.conn.ExecContext(ctx, `INSERT INTO document_artifact_ledger (id, workflow_id, kind, parent_id, content_revision, digest, schema_version, owner_role, policy_version, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workflow_id, kind, digest) DO NOTHING`, artifact.ID, workflowID, artifact.Kind, artifact.ParentID, artifact.ContentRevision, artifact.Digest, artifact.SchemaVersion, artifact.OwnerRole, artifact.PolicyVersion, payload, artifact.CreatedAt.UTC())
+	_, err := d.conn.ExecContext(ctx, `INSERT INTO document_artifact_ledger (id, workflow_id, kind, parent_id, content_revision, digest, schema_version, owner_role, policy_version, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, artifact.ID, workflowID, artifact.Kind, artifact.ParentID, artifact.ContentRevision, artifact.Digest, artifact.SchemaVersion, artifact.OwnerRole, artifact.PolicyVersion, payload, artifact.CreatedAt.UTC())
 	return err
 }
 

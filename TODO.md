@@ -179,6 +179,10 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
     attempt 后缀 `-a<workflow.revision>`,PracticeRevision 增记 `workflow_revision`,
     发布校验(`validatePublicationLedger`)按同规则派生;同 attempt 内重试字节相同仍走
     幂等去重。
+  - 规格修订(同日,第二次 E2E 实测):确定性重跑会再生成与前一 attempt 字节相同的
+    candidate(archive digest 不变),新 ID 旧 digest 撞 `UNIQUE(workflow_id, kind,
+    digest)`。该约束把"两次 attempt 提交相同内容"误判为重复,与 attempt 命名空间冲突;
+    schema 48 起移除该约束(ID 主键 + ID 等值去重已足够),SaveArtifact 改为按 id 幂等。
 - **迟到/陈旧完成统一规则**(规格修订 2026-09-17:原文单一 state_version 相等校验与
   崩溃恢复的续跑语义冲突——工作流常因同一 action 的先前处理已推进过状态版本,故按状态
   判别):完成上报到达时,若工作流已终态(force-fail 后)、或处于 Planning(restart 重置
