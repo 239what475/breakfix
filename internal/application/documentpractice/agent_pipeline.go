@@ -216,6 +216,16 @@ type PipelineReconcileResult struct {
 	VerificationAction runnable.ActionIdentity
 }
 
+// ForceFail and Restart expose the administrative verbs through the pipeline
+// without granting access to the underlying service or store.
+func (p *AgentPipeline) ForceFail(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	return p.service.ForceFail(ctx, workflowID, reason, action)
+}
+
+func (p *AgentPipeline) Restart(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	return p.service.Restart(ctx, workflowID, reason, action)
+}
+
 // Reconcile completes exactly one public runnable action for an already known
 // workflow. Materialization schedules verification; a passed verification runs
 // independent review and atomically publishes. A failed verification remains a
@@ -328,6 +338,15 @@ func (p *AgentPipeline) reconcileVerification(ctx context.Context, workflowID st
 
 // ReconcileCompletedAction routes one completed public runnable action through
 // its durable documentation binding. An unrelated content kind is a no-op.
+//
+// A completion is acknowledged only (binding marked reconciled, no state
+// change, logged) when the workflow can never act on it: it reached a terminal
+// state such as an administrative force-fail, it sits in Planning — the state
+// a restart resets to and a state that never binds runnable actions — or the
+// action's phase belongs to an earlier lineage than the workflow's current
+// state. Otherwise the pipeline resumes: the workflow may legitimately have
+// advanced past earlier steps of this same action before an interruption, and
+// every state advance stays fenced by the store's state-version check.
 func (p *AgentPipeline) ReconcileCompletedAction(ctx context.Context, action runnable.ActionIdentity) error {
 	workflowID, found, err := p.service.WorkflowForRunnableAction(ctx, action)
 	if err != nil {
@@ -336,10 +355,45 @@ func (p *AgentPipeline) ReconcileCompletedAction(ctx context.Context, action run
 	if !found {
 		return nil
 	}
+	workflow, err := p.service.store.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if stale, reason := staleRunnableCompletion(workflow, action); stale {
+		slog.Warn("late or stale documentation runnable action completion is acknowledged without advancing",
+			"reason", reason,
+			"workflow_id", workflowID, "workflow_state", string(workflow.State),
+			"workflow_state_version", workflow.StateVersion, "action_state_version", action.StateVersion,
+			"action_key", action.Key())
+		return p.service.MarkRunnableActionReconciled(ctx, action)
+	}
 	if _, err := p.Reconcile(ctx, workflowID, action); err != nil {
 		return err
 	}
 	return p.service.MarkRunnableActionReconciled(ctx, action)
+}
+
+// staleRunnableCompletion decides, read-only, whether a completed action can
+// no longer advance its workflow.
+func staleRunnableCompletion(workflow domain.Workflow, action runnable.ActionIdentity) (bool, string) {
+	if workflow.State.Terminal() {
+		return true, "workflow_terminal"
+	}
+	if workflow.State == domain.Planning {
+		return true, "workflow_restarted"
+	}
+	if action.Phase == runnable.ActionMaterializeArtifact && workflow.State == domain.MaterializingArtifact && action.StateVersion != workflow.StateVersion {
+		return true, "materialization_superseded"
+	}
+	earlyStates := []domain.WorkflowState{domain.PlanReviewing, domain.Generating, domain.ArtifactReviewing, domain.MaterializingArtifact}
+	if action.Phase == runnable.ActionVerify {
+		for _, state := range earlyStates {
+			if workflow.State == state {
+				return true, "verification_premature"
+			}
+		}
+	}
+	return false, ""
 }
 
 // Recover reconciles completed actions left unacknowledged after a Server

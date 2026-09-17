@@ -65,6 +65,81 @@ export type AdminAuditPage = {
     next_cursor?: string;
 };
 
+export type AdminDocumentationWorkflowStuck = {
+    flag: boolean;
+    reason?: 'action_failed' | 'attempts_exhausted' | 'dwell_timeout';
+    failure_class?: string;
+    failure_code?: string;
+    failure_summary?: string;
+};
+
+export type AdminDocumentationWorkflow = {
+    id: string;
+    state: string;
+    state_version: number;
+    revision: number;
+    /**
+     * State entry time; dwell_seconds is measured from it
+     */
+    updated_at: string;
+    dwell_seconds: number;
+    stuck: AdminDocumentationWorkflowStuck;
+};
+
+export type AdminDocumentationWorkflowList = {
+    workflows: Array<AdminDocumentationWorkflow>;
+};
+
+export type AdminDocumentationLedgerEntry = {
+    id: string;
+    kind: string;
+    parent_id?: string;
+    content_revision: string;
+    digest: string;
+    schema_version: string;
+    owner_role: string;
+    policy_version?: string;
+    created_at: string;
+};
+
+export type AdminDocumentationAgentAudit = {
+    run_id: string;
+    role: string;
+    model: string;
+    prompt_version: string;
+    tool_version: string;
+    policy_version: string;
+    input_digest: string;
+    output_digest: string;
+    created_at: string;
+};
+
+export type AdminDocumentationPublication = {
+    id: string;
+    manifest: {
+        [key: string]: unknown;
+    };
+    manifest_digest: string;
+    created_at: string;
+};
+
+export type AdminDocumentationWorkflowDetail = {
+    id: string;
+    state: string;
+    state_version: number;
+    revision: number;
+    updated_at: string;
+    dwell_seconds: number;
+    stuck: AdminDocumentationWorkflowStuck;
+    ledger: Array<AdminDocumentationLedgerEntry>;
+    agent_audits: Array<AdminDocumentationAgentAudit>;
+    publication?: AdminDocumentationPublication;
+};
+
+export type AdminWorkflowReasonRequest = {
+    reason: string;
+};
+
 export type LoginRequest = {
     username: string;
     password: string;
@@ -546,6 +621,8 @@ export type AuthoringSession = {
 
 export type AuthoringSessionId = string;
 
+export type DocumentWorkflowId = string;
+
 export type GeneratorWorkflowId = string;
 
 export type GeneratorTurnId = string;
@@ -751,6 +828,160 @@ export type ListAdminAuditResponses = {
 };
 
 export type ListAdminAuditResponse = ListAdminAuditResponses[keyof ListAdminAuditResponses];
+
+export type ListAdminDocumentationWorkflowsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/documentation/workflows';
+};
+
+export type ListAdminDocumentationWorkflowsErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ListAdminDocumentationWorkflowsError = ListAdminDocumentationWorkflowsErrors[keyof ListAdminDocumentationWorkflowsErrors];
+
+export type ListAdminDocumentationWorkflowsResponses = {
+    /**
+     * All documentation workflows, most recently updated first
+     */
+    200: AdminDocumentationWorkflowList;
+};
+
+export type ListAdminDocumentationWorkflowsResponse = ListAdminDocumentationWorkflowsResponses[keyof ListAdminDocumentationWorkflowsResponses];
+
+export type GetAdminDocumentationWorkflowData = {
+    body?: never;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/workflows/{workflow_id}';
+};
+
+export type GetAdminDocumentationWorkflowErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetAdminDocumentationWorkflowError = GetAdminDocumentationWorkflowErrors[keyof GetAdminDocumentationWorkflowErrors];
+
+export type GetAdminDocumentationWorkflowResponses = {
+    /**
+     * Workflow detail
+     */
+    200: AdminDocumentationWorkflowDetail;
+};
+
+export type GetAdminDocumentationWorkflowResponse = GetAdminDocumentationWorkflowResponses[keyof GetAdminDocumentationWorkflowResponses];
+
+export type ForceFailAdminDocumentationWorkflowData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/workflows/{workflow_id}/force-fail';
+};
+
+export type ForceFailAdminDocumentationWorkflowErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ForceFailAdminDocumentationWorkflowError = ForceFailAdminDocumentationWorkflowErrors[keyof ForceFailAdminDocumentationWorkflowErrors];
+
+export type ForceFailAdminDocumentationWorkflowResponses = {
+    /**
+     * Workflow forced to Failed
+     */
+    200: AdminDocumentationWorkflow;
+};
+
+export type ForceFailAdminDocumentationWorkflowResponse = ForceFailAdminDocumentationWorkflowResponses[keyof ForceFailAdminDocumentationWorkflowResponses];
+
+export type RestartAdminDocumentationWorkflowData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        workflow_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/workflows/{workflow_id}/restart';
+};
+
+export type RestartAdminDocumentationWorkflowErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type RestartAdminDocumentationWorkflowError = RestartAdminDocumentationWorkflowErrors[keyof RestartAdminDocumentationWorkflowErrors];
+
+export type RestartAdminDocumentationWorkflowResponses = {
+    /**
+     * Workflow reset to Planning
+     */
+    200: AdminDocumentationWorkflow;
+};
+
+export type RestartAdminDocumentationWorkflowResponse = RestartAdminDocumentationWorkflowResponses[keyof RestartAdminDocumentationWorkflowResponses];
 
 export type GetMySpaceData = {
     body?: never;

@@ -58,3 +58,21 @@ func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.C
 	}
 	return result.Workflow, nil
 }
+
+// ForceFailDocumentationWorkflow resolves a stuck workflow as an
+// administrative decision and records the acting admin.
+func (a *fixedDocumentationApplication) ForceFailDocumentationWorkflow(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	if a == nil || a.pipeline == nil {
+		return domain.Workflow{}, fmt.Errorf("documentation practice is not configured")
+	}
+	return a.pipeline.ForceFail(ctx, workflowID, reason, action)
+}
+
+// RestartDocumentationWorkflow resets a failed or rejected workflow to
+// Planning and records the acting admin; the next ignition re-runs the Agent.
+func (a *fixedDocumentationApplication) RestartDocumentationWorkflow(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	if a == nil || a.pipeline == nil {
+		return domain.Workflow{}, fmt.Errorf("documentation practice is not configured")
+	}
+	return a.pipeline.Restart(ctx, workflowID, reason, action)
+}

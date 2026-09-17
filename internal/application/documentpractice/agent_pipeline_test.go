@@ -2,9 +2,11 @@ package documentpractice
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
@@ -297,3 +299,65 @@ var errPipelineGeneratorCalled = &pipelineError{"generator should not run"}
 type pipelineError struct{ message string }
 
 func (e *pipelineError) Error() string { return e.message }
+
+func TestLateOrStaleCompletionIsAcknowledgedWithoutAdvancing(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	pipeline, err := NewAgentPipeline(service, fakePlannerReader{}, fakePlanAgent{}, []PlanReviewRole{pipelineReviewer{role: "evidence"}}, pipelineGenerator{}, []CandidateReviewRole{pipelineReviewer{role: "safety"}}, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := service.Start(ctx, "document-late-completion", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A materialization completion belonging to the failed lineage is late.
+	stale := runnable.ActionIdentity{
+		Content:      runnable.ContentIdentity{Kind: "practice", ID: "page-1", Revision: "1"},
+		SpecDigest:   serviceDigest("a"),
+		Phase:        runnable.ActionMaterializeArtifact,
+		StateVersion: workflow.StateVersion,
+	}
+	if err := store.BindRunnableAction(ctx, workflow.ID, stale, now); err != nil {
+		t.Fatal(err)
+	}
+	// The workflow left the runnable phase behind: force-fail it first so a
+	// terminal workflow must never advance from a late completion.
+	if _, err := service.ForceFail(ctx, workflow.ID, "operator unblocked it", &audit.HumanAction{ID: "audit-1", UserID: "u-admin", Action: audit.ActionDocumentationWorkflowForceFail, TargetType: audit.TargetDocumentWorkflow, TargetID: workflow.ID, Detail: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ReconcileCompletedAction(ctx, stale); err != nil {
+		t.Fatalf("late completion after force-fail: %v", err)
+	}
+	final, err := store.GetWorkflow(ctx, workflow.ID)
+	if err != nil || final.State != domain.Failed {
+		t.Fatalf("workflow after late completion = %#v, %v", final, err)
+	}
+	if !store.actions[stale.Key()].reconciled {
+		t.Fatalf("late completion binding was not marked reconciled")
+	}
+
+	// A stale state version after a restart is likewise only acknowledged.
+	restartAction := audit.HumanAction{ID: "audit-2", UserID: "u-admin", Action: audit.ActionDocumentationWorkflowRestart, TargetType: audit.TargetDocumentWorkflow, TargetID: workflow.ID, Detail: json.RawMessage(`{}`), CreatedAt: now}
+	restarted, err := service.Restart(ctx, workflow.ID, "retry", &restartAction)
+	if err != nil || restarted.State != domain.Planning {
+		t.Fatalf("restart = %#v, %v", restarted, err)
+	}
+	if err := pipeline.ReconcileCompletedAction(ctx, stale); err != nil {
+		t.Fatalf("stale completion after restart: %v", err)
+	}
+	final, err = store.GetWorkflow(ctx, workflow.ID)
+	if err != nil || final.State != domain.Planning {
+		t.Fatalf("workflow after stale completion = %#v, %v", final, err)
+	}
+	if !store.actions[stale.Key()].reconciled {
+		t.Fatalf("stale completion binding was not marked reconciled")
+	}
+}

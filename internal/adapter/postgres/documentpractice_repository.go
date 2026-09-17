@@ -8,11 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
-	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/audit"
+	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -147,6 +148,231 @@ func (d *DocumentPracticeRepository) GetWorkflow(ctx context.Context, id string)
 	}
 	w.Artifacts = artifacts
 	return w, nil
+}
+
+// ForceFailWorkflow drives any non-terminal workflow to Failed as an
+// administrative decision and records the twin audit trail — an artifact
+// ledger entry plus a human action row — in the same transaction. It deletes
+// nothing and leaves in-flight runtime work to its existing TTLs.
+func (d *DocumentPracticeRepository) ForceFailWorkflow(ctx context.Context, workflowID, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
+	return d.adminWorkflowTransition(ctx, workflowID, reason, action, now, func(w *domain.Workflow) error {
+		return w.AdvanceAt(domain.Failed, now)
+	}, "admin.force_fail")
+}
+
+// RestartWorkflow resets a failed or rejected workflow to Planning. The
+// revision counter advances without the MaxRevisions cap because a restart is
+// a human judgment, not an automatic loop iteration. It invokes no Agent role.
+func (d *DocumentPracticeRepository) RestartWorkflow(ctx context.Context, workflowID, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
+	return d.adminWorkflowTransition(ctx, workflowID, reason, action, now, func(w *domain.Workflow) error {
+		return w.RestartAt(now)
+	}, "admin.restart")
+}
+
+// adminWorkflowTransition is the shared force-fail/restart implementation. The
+// state fence, the ledger entry, and the human audit commit together: a lost
+// race or rejected transition leaves no trace in either record.
+func (d *DocumentPracticeRepository) adminWorkflowTransition(ctx context.Context, workflowID, reason string, action *audit.HumanAction, now time.Time, transition func(*domain.Workflow) error, ledgerKind string) (domain.Workflow, error) {
+	if strings.TrimSpace(workflowID) == "" || now.IsZero() {
+		return domain.Workflow{}, errors.New("administrative workflow transition is invalid")
+	}
+	if action == nil {
+		return domain.Workflow{}, errors.New("administrative workflow transition requires a human action audit")
+	}
+	if err := action.Validate(); err != nil {
+		return domain.Workflow{}, err
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Workflow{}, fmt.Errorf("begin administrative workflow transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	fromState := workflow.State
+	if err := transition(&workflow); err != nil {
+		return domain.Workflow{}, fmt.Errorf("%w (%s)", domain.ErrWorkflowConflict, err.Error())
+	}
+	payload, err := json.Marshal(struct {
+		Actor     string    `json:"actor"`
+		FromState string    `json:"from_state"`
+		Reason    string    `json:"reason"`
+		At        time.Time `json:"at"`
+	}{Actor: action.UserID, FromState: string(fromState), Reason: reason, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	digest, err := domain.DigestAgentInput(struct {
+		Actor     string    `json:"actor"`
+		FromState string    `json:"from_state"`
+		Reason    string    `json:"reason"`
+		At        time.Time `json:"at"`
+	}{Actor: action.UserID, FromState: string(fromState), Reason: reason, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	artifact := domain.ArtifactRecord{
+		ID:              ledgerKind + "-" + workflowID + "-v" + strconv.FormatInt(workflow.StateVersion, 10),
+		Kind:            ledgerKind,
+		ContentRevision: strconv.FormatInt(workflow.Revision, 10),
+		Digest:          digest,
+		SchemaVersion:   domain.FormatVersion,
+		OwnerRole:       "admin",
+		CreatedAt:       now.UTC(),
+		Payload:         payload,
+	}
+	if err := insertImmutableDocumentArtifact(ctx, tx, workflowID, artifact); err != nil {
+		return domain.Workflow{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE document_workflows SET state = ?, state_version = ?, revision = ?, updated_at = ? WHERE id = ? AND state_version = ?`, workflow.State, workflow.StateVersion, workflow.Revision, workflow.UpdatedAt, workflowID, workflow.StateVersion-1)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return domain.Workflow{}, errors.New("administrative workflow transition lost its fence")
+	}
+	enriched := *action
+	detail, err := json.Marshal(map[string]string{"reason": reason, "from_state": string(fromState), "to_state": string(workflow.State)})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	enriched.Detail = detail
+	if err := insertHumanAction(ctx, tx, enriched); err != nil {
+		return domain.Workflow{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Workflow{}, err
+	}
+	return workflow, nil
+}
+
+// DocumentBoundActionStatus mirrors the public runnable action joined through
+// the workflow's current state-version binding. It feeds stuck derivation and
+// never mutates anything.
+type DocumentBoundActionStatus struct {
+	Phase          runnable.ActionPhase
+	State          string
+	Attempt        int
+	FailureClass   string
+	FailureCode    string
+	FailureSummary string
+}
+
+// DocumentWorkflowObservation is the read model for the admin workflow list
+// and detail. The ledger and audits are assembled separately for the detail.
+type DocumentWorkflowObservation struct {
+	Workflow domain.Workflow
+	Action   *DocumentBoundActionStatus
+}
+
+// ListWorkflowObservations lists every documentation workflow with the public
+// action status bound to its current state version, newest first. The binding
+// join is intentionally read-only; stuck flags are derived by callers.
+func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Context) ([]DocumentWorkflowObservation, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.lease_owner, w.lease_expires_at, w.updated_at,
+		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
+		FROM document_workflows w
+		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
+		LEFT JOIN runnable_actions a ON a.action_key = b.action_key
+		ORDER BY w.updated_at DESC, w.id`)
+	if err != nil {
+		return nil, fmt.Errorf("list document workflow observations: %w", err)
+	}
+	defer rows.Close()
+	result := []DocumentWorkflowObservation{}
+	for rows.Next() {
+		observation, err := scanWorkflowObservation(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, observation)
+	}
+	return result, rows.Err()
+}
+
+// GetWorkflowObservation resolves one workflow's observation read model.
+func (d *DocumentPracticeRepository) GetWorkflowObservation(ctx context.Context, workflowID string) (DocumentWorkflowObservation, error) {
+	row := d.conn.QueryRowContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.lease_owner, w.lease_expires_at, w.updated_at,
+		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
+		FROM document_workflows w
+		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
+		LEFT JOIN runnable_actions a ON a.action_key = b.action_key
+		WHERE w.id = ?`, workflowID)
+	observation, err := scanWorkflowObservation(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DocumentWorkflowObservation{}, fmt.Errorf("get document workflow observation: %w", domain.ErrWorkflowNotFound)
+	}
+	return observation, err
+}
+
+func scanWorkflowObservation(row interface{ Scan(...any) error }) (DocumentWorkflowObservation, error) {
+	var observation DocumentWorkflowObservation
+	var phase sql.NullString
+	var actionState sql.NullString
+	var attempt sql.NullInt64
+	var failureClass, failureCode, failureSummary sql.NullString
+	if err := row.Scan(&observation.Workflow.ID, &observation.Workflow.State, &observation.Workflow.StateVersion, &observation.Workflow.Revision, &observation.Workflow.MaxRevisions, &observation.Workflow.LeaseOwner, &observation.Workflow.LeaseExpiresAt, &observation.Workflow.UpdatedAt,
+		&phase, &actionState, &attempt, &failureClass, &failureCode, &failureSummary); err != nil {
+		return DocumentWorkflowObservation{}, err
+	}
+	if phase.Valid && actionState.Valid {
+		observation.Action = &DocumentBoundActionStatus{
+			Phase:          runnable.ActionPhase(phase.String),
+			State:          actionState.String,
+			Attempt:        int(attempt.Int64),
+			FailureClass:   failureClass.String,
+			FailureCode:    failureCode.String,
+			FailureSummary: failureSummary.String,
+		}
+	}
+	return observation, nil
+}
+
+// ListAgentAudits returns one workflow's machine-side AgentRun audits in
+// ledger order. The volume is bounded by the fixed pipeline's audit count.
+func (d *DocumentPracticeRepository) ListAgentAudits(ctx context.Context, workflowID string) ([]domain.AgentAudit, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT run_id, role, model, prompt_version, tool_version, policy_version, input_digest, output_digest, created_at FROM document_agent_audits WHERE workflow_id = ? ORDER BY created_at, run_id`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	audits := []domain.AgentAudit{}
+	for rows.Next() {
+		var auditRow domain.AgentAudit
+		if err := rows.Scan(&auditRow.RunID, &auditRow.Role, &auditRow.Model, &auditRow.PromptVersion, &auditRow.ToolVersion, &auditRow.PolicyVersion, &auditRow.InputDigest, &auditRow.OutputDigest, &auditRow.CreatedAt); err != nil {
+			return nil, err
+		}
+		audits = append(audits, auditRow)
+	}
+	return audits, rows.Err()
+}
+
+// DocumentPublicationRecord exposes the published manifest of a workflow.
+type DocumentPublicationRecord struct {
+	ID       string
+	Manifest domain.PublicationManifest
+	Digest   string
+	CreatedAt time.Time
+}
+
+// GetWorkflowPublication returns the published manifest, or nil when the
+// workflow has not published.
+func (d *DocumentPracticeRepository) GetWorkflowPublication(ctx context.Context, workflowID string) (*DocumentPublicationRecord, error) {
+	var record DocumentPublicationRecord
+	var manifest []byte
+	err := d.conn.QueryRowContext(ctx, `SELECT id, manifest, manifest_digest, created_at FROM document_publication_manifests WHERE workflow_id = ?`, workflowID).Scan(&record.ID, &manifest, &record.Digest, &record.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(manifest, &record.Manifest); err != nil {
+		return nil, fmt.Errorf("decode document publication manifest: %w", err)
+	}
+	return &record, nil
 }
 
 // AdvanceWorkflow atomically checks the expected state version and ledger
@@ -590,7 +816,7 @@ func scanDocumentWorkflow(row interface{ Scan(...any) error }) (domain.Workflow,
 	var w domain.Workflow
 	err := row.Scan(&w.ID, &w.State, &w.StateVersion, &w.Revision, &w.MaxRevisions, &w.LeaseOwner, &w.LeaseExpiresAt, &w.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Workflow{}, errors.New("document workflow not found")
+		return domain.Workflow{}, fmt.Errorf("scan document workflow: %w", domain.ErrWorkflowNotFound)
 	}
 	return w, err
 }

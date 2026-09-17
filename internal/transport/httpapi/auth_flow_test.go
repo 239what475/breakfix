@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -28,13 +29,13 @@ type authTestServer struct {
 	cfg    config.Config
 }
 
-func newAuthTestServer(t *testing.T, mutate func(*config.Config, *Dependencies)) *authTestServer {
+func newAuthTestServer(t *testing.T, mutate func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store)) *authTestServer {
 	t.Helper()
 	database := testpostgres.New(t)
 	cfg := config.Config{JWTSecret: "auth-flow-jwt-secret", AllowRegistration: true}
 	dependencies := Dependencies{}
 	if mutate != nil {
-		mutate(&cfg, &dependencies)
+		mutate(&cfg, &dependencies, database)
 	}
 	handler, err := NewHandlerWithDependencies(database, nil, cfg, dependencies)
 	if err != nil {
@@ -49,7 +50,7 @@ func newAuthTestServer(t *testing.T, mutate func(*config.Config, *Dependencies))
 
 func newAuthTestServerSimple(t *testing.T, mutate func(*config.Config)) *authTestServer {
 	t.Helper()
-	return newAuthTestServer(t, func(cfg *config.Config, _ *Dependencies) {
+	return newAuthTestServer(t, func(cfg *config.Config, _ *Dependencies, _ *postgres.Store) {
 		if mutate != nil {
 			mutate(cfg)
 		}
@@ -344,6 +345,14 @@ type auditRecordingDocumentationApplication struct {
 	actors []string
 }
 
+func (a *auditRecordingDocumentationApplication) ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
+	return documentdomain.Workflow{}, errors.New("not implemented")
+}
+
+func (a *auditRecordingDocumentationApplication) RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
+	return documentdomain.Workflow{}, errors.New("not implemented")
+}
+
 func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID string) (documentdomain.Workflow, error) {
 	a.actors = append(a.actors, actorID)
 	now := time.Now().UTC()
@@ -376,7 +385,7 @@ func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx 
 
 func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
 	application := &auditRecordingDocumentationApplication{}
-	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies) {
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, _ *postgres.Store) {
 		dependencies.Documentation = application
 	})
 	application.db = server.db

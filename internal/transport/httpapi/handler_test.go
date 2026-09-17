@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
@@ -33,14 +35,22 @@ func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T)
 }
 
 type testDocumentationApplication struct {
-	calls   int
-	actors  []string
+	calls  int
+	actors []string
 }
 
 func (a *testDocumentationApplication) StartDocumentationPractice(_ context.Context, actorID string) (documentdomain.Workflow, error) {
 	a.calls++
 	a.actors = append(a.actors, actorID)
 	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
+}
+
+func (a *testDocumentationApplication) ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
+	return documentdomain.Workflow{}, errors.New("not implemented")
+}
+
+func (a *testDocumentationApplication) RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
+	return documentdomain.Workflow{}, errors.New("not implemented")
 }
 
 func newHandlerForTest(t testing.TB, database *postgres.Store, client *kubernetes.Client, cfg config.Config) *Handler {

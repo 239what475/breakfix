@@ -16,6 +16,7 @@ import (
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
@@ -76,10 +77,13 @@ type generatorApplication interface {
 	CancelGeneration(context.Context, string, generationdomain.Cancellation) (*generationdomain.Workflow, error)
 }
 
-// documentationApplication starts only the Server-configured fixed workflow.
-// It has no endpoint for Agent artifacts, arbitrary pages, or runtime policy.
+// documentationApplication starts only the Server-configured fixed workflow
+// and carries the administrative force-fail and restart verbs. It has no
+// endpoint for Agent artifacts, arbitrary pages, or runtime policy.
 type documentationApplication interface {
 	StartDocumentationPractice(context.Context, string) (documentdomain.Workflow, error)
+	ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
+	RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
 }
 
 type Dependencies struct {

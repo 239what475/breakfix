@@ -151,6 +151,16 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
+	adminRoutes.GET("/documentation/workflows", h.ListAdminDocumentationWorkflows)
+	adminRoutes.GET("/documentation/workflows/:workflow_id", func(c *gin.Context) {
+		h.GetAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+	})
+	adminRoutes.POST("/documentation/workflows/:workflow_id/force-fail", func(c *gin.Context) {
+		h.ForceFailAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+	})
+	adminRoutes.POST("/documentation/workflows/:workflow_id/restart", func(c *gin.Context) {
+		h.RestartAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+	})
 	adminRoutes.GET("/audit", func(c *gin.Context) {
 		params := api.ListAdminAuditParams{}
 		if raw := c.Query("limit"); raw != "" {

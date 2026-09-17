@@ -193,6 +193,38 @@ func (w *Workflow) ReviseAt(now time.Time) error {
 	return nil
 }
 
+// Administrative workflow errors map onto distinct HTTP outcomes: not-found
+// to 404, conflicts to 409.
+var (
+	// ErrWorkflowNotFound reports an unknown workflow identifier.
+	ErrWorkflowNotFound = errors.New("document workflow not found")
+	// ErrWorkflowConflict reports an administrative action that the workflow's
+	// current state forbids: forcing a terminal workflow, or restarting one
+	// that is neither failed nor rejected.
+	ErrWorkflowConflict = errors.New("documentation workflow state forbids this administrative action")
+)
+
+// RestartAt returns a failed or rejected workflow to Planning for a fresh
+// administrative rerun. It is deliberately not capped by MaxRevisions: that
+// cap bounds the automatic revision loop, while a restart is a human
+// judgment. The workflow only resets state; no Agent role is invoked here.
+func (w *Workflow) RestartAt(now time.Time) error {
+	if w == nil {
+		return errors.New("workflow is nil")
+	}
+	if w.State != Rejected && w.State != Failed {
+		return ErrWorkflowConflict
+	}
+	if now.IsZero() {
+		return errors.New("workflow transition time is required")
+	}
+	w.Revision++
+	w.State = Planning
+	w.StateVersion++
+	w.UpdatedAt = now.UTC()
+	return nil
+}
+
 func allowedTransition(from, to WorkflowState) bool {
 	switch from {
 	case Planning:

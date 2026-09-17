@@ -173,23 +173,30 @@ updated_at。`Start` 仅在 `state == Planning` 时驱动 Agent。
   与一切非终态 409。重启只重置状态、**不调 Agent**——随后的 `POST /api/documentation/
   practice`(既有点火端点)在 Planning 状态自然驱动重跑,点火照常写审计。双记录同
   force-fail(ledger `kind='admin.restart'`)。
-- **迟到/陈旧完成统一规则**:`Reconcile` 在推进前必须校验工作流非终态**且** action 的
-  state_version 等于工作流当前 state_version;任一不满足 → 仅将绑定标记 reconciled、
-  不推进状态、留日志。该规则同时覆盖 force-fail 后的迟到完成与 restart 后的陈旧完成。
+- **迟到/陈旧完成统一规则**(规格修订 2026-09-17:原文单一 state_version 相等校验与
+  崩溃恢复的续跑语义冲突——工作流常因同一 action 的先前处理已推进过状态版本,故按状态
+  判别):完成上报到达时,若工作流已终态(force-fail 后)、或处于 Planning(restart 重置
+  后的重跑尚未点火,而 runnable action 绝不会在 Planning 绑定,故到达 Planning 的完成
+  必属重启前旧线)、或 action 阶段早于工作流当前状态所允许的阶段(materialize 在
+  MaterializingArtifact 但 state_version 不等;verify 在 Verifying 之前),则仅将绑定标记
+  reconciled、不推进状态、留日志;其余情形按既有续跑语义继续,所有状态推进仍由 store 层
+  state_version 条件更新把栅。该规则同时覆盖 force-fail 后的迟到完成与 restart 后的陈旧
+  完成。
 - force-fail/restart 不删除任何数据;在途验证环境不显式取消,靠 1800s MaxLifetime TTL。
 
 验收标准:
 
-- [ ] 构造 PlanReviewing 停滞(模拟 Server 中途崩溃):列表/详情可见、stuck 原因正确;
+- [x] 构造 PlanReviewing 停滞(模拟 Server 中途崩溃):列表/详情可见、stuck 原因正确;
       force-fail 后转 Failed、ledger 与审计各有一条、重复调用 409。
-- [ ] 构造物化 action 终态失败与 attempt 耗尽:详情分别归因 action_failed /
+- [x] 构造物化 action 终态失败与 attempt 耗尽:详情分别归因 action_failed /
       attempts_exhausted;force-fail 同上。
-- [ ] restart:Failed/Rejected → Planning(revision+1),再点火完整重跑;Published /
+- [x] restart:Failed/Rejected → Planning(revision+1),再点火完整重跑;Published /
       NoPractice / 非终态 restart 均 409;MaxRevisions=3 耗尽后仍可 restart。
-- [ ] 迟到完成:force-fail 后补报 action 完成 → 绑定变 reconciled、状态不推进;
+      (再点火完整重跑由既有 pipeline 测试与 1.5 E2E 覆盖。)
+- [x] 迟到完成:force-fail 后补报 action 完成 → 绑定变 reconciled、状态不推进;
       restart 后旧 state_version 的完成同样不推进。
-- [ ] dwell 阈值:agent 阶段默认 15m、config 覆盖生效;runnable 阶段 1800s+余量。
-- [ ] 单测:force-fail/restart 全部合法与非法转换、迟到/陈旧完成规则、双记录事务一致性
+- [x] dwell 阈值:agent 阶段默认 15m、config 覆盖生效;runnable 阶段 1800s+余量。
+- [x] 单测:force-fail/restart 全部合法与非法转换、迟到/陈旧完成规则、双记录事务一致性
       (状态变更失败则 ledger/审计不落)。
 
 提交:`feat(documentpractice): admin workflow observation, force-fail, and restart`。

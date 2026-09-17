@@ -1,6 +1,7 @@
 package documentpractice
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -38,5 +39,52 @@ func TestWorkflowRevisionIsBounded(t *testing.T) {
 	w.MaxRevisions = 1
 	if err := w.Revise(); err == nil {
 		t.Fatal("revision limit ignored")
+	}
+}
+
+func TestWorkflowRestartOnlyFromFailedOrRejected(t *testing.T) {
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	w, err := NewWorkflow("workflow-restart", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.MaxRevisions = 1
+	if err := w.RestartAt(now); !errors.Is(err, ErrWorkflowConflict) {
+		t.Fatalf("restart from Planning = %v, want conflict", err)
+	}
+	w.State = PlanReviewing
+	if err := w.RestartAt(now); !errors.Is(err, ErrWorkflowConflict) {
+		t.Fatalf("restart from PlanReviewing = %v, want conflict", err)
+	}
+	w.State = Failed
+	if err := w.RestartAt(now); err != nil {
+		t.Fatalf("restart from Failed = %v", err)
+	}
+	if w.State != Planning || w.Revision != 2 || w.StateVersion != 2 {
+		t.Fatalf("restarted workflow = %#v", w)
+	}
+	w.State = Rejected
+	if err := w.RestartAt(now); err != nil {
+		t.Fatalf("restart from Rejected = %v", err)
+	}
+	if w.State != Planning || w.Revision != 3 {
+		t.Fatalf("restarted workflow = %#v", w)
+	}
+	// The MaxRevisions cap bounds the automatic revision loop only.
+	w.MaxRevisions = 2
+	w.State = Failed
+	if err := w.RestartAt(now); err != nil {
+		t.Fatalf("restart beyond MaxRevisions = %v", err)
+	}
+	if w.Revision != 4 {
+		t.Fatalf("restart revision = %d, want 4", w.Revision)
+	}
+	w.State = Published
+	if err := w.RestartAt(now); !errors.Is(err, ErrWorkflowConflict) {
+		t.Fatalf("restart from Published = %v, want conflict", err)
+	}
+	w.State = NoPractice
+	if err := w.RestartAt(now); !errors.Is(err, ErrWorkflowConflict) {
+		t.Fatalf("restart from NoPractice = %v, want conflict", err)
 	}
 }

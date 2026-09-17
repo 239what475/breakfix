@@ -30,6 +30,11 @@ type Store interface {
 	ListCompletedUnreconciledRunnableActions(context.Context) ([]runnable.ActionIdentity, error)
 	MarkRunnableActionReconciled(context.Context, runnable.ActionIdentity, time.Time) error
 	PublishPracticeRevision(context.Context, string, int64, domain.PracticeRevision, domain.PublicationManifest, time.Time) (domain.Workflow, error)
+	// ForceFailWorkflow and RestartWorkflow are the administrative escape
+	// hatches. Each commits the state change, its ledger entry, and the human
+	// action audit in one transaction.
+	ForceFailWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
+	RestartWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
 }
 
 type RunnableStore interface {
@@ -465,6 +470,20 @@ func (s *Service) advance(ctx context.Context, workflowID string, next domain.Wo
 
 func (s *Service) advanceFrom(ctx context.Context, workflow domain.Workflow, next domain.WorkflowState, required ...string) (domain.Workflow, error) {
 	return s.store.AdvanceWorkflow(ctx, workflow.ID, workflow.StateVersion, next, s.now(), required...)
+}
+
+// ForceFail resolves an irrecoverable workflow: the machine result becomes
+// Failed exactly as a failed verification would, with the administrator's
+// reason carried in both the ledger entry and the human audit.
+func (s *Service) ForceFail(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	return s.store.ForceFailWorkflow(ctx, workflowID, reason, action, s.now())
+}
+
+// Restart re-drives a failed or rejected workflow through the ordinary
+// ignition endpoint. It only resets the state; the next start invocation
+// performs the Agent work, so restart and ignition stay separate verbs.
+func (s *Service) Restart(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
+	return s.store.RestartWorkflow(ctx, workflowID, reason, action, s.now())
 }
 
 // readyFor permits an exact replay only after the expected artifact is already

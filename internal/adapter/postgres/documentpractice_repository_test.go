@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -263,5 +264,271 @@ func TestCreateWorkflowRecordsTheIgnitionAuditInTheSameTransaction(t *testing.T)
 	rows, err = database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("ignition audit rows after rollback = %#v, %v", rows, err)
+	}
+}
+
+func seedWorkflowInState(t *testing.T, database *Store, id string, state domain.WorkflowState, updatedAt time.Time) domain.Workflow {
+	t.Helper()
+	ctx := context.Background()
+	workflow, err := domain.NewWorkflow(id, updatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, nil); err != nil {
+		t.Fatal(err)
+	}
+	for workflow.State != state {
+		var next domain.WorkflowState
+		switch workflow.State {
+		case domain.Planning:
+			next = domain.PlanReviewing
+		case domain.PlanReviewing:
+			if state == domain.NoPractice {
+				next = domain.NoPractice
+			} else {
+				next = domain.Generating
+			}
+		case domain.Generating:
+			next = domain.ArtifactReviewing
+		case domain.ArtifactReviewing:
+			next = domain.MaterializingArtifact
+		default:
+			t.Fatalf("cannot advance seed workflow from %s to %s", workflow.State, state)
+		}
+		updated, err := database.DocumentPractice.AdvanceWorkflow(ctx, id, workflow.StateVersion, next, updatedAt, nil...)
+		if err != nil {
+			t.Fatalf("advance seed workflow to %s: %v", next, err)
+		}
+		workflow = updated
+	}
+	return workflow
+}
+
+func adminActionFor(t *testing.T, actionName, actor, target string, now time.Time) audit.HumanAction {
+	t.Helper()
+	return audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     actor,
+		Action:     actionName,
+		TargetType: audit.TargetDocumentWorkflow,
+		TargetID:   target,
+		Detail:     json.RawMessage(`{}`),
+		CreatedAt:  now,
+	}
+}
+
+func TestForceFailWorkflowRecordsTheTwinAuditTrail(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	stuckAt := time.Now().UTC().Add(-time.Hour)
+	workflow := seedWorkflowInState(t, database, "document-workflow-stuck", domain.PlanReviewing, stuckAt)
+	now := time.Now().UTC()
+	action := adminActionFor(t, audit.ActionDocumentationWorkflowForceFail, "u-admin", workflow.ID, now)
+
+	forced, err := database.DocumentPractice.ForceFailWorkflow(ctx, workflow.ID, "agent stage crashed", &action, now)
+	if err != nil {
+		t.Fatalf("force fail: %v", err)
+	}
+	if forced.State != domain.Failed || forced.StateVersion != workflow.StateVersion+1 {
+		t.Fatalf("forced workflow = %s v%d, want Failed v%d", forced.State, forced.StateVersion, workflow.StateVersion+1)
+	}
+	// The ledger carries the administrative decision with its from-state.
+	artifacts, err := database.DocumentPractice.ListArtifacts(ctx, workflow.ID)
+	if err != nil || len(artifacts) != 1 {
+		t.Fatalf("ledger after force fail = %#v, %v", artifacts, err)
+	}
+	if artifacts[0].Kind != "admin.force_fail" || artifacts[0].OwnerRole != "admin" {
+		t.Fatalf("force fail ledger entry = %#v", artifacts[0])
+	}
+	var payload struct {
+		Actor     string    `json:"actor"`
+		FromState string    `json:"from_state"`
+		Reason    string    `json:"reason"`
+		At        time.Time `json:"at"`
+	}
+	if err := json.Unmarshal(artifacts[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Actor != "u-admin" || payload.FromState != string(domain.PlanReviewing) || payload.Reason != "agent stage crashed" {
+		t.Fatalf("force fail payload = %#v", payload)
+	}
+	// The human audit row commits with the state change and carries the
+	// transition summary in its detail.
+	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationWorkflowForceFail, Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("force fail audit rows = %#v, %v", rows, err)
+	}
+	var detail map[string]string
+	if err := json.Unmarshal(rows[0].Detail, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail["reason"] != "agent stage crashed" || detail["from_state"] != "PlanReviewing" || detail["to_state"] != "Failed" {
+		t.Fatalf("force fail audit detail = %#v", detail)
+	}
+
+	// Repeating the verb on the terminal workflow conflicts and leaves no trace.
+	repeat := adminActionFor(t, audit.ActionDocumentationWorkflowForceFail, "u-admin", workflow.ID, now.Add(time.Second))
+	if _, err := database.DocumentPractice.ForceFailWorkflow(ctx, workflow.ID, "again", &repeat, now.Add(time.Second)); !errors.Is(err, domain.ErrWorkflowConflict) {
+		t.Fatalf("repeat force fail = %v, want conflict", err)
+	}
+	rows, err = database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationWorkflowForceFail, Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("audit rows after rejected repeat = %#v, %v", rows, err)
+	}
+
+	// Unknown workflows are not found.
+	missing := adminActionFor(t, audit.ActionDocumentationWorkflowForceFail, "u-admin", "document-workflow-missing", now)
+	if _, err := database.DocumentPractice.ForceFailWorkflow(ctx, "document-workflow-missing", "x", &missing, now); !errors.Is(err, domain.ErrWorkflowNotFound) {
+		t.Fatalf("force fail missing workflow = %v, want not found", err)
+	}
+}
+
+func TestRestartWorkflowResetsFailedAndRejectedPastTheRevisionCap(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	stuckAt := time.Now().UTC().Add(-time.Hour)
+	workflow := seedWorkflowInState(t, database, "document-workflow-restart", domain.PlanReviewing, stuckAt)
+	now := time.Now().UTC()
+	forceAction := adminActionFor(t, audit.ActionDocumentationWorkflowForceFail, "u-admin", workflow.ID, now)
+	forced, err := database.DocumentPractice.ForceFailWorkflow(ctx, workflow.ID, "stuck", &forceAction, now)
+	if err != nil {
+		t.Fatalf("force fail before restart: %v", err)
+	}
+
+	restartAction := adminActionFor(t, audit.ActionDocumentationWorkflowRestart, "u-admin", workflow.ID, now.Add(time.Second))
+	restarted, err := database.DocumentPractice.RestartWorkflow(ctx, workflow.ID, "retry", &restartAction, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if restarted.State != domain.Planning || restarted.Revision != forced.Revision+1 || restarted.StateVersion != forced.StateVersion+1 {
+		t.Fatalf("restarted workflow = %#v", restarted)
+	}
+	artifacts, err := database.DocumentPractice.ListArtifacts(ctx, workflow.ID)
+	if err != nil || len(artifacts) != 2 {
+		t.Fatalf("ledger after restart = %#v, %v", artifacts, err)
+	}
+	if artifacts[1].Kind != "admin.restart" || artifacts[1].OwnerRole != "admin" {
+		t.Fatalf("restart ledger entry = %#v", artifacts[1])
+	}
+	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationWorkflowRestart, Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].TargetID != workflow.ID {
+		t.Fatalf("restart audit rows = %#v, %v", rows, err)
+	}
+
+	// Restart only resets state; a non-terminal workflow conflicts.
+	second := adminActionFor(t, audit.ActionDocumentationWorkflowRestart, "u-admin", workflow.ID, now.Add(2*time.Second))
+	if _, err := database.DocumentPractice.RestartWorkflow(ctx, workflow.ID, "again", &second, now.Add(2*time.Second)); !errors.Is(err, domain.ErrWorkflowConflict) {
+		t.Fatalf("restart from Planning = %v, want conflict", err)
+	}
+
+	// A published workflow conflicts, even with revisions still available.
+	// Force-fail is the only path out of a published state (nothing at all).
+	terminal := seedWorkflowInState(t, database, "document-workflow-nopractice", domain.NoPractice, stuckAt)
+	third := adminActionFor(t, audit.ActionDocumentationWorkflowRestart, "u-admin", terminal.ID, now)
+	if _, err := database.DocumentPractice.RestartWorkflow(ctx, terminal.ID, "nope", &third, now); !errors.Is(err, domain.ErrWorkflowConflict) {
+		t.Fatalf("restart from NoPractice = %v, want conflict", err)
+	}
+
+}
+
+func TestForceFailAndRestartIgnoreTheMaxRevisionsCap(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := seedWorkflowInState(t, database, "document-workflow-cap", domain.PlanReviewing, now.Add(-time.Minute))
+	// Cap the automatic revision loop at its current revision.
+	if _, err := database.conn.ExecContext(ctx, `UPDATE document_workflows SET max_revisions = revision WHERE id = ?`, workflow.ID); err != nil {
+		t.Fatal(err)
+	}
+	forceAction := adminActionFor(t, audit.ActionDocumentationWorkflowForceFail, "u-admin", workflow.ID, now)
+	forced, err := database.DocumentPractice.ForceFailWorkflow(ctx, workflow.ID, "stuck", &forceAction, now)
+	if err != nil {
+		t.Fatalf("force fail: %v", err)
+	}
+	// The revision cap does not bind a restart: the revision advances past it.
+	restartAction := adminActionFor(t, audit.ActionDocumentationWorkflowRestart, "u-admin", workflow.ID, now.Add(time.Second))
+	restarted, err := database.DocumentPractice.RestartWorkflow(ctx, workflow.ID, "retry", &restartAction, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("restart with exhausted revisions: %v", err)
+	}
+	if restarted.State != domain.Planning || restarted.Revision != forced.Revision+1 {
+		t.Fatalf("restarted workflow = %#v", restarted)
+	}
+}
+
+func TestWorkflowObservationJoinsTheBoundActionStatus(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := seedWorkflowInState(t, database, "document-workflow-observe", domain.Planning, now)
+	observation, err := database.DocumentPractice.GetWorkflowObservation(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("get observation: %v", err)
+	}
+	if observation.Workflow.ID != workflow.ID || observation.Action != nil {
+		t.Fatalf("agent-phase observation = %#v, want no bound action", observation)
+	}
+	list, err := database.DocumentPractice.ListWorkflowObservations(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("observation list = %#v, %v", list, err)
+	}
+	if _, err := database.DocumentPractice.GetWorkflowObservation(ctx, "document-workflow-missing"); !errors.Is(err, domain.ErrWorkflowNotFound) {
+		t.Fatalf("missing observation = %v, want not found", err)
+	}
+	agentAudits, err := database.DocumentPractice.ListAgentAudits(ctx, workflow.ID)
+	if err != nil || len(agentAudits) != 0 {
+		t.Fatalf("agent audits = %#v, %v", agentAudits, err)
+	}
+	publication, err := database.DocumentPractice.GetWorkflowPublication(ctx, workflow.ID)
+	if err != nil || publication != nil {
+		t.Fatalf("publication = %#v, %v", publication, err)
+	}
+}
+
+func TestWorkflowObservationJoinsFailedAndExhaustedRunnableActions(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := seedWorkflowInState(t, database, "document-workflow-actions", domain.MaterializingArtifact, now)
+	identity := runnable.ActionIdentity{
+		Content:      runnable.ContentIdentity{Kind: "practice", ID: "page-1", Revision: "1"},
+		SpecDigest:   testRunnableDigest("a"),
+		Phase:        runnable.ActionMaterializeArtifact,
+		StateVersion: workflow.StateVersion,
+	}
+	if err := database.DocumentPractice.BindRunnableAction(ctx, workflow.ID, identity, now); err != nil {
+		t.Fatalf("bind runnable action: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_sources (source_digest, archive, created_at) VALUES (?, ?, ?)`, testRunnableDigest("source"), []byte("archive"), now.UTC()); err != nil {
+		t.Fatalf("insert runnable source: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_specs (spec_digest, content_kind, content_id, content_revision, source_digest, spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		testRunnableDigest("a"), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, testRunnableDigest("source"), []byte(`{}`), now.UTC()); err != nil {
+		t.Fatalf("insert runnable spec: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_actions (action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, state, attempt, next_run_at, failure_class, failure_code, failure_summary, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', 5, ?, 'infrastructure', 'env-lost', 'environment vanished', ?, ?)`,
+		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, now.UTC(), now.UTC(), now.UTC()); err != nil {
+		t.Fatalf("insert failed runnable action: %v", err)
+	}
+
+	observation, err := database.DocumentPractice.GetWorkflowObservation(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("get observation: %v", err)
+	}
+	if observation.Action == nil || observation.Action.State != "failed" || observation.Action.FailureCode != "env-lost" || observation.Action.FailureSummary != "environment vanished" || observation.Action.Attempt != 5 {
+		t.Fatalf("failed action observation = %#v", observation.Action)
+	}
+
+	// The attempts-exhausted signature: still queued after five attempts.
+	if _, err := database.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = 'queued', failure_class = '', failure_code = '', failure_summary = '' WHERE action_key = ?`, identity.Key()); err != nil {
+		t.Fatal(err)
+	}
+	observation, err = database.DocumentPractice.GetWorkflowObservation(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("get observation: %v", err)
+	}
+	if observation.Action == nil || observation.Action.State != "queued" || observation.Action.Attempt != 5 {
+		t.Fatalf("exhausted action observation = %#v", observation.Action)
 	}
 }

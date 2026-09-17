@@ -207,6 +207,8 @@ type memoryDocumentStore struct {
 	actions      map[string]memoryDocumentAction
 	published    *domain.PracticeRevision
 	humanActions []audit.HumanAction
+
+	adminTransitions []memoryAdminTransition
 }
 
 type memoryDocumentAction struct {
@@ -233,6 +235,42 @@ func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.
 func (s *memoryDocumentStore) RecordHumanAction(_ context.Context, action audit.HumanAction) error {
 	s.humanActions = append(s.humanActions, action)
 	return nil
+}
+
+func (s *memoryDocumentStore) ForceFailWorkflow(_ context.Context, id, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	fromState := workflow.State
+	if err := workflow.AdvanceAt(domain.Failed, now); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.workflows[id] = workflow
+	s.adminTransitions = append(s.adminTransitions, memoryAdminTransition{kind: "admin.force_fail", workflowID: id, fromState: fromState, reason: reason, action: action})
+	return workflow, nil
+}
+
+func (s *memoryDocumentStore) RestartWorkflow(_ context.Context, id, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	fromState := workflow.State
+	if err := workflow.RestartAt(now); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.workflows[id] = workflow
+	s.adminTransitions = append(s.adminTransitions, memoryAdminTransition{kind: "admin.restart", workflowID: id, fromState: fromState, reason: reason, action: action})
+	return workflow, nil
+}
+
+type memoryAdminTransition struct {
+	kind       string
+	workflowID string
+	fromState  domain.WorkflowState
+	reason     string
+	action     *audit.HumanAction
 }
 
 func (s *memoryDocumentStore) GetWorkflow(_ context.Context, id string) (domain.Workflow, error) {
