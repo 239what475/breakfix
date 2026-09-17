@@ -39,7 +39,21 @@ type Config struct {
 	Runtime                   RuntimeConfig       `yaml:"runtime"`
 	Catalog                   CatalogConfig       `yaml:"catalog"`
 	Documentation             DocumentationConfig `yaml:"documentation"`
+	AllowRegistration         bool                `yaml:"allow_registration"`
+	AgentStuckAfter           string              `yaml:"agent_stuck_after"`
 	GeneratorWorkspaceIdleTTL string              `yaml:"generator_workspace_idle_ttl"`
+}
+
+func (c Config) AgentStuckDuration() (time.Duration, error) {
+	value := strings.TrimSpace(c.AgentStuckAfter)
+	if value == "" {
+		return 15 * time.Minute, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("agent_stuck_after must be a positive duration")
+	}
+	return duration, nil
 }
 
 // RegistryConfig identifies the only OCI repository root used by the platform.
@@ -374,7 +388,7 @@ func immutableOCIReference(value string) bool {
 }
 
 func Load(path string) (Config, error) {
-	var cfg Config
+	cfg := Config{AllowRegistration: true}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("read config: %w", err)
@@ -467,6 +481,9 @@ func (c Config) ValidateServer() error {
 	}
 	if strings.TrimSpace(c.JWTSecret) == "" {
 		return fmt.Errorf("server jwt_secret is required")
+	}
+	if _, err := c.AgentStuckDuration(); err != nil {
+		return fmt.Errorf("server %w", err)
 	}
 	if err := c.InternalWorkers.Validate(); err != nil {
 		return fmt.Errorf("server %w", err)

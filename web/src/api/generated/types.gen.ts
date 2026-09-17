@@ -23,6 +23,25 @@ export type RegisterResponse = {
     totp_url: string;
 };
 
+export type AdminUser = {
+    id: string;
+    subject: string;
+    name: string;
+    role: 'user' | 'admin';
+    created_at: string;
+};
+
+export type AdminUserList = {
+    users: Array<AdminUser>;
+};
+
+export type AdminTotpResetRequest = {
+    /**
+     * The calling admin's own password, confirmed before the target's secret is replaced
+     */
+    password: string;
+};
+
 export type LoginRequest = {
     username: string;
     password: string;
@@ -523,6 +542,10 @@ export type StartDocumentationPracticeErrors = {
     /**
      * Error
      */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
     404: ErrorResponse;
     /**
      * Error
@@ -553,6 +576,10 @@ export type RegisterErrors = {
      * Error
      */
     400: ErrorResponse;
+    /**
+     * Registration is disabled by configuration
+     */
+    403: unknown;
 };
 
 export type RegisterError = RegisterErrors[keyof RegisterErrors];
@@ -565,6 +592,70 @@ export type RegisterResponses = {
 };
 
 export type RegisterResponse2 = RegisterResponses[keyof RegisterResponses];
+
+export type ListAdminUsersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/users';
+};
+
+export type ListAdminUsersErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type ListAdminUsersError = ListAdminUsersErrors[keyof ListAdminUsersErrors];
+
+export type ListAdminUsersResponses = {
+    /**
+     * All user accounts, oldest first
+     */
+    200: AdminUserList;
+};
+
+export type ListAdminUsersResponse = ListAdminUsersResponses[keyof ListAdminUsersResponses];
+
+export type ResetAdminUserTotpData = {
+    body: AdminTotpResetRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/users/{id}/totp-reset';
+};
+
+export type ResetAdminUserTotpErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ResetAdminUserTotpError = ResetAdminUserTotpErrors[keyof ResetAdminUserTotpErrors];
+
+export type ResetAdminUserTotpResponses = {
+    /**
+     * New TOTP secret, shown exactly once
+     */
+    200: RegisterResponse;
+};
+
+export type ResetAdminUserTotpResponse = ResetAdminUserTotpResponses[keyof ResetAdminUserTotpResponses];
 
 export type LoginData = {
     body: LoginRequest;

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestPostgresSchemaAndBoundParameters(t *testing.T) {
 		t.Fatalf("insert boolean bound parameter: %v", err)
 	}
 
-	if _, err := database.Identity.CreateUserWithAuth("user-one", "alice", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "user-one", "alice", "hash", "totp"); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	user, err := database.Identity.GetUserBySubject("alice")

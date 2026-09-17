@@ -11,7 +11,7 @@ import (
 func TestOptionalJWTMiddlewareAddsIdentityOnlyForValidToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	secret := []byte("test-secret")
-	token, err := GenerateJWT("user-a", "Alice", secret)
+	token, err := GenerateJWT("user-a", "Alice", "", secret)
 	if err != nil {
 		t.Fatal(err)
 	}

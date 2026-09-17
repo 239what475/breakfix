@@ -144,7 +144,13 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	})
 	documentationRoutes := router.Group("/api/documentation")
 	documentationRoutes.Use(jwtMW)
-	documentationRoutes.POST("/practice", h.StartDocumentationPractice)
+	// Ignition is an admin verb: the fixed documentation workflow is a
+	// deployment-wide operation, not a per-user action.
+	documentationRoutes.POST("/practice", middleware.RequireAdmin(), h.StartDocumentationPractice)
+	adminRoutes := router.Group("/api/admin")
+	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
+	adminRoutes.GET("/users", h.ListAdminUsers)
+	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
 	router.POST("/api/authoring/sessions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

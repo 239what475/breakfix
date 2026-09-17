@@ -57,6 +57,9 @@ cooldown_minutes: 5
 
 # Replace these development-only values before any public deployment.
 jwt_secret: breakfix-dev-secret-change-in-production
+# Open self-service registration. The very first registered account always
+# becomes the bootstrap admin regardless of this switch.
+allow_registration: true
 internal_workers:
   runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 # Internal endpoint and identity environment used by fixed workers. Production

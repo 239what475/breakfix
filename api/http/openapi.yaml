@@ -11,7 +11,7 @@ paths:
   /documentation/practice:
     post:
       operationId: startDocumentationPractice
-      summary: Start the fixed Kubernetes documentation practice workflow
+      summary: Start the fixed Kubernetes documentation practice workflow (admin only)
       tags: [documentation]
       security:
         - bearerAuth: []
@@ -24,6 +24,8 @@ paths:
                 $ref: "#/components/schemas/DocumentationPracticeStart"
         "401":
           $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
         "409":
@@ -32,7 +34,7 @@ paths:
   /auth/register:
     post:
       operationId: register
-      summary: Register a new user
+      summary: Register a new user; the first registered user becomes admin
       tags: [auth]
       requestBody:
         required: true
@@ -48,6 +50,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegisterResponse"
         "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          description: Registration is disabled by configuration
+
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      summary: List user accounts without credentials (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All user accounts, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserList"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /admin/users/{id}/totp-reset:
+    post:
+      operationId: resetAdminUserTOTP
+      summary: Replace a user's TOTP secret after the caller confirms their own password (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminTOTPResetRequest"
+      responses:
+        "200":
+          description: New TOTP secret, shown exactly once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
 
   /auth/login:
@@ -930,6 +986,40 @@ components:
           type: string
         totp_url:
           type: string
+
+    AdminUser:
+      type: object
+      required: [id, subject, name, role, created_at]
+      properties:
+        id:
+          type: string
+        subject:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        created_at:
+          type: string
+          format: date-time
+
+    AdminUserList:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+
+    AdminTOTPResetRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: The calling admin's own password, confirmed before the target's secret is replaced
 
     LoginRequest:
       type: object

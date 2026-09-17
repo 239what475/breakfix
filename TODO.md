@@ -70,8 +70,10 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 - **点火升权**:`POST /api/documentation/practice` 从 JWT 组移入 requireAdmin 组。
 - `GET /api/admin/users`(admin):`{users: [{id, subject, name, role, created_at}]}`,
   不含 password_hash/totp_secret;只读,无启停/删除/提升。
-- `POST /api/admin/users/:id/totp-reset`(admin):请求体为空;服务端**对调用方自己的
-  password 做 bcrypt 比对**(防 token 窃取后的静默重置),失败 403 且不重置;通过则
+- `POST /api/admin/users/:id/totp-reset`(admin):请求体 `{"password": string}` 为调用方
+  密码确认(规格修订 2026-09-17:原文"请求体为空"与密码比对及 1.5 的操作者密码输入冲突,
+  以实现前的更正为准);服务端**对调用方自己的 password 做 bcrypt 比对**(防 token 窃取后的
+  静默重置),失败 403 且不重置;通过则
   `GenerateTOTPSecret` 新密钥、UPDATE 目标用户、一次性返回 `{totp_secret, totp_url}`
   (与注册响应同一形态);目标用户旧 TOTP 即刻失效;允许 admin 重置自己(密码确认即门槛);
   写审计(1.2,action=`user.totp.reset`)。
@@ -80,12 +82,13 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 
 验收标准:
 
-- [ ] 空库并发首注册(构造两并发 register):恰好一人 admin;次注册恒为 user。
-- [ ] 旧 JWT(无 role)在用户级端点正常、在 admin 端点 403;admin 正常放行。
-- [ ] `allow_registration: false` 时注册 403,登录正常;缺省 true 行为不变。
-- [ ] 非 admin 调用点火 / users / totp-reset 均 403。
-- [ ] totp-reset 后:旧 TOTP 登录失败、新 TOTP 成功;调用方密码错误时不重置且留审计。
-- [ ] 单测覆盖上述路径;OpenAPI 与生成代码同步提交。
+- [x] 空库并发首注册(构造两并发 register):恰好一人 admin;次注册恒为 user。
+- [x] 旧 JWT(无 role)在用户级端点正常、在 admin 端点 403;admin 正常放行。
+- [x] `allow_registration: false` 时注册 403,登录正常;缺省 true 行为不变。
+- [x] 非 admin 调用点火 / users / totp-reset 均 403。
+- [ ] totp-reset 后:旧 TOTP 登录失败、新 TOTP 成功;调用方密码错误时不重置且留审计
+      (审计随 1.2 落地后勾选)。
+- [x] 单测覆盖上述路径;OpenAPI 与生成代码同步提交。
 
 提交:`feat(auth): bootstrap first-user admin with role claims`。
 

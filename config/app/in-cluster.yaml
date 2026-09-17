@@ -42,6 +42,9 @@ crd_namespace: breakfix-system
 cooldown_minutes: 5
 
 jwt_secret: ${BREAKFIX_JWT_SECRET}
+# Open self-service registration. The very first registered account always
+# becomes the bootstrap admin regardless of this switch.
+allow_registration: true
 internal_workers:
   runtime: ${BREAKFIX_RUNTIME_WORKER_API_KEY}
 

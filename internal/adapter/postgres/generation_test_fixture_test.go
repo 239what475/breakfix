@@ -16,7 +16,7 @@ func createGenerationWorkflowFixture(t *testing.T, database *Store, now time.Tim
 	t.Helper()
 	ctx := context.Background()
 	userID := authoring.NewID("workflow-user")
-	if _, err := database.Identity.CreateUserWithAuth(userID, userID, "", ""); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(ctx, userID, userID, "", ""); err != nil {
 		t.Fatalf("create author: %v", err)
 	}
 	plan := authoring.Plan{Metadata: authoring.Metadata{Title: "Workspace workflow", Description: "Exercise durable generator workspace lifecycle.", Runtime: "node"}, Overview: "Generate an Operations scenario.", Checkpoints: []authoring.Checkpoint{{ID: "ready", Title: "Ready", Markdown: "The workspace is ready.", Position: 1}}}

@@ -179,7 +179,7 @@ func newEnvironmentLifecycleHandler(t *testing.T, state *environmentAPITestState
 	root := t.TempDir()
 	writeTestScenario(t, root)
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(state)

@@ -15,7 +15,7 @@ import (
 
 func TestSendAuthoringMessageReceiptDoesNotStartASecondStream(t *testing.T) {
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("user-one", "user-one", "", ""); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "user-one", "user-one", "", ""); err != nil {
 		t.Fatalf("create authoring API user: %v", err)
 	}
 	session, err := database.Authoring.CreateAuthoringSession(context.Background(), authoring.Session{
@@ -64,7 +64,7 @@ func TestSendAuthoringMessageReceiptDoesNotStartASecondStream(t *testing.T) {
 
 func TestRunningAuthoringMessageReceiptDoesNotStartAStream(t *testing.T) {
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("user-one", "user-one", "", ""); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "user-one", "user-one", "", ""); err != nil {
 		t.Fatalf("create authoring API user: %v", err)
 	}
 	session, err := database.Authoring.CreateAuthoringSession(context.Background(), authoring.Session{

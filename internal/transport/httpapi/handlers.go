@@ -45,6 +45,8 @@ type Handler struct {
 	uiOrigin           string
 	terminals          *terminalConnectionTracker
 	serverInstance     string
+	allowRegistration  bool
+	agentStuckAfter    time.Duration
 	runtimeConfig      config.RuntimeConfig
 	incusConfig        incus.Config
 	nodeTerminal       NodeTerminalProvider
@@ -98,6 +100,10 @@ type operationsRunnableBindingResolver interface {
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
+	agentStuckAfter, err := cfg.AgentStuckDuration()
+	if err != nil {
+		return nil, err
+	}
 	catalogService := dependencies.Catalog
 	if catalogService == nil {
 		var lifecycle appcatalog.ScenarioLifecycleStore
@@ -143,6 +149,8 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		uiOrigin:           cfg.UIOrigin,
 		terminals:          newTerminalConnectionTracker(time.Second),
 		serverInstance:     newServerInstanceID(),
+		allowRegistration:  cfg.AllowRegistration,
+		agentStuckAfter:    agentStuckAfter,
 		runtimeConfig:      cfg.Runtime,
 		incusConfig:        cfg.Incus,
 		nodeTerminal:       dependencies.NodeTerminal,

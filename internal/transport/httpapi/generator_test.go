@@ -241,7 +241,7 @@ func generatorHTTPReviewBundleEntries(t *testing.T, payload []byte) map[string]s
 func newGeneratorHTTPRouter(t *testing.T, service *generatorHTTPService) (http.Handler, config.Config) {
 	t.Helper()
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("user-one", "user-one", "", ""); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "user-one", "user-one", "", ""); err != nil {
 		t.Fatalf("create generator API user: %v", err)
 	}
 	cfg := config.Config{DataDir: t.TempDir(), JWTSecret: "generator-http-jwt-secret"}
@@ -272,7 +272,7 @@ func generatorHTTPRequest(t *testing.T, router http.Handler, cfg config.Config, 
 	if value != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	token, err := middleware.GenerateJWT("user-one", "User One", []byte(cfg.JWTSecret))
+	token, err := middleware.GenerateJWT("user-one", "User One", "", []byte(cfg.JWTSecret))
 	if err != nil {
 		t.Fatalf("create generator API token: %v", err)
 	}

@@ -166,7 +166,7 @@ func TestGetScenarioContentReturnsPublishedAssetsForAuthenticatedUser(t *testing
 	writeTestFile(t, filepath.Join(scenarioDir, "hints", "complete.md"), "Look at the service.\n")
 	writeNodeRunnableAssets(t, scenarioDir, "service-unavailable", "complete")
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -211,7 +211,7 @@ func TestGetScenarioContentReturnsReproductionCoreWithoutLearningAids(t *testing
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "initialize.sh"), "#!/bin/sh\n")
 	writeTestFile(t, filepath.Join(scenarioDir, "nodes", "host", "assertions", "initial-connection-refused.sh"), "#!/bin/sh\nprintf '{\"assertions\":[{\"id\":\"connection-refused\",\"satisfied\":true,\"summary\":\"connection refused\"}]}'\n")
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,7 +395,7 @@ func newProgressTestHandler(t *testing.T, environments []runtimev2.RuntimeEnviro
 	root := t.TempDir()
 	writeTestScenario(t, root)
 	database := testpostgres.New(t)
-	if _, err := database.Identity.CreateUserWithAuth("u-demo", "demo", "hash", "totp"); err != nil {
+	if _, err := database.Identity.CreateUserWithAuth(context.Background(), "u-demo", "demo", "hash", "totp"); err != nil {
 		t.Fatal(err)
 	}
 

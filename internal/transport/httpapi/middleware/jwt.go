@@ -13,13 +13,18 @@ import (
 type Claims struct {
 	UserID   string `json:"uid"`
 	UserName string `json:"name"`
+	Role     string `json:"role,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(userID, userName string, secret []byte) (string, error) {
+// GenerateJWT embeds the durable role claim. Tokens issued before the role
+// model lack the field and therefore parse as an ordinary user; no legacy
+// branch exists because roles only change with a schema reset.
+func GenerateJWT(userID, userName, role string, secret []byte) (string, error) {
 	claims := Claims{
 		UserID:   userID,
 		UserName: userName,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -89,4 +94,16 @@ func claimsFromAuthorization(authHeader string, secret []byte) (*Claims, error) 
 func setClaims(c *gin.Context, claims *Claims) {
 	c.Set("user_id", claims.UserID)
 	c.Set("user_name", claims.UserName)
+	c.Set("user_role", claims.Role)
+}
+
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, _ := c.Get("user_role")
+		if role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+			return
+		}
+		c.Next()
+	}
 }
