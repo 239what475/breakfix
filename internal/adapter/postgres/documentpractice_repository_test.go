@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
@@ -19,7 +20,7 @@ func TestDocumentPracticeRepositoryAppendsAndAdvancesAnImmutableLedger(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(context.Background(), workflow); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(context.Background(), workflow, nil); err != nil {
 		t.Fatal(err)
 	}
 	artifact := domain.ArtifactRecord{ID: "plan-01", Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("a"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: []byte(`{"id":"plan-01"}`)}
@@ -62,7 +63,7 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, nil); err != nil {
 		t.Fatal(err)
 	}
 	documentContext := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
@@ -223,4 +224,44 @@ func domainDigestForTest(value []byte) (string, error) {
 		return "", fmt.Errorf("empty JSON")
 	}
 	return domainDigest(value), nil
+}
+
+func TestCreateWorkflowRecordsTheIgnitionAuditInTheSameTransaction(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	workflow, err := domain.NewWorkflow("document-workflow-audit", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     "u-admin",
+		Action:     audit.ActionDocumentationPracticeStart,
+		TargetType: audit.TargetDocumentWorkflow,
+		TargetID:   workflow.ID,
+		Detail:     json.RawMessage(`{"workflow_id":"document-workflow-audit"}`),
+		CreatedAt:  now,
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, &action); err != nil {
+		t.Fatalf("create workflow with audit: %v", err)
+	}
+	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
+	if err != nil {
+		t.Fatalf("list ignition audits: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != action.ID {
+		t.Fatalf("ignition audit rows = %#v, want exactly the committed action", rows)
+	}
+
+	// A rolled-back creation never leaves its audit row behind.
+	duplicate := action
+	duplicate.ID = audit.NewID(now.Add(time.Millisecond))
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, &duplicate); err == nil {
+		t.Fatalf("duplicate workflow creation = nil error, want failure")
+	}
+	rows, err = database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ignition audit rows after rollback = %#v, %v", rows, err)
+	}
 }

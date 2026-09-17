@@ -12,6 +12,7 @@ import (
 	"time"
 
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -94,12 +95,41 @@ func (d *DocumentPracticeRepository) ListArtifacts(ctx context.Context, workflow
 	return result, rows.Err()
 }
 
-func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflow domain.Workflow) error {
+// CreateWorkflow durably creates the workflow and, when the caller supplies
+// the administrative ignition action, its human audit row in the same
+// transaction: an audit row exists only if the workflow does.
+func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflow domain.Workflow, action *audit.HumanAction) error {
 	if err := workflow.Validate(); err != nil {
 		return err
 	}
-	_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.LeaseOwner, workflow.LeaseExpiresAt, workflow.UpdatedAt.UTC())
-	return err
+	if action == nil {
+		_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.LeaseOwner, workflow.LeaseExpiresAt, workflow.UpdatedAt.UTC())
+		return err
+	}
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.LeaseOwner, workflow.LeaseExpiresAt, workflow.UpdatedAt.UTC()); err != nil {
+		return err
+	}
+	if err := insertHumanAction(ctx, tx, *action); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RecordHumanAction appends a standalone administrative action row for paths
+// that changed no documentation state.
+func (d *DocumentPracticeRepository) RecordHumanAction(ctx context.Context, action audit.HumanAction) error {
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	return insertHumanAction(ctx, d.conn, action)
 }
 
 func (d *DocumentPracticeRepository) GetWorkflow(ctx context.Context, id string) (domain.Workflow, error) {

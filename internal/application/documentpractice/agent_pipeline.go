@@ -12,6 +12,7 @@ import (
 	"time"
 
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -88,8 +89,10 @@ type PipelineStartResult struct {
 // Start reads exactly one requested page/anchor and runs planning, independent
 // review, generation, independent artifact review, and deterministic gates.
 // It stops before Provider work and returns the immutable materialization key.
-func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor string) (PipelineStartResult, error) {
-	workflow, err := p.service.Start(ctx, workflowID)
+// The administrative ignition action, when supplied, is recorded together
+// with the workflow creation.
+func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor string, ignition *audit.HumanAction) (PipelineStartResult, error) {
+	workflow, err := p.service.Start(ctx, workflowID, ignition)
 	if err != nil {
 		return PipelineStartResult{}, err
 	}

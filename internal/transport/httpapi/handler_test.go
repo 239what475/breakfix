@@ -32,10 +32,14 @@ func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T)
 	}
 }
 
-type testDocumentationApplication struct{ calls int }
+type testDocumentationApplication struct {
+	calls   int
+	actors  []string
+}
 
-func (a *testDocumentationApplication) StartDocumentationPractice(context.Context) (documentdomain.Workflow, error) {
+func (a *testDocumentationApplication) StartDocumentationPractice(_ context.Context, actorID string) (documentdomain.Workflow, error) {
 	a.calls++
+	a.actors = append(a.actors, actorID)
 	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
 }
 

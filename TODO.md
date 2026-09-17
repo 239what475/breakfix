@@ -86,8 +86,7 @@ TODO 勾选随对应提交更新,禁止收尾批量补勾;规格与实现变更�
 - [x] 旧 JWT(无 role)在用户级端点正常、在 admin 端点 403;admin 正常放行。
 - [x] `allow_registration: false` 时注册 403,登录正常;缺省 true 行为不变。
 - [x] 非 admin 调用点火 / users / totp-reset 均 403。
-- [ ] totp-reset 后:旧 TOTP 登录失败、新 TOTP 成功;调用方密码错误时不重置且留审计
-      (审计随 1.2 落地后勾选)。
+- [x] totp-reset 后:旧 TOTP 登录失败、新 TOTP 成功;调用方密码错误时不重置且留审计。
 - [x] 单测覆盖上述路径;OpenAPI 与生成代码同步提交。
 
 提交:`feat(auth): bootstrap first-user admin with role claims`。
@@ -127,8 +126,9 @@ CREATE INDEX human_action_audits_action ON human_action_audits (action, created_
 验收标准:
 
 - [ ] 1.1/1.3/1.6 的每个管理动词各落地一行审计,字段完整、事务一致(状态变更失败则审计不落)。
-- [ ] 列表 action/user_id 过滤与 cursor 分页可用;非 admin 403。
-- [ ] 单测:写入、过滤、分页;确认无 update/delete 代码路径。
+      (1.1 的点火与 totp-reset 已落地;1.3/1.6 动词随各自小节提交后勾选。)
+- [x] 列表 action/user_id 过滤与 cursor 分页可用;非 admin 403。
+- [x] 单测:写入、过滤、分页;确认无 update/delete 代码路径。
 
 提交:`feat(audit): append-only human action ledger`。
 

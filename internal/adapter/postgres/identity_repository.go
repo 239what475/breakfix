@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/breakfix/breakfix/internal/domain/audit"
 )
 
 type User struct {
@@ -98,13 +100,29 @@ func (d *IdentityRepository) ListUsers(ctx context.Context) ([]UserSummary, erro
 	return users, rows.Err()
 }
 
-func (d *IdentityRepository) UpdateTOTPSecret(ctx context.Context, userID, secret string) error {
-	result, err := d.conn.ExecContext(ctx, `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID)
+// ResetUserTOTPSecret replaces the target's second factor and records the
+// administrator action in the same transaction: a rolled-back reset never
+// leaves an audit row behind, and a recorded reset always took effect.
+func (d *IdentityRepository) ResetUserTOTPSecret(ctx context.Context, userID, secret string, action *audit.HumanAction) error {
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return fmt.Errorf("user not found")
 	}
-	return nil
+	if action != nil {
+		if err := action.Validate(); err != nil {
+			return err
+		}
+		if err := insertHumanAction(ctx, tx, *action); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -79,7 +79,7 @@ type generatorApplication interface {
 // documentationApplication starts only the Server-configured fixed workflow.
 // It has no endpoint for Agent artifacts, arbitrary pages, or runtime policy.
 type documentationApplication interface {
-	StartDocumentationPractice(context.Context) (documentdomain.Workflow, error)
+	StartDocumentationPractice(context.Context, string) (documentdomain.Workflow, error)
 }
 
 type Dependencies struct {

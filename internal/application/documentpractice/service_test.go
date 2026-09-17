@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
@@ -38,7 +39,7 @@ func TestServicePublishesMultiPhaseAutomatedDocumentationPracticeWithoutUserStep
 	}
 	service.now = func() time.Time { return now }
 
-	workflow, err := service.Start(ctx, "document-service-full")
+	workflow, err := service.Start(ctx, "document-service-full", nil)
 	if err != nil || workflow.State != domain.Planning {
 		t.Fatalf("start = %#v, %v", workflow, err)
 	}
@@ -136,7 +137,7 @@ func TestServiceRejectsStaleActionsAndRecordsVerificationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	workflow, err := service.Start(ctx, "document-service-failure")
+	workflow, err := service.Start(ctx, "document-service-failure", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	workflow, err := service.Start(ctx, "document-service-reject")
+	workflow, err := service.Start(ctx, "document-service-reject", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +202,11 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 }
 
 type memoryDocumentStore struct {
-	workflows map[string]domain.Workflow
-	audits    map[string]domain.AgentAudit
-	actions   map[string]memoryDocumentAction
-	published *domain.PracticeRevision
+	workflows    map[string]domain.Workflow
+	audits       map[string]domain.AgentAudit
+	actions      map[string]memoryDocumentAction
+	published    *domain.PracticeRevision
+	humanActions []audit.HumanAction
 }
 
 type memoryDocumentAction struct {
@@ -217,11 +219,19 @@ func newMemoryDocumentStore() *memoryDocumentStore {
 	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}}
 }
 
-func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow) error {
+func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, action *audit.HumanAction) error {
 	if _, exists := s.workflows[workflow.ID]; exists {
 		return errors.New("workflow already exists")
 	}
 	s.workflows[workflow.ID] = workflow
+	if action != nil {
+		s.humanActions = append(s.humanActions, *action)
+	}
+	return nil
+}
+
+func (s *memoryDocumentStore) RecordHumanAction(_ context.Context, action audit.HumanAction) error {
+	s.humanActions = append(s.humanActions, action)
 	return nil
 }
 

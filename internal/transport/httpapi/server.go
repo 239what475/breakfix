@@ -151,6 +151,27 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
+	adminRoutes.GET("/audit", func(c *gin.Context) {
+		params := api.ListAdminAuditParams{}
+		if raw := c.Query("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid audit page limit"})
+				return
+			}
+			params.Limit = &parsed
+		}
+		if raw := c.Query("cursor"); raw != "" {
+			params.Cursor = &raw
+		}
+		if raw := c.Query("action"); raw != "" {
+			params.Action = &raw
+		}
+		if raw := c.Query("user_id"); raw != "" {
+			params.UserId = &raw
+		}
+		h.ListAdminAudit(c, params)
+	})
 	router.POST("/api/authoring/sessions", func(c *gin.Context) {
 		jwtMW(c)
 		if !c.IsAborted() {

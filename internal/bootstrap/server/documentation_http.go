@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	app "github.com/breakfix/breakfix/internal/application/documentpractice"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )
 
@@ -29,11 +32,27 @@ func newFixedDocumentationApplication(pipeline *app.AgentPipeline, cfg config.Do
 	}
 }
 
-func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.Context) (domain.Workflow, error) {
+// StartDocumentationPractice records which administrator pressed the ignition
+// together with the workflow creation, inside one durable transaction.
+func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID string) (domain.Workflow, error) {
 	if a == nil || a.pipeline == nil {
 		return domain.Workflow{}, fmt.Errorf("documentation practice is not configured")
 	}
-	result, err := a.pipeline.Start(ctx, a.workflowID, a.pagePath, a.anchor)
+	now := time.Now().UTC()
+	detail, err := json.Marshal(map[string]string{"workflow_id": a.workflowID})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	action := audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     actorID,
+		Action:     audit.ActionDocumentationPracticeStart,
+		TargetType: audit.TargetDocumentWorkflow,
+		TargetID:   a.workflowID,
+		Detail:     detail,
+		CreatedAt:  now,
+	}
+	result, err := a.pipeline.Start(ctx, a.workflowID, a.pagePath, a.anchor, &action)
 	if err != nil {
 		return domain.Workflow{}, err
 	}

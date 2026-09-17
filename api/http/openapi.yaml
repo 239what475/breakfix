@@ -127,6 +127,50 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
+  /admin/audit:
+    get:
+      operationId: listAdminAudit
+      summary: Page the append-only human action audit ledger (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: action
+          in: query
+          description: Filter by exact administrative action name
+          schema:
+            type: string
+        - name: user_id
+          in: query
+          description: Filter by the acting user identifier
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One page of human actions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAuditPage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
   /me/space:
     get:
       operationId: getMySpace
@@ -1020,6 +1064,41 @@ components:
         password:
           type: string
           description: The calling admin's own password, confirmed before the target's secret is replaced
+
+    AdminHumanAction:
+      type: object
+      required: [id, user_id, action, target_type, target_id, detail, created_at]
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+          description: The acting user
+        action:
+          type: string
+          enum: [documentation.practice.start, documentation.workflow.force_fail, documentation.workflow.restart, user.totp.reset, environment.release]
+        target_type:
+          type: string
+        target_id:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    AdminAuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminHumanAction"
+        next_cursor:
+          type: string
+          description: Present when another page exists
 
     LoginRequest:
       type: object

@@ -42,6 +42,29 @@ export type AdminTotpResetRequest = {
     password: string;
 };
 
+export type AdminHumanAction = {
+    id: string;
+    /**
+     * The acting user
+     */
+    user_id: string;
+    action: 'documentation.practice.start' | 'documentation.workflow.force_fail' | 'documentation.workflow.restart' | 'user.totp.reset' | 'environment.release';
+    target_type: string;
+    target_id: string;
+    detail: {
+        [key: string]: unknown;
+    };
+    created_at: string;
+};
+
+export type AdminAuditPage = {
+    items: Array<AdminHumanAction>;
+    /**
+     * Present when another page exists
+     */
+    next_cursor?: string;
+};
+
 export type LoginRequest = {
     username: string;
     password: string;
@@ -681,6 +704,53 @@ export type LoginResponses = {
 };
 
 export type LoginResponse2 = LoginResponses[keyof LoginResponses];
+
+export type ListAdminAuditData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        /**
+         * Filter by exact administrative action name
+         */
+        action?: string;
+        /**
+         * Filter by the acting user identifier
+         */
+        user_id?: string;
+    };
+    url: '/admin/audit';
+};
+
+export type ListAdminAuditErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type ListAdminAuditError = ListAdminAuditErrors[keyof ListAdminAuditErrors];
+
+export type ListAdminAuditResponses = {
+    /**
+     * One page of human actions, newest first
+     */
+    200: AdminAuditPage;
+};
+
+export type ListAdminAuditResponse = ListAdminAuditResponses[keyof ListAdminAuditResponses];
 
 export type GetMySpaceData = {
     body?: never;

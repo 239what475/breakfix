@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/adapter/auth"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
+	"github.com/breakfix/breakfix/internal/domain/audit"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/breakfix/breakfix/internal/transport/httpapi/middleware"
 	"github.com/gin-gonic/gin"
@@ -136,7 +138,8 @@ func (h *Handler) ListAdminUsers(c *gin.Context) {
 
 // ResetAdminUserTOTP requires the caller's own password so a stolen bearer
 // token alone cannot silently replace a victim's second factor. The target's
-// previous TOTP secret stops validating the moment the update commits.
+// previous TOTP secret stops validating the moment the transaction commits,
+// and that same transaction records the human action audit row.
 func (h *Handler) ResetAdminUserTOTP(c *gin.Context) {
 	if h == nil || h.db == nil {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "identity store unavailable"})
@@ -162,7 +165,22 @@ func (h *Handler) ResetAdminUserTOTP(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "failed to generate TOTP"})
 		return
 	}
-	if err := h.db.Identity.UpdateTOTPSecret(c.Request.Context(), target.ID, secret); err != nil {
+	now := time.Now().UTC()
+	detail, err := json.Marshal(map[string]string{"target_user_id": target.ID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "failed to record audit"})
+		return
+	}
+	action := audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     actor.ID,
+		Action:     audit.ActionUserTOTPReset,
+		TargetType: audit.TargetUser,
+		TargetID:   target.ID,
+		Detail:     detail,
+		CreatedAt:  now,
+	}
+	if err := h.db.Identity.ResetUserTOTPSecret(c.Request.Context(), target.ID, secret, &action); err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: "failed to reset TOTP"})
 		return
 	}

@@ -13,6 +13,8 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/auth"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	"github.com/breakfix/breakfix/internal/domain/audit"
+	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -26,14 +28,15 @@ type authTestServer struct {
 	cfg    config.Config
 }
 
-func newAuthTestServer(t *testing.T, mutate func(*config.Config)) *authTestServer {
+func newAuthTestServer(t *testing.T, mutate func(*config.Config, *Dependencies)) *authTestServer {
 	t.Helper()
 	database := testpostgres.New(t)
 	cfg := config.Config{JWTSecret: "auth-flow-jwt-secret", AllowRegistration: true}
+	dependencies := Dependencies{}
 	if mutate != nil {
-		mutate(&cfg)
+		mutate(&cfg, &dependencies)
 	}
-	handler, err := NewHandlerWithDependencies(database, nil, cfg, Dependencies{})
+	handler, err := NewHandlerWithDependencies(database, nil, cfg, dependencies)
 	if err != nil {
 		t.Fatalf("create auth API handler: %v", err)
 	}
@@ -42,6 +45,15 @@ func newAuthTestServer(t *testing.T, mutate func(*config.Config)) *authTestServe
 		t.Fatalf("register auth API routes: %v", err)
 	}
 	return &authTestServer{router: router, db: database, cfg: cfg}
+}
+
+func newAuthTestServerSimple(t *testing.T, mutate func(*config.Config)) *authTestServer {
+	t.Helper()
+	return newAuthTestServer(t, func(cfg *config.Config, _ *Dependencies) {
+		if mutate != nil {
+			mutate(cfg)
+		}
+	})
 }
 
 func (s *authTestServer) do(t *testing.T, method, path, token string, body any) *httptest.ResponseRecorder {
@@ -221,7 +233,7 @@ func TestLegacyTokenWithoutRoleClaimIsAnOrdinaryUser(t *testing.T) {
 }
 
 func TestRegistrationCanBeDisabled(t *testing.T) {
-	server := newAuthTestServer(t, func(cfg *config.Config) { cfg.AllowRegistration = false })
+	server := newAuthTestServerSimple(t, func(cfg *config.Config) { cfg.AllowRegistration = false })
 	// Seed an account directly so the login path stays verifiable.
 	secret := mustTOTPSecret(t, "seed")
 	if _, err := server.db.Identity.CreateUserWithAuth(context.Background(), "u-seed", "seed", mustHash(t, "seed-password"), secret); err != nil {
@@ -322,4 +334,148 @@ func mustTOTPSecret(t *testing.T, username string) string {
 		t.Fatalf("generate totp secret: %v", err)
 	}
 	return secret
+}
+
+// auditRecordingDocumentationApplication mimics the deployment-owned fixed
+// application: it forwards the ignition actor and records the human action
+// through the real document practice repository.
+type auditRecordingDocumentationApplication struct {
+	db     *postgres.Store
+	actors []string
+}
+
+func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID string) (documentdomain.Workflow, error) {
+	a.actors = append(a.actors, actorID)
+	now := time.Now().UTC()
+	workflow, err := documentdomain.NewWorkflow("document-workflow-01", now)
+	if err != nil {
+		return documentdomain.Workflow{}, err
+	}
+	detail, err := json.Marshal(map[string]string{"workflow_id": workflow.ID})
+	if err != nil {
+		return documentdomain.Workflow{}, err
+	}
+	action := audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     actorID,
+		Action:     audit.ActionDocumentationPracticeStart,
+		TargetType: audit.TargetDocumentWorkflow,
+		TargetID:   workflow.ID,
+		Detail:     detail,
+		CreatedAt:  now,
+	}
+	if err := a.db.DocumentPractice.CreateWorkflow(ctx, workflow, &action); err != nil {
+		stored, getErr := a.db.DocumentPractice.GetWorkflow(ctx, workflow.ID)
+		if getErr != nil {
+			return documentdomain.Workflow{}, err
+		}
+		return stored, nil
+	}
+	return workflow, nil
+}
+
+func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
+	application := &auditRecordingDocumentationApplication{}
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies) {
+		dependencies.Documentation = application
+	})
+	application.db = server.db
+	adminRegister := server.register(t, "alice", "alice-password")
+	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
+	userRegister := server.register(t, "bob", "bob-password")
+	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
+
+	recorder := server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, nil)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("admin ignition = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if len(application.actors) != 1 || application.actors[0] == "" {
+		t.Fatalf("ignition actors = %#v, want the admin identifier", application.actors)
+	}
+	rows, err := server.db.Audit.ListHumanActions(context.Background(), postgres.HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
+	if err != nil {
+		t.Fatalf("list ignition audits: %v", err)
+	}
+	if len(rows) != 1 || rows[0].UserID != application.actors[0] || rows[0].TargetID != "document-workflow-01" {
+		t.Fatalf("ignition audit rows = %#v", rows)
+	}
+
+	// A rejected non-admin ignition changes nothing and records nothing.
+	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, nil)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-admin ignition = %d, want 403", recorder.Code)
+	}
+	rows, err = server.db.Audit.ListHumanActions(context.Background(), postgres.HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ignition audit rows after rejection = %#v, %v", rows, err)
+	}
+}
+
+func TestAdminAuditEndpointFiltersAndPagesTheLedger(t *testing.T) {
+	server := newAuthTestServerSimple(t, nil)
+	adminRegister := server.register(t, "alice", "alice-password")
+	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
+	userRegister := server.register(t, "bob", "bob-password")
+	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
+
+	base := time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < 3; i++ {
+		now := base.Add(time.Duration(i) * time.Minute)
+		action := audit.HumanAction{
+			ID:         audit.NewID(now),
+			UserID:     "alice-id",
+			Action:     audit.ActionUserTOTPReset,
+			TargetType: audit.TargetUser,
+			TargetID:   "u-victim",
+			Detail:     json.RawMessage(`{"target_user_id":"u-victim"}`),
+			CreatedAt:  now,
+		}
+		if err := server.db.Audit.RecordHumanAction(context.Background(), action); err != nil {
+			t.Fatalf("seed audit row: %v", err)
+		}
+	}
+
+	recorder := server.do(t, http.MethodGet, "/api/admin/audit", userToken, nil)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-admin audit list = %d, want 403", recorder.Code)
+	}
+
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit?limit=2", adminToken, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("audit list = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var page api.AdminAuditPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode audit page: %v", err)
+	}
+	if len(page.Items) != 2 || page.NextCursor == nil {
+		t.Fatalf("first audit page = %#v", page)
+	}
+
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit?limit=2&cursor="+*page.NextCursor, adminToken, nil)
+	var secondPage api.AdminAuditPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &secondPage); err != nil {
+		t.Fatalf("decode second audit page: %v", err)
+	}
+	if recorder.Code != http.StatusOK || len(secondPage.Items) != 1 || secondPage.NextCursor != nil {
+		t.Fatalf("second audit page = %d %#v", recorder.Code, secondPage)
+	}
+
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit?action=user.totp.reset&user_id=missing", adminToken, nil)
+	var filteredPage api.AdminAuditPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &filteredPage); err != nil {
+		t.Fatalf("decode filtered audit page: %v", err)
+	}
+	if len(filteredPage.Items) != 0 {
+		t.Fatalf("filtered audit page = %#v, want no rows", filteredPage)
+	}
+
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit?limit=0", adminToken, nil)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("audit list limit=0 = %d, want 400", recorder.Code)
+	}
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit?cursor=bogus", adminToken, nil)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("audit list bogus cursor = %d, want 400", recorder.Code)
+	}
 }
