@@ -51,6 +51,16 @@ async function postgres(sql: string) {
 
 async function scaleRuntimeWorker(replicas: number) {
   await execFile("kubectl", ["-n", "breakfix-system", "scale", "deployment/breakfix-runtime-worker", `--replicas=${String(replicas)}`]);
+  if (replicas === 0) {
+    // The terminating Pod still holds its claim loop for its grace period;
+    // wait until it is really gone so the parked action is never touched.
+    await expect.poll(async () => {
+      const { stdout } = await execFile("kubectl", ["-n", "breakfix-system", "get", "pods", "-l", "app.kubernetes.io/name=breakfix-runtime-worker", "--no-headers"]);
+      return stdout.trim().split("\n").filter((line) => line.trim()).length;
+    }, { timeout: 120_000, intervals: [1_000, 2_000] }).toBe(0);
+  } else {
+    await execFile("kubectl", ["-n", "breakfix-system", "rollout", "status", "deployment/breakfix-runtime-worker", "--timeout=120s"]);
+  }
 }
 
 async function registerAndLogin(request: APIRequestContext, username: string) {
