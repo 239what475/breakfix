@@ -6,14 +6,18 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 历史；更早阶段（管理控制面 v1、离线文档库生成器 docs-project-v10）同样见 git
 历史。
 
-## 阶段一：文档切库（已排期，确认后实施）
+## 阶段一：切库与阅读器统一切换（已排期，确认后实施）
 
-目标：离线文档库（`docs-site/documents`，docs-project-v10 产物）成为 Server 唯一
-文档输入；运行时 HTML 解析与源码读取路径删除；证据绑定三元组；部署不再钉死单页。
+目标：离线文档库（`docs-site/documents`，docs-project-v10 产物）成为产品唯一
+文档输入——流水线与阅读器同源；运行时 HTML 解析与源码读取路径删除；证据绑定
+三元组；部署不再钉死单页；阅读器退役 iframe、直接渲染解析产物。
 
 核心原则（2026-09-18 与用户确认）：解析离线完成、版本化（generator_version）、
 带 digest 固化为产物；运行时只消费产物、不再解析——流水线输入与证据同源，agent
 看到的字节即证据 digest 覆盖的字节，解析器获得独立于 Server 构建的版本身份。
+阅读器并入本阶段（同日与用户确认）：原独立排期实际等于不排，产品会长期停在
+两套文档表示（流水线吃库、读者看 iframe）上；合并为 A/B 两波推进，A 波完成
+即是全绿检查点。
 
 现状（2026-09-18 探查）：
 
@@ -25,7 +29,12 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
   `index.md`/`index.json`（页级 digest、anchors[] 逐锚点 digest、
   generator_version），共 854 页/12476 锚点，运行时零消费；
 - 证据缺口：`document-context` artifact 与 PublicationManifest 只带 upstream
-  commit 与章节文本 digest，无 parser 版本、无页级 digest。
+  commit 与章节文本 digest，无 parser 版本、无页级 digest；
+- 阅读器（SPA）经 iframe 加载 docs-site nginx 渲染的上游 HTML
+  （`VITE_DOCS_ORIGIN` + postMessage 同步），文档 E2E 以 1314/1315 fixture
+  服务器驱动——产品整体存在两套文档表示。
+
+**A 波（流水线侧，提交 1–4；完成即是全绿检查点）**
 
 ### 提交 1 feat(docs): read the pinned page from the offline document library
 
@@ -68,11 +77,39 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
       库以镜像层/只读卷进入部署（Makefile 接线 docs-project 为前置）
 - [ ] go test/build 绿；E2E 不受影响（fixture 已在库上）
 
+**B 波（阅读器侧，提交 5–7；保真度依据 2026-09-18 实测——5818 个代码块保留、
+表格降级 132/854 页、dropped 均值约 2/页且逐页记账于 index.json）**
+
+### 提交 5 feat(api): serve parsed document pages with digest checks
+
+- [ ] Server 新增文档读取 API：按页返回解析产物（markdown、title、page_kind、
+      anchors[]、页级 digest），下发前校验 digest；OpenAPI 契约与 web client
+      同步生成；JWT 可读，页级 digest 作 ETag 协商缓存
+- [ ] 单测：digest 不匹配拒绝、未知页 404、anchors 与 PageManifest 一致
+
+### 提交 6 feat(web): render the reader from parsed pages
+
+- [ ] SPA 内置 Markdown 渲染替代 iframe：GFM 表格、围栏代码块高亮、
+      `> [!NOTE]` 提示块、details、tabs（渲染器选型按调研结论定）；
+      documentation 页懒加载分块，主 bundle 不显著膨胀
+- [ ] URL 语义原样承接（source/version/path/hash → SPA 路由与锚点滚动），
+      移除 postMessage 校验；加载失败重试、移动端菜单平移
+- [ ] 阅读器 E2E 重写为 API 驱动（URL 保持/前进后退/重试平移；防伪造
+      postMessage 测试随机制消亡移除），同提交全绿
+
+### 提交 7 refactor(docs): retire the docs-site runtime surface
+
+- [ ] 退役 nginx 运行时镜像（Hugo 构建保留为生成器输入）、context 注入脚本、
+      1314/1315 fixture 服务器与 `VITE_DOCS_ORIGIN`；Makefile 目标清理
+- [ ] 全套回归：docs-smoke、go test、两套 E2E 绿
+
 ### 边界
 
-- SPA 阅读器 iframe、docs-site nginx 镜像、`VITE_DOCS_ORIGIN` 机制不动；
-  阅读器切解析产物（阶段三）不在本阶段
-- ops 场景侧、admin 控制面零变化；API 契约除新增字段外不变
+- docs-site 的 Hugo 构建保留（生成器输入侧）；其运行时件（nginx 镜像、
+  `VITE_DOCS_ORIGIN`、iframe/postMessage 同步、context 注入脚本、1314/1315
+  fixture 服务器）随 B 波退役
+- ops 场景侧、admin 控制面零变化；API 契约除新增文档读取 API 与新增字段外
+  不变
 - 多语言维持 2026-09-16"暂不实施"决定
 
 ### 验收
@@ -81,6 +118,9 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
   `make test-e2e-admin` 全绿
 - 部署物不再存在单页 ConfigMap；Server 运行时路径无 HTML 解析（解析仅存在于
   离线生成器一侧）
+- 阅读器：保真度对上游抽查（含 tabs/表格/提示块页）；URL 行为
+  （source/version/path/hash、前进后退）回归通过；阅读器 E2E 以 API 驱动
+  重写后全绿
 
 ## 阶段二：多页铺开与批次控制（设计稿，阶段一落地后细化为提交拆解）
 
@@ -124,22 +164,6 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 - 语料树 + 分区聚合端点；admin 工作流列表项补 page/anchor 身份字段（现仅在
   publication manifest 里）
 - 批次对象端点（发起/暂停/取消/重试失败页）与审计 action 枚举扩展
-
-## 阶段三：阅读器切换解析产物（设计共识，阶段一落地后排期）
-
-"解析结果作为输入"原则的普遍推论：阅读器同样消费库产物，而非 iframe 上游
-渲染 HTML。本阶段是 NEXT.md"阅读器内的实践体验"线的第一步，与阶段二无相互
-依赖，先后或并行排期时定。
-
-- Server 新增文档读取 API：按页返回解析产物（markdown + anchors + digest），
-  下发前校验页级 digest；SPA 内置 Markdown 渲染（代码高亮）替代 iframe
-- 读者看到的与流水线据以生成的是同一份字节；锚点即库 anchors[]，实践入口
-  按锚点挂载成为一等公民（该线后续步骤）
-- docs-site nginx 镜像退到生成器输入侧，`VITE_DOCS_ORIGIN` 与 iframe 同步
-  （postMessage 校验、URL 镜像）退场，改为 SPA 内部路由
-- 保真度依据（2026-09-18 实测）：854 页保留 5818 个代码块；表格降级 132 页
-  共 462 处（15%）；dropped_elements 均值约 2/页，逐页记账于 index.json，
-  可审计、可监控
 
 ## 挂起待决策（不排期）
 
