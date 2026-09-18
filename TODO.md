@@ -62,11 +62,11 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 3 test(e2e): drive documentation E2E from a real generated library
 
-- [ ] `e2e-documentation-prepare.sh` 改用真实生成器（`cmd/docs-project
+- [x] `e2e-documentation-prepare.sh` 改用真实生成器（`cmd/docs-project
       -pages` 子集，含 pod-lifecycle 页；可基于 `make docs-fixture` 的真实
       渲染页子集）产出迷你库，替代 `test/fixtures/documentation-e2e` 手工快照；
       ≤1MiB 走 ConfigMap，超限走卷挂载/镜像层（按实测尺寸定）
-- [ ] 文档 E2E 断言 publication manifest 含三元组；admin E2E 回归；两套全绿
+- [x] 文档 E2E 断言 publication manifest 含三元组；admin E2E 回归；两套全绿
 
 ### 提交 4 refactor(docs): retire the runtime HTML parsing path
 

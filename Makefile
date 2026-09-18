@@ -179,13 +179,13 @@ test-e2e-recovery: test-deps
 	./scripts/kind/run-e2e.sh recovery
 
 test-e2e-documentation: test-deps
-	./scripts/kind/e2e-documentation-prepare.sh
+	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/e2e-documentation-prepare.sh
 	./scripts/kind/run-e2e.sh documentation
 
 # The admin suite owns a freshly reset target so its first registration is
 # the bootstrap admin, exactly as the acceptance flow requires.
 test-e2e-admin: test-deps
-	./scripts/kind/e2e-documentation-prepare.sh
+	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/e2e-documentation-prepare.sh
 	./scripts/kind/run-e2e.sh admin
 
 test-acceptance-node: test-deps

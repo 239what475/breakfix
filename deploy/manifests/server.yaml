@@ -135,6 +135,9 @@ spec:
             - name: config
               mountPath: /etc/breakfix
               readOnly: true
+            - name: documentation-library
+              mountPath: /var/lib/breakfix/documentation/library
+              readOnly: true
             - name: documentation-snapshot
               mountPath: /var/lib/breakfix/documentation/snapshot
               readOnly: true
@@ -172,6 +175,23 @@ spec:
         - name: config
           configMap:
             name: breakfix-config
+        # The documentation library is the offline docs-project output. Keys
+        # are flat (path separators replaced with underscores) and mapped back
+        # to their library paths here; e2e-documentation-prepare.sh creates
+        # the ConfigMap from a generator run over the committed fixture pages.
+        - name: documentation-library
+          configMap:
+            name: breakfix-documentation-library
+            optional: true
+            items:
+              - key: manifest.json
+                path: manifest.json
+              - key: docs_concepts_workloads_pods_pod-lifecycle_index.md
+                path: docs/concepts/workloads/pods/pod-lifecycle/index.md
+              - key: docs_concepts_workloads_pods_pod-lifecycle_index.json
+                path: docs/concepts/workloads/pods/pod-lifecycle/index.json
+              - key: images_docs_pod.svg
+                path: images/docs/pod.svg
         - name: documentation-snapshot
           configMap:
             name: breakfix-documentation-snapshot

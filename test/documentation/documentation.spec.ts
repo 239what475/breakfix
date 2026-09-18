@@ -192,6 +192,11 @@ test("fixed documentation practice runs through publication", async ({ request }
   expect(await postgres("SELECT COUNT(*) FROM document_practice_index WHERE source_id = 'kubernetes' AND commit = 'ce98a43f24257385a9766003a6dadc95e962dc63'")).toBe("1");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind IN ('document-context', 'learning-unit-plan', 'plan-gate', 'practice-candidate', 'artifact-gate', 'runnable-revision', 'verification-report', 'verification-review', 'publication-manifest')`)).toBe("9");
   expect(await postgres(`SELECT manifest->'document_context'->>'anchor' FROM document_publication_manifests WHERE workflow_id = '${started.workflow_id}'`)).toBe("pod-lifetime");
+  // The evidence triple binds the publication to the offline library: the
+  // generator version and the digest of the parsed page (deterministic for the
+  // fixture page, identical to the full docs-site/documents library).
+  expect(await postgres(`SELECT manifest->'document_context'->>'parser_version' FROM document_publication_manifests WHERE workflow_id = '${started.workflow_id}'`)).toBe("docs-project-v10");
+  expect(await postgres(`SELECT manifest->'document_context'->>'page_digest' FROM document_publication_manifests WHERE workflow_id = '${started.workflow_id}'`)).toBe("sha256:587884599e33084ccd9ff37feeb38fc553414e1b6273a1f55dfdf3aefa61e5c0");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'learning-unit-plan' AND payload->'user_steps' @> '[{"id":"apply-pod","evidence_ids":["page"]}]'::jsonb`)).toBe("1");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'practice-candidate' AND payload->'user_steps' @> '[{"id":"apply-pod"}]'::jsonb AND payload #> '{spec,validation_plan,phases,0,actions}' @> '[{"id":"apply-pod"}]'::jsonb`)).toBe("1");
 

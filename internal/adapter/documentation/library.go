@@ -247,19 +247,28 @@ func readRootFileVerified(root, path string, limit int64) (string, string, error
 	if err != nil {
 		return "", "", err
 	}
-	target, err := filepath.Abs(full)
+	// Kubernetes projected volumes (ConfigMap items) expose every key as a
+	// symlink into a ..data directory. Follow symlinks, then enforce that the
+	// resolved file stays inside the mounted root: a symlink that escapes the
+	// root is rejected exactly like a traversal path.
+	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", "", err
 	}
-	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
+	absolute, err := filepath.Abs(full)
+	if err != nil {
+		return "", "", err
+	}
+	target, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", "", err
+	}
+	if target != resolvedRoot && !strings.HasPrefix(target, resolvedRoot+string(filepath.Separator)) {
 		return "", "", errors.New("documentation path escapes the library root")
 	}
-	info, err := os.Lstat(target)
+	info, err := os.Stat(target)
 	if err != nil {
 		return "", "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", "", errors.New("documentation symlinks are not readable")
 	}
 	if !info.Mode().IsRegular() {
 		return "", "", errors.New("documentation path is not a regular file")

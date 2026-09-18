@@ -256,3 +256,49 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 	}
 	t.Fatalf("manifest has no anchor %q", context.Anchor)
 }
+
+func TestPinnedLibraryFollowsProjectedVolumeSymlinks(t *testing.T) {
+	// Kubernetes ConfigMap volumes expose each key as a symlink into a ..data
+	// directory. The library must read through such symlinks while rejecting
+	// any symlink that escapes the library root.
+	root := t.TempDir()
+	context := libraryContext()
+	pageDir := filepath.Join(root, filepath.FromSlash(context.PagePath))
+	if err := os.MkdirAll(filepath.Join(root, ".data", filepath.FromSlash(context.PagePath)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLibraryMaterial(t, filepath.Join(root, ".data"), context, libraryMarkdown, nil, nil)
+	for _, name := range []string{"manifest.json"} {
+		if err := os.Symlink(filepath.Join(root, ".data", name), filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(pageDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, ".data", filepath.FromSlash(context.PagePath)), pageDir); err != nil {
+		t.Fatal(err)
+	}
+	library, err := NewPinnedLibrary(context, root, t.TempDir())
+	if err != nil {
+		t.Fatalf("open library through projected symlinks: %v", err)
+	}
+	if _, err := library.ReadPage(context.PagePath, context.Anchor); err != nil {
+		t.Fatalf("read page through projected symlinks: %v", err)
+	}
+
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, "docs", "escape")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(outside, "manifest.json"), "{}")
+	if err := os.Remove(filepath.Join(root, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "manifest.json"), filepath.Join(root, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewPinnedLibrary(context, root, t.TempDir()); err == nil {
+		t.Fatal("symlink escaping the library root was accepted")
+	}
+}

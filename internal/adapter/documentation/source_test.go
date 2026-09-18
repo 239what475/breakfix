@@ -134,14 +134,15 @@ func TestSnapshotBoundsRenderedPageToMainContent(t *testing.T) {
 	}
 }
 
-func TestSnapshotRejectsSymlinksAndOversizedPages(t *testing.T) {
+func TestSnapshotRejectsEscapingSymlinksAndOversizedPages(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := t.TempDir()
-	writeFile(t, filepath.Join(root, "source"), "x")
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "secret"), "x")
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(root, "source"), filepath.Join(root, "docs", "pods.md")); err != nil {
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(root, "docs", "pods.md")); err != nil {
 		t.Fatal(err)
 	}
 	context := unboundContext()
@@ -150,7 +151,26 @@ func TestSnapshotRejectsSymlinksAndOversizedPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err == nil {
-		t.Fatal("symlink page accepted")
+		t.Fatal("symlink escaping the snapshot root was accepted")
+	}
+
+	// Kubernetes projected volumes expose keys as symlinks inside the mount;
+	// a symlink that stays inside the root reads the referenced regular file.
+	root = t.TempDir()
+	sourceRoot = t.TempDir()
+	writeFile(t, filepath.Join(root, "target.md"), "# Pod lifecycle\n")
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "target.md"), filepath.Join(root, "docs", "pods.md")); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = NewSnapshot(context, root, sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.ReadPage(context.PagePath, context.Anchor); err != nil {
+		t.Fatalf("in-root symlink was rejected: %v", err)
 	}
 
 	root = t.TempDir()
