@@ -132,9 +132,12 @@ func handlerTestRunnableRevision(entry scenario.Entry) (runnable.RunnableRevisio
 	if err != nil {
 		return runnable.RunnableRevision{}, runnable.RevisionReference{}, err
 	}
-	artifactDigest := handlerTestDigest("c")
-	providerReference := "incus://test/image@" + artifactDigest
+	// The fabricated artifact must carry the image the materialized manifest
+	// pins; a mismatched artifact makes the catalog integrity check reject
+	// every entry with "materialized source does not match".
 	runtime := runnable.RuntimeNode
+	providerReference := "incus://test/image@sha256:" + entry.Image
+	artifactDigest := "sha256:" + entry.Image
 	if entry.Runtime == scenario.RuntimeK8s {
 		runtime = runnable.RuntimeK8s
 		providerReference = entry.Image

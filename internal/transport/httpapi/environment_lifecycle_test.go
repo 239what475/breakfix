@@ -216,6 +216,9 @@ func scenarioRequest(t *testing.T, handler *Handler, method, action string) *htt
 
 func testReadyEnvironment(name string) runtimev2.RuntimeEnvironment {
 	return runtimev2.RuntimeEnvironment{
+		// A real API server always returns objects with their TypeMeta; the
+		// client's scheme decoder rejects responses without it.
+		TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v2", Kind: "RuntimeEnvironment"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{
 			"breakfix.dev/user": "u-demo", "breakfix.dev/content-kind": "operations", "breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": testPublishedScenarioRevisionID,
 		}},
@@ -280,6 +283,9 @@ func TestServerMarksOnlyBoundVerificationEnvironmentReleasable(t *testing.T) {
 	if err := handler.markVerificationEnvironmentReleasable(context.Background(), string(verification.UID), verification.Spec.RunnableRevisionRef.Digest); err != nil {
 		t.Fatalf("mark verification environment releasable: %v", err)
 	}
+	if err := handler.markVerificationEnvironmentReleasable(context.Background(), string(learning.UID), learning.Spec.RunnableRevisionRef.Digest); err == nil {
+		t.Fatal("learning environment was accepted for verification release")
+	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.environments[verification.Name].Spec.Lease.ReleaseAt == nil {
@@ -287,9 +293,6 @@ func TestServerMarksOnlyBoundVerificationEnvironmentReleasable(t *testing.T) {
 	}
 	if state.environments[learning.Name].Spec.Lease.ReleaseAt != nil {
 		t.Fatalf("learning environment was modified by verification release: %#v", state.environments[learning.Name].Spec)
-	}
-	if err := handler.markVerificationEnvironmentReleasable(context.Background(), string(learning.UID), learning.Spec.RunnableRevisionRef.Digest); err == nil {
-		t.Fatal("learning environment was accepted for verification release")
 	}
 }
 
