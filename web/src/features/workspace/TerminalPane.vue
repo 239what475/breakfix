@@ -24,7 +24,8 @@ const selectedNode = ref("");
 const tabsByNode = reactive<Record<string, string[]>>({});
 const activeByNode = reactive<Record<string, string | null>>({});
 const node = computed(() => props.runtime === "node" ? selectedNode.value || null : null);
-const channel = computed(() => props.channel);
+// A hidden pane owns no terminal: narrow viewports never open the socket.
+const channel = computed(() => (props.visible ? props.channel : null));
 const terminalKey = computed(() => node.value || "management");
 const tabs = computed(() => tabsByNode[terminalKey.value] ?? []);
 const active = computed<string | null>({

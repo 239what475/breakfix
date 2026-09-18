@@ -24,7 +24,6 @@ const loadingContent = ref(false);
 const contentError = ref("");
 const view = ref<"overview" | "problem" | "solution" | "assistant">("overview");
 const sidebarCollapsed = ref(false);
-const mobileView = ref<"document" | "terminal">("document");
 const isNarrow = ref(false);
 const activeHint = ref<string | null>(null);
 const terminalConnected = ref(false);
@@ -39,7 +38,7 @@ let elapsedTimer: number | undefined;
 const scenarioId = computed(() => props.scenario.id);
 const terminalChannel = computed(() => scenarioTerminalChannel(props.scenario.id));
 const progressEnabled = computed(
-  () => terminalConnected.value && !document.hidden,
+  () => !document.hidden,
 );
 const {
   checks,
@@ -56,7 +55,7 @@ const documentSource = computed(() =>
     : (content.value?.solution ?? ""),
 );
 const terminalVisible = computed(
-  () => !isNarrow.value || mobileView.value === "terminal",
+  () => !isNarrow.value,
 );
 const elapsed = computed(() => {
   const minutes = Math.floor(elapsedSeconds.value / 60);
@@ -173,12 +172,10 @@ onUnmounted(() => {
       :elapsed="elapsed"
       :resetting="resetting"
       :stopping="stopping"
-      :mobile-view="mobileView"
       @reset="reset"
       @stop="stop"
-      @update-mobile-view="mobileView = $event"
     />
-    <div class="workspace-body" :class="`mobile-${mobileView}`">
+    <div class="workspace-body">
       <WorkspaceSidebar
         :view="view"
         :has-problem="!!content?.problem"

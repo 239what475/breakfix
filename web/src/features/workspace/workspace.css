@@ -528,9 +528,6 @@
   font-size: 12px;
   line-height: 1.6;
 }
-.mobile-view-toggle {
-  display: none;
-}
 @media (max-width: 950px) {
   .workspace-header {
     gap: 8px;
@@ -558,38 +555,15 @@
     height: auto;
     box-shadow: 5px 0 18px #273b321c;
   }
-  .document-pane,
-  .terminal-pane {
+  .document-pane {
     grid-column: 2;
     grid-row: 1;
     margin: 0;
   }
-  .workspace-body.mobile-document .terminal-pane,
-  .workspace-body.mobile-terminal .document-pane {
+  /* Terminals are desktop-only: the document pane stays visible and the
+     terminal never mounts a connection on a narrow viewport. */
+  .terminal-pane {
     display: none;
-  }
-  .workspace-body.mobile-terminal .terminal-pane {
-    align-self: stretch;
-    min-height: 0;
-  }
-  .mobile-view-toggle {
-    display: flex;
-    overflow: hidden;
-    border: 1px solid #cbd6cf;
-    border-radius: 4px;
-  }
-  .mobile-view-toggle button {
-    min-height: 30px;
-    border: 0;
-    padding: 5px 7px;
-    color: var(--muted);
-    background: #fff;
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .mobile-view-toggle button.active {
-    color: var(--ink);
-    background: #e8f0eb;
   }
 }
 @media (max-width: 660px) {
