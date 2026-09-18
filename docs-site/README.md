@@ -1,7 +1,8 @@
 # Breakfix Kubernetes documentation mirror
 
-This directory contains the reproducible build wrapper for the pinned
-Kubernetes website snapshot. The upstream repository is fetched into
+This directory is the reproducible build wrapper for the pinned Kubernetes
+website snapshot — the **input side of the offline document library**. The
+upstream repository is fetched into
 `.local/docs/upstream` and is never vendored into the Breakfix binary or Git
 tree.
 
@@ -16,8 +17,9 @@ dependency):
 
 ```bash
 make docs-sync
-make docs-image
+make docs-build
 make docs-check
+make docs-project
 make docs-smoke
 ```
 
@@ -29,19 +31,16 @@ the host and the host does not need Hugo, Node.js, npm, or upstream
 `DOCS_CONTAINER_IMAGE` to use an already-built compatible image.
 Node.js and npm are used only inside the upstream Dockerfile image and are not
 installed or checked on the host.
-The base URL and embedded parent origin are fixed build settings in
-`manifest.yaml`. They affect emitted links and embedding, but are not inputs to
-`DocumentContext` identity. The documentation entry point is
-`<docs-origin>/docs/`; generated build metadata is available at
-`<docs-origin>/build-info.json`.
-`docs-smoke` opens the rendered tree and matching pinned source checkout using
-the production Reader contract, then checks the fixed Pod lifecycle page,
-`pod-lifetime` heading, source evidence, include evidence, and build metadata.
-
-After `docs-build`, build the small runtime image that serves
-`docs-site/public` and deploy that image to the local machine or Kind.
-The default image tag is `breakfix/kubernetes-docs:snapshot-ce98a43`; run it
-with `docker run --rm -p 1313:8080 breakfix/kubernetes-docs:snapshot-ce98a43`.
+`docs-project` consumes the rendered tree and writes the offline parsed
+library to `documents/` (per-page markdown with page and anchor digests). The
+Server reads only that library; nothing here is deployed or served at runtime.
+The former nginx runtime image and the iframe context-injection script were
+retired when the reader switched to parsed pages. The base URL is a fixed
+build setting in `manifest.yaml`; it affects emitted links but is not an input
+to `DocumentContext` identity.
+`docs-smoke` opens the rendered tree and the generated library using the
+production Reader contract, then checks the fixed Pod lifecycle page, its
+`pod-lifetime` anchor slice, page and anchor digests, tree, and assets.
 
 Kubernetes documentation is redistributed under its applicable CC BY 4.0
 terms. The mirror must retain upstream attribution and must not copy

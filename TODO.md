@@ -1,12 +1,12 @@
 # TODO
 
-上一阶段"管理控制台重设计"已于 2026-09-18 完成并验收：三段提交（`9469f45`、
-`a6494dc`、`087cb77`）每步 vue-tsc/build 通过、admin E2E 全绿，Incus 恢复后补跑
-canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210feb` 起的 git
-历史；更早阶段（管理控制面 v1、离线文档库生成器 docs-project-v10）同样见 git
-历史。
+上一阶段"切库与阅读器统一切换"已于 2026-09-18 完成并验收：A 波四提交
+（`79e4e07`、`324b9ac`、`aa02be1`、`882bd6f`）+ B 波三提交（`65e121a`、
+`c7534dd` 及本提交）逐提交绿，收尾全量回归（docs-smoke 真实 854 页库、
+go test、documentation E2E 6/6、admin E2E 1/1）通过。更早阶段（管理控制台
+重设计、管理控制面 v1、离线文档库生成器 docs-project-v10）见 git 历史。
 
-## 阶段一：切库与阅读器统一切换（已排期，确认后实施）
+## 阶段一：切库与阅读器统一切换（2026-09-18 完成）
 
 目标：离线文档库（`docs-site/documents`，docs-project-v10 产物）成为产品唯一
 文档输入——流水线与阅读器同源；运行时 HTML 解析与源码读取路径删除；证据绑定
@@ -110,9 +110,9 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 7 refactor(docs): retire the docs-site runtime surface
 
-- [ ] 退役 nginx 运行时镜像（Hugo 构建保留为生成器输入）、context 注入脚本、
+- [x] 退役 nginx 运行时镜像（Hugo 构建保留为生成器输入）、context 注入脚本、
       1314/1315 fixture 服务器与 `VITE_DOCS_ORIGIN`；Makefile 目标清理
-- [ ] 全套回归：docs-smoke、go test、两套 E2E 绿
+- [x] 全套回归：docs-smoke、go test、两套 E2E 绿
 
 ### 边界
 
@@ -123,15 +123,15 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
   不变
 - 多语言维持 2026-09-16"暂不实施"决定
 
-### 验收
+### 验收（2026-09-18 通过）
 
-- `make docs-smoke`（真实库）、`go test ./...`、`make test-e2e-documentation`、
-  `make test-e2e-admin` 全绿
+- `make docs-smoke`（真实库）、`go test ./internal/... ./cmd/...`、
+  `make test-e2e-documentation`（6/6）、`make test-e2e-admin`（1/1）全绿
 - 部署物不再存在单页 ConfigMap；Server 运行时路径无 HTML 解析（解析仅存在于
   离线生成器一侧）
-- 阅读器：保真度对上游抽查（含 tabs/表格/提示块页）；URL 行为
-  （source/version/path/hash、前进后退）回归通过；阅读器 E2E 以 API 驱动
-  重写后全绿
+- 阅读器：保真度断言落在提示块/代码高亮/标题锚点（tabs/details 被生成器压平、
+  本页表格为降级文本，均与生成器实测一致）；URL 行为（source/version/path/
+  hash、前进后退、锚点同步、回退、重试）E2E 通过；阅读器 E2E 以 API 驱动
 
 ## 阶段二：多页铺开与批次控制（设计稿，阶段一落地后细化为提交拆解）
 

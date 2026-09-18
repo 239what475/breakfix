@@ -5,5 +5,4 @@ version: snapshot-ce98a43
 locale: en
 docs_prefix: /docs/
 default_base_url: http://localhost:1313/
-default_parent_origin: http://localhost:5173
 hugo_version: 0.144.2

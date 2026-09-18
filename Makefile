@@ -1,7 +1,7 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps test-deps build images deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-image docs-check docs-metadata docs-smoke \
+	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-check docs-metadata docs-smoke \
 	docs-project docs-fixture
 
 VERSION ?= 0.1.0
@@ -61,9 +61,6 @@ docs-sync:
 
 docs-build:
 	$(DOCS_SITE_SCRIPT) build
-
-docs-image:
-	$(DOCS_SITE_SCRIPT) image
 
 docs-check:
 	$(DOCS_SITE_SCRIPT) check
