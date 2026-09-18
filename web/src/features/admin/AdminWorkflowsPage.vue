@@ -1,16 +1,77 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { AlertTriangle, RefreshCw, X } from "lucide-vue-next";
-import { queueFlagCounts, useAdminWorkflows } from "./admin";
-import { toActiveRef } from "./refs";
-import type { AdminDocumentationWorkflow } from "../../api/generated";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import {
+	AlertTriangle,
+	Bot,
+	Boxes,
+	CircleDot,
+	Compass,
+	FileText,
+	FlaskConical,
+	MoreHorizontal,
+	Package,
+	Rocket,
+	RotateCcw,
+	Shield,
+	ShieldCheck,
+	X,
+	Zap,
+	type LucideIcon,
+} from "lucide-vue-next";
+import WorkflowStepper from "./WorkflowStepper.vue";
+import { clock, dwell, relative, shortId } from "./format";
+import type {
+	AdminDocumentationAgentAudit,
+	AdminDocumentationLedgerEntry,
+	AdminDocumentationWorkflow,
+	AdminDocumentationWorkflowDetail,
+} from "../../api/generated";
 import "../../styles/dialog.css";
 import "./admin.css";
 
-const props = defineProps<{ active: boolean }>();
-const { workflows, detail, queue, loading, error, busy, refresh, openDetail, runAction } = useAdminWorkflows(toActiveRef(props));
+const props = defineProps<{
+	workflows: AdminDocumentationWorkflow[];
+	detail?: AdminDocumentationWorkflowDetail;
+	loading: boolean;
+	busy: boolean;
+	expandRequest?: { id: string; nonce: number };
+	openDetail: (id: string) => void;
+	closeDetail: () => void;
+	runAction: (kind: "force-fail" | "restart", id: string, reason: string) => Promise<boolean>;
+}>();
 
-const flagCounts = computed(() => (queue.value ? queueFlagCounts(queue.value.items) : {}));
+// The stepper ladder covers the nine walking states; terminal outcomes that
+// never walked it are expressed by badge + meta only.
+const STAGE_STATES = new Set([
+	"Planning",
+	"PlanReviewing",
+	"Generating",
+	"ArtifactReviewing",
+	"MaterializingArtifact",
+	"Verifying",
+	"VerificationReviewing",
+	"Publishing",
+	"Published",
+]);
+
+const LEDGER_ICONS: Record<string, { icon: LucideIcon; tone?: "red" | "amber" }> = {
+	"document-context": { icon: FileText },
+	"learning-unit-plan": { icon: Compass },
+	"plan-gate": { icon: Shield },
+	"practice-candidate": { icon: Package },
+	"artifact-gate": { icon: ShieldCheck },
+	"runnable-revision": { icon: Boxes },
+	"verification-report": { icon: FlaskConical },
+	"verification-review": { icon: FlaskConical },
+	"admin.force_fail": { icon: Zap, tone: "red" },
+	"admin.restart": { icon: RotateCcw, tone: "amber" },
+	publication: { icon: Rocket },
+};
+
+const ledgerIcon = (kind: string) => LEDGER_ICONS[kind] ?? { icon: CircleDot };
+
+const expandedId = ref<string>();
+const openMenuId = ref<string>();
 
 const confirm = ref<{
 	kind: "force-fail" | "restart";
@@ -18,6 +79,56 @@ const confirm = ref<{
 	reason: string;
 }>();
 const confirmError = ref("");
+
+const detailFor = (id: string) => (props.detail?.id === id ? props.detail : undefined);
+const canForceFail = (workflow: AdminDocumentationWorkflow) => !["Failed", "Rejected", "Published", "NoPractice"].includes(workflow.state);
+const canRestart = (workflow: AdminDocumentationWorkflow) => workflow.state === "Failed" || workflow.state === "Rejected";
+const hasMenu = (workflow: AdminDocumentationWorkflow) => canForceFail(workflow) || canRestart(workflow);
+
+function toggleRow(id: string) {
+	if (expandedId.value === id) {
+		expandedId.value = undefined;
+		props.closeDetail();
+		return;
+	}
+	expandedId.value = id;
+	props.openDetail(id);
+}
+
+function menuAction(kind: "force-fail" | "restart", workflow: AdminDocumentationWorkflow) {
+	openMenuId.value = undefined;
+	openConfirm(kind, workflow);
+}
+
+function onPointerDown(event: Event) {
+	if (!openMenuId.value) return;
+	if (!(event.target instanceof Element) || !event.target.closest(".admin-row-menu")) openMenuId.value = undefined;
+}
+
+function onKeydown(event: KeyboardEvent) {
+	if (event.key === "Escape" && openMenuId.value) openMenuId.value = undefined;
+}
+
+onMounted(() => {
+	document.addEventListener("pointerdown", onPointerDown);
+	document.addEventListener("keydown", onKeydown);
+});
+onUnmounted(() => {
+	document.removeEventListener("pointerdown", onPointerDown);
+	document.removeEventListener("keydown", onKeydown);
+});
+
+// The stuck banner (or a later request) can target a row from outside the
+// list; each request carries a nonce so repeating the same id still expands.
+watch(
+	() => props.expandRequest,
+	(request) => {
+		if (!request) return;
+		expandedId.value = request.id;
+		props.openDetail(request.id);
+		document.querySelector(`[data-workflow-id="${request.id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+	},
+);
 
 const confirmSummary = computed(() => {
 	if (!confirm.value) return [];
@@ -49,104 +160,114 @@ async function submitConfirm() {
 		confirmError.value = "Reason 必填且不超过 500 字。";
 		return;
 	}
-	const done = await runAction(confirm.value.kind, confirm.value.workflow.id, reason);
+	const done = await props.runAction(confirm.value.kind, confirm.value.workflow.id, reason);
 	if (done) closeConfirm();
 }
 
-const dwell = (seconds: number) => {
-	if (seconds < 90) return `${seconds}s`;
-	if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
-	return `${Math.round(seconds / 3600)}h`;
-};
+const ledgerMeta = (entry: AdminDocumentationLedgerEntry) =>
+	`owner_role=${entry.owner_role}${entry.policy_version ? ` · policy=${entry.policy_version}` : ""} · ${shortId(entry.digest)}`;
 
-const clock = (value: string) => new Date(value).toLocaleString();
+const auditMeta = (audit: AdminDocumentationAgentAudit) =>
+	`model=${audit.model} · prompt=${audit.prompt_version} · tool=${audit.tool_version} · policy=${audit.policy_version}`;
 
 const workflowStateClass = (state: string) => `workflow-state state-${state.toLowerCase()}`;
 </script>
 
 <template>
 	<section class="admin-section" aria-labelledby="admin-workflows-title">
-		<div class="space-section-heading">
-			<div><p class="eyebrow">Documentation control plane</p><h2 id="admin-workflows-title">Documentation workflows</h2></div>
-			<button class="icon-button" type="button" title="Refresh" aria-label="Refresh" @click="refresh()"><RefreshCw :size="15" aria-hidden="true" /></button>
-		</div>
-		<p v-if="error" class="admin-error">{{ error }}</p>
+		<h2 id="admin-workflows-title" class="admin-section-title">Documentation workflows</h2>
 
-		<article v-if="queue" class="admin-queue-card">
-			<h3>队列积压摘要</h3>
-			<div class="admin-queue-grid">
-				<div class="admin-queue-cell"><span class="admin-queue-number">{{ queue.summary.by_state["queued"] ?? 0 }}</span><span>queued</span></div>
-				<div class="admin-queue-cell"><span class="admin-queue-number">{{ queue.summary.by_state["running"] ?? 0 }}</span><span>running</span></div>
-				<div class="admin-queue-cell"><span class="admin-queue-number">{{ queue.summary.by_state["completed"] ?? 0 }}</span><span>completed</span></div>
-				<div class="admin-queue-cell"><span class="admin-queue-number">{{ queue.summary.by_state["failed"] ?? 0 }}</span><span>failed</span></div>
-				<div v-for="(count, flag) in flagCounts" :key="flag" class="admin-queue-cell flagged">
-					<span class="admin-queue-number">{{ count }}</span><span class="admin-flag" :class="{ high: flag === 'attempt-high' }">{{ flag }}</span>
-				</div>
-			</div>
-			<p v-if="queue.items.length" class="admin-queue-items">
-				<span v-for="item in queue.items" :key="item.action_key" class="admin-queue-item">
-					<code>{{ item.phase }}</code> {{ item.state }} · attempt {{ item.attempt }}<template v-if="item.flag"> · <strong>{{ item.flag }}</strong></template>
-				</span>
-			</p>
-		</article>
-
-		<p v-if="loading" class="space-empty">Loading workflows...</p>
-		<p v-else-if="!workflows.length" class="space-empty">当前没有 documentation workflow。点火后在此观察。</p>
+		<p v-if="loading" class="admin-empty">Loading workflows...</p>
+		<p v-else-if="!workflows.length" class="admin-empty">当前没有 documentation workflow。点火后在此观察。</p>
 		<div v-else class="admin-workflow-list">
-			<article v-for="workflow in workflows" :key="workflow.id" class="admin-workflow-row">
-				<div class="admin-workflow-main">
-					<div class="admin-workflow-title">
-						<h3>{{ workflow.id }}</h3>
-						<span class="workflow-state" :class="workflowStateClass(workflow.state)">{{ workflow.state }}</span>
-						<span v-if="workflow.stuck.flag" class="admin-stuck-badge"><AlertTriangle :size="12" aria-hidden="true" />{{ workflow.stuck.reason }}</span>
+			<article
+				v-for="workflow in workflows"
+				:key="workflow.id"
+				class="admin-workflow-row"
+				:class="{ expanded: expandedId === workflow.id }"
+				:data-workflow-id="workflow.id"
+			>
+				<div class="admin-workflow-summary">
+					<button class="admin-workflow-toggle" type="button" :aria-expanded="expandedId === workflow.id" @click="toggleRow(workflow.id)">
+						<div class="admin-workflow-main">
+							<div class="admin-workflow-title">
+								<h3>{{ workflow.id }}</h3>
+								<span class="workflow-state" :class="workflowStateClass(workflow.state)">{{ workflow.state }}</span>
+								<span v-if="workflow.stuck.flag" class="admin-stuck-badge"><AlertTriangle :size="12" aria-hidden="true" />{{ workflow.stuck.reason }}</span>
+							</div>
+							<WorkflowStepper
+								v-if="STAGE_STATES.has(workflow.state)"
+								:state="workflow.state"
+								:dwell-seconds="workflow.dwell_seconds"
+								:stuck="workflow.stuck.flag"
+							/>
+							<p class="admin-workflow-meta">revision {{ workflow.revision }} · state_version {{ workflow.state_version }} · dwell {{ dwell(workflow.dwell_seconds) }} · {{ clock(workflow.updated_at) }}</p>
+						</div>
+					</button>
+					<div v-if="hasMenu(workflow)" class="admin-row-menu">
+						<button
+							class="icon-button"
+							type="button"
+							aria-haspopup="menu"
+							:aria-expanded="openMenuId === workflow.id"
+							aria-label="工作流操作"
+							@click="openMenuId = openMenuId === workflow.id ? undefined : workflow.id"
+						><MoreHorizontal :size="16" aria-hidden="true" /></button>
+						<div v-if="openMenuId === workflow.id" class="admin-menu" role="menu">
+							<button v-if="canForceFail(workflow)" class="admin-menu-item danger" role="menuitem" type="button" @click="menuAction('force-fail', workflow)">Force-fail 强制失败</button>
+							<button v-if="canRestart(workflow)" class="admin-menu-item danger" role="menuitem" type="button" @click="menuAction('restart', workflow)">Restart 重启</button>
+						</div>
 					</div>
-					<p>revision {{ workflow.revision }} · state_version {{ workflow.state_version }} · dwell {{ dwell(workflow.dwell_seconds) }} · {{ clock(workflow.updated_at) }}</p>
 				</div>
-				<div class="admin-workflow-actions">
-					<button class="text-button" type="button" @click="openDetail(workflow.id)">详情</button>
-					<button class="compact-button" type="button" @click="openConfirm('force-fail', workflow)">Force-fail</button>
-					<button class="compact-button" type="button" @click="openConfirm('restart', workflow)">Restart</button>
+
+				<div v-if="expandedId === workflow.id" class="admin-workflow-expand">
+					<template v-if="detailFor(workflow.id)">
+						<dl class="admin-detail-meta">
+							<div><dt>revision</dt><dd>{{ detailFor(workflow.id)!.revision }}</dd></div>
+							<div><dt>state_version</dt><dd>{{ detailFor(workflow.id)!.state_version }}</dd></div>
+							<div><dt>dwell</dt><dd>{{ dwell(detailFor(workflow.id)!.dwell_seconds) }}</dd></div>
+							<div><dt>更新时间</dt><dd>{{ clock(detailFor(workflow.id)!.updated_at) }}</dd></div>
+							<div v-if="detailFor(workflow.id)!.stuck.flag"><dt>stuck 原因</dt><dd>{{ detailFor(workflow.id)!.stuck.reason }}<template v-if="detailFor(workflow.id)!.stuck.failure_code">({{ detailFor(workflow.id)!.stuck.failure_class }}/{{ detailFor(workflow.id)!.stuck.failure_code }})</template></dd></div>
+						</dl>
+
+						<h3 class="admin-detail-heading">时间线</h3>
+						<ul v-if="detailFor(workflow.id)!.ledger.length" class="admin-history-list">
+							<li v-for="entry in detailFor(workflow.id)!.ledger" :key="entry.id" class="admin-history-row">
+								<span class="admin-history-icon" :class="ledgerIcon(entry.kind).tone"><component :is="ledgerIcon(entry.kind).icon" :size="18" aria-hidden="true" /></span>
+								<div class="admin-history-main">
+									<div class="admin-history-title"><strong>{{ entry.kind }}</strong><code>{{ shortId(entry.id) }}</code></div>
+									<p>{{ ledgerMeta(entry) }}</p>
+								</div>
+								<span class="admin-history-time">{{ relative(entry.created_at) }}</span>
+							</li>
+						</ul>
+						<p v-else class="admin-empty">ledger 为空。</p>
+
+						<h3 class="admin-detail-heading">AgentRun 审计</h3>
+						<ul v-if="detailFor(workflow.id)!.agent_audits.length" class="admin-history-list">
+							<li v-for="auditRow in detailFor(workflow.id)!.agent_audits" :key="auditRow.run_id" class="admin-history-row">
+								<span class="admin-history-icon"><Bot :size="18" aria-hidden="true" /></span>
+								<div class="admin-history-main">
+									<div class="admin-history-title"><strong>{{ auditRow.role }}</strong><code>{{ shortId(auditRow.run_id) }}</code></div>
+									<p>{{ auditMeta(auditRow) }}</p>
+								</div>
+								<span class="admin-history-time">{{ relative(auditRow.created_at) }}</span>
+							</li>
+						</ul>
+						<p v-else class="admin-empty">尚无 AgentRun 审计。</p>
+
+						<h3 class="admin-detail-heading">发布清单</h3>
+						<dl v-if="detailFor(workflow.id)!.publication" class="admin-detail-meta">
+							<div><dt>publication</dt><dd>{{ detailFor(workflow.id)!.publication!.id }}</dd></div>
+							<div><dt>manifest digest</dt><dd>{{ detailFor(workflow.id)!.publication!.manifest_digest }}</dd></div>
+							<div><dt>发布时间</dt><dd>{{ clock(detailFor(workflow.id)!.publication!.created_at) }}</dd></div>
+						</dl>
+						<p v-else class="admin-empty">尚未发布。</p>
+					</template>
+					<p v-else class="admin-empty">Loading detail...</p>
 				</div>
 			</article>
 		</div>
-
-		<article v-if="detail" class="admin-workflow-detail">
-			<div class="admin-detail-head">
-				<div>
-					<h3>{{ detail.id }}</h3>
-					<p>
-						<span class="workflow-state" :class="workflowStateClass(detail.state)">{{ detail.state }}</span>
-						revision {{ detail.revision }} · state_version {{ detail.state_version }} · dwell {{ dwell(detail.dwell_seconds) }}
-						<template v-if="detail.stuck.flag"> · <span class="admin-stuck-badge"><AlertTriangle :size="12" aria-hidden="true" />{{ detail.stuck.reason }}</span></template>
-					</p>
-				</div>
-				<button class="icon-button" type="button" title="Close detail" aria-label="Close detail" @click="detail = undefined"><X :size="15" aria-hidden="true" /></button>
-			</div>
-
-			<h4>Ledger 时间线</h4>
-			<ol v-if="detail.ledger.length" class="admin-ledger">
-				<li v-for="entry in detail.ledger" :key="entry.id">
-					<div><code>{{ entry.kind }}</code> <span class="admin-ledger-id">{{ entry.id }}</span></div>
-					<p>owner_role={{ entry.owner_role }}<template v-if="entry.policy_version"> · policy={{ entry.policy_version }}</template> · {{ clock(entry.created_at) }}</p>
-				</li>
-			</ol>
-			<p v-else class="space-empty">ledger 为空。</p>
-
-			<h4>AgentRun 审计</h4>
-			<ul v-if="detail.agent_audits.length" class="admin-audits">
-				<li v-for="auditRow in detail.agent_audits" :key="auditRow.run_id">
-					<div><code>{{ auditRow.role }}</code> <span class="admin-ledger-id">{{ auditRow.run_id }}</span></div>
-					<p>model={{ auditRow.model }} · prompt={{ auditRow.prompt_version }} · tool={{ auditRow.tool_version }} · policy={{ auditRow.policy_version }} · {{ clock(auditRow.created_at) }}</p>
-				</li>
-			</ul>
-			<p v-else class="space-empty">尚无 AgentRun 审计。</p>
-
-			<h4>发布清单</h4>
-			<p v-if="detail.publication" class="admin-publication">
-				<code>{{ detail.publication.id }}</code> · digest {{ detail.publication.manifest_digest }} · {{ clock(detail.publication.created_at) }}
-			</p>
-			<p v-else class="space-empty">尚未发布。</p>
-		</article>
 
 		<div v-if="confirm" class="dialog-backdrop" @click.self="closeConfirm">
 			<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="admin-confirm-title">
@@ -166,7 +287,7 @@ const workflowStateClass = (state: string) => `workflow-state state-${state.toLo
 				<p v-if="confirmError" class="admin-error">{{ confirmError }}</p>
 				<div class="admin-confirm-actions">
 					<button class="text-button" type="button" :disabled="busy" @click="closeConfirm">取消</button>
-					<button class="compact-button" type="button" :disabled="busy || !confirm.reason.trim()" @click="submitConfirm">{{ busy ? "执行中..." : "确认执行" }}</button>
+					<button class="danger-button compact-button" type="button" :disabled="busy || !confirm.reason.trim()" @click="submitConfirm">{{ busy ? "执行中..." : "确认执行" }}</button>
 				</div>
 			</div>
 		</div>

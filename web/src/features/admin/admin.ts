@@ -48,11 +48,22 @@ export function useAdminWorkflows(active: Ref<boolean>) {
 			if (ticket !== request) return;
 			workflows.value = list.workflows;
 			queue.value = queuePage;
+			await refreshDetail();
 		} catch (cause) {
 			if (ticket !== request) return;
 			error.value = cause instanceof Error ? cause.message : "Unable to load documentation workflows";
 		} finally {
 			if (ticket === request) loading.value = false;
+		}
+	}
+
+	// An expanded row must keep showing fresh evidence across list refreshes.
+	async function refreshDetail() {
+		if (!detail.value) return;
+		try {
+			detail.value = await api.getAdminWorkflow(detail.value.id);
+		} catch {
+			// A stale detail beats failing the whole list refresh.
 		}
 	}
 
@@ -71,8 +82,8 @@ export function useAdminWorkflows(active: Ref<boolean>) {
 		try {
 			if (kind === "force-fail") await api.forceFailAdminWorkflow(id, reason);
 			else await api.restartAdminWorkflow(id, reason);
-			detail.value = undefined;
 			await refresh();
+			await refreshDetail();
 			return true;
 		} catch (cause) {
 			error.value = cause instanceof Error ? cause.message : "The workflow action failed";

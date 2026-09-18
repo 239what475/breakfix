@@ -38,9 +38,14 @@ function refreshConsole() {
 	else refreshRequest.value += 1;
 }
 
+// The stuck banner hands the workflows tab a row to expand; the nonce keeps
+// repeat jumps to the same workflow distinct.
+const expandRequest = ref<{ id: string; nonce: number }>();
+let expandNonce = 0;
+
 function focusStuck(id: string) {
+	expandRequest.value = { id, nonce: ++expandNonce };
 	if (tab.value !== "workflows") emit("navigate", "workflows");
-	openDetail(id);
 }
 
 function closeDetail() {
@@ -98,6 +103,7 @@ function closeDetail() {
 					:detail="detail"
 					:loading="loading"
 					:busy="busy"
+					:expand-request="expandRequest"
 					:open-detail="openDetail"
 					:close-detail="closeDetail"
 					:run-action="runAction"

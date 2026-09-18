@@ -246,28 +246,45 @@
 	gap: 8px;
 }
 
+/* Workflow cards: the whole summary toggles the in-card expansion; the only
+   inline action is the trailing overflow menu. */
 .admin-workflow-row {
-	display: flex;
-	gap: 12px;
-	align-items: center;
-	justify-content: space-between;
+	display: grid;
 	min-width: 0;
 	border: 1px solid #d8e0da;
 	border-radius: 6px;
-	padding: 14px 15px;
 	background: var(--surface);
+}
+
+.admin-workflow-row:hover {
+	border-color: #b9cec2;
+}
+
+.admin-workflow-row.expanded {
+	border-color: #9fb8aa;
+}
+
+.admin-workflow-summary {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 10px;
+	padding: 14px 15px;
+}
+
+.admin-workflow-toggle {
+	min-width: 0;
+	border: 0;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+	text-align: left;
 }
 
 .admin-workflow-main {
 	display: grid;
-	gap: 3px;
+	gap: 8px;
 	min-width: 0;
-}
-
-.admin-workflow-main p {
-	margin: 0;
-	color: #6f7c76;
-	font: 10px "DM Mono", monospace;
 }
 
 .admin-workflow-title {
@@ -288,20 +305,258 @@
 	white-space: nowrap;
 }
 
-.admin-workflow-actions {
-	display: flex;
-	gap: 8px;
-	flex-shrink: 0;
+.admin-workflow-meta {
+	margin: 0;
+	color: #6f7c76;
+	font: 10px "DM Mono", monospace;
 }
 
-/* Five-color badge discipline: neutral terminal, blue in flight, green
-   published, amber rejected/stuck, red failed. */
+.admin-row-menu {
+	position: relative;
+	display: flex;
+}
+
+.admin-menu {
+	position: absolute;
+	z-index: 8;
+	top: calc(100% + 6px);
+	right: 0;
+	display: grid;
+	min-width: 176px;
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	padding: 4px;
+	background: #fffefd;
+	box-shadow: 0 10px 24px #2838321f;
+}
+
+.admin-menu-item {
+	display: block;
+	width: 100%;
+	border: 0;
+	border-radius: 3px;
+	padding: 8px 10px;
+	color: #53615a;
+	background: transparent;
+	font-size: 12px;
+	font-weight: 700;
+	text-align: left;
+}
+
+.admin-menu-item:hover {
+	color: #176a9d;
+	background: #e5f0f6;
+}
+
+.admin-menu-item.danger {
+	color: var(--red);
+}
+
+.admin-menu-item.danger:hover {
+	color: #9d443d;
+	background: #fdf1ee;
+}
+
+/* Stage stepper: past nodes check green, the current node is a blue dot (amber
+   and pulsing while stuck), unreached nodes stay quiet gray. */
+.workflow-stepper {
+	display: grid;
+	grid-template-columns: repeat(9, minmax(58px, 1fr));
+	overflow-x: auto;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.stepper-node {
+	position: relative;
+	display: grid;
+	justify-items: center;
+	gap: 3px;
+	min-width: 58px;
+	padding: 0 5px;
+}
+
+.stepper-node:not(:last-child)::after {
+	content: "";
+	position: absolute;
+	top: 5px;
+	left: calc(50% + 12px);
+	width: calc(100% - 24px);
+	height: 2px;
+	background: #dbe2dd;
+}
+
+.stepper-node.done:not(:last-child)::after {
+	background: #bcd9ca;
+}
+
+.stepper-dot {
+	color: #9ca7a2;
+	font: 500 11px "DM Mono", monospace;
+	line-height: 1;
+}
+
+.stepper-node.done .stepper-dot {
+	color: var(--green);
+}
+
+.stepper-node.current .stepper-dot {
+	color: var(--blue);
+}
+
+.stepper-node.current.stuck .stepper-dot {
+	color: var(--amber);
+	animation: stepper-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes stepper-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.4;
+	}
+}
+
+.stepper-label {
+	color: #9ca7a2;
+	font: 9px "DM Mono", monospace;
+	white-space: nowrap;
+}
+
+.stepper-node.done .stepper-label {
+	color: #53625b;
+}
+
+.stepper-node.current .stepper-label {
+	color: var(--ink);
+	font-weight: 700;
+}
+
+.stepper-dwell {
+	color: #71807a;
+	font: 9px "DM Mono", monospace;
+}
+
+/* Row expansion: metadata dl, then the three evidence sections. */
+.admin-workflow-expand {
+	display: grid;
+	gap: 14px;
+	margin: 0 15px 14px;
+	border-top: 1px solid #e3e8e4;
+	padding-top: 13px;
+}
+
+.admin-detail-meta {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	gap: 7px 12px;
+	margin: 0;
+}
+
+.admin-detail-meta dt {
+	color: #7d8984;
+	font: 9px "DM Mono", monospace;
+	text-transform: uppercase;
+}
+
+.admin-detail-meta dd {
+	margin: 5px 0 0;
+	color: #33453d;
+	font: 700 13px "DM Mono", monospace;
+	overflow-wrap: anywhere;
+}
+
+.admin-detail-heading {
+	margin: 6px 0 0;
+	color: #273630;
+	font-size: 17px;
+	line-height: 1.25;
+}
+
+.admin-history-list {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.admin-history-row {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 10px;
+	border: 1px solid #e0e6e2;
+	border-radius: 6px;
+	padding: 9px 12px;
+	background: #fbfcfa;
+}
+
+.admin-history-icon {
+	display: grid;
+	place-items: center;
+	color: #9ca7a2;
+}
+
+.admin-history-icon.red {
+	color: var(--red);
+}
+
+.admin-history-icon.amber {
+	color: var(--amber);
+}
+
+.admin-history-main {
+	min-width: 0;
+}
+
+.admin-history-title {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	flex-wrap: wrap;
+	min-width: 0;
+}
+
+.admin-history-title strong {
+	color: #273630;
+	font-size: 12px;
+}
+
+.admin-history-title code {
+	overflow: hidden;
+	color: #6f7c76;
+	font: 10px "DM Mono", monospace;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.admin-history-row p {
+	margin: 5px 0 0;
+	color: #74817b;
+	font: 10px "DM Mono", monospace;
+	overflow-wrap: anywhere;
+}
+
+.admin-history-time {
+	margin-top: 2px;
+	color: #53625b;
+	font: 10px "DM Mono", monospace;
+	white-space: nowrap;
+}
+
+/* Five-color badge discipline: blue in flight, green published, amber
+   rejected, red failed, neutral gray for NoPractice. */
 .workflow-state {
 	display: inline-block;
 	padding: 2px 9px;
 	border-radius: 999px;
-	background: #e7ede9;
-	color: #53625b;
+	background: #e5f0f6;
+	color: #176a9d;
 	font: 700 10px "DM Mono", monospace;
 }
 
@@ -315,10 +570,14 @@
 	color: var(--red);
 }
 
-.workflow-state.state-rejected,
-.workflow-state.state-nopractice {
+.workflow-state.state-rejected {
 	background: #f4ecdd;
 	color: var(--amber);
+}
+
+.workflow-state.state-nopractice {
+	background: #e7ede9;
+	color: #53625b;
 }
 
 .admin-stuck-badge {
@@ -330,80 +589,6 @@
 	background: #fbe9d7;
 	color: var(--amber);
 	font: 700 10px "DM Mono", monospace;
-}
-
-.admin-workflow-detail {
-	display: grid;
-	gap: 10px;
-	padding: 16px 18px;
-	border: 1px solid #cfd9d2;
-	border-radius: 6px;
-	background: var(--surface);
-}
-
-.admin-detail-head {
-	display: flex;
-	justify-content: space-between;
-	align-items: start;
-	gap: 12px;
-}
-
-.admin-detail-head h3 {
-	margin: 0 0 4px;
-	font-size: 16px;
-	word-break: break-all;
-}
-
-.admin-detail-head p {
-	margin: 0;
-	color: var(--muted);
-	font-size: 12px;
-}
-
-.admin-workflow-detail h4 {
-	margin: 0;
-	font-size: 13px;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	color: var(--muted);
-}
-
-.admin-ledger,
-.admin-audits {
-	display: grid;
-	gap: 8px;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.admin-ledger li,
-.admin-audits li {
-	display: grid;
-	gap: 2px;
-	padding: 8px 12px;
-	border-left: 3px solid #cfd9d2;
-	background: #f6f9f7;
-	border-radius: 0 6px 6px 0;
-	font-size: 12px;
-}
-
-.admin-ledger li p,
-.admin-audits li p {
-	margin: 0;
-	color: var(--muted);
-}
-
-.admin-ledger-id {
-	font-size: 11px;
-	color: var(--muted);
-	word-break: break-all;
-}
-
-.admin-publication {
-	margin: 0;
-	font-size: 12px;
-	word-break: break-all;
 }
 
 .admin-confirm-summary {
@@ -452,6 +637,8 @@
 	word-break: break-all;
 }
 
+/* Audit filters keep the my-space history-filters look until the audit rows
+   move to the icon-row pattern in the next commit. */
 .admin-audit-filters {
 	display: flex;
 	gap: 10px;
@@ -563,13 +750,22 @@
 		margin-bottom: 14px;
 	}
 
-	.admin-workflow-row {
-		align-items: start;
-		flex-direction: column;
+	.admin-workflow-summary {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
-	.admin-workflow-actions {
-		justify-content: flex-end;
+	.admin-row-menu {
+		justify-self: end;
+	}
+
+	.admin-history-row {
+		grid-template-columns: 20px minmax(0, 1fr) auto;
+		gap: 9px;
+	}
+
+	.admin-history-time {
+		align-self: start;
+		margin-top: 2px;
 	}
 }
 
