@@ -29,9 +29,10 @@ const MaxRenderedPageBytes = 2 * 1024 * 1024
 // (docs-project output). The library carries its own generator identity; the
 // server build does not assert one.
 type Library struct {
-	Context domain.DocumentContext
-	Root    string
-	global  docsproject.GlobalManifest
+	Context    domain.DocumentContext
+	Root       string
+	global     docsproject.GlobalManifest
+	assetIndex map[string]string
 }
 
 // NewPinnedLibrary verifies the global manifest against the pinned context
@@ -75,6 +76,9 @@ func NewPinnedLibrary(expected domain.DocumentContext, libraryRoot string) (Libr
 		return Library{}, fmt.Errorf("documentation library does not contain the pinned page %q", expected.PagePath)
 	}
 	library.global = global
+	if err := library.buildAssetIndex(); err != nil {
+		return Library{}, err
+	}
 	return library, nil
 }
 
@@ -148,6 +152,159 @@ func (l Library) anchorSection(manifest docsproject.PageManifest, markdown []byt
 		return nil, docsproject.Anchor{}, errors.New("documentation anchor slice does not match the pinned anchor digest")
 	}
 	return section, *entry, nil
+}
+
+// MaxLibraryAssetBytes bounds one static asset served from the library.
+const MaxLibraryAssetBytes = 16 * 1024 * 1024
+
+// DocumentAnchor is one parsed heading exposed to the reader.
+type DocumentAnchor struct {
+	ID    string `json:"id"`
+	Level int    `json:"level"`
+	Title string `json:"title"`
+}
+
+// DocumentAsset is one static asset referenced by a parsed page.
+type DocumentAsset struct {
+	Path   string `json:"path"`
+	Digest string `json:"digest"`
+}
+
+// DocumentPage is the parsed page served to the reader. Markdown is the
+// offline-parsed output whose bytes the page digest covers.
+type DocumentPage struct {
+	Path     string           `json:"path"`
+	PageKind string           `json:"page_kind"`
+	Title    string           `json:"title"`
+	Digest   string           `json:"digest"`
+	Markdown string           `json:"markdown"`
+	Anchors  []DocumentAnchor `json:"anchors"`
+	Assets   []DocumentAsset  `json:"assets"`
+}
+
+// DocumentTreeChild is one node of the library tree for lazy navigation.
+type DocumentTreeChild struct {
+	Title       string `json:"title"`
+	Path        string `json:"path"`
+	HasChildren bool   `json:"has_children"`
+}
+
+// ReadDocumentPage serves any page of the library after verifying its digest.
+// Unlike ReadPage it is not bound to the agent pipeline's single pinned page:
+// the whole library is the deployment-pinned corpus.
+func (l Library) ReadDocumentPage(path string) (DocumentPage, error) {
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if !libraryContains(l.global.Pages, normalized) {
+		return DocumentPage{}, fmt.Errorf("documentation page %q is not part of the library", normalized)
+	}
+	markdown, manifest, err := l.verifiedPage(normalized)
+	if err != nil {
+		return DocumentPage{}, err
+	}
+	page := DocumentPage{
+		Path: normalized, PageKind: manifest.PageKind, Title: manifest.Title,
+		Digest: manifest.Digest, Markdown: markdown,
+		Anchors: make([]DocumentAnchor, 0, len(manifest.Anchors)),
+		Assets:  make([]DocumentAsset, 0, len(manifest.Assets)),
+	}
+	for _, anchor := range manifest.Anchors {
+		page.Anchors = append(page.Anchors, DocumentAnchor{ID: anchor.ID, Level: anchor.Level, Title: anchor.Title})
+	}
+	for _, asset := range manifest.Assets {
+		page.Assets = append(page.Assets, DocumentAsset{Path: strings.TrimSuffix(asset.Path, "/"), Digest: asset.Digest})
+	}
+	return page, nil
+}
+
+// ReadDocumentTree returns the children of one tree node, or the top-level
+// sections for an empty path. The tree mirrors the upstream sidebar structure.
+func (l Library) ReadDocumentTree(path string) ([]DocumentTreeChild, error) {
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	var children []docsproject.TreeNode
+	if normalized == "" {
+		children = l.global.Tree.Nodes
+	} else {
+		node, found := findTreeNode(l.global.Tree.Nodes, normalized)
+		if !found {
+			return nil, fmt.Errorf("documentation tree node %q is not part of the library", normalized)
+		}
+		children = node.Children
+	}
+	result := make([]DocumentTreeChild, 0, len(children))
+	for _, child := range children {
+		result = append(result, DocumentTreeChild{
+			Title: child.Title, Path: strings.TrimSuffix(child.Path, "/"), HasChildren: len(child.Children) > 0,
+		})
+	}
+	return result, nil
+}
+
+func findTreeNode(nodes []docsproject.TreeNode, path string) (*docsproject.TreeNode, bool) {
+	for index := range nodes {
+		if strings.TrimSuffix(nodes[index].Path, "/") == path {
+			return &nodes[index], true
+		}
+		if found, ok := findTreeNode(nodes[index].Children, path); ok {
+			return found, true
+		}
+	}
+	return nil, false
+}
+
+// ReadDocumentAsset serves one static asset after verifying the digest pinned
+// by the page manifests that reference it.
+func (l Library) ReadDocumentAsset(path string) ([]byte, string, error) {
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	expected, found := l.assetIndex[normalized]
+	if !found {
+		return nil, "", fmt.Errorf("documentation asset %q is not part of the library", normalized)
+	}
+	content, digest, err := readRootFileVerified(l.Root, normalized, MaxLibraryAssetBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	if digest != expected {
+		return nil, "", errors.New("documentation asset bytes do not match the pinned asset digest")
+	}
+	return []byte(content), assetContentType(normalized), nil
+}
+
+func assetContentType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// buildAssetIndex indexes every page manifest's assets once so asset requests
+// can be digest-verified without a corpus scan per request.
+func (l *Library) buildAssetIndex() error {
+	index := make(map[string]string)
+	for _, pagePath := range l.global.Pages {
+		manifestBytes, err := readRootFile(l.Root, filepath.ToSlash(filepath.Join(pagePath, "index.json")), MaxLibraryManifestBytes)
+		if err != nil {
+			return fmt.Errorf("read page manifest for asset index: %w", err)
+		}
+		manifest, err := docsproject.DecodePageManifest([]byte(manifestBytes))
+		if err != nil {
+			return fmt.Errorf("decode page manifest for asset index: %w", err)
+		}
+		for _, asset := range manifest.Assets {
+			index[strings.TrimSuffix(asset.Path, "/")] = asset.Digest
+		}
+	}
+	l.assetIndex = index
+	return nil
 }
 
 func (l Library) ReadMetadata(path string) (Metadata, error) {

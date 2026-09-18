@@ -82,13 +82,13 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 5 feat(api): serve parsed document pages with digest checks
 
-- [ ] Server 新增文档读取 API：按页返回解析产物（markdown、title、page_kind、
+- [x] Server 新增文档读取 API：按页返回解析产物（markdown、title、page_kind、
       anchors[]、页级 digest），下发前校验 digest；OpenAPI 契约与 web client
       同步生成；JWT 可读，页级 digest 作 ETag 协商缓存
-- [ ] 目录树端点：库全局 manifest tree（title/path/children），分区懒加载；
+- [x] 目录树端点：库全局 manifest tree（title/path/children），分区懒加载；
       静态资产端点：按 assets[]（sha256）供图，页面 markdown 内相对路径随
       响应改写
-- [ ] 单测：digest 不匹配拒绝、未知页 404、anchors 与 PageManifest 一致
+- [x] 单测：digest 不匹配拒绝、未知页 404、anchors 与 PageManifest 一致
 
 ### 提交 6 feat(web): render the reader from parsed pages
 

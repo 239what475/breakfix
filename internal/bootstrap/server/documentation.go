@@ -99,18 +99,16 @@ func (p documentationProfiles) ResolveDocumentationRuntimeProfile(constraint dom
 }
 
 // documentationLibraryIdentity is the opened library's self-described parser
-// identity surfaced in the admin system report. It is empty on the legacy
-// rendered-snapshot path.
+// identity surfaced in the admin system report.
 type documentationLibraryIdentity struct {
 	parserVersion  string
 	upstreamCommit string
 }
 
-func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, documentationLibraryIdentity, error) {
+func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, *docsource.Library, error) {
 	if database == nil || !cfg.Documentation.Enabled() {
-		return nil, documentationLibraryIdentity{}, nil
+		return nil, nil, nil
 	}
-	identity := documentationLibraryIdentity{}
 	context := domain.DocumentContext{
 		FormatVersion: domain.FormatVersion, SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
 		Commit: cfg.Documentation.Revision, Version: cfg.Documentation.Version, Language: cfg.Documentation.Language,
@@ -119,37 +117,36 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	}
 	library, err := docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot)
 	if err != nil {
-		return nil, identity, fmt.Errorf("load pinned documentation library: %w", err)
+		return nil, nil, fmt.Errorf("load pinned documentation library: %w", err)
 	}
-	identity.parserVersion, identity.upstreamCommit = library.Identity()
 	reader := app.Reader(library)
 	profiles, err := newDocumentationProfiles(cfg)
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	evidence, err := llm.NewDocumentReviewer(cfg.Agent, "evidence")
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	value, err := llm.NewDocumentReviewer(cfg.Agent, "value")
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	safety, err := llm.NewDocumentReviewer(cfg.Agent, "safety")
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	consistency, err := llm.NewDocumentReviewer(cfg.Agent, "consistency")
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	verification, err := llm.NewDocumentReviewer(cfg.Agent, "verification")
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	service, err := app.NewService(database.DocumentPractice, database.Runnable)
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
 	pipeline, err := app.NewAgentPipeline(
 		service, reader, llm.NewDocumentPlanner(cfg.Agent),
@@ -158,7 +155,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: "document-policy-v2"},
 	)
 	if err != nil {
-		return nil, identity, err
+		return nil, nil, err
 	}
-	return pipeline, identity, nil
+	return pipeline, &library, nil
 }

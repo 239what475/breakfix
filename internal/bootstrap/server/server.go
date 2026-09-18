@@ -298,14 +298,15 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	serviceContext := services.ctx
 	handler, err := httpapi.NewHandlerWithDependencies(database, k8sClient, cfg, httpapi.Dependencies{
-		NodeTerminal:        incusClient,
-		Assistant:           assistantService,
-		Authoring:           authoringService,
-		Catalog:             catalogService,
-		AgentRuntimeContext: serviceContext,
-		Generator:           generatorService,
-		Documentation:       newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
-		SystemReport:        newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
+		NodeTerminal:         incusClient,
+		Assistant:            assistantService,
+		Authoring:            authoringService,
+		Catalog:              catalogService,
+		AgentRuntimeContext:  serviceContext,
+		Generator:            generatorService,
+		Documentation:        newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
+		DocumentationLibrary: documentationLibrary,
+		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
 	})
 	if err != nil {
 		services.stop()

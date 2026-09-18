@@ -8,6 +8,96 @@ servers:
     description: Local dev
 
 paths:
+  /documentation/page:
+    get:
+      operationId: getDocumentationPage
+      summary: One parsed library page verified against its offline digest (public read)
+      tags: [documentation]
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Parsed page; the page digest is returned as the ETag
+          headers:
+            ETag:
+              description: Quoted page digest for conditional requests
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPageResponse"
+        "304":
+          description: Unchanged page for a matching If-None-Match
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /documentation/tree:
+    get:
+      operationId: getDocumentationTree
+      summary: One level of the library navigation tree (public read, lazy per section)
+      tags: [documentation]
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: Tree node path; omit for the top-level sections
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Child nodes of the requested tree level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationTreeResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /documentation/asset:
+    get:
+      operationId: getDocumentationAsset
+      summary: One static library asset verified against its pinned digest (public read)
+      tags: [documentation]
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Library-relative asset path, for example docs/images/ingress.svg
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Asset bytes with their media type; immutable and cacheable
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/Error"
+
   /documentation/practice:
     post:
       operationId: startDocumentationPractice
@@ -1218,6 +1308,74 @@ components:
       properties:
         error:
           type: string
+
+    DocumentationAnchor:
+      type: object
+      required: [id, level, title]
+      properties:
+        id:
+          type: string
+        level:
+          type: integer
+          minimum: 1
+          maximum: 6
+        title:
+          type: string
+
+    DocumentationAsset:
+      type: object
+      required: [path, digest]
+      properties:
+        path:
+          type: string
+        digest:
+          type: string
+
+    DocumentationPageResponse:
+      type: object
+      required: [path, page_kind, title, digest, markdown, anchors, assets]
+      properties:
+        path:
+          type: string
+        page_kind:
+          type: string
+          description: Library page kind, for example content or index
+        title:
+          type: string
+        digest:
+          type: string
+          description: sha256 of the parsed markdown bytes
+        markdown:
+          type: string
+          description: Offline-parsed markdown with page-relative image references rewritten to the asset endpoint
+        anchors:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationAnchor"
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationAsset"
+
+    DocumentationTreeNode:
+      type: object
+      required: [title, path, has_children]
+      properties:
+        title:
+          type: string
+        path:
+          type: string
+        has_children:
+          type: boolean
+
+    DocumentationTreeResponse:
+      type: object
+      required: [nodes]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationTreeNode"
 
     DocumentationPracticeStart:
       type: object

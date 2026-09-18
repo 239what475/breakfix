@@ -91,8 +91,7 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 
 	// Operations scenarios are public read-only. Starting, viewing full content,
 	// and every environment operation below remain bound to an authenticated
-	// user. Documentation uses its own /api/documentation namespace once its
-	// source-sync and reading flow exists; it is intentionally not routed here.
+	// user.
 	catalogRoutes.GET("/api/operations/scenarios", optionalJWTMW, h.ListScenarios)
 	catalogRoutes.POST("/api/operations/scenarios/:id/start", func(c *gin.Context) {
 		jwtMW(c)
@@ -142,6 +141,11 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 			h.CreateTerminalTicket(c, c.Param("id"))
 		}
 	})
+	// Parsed library reads are public content covered by offline digests;
+	// they carry no user data, matching the catalog projection's read model.
+	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
+	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
+	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
 	documentationRoutes := router.Group("/api/documentation")
 	documentationRoutes.Use(jwtMW)
 	// Ignition is an admin verb: the fixed documentation workflow is a

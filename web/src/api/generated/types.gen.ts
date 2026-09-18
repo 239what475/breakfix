@@ -8,6 +8,46 @@ export type ErrorResponse = {
     error: string;
 };
 
+export type DocumentationAnchor = {
+    id: string;
+    level: number;
+    title: string;
+};
+
+export type DocumentationAsset = {
+    path: string;
+    digest: string;
+};
+
+export type DocumentationPageResponse = {
+    path: string;
+    /**
+     * Library page kind, for example content or index
+     */
+    page_kind: string;
+    title: string;
+    /**
+     * sha256 of the parsed markdown bytes
+     */
+    digest: string;
+    /**
+     * Offline-parsed markdown with page-relative image references rewritten to the asset endpoint
+     */
+    markdown: string;
+    anchors: Array<DocumentationAnchor>;
+    assets: Array<DocumentationAsset>;
+};
+
+export type DocumentationTreeNode = {
+    title: string;
+    path: string;
+    has_children: boolean;
+};
+
+export type DocumentationTreeResponse = {
+    nodes: Array<DocumentationTreeNode>;
+};
+
 export type DocumentationPracticeStart = {
     workflow_id: string;
     state: string;
@@ -752,6 +792,96 @@ export type DocumentWorkflowId = string;
 export type GeneratorWorkflowId = string;
 
 export type GeneratorTurnId = string;
+
+export type GetDocumentationPageData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
+         */
+        path: string;
+    };
+    url: '/documentation/page';
+};
+
+export type GetDocumentationPageErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetDocumentationPageError = GetDocumentationPageErrors[keyof GetDocumentationPageErrors];
+
+export type GetDocumentationPageResponses = {
+    /**
+     * Parsed page; the page digest is returned as the ETag
+     */
+    200: DocumentationPageResponse;
+};
+
+export type GetDocumentationPageResponse = GetDocumentationPageResponses[keyof GetDocumentationPageResponses];
+
+export type GetDocumentationTreeData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Tree node path; omit for the top-level sections
+         */
+        path?: string;
+    };
+    url: '/documentation/tree';
+};
+
+export type GetDocumentationTreeErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetDocumentationTreeError = GetDocumentationTreeErrors[keyof GetDocumentationTreeErrors];
+
+export type GetDocumentationTreeResponses = {
+    /**
+     * Child nodes of the requested tree level
+     */
+    200: DocumentationTreeResponse;
+};
+
+export type GetDocumentationTreeResponse = GetDocumentationTreeResponses[keyof GetDocumentationTreeResponses];
+
+export type GetDocumentationAssetData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Library-relative asset path, for example docs/images/ingress.svg
+         */
+        path: string;
+    };
+    url: '/documentation/asset';
+};
+
+export type GetDocumentationAssetErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetDocumentationAssetError = GetDocumentationAssetErrors[keyof GetDocumentationAssetErrors];
+
+export type GetDocumentationAssetResponses = {
+    /**
+     * Asset bytes with their media type; immutable and cacheable
+     */
+    200: Blob | File;
+};
+
+export type GetDocumentationAssetResponse = GetDocumentationAssetResponses[keyof GetDocumentationAssetResponses];
 
 export type StartDocumentationPracticeData = {
     body?: never;

@@ -38,6 +38,14 @@ func writeLibraryMaterial(t *testing.T, root string, context domain.DocumentCont
 			{ID: "pod-phase", Level: 2, Title: "Pod phase", Digest: evidenceDigest("## Pod phase\n\nThe phase is Pending.\n"), Parent: "pod-lifecycle"},
 		},
 	}
+	if err := os.MkdirAll(filepath.Join(root, "images", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const assetContent = "<svg>pod</svg>\n"
+	if err := os.WriteFile(filepath.Join(root, "images", "docs", "pod.svg"), []byte(assetContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	page.Assets = []docsproject.Asset{{Path: "images/docs/pod.svg", Digest: evidenceDigest(assetContent)}}
 	if mutatePage != nil {
 		mutatePage(&page)
 	}
@@ -52,7 +60,11 @@ func writeLibraryMaterial(t *testing.T, root string, context domain.DocumentCont
 		FormatVersion: docsproject.FormatVersion, GeneratorVersion: "docs-project-test",
 		Upstream:  docsproject.Upstream{Source: context.SourceID, Commit: context.Commit, Version: context.Version, Locale: context.Language},
 		BuildInfo: json.RawMessage(fmt.Sprintf(`{"source":%q,"repository":%q,"revision":%q,"version":%q,"locale":%q,"base_url":"http://localhost:1313/"}`, context.SourceID, context.Repository, context.Commit, context.Version, context.Language)),
-		Pages:     []string{context.PagePath + "/"},
+		Tree: docsproject.Tree{Nodes: []docsproject.TreeNode{{
+			Title: "Concepts", Path: "docs/concepts/",
+			Children: []docsproject.TreeNode{{Title: "Pod Lifecycle", Path: context.PagePath + "/"}},
+		}}},
+		Pages: []string{context.PagePath + "/"},
 	}
 	if mutateGlobal != nil {
 		mutateGlobal(&global)
@@ -245,9 +257,26 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 		if page.Digest != anchor.Digest {
 			t.Fatalf("served evidence digest %s does not match the manifest anchor digest %s", page.Digest, anchor.Digest)
 		}
-		return
+		break
 	}
-	t.Fatalf("manifest has no anchor %q", context.Anchor)
+	sections, err := library.ReadDocumentTree("")
+	if err != nil || len(sections) == 0 {
+		t.Fatalf("library tree sections = %#v, %v", sections, err)
+	}
+	document, err := library.ReadDocumentPage(context.PagePath)
+	if err != nil || document.Title != "Pod Lifecycle" || document.Digest != manifest.Digest || len(document.Anchors) != len(manifest.Anchors) {
+		t.Fatalf("document page = %#v, %v", document, err)
+	}
+	for index, anchor := range document.Anchors {
+		if anchor.ID != manifest.Anchors[index].ID || anchor.Level != manifest.Anchors[index].Level || anchor.Title != manifest.Anchors[index].Title {
+			t.Fatalf("document anchor %d = %#v does not match the page manifest", index, anchor)
+		}
+	}
+	for _, asset := range document.Assets {
+		if _, contentType, assetErr := library.ReadDocumentAsset(asset.Path); assetErr != nil || contentType == "" {
+			t.Fatalf("library asset %s = %v", asset.Path, assetErr)
+		}
+	}
 }
 
 func TestPinnedLibraryFollowsProjectedVolumeSymlinks(t *testing.T) {
@@ -303,5 +332,73 @@ func writeFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLibraryServesParsedPagesTreeAndAssets(t *testing.T) {
+	root := t.TempDir()
+	context := libraryContext()
+	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, nil)
+	library, err := NewPinnedLibrary(context, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := library.ReadDocumentPage("docs/concepts/workloads/pods/pod-lifecycle/")
+	if err != nil {
+		t.Fatalf("read document page: %v", err)
+	}
+	if page.Path != context.PagePath || page.PageKind != "content" || page.Title != "Pod Lifecycle" || page.Digest != evidenceDigest(libraryMarkdown) || page.Markdown != libraryMarkdown {
+		t.Fatalf("document page = %#v", page)
+	}
+	if len(page.Anchors) != 3 || page.Anchors[0].ID != "pod-lifecycle" || page.Anchors[0].Level != 1 || page.Anchors[0].Title != "Pod Lifecycle" {
+		t.Fatalf("document anchors = %#v", page.Anchors)
+	}
+	if len(page.Assets) != 1 || page.Assets[0].Path != "images/docs/pod.svg" {
+		t.Fatalf("document assets = %#v", page.Assets)
+	}
+	if _, err := library.ReadDocumentPage("docs/tasks/absent"); err == nil {
+		t.Fatal("page outside the library was served")
+	}
+
+	sections, err := library.ReadDocumentTree("")
+	if err != nil || len(sections) != 1 || sections[0].Title != "Concepts" || !sections[0].HasChildren || sections[0].Path != "docs/concepts" {
+		t.Fatalf("root tree = %#v, %v", sections, err)
+	}
+	children, err := library.ReadDocumentTree("docs/concepts")
+	if err != nil || len(children) != 1 || children[0].Path != context.PagePath || children[0].HasChildren {
+		t.Fatalf("concept children = %#v, %v", children, err)
+	}
+	if _, err := library.ReadDocumentTree("docs/absent"); err == nil {
+		t.Fatal("tree node outside the library was served")
+	}
+
+	content, contentType, err := library.ReadDocumentAsset("images/docs/pod.svg")
+	if err != nil || string(content) != "<svg>pod</svg>\n" || contentType != "image/svg+xml" {
+		t.Fatalf("asset = %q, %q, %v", content, contentType, err)
+	}
+	if _, _, err := library.ReadDocumentAsset("images/docs/absent.svg"); err == nil {
+		t.Fatal("asset outside the library was served")
+	}
+	if err := os.WriteFile(filepath.Join(root, "images", "docs", "pod.svg"), []byte("<svg>tampered</svg>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.ReadDocumentAsset("images/docs/pod.svg"); err == nil {
+		t.Fatal("tampered asset bytes passed the pinned digest")
+	}
+}
+
+func TestLibraryRejectsTamperedDocumentPage(t *testing.T) {
+	root := t.TempDir()
+	context := libraryContext()
+	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, nil)
+	library, err := NewPinnedLibrary(context, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(context.PagePath), "index.md"), []byte(strings.Replace(libraryMarkdown, "mortal", "immortal", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := library.ReadDocumentPage(context.PagePath); err == nil {
+		t.Fatal("tampered document page bytes passed the page digest")
 	}
 }
