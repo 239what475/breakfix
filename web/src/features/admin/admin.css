@@ -1,129 +1,249 @@
-.admin-shell {
+/* Admin console styles. The shell mirrors the my-space two-column layout
+   (sidebar identity + summary cells + icon tabs, centered 1060px content);
+   section styles reuse the app-wide row/badge/button patterns. */
+
+.admin-page {
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	color: var(--ink);
+	background: #f3f6f3;
+}
+
+.admin-layout {
 	display: grid;
-	gap: 18px;
+	grid-template-columns: 250px minmax(0, 1fr);
+	min-width: 0;
+	height: 100%;
 }
 
-.admin-head {
+.admin-sidebar {
+	min-width: 0;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 25px 18px;
+	border-right: 1px solid var(--line);
+	background: #fbfcfa;
+}
+
+.admin-identity {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	padding: 0 5px 21px;
+	border-bottom: 1px solid #e3e8e4;
+}
+
+.admin-avatar {
 	display: grid;
-	gap: 4px;
+	place-items: center;
+	flex: 0 0 auto;
+	width: 34px;
+	height: 34px;
+	border-radius: 50%;
+	color: #17614e;
+	background: #dceee5;
 }
 
-.admin-head h1 {
-	margin: 0;
-	font-size: 24px;
+.admin-identity div {
+	display: grid;
+	min-width: 0;
+	gap: 3px;
 }
 
-.admin-head-sub {
-	margin: 0;
+.admin-identity strong {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 13px;
-	color: var(--muted, #5b6b62);
+}
+
+.admin-identity small {
+	color: var(--muted);
+	font: 10px "DM Mono", monospace;
+}
+
+.admin-summary {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 1px;
+	margin: 20px 0;
+	border: 1px solid #dbe4dd;
+	background: #dbe4dd;
+}
+
+.admin-summary > div {
+	min-width: 0;
+	padding: 10px 9px 9px;
+	background: var(--surface);
+}
+
+.admin-summary dt {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	color: #71807a;
+	font: 9px "DM Mono", monospace;
+	text-transform: uppercase;
+}
+
+.admin-summary dd {
+	margin: 7px 0 0;
+	color: #2b3b34;
+	font: 700 17px "DM Mono", monospace;
+}
+
+/* Queue flags are secondary cells rendered only while flagged actions exist;
+   quiet surface, the amber/red number carries the signal. */
+.admin-summary.admin-summary-flags {
+	gap: 1px;
+	margin: -12px 0 20px;
+	grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+
+.admin-summary-flags > div.attempt-high dt,
+.admin-summary-flags > div.attempt-high dd {
+	color: var(--amber);
+}
+
+.admin-summary-flags > div.failed-unreconciled dt,
+.admin-summary-flags > div.failed-unreconciled dd {
+	color: var(--red);
 }
 
 .admin-tabs {
 	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
+	align-items: center;
+}
+
+.desktop-tabs {
+	display: grid;
+	gap: 3px;
+	margin-top: 24px;
 }
 
 .admin-tabs button {
-	border: 1px solid var(--border, #cfd9d2);
-	background: #fff;
-	border-radius: 999px;
-	padding: 7px 16px;
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--muted, #5b6b62);
-	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 9px;
+	border: 0;
+	border-radius: 4px;
+	padding: 9px 10px;
+	color: #5d6b65;
+	background: transparent;
+	font-size: 12px;
+	font-weight: 700;
+	text-align: left;
+}
+
+.admin-tabs button:hover {
+	color: #25443a;
+	background: #edf3ef;
 }
 
 .admin-tabs button.active {
-	background: var(--ink, #183028);
-	border-color: var(--ink, #183028);
-	color: #fff;
+	color: #176a9d;
+	background: #e5f0f6;
+}
+
+.admin-content {
+	min-width: 0;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 29px clamp(22px, 4vw, 58px) 48px;
+}
+
+.admin-content-header {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 16px;
+	max-width: 1060px;
+	margin: 0 auto 28px;
+}
+
+.admin-content-header h1 {
+	margin: 5px 0 0;
+	font-size: 25px;
+	line-height: 1.18;
+}
+
+.admin-content-actions {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 7px;
+}
+
+.admin-error {
+	max-width: 1060px;
+	margin: 0 auto 18px;
+	padding: 10px 14px;
+	border: 1px solid #e6b5ad;
+	border-radius: 6px;
+	color: var(--red);
+	background: #fff8f6;
+	font-size: 12px;
+}
+
+/* Stuck workflows are the console's one interrupt: a quiet-when-healthy rule
+   keeps this banner out of the layout entirely when nothing is stuck. */
+.admin-alert {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: 1060px;
+	margin: 0 auto 18px;
+	border: 1px solid #e8cfad;
+	border-left: 4px solid var(--amber);
+	border-radius: 6px;
+	padding: 11px 13px;
+	color: #7a5313;
+	background: #fdf9f0;
+	font-size: 12px;
+}
+
+.admin-alert svg {
+	flex: none;
+	color: var(--amber);
+}
+
+.admin-alert .compact-button {
+	margin-left: auto;
+	white-space: nowrap;
 }
 
 .admin-section {
 	display: grid;
 	gap: 14px;
 	align-content: start;
+	max-width: 1060px;
+	margin: 0 auto;
 }
 
-.admin-error {
+.admin-section-title {
 	margin: 0;
-	padding: 10px 14px;
-	border: 1px solid #d8a5a5;
-	border-radius: 6px;
-	background: #fbeeee;
-	color: #8c2f2f;
-	font-size: 13px;
-}
-
-.admin-queue-card {
-	display: grid;
-	gap: 10px;
-	padding: 16px 18px;
-	border: 1px solid #cfd9d2;
-	border-radius: 8px;
-	background: #f6f9f7;
-}
-
-.admin-queue-card h3,
-.admin-workflow-detail h4 {
-	margin: 0;
-	font-size: 13px;
+	color: var(--muted);
+	font: 10px "DM Mono", monospace;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
-	color: var(--muted, #5b6b62);
 }
 
-.admin-queue-grid {
-	display: flex;
-	gap: 18px;
-	flex-wrap: wrap;
-}
-
-.admin-queue-cell {
-	display: grid;
-	gap: 2px;
-	justify-items: center;
-	font-size: 12px;
-	color: var(--muted, #5b6b62);
-}
-
-.admin-queue-number {
-	font-size: 21px;
-	font-weight: 700;
-	color: var(--ink, #183028);
-}
-
-.admin-queue-cell.flagged .admin-queue-number {
-	color: #b3541e;
-}
-
-.admin-flag {
-	font-size: 11px;
-	font-weight: 700;
-}
-
-.admin-flag.high {
-	color: #b3541e;
-}
-
-.admin-queue-items {
-	display: grid;
-	gap: 4px;
+.admin-empty {
 	margin: 0;
+	color: #6d7a74;
 	font-size: 12px;
-	color: var(--muted, #5b6b62);
+	line-height: 1.6;
 }
 
-.admin-queue-item code {
-	font-size: 11px;
+.admin-more {
+	margin-top: 9px;
 }
 
 .admin-workflow-list {
 	display: grid;
-	gap: 10px;
+	gap: 8px;
 }
 
 .admin-workflow-row {
@@ -131,10 +251,11 @@
 	gap: 12px;
 	align-items: center;
 	justify-content: space-between;
-	padding: 13px 16px;
-	border: 1px solid #d7e0da;
-	border-radius: 8px;
-	background: #fff;
+	min-width: 0;
+	border: 1px solid #d8e0da;
+	border-radius: 6px;
+	padding: 14px 15px;
+	background: var(--surface);
 }
 
 .admin-workflow-main {
@@ -145,8 +266,8 @@
 
 .admin-workflow-main p {
 	margin: 0;
-	font-size: 12px;
-	color: var(--muted, #5b6b62);
+	color: #6f7c76;
+	font: 10px "DM Mono", monospace;
 }
 
 .admin-workflow-title {
@@ -154,12 +275,17 @@
 	gap: 8px;
 	align-items: center;
 	flex-wrap: wrap;
+	min-width: 0;
 }
 
 .admin-workflow-title h3 {
+	overflow: hidden;
 	margin: 0;
-	font-size: 14px;
-	word-break: break-all;
+	color: #273630;
+	font-size: 13px;
+	line-height: 1.35;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .admin-workflow-actions {
@@ -168,25 +294,31 @@
 	flex-shrink: 0;
 }
 
+/* Five-color badge discipline: neutral terminal, blue in flight, green
+   published, amber rejected/stuck, red failed. */
 .workflow-state {
 	display: inline-block;
 	padding: 2px 9px;
 	border-radius: 999px;
-	font-size: 11px;
-	font-weight: 700;
 	background: #e7ede9;
-	color: var(--ink, #183028);
-}
-
-.workflow-state.state-failed,
-.workflow-state.state-rejected {
-	background: #f7e3e3;
-	color: #8c2f2f;
+	color: #53625b;
+	font: 700 10px "DM Mono", monospace;
 }
 
 .workflow-state.state-published {
-	background: #e2efe4;
-	color: #2f6b3a;
+	background: #e1f0e8;
+	color: var(--green);
+}
+
+.workflow-state.state-failed {
+	background: #f7e3e3;
+	color: var(--red);
+}
+
+.workflow-state.state-rejected,
+.workflow-state.state-nopractice {
+	background: #f4ecdd;
+	color: var(--amber);
 }
 
 .admin-stuck-badge {
@@ -195,10 +327,9 @@
 	align-items: center;
 	padding: 2px 9px;
 	border-radius: 999px;
-	font-size: 11px;
-	font-weight: 700;
 	background: #fbe9d7;
-	color: #b3541e;
+	color: var(--amber);
+	font: 700 10px "DM Mono", monospace;
 }
 
 .admin-workflow-detail {
@@ -206,8 +337,8 @@
 	gap: 10px;
 	padding: 16px 18px;
 	border: 1px solid #cfd9d2;
-	border-radius: 8px;
-	background: #fff;
+	border-radius: 6px;
+	background: var(--surface);
 }
 
 .admin-detail-head {
@@ -225,8 +356,16 @@
 
 .admin-detail-head p {
 	margin: 0;
+	color: var(--muted);
 	font-size: 12px;
-	color: var(--muted, #5b6b62);
+}
+
+.admin-workflow-detail h4 {
+	margin: 0;
+	font-size: 13px;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--muted);
 }
 
 .admin-ledger,
@@ -252,12 +391,12 @@
 .admin-ledger li p,
 .admin-audits li p {
 	margin: 0;
-	color: var(--muted, #5b6b62);
+	color: var(--muted);
 }
 
 .admin-ledger-id {
 	font-size: 11px;
-	color: var(--muted, #5b6b62);
+	color: var(--muted);
 	word-break: break-all;
 }
 
@@ -277,7 +416,7 @@
 
 .admin-confirm-summary dt {
 	font-weight: 700;
-	color: var(--muted, #5b6b62);
+	color: var(--muted);
 }
 
 .admin-confirm-summary dd {
@@ -290,7 +429,7 @@
 	gap: 5px;
 	font-size: 12px;
 	font-weight: 600;
-	color: var(--muted, #5b6b62);
+	color: var(--muted);
 }
 
 .admin-confirm-reason textarea,
@@ -325,7 +464,7 @@
 	gap: 4px;
 	font-size: 12px;
 	font-weight: 600;
-	color: var(--muted, #5b6b62);
+	color: var(--muted);
 }
 
 .admin-audit-filters input {
@@ -339,4 +478,118 @@
 .admin-audit-detail code {
 	font-size: 11px;
 	word-break: break-all;
+}
+
+.mobile-tabs {
+	display: none;
+}
+
+@media (max-width: 760px) {
+	.desktop-tabs {
+		display: none;
+	}
+
+	.admin-layout {
+		grid-template-columns: 1fr;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+
+	.admin-sidebar {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(172px, 1.1fr);
+		gap: 14px;
+		overflow: hidden;
+		padding: 14px;
+		border-right: 0;
+		border-bottom: 1px solid var(--line);
+	}
+
+	.admin-identity {
+		padding: 0;
+		border: 0;
+	}
+
+	.admin-summary {
+		margin: 0;
+	}
+
+	.admin-summary > div {
+		padding: 7px;
+	}
+
+	.admin-summary dt {
+		font-size: 8px;
+	}
+
+	.admin-summary dd {
+		margin-top: 4px;
+		font-size: 13px;
+	}
+
+	.admin-summary-flags {
+		gap: 1px;
+		margin: 0;
+	}
+
+	.mobile-tabs {
+		display: flex;
+		gap: 3px;
+		margin: -2px 0 20px;
+		border-bottom: 1px solid #dfe6e1;
+		padding-bottom: 9px;
+	}
+
+	.mobile-tabs button {
+		flex: 1 1 0;
+		justify-content: center;
+		padding: 7px 5px;
+		text-align: center;
+	}
+
+	.admin-content {
+		padding: 18px 14px 32px;
+	}
+
+	.admin-content-header {
+		margin-bottom: 22px;
+	}
+
+	.admin-content-header h1 {
+		font-size: 21px;
+	}
+
+	.admin-error,
+	.admin-alert {
+		margin-bottom: 14px;
+	}
+
+	.admin-workflow-row {
+		align-items: start;
+		flex-direction: column;
+	}
+
+	.admin-workflow-actions {
+		justify-content: flex-end;
+	}
+}
+
+@media (max-width: 470px) {
+	.admin-sidebar {
+		grid-template-columns: 1fr;
+	}
+
+	.admin-summary {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
+
+	.admin-summary dt {
+		overflow: hidden;
+		font-size: 8px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.admin-summary-flags {
+		grid-template-columns: 1fr;
+	}
 }

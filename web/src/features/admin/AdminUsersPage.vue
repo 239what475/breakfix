@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { KeyRound, RefreshCw, X } from "lucide-vue-next";
+import { ref, watch } from "vue";
+import { KeyRound, X } from "lucide-vue-next";
 import { useAdminUsers } from "./admin";
 import { toActiveRef, toLoggedInRef } from "./refs";
 import { api } from "../../api/client";
@@ -8,8 +8,15 @@ import type { AdminUser } from "../../api/generated";
 import "../../styles/dialog.css";
 import "./admin.css";
 
-const props = defineProps<{ active: boolean; loggedIn: boolean }>();
+const props = defineProps<{ active: boolean; loggedIn: boolean; refreshRequest: number }>();
 const { users, loading, error, refresh } = useAdminUsers(toActiveRef(props), toLoggedInRef(props));
+
+watch(
+	() => props.refreshRequest,
+	(request, previous) => {
+		if (request !== previous && props.active && props.loggedIn) void refresh();
+	},
+);
 
 const reset = ref<{ user: AdminUser; password: string }>();
 const resetError = ref("");
@@ -47,13 +54,10 @@ async function submitReset() {
 
 <template>
 	<section class="admin-section" aria-labelledby="admin-users-title">
-		<div class="space-section-heading">
-			<div><p class="eyebrow">Identity</p><h2 id="admin-users-title">用户账号</h2></div>
-			<button class="icon-button" type="button" title="Refresh" aria-label="Refresh" @click="refresh()"><RefreshCw :size="15" aria-hidden="true" /></button>
-		</div>
+		<h2 id="admin-users-title" class="admin-section-title">用户账号</h2>
 		<p v-if="error" class="admin-error">{{ error }}</p>
-		<p v-if="loading" class="space-empty">Loading accounts...</p>
-		<p v-else-if="!users.length" class="space-empty">暂无用户。</p>
+		<p v-if="loading" class="admin-empty">Loading accounts...</p>
+		<p v-else-if="!users.length" class="admin-empty">暂无用户。</p>
 		<div v-else class="admin-workflow-list">
 			<article v-for="user in users" :key="user.id" class="admin-workflow-row">
 				<div class="admin-workflow-main">

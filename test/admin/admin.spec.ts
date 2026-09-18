@@ -104,7 +104,10 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   await signInDialog.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("button", { name: "管理" })).toBeVisible();
   await page.getByRole("button", { name: "管理" }).click();
-  await expect(page.getByText("队列积压摘要")).toBeVisible();
+  // The console shell mirrors the app layout: sidebar identity + queue stat
+  // cells + icon tabs, with the active section heading in the content column.
+  await expect(page.getByLabel("Runnable action queue")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "工作流观测与解卡" })).toBeVisible();
 
   // Removing the worker first simulates a permanently stalled provider: the
   // Agent phases run against the in-cluster fixture, then the workflow parks
