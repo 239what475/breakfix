@@ -274,6 +274,37 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /documentation/practices/{id}/terminal-ticket:
+    post:
+      operationId: createPracticeTerminalTicket
+      summary: Create a one-time ticket for the practice terminal WebSocket (JWT)
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalTicketRequest"
+      responses:
+        "200":
+          description: Short-lived one-time terminal ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalTicketResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /auth/register:
     post:
       operationId: register

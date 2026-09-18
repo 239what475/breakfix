@@ -1170,6 +1170,37 @@ export type ResetDocumentationPracticeEnvironmentResponses = {
 
 export type ResetDocumentationPracticeEnvironmentResponse = ResetDocumentationPracticeEnvironmentResponses[keyof ResetDocumentationPracticeEnvironmentResponses];
 
+export type CreatePracticeTerminalTicketData = {
+    body: TerminalTicketRequest;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}/terminal-ticket';
+};
+
+export type CreatePracticeTerminalTicketErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type CreatePracticeTerminalTicketError = CreatePracticeTerminalTicketErrors[keyof CreatePracticeTerminalTicketErrors];
+
+export type CreatePracticeTerminalTicketResponses = {
+    /**
+     * Short-lived one-time terminal ticket
+     */
+    200: TerminalTicketResponse;
+};
+
+export type CreatePracticeTerminalTicketResponse = CreatePracticeTerminalTicketResponses[keyof CreatePracticeTerminalTicketResponses];
+
 export type RegisterData = {
     body: RegisterRequest;
     path?: never;

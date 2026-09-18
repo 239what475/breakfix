@@ -159,6 +159,10 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	documentationRoutes.GET("/practices/:id/environment", h.GetDocumentationPracticeEnvironment)
 	documentationRoutes.POST("/practices/:id/stop", h.StopDocumentationPracticeEnvironment)
 	documentationRoutes.POST("/practices/:id/reset", h.ResetDocumentationPracticeEnvironment)
+	documentationRoutes.POST("/practices/:id/terminal-ticket", h.CreatePracticeTerminalTicket)
+	// The terminal WebSocket authenticates with the one-time ticket instead of
+	// the JWT, exactly like the operations terminal.
+	router.GET("/api/documentation/practices/:id/terminal", h.HandlePracticeTerminalTicket)
 	adminRoutes := router.Group("/api/admin")
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
