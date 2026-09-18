@@ -194,6 +194,37 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(3*time.Second)); err == nil {
 		t.Fatal("mismatched verification digest was published")
 	}
+
+	// The reader index returns exactly the anchor the page registered.
+	summaries, err := database.DocumentPractice.ListPublishedPracticesForPage(ctx, documentContext.SourceID, documentContext.Commit, documentContext.Language, documentContext.PagePath)
+	if err != nil || len(summaries) != 1 || summaries[0].Anchor != documentContext.Anchor || summaries[0].PracticeID != revision.ID || summaries[0].Title != "Pod lifecycle" {
+		t.Fatalf("published practice summaries = %#v, %v", summaries, err)
+	}
+	empty, err := database.DocumentPractice.ListPublishedPracticesForPage(ctx, documentContext.SourceID, documentContext.Commit, documentContext.Language, "docs/other.md")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("other pages must have no practices: %#v, %v", empty, err)
+	}
+	found, err := database.DocumentPractice.GetPublishedPractice(ctx, revision.ID)
+	if err != nil || found.ReaderProjection == nil || found.ReaderProjection.Title != "Pod lifecycle" || found.RunnableRevisionRef != storedRevision.Reference {
+		t.Fatalf("published practice read = %#v, %v", found, err)
+	}
+
+	// The single legacy record published before projections existed is not
+	// backfilled: stripping its projection makes it invisible to readers,
+	// exactly like an unknown ID.
+	if _, err := database.conn.ExecContext(ctx, `UPDATE document_practice_revisions SET revision = revision - 'reader_projection' WHERE id = ?`, revision.ID); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := database.DocumentPractice.ListPublishedPracticesForPage(ctx, documentContext.SourceID, documentContext.Commit, documentContext.Language, documentContext.PagePath)
+	if err != nil || len(legacy) != 0 {
+		t.Fatalf("projection-less record must be invisible: %#v, %v", legacy, err)
+	}
+	if _, err := database.DocumentPractice.GetPublishedPractice(ctx, revision.ID); !errors.Is(err, ErrPublishedPracticeNotFound) {
+		t.Fatalf("projection-less record read err = %v", err)
+	}
+	if _, err := database.DocumentPractice.GetPublishedPractice(ctx, "practice-absent"); !errors.Is(err, ErrPublishedPracticeNotFound) {
+		t.Fatalf("unknown practice read err = %v", err)
+	}
 }
 
 func TestSameJSONIgnoresObjectKeyOrder(t *testing.T) {

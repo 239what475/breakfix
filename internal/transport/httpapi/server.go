@@ -146,6 +146,8 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
 	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
 	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
+	router.GET("/api/documentation/practices", optionalJWTMW, h.ListDocumentationPractices)
+	router.GET("/api/documentation/practices/:id", optionalJWTMW, h.GetDocumentationPractice)
 	documentationRoutes := router.Group("/api/documentation")
 	documentationRoutes.Use(jwtMW)
 	// Ignition is an admin verb: the fixed documentation workflow is a

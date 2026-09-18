@@ -121,6 +121,58 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  /documentation/practices:
+    get:
+      operationId: listDocumentationPractices
+      summary: Practices anchored on one library page (public read)
+      tags: [documentation]
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reader-visible practices on the page; the set digest is returned as the ETag
+          headers:
+            ETag:
+              description: Quoted digest of the returned practice set for conditional requests
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticesResponse"
+        "304":
+          description: Unchanged practice set for a matching If-None-Match
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /documentation/practices/{id}:
+    get:
+      operationId: getDocumentationPractice
+      summary: One practice's reader projection with its runtime summary (public read)
+      tags: [documentation]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reader projection detail resolved through the immutable runnable revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeDetail"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
   /auth/register:
     post:
       operationId: register
@@ -1385,6 +1437,64 @@ components:
           type: string
         state:
           type: string
+
+    DocumentationPracticeSummary:
+      type: object
+      required: [anchor, practice_id, title]
+      properties:
+        anchor:
+          type: string
+          description: Heading anchor on the page this practice hangs from
+        practice_id:
+          type: string
+        title:
+          type: string
+
+    DocumentationPracticesResponse:
+      type: object
+      required: [digest, practices]
+      properties:
+        digest:
+          type: string
+          description: sha256 digest of the returned practice set; returned as the ETag
+        practices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationPracticeSummary"
+
+    DocumentationPracticeRuntime:
+      type: object
+      required: [name, base_image]
+      properties:
+        name:
+          type: string
+          description: Runtime kind, for example k8s or node
+        base_image:
+          type: string
+
+    DocumentationPracticeDetail:
+      type: object
+      required: [id, title, objective, boundary, steps, observations, runtime]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        objective:
+          type: string
+        boundary:
+          type: string
+        steps:
+          type: array
+          description: Instruction text; empty for pure observation practices
+          items:
+            type: string
+        observations:
+          type: array
+          items:
+            type: string
+        runtime:
+          $ref: "#/components/schemas/DocumentationPracticeRuntime"
 
     RegisterRequest:
       type: object

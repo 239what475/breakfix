@@ -128,6 +128,12 @@ func (l Library) Identity() (parserVersion, upstreamCommit string) {
 	return l.global.GeneratorVersion, l.global.Upstream.Commit
 }
 
+// PinnedContext returns the verified source/commit/language identity that
+// reader queries (such as the published practices index) must be scoped to.
+func (l Library) PinnedContext() domain.DocumentContext {
+	return l.Context
+}
+
 // anchorSection returns the markdown slice for one anchor and proves it is the
 // slice the offline parser digest pinned. Any slicing ambiguity is a digest
 // mismatch, never silently different evidence.

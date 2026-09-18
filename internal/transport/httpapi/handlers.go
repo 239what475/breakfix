@@ -55,6 +55,7 @@ type Handler struct {
 	generator            generatorApplication
 	documentation        documentationApplication
 	documentationLibrary documentationLibrary
+	documentationReader  documentationPracticeReader
 	systemReport         SystemReportProvider
 }
 
@@ -98,6 +99,7 @@ type Dependencies struct {
 	RunnableBindings     operationsRunnableBindingResolver
 	Documentation        documentationApplication
 	DocumentationLibrary documentationLibrary
+	DocumentationReader  documentationPracticeReader
 	// SystemReport assembles the admin system status from process-scoped state
 	// that only the bootstrap owns: build information and the background
 	// service registry.
@@ -108,6 +110,15 @@ type Dependencies struct {
 // reconstructing a runtime profile or artifact from mutable content data.
 type operationsRunnableBindingResolver interface {
 	ResolveOperationsRevisionBinding(context.Context, string) (runnable.RevisionReference, error)
+}
+
+// documentationPracticeReader is the reader-facing port over published
+// practices: the per-page index, one reader-visible revision, and the
+// immutable runnable revision its runtime summary resolves through.
+type documentationPracticeReader interface {
+	ListPublishedPracticesForPage(ctx context.Context, sourceID, commit, language, pagePath string) ([]postgres.PublishedPracticeSummary, error)
+	GetPublishedPractice(ctx context.Context, practiceID string) (documentdomain.PracticeRevision, error)
+	ResolveRunnableRevision(ctx context.Context, id, digest string) (runnable.RunnableRevision, error)
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
@@ -168,10 +179,14 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		generator:            dependencies.Generator,
 		documentation:        dependencies.Documentation,
 		documentationLibrary: dependencies.DocumentationLibrary,
+		documentationReader:  dependencies.DocumentationReader,
 		systemReport:         dependencies.SystemReport,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable
+	}
+	if handler.documentationReader == nil && database != nil {
+		handler.documentationReader = postgresPracticeReader{store: database}
 	}
 	handler.authoring = dependencies.Authoring
 	handler.assistant = dependencies.Assistant

@@ -870,3 +870,70 @@ func (d *DocumentPracticeRepository) CountDocumentWorkflowsByState(ctx context.C
 	}
 	return counts, rows.Err()
 }
+
+// ErrPublishedPracticeNotFound reports that a practice is unknown or not
+// reader-visible. The reader treats both identically.
+var ErrPublishedPracticeNotFound = errors.New("published practice is not available")
+
+// PublishedPracticeSummary is the reader-visible practice entry on a page:
+// the anchor it hangs from, its stable identifier, and its frozen title.
+type PublishedPracticeSummary struct {
+	Anchor     string
+	PracticeID string
+	Title      string
+}
+
+// ListPublishedPracticesForPage returns the practices a reader sees on one
+// page, scoped to the pinned library identity. Revisions without a reader
+// projection are invisible by design: the record published before
+// projections existed is not backfilled.
+func (d *DocumentPracticeRepository) ListPublishedPracticesForPage(ctx context.Context, sourceID, commit, language, pagePath string) ([]PublishedPracticeSummary, error) {
+	if strings.TrimSpace(sourceID) == "" || strings.TrimSpace(commit) == "" || strings.TrimSpace(language) == "" || strings.TrimSpace(pagePath) == "" {
+		return nil, errors.New("documentation page identity is required")
+	}
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT index.anchor, revisions.id, revisions.revision->'reader_projection'->>'title'
+		FROM document_practice_index AS index
+		JOIN document_practice_revisions AS revisions ON revisions.id = index.practice_revision_id
+		WHERE index.source_id = ? AND index.commit = ? AND index.language = ? AND index.page_path = ?
+		  AND revisions.revision->'reader_projection' IS NOT NULL
+		ORDER BY index.anchor`, sourceID, commit, language, pagePath)
+	if err != nil {
+		return nil, fmt.Errorf("list published practices: %w", err)
+	}
+	defer rows.Close()
+	summaries := []PublishedPracticeSummary{}
+	for rows.Next() {
+		var summary PublishedPracticeSummary
+		if err := rows.Scan(&summary.Anchor, &summary.PracticeID, &summary.Title); err != nil {
+			return nil, fmt.Errorf("scan published practice: %w", err)
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
+}
+
+// GetPublishedPractice returns one reader-visible practice revision. Unknown
+// IDs and revisions without a reader projection are indistinguishable to the
+// reader: both report not found.
+func (d *DocumentPracticeRepository) GetPublishedPractice(ctx context.Context, practiceID string) (domain.PracticeRevision, error) {
+	if strings.TrimSpace(practiceID) == "" {
+		return domain.PracticeRevision{}, ErrPublishedPracticeNotFound
+	}
+	var encoded []byte
+	err := d.conn.QueryRowContext(ctx, `SELECT revision FROM document_practice_revisions WHERE id = ?`, practiceID).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PracticeRevision{}, ErrPublishedPracticeNotFound
+	}
+	if err != nil {
+		return domain.PracticeRevision{}, fmt.Errorf("read published practice: %w", err)
+	}
+	var revision domain.PracticeRevision
+	if err := json.Unmarshal(encoded, &revision); err != nil {
+		return domain.PracticeRevision{}, fmt.Errorf("decode published practice: %w", err)
+	}
+	if revision.ReaderProjection == nil {
+		return domain.PracticeRevision{}, ErrPublishedPracticeNotFound
+	}
+	return revision, nil
+}

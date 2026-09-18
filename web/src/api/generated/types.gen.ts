@@ -53,6 +53,44 @@ export type DocumentationPracticeStart = {
     state: string;
 };
 
+export type DocumentationPracticeSummary = {
+    /**
+     * Heading anchor on the page this practice hangs from
+     */
+    anchor: string;
+    practice_id: string;
+    title: string;
+};
+
+export type DocumentationPracticesResponse = {
+    /**
+     * sha256 digest of the returned practice set; returned as the ETag
+     */
+    digest: string;
+    practices: Array<DocumentationPracticeSummary>;
+};
+
+export type DocumentationPracticeRuntime = {
+    /**
+     * Runtime kind, for example k8s or node
+     */
+    name: string;
+    base_image: string;
+};
+
+export type DocumentationPracticeDetail = {
+    id: string;
+    title: string;
+    objective: string;
+    boundary: string;
+    /**
+     * Instruction text; empty for pure observation practices
+     */
+    steps: Array<string>;
+    observations: Array<string>;
+    runtime: DocumentationPracticeRuntime;
+};
+
 export type RegisterRequest = {
     username: string;
     password: string;
@@ -919,6 +957,67 @@ export type StartDocumentationPracticeResponses = {
 };
 
 export type StartDocumentationPracticeResponse = StartDocumentationPracticeResponses[keyof StartDocumentationPracticeResponses];
+
+export type ListDocumentationPracticesData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
+         */
+        path: string;
+    };
+    url: '/documentation/practices';
+};
+
+export type ListDocumentationPracticesErrors = {
+    /**
+     * Error
+     */
+    503: ErrorResponse;
+};
+
+export type ListDocumentationPracticesError = ListDocumentationPracticesErrors[keyof ListDocumentationPracticesErrors];
+
+export type ListDocumentationPracticesResponses = {
+    /**
+     * Reader-visible practices on the page; the set digest is returned as the ETag
+     */
+    200: DocumentationPracticesResponse;
+};
+
+export type ListDocumentationPracticesResponse = ListDocumentationPracticesResponses[keyof ListDocumentationPracticesResponses];
+
+export type GetDocumentationPracticeData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}';
+};
+
+export type GetDocumentationPracticeErrors = {
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    503: ErrorResponse;
+};
+
+export type GetDocumentationPracticeError = GetDocumentationPracticeErrors[keyof GetDocumentationPracticeErrors];
+
+export type GetDocumentationPracticeResponses = {
+    /**
+     * Reader projection detail resolved through the immutable runnable revision
+     */
+    200: DocumentationPracticeDetail;
+};
+
+export type GetDocumentationPracticeResponse = GetDocumentationPracticeResponses[keyof GetDocumentationPracticeResponses];
 
 export type RegisterData = {
     body: RegisterRequest;

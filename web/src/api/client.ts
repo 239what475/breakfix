@@ -13,6 +13,8 @@ import type {
 } from "./types";
 import type {
 	DocumentationPageResponse,
+	DocumentationPracticeDetail,
+	DocumentationPracticesResponse,
 	DocumentationTreeResponse,
 	ScenarioList,
 	ScenarioProgress,
@@ -251,6 +253,16 @@ export const api = {
 		request<DocumentationTreeResponse>(
 			"GET",
 			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
+		),
+	getDocumentationPractices: (path: string) =>
+		request<DocumentationPracticesResponse>(
+			"GET",
+			`/documentation/practices?path=${encodeURIComponent(path)}`,
+		),
+	getDocumentationPractice: (id: string) =>
+		request<DocumentationPracticeDetail>(
+			"GET",
+			`/documentation/practices/${encodeURIComponent(id)}`,
 		),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
