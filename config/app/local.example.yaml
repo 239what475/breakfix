@@ -29,21 +29,18 @@ catalog:
   release_reference: ""
 
 # Fixed Kubernetes documentation input. Set library_root to a generated
-# docs-project library (preferred) or snapshot_root to the legacy rendered
-# mirror; the matching upstream checkout is mounted read-only for source
-# evidence. Server verifies fixed source metadata and the configured page
-# content; it does not use a fallback origin, revision, or source root.
+# docs-project library mounted read-only. Server verifies the library's pinned
+# upstream identity and every page digest before serving evidence; it does not
+# use a fallback origin or revision.
 documentation:
   library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
-  snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
-  source_root: ${BREAKFIX_DOCUMENTATION_SOURCE_ROOT}
   source_id: kubernetes
   repository: https://github.com/kubernetes/website.git
   revision: ce98a43f24257385a9766003a6dadc95e962dc63
   version: snapshot-ce98a43
   language: en
   license: CC BY 4.0
-  page_path: docs/concepts/workloads/pods/pod-lifecycle/index.html
+  page_path: docs/concepts/workloads/pods/pod-lifecycle
   anchor: pod-lifetime
 
 # vcluster command and chart source.

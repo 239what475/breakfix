@@ -20,7 +20,7 @@ import (
 const runnableActionStuckBudget = 1800*time.Second + 300*time.Second
 
 // requireDocumentationProduct guards every admin documentation endpoint: the
-// product is deployment-owned and entirely absent when snapshot_root is unset.
+// product is deployment-owned and entirely absent when library_root is unset.
 func (h *Handler) requireDocumentationProduct(c *gin.Context) bool {
 	if h == nil || h.db == nil || h.documentation == nil {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "documentation practice is not configured"})

@@ -112,12 +112,6 @@ type Metadata struct {
 	Anchors []string        `json:"anchors"`
 	Digest  string          `json:"digest"`
 }
-type SourceFragment struct {
-	Context  DocumentContext   `json:"context"`
-	Evidence EvidenceReference `json:"evidence"`
-	Content  string            `json:"content"`
-}
-
 func (e EvidenceReference) Validate() error {
 	if err := stableID(e.ID, "evidence.id"); err != nil {
 		return err

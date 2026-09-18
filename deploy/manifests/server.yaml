@@ -138,12 +138,6 @@ spec:
             - name: documentation-library
               mountPath: /var/lib/breakfix/documentation/library
               readOnly: true
-            - name: documentation-snapshot
-              mountPath: /var/lib/breakfix/documentation/snapshot
-              readOnly: true
-            - name: documentation-source
-              mountPath: /var/lib/breakfix/documentation/source
-              readOnly: true
             - name: data
               mountPath: /var/lib/breakfix
             - name: incus-tls
@@ -192,22 +186,6 @@ spec:
                 path: docs/concepts/workloads/pods/pod-lifecycle/index.json
               - key: images_docs_pod.svg
                 path: images/docs/pod.svg
-        - name: documentation-snapshot
-          configMap:
-            name: breakfix-documentation-snapshot
-            optional: true
-            items:
-              - key: build-info.json
-                path: build-info.json
-              - key: index.html
-                path: docs/concepts/workloads/pods/pod-lifecycle/index.html
-        - name: documentation-source
-          configMap:
-            name: breakfix-documentation-source
-            optional: true
-            items:
-              - key: index.md
-                path: docs/concepts/workloads/pods/pod-lifecycle/index.md
         - name: data
           persistentVolumeClaim:
             claimName: breakfix-server-data

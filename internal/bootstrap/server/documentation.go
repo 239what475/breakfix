@@ -117,21 +117,12 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		License: cfg.Documentation.License, PagePath: cfg.Documentation.PagePath,
 		Anchor: cfg.Documentation.Anchor,
 	}
-	var reader app.Reader
-	var err error
-	if strings.TrimSpace(cfg.Documentation.LibraryRoot) != "" {
-		library, libraryErr := docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot, cfg.Documentation.SourceRoot)
-		if libraryErr != nil {
-			return nil, identity, fmt.Errorf("load pinned documentation library: %w", libraryErr)
-		}
-		identity.parserVersion, identity.upstreamCommit = library.Identity()
-		reader = library
-	} else {
-		reader, err = docsource.NewPinnedSnapshot(context, cfg.Documentation.SnapshotRoot, cfg.Documentation.SourceRoot)
-		if err != nil {
-			return nil, identity, fmt.Errorf("load pinned documentation snapshot: %w", err)
-		}
+	library, err := docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot)
+	if err != nil {
+		return nil, identity, fmt.Errorf("load pinned documentation library: %w", err)
 	}
+	identity.parserVersion, identity.upstreamCommit = library.Identity()
+	reader := app.Reader(library)
 	profiles, err := newDocumentationProfiles(cfg)
 	if err != nil {
 		return nil, identity, err

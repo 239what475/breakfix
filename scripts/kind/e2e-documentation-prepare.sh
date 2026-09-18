@@ -5,7 +5,6 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 runtime_secret=${BREAKFIX_RUNTIME_SECRET:-breakfix-runtime}
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/${BREAKFIX_E2E_TARGET:-e2e}}
-source_fixture_root=$repo_root/test/fixtures/documentation-e2e
 docs_fixture_root=$repo_root/test/fixtures/docs-project
 library_dir=$state_dir/document-library
 target_script=$repo_root/scripts/kind/e2e-target.sh
@@ -16,7 +15,6 @@ encode() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 for tool in base64 docker go jq kubectl make tr; do require_command "$tool"; done
 [ -f "$docs_fixture_root/build-info.json" ] || fail "docs-project fixture is incomplete; run make docs-fixture"
-[ -f "$source_fixture_root/source/docs/concepts/workloads/pods/pod-lifecycle/index.md" ] || fail "documentation source fixture is incomplete"
 
 # Prepare the ordinary disposable target first so this suite inherits its
 # isolated database, Registry, Incus projects, and immutable runtime snapshot.
@@ -59,9 +57,6 @@ done
 # shellcheck disable=SC2086
 kubectl -n "$namespace" create configmap breakfix-documentation-library $library_args \
 	--dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - >/dev/null
-kubectl -n "$namespace" create configmap breakfix-documentation-source \
-	--from-file=index.md="$source_fixture_root/source/docs/concepts/workloads/pods/pod-lifecycle/index.md" \
-	--dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 config_name=$(kubectl -n "$namespace" get deployment breakfix-server -o json |
 	jq -r '.spec.template.spec.volumes[] | select(.name == "config") | .configMap.name // empty')
@@ -70,9 +65,6 @@ config=$(kubectl -n "$namespace" get configmap "$config_name" -o json | jq -r '.
 [ -n "$config" ] && [ "$config" != "null" ] || fail "config ConfigMap $config_name has no config.yaml"
 config=$(printf '%s\n' "$config" | sed \
 	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#' \
-	-e 's#^  snapshot_root: .*#  snapshot_root: ""#' \
-	-e 's#^  source_root: .*#  source_root: /var/lib/breakfix/documentation/source#' \
-	-e 's#page_path: .*#page_path: docs/concepts/workloads/pods/pod-lifecycle#' \
 	-e 's#base_url: https://api.deepseek.com#base_url: http://document-agent-fixture:8080#' \
 	-e 's#model: deepseek-v4-pro#model: documentation-fixture#')
 kubectl -n "$namespace" patch configmap "$config_name" --type merge --patch "$(jq -cn --arg config "$config" '{data:{"config.yaml":$config}}')" >/dev/null

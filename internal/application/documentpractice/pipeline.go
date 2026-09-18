@@ -17,16 +17,14 @@ import (
 
 // Planner reads only through a fixed-revision Reader and delegates semantic
 // suggestions to an Agent. The Agent never receives unrestricted filesystem
-// or network capabilities.
+// or network capabilities. The Reader serves offline-parsed library output
+// only; there is no runtime source-file or rendered-HTML access.
 type Reader interface {
 	ReadPage(string, string) (domain.Page, error)
 	ReadMetadata(string) (domain.Metadata, error)
-	ReadSource(string, int, int) (domain.SourceFragment, error)
-	ReadInclude(string, int, int) (domain.SourceFragment, error)
 }
 type Page = domain.Page
 type Metadata = domain.Metadata
-type SourceFragment = domain.SourceFragment
 
 type PlanningAgent interface {
 	Propose(context.Context, Page, Metadata, []domain.EvidenceReference) (domain.LearningUnitPlan, error)

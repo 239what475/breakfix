@@ -75,49 +75,38 @@ type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
 }
 
-// DocumentationConfig identifies one mounted immutable document input and its
-// matching upstream source tree. library_root points at an offline generated
-// library (docs-project output) and takes precedence when set; snapshot_root
-// is the legacy rendered-HTML mirror. An empty root disables the product;
-// there is no fallback origin, revision, or source root.
+// DocumentationConfig identifies one mounted immutable offline document
+// library (docs-project output) and its pinned upstream identity. An empty
+// library_root disables the product; there is no fallback origin or revision.
 type DocumentationConfig struct {
-	LibraryRoot  string `yaml:"library_root"`
-	SnapshotRoot string `yaml:"snapshot_root"`
-	SourceRoot   string `yaml:"source_root"`
-	SourceID     string `yaml:"source_id"`
-	Repository   string `yaml:"repository"`
-	Revision     string `yaml:"revision"`
-	Version      string `yaml:"version"`
-	Language     string `yaml:"language"`
-	License      string `yaml:"license"`
-	PagePath     string `yaml:"page_path"`
-	Anchor       string `yaml:"anchor"`
+	LibraryRoot string `yaml:"library_root"`
+	SourceID    string `yaml:"source_id"`
+	Repository  string `yaml:"repository"`
+	Revision    string `yaml:"revision"`
+	Version     string `yaml:"version"`
+	Language    string `yaml:"language"`
+	License     string `yaml:"license"`
+	PagePath    string `yaml:"page_path"`
+	Anchor      string `yaml:"anchor"`
 }
 
-func (c DocumentationConfig) Enabled() bool {
-	return strings.TrimSpace(c.LibraryRoot) != "" || strings.TrimSpace(c.SnapshotRoot) != ""
-}
+func (c DocumentationConfig) Enabled() bool { return strings.TrimSpace(c.LibraryRoot) != "" }
 
 func (c DocumentationConfig) Validate() error {
 	if !c.Enabled() {
 		return nil
 	}
-	rootName := "snapshot_root"
-	if strings.TrimSpace(c.LibraryRoot) != "" {
-		rootName = "library_root"
-	}
 	for name, value := range map[string]string{
-		"source_root": c.SourceRoot,
-		"source_id":   c.SourceID,
-		"repository":  c.Repository,
-		"revision":    c.Revision,
-		"version":     c.Version,
-		"language":    c.Language,
-		"license":     c.License,
-		"page_path":   c.PagePath,
+		"source_id":  c.SourceID,
+		"repository": c.Repository,
+		"revision":   c.Revision,
+		"version":    c.Version,
+		"language":   c.Language,
+		"license":    c.License,
+		"page_path":  c.PagePath,
 	} {
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("documentation %s is required when %s is configured", name, rootName)
+			return fmt.Errorf("documentation %s is required when library_root is configured", name)
 		}
 	}
 	page := strings.TrimSpace(c.PagePath)
@@ -415,8 +404,6 @@ func Load(path string) (Config, error) {
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
 	cfg.Documentation.LibraryRoot = os.ExpandEnv(cfg.Documentation.LibraryRoot)
-	cfg.Documentation.SnapshotRoot = os.ExpandEnv(cfg.Documentation.SnapshotRoot)
-	cfg.Documentation.SourceRoot = os.ExpandEnv(cfg.Documentation.SourceRoot)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)

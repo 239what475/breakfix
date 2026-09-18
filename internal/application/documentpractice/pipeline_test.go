@@ -17,12 +17,6 @@ type fakePlannerReader struct {
 
 func (r fakePlannerReader) ReadPage(string, string) (domain.Page, error) { return r.page, nil }
 func (r fakePlannerReader) ReadMetadata(string) (domain.Metadata, error) { return r.metadata, nil }
-func (r fakePlannerReader) ReadSource(string, int, int) (domain.SourceFragment, error) {
-	return domain.SourceFragment{}, nil
-}
-func (r fakePlannerReader) ReadInclude(string, int, int) (domain.SourceFragment, error) {
-	return domain.SourceFragment{}, nil
-}
 
 type fakePlanAgent struct{ plan domain.LearningUnitPlan }
 

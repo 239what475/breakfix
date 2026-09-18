@@ -70,12 +70,12 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 4 refactor(docs): retire the runtime HTML parsing path
 
-- [ ] 删除 `snapshot_root`/`source_root` 配置、`ReadSource`/`ReadInclude` 与
+- [x] 删除 `snapshot_root`/`source_root` 配置、`ReadSource`/`ReadInclude` 与
       `renderedSectionText`/`renderedMainContent` 等运行时 HTML 路径，reader
       仅剩库实现；docs-smoke 删除源码读取断言
-- [ ] `deploy/manifests/server.yaml` 移除两个 documentation ConfigMap 与卷，
+- [x] `deploy/manifests/server.yaml` 移除两个 documentation ConfigMap 与卷，
       库以镜像层/只读卷进入部署（Makefile 接线 docs-project 为前置）
-- [ ] go test/build 绿；E2E 不受影响（fixture 已在库上）
+- [x] go test/build 绿；E2E 不受影响（fixture 已在库上）
 
 **B 波（阅读器侧，提交 5–7；保真度依据 2026-09-18 实测——5818 个代码块保留、
 表格降级 132/854 页、dropped 均值约 2/页且逐页记账于 index.json）**

@@ -68,12 +68,10 @@ func writeLibraryMaterial(t *testing.T, root string, context domain.DocumentCont
 
 func TestPinnedLibraryServesDigestVerifiedAnchorSlices(t *testing.T) {
 	root := t.TempDir()
-	sourceRoot := t.TempDir()
-	writeFile(t, filepath.Join(sourceRoot, "content", "pod-lifecycle.md"), "---\ntitle: Pod Lifecycle\n---\n")
 	context := libraryContext()
 	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, nil)
 
-	library, err := NewPinnedLibrary(context, root, sourceRoot)
+	library, err := NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatalf("open pinned library: %v", err)
 	}
@@ -101,10 +99,6 @@ func TestPinnedLibraryServesDigestVerifiedAnchorSlices(t *testing.T) {
 	if metadata.Digest != evidenceDigest(libraryMarkdown) {
 		t.Fatalf("metadata digest %q is not the page digest", metadata.Digest)
 	}
-	source, err := library.ReadSource("content/pod-lifecycle.md", 1, 2)
-	if err != nil || source.Evidence.Kind != domain.EvidenceSource || source.Content != "---\ntitle: Pod Lifecycle" {
-		t.Fatalf("library source fragment = %#v, %v", source, err)
-	}
 	if _, err := library.ReadPage("docs/other", ""); err == nil {
 		t.Fatal("page outside the pinned context was accepted")
 	}
@@ -119,7 +113,7 @@ func TestPinnedLibraryRejectsManifestContextMismatch(t *testing.T) {
 	writeLibraryMaterial(t, root, context, libraryMarkdown, func(global *docsproject.GlobalManifest) {
 		global.Upstream.Commit = strings.Repeat("b", 40)
 	}, nil)
-	if _, err := NewPinnedLibrary(context, root, t.TempDir()); err == nil {
+	if _, err := NewPinnedLibrary(context, root); err == nil {
 		t.Fatal("library with a different upstream commit was accepted")
 	}
 
@@ -127,7 +121,7 @@ func TestPinnedLibraryRejectsManifestContextMismatch(t *testing.T) {
 	writeLibraryMaterial(t, root, context, libraryMarkdown, func(global *docsproject.GlobalManifest) {
 		global.BuildInfo = json.RawMessage(`{"source":"kubernetes","repository":"https://github.com/other/website.git"}`)
 	}, nil)
-	if _, err := NewPinnedLibrary(context, root, t.TempDir()); err == nil {
+	if _, err := NewPinnedLibrary(context, root); err == nil {
 		t.Fatal("library with a different repository was accepted")
 	}
 
@@ -135,7 +129,7 @@ func TestPinnedLibraryRejectsManifestContextMismatch(t *testing.T) {
 	writeLibraryMaterial(t, root, context, libraryMarkdown, func(global *docsproject.GlobalManifest) {
 		global.Pages = []string{"docs/tasks/other/"}
 	}, nil)
-	if _, err := NewPinnedLibrary(context, root, t.TempDir()); err == nil {
+	if _, err := NewPinnedLibrary(context, root); err == nil {
 		t.Fatal("library without the pinned page was accepted")
 	}
 }
@@ -144,7 +138,7 @@ func TestPinnedLibraryRejectsTamperedPageBytes(t *testing.T) {
 	root := t.TempDir()
 	context := libraryContext()
 	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, nil)
-	library, err := NewPinnedLibrary(context, root, t.TempDir())
+	library, err := NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +164,7 @@ func TestPinnedLibraryRejectsAnchorDigestMismatch(t *testing.T) {
 			}
 		}
 	})
-	library, err := NewPinnedLibrary(context, root, t.TempDir())
+	library, err := NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +182,7 @@ func TestPinnedLibraryRejectsPageManifestMismatch(t *testing.T) {
 	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, func(page *docsproject.PageManifest) {
 		page.Upstream.Commit = strings.Repeat("b", 40)
 	})
-	library, err := NewPinnedLibrary(context, root, t.TempDir())
+	library, err := NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +194,7 @@ func TestPinnedLibraryRejectsPageManifestMismatch(t *testing.T) {
 	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, func(page *docsproject.PageManifest) {
 		page.Digest = evidenceDigest("not the markdown")
 	})
-	library, err = NewPinnedLibrary(context, root, t.TempDir())
+	library, err = NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,9 +208,8 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 		t.Skip("documentation smoke target was not requested")
 	}
 	libraryRoot := strings.TrimSpace(os.Getenv("BREAKFIX_DOCUMENTATION_LIBRARY_ROOT"))
-	sourceRoot := strings.TrimSpace(os.Getenv("BREAKFIX_DOCUMENTATION_SOURCE_ROOT"))
-	if libraryRoot == "" || sourceRoot == "" {
-		t.Fatal("documentation library smoke requires library and source roots")
+	if libraryRoot == "" {
+		t.Fatal("documentation library smoke requires the library root")
 	}
 	context := domain.DocumentContext{
 		FormatVersion: domain.FormatVersion,
@@ -229,7 +222,7 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 		PagePath:      "docs/concepts/workloads/pods/pod-lifecycle",
 		Anchor:        "pod-lifetime",
 	}
-	library, err := NewPinnedLibrary(context, libraryRoot, sourceRoot)
+	library, err := NewPinnedLibrary(context, libraryRoot)
 	if err != nil {
 		t.Fatalf("open pinned Kubernetes library: %v", err)
 	}
@@ -279,7 +272,7 @@ func TestPinnedLibraryFollowsProjectedVolumeSymlinks(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, ".data", filepath.FromSlash(context.PagePath)), pageDir); err != nil {
 		t.Fatal(err)
 	}
-	library, err := NewPinnedLibrary(context, root, t.TempDir())
+	library, err := NewPinnedLibrary(context, root)
 	if err != nil {
 		t.Fatalf("open library through projected symlinks: %v", err)
 	}
@@ -298,7 +291,17 @@ func TestPinnedLibraryFollowsProjectedVolumeSymlinks(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "manifest.json"), filepath.Join(root, "manifest.json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewPinnedLibrary(context, root, t.TempDir()); err == nil {
+	if _, err := NewPinnedLibrary(context, root); err == nil {
 		t.Fatal("symlink escaping the library root was accepted")
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

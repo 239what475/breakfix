@@ -1,6 +1,12 @@
+// Package documentation provides the constrained, read-only library access
+// used by documentation agents. It never performs network requests and never
+// parses rendered HTML: parsing happened offline in docs-project, and this
+// adapter only verifies digests and slices the parsed output.
 package docsource
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,27 +22,28 @@ import (
 // while verifying a library. Page markdown keeps the rendered-page limit.
 const MaxLibraryManifestBytes = 8 * 1024 * 1024
 
+// MaxRenderedPageBytes bounds one parsed page's markdown.
+const MaxRenderedPageBytes = 2 * 1024 * 1024
+
 // Library reads the pinned page from an offline generated document library
-// (docs-project output). Parsing already happened offline; this adapter only
-// verifies digests and slices. It never parses rendered HTML.
+// (docs-project output). The library carries its own generator identity; the
+// server build does not assert one.
 type Library struct {
-	Context    domain.DocumentContext
-	Root       string
-	SourceRoot string
-	global     docsproject.GlobalManifest
+	Context domain.DocumentContext
+	Root    string
+	global  docsproject.GlobalManifest
 }
 
 // NewPinnedLibrary verifies the global manifest against the pinned context
-// before any page is served. The library carries its own generator identity;
-// the server build does not assert one.
-func NewPinnedLibrary(expected domain.DocumentContext, libraryRoot, sourceRoot string) (Library, error) {
+// before any page is served.
+func NewPinnedLibrary(expected domain.DocumentContext, libraryRoot string) (Library, error) {
 	if strings.TrimSpace(libraryRoot) == "" {
 		return Library{}, errors.New("documentation library root is required")
 	}
 	if err := expected.Validate(); err != nil {
 		return Library{}, fmt.Errorf("documentation pinned context: %w", err)
 	}
-	library := Library{Context: expected, Root: filepath.Clean(libraryRoot), SourceRoot: strings.TrimSpace(sourceRoot)}
+	library := Library{Context: expected, Root: filepath.Clean(libraryRoot)}
 	if _, err := library.requireDirectory(library.Root, "documentation library root"); err != nil {
 		return Library{}, err
 	}
@@ -79,6 +86,9 @@ func libraryContains(pages []string, pagePath string) bool {
 	}
 	return false
 }
+
+type Page = domain.Page
+type Metadata = domain.Metadata
 
 func (l Library) ReadPage(path, anchor string) (Page, error) {
 	if path != l.Context.PagePath || anchor != l.Context.Anchor {
@@ -188,42 +198,6 @@ func (l Library) verifiedPage(path string) (string, docsproject.PageManifest, er
 	return markdown, manifest, nil
 }
 
-// ReadSource and ReadInclude still serve upstream source fragments. They are
-// scheduled for removal with the runtime source-reading path.
-func (l Library) ReadSource(path string, startLine, endLine int) (SourceFragment, error) {
-	return l.fragment(domain.EvidenceSource, path, startLine, endLine)
-}
-
-func (l Library) ReadInclude(path string, startLine, endLine int) (SourceFragment, error) {
-	return l.fragment(domain.EvidenceInclude, path, startLine, endLine)
-}
-
-func (l Library) fragment(kind domain.EvidenceKind, path string, start, end int) (SourceFragment, error) {
-	if strings.TrimSpace(l.SourceRoot) == "" {
-		return SourceFragment{}, errors.New("documentation source root is not configured")
-	}
-	if _, err := l.requireDirectory(l.SourceRoot, "documentation source root"); err != nil {
-		return SourceFragment{}, err
-	}
-	content, digest, err := readRootFileVerified(l.SourceRoot, path, MaxReadBytes)
-	if err != nil {
-		return SourceFragment{}, err
-	}
-	lines := strings.Split(content, "\n")
-	if start == 0 {
-		start = 1
-	}
-	if end == 0 {
-		end = len(lines)
-	}
-	if start < 1 || end < start || end > len(lines) {
-		return SourceFragment{}, errors.New("source line range is outside the file")
-	}
-	fragment := strings.Join(lines[start-1:end], "\n")
-	id := fmt.Sprintf("%s-%d-%d", strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(path), filepath.Ext(path)), "/", "-"), start, end)
-	return SourceFragment{Context: l.Context, Evidence: domain.EvidenceReference{ID: id, Kind: kind, Path: path, Digest: digest, StartLine: start, EndLine: end, Quote: fragment}, Content: fragment}, nil
-}
-
 func (l Library) requireDirectory(root, description string) (os.FileInfo, error) {
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
@@ -281,4 +255,9 @@ func readRootFileVerified(root, path string, limit int64) (string, string, error
 		return "", "", err
 	}
 	return string(b), evidenceDigest(string(b)), nil
+}
+
+func evidenceDigest(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(h[:])
 }

@@ -116,41 +116,25 @@ func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
 	}
 }
 
-func TestDocumentationConfigRequiresACompleteFixedSnapshot(t *testing.T) {
+func TestDocumentationConfigRequiresACompleteFixedLibrary(t *testing.T) {
 	if err := (DocumentationConfig{}).Validate(); err != nil {
 		t.Fatalf("disabled documentation config = %v", err)
 	}
-	configured := DocumentationConfig{SnapshotRoot: "/var/lib/breakfix/docs", SourceRoot: "/var/lib/breakfix/docs-source", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle/", Anchor: "pod-lifecycle"}
+	configured := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
 	if err := configured.Validate(); err != nil {
-		t.Fatalf("fixed documentation config = %v", err)
+		t.Fatalf("library documentation config = %v", err)
+	}
+	if !configured.Enabled() || (DocumentationConfig{}).Enabled() {
+		t.Fatal("documentation enablement must follow the configured library root")
 	}
 	configured.PagePath = "../secret"
 	if err := configured.Validate(); err == nil {
 		t.Fatal("documentation path traversal was accepted")
 	}
-	configured.PagePath = "docs/concepts/workloads/pods/pod-lifecycle/"
-	configured.SourceRoot = ""
+	configured.PagePath = "docs/concepts/workloads/pods/pod-lifecycle"
+	configured.SourceID = ""
 	if err := configured.Validate(); err == nil {
-		t.Fatal("documentation without a fixed source root was accepted")
-	}
-	library := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceRoot: "/var/lib/breakfix/docs-source", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
-	if err := library.Validate(); err != nil {
-		t.Fatalf("library documentation config = %v", err)
-	}
-	if !library.Enabled() {
-		t.Fatal("documentation enablement must follow the configured root")
-	}
-	if (DocumentationConfig{}).Enabled() {
-		t.Fatal("documentation without any root must stay disabled")
-	}
-	library.SourceID = ""
-	if err := library.Validate(); err == nil {
-		t.Fatal("library documentation without upstream identity was accepted")
-	}
-	library.SnapshotRoot = "/var/lib/breakfix/docs"
-	library.SourceID = "kubernetes"
-	if err := library.Validate(); err != nil {
-		t.Fatalf("library root must take precedence over the legacy snapshot root: %v", err)
+		t.Fatal("documentation without upstream identity was accepted")
 	}
 }
 
