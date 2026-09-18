@@ -2,10 +2,11 @@
 import { PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-vue-next";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { api } from "../../api/client";
-import type { DocumentationPageResponse } from "../../api/generated";
+import type { DocumentationPageResponse, DocumentationPracticeDetail, DocumentationPracticeSummary } from "../../api/generated";
 import { documentationSource, libraryPathOf, urlPathOf } from "./documentation";
 import { renderDocumentMarkdown } from "./markdown";
 import DocumentationToc, { type TreeEntry } from "./DocumentationToc.vue";
+import PracticePanel from "./PracticePanel.vue";
 import "./documentation.css";
 
 const entryUrlPath: string = documentationSource.entryPath;
@@ -20,6 +21,18 @@ const tocFailed = ref(false);
 const tocOpen = ref(false);
 const tocCollapsed = ref(false);
 const article = ref<HTMLElement>();
+
+// The practice line: one published practice can hang from a heading anchor.
+// Opening it collapses the outline into the reader's reserved rail slot, and
+// closing it restores the outline exactly as the reader left it.
+const practices = ref<DocumentationPracticeSummary[]>([]);
+const activePracticeAnchor = ref<string | null>(null);
+const practiceDetail = ref<DocumentationPracticeDetail | null>(null);
+const practiceDetailLoading = ref(false);
+const practiceDetailFailed = ref(false);
+const tocCollapsedBeforePractice = ref<boolean | null>(null);
+
+const practiceOpen = computed(() => activePracticeAnchor.value !== null);
 
 const currentLibraryPath = computed(() => libraryPathOf(current.value.path));
 
@@ -64,6 +77,7 @@ function readLocation() {
 
 async function loadPage(scrollHash: string) {
   const libraryPath = currentLibraryPath.value;
+  resetPracticeState();
   if (!libraryPath || libraryPath === "docs") {
     // A section root is not a page: keep the location and show the outline.
     page.value = null;
@@ -82,6 +96,14 @@ async function loadPage(scrollHash: string) {
   } catch {
     loading.value = false;
     failed.value = true;
+  }
+  // The practice index is a per-page pull; a reader without a published
+  // practice simply renders none, so failures stay silent here.
+  try {
+    const practiceList = await api.getDocumentationPractices(libraryPath);
+    if (currentLibraryPath.value === libraryPath) practices.value = practiceList.practices;
+  } catch {
+    practices.value = [];
   }
 }
 
@@ -159,6 +181,90 @@ function handlePopState() {
   void loadPage(current.value.hash);
 }
 
+// The practice entry rides the rendered headings: one anchor button per
+// published practice, inserted after the markdown lands in the article and
+// re-inserted whenever the rendered body is replaced.
+function decoratePracticeHeadings() {
+  const container = article.value;
+  if (!container) return;
+  container.querySelectorAll(".practice-anchor-button").forEach((button) => button.remove());
+  for (const practice of practices.value) {
+    const heading = container.querySelector(`[id="${CSS.escape(practice.anchor)}"]`);
+    if (!heading || heading.querySelector(".practice-anchor-button")) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "practice-anchor-button";
+    button.dataset.anchor = practice.anchor;
+    button.setAttribute("aria-label", `Start practice: ${practice.title}`);
+    button.title = practice.title;
+    button.textContent = "Practice";
+    heading.appendChild(button);
+  }
+}
+
+function scrollHeadingIntoView(anchor: string) {
+  const target = article.value?.querySelector(`[id="${CSS.escape(anchor)}"]`);
+  target?.scrollIntoView({ block: "start" });
+}
+
+function handleArticleClick(event: MouseEvent) {
+  const button = (event.target as HTMLElement | null)?.closest?.(".practice-anchor-button");
+  if (!(button instanceof HTMLElement)) return;
+  const anchor = button.getAttribute("data-anchor");
+  if (anchor) void openPractice(anchor);
+}
+
+async function openPractice(anchor: string) {
+  const summary = practices.value.find((item) => item.anchor === anchor);
+  if (!summary || activePracticeAnchor.value === anchor) return;
+  activePracticeAnchor.value = anchor;
+  practiceDetail.value = null;
+  practiceDetailFailed.value = false;
+  // The outline gives its column to the practice rail; the reader restores
+  // the original outline state when the panel closes.
+  if (tocCollapsedBeforePractice.value === null) tocCollapsedBeforePractice.value = tocCollapsed.value;
+  tocCollapsed.value = true;
+  await nextTick();
+  scrollHeadingIntoView(anchor);
+  practiceDetailLoading.value = true;
+  try {
+    const detail = await api.getDocumentationPractice(summary.practice_id);
+    if (activePracticeAnchor.value !== anchor) return;
+    practiceDetail.value = detail;
+    practiceDetailLoading.value = false;
+  } catch {
+    if (activePracticeAnchor.value !== anchor) return;
+    practiceDetailLoading.value = false;
+    practiceDetailFailed.value = true;
+  }
+}
+
+async function closePractice() {
+  const anchor = activePracticeAnchor.value;
+  if (anchor === null) return;
+  activePracticeAnchor.value = null;
+  practiceDetail.value = null;
+  practiceDetailFailed.value = false;
+  if (tocCollapsedBeforePractice.value !== null) {
+    tocCollapsed.value = tocCollapsedBeforePractice.value;
+    tocCollapsedBeforePractice.value = null;
+  }
+  await nextTick();
+  scrollHeadingIntoView(anchor);
+}
+
+function resetPracticeState() {
+  activePracticeAnchor.value = null;
+  practiceDetail.value = null;
+  practiceDetailLoading.value = false;
+  practiceDetailFailed.value = false;
+  practices.value = [];
+  if (tocCollapsedBeforePractice.value !== null) {
+    tocCollapsed.value = tocCollapsedBeforePractice.value;
+    tocCollapsedBeforePractice.value = null;
+  }
+}
+
 let observer: IntersectionObserver | undefined;
 
 function observeHeadings() {
@@ -185,6 +291,11 @@ watch(body, async () => {
   observeHeadings();
 });
 
+watch([body, practices], async () => {
+  await nextTick();
+  decoratePracticeHeadings();
+});
+
 readLocation();
 void loadTreeRoots();
 void loadPage(current.value.hash);
@@ -197,9 +308,9 @@ onUnmounted(() => {
 
 <template>
   <section class="documentation-page" aria-label="Kubernetes documentation">
-    <!-- The grid reserves a right column for the practice rail (the NEXT.md
-         reader line); it is deliberately not rendered in this phase. -->
-    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed }">
+    <!-- The grid reserves a right column for the practice rail; opening a
+         practice collapses the outline and renders the panel in the rail. -->
+    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed, 'practice-open': practiceOpen }">
       <button
         class="compact-button documentation-toc-toggle"
         type="button"
@@ -237,15 +348,24 @@ onUnmounted(() => {
           </button>
         </div>
         <!-- Rendered from library markdown with html:false; all markup comes
-             from markdown-it's own rules plus classed wrappers. -->
+             from markdown-it's own rules plus classed wrappers. The practice
+             anchor buttons are attached after render, never by the parser. -->
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <article v-else-if="page" ref="article" class="documentation-article" v-html="body"></article>
+        <article v-else-if="page" ref="article" class="documentation-article" @click="handleArticleClick" v-html="body"></article>
         <div v-else class="documentation-empty">
           <h2>Documentation</h2>
           <p>Choose a page from the outline to start reading.</p>
         </div>
       </div>
-      <div class="documentation-rail" aria-hidden="true"></div>
+      <div class="documentation-rail">
+        <PracticePanel
+          v-if="practiceOpen"
+          :detail="practiceDetail"
+          :loading="practiceDetailLoading"
+          :failed="practiceDetailFailed"
+          @close="closePractice"
+        />
+      </div>
     </div>
   </section>
 </template>
