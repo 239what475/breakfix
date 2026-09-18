@@ -57,85 +57,91 @@
   div；标题 ID 来自库 anchors[]（`assignHeadingIds`），插入点可直接对位；
   IntersectionObserver 只做 URL 同步，本线不动（无节区间激活逻辑）。
 
+已于 2026-09-19 完成并验收：A 波两提交（`110c82f`、`f28afbb`）+ B 波两提交
+（`a27086c`、`18394cf`）+ C 波三提交（`9e3d8b5`、`f55c2f8`、`79bd9ae`）逐提交
+绿（另有 `50a3e49` 修复无 DB 时从未运行的 httpapi 环境生命周期测试基建）。
+收尾全量回归（docs-smoke 真实 854 页库、test-unit 含 DB 用例、
+ops/documentation/admin 三套 E2E、verify-generated）全绿。
+
 提交拆解（A/B/C 三波；A、B 波完成即全绿检查点）
 
 **A 波（读路径）**
 
 ### 提交 1 feat(docs): materialize the reader projection at publish time
 
-- [ ] `domain.PracticeRevision` 增可空读者投影字段（标题必填，目标/边界/步骤/
+- [x] `domain.PracticeRevision` 增可空读者投影字段（标题必填，目标/边界/步骤/
       观察点；步骤允许为空）；发布路径从 plan 工件固化写入 revision JSONB
-- [ ] 单测：plan 缺标题拒绝发布；投影随记录持久化且读回完整；存量无投影记录
+- [x] 单测：plan 缺标题拒绝发布；投影随记录持久化且读回完整；存量无投影记录
       照常解码（可空）
 
 ### 提交 2 feat(api): serve published practices to the reader
 
-- [ ] `GET /api/documentation/practices?path=`：按 config 钉死的
+- [x] `GET /api/documentation/practices?path=`：按 config 钉死的
       source/commit/language 查索引，只返回带投影的记录
       （`anchor`/`practice_id`/`title`），每页一次拉取；ETag 由返回集 digest
       合成，`If-None-Match` 命中 304
-- [ ] `GET /api/documentation/practices/{id}`：读者投影详情 + 运行时摘要
+- [x] `GET /api/documentation/practices/{id}`：读者投影详情 + 运行时摘要
       （runtime/基础镜像，经 runnable revision ref 解析）；两者可选 JWT 公开读，
       与 page/tree/asset 同约定；OpenAPI 契约与 web client 同步生成进本提交
-- [ ] 单测：无投影记录不可见、未知 id 404、返回锚点与索引一致
+- [x] 单测：无投影记录不可见、未知 id 404、返回锚点与索引一致
 
 **B 波（会话后端）**
 
 ### 提交 3 feat(api): run practice environments from published revisions
 
-- [ ] 环境服务的 content-kind 与 revision binding 参数化
+- [x] 环境服务的 content-kind 与 revision binding 参数化
       （findEnvironment/createEnvironment/environmentObjectMeta）；新增
       `ResolveDocumentationPracticeRevisionBinding`（读
       `document_practice_revisions` → runnable revision ref）；label 值
       `documentation-practice`（与 runnable Kind 一致），Purpose learning，确定性
       CR 名复用 learningEnvironmentName 模式
-- [ ] `POST …/practices/{id}/start`（find-or-create，对齐 ops 语义：
+- [x] `POST …/practices/{id}/start`（find-or-create，对齐 ops 语义：
       Existing/Draining 恢复、非 Ready 等待 Ready）、`GET …/environment`
       （phase/终端节点信息）、`POST …/stop`、`POST …/reset`
       （Spec.ResetNonce++）；全部 JWT
-- [ ] ops 路径行为零变化（参数化而非重写）；单测：find-or-create 幂等、并发
+- [x] ops 路径行为零变化（参数化而非重写）；单测：find-or-create 幂等、并发
       启动由确定性 CR 名围栏、ops kind 不受影响
 
 ### 提交 4 feat(api): attach practice terminals
 
-- [ ] `POST …/practices/{id}/terminal-ticket` + `GET …/terminal?ticket=`
+- [x] `POST …/practices/{id}/terminal-ticket` + `GET …/terminal?ticket=`
       镜像 ops 双端点：一次性 ticket（哈希存储、1 分钟 TTL）+ WebSocket（origin
       允许清单、resize/data/ready 协议、连接期 lease 自动续期）；环境解析改为
       按 (user, content-kind, content-id) 共享，ticket 存储与终端连接记账原样
       复用
-- [ ] 单测：ticket 一次性与过期拒绝、origin 不在允许清单拒绝、未知实践 404
+- [x] 单测：ticket 一次性与过期拒绝、origin 不在允许清单拒绝、未知实践 404
 
 **C 波（前端 + E2E）**
 
 ### 提交 5 feat(web): open the practice panel from heading anchors
 
-- [ ] 渲染后按页级 practices 索引往有实践的标题插按钮（事件委托，
+- [x] 渲染后按页级 practices 索引往有实践的标题插按钮（事件委托，
       `data-anchor`），≤900px CSS 隐藏；`.practice-open` 网格态
       （`0 minmax(0,1fr) minmax(360px,32%)`），打开时记忆目录原状态、关闭恢复；
       打开/关闭 scrollIntoView 锚定实践所属标题
-- [ ] 面板纯展示部分：标题/目标/边界 + 可折叠步骤 + 观察点（会话操作随提交 6）
-- [ ] 阅读器 E2E：按钮按锚点出现/消失、面板开合、布局切换与目录恢复、移动端
+- [x] 面板纯展示部分：标题/目标/边界 + 可折叠步骤 + 观察点（会话操作随提交 6）
+- [x] 阅读器 E2E：按钮按锚点出现/消失、面板开合、布局切换与目录恢复、移动端
       宽度无按钮
 
 ### 提交 6 feat(web): run the practice session in the panel
 
-- [ ] `useTerminalSession`/`TerminalPane` 泛化（scenario 专用的基础路径与身份
+- [x] `useTerminalSession`/`TerminalPane` 泛化（scenario 专用的基础路径与身份
       抽象为参数）；会话接线：未登录 AuthDialog 后自动继续、启动轮询 phase
       （准备环境中状态）、Ready 后终端接入、结束/重置、切换实践自动结束上一
       会话（toast）
-- [ ] E2E：启动 → Ready → 终端就绪 → 停止；关闭面板再进入重接；ops/
+- [x] E2E：启动 → Ready → 终端就绪 → 停止；关闭面板再进入重接；ops/
       documentation/admin E2E 回归
 
 ### 提交 7 refactor(web): retire the ops mobile terminal toggle
 
-- [ ] 删除 ScenarioWorkspace 的 mobileView 与 WorkspaceHeader 的 Docs/Terminal
+- [x] 删除 ScenarioWorkspace 的 mobileView 与 WorkspaceHeader 的 Docs/Terminal
       分段切换及配套 CSS（`.mobile-view-toggle`、`.workspace-body.mobile-*`
       窗格切换规则）；≤950px 终端窗格隐藏、文档窗格常显，侧栏图标栏不变；
       终端可见性计算简化为窄屏不连（移动端不建立 WS/PTY）
-- [ ] 进度轮询门槛由"终端已连接且页面可见"放宽为"页面可见"（移除后移动端
+- [x] 进度轮询门槛由"终端已连接且页面可见"放宽为"页面可见"（移除后移动端
       只读查看时检查点列表仍会刷新）；此切换无 E2E 覆盖（2026-09-19 探查），
       ops E2E 回归证明桌面行为不变
-- [ ] 收尾全量回归：`make docs-smoke`、`make test-unit`、`make test-e2e`、
+- [x] 收尾全量回归：`make docs-smoke`、`make test-unit`、`make test-e2e`、
       `make test-e2e-documentation`、`make test-e2e-admin`、
       `make verify-generated` 全绿
 
