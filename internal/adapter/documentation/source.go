@@ -249,40 +249,7 @@ func (s Snapshot) readFragment(root, path string, kind domain.EvidenceKind, star
 }
 
 func (s Snapshot) readFromLimit(root, path string, limit int64) (string, string, error) {
-	if err := domain.ValidateRelativePath(path); err != nil {
-		return "", "", err
-	}
-	full := filepath.Join(root, filepath.FromSlash(path))
-	root, err := filepath.Abs(root)
-	if err != nil {
-		return "", "", err
-	}
-	target, err := filepath.Abs(full)
-	if err != nil {
-		return "", "", err
-	}
-	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
-		return "", "", errors.New("documentation path escapes snapshot root")
-	}
-	info, err := os.Lstat(target)
-	if err != nil {
-		return "", "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", "", errors.New("documentation symlinks are not readable")
-	}
-	if !info.Mode().IsRegular() {
-		return "", "", errors.New("documentation path is not a regular file")
-	}
-	if info.Size() > limit {
-		return "", "", errors.New("documentation file exceeds read limit")
-	}
-	b, err := os.ReadFile(target)
-	if err != nil {
-		return "", "", err
-	}
-	h := sha256.Sum256(b)
-	return string(b), "sha256:" + hex.EncodeToString(h[:]), nil
+	return readRootFileVerified(root, path, limit)
 }
 
 func (s Snapshot) requireDirectory(root, description string) (os.FileInfo, error) {

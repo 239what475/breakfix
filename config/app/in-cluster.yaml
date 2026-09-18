@@ -21,6 +21,7 @@ catalog:
 # are mounted read-only. The only initial workflow scope is the fixed Pod
 # lifecycle page.
 documentation:
+  library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
   snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
   source_root: ${BREAKFIX_DOCUMENTATION_SOURCE_ROOT}
   source_id: kubernetes

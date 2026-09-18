@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-const formatVersion = 1
+const FormatVersion = 1
 
 type Upstream struct {
 	Source  string `json:"source"`
@@ -234,7 +234,7 @@ func existingPage(out, pagePath, version string) (PageManifest, bool) {
 }
 
 func writeFailureReport(out, version string, failures []PageFailure) error {
-	content, err := marshalJSON(FailureReport{FormatVersion: formatVersion, GeneratorVersion: version, Failures: failures})
+	content, err := marshalJSON(FailureReport{FormatVersion: FormatVersion, GeneratorVersion: version, Failures: failures})
 	if err != nil {
 		return err
 	}
@@ -262,7 +262,7 @@ func loadUpstream(root string) (Upstream, json.RawMessage, error) {
 
 func newPageManifest(version string, upstream Upstream, pagePath, pageKind string, page ExtractedPage) PageManifest {
 	return PageManifest{
-		FormatVersion:    formatVersion,
+		FormatVersion:    FormatVersion,
 		GeneratorVersion: version,
 		Upstream:         upstream,
 		Path:             pagePath,
@@ -320,7 +320,7 @@ func anchorsForMarkdown(markdown []byte, headings []ExtractedHeading) []Anchor {
 	return anchors
 }
 
-func markdownAnchorSection(markdown []byte, headings []ExtractedHeading, id string) ([]byte, error) {
+func MarkdownAnchorSection(markdown []byte, headings []ExtractedHeading, id string) ([]byte, error) {
 	anchors := anchorsForMarkdown(markdown, headings)
 	for _, anchor := range anchors {
 		if anchor.ID != id {
@@ -352,7 +352,7 @@ func newGlobalManifest(config Config, state treeState, upstream Upstream, rawBui
 		return GlobalManifest{}, fmt.Errorf("read redirects for manifest: %w", err)
 	}
 	manifest := GlobalManifest{
-		FormatVersion:    formatVersion,
+		FormatVersion:    FormatVersion,
 		GeneratorVersion: config.Version,
 		Upstream:         upstream,
 		BuildInfo:        rawBuildInfo,

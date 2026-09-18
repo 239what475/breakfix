@@ -133,6 +133,25 @@ func TestDocumentationConfigRequiresACompleteFixedSnapshot(t *testing.T) {
 	if err := configured.Validate(); err == nil {
 		t.Fatal("documentation without a fixed source root was accepted")
 	}
+	library := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceRoot: "/var/lib/breakfix/docs-source", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+	if err := library.Validate(); err != nil {
+		t.Fatalf("library documentation config = %v", err)
+	}
+	if !library.Enabled() {
+		t.Fatal("documentation enablement must follow the configured root")
+	}
+	if (DocumentationConfig{}).Enabled() {
+		t.Fatal("documentation without any root must stay disabled")
+	}
+	library.SourceID = ""
+	if err := library.Validate(); err == nil {
+		t.Fatal("library documentation without upstream identity was accepted")
+	}
+	library.SnapshotRoot = "/var/lib/breakfix/docs"
+	library.SourceID = "kubernetes"
+	if err := library.Validate(); err != nil {
+		t.Fatalf("library root must take precedence over the legacy snapshot root: %v", err)
+	}
 }
 
 func TestLoadExpandsHomeKubeconfigPath(t *testing.T) {

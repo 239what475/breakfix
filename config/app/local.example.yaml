@@ -28,11 +28,13 @@ registry:
 catalog:
   release_reference: ""
 
-# Fixed Kubernetes documentation snapshot. Set snapshot_root only after
-# docs-site/public and the matching upstream checkout have been mounted
-# read-only. Server verifies fixed source metadata and the configured page
+# Fixed Kubernetes documentation input. Set library_root to a generated
+# docs-project library (preferred) or snapshot_root to the legacy rendered
+# mirror; the matching upstream checkout is mounted read-only for source
+# evidence. Server verifies fixed source metadata and the configured page
 # content; it does not use a fallback origin, revision, or source root.
 documentation:
+  library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
   snapshot_root: ${BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT}
   source_root: ${BREAKFIX_DOCUMENTATION_SOURCE_ROOT}
   source_id: kubernetes

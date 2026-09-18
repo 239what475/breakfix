@@ -72,7 +72,7 @@ docs-metadata:
 	$(DOCS_SITE_SCRIPT) metadata
 
 docs-smoke: docs-check
-	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT=$(CURDIR)/docs-site/public BREAKFIX_DOCUMENTATION_SOURCE_ROOT=$(CURDIR)/.local/docs/upstream go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycleSnapshotSmoke
+	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_LIBRARY_ROOT=$(CURDIR)/docs-site/documents BREAKFIX_DOCUMENTATION_SNAPSHOT_ROOT=$(CURDIR)/docs-site/public BREAKFIX_DOCUMENTATION_SOURCE_ROOT=$(CURDIR)/.local/docs/upstream go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycle
 
 docs-project:
 	go run ./cmd/docs-project -root $(CURDIR)/docs-site/public -out $(CURDIR)/docs-site/documents -workers 8 -version $(DOCS_PROJECT_VERSION) -site-origin https://kubernetes.io

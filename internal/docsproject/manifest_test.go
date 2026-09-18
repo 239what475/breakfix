@@ -67,7 +67,7 @@ func TestAnchorsUseSectionByteRangesAndParents(t *testing.T) {
 
 func TestMarkdownAnchorSectionRejectsAbsentAnchor(t *testing.T) {
 	markdown := []byte("# Page\n\n## One\n")
-	if _, err := markdownAnchorSection(markdown, []ExtractedHeading{{ID: "one", Level: 2, Title: "One"}}, "missing"); err == nil {
+	if _, err := MarkdownAnchorSection(markdown, []ExtractedHeading{{ID: "one", Level: 2, Title: "One"}}, "missing"); err == nil {
 		t.Fatal("missing anchor was accepted")
 	}
 }

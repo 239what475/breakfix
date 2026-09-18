@@ -38,14 +38,14 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 1 feat(docs): read the pinned page from the offline document library
 
-- [ ] 新增库适配器（复用 `internal/docsproject` 的严格解码与
+- [x] 新增库适配器（复用 `internal/docsproject` 的严格解码与
       `markdownAnchorSection`）：按 pinned `DocumentContext` 校验全局 manifest
       （upstream source/commit/version/locale、build_info.repository），
       `ReadPage(path, anchor)` 先验页级 digest（sha256 of index.md）再按
       `anchors[].digest` 验 anchor 切片，`ReadMetadata` 改读 PageManifest
-- [ ] config 增加 `library_root`，与旧 key 并存、配置即优先；`make docs-smoke`
+- [x] config 增加 `library_root`，与旧 key 并存、配置即优先；`make docs-smoke`
       增加真实库冒烟（库路径断言；源码读取断言留待提交 4 删除）
-- [ ] 单测：页/锚点 digest 不匹配、manifest 与 pinned context 不符 → 拒绝
+- [x] 单测：页/锚点 digest 不匹配、manifest 与 pinned context 不符 → 拒绝
 
 ### 提交 2 feat(docs): bind pipeline evidence to library digests
 
