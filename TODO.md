@@ -85,13 +85,24 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 - [ ] Server 新增文档读取 API：按页返回解析产物（markdown、title、page_kind、
       anchors[]、页级 digest），下发前校验 digest；OpenAPI 契约与 web client
       同步生成；JWT 可读，页级 digest 作 ETag 协商缓存
+- [ ] 目录树端点：库全局 manifest tree（title/path/children），分区懒加载；
+      静态资产端点：按 assets[]（sha256）供图，页面 markdown 内相对路径随
+      响应改写
 - [ ] 单测：digest 不匹配拒绝、未知页 404、anchors 与 PageManifest 一致
 
 ### 提交 6 feat(web): render the reader from parsed pages
 
-- [ ] SPA 内置 Markdown 渲染替代 iframe：GFM 表格、围栏代码块高亮、
-      `> [!NOTE]` 提示块、details、tabs（渲染器选型按调研结论定）；
-      documentation 页懒加载分块，主 bundle 不显著膨胀
+- [ ] SPA 内置 Markdown 渲染替代 iframe（选型 2026-09-18 调研后与用户确认）：
+      markdown-it（html:false，GFM 表格内置；自定义规则渲染 `> [!NOTE]` 系
+      提示块、标题 ID 映射库 anchors[]）+ Shiki 细粒度高亮（实测 12 语言
+      shell/yaml/json/go/console/powershell/toml/http 等全覆盖）；tabs/details
+      已被生成器压平为 `**Panel:**`/加粗摘要，无需交互组件；documentation 页
+      懒加载分块，主 bundle 不显著膨胀
+- [ ] 布局（2026-09-18 与用户确认）：左侧可收起目录（库 tree 懒加载、当前页
+      高亮、移动端进抽屉）+ 中间文档主体；网格预留右侧实践栏位，本期不渲染
+      ——实践入口属 NEXT.md 阅读器线（右栏默认收起、移动端退化为章节内联；
+      当前 853/854 页无已发布实践）；滚动位置 ↔ 锚点同步（IntersectionObserver，
+      为实践线识别当前章节打底）
 - [ ] URL 语义原样承接（source/version/path/hash → SPA 路由与锚点滚动），
       移除 postMessage 校验；加载失败重试、移动端菜单平移
 - [ ] 阅读器 E2E 重写为 API 驱动（URL 保持/前进后退/重试平移；防伪造
