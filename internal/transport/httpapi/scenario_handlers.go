@@ -33,7 +33,7 @@ func (h *Handler) StartScenario(c *gin.Context, id string) {
 		return
 	}
 
-	existing, err := h.findEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	existing, err := h.findEnvironment(c.Request.Context(), user.ID, h.operationsEnvironmentTarget(scenarioEntry))
 	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find existing environment: %v", err)})
 		return
@@ -56,7 +56,7 @@ func (h *Handler) StartScenario(c *gin.Context, id string) {
 		return
 	}
 
-	env, err := h.createEnvironment(c.Request.Context(), user, scenarioEntry)
+	env, err := h.createEnvironment(c.Request.Context(), user, h.operationsEnvironmentTarget(scenarioEntry))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -78,7 +78,7 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 
-	existing, err := h.findProgressEnvironment(c.Request.Context(), user.ID, scenarioEntry)
+	existing, err := h.findProgressEnvironment(c.Request.Context(), user.ID, h.operationsEnvironmentTarget(scenarioEntry))
 	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find existing environment: %v", err)})
 		return
@@ -106,7 +106,7 @@ func (h *Handler) ResetScenario(c *gin.Context, id string) {
 		return
 	}
 
-	env, err := h.createEnvironment(c.Request.Context(), user, scenarioEntry)
+	env, err := h.createEnvironment(c.Request.Context(), user, h.operationsEnvironmentTarget(scenarioEntry))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return

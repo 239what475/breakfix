@@ -457,6 +457,7 @@ func nodeTestManifest(title string) string {
 
 func testRuntimeEnvironment(name string, phase runtimev2.EnvironmentPhase) runtimev2.RuntimeEnvironment {
 	return runtimev2.RuntimeEnvironment{
+		TypeMeta: metav1.TypeMeta{APIVersion: "breakfix.dev/v2", Kind: "RuntimeEnvironment"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{
 			"breakfix.dev/user": "u-demo", "breakfix.dev/content-kind": "operations", "breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": testPublishedScenarioRevisionID,
 		}},

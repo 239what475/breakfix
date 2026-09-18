@@ -153,6 +153,12 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	// Ignition is an admin verb: the fixed documentation workflow is a
 	// deployment-wide operation, not a per-user action.
 	documentationRoutes.POST("/practice", middleware.RequireAdmin(), h.StartDocumentationPractice)
+	// Practice environments are per-user session verbs with the same
+	// find-or-create lifecycle as the Operations scenario environment.
+	documentationRoutes.POST("/practices/:id/start", h.StartDocumentationPracticeEnvironment)
+	documentationRoutes.GET("/practices/:id/environment", h.GetDocumentationPracticeEnvironment)
+	documentationRoutes.POST("/practices/:id/stop", h.StopDocumentationPracticeEnvironment)
+	documentationRoutes.POST("/practices/:id/reset", h.ResetDocumentationPracticeEnvironment)
 	adminRoutes := router.Group("/api/admin")
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)

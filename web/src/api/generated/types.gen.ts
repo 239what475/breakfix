@@ -78,6 +78,33 @@ export type DocumentationPracticeRuntime = {
     base_image: string;
 };
 
+export type DocumentationPracticeEnvironment = {
+    /**
+     * Controller phase, for example Pending, Provisioning, Ready, Draining
+     */
+    phase: string;
+    /**
+     * Runtime kind, for example k8s or node
+     */
+    runtime: string;
+    /**
+     * Terminal node names; empty for the single management terminal
+     */
+    nodes: Array<string>;
+};
+
+export type DocumentationPracticeStopResponse = {
+    stopped: boolean;
+};
+
+export type DocumentationPracticeResetResponse = {
+    reset: boolean;
+    /**
+     * The bumped reset nonce of the environment
+     */
+    reset_nonce: number;
+};
+
 export type DocumentationPracticeDetail = {
     id: string;
     title: string;
@@ -1018,6 +1045,130 @@ export type GetDocumentationPracticeResponses = {
 };
 
 export type GetDocumentationPracticeResponse = GetDocumentationPracticeResponses[keyof GetDocumentationPracticeResponses];
+
+export type StartDocumentationPracticeEnvironmentData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}/start';
+};
+
+export type StartDocumentationPracticeEnvironmentErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type StartDocumentationPracticeEnvironmentError = StartDocumentationPracticeEnvironmentErrors[keyof StartDocumentationPracticeEnvironmentErrors];
+
+export type StartDocumentationPracticeEnvironmentResponses = {
+    /**
+     * Environment is Ready
+     */
+    200: DocumentationPracticeEnvironment;
+};
+
+export type StartDocumentationPracticeEnvironmentResponse = StartDocumentationPracticeEnvironmentResponses[keyof StartDocumentationPracticeEnvironmentResponses];
+
+export type GetDocumentationPracticeEnvironmentData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}/environment';
+};
+
+export type GetDocumentationPracticeEnvironmentErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetDocumentationPracticeEnvironmentError = GetDocumentationPracticeEnvironmentErrors[keyof GetDocumentationPracticeEnvironmentErrors];
+
+export type GetDocumentationPracticeEnvironmentResponses = {
+    /**
+     * Current environment projection
+     */
+    200: DocumentationPracticeEnvironment;
+};
+
+export type GetDocumentationPracticeEnvironmentResponse = GetDocumentationPracticeEnvironmentResponses[keyof GetDocumentationPracticeEnvironmentResponses];
+
+export type StopDocumentationPracticeEnvironmentData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}/stop';
+};
+
+export type StopDocumentationPracticeEnvironmentErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type StopDocumentationPracticeEnvironmentError = StopDocumentationPracticeEnvironmentErrors[keyof StopDocumentationPracticeEnvironmentErrors];
+
+export type StopDocumentationPracticeEnvironmentResponses = {
+    /**
+     * Environment stopped
+     */
+    200: DocumentationPracticeStopResponse;
+};
+
+export type StopDocumentationPracticeEnvironmentResponse = StopDocumentationPracticeEnvironmentResponses[keyof StopDocumentationPracticeEnvironmentResponses];
+
+export type ResetDocumentationPracticeEnvironmentData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/documentation/practices/{id}/reset';
+};
+
+export type ResetDocumentationPracticeEnvironmentErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ResetDocumentationPracticeEnvironmentError = ResetDocumentationPracticeEnvironmentErrors[keyof ResetDocumentationPracticeEnvironmentErrors];
+
+export type ResetDocumentationPracticeEnvironmentResponses = {
+    /**
+     * Environment reset requested
+     */
+    200: DocumentationPracticeResetResponse;
+};
+
+export type ResetDocumentationPracticeEnvironmentResponse = ResetDocumentationPracticeEnvironmentResponses[keyof ResetDocumentationPracticeEnvironmentResponses];
 
 export type RegisterData = {
     body: RegisterRequest;

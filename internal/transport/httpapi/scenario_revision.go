@@ -62,9 +62,9 @@ func (h *Handler) resolveEnvironmentScenario(ctx context.Context, userID, scenar
 			err         error
 		)
 		if includeCompleted {
-			environment, err = h.findProgressEnvironment(ctx, userID, current)
+			environment, err = h.findProgressEnvironment(ctx, userID, h.operationsEnvironmentTarget(current))
 		} else {
-			environment, err = h.findEnvironment(ctx, userID, current)
+			environment, err = h.findEnvironment(ctx, userID, h.operationsEnvironmentTarget(current))
 		}
 		if err == nil {
 			return current, environment, nil

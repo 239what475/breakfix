@@ -24,7 +24,7 @@ type environmentRuntimeAdapter struct {
 	readyTimeout    time.Duration
 	list            func(context.Context, string) ([]activeEnvironment, error)
 	get             func(context.Context, string) (*activeEnvironment, error)
-	create          func(context.Context, *postgres.User, *scenario.Entry) (string, error)
+	create          func(context.Context, *postgres.User, environmentContentTarget) (string, error)
 	requestReset    func(context.Context, string, types.UID) (int64, error)
 	requestDeletion func(context.Context, string, types.UID) error
 	updateLease     func(context.Context, string, metav1.Time) error
@@ -76,18 +76,18 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 		}
 		return value, nil
 	}
-	adapter.create = func(ctx context.Context, user *postgres.User, entry *scenario.Entry) (string, error) {
-		if h.runnableBindings == nil || user == nil || entry == nil {
+	adapter.create = func(ctx context.Context, user *postgres.User, target environmentContentTarget) (string, error) {
+		if target.resolveBinding == nil || user == nil {
 			return "", fmt.Errorf("runnable revision store is unavailable")
 		}
-		reference, err := h.runnableBindings.ResolveOperationsRevisionBinding(ctx, entry.RevisionID)
+		reference, err := target.resolveBinding(ctx)
 		if err != nil {
 			return "", fmt.Errorf("resolve runnable revision for environment: %w", err)
 		}
-		name := learningEnvironmentName(user.ID, entry)
+		name := learningEnvironmentName(user.ID, target)
 		now := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 		environment := &runtimev2.RuntimeEnvironment{
-			ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, entry.ID, entry.RevisionID, runtimev2.PurposeLearning),
+			ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, target.kind, target.id, target.revisionID, runtimev2.PurposeLearning),
 			Spec: runtimev2.RuntimeEnvironmentSpec{
 				RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: reference.ID, Digest: reference.Digest},
 				Purpose:             runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: now},
@@ -141,18 +141,18 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 // learningEnvironmentName gives concurrent Start requests the same CRD name.
 // A stable name makes the Kubernetes API the cross-server ownership fence,
 // rather than relying on a process-local lock or a best-effort List then Create.
-func learningEnvironmentName(userID string, entry *scenario.Entry) string {
-	if entry == nil {
+func learningEnvironmentName(userID string, target environmentContentTarget) string {
+	if target.id == "" {
 		return kubernetes.DNSLabelName("learning", userID)
 	}
-	return kubernetes.DNSLabelName("learning", userID, entry.ID, entry.RevisionID)
+	return kubernetes.DNSLabelName("learning", userID, target.id, target.revisionID)
 }
 
-func environmentObjectMeta(name, namespace, userID, contentID, contentRevision string, purpose runtimev2.EnvironmentPurpose) metav1.ObjectMeta {
+func environmentObjectMeta(name, namespace, userID, contentKind, contentID, contentRevision string, purpose runtimev2.EnvironmentPurpose) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
 		Name: name, Namespace: namespace,
 		Labels: map[string]string{
-			"breakfix.dev/user": userID, "breakfix.dev/content-kind": "operations",
+			"breakfix.dev/user": userID, "breakfix.dev/content-kind": contentKind,
 			"breakfix.dev/content-id": contentID, "breakfix.dev/content-revision": contentRevision,
 			"breakfix.dev/purpose": string(purpose),
 		},

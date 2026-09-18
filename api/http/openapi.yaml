@@ -173,6 +173,107 @@ paths:
         "503":
           $ref: "#/components/responses/Error"
 
+  /documentation/practices/{id}/start:
+    post:
+      operationId: startDocumentationPracticeEnvironment
+      summary: Start or resume the practice environment (JWT)
+      description: Find-or-create with deterministic naming; an existing environment resumes and waits until Ready.
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Environment is Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeEnvironment"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /documentation/practices/{id}/environment:
+    get:
+      operationId: getDocumentationPracticeEnvironment
+      summary: Live environment phase and terminal node info (JWT)
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current environment projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeEnvironment"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /documentation/practices/{id}/stop:
+    post:
+      operationId: stopDocumentationPracticeEnvironment
+      summary: Destroy the practice environment (JWT)
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Environment stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeStopResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /documentation/practices/{id}/reset:
+    post:
+      operationId: resetDocumentationPracticeEnvironment
+      summary: Reset the practice environment by bumping its reset nonce (JWT)
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Environment reset requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationPracticeResetResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /auth/register:
     post:
       operationId: register
@@ -1471,6 +1572,39 @@ components:
           description: Runtime kind, for example k8s or node
         base_image:
           type: string
+
+    DocumentationPracticeEnvironment:
+      type: object
+      required: [phase, runtime, nodes]
+      properties:
+        phase:
+          type: string
+          description: Controller phase, for example Pending, Provisioning, Ready, Draining
+        runtime:
+          type: string
+          description: Runtime kind, for example k8s or node
+        nodes:
+          type: array
+          description: Terminal node names; empty for the single management terminal
+          items:
+            type: string
+
+    DocumentationPracticeStopResponse:
+      type: object
+      required: [stopped]
+      properties:
+        stopped:
+          type: boolean
+
+    DocumentationPracticeResetResponse:
+      type: object
+      required: [reset, reset_nonce]
+      properties:
+        reset:
+          type: boolean
+        reset_nonce:
+          type: integer
+          description: The bumped reset nonce of the environment
 
     DocumentationPracticeDetail:
       type: object

@@ -11,12 +11,53 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/incus"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/content/scenario"
+	"github.com/breakfix/breakfix/internal/domain/runnable"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
 var errNoActiveAssistantEnvironment = errors.New("no active environment for assistant run")
+
+const (
+	// environmentContentOperations is the content-kind label of environments
+	// pinned to Operations scenarios; environmentContentDocumentationPractice
+	// matches the runnable Kind of published documentation practices.
+	environmentContentOperations             = "operations"
+	environmentContentDocumentationPractice = "documentation-practice"
+)
+
+// environmentContentTarget is the content identity one learning environment is
+// pinned to, regardless of kind. Operations scenarios build it from their
+// catalog entry; published documentation practices build it from their
+// immutable revision. Both kinds share the find-or-create path and differ
+// only in labels and in how their runnable revision binding resolves.
+type environmentContentTarget struct {
+	kind       string
+	id         string
+	revisionID string
+	runtime    string
+	title      string
+	// resolveBinding supplies the immutable runnable revision the environment
+	// runs. Catalog-backed content resolves lazily through its revision
+	// binding; a published practice already carries its reference.
+	resolveBinding func(context.Context) (runnable.RevisionReference, error)
+}
+
+// operationsEnvironmentTarget pins an environment to one Operations scenario
+// revision without changing the Operations label vocabulary.
+func (h *Handler) operationsEnvironmentTarget(entry *scenario.Entry) environmentContentTarget {
+	return environmentContentTarget{
+		kind: environmentContentOperations, id: entry.ID, revisionID: entry.RevisionID,
+		runtime: entry.Runtime, title: entry.Title,
+		resolveBinding: func(ctx context.Context) (runnable.RevisionReference, error) {
+			if h.runnableBindings == nil {
+				return runnable.RevisionReference{}, errors.New("runnable revision store is unavailable")
+			}
+			return h.runnableBindings.ResolveOperationsRevisionBinding(ctx, entry.RevisionID)
+		},
+	}
+}
 
 // These are HTTP projections, not CRD or domain types. They retain only the
 // public lifecycle and Operations display data needed by this transport.
@@ -204,12 +245,12 @@ func (h *Handler) listActiveEnvironments(ctx context.Context, userID string) ([]
 	return result, nil
 }
 
-func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *scenario.Entry) (*activeEnvironment, error) {
-	if entry == nil {
+func (h *Handler) findEnvironment(ctx context.Context, userID string, target environmentContentTarget) (*activeEnvironment, error) {
+	if target.id == "" {
 		return nil, errNoMatchingEnvironment
 	}
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/content-kind=operations,breakfix.dev/content-id=%s", userID, entry.ID)
-	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/content-kind=%s,breakfix.dev/content-id=%s", userID, target.kind, target.id)
+	adapter, err := h.environmentRuntimeAdapter(target.runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +259,7 @@ func (h *Handler) findEnvironment(ctx context.Context, userID string, entry *sce
 		return nil, err
 	}
 	for index := range environments {
-		if environments[index].SourceRevision == entry.RevisionID && isLiveEnvironmentPhase(environments[index].Phase) {
+		if environments[index].SourceRevision == target.revisionID && isLiveEnvironmentPhase(environments[index].Phase) {
 			return &environments[index], nil
 		}
 	}
@@ -238,12 +279,12 @@ func (h *Handler) findActiveEnvironmentByUID(ctx context.Context, userID, enviro
 	return nil, errNoActiveAssistantEnvironment
 }
 
-func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, entry *scenario.Entry) (*activeEnvironment, error) {
-	if entry == nil {
+func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, target environmentContentTarget) (*activeEnvironment, error) {
+	if target.id == "" {
 		return nil, errNoMatchingEnvironment
 	}
-	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/content-kind=operations,breakfix.dev/content-id=%s", userID, entry.ID)
-	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
+	selector := fmt.Sprintf("breakfix.dev/user=%s,breakfix.dev/content-kind=%s,breakfix.dev/content-id=%s", userID, target.kind, target.id)
+	adapter, err := h.environmentRuntimeAdapter(target.runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -252,25 +293,25 @@ func (h *Handler) findProgressEnvironment(ctx context.Context, userID string, en
 		return nil, err
 	}
 	for index := range environments {
-		if environments[index].SourceRevision == entry.RevisionID && isLiveEnvironmentPhase(environments[index].Phase) {
+		if environments[index].SourceRevision == target.revisionID && isLiveEnvironmentPhase(environments[index].Phase) {
 			return &environments[index], nil
 		}
 	}
 	for index := range environments {
-		if environments[index].SourceRevision == entry.RevisionID && environments[index].Phase == runtimev2.PhaseReleased {
+		if environments[index].SourceRevision == target.revisionID && environments[index].Phase == runtimev2.PhaseReleased {
 			return &environments[index], nil
 		}
 	}
 	return nil, errNoMatchingEnvironment
 }
 
-func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, entry *scenario.Entry) (*activeEnvironment, error) {
-	adapter, err := h.environmentRuntimeAdapter(entry.Runtime)
+func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, target environmentContentTarget) (*activeEnvironment, error) {
+	adapter, err := h.environmentRuntimeAdapter(target.runtime)
 	if err != nil {
 		return nil, err
 	}
 	for attempt := 0; attempt < environmentCreateAttempts; attempt++ {
-		name, createErr := adapter.create(ctx, user, entry)
+		name, createErr := adapter.create(ctx, user, target)
 		if createErr == nil {
 			environment, waitErr := h.waitEnvironmentReady(ctx, adapter.runtime, name, adapter.readyTimeout)
 			if waitErr == nil {
@@ -285,7 +326,7 @@ func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, en
 			return nil, createErr
 		}
 
-		existing, getErr := adapter.get(ctx, learningEnvironmentName(user.ID, entry))
+		existing, getErr := adapter.get(ctx, learningEnvironmentName(user.ID, target))
 		if apierrors.IsNotFound(getErr) {
 			continue
 		}
@@ -298,7 +339,7 @@ func (h *Handler) createEnvironment(ctx context.Context, user *postgres.User, en
 			}
 			continue
 		}
-		if !environmentMatchesEntry(existing, user.ID, entry) {
+		if !environmentMatchesTarget(existing, user.ID, target) {
 			return nil, fmt.Errorf("existing environment %q does not match the requested scenario revision", existing.Name)
 		}
 		return h.waitEnvironmentReady(ctx, adapter.runtime, existing.Name, adapter.readyTimeout)
@@ -396,13 +437,13 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 	}
 }
 
-func environmentMatchesEntry(environment *activeEnvironment, userID string, entry *scenario.Entry) bool {
-	return environment != nil && entry != nil &&
+func environmentMatchesTarget(environment *activeEnvironment, userID string, target environmentContentTarget) bool {
+	return environment != nil && target.id != "" &&
 		environment.UserID == userID &&
 		environment.Purpose == runtimev2.PurposeLearning &&
-		environment.ScenarioRef == entry.ID &&
-		environment.SourceRevision == entry.RevisionID &&
-		environment.Runtime == entry.Runtime
+		environment.ScenarioRef == target.id &&
+		environment.SourceRevision == target.revisionID &&
+		environment.Runtime == target.runtime
 }
 
 func environmentDeletionTimeout(runtime string) time.Duration {
