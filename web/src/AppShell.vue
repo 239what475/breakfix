@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
 import AppTopbar from "./AppTopbar.vue";
 import AuthDialog from "./features/auth/AuthDialog.vue";
 import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
 import ScenarioCatalogPage from "./features/catalog/ScenarioCatalogPage.vue";
 import MySpacePage from "./features/my-space/MySpacePage.vue";
-import DocumentationPage from "./features/documentation/DocumentationPage.vue";
 import { documentationSource } from "./features/documentation/documentation";
 import AdminPage from "./features/admin/AdminPage.vue";
 import { isLoggedIn, tokenUserRole } from "./api/client";
 import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
 import { useScenarioSession } from "./features/workspace/useScenarioSession";
+
+// The documentation reader (markdown-it + Shiki) loads as its own chunk so
+// the primary bundle stays lean.
+const DocumentationPage = defineAsyncComponent(() => import("./features/documentation/DocumentationPage.vue"));
 
 const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");

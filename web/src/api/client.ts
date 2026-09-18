@@ -12,6 +12,8 @@ import type {
 	MySpaceLearningPage,
 } from "./types";
 import type {
+	DocumentationPageResponse,
+	DocumentationTreeResponse,
 	ScenarioList,
 	ScenarioProgress,
 	CloseTerminalWindowResponse,
@@ -240,6 +242,16 @@ export const api = {
     ),
 	listScenarios: () =>
 		request<ScenarioList>("GET", "/operations/scenarios"),
+	getDocumentationPage: (path: string) =>
+		request<DocumentationPageResponse>(
+			"GET",
+			`/documentation/page?path=${encodeURIComponent(path)}`,
+		),
+	getDocumentationTree: (path?: string) =>
+		request<DocumentationTreeResponse>(
+			"GET",
+			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
+		),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });

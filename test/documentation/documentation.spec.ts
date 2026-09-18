@@ -1,11 +1,15 @@
 import { createHmac } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const execFile = promisify(execFileCallback);
 
-const entryUrl = "/documentation?source=kubernetes&version=snapshot-ce98a43&path=%2Fdocs%2F";
+const apiBase = process.env.BREAKFIX_E2E_BASE_URL;
+const source = "kubernetes";
+const version = "snapshot-ce98a43";
+const entryUrl = `/documentation?source=${source}&version=${version}&path=%2Fdocs%2F`;
+const podLifecycleUrl = `/documentation?source=${source}&version=${version}&path=%2Fdocs%2Fconcepts%2Fworkloads%2Fpods%2Fpod-lifecycle%2F`;
 
 function decodeBase32(value: string) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -71,99 +75,93 @@ async function postAfterServerRestart(request: APIRequestContext, url: string, t
   throw lastError;
 }
 
-test("guest can read fixture documentation and retain its location", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "Documentation", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Documentation", exact: true }).click();
-  await expect(page).toHaveURL(/\/documentation\?source=kubernetes/);
-  const frame = page.frameLocator('iframe[title="Kubernetes documentation"]');
-  await expect(frame.getByRole("heading", { name: "Fixture documentation" })).toBeVisible();
+async function gotoReader(page: Page, readerUrl: string) {
+  if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the documentation reader tests");
+  await page.goto(`${apiBase}${readerUrl}`);
+}
+
+test("guest can read parsed documentation and retain its location", async ({ page }) => {
+  await gotoReader(page, entryUrl);
+  const outline = page.getByRole("navigation", { name: "Documentation outline" });
+  await expect(outline).toBeVisible();
+  // A section root is not a page: the outline is the entry experience.
+  await expect(page.getByText("Choose a page from the outline to start reading.")).toBeVisible();
   await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
 
-  await frame.getByRole("link", { name: "Open the next page" }).click();
-  await expect(frame.getByRole("heading", { name: "Fixture page" })).toBeVisible();
-  await expect(page).toHaveURL(/path=%2Fdocs%2Fpage%2F/);
+  // Walk the outline to the pinned practice page.
+  await page.getByRole("button", { name: "Toggle Concepts section" }).click();
+  await page.getByRole("button", { name: "Toggle Workloads section" }).click();
+  await page.getByRole("button", { name: "Toggle Pods section" }).click();
+  await page.getByRole("button", { name: "Pod Lifecycle", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Pod Lifecycle", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/path=%2Fdocs%2Fconcepts%2Fworkloads%2Fpods%2Fpod-lifecycle%2F(?:&|$)/);
 
-  await frame.locator("body").evaluate(() => window.history.back());
-  await expect(frame.getByRole("heading", { name: "Fixture documentation" })).toBeVisible();
+  // Parsed markdown keeps structure: the pinned anchor is an addressable
+  // heading with its library identity.
+  await expect(page.locator("#pod-lifetime")).toBeVisible();
+
+  // Back returns to the section root; forward restores the page.
+  await page.goBack();
   await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
+  await expect(page.getByText("Choose a page from the outline to start reading.")).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "Pod Lifecycle", exact: true })).toBeVisible();
 
-  await frame.getByRole("link", { name: "Jump to topic" }).click();
-  await expect(page).toHaveURL(/hash=topic/);
+  // Scrolling keeps the URL hash in sync with the current anchor.
+  await page.locator("#pod-lifetime").evaluate((heading) => heading.scrollIntoView({ block: "start" }));
+  await expect(page).toHaveURL(/hash=pod-lifetime/, { timeout: 10_000 });
 });
 
-test("documentation reader ignores forged messages", async ({ page }) => {
-  await page.goto(entryUrl);
-  const frame = page.frameLocator('iframe[title="Kubernetes documentation"]');
-  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
-  await frame.locator("body").evaluate(() => {
-    window.parent.postMessage({
-      type: "breakfix:unknown",
-      source: "kubernetes",
-      version: "snapshot-ce98a43",
-      locale: "en",
-      path: "/docs/page/",
-      hash: "#forged",
-    }, "http://localhost:5173");
-    window.parent.postMessage({
-      type: "breakfix:document-location",
-      source: "kubernetes",
-      version: "snapshot-ce98a43",
-      locale: "en",
-      path: "/docs/page/",
-      hash: "not-a-hash",
-    }, "http://localhost:5173");
-  });
-  await page.waitForTimeout(100);
-  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
-
-  const sameOriginPopupPromise = page.waitForEvent("popup");
-  await page.evaluate(() => window.open("http://localhost:1314/docs/sender/"));
-  const sameOriginPopup = await sameOriginPopupPromise;
-  await sameOriginPopup.waitForLoadState();
-  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
-  await sameOriginPopup.close();
-
-  const otherOriginPopupPromise = page.waitForEvent("popup");
-  await page.evaluate(() => window.open("http://localhost:1315/docs/sender/"));
-  const otherOriginPopup = await otherOriginPopupPromise;
-  await otherOriginPopup.waitForLoadState();
-  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
-  await otherOriginPopup.close();
+test("parsed pages carry alerts, code, and headings", async ({ page }) => {
+  await gotoReader(page, podLifecycleUrl);
+  const article = page.locator(".documentation-article");
+  await expect(article).toBeVisible();
+  // The generator flattens interactive chrome; markdown structure survives.
+  // Tables on this page are degraded to text rows by the offline generator,
+  // so the reader assertions cover headings, alerts, and code blocks.
+  await expect(article.locator("h2#pod-lifetime")).toBeVisible();
+  await expect(article.locator("blockquote.doc-alert").first()).toBeVisible();
+  await expect(article.locator("blockquote.doc-alert-note").first()).toBeVisible();
+  await expect(article.locator("blockquote.doc-alert-caution").first()).toBeVisible();
+  await expect(article.locator("pre").first()).toBeVisible();
+  await expect(article.locator("pre.shiki").first()).toBeVisible();
 });
 
-test("documentation navigation is available from the mobile menu", async ({ page }) => {
+test("documentation reader reports load failures and retries", async ({ page }) => {
+  await page.route("**/api/documentation/page**", (route) => route.abort());
+  await gotoReader(page, podLifecycleUrl);
+  await expect(page.getByText("Documentation is unavailable.", { exact: true })).toBeVisible();
+  await page.unroute("**/api/documentation/page**");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Pod Lifecycle", exact: true })).toBeVisible();
+});
+
+test("documentation reader falls back from a non-document path", async ({ page }) => {
+  await gotoReader(page, `/documentation?source=${source}&version=${version}&path=%2Fblog%2F`);
+  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
+  await expect(page.getByText("Choose a page from the outline to start reading.")).toBeVisible();
+});
+
+test("documentation navigation is available from the mobile menu and drawer", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await gotoReader(page, entryUrl);
+  await expect(page.getByRole("button", { name: "Contents", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Contents", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Documentation outline" })).toBeVisible();
+  await page.getByRole("button", { name: "Close documentation outline" }).click();
+  await expect(page.getByRole("navigation", { name: "Documentation outline" })).not.toBeVisible();
+
+  await page.goto(`${apiBase}/`);
   await page.getByRole("button", { name: "Navigation", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Documentation", exact: true })).toBeVisible();
 });
 
-test("documentation reader reports load failures and retries", async ({ page }) => {
-  await page.route("http://localhost:1314/**", (route) => route.abort());
-  await page.goto(entryUrl);
-  // Chromium does not dispatch iframe error for every aborted navigation;
-  // exercise the component's error handler explicitly after the failed load.
-  await page.locator('iframe[title="Kubernetes documentation"]').evaluate((iframe) => iframe.dispatchEvent(new Event("error")));
-  await expect(page.getByText("Documentation is unavailable.", { exact: true })).toBeVisible();
-  await page.unroute("http://localhost:1314/**");
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.frameLocator('iframe[title="Kubernetes documentation"]').getByRole("heading", { name: "Fixture documentation" })).toBeVisible();
-});
-
-test("documentation reader falls back from a non-document path", async ({ page }) => {
-  await page.goto("/documentation?source=kubernetes&version=snapshot-ce98a43&path=%2Fblog%2F");
-  await expect(page).toHaveURL(/path=%2Fdocs%2F(?:&|$)/);
-  await expect(page.frameLocator('iframe[title="Kubernetes documentation"]').getByRole("heading", { name: "Fixture documentation" })).toBeVisible();
-});
-
 test("fixed documentation practice runs through publication", async ({ request }) => {
   test.setTimeout(12 * 60_000);
-  const apiBase = process.env.BREAKFIX_E2E_BASE_URL;
   if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the documentation workflow test");
   const username = `documentation-${Date.now()}`;
   const register = await request.post(`${apiBase}/api/auth/register`, { data: { username, password: "documentation-test-password" } });
-  expect(register.status()).toBe(201);
+  expect(register.status(), await register.text()).toBe(201);
   const registration = await register.json() as { totp_secret: string };
   const login = await request.post(`${apiBase}/api/auth/login`, { data: { username, password: "documentation-test-password", totp_code: totp(registration.totp_secret) } });
   expect(login.status()).toBe(200);
