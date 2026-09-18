@@ -532,3 +532,39 @@ func TestWorkflowObservationJoinsFailedAndExhaustedRunnableActions(t *testing.T)
 		t.Fatalf("exhausted action observation = %#v", observation.Action)
 	}
 }
+
+func TestValidatePublicationLedgerBindsTheEvidenceTriple(t *testing.T) {
+	now := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
+	context := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle", ParserVersion: "docs-project-v10", PageDigest: testRunnableDigest("page")}
+	plan := domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: "plan-01", Revision: 1, Context: context, Title: "Pod lifecycle", Objective: "Observe Pod state", Boundary: "One Pod", Runtime: domain.RuntimeConstraint{Runtime: "k8s"}, Evidence: []domain.EvidenceReference{{ID: "page", Kind: domain.EvidencePage, Path: context.PagePath, Digest: testRunnableDigest("d")}}, CreatedAt: now}
+	planPayload, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextPayload, err := json.Marshal(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("ctx"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
+	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1-a1", ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("plan"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
+	revision := domain.PracticeRevision{ID: "practice-01", WorkflowID: "workflow-01", Context: context, PlanID: plan.ID, PlanRevision: 1, WorkflowRevision: 1, CandidateID: "candidate-01", PublishedAt: now}
+	artifacts := []domain.ArtifactRecord{contextArtifact, planArtifact}
+
+	consistent := domain.PublicationManifest{Context: context}
+	if err := validatePublicationLedger(artifacts, revision, consistent); err == nil || err.Error() == "practice publication manifest context does not match the practice revision" {
+		t.Fatalf("ledger beyond the context binding should fail on later bindings: %v", err)
+	}
+	otherParser := context
+	otherParser.ParserVersion = "docs-project-v11"
+	forked := domain.PublicationManifest{Context: otherParser}
+	err = validatePublicationLedger(artifacts, revision, forked)
+	if err == nil || err.Error() != "practice publication manifest context does not match the practice revision" {
+		t.Fatalf("manifest with a different parser identity must be rejected: %v", err)
+	}
+	otherPage := context
+	otherPage.PageDigest = testRunnableDigest("other-page")
+	err = validatePublicationLedger(artifacts, revision, domain.PublicationManifest{Context: otherPage})
+	if err == nil || err.Error() != "practice publication manifest context does not match the practice revision" {
+		t.Fatalf("manifest with a different page digest must be rejected: %v", err)
+	}
+}

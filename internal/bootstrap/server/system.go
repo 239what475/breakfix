@@ -13,12 +13,13 @@ import (
 // background service registry. Catalog integrity stays in the HTTP layer so
 // the check runs against the request context.
 type systemReportProvider struct {
-	cfg      config.Config
-	registry *serviceRegistry
+	cfg                  config.Config
+	registry             *serviceRegistry
+	documentationLibrary documentationLibraryIdentity
 }
 
-func newSystemReportProvider(cfg config.Config, registry *serviceRegistry) *systemReportProvider {
-	return &systemReportProvider{cfg: cfg, registry: registry}
+func newSystemReportProvider(cfg config.Config, registry *serviceRegistry, documentationLibrary documentationLibraryIdentity) *systemReportProvider {
+	return &systemReportProvider{cfg: cfg, registry: registry, documentationLibrary: documentationLibrary}
 }
 
 func (p *systemReportProvider) Report(context.Context) (httpapi.SystemReport, error) {
@@ -39,13 +40,15 @@ func (p *systemReportProvider) Report(context.Context) (httpapi.SystemReport, er
 	if p.cfg.Documentation.Enabled() {
 		documentation := p.cfg.Documentation
 		report.Documentation = &httpapi.SystemDocumentationReport{
-			SourceID:   documentation.SourceID,
-			Repository: documentation.Repository,
-			Revision:   documentation.Revision,
-			Version:    documentation.Version,
-			Language:   documentation.Language,
-			PagePath:   documentation.PagePath,
-			Anchor:     documentation.Anchor,
+			SourceID:       documentation.SourceID,
+			Repository:     documentation.Repository,
+			Revision:       documentation.Revision,
+			Version:        documentation.Version,
+			Language:       documentation.Language,
+			PagePath:       documentation.PagePath,
+			Anchor:         documentation.Anchor,
+			ParserVersion:  p.documentationLibrary.parserVersion,
+			UpstreamCommit: p.documentationLibrary.upstreamCommit,
 		}
 	}
 	return report, nil

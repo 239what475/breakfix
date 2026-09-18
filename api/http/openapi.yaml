@@ -1647,6 +1647,14 @@ components:
           type: string
         anchor:
           type: string
+        parser_version:
+          type: string
+          nullable: true
+          description: Offline library generator_version; absent on the legacy rendered-snapshot path
+        upstream_commit:
+          type: string
+          nullable: true
+          description: Upstream commit pinned inside the library manifest
 
     AdminSystemStatus:
       type: object

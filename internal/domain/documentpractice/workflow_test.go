@@ -88,3 +88,29 @@ func TestWorkflowRestartOnlyFromFailedOrRejected(t *testing.T) {
 		t.Fatalf("restart from NoPractice = %v, want conflict", err)
 	}
 }
+
+func TestContextParserIdentityIsEvidenceNotIdentity(t *testing.T) {
+	base := DocumentContext{FormatVersion: FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
+	upgraded := base
+	upgraded.ParserVersion = "docs-project-v11"
+	upgraded.PageDigest = "sha256:" + strings.Repeat("b", 64)
+	if err := upgraded.Validate(); err != nil {
+		t.Fatalf("context with a bound parser identity = %v", err)
+	}
+	if ContentID(base) != ContentID(upgraded) {
+		t.Fatal("parser version and page digest must not change ContentID")
+	}
+	half := base
+	half.ParserVersion = "docs-project-v11"
+	if err := half.Validate(); err == nil {
+		t.Fatal("parser version without page digest was accepted")
+	}
+	badDigest := upgraded
+	badDigest.PageDigest = "sha256:short"
+	if err := badDigest.Validate(); err == nil {
+		t.Fatal("malformed page digest was accepted")
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("legacy context without parser identity = %v", err)
+	}
+}

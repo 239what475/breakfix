@@ -170,7 +170,7 @@ func reviewArguments(prompt string, messages []chatMessage) (string, error) {
 			}
 		}
 	}
-	return marshalValid(domain.ReviewOpinion{ReviewerID: runID, Role: role, Decision: domain.ReviewApprove, PolicyVersion: "document-policy-v1"})
+	return marshalValid(domain.ReviewOpinion{ReviewerID: runID, Role: role, Decision: domain.ReviewApprove, PolicyVersion: "document-policy-v2"})
 }
 
 func messagesText(messages []chatMessage) []string {

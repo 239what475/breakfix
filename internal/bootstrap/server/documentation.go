@@ -98,10 +98,19 @@ func (p documentationProfiles) ResolveDocumentationRuntimeProfile(constraint dom
 	return p.profile, nil
 }
 
-func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, error) {
+// documentationLibraryIdentity is the opened library's self-described parser
+// identity surfaced in the admin system report. It is empty on the legacy
+// rendered-snapshot path.
+type documentationLibraryIdentity struct {
+	parserVersion  string
+	upstreamCommit string
+}
+
+func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, documentationLibraryIdentity, error) {
 	if database == nil || !cfg.Documentation.Enabled() {
-		return nil, nil
+		return nil, documentationLibraryIdentity{}, nil
 	}
+	identity := documentationLibraryIdentity{}
 	context := domain.DocumentContext{
 		FormatVersion: domain.FormatVersion, SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
 		Commit: cfg.Documentation.Revision, Version: cfg.Documentation.Version, Language: cfg.Documentation.Language,
@@ -111,48 +120,54 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	var reader app.Reader
 	var err error
 	if strings.TrimSpace(cfg.Documentation.LibraryRoot) != "" {
-		reader, err = docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot, cfg.Documentation.SourceRoot)
-		if err != nil {
-			return nil, fmt.Errorf("load pinned documentation library: %w", err)
+		library, libraryErr := docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot, cfg.Documentation.SourceRoot)
+		if libraryErr != nil {
+			return nil, identity, fmt.Errorf("load pinned documentation library: %w", libraryErr)
 		}
+		identity.parserVersion, identity.upstreamCommit = library.Identity()
+		reader = library
 	} else {
 		reader, err = docsource.NewPinnedSnapshot(context, cfg.Documentation.SnapshotRoot, cfg.Documentation.SourceRoot)
 		if err != nil {
-			return nil, fmt.Errorf("load pinned documentation snapshot: %w", err)
+			return nil, identity, fmt.Errorf("load pinned documentation snapshot: %w", err)
 		}
 	}
 	profiles, err := newDocumentationProfiles(cfg)
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	evidence, err := llm.NewDocumentReviewer(cfg.Agent, "evidence")
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	value, err := llm.NewDocumentReviewer(cfg.Agent, "value")
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	safety, err := llm.NewDocumentReviewer(cfg.Agent, "safety")
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	consistency, err := llm.NewDocumentReviewer(cfg.Agent, "consistency")
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	verification, err := llm.NewDocumentReviewer(cfg.Agent, "verification")
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
 	service, err := app.NewService(database.DocumentPractice, database.Runnable)
 	if err != nil {
-		return nil, err
+		return nil, identity, err
 	}
-	return app.NewAgentPipeline(
+	pipeline, err := app.NewAgentPipeline(
 		service, reader, llm.NewDocumentPlanner(cfg.Agent),
 		[]app.PlanReviewRole{evidence, value}, llm.NewDocumentGenerator(cfg.Agent),
 		[]app.CandidateReviewRole{safety, consistency}, []app.VerificationReviewRole{verification}, profiles,
-		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v1", ToolVersion: "document-tools-v1", PolicyVersion: "document-policy-v1"},
+		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: "document-policy-v2"},
 	)
+	if err != nil {
+		return nil, identity, err
+	}
+	return pipeline, identity, nil
 }

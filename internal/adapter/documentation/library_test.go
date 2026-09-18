@@ -84,9 +84,19 @@ func TestPinnedLibraryServesDigestVerifiedAnchorSlices(t *testing.T) {
 	if page.Digest != evidenceDigest(page.Content) {
 		t.Fatalf("page digest %q does not cover the served slice", page.Digest)
 	}
+	if page.Context.ParserVersion != "docs-project-test" || page.Context.PageDigest != evidenceDigest(libraryMarkdown) {
+		t.Fatalf("page context does not carry the evidence triple: %#v", page.Context)
+	}
 	metadata, err := library.ReadMetadata(context.PagePath)
 	if err != nil || metadata.Title != "Pod Lifecycle" || len(metadata.Anchors) != 3 || metadata.Anchors[1] != "pod-lifetime" {
 		t.Fatalf("library metadata = %#v, %v", metadata, err)
+	}
+	if metadata.Context.ParserVersion != "docs-project-test" || metadata.Context.PageDigest != evidenceDigest(libraryMarkdown) {
+		t.Fatalf("metadata context does not carry the evidence triple: %#v", metadata.Context)
+	}
+	parserVersion, upstreamCommit := library.Identity()
+	if parserVersion != "docs-project-test" || upstreamCommit != context.Commit {
+		t.Fatalf("library identity = %q, %q", parserVersion, upstreamCommit)
 	}
 	if metadata.Digest != evidenceDigest(libraryMarkdown) {
 		t.Fatalf("metadata digest %q is not the page digest", metadata.Digest)

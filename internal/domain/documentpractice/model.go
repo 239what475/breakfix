@@ -35,6 +35,13 @@ func (k EvidenceKind) Valid() bool {
 // DocumentContext identifies one immutable document scope. The upstream
 // revision and fixed page coordinates are the identity; rendered HTML is
 // presentation, not an identity input.
+//
+// ParserVersion and PageDigest extend the context with the offline parser
+// identity (library generator_version) and the digest of the parsed page the
+// evidence was sliced from. They are evidence attributes, never identity:
+// ContentID and workflow identity deliberately ignore them, so a parser
+// upgrade never forks existing workflows. Ledger rows written before the
+// library switchover legitimately carry both empty.
 type DocumentContext struct {
 	FormatVersion string `json:"format_version"`
 	SourceID      string `json:"source_id"`
@@ -45,6 +52,8 @@ type DocumentContext struct {
 	License       string `json:"license"`
 	PagePath      string `json:"page_path"`
 	Anchor        string `json:"anchor,omitempty"`
+	ParserVersion string `json:"parser_version,omitempty"`
+	PageDigest    string `json:"page_digest,omitempty"`
 }
 
 func (c DocumentContext) Validate() error {
@@ -55,6 +64,12 @@ func (c DocumentContext) Validate() error {
 	}
 	if err := ValidateRelativePath(c.PagePath); err != nil {
 		return fmt.Errorf("document context page path: %w", err)
+	}
+	if (strings.TrimSpace(c.ParserVersion) == "") != (strings.TrimSpace(c.PageDigest) == "") {
+		return errors.New("document context parser version and page digest must be bound together")
+	}
+	if c.PageDigest != "" && !runnable.ValidDigest(c.PageDigest) {
+		return errors.New("document context page digest is not a valid sha256 digest")
 	}
 	return nil
 }

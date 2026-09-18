@@ -246,6 +246,14 @@ export type AdminDocumentationDeployment = {
     language: string;
     page_path: string;
     anchor: string;
+    /**
+     * Offline library generator_version; absent on the legacy rendered-snapshot path
+     */
+    parser_version?: string | null;
+    /**
+     * Upstream commit pinned inside the library manifest
+     */
+    upstream_commit?: string | null;
 };
 
 export type AdminSystemStatus = {

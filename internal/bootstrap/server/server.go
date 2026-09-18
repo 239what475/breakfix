@@ -207,7 +207,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create generation runnable coordinator: %w", err)
 	}
-	documentationPipeline, err := newDocumentationPipeline(cfg, database)
+	documentationPipeline, documentationLibrary, err := newDocumentationPipeline(cfg, database)
 	if err != nil {
 		incusClient.Close()
 		cleanupDatabase()
@@ -305,7 +305,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		AgentRuntimeContext: serviceContext,
 		Generator:           generatorService,
 		Documentation:       newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
-		SystemReport:        newSystemReportProvider(cfg, services.registry).Report,
+		SystemReport:        newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
 	})
 	if err != nil {
 		services.stop()

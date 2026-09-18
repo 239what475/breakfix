@@ -53,7 +53,7 @@ func (h *Handler) GetAdminSystem(c *gin.Context) {
 	}
 	status.CatalogIntegrity = integrity
 	if report.Documentation != nil {
-		status.Documentation = &api.AdminDocumentationDeployment{
+		documentation := &api.AdminDocumentationDeployment{
 			SourceId:   report.Documentation.SourceID,
 			Repository: report.Documentation.Repository,
 			Revision:   report.Documentation.Revision,
@@ -62,6 +62,13 @@ func (h *Handler) GetAdminSystem(c *gin.Context) {
 			PagePath:   report.Documentation.PagePath,
 			Anchor:     report.Documentation.Anchor,
 		}
+		if report.Documentation.ParserVersion != "" {
+			documentation.ParserVersion = &report.Documentation.ParserVersion
+		}
+		if report.Documentation.UpstreamCommit != "" {
+			documentation.UpstreamCommit = &report.Documentation.UpstreamCommit
+		}
+		status.Documentation = documentation
 	}
 	c.JSON(http.StatusOK, status)
 }

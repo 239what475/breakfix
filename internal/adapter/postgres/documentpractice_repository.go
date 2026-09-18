@@ -726,6 +726,12 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 	if !ok || contextArtifact.Kind != "document-context" || !sameJSON(contextArtifact.Payload, revision.Context) {
 		return errors.New("practice publication document context binding is invalid")
 	}
+	// The evidence triple (upstream commit, parser version, page digest) lives
+	// inside DocumentContext, so context equality across the practice revision
+	// and the publication manifest is also triple consistency.
+	if manifest.Context != revision.Context {
+		return errors.New("practice publication manifest context does not match the practice revision")
+	}
 	if planArtifact.ParentID != contextArtifact.ID {
 		return errors.New("practice publication learning plan is not bound to its document context")
 	}

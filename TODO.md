@@ -49,16 +49,16 @@ canonical `make test-e2e-admin` 亦全绿。实施规格与验收记录见 `b210
 
 ### 提交 2 feat(docs): bind pipeline evidence to library digests
 
-- [ ] `DocumentContext` 增加 `ParserVersion`（= 库 generator_version）与
+- [x] `DocumentContext` 增加 `ParserVersion`（= 库 generator_version）与
       `PageDigest`，写入 document-context artifact payload 与
       PublicationManifest.Context；`ContentID` 计算式不变，存量 workflow ID
       稳定——ContentID 只锚定上游身份（source+commit+page+anchor），解析器
       升级不自动分叉新工作流，是否重生成由阶段二批次决定；同 ID 下不同
       parser 版本的运行以 ledger 三元组区分，可审计
-- [ ] postgres `validatePublicationLedger` 校验三元组一致；agent 输入
+- [x] postgres `validatePublicationLedger` 校验三元组一致；agent 输入
       （DocumentData、EvidenceReference.Digest）改由库切片提供；若输入语义
       变化，同步提升 prompt/tool/policy version 常量
-- [ ] admin system info 端点暴露库标识（generator_version、upstream commit）
+- [x] admin system info 端点暴露库标识（generator_version、upstream commit）
 
 ### 提交 3 test(e2e): drive documentation E2E from a real generated library
 

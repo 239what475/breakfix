@@ -88,14 +88,30 @@ func (l Library) ReadPage(path, anchor string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+	context := l.evidenceContext(manifest)
 	if strings.TrimSpace(anchor) == "" {
-		return Page{Context: l.Context, Path: path, Content: markdown, Digest: manifest.Digest}, nil
+		return Page{Context: context, Path: path, Content: markdown, Digest: manifest.Digest}, nil
 	}
 	section, entry, err := l.anchorSection(manifest, []byte(markdown), anchor)
 	if err != nil {
 		return Page{}, err
 	}
-	return Page{Context: l.Context, Path: path, Anchor: anchor, Content: string(section), Digest: entry.Digest}, nil
+	return Page{Context: context, Path: path, Anchor: anchor, Content: string(section), Digest: entry.Digest}, nil
+}
+
+// evidenceContext extends the pinned upstream context with the evidence
+// triple attributes: the offline parser version and the parsed page digest.
+func (l Library) evidenceContext(manifest docsproject.PageManifest) domain.DocumentContext {
+	context := l.Context
+	context.ParserVersion = manifest.GeneratorVersion
+	context.PageDigest = manifest.Digest
+	return context
+}
+
+// Identity exposes the opened library's generator identity for diagnostics.
+// The upstream commit is the one pinned inside the library, not the config.
+func (l Library) Identity() (parserVersion, upstreamCommit string) {
+	return l.global.GeneratorVersion, l.global.Upstream.Commit
 }
 
 // anchorSection returns the markdown slice for one anchor and proves it is the
@@ -136,7 +152,7 @@ func (l Library) ReadMetadata(path string) (Metadata, error) {
 	for _, anchor := range manifest.Anchors {
 		anchors = append(anchors, anchor.ID)
 	}
-	return Metadata{Context: l.Context, Path: path, Title: manifest.Title, Anchors: anchors, Digest: manifest.Digest}, nil
+	return Metadata{Context: l.evidenceContext(manifest), Path: path, Title: manifest.Title, Anchors: anchors, Digest: manifest.Digest}, nil
 }
 
 // verifiedPage loads one page directory and proves the markdown bytes are the
@@ -162,6 +178,9 @@ func (l Library) verifiedPage(path string) (string, docsproject.PageManifest, er
 	}
 	if manifest.Upstream != (docsproject.Upstream{Source: l.Context.SourceID, Commit: l.Context.Commit, Version: l.Context.Version, Locale: l.Context.Language}) {
 		return "", docsproject.PageManifest{}, errors.New("documentation page manifest upstream identity does not match the configured pinned source")
+	}
+	if manifest.GeneratorVersion != l.global.GeneratorVersion {
+		return "", docsproject.PageManifest{}, errors.New("documentation page was produced by a different generator run than the library manifest")
 	}
 	if evidenceDigest(markdown) != manifest.Digest {
 		return "", docsproject.PageManifest{}, errors.New("documentation page bytes do not match the pinned page digest")

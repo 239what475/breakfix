@@ -16,14 +16,18 @@ type BackgroundServiceStatus struct {
 }
 
 // SystemDocumentationReport summarizes the pinned documentation deployment.
+// ParserVersion and UpstreamCommit carry the opened library's own identity and
+// stay empty on the legacy rendered-snapshot path.
 type SystemDocumentationReport struct {
-	SourceID   string
-	Repository string
-	Revision   string
-	Version    string
-	Language   string
-	PagePath   string
-	Anchor     string
+	SourceID       string
+	Repository     string
+	Revision       string
+	Version        string
+	Language       string
+	PagePath       string
+	Anchor         string
+	ParserVersion  string
+	UpstreamCommit string
 }
 
 // SystemReport carries the bootstrap-owned half of the admin system status.
