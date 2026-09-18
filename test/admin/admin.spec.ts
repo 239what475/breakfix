@@ -214,7 +214,8 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   expect(badPassword.status()).toBe(403);
 
   await page.getByRole("button", { name: "用户" }).click();
-  const memberRow = page.locator(".admin-workflow-row", { hasText: memberUsername });
+  const memberRow = page.locator(".admin-user-row", { hasText: memberUsername });
+  await expect(memberRow.locator(".admin-role-badge")).toHaveText("user");
   await memberRow.getByRole("button", { name: "重置 TOTP" }).click();
   await page.getByLabel("操作者密码").fill(password);
   await page.getByRole("button", { name: "确认重置" }).click();
@@ -232,6 +233,16 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
     data: { username: memberUsername, password, totp_code: totp(rotatedSecret) },
   });
   expect(newCodeLogin.status()).toBe(200);
+
+  // The audit ledger renders the icon-row pattern; a row expands to its
+  // formatted JSON payload on click.
+  await page.getByRole("button", { name: "审计" }).click();
+  const forceFailRow = page.locator(".admin-audit-toggle", { hasText: "documentation.workflow.force_fail" });
+  await expect(forceFailRow).toBeVisible();
+  await forceFailRow.click();
+  const expandedDetail = page.locator(".admin-audit-item", { hasText: "documentation.workflow.force_fail" }).locator(".admin-audit-detail");
+  await expect(expandedDetail).toContainText("from_state");
+  await expect(expandedDetail).toContainText("MaterializingArtifact");
 });
 
 // Resolve the member's durable identifier through the admin user list.

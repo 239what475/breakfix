@@ -637,34 +637,161 @@
 	word-break: break-all;
 }
 
-/* Audit filters keep the my-space history-filters look until the audit rows
-   move to the icon-row pattern in the next commit. */
+/* Users: space-row pattern; the role badge is a section-count style cell -
+   brand green for admin, neutral gray for user, never red. */
+.admin-user-list {
+	display: grid;
+	gap: 8px;
+}
+
+.admin-user-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 16px;
+	min-width: 0;
+	border: 1px solid #d8e0da;
+	border-radius: 6px;
+	padding: 14px 15px;
+	background: var(--surface);
+}
+
+.admin-user-main {
+	min-width: 0;
+}
+
+.admin-user-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.admin-user-title h3 {
+	overflow: hidden;
+	margin: 0;
+	color: #273630;
+	font-size: 13px;
+	line-height: 1.35;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.admin-role-badge {
+	flex: 0 0 auto;
+	padding: 3px 7px;
+	border-radius: 4px;
+	background: #e7ede9;
+	color: #53625b;
+	font: 700 9px "DM Mono", monospace;
+	text-transform: uppercase;
+}
+
+.admin-role-badge.admin {
+	background: #e1f0e8;
+	color: #17614e;
+}
+
+.admin-user-meta {
+	margin: 7px 0 0;
+	color: #6f7c76;
+	font: 10px "DM Mono", monospace;
+}
+
+.admin-user-action {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+/* Audit: history-row pattern with a semantic action icon column; the detail
+   payload stays collapsed until the row is toggled. */
 .admin-audit-filters {
 	display: flex;
-	gap: 10px;
-	align-items: end;
 	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 7px;
 }
 
 .admin-audit-filters label {
-	display: grid;
-	gap: 4px;
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--muted);
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: #718078;
+	font: 9px "DM Mono", monospace;
+	text-transform: uppercase;
 }
 
 .admin-audit-filters input {
-	min-width: 220px;
-	padding: 8px 11px;
-	border: 1px solid #cfd9d2;
-	border-radius: 6px;
-	font: inherit;
+	max-width: 240px;
+	border: 1px solid #d5dfd8;
+	border-radius: 4px;
+	padding: 6px 8px;
+	color: #405049;
+	background-color: var(--surface);
+	font: 11px "DM Mono", monospace;
 }
 
-.admin-audit-detail code {
-	font-size: 11px;
-	word-break: break-all;
+.admin-audit-list {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.admin-audit-item {
+	min-width: 0;
+	border: 1px solid #e0e6e2;
+	border-radius: 6px;
+	background: #fbfcfa;
+}
+
+.admin-audit-toggle {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr) auto;
+	align-items: start;
+	gap: 10px;
+	width: 100%;
+	border: 0;
+	border-radius: 6px;
+	padding: 9px 12px;
+	background: transparent;
+	color: inherit;
+	text-align: left;
+}
+
+.admin-audit-toggle:not(:disabled):hover {
+	background: #f1f5f1;
+}
+
+.admin-audit-main {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.admin-audit-action {
+	color: #273630;
+	font: 700 11px "DM Mono", monospace;
+	overflow-wrap: anywhere;
+}
+
+.admin-audit-target {
+	color: #74817b;
+	font: 10px "DM Mono", monospace;
+	overflow-wrap: anywhere;
+}
+
+.admin-audit-detail {
+	margin: 0;
+	border-top: 1px solid #e3e8e4;
+	border-radius: 0 0 6px 6px;
+	padding: 10px 12px 11px 44px;
+	color: #33453d;
+	background: #f6f9f7;
+	font: 10px "DM Mono", monospace;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .mobile-tabs {
@@ -766,6 +893,33 @@
 	.admin-history-time {
 		align-self: start;
 		margin-top: 2px;
+	}
+
+	.admin-audit-filters {
+		justify-content: flex-start;
+	}
+
+	.admin-audit-filters input {
+		max-width: none;
+		flex: 1 1 150px;
+	}
+
+	.admin-audit-toggle {
+		grid-template-columns: 20px minmax(0, 1fr) auto;
+		gap: 9px;
+	}
+
+	.admin-audit-detail {
+		padding-left: 41px;
+	}
+
+	.admin-user-row {
+		grid-template-columns: minmax(0, 1fr);
+		align-items: start;
+	}
+
+	.admin-user-action {
+		justify-self: start;
 	}
 }
 

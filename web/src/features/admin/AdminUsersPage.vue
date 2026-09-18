@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import { KeyRound, X } from "lucide-vue-next";
 import { useAdminUsers } from "./admin";
+import { clock } from "./format";
 import { toActiveRef, toLoggedInRef } from "./refs";
 import { api } from "../../api/client";
 import type { AdminUser } from "../../api/generated";
@@ -24,7 +25,6 @@ const resetBusy = ref(false);
 // The rotated secret is shown exactly once and never re-fetched.
 const rotated = ref<{ user: AdminUser; secret: string; url: string }>();
 
-const clock = (value: string) => new Date(value).toLocaleString();
 function openReset(user: AdminUser) {
 	reset.value = { user, password: "" };
 	resetError.value = "";
@@ -58,18 +58,16 @@ async function submitReset() {
 		<p v-if="error" class="admin-error">{{ error }}</p>
 		<p v-if="loading" class="admin-empty">Loading accounts...</p>
 		<p v-else-if="!users.length" class="admin-empty">暂无用户。</p>
-		<div v-else class="admin-workflow-list">
-			<article v-for="user in users" :key="user.id" class="admin-workflow-row">
-				<div class="admin-workflow-main">
-					<div class="admin-workflow-title">
+		<div v-else class="admin-user-list">
+			<article v-for="user in users" :key="user.id" class="admin-user-row">
+				<div class="admin-user-main">
+					<div class="admin-user-title">
 						<h3>{{ user.name }}</h3>
-						<span class="workflow-state" :class="user.role === 'admin' ? 'state-failed' : 'state-planning'">{{ user.role }}</span>
+						<span class="admin-role-badge" :class="user.role">{{ user.role }}</span>
 					</div>
-					<p>subject {{ user.subject }} · 创建于 {{ clock(user.created_at) }}</p>
+					<p class="admin-user-meta">subject {{ user.subject }} · 创建于 {{ clock(user.created_at) }}</p>
 				</div>
-				<div class="admin-workflow-actions">
-					<button class="compact-button" type="button" @click="openReset(user)"><KeyRound :size="13" aria-hidden="true" />重置 TOTP</button>
-				</div>
+				<button class="text-button admin-user-action" type="button" @click="openReset(user)"><KeyRound :size="13" aria-hidden="true" />重置 TOTP</button>
 			</article>
 		</div>
 
