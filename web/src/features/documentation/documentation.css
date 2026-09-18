@@ -481,6 +481,40 @@
   list-style: disc;
 }
 
+/* The session area sits at the bottom of the panel: status while the
+   environment prepares, then the terminal with its stop/reset actions. */
+.practice-panel-session {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  min-height: 0;
+}
+
+.practice-panel-session-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.practice-panel-start {
+  align-self: flex-start;
+}
+
+.practice-panel-terminal {
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  flex: 1 1 auto;
+}
+
+.practice-panel-terminal .terminal-body {
+  flex: 1 1 auto;
+  min-height: 200px;
+}
+
 .documentation-toc-backdrop {
   display: none;
 }

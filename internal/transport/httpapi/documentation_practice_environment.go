@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
@@ -16,6 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// practiceRevisionToken bounds the revision identity that fences one
+// practice's environment. Runnable revision IDs exceed the CRD label value
+// limit of 63 bytes, so the immutable digest pins the identity instead: its
+// leading hex is deterministic and stays stable for the lifetime of the
+// revision.
+func practiceRevisionToken(reference runnable.RevisionReference) string {
+	return strings.TrimPrefix(reference.Digest, "sha256:")[:32]
+}
+
 // practiceEnvironmentTarget pins an environment to one published practice
 // revision. The runnable revision reference is already frozen in the
 // revision, so the binding resolves without another lookup. The runtime comes
@@ -23,7 +33,7 @@ import (
 func (h *Handler) practiceEnvironmentTarget(revision documentdomain.PracticeRevision) environmentContentTarget {
 	reference := revision.RunnableRevisionRef
 	return environmentContentTarget{
-		kind: environmentContentDocumentationPractice, id: revision.ID, revisionID: reference.ID,
+		kind: environmentContentDocumentationPractice, id: revision.ID, revisionID: practiceRevisionToken(reference),
 		title: revision.ReaderProjection.Title,
 		resolveBinding: func(context.Context) (runnable.RevisionReference, error) { return reference, nil },
 	}

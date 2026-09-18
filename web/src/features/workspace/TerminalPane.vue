@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { Monitor, Plus, X } from "lucide-vue-next";
-import { api } from "../../api/client";
 import type { AssistantTerminalContext, ScenarioNode } from "../../api/types";
-import { useTerminalSession } from "./useTerminalSession";
+import { useTerminalSession, type TerminalChannel } from "./useTerminalSession";
 
 const props = defineProps<{
-  scenarioId: string;
+  /** The content identity the terminal belongs to; used for window close. */
+  terminalId: string;
   runtime: "node" | "k8s";
   nodes: ScenarioNode[];
   visible: boolean;
+  /** Ticket + socket plumbing for this content kind. */
+  channel: TerminalChannel;
+  /** Optional server-side window close; practices have no such endpoint. */
+  closeWindow?: (window: string, node: string | undefined) => Promise<void>;
 }>();
 const emit = defineEmits<{
   connected: [connected: boolean];
@@ -19,8 +23,8 @@ const host = ref<HTMLDivElement>();
 const selectedNode = ref("");
 const tabsByNode = reactive<Record<string, string[]>>({});
 const activeByNode = reactive<Record<string, string | null>>({});
-const scenario = computed(() => props.scenarioId);
 const node = computed(() => props.runtime === "node" ? selectedNode.value || null : null);
+const channel = computed(() => props.channel);
 const terminalKey = computed(() => node.value || "management");
 const tabs = computed(() => tabsByNode[terminalKey.value] ?? []);
 const active = computed<string | null>({
@@ -28,7 +32,7 @@ const active = computed<string | null>({
   set: (value) => { activeByNode[terminalKey.value] = value; },
 });
 const { state, stateMessage, connect, focus, refreshLayout } =
-  useTerminalSession(host, scenario, node, active);
+  useTerminalSession(host, channel, node, active);
 const connected = computed(() => state.value === "connected");
 watch(connected, (value) => emit("connected", value), { immediate: true });
 
@@ -67,7 +71,7 @@ function resetTerminals() {
 }
 
 watch(
-  [() => props.scenarioId, () => props.runtime, () => props.nodes.map((item) => item.name).join("\0")],
+  [() => props.terminalId, () => props.runtime, () => props.nodes.map((item) => item.name).join("\0")],
   resetTerminals,
   { immediate: true },
 );
@@ -100,10 +104,12 @@ async function closeTab(name: string) {
   const targetNode = node.value;
   if (name === active.value) active.value = null;
   tabsByNode[key] = tabs.value.filter((tab) => tab !== name);
-  try {
-    await api.closeTerminalWindow(props.scenarioId, name, targetNode || undefined);
-  } catch {
-    /* the local tab is already gone */
+  if (props.closeWindow) {
+    try {
+      await props.closeWindow(name, targetNode || undefined);
+    } catch {
+      /* the local tab is already gone */
+    }
   }
   if (!active.value && tabsByNode[key].length)
     active.value = tabsByNode[key][tabsByNode[key].length - 1];

@@ -83,7 +83,7 @@ func TestStartDocumentationPracticeEnvironmentIsIdempotent(t *testing.T) {
 		t.Fatalf("practice environment spec = %#v", created.Spec)
 	}
 	expectedName := learningEnvironmentName("u-demo", environmentContentTarget{
-		kind: environmentContentDocumentationPractice, id: "practice-01", revisionID: "runnable-revision-01",
+		kind: environmentContentDocumentationPractice, id: "practice-01", revisionID: practiceRevisionToken(runnable.RevisionReference{Digest: testRunnableRevisionDigest}),
 	})
 	if created.Name != expectedName {
 		t.Fatalf("practice environment name = %q, want deterministic %q", created.Name, expectedName)
@@ -169,7 +169,7 @@ func TestStopAndResetDocumentationPracticeEnvironmentLifecycle(t *testing.T) {
 		state.mu.Unlock()
 		t.Fatalf("reset created or deleted environments: creates:%d deletes:%d", state.createSuccesses, state.deleteRequests)
 	}
-	updated := state.environments[learningEnvironmentName("u-demo", environmentContentTarget{kind: environmentContentDocumentationPractice, id: "practice-01", revisionID: "runnable-revision-01"})]
+	updated := state.environments[learningEnvironmentName("u-demo", environmentContentTarget{kind: environmentContentDocumentationPractice, id: "practice-01", revisionID: practiceRevisionToken(runnable.RevisionReference{Digest: testRunnableRevisionDigest})})]
 	state.mu.Unlock()
 	if updated.Spec.ResetNonce != 1 {
 		t.Fatalf("reset nonce = %d, want 1", updated.Spec.ResetNonce)

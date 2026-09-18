@@ -1,18 +1,39 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronRight, X } from "lucide-vue-next";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { DocumentationPracticeDetail } from "../../api/generated";
+import TerminalPane from "../workspace/TerminalPane.vue";
+import { practiceTerminalChannel } from "../workspace/useTerminalSession";
 
-defineProps<{
+const props = defineProps<{
+  practiceId: string;
   detail: DocumentationPracticeDetail | null;
   loading: boolean;
   failed: boolean;
+  /** The environment session for this practice. */
+  sessionActive: boolean;
+  starting: boolean;
+  stopping: boolean;
+  resetting: boolean;
+  ready: boolean;
+  phase: string;
+  runtime: "node" | "k8s";
+  nodes: { name: string; title: string }[];
 }>();
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; start: []; stop: []; reset: [] }>();
 
 const stepsOpen = ref(true);
 const observationsOpen = ref(true);
+
+const channel = computed(() => practiceTerminalChannel(props.practiceId));
+
+function phaseLabel() {
+  if (!props.starting) return "";
+  if (props.phase === "Provisioning") return "Provisioning the environment...";
+  if (props.phase === "Ready") return "Environment is almost ready...";
+  return "Preparing the environment...";
+}
 </script>
 
 <template>
@@ -65,6 +86,38 @@ const observationsOpen = ref(true);
           <li v-for="(observation, index) in detail.observations" :key="index">{{ observation }}</li>
         </ul>
       </section>
+
+      <!-- The temporary environment lives below the guidance: start it on
+           demand, watch it prepare, and work in the terminal once Ready. -->
+      <div class="practice-panel-session">
+        <div v-if="starting" class="practice-panel-state" role="status">{{ phaseLabel() }}</div>
+        <template v-if="ready">
+          <div class="practice-panel-session-actions">
+            <button class="compact-button" type="button" :disabled="resetting" @click="emit('reset')">
+              {{ resetting ? "Resetting..." : "Reset" }}
+            </button>
+            <button class="compact-button danger-button" type="button" :disabled="stopping" @click="emit('stop')">
+              {{ stopping ? "Stopping..." : "Stop" }}
+            </button>
+          </div>
+          <TerminalPane
+            :terminal-id="practiceId"
+            :runtime="runtime"
+            :nodes="nodes"
+            :visible="true"
+            :channel="channel"
+            class="practice-panel-terminal"
+          />
+        </template>
+        <button
+          v-else-if="!sessionActive && !starting"
+          class="primary-button practice-panel-start"
+          type="button"
+          @click="emit('start')"
+        >
+          Start practice
+        </button>
+      </div>
     </template>
   </aside>
 </template>

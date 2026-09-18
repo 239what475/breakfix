@@ -262,6 +262,11 @@ test("the practice panel swaps the layout and the close restores the outline", a
 
   await page.locator("#pod-lifetime .practice-anchor-button").click();
   await expect(reader).toHaveClass(/practice-open/);
+  // An anonymous anchor click is the session entry: it asks for a login and
+  // would continue after it. This display-only pass dismisses the dialog.
+  await expect(page.locator(".dialog-backdrop")).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.locator(".dialog-backdrop")).toHaveCount(0);
   const panel = page.locator(".practice-panel");
   await expect(panel).toBeVisible();
   // The panel shows the reader projection frozen at publish time.
@@ -296,4 +301,46 @@ test("mobile readers see no practice entry", async ({ page, request }) => {
   await expect(page.locator(".documentation-article")).toBeVisible();
   await expect(page.locator(".practice-anchor-button")).toBeHidden();
   await expect(page.locator(".practice-panel")).toHaveCount(0);
+});
+
+test("the practice session prepares, attaches, and stops in the panel", async ({ page, request }) => {
+  test.setTimeout(15 * 60_000);
+  await ensurePracticePublished(request);
+
+  // A logged-in reader: the session verbs all require the JWT.
+  const username = `practice-session-${Date.now()}`;
+  const register = await request.post(`${apiBase}/api/auth/register`, { data: { username, password: "documentation-test-password" } });
+  expect(register.status(), await register.text()).toBe(201);
+  const registration = await register.json() as { totp_secret: string };
+  const login = await request.post(`${apiBase}/api/auth/login`, { data: { username, password: "documentation-test-password", totp_code: totp(registration.totp_secret) } });
+  expect(login.status()).toBe(200);
+  const credentials = await login.json() as { token: string };
+  await page.addInitScript((token) => window.localStorage.setItem("token", token), credentials.token);
+
+  await gotoReader(page, podLifecycleUrl);
+  await page.locator("#pod-lifetime .practice-anchor-button").click();
+  const panel = page.locator(".practice-panel");
+  await expect(panel.getByRole("heading", { name: "Observe Pod lifetime" })).toBeVisible();
+
+  // Click-to-session: the temporary environment prepares in the panel, then
+  // the terminal attaches once it is Ready.
+  await expect(panel.locator(".practice-panel-terminal")).toBeVisible({ timeout: 10 * 60_000 });
+  await expect(panel.locator(".terminal-status")).toContainText("Connected", { timeout: 90_000 });
+  await page.keyboard.type("echo practice-ready");
+  await page.keyboard.press("Enter");
+  await expect(panel.locator(".practice-panel-terminal")).toContainText("practice-ready", { timeout: 30_000 });
+
+  // Closing the panel only detaches; re-entering finds the environment again
+  // and reattaches the terminal.
+  await panel.getByRole("button", { name: "Close practice panel" }).click();
+  await expect(page.locator(".practice-panel")).toHaveCount(0);
+  await page.locator("#pod-lifetime .practice-anchor-button").click();
+  await expect(panel.locator(".practice-panel-terminal")).toBeVisible({ timeout: 10 * 60_000 });
+  await expect(panel.locator(".terminal-status")).toContainText("Connected", { timeout: 90_000 });
+
+  // The explicit stop is optimistic: the panel leaves the ready state right
+  // away and the server drains and deletes the environment in the background.
+  await panel.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator(".toast").getByText("Practice environment stop requested.")).toBeVisible();
+  await expect(panel.locator(".practice-panel-terminal")).toHaveCount(0);
 });

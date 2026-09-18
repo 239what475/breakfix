@@ -94,6 +94,14 @@ func (s *environmentAPITestState) serveCollection(w http.ResponseWriter, r *http
 			writeKubernetesError(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
 			return
 		}
+		// The real API server rejects CRs whose label values exceed 63 bytes;
+		// mirror that so environment metadata stays within the limit.
+		for _, value := range environment.Labels {
+			if len(value) > 63 {
+				writeKubernetesError(w, http.StatusUnprocessableEntity, metav1.StatusReasonInvalid, fmt.Sprintf("metadata.labels: Invalid value: %q: must be no more than 63 bytes", value))
+				return
+			}
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if _, exists := s.environments[environment.Name]; exists {

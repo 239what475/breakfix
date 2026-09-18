@@ -8,6 +8,7 @@ import ScenarioOverview from "./ScenarioOverview.vue";
 import TerminalPane from "./TerminalPane.vue";
 import WorkspaceHeader from "./WorkspaceHeader.vue";
 import WorkspaceSidebar from "./WorkspaceSidebar.vue";
+import { scenarioTerminalChannel } from "./useTerminalSession";
 import { useScenarioProgress } from "./useScenarioProgress";
 import "./workspace.css";
 import "./assistant.css";
@@ -36,6 +37,7 @@ const sessionStartedAt = ref(Date.now());
 const elapsedSeconds = ref(0);
 let elapsedTimer: number | undefined;
 const scenarioId = computed(() => props.scenario.id);
+const terminalChannel = computed(() => scenarioTerminalChannel(props.scenario.id));
 const progressEnabled = computed(
   () => terminalConnected.value && !document.hidden,
 );
@@ -235,10 +237,12 @@ onUnmounted(() => {
         </template>
       </section>
       <TerminalPane
-        :scenario-id="scenario.id"
+        :terminal-id="scenario.id"
         :runtime="content?.runtime ?? scenario.runtime"
         :nodes="content?.nodes ?? []"
         :visible="terminalVisible"
+        :channel="terminalChannel"
+        :close-window="async (window, node) => { await api.closeTerminalWindow(scenario.id, window, node); }"
         @connected="terminalConnected = $event"
         @context="(node, current, terminals) => { currentTerminalNode = node; currentTerminalWindow = current; terminalContexts = terminals; }"
       />

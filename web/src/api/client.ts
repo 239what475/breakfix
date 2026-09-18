@@ -14,7 +14,10 @@ import type {
 import type {
 	DocumentationPageResponse,
 	DocumentationPracticeDetail,
+	DocumentationPracticeEnvironment,
 	DocumentationPracticesResponse,
+	DocumentationPracticeResetResponse,
+	DocumentationPracticeStopResponse,
 	DocumentationTreeResponse,
 	ScenarioList,
 	ScenarioProgress,
@@ -263,6 +266,32 @@ export const api = {
 		request<DocumentationPracticeDetail>(
 			"GET",
 			`/documentation/practices/${encodeURIComponent(id)}`,
+		),
+	startDocumentationPracticeEnvironment: (id: string) =>
+		request<DocumentationPracticeEnvironment>(
+			"POST",
+			`/documentation/practices/${encodeURIComponent(id)}/start`,
+		),
+	getDocumentationPracticeEnvironment: (id: string) =>
+		request<DocumentationPracticeEnvironment>(
+			"GET",
+			`/documentation/practices/${encodeURIComponent(id)}/environment`,
+		),
+	stopDocumentationPracticeEnvironment: (id: string) =>
+		request<DocumentationPracticeStopResponse>(
+			"POST",
+			`/documentation/practices/${encodeURIComponent(id)}/stop`,
+		),
+	resetDocumentationPracticeEnvironment: (id: string) =>
+		request<DocumentationPracticeResetResponse>(
+			"POST",
+			`/documentation/practices/${encodeURIComponent(id)}/reset`,
+		),
+	createPracticeTerminalTicket: (id: string, window: string, node?: string) =>
+		request<TerminalTicketResponse>(
+			"POST",
+			`/documentation/practices/${encodeURIComponent(id)}/terminal-ticket`,
+			{ window, node },
 		),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {

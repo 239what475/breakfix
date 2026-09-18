@@ -7,7 +7,14 @@ import { documentationSource, libraryPathOf, urlPathOf } from "./documentation";
 import { renderDocumentMarkdown } from "./markdown";
 import DocumentationToc, { type TreeEntry } from "./DocumentationToc.vue";
 import PracticePanel from "./PracticePanel.vue";
+import { usePracticeSession } from "./usePracticeSession";
 import "./documentation.css";
+
+const props = defineProps<{ authSignal?: number }>();
+const emit = defineEmits<{
+  "request-auth": [];
+  notice: [text: string, kind?: "error" | "info"];
+}>();
 
 const entryUrlPath: string = documentationSource.entryPath;
 const loading = ref(false);
@@ -33,6 +40,30 @@ const practiceDetailFailed = ref(false);
 const tocCollapsedBeforePractice = ref<boolean | null>(null);
 
 const practiceOpen = computed(() => activePracticeAnchor.value !== null);
+
+const activePracticeId = computed(
+  () => practices.value.find((item) => item.anchor === activePracticeAnchor.value)?.practice_id ?? null,
+);
+
+// Clicking the anchor is the session entry: it starts (or resumes) the
+// temporary environment, the panel polls the phase while it prepares, and the
+// terminal attaches once it is Ready. Anonymous readers continue after login.
+const notify = (text: string, kind?: "error" | "info") => emit("notice", text, kind);
+const practiceSession = usePracticeSession(notify, () => emit("request-auth"));
+const {
+  phase: sessionPhase,
+  starting: sessionStarting,
+  stopping: sessionStopping,
+  resetting: sessionResetting,
+  environmentReady: sessionEnvironmentReady,
+  runtime: sessionRuntime,
+  nodes: sessionNodes,
+} = practiceSession;
+
+watch(
+  () => props.authSignal,
+  () => void practiceSession.resumeAfterAuth(),
+);
 
 const currentLibraryPath = computed(() => libraryPathOf(current.value.path));
 
@@ -227,6 +258,9 @@ async function openPractice(anchor: string) {
   await nextTick();
   scrollHeadingIntoView(anchor);
   practiceDetailLoading.value = true;
+  // Clicking the anchor is the session entry: start (or resume) while the
+  // projection loads. Auth-gated starts resume once the login lands.
+  practiceSession.startFor(summary.practice_id);
   try {
     const detail = await api.getDocumentationPractice(summary.practice_id);
     if (activePracticeAnchor.value !== anchor) return;
@@ -245,6 +279,9 @@ async function closePractice() {
   activePracticeAnchor.value = null;
   practiceDetail.value = null;
   practiceDetailFailed.value = false;
+  // Closing only detaches: the terminal disconnects with the panel and the
+  // environment is reclaimed by its idle TTL.
+  practiceSession.detach();
   if (tocCollapsedBeforePractice.value !== null) {
     tocCollapsed.value = tocCollapsedBeforePractice.value;
     tocCollapsedBeforePractice.value = null;
@@ -359,11 +396,23 @@ onUnmounted(() => {
       </div>
       <div class="documentation-rail">
         <PracticePanel
-          v-if="practiceOpen"
+          v-if="practiceOpen && activePracticeId"
+          :practice-id="activePracticeId"
           :detail="practiceDetail"
           :loading="practiceDetailLoading"
           :failed="practiceDetailFailed"
+          :session-active="sessionEnvironmentReady"
+          :starting="sessionStarting"
+          :stopping="sessionStopping"
+          :resetting="sessionResetting"
+          :ready="sessionEnvironmentReady"
+          :phase="sessionPhase"
+          :runtime="sessionRuntime"
+          :nodes="sessionNodes"
           @close="closePractice"
+          @start="activePracticeId && practiceSession.start(activePracticeId)"
+          @stop="practiceSession.stop()"
+          @reset="practiceSession.reset()"
         />
       </div>
     </div>

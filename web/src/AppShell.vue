@@ -45,6 +45,9 @@ watch(
 	{ immediate: true },
 );
 const mySpaceRefreshRequest = ref(0);
+// Incremented on every successful login so mounted pages can resume an
+// auth-gated flow (the reader's pending practice start).
+const authSignal = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
 let noticeTimer: number | undefined;
@@ -146,6 +149,7 @@ function signOut() {
 
 function handleAuthenticated(name: string) {
 	isAdmin.value = isLoggedIn() && tokenUserRole() === "admin";
+	authSignal.value += 1;
 	authenticated(name);
 }
 
@@ -187,7 +191,12 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
       {{ notice.text }}
     </div>
 		<main class="app-main">
-      <DocumentationPage v-if="!workspace && !authoringOpen && page === 'documentation'" />
+      <DocumentationPage
+        v-if="!workspace && !authoringOpen && page === 'documentation'"
+        :auth-signal="authSignal"
+        @request-auth="openAuth('login')"
+        @notice="notify"
+      />
       <ScenarioCatalogPage
 		v-show="!workspace && !authoringOpen && page === 'operations'"
       :scenarios="scenarios"

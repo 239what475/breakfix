@@ -6,9 +6,47 @@ import "@xterm/xterm/css/xterm.css";
 
 type TerminalState = "idle" | "connecting" | "connected" | "disconnected";
 
+// A terminal channel abstracts the content-specific parts of one terminal:
+// how a one-time ticket is minted and where the ticket-authenticated socket
+// lives. Operations scenarios and documentation practices share the socket
+// protocol and differ only in their channel.
+export interface TerminalChannel {
+  ticket: (window: string, node: string | undefined) => Promise<string>;
+  socket: (window: string, ticket: string, node: string | undefined) => string;
+}
+
+function terminalSocketURL(path: string, window: string, ticket: string, node: string | undefined) {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const query = new URLSearchParams({ window, ticket });
+  if (node) query.set("node", node);
+  return `${protocol}//${location.host}${path}?${query.toString()}`;
+}
+
+export function scenarioTerminalChannel(scenarioId: string): TerminalChannel {
+  return {
+    ticket: (window, node) =>
+      api
+        .createTerminalTicket(scenarioId, window, node)
+        .then((response) => response.ticket),
+    socket: (window, ticket, node) =>
+      terminalSocketURL(`/api/operations/scenarios/${scenarioId}/terminal`, window, ticket, node),
+  };
+}
+
+export function practiceTerminalChannel(practiceId: string): TerminalChannel {
+  return {
+    ticket: (window, node) =>
+      api
+        .createPracticeTerminalTicket(practiceId, window, node)
+        .then((response) => response.ticket),
+    socket: (window, ticket, node) =>
+      terminalSocketURL(`/api/documentation/practices/${practiceId}/terminal`, window, ticket, node),
+  };
+}
+
 export function useTerminalSession(
   host: Readonly<Ref<HTMLDivElement | undefined>>,
-  scenarioId: Readonly<Ref<string | null>>,
+  channel: Readonly<Ref<TerminalChannel | null>>,
   nodeName: Readonly<Ref<string | null>>,
   windowName: Readonly<Ref<string | null>>,
 ) {
@@ -47,10 +85,10 @@ export function useTerminalSession(
 
   async function connect() {
     disconnect();
-    const scenario = scenarioId.value;
+    const link = channel.value;
     const node = nodeName.value;
     const window = windowName.value;
-    if (!host.value || !scenario || !window) {
+    if (!host.value || !link || !window) {
       state.value = "idle";
       return;
     }
@@ -84,7 +122,7 @@ export function useTerminalSession(
     fit.fit();
     let ticket: string;
     try {
-      ticket = (await api.createTerminalTicket(scenario, window, node || undefined)).ticket;
+      ticket = await link.ticket(window, node || undefined);
     } catch (error) {
       if (currentEpoch !== epoch) return;
       state.value = "disconnected";
@@ -92,10 +130,7 @@ export function useTerminalSession(
       return;
     }
     if (currentEpoch !== epoch) return;
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const query = new URLSearchParams({ window, ticket });
-    if (node) query.set("node", node);
-    socket = new WebSocket(`${protocol}//${location.host}/api/operations/scenarios/${scenario}/terminal?${query.toString()}`);
+    socket = new WebSocket(link.socket(window, ticket, node || undefined));
     socket.onopen = () => {
       if (currentEpoch !== epoch) return;
       stateMessage.value = "";
@@ -137,7 +172,7 @@ export function useTerminalSession(
     observer.observe(host.value);
   }
 
-  watch([host, scenarioId, nodeName, windowName], () => void connect(), { flush: "post" });
+  watch([host, channel, nodeName, windowName], () => void connect(), { flush: "post" });
   onScopeDispose(disconnect);
   function refreshLayout() {
     requestAnimationFrame(() => {
