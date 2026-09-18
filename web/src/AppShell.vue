@@ -29,12 +29,18 @@ const adminSection = ref<AdminSection>(adminSectionFromPath());
 // The backend independently enforces requireAdmin on every admin endpoint.
 const isAdmin = ref(isLoggedIn() && tokenUserRole() === "admin");
 
-watch(isAdmin, (admin) => {
-	if (!admin && page.value === "admin") {
-		page.value = "operations";
-		window.history.pushState({}, "", "/");
-	}
-});
+watch(
+	isAdmin,
+	(admin) => {
+		if (!admin && page.value === "admin") {
+			page.value = "operations";
+			window.history.pushState({}, "", "/");
+		}
+	},
+	// Immediate covers the initial page load: a non-admin opening /admin/*
+	// directly is redirected instead of rendering the console skeleton.
+	{ immediate: true },
+);
 const mySpaceRefreshRequest = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
