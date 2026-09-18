@@ -1,141 +1,166 @@
 # TODO
 
 上一阶段"切库与阅读器统一切换"已于 2026-09-18 完成并验收：A 波四提交
-（`79e4e07`、`324b9ac`、`aa02be1`、`882bd6f`）+ B 波三提交（`65e121a`、
-`c7534dd` 及本提交）逐提交绿，收尾全量回归（docs-smoke 真实 854 页库、
-go test、documentation E2E 6/6、admin E2E 1/1）通过。更早阶段（管理控制台
-重设计、管理控制面 v1、离线文档库生成器 docs-project-v10）见 git 历史。
+（`79e4e07`、`324b9ac`、`aa02be1`、`882bd6f`）+ B 波三提交
+（`65e121a`、`c7534dd` 及收尾提交）逐提交绿，收尾全量回归（docs-smoke 真实
+854 页库、go test、documentation E2E 6/6、admin E2E 1/1）通过。更早阶段（管理
+控制台重设计、管理控制面 v1、离线文档库生成器 docs-project-v10）同样见 git
+历史；本文件只保留当前阶段与未立项的设计稿。
 
-## 阶段一：切库与阅读器统一切换（2026-09-18 完成）
+## 阅读器实践入口（当前阶段，2026-09-19 立项）
 
-目标：离线文档库（`docs-site/documents`，docs-project-v10 产物）成为产品唯一
-文档输入——流水线与阅读器同源；运行时 HTML 解析与源码读取路径删除；证据绑定
-三元组；部署不再钉死单页；阅读器退役 iframe、直接渲染解析产物。
+目标：已发布的 PracticeRevision 在阅读页可见可达——有实践的章节标题旁挂锚点
+按钮，点击即启动临时环境与终端，结束后收起面板回到原文。实践是段落的延伸：
+临时、即用、无档案。
 
-核心原则（2026-09-18 与用户确认）：解析离线完成、版本化（generator_version）、
-带 digest 固化为产物；运行时只消费产物、不再解析——流水线输入与证据同源，agent
-看到的字节即证据 digest 覆盖的字节，解析器获得独立于 Server 构建的版本身份。
-阅读器并入本阶段（同日与用户确认）：原独立排期实际等于不排，产品会长期停在
-两套文档表示（流水线吃库、读者看 iframe）上；合并为 A/B 两波推进，A 波完成
-即是全绿检查点。
+核心决策（2026-09-19 与用户确认）：
 
-现状（2026-09-18 探查）：
+- 入口：渲染后往有实践的标题插入锚点按钮（事件委托挂 article 容器）；
+  ≤900px CSS 隐藏，移动端纯阅读，无入口无终端；
+- 布局：默认 `目录 | 正文`，实践打开后目录让位收起、正文左移，右栏使用阅读器
+  重建时预留的 rail 槽位显示实践面板；关闭面板恢复目录原状态；打开/关闭均
+  scrollIntoView 锚定实践所属标题，对抗正文变窄的重排漂移；
+- 点击即会话（无中间页）：find-or-create 环境 → 面板轮询 phase
+  （Pending→Provisioning→Ready）→ 终端接入（连接期 lease 自动续期，现有行为）；
+  面板 = 上部标题/目标/边界 + 可折叠步骤与观察点 + 下部终端与状态操作；
+- 同时仅一个会话：点其他实践按钮自动结束上一会话（stop + toast）；关闭面板仅
+  断开终端，环境按 IdleTTL 自然回收；面板提供显式"结束""重置"；再次点击同标题
+  重新接上（find-or-create）；
+- 无学习记录：实践在"我的空间"不留痕（my_space 对非 ops content-kind 的活跃
+  环境本就静默跳过，零改动即所需），无 attempt/完成/断言求值，观察引导只是
+  面板说明文本；
+- 读者文本发布时固化：PracticeRevision 增可空读者投影（标题/目标/边界/步骤/
+  观察点；步骤允许为空，容纳纯观察实践），发布路径从 plan 工件固化写入 revision
+  JSONB（无 DDL）；步骤/观察点只取 instruction/description 文本，evidence 绑定
+  不进投影；
+- 存量唯一一条无投影的已发布记录不回填，读路径只返回带投影的记录（对读者
+  不可见），不为此建更新路径；
+- 未登录读者：入口可见，点击弹 AuthDialog，登录后自动继续（复用 ops
+  pendingStart 模式）；
+- 终端桌面端专用：运维工作台现有的移动端 Docs/Terminal 切换随本阶段一并
+  移除（2026-09-19 与用户确认）——两个模块的移动端统一为纯查看，终端不再
+  作为进度轮询的前提（放宽为页面可见即轮询）。
 
-- Server 输入是两个 ConfigMap 钉死的单页快照（`deploy/manifests/server.yaml`：
-  `breakfix-documentation-snapshot`/`-source`），
-  `internal/adapter/documentation/source.go` 在运行时解析渲染 HTML 提取章节
-  文本，并可读上游源码片段（`ReadSource`/`ReadInclude`）；
-- 库产物已是结构化 Markdown：全局 `manifest.json`（tree/upstream/stats）+ 每页
-  `index.md`/`index.json`（页级 digest、anchors[] 逐锚点 digest、
-  generator_version），共 854 页/12476 锚点，运行时零消费；
-- 证据缺口：`document-context` artifact 与 PublicationManifest 只带 upstream
-  commit 与章节文本 digest，无 parser 版本、无页级 digest；
-- 阅读器（SPA）经 iframe 加载 docs-site nginx 渲染的上游 HTML
-  （`VITE_DOCS_ORIGIN` + postMessage 同步），文档 E2E 以 1314/1315 fixture
-  服务器驱动——产品整体存在两套文档表示。
+现状（2026-09-19 探查）：
 
-**A 波（流水线侧，提交 1–4；完成即是全绿检查点）**
+- `document_practice_index`（`internal/adapter/postgres/
+  schema_documentpractice.go`）append-only，唯一写者是
+  `PublishPracticeRevision`；今天没有任何读路径（无 repository 查询、无端点），
+  `document_practice_revisions` 也只在发布事务内做幂等检查；
+- `PracticeRevision`（`internal/domain/documentpractice/model.go`）是薄引用
+  （runnable/verification/manifest 引用），不含读者文本；UserSteps/Observations
+  只存在于流水线 plan 工件；
+- 环境与终端全部钉死 ops：`environmentObjectMeta` 硬编码
+  `content-kind: operations`，无 ResolveDocumentationPracticeRevisionBinding，
+  终端 ticket/WS 只存在于 `/api/operations/scenarios/{id}/…`；
+- 阅读器：`.documentation-reader` 网格 `264px minmax(0,1fr) 0`，rail 槽位是空
+  div；标题 ID 来自库 anchors[]（`assignHeadingIds`），插入点可直接对位；
+  IntersectionObserver 只做 URL 同步，本线不动（无节区间激活逻辑）。
 
-### 提交 1 feat(docs): read the pinned page from the offline document library
+提交拆解（A/B/C 三波；A、B 波完成即全绿检查点）
 
-- [x] 新增库适配器（复用 `internal/docsproject` 的严格解码与
-      `markdownAnchorSection`）：按 pinned `DocumentContext` 校验全局 manifest
-      （upstream source/commit/version/locale、build_info.repository），
-      `ReadPage(path, anchor)` 先验页级 digest（sha256 of index.md）再按
-      `anchors[].digest` 验 anchor 切片，`ReadMetadata` 改读 PageManifest
-- [x] config 增加 `library_root`，与旧 key 并存、配置即优先；`make docs-smoke`
-      增加真实库冒烟（库路径断言；源码读取断言留待提交 4 删除）
-- [x] 单测：页/锚点 digest 不匹配、manifest 与 pinned context 不符 → 拒绝
+**A 波（读路径）**
 
-### 提交 2 feat(docs): bind pipeline evidence to library digests
+### 提交 1 feat(docs): materialize the reader projection at publish time
 
-- [x] `DocumentContext` 增加 `ParserVersion`（= 库 generator_version）与
-      `PageDigest`，写入 document-context artifact payload 与
-      PublicationManifest.Context；`ContentID` 计算式不变，存量 workflow ID
-      稳定——ContentID 只锚定上游身份（source+commit+page+anchor），解析器
-      升级不自动分叉新工作流，是否重生成由阶段二批次决定；同 ID 下不同
-      parser 版本的运行以 ledger 三元组区分，可审计
-- [x] postgres `validatePublicationLedger` 校验三元组一致；agent 输入
-      （DocumentData、EvidenceReference.Digest）改由库切片提供；若输入语义
-      变化，同步提升 prompt/tool/policy version 常量
-- [x] admin system info 端点暴露库标识（generator_version、upstream commit）
+- [ ] `domain.PracticeRevision` 增可空读者投影字段（标题必填，目标/边界/步骤/
+      观察点；步骤允许为空）；发布路径从 plan 工件固化写入 revision JSONB
+- [ ] 单测：plan 缺标题拒绝发布；投影随记录持久化且读回完整；存量无投影记录
+      照常解码（可空）
 
-### 提交 3 test(e2e): drive documentation E2E from a real generated library
+### 提交 2 feat(api): serve published practices to the reader
 
-- [x] `e2e-documentation-prepare.sh` 改用真实生成器（`cmd/docs-project
-      -pages` 子集，含 pod-lifecycle 页；可基于 `make docs-fixture` 的真实
-      渲染页子集）产出迷你库，替代 `test/fixtures/documentation-e2e` 手工快照；
-      ≤1MiB 走 ConfigMap，超限走卷挂载/镜像层（按实测尺寸定）
-- [x] 文档 E2E 断言 publication manifest 含三元组；admin E2E 回归；两套全绿
+- [ ] `GET /api/documentation/practices?path=`：按 config 钉死的
+      source/commit/language 查索引，只返回带投影的记录
+      （`anchor`/`practice_id`/`title`），每页一次拉取；ETag 由返回集 digest
+      合成，`If-None-Match` 命中 304
+- [ ] `GET /api/documentation/practices/{id}`：读者投影详情 + 运行时摘要
+      （runtime/基础镜像，经 runnable revision ref 解析）；两者可选 JWT 公开读，
+      与 page/tree/asset 同约定；OpenAPI 契约与 web client 同步生成进本提交
+- [ ] 单测：无投影记录不可见、未知 id 404、返回锚点与索引一致
 
-### 提交 4 refactor(docs): retire the runtime HTML parsing path
+**B 波（会话后端）**
 
-- [x] 删除 `snapshot_root`/`source_root` 配置、`ReadSource`/`ReadInclude` 与
-      `renderedSectionText`/`renderedMainContent` 等运行时 HTML 路径，reader
-      仅剩库实现；docs-smoke 删除源码读取断言
-- [x] `deploy/manifests/server.yaml` 移除两个 documentation ConfigMap 与卷，
-      库以镜像层/只读卷进入部署（Makefile 接线 docs-project 为前置）
-- [x] go test/build 绿；E2E 不受影响（fixture 已在库上）
+### 提交 3 feat(api): run practice environments from published revisions
 
-**B 波（阅读器侧，提交 5–7；保真度依据 2026-09-18 实测——5818 个代码块保留、
-表格降级 132/854 页、dropped 均值约 2/页且逐页记账于 index.json）**
+- [ ] 环境服务的 content-kind 与 revision binding 参数化
+      （findEnvironment/createEnvironment/environmentObjectMeta）；新增
+      `ResolveDocumentationPracticeRevisionBinding`（读
+      `document_practice_revisions` → runnable revision ref）；label 值
+      `documentation-practice`（与 runnable Kind 一致），Purpose learning，确定性
+      CR 名复用 learningEnvironmentName 模式
+- [ ] `POST …/practices/{id}/start`（find-or-create，对齐 ops 语义：
+      Existing/Draining 恢复、非 Ready 等待 Ready）、`GET …/environment`
+      （phase/终端节点信息）、`POST …/stop`、`POST …/reset`
+      （Spec.ResetNonce++）；全部 JWT
+- [ ] ops 路径行为零变化（参数化而非重写）；单测：find-or-create 幂等、并发
+      启动由确定性 CR 名围栏、ops kind 不受影响
 
-### 提交 5 feat(api): serve parsed document pages with digest checks
+### 提交 4 feat(api): attach practice terminals
 
-- [x] Server 新增文档读取 API：按页返回解析产物（markdown、title、page_kind、
-      anchors[]、页级 digest），下发前校验 digest；OpenAPI 契约与 web client
-      同步生成；JWT 可读，页级 digest 作 ETag 协商缓存
-- [x] 目录树端点：库全局 manifest tree（title/path/children），分区懒加载；
-      静态资产端点：按 assets[]（sha256）供图，页面 markdown 内相对路径随
-      响应改写
-- [x] 单测：digest 不匹配拒绝、未知页 404、anchors 与 PageManifest 一致
+- [ ] `POST …/practices/{id}/terminal-ticket` + `GET …/terminal?ticket=`
+      镜像 ops 双端点：一次性 ticket（哈希存储、1 分钟 TTL）+ WebSocket（origin
+      允许清单、resize/data/ready 协议、连接期 lease 自动续期）；环境解析改为
+      按 (user, content-kind, content-id) 共享，ticket 存储与终端连接记账原样
+      复用
+- [ ] 单测：ticket 一次性与过期拒绝、origin 不在允许清单拒绝、未知实践 404
 
-### 提交 6 feat(web): render the reader from parsed pages
+**C 波（前端 + E2E）**
 
-- [x] SPA 内置 Markdown 渲染替代 iframe（选型 2026-09-18 调研后与用户确认）：
-      markdown-it（html:false，GFM 表格内置；自定义规则渲染 `> [!NOTE]` 系
-      提示块、标题 ID 映射库 anchors[]）+ Shiki 细粒度高亮（实测 12 语言
-      shell/yaml/json/go/console/powershell/toml/http 等全覆盖）；tabs/details
-      已被生成器压平为 `**Panel:**`/加粗摘要，无需交互组件；documentation 页
-      懒加载分块，主 bundle 不显著膨胀
-- [x] 布局（2026-09-18 与用户确认）：左侧可收起目录（库 tree 懒加载、当前页
-      高亮、移动端进抽屉）+ 中间文档主体；网格预留右侧实践栏位，本期不渲染
-      ——实践入口属 NEXT.md 阅读器线（右栏默认收起、移动端退化为章节内联；
-      当前 853/854 页无已发布实践）；滚动位置 ↔ 锚点同步（IntersectionObserver，
-      为实践线识别当前章节打底）
-- [x] URL 语义原样承接（source/version/path/hash → SPA 路由与锚点滚动），
-      移除 postMessage 校验；加载失败重试、移动端菜单平移
-- [x] 阅读器 E2E 重写为 API 驱动（URL 保持/前进后退/重试平移；防伪造
-      postMessage 测试随机制消亡移除），同提交全绿
+### 提交 5 feat(web): open the practice panel from heading anchors
 
-### 提交 7 refactor(docs): retire the docs-site runtime surface
+- [ ] 渲染后按页级 practices 索引往有实践的标题插按钮（事件委托，
+      `data-anchor`），≤900px CSS 隐藏；`.practice-open` 网格态
+      （`0 minmax(0,1fr) minmax(360px,32%)`），打开时记忆目录原状态、关闭恢复；
+      打开/关闭 scrollIntoView 锚定实践所属标题
+- [ ] 面板纯展示部分：标题/目标/边界 + 可折叠步骤 + 观察点（会话操作随提交 6）
+- [ ] 阅读器 E2E：按钮按锚点出现/消失、面板开合、布局切换与目录恢复、移动端
+      宽度无按钮
 
-- [x] 退役 nginx 运行时镜像（Hugo 构建保留为生成器输入）、context 注入脚本、
-      1314/1315 fixture 服务器与 `VITE_DOCS_ORIGIN`；Makefile 目标清理
-- [x] 全套回归：docs-smoke、go test、两套 E2E 绿
+### 提交 6 feat(web): run the practice session in the panel
+
+- [ ] `useTerminalSession`/`TerminalPane` 泛化（scenario 专用的基础路径与身份
+      抽象为参数）；会话接线：未登录 AuthDialog 后自动继续、启动轮询 phase
+      （准备环境中状态）、Ready 后终端接入、结束/重置、切换实践自动结束上一
+      会话（toast）
+- [ ] E2E：启动 → Ready → 终端就绪 → 停止；关闭面板再进入重接；ops/
+      documentation/admin E2E 回归
+
+### 提交 7 refactor(web): retire the ops mobile terminal toggle
+
+- [ ] 删除 ScenarioWorkspace 的 mobileView 与 WorkspaceHeader 的 Docs/Terminal
+      分段切换及配套 CSS（`.mobile-view-toggle`、`.workspace-body.mobile-*`
+      窗格切换规则）；≤950px 终端窗格隐藏、文档窗格常显，侧栏图标栏不变；
+      终端可见性计算简化为窄屏不连（移动端不建立 WS/PTY）
+- [ ] 进度轮询门槛由"终端已连接且页面可见"放宽为"页面可见"（移除后移动端
+      只读查看时检查点列表仍会刷新）；此切换无 E2E 覆盖（2026-09-19 探查），
+      ops E2E 回归证明桌面行为不变
+- [ ] 收尾全量回归：`make docs-smoke`、`make test-unit`、`make test-e2e`、
+      `make test-e2e-documentation`、`make test-e2e-admin`、
+      `make verify-generated` 全绿
 
 ### 边界
 
-- docs-site 的 Hugo 构建保留（生成器输入侧）；其运行时件（nginx 镜像、
-  `VITE_DOCS_ORIGIN`、iframe/postMessage 同步、context 注入脚本、1314/1315
-  fixture 服务器）随 B 波退役
-- ops 场景侧、admin 控制面零变化；API 契约除新增文档读取 API 与新增字段外
-  不变
-- 多语言维持 2026-09-16"暂不实施"决定
+- ops 场景侧后端、admin 控制面、学习投影零变化（参数化不得改变 ops 行为，
+  由 ops E2E 证明；ops 前端唯一变化是提交 7 的移动端终端移除）；实践环境在
+  "我的空间"的静默跳过是本线期望行为，不是缺陷
+- 无 attempt/完成记录、无服务端断言求值（若未来要"我实践过什么"，独立立项）
+- 多源/多语言不动，practices 查询用 config 钉死的 source/commit/language；
+  OpenAPI 只增不改
+- 移动端无终端：阅读器无入口纯阅读，运维工作台 Docs/Terminal 切换随提交 7
+  移除，终端桌面端专用
 
-### 验收（2026-09-18 通过）
+### 验收（完成后回填日期）
 
-- `make docs-smoke`（真实库）、`go test ./internal/... ./cmd/...`、
-  `make test-e2e-documentation`（6/6）、`make test-e2e-admin`（1/1）全绿
-- 部署物不再存在单页 ConfigMap；Server 运行时路径无 HTML 解析（解析仅存在于
-  离线生成器一侧）
-- 阅读器：保真度断言落在提示块/代码高亮/标题锚点（tabs/details 被生成器压平、
-  本页表格为降级文本，均与生成器实测一致）；URL 行为（source/version/path/
-  hash、前进后退、锚点同步、回退、重试）E2E 通过；阅读器 E2E 以 API 驱动
+- 逐提交绿；收尾 docs-smoke（真实 854 页库）、test-unit、ops/documentation/
+  admin 三套 E2E 全绿
+- 手工：有已发布实践的页面上，按钮 → 面板 → 环境就绪 → 终端可操作 → 结束并
+  回收；未登录点击路径登录后自动继续；关闭面板后目录恢复原状态
 
-## 阶段二：多页铺开与批次控制（设计稿，阶段一落地后细化为提交拆解）
+## 多页铺开与批次控制（设计稿，阅读器实践入口落地后细化为提交拆解）
 
-前提：阶段一切库落地——部署携带全量库，树/页/锚点元数据在 manifest 里现成。
+前提（已落地 2026-09-18）：切库——部署携带全量库，树/页/锚点元数据在
+manifest 里现成。
 
 ### 管理台"文档"分区：语料目录树
 
