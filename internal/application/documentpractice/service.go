@@ -469,7 +469,7 @@ func (s *Service) Publish(ctx context.Context, workflowID string, candidate doma
 	if err != nil {
 		return domain.Workflow{}, domain.PracticeRevision{}, err
 	}
-	practice := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-" + candidate.ID, WorkflowID: workflowID, Context: candidate.Context, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: workflow.Revision, CandidateID: candidate.ID, RunnableRevisionRef: revisionRef, VerificationReportRef: report.Reference, PublicationManifestID: manifest.ID, PublishedAt: s.now()}
+	practice := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-" + candidate.ID, WorkflowID: workflowID, Context: candidate.Context, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: workflow.Revision, CandidateID: candidate.ID, RunnableRevisionRef: revisionRef, VerificationReportRef: report.Reference, PublicationManifestID: manifest.ID, ReaderProjection: domain.ReaderProjectionFromPlan(plan), PublishedAt: s.now()}
 	final, err := s.store.PublishPracticeRevision(ctx, workflowID, workflow.StateVersion, practice, manifest, s.now())
 	return final, practice, err
 }

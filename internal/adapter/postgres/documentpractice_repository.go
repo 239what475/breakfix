@@ -739,6 +739,9 @@ func validatePublicationLedger(artifacts []domain.ArtifactRecord, revision domai
 	if err := json.Unmarshal(planArtifact.Payload, &plan); err != nil || plan.Validate() != nil || plan.ID != revision.PlanID || plan.Revision != revision.PlanRevision || plan.Context != revision.Context {
 		return errors.New("practice publication learning plan binding is invalid")
 	}
+	if revision.ReaderProjection == nil || !reflect.DeepEqual(*revision.ReaderProjection, *domain.ReaderProjectionFromPlan(plan)) {
+		return errors.New("practice publication reader projection does not bind the learning plan")
+	}
 	planGate, ok := byID["plan-gate-"+planID]
 	if !ok || planGate.Kind != "plan-gate" || planGate.ParentID != planID || !sameJSON(planGate.Payload, manifest.PlanGate) {
 		return errors.New("practice publication plan gate binding is invalid")

@@ -342,6 +342,41 @@ type PublicationManifest struct {
 	CreatedAt                time.Time                `json:"created_at"`
 }
 
+// ReaderProjection is the reader-facing text frozen into a practice revision
+// at publish time. Steps keep only instruction text and observations only
+// description text: the reader sees plain guidance, never the evidence
+// bindings that ground the verification apparatus. Steps may be empty to
+// accommodate pure observation practices.
+type ReaderProjection struct {
+	Title        string   `json:"title"`
+	Objective    string   `json:"objective"`
+	Boundary     string   `json:"boundary"`
+	Steps        []string `json:"steps"`
+	Observations []string `json:"observations"`
+}
+
+func (p ReaderProjection) Validate() error {
+	if strings.TrimSpace(p.Title) == "" {
+		return errors.New("reader projection requires a title")
+	}
+	return nil
+}
+
+// ReaderProjectionFromPlan materializes the reader projection from the plan
+// artifact so the publish path can freeze the approved reader text into the
+// immutable revision.
+func ReaderProjectionFromPlan(plan LearningUnitPlan) *ReaderProjection {
+	steps := make([]string, 0, len(plan.UserSteps))
+	for _, step := range plan.UserSteps {
+		steps = append(steps, step.Instruction)
+	}
+	observations := make([]string, 0, len(plan.Observations))
+	for _, observation := range plan.Observations {
+		observations = append(observations, observation.Description)
+	}
+	return &ReaderProjection{Title: plan.Title, Objective: plan.Objective, Boundary: plan.Boundary, Steps: steps, Observations: observations}
+}
+
 // PracticeRevision is the immutable product record made visible by the
 // documentation publication finalizer. It references, rather than copies,
 // the common runtime revision and report.
@@ -360,7 +395,11 @@ type PracticeRevision struct {
 	RunnableRevisionRef   runnable.RevisionReference           `json:"runnable_revision_ref"`
 	VerificationReportRef runnable.VerificationReportReference `json:"verification_report_ref"`
 	PublicationManifestID string                               `json:"publication_manifest_id"`
-	PublishedAt           time.Time                            `json:"published_at"`
+	// ReaderProjection is the reader-facing text materialized from the plan
+	// artifact at publish time. It is nullable: revisions published before the
+	// projection existed decode with nil and stay invisible to readers.
+	ReaderProjection *ReaderProjection `json:"reader_projection,omitempty"`
+	PublishedAt      time.Time         `json:"published_at"`
 }
 
 func (r PracticeRevision) Validate() error {
@@ -373,7 +412,13 @@ func (r PracticeRevision) Validate() error {
 	if err := r.RunnableRevisionRef.Validate(); err != nil {
 		return err
 	}
-	return r.VerificationReportRef.Validate()
+	if err := r.VerificationReportRef.Validate(); err != nil {
+		return err
+	}
+	if r.ReaderProjection != nil {
+		return r.ReaderProjection.Validate()
+	}
+	return nil
 }
 
 func (b VerificationReviewBundle) Validate(report runnable.VerificationReport) error {

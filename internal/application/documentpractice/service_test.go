@@ -122,6 +122,10 @@ func TestServicePublishesMultiPhaseAutomatedDocumentationPracticeWithoutUserStep
 	if err != nil || workflow.State != domain.Published || practice.CandidateID != candidate.ID || store.published == nil || len(candidate.UserSteps) != 0 {
 		t.Fatalf("publish = %#v %#v, %v", workflow, practice, err)
 	}
+	projection := practice.ReaderProjection
+	if projection == nil || projection.Title != plan.Title || projection.Objective != plan.Objective || projection.Boundary != plan.Boundary || len(projection.Steps) != 0 || len(projection.Observations) != 1 || projection.Observations[0] != "Pod reaches Running" {
+		t.Fatalf("publish did not freeze the reader projection from the plan: %+v", projection)
+	}
 }
 
 func TestServiceRejectsStaleActionsAndRecordsVerificationFailure(t *testing.T) {

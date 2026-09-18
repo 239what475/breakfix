@@ -117,7 +117,7 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	candidateArtifact := domain.ArtifactRecord{ID: "candidate-candidate-document-01-r1-a1", ParentID: planArtifact.ID, Kind: "practice-candidate", ContentRevision: "1", Digest: candidate.Source.Digest, SchemaVersion: domain.FormatVersion, OwnerRole: "generator", CreatedAt: now, Payload: candidatePayload}
 	artifactGate := domain.GateResult{ArtifactID: candidate.ID, ArtifactDigest: candidate.Source.Digest, Decision: domain.ReviewApprove, PolicyVersion: "gate-v1", CreatedAt: now}
 	manifest := domain.PublicationManifest{FormatVersion: domain.FormatVersion, ID: "manifest-document-01", Context: documentContext, PracticeCandidateID: candidate.ID, RunnableRevisionDigest: runnableDigest, EnvironmentProfileDigest: report.Environment.ProfileDigest, VerificationReportDigest: reportDigest, PlanGate: planGate, ArtifactGate: artifactGate, VerificationReview: review, CreatedAt: now}
-	revision := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-revision-01", WorkflowID: workflow.ID, Context: documentContext, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: 1, CandidateID: candidate.ID, RunnableRevisionRef: storedRevision.Reference, VerificationReportRef: storedReport.Reference, PublicationManifestID: manifest.ID, PublishedAt: now}
+	revision := domain.PracticeRevision{FormatVersion: domain.FormatVersion, ID: "practice-revision-01", WorkflowID: workflow.ID, Context: documentContext, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: 1, CandidateID: candidate.ID, RunnableRevisionRef: storedRevision.Reference, VerificationReportRef: storedReport.Reference, PublicationManifestID: manifest.ID, ReaderProjection: domain.ReaderProjectionFromPlan(plan), PublishedAt: now}
 	if err := database.DocumentPractice.AppendArtifact(ctx, workflow.ID, contextArtifact); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +171,21 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	}
 	if artifact, found := documentArtifactByKind(artifacts, "publication-manifest"); !found || artifact.ParentID != "verification-review-"+storedReport.Reference.ID || !sameJSON(artifact.Payload, manifest) {
 		t.Fatalf("publication manifest was not appended to the immutable ledger: %#v", artifact)
+	}
+	var storedRevisionJSON []byte
+	if err := database.conn.QueryRowContext(ctx, `SELECT revision FROM document_practice_revisions WHERE id = ?`, revision.ID).Scan(&storedRevisionJSON); err != nil {
+		t.Fatal(err)
+	}
+	var persisted domain.PracticeRevision
+	if err := json.Unmarshal(storedRevisionJSON, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	projection := persisted.ReaderProjection
+	if projection == nil || projection.Title != "Pod lifecycle" || projection.Objective != "Observe Pod state" || projection.Boundary != "One Pod" || len(projection.Steps) != 0 || len(projection.Observations) != 1 || projection.Observations[0] != "The Pod becomes ready" {
+		t.Fatalf("reader projection was not persisted intact: %+v", projection)
+	}
+	if persisted.ReaderProjection != nil && strings.Contains(string(storedRevisionJSON), "evidence_ids") {
+		t.Fatal("reader projection leaked evidence bindings into the persisted revision")
 	}
 	if _, err := database.DocumentPractice.PublishPracticeRevision(ctx, workflow.ID, workflow.StateVersion, revision, manifest, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("repeat publication: %v", err)
@@ -535,7 +550,7 @@ func TestWorkflowObservationJoinsFailedAndExhaustedRunnableActions(t *testing.T)
 
 func TestValidatePublicationLedgerBindsTheEvidenceTriple(t *testing.T) {
 	now := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
-	context := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle", ParserVersion: "docs-project-v10", PageDigest: testRunnableDigest("page")}
+	context := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle", ParserVersion: "docs-project-v10", PageDigest: testRunnableDigest("e")}
 	plan := domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: "plan-01", Revision: 1, Context: context, Title: "Pod lifecycle", Objective: "Observe Pod state", Boundary: "One Pod", Runtime: domain.RuntimeConstraint{Runtime: "k8s"}, Evidence: []domain.EvidenceReference{{ID: "page", Kind: domain.EvidencePage, Path: context.PagePath, Digest: testRunnableDigest("d")}}, CreatedAt: now}
 	planPayload, err := json.Marshal(plan)
 	if err != nil {
@@ -566,5 +581,50 @@ func TestValidatePublicationLedgerBindsTheEvidenceTriple(t *testing.T) {
 	err = validatePublicationLedger(artifacts, revision, domain.PublicationManifest{Context: otherPage})
 	if err == nil || err.Error() != "practice publication manifest context does not match the practice revision" {
 		t.Fatalf("manifest with a different page digest must be rejected: %v", err)
+	}
+}
+
+func TestValidatePublicationLedgerRejectsTitlelessPlanAndDetachedReaderProjection(t *testing.T) {
+	now := time.Date(2026, 9, 19, 0, 0, 0, 0, time.UTC)
+	context := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle", ParserVersion: "docs-project-v10", PageDigest: testRunnableDigest("e")}
+	buildLedger := func(t *testing.T, plan domain.LearningUnitPlan) []domain.ArtifactRecord {
+		t.Helper()
+		planPayload, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contextPayload, err := json.Marshal(context)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("ctx"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
+		planArtifact := domain.ArtifactRecord{ID: fmt.Sprintf("plan-%s-r%d-a1", plan.ID, plan.Revision), ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("plan"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
+		return []domain.ArtifactRecord{contextArtifact, planArtifact}
+	}
+	buildRevision := func(plan domain.LearningUnitPlan, projection *domain.ReaderProjection) domain.PracticeRevision {
+		return domain.PracticeRevision{ID: "practice-01", WorkflowID: "workflow-01", Context: context, PlanID: plan.ID, PlanRevision: plan.Revision, WorkflowRevision: 1, CandidateID: "candidate-01", ReaderProjection: projection, PublishedAt: now}
+	}
+	manifest := domain.PublicationManifest{Context: context}
+
+	// A plan artifact without a title never publishes, no matter what the
+	// revision's projection claims to carry.
+	titleless := domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: "plan-01", Revision: 1, Context: context, Objective: "Observe Pod state", Boundary: "One Pod", Runtime: domain.RuntimeConstraint{Runtime: "k8s", BaseImage: "kindest/node", Resources: runnable.ResourceLimits{CPU: "1", MemoryBytes: 256 << 20, EphemeralBytes: 512 << 20, MaxProcesses: 32, MaxConcurrentTasks: 1}, Network: "isolated", Topology: "single-cluster"}, Evidence: []domain.EvidenceReference{{ID: "page", Kind: domain.EvidencePage, Path: context.PagePath, Digest: testRunnableDigest("d")}}, Observations: []domain.ObservationPoint{{ID: "ready", Description: "The Pod becomes ready", EvidenceIDs: []string{"page"}}}, CreatedAt: now}
+	err := validatePublicationLedger(buildLedger(t, titleless), buildRevision(titleless, domain.ReaderProjectionFromPlan(titleless)), manifest)
+	if err == nil || err.Error() != "practice publication learning plan binding is invalid" {
+		t.Fatalf("titleless plan must be rejected at publish: %v", err)
+	}
+
+	plan := titleless
+	plan.Title = "Pod lifecycle"
+	ledger := buildLedger(t, plan)
+	err = validatePublicationLedger(ledger, buildRevision(plan, nil), manifest)
+	if err == nil || err.Error() != "practice publication reader projection does not bind the learning plan" {
+		t.Fatalf("missing reader projection must be rejected at publish: %v", err)
+	}
+	detached := domain.ReaderProjectionFromPlan(plan)
+	detached.Title = "Another title"
+	err = validatePublicationLedger(ledger, buildRevision(plan, detached), manifest)
+	if err == nil || err.Error() != "practice publication reader projection does not bind the learning plan" {
+		t.Fatalf("divergent reader projection must be rejected at publish: %v", err)
 	}
 }
