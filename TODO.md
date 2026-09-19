@@ -85,6 +85,20 @@ fixture 并参数化投影断言（d7dc649）；docs prepare 的投影等待与 
 incus_* 键，并补拷 breakfix-registry-auth/pull 与 worker identity Secret；验收后
 core 集群已删除。
 
+### 提交 4 test(e2e): one-prepare regression orchestration ✅ f3a1457（验收后追加）
+
+- [x] `make test-e2e-regression`：一次 documentation prepare 服务整条链——admin 先跑
+      （全新 target 选举 bootstrap admin）→ 数据库级 reset → documentation（恢复
+      practice 计数断言的干净库）→ k8s → ui，full 剖面再追加 node、recovery；单套件
+      入口保持自包含不变；
+- [x] `scripts/kind/e2e-reset-database.sh`：套件间数据库级 reset——删 RuntimeEnvironments
+      （Controller finalizer 回收运行资源）、重建数据库、单次重启 Server/Controller、
+      等 Server 从 runtime Secret 记录的 digest 重装 fixture Catalog；部署、文档库
+      挂载、Registry 产物与 prepared 标记全部原样保留；
+- [x] 验收（2026-09-20，full target）：全链一次通过，admin 4/4、documentation 3/3、
+      k8s 1/1、ui 3/3、node 3/3、recovery 2/2，整链约 28 分钟（此前同等全量约
+      45–55 分钟，三套件各自 prepare）。
+
 ## 挂起待决策（不排期）
 
 - **内容治理/紧急下架**：场景侧非 authoring 内容无法下架、无管理员覆盖;实践内容
