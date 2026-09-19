@@ -586,6 +586,136 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  /admin/documentation/batches:
+    post:
+      operationId: createAdminDocumentationBatch
+      summary: Declare a documentation batch over one corpus scope (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentationBatchCreateRequest"
+      responses:
+        "202":
+          description: Batch accepted; it stays Pending until the scheduler starts it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listAdminDocumentationBatches
+      summary: List the newest documentation batches with progress counts (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Newest batches first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatchList"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/batches/{batch_id}:
+    get:
+      operationId: getAdminDocumentationBatch
+      summary: Inspect one documentation batch with progress counts (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Batch detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/batches/{batch_id}/items:
+    get:
+      operationId: listAdminDocumentationBatchItems
+      summary: Page through one batch's items in corpus order (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: state
+          in: query
+          description: Filter by exact item state
+          schema:
+            type: string
+            enum: [Pending, Scheduled, Running, Published, NoPractice, Rejected, Failed, Skipped, Cancelled]
+      responses:
+        "200":
+          description: One page of batch items, corpus order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatchItemsPage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /admin/runnable-actions:
     get:
       operationId: listAdminRunnableActions
@@ -1768,7 +1898,7 @@ components:
           description: The acting user
         action:
           type: string
-          enum: [documentation.practice.start, documentation.workflow.force_fail, documentation.workflow.restart, user.totp.reset, environment.release]
+          enum: [documentation.practice.start, documentation.workflow.force_fail, documentation.workflow.restart, documentation.batch.create, documentation.batch.pause, documentation.batch.resume, documentation.batch.cancel, documentation.batch.retry, user.totp.reset, environment.release]
         target_type:
           type: string
         target_id:
@@ -1951,6 +2081,152 @@ components:
             $ref: "#/components/schemas/AdminDocumentationAgentAudit"
         publication:
           $ref: "#/components/schemas/AdminDocumentationPublication"
+
+    DocumentationBatchCreateRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          $ref: "#/components/schemas/AdminDocumentBatchScope"
+        concurrency:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: In-flight Agent chain threshold; defaults to 2 when omitted
+
+    AdminDocumentBatchScope:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [full, sections, pages]
+        sections:
+          type: array
+          description: Library tree node paths for kind=sections
+          items:
+            type: string
+        pages:
+          type: array
+          description: Explicit page paths for kind=pages
+          items:
+            type: string
+        overrides:
+          type: array
+          description: Explicit (page, anchor) pairs that replace the level-2 anchor rule for their page
+          items:
+            $ref: "#/components/schemas/AdminDocumentBatchAnchorRef"
+
+    AdminDocumentBatchAnchorRef:
+      type: object
+      required: [page_path, anchor]
+      properties:
+        page_path:
+          type: string
+        anchor:
+          type: string
+
+    AdminDocumentBatchResolution:
+      type: object
+      required: [resolved_pages]
+      properties:
+        resolved_pages:
+          type: integer
+        excluded:
+          type: array
+          description: Pages dropped by the deterministic resolution with the reason
+          items:
+            type: object
+            required: [page_path, reason]
+            properties:
+              page_path:
+                type: string
+              reason:
+                type: string
+                enum: [index, no-anchor, duplicate]
+
+    AdminDocumentBatch:
+      type: object
+      required: [id, state, scope, concurrency, resolution, total_items, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Running, Paused, Completed, Cancelled]
+        scope:
+          $ref: "#/components/schemas/AdminDocumentBatchScope"
+        concurrency:
+          type: integer
+        resolution:
+          $ref: "#/components/schemas/AdminDocumentBatchResolution"
+        total_items:
+          type: integer
+        counts:
+          type: object
+          description: Item counts per state; absent states have zero items
+          additionalProperties:
+            type: integer
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminDocumentBatchList:
+      type: object
+      required: [batches]
+      properties:
+        batches:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDocumentBatch"
+
+    AdminDocumentBatchItem:
+      type: object
+      required: [id, batch_id, ordinal, page_path, anchor, title, workflow_id, state, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        batch_id:
+          type: string
+        ordinal:
+          type: integer
+        page_path:
+          type: string
+        anchor:
+          type: string
+        title:
+          type: string
+        workflow_id:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Scheduled, Running, Published, NoPractice, Rejected, Failed, Skipped, Cancelled]
+        detail:
+          type: string
+          description: Skip or failure summary when applicable
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminDocumentBatchItemsPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDocumentBatchItem"
+        next_cursor:
+          type: string
+          description: Present when another page exists
 
     AdminWorkflowReasonRequest:
       type: object

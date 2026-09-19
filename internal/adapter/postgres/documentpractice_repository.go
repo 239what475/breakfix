@@ -531,9 +531,9 @@ func (d *DocumentPracticeRepository) ListAgentAudits(ctx context.Context, workfl
 
 // DocumentPublicationRecord exposes the published manifest of a workflow.
 type DocumentPublicationRecord struct {
-	ID       string
-	Manifest domain.PublicationManifest
-	Digest   string
+	ID        string
+	Manifest  domain.PublicationManifest
+	Digest    string
 	CreatedAt time.Time
 }
 
@@ -1101,4 +1101,250 @@ func (d *DocumentPracticeRepository) GetPublishedPractice(ctx context.Context, p
 		return domain.PracticeRevision{}, ErrPublishedPracticeNotFound
 	}
 	return revision, nil
+}
+
+// CreateBatch durably creates the batch, its resolved items, and the creating
+// administrator's human action audit in one transaction: the audit row exists
+// only if the batch does.
+func (d *DocumentPracticeRepository) CreateBatch(ctx context.Context, batch domain.DocumentBatch, items []domain.BatchItem, action *audit.HumanAction) error {
+	if err := batch.Validate(); err != nil {
+		return err
+	}
+	if action == nil {
+		return errors.New("document batch creation requires a human action audit")
+	}
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	scopeJSON, err := json.Marshal(batch.Scope)
+	if err != nil {
+		return err
+	}
+	resolutionJSON, err := json.Marshal(batch.Resolution)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := item.Validate(); err != nil {
+			return err
+		}
+		if item.BatchID != batch.ID {
+			return errors.New("document batch item belongs to another batch")
+		}
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin create document batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO document_batches (id, state, scope, concurrency, resolution, total_items, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		batch.ID, batch.State, scopeJSON, batch.Concurrency, resolutionJSON, batch.TotalItems, batch.CreatedBy, batch.CreatedAt.UTC(), batch.UpdatedAt.UTC()); err != nil {
+		return fmt.Errorf("insert document batch: %w", err)
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO document_batch_items (id, batch_id, ordinal, page_path, anchor, title, workflow_id, state, detail, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			item.ID, item.BatchID, item.Ordinal, item.PagePath, item.Anchor, item.Title, item.WorkflowID, item.State, item.Detail, item.CreatedAt.UTC(), item.UpdatedAt.UTC()); err != nil {
+			return fmt.Errorf("insert document batch item: %w", err)
+		}
+	}
+	if err := insertHumanAction(ctx, tx, *action); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+const documentBatchColumns = `id, state, scope, concurrency, resolution, total_items, created_by, created_at, updated_at`
+
+func scanDocumentBatch(row interface{ Scan(...any) error }) (domain.DocumentBatch, error) {
+	var batch domain.DocumentBatch
+	var scopeJSON, resolutionJSON []byte
+	if err := row.Scan(&batch.ID, &batch.State, &scopeJSON, &batch.Concurrency, &resolutionJSON, &batch.TotalItems, &batch.CreatedBy, &batch.CreatedAt, &batch.UpdatedAt); err != nil {
+		return domain.DocumentBatch{}, err
+	}
+	if err := json.Unmarshal(scopeJSON, &batch.Scope); err != nil {
+		return domain.DocumentBatch{}, fmt.Errorf("decode document batch scope: %w", err)
+	}
+	if err := json.Unmarshal(resolutionJSON, &batch.Resolution); err != nil {
+		return domain.DocumentBatch{}, fmt.Errorf("decode document batch resolution: %w", err)
+	}
+	if err := batch.Validate(); err != nil {
+		return domain.DocumentBatch{}, err
+	}
+	return batch, nil
+}
+
+// GetBatch returns one batch with per-state item counts.
+func (d *DocumentPracticeRepository) GetBatch(ctx context.Context, batchID string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	row := d.conn.QueryRowContext(ctx, `SELECT `+documentBatchColumns+` FROM document_batches WHERE id = ?`, batchID)
+	batch, err := scanDocumentBatch(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.DocumentBatch{}, nil, fmt.Errorf("get document batch: %w", domain.ErrWorkflowNotFound)
+	}
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	counts, err := d.countBatchItems(ctx, batchID)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	return batch, counts, nil
+}
+
+// ListBatches returns the newest batches with per-state item counts.
+func (d *DocumentPracticeRepository) ListBatches(ctx context.Context, limit int) ([]domain.DocumentBatch, []domain.BatchItemCounts, error) {
+	if limit < 1 {
+		return nil, nil, errors.New("document batch list limit must be positive")
+	}
+	rows, err := d.conn.QueryContext(ctx, `SELECT `+documentBatchColumns+` FROM document_batches ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list document batches: %w", err)
+	}
+	defer rows.Close()
+	batches := []domain.DocumentBatch{}
+	ids := []string{}
+	for rows.Next() {
+		batch, err := scanDocumentBatch(rows)
+		if err != nil {
+			return nil, nil, err
+		}
+		batches = append(batches, batch)
+		ids = append(ids, batch.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	countsByBatch := map[string]domain.BatchItemCounts{}
+	if len(ids) > 0 {
+		countRows, err := d.conn.QueryContext(ctx, `SELECT batch_id, state, COUNT(*) FROM document_batch_items WHERE batch_id IN (`+placeholders(len(ids))+`) GROUP BY batch_id, state`, toAny(ids)...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("count document batch items: %w", err)
+		}
+		defer countRows.Close()
+		for countRows.Next() {
+			var batchID, state string
+			var count int
+			if err := countRows.Scan(&batchID, &state, &count); err != nil {
+				return nil, nil, err
+			}
+			if countsByBatch[batchID] == nil {
+				countsByBatch[batchID] = domain.BatchItemCounts{}
+			}
+			countsByBatch[batchID][domain.BatchItemState(state)] = count
+		}
+		if err := countRows.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
+	counts := make([]domain.BatchItemCounts, 0, len(batches))
+	for _, batch := range batches {
+		if countsByBatch[batch.ID] == nil {
+			countsByBatch[batch.ID] = domain.BatchItemCounts{}
+		}
+		counts = append(counts, countsByBatch[batch.ID])
+	}
+	return batches, counts, nil
+}
+
+func (d *DocumentPracticeRepository) countBatchItems(ctx context.Context, batchID string) (domain.BatchItemCounts, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT state, COUNT(*) FROM document_batch_items WHERE batch_id = ? GROUP BY state`, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("count document batch items: %w", err)
+	}
+	defer rows.Close()
+	counts := domain.BatchItemCounts{}
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		counts[domain.BatchItemState(state)] = count
+	}
+	return counts, rows.Err()
+}
+
+// ListBatchItems pages one batch's items in corpus order. The returned cursor
+// is nil when the page is the last one.
+func (d *DocumentPracticeRepository) ListBatchItems(ctx context.Context, filter domain.BatchItemFilter) ([]domain.BatchItem, *domain.BatchItemCursor, error) {
+	if filter.Limit < 1 {
+		return nil, nil, errors.New("document batch item limit must be positive")
+	}
+	if strings.TrimSpace(filter.BatchID) == "" {
+		return nil, nil, errors.New("document batch item filter requires a batch")
+	}
+	conditions := []string{`batch_id = ?`}
+	args := []any{filter.BatchID}
+	if filter.State != "" {
+		if !filter.State.Valid() {
+			return nil, nil, errors.New("document batch item state filter is invalid")
+		}
+		conditions = append(conditions, `state = ?`)
+		args = append(args, filter.State)
+	}
+	if filter.Cursor != nil {
+		conditions = append(conditions, `ordinal > ?`)
+		args = append(args, filter.Cursor.Ordinal)
+	}
+	query := `SELECT id, batch_id, ordinal, page_path, anchor, title, workflow_id, state, detail, created_at, updated_at
+		FROM document_batch_items WHERE ` + strings.Join(conditions, ` AND `) + ` ORDER BY ordinal ASC LIMIT ?`
+	args = append(args, filter.Limit+1)
+	rows, err := d.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list document batch items: %w", err)
+	}
+	defer rows.Close()
+	items := []domain.BatchItem{}
+	for rows.Next() {
+		var item domain.BatchItem
+		if err := rows.Scan(&item.ID, &item.BatchID, &item.Ordinal, &item.PagePath, &item.Anchor, &item.Title, &item.WorkflowID, &item.State, &item.Detail, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	var next *domain.BatchItemCursor
+	if len(items) > filter.Limit {
+		last := items[filter.Limit-1]
+		next = &domain.BatchItemCursor{Ordinal: last.Ordinal}
+		items = items[:filter.Limit]
+	}
+	return items, next, nil
+}
+
+// ListPublishedWorkflowAnchors keys the pinned identity's published practices
+// by "page\x00anchor" so batch creation can skip them in one query.
+func (d *DocumentPracticeRepository) ListPublishedWorkflowAnchors(ctx context.Context, identity domain.DocumentContext) (map[string]bool, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT page_path, anchor FROM document_workflows
+		WHERE source_id = ? AND commit = ? AND language = ? AND state = 'Published'`, identity.SourceID, identity.Commit, identity.Language)
+	if err != nil {
+		return nil, fmt.Errorf("list published document workflow anchors: %w", err)
+	}
+	defer rows.Close()
+	published := map[string]bool{}
+	for rows.Next() {
+		var pagePath, anchor string
+		if err := rows.Scan(&pagePath, &anchor); err != nil {
+			return nil, err
+		}
+		published[pagePath+"\x00"+anchor] = true
+	}
+	return published, rows.Err()
+}
+
+func placeholders(count int) string {
+	result := make([]string, count)
+	for index := range result {
+		result[index] = "?"
+	}
+	return strings.Join(result, ", ")
+}
+
+func toAny(values []string) []any {
+	result := make([]any, len(values))
+	for index, value := range values {
+		result[index] = value
+	}
+	return result
 }

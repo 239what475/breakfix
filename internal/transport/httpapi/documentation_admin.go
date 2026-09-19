@@ -70,7 +70,7 @@ func (h *Handler) ListAdminDocumentationWorkflows(c *gin.Context, params api.Lis
 		page.NextCursor = encodeDocumentationWorkflowCursor(next.UpdatedAt, next.ID)
 	}
 	for _, observation := range observations {
-		page.Workflows = append(page.Workflows, adminDocumentationWorkflowSummary(observation, now, h.agentStuckAfter, h.documentationLibrary))
+		page.Workflows = append(page.Workflows, h.adminDocumentationWorkflowSummary(observation, now, h.agentStuckAfter))
 	}
 	c.JSON(http.StatusOK, page)
 }
@@ -117,7 +117,7 @@ func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.D
 		AgentAudits:  make([]api.AdminDocumentationAgentAudit, 0, len(agentAudits)),
 		PagePath:     workflowStringPointer(observation.Identity.PagePath),
 		Anchor:       workflowStringPointer(observation.Identity.Anchor),
-		Title:        workflowStringPointer(h.documentationLibrary.DocumentPageTitle(observation.Identity.PagePath)),
+		Title:        h.libraryTitle(observation.Identity.PagePath),
 	}
 
 	for _, artifact := range artifacts {
@@ -234,10 +234,19 @@ func (h *Handler) runAdminWorkflowAction(c *gin.Context, workflowID string, audi
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, adminDocumentationWorkflowSummary(observation, time.Now().UTC(), h.agentStuckAfter, h.documentationLibrary))
+	c.JSON(http.StatusOK, h.adminDocumentationWorkflowSummary(observation, time.Now().UTC(), h.agentStuckAfter))
 }
 
-func adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObservation, now time.Time, agentStuckAfter time.Duration, library documentationLibrary) api.AdminDocumentationWorkflow {
+// libraryTitle resolves one page's title through the deployment's library;
+// it stays empty when the library is unavailable.
+func (h *Handler) libraryTitle(pagePath string) *string {
+	if h == nil || h.documentationLibrary == nil {
+		return nil
+	}
+	return workflowStringPointer(h.documentationLibrary.DocumentPageTitle(pagePath))
+}
+
+func (h *Handler) adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObservation, now time.Time, agentStuckAfter time.Duration) api.AdminDocumentationWorkflow {
 	summary := api.AdminDocumentationWorkflow{
 		Id:           observation.Workflow.ID,
 		State:        string(observation.Workflow.State),
@@ -248,9 +257,7 @@ func adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObse
 		Stuck:        deriveDocumentationStuck(observation, now, agentStuckAfter),
 		PagePath:     workflowStringPointer(observation.Identity.PagePath),
 		Anchor:       workflowStringPointer(observation.Identity.Anchor),
-	}
-	if library != nil {
-		summary.Title = workflowStringPointer(library.DocumentPageTitle(observation.Identity.PagePath))
+		Title:        h.libraryTitle(observation.Identity.PagePath),
 	}
 	return summary
 }

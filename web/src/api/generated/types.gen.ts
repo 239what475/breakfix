@@ -164,7 +164,7 @@ export type AdminHumanAction = {
      * The acting user
      */
     user_id: string;
-    action: 'documentation.practice.start' | 'documentation.workflow.force_fail' | 'documentation.workflow.restart' | 'user.totp.reset' | 'environment.release';
+    action: 'documentation.practice.start' | 'documentation.workflow.force_fail' | 'documentation.workflow.restart' | 'documentation.batch.create' | 'documentation.batch.pause' | 'documentation.batch.resume' | 'documentation.batch.cancel' | 'documentation.batch.retry' | 'user.totp.reset' | 'environment.release';
     target_type: string;
     target_id: string;
     detail: {
@@ -278,6 +278,93 @@ export type AdminDocumentationWorkflowDetail = {
     ledger: Array<AdminDocumentationLedgerEntry>;
     agent_audits: Array<AdminDocumentationAgentAudit>;
     publication?: AdminDocumentationPublication;
+};
+
+export type DocumentationBatchCreateRequest = {
+    scope: AdminDocumentBatchScope;
+    /**
+     * In-flight Agent chain threshold; defaults to 2 when omitted
+     */
+    concurrency?: number;
+};
+
+export type AdminDocumentBatchScope = {
+    kind: 'full' | 'sections' | 'pages';
+    /**
+     * Library tree node paths for kind=sections
+     */
+    sections?: Array<string>;
+    /**
+     * Explicit page paths for kind=pages
+     */
+    pages?: Array<string>;
+    /**
+     * Explicit (page, anchor) pairs that replace the level-2 anchor rule for their page
+     */
+    overrides?: Array<AdminDocumentBatchAnchorRef>;
+};
+
+export type AdminDocumentBatchAnchorRef = {
+    page_path: string;
+    anchor: string;
+};
+
+export type AdminDocumentBatchResolution = {
+    resolved_pages: number;
+    /**
+     * Pages dropped by the deterministic resolution with the reason
+     */
+    excluded?: Array<{
+        page_path: string;
+        reason: 'index' | 'no-anchor' | 'duplicate';
+    }>;
+};
+
+export type AdminDocumentBatch = {
+    id: string;
+    state: 'Pending' | 'Running' | 'Paused' | 'Completed' | 'Cancelled';
+    scope: AdminDocumentBatchScope;
+    concurrency: number;
+    resolution: AdminDocumentBatchResolution;
+    total_items: number;
+    /**
+     * Item counts per state; absent states have zero items
+     */
+    counts?: {
+        [key: string]: number;
+    };
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AdminDocumentBatchList = {
+    batches: Array<AdminDocumentBatch>;
+};
+
+export type AdminDocumentBatchItem = {
+    id: string;
+    batch_id: string;
+    ordinal: number;
+    page_path: string;
+    anchor: string;
+    title: string;
+    workflow_id: string;
+    state: 'Pending' | 'Scheduled' | 'Running' | 'Published' | 'NoPractice' | 'Rejected' | 'Failed' | 'Skipped' | 'Cancelled';
+    /**
+     * Skip or failure summary when applicable
+     */
+    detail?: string;
+    created_at: string;
+    updated_at: string;
+};
+
+export type AdminDocumentBatchItemsPage = {
+    items: Array<AdminDocumentBatchItem>;
+    /**
+     * Present when another page exists
+     */
+    next_cursor?: string;
 };
 
 export type AdminWorkflowReasonRequest = {
@@ -1574,6 +1661,162 @@ export type RestartAdminDocumentationWorkflowResponses = {
 };
 
 export type RestartAdminDocumentationWorkflowResponse = RestartAdminDocumentationWorkflowResponses[keyof RestartAdminDocumentationWorkflowResponses];
+
+export type ListAdminDocumentationBatchesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        limit?: number;
+    };
+    url: '/admin/documentation/batches';
+};
+
+export type ListAdminDocumentationBatchesErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ListAdminDocumentationBatchesError = ListAdminDocumentationBatchesErrors[keyof ListAdminDocumentationBatchesErrors];
+
+export type ListAdminDocumentationBatchesResponses = {
+    /**
+     * Newest batches first
+     */
+    200: AdminDocumentBatchList;
+};
+
+export type ListAdminDocumentationBatchesResponse = ListAdminDocumentationBatchesResponses[keyof ListAdminDocumentationBatchesResponses];
+
+export type CreateAdminDocumentationBatchData = {
+    body: DocumentationBatchCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/documentation/batches';
+};
+
+export type CreateAdminDocumentationBatchErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type CreateAdminDocumentationBatchError = CreateAdminDocumentationBatchErrors[keyof CreateAdminDocumentationBatchErrors];
+
+export type CreateAdminDocumentationBatchResponses = {
+    /**
+     * Batch accepted; it stays Pending until the scheduler starts it
+     */
+    202: AdminDocumentBatch;
+};
+
+export type CreateAdminDocumentationBatchResponse = CreateAdminDocumentationBatchResponses[keyof CreateAdminDocumentationBatchResponses];
+
+export type GetAdminDocumentationBatchData = {
+    body?: never;
+    path: {
+        batch_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/batches/{batch_id}';
+};
+
+export type GetAdminDocumentationBatchErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type GetAdminDocumentationBatchError = GetAdminDocumentationBatchErrors[keyof GetAdminDocumentationBatchErrors];
+
+export type GetAdminDocumentationBatchResponses = {
+    /**
+     * Batch detail
+     */
+    200: AdminDocumentBatch;
+};
+
+export type GetAdminDocumentationBatchResponse = GetAdminDocumentationBatchResponses[keyof GetAdminDocumentationBatchResponses];
+
+export type ListAdminDocumentationBatchItemsData = {
+    body?: never;
+    path: {
+        batch_id: string;
+    };
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        /**
+         * Filter by exact item state
+         */
+        state?: 'Pending' | 'Scheduled' | 'Running' | 'Published' | 'NoPractice' | 'Rejected' | 'Failed' | 'Skipped' | 'Cancelled';
+    };
+    url: '/admin/documentation/batches/{batch_id}/items';
+};
+
+export type ListAdminDocumentationBatchItemsErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ListAdminDocumentationBatchItemsError = ListAdminDocumentationBatchItemsErrors[keyof ListAdminDocumentationBatchItemsErrors];
+
+export type ListAdminDocumentationBatchItemsResponses = {
+    /**
+     * One page of batch items, corpus order
+     */
+    200: AdminDocumentBatchItemsPage;
+};
+
+export type ListAdminDocumentationBatchItemsResponse = ListAdminDocumentationBatchItemsResponses[keyof ListAdminDocumentationBatchItemsResponses];
 
 export type ListAdminRunnableActionsData = {
     body?: never;

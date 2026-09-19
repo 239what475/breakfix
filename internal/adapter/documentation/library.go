@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/docsproject"
@@ -46,6 +47,7 @@ type Library struct {
 	global     docsproject.GlobalManifest
 	assetIndex map[string]string
 	titleIndex map[string]string
+	corpus     map[string]CorpusPage
 }
 
 // NewPinnedLibrary verifies the global manifest against the pinned upstream
@@ -214,6 +216,44 @@ type DocumentTreeChild struct {
 	HasChildren bool   `json:"has_children"`
 }
 
+// CorpusPage is one library page's batch-relevant summary: the path, its
+// manifest title and kind, and its manifest anchors. Batch scope resolution
+// reads these instead of re-reading page manifests.
+type CorpusPage struct {
+	Path     string           `json:"path"`
+	Title    string           `json:"title"`
+	PageKind string           `json:"page_kind"`
+	Anchors  []DocumentAnchor `json:"anchors"`
+}
+
+// FirstLevel2Anchor returns the first level-2 anchor of the page in manifest
+// order, or false when the page has none.
+func (p CorpusPage) FirstLevel2Anchor() (DocumentAnchor, bool) {
+	for _, anchor := range p.Anchors {
+		if anchor.Level == 2 {
+			return anchor, true
+		}
+	}
+	return DocumentAnchor{}, false
+}
+
+// CorpusPages returns every page of the library ordered by path.
+func (l Library) CorpusPages() []CorpusPage {
+	pages := make([]CorpusPage, 0, len(l.corpus))
+	for _, page := range l.corpus {
+		pages = append(pages, page)
+	}
+	sort.Slice(pages, func(i, j int) bool { return pages[i].Path < pages[j].Path })
+	return pages
+}
+
+// HasSection reports whether the library tree contains one exact node path.
+func (l Library) HasSection(section string) bool {
+	normalized := strings.TrimSuffix(strings.TrimSpace(section), "/")
+	_, found := findTreeNode(l.global.Tree.Nodes, normalized)
+	return found
+}
+
 // ReadDocumentPage serves any page of the library after verifying its digest.
 // Unlike ReadPage it is not bound to the agent pipeline's single pinned page:
 // the whole library is the deployment-pinned corpus.
@@ -317,6 +357,7 @@ func assetContentType(path string) string {
 func (l *Library) buildAssetIndex() error {
 	index := make(map[string]string)
 	titles := make(map[string]string)
+	corpus := make(map[string]CorpusPage)
 	for _, pagePath := range l.global.Pages {
 		manifestBytes, err := readRootFile(l.Root, filepath.ToSlash(filepath.Join(pagePath, "index.json")), MaxLibraryManifestBytes)
 		if err != nil {
@@ -326,13 +367,20 @@ func (l *Library) buildAssetIndex() error {
 		if err != nil {
 			return fmt.Errorf("decode page manifest for asset index: %w", err)
 		}
+		normalized := strings.TrimSuffix(manifest.Path, "/")
 		for _, asset := range manifest.Assets {
 			index[strings.TrimSuffix(asset.Path, "/")] = asset.Digest
 		}
-		titles[strings.TrimSuffix(manifest.Path, "/")] = manifest.Title
+		titles[normalized] = manifest.Title
+		anchors := make([]DocumentAnchor, 0, len(manifest.Anchors))
+		for _, anchor := range manifest.Anchors {
+			anchors = append(anchors, DocumentAnchor{ID: anchor.ID, Level: anchor.Level, Title: anchor.Title})
+		}
+		corpus[normalized] = CorpusPage{Path: normalized, Title: manifest.Title, PageKind: manifest.PageKind, Anchors: anchors}
 	}
 	l.assetIndex = index
 	l.titleIndex = titles
+	l.corpus = corpus
 	return nil
 }
 

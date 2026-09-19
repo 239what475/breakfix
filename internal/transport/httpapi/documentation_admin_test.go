@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/adapter/kubernetes"
+	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appdocument "github.com/breakfix/breakfix/internal/application/documentpractice"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/audit"
@@ -72,7 +72,7 @@ func TestDeriveDocumentationStuckCoversEveryAttribution(t *testing.T) {
 	}
 
 	// Without a binding signal, the runnable dwell budget (1800s+300s) applies.
-	quiet := postgres.DocumentWorkflowObservation{Workflow: documentdomain.Workflow{State: documentdomain.VerificationReviewing, UpdatedAt: now.Add(-2100 * time.Second - time.Second)}}
+	quiet := postgres.DocumentWorkflowObservation{Workflow: documentdomain.Workflow{State: documentdomain.VerificationReviewing, UpdatedAt: now.Add(-2100*time.Second - time.Second)}}
 	if stuck = deriveDocumentationStuck(quiet, now, agentStuckAfter); !stuck.Flag || *stuck.Reason != "dwell_timeout" {
 		t.Fatalf("runnable dwell attribution = %#v", stuck)
 	}
@@ -268,5 +268,94 @@ func TestAdminRunnableActionsEndpointAndMetrics(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("metrics missing %q in:\n%s", expected, body)
 		}
+	}
+}
+
+func TestAdminDocumentationBatchEndpointsCreateAuditAndPage(t *testing.T) {
+	var corpus fakeDocumentationCorpus
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store) *kubernetes.Client {
+		service, err := appdocument.NewService(database.DocumentPractice, database.Runnable)
+		if err != nil {
+			t.Fatalf("create document practice service: %v", err)
+		}
+		batches, err := appdocument.NewBatchService(service, corpus)
+		if err != nil {
+			t.Fatalf("create batch service: %v", err)
+		}
+		dependencies.Documentation = &liveDocumentationAdminApplication{service: service}
+		dependencies.DocumentationBatches = batches
+		return nil
+	})
+	adminRegister := server.register(t, "alice", "alice-password")
+	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
+	userRegister := server.register(t, "bob", "bob-password")
+	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
+
+	created := server.do(t, http.MethodPost, "/api/admin/documentation/batches", userToken, map[string]any{
+		"scope": map[string]any{"kind": "pages", "pages": []string{"docs/concepts/workloads/pods/pod-lifecycle"}},
+	})
+	if created.Code != http.StatusForbidden {
+		t.Fatalf("non-admin batch create = %d, want 403", created.Code)
+	}
+	created = server.do(t, http.MethodPost, "/api/admin/documentation/batches", adminToken, map[string]any{
+		"scope":       map[string]any{"kind": "pages", "pages": []string{"docs/concepts/workloads/pods/pod-lifecycle"}},
+		"concurrency": 3,
+	})
+	if created.Code != http.StatusAccepted {
+		t.Fatalf("batch create = %d: %s", created.Code, created.Body.String())
+	}
+	var batch api.AdminDocumentBatch
+	if err := json.Unmarshal(created.Body.Bytes(), &batch); err != nil {
+		t.Fatal(err)
+	}
+	if batch.State != "Pending" || batch.Concurrency != 3 || batch.TotalItems != 1 {
+		t.Fatalf("created batch = %#v", batch)
+	}
+	if batch.Counts == nil || (*batch.Counts)["Pending"] != 1 {
+		t.Fatalf("created batch counts = %#v", batch.Counts)
+	}
+
+	list := server.do(t, http.MethodGet, "/api/admin/documentation/batches", adminToken, nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("batch list = %d", list.Code)
+	}
+	detail := server.do(t, http.MethodGet, "/api/admin/documentation/batches/"+batch.Id, adminToken, nil)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("batch detail = %d", detail.Code)
+	}
+	items := server.do(t, http.MethodGet, "/api/admin/documentation/batches/"+batch.Id+"/items?state=Pending&limit=1", adminToken, nil)
+	if items.Code != http.StatusOK {
+		t.Fatalf("batch items = %d: %s", items.Code, items.Body.String())
+	}
+	var page api.AdminDocumentBatchItemsPage
+	if err := json.Unmarshal(items.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].PagePath != "docs/concepts/workloads/pods/pod-lifecycle" || page.NextCursor != nil {
+		t.Fatalf("item page = %#v", page)
+	}
+	missing := server.do(t, http.MethodGet, "/api/admin/documentation/batches/document-batch-missing", adminToken, nil)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing batch = %d, want 404", missing.Code)
+	}
+}
+
+// fakeDocumentationCorpus is a minimal corpus for the batch endpoint tests.
+type fakeDocumentationCorpus struct{}
+
+func (c fakeDocumentationCorpus) CorpusPages() []appdocument.CorpusPage {
+	return []appdocument.CorpusPage{{
+		Path: "docs/concepts/workloads/pods/pod-lifecycle", Title: "Pod Lifecycle", PageKind: "content",
+		Anchors: []appdocument.CorpusAnchor{{ID: "pod-lifecycle", Level: 1}, {ID: "pod-lifetime", Level: 2}},
+	}}
+}
+
+func (c fakeDocumentationCorpus) HasSection(string) bool { return false }
+
+func (c fakeDocumentationCorpus) WorkflowContext() documentdomain.DocumentContext {
+	return documentdomain.DocumentContext{
+		FormatVersion: documentdomain.FormatVersion, SourceID: "kubernetes",
+		Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40),
+		Version: "v1.34", Language: "en", License: "CC BY 4.0",
 	}
 }

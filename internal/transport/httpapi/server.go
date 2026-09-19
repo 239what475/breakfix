@@ -167,6 +167,40 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
+	adminRoutes.POST("/documentation/batches", middleware.RequireAdmin(), h.CreateAdminDocumentationBatch)
+	adminRoutes.GET("/documentation/batches", func(c *gin.Context) {
+		params := api.ListAdminDocumentationBatchesParams{}
+		if raw := c.Query("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid batch list limit"})
+				return
+			}
+			params.Limit = &parsed
+		}
+		h.ListAdminDocumentationBatches(c, params)
+	})
+	adminRoutes.GET("/documentation/batches/:batch_id", func(c *gin.Context) {
+		h.GetAdminDocumentationBatch(c, c.Param("batch_id"))
+	})
+	adminRoutes.GET("/documentation/batches/:batch_id/items", func(c *gin.Context) {
+		params := api.ListAdminDocumentationBatchItemsParams{}
+		if raw := c.Query("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid batch item limit"})
+				return
+			}
+			params.Limit = &parsed
+		}
+		if raw := c.Query("cursor"); raw != "" {
+			params.Cursor = &raw
+		}
+		if raw := c.Query("state"); raw != "" {
+			params.State = (*api.ListAdminDocumentationBatchItemsParamsState)(&raw)
+		}
+		h.ListAdminDocumentationBatchItems(c, c.Param("batch_id"), params)
+	})
 	adminRoutes.GET("/documentation/workflows", func(c *gin.Context) {
 		params := api.ListAdminDocumentationWorkflowsParams{}
 		if raw := c.Query("limit"); raw != "" {

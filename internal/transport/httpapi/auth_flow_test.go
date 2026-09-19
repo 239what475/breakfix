@@ -221,7 +221,7 @@ func TestLegacyTokenWithoutRoleClaimIsAnOrdinaryUser(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("user token on admin endpoint = %d, want 403", recorder.Code)
 	}
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, nil)
+	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, documentationPracticeStartBody)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("user token on practice ignition = %d, want 403: %s", recorder.Code, recorder.Body.String())
 	}
@@ -230,7 +230,7 @@ func TestLegacyTokenWithoutRoleClaimIsAnOrdinaryUser(t *testing.T) {
 		t.Fatalf("user token on totp reset = %d, want 403", recorder.Code)
 	}
 
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, nil)
+	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, documentationPracticeStartBody)
 	if recorder.Code == http.StatusForbidden || recorder.Code == http.StatusUnauthorized {
 		t.Fatalf("admin token on practice ignition = %d, want past authorization", recorder.Code)
 	}
@@ -340,6 +340,12 @@ func mustTOTPSecret(t *testing.T, username string) string {
 	return secret
 }
 
+// documentationPracticeStartBody is the page-addressed ignition request.
+var documentationPracticeStartBody = map[string]string{
+	"page_path": "docs/concepts/workloads/pods/pod-lifecycle",
+	"anchor":    "pod-lifetime",
+}
+
 // auditRecordingDocumentationApplication mimics the deployment-owned fixed
 // application: it forwards the ignition actor and records the human action
 // through the real document practice repository.
@@ -401,9 +407,20 @@ func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
 	userRegister := server.register(t, "bob", "bob-password")
 	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
 
-	recorder := server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, nil)
+	recorder := server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, documentationPracticeStartBody)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("admin ignition = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var started struct {
+		WorkflowID string `json:"workflow_id"`
+		State      string `json:"state"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	workflowID := started.WorkflowID
+	if workflowID == "" {
+		t.Fatal("ignition response carries no workflow id")
 	}
 	if len(application.actors) != 1 || application.actors[0] == "" {
 		t.Fatalf("ignition actors = %#v, want the admin identifier", application.actors)
@@ -412,12 +429,12 @@ func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list ignition audits: %v", err)
 	}
-	if len(rows) != 1 || rows[0].UserID != application.actors[0] || rows[0].TargetID != "document-workflow-01" {
-		t.Fatalf("ignition audit rows = %#v", rows)
+	if len(rows) != 1 || rows[0].UserID != application.actors[0] || rows[0].TargetID != workflowID {
+		t.Fatalf("ignition audit rows = %#v, want target %q", rows, workflowID)
 	}
 
 	// A rejected non-admin ignition changes nothing and records nothing.
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, nil)
+	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, documentationPracticeStartBody)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("non-admin ignition = %d, want 403", recorder.Code)
 	}

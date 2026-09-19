@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -269,12 +270,15 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 }
 
 type memoryDocumentStore struct {
-	workflows    map[string]domain.Workflow
-	identities   map[string]domain.WorkflowPageIdentity
-	audits       map[string]domain.AgentAudit
-	actions      map[string]memoryDocumentAction
-	published    *domain.PracticeRevision
-	humanActions []audit.HumanAction
+	workflows        map[string]domain.Workflow
+	identities       map[string]domain.WorkflowPageIdentity
+	batches          map[string]domain.DocumentBatch
+	batchItems       map[string][]domain.BatchItem
+	publishedAnchors map[string]bool
+	audits           map[string]domain.AgentAudit
+	actions          map[string]memoryDocumentAction
+	published        *domain.PracticeRevision
+	humanActions     []audit.HumanAction
 	// watchdogStatuses carries the public action status of bound actions for
 	// the watchdog candidate listing; the map key is the action key.
 	watchdogStatuses map[string]WatchdogActionStatus
@@ -290,7 +294,7 @@ type memoryDocumentAction struct {
 }
 
 func newMemoryDocumentStore() *memoryDocumentStore {
-	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, identities: map[string]domain.WorkflowPageIdentity{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}, watchdogStatuses: map[string]WatchdogActionStatus{}, watchdogReasons: map[string]string{}}
+	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, identities: map[string]domain.WorkflowPageIdentity{}, batches: map[string]domain.DocumentBatch{}, batchItems: map[string][]domain.BatchItem{}, publishedAnchors: map[string]bool{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}, watchdogStatuses: map[string]WatchdogActionStatus{}, watchdogReasons: map[string]string{}}
 }
 
 func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, identity domain.WorkflowPageIdentity, action *audit.HumanAction) error {
@@ -640,3 +644,90 @@ func serviceDigest(value string) string { return "sha256:" + strings.Repeat(valu
 
 var _ Store = (*memoryDocumentStore)(nil)
 var _ RunnableStore = (*memoryRunnableStore)(nil)
+
+func (s *memoryDocumentStore) CreateBatch(_ context.Context, batch domain.DocumentBatch, items []domain.BatchItem, action *audit.HumanAction) error {
+	if err := batch.Validate(); err != nil {
+		return err
+	}
+	if _, exists := s.batches[batch.ID]; exists {
+		return errors.New("batch already exists")
+	}
+	if action == nil {
+		return errors.New("batch creation requires a human action audit")
+	}
+	if err := action.Validate(); err != nil {
+		return err
+	}
+	s.batches[batch.ID] = batch
+	s.batchItems[batch.ID] = append([]domain.BatchItem(nil), items...)
+	s.humanActions = append(s.humanActions, *action)
+	return nil
+}
+
+func (s *memoryDocumentStore) GetBatch(_ context.Context, batchID string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	batch, exists := s.batches[batchID]
+	if !exists {
+		return domain.DocumentBatch{}, nil, errors.New("document batch not found")
+	}
+	counts := domain.BatchItemCounts{}
+	for _, item := range s.batchItems[batchID] {
+		counts[item.State]++
+	}
+	return batch, counts, nil
+}
+
+func (s *memoryDocumentStore) ListBatches(_ context.Context, limit int) ([]domain.DocumentBatch, []domain.BatchItemCounts, error) {
+	batches := make([]domain.DocumentBatch, 0, len(s.batches))
+	for _, batch := range s.batches {
+		batches = append(batches, batch)
+	}
+	sort.Slice(batches, func(i, j int) bool { return batches[i].CreatedAt.After(batches[j].CreatedAt) })
+	if len(batches) > limit {
+		batches = batches[:limit]
+	}
+	counts := make([]domain.BatchItemCounts, 0, len(batches))
+	for _, batch := range batches {
+		_, batchCounts, err := s.GetBatch(context.Background(), batch.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		counts = append(counts, batchCounts)
+	}
+	return batches, counts, nil
+}
+
+func (s *memoryDocumentStore) ListBatchItems(_ context.Context, filter domain.BatchItemFilter) ([]domain.BatchItem, *domain.BatchItemCursor, error) {
+	if filter.Limit < 1 || filter.BatchID == "" {
+		return nil, nil, errors.New("invalid batch item filter")
+	}
+	items := []domain.BatchItem{}
+	for _, item := range s.batchItems[filter.BatchID] {
+		if filter.State != "" && item.State != filter.State {
+			continue
+		}
+		if filter.Cursor != nil && item.Ordinal <= filter.Cursor.Ordinal {
+			continue
+		}
+		items = append(items, item)
+	}
+	var next *domain.BatchItemCursor
+	if len(items) > filter.Limit {
+		last := items[filter.Limit-1]
+		next = &domain.BatchItemCursor{Ordinal: last.Ordinal}
+		items = items[:filter.Limit]
+	}
+	return items, next, nil
+}
+
+func (s *memoryDocumentStore) ListPublishedWorkflowAnchors(_ context.Context, identity domain.DocumentContext) (map[string]bool, error) {
+	published := map[string]bool{}
+	for key := range s.publishedAnchors {
+		published[key] = true
+	}
+	_ = identity
+	return published, nil
+}
+
+func (s *memoryDocumentStore) setPublishedAnchor(pagePath, anchor string) {
+	s.publishedAnchors[pagePath+"\x00"+anchor] = true
+}

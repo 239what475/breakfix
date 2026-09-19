@@ -54,6 +54,7 @@ type Handler struct {
 	nodeProviderReady    NodeProviderReadiness
 	generator            generatorApplication
 	documentation        documentationApplication
+	documentationBatches documentationBatchApplication
 	documentationLibrary documentationLibrary
 	documentationReader  documentationPracticeReader
 	systemReport         SystemReportProvider
@@ -98,6 +99,7 @@ type Dependencies struct {
 	Generator            generatorApplication
 	RunnableBindings     operationsRunnableBindingResolver
 	Documentation        documentationApplication
+	DocumentationBatches documentationBatchApplication
 	DocumentationLibrary documentationLibrary
 	DocumentationReader  documentationPracticeReader
 	// SystemReport assembles the admin system status from process-scoped state
@@ -178,6 +180,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		nodeTerminal:         dependencies.NodeTerminal,
 		generator:            dependencies.Generator,
 		documentation:        dependencies.Documentation,
+		documentationBatches: dependencies.DocumentationBatches,
 		documentationLibrary: dependencies.DocumentationLibrary,
 		documentationReader:  dependencies.DocumentationReader,
 		systemReport:         dependencies.SystemReport,

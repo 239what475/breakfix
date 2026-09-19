@@ -83,6 +83,44 @@ func newDocumentationProfiles(cfg config.Config) (documentationProfiles, error) 
 	return documentationProfiles{constraint: constraint, profile: profile, lifecycle: lifecycle}, nil
 }
 
+// documentationCorpus adapts the opened library to the batch scope resolver
+// port. The resolution itself is product policy in the application layer.
+type documentationCorpus struct {
+	library *docsource.Library
+}
+
+func (c documentationCorpus) CorpusPages() []app.CorpusPage {
+	pages := c.library.CorpusPages()
+	result := make([]app.CorpusPage, 0, len(pages))
+	for _, page := range pages {
+		anchors := make([]app.CorpusAnchor, 0, len(page.Anchors))
+		for _, anchor := range page.Anchors {
+			anchors = append(anchors, app.CorpusAnchor{ID: anchor.ID, Level: anchor.Level})
+		}
+		result = append(result, app.CorpusPage{Path: page.Path, Title: page.Title, PageKind: page.PageKind, Anchors: anchors})
+	}
+	return result
+}
+
+func (c documentationCorpus) HasSection(section string) bool {
+	return c.library.HasSection(section)
+}
+
+func (c documentationCorpus) WorkflowContext() domain.DocumentContext {
+	return c.library.PinnedContext()
+}
+
+func newDocumentationBatches(service *app.Service, library *docsource.Library) *app.BatchService {
+	if service == nil || library == nil {
+		return nil
+	}
+	batches, err := app.NewBatchService(service, documentationCorpus{library: library})
+	if err != nil {
+		return nil
+	}
+	return batches
+}
+
 func (p documentationProfiles) DocumentationRuntimeConstraints() []domain.RuntimeConstraint {
 	return []domain.RuntimeConstraint{p.constraint}
 }
@@ -105,9 +143,9 @@ type documentationLibraryIdentity struct {
 	upstreamCommit string
 }
 
-func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, *docsource.Library, error) {
+func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, *app.Service, *docsource.Library, error) {
 	if database == nil || !cfg.Documentation.Enabled() {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	identity := docsource.LibraryIdentity{
 		SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
@@ -116,36 +154,36 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	}
 	library, err := docsource.NewPinnedLibrary(identity, cfg.Documentation.LibraryRoot)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load pinned documentation library: %w", err)
+		return nil, nil, nil, fmt.Errorf("load pinned documentation library: %w", err)
 	}
 	reader := app.Reader(library)
 	profiles, err := newDocumentationProfiles(cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	evidence, err := llm.NewDocumentReviewer(cfg.Agent, "evidence")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	value, err := llm.NewDocumentReviewer(cfg.Agent, "value")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	safety, err := llm.NewDocumentReviewer(cfg.Agent, "safety")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	consistency, err := llm.NewDocumentReviewer(cfg.Agent, "consistency")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	verification, err := llm.NewDocumentReviewer(cfg.Agent, "verification")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	service, err := app.NewService(database.DocumentPractice, database.Runnable)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	pipeline, err := app.NewAgentPipeline(
 		service, reader, llm.NewDocumentPlanner(cfg.Agent),
@@ -154,7 +192,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: "document-policy-v2"},
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return pipeline, &library, nil
+	return pipeline, service, &library, nil
 }

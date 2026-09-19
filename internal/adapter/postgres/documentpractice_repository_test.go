@@ -843,3 +843,94 @@ func TestBackfillWorkflowPageIdentityDerivesFromLedgerContext(t *testing.T) {
 		t.Fatalf("second backfill = %d, %v", backfilled, err)
 	}
 }
+
+func TestBatchRepositoryPersistsBatchWithItemsAndAudit(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	batch := domain.DocumentBatch{
+		ID:          domain.NewBatchID(now),
+		State:       domain.BatchPending,
+		Scope:       domain.BatchScope{Kind: domain.BatchScopePages, Pages: []string{"docs/a", "docs/b"}},
+		Concurrency: 2,
+		Resolution:  domain.BatchResolution{Resolved: 2, Excluded: []domain.BatchExcludedPage{{PagePath: "docs/c", Reason: domain.ExcludedNoAnchor}}},
+		TotalItems:  2,
+		CreatedBy:   "u-admin",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	items := []domain.BatchItem{
+		{ID: domain.NewBatchItemID(batch.ID, 0), BatchID: batch.ID, Ordinal: 0, PagePath: "docs/a", Anchor: "a-h2", Title: "A", WorkflowID: "document-workflow-a", State: domain.ItemSkipped, Detail: "already-published", CreatedAt: now, UpdatedAt: now},
+		{ID: domain.NewBatchItemID(batch.ID, 1), BatchID: batch.ID, Ordinal: 1, PagePath: "docs/b", Anchor: "b-h2", Title: "B", WorkflowID: "document-workflow-b", State: domain.ItemPending, CreatedAt: now, UpdatedAt: now},
+	}
+	action := audit.HumanAction{ID: "audit-batch-create", UserID: "u-admin", Action: audit.ActionDocumentationBatchCreate, TargetType: audit.TargetDocumentBatch, TargetID: batch.ID, Detail: []byte(`{}`), CreatedAt: now}
+	if err := database.DocumentPractice.CreateBatch(ctx, batch, items, &action); err != nil {
+		t.Fatalf("create batch: %v", err)
+	}
+	got, counts, err := database.DocumentPractice.GetBatch(ctx, batch.ID)
+	if err != nil {
+		t.Fatalf("get batch: %v", err)
+	}
+	if got.Scope.Kind != domain.BatchScopePages || len(got.Scope.Pages) != 2 || got.TotalItems != 2 || len(got.Resolution.Excluded) != 1 {
+		t.Fatalf("stored batch = %#v", got)
+	}
+	if counts[domain.ItemSkipped] != 1 || counts[domain.ItemPending] != 1 {
+		t.Fatalf("counts = %#v", counts)
+	}
+
+	// Duplicate item anchors are refused by the unique constraint.
+	duplicate := items[0]
+	duplicate.ID = domain.NewBatchItemID(batch.ID, 9)
+	if err := database.DocumentPractice.CreateBatch(ctx, batch, []domain.BatchItem{duplicate}, &action); err == nil {
+		t.Fatal("duplicate batch anchor was accepted")
+	}
+
+	// Item pages keyset through corpus order, with a state filter.
+	page1, next, err := database.DocumentPractice.ListBatchItems(ctx, domain.BatchItemFilter{BatchID: batch.ID, Limit: 1})
+	if err != nil || len(page1) != 1 || next == nil || page1[0].Ordinal != 0 {
+		t.Fatalf("item page 1 = %#v next=%#v err=%v", page1, next, err)
+	}
+	page2, next2, err := database.DocumentPractice.ListBatchItems(ctx, domain.BatchItemFilter{BatchID: batch.ID, Limit: 5, Cursor: next})
+	if err != nil || len(page2) != 1 || next2 != nil || page2[0].Ordinal != 1 {
+		t.Fatalf("item page 2 = %#v next=%#v err=%v", page2, next2, err)
+	}
+	skipped, _, err := database.DocumentPractice.ListBatchItems(ctx, domain.BatchItemFilter{BatchID: batch.ID, Limit: 5, State: domain.ItemSkipped})
+	if err != nil || len(skipped) != 1 || skipped[0].Detail != "already-published" {
+		t.Fatalf("skipped filter = %#v, %v", skipped, err)
+	}
+
+	list, listCounts, err := database.DocumentPractice.ListBatches(ctx, 10)
+	if err != nil || len(list) != 1 || listCounts[0][domain.ItemPending] != 1 {
+		t.Fatalf("batch list = %#v counts=%#v err=%v", list, listCounts, err)
+	}
+
+	// The creation audit was written inside the same transaction.
+	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationBatchCreate, Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].TargetID != batch.ID {
+		t.Fatalf("batch audit rows = %#v, %v", rows, err)
+	}
+}
+
+func TestListPublishedWorkflowAnchorsScopesToThePinnedIdentity(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	identity := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en"}
+	workflow := seedWorkflowInState(t, database, "document-workflow-published-anchor", domain.Planning, now)
+	if _, err := database.conn.ExecContext(ctx, `UPDATE document_workflows SET state = 'Published' WHERE id = ?`, workflow.ID); err != nil {
+		t.Fatal(err)
+	}
+	published, err := database.DocumentPractice.ListPublishedWorkflowAnchors(ctx, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !published["docs/concepts/workloads/pods/pod-lifecycle\x00pod-lifetime"] {
+		t.Fatalf("published anchors = %#v", published)
+	}
+	otherIdentity := identity
+	otherIdentity.SourceID = "other"
+	published, err = database.DocumentPractice.ListPublishedWorkflowAnchors(ctx, otherIdentity)
+	if err != nil || len(published) != 0 {
+		t.Fatalf("foreign identity anchors = %#v, %v", published, err)
+	}
+}

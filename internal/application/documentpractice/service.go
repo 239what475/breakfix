@@ -42,6 +42,19 @@ type Store interface {
 	// decision: the state fence and the watchdog ledger entry commit together,
 	// and no human action audit row is written.
 	WatchdogFailWorkflow(context.Context, string, string, int64, time.Time) (domain.Workflow, error)
+	// CreateBatch durably creates the batch, its resolved items, and the
+	// creating administrator's human action audit in one transaction.
+	CreateBatch(context.Context, domain.DocumentBatch, []domain.BatchItem, *audit.HumanAction) error
+	// GetBatch returns one batch with per-state item counts.
+	GetBatch(context.Context, string) (domain.DocumentBatch, domain.BatchItemCounts, error)
+	// ListBatches returns the newest batches with per-state item counts.
+	ListBatches(context.Context, int) ([]domain.DocumentBatch, []domain.BatchItemCounts, error)
+	// ListBatchItems pages one batch's items in corpus order.
+	ListBatchItems(context.Context, domain.BatchItemFilter) ([]domain.BatchItem, *domain.BatchItemCursor, error)
+	// ListPublishedWorkflowAnchors returns the set of already-published
+	// (page_path, anchor) pairs for the pinned library identity, keyed by
+	// "page\x00anchor".
+	ListPublishedWorkflowAnchors(context.Context, domain.DocumentContext) (map[string]bool, error)
 }
 
 type RunnableStore interface {

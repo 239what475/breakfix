@@ -102,13 +102,13 @@ func (a ArtifactRecord) Validate() error {
 }
 
 type Workflow struct {
-	ID             string           `json:"id"`
-	State          WorkflowState    `json:"state"`
-	StateVersion   int64            `json:"state_version"`
-	Revision       int64            `json:"revision"`
-	MaxRevisions   int64            `json:"max_revisions"`
-	Artifacts      []ArtifactRecord `json:"artifacts"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	ID           string           `json:"id"`
+	State        WorkflowState    `json:"state"`
+	StateVersion int64            `json:"state_version"`
+	Revision     int64            `json:"revision"`
+	MaxRevisions int64            `json:"max_revisions"`
+	Artifacts    []ArtifactRecord `json:"artifacts"`
+	UpdatedAt    time.Time        `json:"updated_at"`
 }
 
 func NewWorkflow(id string, now time.Time) (Workflow, error) {

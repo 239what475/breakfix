@@ -95,4 +95,32 @@ var schemaDocumentPracticeStatements = []string{
 		practice_revision_id TEXT NOT NULL REFERENCES document_practice_revisions(id) ON DELETE RESTRICT,
 		PRIMARY KEY (source_id, commit, language, page_path, anchor)
 	)`,
+	`CREATE TABLE document_batches (
+		id TEXT PRIMARY KEY,
+		state TEXT NOT NULL CHECK (state IN ('Pending','Running','Paused','Completed','Cancelled')),
+		scope JSONB NOT NULL,
+		concurrency INTEGER NOT NULL CHECK (concurrency BETWEEN 1 AND 8),
+		resolution JSONB NOT NULL,
+		total_items INTEGER NOT NULL CHECK (total_items >= 0),
+		created_by TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL
+	)`,
+	`CREATE TABLE document_batch_items (
+		id TEXT PRIMARY KEY,
+		batch_id TEXT NOT NULL REFERENCES document_batches(id) ON DELETE RESTRICT,
+		ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+		page_path TEXT NOT NULL,
+		anchor TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL DEFAULT '',
+		workflow_id TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL CHECK (state IN ('Pending','Scheduled','Running','Published','NoPractice','Rejected','Failed','Skipped','Cancelled')),
+		detail TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL,
+		UNIQUE (batch_id, page_path, anchor),
+		UNIQUE (batch_id, ordinal)
+	)`,
+	`CREATE INDEX document_batch_items_dispatch ON document_batch_items(batch_id, state, ordinal)`,
+	`CREATE INDEX document_batch_items_workflow ON document_batch_items(workflow_id)`,
 }

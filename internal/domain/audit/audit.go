@@ -14,18 +14,24 @@ import (
 // The action vocabulary is a closed set. A new verb must be registered here
 // before any write path may emit it.
 const (
-	ActionDocumentationPracticeStart  = "documentation.practice.start"
+	ActionDocumentationPracticeStart     = "documentation.practice.start"
 	ActionDocumentationWorkflowForceFail = "documentation.workflow.force_fail"
 	ActionDocumentationWorkflowRestart   = "documentation.workflow.restart"
+	ActionDocumentationBatchCreate       = "documentation.batch.create"
+	ActionDocumentationBatchPause        = "documentation.batch.pause"
+	ActionDocumentationBatchResume       = "documentation.batch.resume"
+	ActionDocumentationBatchCancel       = "documentation.batch.cancel"
+	ActionDocumentationBatchRetry        = "documentation.batch.retry"
 	ActionUserTOTPReset                  = "user.totp.reset"
 	ActionEnvironmentRelease             = "environment.release"
 )
 
 // Target types name the durable object an action was aimed at.
 const (
-	TargetDocumentWorkflow    = "document_workflow"
-	TargetUser                = "user"
-	TargetRuntimeEnvironment  = "runtime_environment"
+	TargetDocumentWorkflow   = "document_workflow"
+	TargetDocumentBatch      = "document_batch"
+	TargetUser               = "user"
+	TargetRuntimeEnvironment = "runtime_environment"
 )
 
 type HumanAction struct {
@@ -47,7 +53,9 @@ func (a HumanAction) Validate() error {
 
 func validAction(action string) bool {
 	switch action {
-	case ActionDocumentationPracticeStart, ActionDocumentationWorkflowForceFail, ActionDocumentationWorkflowRestart, ActionUserTOTPReset, ActionEnvironmentRelease:
+	case ActionDocumentationPracticeStart, ActionDocumentationWorkflowForceFail, ActionDocumentationWorkflowRestart,
+		ActionDocumentationBatchCreate, ActionDocumentationBatchPause, ActionDocumentationBatchResume, ActionDocumentationBatchCancel, ActionDocumentationBatchRetry,
+		ActionUserTOTPReset, ActionEnvironmentRelease:
 		return true
 	}
 	return false

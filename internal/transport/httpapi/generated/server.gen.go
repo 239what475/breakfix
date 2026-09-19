@@ -41,6 +41,114 @@ func (e AdminCatalogIntegrityState) Valid() bool {
 	}
 }
 
+// Defines values for AdminDocumentBatchState.
+const (
+	AdminDocumentBatchStateCancelled AdminDocumentBatchState = "Cancelled"
+	AdminDocumentBatchStateCompleted AdminDocumentBatchState = "Completed"
+	AdminDocumentBatchStatePaused    AdminDocumentBatchState = "Paused"
+	AdminDocumentBatchStatePending   AdminDocumentBatchState = "Pending"
+	AdminDocumentBatchStateRunning   AdminDocumentBatchState = "Running"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentBatchState enum.
+func (e AdminDocumentBatchState) Valid() bool {
+	switch e {
+	case AdminDocumentBatchStateCancelled:
+		return true
+	case AdminDocumentBatchStateCompleted:
+		return true
+	case AdminDocumentBatchStatePaused:
+		return true
+	case AdminDocumentBatchStatePending:
+		return true
+	case AdminDocumentBatchStateRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDocumentBatchItemState.
+const (
+	AdminDocumentBatchItemStateCancelled  AdminDocumentBatchItemState = "Cancelled"
+	AdminDocumentBatchItemStateFailed     AdminDocumentBatchItemState = "Failed"
+	AdminDocumentBatchItemStateNoPractice AdminDocumentBatchItemState = "NoPractice"
+	AdminDocumentBatchItemStatePending    AdminDocumentBatchItemState = "Pending"
+	AdminDocumentBatchItemStatePublished  AdminDocumentBatchItemState = "Published"
+	AdminDocumentBatchItemStateRejected   AdminDocumentBatchItemState = "Rejected"
+	AdminDocumentBatchItemStateRunning    AdminDocumentBatchItemState = "Running"
+	AdminDocumentBatchItemStateScheduled  AdminDocumentBatchItemState = "Scheduled"
+	AdminDocumentBatchItemStateSkipped    AdminDocumentBatchItemState = "Skipped"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentBatchItemState enum.
+func (e AdminDocumentBatchItemState) Valid() bool {
+	switch e {
+	case AdminDocumentBatchItemStateCancelled:
+		return true
+	case AdminDocumentBatchItemStateFailed:
+		return true
+	case AdminDocumentBatchItemStateNoPractice:
+		return true
+	case AdminDocumentBatchItemStatePending:
+		return true
+	case AdminDocumentBatchItemStatePublished:
+		return true
+	case AdminDocumentBatchItemStateRejected:
+		return true
+	case AdminDocumentBatchItemStateRunning:
+		return true
+	case AdminDocumentBatchItemStateScheduled:
+		return true
+	case AdminDocumentBatchItemStateSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDocumentBatchResolutionExcludedReason.
+const (
+	Duplicate AdminDocumentBatchResolutionExcludedReason = "duplicate"
+	Index     AdminDocumentBatchResolutionExcludedReason = "index"
+	NoAnchor  AdminDocumentBatchResolutionExcludedReason = "no-anchor"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentBatchResolutionExcludedReason enum.
+func (e AdminDocumentBatchResolutionExcludedReason) Valid() bool {
+	switch e {
+	case Duplicate:
+		return true
+	case Index:
+		return true
+	case NoAnchor:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminDocumentBatchScopeKind.
+const (
+	Full     AdminDocumentBatchScopeKind = "full"
+	Pages    AdminDocumentBatchScopeKind = "pages"
+	Sections AdminDocumentBatchScopeKind = "sections"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentBatchScopeKind enum.
+func (e AdminDocumentBatchScopeKind) Valid() bool {
+	switch e {
+	case Full:
+		return true
+	case Pages:
+		return true
+	case Sections:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminDocumentationWorkflowStuckReason.
 const (
 	ActionFailed      AdminDocumentationWorkflowStuckReason = "action_failed"
@@ -82,16 +190,16 @@ func (e AdminEnvironmentPurpose) Valid() bool {
 
 // Defines values for AdminEnvironmentFailureClass.
 const (
-	AdminEnvironmentFailureClassArtifact       AdminEnvironmentFailureClass = "artifact"
-	AdminEnvironmentFailureClassInfrastructure AdminEnvironmentFailureClass = "infrastructure"
+	Artifact       AdminEnvironmentFailureClass = "artifact"
+	Infrastructure AdminEnvironmentFailureClass = "infrastructure"
 )
 
 // Valid indicates whether the value is a known member of the AdminEnvironmentFailureClass enum.
 func (e AdminEnvironmentFailureClass) Valid() bool {
 	switch e {
-	case AdminEnvironmentFailureClassArtifact:
+	case Artifact:
 		return true
-	case AdminEnvironmentFailureClassInfrastructure:
+	case Infrastructure:
 		return true
 	default:
 		return false
@@ -100,6 +208,11 @@ func (e AdminEnvironmentFailureClass) Valid() bool {
 
 // Defines values for AdminHumanActionAction.
 const (
+	AdminHumanActionActionDocumentationBatchCancel       AdminHumanActionAction = "documentation.batch.cancel"
+	AdminHumanActionActionDocumentationBatchCreate       AdminHumanActionAction = "documentation.batch.create"
+	AdminHumanActionActionDocumentationBatchPause        AdminHumanActionAction = "documentation.batch.pause"
+	AdminHumanActionActionDocumentationBatchResume       AdminHumanActionAction = "documentation.batch.resume"
+	AdminHumanActionActionDocumentationBatchRetry        AdminHumanActionAction = "documentation.batch.retry"
 	AdminHumanActionActionDocumentationPracticeStart     AdminHumanActionAction = "documentation.practice.start"
 	AdminHumanActionActionDocumentationWorkflowForceFail AdminHumanActionAction = "documentation.workflow.force_fail"
 	AdminHumanActionActionDocumentationWorkflowRestart   AdminHumanActionAction = "documentation.workflow.restart"
@@ -110,6 +223,16 @@ const (
 // Valid indicates whether the value is a known member of the AdminHumanActionAction enum.
 func (e AdminHumanActionAction) Valid() bool {
 	switch e {
+	case AdminHumanActionActionDocumentationBatchCancel:
+		return true
+	case AdminHumanActionActionDocumentationBatchCreate:
+		return true
+	case AdminHumanActionActionDocumentationBatchPause:
+		return true
+	case AdminHumanActionActionDocumentationBatchResume:
+		return true
+	case AdminHumanActionActionDocumentationBatchRetry:
+		return true
 	case AdminHumanActionActionDocumentationPracticeStart:
 		return true
 	case AdminHumanActionActionDocumentationWorkflowForceFail:
@@ -487,16 +610,16 @@ func (e MySpaceActiveEnvironmentRuntime) Valid() bool {
 
 // Defines values for MySpaceAuthoringDraftState.
 const (
-	DraftConversation MySpaceAuthoringDraftState = "DraftConversation"
-	IntentReview      MySpaceAuthoringDraftState = "IntentReview"
+	MySpaceAuthoringDraftStateDraftConversation MySpaceAuthoringDraftState = "DraftConversation"
+	MySpaceAuthoringDraftStateIntentReview      MySpaceAuthoringDraftState = "IntentReview"
 )
 
 // Valid indicates whether the value is a known member of the MySpaceAuthoringDraftState enum.
 func (e MySpaceAuthoringDraftState) Valid() bool {
 	switch e {
-	case DraftConversation:
+	case MySpaceAuthoringDraftStateDraftConversation:
 		return true
-	case IntentReview:
+	case MySpaceAuthoringDraftStateIntentReview:
 		return true
 	default:
 		return false
@@ -620,6 +743,45 @@ func (e ScenarioSummaryRuntime) Valid() bool {
 	}
 }
 
+// Defines values for ListAdminDocumentationBatchItemsParamsState.
+const (
+	ListAdminDocumentationBatchItemsParamsStateCancelled  ListAdminDocumentationBatchItemsParamsState = "Cancelled"
+	ListAdminDocumentationBatchItemsParamsStateFailed     ListAdminDocumentationBatchItemsParamsState = "Failed"
+	ListAdminDocumentationBatchItemsParamsStateNoPractice ListAdminDocumentationBatchItemsParamsState = "NoPractice"
+	ListAdminDocumentationBatchItemsParamsStatePending    ListAdminDocumentationBatchItemsParamsState = "Pending"
+	ListAdminDocumentationBatchItemsParamsStatePublished  ListAdminDocumentationBatchItemsParamsState = "Published"
+	ListAdminDocumentationBatchItemsParamsStateRejected   ListAdminDocumentationBatchItemsParamsState = "Rejected"
+	ListAdminDocumentationBatchItemsParamsStateRunning    ListAdminDocumentationBatchItemsParamsState = "Running"
+	ListAdminDocumentationBatchItemsParamsStateScheduled  ListAdminDocumentationBatchItemsParamsState = "Scheduled"
+	ListAdminDocumentationBatchItemsParamsStateSkipped    ListAdminDocumentationBatchItemsParamsState = "Skipped"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminDocumentationBatchItemsParamsState enum.
+func (e ListAdminDocumentationBatchItemsParamsState) Valid() bool {
+	switch e {
+	case ListAdminDocumentationBatchItemsParamsStateCancelled:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateFailed:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateNoPractice:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStatePending:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStatePublished:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateRejected:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateRunning:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateScheduled:
+		return true
+	case ListAdminDocumentationBatchItemsParamsStateSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListAdminRunnableActionsParamsState.
 const (
 	ListAdminRunnableActionsParamsStateCompleted ListAdminRunnableActionsParamsState = "completed"
@@ -679,19 +841,19 @@ func (e GetGeneratorReviewBundleParamsKind) Valid() bool {
 
 // Defines values for GetMySpaceLearningParamsState.
 const (
-	Active    GetMySpaceLearningParamsState = "active"
-	Completed GetMySpaceLearningParamsState = "completed"
-	Ended     GetMySpaceLearningParamsState = "ended"
+	GetMySpaceLearningParamsStateActive    GetMySpaceLearningParamsState = "active"
+	GetMySpaceLearningParamsStateCompleted GetMySpaceLearningParamsState = "completed"
+	GetMySpaceLearningParamsStateEnded     GetMySpaceLearningParamsState = "ended"
 )
 
 // Valid indicates whether the value is a known member of the GetMySpaceLearningParamsState enum.
 func (e GetMySpaceLearningParamsState) Valid() bool {
 	switch e {
-	case Active:
+	case GetMySpaceLearningParamsStateActive:
 		return true
-	case Completed:
+	case GetMySpaceLearningParamsStateCompleted:
 		return true
-	case Ended:
+	case GetMySpaceLearningParamsStateEnded:
 		return true
 	default:
 		return false
@@ -741,6 +903,94 @@ type AdminCatalogIntegrity struct {
 
 // AdminCatalogIntegrityState defines model for AdminCatalogIntegrity.State.
 type AdminCatalogIntegrityState string
+
+// AdminDocumentBatch defines model for AdminDocumentBatch.
+type AdminDocumentBatch struct {
+	Concurrency int `json:"concurrency"`
+
+	// Counts Item counts per state; absent states have zero items
+	Counts     *map[string]int              `json:"counts,omitempty"`
+	CreatedAt  time.Time                    `json:"created_at"`
+	CreatedBy  string                       `json:"created_by"`
+	Id         string                       `json:"id"`
+	Resolution AdminDocumentBatchResolution `json:"resolution"`
+	Scope      AdminDocumentBatchScope      `json:"scope"`
+	State      AdminDocumentBatchState      `json:"state"`
+	TotalItems int                          `json:"total_items"`
+	UpdatedAt  time.Time                    `json:"updated_at"`
+}
+
+// AdminDocumentBatchState defines model for AdminDocumentBatch.State.
+type AdminDocumentBatchState string
+
+// AdminDocumentBatchAnchorRef defines model for AdminDocumentBatchAnchorRef.
+type AdminDocumentBatchAnchorRef struct {
+	Anchor   string `json:"anchor"`
+	PagePath string `json:"page_path"`
+}
+
+// AdminDocumentBatchItem defines model for AdminDocumentBatchItem.
+type AdminDocumentBatchItem struct {
+	Anchor    string    `json:"anchor"`
+	BatchId   string    `json:"batch_id"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Detail Skip or failure summary when applicable
+	Detail     *string                     `json:"detail,omitempty"`
+	Id         string                      `json:"id"`
+	Ordinal    int                         `json:"ordinal"`
+	PagePath   string                      `json:"page_path"`
+	State      AdminDocumentBatchItemState `json:"state"`
+	Title      string                      `json:"title"`
+	UpdatedAt  time.Time                   `json:"updated_at"`
+	WorkflowId string                      `json:"workflow_id"`
+}
+
+// AdminDocumentBatchItemState defines model for AdminDocumentBatchItem.State.
+type AdminDocumentBatchItemState string
+
+// AdminDocumentBatchItemsPage defines model for AdminDocumentBatchItemsPage.
+type AdminDocumentBatchItemsPage struct {
+	Items []AdminDocumentBatchItem `json:"items"`
+
+	// NextCursor Present when another page exists
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// AdminDocumentBatchList defines model for AdminDocumentBatchList.
+type AdminDocumentBatchList struct {
+	Batches []AdminDocumentBatch `json:"batches"`
+}
+
+// AdminDocumentBatchResolution defines model for AdminDocumentBatchResolution.
+type AdminDocumentBatchResolution struct {
+	// Excluded Pages dropped by the deterministic resolution with the reason
+	Excluded *[]struct {
+		PagePath string                                     `json:"page_path"`
+		Reason   AdminDocumentBatchResolutionExcludedReason `json:"reason"`
+	} `json:"excluded,omitempty"`
+	ResolvedPages int `json:"resolved_pages"`
+}
+
+// AdminDocumentBatchResolutionExcludedReason defines model for AdminDocumentBatchResolution.Excluded.Reason.
+type AdminDocumentBatchResolutionExcludedReason string
+
+// AdminDocumentBatchScope defines model for AdminDocumentBatchScope.
+type AdminDocumentBatchScope struct {
+	Kind AdminDocumentBatchScopeKind `json:"kind"`
+
+	// Overrides Explicit (page, anchor) pairs that replace the level-2 anchor rule for their page
+	Overrides *[]AdminDocumentBatchAnchorRef `json:"overrides,omitempty"`
+
+	// Pages Explicit page paths for kind=pages
+	Pages *[]string `json:"pages,omitempty"`
+
+	// Sections Library tree node paths for kind=sections
+	Sections *[]string `json:"sections,omitempty"`
+}
+
+// AdminDocumentBatchScopeKind defines model for AdminDocumentBatchScope.Kind.
+type AdminDocumentBatchScopeKind string
 
 // AdminDocumentationAgentAudit defines model for AdminDocumentationAgentAudit.
 type AdminDocumentationAgentAudit struct {
@@ -1201,6 +1451,13 @@ type DocumentationAnchor struct {
 type DocumentationAsset struct {
 	Digest string `json:"digest"`
 	Path   string `json:"path"`
+}
+
+// DocumentationBatchCreateRequest defines model for DocumentationBatchCreateRequest.
+type DocumentationBatchCreateRequest struct {
+	// Concurrency In-flight Agent chain threshold; defaults to 2 when omitted
+	Concurrency *int                    `json:"concurrency,omitempty"`
+	Scope       AdminDocumentBatchScope `json:"scope"`
 }
 
 // DocumentationPageResponse defines model for DocumentationPageResponse.
@@ -1771,6 +2028,24 @@ type ListAdminAuditParams struct {
 	UserId *string `form:"user_id,omitempty" json:"user_id,omitempty"`
 }
 
+// ListAdminDocumentationBatchesParams defines parameters for ListAdminDocumentationBatches.
+type ListAdminDocumentationBatchesParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListAdminDocumentationBatchItemsParams defines parameters for ListAdminDocumentationBatchItems.
+type ListAdminDocumentationBatchItemsParams struct {
+	// Cursor Opaque cursor from a previous page
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// State Filter by exact item state
+	State *ListAdminDocumentationBatchItemsParamsState `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListAdminDocumentationBatchItemsParamsState defines parameters for ListAdminDocumentationBatchItems.
+type ListAdminDocumentationBatchItemsParamsState string
+
 // ListAdminDocumentationWorkflowsParams defines parameters for ListAdminDocumentationWorkflows.
 type ListAdminDocumentationWorkflowsParams struct {
 	// Cursor Opaque cursor from a previous page
@@ -1868,6 +2143,9 @@ type CloseTerminalWindowParams struct {
 	Node *string `form:"node,omitempty" json:"node,omitempty"`
 }
 
+// CreateAdminDocumentationBatchJSONRequestBody defines body for CreateAdminDocumentationBatch for application/json ContentType.
+type CreateAdminDocumentationBatchJSONRequestBody = DocumentationBatchCreateRequest
+
 // ForceFailAdminDocumentationWorkflowJSONRequestBody defines body for ForceFailAdminDocumentationWorkflow for application/json ContentType.
 type ForceFailAdminDocumentationWorkflowJSONRequestBody = AdminWorkflowReasonRequest
 
@@ -1933,6 +2211,18 @@ type ServerInterface interface {
 	// Page the append-only human action audit ledger (admin only)
 	// (GET /admin/audit)
 	ListAdminAudit(c *gin.Context, params ListAdminAuditParams)
+	// List the newest documentation batches with progress counts (admin only)
+	// (GET /admin/documentation/batches)
+	ListAdminDocumentationBatches(c *gin.Context, params ListAdminDocumentationBatchesParams)
+	// Declare a documentation batch over one corpus scope (admin only)
+	// (POST /admin/documentation/batches)
+	CreateAdminDocumentationBatch(c *gin.Context)
+	// Inspect one documentation batch with progress counts (admin only)
+	// (GET /admin/documentation/batches/{batch_id})
+	GetAdminDocumentationBatch(c *gin.Context, batchId string)
+	// Page through one batch's items in corpus order (admin only)
+	// (GET /admin/documentation/batches/{batch_id}/items)
+	ListAdminDocumentationBatchItems(c *gin.Context, batchId string, params ListAdminDocumentationBatchItemsParams)
 	// List documentation workflows with page identity and stuck status (admin only)
 	// (GET /admin/documentation/workflows)
 	ListAdminDocumentationWorkflows(c *gin.Context, params ListAdminDocumentationWorkflowsParams)
@@ -2163,6 +2453,131 @@ func (siw *ServerInterfaceWrapper) ListAdminAudit(c *gin.Context) {
 	}
 
 	siw.Handler.ListAdminAudit(c, params)
+}
+
+// ListAdminDocumentationBatches operation middleware
+func (siw *ServerInterfaceWrapper) ListAdminDocumentationBatches(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAdminDocumentationBatchesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListAdminDocumentationBatches(c, params)
+}
+
+// CreateAdminDocumentationBatch operation middleware
+func (siw *ServerInterfaceWrapper) CreateAdminDocumentationBatch(c *gin.Context) {
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateAdminDocumentationBatch(c)
+}
+
+// GetAdminDocumentationBatch operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDocumentationBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "batch_id" -------------
+	var batchId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDocumentationBatch(c, batchId)
+}
+
+// ListAdminDocumentationBatchItems operation middleware
+func (siw *ServerInterfaceWrapper) ListAdminDocumentationBatchItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "batch_id" -------------
+	var batchId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAdminDocumentationBatchItemsParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListAdminDocumentationBatchItems(c, batchId, params)
 }
 
 // ListAdminDocumentationWorkflows operation middleware
@@ -3680,6 +4095,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	}
 
 	router.GET(options.BaseURL+"/admin/audit", wrapper.ListAdminAudit)
+	router.GET(options.BaseURL+"/admin/documentation/batches", wrapper.ListAdminDocumentationBatches)
+	router.POST(options.BaseURL+"/admin/documentation/batches", wrapper.CreateAdminDocumentationBatch)
+	router.GET(options.BaseURL+"/admin/documentation/batches/:batch_id", wrapper.GetAdminDocumentationBatch)
+	router.GET(options.BaseURL+"/admin/documentation/batches/:batch_id/items", wrapper.ListAdminDocumentationBatchItems)
 	router.GET(options.BaseURL+"/admin/documentation/workflows", wrapper.ListAdminDocumentationWorkflows)
 	router.GET(options.BaseURL+"/admin/documentation/workflows/:workflow_id", wrapper.GetAdminDocumentationWorkflow)
 	router.POST(options.BaseURL+"/admin/documentation/workflows/:workflow_id/force-fail", wrapper.ForceFailAdminDocumentationWorkflow)
@@ -3743,171 +4162,186 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"+4//GwAA//8=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

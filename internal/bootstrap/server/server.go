@@ -207,7 +207,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create generation runnable coordinator: %w", err)
 	}
-	documentationPipeline, documentationLibrary, err := newDocumentationPipeline(cfg, database)
+	documentationPipeline, documentationService, documentationLibrary, err := newDocumentationPipeline(cfg, database)
 	if err != nil {
 		incusClient.Close()
 		cleanupDatabase()
@@ -222,6 +222,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			return nil, fmt.Errorf("backfill documentation workflow page identity: %w", err)
 		}
 	}
+
+	documentationBatches := newDocumentationBatches(documentationService, documentationLibrary)
 
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {
@@ -314,6 +316,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		AgentRuntimeContext:  serviceContext,
 		Generator:            generatorService,
 		Documentation:        newFixedDocumentationApplication(documentationPipeline, documentationLibrary),
+		DocumentationBatches: documentationBatches,
 		DocumentationLibrary: documentationLibrary,
 		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
 	})
