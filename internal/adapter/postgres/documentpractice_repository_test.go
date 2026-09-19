@@ -1005,3 +1005,68 @@ func TestBatchSchedulerRepositoryFencesTransitionsAndCancels(t *testing.T) {
 		t.Fatalf("active batches = %#v, %v", active, err)
 	}
 }
+
+func TestCorpusRollupNeverMarksAgedTerminalWorkflowsStuck(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	aged := base.Add(-2 * time.Hour)
+	identity := testWorkflowIdentity()
+
+	// Aged terminal workflow: the rollup must not count it as stuck.
+	terminal, err := domain.NewWorkflow("document-workflow-terminal", aged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, terminal, identity, nil); err != nil {
+		t.Fatal(err)
+	}
+	artifact := domain.ArtifactRecord{ID: "context-terminal", Kind: "document-context", ContentRevision: "1", Digest: testRunnableDigest("t"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: aged, Payload: []byte(`{"id":"context-terminal"}`)}
+	appendAndAdvanceDocumentWorkflow(t, database.DocumentPractice, ctx, terminal.ID, artifact, domain.PlanReviewing, aged.Add(time.Second))
+	gate := domain.ArtifactRecord{ID: "plan-gate-terminal", Kind: "plan-gate", ContentRevision: "1", Digest: testRunnableDigest("g"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: aged.Add(time.Second), Payload: []byte(`{"id":"plan-gate-terminal"}`)}
+	appendAndAdvanceDocumentWorkflow(t, database.DocumentPractice, ctx, terminal.ID, gate, domain.NoPractice, aged.Add(2*time.Second))
+
+	// Aged non-terminal workflow: stuck through the agent dwell cutoff.
+	stalled, err := domain.NewWorkflow("document-workflow-stalled", aged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, stalled, identity, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh non-terminal workflow: within every dwell budget.
+	fresh, err := domain.NewWorkflow("document-workflow-fresh", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, fresh, identity, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Failed workflow: always the attention signal.
+	failed, err := domain.NewWorkflow("document-workflow-failed", aged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DocumentPractice.CreateWorkflow(ctx, failed, identity, nil); err != nil {
+		t.Fatal(err)
+	}
+	failedArtifact := domain.ArtifactRecord{ID: "context-failed", Kind: "document-context", ContentRevision: "1", Digest: testRunnableDigest("f"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: aged, Payload: []byte(`{"id":"context-failed"}`)}
+	appendAndAdvanceDocumentWorkflow(t, database.DocumentPractice, ctx, failed.ID, failedArtifact, domain.Failed, aged.Add(time.Second))
+
+	counts, err := database.DocumentPractice.SummarizeWorkflowStatesByPages(ctx,
+		domain.DocumentContext{SourceID: identity.SourceID, Commit: identity.Commit, Language: identity.Language},
+		[]string{identity.PagePath},
+		base.Add(-30*time.Minute), base.Add(-35*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := counts[identity.PagePath]
+	if got.Total != 4 || got.NoPractice != 1 || got.Failed != 1 || got.InProgress != 2 {
+		t.Fatalf("rollup counts = %#v", got)
+	}
+	if got.Stuck != 2 {
+		t.Fatalf("stuck = %d, want 2 (aged stalled + failed; the aged terminal row must not count)", got.Stuck)
+	}
+}

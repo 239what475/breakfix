@@ -441,6 +441,16 @@ func TestBatchRetryReenqueuesFailedItems(t *testing.T) {
 	if retries != 1 || restarts != 2 {
 		t.Fatalf("retry audits = %d/%d", retries, restarts)
 	}
+	// Every persisted audit row keeps its own ID: the ledger keys human
+	// actions by it, and a restart verb copied from the batch verb used to
+	// collide on the primary key against the real store.
+	seen := make(map[string]bool)
+	for _, action := range f.store.humanActions {
+		if seen[action.ID] {
+			t.Fatalf("duplicate human action id %q", action.ID)
+		}
+		seen[action.ID] = true
+	}
 	// Retrying a Cancelled (not Running/Paused) batch is refused.
 	if _, _, err := f.batches.CancelBatch(ctx, batchID, "u-admin", "done with this batch"); err != nil {
 		t.Fatalf("cancel: %v", err)

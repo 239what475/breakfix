@@ -381,8 +381,11 @@ func (s *BatchService) RetryFailedItems(ctx context.Context, batchID, actorID, r
 	}
 	now := s.now()
 	retried := 0
-	for _, item := range failed {
+	for i, item := range failed {
 		restartAction := *action
+		// The ledger keys human actions by ID: each restart must carry its
+		// own, distinct from the batch-level retry verb written below.
+		restartAction.ID = fmt.Sprintf("%s-restart-%d", action.ID, i)
 		restartAction.Action = audit.ActionDocumentationWorkflowRestart
 		restartAction.TargetType = audit.TargetDocumentWorkflow
 		restartAction.TargetID = item.WorkflowID

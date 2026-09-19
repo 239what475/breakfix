@@ -1531,7 +1531,9 @@ type CorpusPageStateCounts struct {
 
 // SummarizeWorkflowStatesByPages rolls the pinned identity's workflows up per
 // page path. Unknown pages simply have no rows. The dwell cutoffs split
-// stuck detection between Agent phases and public runtime phases.
+// stuck detection between Agent phases and public runtime phases; terminal
+// states never count as stuck - Failed is the explicit attention signal and
+// Published/NoPractice/Rejected rows simply age.
 func (d *DocumentPracticeRepository) SummarizeWorkflowStatesByPages(ctx context.Context, identity domain.DocumentContext, pages []string, agentCutoff, runtimeCutoff time.Time) (map[string]CorpusPageStateCounts, error) {
 	result := map[string]CorpusPageStateCounts{}
 	if len(pages) == 0 {
@@ -1545,7 +1547,7 @@ func (d *DocumentPracticeRepository) SummarizeWorkflowStatesByPages(ctx context.
 		}
 		batch := pages[start:end]
 		query := `SELECT page_path, state, COUNT(*),
-				COUNT(*) FILTER (WHERE state = 'Failed' OR updated_at <= (CASE WHEN state IN ('MaterializingArtifact','Verifying','VerificationReviewing','Publishing') THEN ?::timestamptz ELSE ?::timestamptz END))
+				COUNT(*) FILTER (WHERE state = 'Failed' OR (state NOT IN ('Published', 'NoPractice', 'Rejected') AND updated_at <= (CASE WHEN state IN ('MaterializingArtifact','Verifying','VerificationReviewing','Publishing') THEN ?::timestamptz ELSE ?::timestamptz END)))
 				FROM document_workflows
 				WHERE source_id = ? AND commit = ? AND language = ? AND page_path IN (` + placeholders(len(batch)) + `)
 				GROUP BY page_path, state`

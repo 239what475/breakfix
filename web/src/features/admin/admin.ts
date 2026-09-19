@@ -459,7 +459,7 @@ export function useAdminCorpus(active: Ref<boolean>, runWorkflowAction: (kind: "
 
 	watch(active, (isActive) => {
 		if (isActive && !corpusRows.value.length && !corpusLoading.value) void refresh();
-	});
+	}, { immediate: true });
 
 	return {
 		corpusRows, corpusCursor, corpusLoading, corpusLoadingMore, corpusError,
