@@ -76,8 +76,10 @@ type CatalogConfig struct {
 }
 
 // DocumentationConfig identifies one mounted immutable offline document
-// library (docs-project output) and its pinned upstream identity. An empty
-// library_root disables the product; there is no fallback origin or revision.
+// library (docs-project output) and its pinned upstream identity. The
+// deployment pins the library, never a page: the corpus is addressable per
+// page through the practice pipeline. An empty library_root disables the
+// product; there is no fallback origin or revision.
 type DocumentationConfig struct {
 	LibraryRoot string `yaml:"library_root"`
 	SourceID    string `yaml:"source_id"`
@@ -86,8 +88,6 @@ type DocumentationConfig struct {
 	Version     string `yaml:"version"`
 	Language    string `yaml:"language"`
 	License     string `yaml:"license"`
-	PagePath    string `yaml:"page_path"`
-	Anchor      string `yaml:"anchor"`
 }
 
 func (c DocumentationConfig) Enabled() bool { return strings.TrimSpace(c.LibraryRoot) != "" }
@@ -103,15 +103,10 @@ func (c DocumentationConfig) Validate() error {
 		"version":    c.Version,
 		"language":   c.Language,
 		"license":    c.License,
-		"page_path":  c.PagePath,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("documentation %s is required when library_root is configured", name)
 		}
-	}
-	page := strings.TrimSpace(c.PagePath)
-	if strings.HasPrefix(page, "/") || strings.Contains(page, "\\") || page == "." || strings.HasPrefix(page, "../") || strings.Contains(page, "/../") {
-		return fmt.Errorf("documentation page_path must be a safe relative path")
 	}
 	return nil
 }

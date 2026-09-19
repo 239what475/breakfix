@@ -356,7 +356,7 @@ func (a *auditRecordingDocumentationApplication) RestartDocumentationWorkflow(co
 	return documentdomain.Workflow{}, errors.New("not implemented")
 }
 
-func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID string) (documentdomain.Workflow, error) {
+func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID, pagePath, anchor string) (documentdomain.Workflow, error) {
 	a.actors = append(a.actors, actorID)
 	now := time.Now().UTC()
 	workflow, err := documentdomain.NewWorkflow("document-workflow-01", now)
@@ -367,7 +367,9 @@ func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx 
 	if err != nil {
 		return documentdomain.Workflow{}, err
 	}
-	identity := documentdomain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+	context := documentdomain.DocumentContext{FormatVersion: documentdomain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Commit: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: pagePath, Anchor: anchor}
+	identity := documentdomain.WorkflowPageIdentity{SourceID: context.SourceID, Commit: context.Commit, Language: context.Language, PagePath: pagePath, Anchor: anchor}
+	workflow.ID = "document-workflow-" + documentdomain.ContentID(context)
 	action := audit.HumanAction{
 		ID:         audit.NewID(now),
 		UserID:     actorID,

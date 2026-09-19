@@ -116,22 +116,17 @@ func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
 	}
 }
 
-func TestDocumentationConfigRequiresACompleteFixedLibrary(t *testing.T) {
+func TestDocumentationConfigRequiresACompleteLibraryIdentity(t *testing.T) {
 	if err := (DocumentationConfig{}).Validate(); err != nil {
 		t.Fatalf("disabled documentation config = %v", err)
 	}
-	configured := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+	configured := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0"}
 	if err := configured.Validate(); err != nil {
 		t.Fatalf("library documentation config = %v", err)
 	}
 	if !configured.Enabled() || (DocumentationConfig{}).Enabled() {
 		t.Fatal("documentation enablement must follow the configured library root")
 	}
-	configured.PagePath = "../secret"
-	if err := configured.Validate(); err == nil {
-		t.Fatal("documentation path traversal was accepted")
-	}
-	configured.PagePath = "docs/concepts/workloads/pods/pod-lifecycle"
 	configured.SourceID = ""
 	if err := configured.Validate(); err == nil {
 		t.Fatal("documentation without upstream identity was accepted")

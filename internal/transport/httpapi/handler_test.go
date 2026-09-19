@@ -27,21 +27,29 @@ func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T)
 	h := &Handler{documentation: application}
 	recorder := httptest.NewRecorder()
 	ginContext, _ := gin.CreateTestContext(recorder)
-	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/documentation/practice", nil)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/documentation/practice", strings.NewReader(`{"page_path":"docs/concepts/workloads/pods/pod-lifecycle","anchor":"pod-lifetime"}`))
+	ginContext.Request.Header.Set("Content-Type", "application/json")
 	h.StartDocumentationPractice(ginContext)
 	if recorder.Code != http.StatusAccepted || application.calls != 1 {
-		t.Fatalf("documentation start = %d, calls = %d", recorder.Code, application.calls)
+		t.Fatalf("documentation start = %d, calls = %d, body = %s", recorder.Code, application.calls, recorder.Body.String())
+	}
+	if application.pages[0] != "docs/concepts/workloads/pods/pod-lifecycle" || application.anchors[0] != "pod-lifetime" {
+		t.Fatalf("documentation start page = %q anchor = %q", application.pages[0], application.anchors[0])
 	}
 }
 
 type testDocumentationApplication struct {
 	calls  int
 	actors []string
+	pages  []string
+	anchors []string
 }
 
-func (a *testDocumentationApplication) StartDocumentationPractice(_ context.Context, actorID string) (documentdomain.Workflow, error) {
+func (a *testDocumentationApplication) StartDocumentationPractice(_ context.Context, actorID, pagePath, anchor string) (documentdomain.Workflow, error) {
 	a.calls++
 	a.actors = append(a.actors, actorID)
+	a.pages = append(a.pages, pagePath)
+	a.anchors = append(a.anchors, anchor)
 	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
 }
 

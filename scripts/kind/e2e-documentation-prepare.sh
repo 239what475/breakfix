@@ -58,6 +58,31 @@ done
 kubectl -n "$namespace" create configmap breakfix-documentation-library $library_args \
 	--dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - >/dev/null
 
+# The deployment mounts the full library through the dedicated library image by
+# default. The E2E target keeps the mini library on its ConfigMap path: swap
+# only the documentation-library volume source back to the ConfigMap and leave
+# every other volume untouched.
+patched_volumes=$(kubectl -n "$namespace" get deployment breakfix-server -o json | jq -c '
+	.spec.template.spec.volumes | map(
+		if .name == "documentation-library" then
+			{
+				name: "documentation-library",
+				configMap: {
+					name: "breakfix-documentation-library",
+					items: [
+						{key: "manifest.json", path: "manifest.json"},
+						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.md", path: "docs/concepts/workloads/pods/pod-lifecycle/index.md"},
+						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.json", path: "docs/concepts/workloads/pods/pod-lifecycle/index.json"},
+						{key: "images_docs_pod.svg", path: "images/docs/pod.svg"}
+					]
+				}
+			}
+		else . end
+	)')
+[ -n "$patched_volumes" ] && [ "$patched_volumes" != "null" ] || fail "Breakfix Server deployment has no volumes to patch"
+kubectl -n "$namespace" patch deployment breakfix-server --type merge \
+	-p "$(jq -cn --argjson volumes "$patched_volumes" '{spec:{template:{spec:{volumes:$volumes}}}}')" >/dev/null
+
 config_name=$(kubectl -n "$namespace" get deployment breakfix-server -o json |
 	jq -r '.spec.template.spec.volumes[] | select(.name == "config") | .configMap.name // empty')
 [ -n "$config_name" ] || fail "Breakfix Server deployment has no config ConfigMap volume"

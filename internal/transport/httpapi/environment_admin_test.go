@@ -206,7 +206,6 @@ func TestAdminSystemEndpointReportsBuildAndServices(t *testing.T) {
 				Documentation: &SystemDocumentationReport{
 					SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git",
 					Revision: "ce98a43", Version: "snapshot-ce98a43", Language: "en",
-					PagePath: "docs/concepts/workloads/pods/pod-lifecycle/index.html", Anchor: "pod-lifetime",
 				},
 				Services: []BackgroundServiceStatus{
 					{Name: "learning cleanup", StartedAt: lastTick.Add(-time.Hour), LastTickAt: &lastTick},
@@ -239,7 +238,7 @@ func TestAdminSystemEndpointReportsBuildAndServices(t *testing.T) {
 	if status.CatalogIntegrity.State != "ok" {
 		t.Fatalf("catalog integrity = %#v", status.CatalogIntegrity)
 	}
-	if status.Documentation == nil || status.Documentation.SourceId != "kubernetes" || status.Documentation.Anchor != "pod-lifetime" {
+	if status.Documentation == nil || status.Documentation.SourceId != "kubernetes" {
 		t.Fatalf("documentation section = %#v", status.Documentation)
 	}
 	if len(status.Services) != 2 {

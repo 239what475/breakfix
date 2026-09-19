@@ -7,39 +7,48 @@ import (
 	"time"
 
 	app "github.com/breakfix/breakfix/internal/application/documentpractice"
-	"github.com/breakfix/breakfix/internal/bootstrap/config"
+	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
 	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )
 
 // fixedDocumentationApplication exposes no page or Agent controls to HTTP.
-// The source location and workflow identity are entirely deployment-owned.
+// The source identity is deployment-owned; the ignition request addresses one
+// page of the opened library.
 type fixedDocumentationApplication struct {
-	pipeline   *app.AgentPipeline
-	workflowID string
-	pagePath   string
-	anchor     string
+	pipeline *app.AgentPipeline
+	identity docsource.LibraryIdentity
 }
 
-func newFixedDocumentationApplication(pipeline *app.AgentPipeline, cfg config.DocumentationConfig) *fixedDocumentationApplication {
-	if pipeline == nil || !cfg.Enabled() {
+func newFixedDocumentationApplication(pipeline *app.AgentPipeline, library *docsource.Library) *fixedDocumentationApplication {
+	if pipeline == nil || library == nil {
 		return nil
 	}
-	context := domain.DocumentContext{SourceID: cfg.SourceID, Commit: cfg.Revision, Language: cfg.Language, PagePath: cfg.PagePath, Anchor: cfg.Anchor}
+	context := library.PinnedContext()
 	return &fixedDocumentationApplication{
-		pipeline: pipeline, workflowID: "document-workflow-" + domain.ContentID(context),
-		pagePath: cfg.PagePath, anchor: cfg.Anchor,
+		pipeline: pipeline,
+		identity: docsource.LibraryIdentity{SourceID: context.SourceID, Repository: context.Repository, Commit: context.Commit, Version: context.Version, Language: context.Language, License: context.License},
 	}
 }
 
-// StartDocumentationPractice records which administrator pressed the ignition
-// together with the workflow creation, inside one durable transaction.
-func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID string) (domain.Workflow, error) {
+// StartDocumentationPractice records which administrator pressed the ignition,
+// for which page, together with the workflow creation, inside one durable
+// transaction.
+func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID, pagePath, anchor string) (domain.Workflow, error) {
 	if a == nil || a.pipeline == nil {
 		return domain.Workflow{}, fmt.Errorf("documentation practice is not configured")
 	}
+	context := domain.DocumentContext{
+		FormatVersion: domain.FormatVersion, SourceID: a.identity.SourceID, Repository: a.identity.Repository,
+		Commit: a.identity.Commit, Version: a.identity.Version, Language: a.identity.Language,
+		License: a.identity.License, PagePath: pagePath, Anchor: anchor,
+	}
+	if err := context.Validate(); err != nil {
+		return domain.Workflow{}, fmt.Errorf("documentation practice request is invalid: %w", err)
+	}
+	workflowID := "document-workflow-" + domain.ContentID(context)
 	now := time.Now().UTC()
-	detail, err := json.Marshal(map[string]string{"workflow_id": a.workflowID})
+	detail, err := json.Marshal(map[string]string{"workflow_id": workflowID, "page_path": pagePath, "anchor": anchor})
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -48,11 +57,11 @@ func (a *fixedDocumentationApplication) StartDocumentationPractice(ctx context.C
 		UserID:     actorID,
 		Action:     audit.ActionDocumentationPracticeStart,
 		TargetType: audit.TargetDocumentWorkflow,
-		TargetID:   a.workflowID,
+		TargetID:   workflowID,
 		Detail:     detail,
 		CreatedAt:  now,
 	}
-	result, err := a.pipeline.Start(ctx, a.workflowID, a.pagePath, a.anchor, &action)
+	result, err := a.pipeline.Start(ctx, workflowID, pagePath, anchor, &action)
 	if err != nil {
 		return domain.Workflow{}, err
 	}

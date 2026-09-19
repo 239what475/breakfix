@@ -47,8 +47,6 @@ func (p *systemReportProvider) Report(context.Context) (httpapi.SystemReport, er
 			Revision:       documentation.Revision,
 			Version:        documentation.Version,
 			Language:       documentation.Language,
-			PagePath:       documentation.PagePath,
-			Anchor:         documentation.Anchor,
 			ParserVersion:  parserVersion,
 			UpstreamCommit: upstreamCommit,
 		}

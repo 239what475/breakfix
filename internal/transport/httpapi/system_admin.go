@@ -59,8 +59,6 @@ func (h *Handler) GetAdminSystem(c *gin.Context) {
 			Revision:   report.Documentation.Revision,
 			Version:    report.Documentation.Version,
 			Language:   report.Documentation.Language,
-			PagePath:   report.Documentation.PagePath,
-			Anchor:     report.Documentation.Anchor,
 		}
 		if report.Documentation.ParserVersion != "" {
 			documentation.ParserVersion = &report.Documentation.ParserVersion

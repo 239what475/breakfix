@@ -24,8 +24,6 @@ type SystemDocumentationReport struct {
 	Revision       string
 	Version        string
 	Language       string
-	PagePath       string
-	Anchor         string
 	ParserVersion  string
 	UpstreamCommit string
 }

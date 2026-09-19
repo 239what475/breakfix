@@ -23,7 +23,7 @@ type liveDocumentationAdminApplication struct {
 	service *appdocument.Service
 }
 
-func (a *liveDocumentationAdminApplication) StartDocumentationPractice(context.Context, string) (documentdomain.Workflow, error) {
+func (a *liveDocumentationAdminApplication) StartDocumentationPractice(context.Context, string, string, string) (documentdomain.Workflow, error) {
 	return documentdomain.Workflow{}, nil
 }
 

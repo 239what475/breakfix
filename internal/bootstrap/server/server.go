@@ -313,7 +313,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		Catalog:              catalogService,
 		AgentRuntimeContext:  serviceContext,
 		Generator:            generatorService,
-		Documentation:        newFixedDocumentationApplication(documentationPipeline, cfg.Documentation),
+		Documentation:        newFixedDocumentationApplication(documentationPipeline, documentationLibrary),
 		DocumentationLibrary: documentationLibrary,
 		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
 	})

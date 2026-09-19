@@ -101,13 +101,19 @@ paths:
   /documentation/practice:
     post:
       operationId: startDocumentationPractice
-      summary: Start the fixed Kubernetes documentation practice workflow (admin only)
+      summary: Start the documentation practice workflow for one library page (admin only)
       tags: [documentation]
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentationPracticeStartRequest"
       responses:
         "202":
-          description: Fixed documentation practice workflow accepted
+          description: Documentation practice workflow accepted
           content:
             application/json:
               schema:
@@ -1595,6 +1601,17 @@ components:
         state:
           type: string
 
+    DocumentationPracticeStartRequest:
+      type: object
+      required: [page_path]
+      properties:
+        page_path:
+          type: string
+          description: Page of the pinned library to practice
+        anchor:
+          type: string
+          description: Heading anchor on the page; empty for page-level ignition
+
     DocumentationPracticeSummary:
       type: object
       required: [anchor, practice_id, title]
@@ -2110,7 +2127,7 @@ components:
 
     AdminDocumentationDeployment:
       type: object
-      required: [source_id, repository, revision, version, language, page_path, anchor]
+      required: [source_id, repository, revision, version, language]
       properties:
         source_id:
           type: string
@@ -2121,10 +2138,6 @@ components:
         version:
           type: string
         language:
-          type: string
-        page_path:
-          type: string
-        anchor:
           type: string
         parser_version:
           type: string

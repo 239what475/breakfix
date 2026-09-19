@@ -62,11 +62,15 @@ async function runtimeEnvironmentExists(uid: string) {
   return resources.items?.some((item) => item.metadata?.uid === uid) ?? false;
 }
 
+// The deployment pins the library identity, not a page: ignition addresses
+// one page of the opened corpus.
+const practiceStartBody = { page_path: "docs/concepts/workloads/pods/pod-lifecycle", anchor: "pod-lifetime" };
+
 async function postAfterServerRestart(request: APIRequestContext, url: string, token: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      return await request.post(url, { headers: { Authorization: `Bearer ${token}` } });
+      return await request.post(url, { headers: { Authorization: `Bearer ${token}` }, data: practiceStartBody });
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
@@ -167,7 +171,7 @@ test("fixed documentation practice runs through publication", async ({ request }
   expect(login.status()).toBe(200);
   const credentials = await login.json() as { token: string };
 
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` } });
+  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` }, data: practiceStartBody });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string; state: string };
   expect(started.workflow_id).toMatch(/^document-workflow-/);
@@ -225,7 +229,7 @@ async function ensurePracticePublished(request: APIRequestContext) {
   const login = await request.post(`${apiBase}/api/auth/login`, { data: { username, password: "documentation-test-password", totp_code: totp(registration.totp_secret) } });
   expect(login.status()).toBe(200);
   const credentials = await login.json() as { token: string };
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` } });
+  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` }, data: practiceStartBody });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
   await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {

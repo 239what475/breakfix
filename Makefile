@@ -1,4 +1,4 @@
-.PHONY: generate verify-generated verify-legacy-removal web-deps test-deps build images deploy-kind reset-kind \
+.PHONY: generate verify-generated verify-legacy-removal web-deps test-deps build images documentation-library-image deploy-kind reset-kind \
 	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
 	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-check docs-metadata docs-smoke \
@@ -125,7 +125,17 @@ images: build
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-runtime-worker:$(RUNTIME_IMAGE_TAG) -f build/images/runtime-worker/Dockerfile $(BIN_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-k8s-base:latest build/images/k8s-base
 
-deploy-kind: images
+# The documentation library image carries the full parsed corpus (docs-project
+# output) as immutable, digest-addressable content. Deployment chains
+# docs-project -> library image -> kustomize; the E2E mini library keeps its
+# ConfigMap path instead.
+documentation-library-image: docs-project
+	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false \
+		-t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-documentation-library:$(RUNTIME_IMAGE_TAG) \
+		-t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-documentation-library:$(DOCS_PROJECT_VERSION) \
+		-f build/images/documentation-library/Dockerfile docs-site
+
+deploy-kind: images documentation-library-image
 	./scripts/kind/runtime.sh
 
 reset-kind:

@@ -25,6 +25,18 @@ const MaxLibraryManifestBytes = 8 * 1024 * 1024
 // MaxRenderedPageBytes bounds one parsed page's markdown.
 const MaxRenderedPageBytes = 2 * 1024 * 1024
 
+// LibraryIdentity is the upstream identity a library must prove before any
+// page is served. The library carries its own copy; the deployment pins the
+// identity, never a page.
+type LibraryIdentity struct {
+	SourceID   string
+	Repository string
+	Commit     string
+	Version    string
+	Language   string
+	License    string
+}
+
 // Library reads the pinned page from an offline generated document library
 // (docs-project output). The library carries its own generator identity; the
 // server build does not assert one.
@@ -36,14 +48,20 @@ type Library struct {
 	titleIndex map[string]string
 }
 
-// NewPinnedLibrary verifies the global manifest against the pinned context
-// before any page is served.
-func NewPinnedLibrary(expected domain.DocumentContext, libraryRoot string) (Library, error) {
+// NewPinnedLibrary verifies the global manifest against the pinned upstream
+// identity before any page is served. The deployment no longer pins a page:
+// every page of the opened library is readable through the digest-verified
+// accessors.
+func NewPinnedLibrary(identity LibraryIdentity, libraryRoot string) (Library, error) {
 	if strings.TrimSpace(libraryRoot) == "" {
 		return Library{}, errors.New("documentation library root is required")
 	}
-	if err := expected.Validate(); err != nil {
-		return Library{}, fmt.Errorf("documentation pinned context: %w", err)
+	expected := domain.DocumentContext{
+		FormatVersion: domain.FormatVersion, SourceID: identity.SourceID, Repository: identity.Repository,
+		Commit: identity.Commit, Version: identity.Version, Language: identity.Language, License: identity.License,
+	}
+	if expected.SourceID == "" || expected.Repository == "" || expected.Commit == "" || expected.Version == "" || expected.Language == "" || expected.License == "" {
+		return Library{}, errors.New("documentation library identity is incomplete")
 	}
 	library := Library{Context: expected, Root: filepath.Clean(libraryRoot)}
 	if _, err := library.requireDirectory(library.Root, "documentation library root"); err != nil {
@@ -73,9 +91,6 @@ func NewPinnedLibrary(expected domain.DocumentContext, libraryRoot string) (Libr
 	if buildInfo.Repository != expected.Repository {
 		return Library{}, errors.New("documentation library build-info repository does not match the configured pinned source")
 	}
-	if !libraryContains(global.Pages, expected.PagePath) {
-		return Library{}, fmt.Errorf("documentation library does not contain the pinned page %q", expected.PagePath)
-	}
 	library.global = global
 	if err := library.buildAssetIndex(); err != nil {
 		return Library{}, err
@@ -96,22 +111,25 @@ type Page = domain.Page
 type Metadata = domain.Metadata
 
 func (l Library) ReadPage(path, anchor string) (Page, error) {
-	if path != l.Context.PagePath || anchor != l.Context.Anchor {
-		return Page{}, errors.New("documentation page is outside the pinned context")
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if !libraryContains(l.global.Pages, normalized) {
+		return Page{}, fmt.Errorf("documentation page %q is not part of the library", normalized)
 	}
-	markdown, manifest, err := l.verifiedPage(path)
+	markdown, manifest, err := l.verifiedPage(normalized)
 	if err != nil {
 		return Page{}, err
 	}
 	context := l.evidenceContext(manifest)
+	context.PagePath = normalized
+	context.Anchor = anchor
 	if strings.TrimSpace(anchor) == "" {
-		return Page{Context: context, Path: path, Content: markdown, Digest: manifest.Digest}, nil
+		return Page{Context: context, Path: normalized, Content: markdown, Digest: manifest.Digest}, nil
 	}
 	section, entry, err := l.anchorSection(manifest, []byte(markdown), anchor)
 	if err != nil {
 		return Page{}, err
 	}
-	return Page{Context: context, Path: path, Anchor: anchor, Content: string(section), Digest: entry.Digest}, nil
+	return Page{Context: context, Path: normalized, Anchor: anchor, Content: string(section), Digest: entry.Digest}, nil
 }
 
 // evidenceContext extends the pinned upstream context with the evidence
@@ -327,10 +345,11 @@ func (l Library) DocumentPageTitle(path string) string {
 }
 
 func (l Library) ReadMetadata(path string) (Metadata, error) {
-	if path != l.Context.PagePath {
-		return Metadata{}, errors.New("documentation page is outside the pinned context")
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if !libraryContains(l.global.Pages, normalized) {
+		return Metadata{}, fmt.Errorf("documentation page %q is not part of the library", normalized)
 	}
-	_, manifest, err := l.verifiedPage(path)
+	_, manifest, err := l.verifiedPage(normalized)
 	if err != nil {
 		return Metadata{}, err
 	}
@@ -338,7 +357,9 @@ func (l Library) ReadMetadata(path string) (Metadata, error) {
 	for _, anchor := range manifest.Anchors {
 		anchors = append(anchors, anchor.ID)
 	}
-	return Metadata{Context: l.evidenceContext(manifest), Path: path, Title: manifest.Title, Anchors: anchors, Digest: manifest.Digest}, nil
+	context := l.evidenceContext(manifest)
+	context.PagePath = normalized
+	return Metadata{Context: context, Path: normalized, Title: manifest.Title, Anchors: anchors, Digest: manifest.Digest}, nil
 }
 
 // verifiedPage loads one page directory and proves the markdown bytes are the

@@ -17,9 +17,9 @@ registry:
 catalog:
   release_reference: ${BREAKFIX_CATALOG_RELEASE_REFERENCE}
 
-# This remains disabled until a verified rendered tree and matching source tree
-# are mounted read-only. The only initial workflow scope is the fixed Pod
-# lifecycle page.
+# This remains disabled until the immutable library image carrying the parsed
+# corpus is mounted read-only. The deployment pins the library identity, never
+# a page: ignition and batches address pages of the opened corpus.
 documentation:
   library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
   source_id: kubernetes
@@ -28,8 +28,6 @@ documentation:
   version: snapshot-ce98a43
   language: en
   license: CC BY 4.0
-  page_path: docs/concepts/workloads/pods/pod-lifecycle
-  anchor: pod-lifetime
 
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh

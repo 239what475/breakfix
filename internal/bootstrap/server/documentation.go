@@ -109,13 +109,12 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	if database == nil || !cfg.Documentation.Enabled() {
 		return nil, nil, nil
 	}
-	context := domain.DocumentContext{
-		FormatVersion: domain.FormatVersion, SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
+	identity := docsource.LibraryIdentity{
+		SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
 		Commit: cfg.Documentation.Revision, Version: cfg.Documentation.Version, Language: cfg.Documentation.Language,
-		License: cfg.Documentation.License, PagePath: cfg.Documentation.PagePath,
-		Anchor: cfg.Documentation.Anchor,
+		License: cfg.Documentation.License,
 	}
-	library, err := docsource.NewPinnedLibrary(context, cfg.Documentation.LibraryRoot)
+	library, err := docsource.NewPinnedLibrary(identity, cfg.Documentation.LibraryRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load pinned documentation library: %w", err)
 	}

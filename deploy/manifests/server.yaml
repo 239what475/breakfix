@@ -169,23 +169,16 @@ spec:
         - name: config
           configMap:
             name: breakfix-config
-        # The documentation library is the offline docs-project output. Keys
-        # are flat (path separators replaced with underscores) and mapped back
-        # to their library paths here; e2e-documentation-prepare.sh creates
-        # the ConfigMap from a generator run over the committed fixture pages.
+        # The documentation library is the full offline docs-project output,
+        # carried by a dedicated content-only image (build/images/
+        # documentation-library) and mounted read-only as an image volume: the
+        # corpus is immutable, versioned, and digest-addressable exactly like
+        # every other parsed input. e2e-documentation-prepare.sh swaps this
+        # volume source to the mini-library ConfigMap for the E2E target.
         - name: documentation-library
-          configMap:
-            name: breakfix-documentation-library
-            optional: true
-            items:
-              - key: manifest.json
-                path: manifest.json
-              - key: docs_concepts_workloads_pods_pod-lifecycle_index.md
-                path: docs/concepts/workloads/pods/pod-lifecycle/index.md
-              - key: docs_concepts_workloads_pods_pod-lifecycle_index.json
-                path: docs/concepts/workloads/pods/pod-lifecycle/index.json
-              - key: images_docs_pod.svg
-                path: images/docs/pod.svg
+          image:
+            reference: ghcr.io/breakfix/breakfix-documentation-library:dev
+            pullPolicy: IfNotPresent
         - name: data
           persistentVolumeClaim:
             claimName: breakfix-server-data

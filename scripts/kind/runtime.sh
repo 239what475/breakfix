@@ -32,6 +32,7 @@ esac
 kind_cluster=${context#kind-}
 runtime_images=$(kubectl kustomize "$root_manifest" | awk '
   /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+  /^[[:space:]]*reference: ghcr.io\/breakfix\/breakfix-/ { print $2 }
 ')
 [ -n "$runtime_images" ] || {
   printf 'could not find Breakfix runtime images in %s\n' "$root_manifest" >&2

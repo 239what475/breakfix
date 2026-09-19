@@ -53,6 +53,17 @@ export type DocumentationPracticeStart = {
     state: string;
 };
 
+export type DocumentationPracticeStartRequest = {
+    /**
+     * Page of the pinned library to practice
+     */
+    page_path: string;
+    /**
+     * Heading anchor on the page; empty for page-level ignition
+     */
+    anchor?: string;
+};
+
 export type DocumentationPracticeSummary = {
     /**
      * Heading anchor on the page this practice hangs from
@@ -377,8 +388,6 @@ export type AdminDocumentationDeployment = {
     revision: string;
     version: string;
     language: string;
-    page_path: string;
-    anchor: string;
     /**
      * Offline library generator_version; absent on the legacy rendered-snapshot path
      */
@@ -977,7 +986,7 @@ export type GetDocumentationAssetResponses = {
 export type GetDocumentationAssetResponse = GetDocumentationAssetResponses[keyof GetDocumentationAssetResponses];
 
 export type StartDocumentationPracticeData = {
-    body?: never;
+    body: DocumentationPracticeStartRequest;
     path?: never;
     query?: never;
     url: '/documentation/practice';
@@ -1006,7 +1015,7 @@ export type StartDocumentationPracticeError = StartDocumentationPracticeErrors[k
 
 export type StartDocumentationPracticeResponses = {
     /**
-     * Fixed documentation practice workflow accepted
+     * Documentation practice workflow accepted
      */
     202: DocumentationPracticeStart;
 };

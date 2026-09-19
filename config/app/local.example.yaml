@@ -28,10 +28,10 @@ registry:
 catalog:
   release_reference: ""
 
-# Fixed Kubernetes documentation input. Set library_root to a generated
-# docs-project library mounted read-only. Server verifies the library's pinned
-# upstream identity and every page digest before serving evidence; it does not
-# use a fallback origin or revision.
+# Documentation corpus input. Set library_root to a generated docs-project
+# library mounted read-only. Server verifies the library's pinned upstream
+# identity and every page digest before serving evidence; it does not use a
+# fallback origin or revision, and no page is pinned at the deployment level.
 documentation:
   library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
   source_id: kubernetes
@@ -40,8 +40,6 @@ documentation:
   version: snapshot-ce98a43
   language: en
   license: CC BY 4.0
-  page_path: docs/concepts/workloads/pods/pod-lifecycle
-  anchor: pod-lifetime
 
 # vcluster command and chart source.
 vcluster_binary: vcluster

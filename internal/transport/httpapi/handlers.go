@@ -84,7 +84,7 @@ type generatorApplication interface {
 // and carries the administrative force-fail and restart verbs. It has no
 // endpoint for Agent artifacts, arbitrary pages, or runtime policy.
 type documentationApplication interface {
-	StartDocumentationPractice(context.Context, string) (documentdomain.Workflow, error)
+	StartDocumentationPractice(context.Context, string, string, string) (documentdomain.Workflow, error)
 	ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
 	RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
 }
