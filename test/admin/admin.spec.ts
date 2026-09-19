@@ -1,5 +1,8 @@
 import { createHmac } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
@@ -76,6 +79,34 @@ async function registerAndLogin(request: APIRequestContext, username: string) {
   return { username, token: credentials.token, totpSecret: registration.totp_secret, role: payload.role ?? "" };
 }
 
+// Batch and corpus tests reuse the bootstrap admin the first test elects.
+// The credentials survive worker restarts through a session file: Playwright
+// recycles the worker process after a failed test, wiping module state.
+const sessionFile = join(tmpdir(), "breakfix-admin-e2e-session.json");
+
+function saveBootstrapAdmin(admin: { username: string; totpSecret: string }) {
+  writeFileSync(sessionFile, JSON.stringify(admin));
+}
+
+function readBootstrapAdmin(): { username: string; totpSecret: string } {
+  if (!existsSync(sessionFile)) throw new Error("bootstrap admin session missing; the rescue test must run first");
+  return JSON.parse(readFileSync(sessionFile, "utf8")) as { username: string; totpSecret: string };
+}
+
+async function loginBootstrapAdmin(request: APIRequestContext): Promise<string> {
+  const session = readBootstrapAdmin();
+  const login = await request.post(`${apiBase}/api/auth/login`, {
+    data: { username: session.username, password, totp_code: totp(session.totpSecret) },
+  });
+  expect(login.status(), await login.text()).toBe(200);
+  return ((await login.json()) as { token: string }).token;
+}
+
+const podLifecyclePage = "docs/concepts/workloads/pods/pod-lifecycle";
+const autoscalePage = "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale";
+const ingressPage = "docs/concepts/services-networking/ingress";
+const practiceBody = { page_path: podLifecyclePage, anchor: "pod-lifetime" };
+
 test("admin console rescues a stuck documentation workflow end to end", async ({ page, request }) => {
   test.setTimeout(15 * 60_000);
 
@@ -85,6 +116,7 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   const memberUsername = `member-${Date.now()}`;
   const admin = await registerAndLogin(request, adminUsername);
   expect(admin.role).toBe("admin");
+  saveBootstrapAdmin({ username: adminUsername, totpSecret: admin.totpSecret });
   const member = await registerAndLogin(request, memberUsername);
   expect(member.role).toBe("user");
 
@@ -113,7 +145,7 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   // Agent phases run against the in-cluster fixture, then the workflow parks
   // in MaterializingArtifact with a queued action and no Worker to claim it.
   await scaleRuntimeWorker(0);
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` } });
+  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` }, data: practiceBody });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
   const workflowId = started.workflow_id;
@@ -167,7 +199,7 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   // The ordinary ignition endpoint re-drives the restarted workflow. The
   // Worker comes back only after the re-run has parked again, so the console
   // actions are what rescue the workflow, then publication completes.
-  const reignite = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` } });
+  const reignite = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` }, data: practiceBody });
   expect(reignite.status(), await reignite.text()).toBe(202);
   await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
     timeout: 90_000,
@@ -243,6 +275,221 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   const expandedDetail = page.locator(".admin-audit-item", { hasText: "documentation.workflow.force_fail" }).locator(".admin-audit-detail");
   await expect(expandedDetail).toContainText("from_state");
   await expect(expandedDetail).toContainText("MaterializingArtifact");
+});
+
+
+type Batch = {
+  id: string;
+  state: string;
+  concurrency: number;
+  total_items: number;
+  counts?: Record<string, number>;
+};
+
+async function createBatch(request: APIRequestContext, token: string, scope: Record<string, unknown>) {
+  const created = await request.post(`${apiBase}/api/admin/documentation/batches`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { scope },
+  });
+  expect(created.status(), await created.text()).toBe(202);
+  return (await created.json()) as Batch;
+}
+
+async function getBatch(request: APIRequestContext, token: string, id: string): Promise<Batch> {
+  const detail = await request.get(`${apiBase}/api/admin/documentation/batches/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(detail.status(), await detail.text()).toBe(200);
+  return (await detail.json()) as Batch;
+}
+
+async function listBatchItems(request: APIRequestContext, token: string, id: string) {
+  const items = await request.get(`${apiBase}/api/admin/documentation/batches/${id}/items?limit=50`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(items.status()).toBe(200);
+  return (await items.json()) as { items: Array<{ id: string; page_path: string; anchor: string; state: string; detail?: string }> };
+}
+
+const terminalItemStates = ["Published", "NoPractice", "Rejected", "Failed", "Skipped", "Cancelled"];
+
+// The batch rollout proves the full declarative flow: one item skips because
+// its practice is already published, the scheduler practices the other page
+// end to end, and the corpus rollup aggregates both server-side.
+test("documentation batches schedule, publish, skip, and roll up the corpus", async ({ page, request }) => {
+  test.setTimeout(20 * 60_000);
+  const token = await loginBootstrapAdmin(request);
+
+  const batch = await createBatch(request, token, { kind: "pages", pages: [podLifecyclePage, autoscalePage] });
+  expect(batch.total_items).toBe(2);
+  expect(["Pending", "Running"]).toContain(batch.state);
+
+  await expect.poll(async () => {
+    const current = await getBatch(request, token, batch.id);
+    return `${current.state}:${current.counts?.Failed ?? 0}`;
+  }, { timeout: 15 * 60_000, intervals: [3_000, 5_000, 10_000] }).toBe("Completed:0");
+  const finished = await getBatch(request, token, batch.id);
+  expect(finished.counts?.Skipped ?? 0).toBe(1);
+  expect(finished.counts?.Published ?? 0).toBe(1);
+
+  // The scheduler drove the practice through the deterministic level-2
+  // anchor rule without any human ignition.
+  const autoscaleWorkflow = await postgres(`SELECT id FROM document_workflows WHERE page_path = '${autoscalePage}' AND anchor = 'how-does-a-horizontalpodautoscaler-work' AND state = 'Published'`);
+  expect(autoscaleWorkflow).toMatch(/^document-workflow-/);
+
+  // The console corpus view shows the rollup row server-side.
+  await page.goto(apiBase);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const signInDialog = page.getByRole("dialog");
+  const session = readBootstrapAdmin();
+  await signInDialog.getByLabel("Username").fill(session.username);
+  await signInDialog.getByLabel("Password").fill(password);
+  await signInDialog.getByLabel("Authenticator code").fill(totp(session.totpSecret));
+  await signInDialog.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "管理" }).click();
+  await page.getByRole("button", { name: "文档" }).click();
+  await expect(page.getByRole("heading", { name: "文档语料与批次" })).toBeVisible();
+  const autoscaleRow = page.locator(".admin-corpus-page-toggle", { hasText: "Horizontal Pod Autoscaling" });
+  await expect(autoscaleRow).toBeVisible();
+  await expect(autoscaleRow).toContainText("已发布 1/");
+
+  // The batch detail shows per-item rows with their terminal states.
+  await page.getByRole("button", { name: "批次" }).click();
+  const batchRow = page.locator(".admin-batch-row", { hasText: batch.id.slice(-8) });
+  await expect(batchRow).toBeVisible();
+  await batchRow.getByRole("button", { name: batch.id.slice(-8) }).click();
+  await expect(page.locator(".admin-batch-detail")).toContainText("Skipped");
+  await expect(page.locator(".admin-batch-detail")).toContainText("Published");
+
+  // Failures-only filtering hides healthy pages.
+  await page.getByRole("button", { name: "语料树" }).click();
+  await page.getByLabel("Search page titles").fill("Horizontal Pod Autoscaling");
+  await page.getByRole("button", { name: "应用" }).click();
+  await page.getByLabel("只看失败/卡住").check();
+  await expect(page.locator(".admin-corpus-page-toggle")).toHaveCount(0);
+});
+
+// The watchdog replaces the human force-fail escape hatch: when the bound
+// runnable action fails, the workflow maps onto Failed with a system ledger
+// entry and the batch item follows - no administrator involved.
+test("watchdog maps a failed runnable action onto its workflow and batch item", async ({ request }) => {
+  test.setTimeout(10 * 60_000);
+  const token = await loginBootstrapAdmin(request);
+
+  await scaleRuntimeWorker(0);
+  const start = await request.post(`${apiBase}/api/documentation/practice`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { page_path: ingressPage, anchor: "terminology" },
+  });
+  expect(start.status(), await start.text()).toBe(202);
+  const started = (await start.json()) as { workflow_id: string };
+  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
+    timeout: 3 * 60_000,
+    intervals: [1_000, 2_000],
+  }).toBe("MaterializingArtifact");
+
+  // Simulate the worker-side failure the watchdog watches for.
+  const actionKey = await postgres(`SELECT a.action_key FROM runnable_actions a JOIN document_runnable_actions b ON b.action_key = a.action_key WHERE b.workflow_id = '${started.workflow_id}' AND a.state = 'queued' LIMIT 1`);
+  expect(actionKey).not.toBe("");
+  await postgres(`UPDATE runnable_actions SET state = 'failed', failure_class = 'artifact', failure_code = 'watchdog-e2e', failure_summary = 'simulated worker failure' WHERE action_key = '${actionKey}'`);
+
+  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
+    timeout: 2 * 60_000,
+    intervals: [1_000, 2_000, 5_000],
+  }).toBe("Failed");
+  expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind = 'watchdog.force_fail' AND owner_role = 'system'`)).toBe("1");
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.workflow.force_fail' AND target_id = '${started.workflow_id}'`)).toBe("0");
+
+  // The batch item follows its workflow to Failed.
+  const batch = await createBatch(request, token, { kind: "pages", pages: [ingressPage] });
+  await expect.poll(async () => {
+    const page = await listBatchItems(request, token, batch.id);
+    const item = page.items.find((entry) => entry.page_path === ingressPage);
+    return item?.state ?? "missing";
+  }, { timeout: 3 * 60_000, intervals: [2_000, 5_000] }).toBe("Failed");
+});
+
+// Pause stops new ignitions, resume continues, and cancel leaves in-flight
+// items to their terminal states; retry re-enqueues the failed page and the
+// scheduler drives it all the way to publication.
+test("batch pause, resume, cancel, and retry keep item semantics", async ({ request }) => {
+  test.setTimeout(20 * 60_000);
+  const token = await loginBootstrapAdmin(request);
+
+  // Restart the failed ingress workflow so a fresh batch chain can run.
+  const ingressWorkflow = await postgres(`SELECT id FROM document_workflows WHERE page_path = '${ingressPage}' AND anchor = 'terminology' AND state = 'Failed' LIMIT 1`);
+  expect(ingressWorkflow).toMatch(/^document-workflow-/);
+  const restart = await request.post(`${apiBase}/api/admin/documentation/workflows/${ingressWorkflow}/restart`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { reason: "E2E: batch retry cycle" },
+  });
+  expect(restart.status(), await restart.text()).toBe(200);
+
+  // With the worker removed the chain parks at MaterializingArtifact and the
+  // item stays Running - the perfect in-flight subject for the controls.
+  await scaleRuntimeWorker(0);
+  const batch = await createBatch(request, token, { kind: "pages", pages: [ingressPage] });
+  await expect.poll(async () => {
+    const page = await listBatchItems(request, token, batch.id);
+    const item = page.items.find((entry) => entry.page_path === ingressPage);
+    return item?.state ?? "missing";
+  }, { timeout: 3 * 60_000, intervals: [2_000, 5_000] }).toBe("Running");
+
+  const paused = await request.post(`${apiBase}/api/admin/documentation/batches/${batch.id}/pause`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { reason: "E2E: pause before resume" },
+  });
+  expect(paused.status(), await paused.text()).toBe(200);
+  expect(((await paused.json()) as Batch).state).toBe("Paused");
+
+  const resumed = await request.post(`${apiBase}/api/admin/documentation/batches/${batch.id}/resume`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { reason: "E2E: resume after pause" },
+  });
+  expect(resumed.status(), await resumed.text()).toBe(200);
+  expect(((await resumed.json()) as Batch).state).toBe("Running");
+
+  const cancelled = await request.post(`${apiBase}/api/admin/documentation/batches/${batch.id}/cancel`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { reason: "E2E: cancel leaves in-flight work alone" },
+  });
+  expect(cancelled.status(), await cancelled.text()).toBe(200);
+  expect(((await cancelled.json()) as Batch).state).toBe("Cancelled");
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.batch.cancel' AND target_id = '${batch.id}'`)).toBe("1");
+
+  // The cancelled batch's in-flight item still runs to its own outcome.
+  await scaleRuntimeWorker(1);
+  await expect.poll(async () => {
+    const page = await listBatchItems(request, token, batch.id);
+    const item = page.items.find((entry) => entry.page_path === ingressPage);
+    return item?.state ?? "missing";
+  }, { timeout: 12 * 60_000, intervals: [3_000, 5_000, 10_000] }).toBe("Published");
+
+  // Retry re-enqueues a failed page on a live batch: restart the workflow,
+  // and the scheduler re-ignites through the fixture to publication.
+  await scaleRuntimeWorker(0);
+  const failedBatch = await createBatch(request, token, { kind: "pages", pages: [ingressPage] });
+  const failedWorkflow = await postgres(`SELECT id FROM document_workflows WHERE page_path = '${ingressPage}' AND anchor = 'terminology' AND state = 'MaterializingArtifact' LIMIT 1`);
+  expect(failedWorkflow).toMatch(/^document-workflow-/);
+  const actionKey = await postgres(`SELECT a.action_key FROM runnable_actions a JOIN document_runnable_actions b ON b.action_key = a.action_key WHERE b.workflow_id = '${failedWorkflow}' AND a.state = 'queued' LIMIT 1`);
+  await postgres(`UPDATE runnable_actions SET state = 'failed', failure_class = 'artifact', failure_code = 'retry-e2e', failure_summary = 'simulated worker failure' WHERE action_key = '${actionKey}'`);
+  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${failedWorkflow}'`), {
+    timeout: 2 * 60_000,
+    intervals: [1_000, 2_000],
+  }).toBe("Failed");
+
+  await scaleRuntimeWorker(1);
+  const retried = await request.post(`${apiBase}/api/admin/documentation/batches/${failedBatch.id}/retry-failed`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { reason: "E2E: retry the failed page" },
+  });
+  expect(retried.status(), await retried.text()).toBe(200);
+  await expect.poll(async () => {
+    const page = await listBatchItems(request, token, failedBatch.id);
+    const item = page.items.find((entry) => entry.page_path === ingressPage);
+    return item?.state ?? "missing";
+  }, { timeout: 12 * 60_000, intervals: [3_000, 5_000, 10_000] }).toBe("Published");
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.batch.retry' AND target_id = '${failedBatch.id}'`)).toBe("1");
 });
 
 // Resolve the member's durable identifier through the admin user list.

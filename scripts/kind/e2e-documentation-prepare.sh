@@ -38,11 +38,11 @@ kubectl -n "$namespace" rollout status deployment/document-agent-fixture --timeo
 # the committed rendered fixture pages are projected by the same generator that
 # produces the full library, so page digests match docs-site/documents exactly.
 generator_version=${DOCS_PROJECT_VERSION:-docs-project-v10}
-library_page=docs/concepts/workloads/pods/pod-lifecycle/
+library_pages="docs/concepts/workloads/pods/pod-lifecycle/,docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/,docs/concepts/services-networking/ingress/"
 rm -rf "$library_dir"
 go run "$repo_root/cmd/docs-project" -root "$docs_fixture_root" -out "$library_dir" \
 	-version "$generator_version" -site-origin https://kubernetes.io \
-	-pages "$library_page" || fail "docs-project library generation failed"
+	-pages "$library_pages" || fail "docs-project library generation failed"
 [ -s "$library_dir/manifest.json" ] || fail "generated documentation library is incomplete"
 
 # ConfigMap keys are flat; deploy/manifests/server.yaml maps them back to
@@ -73,6 +73,10 @@ patched_volumes=$(kubectl -n "$namespace" get deployment breakfix-server -o json
 						{key: "manifest.json", path: "manifest.json"},
 						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.md", path: "docs/concepts/workloads/pods/pod-lifecycle/index.md"},
 						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.json", path: "docs/concepts/workloads/pods/pod-lifecycle/index.json"},
+						{key: "docs_concepts_workloads_autoscaling_horizontal-pod-autoscale_index.md", path: "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/index.md"},
+						{key: "docs_concepts_workloads_autoscaling_horizontal-pod-autoscale_index.json", path: "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/index.json"},
+						{key: "docs_concepts_services-networking_ingress_index.md", path: "docs/concepts/services-networking/ingress/index.md"},
+						{key: "docs_concepts_services-networking_ingress_index.json", path: "docs/concepts/services-networking/ingress/index.json"},
 						{key: "images_docs_pod.svg", path: "images/docs/pod.svg"}
 					]
 				}

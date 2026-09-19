@@ -35,6 +35,7 @@
 - [本地开发](operations/development.md)
 - [测试与真实验收](operations/testing.md)
 - [备份与恢复](operations/recovery.md)
+- [Runtime Worker 尺寸与批次并发配对](operations/worker-sizing.md)
 
 根目录 [`NEXT.md`](../NEXT.md)、[`REVIEW.md`](../REVIEW.md) 与 [`TODO.md`](../TODO.md) 分别记录后续方向、持续审查和
 当前可执行工作；它们不是长期架构规范。

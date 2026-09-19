@@ -557,7 +557,14 @@ func workflowPublicationInputs(workflow domain.Workflow) (domain.LearningUnitPla
 	var candidate domain.PracticeCandidate
 	var planGate domain.GateResult
 	var artifactGate domain.GateResult
+	// Every chain artifact is namespaced by its workflow attempt; a restarted
+	// workflow carries several attempts, and publication must bind to the
+	// current one.
+	attempt := fmt.Sprintf("-a%d", workflow.Revision)
 	for _, artifact := range workflow.Artifacts {
+		if !strings.HasSuffix(artifact.ID, attempt) {
+			continue
+		}
 		switch artifact.Kind {
 		case "learning-unit-plan":
 			_ = json.Unmarshal(artifact.Payload, &plan)

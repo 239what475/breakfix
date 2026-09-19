@@ -114,8 +114,11 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
+            # Sized from the pilot batch sampling; see
+            # docs/operations/worker-sizing.md for the measurements and the
+            # batch concurrency <-> replica pairing guidance.
             requests:
-              cpu: 500m
+              cpu: 750m
               memory: 512Mi
               ephemeral-storage: 2Gi
             limits:

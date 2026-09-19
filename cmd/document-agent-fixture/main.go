@@ -149,8 +149,19 @@ func planArguments(prompt string) (string, error) {
 	if err := json.Unmarshal(values["allowed_runtime_constraints"], &constraints); err != nil || len(constraints) == 0 {
 		return "", fmt.Errorf("fixture runtime constraint is missing")
 	}
-	plan := domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: "pod-lifecycle", Revision: 1, Context: page.Context, Title: "Observe Pod lifetime", Objective: "Observe a Pod reach Running", Boundary: "One Pod in the fixed Kubernetes environment", Runtime: constraints[0], Evidence: evidence, UserSteps: []domain.UserStep{{ID: "apply-pod", Instruction: "Create the Pod and observe its phase", EvidenceIDs: []string{"page"}}}, Observations: []domain.ObservationPoint{{ID: "pod-running", Description: "The Pod reaches the Running phase", EvidenceIDs: []string{"page"}}}, CreatedAt: time.Now().UTC()}
+	plan := domain.LearningUnitPlan{FormatVersion: domain.FormatVersion, ID: pageSlug(page.Context.PagePath), Revision: 1, Context: page.Context, Title: "Observe Pod lifetime", Objective: "Observe a Pod reach Running", Boundary: "One Pod in the fixed Kubernetes environment", Runtime: constraints[0], Evidence: evidence, UserSteps: []domain.UserStep{{ID: "apply-pod", Instruction: "Create the Pod and observe its phase", EvidenceIDs: []string{"page"}}}, Observations: []domain.ObservationPoint{{ID: "pod-running", Description: "The Pod reaches the Running phase", EvidenceIDs: []string{"page"}}}, CreatedAt: time.Now().UTC()}
 	return marshalValid(plan)
+}
+
+// pageSlug derives a stable per-page identifier: the ledger names plan and
+// candidate artifacts globally, so two pages must never share one.
+func pageSlug(path string) string {
+	slug := strings.ToLower(strings.Trim(strings.TrimSpace(path), "/"))
+	slug = strings.ReplaceAll(slug, "/", "-")
+	if slug == "" {
+		return "page"
+	}
+	return slug
 }
 
 func reviewArguments(prompt string, messages []chatMessage) (string, error) {
@@ -210,7 +221,7 @@ func candidateArguments(prompt string) (string, error) {
 		Initialization []runnable.ActionSpec     `json:"initialization"`
 		ValidationPlan runnable.ValidationPlan   `json:"validation_plan"`
 		Files          []app.GeneratedFile       `json:"files"`
-	}{ID: "pod-lifecycle-e2e", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, UserSteps: plan.UserSteps, Observations: plan.Observations, Initialization: initialization, ValidationPlan: validation, Files: []app.GeneratedFile{
+	}{ID: pageSlug(plan.Context.PagePath) + "-e2e", Revision: 1, PlanID: plan.ID, PlanRevision: plan.Revision, UserSteps: plan.UserSteps, Observations: plan.Observations, Initialization: initialization, ValidationPlan: validation, Files: []app.GeneratedFile{
 		{Path: "scripts/init.sh", Executable: true, Content: "#!/bin/sh\nset -eu\nkubectl delete pod pod-lifecycle --ignore-not-found --wait=true\n"},
 		{Path: "scripts/apply.sh", Executable: true, Content: "#!/bin/sh\nset -eu\nkubectl run pod-lifecycle --image=" + image + " --restart=Never --command -- sleep 300\nkubectl wait --for=jsonpath='{.status.phase}'=Running pod/pod-lifecycle --timeout=180s\n"},
 		{Path: "scripts/assert.sh", Executable: true, Content: "#!/bin/sh\nset -eu\nphase=$(kubectl get pod pod-lifecycle -o jsonpath='{.status.phase}')\nif [ \"$phase\" = Running ]; then satisfied=true; else satisfied=false; fi\nprintf '{\"assertions\":[{\"id\":\"pod-running\",\"satisfied\":%s,\"summary\":\"Pod phase is %s\"}]}\\n' \"$satisfied\" \"$phase\"\n"},
