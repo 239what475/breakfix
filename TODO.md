@@ -206,21 +206,23 @@ documentation E2E 10/10、ops E2E 3/3、admin E2E 1/1，验收人独立复跑）
 ### 提交 8 test(e2e): batch rollout end to end
 
 （2026-09-19：迷你库已扩到 3 页；批次铺开/看门狗/暂停-取消-重试场景随
-E2E 结构重构全部跑绿（admin 8/8、documentation 10/10，见上方插入项）；
-仅剩收尾全量回归未执行。）
+E2E 结构重构全部跑绿；收尾全量回归同日通过。）
 
 - [x] E2E 迷你库扩到 2–3 页；批次发起 → 调度 → 发布 → 语料树聚合断言；
       暂停/取消/重试覆盖；看门狗场景（action 失败自动 Failed，替代人工
       force-fail 兜底）
-- [ ] 收尾全量回归：docs-smoke、test-unit、verify-generated、web 构建、
+- [x] 收尾全量回归：docs-smoke、test-unit、verify-generated、web 构建、
       ops/documentation/admin 三套 E2E 全绿
 
 ### 提交 9 docs(ops): size the runtime worker fleet from the pilot batch
 
-- [ ] 试点批次期间采样 worker 资源（kind 节点 docker stats，或补装
+（尺寸实测与 manifest 回填随 `129ca59` 落地，见
+`docs/operations/worker-sizing.md`。）
+
+- [x] 试点批次期间采样 worker 资源（kind 节点 docker stats，或补装
       metrics-server 用 kubectl top）：空转基线、materialize 密集段、verify
       密集段的 CPU/内存峰值；确认镜像层操作是否流式（内存是否驻留）
-- [ ] 尺寸表进运维文档（每副本基线 + 每 action 增量 + 推荐 requests/
+- [x] 尺寸表进运维文档（每副本基线 + 每 action 增量 + 推荐 requests/
       limits），manifest 数值按测量回填；"批次并发阀值 ↔ 副本数"配对建议
       （默认 2↔2）与扩容路径成文
 
@@ -235,10 +237,20 @@ E2E 结构重构全部跑绿（admin 8/8、documentation 10/10，见上方插入
 
 ### 验收（完成后回填日期）
 
+已于 2026-09-19 完成并验收：提交 1–7（`0cab872`、`ed21878`、`471cd5f`、
+`65a337e`、`79d1100`、`1a97306`、`37293e3`）逐提交绿；提交 8 场景随
+`129ca59` 与 E2E 结构重构（`8c8eaed` + prepare 瘦身 `3a0197d`）落地，期间
+修复三个产品缺陷（`358e890`：批次 retry 审计主键冲突、语料汇总超龄终态误
+计卡住、语料加载 watch 缺 immediate）；提交 9 尺寸实测随 `129ca59`。收尾
+全量回归（2026-09-19）通过：docs-smoke、test-unit 45 包、verify-generated、
+web 构建、ui 3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 10/10
+（套件 4.8 分钟）、admin 8/8（套件 6.3 分钟）。
+
 - 逐提交绿；收尾 docs-smoke、test-unit、verify-generated、web 构建、
-  ops/documentation/admin 三套 E2E
-- 批次语义：单 section 试点批次跑通；暂停→恢复续跑；取消在飞条目到终态；
-  重试失败页；Server 重启批次续跑
+  ops/documentation/admin 三套 E2E（含 ui/node/k8s/recovery 全套）
+- 批次语义：pages 范围批次 E2E 跑通（发起→调度→发布→skip/语料聚合）；暂
+  停→恢复续跑；取消在飞条目到终态（看门狗失败路径）；重试失败页；
+  sections/full 解析与崩溃续跑由单测覆盖
 - 看门狗：action 失败自动映射工作流 Failed（worker 停摆场景不再依赖人工
   force-fail）
 - 管理台：语料树聚合正确、过滤搜索可用、批次操作全部留痕审计
