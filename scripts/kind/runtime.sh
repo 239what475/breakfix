@@ -196,9 +196,7 @@ kubectl -n "$namespace" get networkpolicy breakfix-runtime-worker -o json |
         .ports = (((.ports // []) + [
           $incus_egress_port,
           {protocol: "TCP", port: $registry_node_port}
-        ]
-          | map(select(. != null))
-          | unique_by([.protocol, .port]))
+        ] | map(select(. != null)) | unique_by([.protocol, .port])))
       else
         .
       end
