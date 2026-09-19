@@ -13,13 +13,14 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    // Pure reader rendering: no practice chains, safe to re-run in seconds
-    // against an already prepared target.
-    { name: "reader-fast", testMatch: /reader\.fast\.spec\.ts$/ },
     // Real publication chains: the first test publishes the pinned practice
     // and restarts Server and Runtime Worker mid-flight, so the project stays
-    // on one worker and runs only after the reader tests finish - a parallel
-    // reader walk would hit the restart window and lose its tree fetches.
-    { name: "practice-chain", testMatch: /practice\.chain\.spec\.ts$/, workers: 1, dependencies: ["reader-fast"] },
+    // on one worker. Reader navigation, URL/hash sync, retries, and the
+    // practice panel behavior live in the vitest component tier.
+    { name: "practice-chain", testMatch: /practice\.chain\.spec\.ts$/, workers: 1 },
+    // Thin reader smoke: the generated content contract from the external
+    // docs-project generator plus the viewport-driven surfaces. It runs after
+    // the practice chain to reuse the published state on the pinned page.
+    { name: "reader-smoke", testMatch: /reader\.smoke\.spec\.ts$/, dependencies: ["practice-chain"] },
   ],
 });

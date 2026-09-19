@@ -8,7 +8,6 @@ const execFile = promisify(execFileCallback);
 const apiBase = process.env.BREAKFIX_E2E_BASE_URL;
 const source = "kubernetes";
 const version = "snapshot-ce98a43";
-const entryUrl = `/documentation?source=${source}&version=${version}&path=%2Fdocs%2F`;
 const podLifecycleUrl = `/documentation?source=${source}&version=${version}&path=%2Fdocs%2Fconcepts%2Fworkloads%2Fpods%2Fpod-lifecycle%2F`;
 
 function decodeBase32(value: string) {
@@ -84,7 +83,7 @@ async function gotoReader(page: Page, readerUrl: string) {
   await page.goto(`${apiBase}${readerUrl}`);
 }
 
-test("fixed documentation practice runs through publication", async ({ request }) => {
+test("fixed documentation practice runs through publication", async ({ page, request }) => {
   test.setTimeout(12 * 60_000);
   if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the documentation workflow test");
   const username = `documentation-${Date.now()}`;
@@ -138,6 +137,11 @@ test("fixed documentation practice runs through publication", async ({ request }
     timeout: 2 * 60_000,
     intervals: [500, 1_000, 2_000, 5_000],
   }).toBe(false);
+
+  // The published practice leaves its reader entry on the anchor - the one
+  // button-existence line of the practice UI contract kept at chain level.
+  await gotoReader(page, podLifecycleUrl);
+  await expect(page.locator("h2#pod-lifetime .practice-anchor-button")).toBeVisible();
 });
 
 // The reader tests below need the published practice on the pinned page. The
@@ -161,75 +165,6 @@ async function ensurePracticePublished(request: APIRequestContext) {
     intervals: [1_000, 2_000, 5_000, 10_000],
   }).toBe("Published");
 }
-
-test("published practices anchor one button on the reader heading", async ({ page, request }) => {
-  test.setTimeout(12 * 60_000);
-  await ensurePracticePublished(request);
-
-  await gotoReader(page, podLifecycleUrl);
-  const article = page.locator(".documentation-article");
-  await expect(article).toBeVisible();
-  // Exactly the published anchor carries the practice entry.
-  await expect(article.locator("h2#pod-lifetime .practice-anchor-button")).toBeVisible();
-  await expect(article.locator(".practice-anchor-button")).toHaveCount(1);
-
-  // Leaving the page removes the entry with the rendered body.
-  await gotoReader(page, entryUrl);
-  await expect(page.getByText("Choose a page from the outline to start reading.")).toBeVisible();
-  await expect(page.locator(".practice-anchor-button")).toHaveCount(0);
-});
-
-test("the practice panel swaps the layout and the close restores the outline", async ({ page, request }) => {
-  test.setTimeout(12 * 60_000);
-  await ensurePracticePublished(request);
-
-  await gotoReader(page, podLifecycleUrl);
-  const reader = page.locator(".documentation-reader");
-  await expect(page.locator("#pod-lifetime .practice-anchor-button")).toBeVisible();
-  await expect(reader).not.toHaveClass(/practice-open/);
-
-  await page.locator("#pod-lifetime .practice-anchor-button").click();
-  await expect(reader).toHaveClass(/practice-open/);
-  // An anonymous anchor click is the session entry: it asks for a login and
-  // would continue after it. This display-only pass dismisses the dialog.
-  await expect(page.locator(".dialog-backdrop")).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.locator(".dialog-backdrop")).toHaveCount(0);
-  const panel = page.locator(".practice-panel");
-  await expect(panel).toBeVisible();
-  // The panel shows the reader projection frozen at publish time.
-  await expect(panel.getByRole("heading", { name: "Observe Pod lifetime" })).toBeVisible();
-  await expect(panel.getByText("Observe a Pod reach Running", { exact: true })).toBeVisible();
-  await expect(panel.getByText("One Pod in the fixed Kubernetes environment", { exact: true })).toBeVisible();
-
-  const stepsToggle = panel.getByRole("button", { name: "Steps" });
-  await expect(stepsToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(panel.locator(".practice-panel-steps")).toBeVisible();
-  await stepsToggle.click();
-  await expect(stepsToggle).toHaveAttribute("aria-expanded", "false");
-  await expect(panel.getByText("Create the Pod and observe its phase", { exact: true })).toBeHidden();
-  await panel.getByRole("button", { name: "Observations" }).click();
-  await expect(panel.getByText("The Pod reaches the Running phase", { exact: true })).toBeHidden();
-
-  // Opening anchored the practice heading; closing restores the outline and
-  // re-anchors the same heading against the reflow.
-  await panel.getByRole("button", { name: "Close practice panel" }).click();
-  await expect(reader).not.toHaveClass(/practice-open/);
-  await expect(reader).not.toHaveClass(/toc-collapsed/);
-  await expect(page.locator(".practice-panel")).toHaveCount(0);
-  expect(await page.locator("#pod-lifetime").evaluate((heading) => (heading as HTMLElement).getBoundingClientRect().top)).toBeLessThan(240);
-});
-
-test("mobile readers see no practice entry", async ({ page, request }) => {
-  test.setTimeout(12 * 60_000);
-  await ensurePracticePublished(request);
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await gotoReader(page, podLifecycleUrl);
-  await expect(page.locator(".documentation-article")).toBeVisible();
-  await expect(page.locator(".practice-anchor-button")).toBeHidden();
-  await expect(page.locator(".practice-panel")).toHaveCount(0);
-});
 
 test("the practice session prepares, attaches, and stops in the panel", async ({ page, request }) => {
   test.setTimeout(15 * 60_000);

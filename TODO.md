@@ -102,10 +102,10 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 5 test(e2e): condense the reader suite into a thin smoke
 
-- [ ] 薄 smoke：大纲走到 pod-lifecycle + 生成内容契约（h2#pod-lifetime、
+- [x] 薄 smoke：大纲走到 pod-lifecycle + 生成内容契约（h2#pod-lifetime、
       doc-alert、pre.shiki）+ 移动端菜单/抽屉 + 实践按钮恰好一个 + 移动端
       无入口；reader-fast 项目由 smoke 项目接替（依赖 practice 链）
-- [ ] 删 5 条 reader fast 与 3 条实践 UI e2e；发布链尾部加一行按钮存在
+- [x] 删 5 条 reader fast 与 3 条实践 UI e2e；发布链尾部加一行按钮存在
       性；documentation 10→3
 
 **C 波（控制台链合并）**
