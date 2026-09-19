@@ -156,12 +156,14 @@ ops/documentation/admin 三套 E2E、verify-generated）全绿。
 - 移动端无终端：阅读器无入口纯阅读，运维工作台 Docs/Terminal 切换随提交 7
   移除，终端桌面端专用
 
-### 验收（完成后回填日期）
+### 验收（2026-09-19 通过，独立复核）
 
-- 逐提交绿；收尾 docs-smoke（真实 854 页库）、test-unit、ops/documentation/
-  admin 三套 E2E 全绿
-- 手工：有已发布实践的页面上，按钮 → 面板 → 环境就绪 → 终端可操作 → 结束并
-  回收；未登录点击路径登录后自动继续；关闭面板后目录恢复原状态
+- 逐提交绿；收尾 docs-smoke（真实 854 页库）、test-unit、verify-generated、
+  web 构建、ops/documentation/admin 三套 E2E 全绿（验收人本机复跑：
+  documentation 10/10、ops 3/3、admin 1/1）
+- 手工项由 E2E 断言覆盖：按钮 → 面板 → 环境就绪 → 终端可操作 → 结束并回收
+  （含真实环境内执行命令）；未登录点击路径登录后自动继续；关闭面板后目录恢复
+  原状态与滚动锚定
 
 ## 多页铺开与批次控制（设计稿，阅读器实践入口落地后细化为提交拆解）
 
