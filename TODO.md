@@ -95,9 +95,9 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 4 test(web): reader and practice panel component tests
 
-- [ ] 阅读器导航（大纲懒加载、URL 同步、前进后退、hash 用事件模拟）、
+- [x] 阅读器导航（大纲懒加载、URL 同步、前进后退、hash 用事件模拟）、
       加载失败与重试、非 docs 路径回退
-- [ ] 实践锚点按钮唯一性、面板开关与布局类切换、Steps 折叠、冻结投影
+- [x] 实践锚点按钮唯一性、面板开关与布局类切换、Steps 折叠、冻结投影
       渲染；提交小型 tree/页面 HTML/投影 fixture
 
 ### 提交 5 test(e2e): condense the reader suite into a thin smoke
