@@ -72,7 +72,8 @@ Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、
 - [ ] core 剖面（runtime Secret 去掉 incus 字段、无 Incus Secret、机器无 incus CLI）：
       e2e-prepare → ui、k8s、admin、documentation 全绿；node/recovery 启动即报需要
       full 剖面；
-- [ ] make test-unit、verify-generated、web-test-unit 绿。
+- [x] make test-unit、verify-generated、web-test-unit 绿（44 包 / 契约 diff 干净 / 6 文件
+      20 用例，2026-09-20）。
 
 ## 测试分层与 E2E 降级（剩余未完成部分，2026-09-19 立项）
 
