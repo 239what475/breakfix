@@ -414,9 +414,9 @@ func (p *AgentPipeline) Recover(ctx context.Context) error {
 	return nil
 }
 
-// Run retries post-completion product reconciliation. It never executes a
-// runnable action: Worker ownership and public result persistence remain
-// outside this loop.
+// Run retries post-completion product reconciliation and runs the watchdog
+// on every tick. It never executes a runnable action: Worker ownership and
+// public result persistence remain outside this loop.
 func (p *AgentPipeline) Run(ctx context.Context) error {
 	if p == nil {
 		return errors.New("documentation Agent pipeline is not configured")
@@ -428,15 +428,22 @@ func (p *AgentPipeline) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			err := p.Recover(ctx)
+			err := p.tick(ctx)
 			if p.OnTick != nil {
 				p.OnTick(err)
 			}
 			if err != nil && ctx.Err() == nil {
-				slog.Warn("reconcile completed documentation runnable actions", "err", err)
+				slog.Warn("reconcile and watchdog documentation workflows", "err", err)
 			}
 		}
 	}
+}
+
+func (p *AgentPipeline) tick(ctx context.Context) error {
+	if err := p.Recover(ctx); err != nil {
+		return err
+	}
+	return p.Watchdog(ctx)
 }
 
 func (p *AgentPipeline) reviewPlan(ctx context.Context, plan domain.LearningUnitPlan) ([]domain.ReviewOpinion, []domain.AgentAudit, error) {

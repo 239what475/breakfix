@@ -659,3 +659,92 @@ func TestValidatePublicationLedgerRejectsTitlelessPlanAndDetachedReaderProjectio
 		t.Fatalf("divergent reader projection must be rejected at publish: %v", err)
 	}
 }
+
+func TestWatchdogRepositoryListsCandidatesAndMapsStrandedWorkflows(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := seedWorkflowInState(t, database, "document-workflow-watchdog", domain.MaterializingArtifact, now)
+	identity := runnable.ActionIdentity{
+		Content:      runnable.ContentIdentity{Kind: "practice", ID: "page-1", Revision: "1"},
+		SpecDigest:   testRunnableDigest("a"),
+		Phase:        runnable.ActionMaterializeArtifact,
+		StateVersion: workflow.StateVersion,
+	}
+	if err := database.DocumentPractice.BindRunnableAction(ctx, workflow.ID, identity, now); err != nil {
+		t.Fatalf("bind runnable action: %v", err)
+	}
+	insertWatchdogRunnableAction(t, database, identity, "queued", 5, now.Add(-runnableWatchdogTestBudget))
+
+	// The exhausted action is inside its grace period: no candidate is mapped yet.
+	candidates, err := database.DocumentPractice.ListWorkflowWatchdogCandidates(ctx, now)
+	if err != nil {
+		t.Fatalf("list watchdog candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].WorkflowID != workflow.ID || candidates[0].Action.Attempt != 5 || candidates[0].Action.State != "queued" {
+		t.Fatalf("grace candidates = %#v", candidates)
+	}
+	// The grace policy lives in the application layer; the store only fences.
+	// A mapping whose expected state version is stale must be rejected.
+	if _, err := database.DocumentPractice.WatchdogFailWorkflow(ctx, workflow.ID, "attempts_exhausted", workflow.StateVersion+3, now); err == nil {
+		t.Fatal("watchdog accepted a stale state-version fence")
+	}
+	workflowAfterRejection, err := database.DocumentPractice.GetWorkflow(ctx, workflow.ID)
+	if err != nil || workflowAfterRejection.State != domain.MaterializingArtifact {
+		t.Fatalf("rejected mapping changed state: %s, %v", workflowAfterRejection.State, err)
+	}
+
+	if _, err := database.conn.ExecContext(ctx, `UPDATE runnable_actions SET updated_at = ? WHERE action_key = ?`, now.Add(-runnableWatchdogTestBudget-time.Second), identity.Key()); err != nil {
+		t.Fatal(err)
+	}
+	mapped, err := database.DocumentPractice.WatchdogFailWorkflow(ctx, workflow.ID, "attempts_exhausted", workflow.StateVersion, now)
+	if err != nil || mapped.State != domain.Failed || mapped.StateVersion != workflow.StateVersion+1 {
+		t.Fatalf("watchdog mapping = %#v, %v", mapped, err)
+	}
+	var ownerRole, payload string
+	if err := database.conn.QueryRowContext(ctx, `SELECT owner_role, payload FROM document_artifact_ledger WHERE kind = 'watchdog.force_fail' AND workflow_id = ?`, workflow.ID).Scan(&ownerRole, &payload); err != nil {
+		t.Fatalf("watchdog ledger entry: %v", err)
+	}
+	if ownerRole != "system" || !strings.Contains(payload, "attempts_exhausted") {
+		t.Fatalf("watchdog ledger = %s %s", ownerRole, payload)
+	}
+	humanRows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Limit: 50})
+	if err != nil {
+		t.Fatalf("list human actions: %v", err)
+	}
+	for _, row := range humanRows {
+		if row.TargetID == workflow.ID {
+			t.Fatalf("watchdog wrote a human action row: %#v", row)
+		}
+	}
+
+	// A terminal workflow is not a candidate even with a failed bound action.
+	if _, err := database.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = 'failed', failure_class = 'artifact', failure_code = 'x', failure_summary = 'y' WHERE action_key = ?`, identity.Key()); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = database.DocumentPractice.ListWorkflowWatchdogCandidates(ctx, now)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("terminal workflow candidates = %#v, %v", candidates, err)
+	}
+}
+
+// runnableWatchdogTestBudget mirrors the application watchdog grace so the SQL
+// test exercises the same magnitude without importing the application package.
+const runnableWatchdogTestBudget = 2100 * time.Second
+
+func insertWatchdogRunnableAction(t *testing.T, database *Store, identity runnable.ActionIdentity, state string, attempt int, updatedAt time.Time) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := database.conn.ExecContext(context.Background(), `INSERT INTO runnable_sources (source_digest, archive, created_at) VALUES (?, ?, ?)`, testRunnableDigest("source"), []byte("archive"), now.UTC()); err != nil {
+		t.Fatalf("insert runnable source: %v", err)
+	}
+	if _, err := database.conn.ExecContext(context.Background(), `INSERT INTO runnable_specs (spec_digest, content_kind, content_id, content_revision, source_digest, spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		identity.SpecDigest, identity.Content.Kind, identity.Content.ID, identity.Content.Revision, testRunnableDigest("source"), []byte(`{}`), now.UTC()); err != nil {
+		t.Fatalf("insert runnable spec: %v", err)
+	}
+	if _, err := database.conn.ExecContext(context.Background(), `INSERT INTO runnable_actions (action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, state, attempt, next_run_at, lease_owner, lease_expires_at, failure_class, failure_code, failure_summary, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 'infrastructure', 'env-lost', 'environment vanished', ?, ?)`,
+		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, state, attempt, now.UTC(), now.UTC(), updatedAt.UTC()); err != nil {
+		t.Fatalf("insert runnable action: %v", err)
+	}
+}

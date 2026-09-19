@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -273,6 +274,10 @@ type memoryDocumentStore struct {
 	actions      map[string]memoryDocumentAction
 	published    *domain.PracticeRevision
 	humanActions []audit.HumanAction
+	// watchdogStatuses carries the public action status of bound actions for
+	// the watchdog candidate listing; the map key is the action key.
+	watchdogStatuses map[string]WatchdogActionStatus
+	watchdogReasons  map[string]string
 
 	adminTransitions []memoryAdminTransition
 }
@@ -284,7 +289,7 @@ type memoryDocumentAction struct {
 }
 
 func newMemoryDocumentStore() *memoryDocumentStore {
-	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}}
+	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}, watchdogStatuses: map[string]WatchdogActionStatus{}, watchdogReasons: map[string]string{}}
 }
 
 func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, action *audit.HumanAction) error {
@@ -414,6 +419,53 @@ func (s *memoryDocumentStore) BindRunnableAction(_ context.Context, workflowID s
 	}
 	s.actions[action.Key()] = memoryDocumentAction{workflowID: workflowID, action: action}
 	return nil
+}
+
+func (s *memoryDocumentStore) setWatchdogStatus(action runnable.ActionIdentity, status WatchdogActionStatus) {
+	s.watchdogStatuses[action.Key()] = status
+}
+
+func (s *memoryDocumentStore) ListWorkflowWatchdogCandidates(_ context.Context, now time.Time) ([]WatchdogCandidate, error) {
+	candidates := []WatchdogCandidate{}
+	for _, value := range s.actions {
+		workflow, ok := s.workflows[value.workflowID]
+		if !ok || workflow.State.Terminal() || workflow.StateVersion != value.action.StateVersion {
+			continue
+		}
+		status, ok := s.watchdogStatuses[value.action.Key()]
+		if !ok {
+			continue
+		}
+		if status.State != "failed" && !(status.Attempt >= 5 && (status.State == "queued" || (status.State == "running" && status.LeaseExpired))) {
+			continue
+		}
+		if status.UpdatedAt.IsZero() {
+			status.UpdatedAt = now
+		}
+		candidates = append(candidates, WatchdogCandidate{WorkflowID: value.workflowID, WorkflowState: workflow.State, WorkflowStateVersion: workflow.StateVersion, Action: status})
+	}
+	return candidates, nil
+}
+
+func (s *memoryDocumentStore) WatchdogFailWorkflow(_ context.Context, id, reason string, expected int64, now time.Time) (domain.Workflow, error) {
+	workflow, err := s.GetWorkflow(context.Background(), id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.StateVersion != expected {
+		return domain.Workflow{}, errors.New("stale state version")
+	}
+	if err := workflow.AdvanceAt(domain.Failed, now); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.workflows[id] = workflow
+	s.watchdogReasons[id] = reason
+	artifact := domain.ArtifactRecord{ID: "watchdog.force_fail-" + id + "-v" + strconv.FormatInt(workflow.StateVersion, 10), Kind: "watchdog.force_fail", ContentRevision: strconv.FormatInt(workflow.Revision, 10), Digest: serviceDigest("7"), SchemaVersion: domain.FormatVersion, OwnerRole: "system", CreatedAt: now}
+	if err := workflow.Append(artifact, now); err != nil {
+		panic(err)
+	}
+	s.workflows[id] = workflow
+	return workflow, nil
 }
 
 func (s *memoryDocumentStore) WorkflowForRunnableAction(_ context.Context, action runnable.ActionIdentity) (string, bool, error) {

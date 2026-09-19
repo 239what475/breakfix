@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	app "github.com/breakfix/breakfix/internal/application/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
@@ -241,6 +242,105 @@ func (d *DocumentPracticeRepository) adminWorkflowTransition(ctx context.Context
 	enriched.Detail = detail
 	if err := insertHumanAction(ctx, tx, enriched); err != nil {
 		return domain.Workflow{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Workflow{}, err
+	}
+	return workflow, nil
+}
+
+// ListWorkflowWatchdogCandidates returns every non-terminal workflow whose
+// bound public action (at the workflow's current state version) already failed
+// or exhausted its attempts. Reading the candidates is intentionally read-only;
+// the mapping decision belongs to the application layer.
+func (d *DocumentPracticeRepository) ListWorkflowWatchdogCandidates(ctx context.Context, now time.Time) ([]app.WatchdogCandidate, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT w.id, w.state, w.state_version, b.phase, a.state, a.attempt,
+			COALESCE(a.failure_class, ''), COALESCE(a.failure_code, ''), COALESCE(a.failure_summary, ''),
+			a.updated_at, (a.state = 'running' AND a.lease_expires_at IS NOT NULL AND a.lease_expires_at <= ?)
+			FROM document_workflows w
+			JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
+			JOIN runnable_actions a ON a.action_key = b.action_key
+			WHERE w.state NOT IN ('Published','NoPractice','Rejected','Failed')
+			  AND (a.state = 'failed' OR (a.attempt >= 5 AND a.state IN ('queued','running')))
+			ORDER BY w.id`, now.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("list document workflow watchdog candidates: %w", err)
+	}
+	defer rows.Close()
+	result := []app.WatchdogCandidate{}
+	for rows.Next() {
+		var candidate app.WatchdogCandidate
+		if err := rows.Scan(&candidate.WorkflowID, &candidate.WorkflowState, &candidate.WorkflowStateVersion,
+			&candidate.Action.Phase, &candidate.Action.State, &candidate.Action.Attempt,
+			&candidate.Action.FailureClass, &candidate.Action.FailureCode, &candidate.Action.FailureSummary,
+			&candidate.Action.UpdatedAt, &candidate.Action.LeaseExpired); err != nil {
+			return nil, err
+		}
+		result = append(result, candidate)
+	}
+	return result, rows.Err()
+}
+
+// WatchdogFailWorkflow maps a stranded workflow onto Failed as a system
+// decision. The state fence and the watchdog ledger entry commit together; no
+// human action audit row is written because no human operated.
+func (d *DocumentPracticeRepository) WatchdogFailWorkflow(ctx context.Context, workflowID, reason string, expectedStateVersion int64, now time.Time) (domain.Workflow, error) {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(reason) == "" || expectedStateVersion < 1 || now.IsZero() {
+		return domain.Workflow{}, errors.New("watchdog workflow transition is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Workflow{}, fmt.Errorf("begin watchdog workflow transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.StateVersion != expectedStateVersion {
+		return domain.Workflow{}, fmt.Errorf("%w (workflow moved to %s v%d)", domain.ErrWorkflowConflict, workflow.State, workflow.StateVersion)
+	}
+	fromState := workflow.State
+	if err := workflow.AdvanceAt(domain.Failed, now); err != nil {
+		return domain.Workflow{}, fmt.Errorf("%w (%s)", domain.ErrWorkflowConflict, err.Error())
+	}
+	payload, err := json.Marshal(struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Reason    string    `json:"reason"`
+		At        time.Time `json:"at"`
+	}{System: "watchdog", FromState: string(fromState), Reason: reason, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	digest, err := domain.DigestAgentInput(struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Reason    string    `json:"reason"`
+		At        time.Time `json:"at"`
+	}{System: "watchdog", FromState: string(fromState), Reason: reason, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	artifact := domain.ArtifactRecord{
+		ID:              "watchdog.force_fail-" + workflowID + "-v" + strconv.FormatInt(workflow.StateVersion, 10),
+		Kind:            "watchdog.force_fail",
+		ContentRevision: strconv.FormatInt(workflow.Revision, 10),
+		Digest:          digest,
+		SchemaVersion:   domain.FormatVersion,
+		OwnerRole:       "system",
+		CreatedAt:       now.UTC(),
+		Payload:         payload,
+	}
+	if err := insertImmutableDocumentArtifact(ctx, tx, workflowID, artifact); err != nil {
+		return domain.Workflow{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE document_workflows SET state = ?, state_version = ?, updated_at = ? WHERE id = ? AND state_version = ?`, workflow.State, workflow.StateVersion, workflow.UpdatedAt, workflowID, expectedStateVersion)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return domain.Workflow{}, errors.New("watchdog workflow transition lost its fence")
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.Workflow{}, err

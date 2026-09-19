@@ -35,6 +35,13 @@ type Store interface {
 	// action audit in one transaction.
 	ForceFailWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
 	RestartWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
+	// ListWorkflowWatchdogCandidates returns every non-terminal workflow whose
+	// bound public runnable action already failed or exhausted its attempts.
+	ListWorkflowWatchdogCandidates(context.Context, time.Time) ([]WatchdogCandidate, error)
+	// WatchdogFailWorkflow maps one stranded workflow onto Failed as a system
+	// decision: the state fence and the watchdog ledger entry commit together,
+	// and no human action audit row is written.
+	WatchdogFailWorkflow(context.Context, string, string, int64, time.Time) (domain.Workflow, error)
 }
 
 type RunnableStore interface {
