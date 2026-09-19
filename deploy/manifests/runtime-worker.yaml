@@ -66,11 +66,13 @@ spec:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: incus_endpoint
+                  optional: true
             - name: BREAKFIX_INCUS_BASE_IMAGE_FINGERPRINT
               valueFrom:
                 secretKeyRef:
                   name: breakfix-runtime
                   key: incus_base_image_fingerprint
+                  optional: true
             - name: BREAKFIX_INCUS_BUILD_PROJECT
               valueFrom:
                 secretKeyRef:
@@ -138,6 +140,7 @@ spec:
           secret:
             secretName: breakfix-incus-runtime
             defaultMode: 0440
+            optional: true
         - name: registry-ca
           configMap:
             name: breakfix-registry-ca
