@@ -10,6 +10,14 @@ fixture_source=${BREAKFIX_E2E_CATALOG_SOURCE:-$repo_root/test/fixtures/catalog-r
 fixture_title='Node 运行时验收'
 fixture_runtime=node
 fixture_count=2
+profile=${BREAKFIX_E2E_PROFILE:-full}
+case "$profile" in
+	core|full)
+		;;
+	*)
+		fail "BREAKFIX_E2E_PROFILE must be core or full, got \"$profile\""
+		;;
+esac
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/$target_id}
 fixture_archive=$state_dir/catalog-release.oci.tar
 catalog_tag=${BREAKFIX_E2E_CATALOG_TAG:-e2e-$target_id}
@@ -113,6 +121,31 @@ case "$defer_server_restart" in
 esac
 [ -d "$fixture_source" ] || fail "fixture source does not exist: $fixture_source"
 [ -f "$fixture_source/release.yaml" ] || fail "fixture source does not contain release.yaml: $fixture_source"
+
+# The core profile has no Incus provider, so the Node fixture entry cannot
+# materialize during the Catalog install. Publish a pruned copy that keeps only
+# the K8s scenario; the source fixture stays the canonical full-profile input.
+if [ "$profile" = core ]; then
+	core_fixture_root=$state_dir/catalog-release-core
+	rm -rf "$core_fixture_root"
+	mkdir -p "$core_fixture_root/scenarios"
+	awk '
+		/^  - path: scenarios\/node-runtime-fixture$/ { drop=1; next }
+		drop && /^    contentRevision:/ { drop=0; next }
+		{ print }
+	' "$fixture_source/release.yaml" >"$core_fixture_root/release.yaml"
+	grep -q 'scenarios/k8s-reproduction-core' "$core_fixture_root/release.yaml" ||
+		fail "fixture source does not contain the K8s scenario required by the core profile"
+	! grep -q 'node-runtime-fixture' "$core_fixture_root/release.yaml" ||
+		fail "core fixture pruning left a Node scenario entry behind"
+	cp -a "$fixture_source/scenarios/k8s-reproduction-core" "$core_fixture_root/scenarios/"
+	fixture_source=$core_fixture_root
+	fixture_count=1
+fi
+expect_node=1
+if [ "$profile" = core ]; then
+	expect_node=0
+fi
 
 # Validate all dependencies before the reset changes the selected E2E target.
 "$target_script" preflight
@@ -230,9 +263,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
 			--argjson count "$fixture_count" \
+			--argjson expect_node "$expect_node" \
 			'
 				(.scenarios | length) == $count and
-				any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+				(($expect_node == 1 and any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"])) or $expect_node == 0) and
 				any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
 			' "$catalog_json" >/dev/null; then
 		break
@@ -243,9 +277,10 @@ jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
 	--argjson count "$fixture_count" \
+	--argjson expect_node "$expect_node" \
 	'
 		(.scenarios | length) == $count and
-		any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+		(($expect_node == 1 and any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"])) or $expect_node == 0) and
 		any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
 	' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 
