@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { AlertTriangle, RefreshCw, ScrollText, ShieldCheck, Users, Workflow } from "lucide-vue-next";
+import { AlertTriangle, BookOpen, RefreshCw, ScrollText, ShieldCheck, Users, Workflow } from "lucide-vue-next";
 import AdminAuditPage from "./AdminAuditPage.vue";
+import AdminCorpusPage from "./AdminCorpusPage.vue";
 import AdminUsersPage from "./AdminUsersPage.vue";
 import AdminWorkflowsPage from "./AdminWorkflowsPage.vue";
-import { queueFlagCounts, useAdminWorkflows } from "./admin";
+import { queueFlagCounts, useAdminCorpus, useAdminWorkflows } from "./admin";
 import { toActiveRef } from "./refs";
 import "./admin.css";
 
-const props = defineProps<{ active: boolean; loggedIn: boolean; section: "workflows" | "users" | "audit" }>();
-const emit = defineEmits<{ navigate: [section: "workflows" | "users" | "audit"] }>();
+const props = defineProps<{ active: boolean; loggedIn: boolean; section: "workflows" | "users" | "audit" | "corpus" }>();
+const emit = defineEmits<{ navigate: [section: "workflows" | "users" | "audit" | "corpus"] }>();
 
-const tab = ref<"workflows" | "users" | "audit">(props.section);
+const tab = ref<"workflows" | "users" | "audit" | "corpus">(props.section);
 
 watch(
 	() => props.section,
@@ -20,11 +21,12 @@ watch(
 	},
 );
 
-const heading = computed(() => ({ workflows: "工作流观测与解卡", users: "账号管理", audit: "人操作审计" })[tab.value]);
+const heading = computed(() => ({ workflows: "工作流观测与解卡", users: "账号管理", audit: "人操作审计", corpus: "文档语料与批次" })[tab.value]);
 
 // One shared fetch drives the sidebar queue cells, the stuck banner, and the
 // workflows tab, so every section renders the same queue state.
 const { workflows, detail, queue, loading, error, busy, refresh, openDetail, runAction } = useAdminWorkflows(toActiveRef(props));
+const corpus = useAdminCorpus(toActiveRef(props), runAction);
 
 const flagCounts = computed(() => (queue.value ? queueFlagCounts(queue.value.items) : {}));
 const stuckWorkflows = computed(() => workflows.value.filter((workflow) => workflow.stuck.flag));
@@ -35,6 +37,7 @@ const refreshRequest = ref(0);
 
 function refreshConsole() {
 	if (tab.value === "workflows") void refresh();
+	else if (tab.value === "corpus") void corpus.refresh();
 	else refreshRequest.value += 1;
 }
 
@@ -75,6 +78,7 @@ function closeDetail() {
 				</dl>
 				<nav class="admin-tabs desktop-tabs" aria-label="Admin sections">
 					<button :class="{ active: tab === 'workflows' }" type="button" @click="emit('navigate', 'workflows')"><Workflow :size="16" aria-hidden="true" />工作流</button>
+					<button :class="{ active: tab === 'corpus' }" type="button" @click="emit('navigate', 'corpus')"><BookOpen :size="16" aria-hidden="true" />文档</button>
 					<button :class="{ active: tab === 'users' }" type="button" @click="emit('navigate', 'users')"><Users :size="16" aria-hidden="true" />用户</button>
 					<button :class="{ active: tab === 'audit' }" type="button" @click="emit('navigate', 'audit')"><ScrollText :size="16" aria-hidden="true" />审计</button>
 				</nav>
@@ -82,6 +86,7 @@ function closeDetail() {
 			<main class="admin-content">
 				<nav class="admin-tabs mobile-tabs" aria-label="Admin sections">
 					<button :class="{ active: tab === 'workflows' }" type="button" @click="emit('navigate', 'workflows')">工作流</button>
+					<button :class="{ active: tab === 'corpus' }" type="button" @click="emit('navigate', 'corpus')">文档</button>
 					<button :class="{ active: tab === 'users' }" type="button" @click="emit('navigate', 'users')">用户</button>
 					<button :class="{ active: tab === 'audit' }" type="button" @click="emit('navigate', 'audit')">审计</button>
 				</nav>
@@ -108,6 +113,7 @@ function closeDetail() {
 					:close-detail="closeDetail"
 					:run-action="runAction"
 				/>
+				<AdminCorpusPage v-show="tab === 'corpus'" :active="props.active && tab === 'corpus'" :refresh-request="refreshRequest" :corpus="corpus" :run-workflow-action="runAction" />
 				<AdminUsersPage v-show="tab === 'users'" :active="props.active && tab === 'users'" :logged-in="props.loggedIn" :refresh-request="refreshRequest" />
 				<AdminAuditPage v-show="tab === 'audit'" :active="props.active && tab === 'audit'" :logged-in="props.loggedIn" :refresh-request="refreshRequest" />
 			</main>

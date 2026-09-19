@@ -864,6 +864,57 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  /admin/documentation/corpus:
+    get:
+      operationId: listAdminDocumentationCorpus
+      summary: Project the corpus pages with workflow state rollups (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: section
+          in: query
+          description: Tree node path; only pages under it are returned
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Case-insensitive substring match on the page title, resolved from the library manifests
+          schema:
+            type: string
+        - name: failures
+          in: query
+          description: Only pages with failed or dwell-stuck workflows
+          schema:
+            type: boolean
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Corpus page rows in path order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentationCorpusPage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /admin/runnable-actions:
     get:
       operationId: listAdminRunnableActions
@@ -2229,6 +2280,41 @@ components:
             $ref: "#/components/schemas/AdminDocumentationAgentAudit"
         publication:
           $ref: "#/components/schemas/AdminDocumentationPublication"
+
+    AdminDocumentationCorpusPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDocumentationCorpusPageRow"
+        next_cursor:
+          type: string
+          description: Present when another page exists
+
+    AdminDocumentationCorpusPageRow:
+      type: object
+      required: [page_path, title, total, published, failed, no_practice, in_progress, stuck]
+      properties:
+        page_path:
+          type: string
+        title:
+          type: string
+        total:
+          type: integer
+          description: Workflows practicing this page
+        published:
+          type: integer
+        failed:
+          type: integer
+        no_practice:
+          type: integer
+        in_progress:
+          type: integer
+        stuck:
+          type: integer
+          description: Failed workflows plus workflows past their state class dwell budget
 
     DocumentationBatchCreateRequest:
       type: object

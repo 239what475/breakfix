@@ -19,10 +19,10 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-type AdminSection = "workflows" | "users" | "audit";
+type AdminSection = "workflows" | "users" | "audit" | "corpus";
 
 function adminSectionFromPath(): AdminSection {
-	const match = window.location.pathname.match(/^\/admin\/(workflows|users|audit)$/);
+	const match = window.location.pathname.match(/^\/admin\/(workflows|users|audit|corpus)$/);
 	return (match?.[1] as AdminSection) ?? "workflows";
 }
 

@@ -26,6 +26,10 @@ func (f fakeDocumentationLibrary) DocumentPageTitle(string) string {
 	return "Pod Lifecycle"
 }
 
+func (f fakeDocumentationLibrary) DocumentTitles() map[string]string {
+	return map[string]string{"docs/concepts/workloads/pods/pod-lifecycle": "Pod Lifecycle"}
+}
+
 func (f fakeDocumentationLibrary) ReadDocumentTree(string) ([]docsource.DocumentTreeChild, error) {
 	return f.tree, nil
 }

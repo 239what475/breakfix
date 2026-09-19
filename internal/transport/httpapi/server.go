@@ -213,6 +213,35 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		}
 		h.ListAdminDocumentationBatchItems(c, c.Param("batch_id"), params)
 	})
+	adminRoutes.GET("/documentation/corpus", func(c *gin.Context) {
+		params := api.ListAdminDocumentationCorpusParams{}
+		if raw := c.Query("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid corpus page limit"})
+				return
+			}
+			params.Limit = &parsed
+		}
+		if raw := c.Query("cursor"); raw != "" {
+			params.Cursor = &raw
+		}
+		if raw := c.Query("section"); raw != "" {
+			params.Section = &raw
+		}
+		if raw := c.Query("search"); raw != "" {
+			params.Search = &raw
+		}
+		if raw := c.Query("failures"); raw != "" {
+			parsed, err := strconv.ParseBool(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid corpus failures filter"})
+				return
+			}
+			params.Failures = &parsed
+		}
+		h.ListAdminDocumentationCorpus(c, params)
+	})
 	adminRoutes.GET("/documentation/workflows", func(c *gin.Context) {
 		params := api.ListAdminDocumentationWorkflowsParams{}
 		if raw := c.Query("limit"); raw != "" {

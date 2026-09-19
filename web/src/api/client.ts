@@ -33,11 +33,24 @@ import type {
 	AdminDocumentationWorkflow,
 	AdminDocumentationWorkflowDetail,
 	AdminDocumentationWorkflowList,
+	AdminDocumentationCorpusPage,
+	AdminDocumentBatch,
+	AdminDocumentBatchList,
+	AdminDocumentBatchItemsPage,
 	AdminRunnableActionPage,
 	AdminUserList,
 } from "./generated";
 
 export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
+
+// AdminDocumentBatchScopeInput is the declarative batch scope the console
+// sends when initiating a rollout over the corpus.
+export type AdminDocumentBatchScopeInput = {
+  kind: "full" | "sections" | "pages";
+  sections?: string[];
+  pages?: string[];
+  overrides?: { page_path: string; anchor: string }[];
+};
 
 const base = "/api";
 
@@ -343,8 +356,44 @@ export const api = {
 	listAdminUsers: () => request<AdminUserList>("GET", "/admin/users"),
 	resetAdminUserTOTP: (id: string, password: string) =>
 		request<RegisterResponse>("POST", `/admin/users/${id}/totp-reset`, { password }),
-	listAdminWorkflows: () =>
-		request<AdminDocumentationWorkflowList>("GET", "/admin/documentation/workflows"),
+	listAdminWorkflows: ({ cursor, limit = 50, state, page_path }: { cursor?: string; limit?: number; state?: string; page_path?: string } = {}) => {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (cursor) query.set("cursor", cursor);
+		if (state) query.set("state", state);
+		if (page_path) query.set("page_path", page_path);
+		return request<AdminDocumentationWorkflowList>("GET", `/admin/documentation/workflows?${query.toString()}`);
+	},
+	listAdminCorpus: ({ section, search, failures, cursor, limit = 50 }: { section?: string; search?: string; failures?: boolean; cursor?: string; limit?: number } = {}) => {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (section) query.set("section", section);
+		if (search) query.set("search", search);
+		if (failures) query.set("failures", "true");
+		if (cursor) query.set("cursor", cursor);
+		return request<AdminDocumentationCorpusPage>("GET", `/admin/documentation/corpus?${query.toString()}`);
+	},
+	listAdminBatches: (limit = 20) =>
+		request<AdminDocumentBatchList>("GET", `/admin/documentation/batches?limit=${limit}`),
+	getAdminBatch: (id: string) =>
+		request<AdminDocumentBatch>("GET", `/admin/documentation/batches/${encodeURIComponent(id)}`),
+	listAdminBatchItems: (id: string, { state, cursor, limit = 50 }: { state?: string; cursor?: string; limit?: number } = {}) => {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (state) query.set("state", state);
+		if (cursor) query.set("cursor", cursor);
+		return request<AdminDocumentBatchItemsPage>("GET", `/admin/documentation/batches/${encodeURIComponent(id)}/items?${query.toString()}`);
+	},
+	createAdminBatch: (scope: AdminDocumentBatchScopeInput, concurrency?: number) =>
+		request<AdminDocumentBatch>("POST", "/admin/documentation/batches", {
+			scope,
+			...(concurrency ? { concurrency } : {}),
+		}),
+	pauseAdminBatch: (id: string, reason: string) =>
+		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/pause`, { reason }),
+	resumeAdminBatch: (id: string, reason: string) =>
+		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/resume`, { reason }),
+	cancelAdminBatch: (id: string, reason: string) =>
+		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/cancel`, { reason }),
+	retryFailedAdminBatch: (id: string, reason: string) =>
+		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/retry-failed`, { reason }),
 	getAdminWorkflow: (id: string) =>
 		request<AdminDocumentationWorkflowDetail>("GET", `/admin/documentation/workflows/${id}`),
 	forceFailAdminWorkflow: (id: string, reason: string) =>

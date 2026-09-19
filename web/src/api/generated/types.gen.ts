@@ -280,6 +280,31 @@ export type AdminDocumentationWorkflowDetail = {
     publication?: AdminDocumentationPublication;
 };
 
+export type AdminDocumentationCorpusPage = {
+    items: Array<AdminDocumentationCorpusPageRow>;
+    /**
+     * Present when another page exists
+     */
+    next_cursor?: string;
+};
+
+export type AdminDocumentationCorpusPageRow = {
+    page_path: string;
+    title: string;
+    /**
+     * Workflows practicing this page
+     */
+    total: number;
+    published: number;
+    failed: number;
+    no_practice: number;
+    in_progress: number;
+    /**
+     * Failed workflows plus workflows past their state class dwell budget
+     */
+    stuck: number;
+};
+
 export type DocumentationBatchCreateRequest = {
     scope: AdminDocumentBatchScope;
     /**
@@ -1989,6 +2014,61 @@ export type RetryFailedAdminDocumentationBatchItemsResponses = {
 };
 
 export type RetryFailedAdminDocumentationBatchItemsResponse = RetryFailedAdminDocumentationBatchItemsResponses[keyof RetryFailedAdminDocumentationBatchItemsResponses];
+
+export type ListAdminDocumentationCorpusData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Tree node path; only pages under it are returned
+         */
+        section?: string;
+        /**
+         * Case-insensitive substring match on the page title, resolved from the library manifests
+         */
+        search?: string;
+        /**
+         * Only pages with failed or dwell-stuck workflows
+         */
+        failures?: boolean;
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/admin/documentation/corpus';
+};
+
+export type ListAdminDocumentationCorpusErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type ListAdminDocumentationCorpusError = ListAdminDocumentationCorpusErrors[keyof ListAdminDocumentationCorpusErrors];
+
+export type ListAdminDocumentationCorpusResponses = {
+    /**
+     * Corpus page rows in path order
+     */
+    200: AdminDocumentationCorpusPage;
+};
+
+export type ListAdminDocumentationCorpusResponse = ListAdminDocumentationCorpusResponses[keyof ListAdminDocumentationCorpusResponses];
 
 export type ListAdminRunnableActionsData = {
     body?: never;

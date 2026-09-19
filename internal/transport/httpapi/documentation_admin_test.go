@@ -359,3 +359,63 @@ func (c fakeDocumentationCorpus) WorkflowContext() documentdomain.DocumentContex
 		Version: "v1.34", Language: "en", License: "CC BY 4.0",
 	}
 }
+
+func TestAdminDocumentationCorpusSearchesTitlesAndRollsUpStates(t *testing.T) {
+	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, database *postgres.Store) *kubernetes.Client {
+		service, err := appdocument.NewService(database.DocumentPractice, database.Runnable)
+		if err != nil {
+			t.Fatalf("create document practice service: %v", err)
+		}
+		dependencies.Documentation = &liveDocumentationAdminApplication{service: service}
+		dependencies.DocumentationLibrary = fakeDocumentationLibrary{}
+		return nil
+	})
+	adminRegister := server.register(t, "alice", "alice-password")
+	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
+
+	// A workflow on the fake library's only page.
+	now := time.Now().UTC()
+	workflow, err := documentdomain.NewWorkflow("document-workflow-corpus", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := documentdomain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+	if err := server.db.DocumentPractice.CreateWorkflow(context.Background(), workflow, identity, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	unauthorized := server.do(t, http.MethodGet, "/api/admin/documentation/corpus", "", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("corpus without a token = %d, want 401", unauthorized.Code)
+	}
+	recorder := server.do(t, http.MethodGet, "/api/admin/documentation/corpus", adminToken, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("corpus = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var page api.AdminDocumentationCorpusPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].PagePath != "docs/concepts/workloads/pods/pod-lifecycle" || page.Items[0].Title != "Pod Lifecycle" {
+		t.Fatalf("corpus page = %#v", page.Items)
+	}
+	if page.Items[0].Total != 1 || page.Items[0].InProgress != 1 || page.Items[0].Stuck != 0 {
+		t.Fatalf("corpus rollup = %#v", page.Items[0])
+	}
+
+	// The title search matches server-side.
+	searched := server.do(t, http.MethodGet, "/api/admin/documentation/corpus?search=pod+life", adminToken, nil)
+	if searched.Code != http.StatusOK {
+		t.Fatalf("search = %d", searched.Code)
+	}
+	if err := json.Unmarshal(searched.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("searched corpus = %#v", page.Items)
+	}
+	missed := server.do(t, http.MethodGet, "/api/admin/documentation/corpus?search=zzz", adminToken, nil)
+	if err := json.Unmarshal(missed.Body.Bytes(), &page); err != nil || len(page.Items) != 0 {
+		t.Fatalf("unmatched search = %#v, %v", page.Items, err)
+	}
+}

@@ -1516,3 +1516,75 @@ func (d *DocumentPracticeRepository) CancelBatch(ctx context.Context, batchID st
 	}
 	return cancelled, tx.Commit()
 }
+
+// CorpusPageStateCounts is one page's workflow-state rollup for the admin
+// corpus projection. Stuck counts workflows that are either Failed or past
+// their state class's dwell budget.
+type CorpusPageStateCounts struct {
+	Total      int
+	Published  int
+	Failed     int
+	NoPractice int
+	InProgress int
+	Stuck      int
+}
+
+// SummarizeWorkflowStatesByPages rolls the pinned identity's workflows up per
+// page path. Unknown pages simply have no rows. The dwell cutoffs split
+// stuck detection between Agent phases and public runtime phases.
+func (d *DocumentPracticeRepository) SummarizeWorkflowStatesByPages(ctx context.Context, identity domain.DocumentContext, pages []string, agentCutoff, runtimeCutoff time.Time) (map[string]CorpusPageStateCounts, error) {
+	result := map[string]CorpusPageStateCounts{}
+	if len(pages) == 0 {
+		return result, nil
+	}
+	const chunk = 100
+	for start := 0; start < len(pages); start += chunk {
+		end := start + chunk
+		if end > len(pages) {
+			end = len(pages)
+		}
+		batch := pages[start:end]
+		query := `SELECT page_path, state, COUNT(*),
+				COUNT(*) FILTER (WHERE state = 'Failed' OR updated_at <= (CASE WHEN state IN ('MaterializingArtifact','Verifying','VerificationReviewing','Publishing') THEN ?::timestamptz ELSE ?::timestamptz END))
+				FROM document_workflows
+				WHERE source_id = ? AND commit = ? AND language = ? AND page_path IN (` + placeholders(len(batch)) + `)
+				GROUP BY page_path, state`
+		args := []any{runtimeCutoff.UTC(), agentCutoff.UTC(), identity.SourceID, identity.Commit, identity.Language}
+		for _, page := range batch {
+			args = append(args, page)
+		}
+		rows, err := d.conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("summarize document workflow states: %w", err)
+		}
+		for rows.Next() {
+			var pagePath string
+			var state domain.WorkflowState
+			var count, stuck int
+			if err := rows.Scan(&pagePath, &state, &count, &stuck); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			counts := result[pagePath]
+			counts.Total += count
+			counts.Stuck += stuck
+			switch state {
+			case domain.Published:
+				counts.Published += count
+			case domain.Failed:
+				counts.Failed += count
+			case domain.NoPractice:
+				counts.NoPractice += count
+			default:
+				counts.InProgress += count
+			}
+			result[pagePath] = counts
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return result, nil
+}

@@ -392,6 +392,17 @@ func (l Library) DocumentPageTitle(path string) string {
 	return l.titleIndex[normalized]
 }
 
+// DocumentTitles lists every library page path with its manifest title. The
+// map is a snapshot copy; callers must not mutate it expecting library
+// changes.
+func (l Library) DocumentTitles() map[string]string {
+	titles := make(map[string]string, len(l.titleIndex))
+	for path, title := range l.titleIndex {
+		titles[path] = title
+	}
+	return titles
+}
+
 func (l Library) ReadMetadata(path string) (Metadata, error) {
 	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
 	if !libraryContains(l.global.Pages, normalized) {

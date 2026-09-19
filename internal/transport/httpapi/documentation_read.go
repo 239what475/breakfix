@@ -19,6 +19,8 @@ type documentationLibrary interface {
 	// DocumentPageTitle resolves one page's title from the library manifests;
 	// an unknown page yields an empty string.
 	DocumentPageTitle(string) string
+	// DocumentTitles lists every library page path with its title.
+	DocumentTitles() map[string]string
 	ReadDocumentTree(string) ([]docsource.DocumentTreeChild, error)
 	ReadDocumentAsset(string) ([]byte, string, error)
 	// PinnedContext is the verified source/commit/language identity reader
