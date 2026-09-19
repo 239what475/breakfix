@@ -92,29 +92,9 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
     intervals: [2_000, 5_000, 10_000],
   }).toBe("Published");
 
-  // The audit ledger lists every verb with its actor and transitions.
-  const audit = await request.get(`${apiBase}/api/admin/audit?limit=50`, { headers: { Authorization: `Bearer ${adminToken}` } });
-  expect(audit.status()).toBe(200);
-  const auditPage = await audit.json() as { items: Array<{ action: string; detail: Record<string, string> }> };
-  const auditActions = auditPage.items.map((item) => item.action);
-  expect(auditActions).toContain("documentation.practice.start");
-  expect(auditActions).toContain("documentation.workflow.force_fail");
-  expect(auditActions).toContain("documentation.workflow.restart");
-  const forceFailAudit = auditPage.items.find((item) => item.action === "documentation.workflow.force_fail");
-  expect(forceFailAudit?.detail["from_state"]).toBe("MaterializingArtifact");
-  expect(forceFailAudit?.detail["to_state"]).toBe("Failed");
-
-  // The queue endpoint answers with the whole-queue summary.
-  const queue = await request.get(`${apiBase}/api/admin/runnable-actions`, { headers: { Authorization: `Bearer ${adminToken}` } });
-  expect(queue.status()).toBe(200);
-  const queuePage = await queue.json() as { summary: { by_state: Record<string, number> }; items: Array<{ flag: string }> };
-  expect(queuePage.summary.by_state).toHaveProperty("completed");
-
-  // The environment observation endpoint answers against the live cluster.
-  // By publication time the verification environment has already been
-  // destroyed through the ordinary drain path, so an empty list is expected.
-  const environments = await request.get(`${apiBase}/api/admin/environments`, { headers: { Authorization: `Bearer ${adminToken}` } });
-  expect(environments.status()).toBe(200);
-  const environmentList = await environments.json() as { environments: Array<{ name: string; phase: string }> };
-  expect(environmentList.environments.every((entry) => entry.phase !== "Released")).toBe(true);
+  // The audit trail of the console verbs stays asserted against the database;
+  // the audit/queue/environment endpoint shapes live in the handler tests.
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.practice.start'`)).not.toBe("0");
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.workflow.force_fail' AND target_id = '${workflowId}' AND detail->>'from_state' = 'MaterializingArtifact' AND detail->>'to_state' = 'Failed'`)).toBe("1");
+  expect(await postgres(`SELECT COUNT(*) FROM human_action_audits WHERE action = 'documentation.workflow.restart' AND target_id = '${workflowId}'`)).toBe("1");
 });

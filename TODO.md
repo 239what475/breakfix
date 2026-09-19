@@ -72,7 +72,7 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 1 test(e2e): drop admin assertions covered by the lower tiers
 
-- [ ] 删 auth-roles fast spec（403 门禁与角色分配 handler 已逐条断言）；
+- [x] 删 auth-roles fast spec（403 门禁与角色分配 handler 已逐条断言）；
       剪 workflow-rescue 尾部的审计列表/queue 汇总/environments 探测
       （handler 已覆盖），场景保留状态可见性与 DB 断言；admin 8→7
 
