@@ -31,14 +31,17 @@ func TestWorkflowLedgerIsAppendOnlyAndTransitionsAreGated(t *testing.T) {
 	}
 }
 
-func TestWorkflowRevisionIsBounded(t *testing.T) {
+func TestArtifactReviewingCannotReturnToGenerating(t *testing.T) {
 	w, err := NewWorkflow("workflow-2", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.MaxRevisions = 1
-	if err := w.Revise(); err == nil {
-		t.Fatal("revision limit ignored")
+	w.State = ArtifactReviewing
+	if err := w.Advance(Generating); err == nil {
+		t.Fatal("ArtifactReviewing -> Generating accepted after the revision loop removal")
+	}
+	if err := w.Advance(MaterializingArtifact); err != nil {
+		t.Fatalf("ArtifactReviewing -> MaterializingArtifact = %v", err)
 	}
 }
 
@@ -70,7 +73,7 @@ func TestWorkflowRestartOnlyFromFailedOrRejected(t *testing.T) {
 	if w.State != Planning || w.Revision != 3 {
 		t.Fatalf("restarted workflow = %#v", w)
 	}
-	// The MaxRevisions cap bounds the automatic revision loop only.
+	// MaxRevisions never caps a restart: it is a human judgment.
 	w.MaxRevisions = 2
 	w.State = Failed
 	if err := w.RestartAt(now); err != nil {

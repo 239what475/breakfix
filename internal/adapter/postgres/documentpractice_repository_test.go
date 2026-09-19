@@ -38,12 +38,6 @@ func TestDocumentPracticeRepositoryAppendsAndAdvancesAnImmutableLedger(t *testin
 	if _, err := database.DocumentPractice.AdvanceWorkflow(context.Background(), workflow.ID, 1, domain.Generating, now.Add(2*time.Second)); err == nil {
 		t.Fatal("stale state version accepted")
 	}
-	if _, err := database.DocumentPractice.AcquireWorkflowLease(context.Background(), workflow.ID, "server-a", time.Minute, now.Add(3*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.DocumentPractice.AcquireWorkflowLease(context.Background(), workflow.ID, "server-b", time.Minute, now.Add(4*time.Second)); err == nil {
-		t.Fatal("active workflow lease was stolen")
-	}
 	action := runnable.ActionIdentity{Content: runnable.ContentIdentity{Kind: "documentation-practice", ID: "practice-document-01", Revision: "candidate-01"}, SpecDigest: testRunnableDigest("f"), Phase: runnable.ActionMaterializeArtifact, StateVersion: 2}
 	if err := database.DocumentPractice.BindRunnableAction(context.Background(), workflow.ID, action, now.Add(5*time.Second)); err != nil {
 		t.Fatal(err)

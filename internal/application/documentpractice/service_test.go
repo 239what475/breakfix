@@ -379,20 +379,6 @@ func (s *memoryDocumentStore) AdvanceWorkflow(_ context.Context, id string, expe
 	return workflow, nil
 }
 
-func (s *memoryDocumentStore) AcquireWorkflowLease(_ context.Context, id, owner string, ttl time.Duration, now time.Time) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
-	if err != nil {
-		return domain.Workflow{}, err
-	}
-	if workflow.LeaseOwner != "" && workflow.LeaseOwner != owner && workflow.LeaseExpiresAt != nil && workflow.LeaseExpiresAt.After(now) {
-		return domain.Workflow{}, errors.New("lease held")
-	}
-	expires := now.Add(ttl)
-	workflow.LeaseOwner, workflow.LeaseExpiresAt = owner, &expires
-	s.workflows[id] = workflow
-	return workflow, nil
-}
-
 func (s *memoryDocumentStore) SaveAgentAudit(_ context.Context, _ string, audit domain.AgentAudit) error {
 	if err := audit.Validate(); err != nil {
 		return err

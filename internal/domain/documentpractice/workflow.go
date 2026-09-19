@@ -85,8 +85,6 @@ type Workflow struct {
 	StateVersion   int64            `json:"state_version"`
 	Revision       int64            `json:"revision"`
 	MaxRevisions   int64            `json:"max_revisions"`
-	LeaseOwner     string           `json:"lease_owner,omitempty"`
-	LeaseExpiresAt *time.Time       `json:"lease_expires_at,omitempty"`
 	Artifacts      []ArtifactRecord `json:"artifacts"`
 	UpdatedAt      time.Time        `json:"updated_at"`
 }
@@ -172,27 +170,6 @@ func (w *Workflow) AdvanceAt(next WorkflowState, now time.Time, requiredKinds ..
 	return nil
 }
 
-func (w *Workflow) Revise() error {
-	return w.ReviseAt(time.Now().UTC())
-}
-
-func (w *Workflow) ReviseAt(now time.Time) error {
-	if w == nil || w.State.Terminal() {
-		return errors.New("workflow cannot be revised")
-	}
-	if w.Revision >= w.MaxRevisions {
-		return errors.New("workflow revision limit reached")
-	}
-	w.Revision++
-	w.State = Planning
-	w.StateVersion++
-	if now.IsZero() {
-		return errors.New("workflow revision time is required")
-	}
-	w.UpdatedAt = now.UTC()
-	return nil
-}
-
 // Administrative workflow errors map onto distinct HTTP outcomes: not-found
 // to 404, conflicts to 409.
 var (
@@ -205,9 +182,9 @@ var (
 )
 
 // RestartAt returns a failed or rejected workflow to Planning for a fresh
-// administrative rerun. It is deliberately not capped by MaxRevisions: that
-// cap bounds the automatic revision loop, while a restart is a human
-// judgment. The workflow only resets state; no Agent role is invoked here.
+// administrative rerun. It is deliberately not capped by MaxRevisions: a
+// restart is a human judgment, not an automatic loop iteration. The workflow
+// only resets state; no Agent role is invoked here.
 func (w *Workflow) RestartAt(now time.Time) error {
 	if w == nil {
 		return errors.New("workflow is nil")
@@ -234,7 +211,7 @@ func allowedTransition(from, to WorkflowState) bool {
 	case Generating:
 		return to == ArtifactReviewing || to == Failed
 	case ArtifactReviewing:
-		return to == MaterializingArtifact || to == Generating || to == Rejected || to == Failed
+		return to == MaterializingArtifact || to == Rejected || to == Failed
 	case MaterializingArtifact:
 		return to == Verifying || to == Failed
 	case Verifying:

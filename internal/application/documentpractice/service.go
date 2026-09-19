@@ -23,7 +23,6 @@ type Store interface {
 	GetWorkflow(context.Context, string) (domain.Workflow, error)
 	AppendArtifact(context.Context, string, domain.ArtifactRecord) error
 	AdvanceWorkflow(context.Context, string, int64, domain.WorkflowState, time.Time, ...string) (domain.Workflow, error)
-	AcquireWorkflowLease(context.Context, string, string, time.Duration, time.Time) (domain.Workflow, error)
 	SaveAgentAudit(context.Context, string, domain.AgentAudit) error
 	BindRunnableAction(context.Context, string, runnable.ActionIdentity, time.Time) error
 	WorkflowForRunnableAction(context.Context, runnable.ActionIdentity) (string, bool, error)

@@ -105,7 +105,7 @@ func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflo
 		return err
 	}
 	if action == nil {
-		_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.LeaseOwner, workflow.LeaseExpiresAt, workflow.UpdatedAt.UTC())
+		_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.UpdatedAt.UTC())
 		return err
 	}
 	if err := action.Validate(); err != nil {
@@ -116,7 +116,7 @@ func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflo
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.LeaseOwner, workflow.LeaseExpiresAt, workflow.UpdatedAt.UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.UpdatedAt.UTC()); err != nil {
 		return err
 	}
 	if err := insertHumanAction(ctx, tx, *action); err != nil {
@@ -136,7 +136,7 @@ func (d *DocumentPracticeRepository) RecordHumanAction(ctx context.Context, acti
 
 func (d *DocumentPracticeRepository) GetWorkflow(ctx context.Context, id string) (domain.Workflow, error) {
 	var w domain.Workflow
-	err := d.conn.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ?`, id).Scan(&w.ID, &w.State, &w.StateVersion, &w.Revision, &w.MaxRevisions, &w.LeaseOwner, &w.LeaseExpiresAt, &w.UpdatedAt)
+	err := d.conn.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ?`, id).Scan(&w.ID, &w.State, &w.StateVersion, &w.Revision, &w.MaxRevisions, &w.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Workflow{}, errors.New("document workflow not found")
 	}
@@ -188,7 +188,7 @@ func (d *DocumentPracticeRepository) adminWorkflowTransition(ctx context.Context
 		return domain.Workflow{}, fmt.Errorf("begin administrative workflow transition: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -293,7 +293,7 @@ func (d *DocumentPracticeRepository) WatchdogFailWorkflow(ctx context.Context, w
 		return domain.Workflow{}, fmt.Errorf("begin watchdog workflow transition: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -371,7 +371,7 @@ type DocumentWorkflowObservation struct {
 // action status bound to its current state version, newest first. The binding
 // join is intentionally read-only; stuck flags are derived by callers.
 func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Context) ([]DocumentWorkflowObservation, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.lease_owner, w.lease_expires_at, w.updated_at,
+	rows, err := d.conn.QueryContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.updated_at,
 		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
 		FROM document_workflows w
 		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
@@ -394,7 +394,7 @@ func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Contex
 
 // GetWorkflowObservation resolves one workflow's observation read model.
 func (d *DocumentPracticeRepository) GetWorkflowObservation(ctx context.Context, workflowID string) (DocumentWorkflowObservation, error) {
-	row := d.conn.QueryRowContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.lease_owner, w.lease_expires_at, w.updated_at,
+	row := d.conn.QueryRowContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.updated_at,
 		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
 		FROM document_workflows w
 		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
@@ -413,7 +413,7 @@ func scanWorkflowObservation(row interface{ Scan(...any) error }) (DocumentWorkf
 	var actionState sql.NullString
 	var attempt sql.NullInt64
 	var failureClass, failureCode, failureSummary sql.NullString
-	if err := row.Scan(&observation.Workflow.ID, &observation.Workflow.State, &observation.Workflow.StateVersion, &observation.Workflow.Revision, &observation.Workflow.MaxRevisions, &observation.Workflow.LeaseOwner, &observation.Workflow.LeaseExpiresAt, &observation.Workflow.UpdatedAt,
+	if err := row.Scan(&observation.Workflow.ID, &observation.Workflow.State, &observation.Workflow.StateVersion, &observation.Workflow.Revision, &observation.Workflow.MaxRevisions, &observation.Workflow.UpdatedAt,
 		&phase, &actionState, &attempt, &failureClass, &failureCode, &failureSummary); err != nil {
 		return DocumentWorkflowObservation{}, err
 	}
@@ -487,7 +487,7 @@ func (d *DocumentPracticeRepository) AdvanceWorkflow(ctx context.Context, workfl
 		return domain.Workflow{}, fmt.Errorf("begin advance document workflow: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	w, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	w, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -513,21 +513,6 @@ func (d *DocumentPracticeRepository) AdvanceWorkflow(ctx context.Context, workfl
 		return domain.Workflow{}, err
 	}
 	return w, nil
-}
-
-func (d *DocumentPracticeRepository) AcquireWorkflowLease(ctx context.Context, workflowID, owner string, ttl time.Duration, now time.Time) (domain.Workflow, error) {
-	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(owner) == "" || ttl <= 0 || now.IsZero() {
-		return domain.Workflow{}, errors.New("document workflow lease is invalid")
-	}
-	expires := now.UTC().Add(ttl)
-	result, err := d.conn.ExecContext(ctx, `UPDATE document_workflows SET lease_owner = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND (lease_owner = '' OR lease_owner = ? OR lease_expires_at <= ?)`, owner, expires, now.UTC(), workflowID, owner, now.UTC())
-	if err != nil {
-		return domain.Workflow{}, err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return domain.Workflow{}, errors.New("document workflow lease is held")
-	}
-	return d.GetWorkflow(ctx, workflowID)
 }
 
 // BindRunnableAction reserves the exact public runtime identity before it can
@@ -695,7 +680,7 @@ func (d *DocumentPracticeRepository) PublishPracticeRevision(ctx context.Context
 		return domain.Workflow{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, lease_owner, lease_expires_at, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -923,7 +908,7 @@ func domainDigest(value []byte) string {
 
 func scanDocumentWorkflow(row interface{ Scan(...any) error }) (domain.Workflow, error) {
 	var w domain.Workflow
-	err := row.Scan(&w.ID, &w.State, &w.StateVersion, &w.Revision, &w.MaxRevisions, &w.LeaseOwner, &w.LeaseExpiresAt, &w.UpdatedAt)
+	err := row.Scan(&w.ID, &w.State, &w.StateVersion, &w.Revision, &w.MaxRevisions, &w.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Workflow{}, fmt.Errorf("scan document workflow: %w", domain.ErrWorkflowNotFound)
 	}

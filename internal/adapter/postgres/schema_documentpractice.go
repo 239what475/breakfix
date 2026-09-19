@@ -25,10 +25,7 @@ var schemaDocumentPracticeStatements = []string{
 		state_version BIGINT NOT NULL CHECK (state_version >= 1),
 		revision BIGINT NOT NULL CHECK (revision >= 1),
 		max_revisions BIGINT NOT NULL CHECK (max_revisions >= 1),
-		lease_owner TEXT NOT NULL DEFAULT '',
-		lease_expires_at TIMESTAMPTZ,
-		updated_at TIMESTAMPTZ NOT NULL,
-		CHECK ((lease_owner = '') = (lease_expires_at IS NULL))
+		updated_at TIMESTAMPTZ NOT NULL
 	)`,
 	`CREATE TABLE document_runnable_actions (
 		action_key TEXT PRIMARY KEY,

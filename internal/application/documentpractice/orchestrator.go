@@ -2,7 +2,6 @@ package documentpractice
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -86,25 +85,4 @@ func (o *Orchestrator) Start(id string) (domain.Workflow, error) {
 		return domain.Workflow{}, err
 	}
 	return w, nil
-}
-
-func (o *Orchestrator) RequireLease(workflowID, owner string, now time.Time) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if strings.TrimSpace(owner) == "" || now.IsZero() {
-		return errors.New("workflow lease requires owner and time")
-	}
-	w, ok := o.ledger.Workflow(workflowID)
-	if !ok {
-		return errors.New("workflow not found")
-	}
-	if w.LeaseOwner != "" && w.LeaseOwner != owner && w.LeaseExpiresAt != nil && w.LeaseExpiresAt.After(now) {
-		return fmt.Errorf("workflow lease held by %s", w.LeaseOwner)
-	}
-	expires := now.Add(2 * time.Minute)
-	w.LeaseOwner, w.LeaseExpiresAt = owner, &expires
-	o.ledger.mu.Lock()
-	o.ledger.workflows[workflowID] = w
-	o.ledger.mu.Unlock()
-	return nil
 }
