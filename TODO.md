@@ -125,6 +125,22 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 - [x] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
       驱动 parked→Failed→条目跟随，进一步压薄合并链
 
+### 验收（2026-09-20 回填）
+
+已于 2026-09-20 完成并验收：提交 1–7（`d7070f2`、`15df998`、`a26882f`、
+`c68ee1e`、`d340786`、`2b9623c`、`d780567`）按 A/B/C 波逐波落地，D 波可选
+加固一并完成；每个删除性提交均附"被删 E2E 断言 → 新家"对照。E2E 从 21 条
+降到 10 条（admin 8→4：setup+救援+批次发布+合并链；documentation 10→3：
+发布全链+会话终端+阅读器薄 smoke；ui 3 条不动），日常开发回路由 web Vitest
+层承担（20 条：admin 12 + 阅读器 8），mock 边界切在 client 模块（生成的
+`src/api/generated` 只含类型，运行时 `api` 对象在 `src/api/client`）。提交 7
+的 DB-gated 真 tick 测试对真 Postgres（unittest-pg）跑绿，`internal/adapter/
+postgres` 全包 54.9s 通过。三波收尾各跑全量回归（A/B/C），末轮（2026-09-20）
+全绿：docs-smoke、test-unit 45 包、verify-generated、web 构建、web 单测
+20 条、ui 3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 3/3（3.9m）、
+admin 4/4（7.5m，合并链单 park 2.7m，替代原 watchdog+controls 双 park 约
+3m）。
+
 ## 挂起待决策（不排期）
 
 - **内容治理/紧急下架**：场景侧非 authoring 内容无法下架、无管理员覆盖;实践内容
