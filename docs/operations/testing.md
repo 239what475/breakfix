@@ -58,6 +58,17 @@ make test-e2e-node      # Node 学习主路径
 make test-e2e-recovery  # Server 与 Controller restart
 ```
 
+单套件入口各自完整执行一次 prepare，保证从任何状态都正确；一次全量回归改用编排入口，只为整条链付一次
+prepare：
+
+```bash
+make test-e2e-regression
+```
+
+它执行一次 documentation prepare，随后按 admin →（数据库级 reset）→ documentation → k8s → ui 串行运行；
+full 剖面再追加 node 与 recovery。数据库级 reset 只重建数据库并让 Server 从 runtime Secret 记录的
+digest 重装 fixture Catalog，部署、文档库挂载、Registry 与 prepared 标记全部保持原样。
+
 `e2e-prepare` 选择动态 `127.0.0.1` 端口，把它记录在 `.local/e2e/<target>/ui-origin-port` 并写入 Server 配置。每个测试入口由
 `scripts/kind/run-e2e.sh` 独占该端口的 Server port-forward；测试代码不能自行启动 port-forward。
 
