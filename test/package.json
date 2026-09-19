@@ -14,7 +14,6 @@
     "test:e2e:documentation:reader": "playwright test -c playwright.documentation.config.ts --project=reader-fast",
     "test:e2e:documentation:practice": "playwright test -c playwright.documentation.config.ts --project=practice-chain",
     "test:e2e:admin": "playwright test -c playwright.admin.config.ts",
-    "test:e2e:admin:fast": "playwright test -c playwright.admin.config.ts --project=admin-fast",
     "test:e2e:admin:chain": "playwright test -c playwright.admin.config.ts --project=admin-chain",
     "test:acceptance:node": "playwright test -c playwright.agent-live.config.ts authoring.node.live.spec.ts",
     "test:acceptance:mcp": "playwright test -c playwright.agent-live.config.ts authoring.mcp.live.spec.ts",

@@ -86,9 +86,9 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 3 test(web): console component tests replace the admin fast specs
 
-- [ ] 用户区 TOTP 重置对话框、审计区行渲染与 payload 展开、工作流列表
+- [x] 用户区 TOTP 重置对话框、审计区行渲染与 payload 展开、工作流列表
       stepper/终态无 stepper/溢出菜单/确认按钮原因必填
-- [ ] 删 users-totp、audit-ui 两条 e2e，摘除 admin-fast 项目与
+- [x] 删 users-totp、audit-ui 两条 e2e，摘除 admin-fast 项目与
       test:e2e:admin:fast 脚本；admin 7→5
 
 **B 波（阅读器降级）**
