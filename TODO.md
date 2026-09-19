@@ -122,7 +122,7 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 7（可选，不阻塞验收）test(postgres): live ticks for watchdog and scheduler
 
-- [ ] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
+- [x] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
       驱动 parked→Failed→条目跟随，进一步压薄合并链
 
 ## 挂起待决策（不排期）
