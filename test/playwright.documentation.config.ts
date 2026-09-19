@@ -12,4 +12,14 @@ export default defineConfig({
     headless: true,
     trace: "retain-on-failure",
   },
+  projects: [
+    // Pure reader rendering: no practice chains, safe to re-run in seconds
+    // against an already prepared target.
+    { name: "reader-fast", testMatch: /reader\.fast\.spec\.ts$/ },
+    // Real publication chains: the first test publishes the pinned practice
+    // and restarts Server and Runtime Worker mid-flight, so the project stays
+    // on one worker and runs only after the reader tests finish - a parallel
+    // reader walk would hit the restart window and lose its tree fetches.
+    { name: "practice-chain", testMatch: /practice\.chain\.spec\.ts$/, workers: 1, dependencies: ["reader-fast"] },
+  ],
 });

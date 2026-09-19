@@ -27,6 +27,10 @@ WEB_DIR := web
 WEB_DIST := $(WEB_DIR)/dist
 WEB_EMBED_DIR := internal/transport/httpapi/ui/assets
 WEB_DEPS_STAMP := $(WEB_DIR)/node_modules/.breakfix-deps
+# The web bundle only rebuilds when its inputs change; E2E prepare invoked
+# after a Go-only edit then skips the multi-minute vite build entirely.
+WEB_SRC_FILES := $(shell find $(WEB_DIR)/src $(WEB_DIR)/public $(WEB_DIR)/index.html $(WEB_DIR)/vite.config.ts $(WEB_DIR)/tsconfig*.json -type f 2>/dev/null | sort)
+WEB_BUILD_STAMP := $(WEB_DIR)/.breakfix-web-build
 TEST_DIR := test
 TEST_DEPS_STAMP := $(TEST_DIR)/node_modules/.breakfix-deps
 BIN_DIR := bin
@@ -108,8 +112,12 @@ verify-generated: web-deps
 	diff -u $(OPENAPI_GO_OUTPUT) "$$tmp/server.gen.go" && \
 	diff -ru $(OPENAPI_FRONTEND_OUTPUT) "$$tmp/frontend"
 
-build: web-deps
+$(WEB_BUILD_STAMP): $(WEB_DEPS_STAMP) $(WEB_SRC_FILES)
+	@test -d $(WEB_DIST) || rm -f $@
 	npm run build --prefix $(WEB_DIR)
+	@touch $@
+
+build: web-deps $(WEB_BUILD_STAMP)
 	@mkdir -p $(WEB_EMBED_DIR)
 	@find $(WEB_EMBED_DIR) -mindepth 1 ! -name .gitkeep -delete
 	@cp -a $(WEB_DIST)/. $(WEB_EMBED_DIR)/

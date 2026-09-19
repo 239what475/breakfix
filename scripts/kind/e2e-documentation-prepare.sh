@@ -13,13 +13,35 @@ fail() { printf 'Breakfix documentation E2E prepare: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"; }
 encode() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
-for tool in base64 docker go jq kubectl make tr; do require_command "$tool"; done
+for tool in base64 curl docker go jq kubectl make sed tr; do require_command "$tool"; done
 [ -f "$docs_fixture_root/build-info.json" ] || fail "docs-project fixture is incomplete; run make docs-fixture"
+
+port_forward_pid=
+port_forward_log=$state_dir/doc-prepare-port-forward.log
+
+start_port_forward() {
+	local_port=$1
+	: >"$port_forward_log"
+	kubectl -n "$namespace" port-forward --address 127.0.0.1 service/breakfix-server "$local_port:9090" >"$port_forward_log" 2>&1 &
+	port_forward_pid=$!
+}
+
+stop_port_forward() {
+	if [ -n "$port_forward_pid" ] && kill -0 "$port_forward_pid" >/dev/null 2>&1; then
+		kill "$port_forward_pid" >/dev/null 2>&1 || true
+		wait "$port_forward_pid" >/dev/null 2>&1 || true
+	fi
+	port_forward_pid=
+}
+
+trap stop_port_forward EXIT HUP INT TERM
 
 # Prepare the ordinary disposable target first so this suite inherits its
 # isolated database, Registry, Incus projects, and immutable runtime snapshot.
-make -C "$repo_root" --no-print-directory e2e-prepare
-"$target_script" assert-prepared
+# The Server rollout is deferred: this script patches documentation config
+# into the deployment afterwards and owns the single final rollout, the
+# fixture Catalog projection wait, and the prepared marker.
+BREAKFIX_E2E_DEFER_SERVER_RESTART=1 make -C "$repo_root" --no-print-directory e2e-prepare
 
 fixture_build_dir=$state_dir/document-agent-fixture-build
 mkdir -p "$fixture_build_dir"
@@ -28,6 +50,15 @@ docker build --platform linux/amd64 --provenance=false -t breakfix/document-agen
 	-f "$repo_root/build/images/document-agent-fixture/Dockerfile" "$fixture_build_dir" >/dev/null
 kind_cluster=${BREAKFIX_E2E_KIND_CLUSTER:-breakfix-e2e}
 kind load docker-image --name "$kind_cluster" breakfix/document-agent-fixture:e2e >/dev/null
+# The verification pods run inside the vcluster environments hosted on the
+# Kind node; landing the small workload image in the node's containerd keeps
+# the first wait short. `kind load` rejects the multi-arch busybox manifest
+# because the local store only holds the host platform, and the node cannot
+# reach docker.io directly - so the host platform blobs travel over through
+# docker save instead.
+kind_node=${BREAKFIX_E2E_KIND_NODE:-${kind_cluster}-control-plane}
+docker image inspect busybox:1.36.1 >/dev/null 2>&1 || docker pull busybox:1.36.1 >/dev/null
+docker save busybox:1.36.1 | docker exec -i "$kind_node" ctr --namespace=k8s.io images import - >/dev/null
 kubectl -n "$namespace" apply -f "$repo_root/test/kind/document-agent-fixture.yaml" >/dev/null
 # The fixture image is rebuilt under a stable E2E tag. Restart its Deployment
 # so Kubernetes does not keep serving an earlier locally loaded image.
@@ -105,5 +136,54 @@ kubectl -n "$namespace" patch secret "$runtime_secret" --type merge --patch \
 	"$(jq -cn --arg value "documentation-fixture-key" --arg encoded "$(encode documentation-fixture-key)" '{data:{deepseek_api_key:$encoded}}')" >/dev/null
 kubectl -n "$namespace" rollout restart deployment/breakfix-server >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-server --timeout=3m >/dev/null
+
+# The deferred e2e-prepare handed its fixture reference over; finish its job
+# now that the Server runs with every documentation patch in place.
+catalog_reference=$(sed -n '1p' "$state_dir/catalog-reference")
+[ -n "$catalog_reference" ] || fail "deferred e2e-prepare left no catalog reference in $state_dir/catalog-reference"
+case "$catalog_reference" in
+	*/catalog/*@sha256:*) ;;
+	*) fail "deferred catalog reference has an unexpected shape: $catalog_reference" ;;
+esac
+configured_port=$(sed -n '1p' "$state_dir/ui-origin-port")
+case "$configured_port" in
+	''|*[!0-9]*) fail "prepared target is missing a valid ui-origin-port" ;;
+esac
+ui_origin=http://127.0.0.1:$configured_port
+
+start_port_forward "$configured_port"
+base_url=$ui_origin
+fixture_title='Node 运行时验收'
+fixture_runtime=node
+fixture_count=2
+catalog_json=$state_dir/catalog-projection.json
+deadline=$(( $(date +%s) + ${BREAKFIX_E2E_PREPARE_TIMEOUT_SECONDS:-900} ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+	if curl --fail --silent --show-error "$base_url/readyz" >/dev/null 2>&1 &&
+		curl --fail --silent --show-error "$base_url/api/operations/scenarios" >"$catalog_json" 2>/dev/null &&
+		jq -e \
+			--arg title "$fixture_title" \
+			--arg runtime "$fixture_runtime" \
+			--argjson count "$fixture_count" \
+			'
+				(.scenarios | length) == $count and
+				any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+				any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
+			' "$catalog_json" >/dev/null; then
+		break
+	fi
+	sleep 2
+done
+jq -e \
+	--arg title "$fixture_title" \
+	--arg runtime "$fixture_runtime" \
+	--argjson count "$fixture_count" \
+	'
+		(.scenarios | length) == $count and
+		any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+		any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
+	' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
+stop_port_forward
+"$target_script" mark-prepared "$catalog_reference" "$ui_origin"
 
 printf 'Prepared documentation fixture on Kind target %s.\n' "$kind_cluster"

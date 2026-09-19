@@ -89,86 +89,126 @@ documentation E2E 10/10、ops E2E 3/3、admin E2E 1/1，验收人独立复跑）
   无库；
 - 审计动词闭集 5 个；批次对象、语料聚合端点、按页查询均不存在。
 
+提交 1–7 已于 2026-09-19 逐提交落地（`0cab872`、`ed21878`、`471cd5f`、
+`65a337e`、`79d1100`、`1a97306`、`37293e3`），代码与配套单测齐备（documentpractice
+包现行单测绿）；三套 E2E 的收尾全量回归尚未执行，归提交 8。同日决定：提交 8
+暂停——单次验证成本（全量 prepare + 巨石串行用例）约 20 分钟，不可接受——
+先完成下方"插入项"的 E2E 结构重构，再回来跑绿提交 8 与收尾回归。
+
 提交拆解（A/B/C/D 四波；A、B、C 波完成即全绿检查点）
 
 **A 波（清场：看门狗、死代码、页身份）**
 
 ### 提交 1 feat(docs): map runnable action failures onto workflows
 
-- [ ] 看门狗（reconcile 伴生循环）：绑定 action `state='failed'` 立即映射
+- [x] 看门狗（reconcile 伴生循环）：绑定 action `state='failed'` 立即映射
       工作流 Failed；`state='queued'` 且 attempt≥5 在既有 2100s stuck 预算
       宽限后映射；写 ledger 工件 `watchdog.force_fail`（owner_role=system +
       原因），不动 human_action_audits
-- [ ] 单测：artifact 失败立即映射；attempt 耗尽快照后映射；运行中的第 5 次
+- [x] 单测：artifact 失败立即映射；attempt 耗尽快照后映射；运行中的第 5 次
       尝试不误杀（等结果或租约过期后再判）；终态工作流不动
 
 ### 提交 2 refactor(docs): remove the revision loop and workflow lease
 
-- [ ] 删 `Revise`/`ReviseAt` 与 ArtifactReviewing→Generating 转移、
+- [x] 删 `Revise`/`ReviseAt` 与 ArtifactReviewing→Generating 转移、
       `AcquireWorkflowLease`（store 接口 + postgres 实现 + 内存假实现）、
       `lease_owner`/`lease_expires_at` 列与配对 CHECK（schema 版本递增）
-- [ ] 测试更新；grep 证明无生产调用者残留
+- [x] 测试更新；grep 证明无生产调用者残留
 
 ### 提交 3 feat(docs): page identity on workflows and a pageable admin list
 
-- [ ] `document_workflows` 加 (source_id, commit, language, page_path,
+- [x] `document_workflows` 加 (source_id, commit, language, page_path,
       anchor) 列 + 索引，创建路径写入，存量一行迁移回填
-- [ ] 管理台工作流列表：keyset 分页 + state/page_path 过滤 + 列表项带
+- [x] 管理台工作流列表：keyset 分页 + state/page_path 过滤 + 列表项带
       page/anchor/title（title 从库 manifest 服务端解析）；OpenAPI 与 web
       client 同步生成进本提交
-- [ ] 单测：分页/过滤/回填
+- [x] 单测：分页/过滤/回填
 
 **B 波（部署解钉：全量库进部署）**
 
 ### 提交 4 feat(docs): carry the full library through a dedicated image
 
-- [ ] 库镜像构建与部署接线（Makefile：docs-project → 库镜像 → kustomize）；
+- [x] 库镜像构建与部署接线（Makefile：docs-project → 库镜像 → kustomize）；
       server.yaml 卷改造，readOnlyRootFilesystem 不破；E2E 迷你库 ConfigMap
       路径不动
-- [ ] config 删 page_path/anchor（校验与样例更新）；`NewPinnedLibrary` 去掉
+- [x] config 删 page_path/anchor（校验与样例更新）；`NewPinnedLibrary` 去掉
       "钉死页必须在库中"启动校验；`ReadPage` 解除钉死页拒绝（digest 校验
       保持）
-- [ ] docs-smoke、E2E 准备脚本适配
+- [x] docs-smoke、E2E 准备脚本适配
 
 **C 波（批次核心：对象 + 调度器）**
 
 ### 提交 5 feat(docs): declarative batches over the corpus
 
-- [ ] `document_batches`/`document_batch_items` 表 + 领域状态机（批次
+- [x] `document_batches`/`document_batch_items` 表 + 领域状态机（批次
       Pending→Running⇄Paused→Completed|Cancelled；条目 Pending→Scheduled→
       Running→Published|NoPractice|Rejected|Failed|Skipped|Cancelled）
-- [ ] scope 解析：sections/pages/full → 页集；锚点规则（第一个 level-2 锚；
+- [x] scope 解析：sections/pages/full → 页集；锚点规则（第一个 level-2 锚；
       index 页与无 h2 页剔除记 no-anchor；显式 (page, anchor) 覆盖）；已有
       终态工作流的 Skipped/可重试语义
-- [ ] 审计动词扩展 + 端点：发起（202 + 校验）/列表/详情（条目分页）；
+- [x] 审计动词扩展 + 端点：发起（202 + 校验）/列表/详情（条目分页）；
       单测：scope 解析、幂等、状态机围栏
 
 ### 提交 6 feat(docs): the batch scheduler loop
 
-- [ ] 后台循环 + 有界 goroutine 池：并发阀值（默认 2、上限 8）内补足点火；
+- [x] 后台循环 + 有界 goroutine 池：并发阀值（默认 2、上限 8）内补足点火；
       Start 错误 → 条目 Failed + 摘要；条目终态回填
-- [ ] 暂停/恢复/取消/重试失败页端点与语义（取消：在飞条目跑到终态；重试：
+- [x] 暂停/恢复/取消/重试失败页端点与语义（取消：在飞条目跑到终态；重试：
       restart + 重新入队）；崩溃续跑（状态全 DB 推导）；与看门狗/force-fail
       的边界——调度器只管本批工作流
-- [ ] 单测：并发上限围栏、暂停恢复、取消语义、重试失败页、崩溃恢复
+- [x] 单测：并发上限围栏、暂停恢复、取消语义、重试失败页、崩溃恢复
 
 **D 波（管理台 + E2E）**
 
 ### 提交 7 feat(web): the documentation corpus section in the admin console
 
-- [ ] "文档"分区：语料树（懒加载分区 + 聚合行：已发布 x/N · 失败 y · 进行中
+- [x] "文档"分区：语料树（懒加载分区 + 聚合行：已发布 x/N · 失败 y · 进行中
       z · 无实践）+ 页面行（五色状态徽章、锚点级行展开、行尾 ⋯ 菜单救援
       操作）+ "只看失败/卡住"过滤与标题搜索（服务端）
-- [ ] 批次视图：列表 + 详情（条目分页、进度计数）+ 发起（树上勾选范围）/
+- [x] 批次视图：列表 + 详情（条目分页、进度计数）+ 发起（树上勾选范围）/
       暂停/恢复/取消/重试操作（理由弹窗，复用既有确认模式）
+
+### 插入项（2026-09-19 决定，先于提交 8）refactor(test): E2E 结构重构
+
+设计（三层，2026-09-19 定稿并当日实施）：
+
+- 拆分：admin 套件 = admin-setup（bootstrap admin 选举/复用，session 文件按
+  target 命名）+ admin-fast（纯控制台断言 auth-roles / users-totp / audit-ui，
+  可并行、可在已用 target 上秒级重跑，audit 数据 SQL seed）+ admin-chain
+  （真链路 workflow-rescue / batch-rollout / batch-controls，单 worker；每个
+  文件独占一个 (page, anchor) 对——pod-lifetime、autoscale 首锚 +
+  ingress@terminology、ingress@what-is-ingress、ingress@prerequisites——互不
+  依赖且覆盖 scope 的显式锚点覆盖；fresh target 上任意子集可 --grep）；
+  documentation 套件 = reader-fast（纯阅读器渲染）+ practice-chain（发布链 +
+  面板会话，沿用 ensurePracticePublished 复用）；子集入口
+  npm run test:e2e:admin:{fast,chain} 与 :documentation:{reader,practice}
+- 快速档：fixture 验证脚本 wait 180s→90s、pod 存活 300s→90s；busybox:1.36.1
+  预载进 Kind 节点消掉 vcluster 内首拉；单链 5-6 分钟 → 目标 ≤2 分钟
+  （materialize 段镜像层预缓存列为后续项）
+- prepare 瘦身：web 构建按输入 stamp 化（仅 Go 改动时跳过多分钟的 vite
+  构建）；e2e-prepare 新增 BREAKFIX_E2E_DEFER_SERVER_RESTART=1（跳过自身
+  server 重启与投影等待，落盘 catalog reference），doc-prepare 全部 patch 后
+  做唯一一次 server rollout + 投影等待 + mark-prepared——server 重启
+  3 次→2 次、rollout 等待 3 次→1 次
+- 契约：chain 场景假设 freshly reset target（沿用既有语义；fast 场景无此
+  约束）；失败重跑只付单场景的链路时间
+
+- [x] 实施已落地（2026-09-19；调试中另修三个产品 bug——批次 retry 审计
+      主键冲突、语料汇总把超龄终态计为卡住、语料加载 watch 缺 immediate，
+      以及 fixture 工件/实践 ID 未含锚点且超 K8s 标签 63 字节上限两个
+      fixture 缺陷，均有回归测试或验收覆盖）
+- [x] 验证（2026-09-19）：admin 8/8（套件 8.6 分钟）、documentation
+      10/10（套件 5.4 分钟）；单链 1.5–3 分钟、fast 场景秒级。温缓存
+      prepare 实测 5.7–6.7 分钟，未达 ≤5 目标——镜像双次加载与双部署
+      循环的瘦身为本插入项收尾，随后补上
 
 ### 提交 8 test(e2e): batch rollout end to end
 
-（2026-09-19 进行中，未做完：迷你库已扩到 3 页，批次铺开/看门狗/暂停-取消-
-重试三场景与配套 fixture、流水线修订已落盘；E2E 尚未全绿，下列条目保持
-未勾，收尾全量回归未执行。）
+（2026-09-19：迷你库已扩到 3 页；批次铺开/看门狗/暂停-取消-重试场景随
+E2E 结构重构全部跑绿（admin 8/8、documentation 10/10，见上方插入项）；
+仅剩收尾全量回归未执行。）
 
-- [ ] E2E 迷你库扩到 2–3 页；批次发起 → 调度 → 发布 → 语料树聚合断言；
+- [x] E2E 迷你库扩到 2–3 页；批次发起 → 调度 → 发布 → 语料树聚合断言；
       暂停/取消/重试覆盖；看门狗场景（action 失败自动 Failed，替代人工
       force-fail 兜底）
 - [ ] 收尾全量回归：docs-smoke、test-unit、verify-generated、web 构建、
