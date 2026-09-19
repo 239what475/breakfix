@@ -85,6 +85,26 @@ func TestProcessConfigurationsValidate(t *testing.T) {
 	}
 }
 
+func TestProcessConfigurationsValidateWithoutIncus(t *testing.T) {
+	// A Node-less deployment mounts the same configuration with an absent
+	// Incus endpoint; every process must stay bootable and the provider
+	// must report itself disabled.
+	cfg := validProcessConfig()
+	cfg.Incus.Endpoint = ""
+	if cfg.Incus.Enabled() {
+		t.Fatal("config without incus endpoint is enabled")
+	}
+	if err := cfg.ValidateServer(); err != nil {
+		t.Fatalf("validate server configuration: %v", err)
+	}
+	if err := cfg.ValidateController(); err != nil {
+		t.Fatalf("validate controller configuration: %v", err)
+	}
+	if err := cfg.ValidateRuntimeWorker(); err != nil {
+		t.Fatalf("validate runtime worker configuration: %v", err)
+	}
+}
+
 func TestAgentAuthoringDeadlineDefaultsAndParses(t *testing.T) {
 	defaultDeadline, err := (AgentConfig{}).AuthoringDeadline()
 	if err != nil {

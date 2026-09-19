@@ -69,10 +69,15 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleServer)
-	if err != nil {
-		cleanupDatabase()
-		return nil, fmt.Errorf("create Incus client: %w", err)
+	// A Node-less deployment omits the Incus endpoint; the nil client keeps
+	// every Node operation failing with an explicit "not configured" error.
+	var incusClient *incus.ReconnectableClient
+	if cfg.Incus.Enabled() {
+		incusClient, err = incus.NewReconnectableClient(cfg.Incus, incus.RoleServer)
+		if err != nil {
+			cleanupDatabase()
+			return nil, fmt.Errorf("create Incus client: %w", err)
+		}
 	}
 	registryAuthority, err := oci.AuthorityForReference(cfg.Registry.Repository)
 	if err != nil {

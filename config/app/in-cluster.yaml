@@ -101,6 +101,10 @@ runtime:
         - 172.16.0.0/12
         - 192.168.0.0/16
 
+# The Incus system-container provider. An empty BREAKFIX_INCUS_ENDPOINT (a
+# runtime Secret without incus_endpoint) disables the Node provider: the
+# process boots Node-less and every Node operation fails with an explicit
+# "provider is not configured" error instead of crashing startup.
 incus:
   endpoint: ${BREAKFIX_INCUS_ENDPOINT}
   tls:

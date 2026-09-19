@@ -30,6 +30,34 @@ func TestConfigRejectsUnsafeConnectionAndMutableFingerprint(t *testing.T) {
 	}
 }
 
+func TestConfigEmptyEndpointDisablesProvider(t *testing.T) {
+	empty := Config{}
+	if empty.Enabled() {
+		t.Fatal("zero config is not enabled")
+	}
+	if err := empty.Validate(); err != nil {
+		t.Fatalf("zero config: %v", err)
+	}
+	// The deployment templates keep every other field static while the
+	// endpoint comes from the runtime Secret: with the endpoint absent the
+	// configuration stays disabled, never partially validated.
+	nodeless := testConfig()
+	nodeless.Endpoint = ""
+	if nodeless.Enabled() {
+		t.Fatal("config without endpoint is not enabled")
+	}
+	if err := nodeless.Validate(); err != nil {
+		t.Fatalf("node-less config: %v", err)
+	}
+	partial := Config{Endpoint: "https://incus.example:8443"}
+	if !partial.Enabled() {
+		t.Fatal("endpoint-only config is enabled")
+	}
+	if err := partial.Validate(); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("partial config Validate() = %v, want invalid", err)
+	}
+}
+
 func TestProviderNamesAreOpaqueAndDeterministic(t *testing.T) {
 	first, err := NamesForEnvironment("bf", "environment-550e8400-e29b-41d4-a716-446655440000")
 	if err != nil {

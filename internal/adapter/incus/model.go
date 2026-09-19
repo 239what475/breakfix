@@ -47,7 +47,20 @@ type Config struct {
 	BlockedEgressCIDRs     []string  `yaml:"blocked_egress_cidrs"`
 }
 
+// Enabled reports whether this process runs with the Node provider. The
+// deployment templates inject incus.endpoint from the runtime Secret, so an
+// absent endpoint is the documented way to run a Node-less deployment: every
+// Node operation then fails fast with a clear "provider is not configured"
+// error instead of crashing startup. Any other partially filled field keeps
+// the configuration enabled and therefore strictly validated.
+func (c Config) Enabled() bool {
+	return strings.TrimSpace(c.Endpoint) != ""
+}
+
 func (c Config) Validate() error {
+	if !c.Enabled() {
+		return nil
+	}
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(c.Endpoint))
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
 		return fmt.Errorf("%w: incus endpoint must be an absolute HTTPS origin", ErrInvalid)

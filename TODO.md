@@ -1,145 +1,104 @@
 # TODO
 
-上一阶段"多页铺开与批次控制"已于 2026-09-19 完成并验收：提交 1–7
-（`0cab872`、`ed21878`、`471cd5f`、`65a337e`、`79d1100`、`1a97306`、
-`37293e3`）逐提交绿；提交 8 的批次/看门狗/控制流场景随 `129ca59` 与 E2E
-结构重构（`8c8eaed` + prepare 瘦身 `3a0197d`）落地，期间修复三个产品缺陷
-（`358e890`：批次 retry 审计主键冲突、语料汇总超龄终态误计卡住、语料加载
-watch 缺 immediate）；提交 9 的 worker 尺寸实测随 `129ca59` 落地。收尾全量
-回归通过：docs-smoke、test-unit 45 包、verify-generated、web 构建，ui
-3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 10/10、admin 8/8。
-更早阶段（阅读器实践入口、切库与阅读器统一切换、管理控制台重设计等）见
-git 历史；本文件保留当前阶段与未立项事项。
+已完成的阶段见 git 历史；本文件保留当前阶段与未立项事项。
 
-## 测试分层与 E2E 降级（当前阶段，2026-09-19 立项）
+## E2E 剖面化：core/full（当前阶段，2026-09-20 立项）
 
-目标：E2E 断言迁到"故障根源所在的最低层"，E2E 只保留跨系统接线与真实
-浏览器才有的行为（视口、布局、WebSocket 终端）。Go 三层（handler、
-DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删不建；唯一
-新基建是 web 前端 Vitest 层（当前零覆盖）。完成后 E2E 从 21 条降到 10 条
-（5 条真链 + 阅读器薄 smoke + ui 3 条 smoke + setup），admin 链区 8.6 分钟
-降到约 6 分钟，日常开发回路由 Vitest 秒级承担。
+背景：CI 重写前的测试改造。目标是把 E2E 公共链从 Incus 硬耦合中解出，引入
+`BREAKFIX_E2E_PROFILE=core|full`（默认 full，本地现有工作流零变化）。core 剖面只依赖
+Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、无 Incus 的开发机）
+运行 ui/k8s/admin/documentation 套件；node、recovery 与 live acceptance 保留在 full
+剖面。CI workflow 重写不在本阶段，剖面落地后另行立项。
 
-关键事实（2026-09-19 探查，设计前提）：
+关键事实（2026-09-20 探查，设计前提）：
 
-- handler 层 18 个测试文件已覆盖：普通角色对 admin 端点与 practice 点火
-  的 403（auth_flow_test）、TOTP 重置的密码确认与轮换、force-fail/restart
-  重复 409、批次端点+审计、语料搜索汇总、审计 keyset 分页；
-- DB-gated 层 40+ 测试（BREAKFIX_TEST_DATABASE_URL，每测试一 schema）已
-  覆盖 watchdog 映射、语料汇总 SQL、批次状态围栏；
-- application 层 fakes 已覆盖调度器 pause/resume/cancel/retry；
-- web 的 API client 是 openapi.yaml 生成的 hey-api client，与 Go server
-  同源——契约漂移由生成链 + vue-tsc 编译 + handler 测试钉真实 JSON + 薄
-  smoke 四重兜底，mock 降级的残余风险有界；
-- happy-dom/jsdom 的盲区：布局、真实滚动、视口、WebSocket——刻意留在
-  E2E。
+- 文档实践场景的 runtime 在产品内硬编码为 k8s
+  （internal/bootstrap/server/documentation.go 的 constraint `Runtime: RuntimeK8s`）——
+  admin/documentation 套件运行时不碰 Incus，卡点只在公共 prepare 链；
+- ReconnectableClient 全部方法 nil 安全（clientFor 报 "Node provider is not
+  configured"）；provider 层已按 runtime 分派——ArtifactBuilder、EnvironmentProvider、
+  VerificationProvider 的 k8s 路径不触碰 Incus client，worker 健康能力的注释明确
+  能力探针不是 readiness 门；
+- config/app/in-cluster.yaml 的 incus.endpoint 本来就是 `${BREAKFIX_INCUS_ENDPOINT}`
+  从 runtime Secret 注入——endpoint 为空即未启用，天然就是开关，无需拆配置文件；
+- 耦合点清单：config 三个进程验证器无条件 `Incus.Validate()`；server/controller/
+  runtime-worker 三个 bootstrap 无条件构造 client；部署清单的 incus secretKeyRef 非
+  optional、incus-tls secret 卷非 optional；e2e-target.sh 的 preflight/ensure-incus/
+  configure-runtime/reset、run-e2e.sh 的工具清单与诊断采集、runtime.sh 的 endpoint
+  端口校验与 NetworkPolicy incus 端口注入；
+- recovery 两条 spec 断言 incus PTY 终端重连与 node answer 完成恢复——这正是 node
+  专属恢复路径，保留 node fixture（评估过换 k8s fixture：会丢掉终端重连覆盖，不换）；
+- 套件剖面归属：core = ui、k8s、documentation、admin、acceptance-k8s（live 门禁另由
+  RUN_AGENT_LIVE_E2E 把守）；full-only = node、recovery、acceptance-node、
+  acceptance-mcp、acceptance-interruption、agent-assistant、agent-soak。
 
-核心决策（2026-09-19 与用户确认）：
+提交拆解：
 
-- 判定标准：断言住在故障根源所在的最低层且只住一层（SQL→DB-gated、动词
-  语义→handler、调度语义→application、组件行为→Vitest、跨系统接线与
-  视口/终端→E2E）；
-- Vitest 的 mock 边界切在生成的 client 模块（src/api/generated），不起
-  msw/网络栈；
-- 保留脊柱 5 链：发布全链（重启/证据/幂等重放/环境回收）、会话终端、
-  控制台救援（瘦身）、批次发布（瘦身）、watchdog+controls 合并链；
-- 生成内容契约（doc-alert/pre.shiki 类名来自外部 docs-project 生成器）
-  本仓无可承载层，留在阅读器薄 smoke；
-- 验收门槛：每个删除性提交附"被删 E2E 断言 → 新家"对照；A/B/C 波完成
-  各跑全量回归；
-- 不动：ui 3 条 smoke（公共门面唯一覆盖，低优先级可后并）、node/k8s/
-  recovery/acceptance/agent-*（worker+incus+真实模型即产品本身）。
+### 提交 1 feat(config): make the Incus provider optional
 
-迁移清单：
+- [ ] `incus.Config.Enabled()`：endpoint 非空即启用；`Validate()` 对未启用配置放行，
+      非空配置维持现状严校验；`NewReconnectableClient` 拒绝未启用配置（防构造出
+      必然失败的 client）；
+- [ ] server/controller/runtime-worker 三个 bootstrap 仅在启用时构造 client，未启用
+      传递 nil（方法 nil 安全，node 操作报明确错误）；worker 的 node-provider 健康
+      能力仅在启用时注册；
+- [ ] 单测：空配置 Validate 通过、仅 endpoint 的部分配置拒绝、Enabled 判定、无 incus
+      endpoint 的进程配置通过三个验证器。
 
-- admin：auth-roles 整条删；users-totp、audit-ui 的 UI 部分降 Vitest 后
-  整条删；workflow-rescue 删尾部纯 API 探测（audit 列表/queue 汇总/
-  environments），stepper/溢出菜单/原因必填降 Vitest；batch-rollout 的
-  控制台断言（语料树已发布计数、批次详情展开、只看失败过滤含"勾选后需
-  再点应用"）降 Vitest；watchdog 与 controls 两场景并一条链——共用一次
-  park：SQL-fail → watchdog 判 Failed（ledger watchdog.force_fail、无
-  human 审计）→ 批次项跟随 Failed → pause/resume/cancel 薄验证（200+
-  状态+审计计数，重语义删）→ companion 保活 → retry 到 Published；
-- documentation：reader 的导航/URL/hash/前进后退、错误重试、非 docs 路径
-  回退降 Vitest；实践锚点按钮唯一性、面板切换/Steps 折叠/冻结投影降
-  Vitest；上述连同生成内容契约、移动端菜单、移动端无入口合成阅读器薄
-  smoke（排 practice 链后复用已发布状态），发布链尾部留一行按钮存在性兜
-  契约。
+### 提交 2 feat(deploy): optional Incus secret references
 
-提交拆解（A/B/C 波完成即全绿检查点；D 波可选，不阻塞验收）
+- [ ] server/controller/runtime-worker 清单：incus 相关 secretKeyRef 全部
+      `optional: true`，incus-tls secret 卷 `optional: true`——生产语义不变（Secret
+      存在即挂载），core 目标不建 Incus Secret、runtime Secret 不带 incus 字段即可
+      完整启动。
 
-**A 波（清场 + Vitest 基建）**
+### 提交 3 test(e2e): profile-aware kind e2e chain
 
-### 提交 1 test(e2e): drop admin assertions covered by the lower tiers
+- [ ] `BREAKFIX_E2E_PROFILE=core|full`（默认 full，非法值显式报错）；
+- [ ] e2e-target.sh：core 下 preflight 免 incus CLI/共享 project/基础镜像检查（改为
+      要求 runtime Secret 不含 incus_endpoint，防带残留字段的目标误跑）、ensure-incus
+      与 configure-runtime 的 incus 键跳过、reset 免 incus 工具与 project 清理、诊断
+      免 incus 采集；full 下 preflight 追加 incus_endpoint 非空校验；
+- [ ] runtime.sh：incus endpoint 读取 null 安全；为空时跳过端口校验与 NetworkPolicy
+      的 incus 端口注入；
+- [ ] run-e2e.sh：工具清单按剖面收紧；full-only 套件在 core 下启动即报"requires
+      the full profile"；失败诊断的 incus 采集按剖面；
+- [ ] run-authoring-interruption-e2e.sh：core 剖面拒绝执行（node 场景）；
+- [ ] docs/operations/testing.md 记录两剖面、归属矩阵与 core 剖面的 Secret 前提。
 
-- [x] 删 auth-roles fast spec（403 门禁与角色分配 handler 已逐条断言）；
-      剪 workflow-rescue 尾部的审计列表/queue 汇总/environments 探测
-      （handler 已覆盖），场景保留状态可见性与 DB 断言；admin 8→7
+验收（本地，含 Incus 的专用 target）：
 
-### 提交 2 test(web): scaffold vitest and cover the admin corpus section
+- [ ] full 剖面全量回归与现状一致（ui/node/k8s/recovery/documentation/admin）；
+- [ ] core 剖面（runtime Secret 去掉 incus 字段、无 Incus Secret、机器无 incus CLI）：
+      e2e-prepare → ui、k8s、admin、documentation 全绿；node/recovery 启动即报需要
+      full 剖面；
+- [ ] make test-unit、verify-generated、web-test-unit 绿。
 
-- [x] web/ 装 vitest + @vue/test-utils + happy-dom；package.json 加
-      test:unit；Makefile 加目标并纳入全量回归清单；mock 边界 = vi.mock
-      生成的 client 模块
-- [x] 第一批组件测试：语料区（树渲染、已发布计数、批次详情展开、只看
-      失败过滤的应用提交语义，含路由已激活时 watch immediate 回归）
+## 测试分层与 E2E 降级（剩余未完成部分，2026-09-19 立项）
 
-### 提交 3 test(web): console component tests replace the admin fast specs
-
-- [x] 用户区 TOTP 重置对话框、审计区行渲染与 payload 展开、工作流列表
-      stepper/终态无 stepper/溢出菜单/确认按钮原因必填
-- [x] 删 users-totp、audit-ui 两条 e2e，摘除 admin-fast 项目与
-      test:e2e:admin:fast 脚本；admin 7→5
-
-**B 波（阅读器降级）**
-
-### 提交 4 test(web): reader and practice panel component tests
-
-- [x] 阅读器导航（大纲懒加载、URL 同步、前进后退、hash 用事件模拟）、
-      加载失败与重试、非 docs 路径回退
-- [x] 实践锚点按钮唯一性、面板开关与布局类切换、Steps 折叠、冻结投影
-      渲染；提交小型 tree/页面 HTML/投影 fixture
+目标与判定标准见 git 历史（32e1bb8 等）；已完成 A 波（提交 1–4）与 B 波的组件测试
+部分（c68ee1e）。剩余：
 
 ### 提交 5 test(e2e): condense the reader suite into a thin smoke
 
-- [x] 薄 smoke：大纲走到 pod-lifecycle + 生成内容契约（h2#pod-lifetime、
+- [ ] 薄 smoke：大纲走到 pod-lifecycle + 生成内容契约（h2#pod-lifetime、
       doc-alert、pre.shiki）+ 移动端菜单/抽屉 + 实践按钮恰好一个 + 移动端
       无入口；reader-fast 项目由 smoke 项目接替（依赖 practice 链）
-- [x] 删 5 条 reader fast 与 3 条实践 UI e2e；发布链尾部加一行按钮存在
+- [ ] 删 5 条 reader fast 与 3 条实践 UI e2e；发布链尾部加一行按钮存在
       性；documentation 10→3
-
-**C 波（控制台链合并）**
 
 ### 提交 6 test(e2e): merge watchdog and controls into one chain
 
-- [x] 合并链：park（worker 0）→ SQL-fail → watchdog 判 Failed → 批次
+- [ ] 合并链：park（worker 0）→ SQL-fail → watchdog 判 Failed → 批次
       （ingress@what-is + autoscale@algorithm-details companion）项跟随 →
       pause/resume/cancel 薄验证 → 第二批次重映射 Failed + companion 保
       活 → retry-failed → worker 回 → Published；重语义断言删（三层已
       覆盖）；admin 5→4
 
-**D 波（可选加固）**
+### 提交 7（可选，不阻塞验收） test(postgres): live ticks for watchdog and scheduler
 
-### 提交 7（可选，不阻塞验收）test(postgres): live ticks for watchdog and scheduler
-
-- [x] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
+- [ ] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
       驱动 parked→Failed→条目跟随，进一步压薄合并链
-
-### 验收（2026-09-20 回填）
-
-已于 2026-09-20 完成并验收：提交 1–7（`d7070f2`、`15df998`、`a26882f`、
-`c68ee1e`、`d340786`、`2b9623c`、`d780567`）按 A/B/C 波逐波落地，D 波可选
-加固一并完成；每个删除性提交均附"被删 E2E 断言 → 新家"对照。E2E 从 21 条
-降到 10 条（admin 8→4：setup+救援+批次发布+合并链；documentation 10→3：
-发布全链+会话终端+阅读器薄 smoke；ui 3 条不动），日常开发回路由 web Vitest
-层承担（20 条：admin 12 + 阅读器 8），mock 边界切在 client 模块（生成的
-`src/api/generated` 只含类型，运行时 `api` 对象在 `src/api/client`）。提交 7
-的 DB-gated 真 tick 测试对真 Postgres（unittest-pg）跑绿，`internal/adapter/
-postgres` 全包 54.9s 通过。三波收尾各跑全量回归（A/B/C），末轮（2026-09-20）
-全绿：docs-smoke、test-unit 45 包、verify-generated、web 构建、web 单测
-20 条、ui 3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 3/3（3.9m）、
-admin 4/4（7.5m，合并链单 park 2.7m，替代原 watchdog+controls 双 park 约
-3m）。
 
 ## 挂起待决策（不排期）
 

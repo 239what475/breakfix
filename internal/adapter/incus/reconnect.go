@@ -27,6 +27,9 @@ func NewReconnectableClient(config Config, role Role) (*ReconnectableClient, err
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
+	if !config.Enabled() {
+		return nil, fmt.Errorf("%w: Incus provider configuration is empty; construct the client only when the provider is enabled and pass a nil client otherwise", ErrInvalid)
+	}
 	if !role.Valid() {
 		return nil, fmt.Errorf("%w: invalid Incus provider role %q", ErrInvalid, role)
 	}

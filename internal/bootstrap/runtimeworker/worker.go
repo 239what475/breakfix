@@ -46,9 +46,15 @@ func Run(ctx context.Context, configPath, workerID string) error {
 	if err != nil {
 		return fmt.Errorf("create runnable action client: %w", err)
 	}
-	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleRuntime)
-	if err != nil {
-		return fmt.Errorf("create Runtime Worker Incus client: %w", err)
+	// A Node-less deployment omits the Incus endpoint; the nil client keeps
+	// every Node runnable action failing with an explicit "not configured"
+	// error while K8s actions continue unaffected.
+	var incusClient *incus.ReconnectableClient
+	if cfg.Incus.Enabled() {
+		incusClient, err = incus.NewReconnectableClient(cfg.Incus, incus.RoleRuntime)
+		if err != nil {
+			return fmt.Errorf("create Runtime Worker Incus client: %w", err)
+		}
 	}
 	defer incusClient.Close()
 	registryAuthority, err := oci.AuthorityForReference(cfg.Registry.Repository)
@@ -92,18 +98,25 @@ func Run(ctx context.Context, configPath, workerID string) error {
 		return fmt.Errorf("create runnable Runtime Worker: %w", err)
 	}
 
+	capabilities := []health.Capability{
+		{Name: "registry", Ready: func(probeCtx context.Context) error { return registryClient.Ping(probeCtx) }},
+		{Name: "kubernetes-api", Ready: func(probeCtx context.Context) error {
+			_, err := k8sClient.ListRuntimeEnvironments(probeCtx, cfg.CRDNamespace, "")
+			return err
+		}},
+	}
+	if incusClient != nil {
+		// The probe reports a live Node provider; a Node-less deployment has
+		// no provider to report and must not advertise a permanently failing
+		// capability.
+		capabilities = append(capabilities, health.Capability{Name: "node-provider", Ready: func(probeCtx context.Context) error {
+			_, err := incusClient.Preflight(probeCtx)
+			return err
+		}})
+	}
+
 	return health.Run(ctx, health.Config{
 		Port: cfg.HealthPort, Component: "runtime-worker",
-		Capabilities: []health.Capability{
-			{Name: "registry", Ready: func(probeCtx context.Context) error { return registryClient.Ping(probeCtx) }},
-			{Name: "kubernetes-api", Ready: func(probeCtx context.Context) error {
-				_, err := k8sClient.ListRuntimeEnvironments(probeCtx, cfg.CRDNamespace, "")
-				return err
-			}},
-			{Name: "node-provider", Ready: func(probeCtx context.Context) error {
-				_, err := incusClient.Preflight(probeCtx)
-				return err
-			}},
-		},
+		Capabilities: capabilities,
 	}, runner.Run)
 }

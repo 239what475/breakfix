@@ -17,6 +17,22 @@ import (
 	"time"
 )
 
+func TestNewReconnectableClientRejectsDisabledConfig(t *testing.T) {
+	if _, err := NewReconnectableClient(Config{}, RoleRuntime); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("NewReconnectableClient(disabled) = %v, want invalid", err)
+	}
+	// A nil client is the disabled form: every operation must fail with the
+	// explicit "not configured" classification instead of panicking.
+	var client *ReconnectableClient
+	client.Close()
+	if _, err := client.Preflight(context.Background()); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("disabled Preflight() = %v, want unavailable", err)
+	}
+	if _, err := client.BuildNodeImage(context.Background(), BuildNodeImageRequest{}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("disabled BuildNodeImage() = %v, want unavailable", err)
+	}
+}
+
 func TestReconnectableClientKeepsDeterministicIdentityOffline(t *testing.T) {
 	client, err := NewReconnectableClient(offlineReconnectConfig(t), RoleController)
 	if err != nil {

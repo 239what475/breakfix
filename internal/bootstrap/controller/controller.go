@@ -42,9 +42,14 @@ func Run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	incusClient, err := incus.NewReconnectableClient(cfg.Incus, incus.RoleController)
-	if err != nil {
-		return fmt.Errorf("create Controller Incus client: %w", err)
+	// A Node-less deployment omits the Incus endpoint; the nil client keeps
+	// every Node environment failing with an explicit "not configured" error.
+	var incusClient *incus.ReconnectableClient
+	if cfg.Incus.Enabled() {
+		incusClient, err = incus.NewReconnectableClient(cfg.Incus, incus.RoleController)
+		if err != nil {
+			return fmt.Errorf("create Controller Incus client: %w", err)
+		}
 	}
 	defer incusClient.Close()
 	database, err := postgres.New(cfg.DatabaseURL)
