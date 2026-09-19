@@ -199,8 +199,9 @@ documentation E2E 10/10、ops E2E 3/3、admin E2E 1/1，验收人独立复跑）
       fixture 缺陷，均有回归测试或验收覆盖）
 - [x] 验证（2026-09-19）：admin 8/8（套件 8.6 分钟）、documentation
       10/10（套件 5.4 分钟）；单链 1.5–3 分钟、fast 场景秒级。温缓存
-      prepare 实测 5.7–6.7 分钟，未达 ≤5 目标——镜像双次加载与双部署
-      循环的瘦身为本插入项收尾，随后补上
+      prepare 瘦身后实测 ≈5.0 分钟（镜像每 prepare 只加载一次、Registry
+      不再重复重启、修掉 defer 改造引入的多余一轮部署），全套 admin
+      端到端 11.3 分钟
 
 ### 提交 8 test(e2e): batch rollout end to end
 

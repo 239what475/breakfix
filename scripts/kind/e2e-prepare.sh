@@ -5,6 +5,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 runtime_secret=${BREAKFIX_RUNTIME_SECRET:-breakfix-runtime}
 target_id=${BREAKFIX_E2E_TARGET:-e2e}
+kind_cluster=${BREAKFIX_E2E_KIND_CLUSTER:-breakfix-e2e}
 fixture_source=${BREAKFIX_E2E_CATALOG_SOURCE:-$repo_root/test/fixtures/catalog-release}
 fixture_title='Node 运行时验收'
 fixture_runtime=node
@@ -105,7 +106,7 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-for tool in base64 curl go jq kubectl make sed tr; do require_command "$tool"; done
+for tool in awk base64 curl docker go jq kind kubectl make sed tr; do require_command "$tool"; done
 case "$defer_server_restart" in
 	0|1) ;;
 	*) fail "BREAKFIX_E2E_DEFER_SERVER_RESTART must be 0 or 1" ;;
@@ -120,6 +121,22 @@ esac
 # keeps an accidental invocation on another context from changing Docker state
 # or attempting network image resolution.
 make -C "$repo_root" images
+
+# Load the freshly built images into the node exactly once: both runtime.sh
+# passes below skip their own load (BREAKFIX_KIND_SKIP_IMAGE_LOAD=1) because
+# the bytes never change between them - the second full import measured at
+# minutes of pure duplicate work.
+runtime_images=$(kubectl kustomize "$repo_root" | awk '
+  /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+  /^[[:space:]]*reference: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+')
+[ -n "$runtime_images" ] || fail "could not find Breakfix runtime images in the root manifest"
+for image in $runtime_images; do
+  docker image inspect "$image" >/dev/null 2>&1 ||
+    fail "local runtime image is missing after make images: $image"
+  kind load docker-image --name "$kind_cluster" "$image" >/dev/null
+done
+
 "$target_script" mark
 "$target_script" ensure-incus
 "$target_script" configure-runtime
@@ -127,7 +144,8 @@ make -C "$repo_root" images
 # deliberately skipped here: a destructive schema migration must be able to
 # remove the prior target database before the new Server accepts it. Runtime
 # Workers can run while Server is unavailable; they only retry public actions.
-BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
+BREAKFIX_KIND_SKIP_IMAGE_LOAD=1 BREAKFIX_KIND_SKIP_REGISTRY_RESTART=1 \
+  BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
 "$target_script" reset
 # reset deliberately removes its marker and Secret snapshot. Mark the clean
 # target again so this prepare owns a fresh restore point for its deployment.
@@ -135,14 +153,15 @@ BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
 "$target_script" ensure-incus
 "$target_script" configure-runtime
 
-"$repo_root/scripts/kind/runtime.sh"
 if [ "$defer_server_restart" -eq 0 ]; then
-	"$repo_root/scripts/kind/runtime.sh"
+	BREAKFIX_KIND_SKIP_IMAGE_LOAD=1 BREAKFIX_KIND_SKIP_REGISTRY_RESTART=1 \
+		"$repo_root/scripts/kind/runtime.sh"
 else
 	# The calling prepare still patches documentation config into the
 	# Server deployment; keep it down so the target sees exactly one Server
 	# start once every patch is in place.
-	BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
+	BREAKFIX_KIND_SKIP_IMAGE_LOAD=1 BREAKFIX_KIND_SKIP_REGISTRY_RESTART=1 \
+		BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
 fi
 
 registry_repository=$(secret_value registry_repository)

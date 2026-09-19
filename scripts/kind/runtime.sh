@@ -5,6 +5,11 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 runtime_worker_replicas=${BREAKFIX_KIND_RUNTIME_WORKER_REPLICAS:-1}
 skip_server_rollout=${BREAKFIX_KIND_SKIP_SERVER_ROLLOUT:-0}
+# The E2E prepare loads every image once itself and never restarts the
+# stateless Registry between its two passes; both flags keep this entry
+# point's standalone behavior when unset.
+skip_image_load=${BREAKFIX_KIND_SKIP_IMAGE_LOAD:-0}
+skip_registry_restart=${BREAKFIX_KIND_SKIP_REGISTRY_RESTART:-0}
 root_manifest=${BREAKFIX_KIND_ROOT_MANIFEST:-$repo_root}
 kind_overlay=${BREAKFIX_KIND_OVERLAY_MANIFEST:-$repo_root/deploy/overlays/kind}
 registry_node_port=30443
@@ -28,23 +33,26 @@ esac
 
 # The development manifests intentionally use the mutable `:dev` image tags.
 # Load the freshly built local images into this Kind cluster before applying
-# them so `IfNotPresent` cannot silently reuse an older node cache.
+# them so `IfNotPresent` cannot silently reuse an older node cache. The E2E
+# prepare performs this load once up front and skips it here.
 kind_cluster=${context#kind-}
-runtime_images=$(kubectl kustomize "$root_manifest" | awk '
-  /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
-  /^[[:space:]]*reference: ghcr.io\/breakfix\/breakfix-/ { print $2 }
-')
-[ -n "$runtime_images" ] || {
-  printf 'could not find Breakfix runtime images in %s\n' "$root_manifest" >&2
-  exit 1
-}
-for image in $runtime_images; do
-  docker image inspect "$image" >/dev/null 2>&1 || {
-    printf 'local runtime image is required before Kind deployment: %s\n' "$image" >&2
+if [ "$skip_image_load" -eq 0 ]; then
+  runtime_images=$(kubectl kustomize "$root_manifest" | awk '
+    /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+    /^[[:space:]]*reference: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+  ')
+  [ -n "$runtime_images" ] || {
+    printf 'could not find Breakfix runtime images in %s\n' "$root_manifest" >&2
     exit 1
   }
-  kind load docker-image --name "$kind_cluster" "$image" >/dev/null
-done
+  for image in $runtime_images; do
+    docker image inspect "$image" >/dev/null 2>&1 || {
+      printf 'local runtime image is required before Kind deployment: %s\n' "$image" >&2
+      exit 1
+    }
+    kind load docker-image --name "$kind_cluster" "$image" >/dev/null
+  done
+fi
 
 kubectl apply -f "$repo_root/deploy/manifests/namespace.yaml" >/dev/null
 
@@ -133,6 +141,17 @@ case "$skip_server_rollout" in
     exit 2
     ;;
 esac
+for flag_name in BREAKFIX_KIND_SKIP_IMAGE_LOAD BREAKFIX_KIND_SKIP_REGISTRY_RESTART; do
+  eval "flag_value=\${$flag_name}"
+  case "$flag_value" in
+    0|1)
+      ;;
+    *)
+      printf '%s must be 0 or 1\n' "$flag_name" >&2
+      exit 2
+      ;;
+  esac
+done
 endpoint=$(kubectl -n "$namespace" get secret breakfix-runtime -o json |
   jq -r '.data.incus_endpoint | @base64d')
 incus_port=${endpoint##*:}
@@ -203,9 +222,14 @@ kubectl -n "$namespace" scale deployment/breakfix-runtime-worker \
 
 # Secret-backed environment variables are read only when a Pod starts. This
 # development entry point applies an administrator-owned Secret and must make
-# every local control-plane process observe its current values.
-kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
-kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
+# every local control-plane process observe its current values. The Registry's
+# credentials are byte-identical across one target's E2E prepares, so the
+# E2E prepare keeps a running Registry as-is instead of churning the only
+# writer of the fixture catalog.
+if [ "$skip_registry_restart" -eq 0 ]; then
+  kubectl -n "$namespace" rollout restart deployment/breakfix-registry >/dev/null
+  kubectl -n "$namespace" rollout status deployment/breakfix-registry --timeout=2m >/dev/null
+fi
 for deployment in server controller runtime-worker; do
   kubectl -n "$namespace" rollout restart deployment/"breakfix-$deployment" >/dev/null
 done
