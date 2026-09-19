@@ -16,9 +16,14 @@ import (
 )
 
 // documentationBatchApplication creates declarative batches with their
-// creation audit. Reads go through the repositories directly.
+// creation audit and drives the audited batch operations. Reads go through
+// the repositories directly.
 type documentationBatchApplication interface {
 	CreateBatch(ctx context.Context, scope documentdomain.BatchScope, concurrency int, action *audit.HumanAction) (documentdomain.DocumentBatch, error)
+	PauseBatch(ctx context.Context, batchID, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error)
+	ResumeBatch(ctx context.Context, batchID, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error)
+	CancelBatch(ctx context.Context, batchID, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error)
+	RetryFailedItems(ctx context.Context, batchID, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, int, error)
 }
 
 const adminBatchInitialLimit = 20
@@ -259,6 +264,75 @@ func batchScopeToAPI(scope documentdomain.BatchScope) api.AdminDocumentBatchScop
 		result.Overrides = &overrides
 	}
 	return result
+}
+
+// runBatchAction binds the required reason, records the acting administrator
+// through the verb's audit, and answers with a fresh batch detail.
+func (h *Handler) runBatchAction(c *gin.Context, batchID string, run func(ctx context.Context, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error)) {
+	if !h.requireDocumentationProduct(c) {
+		return
+	}
+	if _, _, err := h.db.DocumentPractice.GetBatch(c.Request.Context(), batchID); err != nil {
+		if errors.Is(err, documentdomain.ErrWorkflowNotFound) {
+			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "document batch not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	var request api.AdminWorkflowReasonRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "reason is required"})
+		return
+	}
+	reason := request.Reason
+	if len(reason) == 0 || len(reason) > 500 {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "reason must be between 1 and 500 characters"})
+		return
+	}
+	actorID, _ := c.Get("user_id")
+	actor, _ := actorID.(string)
+	batch, counts, err := run(c.Request.Context(), actor, reason)
+	if err != nil {
+		if errors.Is(err, documentdomain.ErrWorkflowConflict) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, adminDocumentBatch(batch, counts))
+}
+
+// PauseAdminDocumentationBatch stops new ignitions for a Running batch.
+func (h *Handler) PauseAdminDocumentationBatch(c *gin.Context, batchID string) {
+	h.runBatchAction(c, batchID, func(ctx context.Context, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error) {
+		return h.documentationBatches.PauseBatch(ctx, batchID, actorID, reason)
+	})
+}
+
+// ResumeAdminDocumentationBatch restarts scheduling for a Paused batch.
+func (h *Handler) ResumeAdminDocumentationBatch(c *gin.Context, batchID string) {
+	h.runBatchAction(c, batchID, func(ctx context.Context, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error) {
+		return h.documentationBatches.ResumeBatch(ctx, batchID, actorID, reason)
+	})
+}
+
+// CancelAdminDocumentationBatch cancels a batch; not-yet-started items are
+// cancelled and in-flight items run to their terminal states.
+func (h *Handler) CancelAdminDocumentationBatch(c *gin.Context, batchID string) {
+	h.runBatchAction(c, batchID, func(ctx context.Context, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error) {
+		return h.documentationBatches.CancelBatch(ctx, batchID, actorID, reason)
+	})
+}
+
+// RetryFailedAdminDocumentationBatchItems restarts a live batch's failed
+// workflows and re-enqueues their items.
+func (h *Handler) RetryFailedAdminDocumentationBatchItems(c *gin.Context, batchID string) {
+	h.runBatchAction(c, batchID, func(ctx context.Context, actorID, reason string) (documentdomain.DocumentBatch, documentdomain.BatchItemCounts, error) {
+		batch, counts, _, err := h.documentationBatches.RetryFailedItems(ctx, batchID, actorID, reason)
+		return batch, counts, err
+	})
 }
 
 type batchItemCursorToken struct {

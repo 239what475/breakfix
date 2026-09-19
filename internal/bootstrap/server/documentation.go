@@ -110,6 +110,13 @@ func (c documentationCorpus) WorkflowContext() domain.DocumentContext {
 	return c.library.PinnedContext()
 }
 
+func newDocumentationBatchScheduler(service *app.Service, pipeline *app.AgentPipeline) (*app.BatchScheduler, error) {
+	if service == nil || pipeline == nil {
+		return nil, errors.New("documentation batch scheduler requires the pipeline")
+	}
+	return app.NewBatchScheduler(service, pipeline)
+}
+
 func newDocumentationBatches(service *app.Service, library *docsource.Library) *app.BatchService {
 	if service == nil || library == nil {
 		return nil

@@ -180,6 +180,18 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		}
 		h.ListAdminDocumentationBatches(c, params)
 	})
+	adminRoutes.POST("/documentation/batches/:batch_id/pause", func(c *gin.Context) {
+		h.PauseAdminDocumentationBatch(c, c.Param("batch_id"))
+	})
+	adminRoutes.POST("/documentation/batches/:batch_id/resume", func(c *gin.Context) {
+		h.ResumeAdminDocumentationBatch(c, c.Param("batch_id"))
+	})
+	adminRoutes.POST("/documentation/batches/:batch_id/cancel", func(c *gin.Context) {
+		h.CancelAdminDocumentationBatch(c, c.Param("batch_id"))
+	})
+	adminRoutes.POST("/documentation/batches/:batch_id/retry-failed", func(c *gin.Context) {
+		h.RetryFailedAdminDocumentationBatchItems(c, c.Param("batch_id"))
+	})
 	adminRoutes.GET("/documentation/batches/:batch_id", func(c *gin.Context) {
 		h.GetAdminDocumentationBatch(c, c.Param("batch_id"))
 	})

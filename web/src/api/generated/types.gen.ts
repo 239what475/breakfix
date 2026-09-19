@@ -1818,6 +1818,178 @@ export type ListAdminDocumentationBatchItemsResponses = {
 
 export type ListAdminDocumentationBatchItemsResponse = ListAdminDocumentationBatchItemsResponses[keyof ListAdminDocumentationBatchItemsResponses];
 
+export type PauseAdminDocumentationBatchData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        batch_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/batches/{batch_id}/pause';
+};
+
+export type PauseAdminDocumentationBatchErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type PauseAdminDocumentationBatchError = PauseAdminDocumentationBatchErrors[keyof PauseAdminDocumentationBatchErrors];
+
+export type PauseAdminDocumentationBatchResponses = {
+    /**
+     * Batch paused
+     */
+    200: AdminDocumentBatch;
+};
+
+export type PauseAdminDocumentationBatchResponse = PauseAdminDocumentationBatchResponses[keyof PauseAdminDocumentationBatchResponses];
+
+export type ResumeAdminDocumentationBatchData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        batch_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/batches/{batch_id}/resume';
+};
+
+export type ResumeAdminDocumentationBatchErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ResumeAdminDocumentationBatchError = ResumeAdminDocumentationBatchErrors[keyof ResumeAdminDocumentationBatchErrors];
+
+export type ResumeAdminDocumentationBatchResponses = {
+    /**
+     * Batch resumed
+     */
+    200: AdminDocumentBatch;
+};
+
+export type ResumeAdminDocumentationBatchResponse = ResumeAdminDocumentationBatchResponses[keyof ResumeAdminDocumentationBatchResponses];
+
+export type CancelAdminDocumentationBatchData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        batch_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/batches/{batch_id}/cancel';
+};
+
+export type CancelAdminDocumentationBatchErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type CancelAdminDocumentationBatchError = CancelAdminDocumentationBatchErrors[keyof CancelAdminDocumentationBatchErrors];
+
+export type CancelAdminDocumentationBatchResponses = {
+    /**
+     * Batch cancelled
+     */
+    200: AdminDocumentBatch;
+};
+
+export type CancelAdminDocumentationBatchResponse = CancelAdminDocumentationBatchResponses[keyof CancelAdminDocumentationBatchResponses];
+
+export type RetryFailedAdminDocumentationBatchItemsData = {
+    body: AdminWorkflowReasonRequest;
+    path: {
+        batch_id: string;
+    };
+    query?: never;
+    url: '/admin/documentation/batches/{batch_id}/retry-failed';
+};
+
+export type RetryFailedAdminDocumentationBatchItemsErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type RetryFailedAdminDocumentationBatchItemsError = RetryFailedAdminDocumentationBatchItemsErrors[keyof RetryFailedAdminDocumentationBatchItemsErrors];
+
+export type RetryFailedAdminDocumentationBatchItemsResponses = {
+    /**
+     * Failed items re-enqueued
+     */
+    200: AdminDocumentBatch;
+};
+
+export type RetryFailedAdminDocumentationBatchItemsResponse = RetryFailedAdminDocumentationBatchItemsResponses[keyof RetryFailedAdminDocumentationBatchItemsResponses];
+
 export type ListAdminRunnableActionsData = {
     body?: never;
     path?: never;

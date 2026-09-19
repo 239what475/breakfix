@@ -1348,3 +1348,171 @@ func toAny(values []string) []any {
 	}
 	return result
 }
+
+// ListSchedulerBatches returns every batch in the given states, oldest first.
+func (d *DocumentPracticeRepository) ListSchedulerBatches(ctx context.Context, states []domain.BatchState) ([]domain.DocumentBatch, error) {
+	if len(states) == 0 {
+		return []domain.DocumentBatch{}, nil
+	}
+	stateStrings := make([]any, 0, len(states))
+	for _, state := range states {
+		stateStrings = append(stateStrings, string(state))
+	}
+	query := `SELECT ` + documentBatchColumns + ` FROM document_batches WHERE state IN (` + placeholders(len(states)) + `) ORDER BY created_at, id`
+	rows, err := d.conn.QueryContext(ctx, query, stateStrings...)
+	if err != nil {
+		return nil, fmt.Errorf("list scheduler document batches: %w", err)
+	}
+	defer rows.Close()
+	batches := []domain.DocumentBatch{}
+	for rows.Next() {
+		batch, err := scanDocumentBatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		batches = append(batches, batch)
+	}
+	return batches, rows.Err()
+}
+
+// ListBatchItemsByStates returns one batch's items in the given states,
+// corpus order.
+func (d *DocumentPracticeRepository) ListBatchItemsByStates(ctx context.Context, batchID string, states []domain.BatchItemState) ([]domain.BatchItem, error) {
+	if len(states) == 0 {
+		return []domain.BatchItem{}, nil
+	}
+	stateStrings := make([]any, 0, len(states))
+	for _, state := range states {
+		stateStrings = append(stateStrings, string(state))
+	}
+	query := `SELECT id, batch_id, ordinal, page_path, anchor, title, workflow_id, state, detail, created_at, updated_at
+		FROM document_batch_items WHERE batch_id = ? AND state IN (` + placeholders(len(states)) + `) ORDER BY ordinal`
+	args := append([]any{batchID}, stateStrings...)
+	rows, err := d.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list document batch items by states: %w", err)
+	}
+	defer rows.Close()
+	items := []domain.BatchItem{}
+	for rows.Next() {
+		var item domain.BatchItem
+		if err := rows.Scan(&item.ID, &item.BatchID, &item.Ordinal, &item.PagePath, &item.Anchor, &item.Title, &item.WorkflowID, &item.State, &item.Detail, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ActiveBatchItemWorkflowStates joins every in-flight item of a batch with its
+// workflow's current state.
+func (d *DocumentPracticeRepository) ActiveBatchItemWorkflowStates(ctx context.Context, batchID string) ([]app.ActiveBatchItem, error) {
+	rows, err := d.conn.QueryContext(ctx, `SELECT i.id, i.batch_id, i.ordinal, i.page_path, i.anchor, i.title, i.workflow_id, i.state, i.detail, i.created_at, i.updated_at, w.state
+		FROM document_batch_items i
+		JOIN document_workflows w ON w.id = i.workflow_id
+		WHERE i.batch_id = ? AND i.state IN ('Scheduled','Running') ORDER BY i.ordinal`, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("list active document batch items: %w", err)
+	}
+	defer rows.Close()
+	result := []app.ActiveBatchItem{}
+	for rows.Next() {
+		var item domain.BatchItem
+		var workflowState domain.WorkflowState
+		if err := rows.Scan(&item.ID, &item.BatchID, &item.Ordinal, &item.PagePath, &item.Anchor, &item.Title, &item.WorkflowID, &item.State, &item.Detail, &item.CreatedAt, &item.UpdatedAt, &workflowState); err != nil {
+			return nil, err
+		}
+		result = append(result, app.ActiveBatchItem{Item: item, WorkflowState: workflowState})
+	}
+	return result, rows.Err()
+}
+
+// TransitionBatchItem moves one item under a state fence and reports whether
+// this caller won it.
+func (d *DocumentPracticeRepository) TransitionBatchItem(ctx context.Context, itemID string, from, to domain.BatchItemState, detail string, now time.Time) (bool, error) {
+	if !from.Valid() || !to.Valid() || now.IsZero() {
+		return false, errors.New("document batch item transition is invalid")
+	}
+	query := `UPDATE document_batch_items SET state = ?, detail = ?, updated_at = ? WHERE id = ? AND state = ?`
+	args := []any{to, detail, now.UTC(), itemID, from}
+	if detail == "" {
+		query = `UPDATE document_batch_items SET state = ?, updated_at = ? WHERE id = ? AND state = ?`
+		args = []any{to, now.UTC(), itemID, from}
+	}
+	result, err := d.conn.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("transition document batch item: %w", err)
+	}
+	changed, _ := result.RowsAffected()
+	return changed == 1, nil
+}
+
+// TransitionBatchState moves the batch under a state fence and, when a human
+// action is supplied, records its audit in the same transaction.
+func (d *DocumentPracticeRepository) TransitionBatchState(ctx context.Context, batchID string, from, to domain.BatchState, action *audit.HumanAction, now time.Time) (bool, error) {
+	if !from.Valid() || !to.Valid() || now.IsZero() {
+		return false, errors.New("document batch transition is invalid")
+	}
+	if action == nil {
+		result, err := d.conn.ExecContext(ctx, `UPDATE document_batches SET state = ?, updated_at = ? WHERE id = ? AND state = ?`, to, now.UTC(), batchID, from)
+		if err != nil {
+			return false, fmt.Errorf("transition document batch: %w", err)
+		}
+		changed, _ := result.RowsAffected()
+		return changed == 1, nil
+	}
+	if err := action.Validate(); err != nil {
+		return false, err
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin document batch transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE document_batches SET state = ?, updated_at = ? WHERE id = ? AND state = ?`, to, now.UTC(), batchID, from)
+	if err != nil {
+		return false, fmt.Errorf("transition document batch: %w", err)
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return false, nil
+	}
+	if err := insertHumanAction(ctx, tx, *action); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// CancelBatch fences the batch to Cancelled and cancels its not-yet-started
+// items in one transaction; in-flight items keep running to their terminal
+// states.
+func (d *DocumentPracticeRepository) CancelBatch(ctx context.Context, batchID string, from domain.BatchState, action *audit.HumanAction, now time.Time) (int64, error) {
+	if !from.Valid() || now.IsZero() {
+		return 0, errors.New("document batch cancel is invalid")
+	}
+	if action == nil || action.Validate() != nil {
+		return 0, errors.New("document batch cancel requires a human action audit")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin document batch cancel: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE document_batches SET state = ?, updated_at = ? WHERE id = ? AND state = ?`, domain.BatchCancelled, now.UTC(), batchID, from)
+	if err != nil {
+		return 0, fmt.Errorf("cancel document batch: %w", err)
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return 0, nil
+	}
+	items, err := tx.ExecContext(ctx, `UPDATE document_batch_items SET state = ?, detail = ?, updated_at = ? WHERE batch_id = ? AND state = ?`, domain.ItemCancelled, "batch-cancelled", now.UTC(), batchID, domain.ItemPending)
+	if err != nil {
+		return 0, fmt.Errorf("cancel document batch items: %w", err)
+	}
+	cancelled, _ := items.RowsAffected()
+	if err := insertHumanAction(ctx, tx, *action); err != nil {
+		return 0, err
+	}
+	return cancelled, tx.Commit()
+}

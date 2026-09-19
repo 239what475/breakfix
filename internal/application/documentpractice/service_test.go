@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,6 +271,7 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 }
 
 type memoryDocumentStore struct {
+	mu               sync.Mutex
 	workflows        map[string]domain.Workflow
 	identities       map[string]domain.WorkflowPageIdentity
 	batches          map[string]domain.DocumentBatch
@@ -298,6 +300,8 @@ func newMemoryDocumentStore() *memoryDocumentStore {
 }
 
 func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, identity domain.WorkflowPageIdentity, action *audit.HumanAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, exists := s.workflows[workflow.ID]; exists {
 		return errors.New("workflow already exists")
 	}
@@ -310,12 +314,16 @@ func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.
 }
 
 func (s *memoryDocumentStore) RecordHumanAction(_ context.Context, action audit.HumanAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.humanActions = append(s.humanActions, action)
 	return nil
 }
 
 func (s *memoryDocumentStore) ForceFailWorkflow(_ context.Context, id, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -325,11 +333,16 @@ func (s *memoryDocumentStore) ForceFailWorkflow(_ context.Context, id, reason st
 	}
 	s.workflows[id] = workflow
 	s.adminTransitions = append(s.adminTransitions, memoryAdminTransition{kind: "admin.force_fail", workflowID: id, fromState: fromState, reason: reason, action: action})
+	if action != nil {
+		s.humanActions = append(s.humanActions, *action)
+	}
 	return workflow, nil
 }
 
 func (s *memoryDocumentStore) RestartWorkflow(_ context.Context, id, reason string, action *audit.HumanAction, now time.Time) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -339,6 +352,9 @@ func (s *memoryDocumentStore) RestartWorkflow(_ context.Context, id, reason stri
 	}
 	s.workflows[id] = workflow
 	s.adminTransitions = append(s.adminTransitions, memoryAdminTransition{kind: "admin.restart", workflowID: id, fromState: fromState, reason: reason, action: action})
+	if action != nil {
+		s.humanActions = append(s.humanActions, *action)
+	}
 	return workflow, nil
 }
 
@@ -351,6 +367,12 @@ type memoryAdminTransition struct {
 }
 
 func (s *memoryDocumentStore) GetWorkflow(_ context.Context, id string) (domain.Workflow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.getWorkflowUnlocked(id)
+}
+
+func (s *memoryDocumentStore) getWorkflowUnlocked(id string) (domain.Workflow, error) {
 	workflow, exists := s.workflows[id]
 	if !exists {
 		return domain.Workflow{}, errors.New("workflow not found")
@@ -359,7 +381,9 @@ func (s *memoryDocumentStore) GetWorkflow(_ context.Context, id string) (domain.
 }
 
 func (s *memoryDocumentStore) AppendArtifact(_ context.Context, id string, artifact domain.ArtifactRecord) error {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return err
 	}
@@ -371,7 +395,9 @@ func (s *memoryDocumentStore) AppendArtifact(_ context.Context, id string, artif
 }
 
 func (s *memoryDocumentStore) AdvanceWorkflow(_ context.Context, id string, expected int64, next domain.WorkflowState, now time.Time, required ...string) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -386,6 +412,8 @@ func (s *memoryDocumentStore) AdvanceWorkflow(_ context.Context, id string, expe
 }
 
 func (s *memoryDocumentStore) SaveAgentAudit(_ context.Context, _ string, audit domain.AgentAudit) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := audit.Validate(); err != nil {
 		return err
 	}
@@ -397,10 +425,12 @@ func (s *memoryDocumentStore) SaveAgentAudit(_ context.Context, _ string, audit 
 }
 
 func (s *memoryDocumentStore) BindRunnableAction(_ context.Context, workflowID string, action runnable.ActionIdentity, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := action.Validate(); err != nil {
 		return err
 	}
-	if _, err := s.GetWorkflow(context.Background(), workflowID); err != nil {
+	if _, err := s.getWorkflowUnlocked(workflowID); err != nil {
 		return err
 	}
 	if existing, ok := s.actions[action.Key()]; ok {
@@ -414,10 +444,14 @@ func (s *memoryDocumentStore) BindRunnableAction(_ context.Context, workflowID s
 }
 
 func (s *memoryDocumentStore) setWatchdogStatus(action runnable.ActionIdentity, status WatchdogActionStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.watchdogStatuses[action.Key()] = status
 }
 
 func (s *memoryDocumentStore) ListWorkflowWatchdogCandidates(_ context.Context, now time.Time) ([]WatchdogCandidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	candidates := []WatchdogCandidate{}
 	for _, value := range s.actions {
 		workflow, ok := s.workflows[value.workflowID]
@@ -440,7 +474,9 @@ func (s *memoryDocumentStore) ListWorkflowWatchdogCandidates(_ context.Context, 
 }
 
 func (s *memoryDocumentStore) WatchdogFailWorkflow(_ context.Context, id, reason string, expected int64, now time.Time) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -461,6 +497,8 @@ func (s *memoryDocumentStore) WatchdogFailWorkflow(_ context.Context, id, reason
 }
 
 func (s *memoryDocumentStore) WorkflowForRunnableAction(_ context.Context, action runnable.ActionIdentity) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := action.Validate(); err != nil {
 		return "", false, err
 	}
@@ -469,6 +507,8 @@ func (s *memoryDocumentStore) WorkflowForRunnableAction(_ context.Context, actio
 }
 
 func (s *memoryDocumentStore) ListCompletedUnreconciledRunnableActions(_ context.Context) ([]runnable.ActionIdentity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	result := make([]runnable.ActionIdentity, 0, len(s.actions))
 	for _, value := range s.actions {
 		if !value.reconciled {
@@ -479,6 +519,8 @@ func (s *memoryDocumentStore) ListCompletedUnreconciledRunnableActions(_ context
 }
 
 func (s *memoryDocumentStore) MarkRunnableActionReconciled(_ context.Context, action runnable.ActionIdentity, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	value, ok := s.actions[action.Key()]
 	if !ok || value.action != action {
 		return errors.New("runnable action binding not found")
@@ -489,7 +531,9 @@ func (s *memoryDocumentStore) MarkRunnableActionReconciled(_ context.Context, ac
 }
 
 func (s *memoryDocumentStore) PublishPracticeRevision(_ context.Context, id string, expected int64, revision domain.PracticeRevision, _ domain.PublicationManifest, now time.Time) (domain.Workflow, error) {
-	workflow, err := s.GetWorkflow(context.Background(), id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
 	if err != nil {
 		return domain.Workflow{}, err
 	}
@@ -646,6 +690,8 @@ var _ Store = (*memoryDocumentStore)(nil)
 var _ RunnableStore = (*memoryRunnableStore)(nil)
 
 func (s *memoryDocumentStore) CreateBatch(_ context.Context, batch domain.DocumentBatch, items []domain.BatchItem, action *audit.HumanAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := batch.Validate(); err != nil {
 		return err
 	}
@@ -665,6 +711,8 @@ func (s *memoryDocumentStore) CreateBatch(_ context.Context, batch domain.Docume
 }
 
 func (s *memoryDocumentStore) GetBatch(_ context.Context, batchID string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	batch, exists := s.batches[batchID]
 	if !exists {
 		return domain.DocumentBatch{}, nil, errors.New("document batch not found")
@@ -677,6 +725,8 @@ func (s *memoryDocumentStore) GetBatch(_ context.Context, batchID string) (domai
 }
 
 func (s *memoryDocumentStore) ListBatches(_ context.Context, limit int) ([]domain.DocumentBatch, []domain.BatchItemCounts, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	batches := make([]domain.DocumentBatch, 0, len(s.batches))
 	for _, batch := range s.batches {
 		batches = append(batches, batch)
@@ -687,9 +737,9 @@ func (s *memoryDocumentStore) ListBatches(_ context.Context, limit int) ([]domai
 	}
 	counts := make([]domain.BatchItemCounts, 0, len(batches))
 	for _, batch := range batches {
-		_, batchCounts, err := s.GetBatch(context.Background(), batch.ID)
-		if err != nil {
-			return nil, nil, err
+		batchCounts := domain.BatchItemCounts{}
+		for _, item := range s.batchItems[batch.ID] {
+			batchCounts[item.State]++
 		}
 		counts = append(counts, batchCounts)
 	}
@@ -697,6 +747,8 @@ func (s *memoryDocumentStore) ListBatches(_ context.Context, limit int) ([]domai
 }
 
 func (s *memoryDocumentStore) ListBatchItems(_ context.Context, filter domain.BatchItemFilter) ([]domain.BatchItem, *domain.BatchItemCursor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if filter.Limit < 1 || filter.BatchID == "" {
 		return nil, nil, errors.New("invalid batch item filter")
 	}
@@ -720,6 +772,8 @@ func (s *memoryDocumentStore) ListBatchItems(_ context.Context, filter domain.Ba
 }
 
 func (s *memoryDocumentStore) ListPublishedWorkflowAnchors(_ context.Context, identity domain.DocumentContext) (map[string]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	published := map[string]bool{}
 	for key := range s.publishedAnchors {
 		published[key] = true
@@ -729,5 +783,121 @@ func (s *memoryDocumentStore) ListPublishedWorkflowAnchors(_ context.Context, id
 }
 
 func (s *memoryDocumentStore) setPublishedAnchor(pagePath, anchor string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.publishedAnchors[pagePath+"\x00"+anchor] = true
+}
+
+func (s *memoryDocumentStore) ListSchedulerBatches(_ context.Context, states []domain.BatchState) ([]domain.DocumentBatch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wanted := map[domain.BatchState]bool{}
+	for _, state := range states {
+		wanted[state] = true
+	}
+	batches := []domain.DocumentBatch{}
+	for _, batch := range s.batches {
+		if wanted[batch.State] {
+			batches = append(batches, batch)
+		}
+	}
+	sort.Slice(batches, func(i, j int) bool { return batches[i].CreatedAt.Before(batches[j].CreatedAt) })
+	return batches, nil
+}
+
+func (s *memoryDocumentStore) ListBatchItemsByStates(_ context.Context, batchID string, states []domain.BatchItemState) ([]domain.BatchItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wanted := map[domain.BatchItemState]bool{}
+	for _, state := range states {
+		wanted[state] = true
+	}
+	items := []domain.BatchItem{}
+	for _, item := range s.batchItems[batchID] {
+		if wanted[item.State] {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func (s *memoryDocumentStore) ActiveBatchItemWorkflowStates(_ context.Context, batchID string) ([]ActiveBatchItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := []ActiveBatchItem{}
+	for _, item := range s.batchItems[batchID] {
+		if item.State != domain.ItemScheduled && item.State != domain.ItemRunning {
+			continue
+		}
+		workflow, ok := s.workflows[item.WorkflowID]
+		if !ok {
+			continue
+		}
+		result = append(result, ActiveBatchItem{Item: item, WorkflowState: workflow.State})
+	}
+	return result, nil
+}
+
+func (s *memoryDocumentStore) TransitionBatchItem(_ context.Context, itemID string, from, to domain.BatchItemState, detail string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for batchID, items := range s.batchItems {
+		for index, item := range items {
+			if item.ID != itemID || item.State != from {
+				continue
+			}
+			items[index].State = to
+			items[index].Detail = detail
+			items[index].UpdatedAt = now
+			s.batchItems[batchID] = items
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *memoryDocumentStore) TransitionBatchState(_ context.Context, batchID string, from, to domain.BatchState, action *audit.HumanAction, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	batch, exists := s.batches[batchID]
+	if !exists || batch.State != from {
+		return false, nil
+	}
+	if err := domain.TransitionBatch(from, to); err != nil && from != to {
+		return false, err
+	}
+	batch.State = to
+	batch.UpdatedAt = now
+	s.batches[batchID] = batch
+	if action != nil {
+		s.humanActions = append(s.humanActions, *action)
+	}
+	return true, nil
+}
+
+func (s *memoryDocumentStore) CancelBatch(_ context.Context, batchID string, from domain.BatchState, action *audit.HumanAction, now time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	batch, exists := s.batches[batchID]
+	if !exists || batch.State != from {
+		return 0, nil
+	}
+	batch.State = domain.BatchCancelled
+	batch.UpdatedAt = now
+	s.batches[batchID] = batch
+	var cancelled int64
+	items := s.batchItems[batchID]
+	for index, item := range items {
+		if item.State == domain.ItemPending {
+			items[index].State = domain.ItemCancelled
+			items[index].Detail = "batch-cancelled"
+			items[index].UpdatedAt = now
+			cancelled++
+		}
+	}
+	s.batchItems[batchID] = items
+	if action != nil {
+		s.humanActions = append(s.humanActions, *action)
+	}
+	return cancelled, nil
 }

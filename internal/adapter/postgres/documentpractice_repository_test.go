@@ -934,3 +934,74 @@ func TestListPublishedWorkflowAnchorsScopesToThePinnedIdentity(t *testing.T) {
 		t.Fatalf("foreign identity anchors = %#v, %v", published, err)
 	}
 }
+
+func TestBatchSchedulerRepositoryFencesTransitionsAndCancels(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	batch := domain.DocumentBatch{
+		ID: domain.NewBatchID(now), State: domain.BatchPending,
+		Scope:       domain.BatchScope{Kind: domain.BatchScopePages, Pages: []string{"docs/a"}},
+		Concurrency: 2, Resolution: domain.BatchResolution{Resolved: 1}, TotalItems: 1,
+		CreatedBy: "u-admin", CreatedAt: now, UpdatedAt: now,
+	}
+	items := []domain.BatchItem{{ID: domain.NewBatchItemID(batch.ID, 0), BatchID: batch.ID, Ordinal: 0, PagePath: "docs/a", Anchor: "a-h2", Title: "A", WorkflowID: "document-workflow-a", State: domain.ItemPending, CreatedAt: now, UpdatedAt: now}}
+	action := audit.HumanAction{ID: "audit-batch-create", UserID: "u-admin", Action: audit.ActionDocumentationBatchCreate, TargetType: audit.TargetDocumentBatch, TargetID: batch.ID, Detail: []byte(`{}`), CreatedAt: now}
+	if err := database.DocumentPractice.CreateBatch(ctx, batch, items, &action); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fenced transitions: wrong source state loses the fence without an audit.
+	won, err := database.DocumentPractice.TransitionBatchState(ctx, batch.ID, domain.BatchRunning, domain.BatchPaused, nil, now)
+	if err != nil || won {
+		t.Fatalf("stale transition won = %t, %v", won, err)
+	}
+	won, err = database.DocumentPractice.TransitionBatchState(ctx, batch.ID, domain.BatchPending, domain.BatchRunning, nil, now)
+	if err != nil || !won {
+		t.Fatalf("start transition = %t, %v", won, err)
+	}
+	action.ID = "audit-batch-pause"
+	action.Action = audit.ActionDocumentationBatchPause
+	won, err = database.DocumentPractice.TransitionBatchState(ctx, batch.ID, domain.BatchRunning, domain.BatchPaused, &action, now)
+	if err != nil || !won {
+		t.Fatalf("pause transition = %t, %v", won, err)
+	}
+	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationBatchPause, Limit: 5})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("pause audit rows = %#v, %v", rows, err)
+	}
+
+	// Cancel fences the batch and cancels not-yet-started items atomically.
+	cancel := audit.HumanAction{ID: "audit-batch-cancel", UserID: "u-admin", Action: audit.ActionDocumentationBatchCancel, TargetType: audit.TargetDocumentBatch, TargetID: batch.ID, Detail: []byte(`{}`), CreatedAt: now}
+	cancelled, err := database.DocumentPractice.CancelBatch(ctx, batch.ID, domain.BatchRunning, &cancel, now)
+	if err != nil || cancelled != 0 {
+		t.Fatalf("cancel from the wrong source state = %d, %v", cancelled, err)
+	}
+	cancelled, err = database.DocumentPractice.CancelBatch(ctx, batch.ID, domain.BatchPaused, &cancel, now)
+	if err != nil || cancelled != 1 {
+		t.Fatalf("cancelled = %d, %v", cancelled, err)
+	}
+	got, counts, err := database.DocumentPractice.GetBatch(ctx, batch.ID)
+	if err != nil || got.State != domain.BatchCancelled || counts[domain.ItemCancelled] != 1 {
+		t.Fatalf("cancelled batch = %#v counts=%#v err=%v", got, counts, err)
+	}
+
+	// Item fences still apply to a cancelled batch's items: only the current
+	// state owner advances.
+	if won, err := database.DocumentPractice.TransitionBatchItem(ctx, items[0].ID, domain.ItemRunning, domain.ItemScheduled, "", now); err != nil || won {
+		t.Fatalf("stale item transition = %t, %v", won, err)
+	}
+	if won, err := database.DocumentPractice.TransitionBatchItem(ctx, items[0].ID, domain.ItemRunning, domain.ItemScheduled, "", now); err != nil || won {
+		t.Fatalf("stale claimed-item transition = %t, %v", won, err)
+	}
+
+	// The scheduler listing filters by state.
+	running, err := database.DocumentPractice.ListSchedulerBatches(ctx, []domain.BatchState{domain.BatchRunning})
+	if err != nil || len(running) != 0 {
+		t.Fatalf("running batches = %#v, %v", running, err)
+	}
+	active, err := database.DocumentPractice.ListSchedulerBatches(ctx, []domain.BatchState{domain.BatchPending, domain.BatchRunning, domain.BatchPaused, domain.BatchCancelled})
+	if err != nil || len(active) != 1 {
+		t.Fatalf("active batches = %#v, %v", active, err)
+	}
+}

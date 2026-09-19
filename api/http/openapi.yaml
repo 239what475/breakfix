@@ -716,6 +716,154 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /admin/documentation/batches/{batch_id}/pause:
+    post:
+      operationId: pauseAdminDocumentationBatch
+      summary: Stop new ignitions for a Running batch with a required reason (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminWorkflowReasonRequest"
+      responses:
+        "200":
+          description: Batch paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/batches/{batch_id}/resume:
+    post:
+      operationId: resumeAdminDocumentationBatch
+      summary: Resume scheduling for a Paused batch with a required reason (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminWorkflowReasonRequest"
+      responses:
+        "200":
+          description: Batch resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/batches/{batch_id}/cancel:
+    post:
+      operationId: cancelAdminDocumentationBatch
+      summary: Cancel a batch; not-yet-started items are cancelled and in-flight items run to their terminal states (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminWorkflowReasonRequest"
+      responses:
+        "200":
+          description: Batch cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/batches/{batch_id}/retry-failed:
+    post:
+      operationId: retryFailedAdminDocumentationBatchItems
+      summary: Restart a live batch's failed workflows and re-enqueue their items with a required reason (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminWorkflowReasonRequest"
+      responses:
+        "200":
+          description: Failed items re-enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentBatch"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
   /admin/runnable-actions:
     get:
       operationId: listAdminRunnableActions

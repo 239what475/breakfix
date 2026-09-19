@@ -55,6 +55,30 @@ type Store interface {
 	// (page_path, anchor) pairs for the pinned library identity, keyed by
 	// "page\x00anchor".
 	ListPublishedWorkflowAnchors(context.Context, domain.DocumentContext) (map[string]bool, error)
+	// ListSchedulerBatches returns every batch in the given states.
+	ListSchedulerBatches(context.Context, []domain.BatchState) ([]domain.DocumentBatch, error)
+	// ListBatchItemsByStates returns one batch's items in the given states,
+	// corpus order.
+	ListBatchItemsByStates(context.Context, string, []domain.BatchItemState) ([]domain.BatchItem, error)
+	// ActiveBatchItemWorkflowStates joins every in-flight item of a batch with
+	// its workflow's current state; the backfill derives from it.
+	ActiveBatchItemWorkflowStates(context.Context, string) ([]ActiveBatchItem, error)
+	// TransitionBatchItem moves one item under a state fence and reports
+	// whether this caller won the fence.
+	TransitionBatchItem(context.Context, string, domain.BatchItemState, domain.BatchItemState, string, time.Time) (bool, error)
+	// TransitionBatchState moves the batch under a state fence and, when a
+	// human action is supplied, records its audit in the same transaction.
+	TransitionBatchState(context.Context, string, domain.BatchState, domain.BatchState, *audit.HumanAction, time.Time) (bool, error)
+	// CancelBatch fences the batch to Cancelled and cancels its not-yet-started
+	// items in one transaction; in-flight items keep running to their terminal
+	// states. It reports how many pending items were cancelled.
+	CancelBatch(context.Context, string, domain.BatchState, *audit.HumanAction, time.Time) (int64, error)
+}
+
+// ActiveBatchItem is one in-flight item joined with its workflow state.
+type ActiveBatchItem struct {
+	Item          domain.BatchItem
+	WorkflowState domain.WorkflowState
 }
 
 type RunnableStore interface {

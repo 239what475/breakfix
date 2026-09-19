@@ -20,6 +20,7 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
+	appdoc "github.com/breakfix/breakfix/internal/application/documentpractice"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
@@ -224,6 +225,15 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 
 	documentationBatches := newDocumentationBatches(documentationService, documentationLibrary)
+	var documentationScheduler *appdoc.BatchScheduler
+	if documentationPipeline != nil {
+		documentationScheduler, err = newDocumentationBatchScheduler(documentationService, documentationPipeline)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create documentation batch scheduler: %w", err)
+		}
+	}
 
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {
@@ -428,6 +438,8 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if documentationPipeline != nil {
 		documentationPipeline.OnTick = services.tickObserver("documentation practice action reconciler")
 		services.start("documentation practice action reconciler", documentationPipeline.Run)
+		documentationScheduler.OnTick = services.tickObserver("documentation batch scheduler")
+		services.start("documentation batch scheduler", documentationScheduler.Run)
 	}
 	services.start("interactive agent recovery", interactiveRecovery.Run)
 

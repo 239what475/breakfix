@@ -275,3 +275,133 @@ func (s *BatchService) ListBatches(ctx context.Context, limit int) ([]domain.Doc
 func (s *BatchService) ListBatchItems(ctx context.Context, filter domain.BatchItemFilter) ([]domain.BatchItem, *domain.BatchItemCursor, error) {
 	return s.service.store.ListBatchItems(ctx, filter)
 }
+
+// batchAction validates the acting admin's reason and builds the audited
+// human action for one batch verb.
+func batchAction(now time.Time, actorID, action, batchID, reason string) (*audit.HumanAction, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 500 {
+		return nil, errors.New("batch action requires a reason between 1 and 500 characters")
+	}
+	detail, err := json.Marshal(map[string]string{"reason": reason})
+	if err != nil {
+		return nil, err
+	}
+	return &audit.HumanAction{
+		ID:         audit.NewID(now),
+		UserID:     actorID,
+		Action:     action,
+		TargetType: audit.TargetDocumentBatch,
+		TargetID:   batchID,
+		Detail:     detail,
+		CreatedAt:  now,
+	}, nil
+}
+
+// PauseBatch stops new ignitions; in-flight items run to their terminal
+// states and the batch resumes from the database on resume.
+func (s *BatchService) PauseBatch(ctx context.Context, batchID, actorID, reason string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	return s.simpleTransition(ctx, batchID, actorID, reason, audit.ActionDocumentationBatchPause, domain.BatchRunning, domain.BatchPaused)
+}
+
+// ResumeBatch restarts scheduling for a paused batch.
+func (s *BatchService) ResumeBatch(ctx context.Context, batchID, actorID, reason string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	return s.simpleTransition(ctx, batchID, actorID, reason, audit.ActionDocumentationBatchResume, domain.BatchPaused, domain.BatchRunning)
+}
+
+func (s *BatchService) simpleTransition(ctx context.Context, batchID, actorID, reason, verb string, from, to domain.BatchState) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	if s == nil || s.service == nil {
+		return domain.DocumentBatch{}, nil, errors.New("documentation batch service is not configured")
+	}
+	if err := domain.TransitionBatch(from, to); err != nil {
+		return domain.DocumentBatch{}, nil, fmt.Errorf("%w (%s)", domain.ErrWorkflowConflict, err.Error())
+	}
+	action, err := batchAction(s.now(), actorID, verb, batchID, reason)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	won, err := s.service.store.TransitionBatchState(ctx, batchID, from, to, action, s.now())
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	if !won {
+		return domain.DocumentBatch{}, nil, fmt.Errorf("%w (batch is not %s)", domain.ErrWorkflowConflict, from)
+	}
+	return s.GetBatch(ctx, batchID)
+}
+
+// CancelBatch stops the batch and cancels its not-yet-started items; in-flight
+// items run to their terminal states.
+func (s *BatchService) CancelBatch(ctx context.Context, batchID, actorID, reason string) (domain.DocumentBatch, domain.BatchItemCounts, error) {
+	if s == nil || s.service == nil {
+		return domain.DocumentBatch{}, nil, errors.New("documentation batch service is not configured")
+	}
+	action, err := batchAction(s.now(), actorID, audit.ActionDocumentationBatchCancel, batchID, reason)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	batch, _, err := s.GetBatch(ctx, batchID)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	if batch.State.Terminal() {
+		return domain.DocumentBatch{}, nil, fmt.Errorf("%w (batch is already %s)", domain.ErrWorkflowConflict, batch.State)
+	}
+	cancelled, err := s.service.store.CancelBatch(ctx, batchID, batch.State, action, s.now())
+	if err != nil {
+		return domain.DocumentBatch{}, nil, err
+	}
+	if cancelled < 0 {
+		return domain.DocumentBatch{}, nil, fmt.Errorf("%w (batch moved concurrently)", domain.ErrWorkflowConflict)
+	}
+	return s.GetBatch(ctx, batchID)
+}
+
+// RetryFailedItems restarts a batch's failed workflows and re-enqueues their
+// items. The retry is a human judgment on a live batch: the verb is audited
+// once for the batch, and every workflow restart writes its own audit pair.
+func (s *BatchService) RetryFailedItems(ctx context.Context, batchID, actorID, reason string) (domain.DocumentBatch, domain.BatchItemCounts, int, error) {
+	if s == nil || s.service == nil {
+		return domain.DocumentBatch{}, nil, 0, errors.New("documentation batch service is not configured")
+	}
+	action, err := batchAction(s.now(), actorID, audit.ActionDocumentationBatchRetry, batchID, reason)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, 0, err
+	}
+	batch, _, err := s.GetBatch(ctx, batchID)
+	if err != nil {
+		return domain.DocumentBatch{}, nil, 0, err
+	}
+	if batch.State != domain.BatchRunning && batch.State != domain.BatchPaused {
+		return domain.DocumentBatch{}, nil, 0, fmt.Errorf("%w (retry requires a Running or Paused batch)", domain.ErrWorkflowConflict)
+	}
+	failed, err := s.service.store.ListBatchItemsByStates(ctx, batchID, []domain.BatchItemState{domain.ItemFailed})
+	if err != nil {
+		return domain.DocumentBatch{}, nil, 0, err
+	}
+	now := s.now()
+	retried := 0
+	for _, item := range failed {
+		restartAction := *action
+		restartAction.Action = audit.ActionDocumentationWorkflowRestart
+		restartAction.TargetType = audit.TargetDocumentWorkflow
+		restartAction.TargetID = item.WorkflowID
+		if _, err := s.service.Restart(ctx, item.WorkflowID, "batch retry: "+reason, &restartAction); err != nil {
+			// A workflow that cannot restart (already re-driven, or terminal in
+			// another state) keeps its item failed; the pass continues.
+			continue
+		}
+		won, err := s.service.store.TransitionBatchItem(ctx, item.ID, domain.ItemFailed, domain.ItemPending, "", now)
+		if err != nil {
+			return domain.DocumentBatch{}, nil, 0, err
+		}
+		if won {
+			retried++
+		}
+	}
+	if _, err := s.service.store.TransitionBatchState(ctx, batchID, batch.State, batch.State, action, now); err != nil {
+		return domain.DocumentBatch{}, nil, 0, err
+	}
+	updated, counts, err := s.GetBatch(ctx, batchID)
+	return updated, counts, retried, err
+}
