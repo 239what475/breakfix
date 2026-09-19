@@ -7,6 +7,7 @@ target_id=${BREAKFIX_E2E_TARGET:-e2e}
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/$target_id}
 target_script=$repo_root/scripts/kind/e2e-target.sh
 suite=${1:-}
+profile=${BREAKFIX_E2E_PROFILE:-full}
 port_forward_pid=
 supervisor_pid=
 port_file=$state_dir/$suite-port
@@ -24,16 +25,38 @@ require_command() {
 	command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
+case "$profile" in
+	core|full)
+		;;
+	*)
+		fail "BREAKFIX_E2E_PROFILE must be core or full, got \"$profile\""
+		;;
+esac
+
 case "$suite" in
 	ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|k8s|recovery|documentation|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
 
-for tool in cp curl incus kubectl npm sed; do
+# These suites drive Node runtime environments (Incus system containers) or
+# live Node acceptance; the core profile has no Node provider at all.
+case "$suite" in
+	node|recovery|acceptance-node|acceptance-mcp|acceptance-interruption|agent-assistant|agent-soak)
+		if [ "$profile" != full ]; then
+			fail "suite \"$suite\" requires the full profile (BREAKFIX_E2E_PROFILE=full): it drives Node runtime environments"
+		fi
+		;;
+esac
+
+runner_tools="cp curl kubectl npm sed"
+if [ "$profile" = full ]; then
+	runner_tools="$runner_tools incus"
+fi
+for tool in $runner_tools; do
 	require_command "$tool"
 done
 
@@ -67,16 +90,18 @@ dump_diagnostics() {
 		kubectl -n "$namespace" get "$identity" -o yaml >"$diagnostics_dir/$file.yaml" 2>&1 || true
 	done <"$diagnostics_dir/environment-identities.txt"
 
-	for project in \
-		"${BREAKFIX_E2E_INCUS_BUILD_PROJECT:-breakfix-e2e-build}" \
-		"${BREAKFIX_E2E_INCUS_IMAGE_PROJECT:-breakfix-e2e-images}"; do
-		incus project show "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:$project" \
-			>"$diagnostics_dir/incus-$project.project.yaml" 2>&1 || true
-		incus list "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:" --project "$project" --format yaml \
-			>"$diagnostics_dir/incus-$project.instances.yaml" 2>&1 || true
-		incus image list "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:" --project "$project" --format yaml \
-			>"$diagnostics_dir/incus-$project.images.yaml" 2>&1 || true
-	done
+	if [ "$profile" = full ]; then
+		for project in \
+			"${BREAKFIX_E2E_INCUS_BUILD_PROJECT:-breakfix-e2e-build}" \
+			"${BREAKFIX_E2E_INCUS_IMAGE_PROJECT:-breakfix-e2e-images}"; do
+			incus project show "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:$project" \
+				>"$diagnostics_dir/incus-$project.project.yaml" 2>&1 || true
+			incus list "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:" --project "$project" --format yaml \
+				>"$diagnostics_dir/incus-$project.instances.yaml" 2>&1 || true
+			incus image list "${BREAKFIX_E2E_INCUS_REMOTE:-incus-cluster}:" --project "$project" --format yaml \
+				>"$diagnostics_dir/incus-$project.images.yaml" 2>&1 || true
+		done
+	fi
 	for artifact in \
 		"$repo_root/test/results/$suite" \
 		"$repo_root/test/report/$suite"; do

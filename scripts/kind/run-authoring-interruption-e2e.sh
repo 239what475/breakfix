@@ -20,6 +20,17 @@ require_command() {
 	command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
+case "${BREAKFIX_E2E_PROFILE:-full}" in
+	core)
+		fail 'the authoring interruption chain drives Node runtime environments and requires the full profile (BREAKFIX_E2E_PROFILE=full)'
+		;;
+	full)
+		;;
+	*)
+		fail "BREAKFIX_E2E_PROFILE must be core or full, got \"${BREAKFIX_E2E_PROFILE}\""
+		;;
+esac
+
 patch_config() {
 	value=$1
 	config=$(jq -r '.data["config.yaml"] // empty' "$original_config")

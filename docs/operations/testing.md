@@ -15,6 +15,22 @@ Breakfix 按依赖和失败边界分层测试。日常测试不启动模型、�
 平台验收不替代快速测试；Controller 的 `envtest` 也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go
 单元/集成测试覆盖，不塞进浏览器场景。
 
+## E2E 剖面：core 与 full
+
+平台验收链以 `BREAKFIX_E2E_PROFILE` 选择剖面，默认 `full`（与既有本地工作流一致）：
+
+| 剖面 | 平台依赖 | 可跑套件 |
+| --- | --- | --- |
+| `core` | Kind + in-cluster Registry/PostgreSQL；无 Incus CLI、无 Incus Secret | ui、k8s、admin、documentation（acceptance-k8s 的运行时也是 k8s，live 门禁另由 `RUN_AGENT_LIVE_E2E` 把守） |
+| `full` | 同上 + 外部 Incus remote（预置 project、基础镜像、profile） | 全部套件 |
+
+core 剖面的运行时 Secret 不携带任何 `incus_*` 字段（preflight 会拒绝带残留字段的目标），部署清单对 Incus
+Secret 的引用全部可选，Server/Controller/Runtime Worker 以 Node-less 模式启动：Node 场景的置备、物化与终端在第一时间报
+"provider is not configured"，K8s 场景不受影响。`node`、`recovery`、`acceptance-node`、`acceptance-mcp`、
+`acceptance-interruption`、`agent-assistant`、`agent-soak` 套件在 core 剖面下启动即报需要 full 剖面；`recovery`
+断言 incus PTY 终端重连与 node answer 完成恢复，刻意保留 Node fixture。full 剖面的 preflight 额外要求 runtime Secret
+提供 `incus_endpoint`。
+
 ## 可丢弃的 Kind 目标
 
 E2E 只接受明确的 Kind context。默认目标是 `kind-breakfix-e2e`，可通过 `BREAKFIX_E2E_KIND_CLUSTER` 指定另一个专用目标；
@@ -30,7 +46,7 @@ kubectl config use-context kind-breakfix-e2e
 make e2e-prepare
 ```
 
-`e2e-prepare` 依次执行只读 preflight、构建运行时镜像、准备专用 Incus project、部署干净目标、打包并推送
+`e2e-prepare` 依次执行只读 preflight、构建运行时镜像、（full 剖面）准备专用 Incus project、部署干净目标、打包并推送
 `test/fixtures/catalog-release/` 的 immutable OCI digest、配置该 digest 并等待固定 Catalog 场景公开。它不调用模型、不复制文件到
 PVC、不直接写数据库，也不自动运行 Playwright。fixture 是稳定的 Node 运行时场景，prepare 检查它的标题、runtime、类型和直接标签。
 

@@ -152,16 +152,22 @@ for flag_name in BREAKFIX_KIND_SKIP_IMAGE_LOAD BREAKFIX_KIND_SKIP_REGISTRY_RESTA
       ;;
   esac
 done
+# An empty endpoint is the Node-less deployment: the provider stays disabled
+# and the worker NetworkPolicy carries no Incus egress port.
 endpoint=$(kubectl -n "$namespace" get secret breakfix-runtime -o json |
-  jq -r '.data.incus_endpoint | @base64d')
-incus_port=${endpoint##*:}
-incus_port=${incus_port%%/*}
-case "$incus_port" in
-  '' | *[!0-9]*)
-    printf 'Incus endpoint must contain an explicit numeric port\n' >&2
-    exit 1
-    ;;
-esac
+  jq -r '.data.incus_endpoint // "" | @base64d')
+incus_egress_port=null
+if [ -n "$endpoint" ]; then
+  incus_port=${endpoint##*:}
+  incus_port=${incus_port%%/*}
+  case "$incus_port" in
+    '' | *[!0-9]*)
+      printf 'Incus endpoint must contain an explicit numeric port\n' >&2
+      exit 1
+      ;;
+  esac
+  incus_egress_port="{\"protocol\":\"TCP\",\"port\":$incus_port}"
+fi
 
 base_image_digest=$(secret_value k8s_base_image_digest)
 case "$base_image_digest" in
@@ -184,13 +190,14 @@ actual_registry_node_port=$(kubectl -n "$namespace" get service breakfix-registr
   exit 1
 }
 kubectl -n "$namespace" get networkpolicy breakfix-runtime-worker -o json |
-  jq --argjson incus_port "$incus_port" --argjson registry_node_port "$registry_node_port" '
+  jq --argjson registry_node_port "$registry_node_port" --argjson incus_egress_port "$incus_egress_port" '
     .spec.egress |= map(
       if any(.to[]?; has("ipBlock")) then
         .ports = (((.ports // []) + [
-          {protocol: "TCP", port: $incus_port},
+          $incus_egress_port,
           {protocol: "TCP", port: $registry_node_port}
-        ])
+        ]
+          | map(select(. != null))
           | unique_by([.protocol, .port]))
       else
         .
@@ -246,8 +253,13 @@ for deployment in server controller runtime-worker; do
   kubectl -n "$namespace" rollout status deployment/"breakfix-$deployment" --timeout=3m >/dev/null
 done
 
-printf 'Applied Kind runtime with %s Runtime Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
-	"$runtime_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
+if [ -n "$endpoint" ]; then
+  printf 'Applied Kind runtime with %s Runtime Worker replica(s), Incus egress port %s, and Registry NodePort %s at %s.\n' \
+    "$runtime_worker_replicas" "$incus_port" "$registry_node_port" "$registry_repository"
+else
+  printf 'Applied Kind runtime with %s Runtime Worker replica(s), no Incus provider, and Registry NodePort %s at %s.\n' \
+    "$runtime_worker_replicas" "$registry_node_port" "$registry_repository"
+fi
 if [ "$skip_server_rollout" -eq 1 ]; then
 	printf 'Skipped Server rollout readiness while preparing a destructive E2E state reset.\n'
 fi

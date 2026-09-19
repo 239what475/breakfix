@@ -18,6 +18,7 @@ build_profile=${BREAKFIX_E2E_INCUS_BUILD_PROFILE:-breakfix-bootstrap}
 storage_pool=${BREAKFIX_E2E_INCUS_STORAGE_POOL:-local}
 build_network=${BREAKFIX_E2E_INCUS_BUILD_NETWORK:-bf-bootstrap}
 opensandbox_service=${BREAKFIX_E2E_OPENSANDBOX_SERVICE:-opensandbox-server}
+profile=${BREAKFIX_E2E_PROFILE:-full}
 marker_name=breakfix-e2e-target
 prepared_marker_name=breakfix-e2e-prepared
 target_label_key=breakfix.dev/e2e-target
@@ -327,10 +328,23 @@ base_fingerprint() {
 }
 
 preflight() {
-	for tool in awk curl docker grep incus jq kind kubectl make npm openssl sha256sum; do require_command "$tool"; done
+	preflight_tools="awk curl docker grep jq kind kubectl make npm openssl sha256sum"
+	if [ "$profile" = full ]; then
+		preflight_tools="$preflight_tools incus"
+	fi
+	for tool in $preflight_tools; do require_command "$tool"; done
 	require_kind_target
 	validate_configuration
 	require_runtime_secret
+	if [ "$profile" = core ]; then
+		# Stale Incus fields would silently re-enable the Node provider on a
+		# Node-less target; refuse them instead of discovering this mid-suite.
+		[ -z "$(secret_value incus_endpoint)" ] ||
+			fail "core profile requires a runtime Secret without incus_endpoint"
+		return
+	fi
+	[ -n "$(secret_value incus_endpoint)" ] ||
+		fail "full profile requires the runtime Secret to provide incus_endpoint"
 	fingerprint=$(base_fingerprint)
 	printf '%s\n' "$fingerprint" | grep -Eq '^[a-f0-9]{64}$' ||
 		fail "runtime Secret must provide a full lowercase incus_base_image_fingerprint"
@@ -347,6 +361,10 @@ preflight() {
 }
 
 ensure_incus() {
+	if [ "$profile" = core ]; then
+		printf 'Skipped Incus E2E preparation: target %s runs the core profile.\n' "$target_id"
+		return
+	fi
 	for tool in incus jq kubectl; do require_command "$tool"; done
 	verify_marker
 	require_runtime_secret
@@ -366,6 +384,11 @@ configure_runtime() {
 	for tool in base64 jq kubectl tr; do require_command "$tool"; done
 	verify_marker
 	require_runtime_secret
+	if [ "$profile" = core ]; then
+		patch=$(jq -cn --arg catalog "$(encode "")" '{data: {catalog_release_reference: $catalog}}')
+		kubectl -n "$namespace" patch secret "$runtime_secret" --type merge --patch "$patch" >/dev/null
+		return
+	fi
 	verify_owned_project "$build_project"
 	verify_owned_project "$image_project"
 	patch=$(jq -cn \
@@ -675,18 +698,24 @@ dump_reset_diagnostics() {
 			'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT workspace_id, workflow_id, namespace, pvc_name, sandbox_id, state FROM generator_workspaces WHERE state <> '\''deleted'\'' ORDER BY workspace_id;"' \
 			>"$diagnostics/generator-workspaces.sql.txt" 2>&1 || true
 	fi
-	for project in "$build_project" "$image_project"; do
-		incus project show "$incus_remote:$project" >"$diagnostics/incus-$project.project.yaml" 2>&1 || true
-		incus list "$incus_remote:" --project "$project" --format yaml >"$diagnostics/incus-$project.instances.yaml" 2>&1 || true
-		incus image list "$incus_remote:" --project "$project" --format yaml >"$diagnostics/incus-$project.images.yaml" 2>&1 || true
-	done
+	if [ "$profile" = full ]; then
+		for project in "$build_project" "$image_project"; do
+			incus project show "$incus_remote:$project" >"$diagnostics/incus-$project.project.yaml" 2>&1 || true
+			incus list "$incus_remote:" --project "$project" --format yaml >"$diagnostics/incus-$project.instances.yaml" 2>&1 || true
+			incus image list "$incus_remote:" --project "$project" --format yaml >"$diagnostics/incus-$project.images.yaml" 2>&1 || true
+		done
+	fi
 	printf '%s\n' "$result" >"$diagnostics/exit-status.txt"
 	printf 'E2E reset failed; diagnostics retained in %s\n' "$diagnostics" >&2
 }
 
 reset_target() {
 	trap 'result=$?; stop_opensandbox_port_forward; if [ "$result" -ne 0 ]; then dump_reset_diagnostics "$result"; fi; exit "$result"' EXIT HUP INT TERM
-	for tool in awk base64 cat curl grep head incus jq kubectl mktemp openssl sed sha256sum sleep tr; do require_command "$tool"; done
+	reset_tools="awk base64 cat curl grep head jq kubectl mktemp openssl sed sha256sum sleep tr"
+	if [ "$profile" = full ]; then
+		reset_tools="$reset_tools incus"
+	fi
+	for tool in $reset_tools; do require_command "$tool"; done
 	verify_marker
 	require_runtime_secret
 	verify_runtime_snapshot
@@ -701,7 +730,9 @@ reset_target() {
 
 	delete_environments
 	cleanup_generator_workspaces
-	delete_owned_projects
+	if [ "$profile" = full ]; then
+		delete_owned_projects
+	fi
 
 	# Controller has finished finalizers. It is now safe to stop the remaining
 	# control-plane writers and remove only this target's durable state.
@@ -721,6 +752,14 @@ reset_target() {
 
 	printf 'Reset Breakfix E2E target %s. Shared Incus projects and base images were not modified.\n' "$target_id"
 }
+
+case "$profile" in
+	core|full)
+		;;
+	*)
+		fail "BREAKFIX_E2E_PROFILE must be core or full, got \"$profile\""
+		;;
+esac
 
 case "$command" in
 	preflight)

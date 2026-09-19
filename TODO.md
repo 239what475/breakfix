@@ -34,37 +34,37 @@ Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、
 
 提交拆解：
 
-### 提交 1 feat(config): make the Incus provider optional
+### 提交 1 feat(config): make the Incus provider optional ✅ ad0ab47
 
-- [ ] `incus.Config.Enabled()`：endpoint 非空即启用；`Validate()` 对未启用配置放行，
+- [x] `incus.Config.Enabled()`：endpoint 非空即启用；`Validate()` 对未启用配置放行，
       非空配置维持现状严校验；`NewReconnectableClient` 拒绝未启用配置（防构造出
       必然失败的 client）；
-- [ ] server/controller/runtime-worker 三个 bootstrap 仅在启用时构造 client，未启用
+- [x] server/controller/runtime-worker 三个 bootstrap 仅在启用时构造 client，未启用
       传递 nil（方法 nil 安全，node 操作报明确错误）；worker 的 node-provider 健康
       能力仅在启用时注册；
-- [ ] 单测：空配置 Validate 通过、仅 endpoint 的部分配置拒绝、Enabled 判定、无 incus
+- [x] 单测：空配置 Validate 通过、仅 endpoint 的部分配置拒绝、Enabled 判定、无 incus
       endpoint 的进程配置通过三个验证器。
 
-### 提交 2 feat(deploy): optional Incus secret references
+### 提交 2 feat(deploy): optional Incus secret references ✅ 2ecfe9a
 
-- [ ] server/controller/runtime-worker 清单：incus 相关 secretKeyRef 全部
+- [x] server/controller/runtime-worker 清单：incus 相关 secretKeyRef 全部
       `optional: true`，incus-tls secret 卷 `optional: true`——生产语义不变（Secret
       存在即挂载），core 目标不建 Incus Secret、runtime Secret 不带 incus 字段即可
       完整启动。
 
 ### 提交 3 test(e2e): profile-aware kind e2e chain
 
-- [ ] `BREAKFIX_E2E_PROFILE=core|full`（默认 full，非法值显式报错）；
-- [ ] e2e-target.sh：core 下 preflight 免 incus CLI/共享 project/基础镜像检查（改为
+- [x] `BREAKFIX_E2E_PROFILE=core|full`（默认 full，非法值显式报错）；
+- [x] e2e-target.sh：core 下 preflight 免 incus CLI/共享 project/基础镜像检查（改为
       要求 runtime Secret 不含 incus_endpoint，防带残留字段的目标误跑）、ensure-incus
       与 configure-runtime 的 incus 键跳过、reset 免 incus 工具与 project 清理、诊断
       免 incus 采集；full 下 preflight 追加 incus_endpoint 非空校验；
-- [ ] runtime.sh：incus endpoint 读取 null 安全；为空时跳过端口校验与 NetworkPolicy
+- [x] runtime.sh：incus endpoint 读取 null 安全；为空时跳过端口校验与 NetworkPolicy
       的 incus 端口注入；
-- [ ] run-e2e.sh：工具清单按剖面收紧；full-only 套件在 core 下启动即报"requires
+- [x] run-e2e.sh：工具清单按剖面收紧；full-only 套件在 core 下启动即报"requires
       the full profile"；失败诊断的 incus 采集按剖面；
-- [ ] run-authoring-interruption-e2e.sh：core 剖面拒绝执行（node 场景）；
-- [ ] docs/operations/testing.md 记录两剖面、归属矩阵与 core 剖面的 Secret 前提。
+- [x] run-authoring-interruption-e2e.sh：core 剖面拒绝执行（node 场景）；
+- [x] docs/operations/testing.md 记录两剖面、归属矩阵与 core 剖面的 Secret 前提。
 
 验收（本地，含 Incus 的专用 target）：
 
