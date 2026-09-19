@@ -279,7 +279,7 @@ func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, docWorkflow, nil); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, docWorkflow, testWorkflowIdentity(), nil); err != nil {
 		t.Fatal(err)
 	}
 	failed := runnable.ActionIdentity{

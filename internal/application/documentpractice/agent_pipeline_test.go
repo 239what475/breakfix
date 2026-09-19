@@ -313,7 +313,7 @@ func TestLateOrStaleCompletionIsAcknowledgedWithoutAdvancing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := service.Start(ctx, "document-late-completion", nil)
+	workflow, err := service.Start(ctx, "document-late-completion", testPageIdentity(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

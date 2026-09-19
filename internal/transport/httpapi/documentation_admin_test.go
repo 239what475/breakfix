@@ -104,7 +104,8 @@ func TestAdminDocumentationWorkflowObservationForceFailAndRestart(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := server.db.DocumentPractice.CreateWorkflow(context.Background(), stuck, nil); err != nil {
+	identity := documentdomain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+	if err := server.db.DocumentPractice.CreateWorkflow(context.Background(), stuck, identity, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := server.db.DocumentPractice.AdvanceWorkflow(context.Background(), stuck.ID, stuck.StateVersion, documentdomain.PlanReviewing, stuckAt); err != nil {

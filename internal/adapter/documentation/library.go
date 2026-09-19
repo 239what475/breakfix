@@ -33,6 +33,7 @@ type Library struct {
 	Root       string
 	global     docsproject.GlobalManifest
 	assetIndex map[string]string
+	titleIndex map[string]string
 }
 
 // NewPinnedLibrary verifies the global manifest against the pinned context
@@ -292,10 +293,12 @@ func assetContentType(path string) string {
 	}
 }
 
-// buildAssetIndex indexes every page manifest's assets once so asset requests
-// can be digest-verified without a corpus scan per request.
+// buildAssetIndex indexes every page manifest's assets and titles once so
+// asset requests can be digest-verified and admin lists can resolve page
+// titles without a corpus scan per request.
 func (l *Library) buildAssetIndex() error {
 	index := make(map[string]string)
+	titles := make(map[string]string)
 	for _, pagePath := range l.global.Pages {
 		manifestBytes, err := readRootFile(l.Root, filepath.ToSlash(filepath.Join(pagePath, "index.json")), MaxLibraryManifestBytes)
 		if err != nil {
@@ -308,9 +311,19 @@ func (l *Library) buildAssetIndex() error {
 		for _, asset := range manifest.Assets {
 			index[strings.TrimSuffix(asset.Path, "/")] = asset.Digest
 		}
+		titles[strings.TrimSuffix(manifest.Path, "/")] = manifest.Title
 	}
 	l.assetIndex = index
+	l.titleIndex = titles
 	return nil
+}
+
+// DocumentPageTitle resolves one library page's title from the page manifests
+// collected at open time. A page outside the library resolves to an empty
+// title: the admin list labels workflows with whatever the library knows.
+func (l Library) DocumentPageTitle(path string) string {
+	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
+	return l.titleIndex[normalized]
 }
 
 func (l Library) ReadMetadata(path string) (Metadata, error) {

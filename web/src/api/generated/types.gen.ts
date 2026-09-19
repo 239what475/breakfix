@@ -184,6 +184,18 @@ export type AdminDocumentationWorkflow = {
     state_version: number;
     revision: number;
     /**
+     * Documentation page the workflow practices
+     */
+    page_path?: string;
+    /**
+     * Heading anchor on the page; empty for page-level practices
+     */
+    anchor?: string;
+    /**
+     * Page title resolved server-side from the library manifest
+     */
+    title?: string;
+    /**
      * State entry time; dwell_seconds is measured from it
      */
     updated_at: string;
@@ -193,6 +205,10 @@ export type AdminDocumentationWorkflow = {
 
 export type AdminDocumentationWorkflowList = {
     workflows: Array<AdminDocumentationWorkflow>;
+    /**
+     * Present when another page exists
+     */
+    next_cursor?: string;
 };
 
 export type AdminDocumentationLedgerEntry = {
@@ -233,6 +249,18 @@ export type AdminDocumentationWorkflowDetail = {
     state: string;
     state_version: number;
     revision: number;
+    /**
+     * Documentation page the workflow practices
+     */
+    page_path?: string;
+    /**
+     * Heading anchor on the page; empty for page-level practices
+     */
+    anchor?: string;
+    /**
+     * Page title resolved server-side from the library manifest
+     */
+    title?: string;
     updated_at: string;
     dwell_seconds: number;
     stuck: AdminDocumentationWorkflowStuck;
@@ -1369,11 +1397,29 @@ export type ListAdminAuditResponse = ListAdminAuditResponses[keyof ListAdminAudi
 export type ListAdminDocumentationWorkflowsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        /**
+         * Filter by exact workflow state
+         */
+        state?: string;
+        /**
+         * Filter by exact documentation page path
+         */
+        page_path?: string;
+    };
     url: '/admin/documentation/workflows';
 };
 
 export type ListAdminDocumentationWorkflowsErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
     /**
      * Error
      */
@@ -1392,7 +1438,7 @@ export type ListAdminDocumentationWorkflowsError = ListAdminDocumentationWorkflo
 
 export type ListAdminDocumentationWorkflowsResponses = {
     /**
-     * All documentation workflows, most recently updated first
+     * One page of documentation workflows, most recently updated first
      */
     200: AdminDocumentationWorkflowList;
 };

@@ -16,9 +16,10 @@ import (
 // intentionally independent of Operations repositories and never exposes an
 // update operation for ledger artifacts or practice revisions.
 type Store interface {
-	// CreateWorkflow durably creates the workflow and, when an administrative
-	// action is supplied, its human audit row in the same transaction.
-	CreateWorkflow(context.Context, domain.Workflow, *audit.HumanAction) error
+	// CreateWorkflow durably creates the workflow with its page identity and,
+	// when an administrative action is supplied, its human audit row in the
+	// same transaction.
+	CreateWorkflow(context.Context, domain.Workflow, domain.WorkflowPageIdentity, *audit.HumanAction) error
 	RecordHumanAction(context.Context, audit.HumanAction) error
 	GetWorkflow(context.Context, string) (domain.Workflow, error)
 	AppendArtifact(context.Context, string, domain.ArtifactRecord) error
@@ -65,16 +66,19 @@ func NewService(store Store, runnableStore RunnableStore) (*Service, error) {
 	return &Service{store: store, runnable: runnableStore, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
-// Start creates the workflow and records the administrative ignition in one
-// transaction. A repeated start request observes the durable workflow at
-// every stage: the replay returns the stored state without a second audit
-// row, because no state change took place.
-func (s *Service) Start(ctx context.Context, workflowID string, action *audit.HumanAction) (domain.Workflow, error) {
+// Start creates the workflow with its page identity and records the
+// administrative ignition in one transaction. A repeated start request
+// observes the durable workflow at every stage: the replay returns the stored
+// state without a second audit row, because no state change took place.
+func (s *Service) Start(ctx context.Context, workflowID string, identity domain.WorkflowPageIdentity, action *audit.HumanAction) (domain.Workflow, error) {
+	if err := identity.Validate(); err != nil {
+		return domain.Workflow{}, err
+	}
 	workflow, err := domain.NewWorkflow(workflowID, s.now())
 	if err != nil {
 		return domain.Workflow{}, err
 	}
-	if err := s.store.CreateWorkflow(ctx, workflow, action); err != nil {
+	if err := s.store.CreateWorkflow(ctx, workflow, identity, action); err != nil {
 		// Workflow identity is caller supplied. Repeating a start request must
 		// return the durable workflow at every stage, never restart its Agent
 		// work or replace immutable ledger entries.

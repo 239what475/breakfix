@@ -41,7 +41,7 @@ func TestServicePublishesMultiPhaseAutomatedDocumentationPracticeWithoutUserStep
 	}
 	service.now = func() time.Time { return now }
 
-	workflow, err := service.Start(ctx, "document-service-full", nil)
+	workflow, err := service.Start(ctx, "document-service-full", testPageIdentity(), nil)
 	if err != nil || workflow.State != domain.Planning {
 		t.Fatalf("start = %#v, %v", workflow, err)
 	}
@@ -143,7 +143,7 @@ func TestServiceRejectsStaleActionsAndRecordsVerificationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	workflow, err := service.Start(ctx, "document-service-failure", nil)
+	workflow, err := service.Start(ctx, "document-service-failure", testPageIdentity(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestRestartedWorkflowReplansIntoFreshLedgerEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	workflow, err := service.Start(ctx, "document-restart-replan", nil)
+	workflow, err := service.Start(ctx, "document-restart-replan", testPageIdentity(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	workflow, err := service.Start(ctx, "document-service-reject", nil)
+	workflow, err := service.Start(ctx, "document-service-reject", testPageIdentity(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,6 +270,7 @@ func TestServicePlanRejectionAndCandidateDigestMismatchDoNotProgress(t *testing.
 
 type memoryDocumentStore struct {
 	workflows    map[string]domain.Workflow
+	identities   map[string]domain.WorkflowPageIdentity
 	audits       map[string]domain.AgentAudit
 	actions      map[string]memoryDocumentAction
 	published    *domain.PracticeRevision
@@ -289,14 +290,15 @@ type memoryDocumentAction struct {
 }
 
 func newMemoryDocumentStore() *memoryDocumentStore {
-	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}, watchdogStatuses: map[string]WatchdogActionStatus{}, watchdogReasons: map[string]string{}}
+	return &memoryDocumentStore{workflows: map[string]domain.Workflow{}, identities: map[string]domain.WorkflowPageIdentity{}, audits: map[string]domain.AgentAudit{}, actions: map[string]memoryDocumentAction{}, watchdogStatuses: map[string]WatchdogActionStatus{}, watchdogReasons: map[string]string{}}
 }
 
-func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, action *audit.HumanAction) error {
+func (s *memoryDocumentStore) CreateWorkflow(_ context.Context, workflow domain.Workflow, identity domain.WorkflowPageIdentity, action *audit.HumanAction) error {
 	if _, exists := s.workflows[workflow.ID]; exists {
 		return errors.New("workflow already exists")
 	}
 	s.workflows[workflow.ID] = workflow
+	s.identities[workflow.ID] = identity
 	if action != nil {
 		s.humanActions = append(s.humanActions, *action)
 	}
@@ -559,6 +561,10 @@ func (s *memoryRunnableStore) ResolveRunnableRevision(_ context.Context, id, dig
 		return runnable.RunnableRevision{}, errors.New("revision not found")
 	}
 	return s.revision, nil
+}
+
+func testPageIdentity() domain.WorkflowPageIdentity {
+	return domain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
 }
 
 func serviceCandidate(t *testing.T, plan domain.LearningUnitPlan, archive []byte, now time.Time) domain.PracticeCandidate {

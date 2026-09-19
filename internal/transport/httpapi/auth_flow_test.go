@@ -367,6 +367,7 @@ func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx 
 	if err != nil {
 		return documentdomain.Workflow{}, err
 	}
+	identity := documentdomain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
 	action := audit.HumanAction{
 		ID:         audit.NewID(now),
 		UserID:     actorID,
@@ -376,7 +377,7 @@ func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx 
 		Detail:     detail,
 		CreatedAt:  now,
 	}
-	if err := a.db.DocumentPractice.CreateWorkflow(ctx, workflow, &action); err != nil {
+	if err := a.db.DocumentPractice.CreateWorkflow(ctx, workflow, identity, &action); err != nil {
 		stored, getErr := a.db.DocumentPractice.GetWorkflow(ctx, workflow.ID)
 		if getErr != nil {
 			return documentdomain.Workflow{}, err

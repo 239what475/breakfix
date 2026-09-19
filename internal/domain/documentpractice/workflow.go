@@ -59,6 +59,28 @@ func (s WorkflowState) Terminal() bool {
 	return s == Published || s == NoPractice || s == Rejected || s == Failed
 }
 
+// WorkflowPageIdentity carries the denormalized corpus coordinates of the
+// page a workflow practices. Workflow IDs already derive from these
+// coordinates, but corpus aggregation, per-page filtering, and batch item
+// association need JOINable bare columns rather than a ContentID hash prefix.
+type WorkflowPageIdentity struct {
+	SourceID string `json:"source_id"`
+	Commit   string `json:"commit"`
+	Language string `json:"language"`
+	PagePath string `json:"page_path"`
+	Anchor   string `json:"anchor,omitempty"`
+}
+
+func (i WorkflowPageIdentity) Validate() error {
+	if strings.TrimSpace(i.SourceID) == "" || strings.TrimSpace(i.Commit) == "" || strings.TrimSpace(i.Language) == "" {
+		return errors.New("workflow page identity requires a source, commit, and language")
+	}
+	if err := ValidateRelativePath(i.PagePath); err != nil {
+		return fmt.Errorf("workflow page identity %w", err)
+	}
+	return nil
+}
+
 type ArtifactRecord struct {
 	ID              string    `json:"id"`
 	Kind            string    `json:"kind"`

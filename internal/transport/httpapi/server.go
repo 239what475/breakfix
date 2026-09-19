@@ -167,7 +167,27 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
-	adminRoutes.GET("/documentation/workflows", h.ListAdminDocumentationWorkflows)
+	adminRoutes.GET("/documentation/workflows", func(c *gin.Context) {
+		params := api.ListAdminDocumentationWorkflowsParams{}
+		if raw := c.Query("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid workflow page limit"})
+				return
+			}
+			params.Limit = &parsed
+		}
+		if raw := c.Query("cursor"); raw != "" {
+			params.Cursor = &raw
+		}
+		if raw := c.Query("state"); raw != "" {
+			params.State = &raw
+		}
+		if raw := c.Query("page_path"); raw != "" {
+			params.PagePath = &raw
+		}
+		h.ListAdminDocumentationWorkflows(c, params)
+	})
 	adminRoutes.GET("/documentation/workflows/:workflow_id", func(c *gin.Context) {
 		h.GetAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
 	})

@@ -402,3 +402,22 @@ func TestLibraryRejectsTamperedDocumentPage(t *testing.T) {
 		t.Fatal("tampered document page bytes passed the page digest")
 	}
 }
+
+func TestLibraryResolvesPageTitlesFromManifests(t *testing.T) {
+	root := t.TempDir()
+	context := libraryContext()
+	writeLibraryMaterial(t, root, context, libraryMarkdown, nil, nil)
+	library, err := NewPinnedLibrary(context, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title := library.DocumentPageTitle(context.PagePath); title != "Pod Lifecycle" {
+		t.Fatalf("page title = %q, want the manifest title", title)
+	}
+	if title := library.DocumentPageTitle("docs/concepts/workloads/pods/pod-lifecycle/"); title != "Pod Lifecycle" {
+		t.Fatalf("normalized page title = %q", title)
+	}
+	if title := library.DocumentPageTitle("docs/absent"); title != "" {
+		t.Fatalf("unknown page title = %q, want empty", title)
+	}
+}

@@ -213,6 +213,15 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("configure documentation practice pipeline: %w", err)
 	}
+	if documentationPipeline != nil {
+		// Workflows created before page identity columns existed carry their
+		// corpus coordinates only inside the ledger; enrich them once at boot.
+		if _, err := database.DocumentPractice.BackfillWorkflowPageIdentity(ctx); err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("backfill documentation workflow page identity: %w", err)
+		}
+	}
 
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {

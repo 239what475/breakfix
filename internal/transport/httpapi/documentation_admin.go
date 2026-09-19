@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -29,21 +30,49 @@ func (h *Handler) requireDocumentationProduct(c *gin.Context) bool {
 	return true
 }
 
-func (h *Handler) ListAdminDocumentationWorkflows(c *gin.Context) {
+const adminDocumentationWorkflowInitialLimit = 50
+
+// ListAdminDocumentationWorkflows pages the workflow list newest-first with
+// optional exact state and page filters. Titles come from the deployment's
+// library manifests, resolved server-side.
+func (h *Handler) ListAdminDocumentationWorkflows(c *gin.Context, params api.ListAdminDocumentationWorkflowsParams) {
 	if !h.requireDocumentationProduct(c) {
 		return
 	}
-	observations, err := h.db.DocumentPractice.ListWorkflowObservations(c.Request.Context())
+	limit := adminDocumentationWorkflowInitialLimit
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	if limit < 1 || limit > 100 {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "workflow page limit must be between 1 and 100"})
+		return
+	}
+	cursor, err := parseDocumentationWorkflowCursor(params.Cursor)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	filter := postgres.DocumentWorkflowListFilter{Limit: limit, Cursor: cursor}
+	if params.State != nil {
+		filter.State = *params.State
+	}
+	if params.PagePath != nil {
+		filter.PagePath = *params.PagePath
+	}
+	observations, next, err := h.db.DocumentPractice.ListWorkflowObservations(c.Request.Context(), filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
 	now := time.Now().UTC()
-	workflows := make([]api.AdminDocumentationWorkflow, 0, len(observations))
-	for _, observation := range observations {
-		workflows = append(workflows, adminDocumentationWorkflowSummary(observation, now, h.agentStuckAfter))
+	page := api.AdminDocumentationWorkflowList{Workflows: make([]api.AdminDocumentationWorkflow, 0, len(observations))}
+	if next != nil {
+		page.NextCursor = encodeDocumentationWorkflowCursor(next.UpdatedAt, next.ID)
 	}
-	c.JSON(http.StatusOK, api.AdminDocumentationWorkflowList{Workflows: workflows})
+	for _, observation := range observations {
+		page.Workflows = append(page.Workflows, adminDocumentationWorkflowSummary(observation, now, h.agentStuckAfter, h.documentationLibrary))
+	}
+	c.JSON(http.StatusOK, page)
 }
 
 func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.DocumentWorkflowID) {
@@ -86,7 +115,11 @@ func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.D
 		Stuck:        deriveDocumentationStuck(observation, now, h.agentStuckAfter),
 		Ledger:       make([]api.AdminDocumentationLedgerEntry, 0, len(artifacts)),
 		AgentAudits:  make([]api.AdminDocumentationAgentAudit, 0, len(agentAudits)),
+		PagePath:     workflowStringPointer(observation.Identity.PagePath),
+		Anchor:       workflowStringPointer(observation.Identity.Anchor),
+		Title:        workflowStringPointer(h.documentationLibrary.DocumentPageTitle(observation.Identity.PagePath)),
 	}
+
 	for _, artifact := range artifacts {
 		var parentID, policyVersion *string
 		if artifact.ParentID != "" {
@@ -201,11 +234,11 @@ func (h *Handler) runAdminWorkflowAction(c *gin.Context, workflowID string, audi
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, adminDocumentationWorkflowSummary(observation, time.Now().UTC(), h.agentStuckAfter))
+	c.JSON(http.StatusOK, adminDocumentationWorkflowSummary(observation, time.Now().UTC(), h.agentStuckAfter, h.documentationLibrary))
 }
 
-func adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObservation, now time.Time, agentStuckAfter time.Duration) api.AdminDocumentationWorkflow {
-	return api.AdminDocumentationWorkflow{
+func adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObservation, now time.Time, agentStuckAfter time.Duration, library documentationLibrary) api.AdminDocumentationWorkflow {
+	summary := api.AdminDocumentationWorkflow{
 		Id:           observation.Workflow.ID,
 		State:        string(observation.Workflow.State),
 		StateVersion: int(observation.Workflow.StateVersion),
@@ -213,7 +246,53 @@ func adminDocumentationWorkflowSummary(observation postgres.DocumentWorkflowObse
 		UpdatedAt:    observation.Workflow.UpdatedAt,
 		DwellSeconds: int(dwellSeconds(observation.Workflow.UpdatedAt, now)),
 		Stuck:        deriveDocumentationStuck(observation, now, agentStuckAfter),
+		PagePath:     workflowStringPointer(observation.Identity.PagePath),
+		Anchor:       workflowStringPointer(observation.Identity.Anchor),
 	}
+	if library != nil {
+		summary.Title = workflowStringPointer(library.DocumentPageTitle(observation.Identity.PagePath))
+	}
+	return summary
+}
+
+type documentationWorkflowCursorToken struct {
+	UpdatedAt string `json:"u"`
+	ID        string `json:"i"`
+}
+
+func encodeDocumentationWorkflowCursor(updatedAt time.Time, id string) *string {
+	payload, err := json.Marshal(documentationWorkflowCursorToken{UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano), ID: id})
+	if err != nil {
+		return nil
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	return &encoded
+}
+
+func parseDocumentationWorkflowCursor(raw *string) (*postgres.DocumentWorkflowCursor, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(*raw)
+	if err != nil {
+		return nil, errors.New("workflow cursor is invalid")
+	}
+	var token documentationWorkflowCursorToken
+	if err := json.Unmarshal(payload, &token); err != nil {
+		return nil, errors.New("workflow cursor is invalid")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, token.UpdatedAt)
+	if err != nil || updatedAt.IsZero() || token.ID == "" {
+		return nil, errors.New("workflow cursor is invalid")
+	}
+	return &postgres.DocumentWorkflowCursor{UpdatedAt: updatedAt.UTC(), ID: token.ID}, nil
+}
+
+func workflowStringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // deriveDocumentationStuck is a read-only derivation; it never writes state.

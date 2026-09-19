@@ -97,15 +97,18 @@ func (d *DocumentPracticeRepository) ListArtifacts(ctx context.Context, workflow
 	return result, rows.Err()
 }
 
-// CreateWorkflow durably creates the workflow and, when the caller supplies
-// the administrative ignition action, its human audit row in the same
-// transaction: an audit row exists only if the workflow does.
-func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflow domain.Workflow, action *audit.HumanAction) error {
+// CreateWorkflow durably creates the workflow with its page identity and,
+// when the caller supplies the administrative ignition action, its human audit
+// row in the same transaction: an audit row exists only if the workflow does.
+func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflow domain.Workflow, identity domain.WorkflowPageIdentity, action *audit.HumanAction) error {
 	if err := workflow.Validate(); err != nil {
 		return err
 	}
+	if err := identity.Validate(); err != nil {
+		return err
+	}
 	if action == nil {
-		_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.UpdatedAt.UTC())
+		_, err := d.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, source_id, commit, language, page_path, anchor, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, identity.SourceID, identity.Commit, identity.Language, identity.PagePath, identity.Anchor, workflow.UpdatedAt.UTC())
 		return err
 	}
 	if err := action.Validate(); err != nil {
@@ -116,13 +119,36 @@ func (d *DocumentPracticeRepository) CreateWorkflow(ctx context.Context, workflo
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.UpdatedAt.UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, source_id, commit, language, page_path, anchor, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, identity.SourceID, identity.Commit, identity.Language, identity.PagePath, identity.Anchor, workflow.UpdatedAt.UTC()); err != nil {
 		return err
 	}
 	if err := insertHumanAction(ctx, tx, *action); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// BackfillWorkflowPageIdentity derives the page identity columns of workflows
+// created before the columns existed from their durable document-context
+// ledger artifact. It is idempotent and reports how many rows it enriched.
+func (d *DocumentPracticeRepository) BackfillWorkflowPageIdentity(ctx context.Context) (int64, error) {
+	result, err := d.conn.ExecContext(ctx, `UPDATE document_workflows w SET
+		source_id = ledger.payload->>'source_id',
+		commit = ledger.payload->>'commit',
+		language = ledger.payload->>'language',
+		page_path = ledger.payload->>'page_path',
+		anchor = COALESCE(ledger.payload->>'anchor', '')
+		FROM (
+			SELECT DISTINCT ON (workflow_id) workflow_id, payload
+			FROM document_artifact_ledger
+			WHERE kind = 'document-context'
+			ORDER BY workflow_id, created_at DESC, id DESC
+		) AS ledger
+		WHERE ledger.workflow_id = w.id AND w.page_path = ''`)
+	if err != nil {
+		return 0, fmt.Errorf("backfill document workflow page identity: %w", err)
+	}
+	return result.RowsAffected()
 }
 
 // RecordHumanAction appends a standalone administrative action row for paths
@@ -364,41 +390,94 @@ type DocumentBoundActionStatus struct {
 // and detail. The ledger and audits are assembled separately for the detail.
 type DocumentWorkflowObservation struct {
 	Workflow domain.Workflow
+	Identity domain.WorkflowPageIdentity
 	Action   *DocumentBoundActionStatus
 }
 
-// ListWorkflowObservations lists every documentation workflow with the public
-// action status bound to its current state version, newest first. The binding
-// join is intentionally read-only; stuck flags are derived by callers.
-func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Context) ([]DocumentWorkflowObservation, error) {
-	rows, err := d.conn.QueryContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.updated_at,
-		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
-		FROM document_workflows w
+// DocumentWorkflowCursor is the keyset continuation of one workflow list
+// page. Rows are ordered by (updated_at DESC, id DESC) so the cursor carries
+// both.
+type DocumentWorkflowCursor struct {
+	UpdatedAt time.Time `json:"u"`
+	ID        string    `json:"i"`
+}
+
+// DocumentWorkflowListFilter narrows the admin workflow list. An empty state
+// or page path means unfiltered.
+type DocumentWorkflowListFilter struct {
+	State    string
+	PagePath string
+	Cursor   *DocumentWorkflowCursor
+	Limit    int
+}
+
+const documentWorkflowObservationColumns = `w.id, w.state, w.state_version, w.revision, w.max_revisions, w.updated_at,
+		w.source_id, w.commit, w.language, w.page_path, w.anchor,
+		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary`
+
+const documentWorkflowObservationJoins = `FROM document_workflows w
 		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
-		LEFT JOIN runnable_actions a ON a.action_key = b.action_key
-		ORDER BY w.updated_at DESC, w.id`)
+		LEFT JOIN runnable_actions a ON a.action_key = b.action_key`
+
+// ListWorkflowObservations lists one page of documentation workflows with the
+// public action status bound to its current state version, newest first. The
+// binding join is intentionally read-only; stuck flags are derived by callers.
+// The returned cursor is nil when the page is the last one.
+func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Context, filter DocumentWorkflowListFilter) ([]DocumentWorkflowObservation, *DocumentWorkflowCursor, error) {
+	if filter.Limit < 1 {
+		return nil, nil, errors.New("document workflow list limit must be positive")
+	}
+	conditions := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	if filter.State != "" {
+		conditions = append(conditions, `w.state = ?`)
+		args = append(args, filter.State)
+	}
+	if filter.PagePath != "" {
+		conditions = append(conditions, `w.page_path = ?`)
+		args = append(args, filter.PagePath)
+	}
+	if filter.Cursor != nil {
+		if filter.Cursor.UpdatedAt.IsZero() || strings.TrimSpace(filter.Cursor.ID) == "" {
+			return nil, nil, errors.New("document workflow list cursor is invalid")
+		}
+		conditions = append(conditions, `(w.updated_at, w.id) < (?, ?)`)
+		args = append(args, filter.Cursor.UpdatedAt.UTC(), filter.Cursor.ID)
+	}
+	query := `SELECT ` + documentWorkflowObservationColumns + ` ` + documentWorkflowObservationJoins
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	query += ` ORDER BY w.updated_at DESC, w.id DESC LIMIT ?`
+	args = append(args, filter.Limit+1)
+	rows, err := d.conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list document workflow observations: %w", err)
+		return nil, nil, fmt.Errorf("list document workflow observations: %w", err)
 	}
 	defer rows.Close()
 	result := []DocumentWorkflowObservation{}
 	for rows.Next() {
 		observation, err := scanWorkflowObservation(rows)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		result = append(result, observation)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	var next *DocumentWorkflowCursor
+	if len(result) > filter.Limit {
+		last := result[filter.Limit-1]
+		next = &DocumentWorkflowCursor{UpdatedAt: last.Workflow.UpdatedAt, ID: last.Workflow.ID}
+		result = result[:filter.Limit]
+	}
+	return result, next, nil
 }
 
 // GetWorkflowObservation resolves one workflow's observation read model.
 func (d *DocumentPracticeRepository) GetWorkflowObservation(ctx context.Context, workflowID string) (DocumentWorkflowObservation, error) {
-	row := d.conn.QueryRowContext(ctx, `SELECT w.id, w.state, w.state_version, w.revision, w.max_revisions, w.updated_at,
-		b.phase, a.state, a.attempt, a.failure_class, a.failure_code, a.failure_summary
-		FROM document_workflows w
-		LEFT JOIN document_runnable_actions b ON b.workflow_id = w.id AND b.state_version = w.state_version
-		LEFT JOIN runnable_actions a ON a.action_key = b.action_key
+	row := d.conn.QueryRowContext(ctx, `SELECT `+documentWorkflowObservationColumns+` `+documentWorkflowObservationJoins+`
 		WHERE w.id = ?`, workflowID)
 	observation, err := scanWorkflowObservation(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -414,6 +493,7 @@ func scanWorkflowObservation(row interface{ Scan(...any) error }) (DocumentWorkf
 	var attempt sql.NullInt64
 	var failureClass, failureCode, failureSummary sql.NullString
 	if err := row.Scan(&observation.Workflow.ID, &observation.Workflow.State, &observation.Workflow.StateVersion, &observation.Workflow.Revision, &observation.Workflow.MaxRevisions, &observation.Workflow.UpdatedAt,
+		&observation.Identity.SourceID, &observation.Identity.Commit, &observation.Identity.Language, &observation.Identity.PagePath, &observation.Identity.Anchor,
 		&phase, &actionState, &attempt, &failureClass, &failureCode, &failureSummary); err != nil {
 		return DocumentWorkflowObservation{}, err
 	}

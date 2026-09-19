@@ -25,8 +25,14 @@ var schemaDocumentPracticeStatements = []string{
 		state_version BIGINT NOT NULL CHECK (state_version >= 1),
 		revision BIGINT NOT NULL CHECK (revision >= 1),
 		max_revisions BIGINT NOT NULL CHECK (max_revisions >= 1),
+		source_id TEXT NOT NULL DEFAULT '',
+		commit TEXT NOT NULL DEFAULT '',
+		language TEXT NOT NULL DEFAULT '',
+		page_path TEXT NOT NULL DEFAULT '',
+		anchor TEXT NOT NULL DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL
 	)`,
+	`CREATE INDEX document_workflows_page ON document_workflows(source_id, commit, language, page_path, anchor)`,
 	`CREATE TABLE document_runnable_actions (
 		action_key TEXT PRIMARY KEY,
 		workflow_id TEXT NOT NULL REFERENCES document_workflows(id) ON DELETE RESTRICT,

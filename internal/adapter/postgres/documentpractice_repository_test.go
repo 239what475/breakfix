@@ -14,6 +14,10 @@ import (
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
+func testWorkflowIdentity() domain.WorkflowPageIdentity {
+	return domain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+}
+
 func TestDocumentPracticeRepositoryAppendsAndAdvancesAnImmutableLedger(t *testing.T) {
 	database := newTestDB(t)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
@@ -21,7 +25,7 @@ func TestDocumentPracticeRepositoryAppendsAndAdvancesAnImmutableLedger(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(context.Background(), workflow, nil); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(context.Background(), workflow, testWorkflowIdentity(), nil); err != nil {
 		t.Fatal(err)
 	}
 	artifact := domain.ArtifactRecord{ID: "plan-01", Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("a"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: []byte(`{"id":"plan-01"}`)}
@@ -58,7 +62,7 @@ func TestDocumentPracticeRepositoryPublishesOnlyVerifiedRuntimeBindings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, nil); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, testWorkflowIdentity(), nil); err != nil {
 		t.Fatal(err)
 	}
 	documentContext := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md", Anchor: "pod-lifecycle"}
@@ -284,7 +288,7 @@ func TestCreateWorkflowRecordsTheIgnitionAuditInTheSameTransaction(t *testing.T)
 		Detail:     json.RawMessage(`{"workflow_id":"document-workflow-audit"}`),
 		CreatedAt:  now,
 	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, &action); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, testWorkflowIdentity(), &action); err != nil {
 		t.Fatalf("create workflow with audit: %v", err)
 	}
 	rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
@@ -298,7 +302,7 @@ func TestCreateWorkflowRecordsTheIgnitionAuditInTheSameTransaction(t *testing.T)
 	// A rolled-back creation never leaves its audit row behind.
 	duplicate := action
 	duplicate.ID = audit.NewID(now.Add(time.Millisecond))
-	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, &duplicate); err == nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, testWorkflowIdentity(), &duplicate); err == nil {
 		t.Fatalf("duplicate workflow creation = nil error, want failure")
 	}
 	rows, err = database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
@@ -314,7 +318,7 @@ func seedWorkflowInState(t *testing.T, database *Store, id string, state domain.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, nil); err != nil {
+	if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, testWorkflowIdentity(), nil); err != nil {
 		t.Fatal(err)
 	}
 	for workflow.State != state {
@@ -508,9 +512,12 @@ func TestWorkflowObservationJoinsTheBoundActionStatus(t *testing.T) {
 	if observation.Workflow.ID != workflow.ID || observation.Action != nil {
 		t.Fatalf("agent-phase observation = %#v, want no bound action", observation)
 	}
-	list, err := database.DocumentPractice.ListWorkflowObservations(ctx)
+	list, _, err := database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 10})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("observation list = %#v, %v", list, err)
+	}
+	if list[0].Identity.PagePath != "docs/concepts/workloads/pods/pod-lifecycle" || list[0].Identity.Anchor != "pod-lifetime" {
+		t.Fatalf("observation identity = %#v", list[0].Identity)
 	}
 	if _, err := database.DocumentPractice.GetWorkflowObservation(ctx, "document-workflow-missing"); !errors.Is(err, domain.ErrWorkflowNotFound) {
 		t.Fatalf("missing observation = %v, want not found", err)
@@ -585,7 +592,7 @@ func TestValidatePublicationLedgerBindsTheEvidenceTriple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("ctx"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
+	contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("c"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
 	planArtifact := domain.ArtifactRecord{ID: "plan-plan-01-r1-a1", ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("plan"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
 	revision := domain.PracticeRevision{ID: "practice-01", WorkflowID: "workflow-01", Context: context, PlanID: plan.ID, PlanRevision: 1, WorkflowRevision: 1, CandidateID: "candidate-01", PublishedAt: now}
 	artifacts := []domain.ArtifactRecord{contextArtifact, planArtifact}
@@ -622,7 +629,7 @@ func TestValidatePublicationLedgerRejectsTitlelessPlanAndDetachedReaderProjectio
 		if err != nil {
 			t.Fatal(err)
 		}
-		contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("ctx"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
+		contextArtifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("c"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: contextPayload}
 		planArtifact := domain.ArtifactRecord{ID: fmt.Sprintf("plan-%s-r%d-a1", plan.ID, plan.Revision), ParentID: contextArtifact.ID, Kind: "learning-unit-plan", ContentRevision: "1", Digest: testRunnableDigest("plan"), SchemaVersion: domain.FormatVersion, OwnerRole: "planner", CreatedAt: now, Payload: planPayload}
 		return []domain.ArtifactRecord{contextArtifact, planArtifact}
 	}
@@ -740,5 +747,99 @@ func insertWatchdogRunnableAction(t *testing.T, database *Store, identity runnab
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 'infrastructure', 'env-lost', 'environment vanished', ?, ?)`,
 		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, state, attempt, now.UTC(), now.UTC(), updatedAt.UTC()); err != nil {
 		t.Fatalf("insert runnable action: %v", err)
+	}
+}
+
+func TestWorkflowListPaginationAndFilters(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	paths := []string{"docs/a", "docs/b", "docs/c"}
+	for index, path := range paths {
+		workflow, err := domain.NewWorkflow(fmt.Sprintf("document-workflow-page-%d", index), now.Add(time.Duration(index)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := domain.WorkflowPageIdentity{SourceID: "kubernetes", Commit: strings.Repeat("a", 40), Language: "en", PagePath: path, Anchor: "intro"}
+		if err := database.DocumentPractice.CreateWorkflow(ctx, workflow, identity, nil); err != nil {
+			t.Fatal(err)
+		}
+		updated, err := database.DocumentPractice.AdvanceWorkflow(ctx, workflow.ID, workflow.StateVersion, domain.PlanReviewing, now.Add(time.Duration(index)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = updated
+	}
+
+	list, next, err := database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 2})
+	if err != nil || len(list) != 2 || next == nil {
+		t.Fatalf("first page = %#v next=%#v err=%v", list, next, err)
+	}
+	if list[0].Workflow.ID != "document-workflow-page-2" || list[1].Workflow.ID != "document-workflow-page-1" {
+		t.Fatalf("first page order = %s, %s", list[0].Workflow.ID, list[1].Workflow.ID)
+	}
+	second, secondNext, err := database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 2, Cursor: next})
+	if err != nil || len(second) != 1 || secondNext != nil {
+		t.Fatalf("second page = %#v next=%#v err=%v", second, secondNext, err)
+	}
+	if second[0].Workflow.ID != "document-workflow-page-0" {
+		t.Fatalf("second page = %s", second[0].Workflow.ID)
+	}
+	if second[0].Identity.PagePath != "docs/a" || second[0].Identity.Anchor != "intro" {
+		t.Fatalf("page identity = %#v", second[0].Identity)
+	}
+
+	filtered, _, err := database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 10, PagePath: "docs/b"})
+	if err != nil || len(filtered) != 1 || filtered[0].Workflow.ID != "document-workflow-page-1" {
+		t.Fatalf("page_path filter = %#v, %v", filtered, err)
+	}
+	filtered, _, err = database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 10, State: string(domain.PlanReviewing)})
+	if err != nil || len(filtered) != 3 {
+		t.Fatalf("state filter = %#v, %v", filtered, err)
+	}
+	filtered, _, err = database.DocumentPractice.ListWorkflowObservations(ctx, DocumentWorkflowListFilter{Limit: 10, State: string(domain.Published)})
+	if err != nil || len(filtered) != 0 {
+		t.Fatalf("published filter = %#v, %v", filtered, err)
+	}
+}
+
+func TestBackfillWorkflowPageIdentityDerivesFromLedgerContext(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 19, 11, 0, 0, 0, time.UTC)
+	workflow, err := domain.NewWorkflow("document-workflow-legacy", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-identity row: insert directly without the identity columns.
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO document_workflows (id, state, state_version, revision, max_revisions, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, workflow.ID, workflow.State, workflow.StateVersion, workflow.Revision, workflow.MaxRevisions, workflow.UpdatedAt.UTC()); err != nil {
+		t.Fatal(err)
+	}
+	context := domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("b", 40), Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/legacy", Anchor: "setup"}
+	encoded, err := json.Marshal(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := domain.ArtifactRecord{ID: "document-context-" + domain.ContentID(context), Kind: "document-context", ContentRevision: context.Commit, Digest: testRunnableDigest("c"), SchemaVersion: domain.FormatVersion, OwnerRole: "server", CreatedAt: now, Payload: encoded}
+	if err := database.DocumentPractice.AppendArtifact(ctx, workflow.ID, artifact); err != nil {
+		t.Fatal(err)
+	}
+
+	backfilled, err := database.DocumentPractice.BackfillWorkflowPageIdentity(ctx)
+	if err != nil || backfilled != 1 {
+		t.Fatalf("backfill = %d, %v", backfilled, err)
+	}
+	observation, err := database.DocumentPractice.GetWorkflowObservation(ctx, workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Identity != (domain.WorkflowPageIdentity{SourceID: context.SourceID, Commit: context.Commit, Language: context.Language, PagePath: context.PagePath, Anchor: context.Anchor}) {
+		t.Fatalf("backfilled identity = %#v", observation.Identity)
+	}
+
+	// The backfill is idempotent: a second pass changes nothing.
+	backfilled, err = database.DocumentPractice.BackfillWorkflowPageIdentity(ctx)
+	if err != nil || backfilled != 0 {
+		t.Fatalf("second backfill = %d, %v", backfilled, err)
 	}
 }

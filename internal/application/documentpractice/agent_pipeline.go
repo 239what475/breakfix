@@ -93,9 +93,15 @@ type PipelineStartResult struct {
 // review, generation, independent artifact review, and deterministic gates.
 // It stops before Provider work and returns the immutable materialization key.
 // The administrative ignition action, when supplied, is recorded together
-// with the workflow creation.
+// with the workflow creation. The library metadata supplies the page identity
+// persisted alongside the workflow for corpus aggregation.
 func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor string, ignition *audit.HumanAction) (PipelineStartResult, error) {
-	workflow, err := p.service.Start(ctx, workflowID, ignition)
+	metadata, err := p.reader.ReadMetadata(pagePath)
+	if err != nil {
+		return PipelineStartResult{}, err
+	}
+	identity := domain.WorkflowPageIdentity{SourceID: metadata.Context.SourceID, Commit: metadata.Context.Commit, Language: metadata.Context.Language, PagePath: pagePath, Anchor: anchor}
+	workflow, err := p.service.Start(ctx, workflowID, identity, ignition)
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
@@ -106,10 +112,6 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 		return PipelineStartResult{Workflow: workflow}, nil
 	}
 	page, err := p.reader.ReadPage(pagePath, anchor)
-	if err != nil {
-		return PipelineStartResult{}, err
-	}
-	metadata, err := p.reader.ReadMetadata(pagePath)
 	if err != nil {
 		return PipelineStartResult{}, err
 	}

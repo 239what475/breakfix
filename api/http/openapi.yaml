@@ -448,17 +448,42 @@ paths:
   /admin/documentation/workflows:
     get:
       operationId: listAdminDocumentationWorkflows
-      summary: List documentation workflows with dwell and stuck status (admin only)
+      summary: List documentation workflows with page identity and stuck status (admin only)
       tags: [admin]
       security:
         - bearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: state
+          in: query
+          description: Filter by exact workflow state
+          schema:
+            type: string
+        - name: page_path
+          in: query
+          description: Filter by exact documentation page path
+          schema:
+            type: string
       responses:
         "200":
-          description: All documentation workflows, most recently updated first
+          description: One page of documentation workflows, most recently updated first
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminDocumentationWorkflowList"
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -1778,6 +1803,15 @@ components:
           type: integer
         revision:
           type: integer
+        page_path:
+          type: string
+          description: Documentation page the workflow practices
+        anchor:
+          type: string
+          description: Heading anchor on the page; empty for page-level practices
+        title:
+          type: string
+          description: Page title resolved server-side from the library manifest
         updated_at:
           type: string
           format: date-time
@@ -1795,6 +1829,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminDocumentationWorkflow"
+        next_cursor:
+          type: string
+          description: Present when another page exists
 
     AdminDocumentationLedgerEntry:
       type: object
@@ -1871,6 +1908,15 @@ components:
           type: integer
         revision:
           type: integer
+        page_path:
+          type: string
+          description: Documentation page the workflow practices
+        anchor:
+          type: string
+          description: Heading anchor on the page; empty for page-level practices
+        title:
+          type: string
+          description: Page title resolved server-side from the library manifest
         updated_at:
           type: string
           format: date-time

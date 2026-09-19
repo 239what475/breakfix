@@ -22,6 +22,10 @@ func (f fakeDocumentationLibrary) ReadDocumentPage(string) (docsource.DocumentPa
 	return f.page, f.pageErr
 }
 
+func (f fakeDocumentationLibrary) DocumentPageTitle(string) string {
+	return "Pod Lifecycle"
+}
+
 func (f fakeDocumentationLibrary) ReadDocumentTree(string) ([]docsource.DocumentTreeChild, error) {
 	return f.tree, nil
 }
