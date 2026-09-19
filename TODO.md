@@ -52,7 +52,7 @@ Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、
       存在即挂载），core 目标不建 Incus Secret、runtime Secret 不带 incus 字段即可
       完整启动。
 
-### 提交 3 test(e2e): profile-aware kind e2e chain
+### 提交 3 test(e2e): profile-aware kind e2e chain ✅ 988289b（验收期修补：8c6ddb6、d7dc649、da90de8）
 
 - [x] `BREAKFIX_E2E_PROFILE=core|full`（默认 full，非法值显式报错）；
 - [x] e2e-target.sh：core 下 preflight 免 incus CLI/共享 project/基础镜像检查（改为
@@ -66,40 +66,24 @@ Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、
 - [x] run-authoring-interruption-e2e.sh：core 剖面拒绝执行（node 场景）；
 - [x] docs/operations/testing.md 记录两剖面、归属矩阵与 core 剖面的 Secret 前提。
 
-验收（本地，含 Incus 的专用 target）：
+验收（本地，含 Incus 的专用 target；2026-09-20 回填）：
 
-- [ ] full 剖面全量回归与现状一致（ui/node/k8s/recovery/documentation/admin）；
-- [ ] core 剖面（runtime Secret 去掉 incus 字段、无 Incus Secret、机器无 incus CLI）：
-      e2e-prepare → ui、k8s、admin、documentation 全绿；node/recovery 启动即报需要
-      full 剖面；
+- [x] full 剖面全量回归与现状一致（kind-breakfix-e2e，Incus remote 在位）：prepare 绿，
+      ui 3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 3/3、admin 4/4，与
+      降级阶段收尾基线一致；
+- [x] core 剖面（独立 target breakfix-e2e-core：runtime Secret 无任何 incus 字段、
+      无 breakfix-incus-* Secret）：e2e-prepare 发布 k8s-only fixture 并绿，ui 3/3、
+      k8s 1/1、documentation 3/3、admin 4/4；node、recovery、authoring-interruption
+      启动即报需要 full 剖面；
 - [x] make test-unit、verify-generated、web-test-unit 绿（44 包 / 契约 diff 干净 / 6 文件
       20 用例，2026-09-20）。
 
-## 测试分层与 E2E 降级（剩余未完成部分，2026-09-19 立项）
-
-目标与判定标准见 git 历史（32e1bb8 等）；已完成 A 波（提交 1–4）与 B 波的组件测试
-部分（c68ee1e）。剩余：
-
-### 提交 5 test(e2e): condense the reader suite into a thin smoke
-
-- [ ] 薄 smoke：大纲走到 pod-lifecycle + 生成内容契约（h2#pod-lifetime、
-      doc-alert、pre.shiki）+ 移动端菜单/抽屉 + 实践按钮恰好一个 + 移动端
-      无入口；reader-fast 项目由 smoke 项目接替（依赖 practice 链）
-- [ ] 删 5 条 reader fast 与 3 条实践 UI e2e；发布链尾部加一行按钮存在
-      性；documentation 10→3
-
-### 提交 6 test(e2e): merge watchdog and controls into one chain
-
-- [ ] 合并链：park（worker 0）→ SQL-fail → watchdog 判 Failed → 批次
-      （ingress@what-is + autoscale@algorithm-details companion）项跟随 →
-      pause/resume/cancel 薄验证 → 第二批次重映射 Failed + companion 保
-      活 → retry-failed → worker 回 → Published；重语义断言删（三层已
-      覆盖）；admin 5→4
-
-### 提交 7（可选，不阻塞验收） test(postgres): live ticks for watchdog and scheduler
-
-- [ ] DB-gated 集成测试：真 watchdog tick + scheduler tick 对真 Postgres
-      驱动 parked→Failed→条目跟随，进一步压薄合并链
+验收期间修复三处（均为剖面化改造自身引入或暴露）：runtime.sh NetworkPolicy 端口
+合并的 jq 括号缺失，Node 物化因出站被断卡死（8c6ddb6）；core 剖面改发 k8s-only
+fixture 并参数化投影断言（d7dc649）；docs prepare 的投影等待与 ui 浏览断言按剖面
+取 fixture（da90de8）。core 目标的前置：从 full 目标拷贝 runtime Secret 去除
+incus_* 键，并补拷 breakfix-registry-auth/pull 与 worker identity Secret；验收后
+core 集群已删除。
 
 ## 挂起待决策（不排期）
 
