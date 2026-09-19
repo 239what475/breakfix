@@ -78,10 +78,10 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 2 test(web): scaffold vitest and cover the admin corpus section
 
-- [ ] web/ 装 vitest + @vue/test-utils + happy-dom；package.json 加
+- [x] web/ 装 vitest + @vue/test-utils + happy-dom；package.json 加
       test:unit；Makefile 加目标并纳入全量回归清单；mock 边界 = vi.mock
       生成的 client 模块
-- [ ] 第一批组件测试：语料区（树渲染、已发布计数、批次详情展开、只看
+- [x] 第一批组件测试：语料区（树渲染、已发布计数、批次详情展开、只看
       失败过滤的应用提交语义，含路由已激活时 watch immediate 回归）
 
 ### 提交 3 test(web): console component tests replace the admin fast specs

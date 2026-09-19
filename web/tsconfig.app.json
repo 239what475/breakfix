@@ -10,5 +10,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  // Component specs and their helpers run under vitest with their own
+  // dependency types; they never ship in the production build.
+  "exclude": ["src/**/*.spec.ts", "src/test"]
 }
