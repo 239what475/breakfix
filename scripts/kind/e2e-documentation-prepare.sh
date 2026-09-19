@@ -156,6 +156,11 @@ base_url=$ui_origin
 fixture_title='Node 运行时验收'
 fixture_runtime=node
 fixture_count=2
+expect_node=1
+if [ "${BREAKFIX_E2E_PROFILE:-full}" = core ]; then
+	fixture_count=1
+	expect_node=0
+fi
 catalog_json=$state_dir/catalog-projection.json
 deadline=$(( $(date +%s) + ${BREAKFIX_E2E_PREPARE_TIMEOUT_SECONDS:-900} ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -165,9 +170,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 			--arg title "$fixture_title" \
 			--arg runtime "$fixture_runtime" \
 			--argjson count "$fixture_count" \
+			--argjson expect_node "$expect_node" \
 			'
 				(.scenarios | length) == $count and
-				any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+				(($expect_node == 1 and any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"])) or $expect_node == 0) and
 				any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
 			' "$catalog_json" >/dev/null; then
 		break
@@ -178,9 +184,10 @@ jq -e \
 	--arg title "$fixture_title" \
 	--arg runtime "$fixture_runtime" \
 	--argjson count "$fixture_count" \
+	--argjson expect_node "$expect_node" \
 	'
 		(.scenarios | length) == $count and
-		any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"]) and
+		(($expect_node == 1 and any(.scenarios[]; .title == $title and .runtime == $runtime and (.scenario_tags | sort) == ["linux", "runtime-fixture"])) or $expect_node == 0) and
 		any(.scenarios[]; .title == "Kubernetes 复现核心验收" and .runtime == "k8s" and (.scenario_tags | sort) == ["kubernetes", "runtime-fixture"])
 	' "$catalog_json" >/dev/null || fail "fixture Catalog did not reach the expected public projection before timeout"
 stop_port_forward

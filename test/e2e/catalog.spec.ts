@@ -1,19 +1,19 @@
 import { expect, test } from "@playwright/test";
 import { scenarioCard } from "../support/live-helpers";
-import { nodeRuntimeFixture } from "../support/catalog-fixture";
+import { browsableFixture } from "../support/catalog-fixture";
 
 test("guest can browse the prepared public catalog", async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.goto("/");
 
-	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
-	await page.getByRole("textbox", { name: "Search scenarios" }).fill(nodeRuntimeFixture.searchTerm);
-	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
+	await expect(scenarioCard(page, browsableFixture.title)).toBeVisible();
+	await page.getByRole("textbox", { name: "Search scenarios" }).fill(browsableFixture.searchTerm);
+	await expect(scenarioCard(page, browsableFixture.title)).toBeVisible();
 	await page.getByRole("textbox", { name: "Search scenarios" }).fill("not-a-scenario");
 	await expect(page.getByText("No scenarios match these filters.", { exact: true })).toBeVisible();
 	await page.getByRole("textbox", { name: "Search scenarios" }).fill("");
-	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
-	await scenarioCard(page, nodeRuntimeFixture.title)
+	await expect(scenarioCard(page, browsableFixture.title)).toBeVisible();
+	await scenarioCard(page, browsableFixture.title)
 		.getByRole("button", { name: "Start scenario", exact: true })
 		.click();
 	await expect(page.getByRole("dialog")).toBeVisible();

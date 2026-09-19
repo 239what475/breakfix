@@ -3,7 +3,7 @@ import {
 	scenarioCard,
 	registerAndLogin,
 } from "../support/live-helpers";
-import { nodeRuntimeFixture } from "../support/catalog-fixture";
+import { browsableFixture } from "../support/catalog-fixture";
 
 test("authenticated learner can navigate the responsive My space shell", async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
@@ -26,6 +26,6 @@ test("authenticated learner can navigate the responsive My space shell", async (
 	await page.getByRole("button", { name: "Navigation", exact: true }).click();
 	await expect(page.getByRole("navigation", { name: "Mobile primary" })).toBeVisible();
 	await page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Operations", exact: true }).click();
-	await expect(scenarioCard(page, nodeRuntimeFixture.title)).toBeVisible();
+	await expect(scenarioCard(page, browsableFixture.title)).toBeVisible();
 	await expect(page.getByRole("button", { name: "Start scenario", exact: true })).toHaveCount(0);
 });
