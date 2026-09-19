@@ -112,7 +112,7 @@ DB-gated、application fakes）已存在且比预期厚，本阶段 Go 侧只删
 
 ### 提交 6 test(e2e): merge watchdog and controls into one chain
 
-- [ ] 合并链：park（worker 0）→ SQL-fail → watchdog 判 Failed → 批次
+- [x] 合并链：park（worker 0）→ SQL-fail → watchdog 判 Failed → 批次
       （ingress@what-is + autoscale@algorithm-details companion）项跟随 →
       pause/resume/cancel 薄验证 → 第二批次重映射 Failed + companion 保
       活 → retry-failed → worker 回 → Published；重语义断言删（三层已

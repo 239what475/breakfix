@@ -13,11 +13,11 @@ export const adminPassword = "admin-e2e-password";
 
 // Every chain scenario owns a distinct (page, anchor) pair so the specs stay
 // independent on a fresh target and remain grep-able as subsets:
-//   rescue          -> pod-lifecycle @ pod-lifetime
-//   batch rollout   -> autoscale @ how-does-a-horizontalpodautoscaler-work (pre-published)
-//                      ingress     @ terminology (scheduler chain)
-//   watchdog        -> ingress    @ what-is-ingress
-//   batch controls  -> ingress    @ prerequisites
+//   rescue            -> pod-lifecycle @ pod-lifetime
+//   batch rollout     -> autoscale @ how-does-a-horizontalpodautoscaler-work (pre-published)
+//                        ingress     @ terminology (scheduler chain)
+//   watchdog+controls -> ingress    @ what-is-ingress (watchdog failure)
+//                        autoscale @ algorithm-details (parked companion)
 export const podLifecyclePage = "docs/concepts/workloads/pods/pod-lifecycle";
 export const autoscalePage = "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale";
 export const ingressPage = "docs/concepts/services-networking/ingress";
