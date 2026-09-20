@@ -66,9 +66,11 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 
 ### 提交 4 ghcr 收尾（首次真实发布前完成）
 
-- [ ] 四个包可见性定 public（用户点头后 API 执行）；
-- [ ] 网页删除 v0.0.0-rc.1 测试版本（API 无 delete:packages scope，网页 Packages
-      页可删）。
+- [x] 四个包已为 public——实测纠正计划假设：与公开仓库关联的包继承 public 可见性
+      （非旧的"GITHUB_TOKEN 默认 private"规则）；四个包匿名 manifest 拉取全部 200，
+      首次正式发布即可无凭证直拉，无需任何操作；
+- [ ] （可选，纯观感）删除包内残留的 v0.0.0-rc.1/rc.2 测试版本：网页 Packages 页
+      删除，或 `gh auth refresh -s delete:packages` 后交由 CLI 处理。
 
 ### 验收（提交 1、2 于 2026-09-20 回填）
 
@@ -80,7 +82,7 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
       缩短至 ~6 分钟）；
 - [x] tag 保护生效（ruleset active，配置经 GET 复核）；
 - [x] major PR 评审报告产出并交付用户 ✅（评审即执行，7 合 1 挂起）；
-- [ ] ghcr 可见性与测试版本清理完成。
+- [x] ghcr 可见性已实证为 public（匿名 200）；仅剩可选的测试版本清理。
 
 ### 已知后续（不属本阶段）
 
