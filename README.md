@@ -51,7 +51,9 @@ kubectl kustomize .
 # 先在专用 Kind target 上执行 make e2e-prepare，再运行平台验收
 ```
 
-真实 Kubernetes 与模型验收需要显式启用，见[测试与真实验收](docs/operations/testing.md)。
+本地只需运行与变更最相关的层；推送后 CI 分工接手：push 快车道覆盖单元测试、生成契约、
+密钥扫描与 race 扫描，全量 core 回归与 docs 语义校验由按需 nightly 承担。真实 Kubernetes
+与模型验收需要显式启用，见[测试与真实验收](docs/operations/testing.md)。
 
 ## 文档与契约
 
