@@ -1,114 +1,79 @@
 # TODO
 
-已完成的阶段见 git 历史；本文件保留当前阶段与未立项事项。
+已完成的阶段见 git 历史（最近：E2E 剖面化 core/full 与回归编排/bootstrap，验收章见
+aaaf01d、bf766e5、1446833）；本文件保留当前阶段与未立项事项。
 
-## E2E 剖面化：core/full（当前阶段，2026-09-20 立项）
+## CI：push 快车道 + 按需 nightly（当前阶段，2026-09-20 立项）
 
-背景：CI 重写前的测试改造。目标是把 E2E 公共链从 Incus 硬耦合中解出，引入
-`BREAKFIX_E2E_PROFILE=core|full`（默认 full，本地现有工作流零变化）。core 剖面只依赖
-Kind + in-cluster Registry/PostgreSQL，可在无 Incus 的环境（托管 CI、无 Incus 的开发机）
-运行 ui/k8s/admin/documentation 套件；node、recovery 与 live acceptance 保留在 full
-剖面。CI workflow 重写不在本阶段，剖面落地后另行立项。
+背景：剖面化与 bootstrap 落地后，托管 runner 上已无任何需要特殊引导的环节，CI 重写
+只剩 workflow 本身。本仓库单人直推 main，无协作者，PR 门禁语义不存在（2026-09-20 与
+用户确认）；将来有协作者时把触发器从 push 扩到 pull_request 即可，job 本体不动。
 
-关键事实（2026-09-20 探查，设计前提）：
+关键决策（2026-09-20 与用户确认）：
 
-- 文档实践场景的 runtime 在产品内硬编码为 k8s
-  （internal/bootstrap/server/documentation.go 的 constraint `Runtime: RuntimeK8s`）——
-  admin/documentation 套件运行时不碰 Incus，卡点只在公共 prepare 链；
-- ReconnectableClient 全部方法 nil 安全（clientFor 报 "Node provider is not
-  configured"）；provider 层已按 runtime 分派——ArtifactBuilder、EnvironmentProvider、
-  VerificationProvider 的 k8s 路径不触碰 Incus client，worker 健康能力的注释明确
-  能力探针不是 readiness 门；
-- config/app/in-cluster.yaml 的 incus.endpoint 本来就是 `${BREAKFIX_INCUS_ENDPOINT}`
-  从 runtime Secret 注入——endpoint 为空即未启用，天然就是开关，无需拆配置文件；
-- 耦合点清单：config 三个进程验证器无条件 `Incus.Validate()`；server/controller/
-  runtime-worker 三个 bootstrap 无条件构造 client；部署清单的 incus secretKeyRef 非
-  optional、incus-tls secret 卷非 optional；e2e-target.sh 的 preflight/ensure-incus/
-  configure-runtime/reset、run-e2e.sh 的工具清单与诊断采集、runtime.sh 的 endpoint
-  端口校验与 NetworkPolicy incus 端口注入；
-- recovery 两条 spec 断言 incus PTY 终端重连与 node answer 完成恢复——这正是 node
-  专属恢复路径，保留 node fixture（评估过换 k8s fixture：会丢掉终端重连覆盖，不换）；
-- 套件剖面归属：core = ui、k8s、documentation、admin、acceptance-k8s（live 门禁另由
-  RUN_AGENT_LIVE_E2E 把守）；full-only = node、recovery、acceptance-node、
-  acceptance-mcp、acceptance-interruption、agent-assistant、agent-soak。
+- **无 PR**：快车道由 push 到 main 触发，作为干净环境兜底（本地绿 ≠ CI 绿：工具链
+  漂移、缓存污染、漏跑入口），不做分支保护/required checks；
+- **nightly 按需**：gate 比较当前 main HEAD 与 nightly workflow 上一次成功运行的
+  head_sha，相同则跳过全部重 job——无提交的夜晚零成本；nightly 失败后无新提交也会
+  自动重试（上次成功 sha 停留在更早处）；周日额外无条件跑一次（外部漂移兜底：浮动
+  tag 基础镜像、runner 镜像更新），workflow_dispatch 手动强制；
+- **e2e 托管形态**（已本地验证的入口，CI 直接调用）：
+  `make e2e-bootstrap-core` + `BREAKFIX_E2E_PROFILE=core make test-e2e-regression`；
+  node/recovery 留本地 full target，live acceptance 永不进 CI；
+- **顺带修复现有 ci.yml 的已知问题**：golangci-lint-action v6 跑不了 v2 配置（升 v7
+  并钉 lint 版本）、quality 与 build 两个 job 重复 `make build`、Vitest 层缺失、Go
+  版本在 go.mod/ci/release 三处手工钉（改 `go-version-file: go.mod`）。
+
+待拍板：仓库公开还是私有（匿名 API 被限流未查成）。私有则 2000 分钟/月配额下，
+"周日无条件跑"与"每次 push 必跑快车道"两个奢侈项需要用户点头，其余设计两种情况相同。
+
+设计形态：
+
+```
+push 到 main ──→ 快车道（并发取消旧跑）
+                   go-test（PG service + make test-unit）
+                   web-test（make web-test-unit）
+                   contracts-build（verify-generated + make build 唯一一次
+                                    + kubectl kustomize 两套 + lint v7）
+夜晚 ──→ gate：HEAD ≠ 上次成功 nightly 的 sha？
+                   │是                          │否
+                   ▼                            ▼
+     e2e-core：bootstrap + core 全量回归        跳过
+     docs：docs-sync/build/check/smoke
+     vk8s：make test-vk8s-network
+周日无条件跑 + workflow_dispatch 手动
+```
 
 提交拆解：
 
-### 提交 1 feat(config): make the Incus provider optional ✅ ad0ab47
+### 提交 1 ci: push fast lane replaces the PR pipeline
 
-- [x] `incus.Config.Enabled()`：endpoint 非空即启用；`Validate()` 对未启用配置放行，
-      非空配置维持现状严校验；`NewReconnectableClient` 拒绝未启用配置（防构造出
-      必然失败的 client）；
-- [x] server/controller/runtime-worker 三个 bootstrap 仅在启用时构造 client，未启用
-      传递 nil（方法 nil 安全，node 操作报明确错误）；worker 的 node-provider 健康
-      能力仅在启用时注册；
-- [x] 单测：空配置 Validate 通过、仅 endpoint 的部分配置拒绝、Enabled 判定、无 incus
-      endpoint 的进程配置通过三个验证器。
+- [ ] ci.yml 重写：push 触发（去 PR）、concurrency cancel、go-version-file、
+      build 只跑一次、补 web-test、lint 升 action v7 钉版本、各 job timeout-minutes；
+- [ ] release.yml 同步：go-version-file 收敛。
 
-### 提交 2 feat(deploy): optional Incus secret references ✅ 2ecfe9a
+### 提交 2 ci: gated nightly with the core regression
 
-- [x] server/controller/runtime-worker 清单：incus 相关 secretKeyRef 全部
-      `optional: true`，incus-tls secret 卷 `optional: true`——生产语义不变（Secret
-      存在即挂载），core 目标不建 Incus Secret、runtime Secret 不带 incus 字段即可
-      完整启动。
+- [ ] nightly.yml：gate job（API 查上次成功 sha）+ e2e-core（装 kind、建临时集群、
+      bootstrap、core 全量回归、失败上传 .local/e2e 诊断 artifact）+ docs 管线
+      （actions/cache 缓存 .local/docs）+ vk8s；周日 schedule 不带 gate；
+      workflow_dispatch 强制全跑；
+- [ ] 权限最小化（contents: read、actions: read 供 gate 查询）。
 
-### 提交 3 test(e2e): profile-aware kind e2e chain ✅ 988289b（验收期修补：8c6ddb6、d7dc649、da90de8）
+### 提交 3 docs: record the CI tiers and local relevance map
 
-- [x] `BREAKFIX_E2E_PROFILE=core|full`（默认 full，非法值显式报错）；
-- [x] e2e-target.sh：core 下 preflight 免 incus CLI/共享 project/基础镜像检查（改为
-      要求 runtime Secret 不含 incus_endpoint，防带残留字段的目标误跑）、ensure-incus
-      与 configure-runtime 的 incus 键跳过、reset 免 incus 工具与 project 清理、诊断
-      免 incus 采集；full 下 preflight 追加 incus_endpoint 非空校验；
-- [x] runtime.sh：incus endpoint 读取 null 安全；为空时跳过端口校验与 NetworkPolicy
-      的 incus 端口注入；
-- [x] run-e2e.sh：工具清单按剖面收紧；full-only 套件在 core 下启动即报"requires
-      the full profile"；失败诊断的 incus 采集按剖面；
-- [x] run-authoring-interruption-e2e.sh：core 剖面拒绝执行（node 场景）；
-- [x] docs/operations/testing.md 记录两剖面、归属矩阵与 core 剖面的 Secret 前提。
+- [ ] docs/operations/testing.md 补"本地只跑最相关测试"的变更区域 → 套件映射
+      （web→vitest+ui；transport/handler→test-unit+admin/documentation；
+      runtime/k8s→k8s；runtime/node→node；scripts/deploy→受影响套件），以及
+      CI 层级（push 快车道 / 按需 nightly / 本地 full / 人工 live）的说明。
 
-验收（本地，含 Incus 的专用 target；2026-09-20 回填）：
+验收：
 
-- [x] full 剖面全量回归与现状一致（kind-breakfix-e2e，Incus remote 在位）：prepare 绿，
-      ui 3/3、node 3/3、k8s 1/1、recovery 2/2、documentation 3/3、admin 4/4，与
-      降级阶段收尾基线一致；
-- [x] core 剖面（独立 target breakfix-e2e-core：runtime Secret 无任何 incus 字段、
-      无 breakfix-incus-* Secret）：e2e-prepare 发布 k8s-only fixture 并绿，ui 3/3、
-      k8s 1/1、documentation 3/3、admin 4/4；node、recovery、authoring-interruption
-      启动即报需要 full 剖面；
-- [x] make test-unit、verify-generated、web-test-unit 绿（44 包 / 契约 diff 干净 / 6 文件
-      20 用例，2026-09-20）。
-
-验收期间修复三处（均为剖面化改造自身引入或暴露）：runtime.sh NetworkPolicy 端口
-合并的 jq 括号缺失，Node 物化因出站被断卡死（8c6ddb6）；core 剖面改发 k8s-only
-fixture 并参数化投影断言（d7dc649）；docs prepare 的投影等待与 ui 浏览断言按剖面
-取 fixture（da90de8）。core 目标的前置：从 full 目标拷贝 runtime Secret 去除
-incus_* 键，并补拷 breakfix-registry-auth/pull 与 worker identity Secret；验收后
-core 集群已删除。
-
-### 提交 4 test(e2e): one-prepare regression orchestration ✅ f3a1457（验收后追加）
-
-- [x] `make test-e2e-regression`：一次 documentation prepare 服务整条链——admin 先跑
-      （全新 target 选举 bootstrap admin）→ 数据库级 reset → documentation（恢复
-      practice 计数断言的干净库）→ k8s → ui，full 剖面再追加 node、recovery；单套件
-      入口保持自包含不变；
-- [x] `scripts/kind/e2e-reset-database.sh`：套件间数据库级 reset——删 RuntimeEnvironments
-      （Controller finalizer 回收运行资源）、重建数据库、单次重启 Server/Controller、
-      等 Server 从 runtime Secret 记录的 digest 重装 fixture Catalog；部署、文档库
-      挂载、Registry 产物与 prepared 标记全部原样保留；
-- [x] 验收（2026-09-20，full target）：全链一次通过，admin 4/4、documentation 3/3、
-      k8s 1/1、ui 3/3、node 3/3、recovery 2/2，整链约 28 分钟（此前同等全量约
-      45–55 分钟，三套件各自 prepare）。
-
-### 提交 5 test(e2e): bootstrap a disposable core target from an empty cluster ✅ cc6addd（验收后追加）
-
-- [x] `make e2e-bootstrap-core`：在空 Kind 集群上生成 core 剖面的全部可生成前置——runtime Secret
-      （随机数据库/JWT/Registry 凭据，prepare 链拥有的字段留空或占位，模型键由 docs prepare
-      覆盖、OpenSandbox 键为哑值）与 bcrypt htpasswd Registry Secret；拒绝为在役 target 重新
-      生成凭据。full 剖面的 Incus 凭据/证书/remote 仍属运维提供，刻意不由 bootstrap 生成；
-- [x] 验收（2026-09-20）：空集群 `kind create` → `make e2e-bootstrap-core` →
-      `BREAKFIX_E2E_PROFILE=core make e2e-prepare` 从零直达 prepared（零母本拷贝），
-      ui 3/3；full 剖面 preflight 对该 target 明确报缺少 incus_endpoint。此欠账源于
-      core 验收时从 full 集群拷贝 Secret 的绕行，CI bootstrap 复用同一入口。
+- [ ] push 后快车道全绿（首次包含 Vitest 层）；
+- [ ] workflow_dispatch 强制 nightly：bootstrap + core 全量回归 + docs + vk8s 在
+      托管 runner 全绿；
+- [ ] gate 语义：同 sha 再次 dispatch 时重 job 被跳过；
+- [ ] make test-unit、verify-generated、web-test-unit 本地绿（不回归）。
 
 ## 挂起待决策（不排期）
 
