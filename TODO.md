@@ -24,8 +24,13 @@ aaaf01d、bf766e5、1446833）；本文件保留当前阶段与未立项事项�
   并钉 lint 版本）、quality 与 build 两个 job 重复 `make build`、Vitest 层缺失、Go
   版本在 go.mod/ci/release 三处手工钉（改 `go-version-file: go.mod`）。
 
-待拍板：仓库公开还是私有（匿名 API 被限流未查成）。私有则 2000 分钟/月配额下，
-"周日无条件跑"与"每次 push 必跑快车道"两个奢侈项需要用户点头，其余设计两种情况相同。
+前置已定：仓库将由 private 转为 public（2026-09-20 与用户确认）。转公开前完成全历史
+密钥扫描：gitleaks 覆盖 392 个提交，7 个命中经逐一甄别均为测试常量、fixture 占位值
+或生成代码（taxonomy-e2e 测试键、mcp 幂等键、假 TOTP、内嵌 OpenAPI 规范、Makefile
+生成路径变量），真实凭据只存在于 Kind 集群与环境，敏感路径（.local/、local 配置、
+证书私钥）从未入库；已知良性模式已加 .gitleaks.toml allowlist，复扫归零。配额约束
+随之解除，"周日无条件跑"与"每次 push 必跑快车道"两项保留。转公开后需在仓库设置
+开启 push protection（GitHub 网页操作，非仓库文件）。
 
 设计形态：
 
