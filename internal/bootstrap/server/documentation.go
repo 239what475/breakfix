@@ -147,6 +147,8 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	if database == nil || !cfg.Documentation.Enabled() {
 		return nil, nil, nil, nil
 	}
+	const documentationPolicyVersion = "document-policy-v2"
+
 	identity := docsource.LibraryIdentity{
 		SourceID: cfg.Documentation.SourceID, Repository: cfg.Documentation.Repository,
 		Commit: cfg.Documentation.Revision, Version: cfg.Documentation.Version, Language: cfg.Documentation.Language,
@@ -161,23 +163,23 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	evidence, err := llm.NewDocumentReviewer(cfg.Agent, "evidence")
+	evidence, err := llm.NewDocumentReviewer(cfg.Agent, "evidence", documentationPolicyVersion)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	value, err := llm.NewDocumentReviewer(cfg.Agent, "value")
+	value, err := llm.NewDocumentReviewer(cfg.Agent, "value", documentationPolicyVersion)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	safety, err := llm.NewDocumentReviewer(cfg.Agent, "safety")
+	safety, err := llm.NewDocumentReviewer(cfg.Agent, "safety", documentationPolicyVersion)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	consistency, err := llm.NewDocumentReviewer(cfg.Agent, "consistency")
+	consistency, err := llm.NewDocumentReviewer(cfg.Agent, "consistency", documentationPolicyVersion)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	verification, err := llm.NewDocumentReviewer(cfg.Agent, "verification")
+	verification, err := llm.NewDocumentReviewer(cfg.Agent, "verification", documentationPolicyVersion)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -189,7 +191,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		service, reader, llm.NewDocumentPlanner(cfg.Agent),
 		[]app.PlanReviewRole{evidence, value}, llm.NewDocumentGenerator(cfg.Agent),
 		[]app.CandidateReviewRole{safety, consistency}, []app.VerificationReviewRole{verification}, profiles,
-		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: "document-policy-v2"},
+		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: documentationPolicyVersion},
 	)
 	if err != nil {
 		return nil, nil, nil, err
