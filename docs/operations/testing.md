@@ -24,12 +24,15 @@ Breakfix 按依赖和失败边界分层测试。日常测试不启动模型、�
 | `core` | Kind + in-cluster Registry/PostgreSQL；无 Incus CLI、无 Incus Secret | ui、k8s、admin、documentation（acceptance-k8s 的运行时也是 k8s，live 门禁另由 `RUN_AGENT_LIVE_E2E` 把守） |
 | `full` | 同上 + 外部 Incus remote（预置 project、基础镜像、profile） | 全部套件 |
 
-core 剖面的运行时 Secret 不携带任何 `incus_*` 字段（preflight 会拒绝带残留字段的目标），部署清单对 Incus
-Secret 的引用全部可选，Server/Controller/Runtime Worker 以 Node-less 模式启动：Node 场景的置备、物化与终端在第一时间报
-"provider is not configured"，K8s 场景不受影响。`node`、`recovery`、`acceptance-node`、`acceptance-mcp`、
-`acceptance-interruption`、`agent-assistant`、`agent-soak` 套件在 core 剖面下启动即报需要 full 剖面；`recovery`
-断言 incus PTY 终端重连与 node answer 完成恢复，刻意保留 Node fixture。full 剖面的 preflight 额外要求 runtime Secret
-提供 `incus_endpoint`。
+core 剖面的前置全部可由脚本生成：在空 Kind 集群上执行 `make e2e-bootstrap-core`，它会创建 runtime
+Secret（随机数据库/JWT/Registry 凭据，prepare 链拥有的字段留空或占位）与 Registry htpasswd Secret，随后
+`BREAKFIX_E2E_PROFILE=core make e2e-prepare` 从零直达 prepared。preflight 会拒绝带残留 `incus_endpoint`
+的目标。部署清单对 Incus Secret 的引用全部可选，Server/Controller/Runtime Worker 以 Node-less 模式启动：Node
+场景的置备、物化与终端在第一时间报 "provider is not configured"，K8s 场景不受影响。`node`、`recovery`、
+`acceptance-node`、`acceptance-mcp`、`acceptance-interruption`、`agent-assistant`、`agent-soak` 套件在 core
+剖面下启动即报需要 full 剖面；`recovery` 断言 incus PTY 终端重连与 node answer 完成恢复，刻意保留 Node
+fixture。full 剖面的 preflight 额外要求 runtime Secret 提供 `incus_endpoint`，且 Incus 证书与 remote 属于
+运维提供的外部资源，不由 bootstrap 生成。
 
 ## 可丢弃的 Kind 目标
 

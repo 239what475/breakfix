@@ -1,5 +1,5 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images documentation-library-image deploy-kind reset-kind \
-	test-unit lint catalog-package e2e-prepare e2e-reset test-e2e test-e2e-node test-e2e-regression \
+	test-unit lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
 	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-check docs-metadata docs-smoke \
 	docs-project docs-fixture
@@ -182,6 +182,9 @@ catalog-package:
 
 test-e2e: test-deps
 	./scripts/kind/run-e2e.sh ui
+
+e2e-bootstrap-core:
+	./scripts/kind/e2e-bootstrap-core.sh
 
 e2e-prepare:
 	./scripts/kind/e2e-prepare.sh
