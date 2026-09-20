@@ -142,7 +142,7 @@ func materializedArtifactImage(artifact runnable.ArtifactReference) (string, err
 	case runnable.RuntimeNode:
 		_, digest, found := strings.Cut(strings.TrimPrefix(artifact.ProviderReference, "incus://"), "@")
 		if !found || digest != artifact.ArtifactDigest {
-			return "", errors.New("Node artifact reference is invalid")
+			return "", errors.New("node artifact reference is invalid")
 		}
 		return strings.TrimPrefix(digest, "sha256:"), nil
 	case runnable.RuntimeK8s:

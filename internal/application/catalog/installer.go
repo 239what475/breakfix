@@ -85,15 +85,15 @@ type Installer struct {
 	pollInterval time.Duration
 	// OnTick optionally reports each installation pass to the bootstrap's
 	// in-memory service registry.
-	OnTick       func(error)
-	puller       BundlePuller
-	layerReader  SourceLayerReader
-	store        ReleaseStore
-	runnable     RunnableStore
-	operations   appoperations.Config
-	now          func() time.Time
-	sleep        func(context.Context, time.Duration) error
-	mu           sync.Mutex
+	OnTick      func(error)
+	puller      BundlePuller
+	layerReader SourceLayerReader
+	store       ReleaseStore
+	runnable    RunnableStore
+	operations  appoperations.Config
+	now         func() time.Time
+	sleep       func(context.Context, time.Duration) error
+	mu          sync.Mutex
 }
 
 func deterministicCatalogFailure(err error) error {
@@ -526,7 +526,7 @@ func (i *Installer) finalizeCommit(ctx context.Context, source *PortableSource, 
 	if !allMaterialized {
 		return nil
 	}
-	commits, err = i.store.Commits(ctx, release.ID)
+	_, err = i.store.Commits(ctx, release.ID)
 	if err != nil {
 		return i.handleFinalizerError(ctx, release, catalogFinalizerFailure(err))
 	}
@@ -737,22 +737,6 @@ func validateMaterializedCommit(entry catalogdomain.Entry, commit catalogdomain.
 		return deterministicCatalogFailure(errors.New("materialized catalog scenario conflicts with its durable commit"))
 	}
 	return nil
-}
-
-func sourceArchive(source *PortableSource, entry catalogdomain.Entry) ([]byte, error) {
-	archive, err := archiveSourceCandidate(filepath.Join(source.Root, filepath.FromSlash(entry.SourcePath)))
-	if err != nil {
-		return nil, err
-	}
-	return archive, nil
-}
-
-func archiveSourceCandidate(root string) ([]byte, error) {
-	files, err := readSourceFiles(root)
-	if err != nil {
-		return nil, err
-	}
-	return writeSourceLayer(files)
 }
 
 func loadSourceAt(root string) (*PortableSource, catalogdomain.ContentRevision, error) {

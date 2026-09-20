@@ -112,6 +112,7 @@ type Metadata struct {
 	Anchors []string        `json:"anchors"`
 	Digest  string          `json:"digest"`
 }
+
 func (e EvidenceReference) Validate() error {
 	if err := stableID(e.ID, "evidence.id"); err != nil {
 		return err
@@ -381,12 +382,12 @@ func ReaderProjectionFromPlan(plan LearningUnitPlan) *ReaderProjection {
 // documentation publication finalizer. It references, rather than copies,
 // the common runtime revision and report.
 type PracticeRevision struct {
-	FormatVersion         string                               `json:"format_version"`
-	ID                    string                               `json:"id"`
-	WorkflowID            string                               `json:"workflow_id"`
-	Context               DocumentContext                      `json:"document_context"`
-	PlanID                string                               `json:"plan_id"`
-	PlanRevision          int64                                `json:"plan_revision"`
+	FormatVersion string          `json:"format_version"`
+	ID            string          `json:"id"`
+	WorkflowID    string          `json:"workflow_id"`
+	Context       DocumentContext `json:"document_context"`
+	PlanID        string          `json:"plan_id"`
+	PlanRevision  int64           `json:"plan_revision"`
 	// WorkflowRevision records the workflow revision whose Agent run produced
 	// this practice. Ledger artifact IDs derive from it so a workflow that was
 	// administratively restarted can re-plan into fresh ledger entries.
@@ -475,7 +476,7 @@ func stableID(value, field string) error {
 		return fmt.Errorf("%s must be a bounded identifier", field)
 	}
 	for _, r := range value {
-		if !(r == '-' || r == '_' || r == '/' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
+		if r != '-' && r != '_' && r != '/' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
 			return fmt.Errorf("%s contains an invalid character", field)
 		}
 	}
@@ -488,8 +489,4 @@ func ValidateRelativePath(value string) error {
 		return errors.New("path must be a safe relative path")
 	}
 	return nil
-}
-
-func sameContextIdentity(a, b DocumentContext) bool {
-	return a.SourceID == b.SourceID && a.Commit == b.Commit && a.Language == b.Language && a.PagePath == b.PagePath && a.Anchor == b.Anchor
 }

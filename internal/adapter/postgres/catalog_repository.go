@@ -275,7 +275,7 @@ func (d *CatalogRepository) CatalogBootstrapState(ctx context.Context) (catalogd
 	if err != nil {
 		return catalogdomain.BootstrapState{}, fmt.Errorf("list catalog bootstrap releases: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	state := catalogdomain.BootstrapState{}
 	for rows.Next() {
 		release, err := scanCatalogRelease(rows)
@@ -611,7 +611,7 @@ func listCatalogEntries(ctx context.Context, queryer interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCatalogEntries(rows)
 }
 
@@ -626,7 +626,7 @@ func listCatalogCommits(ctx context.Context, queryer interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanCatalogCommits(rows)
 }
 

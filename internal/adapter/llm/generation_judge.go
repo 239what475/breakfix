@@ -64,8 +64,8 @@ func judgeCandidate(ctx context.Context, cfg config.AgentConfig, plan authoring.
 		},
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries: 3,
-			IsRetryAble: func(_ context.Context, err error) bool {
-				return IsTransientTransportError(err)
+			ShouldRetry: func(_ context.Context, retry *adk.RetryContext) *adk.RetryDecision {
+				return &adk.RetryDecision{Retry: IsTransientTransportError(retry.Err)}
 			},
 		},
 	})

@@ -33,8 +33,8 @@ type LeaseMaintainer struct {
 	renewer    EnvironmentLeaseRenewer
 	// OnTick optionally reports each renewal pass to the bootstrap's in-memory
 	// service registry.
-	OnTick     func(error)
-	interval   time.Duration
+	OnTick   func(error)
+	interval time.Duration
 }
 
 func NewLeaseMaintainer(repository LeaseRepository, renewer EnvironmentLeaseRenewer) (*LeaseMaintainer, error) {

@@ -44,7 +44,7 @@ type operationsLearningCheckpointEvaluator struct {
 
 func (e operationsLearningCheckpointEvaluator) Evaluate(ctx context.Context, environment runtimev2.RuntimeEnvironment) ([]applearning.Checkpoint, error) {
 	if e.revisions == nil {
-		return nil, errors.New("Operations runnable revision resolver is required")
+		return nil, errors.New("operations runnable revision resolver is required")
 	}
 	if environment.Spec.Purpose != runtimev2.PurposeLearning || environment.Labels["breakfix.dev/content-kind"] != "operations" || environment.UID == "" {
 		return nil, errors.New("runtime environment is not an Operations learning environment")
@@ -108,7 +108,7 @@ func (e operationsEnvironmentAssertionExecutor) ExecuteReadOnly(ctx context.Cont
 	switch e.environment.Status.Runtime.Provider {
 	case string(runnable.RuntimeNode):
 		if e.node == nil || assertion.Target.Kind != "node" {
-			return operations.AssertionExecutionOutput{}, errors.New("Node learning assertion target is unavailable")
+			return operations.AssertionExecutionOutput{}, errors.New("node learning assertion target is unavailable")
 		}
 		result, err := e.node.ExecNode(ctx, incus.ExecNodeRequest{
 			EnvironmentUID: string(e.environment.UID), Revision: e.environment.Spec.RunnableRevisionRef.Digest,
@@ -121,12 +121,12 @@ func (e operationsEnvironmentAssertionExecutor) ExecuteReadOnly(ctx context.Cont
 		return operations.AssertionExecutionOutput{ExitCode: result.ExitCode, Stdout: []byte(result.Stdout), Stderr: []byte(result.Stderr)}, nil
 	case string(runnable.RuntimeK8s):
 		if e.pods == nil || assertion.Target.Kind != "management" {
-			return operations.AssertionExecutionOutput{}, errors.New("Kubernetes learning assertion target is unavailable")
+			return operations.AssertionExecutionOutput{}, errors.New("kubernetes learning assertion target is unavailable")
 		}
 		terminal := runtimeEndpoint(e.environment.Status.Runtime.EndpointRefs, "terminal")
 		namespace, pod, ok := strings.Cut(terminal, "/")
 		if !ok || namespace == "" || pod == "" {
-			return operations.AssertionExecutionOutput{}, errors.New("Kubernetes learning environment has no terminal endpoint")
+			return operations.AssertionExecutionOutput{}, errors.New("kubernetes learning environment has no terminal endpoint")
 		}
 		result, err := e.pods.ExecInPodStreamsContext(ctx, namespace, pod, runnable.MaxAssertionOutputBytes, "/bin/bash", entrypoint)
 		if err != nil {

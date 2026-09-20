@@ -23,7 +23,7 @@ const (
 	// environmentContentOperations is the content-kind label of environments
 	// pinned to Operations scenarios; environmentContentDocumentationPractice
 	// matches the runnable Kind of published documentation practices.
-	environmentContentOperations             = "operations"
+	environmentContentOperations            = "operations"
 	environmentContentDocumentationPractice = "documentation-practice"
 )
 
@@ -111,7 +111,7 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 	if environment == nil {
 		return nil
 	}
-	runtimeName := string(environment.Status.Runtime.Provider)
+	runtimeName := environment.Status.Runtime.Provider
 	phase := environment.Status.Phase
 	if phase == "" {
 		phase = runtimev2.PhasePending
@@ -127,10 +127,11 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		expires := environment.Status.Lifecycle.ExpiresAt.DeepCopy()
 		active.ExpiresAt = expires
 	}
-	if runtimeName == scenario.RuntimeNode {
+	switch runtimeName {
+	case scenario.RuntimeNode:
 		active.NodeIdentity = nodeIdentityFromRuntime(environment)
 		active.Nodes = nodeSpecsFromRuntime(environment)
-	} else if runtimeName == scenario.RuntimeK8s {
+	case scenario.RuntimeK8s:
 		active.Namespace, active.WorkspacePod = runtimeK8sTerminal(environment)
 	}
 	if environment.Status.Failure != nil {

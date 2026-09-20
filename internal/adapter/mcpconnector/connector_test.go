@@ -134,7 +134,7 @@ func TestConnectorRedactsRemoteErrorDetails(t *testing.T) {
 		t.Fatalf("error envelope status = %q", envelope.Status)
 	}
 	assertNoSensitiveMCPResult(t, result, "sandbox-secret", "local-user-token", "10.0.0.1")
-	if !strings.Contains(mcpResultText(result), "Breakfix could not complete") {
+	if !strings.Contains(mcpResultText(result), "Breakfix server could not complete") {
 		t.Fatalf("tool error = %q", mcpResultText(result))
 	}
 }

@@ -151,8 +151,10 @@ func runDocumentResult[T any](ctx context.Context, cfg config.AgentConfig, name,
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name: name, Description: "Breakfix documentation-practice agent", Instruction: instruction, Model: chat, MaxIterations: documentAgentMaxIterations,
-		ToolsConfig:      adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{resultTool}}},
-		ModelRetryConfig: &adk.ModelRetryConfig{MaxRetries: 3, IsRetryAble: func(_ context.Context, err error) bool { return IsTransientTransportError(err) }},
+		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{resultTool}}},
+		ModelRetryConfig: &adk.ModelRetryConfig{MaxRetries: 3, ShouldRetry: func(_ context.Context, retry *adk.RetryContext) *adk.RetryDecision {
+			return &adk.RetryDecision{Retry: IsTransientTransportError(retry.Err)}
+		}},
 	})
 	if err != nil {
 		return zero, fmt.Errorf("create documentation Agent: %w", err)

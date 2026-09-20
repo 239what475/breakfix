@@ -12,7 +12,7 @@ const defaultWorkspaceReaperInterval = time.Minute
 // WorkspaceReaper owns the periodic retry of durable Generator workspace
 // cleanup. The workspace manager remains the sole owner of actual deletion.
 type WorkspaceReaper struct {
-	manager  *Manager
+	manager *Manager
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
 	OnTick   func(error)

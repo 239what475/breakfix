@@ -34,7 +34,7 @@ func (h *Handler) practiceEnvironmentTarget(revision documentdomain.PracticeRevi
 	reference := revision.RunnableRevisionRef
 	return environmentContentTarget{
 		kind: environmentContentDocumentationPractice, id: revision.ID, revisionID: practiceRevisionToken(reference),
-		title: revision.ReaderProjection.Title,
+		title:          revision.ReaderProjection.Title,
 		resolveBinding: func(context.Context) (runnable.RevisionReference, error) { return reference, nil },
 	}
 }

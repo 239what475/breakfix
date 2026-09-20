@@ -303,13 +303,6 @@ func invalid(field, message string) error {
 	return fmt.Errorf("runnable %s %s", field, message)
 }
 
-func require(condition bool, field, message string) error {
-	if !condition {
-		return invalid(field, message)
-	}
-	return nil
-}
-
 func requiredString(value, field string, maximum int) error {
 	value = strings.TrimSpace(value)
 	if value == "" {

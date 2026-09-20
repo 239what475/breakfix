@@ -127,7 +127,7 @@ func Decode(archive []byte) ([]Entry, error) {
 				return nil, fmt.Errorf("workspace archive directory %q has content", header.Name)
 			}
 			entries = append(entries, Entry{Path: name, Directory: true, Mode: int(header.Mode)})
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if header.Linkname != "" {
 				return nil, fmt.Errorf("workspace archive regular file %q has a link target", header.Name)
 			}
@@ -271,9 +271,7 @@ func archivePath(value string, directory bool) (string, bool, error) {
 	if value == "." || value == "" {
 		return "", true, nil
 	}
-	if strings.HasPrefix(value, "./") {
-		value = strings.TrimPrefix(value, "./")
-	}
+	value = strings.TrimPrefix(value, "./")
 	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
 		return "", false, fmt.Errorf("invalid workspace archive path %q", value)
 	}

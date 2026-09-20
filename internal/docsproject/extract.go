@@ -803,8 +803,18 @@ func (r *pageRenderer) featureState(node *html.Node) *FeatureState {
 
 var sincePattern = regexp.MustCompile(`(?i)since(?: Kubernetes)?\s+(v[0-9][A-Za-z0-9.\-]+)`)
 
+// titleWord upper-cases the first byte of an ASCII word. The generator emits
+// ASCII feature stages; strings.Title is deprecated for Unicode-punctuation
+// reasons that cannot apply here.
+func titleWord(value string) string {
+	if value == "" {
+		return value
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
 func featureMarkdown(feature FeatureState) string {
-	parts := []string{"FEATURE STATE: " + strings.Title(feature.Stage)}
+	parts := []string{"FEATURE STATE: " + titleWord(feature.Stage)}
 	if feature.Gate != "" {
 		parts = append(parts, "gate: "+feature.Gate)
 	}
@@ -978,15 +988,6 @@ func wrap(marker, value string) string {
 		return ""
 	}
 	return marker + value + marker
-}
-
-func isBlockElement(name string) bool {
-	switch name {
-	case "p", "div", "section", "article", "blockquote", "pre", "table", "ul", "ol", "details", "figure", "dl":
-		return true
-	default:
-		return false
-	}
 }
 
 // isInlineNode reports whether a node participates in an inline run during

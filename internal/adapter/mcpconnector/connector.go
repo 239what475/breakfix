@@ -295,18 +295,18 @@ func publicToolError(err error) error {
 	if errors.As(err, &httpErr) {
 		switch httpErr.StatusCode {
 		case 400:
-			return errors.New("Breakfix rejected the requested generation operation")
+			return errors.New("the Breakfix server rejected the requested generation operation")
 		case 401, 403:
-			return errors.New("Breakfix authorization failed")
+			return errors.New("the Breakfix server rejected the authorization")
 		case 404:
 			return errors.New("the requested Breakfix resource was not found")
 		case 409:
 			return errors.New("the generation changed; read its current state before trying again")
 		default:
-			return errors.New("Breakfix could not complete the generation operation")
+			return errors.New("the Breakfix server could not complete the generation operation")
 		}
 	}
-	return errors.New("Breakfix could not complete the generation operation")
+	return errors.New("the Breakfix server could not complete the generation operation")
 }
 
 type publicMCPError struct {

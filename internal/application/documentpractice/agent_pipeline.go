@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/audit"
+	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -59,7 +59,7 @@ type AgentPipelineConfig struct {
 // completed public runnable actions. It owns no provider, queue, filesystem, or
 // database access beyond Service and Reader ports.
 type AgentPipeline struct {
-	service               *Service
+	service *Service
 	// OnTick optionally reports each reconciliation pass to the bootstrap's
 	// in-memory service registry.
 	OnTick                func(error)

@@ -36,11 +36,11 @@ type CleanupService struct {
 	repository CleanupRepository
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick     func(error)
-	interval   time.Duration
-	heartbeat  time.Duration
-	retention  time.Duration
-	now        func() time.Time
+	OnTick    func(error)
+	interval  time.Duration
+	heartbeat time.Duration
+	retention time.Duration
+	now       func() time.Time
 }
 
 func NewCleanupService(repository CleanupRepository) (*CleanupService, error) {
@@ -157,9 +157,9 @@ type ProjectionService struct {
 	repository ProjectionRepository
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick     func(error)
-	interval   time.Duration
-	now        func() time.Time
+	OnTick   func(error)
+	interval time.Duration
+	now      func() time.Time
 }
 
 func NewProjectionService(source ProjectionSource, repository ProjectionRepository) (*ProjectionService, error) {

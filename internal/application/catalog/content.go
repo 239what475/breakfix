@@ -25,14 +25,6 @@ func ContentRevision(root string) (catalogdomain.ContentRevision, error) {
 	return catalogdomain.ContentRevision(revision), nil
 }
 
-func contentRevisionForFiles(files []sourceFile) catalogdomain.ContentRevision {
-	canonical := make([]contentrevision.File, 0, len(files))
-	for _, file := range files {
-		canonical = append(canonical, contentrevision.File{Path: file.Path, Content: file.Content, Executable: file.Executable})
-	}
-	return catalogdomain.ContentRevision(contentrevision.Files(canonical))
-}
-
 type sourceFile struct {
 	Path       string
 	Content    []byte
@@ -71,23 +63,6 @@ func writeSourceArchive(destination io.Writer, source io.Reader) error {
 	zw.ModTime = time.Unix(0, 0).UTC()
 	zw.OS = 255
 	if _, err := io.Copy(zw, source); err != nil {
-		return err
-	}
-	if err := zw.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func writeSourceArchiveFiles(destination io.Writer, files []sourceFile) error {
-	zw, err := gzip.NewWriterLevel(destination, gzip.BestCompression)
-	if err != nil {
-		return err
-	}
-	zw.ModTime = time.Unix(0, 0).UTC()
-	zw.OS = 255
-	if err := writeSourceTar(zw, files); err != nil {
-		_ = zw.Close()
 		return err
 	}
 	if err := zw.Close(); err != nil {

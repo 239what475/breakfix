@@ -48,7 +48,7 @@ func (h *Handler) ListAdminEnvironments(c *gin.Context) {
 			CreatedAt:   environment.CreationTimestamp.UTC(),
 		}
 		if expires := environment.Status.Lifecycle.ExpiresAt; expires != nil {
-			expiresAt := expires.Time.UTC()
+			expiresAt := expires.UTC()
 			item.ExpiresAt = &expiresAt
 		}
 		if failure := environment.Status.Failure; failure != nil {

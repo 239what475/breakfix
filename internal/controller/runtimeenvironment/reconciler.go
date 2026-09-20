@@ -22,6 +22,7 @@ const (
 	provisionRequeue        = 2 * time.Second
 	providerRetryRequeue    = 5 * time.Second
 	reapStatusRequeue       = 2 * time.Second
+	statusStepRequeue       = 2 * time.Second
 	maxConcurrentReconciles = 4
 )
 
@@ -83,7 +84,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		if err := r.Patch(ctx, &environment, client.MergeFrom(before)); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 	}
 
 	revision, err := r.Resolver.ResolveRunnableRevision(ctx, environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest)
@@ -92,7 +93,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		if updateErr != nil {
 			return result, updateErr
 		}
-		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil
+		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil //nolint:nilerr // requeue is the controller idiom for retryable handoffs
 	}
 	if err := ValidateSpec(environment, revision); err != nil {
 		return r.fail(ctx, &environment, runnable.FailureArtifact, "runtime-environment", "invalid-revision-binding", err)
@@ -112,7 +113,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 	}
 	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: revision}
 	switch decision {
@@ -124,7 +125,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 			}); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 		}
 		timeoutSeconds := revision.Spec.LifecyclePolicy.CreateTimeoutSeconds
 		if environment.Status.Operation == runtimev2.OperationResetting {
@@ -223,11 +224,11 @@ func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.R
 	if err := r.Reaps.Enqueue(ctx, request); err != nil {
 		// Cleanup diagnostics remain internal to Reaper. Keeping Draining and
 		// retrying the handoff cannot invalidate completed verification work.
-		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil
+		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil //nolint:nilerr // requeue is the controller idiom for retryable handoffs
 	}
 	record, err := r.Reaps.Get(ctx, request.Key())
 	if err != nil {
-		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil
+		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil //nolint:nilerr // requeue is the controller idiom for retryable handoffs
 	}
 	if record.State != runnable.ReapSucceeded {
 		return ctrl.Result{RequeueAfter: reapStatusRequeue}, nil

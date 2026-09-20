@@ -264,13 +264,13 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		h.ListAdminDocumentationWorkflows(c, params)
 	})
 	adminRoutes.GET("/documentation/workflows/:workflow_id", func(c *gin.Context) {
-		h.GetAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+		h.GetAdminDocumentationWorkflow(c, c.Param("workflow_id"))
 	})
 	adminRoutes.POST("/documentation/workflows/:workflow_id/force-fail", func(c *gin.Context) {
-		h.ForceFailAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+		h.ForceFailAdminDocumentationWorkflow(c, c.Param("workflow_id"))
 	})
 	adminRoutes.POST("/documentation/workflows/:workflow_id/restart", func(c *gin.Context) {
-		h.RestartAdminDocumentationWorkflow(c, api.DocumentWorkflowID(c.Param("workflow_id")))
+		h.RestartAdminDocumentationWorkflow(c, c.Param("workflow_id"))
 	})
 	adminRoutes.GET("/environments", h.ListAdminEnvironments)
 	adminRoutes.POST("/environments/:name/release", func(c *gin.Context) {

@@ -83,10 +83,6 @@ const (
 	reviewBundleContent reviewBundleKind = "content"
 )
 
-func (k reviewBundleKind) valid() bool {
-	return k == reviewBundleContent
-}
-
 func (h *Handler) buildContentReviewPayload(ctx context.Context, workflow generation.Workflow, revision *generation.Revision) ([]byte, error) {
 	projection, err := h.toAPIGeneratorGeneration(ctx, workflow, revision)
 	if err != nil {
@@ -197,7 +193,7 @@ func writeDeterministicReviewArchive(entries map[string][]byte) ([]byte, error) 
 	sort.Strings(names)
 	var data bytes.Buffer
 	gzipWriter := gzip.NewWriter(&data)
-	gzipWriter.Header.ModTime = time.Unix(0, 0).UTC()
+	gzipWriter.ModTime = time.Unix(0, 0).UTC()
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, name := range names {
 		content := entries[name]

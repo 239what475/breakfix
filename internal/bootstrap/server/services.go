@@ -56,13 +56,6 @@ func (l *serviceLifecycle) tickObserver(name string) func(error) {
 	return l.registry.tickObserver(name)
 }
 
-func (l *serviceLifecycle) statuses() []ServiceStatus {
-	if l == nil || l.registry == nil {
-		return nil
-	}
-	return l.registry.snapshot()
-}
-
 // serviceStatus is the in-memory observation of one background service. It is
 // deliberately process-local: nothing here survives a restart, and no
 // external component is contacted.

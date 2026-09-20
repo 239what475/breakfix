@@ -7,6 +7,7 @@ import (
 
 	"github.com/breakfix/breakfix/internal/domain/agent"
 	"github.com/breakfix/breakfix/internal/domain/authoring"
+	"github.com/cloudwego/eino/adk"
 )
 
 func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T) {
@@ -17,12 +18,12 @@ func TestAuthoringModelRetryConfigUsesDeadlineBoundTransportRetries(t *testing.T
 	if config.MaxRetries != math.MaxInt {
 		t.Fatalf("authoring model max retries = %d, want %d", config.MaxRetries, math.MaxInt)
 	}
-	if config.IsRetryAble == nil || !config.IsRetryAble(context.Background(), context.DeadlineExceeded) {
+	if config.ShouldRetry == nil || !config.ShouldRetry(context.Background(), &adk.RetryContext{Err: context.DeadlineExceeded}).Retry {
 		t.Fatal("active context did not retry a transient transport failure")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if config.IsRetryAble(ctx, context.DeadlineExceeded) {
+	if config.ShouldRetry(ctx, &adk.RetryContext{Err: context.DeadlineExceeded}).Retry {
 		t.Fatal("cancelled context scheduled another model retry")
 	}
 }

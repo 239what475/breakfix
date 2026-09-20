@@ -39,9 +39,9 @@ func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T)
 }
 
 type testDocumentationApplication struct {
-	calls  int
-	actors []string
-	pages  []string
+	calls   int
+	actors  []string
+	pages   []string
 	anchors []string
 }
 

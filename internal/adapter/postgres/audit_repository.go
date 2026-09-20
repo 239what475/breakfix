@@ -71,7 +71,7 @@ func (d *HumanActionRepository) ListHumanActions(ctx context.Context, filter Hum
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	actions := make([]audit.HumanAction, 0)
 	for rows.Next() {
 		var action audit.HumanAction

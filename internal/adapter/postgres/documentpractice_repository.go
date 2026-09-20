@@ -83,7 +83,7 @@ func (d *DocumentPracticeRepository) ListArtifacts(ctx context.Context, workflow
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []domain.ArtifactRecord{}
 	for rows.Next() {
 		var a domain.ArtifactRecord
@@ -292,7 +292,7 @@ func (d *DocumentPracticeRepository) ListWorkflowWatchdogCandidates(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("list document workflow watchdog candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []app.WatchdogCandidate{}
 	for rows.Next() {
 		var candidate app.WatchdogCandidate
@@ -454,7 +454,7 @@ func (d *DocumentPracticeRepository) ListWorkflowObservations(ctx context.Contex
 	if err != nil {
 		return nil, nil, fmt.Errorf("list document workflow observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []DocumentWorkflowObservation{}
 	for rows.Next() {
 		observation, err := scanWorkflowObservation(rows)
@@ -517,7 +517,7 @@ func (d *DocumentPracticeRepository) ListAgentAudits(ctx context.Context, workfl
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	audits := []domain.AgentAudit{}
 	for rows.Next() {
 		var auditRow domain.AgentAudit
@@ -661,7 +661,7 @@ func (d *DocumentPracticeRepository) ListCompletedUnreconciledRunnableActions(ct
 	if err != nil {
 		return nil, fmt.Errorf("list completed document runnable actions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []runnable.ActionIdentity{}
 	for rows.Next() {
 		var action runnable.ActionIdentity
@@ -1002,7 +1002,7 @@ func listDocumentArtifacts(ctx context.Context, query interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []domain.ArtifactRecord{}
 	for rows.Next() {
 		var a domain.ArtifactRecord
@@ -1023,7 +1023,7 @@ func (d *DocumentPracticeRepository) CountDocumentWorkflowsByState(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("count document workflows by state: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	counts := map[string]int64{}
 	for rows.Next() {
 		var state string
@@ -1066,7 +1066,7 @@ func (d *DocumentPracticeRepository) ListPublishedPracticesForPage(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("list published practices: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	summaries := []PublishedPracticeSummary{}
 	for rows.Next() {
 		var summary PublishedPracticeSummary
@@ -1199,7 +1199,7 @@ func (d *DocumentPracticeRepository) ListBatches(ctx context.Context, limit int)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list document batches: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	batches := []domain.DocumentBatch{}
 	ids := []string{}
 	for rows.Next() {
@@ -1219,7 +1219,7 @@ func (d *DocumentPracticeRepository) ListBatches(ctx context.Context, limit int)
 		if err != nil {
 			return nil, nil, fmt.Errorf("count document batch items: %w", err)
 		}
-		defer countRows.Close()
+		defer func() { _ = countRows.Close() }()
 		for countRows.Next() {
 			var batchID, state string
 			var count int
@@ -1250,7 +1250,7 @@ func (d *DocumentPracticeRepository) countBatchItems(ctx context.Context, batchI
 	if err != nil {
 		return nil, fmt.Errorf("count document batch items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	counts := domain.BatchItemCounts{}
 	for rows.Next() {
 		var state string
@@ -1292,7 +1292,7 @@ func (d *DocumentPracticeRepository) ListBatchItems(ctx context.Context, filter 
 	if err != nil {
 		return nil, nil, fmt.Errorf("list document batch items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []domain.BatchItem{}
 	for rows.Next() {
 		var item domain.BatchItem
@@ -1321,7 +1321,7 @@ func (d *DocumentPracticeRepository) ListPublishedWorkflowAnchors(ctx context.Co
 	if err != nil {
 		return nil, fmt.Errorf("list published document workflow anchors: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	published := map[string]bool{}
 	for rows.Next() {
 		var pagePath, anchor string
@@ -1363,7 +1363,7 @@ func (d *DocumentPracticeRepository) ListSchedulerBatches(ctx context.Context, s
 	if err != nil {
 		return nil, fmt.Errorf("list scheduler document batches: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	batches := []domain.DocumentBatch{}
 	for rows.Next() {
 		batch, err := scanDocumentBatch(rows)
@@ -1392,7 +1392,7 @@ func (d *DocumentPracticeRepository) ListBatchItemsByStates(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("list document batch items by states: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []domain.BatchItem{}
 	for rows.Next() {
 		var item domain.BatchItem
@@ -1414,7 +1414,7 @@ func (d *DocumentPracticeRepository) ActiveBatchItemWorkflowStates(ctx context.C
 	if err != nil {
 		return nil, fmt.Errorf("list active document batch items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []app.ActiveBatchItem{}
 	for rows.Next() {
 		var item domain.BatchItem
@@ -1564,7 +1564,7 @@ func (d *DocumentPracticeRepository) SummarizeWorkflowStatesByPages(ctx context.
 			var state domain.WorkflowState
 			var count, stuck int
 			if err := rows.Scan(&pagePath, &state, &count, &stuck); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, err
 			}
 			counts := result[pagePath]
@@ -1583,10 +1583,10 @@ func (d *DocumentPracticeRepository) SummarizeWorkflowStatesByPages(ctx context.
 			result[pagePath] = counts
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
-		rows.Close()
+		_ = rows.Close()
 	}
 	return result, nil
 }

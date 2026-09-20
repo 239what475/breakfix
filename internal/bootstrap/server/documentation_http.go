@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	app "github.com/breakfix/breakfix/internal/application/documentpractice"
 	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
+	app "github.com/breakfix/breakfix/internal/application/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/audit"
 	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )

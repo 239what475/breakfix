@@ -140,7 +140,7 @@ func stableCandidateID(value string) error {
 		return errors.New("candidate blueprint id is invalid")
 	}
 	for _, character := range value {
-		if !(character == '-' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9') {
+		if character != '-' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
 			return errors.New("candidate blueprint id is invalid")
 		}
 	}

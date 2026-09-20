@@ -1004,7 +1004,7 @@ func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("list runnable action observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []RunnableActionObservation{}
 	for rows.Next() {
 		var observation RunnableActionObservation
@@ -1033,7 +1033,7 @@ func (d *RunnableRepository) CountRunnableActionsByState(ctx context.Context) (m
 	if err != nil {
 		return nil, fmt.Errorf("count runnable actions by state: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	counts := map[string]int64{}
 	for rows.Next() {
 		var state string
@@ -1052,7 +1052,7 @@ func (d *RunnableRepository) CountRunnableActionsByAttempt(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("count runnable actions by attempt: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	counts := map[string]int64{}
 	for rows.Next() {
 		var attempt int

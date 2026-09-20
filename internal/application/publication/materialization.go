@@ -30,7 +30,7 @@ type MaterializationReconcilerConfig struct {
 	StagingMaxAge time.Duration
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick        func(error)
+	OnTick func(error)
 }
 
 // MaterializationReconciler removes only scenario directories that have no
@@ -43,8 +43,8 @@ type MaterializationReconciler struct {
 	store         MaterializationStore
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick        func(error)
-	now           func() time.Time
+	OnTick func(error)
+	now    func() time.Time
 }
 
 func NewMaterializationReconciler(store MaterializationStore, config MaterializationReconcilerConfig) (*MaterializationReconciler, error) {

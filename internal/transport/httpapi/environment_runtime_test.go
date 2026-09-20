@@ -36,7 +36,7 @@ func TestRenewActivityUpdatesLease(t *testing.T) {
 			return nil
 		},
 	}
-	next := metav1.NewTime(before.Time.Add(750 * time.Millisecond))
+	next := metav1.NewTime(before.Add(750 * time.Millisecond))
 	if err := adapter.renewActivity(context.Background(), "demo", next); err != nil {
 		t.Fatal(err)
 	}

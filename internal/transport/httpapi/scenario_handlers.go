@@ -159,7 +159,7 @@ func (h *Handler) finishEnvironmentAttempt(ctx context.Context, environment *act
 	}
 	readyAt := finishedAt.UTC()
 	if environment.ReadyAt != nil && !environment.ReadyAt.IsZero() {
-		readyAt = environment.ReadyAt.Time.UTC()
+		readyAt = environment.ReadyAt.UTC()
 	}
 	if err := h.db.Environment.RecordScenarioAttempt(ctx, environment.UserID, environment.ScenarioRef, environment.SourceRevision, environment.UID, environment.Runtime, readyAt); err != nil {
 		return err

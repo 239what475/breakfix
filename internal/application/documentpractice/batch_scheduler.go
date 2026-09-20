@@ -176,7 +176,7 @@ func (s *BatchScheduler) topUpBatch(ctx context.Context, batch domain.DocumentBa
 		}
 		budget--
 		s.track(item.ID, true)
-		go s.ignite(item)
+		go s.ignite(item) // #nosec G118 -- batch ignition deliberately outlives the scheduler tick's request context
 	}
 	return nil
 }

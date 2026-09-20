@@ -132,7 +132,7 @@ func (d *GenerationRepository) ListGenerationWorkflowsForUser(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []generation.Workflow{}
 	for rows.Next() {
 		value, err := scanGenerationWorkflow(rows)
@@ -458,7 +458,7 @@ func (d *GenerationRepository) ListRunnableGenerationCandidates(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []generation.Workflow{}
 	for rows.Next() {
 		value, err := scanGenerationWorkflow(rows)
@@ -684,7 +684,7 @@ func (d *GenerationRepository) PendingGenerationPublicationFinalizations(ctx con
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := []generation.PublicationFinalization{}
 	for rows.Next() {
 		workflow, err := scanGenerationWorkflow(rows)
@@ -789,15 +789,27 @@ func (d *GenerationRepository) ReportGenerationArtifactFailure(ctx context.Conte
 		return generation.ErrLeaseLost
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer func() { _ = tx.Rollback() }()
 	workflow, err := lockGenerationAgentClaimTx(ctx, tx, claim, now)
-	if err != nil { return err }
-	if workflow.CandidateRevisionID == "" { return generation.ErrCandidateInvalidState }
+	if err != nil {
+		return err
+	}
+	if workflow.CandidateRevisionID == "" {
+		return generation.ErrCandidateInvalidState
+	}
 	encoded, err := marshalJSON(failure)
-	if err != nil { return err }
-	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, encoded, now.UTC(), workflow.CandidateRevisionID); err != nil { return err }
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1, active_agent_run_id = NULL, agent_lease_owner = '', agent_lease_expires_at = NULL, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil { return err }
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE candidate_revisions SET failure = ?::jsonb, updated_at = ? WHERE id = ?`, encoded, now.UTC(), workflow.CandidateRevisionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_workflows SET state = ?, state_version = state_version + 1, active_agent_run_id = NULL, agent_lease_owner = '', agent_lease_expires_at = NULL, last_error = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, generation.StateGenerating, failure.Summary, now.UTC(), now.UTC(), workflow.ID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

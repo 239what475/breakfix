@@ -121,10 +121,10 @@ func (c *RunnableActionClient) CreateVerificationEnvironment(ctx context.Context
 		return nil, err
 	}
 	if response.Environment == nil || response.Environment.UID == "" {
-		return nil, errors.New("Server returned an invalid verification environment")
+		return nil, errors.New("server returned an invalid verification environment")
 	}
 	if response.Environment.Spec.RunnableRevisionRef.ID != request.RunnableRevisionRef.ID || response.Environment.Spec.RunnableRevisionRef.Digest != request.RunnableRevisionDigest || response.Environment.Spec.Purpose != runtimev2.PurposeVerification {
-		return nil, errors.New("Server returned a verification environment for another runnable revision")
+		return nil, errors.New("server returned a verification environment for another runnable revision")
 	}
 	return response.Environment, nil
 }

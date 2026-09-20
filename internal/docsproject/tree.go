@@ -86,7 +86,7 @@ func parseHTMLFile(path string) (*html.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return html.Parse(file)
 }
 
@@ -164,7 +164,7 @@ func validateTreeSamples(root string, expected Tree, pages []string) error {
 	if count == 0 {
 		return nil
 	}
-	random := rand.New(rand.NewPCG(1, 1))
+	random := rand.New(rand.NewPCG(1, 1)) // #nosec G404 -- the seed is the point: deterministic sampling
 	permutation := random.Perm(len(pages))
 	expectedBytes, _ := json.Marshal(expected)
 	for _, index := range permutation[:count] {

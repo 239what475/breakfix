@@ -232,7 +232,7 @@ func extractReviewPayload(root, kind string, payload []byte) error {
 		if err != nil {
 			return fmt.Errorf("read review payload: %w", err)
 		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeReg {
 			return errors.New("review payload contains a non-regular file")
 		}
 		name, err := safeReviewPayloadPath(kind, header.Name)
@@ -323,12 +323,12 @@ func makeProjectionReadOnly(root string) error {
 			// Keep the cache removable with ordinary user permissions. The files
 			// themselves are read-only, and the connector never reads this tree
 			// as candidate input.
-			return os.Chmod(path, 0o700)
+			return os.Chmod(path, 0o700) // #nosec G302,G122 -- removable cache dirs the projector itself created
 		}
 		if !entry.Type().IsRegular() {
 			return errors.New("review projection contains a non-regular file")
 		}
-		return os.Chmod(path, 0o444)
+		return os.Chmod(path, 0o444) // #nosec G302,G122 -- read-only projection files the projector itself created
 	})
 }
 

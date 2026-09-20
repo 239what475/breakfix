@@ -172,8 +172,11 @@ test-unit: verify-legacy-removal
 web-test-unit: web-deps
 	npm run test:unit --prefix $(WEB_DIR)
 
+# Scoped to the module's real packages: a prepared checkout also carries the
+# rendered upstream website under docs-site/public, whose example Go files
+# are not part of this module.
 lint:
-	golangci-lint run ./...
+	golangci-lint run ./cmd/... ./api/... ./internal/...
 
 catalog-package:
 	@test -n "$(CATALOG_SOURCE)" || { echo "CATALOG_SOURCE must name a portable Catalog Release source"; exit 2; }

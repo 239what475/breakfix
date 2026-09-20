@@ -143,13 +143,6 @@ func (p documentationProfiles) ResolveDocumentationRuntimeProfile(constraint dom
 	return p.profile, nil
 }
 
-// documentationLibraryIdentity is the opened library's self-described parser
-// identity surfaced in the admin system report.
-type documentationLibraryIdentity struct {
-	parserVersion  string
-	upstreamCommit string
-}
-
 func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app.AgentPipeline, *app.Service, *docsource.Library, error) {
 	if database == nil || !cfg.Documentation.Enabled() {
 		return nil, nil, nil, nil

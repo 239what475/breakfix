@@ -105,7 +105,7 @@ func (b *ArtifactBuilder) BuildArtifact(ctx context.Context, spec runnable.Runna
 
 func (b *ArtifactBuilder) buildNode(ctx context.Context, spec runnable.RunnableSpec, specDigest, bundle string) (runnable.ArtifactReference, error) {
 	if b.node == nil {
-		return runnable.ArtifactReference{}, errors.New("Node artifact provider is unavailable")
+		return runnable.ArtifactReference{}, errors.New("node artifact provider is unavailable")
 	}
 	files, err := incus.ImageFilesFromDirectory(bundle)
 	if err != nil {
@@ -216,7 +216,7 @@ func extractSourceArchive(destination string, source io.Reader) error {
 			if err := os.MkdirAll(target, 0o750); err != nil {
 				return fmt.Errorf("create source archive directory: %w", err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return fmt.Errorf("create source archive parent: %w", err)
 			}
@@ -224,7 +224,7 @@ func extractSourceArchive(destination string, source io.Reader) error {
 			if err != nil {
 				return fmt.Errorf("create source archive file: %w", err)
 			}
-			_, copyErr := io.Copy(file, tarReader)
+			_, copyErr := io.CopyN(file, tarReader, header.Size)
 			closeErr := file.Close()
 			if copyErr != nil {
 				return fmt.Errorf("write source archive file: %w", copyErr)

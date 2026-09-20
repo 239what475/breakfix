@@ -521,14 +521,6 @@ func (s *Service) Publish(ctx context.Context, workflowID string, candidate doma
 	return final, practice, err
 }
 
-func (s *Service) advance(ctx context.Context, workflowID string, next domain.WorkflowState, required ...string) (domain.Workflow, error) {
-	workflow, err := s.store.GetWorkflow(ctx, workflowID)
-	if err != nil {
-		return domain.Workflow{}, err
-	}
-	return s.store.AdvanceWorkflow(ctx, workflowID, workflow.StateVersion, next, s.now(), required...)
-}
-
 func (s *Service) advanceFrom(ctx context.Context, workflow domain.Workflow, next domain.WorkflowState, required ...string) (domain.Workflow, error) {
 	return s.store.AdvanceWorkflow(ctx, workflow.ID, workflow.StateVersion, next, s.now(), required...)
 }

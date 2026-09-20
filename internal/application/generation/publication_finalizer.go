@@ -40,7 +40,7 @@ type PublicationFinalizerConfig struct {
 	Interval     time.Duration
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick       func(error)
+	OnTick func(error)
 }
 
 // PublicationFinalizer materializes Operations source and atomically exposes
@@ -53,8 +53,8 @@ type PublicationFinalizer struct {
 	interval     time.Duration
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick       func(error)
-	now          func() time.Time
+	OnTick func(error)
+	now    func() time.Time
 }
 
 func NewPublicationFinalizer(config PublicationFinalizerConfig) (*PublicationFinalizer, error) {
@@ -219,7 +219,7 @@ func runnableArtifactImage(artifact runnable.ArtifactReference) (string, error) 
 	case runnable.RuntimeNode:
 		_, digest, found := strings.Cut(strings.TrimPrefix(artifact.ProviderReference, "incus://"), "@")
 		if !found || digest != artifact.ArtifactDigest {
-			return "", errors.New("Node runnable artifact reference is invalid")
+			return "", errors.New("node runnable artifact reference is invalid")
 		}
 		return strings.TrimPrefix(digest, "sha256:"), nil
 	case runnable.RuntimeK8s:

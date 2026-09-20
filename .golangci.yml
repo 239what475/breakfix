@@ -18,9 +18,20 @@ linters:
     gosec:
       excludes:
         - G204   # Subprocess launching: kubectl calls are expected
-        - G301   # Directory permissions 0755: standard
+        - G301   # Directory permissions 0750/0755: standard for shared runtime dirs
         - G304   # File inclusion: reading scenario YAML files
         - G115   # Integer conversion: exit codes are small
+
+  # Test fixtures carry hardcoded credentials, temp paths, and deliberate
+  # permission modes by construction; taint analysis on them is noise. The
+  # rendered upstream website under docs-site/public is untracked build
+  # output that only exists on prepared machines.
+  exclusions:
+    paths:
+      - docs-site/public
+    rules:
+      - path: _test\.go
+        linters: [gosec]
 
 formatters:
   enable:

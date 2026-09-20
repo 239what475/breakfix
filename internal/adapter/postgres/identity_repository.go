@@ -88,7 +88,7 @@ func (d *IdentityRepository) ListUsers(ctx context.Context) ([]UserSummary, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	users := make([]UserSummary, 0)
 	for rows.Next() {
 		var user UserSummary

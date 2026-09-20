@@ -145,7 +145,7 @@ func (p *VerificationProvider) Execute(ctx context.Context, identity runnable.En
 	profile := resourceRef(environment.Status.Runtime.ResourceRefs, "profile")
 	instance := resourceRef(environment.Status.Runtime.ResourceRefs, "instance:"+request.Target.ID)
 	if instance == "" {
-		return runnableworker.ExecutionOutput{}, fmt.Errorf("Node verification environment has no instance for target %q", request.Target.ID)
+		return runnableworker.ExecutionOutput{}, fmt.Errorf("node verification environment has no instance for target %q", request.Target.ID)
 	}
 	nodeIdentity := incus.NodeEnvironmentIdentity{Project: project, Network: network, ACL: acl, Profile: profile, Nodes: []incus.NodeIdentity{{LogicalName: request.Target.ID, InstanceName: instance}}}
 	result, err := p.node.ExecNode(ctx, incus.ExecNodeRequest{EnvironmentUID: string(environment.UID), Revision: environment.Spec.RunnableRevisionRef.Digest, Identity: nodeIdentity, LogicalName: request.Target.ID, Command: []string{"/bin/bash", entrypoint}})

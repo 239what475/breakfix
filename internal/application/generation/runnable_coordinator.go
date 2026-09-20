@@ -37,9 +37,9 @@ type RunnableCoordinator struct {
 	operations appoperations.Config
 	// OnTick optionally reports each background pass to the bootstrap's
 	// in-memory service registry.
-	OnTick     func(error)
-	interval   time.Duration
-	now        func() time.Time
+	OnTick   func(error)
+	interval time.Duration
+	now      func() time.Time
 }
 
 func NewRunnableCoordinator(store RunnableCoordinatorStore, runnableStore RunnableCoordinatorStoreRuntime, operations appoperations.Config, interval time.Duration) (*RunnableCoordinator, error) {

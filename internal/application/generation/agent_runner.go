@@ -54,7 +54,7 @@ type AgentRunnerConfig struct {
 // is never claimed by this runner. Each claimed phase is dispatched
 // independently; the database workflow remains the scheduling authority.
 type AgentRunner struct {
-	store  GenerationAgentStore
+	store GenerationAgentStore
 	// OnTick optionally reports each claim poll to the bootstrap's in-memory
 	// service registry.
 	OnTick func(error)

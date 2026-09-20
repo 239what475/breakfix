@@ -462,7 +462,7 @@ func (s *memoryDocumentStore) ListWorkflowWatchdogCandidates(_ context.Context, 
 		if !ok {
 			continue
 		}
-		if status.State != "failed" && !(status.Attempt >= 5 && (status.State == "queued" || (status.State == "running" && status.LeaseExpired))) {
+		if status.State != "failed" && (status.Attempt < 5 || status.State != "queued" && (status.State != "running" || !status.LeaseExpired)) {
 			continue
 		}
 		if status.UpdatedAt.IsZero() {

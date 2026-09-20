@@ -66,7 +66,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	failures := 0
 	for {
 		if ctx.Err() != nil {
-			return nil
+			// A cancelled context is an orderly shutdown, not a worker failure.
+			return nil //nolint:nilerr
 		}
 		processed, err := r.ProcessOne(ctx)
 		if err != nil {

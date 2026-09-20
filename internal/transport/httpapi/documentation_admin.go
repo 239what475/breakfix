@@ -80,7 +80,7 @@ func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.D
 		return
 	}
 	ctx := c.Request.Context()
-	observation, err := h.db.DocumentPractice.GetWorkflowObservation(ctx, string(workflowID))
+	observation, err := h.db.DocumentPractice.GetWorkflowObservation(ctx, workflowID)
 	if errors.Is(err, documentdomain.ErrWorkflowNotFound) {
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "document workflow not found"})
 		return
@@ -89,17 +89,17 @@ func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.D
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	artifacts, err := h.db.DocumentPractice.ListArtifacts(ctx, string(workflowID))
+	artifacts, err := h.db.DocumentPractice.ListArtifacts(ctx, workflowID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	agentAudits, err := h.db.DocumentPractice.ListAgentAudits(ctx, string(workflowID))
+	agentAudits, err := h.db.DocumentPractice.ListAgentAudits(ctx, workflowID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	publication, err := h.db.DocumentPractice.GetWorkflowPublication(ctx, string(workflowID))
+	publication, err := h.db.DocumentPractice.GetWorkflowPublication(ctx, workflowID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
 		return
@@ -175,13 +175,13 @@ func (h *Handler) GetAdminDocumentationWorkflow(c *gin.Context, workflowID api.D
 }
 
 func (h *Handler) ForceFailAdminDocumentationWorkflow(c *gin.Context, workflowID api.DocumentWorkflowID) {
-	h.runAdminWorkflowAction(c, string(workflowID), audit.ActionDocumentationWorkflowForceFail, func(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (documentdomain.Workflow, error) {
+	h.runAdminWorkflowAction(c, workflowID, audit.ActionDocumentationWorkflowForceFail, func(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (documentdomain.Workflow, error) {
 		return h.documentation.ForceFailDocumentationWorkflow(ctx, workflowID, reason, action)
 	})
 }
 
 func (h *Handler) RestartAdminDocumentationWorkflow(c *gin.Context, workflowID api.DocumentWorkflowID) {
-	h.runAdminWorkflowAction(c, string(workflowID), audit.ActionDocumentationWorkflowRestart, func(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (documentdomain.Workflow, error) {
+	h.runAdminWorkflowAction(c, workflowID, audit.ActionDocumentationWorkflowRestart, func(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (documentdomain.Workflow, error) {
 		return h.documentation.RestartDocumentationWorkflow(ctx, workflowID, reason, action)
 	})
 }

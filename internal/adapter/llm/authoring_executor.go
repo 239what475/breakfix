@@ -126,8 +126,8 @@ func (e *AuthoringExecutor) Run(ctx context.Context, execution appauthoring.Exec
 func authoringModelRetryConfig() *adk.ModelRetryConfig {
 	return &adk.ModelRetryConfig{
 		MaxRetries: math.MaxInt,
-		IsRetryAble: func(ctx context.Context, err error) bool {
-			return ctx.Err() == nil && IsTransientTransportError(err)
+		ShouldRetry: func(ctx context.Context, retry *adk.RetryContext) *adk.RetryDecision {
+			return &adk.RetryDecision{Retry: ctx.Err() == nil && IsTransientTransportError(retry.Err)}
 		},
 	}
 }
