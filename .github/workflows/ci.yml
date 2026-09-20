@@ -1,11 +1,15 @@
 name: CI
 
 # Solo-maintainer repository: the fast lane runs on every push to main as a
-# clean-environment backstop for the local loop, not as a merge gate. Add
-# pull_request to the triggers when collaborators arrive; the jobs stay put.
+# clean-environment backstop for the local loop, not as a merge gate. With
+# Dependabot as the first "collaborator", pull_request now runs the same
+# jobs on PRs so dependency bumps are verified before they merge; direct
+# pushes by the owner stay unaffected (admins are exempt from protection).
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 permissions:
