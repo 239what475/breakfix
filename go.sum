@@ -231,8 +231,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
-github.com/lxc/incus/v7 v7.0.1 h1:kQhOKjbgQ+4o0u4bMhnBusJAfLulsh/Mdn5Qfdv9WVI=
-github.com/lxc/incus/v7 v7.0.1/go.mod h1:tcDz7GDiaB+CfQyLE3cKofvCnVluP3FvcCbhLtOVmwk=
+github.com/lxc/incus/v7 v7.2.0 h1:LCJmJnn6drX6Igi0ZYLdoxV+PP2I62g06wA12UqT7jY=
+github.com/lxc/incus/v7 v7.2.0/go.mod h1:m78+++9iytP0GZLClbY5BLTXzptYkAKVcvleYRAcYOs=
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/mattn/go-colorable v0.1.1/go.mod h1:FuOcm+DKB9mbwrcAfNl7/TZVBZ6rcnceauSikq3lYCQ=
