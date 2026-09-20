@@ -113,10 +113,17 @@ batch/门禁/发布链，该覆盖转由本地 live 验收承担。
 
 ### 验收（2026-09-20 回填）
 
-- [ ] 本地 full target：RUN_AGENT_LIVE_E2E=1 make test-e2e-documentation 全绿（真实
-      模型驱动 practice 链）——**待用户向 runtime Secret 提供真实 deepseek key**（本地
-      target 从来只有占位值，真实 key 仅用户持有）；
-- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin 同上待 key；
+- [x] 凭证通道 ✅（机制经两轮实测收敛）：导出 `DEEPSEEK_API_KEY` → prepare 注入
+      runtime Secret。首版注入位置在 deferred prepare 之前，被 prepare 内部 reset 的
+      快照还原覆盖（模型带占位 key 出去，401）；移到 reset 之后、唯一一次 Server
+      rollout 之前（fix 于同日提交），401 消失、真实模型调用打通——值不进仓库；
+- [ ] live documentation 套件：机制已通，但**真模型暴露产品 bug**——review agent 的
+      submit_document_review 工具结果连续 8 次被拒（"invalid role or decision"），
+      纠偏反馈不收敛，循环至 ChatModel 迭代上限（"exceeds max iterations"）；
+      fixture 罐头输出永远合法，完全遮蔽此缺陷。第二个失败（"admin role required"）
+      为级联（首个 spec 中途失败改变注册序）。**转产品缺陷修复**：review 工具的
+      role/decision 契约解析或纠偏反馈需对真实模型输出鲁棒，修复合后重跑验收；
+- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin：同因挂起；
 - [x] 回归编排 full 剖面四套件绿 ✅：k8s、ui 链内通过；node 首跑被外部 rollout 干扰
       失败（用户并行会话同时操作同一 target，controller 被链外重启，与本次改动无关），
       空闲后单独复跑 3/3 绿；recovery 2/2 绿；集群内 19h 遗留 fixture Deployment 已清；
