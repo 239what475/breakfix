@@ -24,8 +24,12 @@ manifest_value() {
 
 source_name=$(manifest_value source)
 repository=$(manifest_value repository)
-revision=$(manifest_value revision)
-version=$(manifest_value version)
+# DOCS_REVISION/DOCS_VERSION let the upstream canary run the whole pipeline
+# against a different upstream SHA without touching the pin. The revision
+# must be a full commit SHA: the post-checkout integrity check compares
+# HEAD against it verbatim, so branch names fail by design.
+revision=${DOCS_REVISION:-$(manifest_value revision)}
+version=${DOCS_VERSION:-$(manifest_value version)}
 locale=$(manifest_value locale)
 docs_prefix=$(manifest_value docs_prefix)
 default_base_url=$(manifest_value default_base_url)
