@@ -1,0 +1,34 @@
+# Weekly version-update PRs for the ecosystems the repository actually
+# consumes: the Actions majors, the Go module, and the two npm workspaces.
+# minor+patch land as one grouped PR per ecosystem; major bumps stay
+# ungrouped so each breaking change gets its own review.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: npm
+    directory: /test
+    schedule:
+      interval: weekly
+    groups:
+      test:
+        update-types: ["minor", "patch"]
