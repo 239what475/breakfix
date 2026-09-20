@@ -106,7 +106,8 @@ RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp
 RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
 ```
 
-documentation prepare 会拒绝占位或空的 `deepseek_api_key`：这两组套件消费真实模型配额，
+documentation prepare 支持从调用方环境注入凭证：导出 `DEEPSEEK_API_KEY` 即写入目标
+runtime Secret（值不进仓库）；未导出时拒绝占位或空的 `deepseek_api_key`。这两组套件消费真实模型配额，
 断言的是持久化的流水线状态（批次、门禁、digest、发布索引），不断言模型措辞。
 
 这些入口只断言持久化状态、公开场景、Environment、checkpoint 结果和 MCP 本地审核投影，不断言模型措辞、prompt、工具调用次数或

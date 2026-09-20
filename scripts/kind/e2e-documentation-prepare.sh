@@ -36,13 +36,19 @@ stop_port_forward() {
 trap stop_port_forward EXIT HUP INT TERM
 
 # The live documentation suites drive the practice pipeline with the real
-# model, so the runtime Secret must already carry a real credential; the
-# core-bootstrap placeholder and an empty value are rejected up front.
+# model, so the Server needs a real credential inside the cluster. The
+# natural channel is the caller's environment: an exported DEEPSEEK_API_KEY
+# is injected into this target's runtime Secret here - the value never
+# enters the repository or any committed artifact.
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+	kubectl -n "$namespace" patch secret "$runtime_secret" --type merge \
+		--patch "$(jq -cn --arg encoded "$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')" '{data:{deepseek_api_key:$encoded}}')" >/dev/null
+fi
 model_key=$(kubectl -n "$namespace" get secret "$runtime_secret" -o json |
 	jq -r '.data.deepseek_api_key // "" | @base64d')
 case "$model_key" in
 	''|unused-in-core-profile|unused-until-documentation-prepare|placeholder-replaced-by-prepare)
-		fail "runtime secret $runtime_secret has no real deepseek_api_key; documentation suites call the real model"
+		fail "runtime secret $runtime_secret has no real deepseek_api_key; export DEEPSEEK_API_KEY or provide it in the runtime secret - documentation suites call the real model"
 		;;
 esac
 
