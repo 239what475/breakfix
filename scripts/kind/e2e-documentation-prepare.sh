@@ -35,23 +35,6 @@ stop_port_forward() {
 
 trap stop_port_forward EXIT HUP INT TERM
 
-# The live documentation suites drive the practice pipeline with the real
-# model, so the Server needs a real credential inside the cluster. The
-# natural channel is the caller's environment: an exported DEEPSEEK_API_KEY
-# is injected into this target's runtime Secret here - the value never
-# enters the repository or any committed artifact.
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-	kubectl -n "$namespace" patch secret "$runtime_secret" --type merge \
-		--patch "$(jq -cn --arg encoded "$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')" '{data:{deepseek_api_key:$encoded}}')" >/dev/null
-fi
-model_key=$(kubectl -n "$namespace" get secret "$runtime_secret" -o json |
-	jq -r '.data.deepseek_api_key // "" | @base64d')
-case "$model_key" in
-	''|unused-in-core-profile|unused-until-documentation-prepare|placeholder-replaced-by-prepare)
-		fail "runtime secret $runtime_secret has no real deepseek_api_key; export DEEPSEEK_API_KEY or provide it in the runtime secret - documentation suites call the real model"
-		;;
-esac
-
 # Prepare the ordinary disposable target first so this suite inherits its
 # isolated database, Registry, Incus projects, and immutable runtime snapshot.
 # The Server rollout is deferred: this script patches documentation config
@@ -132,6 +115,24 @@ config=$(printf '%s\n' "$config" | sed \
 	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#')
 kubectl -n "$namespace" patch configmap "$config_name" --type merge --patch "$(jq -cn --arg config "$config" '{data:{"config.yaml":$config}}')" >/dev/null
 
+# The live documentation suites drive the practice pipeline with the real
+# model, so the Server needs a real credential inside the cluster. The
+# natural channel is the caller's environment: an exported DEEPSEEK_API_KEY
+# is injected into this target's runtime Secret here - after the prepare's
+# reset step has restored the Secret from its snapshot, and before the one
+# Server start this script owns. The value never enters the repository or
+# any committed artifact.
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+	kubectl -n "$namespace" patch secret "$runtime_secret" --type merge \
+		--patch "$(jq -cn --arg encoded "$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')" '{data:{deepseek_api_key:$encoded}}')" >/dev/null
+fi
+model_key=$(kubectl -n "$namespace" get secret "$runtime_secret" -o json |
+	jq -r '.data.deepseek_api_key // "" | @base64d')
+case "$model_key" in
+	''|unused-in-core-profile|unused-until-documentation-prepare|placeholder-replaced-by-prepare)
+		fail "runtime secret $runtime_secret has no real deepseek_api_key; export DEEPSEEK_API_KEY or provide it in the runtime secret - documentation suites call the real model"
+		;;
+esac
 kubectl -n "$namespace" rollout restart deployment/breakfix-server >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-server --timeout=3m >/dev/null
 
