@@ -23,7 +23,7 @@
     "test:agent-live:k8s": "playwright test -c playwright.agent-live.config.ts authoring.k8s.live.spec.ts"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1",
-    "yaml": "^2.8.1"
+    "@playwright/test": "1.63.0",
+    "yaml": "^2.9.1"
   }
 }
