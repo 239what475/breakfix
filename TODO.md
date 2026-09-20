@@ -21,21 +21,27 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 
 提交拆解：
 
-### 提交 1 docs-site.sh 环境变量覆盖 + 上游 canary workflow
+### 提交 1 docs-site.sh 环境变量覆盖 + 上游 canary workflow ✅ 9652187、6ef2b09
 
-- [ ] docs-site.sh：`DOCS_REVISION`/`DOCS_VERSION` 以 `:-` 默认值形式覆盖 manifest
+- [x] docs-site.sh：`DOCS_REVISION`/`DOCS_VERSION` 以 `:-` 默认值形式覆盖 manifest
       读取；调用方传 SHA（非分支名），原有的"checkout 后必须等于指定 revision"严格
-      pin 校验原样生效；
-- [ ] .github/workflows/docs-upstream-canary.yml：每周一 cron（错开 nightly）+
-      workflow_dispatch（手动 bump 前预检）；步骤 = ls-remote 解析最新 dev-* 分支
-      SHA → 覆盖变量跑 `make docs-sync/docs-build/docs-project/docs-smoke`（内含
-      check）→ 失败输出"pinned 可用、latest 差距"的对比结论；缓存走独立
-      `DOCS_CACHE_DIR`、key 含解析出的 SHA（重跑便宜、自然轮换）；装 ripgrep。
+      pin 校验原样生效——负向测试（假 SHA 直通 git fetch 被拒）与默认路径回归均过；
+- [x] .github/workflows/docs-upstream-canary.yml：每周二 05:00 CST cron +
+      workflow_dispatch 预检；ls-remote 解析最新 dev-* 分支 SHA → 覆盖变量跑
+      `make docs-sync/docs-build/docs-project/docs-smoke`；缓存独立
+      `DOCS_CACHE_DIR`、key 含解析出的 SHA；装 ripgrep；末步 always 输出 pin/canary
+      对比结论；
+- [x] 首跑实战即产出：dev-1.38 的构建与全量解析本就通过，但 smoke 测试硬编码的
+      pinned 身份拒绝 canary 语料（身份断言先于任何真实兼容性信号失败）——修为同一
+      覆盖约定（env 覆盖、pinned 值为默认，6ef2b09），本地默认路径回归绿。
 
-### 提交 2 tag 保护规则（API，非仓库文件）
+### 提交 2 tag 保护（API，非仓库文件）✅ 2026-09-20
 
-- [ ] `v*` tag 仅 admin 可推——防手滑 tag 直接触发真实发布（推镜像 + 建公开
-      Release）；一行 API，用后验证非 admin 被拒。
+- [x] 计划修正：旧 `tags/protection` API 已 closing down（404），改用现行 rulesets
+      API——ruleset `protect-release-tags`（id 23729630，target=tag，enforcement=
+      active）：`refs/tags/v*` 的 creation/update/deletion 全限制，owner
+      （bypass_mode=always）豁免；单 owner 仓库无法实测非 admin 被拒，按 ruleset
+      语义非 bypass actor 建改删 v* 一律拒绝（含未来协作者）。
 
 ### 提交 3 major PR 评审报告（需用户决策）
 
@@ -51,12 +57,15 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 - [ ] 网页删除 v0.0.0-rc.1 测试版本（API 无 delete:packages scope，网页 Packages
       页可删）。
 
-### 验收
+### 验收（提交 1、2 于 2026-09-20 回填）
 
-- [ ] canary 首跑有结论：最新 dev-* 分支全量解析通过（绿），或产出明确的前瞻差距
-      报告（哪些环节断、预估 bump 成本）；
-- [ ] workflow_dispatch 手动预检路径可用（未来 bump 前先点一次）；
-- [ ] tag 保护生效；
+- [x] canary 首跑有结论 ✅：对 dev-1.38（cedecba）全链绿——sync、hugo 0.144.2
+      构建（无需升 hugo）、全量语料解析、目录树校验、身份+语义 smoke 全部通过；
+      **下次 manifest bump 是例行操作**。附注：bump 时需同步改 manifest 的
+      revision/version 与 smoke 测试默认值（两处 pin 拷贝）；
+- [x] workflow_dispatch 手动预检路径可用（两次 dispatch 实测，二次因缓存命中
+      缩短至 ~6 分钟）；
+- [x] tag 保护生效（ruleset active，配置经 GET 复核）；
 - [ ] major PR 评审报告产出并交付用户；
 - [ ] ghcr 可见性与测试版本清理完成。
 
