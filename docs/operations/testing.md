@@ -107,6 +107,33 @@ RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
 Markdown 渲染。失败时保留 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment、Worker 日志和
 Playwright 附件，之后用 `make e2e-reset` 丢弃目标。
 
+## CI 与本地的分工
+
+CI 只运行可以在托管 runner 上复现的层级：
+
+- **push 快车道**（`ci.yml`，每次 push 到 main）：`make test-unit`（带 PostgreSQL service）、
+  `make web-test-unit`、`make verify-generated` + `make build` + kustomize 渲染 + golangci-lint。
+  单人直推 main，它是干净环境兜底而非合并门禁；
+- **按需 nightly**（`nightly.yml`，每晚 03:00 本地时间）：gate 比较 HEAD 与 nightly 上一次
+  成功运行的 sha——相同则整夜跳过，失败未修复则自动重试，周日无条件跑一次兜底外部漂移；
+  手动 `workflow_dispatch` 遵循同一 gate，`force` 输入可强制全跑。重 job 为 core 剖面全量
+  回归（空集群 `make e2e-bootstrap-core` + `BREAKFIX_E2E_PROFILE=core make
+  test-e2e-regression`，失败留存 `.local/e2e` 诊断 artifact）与 `make test-vk8s-network`；
+- **永不进 CI**：node/recovery 套件（外部 Incus）、live agent 验收（真实模型）——它们属于
+  本地专用 target 与显式人工验收。
+
+本地日常只跑与变更相关的层级，全量回归交给 nightly 与阶段收尾：
+
+| 变更区域 | 本地最相关 |
+| --- | --- |
+| `web/` | `make web-test-unit`；动到浏览路径再跑 ui 套件 |
+| handler / transport / admin、documentation API | `make test-unit`；按需 admin 或 documentation 套件 |
+| runtime（k8s/vcluster）/ controller | `make test-unit`；按需 k8s 套件 |
+| runtime（node）/ Incus 适配 | `make test-unit`；full target 上按需 node 套件 |
+| `scripts/`、`deploy/`、Makefile | 受影响套件；改 prepare/reset 链后跑一次回归编排 |
+| `docs-site/`、文档适配 | `make docs-check`；必要时 docs-smoke |
+| 阶段收尾或大改后 | `make test-e2e-regression`（full target） |
+
 ## 日常验证
 
 ```bash

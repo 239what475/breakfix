@@ -1,0 +1,132 @@
+name: Nightly
+
+# The nightly answers "is this HEAD still good" for the tiers the push fast
+# lane cannot cover: the core-profile E2E regression on a from-zero Kind
+# target, the pinned documentation pipeline, and the vK8s network isolation
+# acceptance. It skips itself when HEAD already has a green nightly (nothing
+# changed, nothing to relearn), retries automatically while a failure is
+# outstanding, and runs unconditionally on Sundays to catch drift in the
+# floating outside world. A manual dispatch follows the same gate unless
+# force is set.
+
+on:
+  schedule:
+    - cron: "0 19 * * *" # 03:00 Asia/Shanghai
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even when this HEAD already has a green nightly
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Decide whether this HEAD needs a nightly
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(date -u +%u)" = "7" ]; then
+            # Weekly unconditional sweep for drift behind floating tags.
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last="$(gh api "repos/${{ github.repository }}/actions/workflows/nightly.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""')"
+          if [ -n "$last" ] && [ "$last" = "${{ github.sha }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            # No green nightly yet, or HEAD moved, or the last one failed.
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  core:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            test/package-lock.json
+      - name: Restore the pinned upstream documentation checkout
+        uses: actions/cache@v6
+        with:
+          path: .local/docs
+          key: docs-upstream-${{ hashFiles('docs-site/manifest.yaml') }}
+      - name: Build the pinned documentation site
+        run: |
+          make docs-sync
+          make docs-build
+      - name: Materialize the offline fixture library
+        run: make docs-fixture
+      - name: Install the pinned kind CLI
+        run: |
+          curl -sfLo ./kind "https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64"
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+      - name: Install Playwright chromium
+        run: |
+          make test-deps
+          npm exec --prefix test -- playwright install --with-deps chromium
+      - name: Bootstrap and run the core regression
+        env:
+          BREAKFIX_E2E_PROFILE: core
+          BREAKFIX_E2E_TARGET: e2e-core
+          BREAKFIX_E2E_KIND_CLUSTER: breakfix-e2e-core
+        run: |
+          docker image prune -af >/dev/null
+          kind create cluster --name breakfix-e2e-core --image kindest/node:v1.36.1
+          make e2e-bootstrap-core
+          make test-e2e-regression
+      - name: Retain E2E diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-core-diagnostics
+          path: |
+            .local/e2e/e2e-core
+            test/results
+            test/report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  vk8s:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the pinned kind and vcluster CLIs
+        run: |
+          curl -sfLo ./kind "https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64"
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          curl -sfLo ./vcluster "https://github.com/loft-sh/vcluster/releases/download/v0.35.1/vcluster-linux-amd64"
+          chmod +x ./vcluster && sudo mv ./vcluster /usr/local/bin/vcluster
+      - name: Verify virtual-cluster network isolation
+        run: make test-vk8s-network
