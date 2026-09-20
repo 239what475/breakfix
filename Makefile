@@ -1,5 +1,5 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images documentation-library-image deploy-kind reset-kind \
-	test-unit lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
+	test-unit test-race lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
 	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-check docs-metadata docs-smoke \
 	docs-project docs-fixture
@@ -167,6 +167,12 @@ verify-legacy-removal:
 
 test-unit: verify-legacy-removal
 	go test -count=1 ./cmd/... ./api/... ./internal/...
+
+# Race sweep that stays DB-free on purpose: the adapter suites skip
+# themselves without BREAKFIX_TEST_DATABASE_URL, so the unset variable
+# keeps this to the packages CI can cover without a PostgreSQL service.
+test-race:
+	env -u BREAKFIX_TEST_DATABASE_URL go test -race -count=1 ./cmd/... ./api/... ./internal/...
 
 # The web component tier (vitest + happy-dom) belongs in every full
 # regression alongside test-unit.
