@@ -69,7 +69,7 @@ jobs:
           done
           ! grep -Eq 'ghcr.io/breakfix/breakfix-(server|controller|runtime-worker|documentation-library):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
       - name: Release deployment artifact
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/breakfix-${{ github.ref_name }}.yaml
           generate_release_notes: true
