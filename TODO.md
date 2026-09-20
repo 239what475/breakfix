@@ -97,27 +97,33 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 文档流水线是唯一进 CI 的 agent 特性；退役后 nightly 不再覆盖文档实践流水线的
 batch/门禁/发布链，该覆盖转由本地 live 验收承担。
 
-- [ ] 删除 fixture 三件套：cmd/document-agent-fixture、build/images/document-agent-fixture、
-      test/kind/document-agent-fixture.yaml + .gitleaks.toml 相关 allowlist；
-- [ ] e2e-documentation-prepare.sh：去掉 fixture 构建/部署与 base_url/model/key 三处
-      补丁；改为前置校验 runtime Secret 携带真实 deepseek key（bootstrap 假值直接
-      拒绝并提示）；库生成/ConfigMap/volume 换源/catalog 等待全部保留；
-- [ ] run-e2e.sh：documentation、admin 套件加 RUN_AGENT_LIVE_E2E=1 门禁（真实模型），
-      不限剖面（k8s 运行时，core target 可跑）；
-- [ ] run-e2e-regression.sh：链回归为标准 prepare + k8s → ui（full 再加 node、
-      recovery），去掉 docs-prepare/admin/reset/documentation 段；
-- [ ] e2e-bootstrap-core.sh 假 deepseek key 注释更新（CI 永不用真实模型）；
-- [ ] testing.md 同步：core 剖面套件列表、回归编排描述、live 验收清单、nightly
-      覆盖边界。
+- [x] 删除 fixture 三件套 + .gitleaks.toml allowlist ✅ 994ec0c；孤儿 e2e-reset-database.sh
+      一并移除，document-agent-fixture/documentation-fixture-key 加入 verify-legacy-removal
+      防复活清单；
+- [x] e2e-documentation-prepare.sh ✅：三处补丁移除；前置校验拒绝空值与三个占位
+      （unused-in-core-profile、unused-until-documentation-prepare、
+      placeholder-replaced-by-prepare——本地 target 快照实测占位即拒）；库生成/
+      ConfigMap/volume 换源/catalog 等待全部保留；
+- [x] run-e2e.sh ✅：documentation/admin 加 RUN_AGENT_LIVE_E2E=1 门禁，与其他 agent
+      套件同款，不限剖面；
+- [x] run-e2e-regression.sh ✅：标准 prepare + k8s → ui（+full 的 node、recovery）；
+- [x] e2e-bootstrap-core.sh 假 key 更名 unused-in-core-profile（CI 永不用真实模型）；
+- [x] testing.md 六处同步 ✅（分层表、剖面表、编排段、live 清单+key 前置校验说明、
+      nightly 边界、本地相关性表）。
 
-### 验收
+### 验收（2026-09-20 回填）
 
 - [ ] 本地 full target：RUN_AGENT_LIVE_E2E=1 make test-e2e-documentation 全绿（真实
-      模型驱动 practice 链）；
-- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin 全绿（真实模型驱动 batch 管理链）；
-- [ ] 回归编排（full 剖面剩余套件）绿；不带门禁变量启动 documentation/admin 被
-      明确拒绝；
-- [ ] 快车道/nightly 配置不引用已删路径，CI 绿。
+      模型驱动 practice 链）——**待用户向 runtime Secret 提供真实 deepseek key**（本地
+      target 从来只有占位值，真实 key 仅用户持有）；
+- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin 同上待 key；
+- [x] 回归编排 full 剖面四套件绿 ✅：k8s、ui 链内通过；node 首跑被外部 rollout 干扰
+      失败（用户并行会话同时操作同一 target，controller 被链外重启，与本次改动无关），
+      空闲后单独复跑 3/3 绿；recovery 2/2 绿；集群内 19h 遗留 fixture Deployment 已清；
+- [x] 占位 key 拒绝路径实测生效；无门禁变量的拒绝为与 agent-assistant 等五处已验
+      门禁完全同构的两行守卫；
+- [x] 快车道五 job 全绿（run 35520691719）；nightly 配置无已删路径引用，当晚 nightly
+      将按 gate 自动跑新链。
 
 ## 挂起待决策（不排期）
 
