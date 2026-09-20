@@ -117,13 +117,23 @@ batch/门禁/发布链，该覆盖转由本地 live 验收承担。
       runtime Secret。首版注入位置在 deferred prepare 之前，被 prepare 内部 reset 的
       快照还原覆盖（模型带占位 key 出去，401）；移到 reset 之后、唯一一次 Server
       rollout 之前（fix 于同日提交），401 消失、真实模型调用打通——值不进仓库；
-- [ ] live documentation 套件：机制已通，但**真模型暴露产品 bug**——review agent 的
-      submit_document_review 工具结果连续 8 次被拒（"invalid role or decision"），
-      纠偏反馈不收敛，循环至 ChatModel 迭代上限（"exceeds max iterations"）；
-      fixture 罐头输出永远合法，完全遮蔽此缺陷。第二个失败（"admin role required"）
-      为级联（首个 spec 中途失败改变注册序）。**转产品缺陷修复**：review 工具的
-      role/decision 契约解析或纠偏反馈需对真实模型输出鲁棒，修复合后重跑验收；
-- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin：同因挂起；
+- [x] reviewer 契约修复 ✅ 119f034（对齐运维 agent 三法则，2026-09-21 经用户批准）：
+      模型载荷收缩为 decision/hard_reject/reasons（decision 以 jsonschema enum 进
+      工具 schema），ReviewerID/Role/PolicyVersion 服务端盖戳，拒绝反馈点名字段与
+      期望值，reject 必须带 reasons，上限 8→12；单测覆盖枚举入 schema/反馈可执行/
+      盖戳构造；44 包 + lint 绿。**live 复跑实证**：typed result rejected 归零，
+      管线在真模型下机械贯通；
+- [ ] live documentation 套件剩余为**产品级新发现**（非缺陷，是门禁在真实工作）：
+      真模型 planner 生成的练习存在逻辑矛盾（观察点 o3 不可观察——启动命令每次
+      容器启动重建 /data/note，"重建后消失"的断言永假），真门禁以精准理由正确
+      Rejected。`Rejected` 为终态，产品设计恢复路径是管理员重启工作流（admin
+      workflow-rescue 即此语义），无自动重规划。fixture 时代的套件假设"门禁必过"：
+      spec 1 假定必 Published、spec 2 的 ensurePracticePublished 恢复分支是死代码
+      （其新注册用户非 bootstrap admin，触发即 403 "admin role required" 级联）。
+      **待用户决策**：(A) 产品侧自动重规划——拒绝理由回喂 planner、有界重试
+      （改状态机）；(B) 套件侧承认现实——spec 1 接受 Published/Rejected 两态，
+      发布路径经 admin 救援续跑（helper 改用 bootstrap admin，顺带补 rescue 覆盖）；
+- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin：待上述决策后一并重跑；
 - [x] 回归编排 full 剖面四套件绿 ✅：k8s、ui 链内通过；node 首跑被外部 rollout 干扰
       失败（用户并行会话同时操作同一 target，controller 被链外重启，与本次改动无关），
       空闲后单独复跑 3/3 绿；recovery 2/2 绿；集群内 19h 遗留 fixture Deployment 已清；
