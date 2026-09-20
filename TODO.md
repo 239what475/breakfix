@@ -43,13 +43,26 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
       （bypass_mode=always）豁免；单 owner 仓库无法实测非 admin 被拒，按 ruleset
       语义非 bypass actor 建改删 v* 一律拒绝（含未来协作者）。
 
-### 提交 3 major PR 评审报告（需用户决策）
+### 提交 3 major PR 评审报告（需用户决策）✅ 2026-09-20（评审即执行）
 
-- [ ] 8 个 major PR 出评审报告：四个 action 主版本（login/buildx/gitleaks/
-      gh-release）属机械升级；四个 npm major 需看 breaking changes——typescript 7
-      （动整个 web 工具链）、markdown-it 15、lucide-vue-next 1.0、@types/node 26；
-      给出风险与建议合并顺序，用户拍板后执行（#15 typescript 现为冲突态，评审时
-      @dependabot rebase）。
+- [x] 报告产出并经用户批准按建议执行，7 个 major PR 落地：#7/#8/#9/#10（四个
+      action 大版本均为 Node 20→24 迁移、输入输出无变化）、#13（@types/node 纯
+      类型）、#14（lucide——**1.0.0 为官方误发布，recreate 重定 1.0.1 后合并**）、
+      #12（markdown-it 15：含 smartquotes DoS 安全修复；v15 自带类型声明，按预测
+      需伴随提交——删 @types/markdown-it、Token 导入改主入口命名导出，伴随提交推
+      PR 分支内部，本地 build+20 用例绿后 CI 复验合并）；
+- [x] #9/#13/#14 与先行合并的 PR 冲突（同文件/lockfile 基底变化），@dependabot
+      rebase 自愈后合并——major 流程的冲突处理路径实证；
+- [x] **#15 typescript 7 判决：挂起等上游**——本地实测 vue-tsc 3.3.11（已是最新）
+      对 TS7 启动即崩（typescript/lib/tsc 子路径在 Go 原生包 exports 中已移除），
+      生态尚无兼容版；PR 留队列，等 vuejs/language-tools 跟进后 Dependabot 自动
+      重开。方法论修正（用户提出）：兼容性判断本地先行（0.5 秒出答案），CI 只做
+      权威确认；
+- [x] A 组验证：v0.0.0-rc.2 一次性 tag 在 login v4/buildx v4/gh-release v3 下
+      发布链全绿，产物四引用 digest 化、0 :dev 残留，release/tag 已删；删除 tag
+      时 ruleset 实证生效（"Cannot delete this tag" 仅 owner bypass 放行）；
+- [x] 遗留：#1–#4 为已被 go 组覆盖/反复冲突的滞留 PR，交给 Dependabot 自愈或
+      自动关闭；js-yaml ×3 告警等周更分组更新。
 
 ### 提交 4 ghcr 收尾（首次真实发布前完成）
 
@@ -66,7 +79,7 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 - [x] workflow_dispatch 手动预检路径可用（两次 dispatch 实测，二次因缓存命中
       缩短至 ~6 分钟）；
 - [x] tag 保护生效（ruleset active，配置经 GET 复核）；
-- [ ] major PR 评审报告产出并交付用户；
+- [x] major PR 评审报告产出并交付用户 ✅（评审即执行，7 合 1 挂起）；
 - [ ] ghcr 可见性与测试版本清理完成。
 
 ### 已知后续（不属本阶段）
