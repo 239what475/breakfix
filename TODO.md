@@ -11,36 +11,44 @@ gitleaks 扫描（392 提交 7 命中均良性并 allowlist）是本阶段密钥
 - [x] 仓库安全开关（网页设置项，经 API 开启，非仓库文件）：secret scanning、push
       protection、dependabot security updates 三项 enabled——GitHub API 现只接受
       `{"status":"enabled"}` 嵌套形态，旧文档的裸字符串形态一律 422。开启即回扫全部
-      历史：0 告警，与 gitleaks 结论互相印证；dependabot 亦 0 告警。non-provider
-      patterns 与 validity checks 留关：前者对测试密集仓库（fixture 占位密钥多）噪音
-      大于收益，后者只在有检出密钥时才有意义，当前 0 检出空转；
-- [ ] **release 链修复（最高优先）**：server 清单以 image volume 挂载
-      `ghcr.io/breakfix/breakfix-documentation-library:dev`（server.yaml:180 一带），
-      而发布流程只对 server/controller/runtime-worker 三个组件做 sed→digest 替换，
-      库镜像既不构建也不推送——按发布清单部署直接 ImagePullBackOff。修复：release
+      历史：0 告警，与 gitleaks 结论互相印证。non-provider patterns 与 validity
+      checks 留关：前者对测试密集仓库（fixture 占位密钥多）噪音大于收益，后者只在
+      有检出密钥时才有意义，当前 0 检出空转。Dependabot 索引完成后补发 26 条依赖
+      告警（Go 19：4 critical；npm 8），自动修复 PR 已排队（见下方"后续"）；
+- [x] **release 链修复（最高优先）** ✅ 1e0bfc2：server 清单以 image volume 挂载
+      `ghcr.io/breakfix/breakfix-documentation-library:dev`，原流程只替换三个运行时
+      组件且从不构建/推送库镜像——按发布清单部署直接 ImagePullBackOff。修复：release
       从 pinned 站点构建库镜像（nightly 同款 docs-sync/build 链 + .local/docs 缓存 +
-      ripgrep），四组件统一 push/digest/sed，`! grep` 断言扩展到 library；sed 覆盖度
-      已本地实证（渲染产物 4 处 :dev 全替换、0 残留）。整条 release 链自 6 月创建以来
-      无执行记录，验收要求以一次性 tag 真实走通；
-- [ ] dependabot 版本更新：.github/dependabot.yml（github-actions/gomod/npm×2，
-      周更，minor+patch 按生态分组，major 不分组单独评审）；
-- [ ] nightly 补 docs 语义校验：`make docs-smoke`（依赖链内含 docs-check）挂在库镜像
-      构建之后——库镜像那步已产出全量语料，smoke 只是复用它跑一个 Go 测试，近乎白送；
-- [ ] 快车道挂 gitleaks：secrets-scan job（fetch-depth: 0，gitleaks-action@v2 沿用
-      .gitleaks.toml allowlist），转公开后的新提交从此有自动密钥防护；
-- [ ] test-race：DB-free race 扫描（`env -u BREAKFIX_TEST_DATABASE_URL`，DB 套件自
-      跳过），独立 go-race job 并行跑，不占用 go-test 的 PG service；
-- [ ] README 验证小节补一句 CI 分工（快车道/nightly 边界指向 testing.md）。
+      ripgrep），四组件统一 push/digest/sed，`! grep` 断言扩展到 library；
+- [x] dependabot 版本更新 ✅ 05f74a7：.github/dependabot.yml（github-actions/gomod/
+      npm×2，周更，minor+patch 按生态分组，major 不分组单独评审）；
+- [x] nightly 补 docs 语义校验 ✅ 7192072：`make docs-smoke`（依赖链内含 docs-check）
+      挂在库镜像构建之后，复用该步已产出的全量语料；
+- [x] 快车道挂 gitleaks ✅ 505ce61：secrets-scan job（fetch-depth: 0，
+      gitleaks-action@v2 沿用 .gitleaks.toml allowlist）；
+- [x] test-race ✅ 505ce61：DB-free race 扫描（`env -u BREAKFIX_TEST_DATABASE_URL`，
+      DB 套件自跳过），独立 go-race job 并行；
+- [x] README 验证小节补 CI 分工 ✅ da0ebb2。
 
-### 验收
+### 验收（2026-09-20 回填）
 
-- [ ] 快车道含 secrets-scan 与 go-race 全绿；
-- [ ] nightly 含 docs-smoke 全绿；
-- [ ] release 链以一次性 tag（如 v0.0.0-rc.1）真实走通：四镜像入 ghcr、发布产物
-      四个镜像引用全部 digest 化且无 :dev 残留；测试 release/tag 事后清理（ghcr 包
-      版本受 delete:packages scope 限制可能残留，无害）；
-- [ ] 已知后续（不属本阶段）：GITHUB_TOKEN 推送的 ghcr 包默认 private，首次真实
-      发布后部署侧需配置拉取凭证或调整包可见性。
+- [x] 快车道含 secrets-scan 与 go-race 全绿（run 35509688964：五 job，secrets-scan
+      首跑即绿，go-race 与 go-test 并行不占 PG service）；
+- [x] nightly 含 docs-smoke 全绿（run 35509845294：gate/core/vk8s，日志确认
+      "passed official public tree checks" + TestPinnedKubernetesPodLifecycle ok）；
+- [x] release 链以一次性 tag 真实走通 ✅（run 35509870235，自 6 月创建以来首次
+      执行即绿）：四镜像入 ghcr.io/239what475/*，发布产物四个镜像引用全部 digest
+      化（含库镜像 image volume reference），0 `:dev` 残留；测试 release/tag 已删，
+      ghcr 测试版本因 token 无 delete:packages scope 残留（private 无害）；
+- [x] make test-race 本地绿（44 包，DB 套件自跳）。
+
+### 后续（新阶段候选，不属本阶段）
+
+- **Dependabot 告警清偿**：26 条依赖告警（4 critical：kin-openapi≤0.143.0、pgx/v5
+  <5.9.0 ×2、ollama 无修复版），15 个修复/更新 PR 已排队（#1–#15）；Go 侧升级需
+  跑回归，npm 侧多为构建链；
+- GITHUB_TOKEN 推送的 ghcr 包默认 private，首次真实发布后部署侧需配拉取凭证或调
+  整包可见性；ghcr 里的 v0.0.0-rc.1 测试版本可网页删除。
 
 ## 挂起待决策（不排期）
 
