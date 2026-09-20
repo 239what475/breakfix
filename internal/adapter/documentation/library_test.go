@@ -233,12 +233,23 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 	if libraryRoot == "" {
 		t.Fatal("documentation library smoke requires the library root")
 	}
+	// DOCS_REVISION/DOCS_VERSION follow the docs-site.sh override convention:
+	// the upstream canary runs this smoke against the latest dev-* corpus, so
+	// the pinned identity stays the default but can be replaced wholesale.
+	commit := strings.TrimSpace(os.Getenv("DOCS_REVISION"))
+	if commit == "" {
+		commit = "ce98a43f24257385a9766003a6dadc95e962dc63"
+	}
+	version := strings.TrimSpace(os.Getenv("DOCS_VERSION"))
+	if version == "" {
+		version = "snapshot-ce98a43"
+	}
 	context := domain.DocumentContext{
 		FormatVersion: domain.FormatVersion,
 		SourceID:      "kubernetes",
 		Repository:    "https://github.com/kubernetes/website.git",
-		Commit:        "ce98a43f24257385a9766003a6dadc95e962dc63",
-		Version:       "snapshot-ce98a43",
+		Commit:        commit,
+		Version:       version,
 		Language:      "en",
 		License:       "CC BY 4.0",
 		PagePath:      "docs/concepts/workloads/pods/pod-lifecycle",
