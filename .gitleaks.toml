@@ -1,0 +1,24 @@
+title = "Breakfix gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Findings from the 2026-09-20 full-history scan before going public: every
+# hit was a test constant, a fixture placeholder, or generated code, never a
+# live credential. Real secrets live only in the Kind cluster and the
+# environment; the tree has never tracked them.
+[allowlist]
+description = "Test constants, fixture placeholders, and generated artifacts"
+paths = [
+	'''internal/transport/httpapi/generated/server\.gen\.go''',
+	'''web/src/api/generated/''',
+]
+regexes = [
+	'''taxonomy-e2e-(internal-key|jwt-secret)''',
+	'''mcp-e2e-publish''',
+	'''NEWSECRET234567''',
+	'''documentation-fixture-key''',
+	'''unused-until-documentation-prepare''',
+	'''unused-in-core-profile''',
+	'''web/src/api/generated''',
+]
