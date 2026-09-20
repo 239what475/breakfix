@@ -1,17 +1,24 @@
 name: CI
 
+# Solo-maintainer repository: the fast lane runs on every push to main as a
+# clean-environment backstop for the local loop, not as a merge gate. Add
+# pull_request to the triggers when collaborators arrive; the jobs stay put.
+
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  quality:
+  go-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgresql:
         image: postgres:17
@@ -30,28 +37,28 @@ jobs:
       BREAKFIX_TEST_DATABASE_URL: postgres://breakfix:breakfix@localhost:5432/breakfix?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test Go packages against PostgreSQL
+        run: make test-unit
+
+  web-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            test/package-lock.json
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.3"
-      - name: Build runtime applications
-        run: make build
-      - name: Verify generated contracts
-        run: make verify-generated
-      - name: Test Go packages against PostgreSQL
-        run: make test-unit
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+          cache-dependency-path: web/package-lock.json
+      - name: Run the web component tier
+        run: make web-test-unit
 
-  build:
+  contracts-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,6 +68,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.3"
-      - name: Build runtime applications
+          go-version-file: go.mod
+      - name: Verify generated contracts
+        run: make verify-generated
+      - name: Build runtime applications once
         run: make build
+      - name: Render the deployment packages
+        run: |
+          kubectl kustomize . >/dev/null
+          kubectl kustomize deploy/overlays/kind >/dev/null
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.13.2
