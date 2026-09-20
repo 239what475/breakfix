@@ -74,6 +74,8 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             test/package-lock.json
+      - name: Install ripgrep for the docs scripts
+        run: sudo apt-get install -y -qq ripgrep
       - name: Restore the pinned upstream documentation checkout
         uses: actions/cache@v6
         with:

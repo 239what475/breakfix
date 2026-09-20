@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install ripgrep for the legacy-removal scan
+        run: sudo apt-get install -y -qq ripgrep
       - name: Test Go packages against PostgreSQL
         run: make test-unit
 

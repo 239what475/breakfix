@@ -150,6 +150,7 @@ reset-kind:
 	./scripts/kind/reset-state.sh
 
 verify-legacy-removal:
+	@command -v rg >/dev/null 2>&1 || { echo "verify-legacy-removal requires ripgrep" >&2; exit 2; }
 	@! rg -n \
 		-e 'internal/domain/(runtime|execution)' \
 		-e 'internal/application/execution' \
